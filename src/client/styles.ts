@@ -2,7 +2,11 @@
  * 这一页的样式，按 effect 生命周期注入 `<style>`。
  *
  * 颜色只用宿主 `Theme` 检查面列出的那十几个 token（`--dsw-alias-*`），每个都带一个中性的回落值，
- * 深浅主题自动跟随。不用任何宿主原语包的类名：那些是打包器哈希出来的私有产物，抄不到也不该抄。
+ * 深浅主题自动跟随。唯一的例外是 `.dsm-primary` 的字色：那个位置宿主的检查面没给 token，
+ * 于是显式写了回落链（见该处注释）——**主题色不能拿"另一个主题下的观感"去估**，深色主题里的
+ * `brand-primary` 是近白色，所以填充按钮上写死白字就是白底白字。
+ *
+ * 不用任何宿主原语包的类名：那些是打包器哈希出来的私有产物，抄不到也不该抄。
  *
  * 排版照「插件」页那一类管理列表：一个区块一张卡片（发丝描边 + 大圆角）、行高紧凑、
  * 次要文字用 `label-secondary`。外层的水平留白与滚动由设置外壳给（它那一列是
@@ -55,7 +59,18 @@ export const CSS = `
 .dsm-button.dsm-primary {
   background: var(--dsw-alias-brand-primary, #3370ff);
   border-color: var(--dsw-alias-brand-primary, #3370ff);
-  color: #fff;
+  /*
+   * 字色**不能写死白**：brand-primary 在深色主题里是 #f9fafb 那种近白（它是"表面的反色"，
+   * 不是为了当填充色才存在），写死 #fff 就是白底白字——按钮整个读不出来。宿主内置按钮用的是
+   * label-primary-foreground（浅色主题 #fff、深色主题 #0f1115），但它不在 Theme 检查面的
+   * 那 14 个 token 里，所以这里挂了回落链：拿不到就退到 bg-layer-1——brand-primary 在明暗
+   * 两套里都是表面的反色，拿**表面色**当字色一定读得出来。
+   */
+  color: var(--dsw-alias-label-primary-foreground, var(--dsw-alias-bg-layer-1, #fff));
+}
+.dsm-button.dsm-primary:hover:not(:disabled) {
+  /* 往表面色混一点点：深色主题里变暗、浅色主题里变亮，两边都像"被按了一下"。 */
+  background: color-mix(in srgb, var(--dsw-alias-brand-primary, #3370ff) 88%, var(--dsw-alias-bg-layer-1, #fff));
 }
 .dsm-list {
   /* 整页里不必再用 320px 的小窗：给一个随视口的上限，短列表不留空、长列表不把页面推得很长。 */
@@ -124,7 +139,14 @@ export const CSS = `
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.dsm-crumb:hover:not(:disabled) { background: var(--dsw-alias-bg-layer-3, rgba(0, 0, 0, 0.05)); }
+/*
+ * 悬停底色是"字色兑透明的一层薄雾"，不是某个表面 token：检查面里的表面色在浅色主题下多半也是
+ * 白的（bg-layer-3 就是 #fff），铺上去等于没有反馈。宿主外壳自己也这么兑（color-mix +
+ * transparent），所以这里跟着走；真遇到不认 color-mix 的浏览器，就只是少一层悬停反馈。
+ */
+.dsm-crumb:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--dsw-alias-label-primary, #1f2329) 8%, transparent);
+}
 .dsm-crumb:disabled { color: var(--dsw-alias-label-secondary, #646a73); cursor: default; }
 /* 一层子目录：等宽两列铺开，比竖排一行一览得多。 */
 .dsm-dirList {
@@ -147,7 +169,9 @@ export const CSS = `
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.dsm-dirEntry:hover { background: var(--dsw-alias-bg-layer-3, rgba(0, 0, 0, 0.05)); }
+.dsm-dirEntry:hover {
+  background: color-mix(in srgb, var(--dsw-alias-label-primary, #1f2329) 8%, transparent);
+}
 .dsm-dirEntry:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary, #3370ff); outline-offset: -1px; }
 .dsm-dirHidden { color: var(--dsw-alias-label-secondary, #646a73); }
 .dsm-table { width: 100%; border-collapse: collapse; }

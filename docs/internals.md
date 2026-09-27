@@ -186,6 +186,17 @@ client 一份配置是 `format: 'cjs'` 外面套三行（banner/intro/footer）�
 颜色只用 `Theme` 检查面列出的 `--dsw-alias-*` token（每个都带中性回落值，深浅主题自动跟随），
 类名收在自己的 `dsm-` 前缀下。
 
+那条"只用检查面的 token"不是洁癖，是踩过的坑：**颜色写死只会在一种主题下错**。真事是
+`.dsm-primary` 写死 `color: #fff`——浅色主题下 `brand-primary` 是近黑（白字没问题），深色主题下它
+是 `--dsw-static-neutral-bluish-50` 的 **#f9fafb**（近白，因为它是"表面的反色"，不是为了当填充色
+才存在），于是白底白字、对比度 1.05:1，按钮上的字整个没了。类型、产物冒烟、真实 profile 的 HTTP
+核对全都抓不到这种错，只有肉眼能发现。现在 `.dsm-primary` 的字色走
+`var(--dsw-alias-label-primary-foreground, var(--dsw-alias-bg-layer-1, #fff))`：检查面没给这个位置
+token，所以显式挂了回落链（拿不到就退到表面色——brand-primary 在明暗两套里都是表面的反色）。
+同一类的还有悬停底色：`bg-layer-3` 在浅色主题里就是 #fff，铺在白卡片上等于没有反馈，改成把
+`label-primary` 兑 8% 透明的薄雾（宿主外壳自己也这么兑）。这三条纪律由 `test/styles.test.mjs`
+机械核对（颜色必须走 token、token 必须在名单里、token 必须带回落值），反事实都验过会失败。
+
 注册进 `settings.section`：设置左侧导航里的一页，与「通用 / 模型 / 插件 / 账户 / Agent 预设」
 并列，`order: 30` 排它们之后。相近的槽位有两个，各有一个真问题，所以都没选：
 
