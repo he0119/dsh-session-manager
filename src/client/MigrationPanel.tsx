@@ -27,6 +27,8 @@ import {
 import { translateWith, zh, type Translate } from './locales.ts'
 import { DirectoryPicker } from './DirectoryPicker.tsx'
 import { normalizePickedPath } from './directory.ts'
+import { SessionIcon } from './icons.tsx'
+import { sessionLabel } from './planRows.ts'
 import type { PanelShare } from './types.ts'
 
 /** 没有注入面时的兜底翻译。 */
@@ -532,24 +534,31 @@ export function MigrationPanel({ t = fallback, state, reload, directory }: Panel
               )}
             </div>
             <div className="dsm-list">
-              {matching.map((session) => (
-                <label key={session.id} className="dsm-row dsm-rowPick">
-                  <input
-                    type="checkbox"
-                    checked={pickMode === 'subset' && picked.includes(session.id)}
-                    onChange={() => {
-                      // 在「全部」下勾某一条 = 我指的就是这一条：顺势切到子集，不要求用户先改单选框
-                      if (pickMode === 'all') setPickMode('subset')
-                      setPicked((current) =>
-                        current.includes(session.id) ? current.filter((id) => id !== session.id) : [...current, session.id],
-                      )
-                    }}
-                  />
-                  <span className="dsm-rowId">{session.id}</span>
-                  <span className="dsm-meta">{formatBytes(session.bytes)}</span>
-                  <span className="dsm-meta">{formatTime(new Date(session.createdAt).toISOString())}</span>
-                </label>
-              ))}
+              {matching.map((session) => {
+                // 与导入导出页同一套口径：显示标题、id 退到悬浮提示（见 planRows.sessionLabel）。
+                const label = sessionLabel(session)
+                return (
+                  <label key={session.id} className="dsm-row dsm-rowPick">
+                    <input
+                      type="checkbox"
+                      checked={pickMode === 'subset' && picked.includes(session.id)}
+                      onChange={() => {
+                        // 在「全部」下勾某一条 = 我指的就是这一条：顺势切到子集，不要求用户先改单选框
+                        if (pickMode === 'all') setPickMode('subset')
+                        setPicked((current) =>
+                          current.includes(session.id) ? current.filter((id) => id !== session.id) : [...current, session.id],
+                        )
+                      }}
+                    />
+                    <SessionIcon />
+                    <span className={label.kind === 'title' ? 'dsm-rowTitle' : 'dsm-rowId'} title={label.tip}>
+                      {label.text}
+                    </span>
+                    <span className="dsm-meta">{formatBytes(session.bytes)}</span>
+                    <span className="dsm-meta">{formatTime(new Date(session.createdAt).toISOString())}</span>
+                  </label>
+                )
+              })}
             </div>
           </>
         )}

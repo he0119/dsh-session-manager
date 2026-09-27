@@ -22,7 +22,8 @@ import * as React from 'react'
 import { download, exportSessions, importBundle, type ImportResponse } from './api.ts'
 import type { ImportEntry, SessionSummary } from './api.ts'
 import { groupSessions, type SessionGroup } from './groups.ts'
-import { describeCwd } from './planRows.ts'
+import { SessionIcon, WorkspaceIcon } from './icons.tsx'
+import { describeCwd, sessionLabel } from './planRows.ts'
 import { translateWith, zh, type Translate } from './locales.ts'
 import type { PanelShare } from './types.ts'
 
@@ -277,27 +278,49 @@ export function TransferPanel({ t = fallback, state, reload }: PanelShare): Reac
                       label={t('selectGroup', { name })}
                       onToggle={() => toggleGroup(group)}
                     />
-                    <span className="dsm-groupTitle">{name}</span>
-                    {group.title !== undefined && <span className="dsm-meta">{group.path}</span>}
+                    <WorkspaceIcon />
+                    <span className="dsm-groupTitle" title={name}>{name}</span>
+                    {group.title !== undefined && <span className="dsm-groupPath" title={group.path}>{group.path}</span>}
                     {group.title === undefined && group.path !== '' && (
                       <span className="dsm-tag dsm-tagIdle">{t('unregisteredDir')}</span>
                     )}
-                    <span className="dsm-spacer" />
-                    <span className="dsm-hint">{t('sessionsInDir', { count: ids.length })}</span>
-                    <span className="dsm-hint">{t('selectedCount', { count: picked })}</span>
+                    {/* 右侧那两串数字是**一整块**：宁可让路径截断，也不要把它拆到第二行去（那样组头
+                        会长成两行，看着像坏掉了）。它靠 margin-left: auto 贴右边，不再用撑开的空档。 */}
+                    <span className="dsm-groupCounts">
+                      <span className="dsm-hint">{t('sessionsInDir', { count: ids.length })}</span>
+                      <span className="dsm-hint">{t('selectedCount', { count: picked })}</span>
+                    </span>
                   </label>
-                  {group.sessions.map((session) => (
-                    <label key={session.id} className="dsm-row dsm-rowExport">
-                      <input
-                        type="checkbox"
-                        checked={selected.includes(session.id)}
-                        onChange={() => toggle(session.id)}
-                      />
-                      <span className="dsm-rowId">{session.id}</span>
-                      <span className="dsm-meta">{formatBytes(session.bytes)}</span>
-                      <span className="dsm-meta">{formatTime(session.createdAt)}</span>
-                    </label>
-                  ))}
+                  {group.sessions.map((session) => {
+                    // 行上显示标题，id 退到悬浮提示（见 planRows.sessionLabel）。
+                    const label = sessionLabel(session)
+                    return (
+                      <label key={session.id} className="dsm-row dsm-rowExport">
+                        <input
+                          type="checkbox"
+                          checked={selected.includes(session.id)}
+                          onChange={() => toggle(session.id)}
+                        />
+                        <SessionIcon />
+                        {/* 标题与小标签同占一格：标签跟着名字走，名字自己负责省略（见 .dsm-rowLabel）。 */}
+                        <span className="dsm-rowLabel">
+                          <span className={label.kind === 'title' ? 'dsm-rowTitle' : 'dsm-rowId'} title={label.tip}>
+                            {label.text}
+                          </span>
+                          {/* 账本没认领的会话（`workspaceId` 缺省）在这里标出来：它在外壳侧边栏里会落到
+                              「未分组」下，而这里按目录分组，所以同一条会话两边的去处不同。少了这枚标签，
+                              那个差异就只能靠人对着两个界面猜——本机上真的被问过一次。 */}
+                          {session.workspaceId === undefined && (
+                            <span className="dsm-tag dsm-tagIdle" title={t('unregisteredSessionTip')}>
+                              {t('unregisteredSession')}
+                            </span>
+                          )}
+                        </span>
+                        <span className="dsm-meta">{formatBytes(session.bytes)}</span>
+                        <span className="dsm-meta">{formatTime(session.createdAt)}</span>
+                      </label>
+                    )
+                  })}
                 </div>
               )
             })
@@ -368,21 +391,26 @@ export function TransferPanel({ t = fallback, state, reload }: PanelShare): Reac
                 </tr>
               </thead>
               <tbody>
-                {plan.entries.map((entry) => (
-                  <tr key={entry.id}>
-                    <td>
-                      <span className={`dsm-tag ${entry.action === 'create' ? 'dsm-tagCreate' : 'dsm-tagSkip'}`}>
-                        {entry.action === 'create' ? t('actionCreate') : t('actionSkip')}
-                      </span>
-                    </td>
-                    <td className="dsm-rowId">
-                      {entry.id}
-                      {entry.reason !== undefined && <div className="dsm-hint">{entry.reason}</div>}
-                    </td>
-                    <td className="dsm-cwd">{cwdText(entry, t)}</td>
-                    <td className="dsm-meta">{formatBytes(totalBytes(entry.files))}</td>
-                  </tr>
-                ))}
+                {plan.entries.map((entry) => {
+                  const label = sessionLabel(entry)
+                  return (
+                    <tr key={entry.id}>
+                      <td>
+                        <span className={`dsm-tag ${entry.action === 'create' ? 'dsm-tagCreate' : 'dsm-tagSkip'}`}>
+                          {entry.action === 'create' ? t('actionCreate') : t('actionSkip')}
+                        </span>
+                      </td>
+                      <td>
+                        <span className={label.kind === 'title' ? 'dsm-rowTitle' : 'dsm-rowId'} title={label.tip}>
+                          {label.text}
+                        </span>
+                        {entry.reason !== undefined && <div className="dsm-hint">{entry.reason}</div>}
+                      </td>
+                      <td className="dsm-cwd">{cwdText(entry, t)}</td>
+                      <td className="dsm-meta">{formatBytes(totalBytes(entry.files))}</td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>

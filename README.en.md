@@ -53,11 +53,18 @@ the built-in pages). `github:` installs are **not** supported here: the build ru
 
 **Import & export** — take sessions away, bring them back
 
+- Rows show a session's **title**, with the full title and the id on hover: a uuid tells a human nothing,
+  and people pick sessions by "the one where I asked about that"; a session with no title falls back to
+  its id;
 - **Export**: tick sessions → the browser downloads one `.dshsess` bundle. The bundle carries the raw
   bytes of **every generation** of those logs (each with a sha256), not files the session created. The
   list is **grouped by directory** (group name = workspace title; a directory no workspace registers shows
   its path and is marked), and **clicking a group header toggles that whole group** — so "take every
-  session of this workspace away" is one click.
+  session of this workspace away" is one click. The two levels never read alike: a group header is a tinted
+  band with a folder glyph, while session rows are indented under it and carry a chat-bubble glyph (a session
+  title is a sentence the user wrote, so it easily looks like a directory name). Sessions no workspace record
+  claims — the ones the shell sidebar parks under Ungrouped — stay with their directory here and carry a small
+  "not registered" tag saying so.
 - **Import**: pick a bundle and a target workspace → **preview first** (per session: what will be created,
   which `cwd` gets rewritten, what is skipped, how the registry changes) → then confirm. Import **never
   overwrites**: a session whose id already exists is skipped and reported; a session with no `cwd` lands in
@@ -72,8 +79,9 @@ the built-in pages). `github:` installs are **not** supported here: the build ru
   directory browser, and on a host with no picker the button is simply not shown;
 - the target directory must already exist; there is also an optional title for a newly created workspace,
   whether to carry the **files the sessions created**, and whether to carry unregistered sessions;
-- **move the whole source directory, or only some of it**: the sessions of the source directory are listed,
-  and ticking any row switches to "only the ticked ones"; one source directory per run;
+- **move the whole source directory, or only some of it**: the sessions of the source directory are listed
+  (titles too, ids on hover), and ticking any row switches to "only the ticked ones"; one source
+  directory per run;
 - **Preview**: session, log and byte counts, source → target bucket, **how the ledger changes** (create or
   reuse the target workspace, how many sessions are added, which workspaces lose them, whether an emptied
   workspace is removed), the artifact plan and its skip reasons;

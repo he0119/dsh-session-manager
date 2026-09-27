@@ -48,14 +48,44 @@ function makeSandbox(name: string): Sandbox {
   return { base, sessionsRoot, registryPath, registry }
 }
 
-function writeSession(root: string, id: string, cwd: string, createdAt: number): void {
+function writeSession(
+  root: string,
+  id: string,
+  cwd: string,
+  createdAt: number,
+  options: { title?: string } = {},
+): void {
   const header: SessionHeader = { type: 'session', version: 4, id, createdAt, cwd, isSeeded: false, delegationDepth: 0 }
-  const text = `${JSON.stringify(header)}\n${JSON.stringify({ type: 'user/message', seq: 0, data: {} })}\n`
+  const lines = [
+    JSON.stringify(header),
+    JSON.stringify({ type: 'user/message', seq: 0, data: {} }),
+    // 标题在 DSH 里是日志事件（最新一条生效），不是 header 字段——夹具得照这个样子写，
+    // 否则测的就不是真实数据形状了（见 src/session-title.ts）。
+    ...(options.title === undefined
+      ? []
+      : [JSON.stringify({ type: 'session/title', seq: 1, data: { title: options.title, source: { kind: 'fallback' } } })]),
+  ]
   const dir = sessionDir(root, cwd, id)
   mkdirSync(dir, { recursive: true })
   writeFileSync(
     join(dir, 'session.v4.jsonl.zstd'),
-    Buffer.concat(text.split('\n').slice(0, -1).map((line) => encodeRawFrame(`${line}\n`))),
+    Buffer.concat(lines.map((line) => encodeRawFrame(`${line}\n`))),
+  )
+}
+
+/** 写一份宿主的投影缓存记录（宿主自己列会话时读它，标题也在里面）。 */
+function writeProjectionCache(sandbox: Sandbox, id: string, record: { createdAt: number; cwd?: string; title?: string }): void {
+  const dir = join(sandbox.base, 'session_projcache', 'sessions')
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(
+    join(dir, `${id}.json`),
+    JSON.stringify({
+      version: 7,
+      record: {
+        identity: { formatVersion: 4, createdAt: record.createdAt, ...(record.cwd === undefined ? {} : { cwd: record.cwd }) },
+        rows: record.title === undefined ? {} : { title: { ver: 1, seq: 1, val: record.title } },
+      },
+    }),
   )
 }
 
@@ -113,7 +143,7 @@ function deps(sandbox: Sandbox): Parameters<typeof createApiHandlers>[0] {
 
 test('GET /state：列出会话与工作区，带上注册表归属', async () => {
   const sandbox = makeSandbox('web-state')
-  writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000)
+  writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000, { title: '帮我安装到 web-dev 中' })
   writeSession(sandbox.sessionsRoot, 'session-b', CWD_B, 2000)
 
   const handlers = createApiHandlers(deps(sandbox))
@@ -128,12 +158,58 @@ test('GET /state：列出会话与工作区，带上注册表归属', async () =
   assert.equal(sessions[0]!['id'], 'session-b')
   assert.equal(sessions.find((s) => s['id'] === 'session-a')!['workspaceId'], 'ws-a')
   assert.equal(sessions.find((s) => s['id'] === 'session-b')!['workspaceId'], undefined)
+  // 标题：界面靠它认会话（id 退到悬浮提示）。缓存不在时读的是日志开头那一段。
+  assert.equal(sessions.find((s) => s['id'] === 'session-a')!['title'], '帮我安装到 web-dev 中')
+  // 日志里没有标题事件的老会话：字段缺席，界面自己回落到 id（而不是空字符串）
+  assert.equal(sessions.find((s) => s['id'] === 'session-b')!['title'], undefined)
   const workspaces = body['workspaces'] as Array<Record<string, unknown>>
   assert.deepEqual(workspaces.map((w) => w['id']), ['ws-a'])
   assert.deepEqual(body['problems'], [])
   // 没注入探测函数时按"这个宿主没有目录选择器"回：界面据此不显示「浏览…」，
   // 而不是显示一个点了必被宿主以 directory-picker/unavailable 拒绝的按钮。
   assert.equal(body['pickerKind'], null)
+})
+
+test('GET /state：标题优先读宿主投影缓存，缓存对不上身份才回落日志', async () => {
+  const sandbox = makeSandbox('web-state-title')
+  // 日志里是首条 fallback 标题，缓存里是用户改过的名字：缓存赢（它就是"最新一条"）。
+  writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000, { title: '日志里的老标题' })
+  writeProjectionCache(sandbox, 'session-a', { createdAt: 1000, cwd: CWD_A, title: '缓存里的新标题' })
+  // 缓存里的 createdAt 对不上（同 id 的另一条生命周期）：不认，回落日志。
+  writeSession(sandbox.sessionsRoot, 'session-b', CWD_B, 2000, { title: '日志里的标题' })
+  writeProjectionCache(sandbox, 'session-b', { createdAt: 999, cwd: CWD_B, title: '别人的标题' })
+  // 缓存里没这条记录（比如刚被本插件导入的会话）：回落日志。
+  writeSession(sandbox.sessionsRoot, 'session-c', CWD_A, 3000, { title: '只在日志里的标题' })
+
+  const handlers = createApiHandlers(deps(sandbox))
+  const { res, captured } = fakeRes()
+  await handlers['GET /state']!(fakeReq('GET', `${API_PREFIX}/state`), res)
+
+  const byId = new Map((json(captured)['sessions'] as Array<Record<string, unknown>>).map((s) => [s['id'], s]))
+  assert.equal(byId.get('session-a')!['title'], '缓存里的新标题')
+  assert.equal(byId.get('session-b')!['title'], '日志里的标题')
+  assert.equal(byId.get('session-c')!['title'], '只在日志里的标题')
+})
+
+test('GET /state：读标题失败（注入的读取器抛错）不影响列出会话', async () => {
+  const sandbox = makeSandbox('web-state-title-broken')
+  writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000, { title: '标题' })
+
+  const handlers = createApiHandlers({
+    ...deps(sandbox),
+    // 标题是装饰：它坏了（缓存格式变了、解码器不吃这段字节……）也只能少显示个名字，
+    // 不能让整页会话都列不出来。
+    resolveTitle: () => {
+      throw new Error('标题读取器坏了')
+    },
+  })
+  const { res, captured } = fakeRes()
+  await handlers['GET /state']!(fakeReq('GET', `${API_PREFIX}/state`), res)
+
+  assert.equal(captured.status, 200)
+  const sessions = json(captured)['sessions'] as Array<Record<string, unknown>>
+  assert.deepEqual(sessions.map((s) => s['id']), ['session-a'])
+  assert.equal(sessions[0]!['title'], undefined)
 })
 
 test('GET /state：宿主的选择器能力种类如实透给界面（native/browse）', async () => {
@@ -192,7 +268,7 @@ test('POST /export：会话不在库里就 404，空选择就 400', async () => 
 
 test('POST /import：预演不写盘，落地后会话与注册表一起落盘', async () => {
   const source = makeSandbox('web-import-source')
-  writeSession(source.sessionsRoot, 'session-a', CWD_A, 1000)
+  writeSession(source.sessionsRoot, 'session-a', CWD_A, 1000, { title: '被导出的会话' })
   const exportHandlers = createApiHandlers(deps(source))
   const exported = fakeRes()
   await exportHandlers['POST /export']!(
@@ -220,6 +296,8 @@ test('POST /import：预演不写盘，落地后会话与注册表一起落盘',
   const planBody = json(planned.captured)
   assert.equal(planBody['ok'], true)
   assert.deepEqual(planBody['created'], ['session-a'])
+  // 预演表里显示的是标题（id 退到悬浮提示）：它从包里的日志事件折出来，清单格式没为此改过。
+  assert.equal((planBody['entries'] as Array<Record<string, unknown>>)[0]!['title'], '被导出的会话')
   assert.equal(existsSync(join(sessionDir(target.sessionsRoot, CWD_B, 'session-a'))), false, '预演不写盘')
 
   const applied = fakeRes()
@@ -314,7 +392,7 @@ test('registerWebRoutes：注册六条精确路由，方法不对回 405', async
 
 test('POST /migrate：mode 缺省只预演，预演结果里带上源/目标桶与注册表变更', async () => {
   const sandbox = makeSandbox('web-migrate-plan')
-  writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000)
+  writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000, { title: '要搬走的会话' })
 
   const handlers = createApiHandlers(deps(sandbox))
   const { res, captured } = fakeRes()
@@ -329,6 +407,8 @@ test('POST /migrate：mode 缺省只预演，预演结果里带上源/目标桶�
   assert.equal(body['applied'], false)
   const preview = body['preview'] as Record<string, unknown>
   assert.equal((preview['sessions'] as unknown[]).length, 1)
+  // 预演里也带标题：迁移页挑会话与导入导出页用同一套口径（标题可见、id 退到悬浮提示）。
+  assert.equal((preview['sessions'] as Array<Record<string, unknown>>)[0]!['title'], '要搬走的会话')
   // 桶名是**绝对路径**：join(会话根, projectKey(工作区目录))
   assert.equal(preview['sourceBucket'], join(sandbox.sessionsRoot, projectKey(CWD_A)))
   assert.equal(preview['targetBucket'], join(sandbox.sessionsRoot, projectKey(CWD_B)))

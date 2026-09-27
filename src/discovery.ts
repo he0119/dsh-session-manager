@@ -4,11 +4,15 @@
 // 首帧实测仅 ~200 字节，因此这里只解码**候选前缀**，不碰其余帧。
 // 严格的自洽性切分（decodeAll(前) + decodeAll(后) === decodeAll(整体)）留给执行阶段，
 // 发现阶段用"前缀可解码 + 以换行结尾 + 能解析成合法 header"三重判据，够严且便宜。
+//
+// 标题（`title`）不在这里读：它不在 header 里，而在日志事件里，读法自成一层（session-title.ts），
+// 由调用方通过 `resolveTitle` 注入——发现阶段该多便宜就多便宜，要不要标题由调用方决定。
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { parseSessionLogName } from './paths.ts'
 import { projectKey } from './project-key.ts'
+import type { TitleQuery } from './session-title.ts'
 import type { DecodeAll, SessionHeader, SessionLogFile } from './types.ts'
 import { ZSTD_MAGIC } from './zstd-frame.ts'
 
@@ -97,15 +101,33 @@ export interface DiscoveredSession {
   header: SessionHeader
   /** 该会话目录里的代次日志文件，按代次升序。 */
   files: SessionLogFile[]
+  /**
+   * 折叠出的标题；读不到就没有（界面此时退回显示 id）。
+   *
+   * 标题不在 header 里而在日志事件里，所以它由调用方注入的 `resolveTitle` 去取
+   * （见 session-title.ts：先宿主投影缓存、后日志开头的有界前缀）。发现阶段自己不读它。
+   */
+  title?: string
+}
+
+/** `scanBucket()` 的选项。 */
+export interface ScanOptions {
+  /**
+   * 读标题。缺席 = 这次扫描不要标题（例如导出时只关心字节，标题是白花的钱）。
+   *
+   * 抛错按"这条没有标题"处理：标题是装饰，不该让整页会话列不出来。
+   */
+  resolveTitle?: (query: TitleQuery) => string | undefined
 }
 
 /**
  * 扫描一个分桶目录下的全部会话。
  * @param bucketDir 形如 `<root>/--C-Users-me-proj--` 的目录。
  * @param decodeAll 多帧感知解码器。
+ * @param options.resolveTitle 读标题的回调（可选）。
  * @returns 会话数组，按 createdAt 降序（新→旧，与宿主账本显示顺序一致）。
  */
-export function scanBucket(bucketDir: string, decodeAll: DecodeAll): DiscoveredSession[] {
+export function scanBucket(bucketDir: string, decodeAll: DecodeAll, options: ScanOptions = {}): DiscoveredSession[] {
   const out: DiscoveredSession[] = []
   for (const dirName of readdirSync(bucketDir)) {
     const dir = join(bucketDir, dirName)
@@ -125,7 +147,16 @@ export function scanBucket(bucketDir: string, decodeAll: DecodeAll): DiscoveredS
     }
     if (!header || files.length === 0) continue // 只有临时/伴生文件的目录
     files.sort((a, b) => a.version - b.version)
-    out.push({ dirName, dir, id: header.id, cwd: header.cwd, createdAt: header.createdAt, header, files })
+    const session: DiscoveredSession = { dirName, dir, id: header.id, cwd: header.cwd, createdAt: header.createdAt, header, files }
+    if (options.resolveTitle) {
+      try {
+        const title = options.resolveTitle(session)
+        if (title !== undefined && title !== '') session.title = title
+      } catch {
+        // 标题读不出来不影响"这条会话在库里"这个事实
+      }
+    }
+    out.push(session)
   }
   out.sort((a, b) => b.createdAt - a.createdAt)
   return out

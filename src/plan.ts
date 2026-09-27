@@ -9,6 +9,7 @@ import { planArtifactMoves } from './artifacts.ts'
 import { bucketOf, scanBucket } from './discovery.ts'
 import { projectKey } from './project-key.ts'
 import { reHome, validateRegistry } from './registry.ts'
+import type { TitleQuery } from './session-title.ts'
 import type { DecodeAll, RelocationPlan, SessionMove, WorkspaceRegistryState } from './types.ts'
 
 /** `buildRelocationPlan()` 的选项。 */
@@ -30,6 +31,12 @@ export interface BuildPlanOptions {
   includeUnowned?: boolean
   /** 是否同时规划"会话中创建的文件"的搬迁（默认 false；需要全量解码，较慢）。 */
   includeArtifacts?: boolean
+  /**
+   * 读会话标题（可选）：界面挑会话时按标题认人（见 session-title.ts）。
+   *
+   * 缺席 = 这次计划不要标题（CLI 与工具层只报数量，不需要），因此发现阶段一分钱都不多花。
+   */
+  resolveTitle?: (query: TitleQuery) => string | undefined
 }
 
 /**
@@ -48,6 +55,7 @@ export function buildRelocationPlan(options: BuildPlanOptions): RelocationPlan {
     title,
     includeUnowned = true,
     includeArtifacts = false,
+    resolveTitle,
   } = options
   const problems: string[] = []
 
@@ -90,7 +98,7 @@ export function buildRelocationPlan(options: BuildPlanOptions): RelocationPlan {
 
   let discovered: ReturnType<typeof scanBucket> = []
   if (existsSync(sourceBucket)) {
-    discovered = scanBucket(sourceBucket, decodeAll)
+    discovered = scanBucket(sourceBucket, decodeAll, resolveTitle === undefined ? {} : { resolveTitle })
     for (const s of discovered) {
       if (s.cwd !== from) problems.push(`session ${s.id}: header cwd ${s.cwd} != ${from}`)
     }
@@ -124,6 +132,7 @@ export function buildRelocationPlan(options: BuildPlanOptions): RelocationPlan {
     targetDirs.add(targetDir)
     return {
       id: s.id,
+      ...(s.title === undefined ? {} : { title: s.title }),
       dirName: s.dirName,
       createdAt: s.createdAt,
       from,

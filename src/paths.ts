@@ -3,7 +3,7 @@
 // 目录布局（宿主 src/index.ts）：
 //   <root>/<projectKey(cwd)>/<encodeSegment(id)>/session.vN.jsonl.zstd
 // 会话 id 与 cwd 共同决定路径；加载时校验二者与磁盘目录一致，否则硬失败。
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 
 import { NO_CWD_DIR, projectKey } from './project-key.ts'
 
@@ -86,4 +86,18 @@ export function sessionLogPath(
   compression = 'zstd',
 ): string {
   return join(sessionDir(root, cwd, id), generationLogFilename(version, compression))
+}
+
+/**
+ * 宿主投影缓存的会话记录目录：`<storages>/session_projcache/sessions`。
+ *
+ * 由 `registryPath` 反推（账本与缓存同在 `<storages>` 下，而配置里只暴露前者）：那个目录里
+ * 每条会话一个 `<encodeSegment(id)>.json`，是宿主自己列会话时读的东西，标题也在里面
+ * （见 session-title.ts）。读不到就当没有缓存——标题照样能从日志里读，只是慢一点。
+ *
+ * @param registryPath 账本文件路径（`<storages>/workspace.json`）。
+ * @returns 缓存记录目录（不保证存在）。
+ */
+export function projectionCacheDir(registryPath: string): string {
+  return join(dirname(registryPath), 'session_projcache', 'sessions')
 }

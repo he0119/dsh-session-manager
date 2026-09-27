@@ -43,6 +43,9 @@ export const zh = {
   selectedCount: '已选 {count}',
   selectGroup: '整组勾选／取消：{name}',
   unregisteredDir: '未登记工作区',
+  unregisteredSession: '未登记在册',
+  unregisteredSessionTip:
+    '这条会话的 id 不在任何工作区的登记表里。外壳侧边栏把这类会话挂到「未分组」下（空白与已归档的它不显示，所以那边看着比这里少）。',
   noCwdGroup: '没有 cwd 的会话',
   exportAction: '导出所选',
   exporting: '打包中…',
@@ -173,6 +176,9 @@ export const en: Record<keyof typeof zh, string> = {
   selectedCount: '{count} selected',
   selectGroup: 'Select or clear this whole group: {name}',
   unregisteredDir: 'not a registered workspace',
+  unregisteredSession: 'not registered',
+  unregisteredSessionTip:
+    "This session's id is in no workspace record. The shell sidebar parks such sessions under Ungrouped (it hides blank and archived ones, so that row shows fewer).",
   noCwdGroup: 'Sessions without a cwd',
   exportAction: 'Export selected',
   exporting: 'Packing…',

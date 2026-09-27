@@ -322,7 +322,8 @@ test('客户端产物：导出列表按目录分组，组头就是"整组勾选"
     registryPath: '/home/u/.dsh/registry.json',
     problems: [],
     sessions: [
-      { id: 's-1', cwd: '/home/u/dev/alpha', createdAt: 2, dir: '/home/u/dev/alpha', bytes: 2048, files: [] },
+      // `workspaceId` 是宿主按账本成员表填的：有值 = 被某个工作区登记在册，缺省 = 谁都没认领。
+      { id: 's-1', cwd: '/home/u/dev/alpha', createdAt: 2, dir: '/home/u/dev/alpha', bytes: 2048, files: [], workspaceId: 'w1' },
       { id: 's-2', cwd: '/home/u/dev/alpha', createdAt: 1, dir: '/home/u/dev/alpha', bytes: 1024, files: [] },
       { id: 's-3', cwd: '/home/u/dev/beta', createdAt: 3, dir: '/home/u/dev/beta', bytes: 512, files: [] },
       { id: 's-4', createdAt: 4, dir: '_no-cwd', bytes: 256, files: [] },
@@ -357,4 +358,65 @@ test('客户端产物：导出列表按目录分组，组头就是"整组勾选"
   )
   const rows = recorded.filter((element) => element.type === 'label' && String(element.props?.className).includes('dsm-rowExport'))
   assert.equal(rows.length, 4, '每条会话一行')
+
+  // 两级各有各的图形标记：组头是文件夹（工作区），会话行是对话气泡。
+  //
+  // 为什么值得钉住：会话标题是**用户自己写的第一句话**，它长得像个工作区名是常事（本机就有一条
+  // 叫"dsh-session-manager 使用说明"的会话）。同屏两级混排时，"这行是工作区还是会话"只能靠形状读，
+  // 而形状是唯一一种"不用读字"就成立的线索——底色和缩进都会随主题、屏幕、色觉打折。
+  // 少了标记不会报错、不会崩，只会让人认错行，所以这里按树核一遍。
+  const levelIcons = (node, out = []) => {
+    if (Array.isArray(node)) {
+      for (const item of node) levelIcons(item, out)
+      return out
+    }
+    if (node === null || typeof node !== 'object') return out
+    // 图形是函数组件给出的：本文件没有渲染器，得自己带着 props 调一次才看得见 <svg>。
+    if (typeof node.type === 'function') return levelIcons(node.type(node.props), out)
+    const className = String(node.props?.className ?? '')
+    if (className.includes('dsm-levelIcon')) out.push(className)
+    return levelIcons(node.props?.children, out)
+  }
+  for (const head of heads) {
+    assert.deepEqual(levelIcons(head), ['dsm-levelIcon dsm-levelWorkspace'], '每条组头挂一个工作区标记（文件夹）')
+  }
+  for (const row of rows) {
+    assert.deepEqual(levelIcons(row), ['dsm-levelIcon dsm-levelSession'], '每条会话行挂一个会话标记（对话气泡）')
+  }
+
+  // 组头右侧那两串数字必须是**一整块**（一个 .dsm-groupCounts 里两个 .dsm-hint），而不是各自一个
+  // flex 项：组头是 nowrap 的，靠的就是"整数块不可压 + 路径先截断"这一对。拆开两个 span 不会报错、
+  // 不会崩，只会让那条修复悄悄失效（路径一长，数字又被挤到第二行），所以这里把结构钉住。
+  const counts = recorded.filter((element) => element.props?.className === 'dsm-groupCounts')
+  assert.equal(counts.length, 3, '每条组头一个计数块')
+  for (const block of counts) {
+    const children = Array.isArray(block.props.children) ? block.props.children : [block.props.children]
+    const hints = children.filter(
+      (child) => child !== null && typeof child === 'object' && String(child.props?.className) === 'dsm-hint',
+    )
+    assert.equal(hints.length, 2, '计数块里正好是"这组几条 / 选中几条"两条')
+  }
+
+  // 「未登记在册」这枚标签只该挂给账本没认领的会话（行里 `workspaceId` 缺省的那些）。挂错或漏挂都
+  // 不会抛错、不会崩，只会让"外壳侧边栏为什么把这些会话放进未分组"重新变成要靠人对着两个界面猜的
+  // 谜——本机上真的被问过一次，所以按行核：先把每行的名字与标签取出来，再按名字对号入座。
+  const rowFacts = (node, acc = { label: '', tags: [] }) => {
+    if (Array.isArray(node)) {
+      for (const item of node) rowFacts(item, acc)
+      return acc
+    }
+    if (node === null || typeof node !== 'object') return acc
+    if (typeof node.type === 'function') return rowFacts(node.type(node.props), acc)
+    const className = String(node.props?.className ?? '')
+    if (className.includes('dsm-tag')) acc.tags.push(node.props?.children)
+    if (className === 'dsm-rowTitle' || className === 'dsm-rowId') acc.label = String(node.props?.children)
+    return rowFacts(node.props?.children, acc)
+  }
+  const tagsByLabel = new Map(rows.map((row) => [rowFacts(row).label, rowFacts(row).tags]))
+  assert.deepEqual(tagsByLabel.get('s-1'), [], '登记在册的会话不挂标签')
+  // s-1 与 s-2 在同一个目录、同一组里：登记在册与没登记在册混在一组是常态（真实库里就是这样），
+  // 标签得精确到行，不能按组一刀切。
+  assert.deepEqual(tagsByLabel.get('s-2'), ['unregisteredSession'], '同目录里未登记在册的那条要单独标出来')
+  assert.deepEqual(tagsByLabel.get('s-3'), ['unregisteredSession'], '没登记的工作区下的会话同样没在册')
+  assert.deepEqual(tagsByLabel.get('s-4'), ['unregisteredSession'], '没有 cwd 的会话当然也不在任何登记表里')
 })

@@ -57,6 +57,8 @@ export type CompressFrame = (text: string) => Buffer
 /** 计划里单个会话的迁移项。 */
 export interface SessionMove {
   id: string
+  /** 折叠出的标题；读不到就没有（见 session-title.ts）。界面靠它认会话，id 退到悬浮提示。 */
+  title?: string
   dirName: string
   createdAt: number
   from: string

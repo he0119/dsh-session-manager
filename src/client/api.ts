@@ -15,6 +15,8 @@ export const API_PREFIX = '/dsh-session-manager/api'
 /** 界面上一条会话。 */
 export interface SessionSummary {
   id: string
+  /** 折叠出的标题（宿主侧从投影缓存或日志里读，见 `src/session-title.ts`）；没有时界面显示 id。 */
+  title?: string
   cwd?: string
   createdAt: number
   dir: string
@@ -48,6 +50,8 @@ export interface StateResponse {
 /** 导入计划里的一条会话。 */
 export interface ImportEntry {
   id: string
+  /** 包里的标题（宿主从载荷的日志里折出来的）；没有时界面显示 id。 */
+  title?: string
   action: 'create' | 'skip'
   reason?: string
   fromCwd?: string
@@ -159,6 +163,8 @@ export function download(result: ExportResult): void {
 /** 预演里的一条会话（宿主 `MigrationPreview.sessions`）。 */
 export interface PreviewSession {
   id: string
+  /** 折叠出的标题；没有时界面显示 id。 */
+  title?: string
   createdAt: number
   registered: boolean
   alreadyAtTarget: boolean

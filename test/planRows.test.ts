@@ -1,4 +1,4 @@
-// test/planRows.test.ts — 导入预演表里「cwd 那一格」的判定。
+// test/planRows.test.ts — 列表/表格里一行的写法：cwd 那一格说什么，以及一条会话怎么称呼。
 //
 // 这一格在用户截图上错过：一次 20 条**全部跳过**的导入，每一行的 cwd 都写着
 // 「保持无 cwd（落 _no-cwd）」，而那些会话明明都有 cwd（截图里第一条就在
@@ -10,7 +10,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { describeCwd } from '../src/client/planRows.ts'
+import { describeCwd, sessionLabel } from '../src/client/planRows.ts'
 
 // 同 groups.test.ts：不 import `src/client/api.ts`（它会把 src/client 拉进没有 DOM 的 Host 工程）。
 
@@ -38,5 +38,36 @@ test('会写、有目标路径但包里没记原 cwd（坏数据）：原路径�
     kind: 'rewrite',
     from: '—',
     to: '/home/uy_sun/test',
+  })
+})
+
+// ---- 一行会话怎么称呼（`sessionLabel`）----
+//
+// 以前列表里到处是 `session-9f3c…`：uuid 对人是零信息，用户是在"我上次问那个问题的会话"这一层挑
+// 会话的。改成显示标题、id 退到悬浮提示；这里钉死四种输入下的输出。
+
+const ID = 'session-24ee5b02-4a73-47f0-8212-0434efeb8062'
+
+test('有标题：行上显示标题，悬浮提示里"完整标题 + id"两行', () => {
+  assert.deepEqual(sessionLabel({ id: ID, title: '帮我安装到 web-dev 中' }), {
+    text: '帮我安装到 web-dev 中',
+    tip: `帮我安装到 web-dev 中\n${ID}`,
+    kind: 'title',
+  })
+})
+
+test('没有标题：回落到 id，并且不在提示里重复一遍', () => {
+  assert.deepEqual(sessionLabel({ id: ID }), { text: ID, tip: ID, kind: 'id' })
+})
+
+test('空白标题当没有标题：别显示一行空格，也别把 id 藏起来', () => {
+  assert.deepEqual(sessionLabel({ id: ID, title: '   ' }), { text: ID, tip: ID, kind: 'id' })
+})
+
+test('标题两边的空白裁掉：宿主写进来的可能带换行（提示是两行的，多一行就错位了）', () => {
+  assert.deepEqual(sessionLabel({ id: ID, title: ' 修一下图标\n' }), {
+    text: '修一下图标',
+    tip: `修一下图标\n${ID}`,
+    kind: 'title',
   })
 })

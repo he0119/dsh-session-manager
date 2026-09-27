@@ -24,6 +24,7 @@ import { gunzipSync, gzipSync } from 'node:zlib'
 
 import { encodeSegment, sessionDir } from './paths.ts'
 import { reHome, writeRegistryAtomic } from './registry.ts'
+import { foldTitleInFrames } from './session-title.ts'
 import { relocateHeaderCwd, relocateHeaderCwdText } from './session-log.ts'
 import type { DecodeAll, RegistryChange, SessionLogFile, WorkspaceRegistryState } from './types.ts'
 
@@ -271,6 +272,13 @@ function scanExistingSessionDirs(root: string): Map<string, string> {
 /** 导入计划里的一条会话。 */
 export interface ImportEntry {
   id: string
+  /**
+   * 包里的标题（日志事件里折叠出来的；包里没有就是 undefined，界面此时显示 id）。
+   *
+   * 不改清单格式：标题本来就在日志里跟着包一起走，再从载荷里读一遍即可（见 `bundleTitle()`）。
+   * 因此别的版本/别的工具产出的包，只要日志里有标题事件，这里也能显示。
+   */
+  title?: string
   action: 'create' | 'skip'
   /** action === 'skip' 时的原因（面向用户，可读）。 */
   reason?: string
@@ -311,12 +319,36 @@ export interface ImportOptions {
   registryPath?: string
   /** 新建工作区的显示标题。 */
   title?: string
+  /**
+   * 解码器：给了才会读包里的标题（`ImportEntry.title`）。
+   *
+   * 可选是因为它只影响**展示**：包已经整份在内存里，折叠标题不需要碰盘，但要多解一段字节；
+   * 不关心标题的调用方（工具层/CLI）不传，就一个字节都不解。
+   */
+  decodeAll?: DecodeAll
   now?: string
   newId?: string
 }
 
 function hasCwd(session: BundleSession): boolean {
   return session.cwd !== undefined && session.cwd !== null && session.cwd !== ''
+}
+
+/**
+ * 包里的标题：载荷已经整份在内存里，按代次取最新那一代，在它的开头有界地折一次标题。
+ *
+ * 只解最新一代的前缀（与 `session-title.readLogTitle` 同一口径）：标题是宿主在会话开头落的，
+ * 老代次的标题必然也被后一代继承，代次越新越接近"最后一条生效"。
+ * @returns 标题；没有解码器、没有文件或读不到时为 undefined。
+ */
+function bundleTitle(bundle: SessionBundle, session: BundleSession, decodeAll: DecodeAll | undefined): string | undefined {
+  if (decodeAll === undefined) return undefined
+  let newest: BundleFileEntry | undefined
+  for (const file of session.files) {
+    if (newest === undefined || file.version > newest.version) newest = file
+  }
+  if (newest === undefined) return undefined
+  return foldTitleInFrames(bundle.payload.subarray(newest.offset, newest.offset + newest.bytes), decodeAll)
 }
 
 /**
@@ -328,7 +360,7 @@ function hasCwd(session: BundleSession): boolean {
  *      落 `_no-cwd` 分桶，也就不参与注册表重挂）。
  */
 export function planImport(bundle: SessionBundle, options: ImportOptions): ImportPlan {
-  const { root, targetCwd, registry, title, now, newId } = options
+  const { root, targetCwd, registry, title, decodeAll, now, newId } = options
   const existingDirs = scanExistingSessionDirs(root)
   const entries: ImportEntry[] = []
   const problems: string[] = []
@@ -341,10 +373,13 @@ export function planImport(bundle: SessionBundle, options: ImportOptions): Impor
     const dir = sessionDir(root, withCwd ? targetCwd : undefined, session.id)
     const files = session.files.map((file) => ({ name: file.name, bytes: file.bytes }))
     const existing = existingDirs.get(encodeSegment(session.id))
+    const sessionTitle = bundleTitle(bundle, session, decodeAll)
+    const titled = sessionTitle === undefined ? {} : { title: sessionTitle }
 
     if (existing !== undefined) {
       entries.push({
         id: session.id,
+        ...titled,
         action: 'skip',
         reason: `这个库里已经有同 id 的会话：${existing}`,
         fromCwd: session.cwd,
@@ -356,6 +391,7 @@ export function planImport(bundle: SessionBundle, options: ImportOptions): Impor
 
     entries.push({
       id: session.id,
+      ...titled,
       action: 'create',
       fromCwd: session.cwd,
       toCwd: withCwd ? targetCwd : undefined,

@@ -114,7 +114,8 @@ tsconfig.client.json Web Client 自己的类型工程（DOM + JSX；Host 那份�
 | `src/zstd-frame.ts` | raw 帧编码、首帧边界定位、多帧感知守卫 | 无 |
 | `src/session-log.ts` | 单日志读取与**保结构** cwd 改写 | 无 |
 | `src/registry.ts` | 注册表启动不变式校验、`reHome()`、原子落盘 | 无 |
-| `src/discovery.ts` | 分桶扫描 + 只解首帧读 header（发现阶段快） | 无 |
+| `src/discovery.ts` | 分桶扫描 + 只解首帧读 header（发现阶段快），可注入标题读取器 | 无 |
+| `src/session-title.ts` | 会话标题：宿主投影缓存优先，缺席时有界地解日志开头 | 无 |
 | `src/plan.ts` | 只读计划：目标推导、阻塞问题、账本变更 | 无 |
 | `src/journal.ts` | 字节级备份清单与回滚 | 无 |
 | `src/execute.ts` | 执行 + 独立复核（含产物目标位校验） | 无 |
@@ -127,10 +128,10 @@ tsconfig.client.json Web Client 自己的类型工程（DOM + JSX；Host 那份�
 | `src/client/*` | Web Client 半边：「会话管理」页（导入导出 + 迁移两个分页）、字典、样式、端点调用 → `lib/client.js` | 无 |
 | `src/index.ts` | 插件入口 `apply(ctx, config)` | `dsh-tools` |
 
-核心层（`project-key` / `paths` / `zstd-frame` / `session-log` / `discovery` / `registry` /
-`plan` / `journal` / `execute` / `artifacts` / `transfer` / `migrate`）**不依赖 DSH**，所以插件
-外壳、CLI 与测试三者共用同一段代码。只有 `src/tools.ts` 与 `src/index.ts` 依赖 `@deepseek-ai/dsh-tools`，
-`src/web.ts` 连它也不依赖（只认一个 `{ register }` 形状）。
+核心层（`project-key` / `paths` / `zstd-frame` / `session-log` / `discovery` / `session-title` /
+`registry` / `plan` / `journal` / `execute` / `artifacts` / `transfer` / `migrate`）**不依赖 DSH**，
+所以插件外壳、CLI 与测试三者共用同一段代码。只有 `src/tools.ts` 与 `src/index.ts` 依赖
+`@deepseek-ai/dsh-tools`，`src/web.ts` 连它也不依赖（只认一个 `{ register }` 形状）。
 
 `src/client/**` 不在 Host 端那份 tsconfig 的 include 里：它要 DOM 与 JSX，而 Host 侧没有。
 那条边界是有意的——「浏览器 API 出现在 Host 代码里」在类型层面就不成立。

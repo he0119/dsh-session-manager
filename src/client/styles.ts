@@ -72,13 +72,24 @@ export const CSS = `
   /* 往表面色混一点点：深色主题里变暗、浅色主题里变亮，两边都像"被按了一下"。 */
   background: color-mix(in srgb, var(--dsw-alias-brand-primary, #3370ff) 88%, var(--dsw-alias-bg-layer-1, #fff));
 }
-/* 一组会话：组头 + 组内若干行。 */
+/*
+ * 一条列表里的两级：**工作区**是组头，**会话**是组头下面缩进的那些行。
+ * 区分手段叠了四层，任意一套主题、任意一种色觉下都读得出上下级：
+ *   ① 底色——组头是一条实心横幅，会话行是卡片底色；
+ *   ② 缩进 + 竖向导引线——会话行整行往里缩，并沿左缘挂一条线（"这几行属于上面那个组头"）；
+ *   ③ 字号——组头 14px/600，会话行跟着页面的 13px/400；
+ *   ④ 图形——组头是文件夹，会话行是对话气泡（见 [icons.tsx](./icons.tsx)）。
+ * 为什么不靠"更深一点的底色"单独扛：浅色主题里 bg-layer-1/2/3 全是同一个白（见下面 .dsm-row:hover
+ * 的注释），能用的只有"字色兑出来的薄雾"，而它对屏幕、亮度、色觉都敏感——层次不能只挂在它身上。
+ */
 .dsm-group { display: block; }
 .dsm-group:first-child .dsm-groupHead { border-top: none; }
 /*
  * 组头是一条"带底色、随列表滚动粘住"的横幅：底色用字色薄雾兑在**卡片表面色**上，于是它既是不透明
  * 的（粘住时底下的行不会透出来），又在明暗两套主题里都是"比卡片略深/略浅一层"的区分色。
  * 前一条声明是给不认 color-mix 的浏览器留的退路：没有底色也还读得出来，只是少了横向的分组感。
+ *
+ * 12% 而不是更淡：组头的底色要一眼看出是"另一个层级"，不是"某一行被选中了"。
  */
 .dsm-groupHead {
   position: sticky;
@@ -87,15 +98,72 @@ export const CSS = `
   display: flex;
   align-items: center;
   gap: 8px;
-  flex-wrap: wrap;
-  padding: 6px 10px;
+  /*
+   * 一条组头永远只占一行：nowrap + 让路径（flex-basis: 0，见下面 .dsm-groupPath）先让位。
+   * 反面教材是本次改之前的写法：wrap + 路径用内容宽度参与折行计算，于是路径一长，右手的两个
+   * 计数就被挤到第二行——组头长成两行、数字跑到左边，看着像坏了（532px 宽的列表里真实发生过）。
+   * 换行是**最后**的手段，截断才是。
+   */
+  flex-wrap: nowrap;
+  padding: 8px 10px;
   background: var(--dsw-alias-bg-layer-1, transparent);
-  background: color-mix(in srgb, var(--dsw-alias-label-primary, #1f2329) 6%, var(--dsw-alias-bg-layer-1, #fff));
-  border-top: 1px solid var(--dsw-alias-border-l1, rgba(0, 0, 0, 0.06));
-  border-bottom: 1px solid var(--dsw-alias-border-l1, rgba(0, 0, 0, 0.06));
+  background: color-mix(in srgb, var(--dsw-alias-label-primary, #1f2329) 12%, var(--dsw-alias-bg-layer-1, #fff));
+  border-top: 1px solid var(--dsw-alias-border-l2, rgba(0, 0, 0, 0.12));
+  border-bottom: 1px solid var(--dsw-alias-border-l2, rgba(0, 0, 0, 0.12));
   cursor: pointer;
 }
-.dsm-groupTitle { font-weight: 600; }
+/*
+ * 组头里的名字：它就是这一行的主角，不折行；实在挤不下时截断（截断了还有悬浮提示补全）。
+ */
+.dsm-groupTitle {
+  font-size: 14px;
+  font-weight: 600;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/*
+ * 组头里的路径：等宽 + 次要色。它是机器字符串，人写的会话标题是句子——字体不同，两者就不会被
+ * 当成同一类东西（尤其那个目录名与会话标题重名的时候）。
+ *
+ * flex: 1 1 0（基准宽度 0）是这一行不折行的关键：它不参与折行/撑宽的计算，多出来的地方
+ * 由它独占（界面宽时它显示全，窄时它先截断）。右边那两串数字因此永远待在原地。
+ */
+.dsm-groupPath {
+  flex: 1 1 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary, #646a73);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 组头右侧的"这组几条 / 选中几条"：一整块，不折行、不压缩。 */
+.dsm-groupCounts {
+  flex: none;
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+/* 组头上的标签（"未登记目录"）也是不可压的：它的字不能折行，压窄了就会溢出自己的框。 */
+.dsm-groupHead > .dsm-tag { flex: none; }
+/*
+ * 组内的会话行：整行缩进一格（勾选框也跟着走，读起来就是"挂在组头下面"），左缘那条 2px 的导引线
+ * 逐行相接，成一条竖线。它压在整个列表的左边界上，正是"这一组"的范围。
+ */
+.dsm-group > .dsm-row {
+  padding-left: 26px;
+  box-shadow: inset 2px 0 0 0 color-mix(in srgb, var(--dsw-alias-label-primary, #1f2329) 14%, transparent);
+}
+/* 两级图形标记的共用部分：颜色跟着所在处的字色档次走，尺寸由 SVG 自己定。 */
+.dsm-levelIcon { flex: none; display: block; color: var(--dsw-alias-label-secondary, #646a73); }
+/* 工作区那一个跟它自己的标题同色（组头是"重"的那一级），会话那一个留在次要色上。 */
+.dsm-levelWorkspace { color: var(--dsw-alias-label-primary, #1f2329); }
 .dsm-list {
   /* 整页里不必再用 320px 的小窗：给一个随视口的上限，短列表不留空、长列表不把页面推得很长。 */
   max-height: min(420px, 42vh);
@@ -103,9 +171,13 @@ export const CSS = `
   border: 1px solid var(--dsw-alias-border-l1, rgba(0, 0, 0, 0.1));
   border-radius: 10px;
 }
+/*
+ * 勾选式列表行（导出列表 / 迁移挑选）：五列 = 勾选框、层级标记、标题、字节、时间。
+ * 行里不再重复 cwd：它在组头上（导出）或字段上（迁移），重复一遍只会把标题挤窄。
+ */
 .dsm-row {
   display: grid;
-  grid-template-columns: 24px minmax(120px, 1.2fr) minmax(120px, 2fr) auto auto;
+  grid-template-columns: 24px 16px minmax(120px, 1.4fr) auto auto;
   align-items: center;
   gap: 8px;
   padding: 6px 10px;
@@ -119,6 +191,35 @@ export const CSS = `
  */
 .dsm-row:hover { background: color-mix(in srgb, var(--dsw-alias-label-primary, #1f2329) 6%, transparent); }
 .dsm-rowId { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
+/*
+ * 行上的标题：正文字体（id 才走等宽），单行省略。
+ *
+ * 省略号是必须的：标题长度由用户的第一句话决定，不能让它把字节/时间两列顶出屏幕。被截掉的部分
+ * 靠悬浮提示补全（见 planRows.sessionLabel：提示里是"完整标题 + id"两行）。min-width: 0 是网格与
+ * 表格里做省略的前提——默认 min-width:auto 会让格子撑到内容宽度，text-overflow 就没机会生效。
+ */
+.dsm-rowTitle {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/*
+ * 行里"名字 + 小标签（未登记在册）"的这一格：标签紧跟在名字右边，不参与省略。
+ *
+ * 名字这一格从"网格的一格"变成了"一格里的 flex 行"，所以两件事得补上：名字要 flex: 1 1 auto
+ * 才会去吃掉标签之外的空档，标签要 flex: none 才不会被压变形。整格 min-width: 0 是外层网格
+ * 做省略的前提（同 .dsm-rowTitle 的注释）。
+ *
+ * id 型的名字（没有标题的老会话）在这条行里也改成单行省略：它本来靠 overflow-wrap: anywhere
+ * 折行，而这里右边多了枚标签，一折行整行就变两行高，跟相邻行参差不齐。省略掉的部分照样有悬浮
+ * 提示（planRows.sessionLabel 的 tip 就是完整 id）。
+ */
+.dsm-rowLabel { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.dsm-rowLabel > .dsm-rowTitle, .dsm-rowLabel > .dsm-rowId { flex: 1 1 auto; }
+.dsm-rowLabel > .dsm-rowId { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dsm-rowLabel > .dsm-tag { flex: none; }
 .dsm-meta { color: var(--dsw-alias-label-secondary, #646a73); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dsm-empty { padding: 14px; color: var(--dsw-alias-label-secondary, #646a73); }
 .dsm-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
@@ -294,8 +395,6 @@ export const CSS = `
 .dsm-input:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary, #3370ff); outline-offset: -1px; }
 .dsm-options { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
 .dsm-check { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
-/* 勾选式列表行：只有"勾选框 + 内容列"，没有 cwd 那一列（cwd 在组头/字段上，不再一行行重复）。 */
-.dsm-rowPick, .dsm-rowExport { grid-template-columns: 24px minmax(120px, 1.4fr) auto auto; }
 .dsm-result {
   display: flex;
   flex-direction: column;

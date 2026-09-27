@@ -13,6 +13,7 @@ import { applyPlan, verifyAppliedPlan } from './execute.ts'
 import { readManifest, rollback, type BackupManifest, type RollbackResult } from './journal.ts'
 import { buildRelocationPlan, describePlan } from './plan.ts'
 import { readRegistry, validateRegistry } from './registry.ts'
+import type { TitleQuery } from './session-title.ts'
 import type { DecodeAll, RelocationPlan, RegistryChange, WorkspaceRegistryState } from './types.ts'
 
 /** 迁移用到的路径与解码器（与 `ResolvedPaths` 同形，但本模块不认识 tools.ts）。 */
@@ -21,6 +22,11 @@ export interface MigrateDeps {
   registryPath: string
   backupRoot: string
   decodeAll: DecodeAll
+  /**
+   * 读会话标题（可选）：预演结果里带上它，界面挑会话时按标题认人（见 session-title.ts）。
+   * 缺席就不读——CLI 与工具层只报数量，不需要。
+   */
+  resolveTitle?: (query: TitleQuery) => string | undefined
 }
 
 /** 一次迁移/预演的请求。 */
@@ -42,6 +48,8 @@ export interface MigrateRequest {
 /** 预演里的一条会话。 */
 export interface PreviewSession {
   id: string
+  /** 折叠出的标题；读不到就没有（见 session-title.ts）。界面靠它认会话，id 退到悬浮提示。 */
+  title?: string
   createdAt: number
   registered: boolean
   alreadyAtTarget: boolean
@@ -128,6 +136,7 @@ function previewOf(plan: RelocationPlan): MigrationPreview {
     bytes += sessionBytes
     return {
       id: session.id,
+      ...(session.title === undefined ? {} : { title: session.title }),
       createdAt: session.createdAt,
       registered: session.registered,
       alreadyAtTarget: session.alreadyAtTarget,
@@ -166,6 +175,7 @@ function buildPlan(deps: MigrateDeps, request: MigrateRequest): RelocationPlan {
     title: request.title,
     includeUnowned: request.includeUnowned !== false,
     includeArtifacts: request.includeArtifacts === true,
+    ...(deps.resolveTitle === undefined ? {} : { resolveTitle: deps.resolveTitle }),
   })
 }
 

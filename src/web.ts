@@ -14,7 +14,7 @@ import { readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 
-import { scanBucket, type DiscoveredSession } from './discovery.ts'
+import { scanBucket, type DiscoveredSession, type ScanOptions } from './discovery.ts'
 import {
   assertBackupDir,
   listBackups,
@@ -24,7 +24,9 @@ import {
   type MigrateDeps,
   type MigrateRequest,
 } from './migrate.ts'
+import { projectionCacheDir } from './paths.ts'
 import { readRegistry, validateRegistry } from './registry.ts'
+import { createTitleResolver, type TitleQuery } from './session-title.ts'
 import { type EffectMode, type PickerKind, type ResolvedPaths } from './tools.ts'
 import {
   applyImport,
@@ -77,11 +79,20 @@ export interface ApiDeps {
    * 「浏览…」是开页面内浏览器还是弹宿主的系统对话框；`null` 时那个按钮根本不出现。
    */
   pickerKind?: () => PickerKind
+  /**
+   * 读会话标题（界面要显示的东西，见 session-title.ts）。
+   *
+   * 缺省按 `paths.registryPath` 反推宿主的投影缓存目录、缓存没有就折日志开头的有界前缀；
+   * 这里留出口子是为了测试能钉住"标题坏了也不影响列出会话"这条边界。
+   */
+  resolveTitle?: (query: TitleQuery) => string | undefined
 }
 
 /** 界面要展示的一条会话。 */
 interface SessionSummary {
   id: string
+  /** 折叠出的标题；读不到时界面退回显示 id（见 session-title.ts）。 */
+  title?: string
   cwd?: string
   createdAt: number
   dir: string
@@ -149,7 +160,7 @@ function loadRegistry(
 }
 
 /** 扫整个会话库（分桶 → 会话）。 */
-export function scanLibrary(root: string, decodeAll: DecodeAll): DiscoveredSession[] {
+export function scanLibrary(root: string, decodeAll: DecodeAll, options: ScanOptions = {}): DiscoveredSession[] {
   const out: DiscoveredSession[] = []
   let buckets: string[]
   try {
@@ -165,7 +176,7 @@ export function scanLibrary(root: string, decodeAll: DecodeAll): DiscoveredSessi
       continue
     }
     try {
-      out.push(...scanBucket(bucketPath, decodeAll))
+      out.push(...scanBucket(bucketPath, decodeAll, options))
     } catch {
       // 单个分桶坏掉不该让整页打不开：跳过它，界面照旧能用。
       continue
@@ -183,6 +194,7 @@ function summarizeSessions(sessions: readonly DiscoveredSession[], registry: Wor
   }
   return sessions.map((session) => ({
     id: session.id,
+    ...(session.title === undefined ? {} : { title: session.title }),
     cwd: session.cwd,
     createdAt: session.createdAt,
     dir: session.dir,
@@ -229,10 +241,14 @@ function fileName(count: number, at: Date): string {
 export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingMessage, res: ServerResponse) => Promise<void>> {
   const { paths, decodeAll } = deps
   const now = deps.now ?? ((): Date => new Date())
+  // 标题只给界面看（`/state`）与导入预演看（包自己带着日志）。导出那条路上没人读它，
+  // 所以那里扫库时刻意不传 resolveTitle——别为用不上的东西花钱。
+  const resolveTitle =
+    deps.resolveTitle ?? createTitleResolver({ cacheDir: projectionCacheDir(paths.registryPath), decodeAll })
 
   const state = async (_req: IncomingMessage, res: ServerResponse): Promise<void> => {
     const { registry, problems } = loadRegistry(paths.registryPath)
-    const sessions = scanLibrary(paths.sessionsRoot, decodeAll)
+    const sessions = scanLibrary(paths.sessionsRoot, decodeAll, { resolveTitle })
     sendJson(res, 200, {
       sessionsRoot: paths.sessionsRoot,
       registryPath: paths.registryPath,
@@ -312,6 +328,9 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
       targetCwd,
       registry: registry ?? undefined,
       registryPath: paths.registryPath,
+      // 预演的每条会话要显示标题：包里的日志已经整份在内存里，折叠一次比再读盘便宜
+      // （见 transfer.bundleTitle）。
+      decodeAll,
     }
 
     let plan: ImportPlan
@@ -367,6 +386,8 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
     registryPath: paths.registryPath,
     backupRoot: paths.backupRoot,
     decodeAll,
+    // 迁移页挑会话时同样按标题认人（与导入导出页同一套口径）。
+    resolveTitle,
   }
   // 没注入就按"需要重启"说：宁可保守，也不谎称已经生效。
   const takesEffect = (): EffectMode => deps.effectMode?.() ?? 'restart-required'
