@@ -1,0 +1,88 @@
+{
+  "name": "@he0119/dsh-session-manager",
+  "version": "0.0.1",
+  "description": "Migrate DSH workspaces and sessions between directories — rewrite session-log cwd, move the log directories, re-home workspace membership, and optionally move the files those sessions created. | 把 DSH 工作区与会话迁移到新目录：改写会话日志 cwd、迁移日志目录、重挂工作区归属，并可选择性搬迁会话中创建的文件。",
+  "type": "module",
+  "packageManager": "pnpm@11.7.0",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "icon": "./icon.svg",
+  "bin": {
+    "dsh-session-manager": "./lib/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./cli": "./lib/cli.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "icon.svg",
+    "cordis.patch.yml",
+    "README.md",
+    "README.en.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0",
+    "dsh": "^0.1.5-rc.1"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "scripts": {
+    "prebuild": "node -e \"require('node:fs').rmSync('lib', { recursive: true, force: true })\"",
+    "build": "tsdown --concurrency 1",
+    "build:host": "tsdown --filter @he0119/dsh-session-manager/host",
+    "build:types": "tsdown --filter @he0119/dsh-session-manager/types",
+    "watch": "tsdown --watch --concurrency 1",
+    "typecheck": "tsc -p tsconfig.test.json",
+    "prepublishOnly": "tsdown --concurrency 1",
+    "test": "node test/run-all.mjs",
+    "test:runner": "node --test",
+    "check:package": "node scripts/check-package.mjs",
+    "check": "tsc -p tsconfig.test.json && node test/run-all.mjs"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "workspace",
+    "migration",
+    "session",
+    "relocate"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/he0119/dsh-session-manager.git"
+  },
+  "homepage": "https://github.com/he0119/dsh-session-manager",
+  "bugs": {
+    "url": "https://github.com/he0119/dsh-session-manager/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-tools": "^0.1.5-rc.1"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "4.0.2",
+    "@deepseek-ai/dsh-tools": "0.1.5-rc.3",
+    "@deepseek-ai/schemastery": "3.18.2",
+    "@types/node": "^22.20.0",
+    "tsdown": "^0.23.0",
+    "typescript": "^5.9.0"
+  },
+  "dependencies": {
+    "fzstd": "^0.1.1"
+  }
+}

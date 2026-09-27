@@ -1,0 +1,4 @@
+- insert:
+    - id: session-manager
+      # 带 scope 的包名必须加引号：`@` 是 YAML 的保留指示符，裸标量不能以它开头。
+      name: '@he0119/dsh-session-manager'

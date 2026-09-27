@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    # on.push.branches 已经让标签推送不触发本工作流；以 workflow_call 被复用时 github 上下文
+    # 仍属于调用方，因此这里不写「push 到标签就跳过」这类条件。
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      # pnpm 版本不在 workflow 里写死：action-setup 读 package.json 的 packageManager，
+      # 与本地 corepack 用同一个版本。它必须排在 setup-node 前面——下面的 cache: pnpm 要靠它算 store 路径。
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          # 与 engines 的下限一致，确保不会无意中依赖更高版本的 Node。
+          node-version: 22.19.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # 类型检查：源文件是 TypeScript，这一步同时覆盖「语法能否解析」与「类型是否自洽」。
+      - run: pnpm run typecheck
+      # 构建产物必须真的出得来——tsdown 不做类型检查，所以它与 typecheck 是两件独立的事。
+      - run: pnpm run build
+      # 打包内容与入口自洽：产物之外还有一层「包进宿主时缺了什么」，只有过一遍 npm 自己
+      # 的打包器才看得见（见 docs/releasing.md）。放在 build 之后，它依赖 lib/ 存在。
+      - run: pnpm run check:package
+      # 这里用的是进程内 runner（test/run-all.mjs），不是 `node --test`：后者为每个测试文件
+      # spawn 子进程，在受限环境里会因命名管道不可用而 EPERM。详见 docs/development.md。
+      # 工具层那一组会 import 真实（devDependency）的 @deepseek-ai/dsh-tools，因此 CI 会真正跑到它。
+      - run: pnpm test

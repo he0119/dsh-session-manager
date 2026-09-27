@@ -1,0 +1,17 @@
+# 本仓库只有一个包，所以这里没有 `packages:` —— 这个文件只承载 pnpm 的设置。
+#
+# pnpm 10+ 起，pnpm 自己的设置以 pnpm-workspace.yaml 为准（官方推荐位置）。
+#
+# node-linker: hoisted
+#   pnpm 默认的 isolated 布局靠 junction/symlink 组织依赖树。在 Windows 沙箱下实测这种布局会让
+#   `@deepseek-ai/cordis` 的运行时依赖解析失败（Cannot find package '@deepseek-ai/cosmokit'，
+#   尽管 .pnpm/…/node_modules 下确实链接了它 —— 生成的 junction 目标畸形，realpath 也解析不出来）。
+#   hoisted 生成扁平的真实目录，不依赖任何链接，并让依赖树与 npm 一致、更便于排查。
+#
+#   ⚠️ 本机实测：pnpm 会忽略这个设置（`pnpm config get node-linker` 返回 undefined，即使在一个
+#   只放 `.npmrc` 的干净临时目录里也一样），布局仍是 isolated。因此**在这台机器上安装依赖请用
+#   npm**，见 docs/development.md「本机安装」。这条设置保留给能正常识别它的 pnpm（CI 即如此）。
+node-linker: hoisted
+
+# pnpm 10+ 默认拦住任何自带安装/构建脚本的依赖。本仓库的依赖都不带安装脚本；
+# 将来若引入带安装脚本的依赖，pnpm 会打印一份待填模板，届时再逐条核对原因放行。
