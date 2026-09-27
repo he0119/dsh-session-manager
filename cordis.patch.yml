@@ -1,0 +1,3 @@
+- insert:
+    - id: session-mover
+      name: dsh-session-mover

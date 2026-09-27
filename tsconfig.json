@@ -1,0 +1,30 @@
+{
+  // 与参考项目（dsh-aperture）的唯一有意偏离：关掉 noUncheckedIndexedAccess。
+  //
+  // 理由：本包的核心是字节与行级处理（buf[i] 比魔术字节、lines[0] 取 header、正则分组），
+  // 这些位置的正确性由**运行期的显式校验**保证（header 形状校验、首帧自洽性等式、
+  // round-trip 比对，失败一律抛错），逐处加 `!` 或空值分支只会淹没真正的类型错误。
+  // strict 仍然全开，其余标志与参考项目一致。
+  "compilerOptions": {
+    "target": "es2023",
+    "lib": ["es2023"],
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "types": ["node"],
+    "rootDir": "src",
+    "outDir": "lib",
+    "declaration": true,
+    "declarationMap": false,
+    "sourceMap": false,
+    "strict": true,
+    "noUncheckedIndexedAccess": false,
+    "noImplicitOverride": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["src"]
+}
