@@ -98,16 +98,7 @@ Linux/CI 上 symlink 正常，用 `pnpm install` 走 `pnpm-lock.yaml` 即可。
 ## 结构
 
 ```
-src/            手写源码（每个文件一个职责，核心层零 DSH 依赖）
-  index.ts        插件入口（挂 tools，并在有 webServer 时挂界面端点）
-  cli.ts          离线 CLI（构建出 lib/cli.js，package.json 的 bin 指向它）
-  tools.ts        4 个工具 + schema + 平台解码器实例
-  web.ts          界面端点（state / export / import / migrate / backups / rollback），
-                  只要求一个 { register } 形状
-  migrate.ts      迁移编排（预演 / 执行 / 回滚 / 备份清单），CLI、工具、界面三个入口共用
-  client/         Web Client 半边（「会话管理」页：导入导出 + 迁移两个分页）-> lib/client.js
-  ...             核心层：project-key / paths / zstd-frame / session-log /
-                  discovery / registry / artifacts / transfer / plan / journal / execute
+src/            手写源码（每个文件一个职责，核心层零 DSH 依赖；逐文件见下表）
 lib/            构建产物（tsdown 输出，已 gitignore）
 test/           测试（run-all.mjs 是进程内 runner）
 docs/           本目录
@@ -115,6 +106,26 @@ tsdown.config.ts 三份构建配置：host（lib/*.js）、types（lib/types/*.d
 cordis.patch.yml 插件注册（package.json 的 dsh.bundle.patch 指向它）
 tsconfig.client.json Web Client 自己的类型工程（DOM + JSX；Host 那份没有）
 ```
+
+| 源文件 | 职责 | DSH 依赖 |
+|---|---|---|
+| `src/project-key.ts` | 逐字符复刻宿主 `projectKey()` + 有损碰撞检测 | 无 |
+| `src/paths.ts` | `encodeSegment()`、代次文件名、会话目录/日志路径 | 无 |
+| `src/zstd-frame.ts` | raw 帧编码、首帧边界定位、多帧感知守卫 | 无 |
+| `src/session-log.ts` | 单日志读取与**保结构** cwd 改写 | 无 |
+| `src/registry.ts` | 注册表启动不变式校验、`reHome()`、原子落盘 | 无 |
+| `src/discovery.ts` | 分桶扫描 + 只解首帧读 header（发现阶段快） | 无 |
+| `src/plan.ts` | 只读计划：目标推导、阻塞问题、账本变更 | 无 |
+| `src/journal.ts` | 字节级备份清单与回滚 | 无 |
+| `src/execute.ts` | 执行 + 独立复核（含产物目标位校验） | 无 |
+| `src/artifacts.ts` | 会话产物提取（证据分层）、规划（求交/剪枝）、搬迁 | 无 |
+| `src/transfer.ts` | `.dshsess` 容器（导出/解析/校验）、导入预演与落地 | 无 |
+| `src/migrate.ts` | 迁移编排：预演 / 执行 / 回滚 / 备份清单（CLI、工具、界面三个入口共用） | 无 |
+| `src/cli.ts` | 离线 CLI（plan/apply/verify/rollback）→ `lib/cli.js` | 无 |
+| `src/tools.ts` | 4 个工具注册（+ schema、平台解码器实例、可选服务探测） | `dsh-tools` |
+| `src/web.ts` | 界面端点（state / export / import / migrate / backups / rollback），只要求 `{ register }` 形状 | 无 |
+| `src/client/*` | Web Client 半边：「会话管理」页（导入导出 + 迁移两个分页）、字典、样式、端点调用 → `lib/client.js` | 无 |
+| `src/index.ts` | 插件入口 `apply(ctx, config)` | `dsh-tools` |
 
 核心层（`project-key` / `paths` / `zstd-frame` / `session-log` / `discovery` / `registry` /
 `plan` / `journal` / `execute` / `artifacts` / `transfer` / `migrate`）**不依赖 DSH**，所以插件
