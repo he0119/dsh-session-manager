@@ -11,8 +11,11 @@ directories, re-home workspace membership, and optionally move the files those s
 >   + argument validation + real execution)
 > - ✅ Session-artifact migration: evidence layering + on-disk intersection + nested pruning, rolled
 >   back together with the sessions
-> - ✅ **59 tests pass** (real log files, real registry, end-to-end, byte-level rollback assertions)
-> - ⏳ Pending your go-ahead: install into a profile and load it in a real DSH
+> - ✅ Source is TypeScript: `src/*.ts` → tsdown → `lib/` (build output, not committed); `tsc` typecheck
+>   and the build both pass
+> - ✅ **62 tests pass** (real log files, real registry, end-to-end byte-level rollback assertions,
+>   and a built-artifact smoke test)
+> - ⏳ Pending your go-ahead: install into a profile and restart DSH to load the 4 tools for real
 
 ## The problem it solves
 
@@ -79,19 +82,19 @@ is immediate.
 ## Installing into a profile
 
 ```bash
-# Canonical: DSH's own plugin command (creates/populates the profile for you)
+# DSH's own plugin command (it creates/populates the profile and maintains deps + lockfile)
 npx @deepseek-ai/dsh@next plugin --profile desktop add /path/to/dsh-session-mover
 # then restart DSH
-
-# Fallback / offline: idempotent installer, dry-run by default
-node scripts/install.mjs           # preview only, writes nothing
-node scripts/install.mjs --apply   # copy the package + add it to dsh.profile.bundles
 ```
 
 Mechanism: `profiles/<name>/cordis.yml` is an empty `[]`; the tree is composed from
 `package.json`'s `dsh.profile.bundles` (each bundle contributes its own `cordis.patch.yml`), then the
 profile's own `cordis.patch.yml` (id-targeted overrides), then `--patch` overlays. So installing means:
 put the package in `node_modules` and add its name to `dsh.profile.bundles`.
+
+`--profile <name>` picks the target profile (`dsh <name>` is shorthand for `dsh --profile <name>`).
+**Do not use your daily instance for development checks** — make a separate dev profile and start it on
+another port (see [docs/development.md](docs/development.md)).
 
 ## Session artifacts (optional)
 
@@ -178,7 +181,6 @@ Block_Type=Raw), making the write path independent of any compressor, external b
 | `src/execute.ts` | apply + independent verification | none |
 | `src/artifacts.ts` | artifact extraction (evidence layering), planning, moving | none |
 | `src/cli.ts` | offline CLI (plan/apply/verify/rollback) → `lib/cli.js` | none |
-| `scripts/install.mjs` | idempotent installer (dry-run by default) | none |
 | `src/tools.ts` | the 4 tool registrations | `dsh-tools` |
 | `src/index.ts` | plugin entry `apply(ctx, config)` | `dsh-tools` |
 

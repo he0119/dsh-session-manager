@@ -46,8 +46,7 @@
     "prepublishOnly": "tsdown --concurrency 1",
     "test": "node test/run-all.mjs",
     "test:runner": "node --test",
-    "check": "tsc -p tsconfig.test.json && node test/run-all.mjs",
-    "install:plugin": "node scripts/install.mjs"
+    "check": "tsc -p tsconfig.test.json && node test/run-all.mjs"
   },
   "keywords": [
     "dsh",

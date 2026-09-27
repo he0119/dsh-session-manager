@@ -100,7 +100,6 @@ src/            手写源码（每个文件一个职责，核心层零 DSH 依�
   ...             核心层：project-key / paths / zstd-frame / session-log /
                   discovery / registry / artifacts / plan / journal / execute
 lib/            构建产物（tsdown 输出，已 gitignore）
-scripts/        安装器等一次性工具
 test/           测试（run-all.mjs 是进程内 runner）
 docs/           本目录
 tsdown.config.ts 两份构建配置：host（lib/*.js）与 types（lib/types/*.d.ts）
@@ -121,16 +120,20 @@ cordis.patch.yml 插件注册（package.json 的 dsh.bundle.patch 指向它）
 
 ## 装进一个 profile
 
-```sh
-node scripts/install.mjs           # dry-run：只打印会改什么
-node scripts/install.mjs --apply   # 复制包 + 加 dsh.profile.bundles，然后重启 DSH
-```
-
-或走宿主的标准安装：
+用宿主自己的插件命令，不要手写安装器：
 
 ```sh
+pnpm run build                                    # 产物必须先存在（插件入口指向 lib/index.js）
 npx @deepseek-ai/dsh@next plugin --profile <name> add <本目录>
+# 然后重启 DSH
 ```
+
+它负责把包放进 `node_modules`、把包名写进 `dsh.profile.bundles`，并维护依赖与锁文件。
+这层「安装」是宿主的职责，自己实现一份只会跟着宿主布局漂移：要么漏掉构建（新克隆的仓库
+`lib/` 不存在，入口直接指向空气），要么绕过 `package.json` 的 `files` 白名单把 `src/`、`test/`
+整个塞进 profile，而且没有卸载路径。所以本仓库不提供安装脚本。
+
+`DSH_PROFILE` / `DSH_PROFILE_DIR` / `DSH_HOME` 是宿主真实提供的环境变量，需要时可直接用。
 
 不要用日常在用的实例做开发验证：照 [README](../README.md) 的方式另建一个开发 profile
 （`dsh <name>` 就是 `dsh --profile <name>`），在另一个端口上起它。Host 端改动必须**重启**才生效。

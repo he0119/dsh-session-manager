@@ -9,11 +9,11 @@
 > - ✅ 核心层 / 迁移引擎 / 离线 CLI / 插件外壳与 4 个工具
 > - ✅ 工具契约用**真实的 `@deepseek-ai/dsh-tools`** 验证（`defineTool` 归一化 + 实参校验 + 真实执行）
 > - ✅ 会话产物搬迁（`artifacts.mjs`）：证据分层 + 存在性求交 + 嵌套剪枝，可随会话一起回滚
-> - ✅ **59 个用例全部通过**（含真实日志、真实注册表、端到端与回滚的字节级断言）
+> - ✅ 源码为 TypeScript，`src/*.ts` → tsdown → `lib/`（构建产物不进 git）；`tsc` 类型检查与构建均通过
+> - ✅ **62 个用例全部通过**（含真实日志、真实注册表、端到端回滚的字节级断言、构建产物冒烟）
 > - ✅ 仓库工程化对齐参考项目：`.gitattributes`(全 LF)、`.gitignore`、`docs/`、双语 README、
 >   `.github/workflows/ci.yml`、`pnpm-workspace.yaml`、`icon.svg`、`LICENSE`、engines/scripts 约定
-> - ⏳ 待定：是否把源码从纯 JS 迁到 TypeScript + tsdown（参考项目是 `src/*.ts` → `lib/` 产物）
-> - ⏳ 待确认后执行：装进 profile 并在真实 DSH 里加载（`scripts/install.mjs`，默认 dry-run）
+> - ⏳ 待你确认：装进哪个 profile 并重启 DSH，在真实实例里加载这 4 个工具
 
 ## 它解决什么问题
 
@@ -75,13 +75,8 @@ node lib/cli.js rollback --backup '<apply 输出的备份目录>'
 ## 安装到 profile
 
 ```bash
-# 首选：DSH 自带的插件命令（它会替你建/填充 profile）
+# 用 DSH 自带的插件命令（它会替你建/填充 profile，并维护依赖与锁文件）
 npx @deepseek-ai/dsh@next plugin --profile desktop add /path/to/dsh-session-mover
-# 然后重启 DSH
-
-# 离线备选：幂等安装器，默认 dry-run
-node scripts/install.mjs           # 只读预览：会改哪些东西
-node scripts/install.mjs --apply   # 复制包 + 加入 dsh.profile.bundles
 # 然后重启 DSH
 ```
 
@@ -90,7 +85,7 @@ node scripts/install.mjs --apply   # 复制包 + 加入 dsh.profile.bundles
 `cordis.patch.yml`（id 定向配置）」+ `--patch` 叠加而成。所以装插件 = 把包放进
 `node_modules` + 把包名加进 `dsh.profile.bundles`。
 
-可用 `--profile <dir>` 指定别的 profile，或用 `DSH_PROFILE_DIR` 环境变量。
+`--profile <name>` 选目标 profile（`dsh <name>` 就是 `dsh --profile <name>`）。
 **不要在日常在用的实例上做开发验证**：另建一个开发 profile、在另一个端口上起它（见
 [docs/development.md](docs/development.md)）。
 
@@ -174,7 +169,6 @@ node scripts/install.mjs --apply   # 复制包 + 加入 dsh.profile.bundles
 | `src/execute.ts` | 执行 + 独立复核（含产物目标位校验） | 无 |
 | `src/artifacts.ts` | 会话产物提取（证据分层）、规划（求交/剪枝）、搬迁 | 无 |
 | `src/cli.ts` | 离线 CLI（plan/apply/verify/rollback）→ `lib/cli.js` | 无 |
-| `scripts/install.mjs` | 幂等安装器（默认 dry-run） | 无 |
 | `src/tools.ts` | 4 个工具注册 | `dsh-tools` |
 | `src/index.ts` | 插件入口 `apply(ctx, config)` | `dsh-tools` |
 
