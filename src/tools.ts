@@ -57,11 +57,39 @@ export function resolvePaths(config: PluginConfig = {}): ResolvedPaths {
 export type EffectMode = 'immediate' | 'restart-required'
 
 /**
+ * 探测一个**可选**宿主服务。
+ *
+ * 必须走 `ctx.get(name)`，**不能**写 `ctx.someService`：Cordis 的 Context 是个 Proxy，服务属性只有
+ * 在该 fiber 的 `inject` 里声明过才可读，否则同步抛 `cannot get property "X" without inject`——
+ * **即使那个服务确实存在**。可选服务（声明了就会把插件变成硬依赖）因此只能这样读，缺席即
+ * `undefined`。
+ *
+ * 纯对象假 ctx 上两种写法都"能跑"：根 context（fiber 没有 runtime）走的是非严格路径。这条差异
+ * 正是本插件曾经在真实 profile 里整个起不来的原因，`test/artifact.test.mjs` 与
+ * `test/tools.test.ts` 现在都在真实 fiber 上跑，就是为了让这类错误在测试里就暴露。
+ *
+ * @param ctx - 宿主上下文（形状未知时按"没有这个服务"处理）。
+ * @param name - 服务名。
+ * @returns 服务实例，或 undefined。
+ */
+export function optionalService(ctx: unknown, name: string): unknown {
+  const get = (ctx as { get?: (serviceName: string) => unknown } | undefined)?.get
+  if (typeof get !== 'function') return undefined
+  try {
+    return get.call(ctx, name)
+  } catch {
+    // 读服务本身失败（旧版 cordis 没有 get、或服务提供方装配中）：按"没有"处理，
+    // 这个探测只用来决定"何时生效"的措辞，不该让它把工具调用整个打挂。
+    return undefined
+  }
+}
+
+/**
  * 迁移何时生效：上游若提供 reassignSessions 就能进程内即时生效，
  * 否则离线落盘必须重启 DSH 才会被承认（宿主持有内存副本）。
  */
 export function effectMode(ctx: unknown): EffectMode {
-  const registry = (ctx as { workspaceRegistry?: { reassignSessions?: unknown } } | undefined)?.workspaceRegistry
+  const registry = optionalService(ctx, 'workspaceRegistry') as { reassignSessions?: unknown } | undefined
   return typeof registry?.reassignSessions === 'function' ? 'immediate' : 'restart-required'
 }
 

@@ -9,12 +9,12 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { join } from 'node:path'
 import test from 'node:test'
 
-import type { Context } from '@deepseek-ai/cordis'
+import { Context } from '@deepseek-ai/cordis'
 import { decompress } from 'fzstd'
 
 import { projectKey } from '../src/project-key.ts'
 import { readRegistry } from '../src/registry.ts'
-import { effectMode, registerTools, type MigrateToolResult, type PlanToolResult } from '../src/tools.ts'
+import { effectMode, registerTools, type MigrateToolResult, type PlanToolResult, type PluginConfig } from '../src/tools.ts'
 import type { DecodeAll, WorkspaceRegistryState } from '../src/types.ts'
 import { encodeRawFrame } from '../src/zstd-frame.ts'
 
@@ -91,20 +91,62 @@ function makeSandbox(name: string): Sandbox {
   return { base, root, registryPath, registry, fromDir, toDir, bucket, logs, backupRoot: join(base, 'backups') }
 }
 
-/** 假的 host ctx：捕获注册的工具；workspaceRegistry 可选（决定生效模式）。 */
-function fakeCtx(options: { withReassign?: boolean } = {}): { ctx: Context; defs: CapturedTool[] } {
-  const defs: CapturedTool[] = []
-  const ctx: Record<string, unknown> = {
-    tools: {
-      register: (def: unknown): (() => void) => {
-        defs.push(def as CapturedTool)
-        return () => {}
-      },
+/**
+ * 由一个**兄弟** fiber 提供服务。
+ *
+ * "兄弟"这件事是刻意的：从根 context 上 `provide` 的服务会在 Context 代理"往上找父 fiber"的
+ * 回退路径里被读到，越权的属性读法（`ctx.workspaceRegistry`）于是也能蒙对。真实 profile 里
+ * workspaceRegistry 由 `dsh-workspace` 这个**兄弟**条目提供，那种写法必抛。
+ */
+async function startSibling(host: Context, service: string, value: unknown): Promise<unknown> {
+  const fiber = host.plugin({
+    name: `fixture:${service}`,
+    inject: [],
+    apply: (ctx: Context) => {
+      ctx.provide(service, value)
     },
-    logger: { info: (): void => {} },
+  })
+  await fiber.await()
+  return fiber
+}
+
+/**
+ * 造一个**真实 Cordis 宿主**并在真实 fiber 里注册工具。
+ *
+ * 为什么不用纯对象假装 ctx：Cordis 的 Context 是 Proxy，服务属性只有在当前 fiber 的 `inject`
+ * 里声明过才可读，否则同步抛 `cannot get property "X" without inject`——**即使那个服务确实存在**。
+ * 纯对象上 `ctx.workspaceRegistry` 读得到，于是"假 ctx 全绿、装进 profile 一调工具就炸"。
+ * 这里因此提供真实服务（各由兄弟条目提供）、开一个声明了 inject 的 fiber，并 `await` 它激活完成。
+ *
+ * @param config - 插件路径配置。
+ * @param options.registry - 是否提供 workspaceRegistry，以及它是否有 reassignSessions。
+ */
+async function makeHost(
+  config: PluginConfig,
+  options: { registry?: 'absent' | 'plain' | 'capable' } = {},
+): Promise<{ ctx: Context; defs: CapturedTool[] }> {
+  const defs: CapturedTool[] = []
+  const host = new Context()
+  await startSibling(host, 'tools', {
+    register: (def: unknown): (() => void) => {
+      defs.push(def as CapturedTool)
+      return () => {}
+    },
+  })
+  const mode = options.registry ?? 'absent'
+  if (mode !== 'absent') {
+    await startSibling(host, 'workspaceRegistry', mode === 'capable' ? { reassignSessions: (): void => {} } : {})
   }
-  if (options.withReassign) ctx['workspaceRegistry'] = { reassignSessions: (): void => {} }
-  return { ctx: ctx as unknown as Context, defs }
+
+  const fiber = host.plugin({
+    name: 'test-host',
+    inject: ['tools'],
+    apply: (ctx: Context) => {
+      registerTools(ctx, config)
+    },
+  })
+  await fiber.await()
+  return { ctx: fiber.ctx, defs }
 }
 
 function byName(defs: CapturedTool[]): Map<string, CapturedTool> {
@@ -115,10 +157,9 @@ async function run(tool: CapturedTool, args: Record<string, unknown>): Promise<u
   return tool.execute(args, {})
 }
 
-test('工具注册：4 个工具，名称与归一化 schema 符合宿主契约', () => {
+test('工具注册：4 个工具，名称与归一化 schema 符合宿主契约', async () => {
   const sb = makeSandbox('tools')
-  const { ctx, defs } = fakeCtx()
-  registerTools(ctx, { sessionsRoot: sb.root, registryPath: sb.registryPath, backupRoot: sb.backupRoot })
+  const { defs } = await makeHost({ sessionsRoot: sb.root, registryPath: sb.registryPath, backupRoot: sb.backupRoot })
 
   assert.equal(defs.length, 4)
   const m = byName(defs)
@@ -148,23 +189,30 @@ test('工具注册：4 个工具，名称与归一化 schema 符合宿主契约'
   rmSync(sb.base, { recursive: true, force: true })
 })
 
-test('生效模式：上游无 reassign 时如实报 restart-required，有则报 immediate', () => {
+test('生效模式：上游无 reassign 时如实报 restart-required，有则报 immediate', async () => {
   const sb = makeSandbox('mode')
-  const plain = fakeCtx()
-  registerTools(plain.ctx, { sessionsRoot: sb.root, registryPath: sb.registryPath, backupRoot: sb.backupRoot })
-  assert.equal(effectMode(plain.ctx), 'restart-required')
-  assert.equal(effectMode({}), 'restart-required')
+  const config = { sessionsRoot: sb.root, registryPath: sb.registryPath, backupRoot: sb.backupRoot }
 
-  const capable = fakeCtx({ withReassign: true })
+  // 在真实 fiber 上读：服务没声明进 inject，属性写法会抛「without inject」，必须走 ctx.get。
+  const absent = await makeHost(config)
+  assert.equal(effectMode(absent.ctx), 'restart-required')
+
+  const plain = await makeHost(config, { registry: 'plain' })
+  assert.equal(effectMode(plain.ctx), 'restart-required', '提供了服务但没有 reassignSessions')
+
+  const capable = await makeHost(config, { registry: 'capable' })
   assert.equal(effectMode(capable.ctx), 'immediate')
+
+  // 连 ctx 形状都不对时也必须给个答案，而不是抛。
+  assert.equal(effectMode({}), 'restart-required')
+  assert.equal(effectMode(undefined), 'restart-required')
 
   rmSync(sb.base, { recursive: true, force: true })
 })
 
 test('工具端到端：plan(只读) → migrate(dry-run) → migrate(apply) → verify → rollback', async () => {
   const sb = makeSandbox('e2e')
-  const { ctx, defs } = fakeCtx()
-  registerTools(ctx, { sessionsRoot: sb.root, registryPath: sb.registryPath, backupRoot: sb.backupRoot })
+  const { defs } = await makeHost({ sessionsRoot: sb.root, registryPath: sb.registryPath, backupRoot: sb.backupRoot })
   const m = byName(defs)
 
   // ---- plan：只读 ----
@@ -224,8 +272,7 @@ test('工具端到端：plan(只读) → migrate(dry-run) → migrate(apply) →
 
 test('工具实参校验：缺必填项被宿主 schema 拒绝', async () => {
   const sb = makeSandbox('args')
-  const { ctx, defs } = fakeCtx()
-  registerTools(ctx, { sessionsRoot: sb.root, registryPath: sb.registryPath, backupRoot: sb.backupRoot })
+  const { defs } = await makeHost({ sessionsRoot: sb.root, registryPath: sb.registryPath, backupRoot: sb.backupRoot })
   const m = byName(defs)
 
   await assert.rejects(() => run(m.get('plan_session_migration')!, { from: sb.fromDir }), /to|required/i)
@@ -241,8 +288,7 @@ test('工具实参校验：缺必填项被宿主 schema 拒绝', async () => {
 
 test('工具渲染：render 返回原生内容块', async () => {
   const sb = makeSandbox('render')
-  const { ctx, defs } = fakeCtx()
-  registerTools(ctx, { sessionsRoot: sb.root, registryPath: sb.registryPath, backupRoot: sb.backupRoot })
+  const { defs } = await makeHost({ sessionsRoot: sb.root, registryPath: sb.registryPath, backupRoot: sb.backupRoot })
   const m = byName(defs)
 
   const tool = m.get('plan_session_migration')!

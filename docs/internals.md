@@ -172,20 +172,38 @@ client 一份配置是 `format: 'cjs'` 外面套三行（banner/intro/footer）�
 导航行时走 `resolveSlotLabel`（是函数就调用），并且订阅了 locale 快照，所以切语言或后到的
 字典都会让那一行重新投影，不必自己重新注册——`test/client.test.mjs` 把这条也钉住了。
 
+## 宿主侧的一条硬约束：可选服务只能用 `ctx.get` / `ctx.inject`
+
+Cordis 的 Context 是个 Proxy，**服务属性只有在当前 fiber 的 `inject` 里声明过才可读**，否则同步抛
+`cannot get property "X" without inject`——**即使那个服务确实存在**。所以：
+
+- 硬依赖写进 `inject`（本插件是 `tools`）；
+- 可选服务（`webServer`、`workspaceRegistry`）走 `ctx.get(name)`，或用 `ctx.inject([name], cb)`
+  开一个子 fiber——后者顺带解决顺序问题：服务由别的 bundle 提供、晚于本插件到位时，回调会在它
+  到位后跑，端点不会永远缺席；
+- 卸载时子 fiber 随父 fiber 一起释放，所以 `ctx.inject` 里注册的路由不需要再手工收集。
+
+这条坑的隐蔽之处在测试里：**根 context（fiber 没有 runtime）走的是非严格路径**，属性读法在
+根上、或从根 `provide` 的服务上都能蒙对。纯对象假 ctx 更是完全读得到。本插件因此在真实 profile
+里整个起不来（`web-dev` 的日志：`cannot get property "webServer" without inject`），而当时的假
+ctx 测试全绿。`test/artifact.test.mjs` 与 `test/tools.test.ts` 现在都在**真实 Cordis 的 fiber 上**、
+并由**兄弟** fiber 提供服务，就是为了让这类错误在测试里就炸。
+
 ## 验证：哪一层证明什么
 
 | 层 | 证明的事 | 位置 |
 |---|---|---|
-| 单元 | `projectKey`/`encodeSegment` 与宿主逐字节一致；有损碰撞确实存在 | `test/project-key.test.mjs` |
-| 单元 | 多帧原语、首帧边界、**多帧感知守卫会拒绝 `node:zlib`** | `test/zstd-frame.test.mjs` |
-| 单元 | 保结构改写只动 header；拒绝错 cwd / 非 header / 首帧多行 | `test/session-log.test.mjs` |
-| 单元 | 启动四条不变式逐类可抓；`reHome` 前后校验 | `test/registry.test.mjs` |
-| 单元 | 产物证据分层、存在性求交、嵌套剪枝 | `test/artifacts.test.mjs` |
+| 单元 | `projectKey`/`encodeSegment` 与宿主逐字节一致；有损碰撞确实存在 | `test/project-key.test.ts` |
+| 单元 | 多帧原语、首帧边界、**多帧感知守卫会拒绝 `node:zlib`** | `test/zstd-frame.test.ts` |
+| 单元 | 保结构改写只动 header；拒绝错 cwd / 非 header / 首帧多行 | `test/session-log.test.ts` |
+| 单元 | 启动四条不变式逐类可抓；`reHome` 前后校验 | `test/registry.test.ts` |
+| 单元 | 产物证据分层、存在性求交、嵌套剪枝 | `test/artifacts.test.ts` |
 | 单元 | `.dhsess` 字节往返、包校验的拒绝面、导入预演/落地/冲突跳过 | `test/transfer.test.ts` |
 | 单元 | 界面端点：列会话、导出、导入与各条 400/404/409 | `test/web.test.ts` |
-| 产物契约 | 按模块加载器契约执行 `lib/client.js`：id、导出面、槽位、字典键集 | `test/client.test.mjs` |
-| 端到端 | 沙箱内造多帧日志 + 注册表，跑 `plan → apply → verify → rollback`，断言**逐字节**还原 | `test/engine.test.mjs` |
-| 契约 | 用**真实 `@deepseek-ai/dsh-tools`** 走 `defineTool`：schema 归一化、实参校验、真实执行 | `test/tools.test.mjs` |
-| 真实数据 | 本机真实会话日志（多帧）+ 真实注册表（84 个工作区） | `test/real-data.test.mjs`、`test/registry.test.mjs` |
+| 产物契约 | 按模块加载器契约执行 `lib/client.js`：id、导出面、槽位、字典键集、导航文案跟语言走 | `test/client.test.mjs` |
+| 宿主契约 | 在**真实 Cordis fiber** 里加载 `lib/index.js`：激活、可选服务探测、路由随 webServer 到位而挂、卸载摘干净 | `test/artifact.test.mjs` |
+| 端到端 | 沙箱内造多帧日志 + 注册表，跑 `plan → apply → verify → rollback`，断言**逐字节**还原 | `test/engine.test.ts` |
+| 契约 | 用**真实 `@deepseek-ai/dsh-tools`** 走 `defineTool`：schema 归一化、实参校验、真实执行（同样跑在真实 fiber 上） | `test/tools.test.ts` |
+| 真实数据 | 本机真实会话日志（多帧）+ 真实注册表（84 个工作区） | `test/real-data.test.ts`、`test/registry.test.ts` |
 
 真实数据那一层是回归锚点：它对着**宿主自己写出来的**文件验，而不是对着我们造的形状验。

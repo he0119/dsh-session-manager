@@ -15,7 +15,7 @@ directories, re-home workspace membership, and optionally move the files those s
 >   back together with the sessions
 > - ✅ Source is TypeScript: `src/*.ts` → tsdown → `lib/` (build output, not committed); `tsc` typecheck
 >   and the build both pass
-> - ✅ **81 of 83 tests pass** (real log files, real registry, end-to-end byte-level rollback assertions,
+> - ✅ **82 of 84 tests pass** (real log files, real registry, end-to-end byte-level rollback assertions,
 >   and a built-artifact smoke test)
 > - ⏳ Pending your go-ahead: install into a profile and restart DSH to load the 4 tools and open that
 >   settings page for real (the page's styling is verified at build/artifact-contract level only — it

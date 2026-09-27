@@ -11,7 +11,7 @@
 > - ✅ 工具契约用**真实的 `@deepseek-ai/dsh-tools`** 验证（`defineTool` 归一化 + 实参校验 + 真实执行）
 > - ✅ 会话产物搬迁（`artifacts.mjs`）：证据分层 + 存在性求交 + 嵌套剪枝，可随会话一起回滚
 > - ✅ 源码为 TypeScript，`src/*.ts` → tsdown → `lib/`（构建产物不进 git）；`tsc` 类型检查与构建均通过
-> - ✅ **83 个用例通过 81 条**（含真实日志、真实注册表、端到端回滚的字节级断言、构建产物冒烟；
+> - ✅ **84 个用例通过 82 条**（含真实日志、真实注册表、端到端回滚的字节级断言、构建产物冒烟；
 >   另 2 条按环境变量门控跳过）
 > - ✅ 仓库工程化对齐参考项目：`.gitattributes`(全 LF)、`.gitignore`、`docs/`、双语 README、
 >   `.github/workflows/ci.yml`、`pnpm-workspace.yaml`、`icon.svg`、`LICENSE`、engines/scripts 约定
