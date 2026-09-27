@@ -35,8 +35,9 @@ const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
  * 各种表格）在冒烟里根本走不到。给了它就只替换**第一次** `useState(null)`——后面那些 null
  * 状态（错误提示、导入计划…）必须保持空，否则会渲染出不存在的数据。
  */
-function fakeReact(recorded = [], firstNull = undefined) {
+function fakeReact(recorded = [], firstNull = undefined, panel = undefined) {
   let seeded = false
+  let seededPanel = false
   const record = (type, props) => {
     const element = { type, props: props ?? {} }
     recorded.push(element)
@@ -54,6 +55,12 @@ function fakeReact(recorded = [], firstNull = undefined) {
       if (!seeded && value === null && firstNull !== undefined) {
         seeded = true
         return [firstNull, () => {}]
+      }
+      // 页内分页的状态：假钩子不会点页签，于是「迁移」那一页的 JSX 在冒烟里一次都跑不到。
+      // 只替换**第一个** `useState('transfer')`（骨架里那个），其余字符串状态照旧。
+      if (!seededPanel && value === 'transfer' && panel !== undefined) {
+        seededPanel = true
+        return [panel, () => {}]
       }
       return [value, () => {}]
     },
@@ -110,7 +117,7 @@ function fakeDocument(nodes) {
 }
 
 /** 按模块加载器的契约执行产物，返回工厂与其 id。 */
-function loadBundle({ firstNull } = {}) {
+function loadBundle({ firstNull, panel } = {}) {
   let entry = null
   const nodes = []
   const sandbox = {
@@ -121,7 +128,7 @@ function loadBundle({ firstNull } = {}) {
   vm.runInNewContext(code, sandbox, { filename: 'lib/client.js' })
   assert.ok(entry !== null, '产物必须以 window.__ModuleLoader__.load({ id, factory }) 报名')
   const recorded = []
-  const react = fakeReact(recorded, firstNull)
+  const react = fakeReact(recorded, firstNull, panel)
   const mod = entry.factory((specifier) => {
     if (specifier === 'react') return react
     if (specifier === 'react/jsx-runtime') {
@@ -165,8 +172,8 @@ test('客户端产物：导出面符合客户端插件契约', { skip }, () => {
 })
 
 /** 跑一次 apply，收下所有注册面（后面几个用例共用）。 */
-function mount({ translate, state } = {}) {
-  const { mod, nodes, recorded } = loadBundle({ firstNull: state })
+function mount({ translate, state, panel } = {}) {
+  const { mod, nodes, recorded } = loadBundle({ firstNull: state, panel })
   const registrations = []
   const dictionaries = []
   const effects = []
@@ -314,6 +321,49 @@ test('客户端产物：页面组件在初始状态下能渲染成元素（不�
   assert.notEqual(element, null)
   // 注意首帧只渲染当前那一页（默认「导入导出」），迁移页要点了页签才在树上：
   // 目录字段的两种分支因此不在这个冒烟用例的射程内，别把断言写在这里骗自己。
+})
+
+test('客户端产物：迁移页把「未分组」列成独立来源（账本没认领的那批可以一次收编）', { skip }, () => {
+  // 迁移页平时在产物冒烟里跑不到（页签状态停在「导入导出」），所以这里把页签 seed 成 'migrate'。
+  // 这一页值得跑一遍：它的来源下拉框现在有两条路（目录 / 未分组），而"未分组"是个**跨目录**的来源
+  // ——判据在 planRows.ts（有单测），这里只证明它真的被摆到了界面上、条数用的是库里的口径。
+  const state = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    pickerKind: 'browse',
+    sessions: [
+      { id: 's-1', cwd: '/home/u/dev/alpha', createdAt: 3, dir: '/home/u/dev/alpha', bytes: 2048, files: [], workspaceId: 'w1' },
+      { id: 's-2', cwd: '/home/u/dev/alpha', createdAt: 2, dir: '/home/u/dev/alpha', bytes: 1024, files: [] },
+      { id: 's-3', cwd: '/home/u/dev/beta', createdAt: 1, dir: '/home/u/dev/beta', bytes: 512, files: [] },
+    ],
+    workspaces: [{ id: 'w1', path: '/home/u/dev/alpha', title: '工作区甲', sessionIds: ['s-1'] }],
+  }
+  const { registrations, recorded } = mount({ state, panel: 'migrate' })
+  const { component } = registrations[0]
+  const { inject } = registrations[0].registration
+  const text = strings(component(inject()))
+
+  assert.ok(text.includes('tabMigrate'), '页签还在（seeded 的那一页就是它）')
+  assert.ok(text.includes('migrateTitle') && text.includes('sourceSessionsNone'), '迁移页本体渲染出来了')
+
+  const options = recorded.filter((element) => element.type === 'option')
+  const paths = options.map((element) => String(element.props?.value))
+  assert.ok(paths.includes('/home/u/dev/alpha'), '已登记工作区的目录仍是候选')
+  assert.ok(paths.includes('/home/u/dev/beta'), '没登记的目录（库里有会话）也是候选')
+  const unowned = options.find((element) => element.props?.value === '@unowned')
+  assert.ok(unowned, '源下拉框里必须有「未分组」这一行')
+  // 条数 = 库里"没被任何工作区认领、且有 cwd"的会话数（s-2 与 s-3），不是某个目录的条数
+  assert.ok(
+    text.some((item) => String(item).includes('ungroupedSource') && String(item).includes('sessionsInDir:{"count":2}')),
+    '未分组那一行要报出跨目录的条数',
+  )
+  // 哨兵值只该出现在 option 的 value 上，不该当文案露出来
+  assert.equal(
+    text.some((item) => String(item).includes('@unowned')),
+    false,
+    '界面上不该出现内部哨兵值',
+  )
 })
 
 test('客户端产物：导出列表按目录分组，组头就是"整组勾选"的入口', { skip }, () => {

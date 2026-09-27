@@ -100,11 +100,23 @@ export interface ArtifactSkip {
 export interface RelocationPlan {
   ok: boolean
   problems: string[]
+  /**
+   * 源工作区目录；**未分组来源**（`unowned`）时是空串——那时源由"账本没认领"决定，
+   * 可以横跨多个分桶，每条会话各自的源在 `sessions[].from` 里。
+   */
   from: string
   to: string
   root: string
+  /** 源分桶；未分组来源时是空串（源不是一个目录，见 `unowned`）。 */
   sourceBucket: string
   targetBucket: string
+  /**
+   * 源是"账本没认领且有 cwd 的会话"（外壳侧边栏那个「未分组」），而不是某个目录。
+   *
+   * 这一条决定了执行阶段怎么清理源分桶（按每条会话自己的桶，见 execute.ts 第 5 步）与
+   * 产物搬迁能不能做（跨目录时拒绝，见 plan.ts 的说明）。
+   */
+  unowned: boolean
   sessions: SessionMove[]
   artifacts: { moves: ArtifactMove[]; problems: string[]; skipped: ArtifactSkip[] } | null
   registryChange: RegistryChange | null

@@ -19,7 +19,7 @@ first and rolled back byte-for-byte afterwards. (Why it has to work that way:
 
 | Entry point | Good for |
 |---|---|
-| The **Session management** page in Settings | Everyday use: tick sessions to export / import, pick directories from dropdowns to migrate, preview, confirm, roll back |
+| The **Session management** page in Settings | Everyday use: tick sessions to export / import, pick a source (a directory or Ungrouped) from a dropdown to migrate, preview, confirm, roll back |
 | 4 model tools | Just say "move this workspace's sessions to `~/dev/xxx`" and let the model preview first, apply second |
 | The offline CLI | When DSH is not running, or when you want to script it |
 
@@ -73,15 +73,21 @@ the built-in pages). `github:` installs are **not** supported here: the build ru
 **Migrate** — move one directory's sessions to another directory
 
 - source and target are each a **single dropdown that holds the value**; candidates are registered
-  workspaces **plus any directory the library actually holds sessions for** (annotated with that count), so
-  no path has to be typed from memory. A path outside the candidates goes in through **Browse…** or **Type a
-  path**: on the desktop **Browse…** opens the OS directory dialog, in the browser it expands an in-page
-  directory browser, and on a host with no picker the button is simply not shown;
+  workspaces **plus any directory the library actually holds sessions for** (annotated with that count)
+  **plus Ungrouped**, so no path has to be typed from memory. A path outside the candidates goes in through
+  **Browse…** or **Type a path**: on the desktop **Browse…** opens the OS directory dialog, in the browser it
+  expands an in-page directory browser, and on a host with no picker the button is simply not shown;
+- **the source can also be Ungrouped**: the sessions no workspace claims that still have a `cwd` (the ones
+  the shell sidebar parks under Ungrouped), possibly spread over several directories — adopt them all into
+  the target workspace in one go. It is the only source that spans directories, because "those two
+  unclaimed sessions across two directories" really is one thing. The "carry unregistered sessions" and
+  "move session artifacts" switches do not apply there (the page says so instead of showing switches that
+  do nothing);
 - the target directory must already exist; there is also an optional title for a newly created workspace,
   whether to carry the **files the sessions created**, and whether to carry unregistered sessions;
-- **move the whole source directory, or only some of it**: the sessions of the source directory are listed
-  (titles too, ids on hover), and ticking any row switches to "only the ticked ones"; one source
-  directory per run;
+- **move the whole source, or only some of it**: the sessions of the source are listed
+  (titles too, ids on hover; under a directory source the unclaimed rows carry a "not registered" tag), and
+  ticking any row switches to "only the ticked ones"; one source per run;
 - **Preview**: session, log and byte counts, source → target bucket, **how the ledger changes** (create or
   reuse the target workspace, how many sessions are added, which workspaces lose them, whether an emptied
   workspace is removed), the artifact plan and its skip reasons;

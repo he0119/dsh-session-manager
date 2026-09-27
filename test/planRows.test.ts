@@ -10,7 +10,15 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { describeCwd, sessionLabel } from '../src/client/planRows.ts'
+import {
+  UNOWNED_SOURCE,
+  describeCwd,
+  migrationMatching,
+  migrationSourceRows,
+  optionLabel,
+  sessionLabel,
+  unownedSessions,
+} from '../src/client/planRows.ts'
 
 // 同 groups.test.ts：不 import `src/client/api.ts`（它会把 src/client 拉进没有 DOM 的 Host 工程）。
 
@@ -70,4 +78,61 @@ test('标题两边的空白裁掉：宿主写进来的可能带换行（提示�
     tip: `修一下图标\n${ID}`,
     kind: 'title',
   })
+})
+
+
+// ---- 迁移页的来源：目录候选与「未分组」（`migrationSourceRows` / `migrationMatching`）----
+//
+// 「未分组」是外壳侧边栏的说法（账本没认领的会话），本插件按目录分组，于是它必须作为一个**单独的
+// 来源**出现，否则那批会话只能一个目录一个目录地勾——"这两个目录里没在册的那两条"本来是一件事。
+// 这一批会跨目录，所以本文件把候选、匹配与那个哨兵值都钉住（界面那层只能靠人眼验收）。
+
+/** 只带判据要用的两个字段：cwd 与归属（同源文件里的 SourceSubject）。 */
+const s = (id: string, cwd: string | undefined, workspaceId?: string) => ({ id, cwd, workspaceId })
+const t = (key: string, params?: Record<string, unknown>): string =>
+  params ? `${key}:${JSON.stringify(params)}` : key
+
+test('未分组来源覆盖的会话：账本没认领 + 有 cwd，两个条件缺一不可', () => {
+  const list = [
+    s('owned', '/a', 'ws-1'),
+    s('orphan', '/a'),
+    s('no-cwd', undefined),
+    s('empty-cwd', ''),
+  ]
+  assert.deepEqual(unownedSessions(list).map((x) => x.id), ['orphan'])
+})
+
+test('源候选：已登记工作区在前、其余目录按路径排、未分组在最后且带上条数', () => {
+  const rows = migrationSourceRows(
+    [s('owned', '/b', 'ws-1'), s('orphan-1', '/a'), s('orphan-2', '/a'), s('owned-2', '/a', 'ws-2')],
+    [{ path: '/b', title: '工作区乙' }],
+    t,
+  )
+  assert.deepEqual(rows, [
+    { path: '/b', title: '工作区乙', count: 1 },
+    { path: '/a', count: 3 },
+    { path: UNOWNED_SOURCE, label: 'ungroupedSource', count: 2 },
+  ])
+})
+
+test('源候选：没有未登记在册的会话时，那一行不出现（别摆一个点了必然报错的选项）', () => {
+  const rows = migrationSourceRows([s('owned', '/a', 'ws-1')], [{ path: '/a', title: '甲' }], t)
+  assert.equal(rows.some((row) => row.path === UNOWNED_SOURCE), false)
+})
+
+test('候选文案：未分组那一行用自己的文案，不把哨兵值漏出来', () => {
+  assert.equal(optionLabel({ path: UNOWNED_SOURCE, label: '未分组', count: 3 }, t), '未分组 — sessionsInDir:{"count":3}')
+  assert.equal(optionLabel({ path: '/a', count: 2 }, t), '/a — sessionsInDir:{"count":2}')
+})
+
+test('源匹配：目录按 cwd 匹配，未分组给的就是跨目录的那一批，空值不匹配任何会话', () => {
+  const list = [s('owned', '/a', 'ws-1'), s('orphan-a', '/a'), s('orphan-b', '/b')]
+  assert.deepEqual(migrationMatching(list, '/a').map((x) => x.id), ['owned', 'orphan-a'])
+  assert.deepEqual(migrationMatching(list, UNOWNED_SOURCE).map((x) => x.id), ['orphan-a', 'orphan-b'])
+  assert.deepEqual(migrationMatching(list, ''), [])
+})
+
+test('哨兵值不像一个路径：目录值永远是绝对路径或空串，撞不上它', () => {
+  assert.equal(UNOWNED_SOURCE.startsWith('/'), false)
+  assert.equal(UNOWNED_SOURCE.includes('\\'), false)
 })

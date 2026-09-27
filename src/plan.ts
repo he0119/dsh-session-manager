@@ -3,10 +3,10 @@
 // 计划是一等产物：apply 只接受一个 plan 对象，rollback 只依赖备份清单。
 // 这样 dry-run 与真实执行走的是同一段代码，避免"预览和实做不一致"。
 import { existsSync, readFileSync, statSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 
 import { planArtifactMoves } from './artifacts.ts'
-import { bucketOf, scanBucket } from './discovery.ts'
+import { bucketOf, scanAll, scanBucket } from './discovery.ts'
 import { projectKey } from './project-key.ts'
 import { reHome, validateRegistry } from './registry.ts'
 import type { TitleQuery } from './session-title.ts'
@@ -18,16 +18,24 @@ export interface BuildPlanOptions {
   root: string
   /** 已解析的 workspace 注册表对象。 */
   registry: WorkspaceRegistryState
-  /** 源工作区目录（绝对路径）。 */
-  from: string
+  /** 源工作区目录（绝对路径）。`unowned` 为 true 时省略（那时源不是一个目录）。 */
+  from?: string
   /** 目标工作区目录（绝对路径，必须已存在）。 */
   to: string
   decodeAll: DecodeAll
   /** 只迁移这些会话；缺省迁移源桶内全部。 */
   sessionIds?: string[] | null
+  /**
+   * 源取"账本没认领且有 `cwd` 的会话"（外壳侧边栏把它们挂在「未分组」下），而不是某个目录。
+   *
+   * 与 `from` 互斥：一个是目录、一个是"谁都没认领"，同时给就是两种源，谁也说不清用哪个。
+   * 这一支可以横跨多个分桶，所以每条会话的源目录各不相同（`sessions[].from`），
+   * 计划里的 `from` / `sourceBucket` 因此是空串。
+   */
+  unowned?: boolean
   /** 目标工作区新建时的标题。 */
   title?: string
-  /** 是否连带源桶中未登记在册的会话（默认 true）。 */
+  /** 是否连带源桶中未登记在册的会话（默认 true；未分组来源下无意义——那批本来就是未登记）。 */
   includeUnowned?: boolean
   /** 是否同时规划"会话中创建的文件"的搬迁（默认 false；需要全量解码，较慢）。 */
   includeArtifacts?: boolean
@@ -48,29 +56,35 @@ export function buildRelocationPlan(options: BuildPlanOptions): RelocationPlan {
   const {
     root,
     registry,
-    from,
     to,
     decodeAll,
     sessionIds = null,
+    unowned = false,
     title,
     includeUnowned = true,
     includeArtifacts = false,
     resolveTitle,
   } = options
+  const from = (options.from ?? '').trim()
   const problems: string[] = []
 
   if (typeof root !== 'string' || !root) problems.push('root is required (path to the sessions root)')
-  if (typeof from !== 'string' || !from) problems.push('from is required (source workspace directory)')
   if (typeof to !== 'string' || !to) problems.push('to is required (target workspace directory)')
+  if (unowned) {
+    if (from !== '') problems.push('source is ambiguous: pass either from (a directory) or unowned, not both')
+  } else if (from === '') {
+    problems.push('from is required (source workspace directory)')
+  }
   if (problems.length) {
     return {
       ok: false,
       problems,
-      from,
+      from: unowned ? '' : from,
       to,
       root,
       sourceBucket: '',
       targetBucket: '',
+      unowned,
       sessions: [],
       artifacts: null,
       registryChange: null,
@@ -78,7 +92,7 @@ export function buildRelocationPlan(options: BuildPlanOptions): RelocationPlan {
     }
   }
 
-  if (from === to) problems.push('from and to are identical — nothing to migrate')
+  if (!unowned && from === to) problems.push('from and to are identical — nothing to migrate')
 
   const regCheck = validateRegistry(registry)
   if (!regCheck.ok) problems.push(...regCheck.problems.map((p) => `registry: ${p}`))
@@ -87,27 +101,13 @@ export function buildRelocationPlan(options: BuildPlanOptions): RelocationPlan {
   if (!existsSync(to)) problems.push(`target directory does not exist: ${to}`)
   else if (!statSync(to).isDirectory()) problems.push(`target is not a directory: ${to}`)
 
-  const sourceBucket = bucketOf(root, from)
+  const sourceBucket = unowned ? '' : bucketOf(root, from)
   const targetBucket = bucketOf(root, to)
-  if (!existsSync(sourceBucket)) problems.push(`source bucket does not exist: ${sourceBucket}`)
+  if (!unowned && !existsSync(sourceBucket)) problems.push(`source bucket does not exist: ${sourceBucket}`)
 
   // 有损目录名的碰撞：源与目标桶若同名，会话日志会混在一起
-  if (projectKey(from) === projectKey(to)) {
+  if (!unowned && projectKey(from) === projectKey(to)) {
     problems.push(`projectKey collision: ${from} and ${to} both encode to ${projectKey(from)}`)
-  }
-
-  let discovered: ReturnType<typeof scanBucket> = []
-  if (existsSync(sourceBucket)) {
-    discovered = scanBucket(sourceBucket, decodeAll, resolveTitle === undefined ? {} : { resolveTitle })
-    for (const s of discovered) {
-      if (s.cwd !== from) problems.push(`session ${s.id}: header cwd ${s.cwd} != ${from}`)
-    }
-    if (sessionIds) {
-      const known = new Set(discovered.map((s) => s.id))
-      for (const id of sessionIds) {
-        if (!known.has(id)) problems.push(`session ${id} not found in ${sourceBucket}`)
-      }
-    }
   }
 
   const owned = new Set<string>()
@@ -115,9 +115,37 @@ export function buildRelocationPlan(options: BuildPlanOptions): RelocationPlan {
     for (const sid of rec.sessionIds) owned.add(sid)
   }
 
+  let discovered: ReturnType<typeof scanBucket> = []
+  if (unowned) {
+    // 未分组来源：整个库里"谁都没认领"的那些。没有 `cwd` 的排除在外——`relocateHeaderCwd()`
+    // 明确拒绝改写一个没有 cwd 的 header（session-log.ts），所以它们根本搬不进来；
+    // 界面上那个来源的条数与这里必须一致，于是界面也按同一条判据圈候选（planRows.unownedSessions）。
+    discovered = scanAll(root, decodeAll, resolveTitle === undefined ? {} : { resolveTitle }).filter(
+      (s) => !owned.has(s.id) && typeof s.cwd === 'string' && s.cwd !== '',
+    )
+  } else if (existsSync(sourceBucket)) {
+    discovered = scanBucket(sourceBucket, decodeAll, resolveTitle === undefined ? {} : { resolveTitle })
+    for (const s of discovered) {
+      if (s.cwd !== from) problems.push(`session ${s.id}: header cwd ${s.cwd} != ${from}`)
+    }
+  }
+
+  if (sessionIds) {
+    const known = new Set(discovered.map((s) => s.id))
+    for (const id of sessionIds) {
+      // 点名的会话不在这次来源的候选里：直接报 problem，不静默少搬（未分组来源下，
+      // "在册"或"没有 cwd"的会话就落在这里——它们不是这个来源能覆盖的东西）。
+      if (!known.has(id)) {
+        problems.push(
+          unowned ? `session ${id} is not an unowned session with a cwd` : `session ${id} not found in ${sourceBucket}`,
+        )
+      }
+    }
+  }
+
   let selected = discovered
   if (sessionIds) selected = discovered.filter((s) => sessionIds.includes(s.id))
-  if (!includeUnowned) {
+  if (!unowned && !includeUnowned) {
     for (const s of selected) {
       if (!owned.has(s.id)) problems.push(`session ${s.id} is not registered in any workspace (use includeUnowned)`)
     }
@@ -127,17 +155,29 @@ export function buildRelocationPlan(options: BuildPlanOptions): RelocationPlan {
   const targetDirs = new Set<string>()
   const sessions: SessionMove[] = selected.map((s) => {
     const targetDir = join(targetBucket, s.dirName)
-    if (existsSync(targetDir)) problems.push(`target session directory already exists: ${targetDir}`)
+    // 每条会话各自一个源：未分组来源下它们分散在不同的分桶里。
+    const sessionFrom = unowned ? (s.cwd as string) : from
+    // `cwd` 已经在目标上的会话（未分组来源下很常见：这条没人认领的会话本来就住在那个目录里，
+    // 只是没登记在册）不需要搬任何东西——它的"目标目录"就是自己现在的位置，所以"目标已存在"
+    // 在这里不是冲突。这一支在单目录来源下够不到（`from === to` 被上面挡了），
+    // 未分组来源下它是**收编**这件事的常态：只补一条账本记录。
+    const alreadyAtTarget = s.cwd === to
+    if (existsSync(targetDir) && !alreadyAtTarget) problems.push(`target session directory already exists: ${targetDir}`)
     if (targetDirs.has(targetDir)) problems.push(`duplicate target directory: ${targetDir}`)
     targetDirs.add(targetDir)
+    // 桶名与 header 的 cwd 若已经对不上，说明这条会话落错了桶（宿主会判它 corrupt）——搬过去正好
+    // 修好，但桶名相同却是另一个 cwd 时目标桶里会撞车，那种情况在这里挡住。
+    if (unowned && !alreadyAtTarget && bucketOf(root, sessionFrom) === targetBucket) {
+      problems.push(`session ${s.id}: its bucket collides with the target's (${projectKey(to)})`)
+    }
     return {
       id: s.id,
       ...(s.title === undefined ? {} : { title: s.title }),
       dirName: s.dirName,
       createdAt: s.createdAt,
-      from,
+      from: sessionFrom,
       to,
-      alreadyAtTarget: s.cwd === to,
+      alreadyAtTarget,
       sourceDir: s.dir,
       targetDir,
       files: s.files,
@@ -148,9 +188,12 @@ export function buildRelocationPlan(options: BuildPlanOptions): RelocationPlan {
   if (sessions.length === 0 && problems.length === 0) problems.push('no sessions selected for migration')
 
   // 可选的产物搬迁：需要**全量解码**会话日志（多帧全解），比发现阶段慢得多，
-  // 因此只在显式要求时做。
+  // 因此只在显式要求时做。未分组来源横跨多个目录时不做：产物定位是"相对于源目录"的
+  // （planArtifactMoves 只收一个 fromDir），一次请求里没有哪一个目录当得起这个角色。
   let artifacts: RelocationPlan['artifacts'] = null
-  if (includeArtifacts && sessions.length > 0) {
+  if (includeArtifacts && unowned && sessions.length > 0) {
+    problems.push('unowned source cannot relocate session artifacts (it spans several source directories)')
+  } else if (includeArtifacts && sessions.length > 0) {
     const texts = sessions.map((s) => ({
       id: s.id,
       // 多代次（v3 + v4）按代次顺序拼接，与宿主读取口径一致
@@ -177,11 +220,12 @@ export function buildRelocationPlan(options: BuildPlanOptions): RelocationPlan {
   return {
     ok: problems.length === 0,
     problems,
-    from,
+    from: unowned ? '' : from,
     to,
     root,
     sourceBucket,
     targetBucket,
+    unowned,
     sessions,
     artifacts,
     registryChange,
@@ -193,7 +237,13 @@ export function buildRelocationPlan(options: BuildPlanOptions): RelocationPlan {
 export function describePlan(plan: RelocationPlan): string {
   const lines: string[] = []
   lines.push(`迁移 ${plan.sessions.length} 个会话：`)
-  lines.push(`  ${plan.from}`)
+  // 未分组来源没有"一个源目录"这回事：源桶由每条会话自己的 cwd 定，因此只报涉及的桶数。
+  const sourceBuckets = new Set(plan.sessions.map((s) => dirname(s.sourceDir)))
+  lines.push(
+    plan.unowned
+      ? `  （未分组：横跨 ${sourceBuckets.size} 个源分桶）`
+      : `  ${plan.from}`,
+  )
   lines.push(`  -> ${plan.to}`)
   const files = plan.sessions.reduce((n, s) => n + s.files.length, 0)
   lines.push(`  日志文件 ${files} 个；目标桶 ${plan.targetBucket}`)
@@ -204,7 +254,8 @@ export function describePlan(plan: RelocationPlan): string {
     const c = plan.registryChange
     lines.push(
       `  注册表：目标工作区 ${c.targetId}${c.createdTarget ? '（新建，前插）' : '（复用）'}；` +
-        `新增归属 ${c.added.length}；摘除自 ${c.movedFrom.length} 个工作区；删除空工作区 ${c.removedSources.length}`,
+        `新增归属 ${c.added.length}（其中未分组收编 ${c.adoptedFromUnowned.length}）；` +
+        `摘除自 ${c.movedFrom.length} 个工作区；删除空工作区 ${c.removedSources.length}`,
     )
   }
   if (plan.problems.length) {

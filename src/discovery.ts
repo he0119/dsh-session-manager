@@ -166,3 +166,35 @@ export function scanBucket(bucketDir: string, decodeAll: DecodeAll, options: Sca
 export function bucketOf(root: string, cwd: string): string {
   return join(root, projectKey(cwd))
 }
+
+/**
+ * 扫**整个**会话库：根下每个分桶各扫一遍，合成一份列表（按 createdAt 降序）。
+ *
+ * 单个分桶坏掉只跳过它：整页会话列不出来比少一条会话严重得多（界面与迁移的
+ * 「未分组」来源都要横跨分桶，所以这一步不能因为一个坏桶就整体失败）。
+ */
+export function scanAll(root: string, decodeAll: DecodeAll, options: ScanOptions = {}): DiscoveredSession[] {
+  const out: DiscoveredSession[] = []
+  let buckets: string[]
+  try {
+    buckets = readdirSync(root)
+  } catch {
+    return out
+  }
+  for (const bucket of buckets) {
+    const bucketPath = join(root, bucket)
+    try {
+      if (!statSync(bucketPath).isDirectory()) continue
+    } catch {
+      continue
+    }
+    try {
+      out.push(...scanBucket(bucketPath, decodeAll, options))
+    } catch {
+      // 单个分桶坏掉不该让整页打不开：跳过它，界面照旧能用。
+      continue
+    }
+  }
+  out.sort((a, b) => b.createdAt - a.createdAt)
+  return out
+}

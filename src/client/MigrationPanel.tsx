@@ -28,7 +28,14 @@ import { translateWith, zh, type Translate } from './locales.ts'
 import { DirectoryPicker } from './DirectoryPicker.tsx'
 import { normalizePickedPath } from './directory.ts'
 import { SessionIcon } from './icons.tsx'
-import { sessionLabel } from './planRows.ts'
+import {
+  UNOWNED_SOURCE,
+  migrationMatching,
+  migrationSourceRows,
+  optionLabel,
+  sessionLabel,
+  type PathRow,
+} from './planRows.ts'
 import type { PanelShare } from './types.ts'
 
 /** 没有注入面时的兜底翻译。 */
@@ -56,19 +63,6 @@ function formatTime(value: string): string {
 /** 会话选择：全部，或从匹配到的会话里勾几条。 */
 type PickMode = 'all' | 'subset'
 
-/** 目录下拉框里的一行。`count` 只有"宿主库里真有会话的目录"才有。 */
-interface PathRow {
-  path: string
-  title?: string
-  count?: number
-}
-
-/** 一行候选的文案：工作区标题（有则带）+ 路径 + 库里的条数（有则带）。 */
-function optionLabel(row: PathRow, t: Translate): string {
-  const head = row.title === undefined ? row.path : `${row.title} — ${row.path}`
-  return row.count === undefined ? head : `${head} — ${t('sessionsInDir', { count: row.count })}`
-}
-
 /** 一个目录字段的入参。 */
 interface PathFieldProps {
   t: Translate
@@ -86,6 +80,13 @@ interface PathFieldProps {
   onToggleManual: () => void
   /** 展开中的浏览框（没展开就是 null）。 */
   browser: React.ReactNode
+  /**
+   * 「手输路径」输入框里显示的东西（缺省 = 当前值）。
+   *
+   * 只给「未分组」用：那个值是个内部哨兵（见 planRows.UNOWNED_SOURCE），原样摆进输入框等于让用户
+   * 看见一个既不是路径也不是人话的东西；框里显示"未分组"，一敲字就变成真路径（onChange 照旧）。
+   */
+  manualValue?: string
 }
 
 /**
@@ -111,6 +112,7 @@ function PathField({
   manualOpen,
   onToggleManual,
   browser,
+  manualValue,
 }: PathFieldProps): React.ReactElement {
   return (
     <div className="dsm-field">
@@ -143,7 +145,7 @@ function PathField({
           className="dsm-input"
           type="text"
           aria-label={label}
-          value={value}
+          value={manualValue ?? value}
           placeholder={t('pathPlaceholder')}
           onChange={(event) => onChange(event.target.value)}
         />
@@ -202,43 +204,32 @@ export function MigrationPanel({ t = fallback, state, reload, directory }: Panel
   }, [loadBackups])
 
   // 库里能按 cwd 匹配到的会话——只是给用户一个勾选面；真正迁移哪些由宿主按源分桶算。
-  const matching = React.useMemo(
-    () => sessions.filter((session) => from.trim() !== '' && session.cwd === from.trim()),
-    [sessions, from],
-  )
+  // 「未分组」来源不是按 cwd 匹配，而是"账本没认领、且有 cwd"的那一批（可以横跨多个目录），
+  // 判据与宿主侧完全同一条（见 planRows.unownedSessions）。
+  const matching = React.useMemo(() => migrationMatching(sessions, from), [sessions, from])
 
-  // 源目录候选 = 已登记工作区 **+ 库里真有会话的目录**（账本里未必有它：未登记，或记的是旧路径）。
+  /** 当前来源是不是那个跨目录的「未分组」。 */
+  const unownedSource = from === UNOWNED_SOURCE
+
+  // 源目录候选 = 已登记工作区 **+ 库里真有会话的目录**（账本里未必有它：未登记，或记的是旧路径）
+  // **+「未分组」**（库里有这类会话时才出现，排在最后：它不是目录，别混进目录堆里）。
   // "只迁其中几条"的第一步是先看见这些会话在哪个目录下，所以每个候选都报**库里的条数**——
   // 账本的登记条数会骗人：同一个目录下可能还有没登记在册的会话（那些默认也会被一起搬走）。
-  const sourceOptions = React.useMemo(() => {
-    const counts = new Map<string, number>()
-    for (const session of sessions) {
-      if (typeof session.cwd !== 'string' || session.cwd === '') continue
-      counts.set(session.cwd, (counts.get(session.cwd) ?? 0) + 1)
-    }
-    const options: PathRow[] = []
-    const seen = new Set<string>()
-    for (const workspace of workspaces) {
-      if (seen.has(workspace.path)) continue
-      seen.add(workspace.path)
-      options.push({ path: workspace.path, title: workspace.title, count: counts.get(workspace.path) ?? 0 })
-    }
-    for (const [path, count] of [...counts.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
-      if (seen.has(path)) continue
-      seen.add(path)
-      options.push({ path, count })
-    }
-    return options
-  }, [sessions, workspaces])
+  const sourceOptions = React.useMemo(() => migrationSourceRows(sessions, workspaces, t), [sessions, workspaces, t])
 
   /**
    * 下拉框里实际列出来的行 = 上面的候选 **+ 当前值本身**。
    *
    * 补这一行是为了让"框里显示的"永远是"真正要用的"：值可能是「浏览…」选回来的、账本和会话都没
    * 覆盖到的目录（比如刚建的空目录），没有这一行下拉框就只能显示占位符，看着像没选中。
+   *
+   * 哨兵值（「未分组」）不补：它的行由候选自己给出（带文案），补一个只有哨兵值的行等于把内部的
+   * 约定漏到界面上。
    */
   const sourceRows = React.useMemo<PathRow[]>(() => {
-    if (from === '' || sourceOptions.some((option) => option.path === from)) return sourceOptions
+    if (from === '' || from === UNOWNED_SOURCE || sourceOptions.some((option) => option.path === from)) {
+      return sourceOptions
+    }
     return [...sourceOptions, { path: from }]
   }, [sourceOptions, from])
 
@@ -260,14 +251,21 @@ export function MigrationPanel({ t = fallback, state, reload, directory }: Panel
     [pickMode, matching, picked],
   )
 
-  /** 请求体：全部（或匹配不到）时 `sessionIds` 传 null，让宿主按源分桶的实际内容迁移。 */
+  /**
+   * 请求体：全部（或匹配不到）时 `sessionIds` 传 null，让宿主按源的实际内容迁移。
+   *
+   * 「未分组」来源在这里翻译：`from` 传空串、`unowned: true`（哨兵值只活在界面里）。
+   * 那个来源下的会话**全是**未登记在册的，所以"连同未登记在册的会话"这个开关对它没有意义，
+   * 一律按 true 发（复选框在这个来源下也不显示）；产物搬迁同理不发（跨目录时宿主会拒）。
+   */
   const request = (mode: 'plan' | 'apply'): MigrationRequest => ({
     mode,
-    from: from.trim(),
+    from: unownedSource ? '' : from.trim(),
+    ...(unownedSource ? { unowned: true } : {}),
     to: to.trim(),
     sessionIds: pickMode === 'subset' ? chosen : null,
-    includeUnowned,
-    includeArtifacts,
+    includeUnowned: unownedSource ? true : includeUnowned,
+    includeArtifacts: unownedSource ? false : includeArtifacts,
     ...(title.trim() === '' ? {} : { title: title.trim() }),
   })
 
@@ -322,11 +320,14 @@ export function MigrationPanel({ t = fallback, state, reload, directory }: Panel
   const browserFor = (which: 'from' | 'to'): React.ReactNode => {
     const api = directory?.()
     if (picking !== which || api === undefined) return null
+    // 起点是这个字段当前的值；「未分组」那个哨兵不是路径，别拿它当起点去问宿主（那会变成
+    // 一次"列 '@unowned' 下面有什么"的无意义调用）。
+    const value = which === 'from' ? from : to
     return (
       <DirectoryPicker
         t={t}
         api={api}
-        startPath={which === 'from' ? from : to}
+        startPath={value === UNOWNED_SOURCE ? '' : value}
         onPick={(path) => applyPath(which, path)}
         onClose={() => setPicking(null)}
       />
@@ -457,6 +458,7 @@ export function MigrationPanel({ t = fallback, state, reload, directory }: Panel
             manualOpen={manual === 'from'}
             onToggleManual={() => setManual((current) => (current === 'from' ? null : 'from'))}
             browser={browserFor('from')}
+            {...(unownedSource ? { manualValue: t('ungroupedSource') } : {})}
           />
           <PathField
             t={t}
@@ -487,16 +489,25 @@ export function MigrationPanel({ t = fallback, state, reload, directory }: Panel
           />
         </label>
 
-        <div className="dsm-options">
-          <label className="dsm-check">
-            <input type="checkbox" checked={includeUnowned} onChange={(event) => setIncludeUnowned(event.target.checked)} />
-            <span>{t('includeUnowned')}</span>
-          </label>
-          <label className="dsm-check">
-            <input type="checkbox" checked={includeArtifacts} onChange={(event) => setIncludeArtifacts(event.target.checked)} />
-            <span>{t('includeArtifacts')}</span>
-          </label>
-        </div>
+        {/*
+          「未分组」来源下这两个开关都没有意义，所以不显示（而不是显示成"能点但没用"）：
+          那批会话本来就全是未登记在册的，而产物搬迁要一个"源目录"作基准、跨目录的源给不出来。
+          请求里照样按 true / false 发（见 request()），于是界面上看不见的东西也不会改变行为。
+        */}
+        {unownedSource ? (
+          <p className="dsm-hint">{t('unownedSourceHint')}</p>
+        ) : (
+          <div className="dsm-options">
+            <label className="dsm-check">
+              <input type="checkbox" checked={includeUnowned} onChange={(event) => setIncludeUnowned(event.target.checked)} />
+              <span>{t('includeUnowned')}</span>
+            </label>
+            <label className="dsm-check">
+              <input type="checkbox" checked={includeArtifacts} onChange={(event) => setIncludeArtifacts(event.target.checked)} />
+              <span>{t('includeArtifacts')}</span>
+            </label>
+          </div>
+        )}
 
         <div className="dsm-field">
           <span className="dsm-fieldLabel">{t('pickScopeLabel')}</span>
@@ -551,8 +562,20 @@ export function MigrationPanel({ t = fallback, state, reload, directory }: Panel
                       }}
                     />
                     <SessionIcon />
-                    <span className={label.kind === 'title' ? 'dsm-rowTitle' : 'dsm-rowId'} title={label.tip}>
-                      {label.text}
+                    {/*
+                      目录来源下，同一个目录里混着"在册"和"没在册"的会话（真实库就是这样），
+                      而没在册的那批正是「未分组」来源能整批带走的东西，所以逐行标出来；切到
+                      「未分组」来源时每一行都不在册，标了等于没标，于是不标。
+                    */}
+                    <span className="dsm-rowLabel">
+                      <span className={label.kind === 'title' ? 'dsm-rowTitle' : 'dsm-rowId'} title={label.tip}>
+                        {label.text}
+                      </span>
+                      {!unownedSource && session.workspaceId === undefined && (
+                        <span className="dsm-tag dsm-tagIdle" title={t('unregisteredSessionTip')}>
+                          {t('unregisteredSession')}
+                        </span>
+                      )}
                     </span>
                     <span className="dsm-meta">{formatBytes(session.bytes)}</span>
                     <span className="dsm-meta">{formatTime(new Date(session.createdAt).toISOString())}</span>
@@ -586,7 +609,11 @@ export function MigrationPanel({ t = fallback, state, reload, directory }: Panel
                 bytes: formatBytes(preview.bytes),
               })}
             </p>
-            <p className="dsm-hint">{t('migrateBuckets', { from: preview.sourceBucket, to: preview.targetBucket })}</p>
+            <p className="dsm-hint">
+              {preview.unowned
+                ? t('migrateBucketsUnowned', { buckets: preview.sourceBuckets.length, to: preview.targetBucket })
+                : t('migrateBuckets', { from: preview.sourceBucket, to: preview.targetBucket })}
+            </p>
 
             {preview.problems.length > 0 && (
               <div className="dsm-problems">

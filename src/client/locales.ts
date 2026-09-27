@@ -80,10 +80,13 @@ export const zh = {
   // ---- 迁移 ----
   migrateTitle: '迁移会话',
   migrateHint:
-    '把会话从某个工作区目录搬到另一个目录：改写日志 header 的 cwd（只动首帧，其余字节不变）、把会话目录移进目标分桶、并重新登记工作区账本。可以整个源目录一起搬，也可以只挑其中几条——先预演，看清会写什么，再确认。',
+    '把会话从一个来源搬到另一个目录（来源可以是某个工作区目录，也可以是「未分组」里那些没人认领的会话）：改写日志 header 的 cwd（只动首帧，其余字节不变）、把会话目录移进目标分桶、并重新登记工作区账本。可以整个来源一起搬，也可以只挑其中几条——先预演，看清会写什么，再确认。',
   fromLabel: '源目录',
   toLabel: '目标目录',
   pickSource: '选择源目录…',
+  ungroupedSource: '未分组',
+  unownedSourceHint:
+    '来源是「未分组」：账本没认领、且有 cwd 的那批会话，可以横跨多个目录，一次全部收进目标工作区。它们的 header 会写上目标目录的 cwd，会话目录搬进目标分桶并登记在册。没有 cwd 的会话不在这里（header 里没有 cwd 可改写），"未登记在册的会话"与"搬迁会话产物"两个开关因此也不适用。',
   pickTarget: '选择目标目录…',
   browse: '浏览…',
   typePath: '手输路径',
@@ -120,6 +123,7 @@ export const zh = {
   migrating: '迁移中…',
   migrateSummary: '将迁移 {sessions} 条会话（{files} 个日志，{bytes}）',
   migrateBuckets: '分桶：{from} → {to}',
+  migrateBucketsUnowned: '未分组横跨 {buckets} 个源分桶 → {to}',
   registryChangeTitle: '注册表变更',
   registryCreateTarget: '登记目标工作区（新建）',
   registryReuseTarget: '登记到已有工作区',
@@ -212,10 +216,13 @@ export const en: Record<keyof typeof zh, string> = {
 
   migrateTitle: 'Migrate sessions',
   migrateHint:
-    'Move sessions from one workspace directory to another: rewrite each log header cwd (first frame only, the rest stays byte-identical), move the session directories into the target bucket, and re-home the workspace ledger. Move the whole source directory at once, or only a few of them — preview first, then confirm.',
+    'Move sessions from one source to another directory (the source is a workspace directory, or the unclaimed sessions under Ungrouped): rewrite each log header cwd (first frame only, the rest stays byte-identical), move the session directories into the target bucket, and re-home the workspace ledger. Move the whole source at once, or only a few of them — preview first, then confirm.',
   fromLabel: 'Source directory',
   toLabel: 'Target directory',
   pickSource: 'Choose a source directory…',
+  ungroupedSource: 'Ungrouped',
+  unownedSourceHint:
+    'The source is Ungrouped: sessions no workspace claims that still have a cwd, possibly spread over several directories — adopt them into the target workspace in one go. Their headers get the target cwd, their directories move into the target bucket, and they get registered. Sessions without a cwd are not listed here (there is no cwd in their header to rewrite), so the "include unregistered sessions" and "move session artifacts" switches do not apply.',
   pickTarget: 'Choose a target directory…',
   browse: 'Browse…',
   typePath: 'Type a path',
@@ -254,6 +261,7 @@ export const en: Record<keyof typeof zh, string> = {
   migrating: 'Migrating…',
   migrateSummary: '{sessions} sessions to migrate ({files} logs, {bytes})',
   migrateBuckets: 'Buckets: {from} → {to}',
+  migrateBucketsUnowned: 'Ungrouped spans {buckets} source buckets → {to}',
   registryChangeTitle: 'Ledger change',
   registryCreateTarget: 'Register the target workspace (new)',
   registryReuseTarget: 'Register into an existing workspace',

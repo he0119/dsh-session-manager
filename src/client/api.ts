@@ -178,10 +178,16 @@ export interface PreviewSession {
 export interface MigrationPreview {
   ok: boolean
   problems: string[]
+  /** 源工作区目录；未分组来源时是空串（见 `unowned`）。 */
   from: string
   to: string
+  /** 源分桶；未分组来源时是空串（源不是一个目录）。 */
   sourceBucket: string
   targetBucket: string
+  /** 源是不是那个跨目录的「未分组」（界面据此换一句分桶说明）。 */
+  unowned: boolean
+  /** 本次会搬动的会话各自所在的源分桶（去重、排序）；未分组来源下不止一个。 */
+  sourceBuckets: string[]
   sessions: PreviewSession[]
   files: number
   bytes: number
@@ -206,8 +212,14 @@ export interface MigrationPreview {
 /** 迁移请求（与宿主 `MigrateRequest` 同形）。 */
 export interface MigrationRequest {
   mode: 'plan' | 'apply'
+  /** 源目录；`unowned` 为 true 时是空串（那时源不是一个目录）。 */
   from: string
   to: string
+  /**
+   * 源取"账本没认领且有 cwd 的会话"（外壳侧边栏的「未分组」），而不是某个目录。
+   * 与 `from` 互斥；界面上的哨兵值（planRows.UNOWNED_SOURCE）到这里才翻译成这个字段。
+   */
+  unowned?: boolean
   sessionIds?: string[] | null
   title?: string
   includeUnowned?: boolean

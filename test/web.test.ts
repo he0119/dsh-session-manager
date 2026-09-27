@@ -449,6 +449,39 @@ test('POST /migrate：带 sessionIds 时只搬点名的会话（界面「只选�
   assert.deepEqual(readRegistry(sandbox.registryPath).tables.workspaces['ws-a']?.sessionIds, ['session-a'])
 })
 
+test('POST /migrate：unowned 来源不带 from 也能预演（界面那个跨目录的「未分组」走这条路）', async () => {
+  const sandbox = makeSandbox('web-migrate-unowned')
+  // session-a 登记在 ws-a 名下，session-b 的 cwd 是同一个目录但谁都没认领 —— 未分组来源只认后者。
+  writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000)
+  writeSession(sandbox.sessionsRoot, 'session-b', CWD_A, 2000)
+
+  const handlers = createApiHandlers(deps(sandbox))
+  const { res, captured } = fakeRes()
+  await handlers['POST /migrate']!(
+    fakeReq('POST', `${API_PREFIX}/migrate`, Buffer.from(JSON.stringify({ unowned: true, to: CWD_B }))),
+    res,
+  )
+  assert.equal(captured.status, 200)
+  const body = json(captured)
+  const preview = body['preview'] as Record<string, unknown>
+  assert.equal(preview['unowned'], true)
+  assert.equal(preview['from'], '')
+  assert.equal(preview['sourceBucket'], '')
+  assert.deepEqual(preview['sourceBuckets'], [join(sandbox.sessionsRoot, projectKey(CWD_A))])
+  assert.deepEqual((preview['sessions'] as { id: string }[]).map((s) => s.id), ['session-b'])
+  // 预演不写盘
+  assert.equal(existsSync(sessionDir(sandbox.sessionsRoot, CWD_A, 'session-b')), true)
+
+  // 两种源都不给：400，且错误信息要说清有两条路
+  const denied = fakeRes()
+  await handlers['POST /migrate']!(
+    fakeReq('POST', `${API_PREFIX}/migrate`, Buffer.from(JSON.stringify({ to: CWD_B }))),
+    denied.res,
+  )
+  assert.equal(denied.captured.status, 400)
+  assert.match(String((json(denied.captured) as Record<string, unknown>)['error']), /unowned/)
+})
+
 test('POST /migrate：mode=apply 真搬并回可回滚的备份；注入 effectMode 时如实回报', async () => {
   const sandbox = makeSandbox('web-migrate-apply')
   writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000)

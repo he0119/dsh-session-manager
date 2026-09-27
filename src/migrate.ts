@@ -7,7 +7,7 @@
 // 计划仍然是一等产物：预演与执行走同一个 `buildRelocationPlan()`，界面看到的预演结果就是
 // 执行时会做的事；回滚只依据备份清单，不认识计划。
 import { existsSync, readdirSync, statSync } from 'node:fs'
-import { join, relative, resolve } from 'node:path'
+import { dirname, join, relative, resolve } from 'node:path'
 
 import { applyPlan, verifyAppliedPlan } from './execute.ts'
 import { readManifest, rollback, type BackupManifest, type RollbackResult } from './journal.ts'
@@ -31,10 +31,15 @@ export interface MigrateDeps {
 
 /** 一次迁移/预演的请求。 */
 export interface MigrateRequest {
-  /** 源工作区目录（绝对路径）。 */
-  from: string
+  /** 源工作区目录（绝对路径）。`unowned` 为 true 时可省略（那时源不是一个目录）。 */
+  from?: string
   /** 目标工作区目录（绝对路径，必须已存在）。 */
   to: string
+  /**
+   * 源取"账本没认领且有 cwd 的会话"（外壳侧边栏的「未分组」），而不是某个目录。
+   * 可以横跨多个分桶，所以与 `from` 互斥。
+   */
+  unowned?: boolean
   /** 只迁移这些会话；缺省（null）为源桶内全部。 */
   sessionIds?: string[] | null
   /** 目标工作区新建时的标题。 */
@@ -63,10 +68,16 @@ export interface PreviewSession {
 export interface MigrationPreview {
   ok: boolean
   problems: string[]
+  /** 源工作区目录；未分组来源时是空串（见 `unowned`）。 */
   from: string
   to: string
+  /** 源分桶；未分组来源时是空串（源不是一个目录）。 */
   sourceBucket: string
   targetBucket: string
+  /** 源是不是那个跨目录的「未分组」（界面据此换一句分桶说明）。 */
+  unowned: boolean
+  /** 本次真正会搬动的会话各自所在的源分桶（去重、排序）——未分组来源下不止一个。 */
+  sourceBuckets: string[]
   sessions: PreviewSession[]
   files: number
   bytes: number
@@ -153,6 +164,9 @@ function previewOf(plan: RelocationPlan): MigrationPreview {
     to: plan.to,
     sourceBucket: plan.sourceBucket,
     targetBucket: plan.targetBucket,
+    unowned: plan.unowned,
+    // 未分组来源横跨多个桶：把每条会话自己的源桶去重报给界面，别让界面拿一个空串去猜。
+    sourceBuckets: [...new Set(plan.sessions.map((session) => dirname(session.sourceDir)))].sort(),
     sessions,
     files,
     bytes,
@@ -168,9 +182,10 @@ function buildPlan(deps: MigrateDeps, request: MigrateRequest): RelocationPlan {
   return buildRelocationPlan({
     root: deps.sessionsRoot,
     registry: loadRegistryForWrite(deps.registryPath),
-    from: request.from,
+    from: request.from ?? '',
     to: request.to,
     decodeAll: deps.decodeAll,
+    unowned: request.unowned === true,
     sessionIds: request.sessionIds ?? null,
     title: request.title,
     includeUnowned: request.includeUnowned !== false,

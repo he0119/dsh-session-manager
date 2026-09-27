@@ -62,7 +62,9 @@ export function applyPlan(plan: RelocationPlan, options: ApplyOptions): ApplyRes
     registryPath,
     sessions: plan.sessions,
     artifacts: artifactMoves,
-    from: plan.from,
+    // 未分组来源没有"一个源目录"这回事：清单里的 from 是给人看的一句摘要，写一个假路径不如不写
+    // （界面那边把缺席显示成「—」；真正的源头在清单的每条会话记录里，回滚只认那些字段）。
+    ...(plan.unowned ? {} : { from: plan.from }),
     to: plan.to,
     now,
   })
@@ -111,10 +113,16 @@ export function applyPlan(plan: RelocationPlan, options: ApplyOptions): ApplyRes
   writeRegistryAtomic(registryPath, plan.nextRegistry)
   say(`registry written (target workspace ${plan.registryChange?.targetId ?? 'n/a'})`)
 
-  // 5) 清理空桶
-  if (existsSync(plan.sourceBucket) && readdirSync(plan.sourceBucket).length === 0) {
-    rmdirSync(plan.sourceBucket)
-    say(`removed empty bucket ${basename(plan.sourceBucket)}`)
+  // 5) 清理空桶：**按每条会话自己的**源分桶去重。单个目录来源时这就是那一个桶（与以前等价），
+  //    未分组来源时可以横跨好几个桶。目标桶跳过不删：cwd 已经在目标上的那些会话本来就住在那里
+  //    （step 3 会跳过它们），删掉目标桶就是删掉刚落好的家。
+  const sourceBuckets = new Set(plan.sessions.map((s) => dirname(s.sourceDir)))
+  for (const bucket of sourceBuckets) {
+    if (bucket === plan.targetBucket) continue
+    if (!existsSync(bucket)) continue
+    if (readdirSync(bucket).length > 0) continue
+    rmdirSync(bucket)
+    say(`removed empty bucket ${basename(bucket)}`)
   }
 
   // 6) 会话产物（可选）

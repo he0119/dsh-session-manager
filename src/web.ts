@@ -14,7 +14,7 @@ import { readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 
-import { scanBucket, type DiscoveredSession, type ScanOptions } from './discovery.ts'
+import { scanAll, scanBucket, type DiscoveredSession, type ScanOptions } from './discovery.ts'
 import {
   assertBackupDir,
   listBackups,
@@ -159,34 +159,15 @@ function loadRegistry(
   }
 }
 
-/** 扫整个会话库（分桶 → 会话）。 */
-export function scanLibrary(root: string, decodeAll: DecodeAll, options: ScanOptions = {}): DiscoveredSession[] {
-  const out: DiscoveredSession[] = []
-  let buckets: string[]
-  try {
-    buckets = readdirSync(root)
-  } catch {
-    return out
-  }
-  for (const bucket of buckets) {
-    const bucketPath = join(root, bucket)
-    try {
-      if (!statSync(bucketPath).isDirectory()) continue
-    } catch {
-      continue
-    }
-    try {
-      out.push(...scanBucket(bucketPath, decodeAll, options))
-    } catch {
-      // 单个分桶坏掉不该让整页打不开：跳过它，界面照旧能用。
-      continue
-    }
-  }
-  out.sort((a, b) => b.createdAt - a.createdAt)
-  return out
-}
+/** 扫整个会话库（分桶 → 会话）。实现在 discovery.ts，迁移页的「未分组」来源用的是同一个。 */
+export const scanLibrary = scanAll
 
-/** 把发现结果与注册表对起来，得到界面要的行。 */
+/**
+ * 把发现结果与注册表对起来，得到界面要的行。
+ *
+ * `workspaceId` 缺省 = 这条会话的 id 不在任何工作区的登记表里（外壳侧边栏会把它挂到「未分组」下，
+ * 见 docs/internals.md）。界面靠它标出"未登记在册"，迁移页的「未分组」来源也用它圈候选。
+ */
 function summarizeSessions(sessions: readonly DiscoveredSession[], registry: WorkspaceRegistryState | null): SessionSummary[] {
   const owner = new Map<string, string>()
   for (const [workspaceId, record] of Object.entries(registry?.tables.workspaces ?? {})) {
@@ -406,9 +387,12 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
       return
     }
     const fields = (body ?? {}) as Record<string, unknown>
+    // 源有两种：一个目录（from），或者"账本没认领的那些会话"（unowned，即外壳侧边栏的「未分组」，
+    // 可以横跨多个目录）。两者互斥时由计划层报 problem——那是"参数说不清"，比这里猜一个更诚实。
+    const unowned = fields['unowned'] === true
     const from = typeof fields['from'] === 'string' ? fields['from'].trim() : ''
-    if (from === '') {
-      sendJson(res, 400, { error: '缺少源工作区目录（from）' })
+    if (from === '' && !unowned) {
+      sendJson(res, 400, { error: '缺少源工作区目录（from），或者用 unowned: true 迁移「未分组」里的会话' })
       return
     }
     let to: string
@@ -430,6 +414,7 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
     const ids = fields['sessionIds']
     const request: MigrateRequest = {
       from,
+      unowned,
       to,
       sessionIds: Array.isArray(ids) ? ids.map((id) => String(id)) : null,
       includeUnowned: fields['includeUnowned'] !== false,
