@@ -101,13 +101,18 @@ decodeAll(buf[0..i)) + decodeAll(buf[i..)) === decodeAll(buf)
 `effectMode(ctx)` 因此**如实探测**：上游若提供 `workspaceRegistry.reassignSessions` 就走进程内
 即时生效，否则返回 `restart-required`，由工具返回值告诉调用方「必须重启 DSH」。不假装即时生效。
 
-## `.dhsess` 包：一条 gzip 流，而不是 tar
+## `.dshsess` 包：一条 gzip 流，而不是 tar
 
 容器是「magic + 清单 + 原始载荷」拼起来再整包 gzip：
 
 ```
 gzip( 'DSHSESS1\n' | u32le 清单长度 | 清单 JSON | 各文件的原始字节 )
 ```
+
+后缀与开头那串魔法字节是同一件事的两种说法：`DSHSESS1` 与 `.dshsess`（DSH + sessions）。这层
+一致性值得钉住，因为**只错在文案上也会把功能弄坏**：客户端的导入框曾带着 `accept=".dhsess"`，
+而宿主导出的文件名一直是 `.dshsess`——选择框的过滤器把刚导出的包挡在外面，用户看到的是"导入坏了"。
+所以 `test/client.test.mjs` 里有一条专门断言产物里不再出现那个少一个字母的后缀。
 
 三个取舍：
 
@@ -124,7 +129,7 @@ gzip( 'DSHSESS1\n' | u32le 清单长度 | 清单 JSON | 各文件的原始字节
 
 | 校验 | 挡下什么 |
 |---|---|
-| magic 与 `formatVersion` | 不是 `.dhsess`、或是换代后本包读不懂的包 |
+| magic 与 `formatVersion` | 不是 `.dshsess`、或是换代后本包读不懂的包 |
 | 每个条目的 `[offset, offset+bytes)` 落在载荷内 | 清单被改坏、偏移溢出 |
 | 每个条目的 sha256 | 载荷被截断或改动了一个字节 |
 | 会话目录名 == `encodeSegment(id)` | 宿主启动时会校验目录名与 header id 一致，不满足的包会污染会话库 |
@@ -301,7 +306,7 @@ ctx 测试全绿。`test/artifact.test.mjs` 与 `test/tools.test.ts` 现在都�
 | 单元 | 保结构改写只动 header；拒绝错 cwd / 非 header / 首帧多行 | `test/session-log.test.ts` |
 | 单元 | 启动四条不变式逐类可抓；`reHome` 前后校验 | `test/registry.test.ts` |
 | 单元 | 产物证据分层、存在性求交、嵌套剪枝 | `test/artifacts.test.ts` |
-| 单元 | `.dhsess` 字节往返、包校验的拒绝面、导入预演/落地/冲突跳过 | `test/transfer.test.ts` |
+| 单元 | `.dshsess` 字节往返、包校验的拒绝面、导入预演/落地/冲突跳过 | `test/transfer.test.ts` |
 | 单元 | 迁移编排：预演只读、dry-run 零写入、执行后复核、回滚还原、**备份目录越界一律拒** | `test/migrate.test.ts` |
 | 单元 | 界面端点：列会话、导出、导入、迁移预演/落地、备份列表、回滚与各条 400/404/409 | `test/web.test.ts` |
 | 产物契约 | 按模块加载器契约执行 `lib/client.js`：id、导出面、槽位、字典键集、导航文案跟语言走、页内两个分页都在 | `test/client.test.mjs` |

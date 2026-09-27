@@ -286,7 +286,7 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
 
     const bytes = await readBody(req)
     if (bytes.length === 0) {
-      sendJson(res, 400, { error: '请求体为空：请上传一个 .dhsess 文件' })
+      sendJson(res, 400, { error: '请求体为空：请上传一个 .dshsess 文件' })
       return
     }
 

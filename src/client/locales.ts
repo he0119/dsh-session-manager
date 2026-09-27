@@ -37,7 +37,7 @@ export const zh = {
   // ---- 导入导出 ----
   exportTitle: '导出',
   exportHint:
-    '勾选要带走的会话，导出一个 .dhsess 包。列表按目录分组，组头那一下是整组勾上／取消。包里是会话日志的原始字节，不含会话创建过的普通文件；同一条会话的所有代次日志一起进包。',
+    '勾选要带走的会话，导出一个 .dshsess 包。列表按目录分组，组头那一下是整组勾上／取消。包里是会话日志的原始字节，不含会话创建过的普通文件；同一条会话的所有代次日志一起进包。',
   selectAll: '全选整库',
   clearAll: '清空',
   selectedCount: '已选 {count}',
@@ -51,8 +51,8 @@ export const zh = {
   noCwd: '（无 cwd）',
 
   importTitle: '导入',
-  importHint: '选一个 .dhsess 包和目标工作区：先预演，看清楚会写什么，再确认落盘。',
-  pickFile: '选择 .dhsess 包',
+  importHint: '选一个 .dshsess 包和目标工作区：先预演，看清楚会写什么，再确认落盘。',
+  pickFile: '选择 .dshsess 包',
   pickWorkspace: '选择目标工作区…',
   preview: '预演',
   previewing: '预演中…',
@@ -69,7 +69,7 @@ export const zh = {
   cwdKeep: '保持无 cwd（落 _no-cwd）',
   applied: '已写入 {count} 条会话（{bytes}）。',
   needSelection: '请先勾选至少一个会话。',
-  needFile: '请先选择要导入的 .dhsess 包。',
+  needFile: '请先选择要导入的 .dshsess 包。',
   needWorkspace: '请先选择目标工作区。',
 
   // ---- 迁移 ----
@@ -165,7 +165,7 @@ export const en: Record<keyof typeof zh, string> = {
 
   exportTitle: 'Export',
   exportHint:
-    'Tick the sessions to take away and download one .dhsess bundle. The list is grouped by directory, and each group header toggles its whole group. The bundle carries the raw log bytes (every generation of a session), not files the session created.',
+    'Tick the sessions to take away and download one .dshsess bundle. The list is grouped by directory, and each group header toggles its whole group. The bundle carries the raw log bytes (every generation of a session), not files the session created.',
   selectAll: 'Select whole library',
   clearAll: 'Clear',
   selectedCount: '{count} selected',
@@ -179,8 +179,8 @@ export const en: Record<keyof typeof zh, string> = {
   noCwd: '(no cwd)',
 
   importTitle: 'Import',
-  importHint: 'Pick a .dhsess bundle and a target workspace: preview first, then confirm to write.',
-  pickFile: 'Choose a .dhsess bundle',
+  importHint: 'Pick a .dshsess bundle and a target workspace: preview first, then confirm to write.',
+  pickFile: 'Choose a .dshsess bundle',
   pickWorkspace: 'Choose a target workspace…',
   preview: 'Preview',
   previewing: 'Previewing…',
@@ -197,7 +197,7 @@ export const en: Record<keyof typeof zh, string> = {
   cwdKeep: 'stays without cwd (lands in _no-cwd)',
   applied: 'Wrote {count} sessions ({bytes}).',
   needSelection: 'Tick at least one session first.',
-  needFile: 'Choose a .dhsess bundle first.',
+  needFile: 'Choose a .dshsess bundle first.',
   needWorkspace: 'Choose a target workspace first.',
 
   migrateTitle: 'Migrate sessions',

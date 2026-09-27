@@ -72,7 +72,7 @@ node lib/cli.js rollback --backup '<apply 输出的备份目录>'
 
 **导入导出**（把会话带走/带回来）
 
-- **导出**：勾选会话 → 浏览器下载一个 `.dhsess` 包。包里是这些会话**所有代次日志的原始字节**
+- **导出**：勾选会话 → 浏览器下载一个 `.dshsess` 包。包里是这些会话**所有代次日志的原始字节**
   （逐条带 sha256），不含会话创建过的普通文件。列表**按目录分组**（组名是工作区标题，没登记过的
   目录直接显示路径并标出来），**组头那一下就是整组勾选/取消**——"把这个工作区的会话都带走"因此
   是一次点击，而不是数一遍再逐条勾。
@@ -221,7 +221,7 @@ npx @deepseek-ai/dsh@next plugin --profile desktop add /path/to/dsh-session-mana
 | `src/journal.ts` | 字节级备份清单与回滚 | 无 |
 | `src/execute.ts` | 执行 + 独立复核（含产物目标位校验） | 无 |
 | `src/artifacts.ts` | 会话产物提取（证据分层）、规划（求交/剪枝）、搬迁 | 无 |
-| `src/transfer.ts` | `.dhsess` 容器（导出/解析/校验）、导入预演与落地 | 无 |
+| `src/transfer.ts` | `.dshsess` 容器（导出/解析/校验）、导入预演与落地 | 无 |
 | `src/migrate.ts` | 迁移编排：预演 / 执行 / 回滚 / 备份清单（CLI、工具、界面三个入口共用） | 无 |
 | `src/cli.ts` | 离线 CLI（plan/apply/verify/rollback）→ `lib/cli.js` | 无 |
 | `src/tools.ts` | 4 个工具注册 | `dsh-tools` |
@@ -263,7 +263,7 @@ DSM_FIXTURE=/path/to/backup node test/run-all.mjs
 空组不出现），`test/styles.test.mjs` 钉住样式表的三条纪律（颜色必须走主题 token、token 必须在
 `Theme` 检查面的名单里、每个 token 都得带回落值）——后一条是踩过"深色主题下白底白字"之后加的。
 
-`test/transfer.test.ts` 覆盖 `.dhsess` 的字节往返、包校验的拒绝面（sha256/截断/magic/版本）、
+`test/transfer.test.ts` 覆盖 `.dshsess` 的字节往返、包校验的拒绝面（sha256/截断/magic/版本）、
 导入预演与落地、同 id 冲突只跳过、无 cwd 与明文 v0 日志两条分支；`test/web.test.ts` 用假
 req/res 直接打端点，覆盖列会话、导出、导入（预演/落地）与各条 400/404/409 拒绝面。
 真实数据那一条用 `DSM_SMOKE_WORKSPACE` 门控，会额外断言只读 `plan` 没有创建目标桶。

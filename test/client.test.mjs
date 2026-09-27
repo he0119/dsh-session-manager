@@ -146,6 +146,15 @@ test('客户端产物：只 require 平台基线模块，id 与包名一致', { 
   assert.equal(entry.id, pkg.name, '工厂 id 必须是包名')
 })
 
+test('客户端产物：包后缀与宿主导出的文件名一致（.dshsess）', { skip }, () => {
+  // 后缀曾经在这一侧写成 `.dhsess`（宿主 web.ts 的 fileName() 一直是 `.dshsess`，魔法字节也是
+  // `DSHSESS1`）。看着只是错字，实际把功能弄坏了：导入的文件选择框带着 `accept=".dhsess"`，
+  // 刚导出的包在下拉里被过滤器挡掉，用户以为导入坏了。
+  assert.equal(/\.dhsess\b/i.test(code), false, '客户端产物里不该再出现 .dhsess 这个后缀')
+  assert.ok(code.includes('.dshsess'), '文件选择框与文案要用 .dshsess')
+  assert.ok(code.includes('accept: ".dshsess"'), '文件选择框的过滤器要与宿主导出的后缀一致')
+})
+
 test('客户端产物：导出面符合客户端插件契约', { skip }, () => {
   const { mod } = loadBundle()
   assert.equal(mod.name, pkg.name)

@@ -78,7 +78,7 @@ package ships a Web Client half) with two tabs:
 
 **Import & export** (take sessions away, bring them back)
 
-- **Export**: tick sessions → the browser downloads one `.dhsess` bundle. The bundle carries the raw
+- **Export**: tick sessions → the browser downloads one `.dshsess` bundle. The bundle carries the raw
   bytes of **every generation** of those logs (each with a sha256), not files the session created. The
   list is **grouped by directory** (group name = workspace title; a directory no workspace registers
   shows its path and is marked), and **clicking a group header toggles that whole group** — so "take
@@ -246,7 +246,7 @@ Block_Type=Raw), making the write path independent of any compressor, external b
 | `src/journal.ts` | byte-level backup manifest and rollback | none |
 | `src/execute.ts` | apply + independent verification | none |
 | `src/artifacts.ts` | artifact extraction (evidence layering), planning, moving | none |
-| `src/transfer.ts` | `.dhsess` container (build/parse/validate), import planning and apply | none |
+| `src/transfer.ts` | `.dshsess` container (build/parse/validate), import planning and apply | none |
 | `src/migrate.ts` | Migration orchestration: preview / apply / rollback / backup listing (shared by CLI, tools and the UI) | none |
 | `src/cli.ts` | offline CLI (plan/apply/verify/rollback) → `lib/cli.js` | none |
 | `src/tools.ts` | the 4 tool registrations | `dsh-tools` |
@@ -287,7 +287,7 @@ duplicate paths, empty-string cwd, no empty groups) and `test/styles.test.mjs` p
 rules (colors must go through theme tokens, tokens must be on the `Theme` surface, every token needs a
 fallback) — the last one was added after shipping white-on-white text in the dark theme.
 
-`test/transfer.test.ts` covers the `.dhsess` byte round-trip, the rejection surface of bundle
+`test/transfer.test.ts` covers the `.dshsess` byte round-trip, the rejection surface of bundle
 validation (sha256 / truncation / magic / version), import preview and apply, id-collision skip, and
 the no-cwd and plain-v0 branches. `test/web.test.ts` drives the endpoints with fake req/res objects:
 listing, export, import (preview/apply) and every 400/404/409 rejection.

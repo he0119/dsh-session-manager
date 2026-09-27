@@ -86,7 +86,7 @@ function sha256(buf: Buffer): string {
 }
 
 /**
- * 把若干会话打成 `.dhsess` 字节。
+ * 把若干会话打成 `.dshsess` 字节。
  * @param sources 会话源（每个源的所有代次文件都进包，保持与磁盘一致）。
  * @param options.now 清单时间戳，便于测试注入。
  * @throws 某个文件读不到时抛错（不产出半成品包）。
@@ -140,7 +140,7 @@ export function buildBundle(
 
 /**
  * 解析并校验一个包。
- * @param bytes 包字节（`.dhsess` 原文）。
+ * @param bytes 包字节（`.dshsess` 原文）。
  * @throws 任何一项不变式不满足时抛错，消息指出是哪一条。
  */
 export function readBundle(bytes: Buffer): SessionBundle {
@@ -154,7 +154,7 @@ export function readBundle(bytes: Buffer): SessionBundle {
   }
   if (raw.length < BUNDLE_MAGIC.length + 4) throw new Error('bundle is truncated before its manifest')
   if (raw.subarray(0, BUNDLE_MAGIC.length).toString('utf8') !== BUNDLE_MAGIC) {
-    throw new Error('bundle magic mismatch (not a .dhsess file, or made by an incompatible version)')
+    throw new Error('bundle magic mismatch (not a .dshsess file, or made by an incompatible version)')
   }
 
   const manifestLength = raw.readUInt32LE(BUNDLE_MAGIC.length)

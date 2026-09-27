@@ -113,7 +113,8 @@ export async function exportSessions(sessionIds: readonly string[]): Promise<Exp
   }
   const disposition = response.headers.get('content-disposition') ?? ''
   const matched = /filename="([^"]+)"/.exec(disposition)
-  return { blob: await response.blob(), filename: matched?.[1] ?? 'dsh-sessions.dhsess' }
+  // 文件名以宿主的 Content-Disposition 为准；这条兜底只在没有响应头时用，后缀与它保持一致。
+  return { blob: await response.blob(), filename: matched?.[1] ?? 'dsh-sessions.dshsess' }
 }
 
 /** 导入一个包：`mode: 'plan'` 只预演不写盘。 */
