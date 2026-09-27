@@ -9,6 +9,7 @@ import test from 'node:test'
 import { decompress } from 'fzstd'
 
 import { sessionDir } from '../src/paths.ts'
+import { projectKey } from '../src/project-key.ts'
 import { readRegistry, validateRegistry, writeRegistryAtomic } from '../src/registry.ts'
 import type { DecodeAll, SessionHeader, WorkspaceRegistryState } from '../src/types.ts'
 import { API_PREFIX, createApiHandlers, registerWebRoutes, type WebRouteLike } from '../src/web.ts'
@@ -266,7 +267,7 @@ test('POST /import：包坏了、目标目录不合法、库已存在同 id，�
   assert.match(String(json(conflictApply.captured)['error']), /没有可导入的会话/)
 })
 
-test('registerWebRoutes：注册三条精确路由，方法不对回 405', async () => {
+test('registerWebRoutes：注册六条精确路由，方法不对回 405', async () => {
   const sandbox = makeSandbox('web-routes')
   const routes: WebRouteLike[] = []
   const dispose = registerWebRoutes(
@@ -279,6 +280,9 @@ test('registerWebRoutes：注册三条精确路由，方法不对回 405', async
       `exact ${API_PREFIX}/state`,
       `exact ${API_PREFIX}/export`,
       `exact ${API_PREFIX}/import`,
+      `exact ${API_PREFIX}/backups`,
+      `exact ${API_PREFIX}/migrate`,
+      `exact ${API_PREFIX}/rollback`,
     ],
   )
 
@@ -287,4 +291,156 @@ test('registerWebRoutes：注册三条精确路由，方法不对回 405', async
   await exportRoute.handler(fakeReq('GET', `${API_PREFIX}/export`), res)
   assert.equal(captured.status, 405)
   dispose()
+})
+
+// ---- 会话管理：迁移 / 备份 / 回滚 ----
+
+test('POST /migrate：mode 缺省只预演，预演结果里带上源/目标桶与注册表变更', async () => {
+  const sandbox = makeSandbox('web-migrate-plan')
+  writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000)
+
+  const handlers = createApiHandlers(deps(sandbox))
+  const { res, captured } = fakeRes()
+  await handlers['POST /migrate']!(
+    fakeReq('POST', `${API_PREFIX}/migrate`, Buffer.from(JSON.stringify({ from: CWD_A, to: CWD_B }))),
+    res,
+  )
+  assert.equal(captured.status, 200)
+  const body = json(captured)
+  assert.equal(body['mode'], 'plan')
+  assert.equal(body['ok'], true)
+  assert.equal(body['applied'], false)
+  const preview = body['preview'] as Record<string, unknown>
+  assert.equal((preview['sessions'] as unknown[]).length, 1)
+  // 桶名是**绝对路径**：join(会话根, projectKey(工作区目录))
+  assert.equal(preview['sourceBucket'], join(sandbox.sessionsRoot, projectKey(CWD_A)))
+  assert.equal(preview['targetBucket'], join(sandbox.sessionsRoot, projectKey(CWD_B)))
+  assert.equal((preview['registryChange'] as Record<string, unknown>)['targetPath'], CWD_B)
+  // 没注入 effectMode 时按保守说法回：注册表落盘还要重启才被承认。
+  assert.equal(body['takesEffect'], 'restart-required')
+  // 预演不写盘：会话还在源桶
+  assert.equal(existsSync(sessionDir(sandbox.sessionsRoot, CWD_A, 'session-a')), true)
+})
+
+test('POST /migrate：mode=apply 真搬并回可回滚的备份；注入 effectMode 时如实回报', async () => {
+  const sandbox = makeSandbox('web-migrate-apply')
+  writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000)
+
+  const handlers = createApiHandlers({ ...deps(sandbox), effectMode: () => 'immediate' })
+  const { res, captured } = fakeRes()
+  await handlers['POST /migrate']!(
+    fakeReq('POST', `${API_PREFIX}/migrate`, Buffer.from(JSON.stringify({ mode: 'apply', from: CWD_A, to: CWD_B }))),
+    res,
+  )
+  assert.equal(captured.status, 200)
+  const body = json(captured)
+  assert.equal(body['mode'], 'apply')
+  assert.equal(body['applied'], true)
+  assert.equal(body['verified'], true, `复核应当通过：${JSON.stringify(body['problems'])}`)
+  assert.equal(body['rewritten'], 1)
+  assert.equal(body['moved'], 1)
+  assert.equal(body['takesEffect'], 'immediate')
+  assert.equal(typeof body['backupDir'], 'string')
+
+  // 真的搬了：目标桶里有、源桶里没有、header.cwd 已改写
+  const moved = sessionDir(sandbox.sessionsRoot, CWD_B, 'session-a')
+  assert.equal(existsSync(moved), true)
+  assert.equal(existsSync(sessionDir(sandbox.sessionsRoot, CWD_A, 'session-a')), false)
+  const header = JSON.parse(decodeAll(readFileSync(join(moved, 'session.v4.jsonl.zstd'))).split('\n')[0]!) as {
+    cwd?: string
+    id?: string
+  }
+  assert.equal(header.cwd, CWD_B)
+  assert.equal(header.id, 'session-a')
+
+  // 备份列表里能看到这一条，带源/目标与会话数
+  const backups = fakeRes()
+  await handlers['GET /backups']!(fakeReq('GET', `${API_PREFIX}/backups`), backups.res)
+  assert.equal(backups.captured.status, 200)
+  const listed = json(backups.captured)['backups'] as Array<Record<string, unknown>>
+  assert.equal(listed.length, 1)
+  assert.equal(listed[0]?.['sessions'], 1)
+  assert.equal(listed[0]?.['from'], CWD_A)
+  assert.equal(listed[0]?.['to'], CWD_B)
+})
+
+test('POST /rollback：先 dryRun 看动作，再真回滚到原状', async () => {
+  const sandbox = makeSandbox('web-rollback')
+  writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000)
+
+  const handlers = createApiHandlers(deps(sandbox))
+  const migrateRes = fakeRes()
+  await handlers['POST /migrate']!(
+    fakeReq('POST', `${API_PREFIX}/migrate`, Buffer.from(JSON.stringify({ mode: 'apply', from: CWD_A, to: CWD_B }))),
+    migrateRes.res,
+  )
+  const backupDir = json(migrateRes.captured)['backupDir'] as string
+  assert.ok(backupDir)
+
+  // dry-run：给动作清单，但不写
+  const dry = fakeRes()
+  await handlers['POST /rollback']!(
+    fakeReq('POST', `${API_PREFIX}/rollback`, Buffer.from(JSON.stringify({ backupDir, dryRun: true }))),
+    dry.res,
+  )
+  assert.equal(dry.captured.status, 200)
+  assert.equal(json(dry.captured)['dryRun'], true)
+  assert.ok((json(dry.captured)['actions'] as unknown[]).length > 0)
+  assert.equal(existsSync(sessionDir(sandbox.sessionsRoot, CWD_B, 'session-a')), true, 'dry-run 不该动目录')
+
+  // 真回滚
+  const done = fakeRes()
+  await handlers['POST /rollback']!(
+    fakeReq('POST', `${API_PREFIX}/rollback`, Buffer.from(JSON.stringify({ backupDir }))),
+    done.res,
+  )
+  assert.equal(done.captured.status, 200)
+  assert.equal(json(done.captured)['dryRun'], false)
+  assert.equal(json(done.captured)['restoredFiles'], 1)
+  assert.equal(existsSync(sessionDir(sandbox.sessionsRoot, CWD_B, 'session-a')), false)
+  const back = sessionDir(sandbox.sessionsRoot, CWD_A, 'session-a')
+  assert.equal(existsSync(back), true)
+  const header = JSON.parse(decodeAll(readFileSync(join(back, 'session.v4.jsonl.zstd'))).split('\n')[0]!) as { cwd?: string }
+  assert.equal(header.cwd, CWD_A)
+})
+
+test('POST /migrate：参数与状态问题各自给出可读的拒绝（400 / 409）', async () => {
+  const sandbox = makeSandbox('web-migrate-refuse')
+  writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000)
+  const handlers = createApiHandlers(deps(sandbox))
+
+  const post = async (body: string): Promise<Captured> => {
+    const { res, captured } = fakeRes()
+    await handlers['POST /migrate']!(fakeReq('POST', `${API_PREFIX}/migrate`, Buffer.from(body)), res)
+    return captured
+  }
+
+  assert.equal((await post('{not json')).status, 400)
+  assert.match(String(json(await post(JSON.stringify({ to: CWD_B })))['error']), /缺少源工作区目录/)
+  assert.match(
+    String(json(await post(JSON.stringify({ from: CWD_A, to: join(sandbox.base, 'nope') })))['error']),
+    /目标工作区目录不存在/,
+  )
+  // 状态问题：源桶不存在 → 409（参数没问题，是库的状态说了不行）
+  const missingBucket = await post(JSON.stringify({ from: join(sandbox.base, 'ghost'), to: CWD_B }))
+  assert.equal(missingBucket.status, 409)
+  assert.equal(json(missingBucket)['ok'], false)
+  assert.ok((json(missingBucket)['preview'] as Record<string, unknown>)['problems'])
+})
+
+test('POST /rollback：只认本插件备份根下的目录', async () => {
+  const sandbox = makeSandbox('web-rollback-guard')
+  const handlers = createApiHandlers(deps(sandbox))
+
+  const post = async (body: unknown): Promise<Captured> => {
+    const { res, captured } = fakeRes()
+    await handlers['POST /rollback']!(fakeReq('POST', `${API_PREFIX}/rollback`, Buffer.from(JSON.stringify(body))), res)
+    return captured
+  }
+
+  assert.match(String(json(await post({}))['error']), /缺少备份目录/)
+  assert.match(String(json(await post({ backupDir: sandbox.base }))['error']), /不在本插件的备份根下/)
+  const empty = join(sandbox.base, 'backups', 'empty')
+  mkdirSync(empty, { recursive: true })
+  assert.match(String(json(await post({ backupDir: empty }))['error']), /没有 manifest\.json/)
 })

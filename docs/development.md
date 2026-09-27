@@ -102,8 +102,10 @@ src/            手写源码（每个文件一个职责，核心层零 DSH 依�
   index.ts        插件入口（挂 tools，并在有 webServer 时挂界面端点）
   cli.ts          离线 CLI（构建出 lib/cli.js，package.json 的 bin 指向它）
   tools.ts        4 个工具 + schema + 平台解码器实例
-  web.ts          界面端点（state / export / import），只要求一个 { register } 形状
-  client/         Web Client 半边（设置页 / 字典 / 样式 / 端点调用）-> lib/client.js
+  web.ts          界面端点（state / export / import / migrate / backups / rollback），
+                  只要求一个 { register } 形状
+  migrate.ts      迁移编排（预演 / 执行 / 回滚 / 备份清单），CLI、工具、界面三个入口共用
+  client/         Web Client 半边（「会话管理」页：导入导出 + 迁移两个分页）-> lib/client.js
   ...             核心层：project-key / paths / zstd-frame / session-log /
                   discovery / registry / artifacts / transfer / plan / journal / execute
 lib/            构建产物（tsdown 输出，已 gitignore）
@@ -115,8 +117,8 @@ tsconfig.client.json Web Client 自己的类型工程（DOM + JSX；Host 那份�
 ```
 
 核心层（`project-key` / `paths` / `zstd-frame` / `session-log` / `discovery` / `registry` /
-`plan` / `journal` / `execute` / `artifacts` / `transfer`）**不依赖 DSH**，所以插件外壳、CLI 与
-测试三者共用同一段代码。只有 `src/tools.ts` 与 `src/index.ts` 依赖 `@deepseek-ai/dsh-tools`，
+`plan` / `journal` / `execute` / `artifacts` / `transfer` / `migrate`）**不依赖 DSH**，所以插件
+外壳、CLI 与测试三者共用同一段代码。只有 `src/tools.ts` 与 `src/index.ts` 依赖 `@deepseek-ai/dsh-tools`，
 `src/web.ts` 连它也不依赖（只认一个 `{ register }` 形状）。
 
 `src/client/**` 不在 Host 端那份 tsconfig 的 include 里：它要 DOM 与 JSX，而 Host 侧没有。

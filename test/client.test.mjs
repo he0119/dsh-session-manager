@@ -27,16 +27,36 @@ const skip = ready ? false : 'lib/client.js 不存在，先跑 pnpm run build'
 const code = ready ? readFileSync(bundlePath, 'utf8') : ''
 const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
 
-/** 假的 react：只需要模块体求值时碰得到的那几个钩子。 */
-function fakeReact() {
+/** 假的 react：钩子给出初始值，同时把创建出来的元素记下来，供"页签还在吗"这类断言用。 */
+function fakeReact(recorded = []) {
+  const record = (type, props) => {
+    const element = { type, props: props ?? {} }
+    recorded.push(element)
+    return element
+  }
   return {
-    createElement: () => ({}),
+    // 只在**真的传了**位置参数时才覆盖 children：jsx-runtime 是把 children 放在 props 里的，
+    // 无条件写会把它清掉（第一版就是这么把整棵树抹平的）。
+    createElement: (type, props, ...children) =>
+      record(type, {
+        ...(props ?? {}),
+        ...(children.length === 0 ? {} : { children: children.length > 1 ? children : children[0] }),
+      }),
     useState: (value) => [value, () => {}],
     useEffect: () => {},
     useRef: (value) => ({ current: value }),
     useCallback: (fn) => fn,
+    useMemo: (fn) => fn(),
     Fragment: Symbol('Fragment'),
   }
+}
+
+/** 从元素树里收集所有字符串（文案就是字符串，键回显也是）。 */
+function strings(node, out = []) {
+  if (typeof node === 'string') out.push(node)
+  else if (Array.isArray(node)) for (const item of node) strings(item, out)
+  else if (node !== null && typeof node === 'object') strings(node.props?.children, out)
+  return out
 }
 
 /** 极小的假 document：够 installStyles 用。 */
@@ -77,13 +97,20 @@ function loadBundle() {
   }
   vm.runInNewContext(code, sandbox, { filename: 'lib/client.js' })
   assert.ok(entry !== null, '产物必须以 window.__ModuleLoader__.load({ id, factory }) 报名')
-  const react = fakeReact()
+  const recorded = []
+  const react = fakeReact(recorded)
   const mod = entry.factory((specifier) => {
     if (specifier === 'react') return react
-    if (specifier === 'react/jsx-runtime') return { jsx: () => ({}), jsxs: () => ({}), Fragment: react.Fragment }
+    if (specifier === 'react/jsx-runtime') {
+      return {
+        jsx: (type, props) => react.createElement(type, props),
+        jsxs: (type, props) => react.createElement(type, props),
+        Fragment: react.Fragment,
+      }
+    }
     throw new Error(`产物 require 了平台模块表里没有的模块：${specifier}`)
   })
-  return { entry, mod, nodes }
+  return { entry, mod, nodes, recorded }
 }
 
 test('客户端产物：只 require 平台基线模块，id 与包名一致', { skip }, () => {
@@ -107,7 +134,7 @@ test('客户端产物：导出面符合客户端插件契约', { skip }, () => {
 
 /** 跑一次 apply，收下所有注册面（后面几个用例共用）。 */
 function mount({ translate } = {}) {
-  const { mod, nodes } = loadBundle()
+  const { mod, nodes, recorded } = loadBundle()
   const registrations = []
   const dictionaries = []
   const effects = []
@@ -142,10 +169,10 @@ function mount({ translate } = {}) {
     },
   })
 
-  return { mod, nodes, registrations, dictionaries, effects, injectedSlots, bound, t }
+  return { mod, nodes, recorded, registrations, dictionaries, effects, injectedSlots, bound, t }
 }
 
-test('客户端产物：apply 注册到设置里的一页，并带上字典与注入面', { skip }, () => {
+test('客户端产物：apply 把「会话管理」注册到设置里的一页，并带上字典与注入面', { skip }, () => {
   const { nodes, registrations, dictionaries, effects, injectedSlots, bound, t } = mount()
 
   // 槽位用 inject 等声明到位，而不是直接 register——声明可能晚于本插件 apply。
@@ -153,7 +180,7 @@ test('客户端产物：apply 注册到设置里的一页，并带上字典与�
   assert.equal(registrations.length, 1)
   const { registration, component } = registrations[0]
   assert.equal(registration.name, 'settings.section')
-  assert.equal(registration.id, 'session-transfer')
+  assert.equal(registration.id, 'session-manager')
   assert.equal(registration.locale, 'dsh-session-manager')
   // 排官方那几页之后（账户 -10 / 通用 0 / 模型 10 / 插件 15 / Agent 预设 20），不插队。
   assert.equal(registration.order, 30)
@@ -182,20 +209,33 @@ test('客户端产物：导航行的文案跟着语言走（同一个 thunk 每�
   // 因此这里必须能在不重新注册的前提下换一份文案，否则切语言后导航行会停在旧语言。
   let active = 'zh'
   const { registrations } = mount({
-    translate: () => (active === 'zh' ? '会话传输' : 'Session transfer'),
+    translate: () => (active === 'zh' ? '会话管理' : 'Session management'),
   })
   const { label } = registrations[0].registration
-  assert.equal(label(), '会话传输')
+  assert.equal(label(), '会话管理')
   active = 'en'
-  assert.equal(label(), 'Session transfer')
+  assert.equal(label(), 'Session management')
+})
+
+test('客户端产物：页面骨架带着两个页内分页（导入导出 / 迁移）', { skip }, () => {
+  const { registrations } = mount()
+  const { component } = registrations[0]
+  const { inject } = registrations[0].registration
+  // 用注入面给的 t（键回显）渲染，于是文案就等于字典键，断言不依赖任何一种语言。
+  const element = component(inject())
+  const text = strings(element)
+  assert.ok(text.includes('tabTransfer'), '页内要有「导入导出」这一页')
+  assert.ok(text.includes('tabMigrate'), '页内要有「迁移」这一页')
+  assert.ok(text.includes('title'), '页面标题走同一份字典')
 })
 
 test('客户端产物：页面组件在初始状态下能渲染成元素（不抛）', { skip }, () => {
   const { registrations } = mount()
   const { component } = registrations[0]
+  const { inject } = registrations[0].registration
   // 假 react 的钩子返回初始值，因此走的是「还没读到数据」那一支渲染；
   // 它照样会把整个函数体跑一遍（文案、格式化、表格骨架），是产物层面最便宜的渲染冒烟。
-  const element = component({})
+  const element = component(inject())
   assert.equal(typeof element, 'object')
   assert.notEqual(element, null)
 })

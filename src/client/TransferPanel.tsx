@@ -1,11 +1,14 @@
 /**
- * 会话导入导出的页面主体（注册在设置 → 会话传输 这一页）。
+ * 「导入导出」分页：把会话带走（导出 .dhsess）或带回来（导入）。
  *
- * 这一层只做三件事：读宿主端点、记本地草稿、把结果摆出来。所有判定都在宿主侧
+ * 这一层只做三件事：调宿主端点、记本地草稿、把结果摆出来。所有判定都在宿主侧
  * （`src/web.ts` + `src/transfer.ts`）：预演返回的就是将要发生的事，页面不自己推算
  *
  *   - 导出：勾选 → 宿主打包 → 浏览器下载；
  *   - 导入：选包 + 选目标工作区 → **预演** → 看清 create/skip 与 cwd 改写 → 确认落盘。
+ *
+ * 会话库数据由页面骨架（[ManagerPanel.tsx](./ManagerPanel.tsx)）拉好传进来：切分页不该各拉一份，
+ * 也不该出现"两个分页对同一个库给出不同数字"。
  *
  * 样式只在 [styles.ts](./styles.ts) 里定义，颜色只用 `--dsw-alias-*` 主题 token；
  * 控件是手写的原生元素，**不 require 宿主的 UI 原语包**——那份包会随时改，而它一抛异常就会让
@@ -16,20 +19,9 @@
 
 import * as React from 'react'
 
-import {
-  download,
-  exportSessions,
-  fetchState,
-  importBundle,
-  type ImportResponse,
-  type StateResponse,
-} from './api.ts'
-import { translateWith, zh, type Translate } from './locales.ts'
-
-/** 页面获得的注入面（`t` 由注册时的 `inject()` 给出；缺席时回落到中文，不让页面白屏）。 */
-export interface TransferPanelProps {
-  t?: Translate
-}
+import { download, exportSessions, importBundle, type ImportResponse } from './api.ts'
+import { translateWith, zh } from './locales.ts'
+import type { PanelShare } from './types.ts'
 
 /** 没有注入面时的兜底翻译。 */
 const fallback = translateWith(zh as unknown as Record<string, string>)
@@ -57,43 +49,25 @@ function formatTime(ms: number): string {
 const totalBytes = (entries: readonly { bytes: number }[]): number =>
   entries.reduce((sum, entry) => sum + (Number.isFinite(entry.bytes) ? entry.bytes : 0), 0)
 
-/** 会话导入导出页。 */
-export function TransferPanel({ t = fallback }: TransferPanelProps): React.ReactElement {
-  const [state, setState] = React.useState<StateResponse | null>(null)
+/** 导入导出页。 */
+export function TransferPanel({ t = fallback, state, reload }: PanelShare): React.ReactElement {
   const [selected, setSelected] = React.useState<readonly string[]>([])
   const [file, setFile] = React.useState<File | null>(null)
   const [payload, setPayload] = React.useState<ArrayBuffer | null>(null)
   const [target, setTarget] = React.useState('')
   const [plan, setPlan] = React.useState<ImportResponse | null>(null)
-  const [busy, setBusy] = React.useState<'load' | 'export' | 'preview' | 'apply' | null>('load')
+  const [busy, setBusy] = React.useState<'export' | 'preview' | 'apply' | null>(null)
   const [error, setError] = React.useState<string | null>(null)
   const [notice, setNotice] = React.useState<string | null>(null)
-
-  const load = React.useCallback(async (): Promise<void> => {
-    setBusy('load')
-    setError(null)
-    try {
-      const next = await fetchState()
-      setState(next)
-      setSelected((current) => current.filter((id) => next.sessions.some((session) => session.id === id)))
-    } catch (cause) {
-      setError(t('failed', { reason: cause instanceof Error ? cause.message : String(cause) }))
-    } finally {
-      setBusy(null)
-    }
-  }, [t])
-
-  // 只跑一次：`t` 不进依赖是有意的——它是渲染期重新绑定的函数，进了依赖会变成每次渲染都重读。
-  const loaded = React.useRef(false)
-  React.useEffect(() => {
-    if (loaded.current) return
-    loaded.current = true
-    void load()
-  }, [load])
 
   const sessions = state?.sessions ?? []
   const workspaces = state?.workspaces ?? []
   const allSelected = sessions.length > 0 && selected.length === sessions.length
+
+  // 库变了（例如刚导入完）：把已经不在库里的选择摘掉，别让「已选 3」里混着不存在的会话。
+  React.useEffect(() => {
+    setSelected((current) => current.filter((id) => sessions.some((session) => session.id === id)))
+  }, [sessions])
 
   const toggle = (id: string): void => {
     setSelected((current) => (current.includes(id) ? current.filter((x) => x !== id) : [...current, id]))
@@ -160,7 +134,7 @@ export function TransferPanel({ t = fallback }: TransferPanelProps): React.React
       setPlan(result)
       if (result.written && result.written.length > 0) {
         setNotice(t('applied', { count: result.written.length, bytes: formatBytes(result.bytes) }))
-        await load()
+        await reload()
       }
     })
   }
@@ -169,19 +143,7 @@ export function TransferPanel({ t = fallback }: TransferPanelProps): React.React
   const skipCount = plan?.entries.filter((entry) => entry.action === 'skip').length ?? 0
 
   return (
-    <section className="dsm-root" data-plugin="dsh-session-manager">
-      <header className="dsm-head">
-        <span className="dsm-title">{t('title')}</span>
-        <span className="dsm-sub">
-          {t('library')}：{state?.sessionsRoot ?? ''} · {t('sessionsCount', { count: sessions.length })} ·{' '}
-          {t('workspacesCount', { count: workspaces.length })}
-        </span>
-        <span className="dsm-spacer" />
-        <button type="button" className="dsm-button" onClick={() => void load()} disabled={busy !== null}>
-          {busy === 'load' ? t('loading') : t('refresh')}
-        </button>
-      </header>
-
+    <>
       {error !== null && (
         <p className="dsm-banner dsm-error">
           <span>{error}</span>
@@ -232,15 +194,11 @@ export function TransferPanel({ t = fallback }: TransferPanelProps): React.React
 
         <div className="dsm-list">
           {sessions.length === 0 ? (
-            <p className="dsm-empty">{busy === 'load' ? t('loading') : t('noSessions')}</p>
+            <p className="dsm-empty">{t('noSessions')}</p>
           ) : (
             sessions.map((session) => (
               <label key={session.id} className="dsm-row">
-                <input
-                  type="checkbox"
-                  checked={selected.includes(session.id)}
-                  onChange={() => toggle(session.id)}
-                />
+                <input type="checkbox" checked={selected.includes(session.id)} onChange={() => toggle(session.id)} />
                 <span className="dsm-rowId">{session.id}</span>
                 <span className="dsm-meta" title={session.cwd ?? ''}>
                   {session.cwd ?? t('noCwd')}
@@ -276,12 +234,7 @@ export function TransferPanel({ t = fallback }: TransferPanelProps): React.React
               </option>
             ))}
           </select>
-          <button
-            type="button"
-            className="dsm-button"
-            onClick={doPreview}
-            disabled={busy !== null || file === null}
-          >
+          <button type="button" className="dsm-button" onClick={doPreview} disabled={busy !== null || file === null}>
             {busy === 'preview' ? t('previewing') : t('preview')}
           </button>
           <button
@@ -340,6 +293,6 @@ export function TransferPanel({ t = fallback }: TransferPanelProps): React.React
           </div>
         )}
       </div>
-    </section>
+    </>
   )
 }

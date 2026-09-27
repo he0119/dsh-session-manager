@@ -1,8 +1,9 @@
 /**
- * `dsh-session-manager` 的 Web Client 端：把「会话传输」注册成设置里的独立一页。
+ * `dsh-session-manager` 的 Web Client 端：把「会话管理」注册成设置里的独立一页。
  *
- * 页面主体在 [TransferPanel.tsx](./TransferPanel.tsx)，文案在 [locales.ts](./locales.ts)，
- * 端点调用在 [api.ts](./api.ts)，样式在 [styles.ts](./styles.ts)——这里只做组装。
+ * 页面主体在 [ManagerPanel.tsx](./ManagerPanel.tsx)（页内分「导入导出」与「迁移」两页），
+ * 文案在 [locales.ts](./locales.ts)，端点调用在 [api.ts](./api.ts)，样式在 [styles.ts](./styles.ts)
+ * ——这里只做组装。
  *
  * 注册进 `settings.section`：设置左侧导航里的一页，与「通用 / 模型 / 插件 / 账户 / Agent 预设」
  * 并列。没有选另外两个相似的槽位，理由是它们各自有一个真问题：
@@ -27,7 +28,7 @@
  * @module dsh-session-manager/client
  */
 
-import { TransferPanel } from './TransferPanel.tsx'
+import { ManagerPanel } from './ManagerPanel.tsx'
 import { NS, en, zh, type Translate } from './locales.ts'
 import { installStyles } from './styles.ts'
 
@@ -36,8 +37,13 @@ export const name = '@he0119/dsh-session-manager'
 
 /** 本页注册的槽位：设置左侧导航里的一页。 */
 export const SECTION_SLOT = 'settings.section'
-/** 本页的槽位 id（也是设置外壳 `only` 过滤时用的那个键）。 */
-export const SECTION_ID = 'session-transfer'
+/**
+ * 本页的槽位 id（也是设置外壳 `only` 过滤时用的那个键）。
+ *
+ * 叫 `session-manager` 而不是 `session-transfer`：这一页现在同时管"搬会话"和"带走/带回来"，
+ * 名字要跟页面一样能覆盖两件事。
+ */
+export const SECTION_ID = 'session-manager'
 /** 排在官方那几页之后（账户 -10 / 通用 0 / 模型 10 / 插件 15 / Agent 预设 20），不插队。 */
 export const SECTION_ORDER = 30
 
@@ -91,7 +97,7 @@ export function apply(ctx: ClientContext): void {
         locale: NS,
         inject: () => ({ t: ctx.locale.bind(NS) }),
       },
-      TransferPanel,
+      ManagerPanel,
     ),
   )
 }

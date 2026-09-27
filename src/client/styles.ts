@@ -111,6 +111,74 @@ export const CSS = `
   align-items: center;
   gap: 8px;
 }
+/* 页内分页：贴着卡片区的下划线式页签，和设置外壳自己的 tab 视觉区分开 */
+.dsm-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border-bottom: 1px solid var(--dsw-alias-border-l1, rgba(0, 0, 0, 0.1));
+}
+.dsm-tab {
+  appearance: none;
+  border: none;
+  background: none;
+  color: var(--dsw-alias-label-secondary, #646a73);
+  font: inherit;
+  cursor: pointer;
+  padding: 6px 10px;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.dsm-tab:hover { color: var(--dsw-alias-label-primary, #1f2329); }
+.dsm-tab[aria-selected='true'] {
+  color: var(--dsw-alias-label-primary, #1f2329);
+  border-bottom-color: var(--dsw-alias-brand-primary, #3370ff);
+  font-weight: 600;
+}
+.dsm-tab:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary, #3370ff); outline-offset: -2px; }
+.dsm-fields { display: flex; flex-direction: column; gap: 8px; }
+.dsm-field { display: flex; flex-direction: column; gap: 4px; }
+.dsm-fieldLabel { color: var(--dsw-alias-label-secondary, #646a73); }
+.dsm-input {
+  border: 1px solid var(--dsw-alias-border-l2, rgba(0, 0, 0, 0.18));
+  background: var(--dsw-alias-bg-layer-2, transparent);
+  color: inherit;
+  border-radius: 8px;
+  padding: 5px 8px;
+  font: inherit;
+  width: 100%;
+  box-sizing: border-box;
+}
+.dsm-input:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary, #3370ff); outline-offset: -1px; }
+.dsm-options { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.dsm-check { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.dsm-rowPick { grid-template-columns: 24px minmax(120px, 1.4fr) auto auto; }
+.dsm-result {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-top: 1px solid var(--dsw-alias-border-l1, rgba(0, 0, 0, 0.08));
+  padding-top: 8px;
+}
+.dsm-listPlain {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--dsw-alias-label-secondary, #646a73);
+  max-height: 240px;
+  overflow: auto;
+}
+.dsm-listPlain li { overflow-wrap: anywhere; }
+.dsm-fields-label { color: var(--dsw-alias-label-primary, #1f2329); font-weight: 500; margin: 0; }
+.dsm-registry, .dsm-problems, .dsm-effect { display: flex; flex-direction: column; gap: 4px; }
+.dsm-backupRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--dsw-alias-border-l1, rgba(0, 0, 0, 0.06));
+}
+.dsm-backupRow:last-child { border-bottom: none; }
+.dsm-backupMain { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 auto; }
 `
 
 /**

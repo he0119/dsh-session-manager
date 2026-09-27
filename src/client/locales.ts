@@ -9,6 +9,10 @@
  * 不在类型层与它绑死——它改名或换形状时，本页最多文案回落到键名，不会连页面一起装不进去。
  * 代价是字典键没有编译期校验，由 `test/client.test.mjs` 的键集断言补上。
  *
+ * 键名按"页面骨架 → 页内分页"分组：`title`/`tabXxx` 是骨架，`exportXxx`/`importXxx` 属于
+ * 导入导出页，`migrateXxx`/`backupXxx`/`rollbackXxx` 属于迁移页。**两份语言的键集必须完全一致**
+ * ——少一个键就是一处会露出键名的界面。
+ *
  * @module dsh-session-manager/client/locales
  */
 
@@ -20,14 +24,17 @@ export type Translate = (key: string, params?: Record<string, string | number>) 
 
 /** 中文文案。 */
 export const zh = {
-  // 设置导航里的那一行，同时也是页面标题——所以取短名，别把「导入导出」塞进导航。
-  title: '会话传输',
+  // 页面骨架：设置导航里的那一行 + 页面标题 + 页内分页
+  title: '会话管理',
+  library: '会话库',
   refresh: '刷新',
   loading: '读取中…',
-  library: '会话库',
+  tabTransfer: '导入导出',
+  tabMigrate: '迁移',
   sessionsCount: '{count} 个会话',
   workspacesCount: '{count} 个工作区',
 
+  // ---- 导入导出 ----
   exportTitle: '导出',
   exportHint:
     '勾选要带走的会话，导出一个 .dhsess 包。包里是会话日志的原始字节，不含会话创建过的普通文件；同一条会话的所有代次日志一起进包。',
@@ -58,20 +65,80 @@ export const zh = {
   cwdRewritten: '{from} → {to}',
   cwdKeep: '保持无 cwd（落 _no-cwd）',
   applied: '已写入 {count} 条会话（{bytes}）。',
-
   needSelection: '请先勾选至少一个会话。',
   needFile: '请先选择要导入的 .dhsess 包。',
   needWorkspace: '请先选择目标工作区。',
+
+  // ---- 迁移 ----
+  migrateTitle: '迁移工作区的会话',
+  migrateHint:
+    '把某个工作区目录下的会话整体搬到另一个目录：改写日志 header 的 cwd（只动首帧，其余字节不变）、把会话目录移进目标分桶、并重新登记工作区账本。先预演，看清会写什么，再确认。',
+  fromLabel: '源工作区',
+  toLabel: '目标目录',
+  fromPlaceholder: '源工作区目录的绝对路径',
+  toPlaceholder: '目标目录的绝对路径（必须已存在）',
+  fillFromWorkspace: '从工作区列表填入…',
+  fillToWorkspace: '从工作区列表填入…',
+  titleLabel: '新建工作区标题（可选）',
+  titlePlaceholder: '目标目录还没登记过时用',
+  includeArtifacts: '同时搬迁会话创建过的文件（要全量解码，较慢）',
+  includeUnowned: '连同未登记在册的会话',
+  sourceSessions: '源工作区里匹配到 {count} 条会话',
+  sourceSessionsNone: '库里没有 cwd 等于源工作区的会话（迁移仍按源分桶里的实际内容进行）',
+  allSessions: '全部',
+  needFrom: '请先填源工作区目录。',
+  needTo: '请先填目标目录。',
+  needMigrateSelection: '请至少勾选一条会话，或选「全部」。',
+  migratePreview: '预演迁移',
+  migrateApply: '确认迁移',
+  migrating: '迁移中…',
+  migrateSummary: '将迁移 {sessions} 条会话（{files} 个日志，{bytes}）',
+  migrateBuckets: '分桶：{from} → {to}',
+  registryChangeTitle: '注册表变更',
+  registryCreateTarget: '登记目标工作区（新建）',
+  registryReuseTarget: '登记到已有工作区',
+  registryAdded: '新增登记 {count} 条',
+  registryAdopted: '从不属于任何工作区的会话里收编 {count} 条',
+  registryMoved: '从 {count} 个工作区搬出',
+  registryRemoved: '移除 {count} 个已空的工作区',
+  registryUnchanged: '注册表无需变更',
+  artifactsPlanned: '计划搬迁 {count} 项产物',
+  artifactsSkipped: '跳过 {count} 项产物',
+  migrateDone: '已迁移 {sessions} 条会话：改写 {rewritten} 个日志、移动 {moved} 个目录{artifacts}。',
+  migrateArtifactsPart: '、搬迁 {count} 项产物',
+  verifiedPass: '复核通过',
+  verifiedFail: '复核未通过',
+  effectImmediate: '注册表变更已由宿主直接承接，无需重启。',
+  effectRestart: '注册表已落盘，但宿主进程内持有内存副本，需重启 DSH 才会生效；重启前请勿在旧工作区继续新增会话。',
+  problemsTitle: '问题',
+
+  // ---- 备份与回滚 ----
+  backupTitle: '备份与回滚',
+  backupHint: '每次迁移都会先留一份字节级备份。回滚按它把会话目录、日志字节与工作区注册表一起还原。',
+  backupRootLabel: '备份根目录',
+  noBackups: '还没有备份。',
+  backupRow: '{sessions} 条会话 · {artifacts} 项产物',
+  rollbackAction: '回滚',
+  rollbackPreview: '看回滚动作',
+  rollbackConfirm: '确认回滚',
+  rollingBack: '回滚中…',
+  rollbackActions: '以下是回滚会做的 {count} 个动作（还没有写盘）：',
+  rollbackDone: '已回滚 {sessions} 条会话、还原 {files} 个文件并恢复注册表。',
+  cancel: '取消',
+
+  // ---- 共同 ----
   failed: '操作失败：{reason}',
   dismiss: '知道了',
 } as const
 
 /** 英文文案（键集必须与中文完全一致）。 */
 export const en: Record<keyof typeof zh, string> = {
-  title: 'Session transfer',
+  title: 'Session management',
+  library: 'Session library',
   refresh: 'Refresh',
   loading: 'Loading…',
-  library: 'Session library',
+  tabTransfer: 'Import & export',
+  tabMigrate: 'Migrate',
   sessionsCount: '{count} sessions',
   workspacesCount: '{count} workspaces',
 
@@ -105,10 +172,68 @@ export const en: Record<keyof typeof zh, string> = {
   cwdRewritten: '{from} → {to}',
   cwdKeep: 'stays without cwd (lands in _no-cwd)',
   applied: 'Wrote {count} sessions ({bytes}).',
-
   needSelection: 'Tick at least one session first.',
   needFile: 'Choose a .dhsess bundle first.',
   needWorkspace: 'Choose a target workspace first.',
+
+  migrateTitle: 'Move a workspace’s sessions',
+  migrateHint:
+    'Move every session of one workspace directory to another: rewrite each log header cwd (first frame only, the rest stays byte-identical), move the session directories into the target bucket, and re-home the workspace ledger. Preview first, then confirm.',
+  fromLabel: 'Source workspace',
+  toLabel: 'Target directory',
+  fromPlaceholder: 'Absolute path of the source workspace directory',
+  toPlaceholder: 'Absolute path of the target directory (must already exist)',
+  fillFromWorkspace: 'Fill from a workspace…',
+  fillToWorkspace: 'Fill from a workspace…',
+  titleLabel: 'Title for a new workspace (optional)',
+  titlePlaceholder: 'Used when the target directory is not registered yet',
+  includeArtifacts: 'Also move files the sessions created (decodes whole logs, slower)',
+  includeUnowned: 'Include sessions registered in no workspace',
+  sourceSessions: '{count} sessions in the library match the source workspace',
+  sourceSessionsNone:
+    'No session in the library has this cwd (the migration still works from the source bucket’s actual contents)',
+  allSessions: 'All',
+  needFrom: 'Fill in the source workspace directory first.',
+  needTo: 'Fill in the target directory first.',
+  needMigrateSelection: 'Tick at least one session, or choose “All”.',
+  migratePreview: 'Preview migration',
+  migrateApply: 'Migrate now',
+  migrating: 'Migrating…',
+  migrateSummary: '{sessions} sessions to migrate ({files} logs, {bytes})',
+  migrateBuckets: 'Buckets: {from} → {to}',
+  registryChangeTitle: 'Ledger change',
+  registryCreateTarget: 'Register the target workspace (new)',
+  registryReuseTarget: 'Register into an existing workspace',
+  registryAdded: '{count} sessions added',
+  registryAdopted: '{count} adopted from unowned sessions',
+  registryMoved: 'moved out of {count} workspaces',
+  registryRemoved: '{count} emptied workspaces removed',
+  registryUnchanged: 'No ledger change needed',
+  artifactsPlanned: '{count} artifacts to move',
+  artifactsSkipped: '{count} artifacts skipped',
+  migrateDone: 'Migrated {sessions} sessions: {rewritten} logs rewritten, {moved} directories moved{artifacts}.',
+  migrateArtifactsPart: ', {count} artifacts moved',
+  verifiedPass: 'verification passed',
+  verifiedFail: 'verification FAILED',
+  effectImmediate: 'The host took the ledger change directly; no restart needed.',
+  effectRestart:
+    'The ledger is on disk, but the host keeps an in-memory copy: restart DSH for it to take effect. Do not add sessions to the old workspace before that.',
+  problemsTitle: 'Problems',
+
+  backupTitle: 'Backups & rollback',
+  backupHint:
+    'Every migration takes a byte-level backup first. Rollback uses it to restore the session directories, the original log bytes and the workspace ledger together.',
+  backupRootLabel: 'Backup root',
+  noBackups: 'No backups yet.',
+  backupRow: '{sessions} sessions · {artifacts} artifacts',
+  rollbackAction: 'Roll back',
+  rollbackPreview: 'Show rollback steps',
+  rollbackConfirm: 'Confirm rollback',
+  rollingBack: 'Rolling back…',
+  rollbackActions: '{count} steps this rollback would take (nothing written yet):',
+  rollbackDone: 'Rolled back {sessions} sessions, restored {files} files and the workspace ledger.',
+  cancel: 'Cancel',
+
   failed: 'Failed: {reason}',
   dismiss: 'Dismiss',
 }

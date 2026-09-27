@@ -135,7 +135,7 @@ test('产物冒烟：在真实 Cordis fiber 里注册 4 个工具且 schema 已�
   await dispose()
 })
 
-test('产物冒烟：宿主提供 webServer 时挂上三条界面路由，卸载时摘掉', { skip }, async () => {
+test('产物冒烟：宿主提供 webServer 时挂上六条界面路由，卸载时摘掉', { skip }, async () => {
   const { routes, removed, dispose } = await loadPlugin()
   await waitFor(() => routes.length > 0, '插件激活后端点上挂')
 
@@ -145,6 +145,9 @@ test('产物冒烟：宿主提供 webServer 时挂上三条界面路由，卸载
       'exact /dsh-session-manager/api/state',
       'exact /dsh-session-manager/api/export',
       'exact /dsh-session-manager/api/import',
+      'exact /dsh-session-manager/api/backups',
+      'exact /dsh-session-manager/api/migrate',
+      'exact /dsh-session-manager/api/rollback',
     ],
     '界面端点必须都在本插件命名空间下，且是精确路由',
   )
@@ -167,11 +170,11 @@ test('产物冒烟：webServer 晚到也能补挂端点（子 fiber 等它）', 
   assert.deepEqual(plugin.routes, [], '先起来时没有端点')
 
   await plugin.provideWebServer()
-  assert.equal(plugin.routes.length, 3, 'webServer 到位后端点必须补挂上')
+  assert.equal(plugin.routes.length, 6, 'webServer 到位后端点必须补挂上')
   assert.equal(plugin.defs.length, 4, '补挂端点不该重复注册工具')
 
   await plugin.dispose()
-  assert.equal(plugin.removed.length, 3, '卸载仍然摘干净')
+  assert.equal(plugin.removed.length, 6, '卸载仍然摘干净')
 })
 
 test('产物冒烟：plan 在真实工作区上只读可用', { skip: realDataSkip }, async () => {

@@ -1,9 +1,12 @@
 // src/web.ts — 浏览器界面用的宿主路由（插件设置页的数据面）。
 //
 // 界面在 Web 端，真正的读写必须在宿主进程里做：会话库在磁盘上、注册表由宿主持有内存副本，
-// 浏览器那一侧既没有权限也不该有。因此这一层只做三件事——**列**、**导出**、**导入**——
-// 并把每次写入的边界条件（目标目录必须真实存在、包必须自校验通过、冲突只跳过不覆盖）挡在
-// 宿主这一侧，而不是指望界面传对参数。
+// 浏览器那一侧既没有权限也不该有。因此这一层只做三件事——**列**、**迁移**、**导入导出**——
+// 并把每次写入的边界条件（目标目录必须真实存在、包必须自校验通过、冲突只跳过不覆盖、回滚只能
+// 回滚自己写下的备份）挡在宿主这一侧，而不是指望界面传对参数。
+//
+// 编排本身在 `src/migrate.ts`（工具层与这一层共用一份），本模块只负责 HTTP 形状：
+// 读参数、翻译成那边认识的请求、把结果按 JSON 回给界面。
 //
 // 与 webServer 服务解耦：本模块只要求一个 `{ register(route) }`，测试里用假 req/res 直接打
 // handler，不必起 HTTP 服务。路由路径固定在本插件命名空间下，`(kind, path)` 与别的插件不会撞。
@@ -12,8 +15,17 @@ import { join } from 'node:path'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 
 import { scanBucket, type DiscoveredSession } from './discovery.ts'
+import {
+  assertBackupDir,
+  listBackups,
+  loadRegistryForWrite,
+  rollbackMigration,
+  runMigration,
+  type MigrateDeps,
+  type MigrateRequest,
+} from './migrate.ts'
 import { readRegistry, validateRegistry } from './registry.ts'
-import { type ResolvedPaths } from './tools.ts'
+import { type EffectMode, type ResolvedPaths } from './tools.ts'
 import {
   applyImport,
   buildBundle,
@@ -51,6 +63,13 @@ export interface ApiDeps {
   now?: () => Date
   /** 插件版本，写进包的来源信息。 */
   pluginVersion?: string
+  /**
+   * 注册表改动何时被宿主承认（`immediate` 还是 `restart-required`）。
+   *
+   * 由入口注入而不是在这里探测：`effectMode()` 要读宿主服务，那件事属于 DSH 边界（`src/index.ts`），
+   * 本模块只认 `{ register() }` 形状，不该知道 Cordis 的存在。
+   */
+  effectMode?: () => EffectMode
 }
 
 /** 界面要展示的一条会话。 */
@@ -174,7 +193,13 @@ function summarizeWorkspaces(registry: WorkspaceRegistryState | null): Workspace
   })
 }
 
-/** 目标工作区目录必须真实存在：header.cwd 指向一个不存在的目录，导入出来的会话是坏的。 */
+/** 读 JSON 请求体；迁移/回滚这类请求很小，给 1 MiB 上限就够（大文件走 readBody 的默认上限）。 */
+async function readJson(req: IncomingMessage, limit = 1024 * 1024): Promise<unknown> {
+  const body = await readBody(req, limit)
+  return JSON.parse(body.toString('utf8') || '{}')
+}
+
+/** 目标目录必须真实存在：header.cwd 指向一个不存在的目录，导入或迁移出来的会话是坏的。 */
 function assertTargetCwd(value: unknown): string {
   if (typeof value !== 'string' || value.trim() === '') throw new Error('缺少目标工作区目录（targetCwd）')
   const cwd = value.trim()
@@ -328,10 +353,121 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
     }
   }
 
+  const migrateDeps: MigrateDeps = {
+    sessionsRoot: paths.sessionsRoot,
+    registryPath: paths.registryPath,
+    backupRoot: paths.backupRoot,
+    decodeAll,
+  }
+  // 没注入就按"需要重启"说：宁可保守，也不谎称已经生效。
+  const takesEffect = (): EffectMode => deps.effectMode?.() ?? 'restart-required'
+
+  const backups = async (_req: IncomingMessage, res: ServerResponse): Promise<void> => {
+    sendJson(res, 200, { backupRoot: paths.backupRoot, backups: listBackups(migrateDeps) })
+  }
+
+  /** 迁移：`mode=apply` 执行，缺省只预演。参数与工具层同一套（都进 runMigration）。 */
+  const migrate = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+    let body: unknown
+    try {
+      body = await readJson(req)
+    } catch {
+      sendJson(res, 400, { error: '请求体不是合法 JSON' })
+      return
+    }
+    const fields = (body ?? {}) as Record<string, unknown>
+    const from = typeof fields['from'] === 'string' ? fields['from'].trim() : ''
+    if (from === '') {
+      sendJson(res, 400, { error: '缺少源工作区目录（from）' })
+      return
+    }
+    let to: string
+    try {
+      to = assertTargetCwd(fields['to'])
+    } catch (error) {
+      sendJson(res, 400, { error: error instanceof Error ? error.message : String(error) })
+      return
+    }
+
+    // 注册表是迁移的前置条件（要往上面登记新工作区）。它坏了就不该动手，先如实拒掉。
+    try {
+      loadRegistryForWrite(paths.registryPath)
+    } catch (error) {
+      sendJson(res, 409, { error: error instanceof Error ? error.message : String(error) })
+      return
+    }
+
+    const ids = fields['sessionIds']
+    const request: MigrateRequest = {
+      from,
+      to,
+      sessionIds: Array.isArray(ids) ? ids.map((id) => String(id)) : null,
+      includeUnowned: fields['includeUnowned'] !== false,
+      includeArtifacts: fields['includeArtifacts'] === true,
+      ...(typeof fields['title'] === 'string' && fields['title'].trim() !== '' ? { title: fields['title'].trim() } : {}),
+    }
+    const apply = fields['mode'] === 'apply'
+    const run = runMigration(migrateDeps, request, { apply })
+    const payload = {
+      mode: apply ? 'apply' : 'plan',
+      ok: run.preview.ok && (!apply || run.verified),
+      preview: run.preview,
+      applied: run.applied,
+      rewritten: run.rewritten,
+      moved: run.moved,
+      artifactsMoved: run.artifactsMoved,
+      verified: run.verified,
+      ...(run.backupDir === undefined ? {} : { backupDir: run.backupDir }),
+      problems: run.problems,
+      summary: run.summary,
+      takesEffect: takesEffect(),
+    }
+
+    if (!run.preview.ok) {
+      // 计划本身有问题（源桶不存在、目标被占用、cwd 不匹配……）：这是"当前状态不允许"，
+      // 用 409 而不是 400——参数可能完全正确，是库的状态说了不行。
+      sendJson(res, 409, payload)
+      return
+    }
+    if (apply && !run.verified) {
+      sendJson(res, 500, { ...payload, error: '迁移后的复核未通过，请查看 problems 并考虑回滚' })
+      return
+    }
+    sendJson(res, 200, payload)
+  }
+
+  /** 回滚：`dryRun` 只回动作清单；只认本插件备份根下的目录（越界一律拒）。 */
+  const rollbackBackup = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+    let body: unknown
+    try {
+      body = await readJson(req)
+    } catch {
+      sendJson(res, 400, { error: '请求体不是合法 JSON' })
+      return
+    }
+    const fields = (body ?? {}) as Record<string, unknown>
+    const backupDir = fields['backupDir']
+    try {
+      assertBackupDir({ backupRoot: paths.backupRoot }, backupDir)
+    } catch (error) {
+      sendJson(res, 400, { error: error instanceof Error ? error.message : String(error) })
+      return
+    }
+    const dryRun = fields['dryRun'] === true
+    const outcome = rollbackMigration(
+      { backupRoot: paths.backupRoot },
+      { backupDir: String(backupDir), dryRun },
+    )
+    sendJson(res, 200, { mode: dryRun ? 'plan' : 'apply', ...outcome, takesEffect: takesEffect() })
+  }
+
   return {
     'GET /state': state,
     'POST /export': exportSessions,
     'POST /import': importSessions,
+    'GET /backups': backups,
+    'POST /migrate': migrate,
+    'POST /rollback': rollbackBackup,
   }
 }
 

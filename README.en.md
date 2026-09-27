@@ -7,15 +7,15 @@ directories, re-home workspace membership, and optionally move the files those s
 
 > **Status**
 > - ✅ Core library, migration engine, offline CLI, plugin shell and 4 tools
-> - ✅ Session import & export: one page in Settings (`settings.section`) plus 3 endpoints under
->   `/dsh-session-manager/api`
+> - ✅ Session management: one page in Settings (`settings.section`, with import/export and migrate
+>   tabs) plus 6 endpoints under `/dsh-session-manager/api`
 > - ✅ Tool contract verified against the **real `@deepseek-ai/dsh-tools`** (`defineTool` normalization
 >   + argument validation + real execution)
 > - ✅ Session-artifact migration: evidence layering + on-disk intersection + nested pruning, rolled
 >   back together with the sessions
 > - ✅ Source is TypeScript: `src/*.ts` → tsdown → `lib/` (build output, not committed); `tsc` typecheck
 >   and the build both pass
-> - ✅ **82 of 84 tests pass** (real log files, real registry, end-to-end byte-level rollback assertions,
+> - ✅ **94 of 96 tests pass** (real log files, real registry, end-to-end byte-level rollback assertions,
 >   and a built-artifact smoke test)
 > - ⏳ Pending your go-ahead: install into a profile and restart DSH to load the 4 tools and open that
 >   settings page for real (the page's styling is verified at build/artifact-contract level only — it
@@ -71,10 +71,12 @@ Defaults are `$DSH_HOME/sessions` and `$DSH_HOME/storages/workspace.json`; overr
 | `rollback_session_migration` | yes | Byte-exact rollback from a backup directory |
 | `verify_workspace_sessions` | no | Check that a directory's bucket agrees with its headers |
 
-### Session import & export (Web UI)
+### Session management (Web UI)
 
-Once installed into a profile, the **Settings** sidebar gains a **Session transfer** page (this
-package ships a Web Client half):
+Once installed into a profile, the **Settings** sidebar gains a **Session management** page (this
+package ships a Web Client half) with two tabs:
+
+**Import & export** (take sessions away, bring them back)
 
 - **Export**: tick sessions → the browser downloads one `.dhsess` bundle. The bundle carries the raw
   bytes of **every generation** of those logs (each with a sha256), not files the session created.
@@ -83,10 +85,29 @@ package ships a Web Client half):
   **never overwrites**: a session whose id already exists in the library is skipped and reported; a
   session with no cwd lands in the `_no-cwd` bucket and is not ledgered.
 
-The endpoints live under `/dsh-session-manager/api` (`state` / `export` / `import`) and all writes
-happen inside the host process. A profile without the `webServer` service (tools-only front ends) still
-loads the plugin — the page simply does not appear. See [docs/internals.md](docs/internals.md) for the
-bundle shape and the invariants it enforces.
+**Migrate** (move one workspace's sessions to another directory)
+
+Previously CLI- and tool-only, now the same orchestration (`src/migrate.ts`, shared by all three entry
+points) is on screen:
+
+- source workspace / target directory (must already exist), an optional title for a newly created
+  workspace, whether to carry the **files the sessions created**, whether to carry unregistered
+  sessions, and "all / only these";
+- **Preview**: session, log and byte counts, source → target bucket, **how the ledger changes** (create
+  or reuse the target workspace, how many sessions are added, which workspaces lose them, whether an
+  emptied workspace is removed), the artifact plan and its skip reasons;
+- **Migrate now**: rewrite each log header `cwd` (first frame only, the rest byte-identical) → move the
+  session directories → re-home the ledger → **independent verification** (the host's own corrupt
+  criterion) → leave a byte-level backup;
+- **Backups & rollback**: every backup this plugin wrote (time, session count, source → target), with
+  the **rollback steps** shown before you confirm; rollback restores directories, log bytes and the
+  ledger together (and removes the emptied target bucket, symmetric with the migration cleaning up an
+  emptied source bucket).
+
+The endpoints live under `/dsh-session-manager/api` (`state` / `export` / `import` / `migrate` /
+`backups` / `rollback`) and all writes happen inside the host process. A profile without the
+`webServer` service (tools-only front ends) still loads the plugin — the page simply does not appear.
+See [docs/internals.md](docs/internals.md) for the bundle shape and the invariants it enforces.
 
 ### When it takes effect (dual mode)
 
@@ -215,10 +236,11 @@ Block_Type=Raw), making the write path independent of any compressor, external b
 | `src/execute.ts` | apply + independent verification | none |
 | `src/artifacts.ts` | artifact extraction (evidence layering), planning, moving | none |
 | `src/transfer.ts` | `.dhsess` container (build/parse/validate), import planning and apply | none |
+| `src/migrate.ts` | Migration orchestration: preview / apply / rollback / backup listing (shared by CLI, tools and the UI) | none |
 | `src/cli.ts` | offline CLI (plan/apply/verify/rollback) → `lib/cli.js` | none |
 | `src/tools.ts` | the 4 tool registrations | `dsh-tools` |
-| `src/web.ts` | UI endpoints (list / export / import); needs only a `{ register }` shape | none |
-| `src/client/*` | Web Client half: settings page, dictionaries, styles, endpoint calls → `lib/client.js` | none |
+| `src/web.ts` | UI endpoints (list / export / import / migrate / backups / rollback); needs only a `{ register }` shape | none |
+| `src/client/*` | Web Client half: the Session management page (tabs: import/export and migrate), dictionaries, styles, endpoint calls → `lib/client.js` | none |
 | `src/index.ts` | plugin entry `apply(ctx, config)` | `dsh-tools` |
 
 The core stays free of DSH dependencies, so the plugin shell, the CLI and the tests all reuse the same

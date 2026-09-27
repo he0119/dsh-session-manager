@@ -12,12 +12,14 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 
 import { readHeaderQuick } from './discovery.ts'
-import { applyPlan, verifyAppliedPlan } from './execute.ts'
-import { readManifest, rollback } from './journal.ts'
-import { buildRelocationPlan, describePlan } from './plan.ts'
+import {
+  previewMigration,
+  rollbackMigration,
+  runMigration,
+  type MigrateDeps,
+} from './migrate.ts'
 import { projectKey } from './project-key.ts'
-import { readRegistry, validateRegistry } from './registry.ts'
-import type { DecodeAll, WorkspaceRegistryState } from './types.ts'
+import type { DecodeAll } from './types.ts'
 
 /**
  * 平台的 fzstd 解码器（纯 JS、多帧感知）。
@@ -99,14 +101,6 @@ const EFFECT_NOTE: Record<EffectMode, string> = {
     '注册表已落盘，但宿主进程内持有内存副本，需重启 DSH 后才会生效；重启前请勿在旧工作区继续新增会话。',
 }
 
-function loadRegistry(paths: ResolvedPaths): WorkspaceRegistryState {
-  const registry = readRegistry(paths.registryPath)
-  const check = validateRegistry(registry)
-  if (!check.ok) {
-    throw new Error(`workspace 注册表不满足启动不变式，拒绝操作：${check.problems.join('; ')}`)
-  }
-  return registry
-}
 
 /** 计划类工具的返回值。 */
 export interface PlanToolResult {
@@ -139,6 +133,14 @@ export interface MigrateToolResult {
 export function registerTools(ctx: Context, config: PluginConfig = {}): Array<() => void> {
   const paths = resolvePaths(config)
   const mode = (): EffectMode => effectMode(ctx)
+  // 预演/执行/回滚都走 src/migrate.ts 那一份编排，界面端点用的是同一个 deps 形状——
+  // 三个入口（CLI / 工具 / 界面）因此不会各写一套。
+  const deps: MigrateDeps = {
+    sessionsRoot: paths.sessionsRoot,
+    registryPath: paths.registryPath,
+    backupRoot: paths.backupRoot,
+    decodeAll,
+  }
   const disposers: Array<() => void> = []
 
   // ---- 只读：计划 ----
@@ -187,23 +189,20 @@ export function registerTools(ctx: Context, config: PluginConfig = {}): Array<()
           ],
         },
         async execute(args): Promise<PlanToolResult> {
-          const plan = buildRelocationPlan({
-            root: paths.sessionsRoot,
-            registry: loadRegistry(paths),
+          const preview = previewMigration(deps, {
             from: args.from,
             to: args.to,
-            decodeAll,
             sessionIds: args.sessionIds ?? null,
             includeUnowned: args.includeUnowned !== false,
           })
           return {
-            ok: plan.ok,
-            sessions: plan.sessions.length,
-            files: plan.sessions.reduce((n, s) => n + s.files.length, 0),
-            targetBucket: plan.targetBucket,
-            summary: describePlan(plan),
+            ok: preview.ok,
+            sessions: preview.sessions.length,
+            files: preview.files,
+            targetBucket: preview.targetBucket,
+            summary: preview.summary,
             takesEffect: mode(),
-            problems: plan.problems,
+            problems: preview.problems,
           }
         },
       }),
@@ -261,55 +260,32 @@ export function registerTools(ctx: Context, config: PluginConfig = {}): Array<()
           ],
         },
         async execute(args): Promise<MigrateToolResult> {
-          const plan = buildRelocationPlan({
-            root: paths.sessionsRoot,
-            registry: loadRegistry(paths),
-            from: args.from,
-            to: args.to,
-            decodeAll,
-            sessionIds: args.sessionIds ?? null,
-            includeUnowned: args.includeUnowned !== false,
-            includeArtifacts: args.includeArtifacts === true,
-          })
-          if (!plan.ok) {
-            return {
-              applied: false,
-              rewritten: 0,
-              moved: 0,
-              artifactsMoved: 0,
-              verified: false,
-              takesEffect: mode(),
-              summary: describePlan(plan),
-              problems: plan.problems,
-            }
-          }
-          if (args.apply !== true) {
-            return {
-              applied: false,
-              rewritten: 0,
-              moved: 0,
-              artifactsMoved: 0,
-              verified: false,
-              takesEffect: mode(),
-              summary: `${describePlan(plan)}\n\n（dry-run，未写任何字节；传 apply:true 执行）`,
-              problems: [],
-            }
-          }
-          const r = applyPlan(plan, { registryPath: paths.registryPath, decodeAll, backupRoot: paths.backupRoot })
-          const v = verifyAppliedPlan(plan, { decodeAll })
+          const run = runMigration(
+            deps,
+            {
+              from: args.from,
+              to: args.to,
+              sessionIds: args.sessionIds ?? null,
+              includeUnowned: args.includeUnowned !== false,
+              includeArtifacts: args.includeArtifacts === true,
+            },
+            { apply: args.apply === true },
+          )
+          const summary = run.applied
+            ? `${run.summary}\n${EFFECT_NOTE[mode()]}`
+            : run.preview.ok
+              ? `${run.summary}\n\n（dry-run，未写任何字节；传 apply:true 执行）`
+              : run.summary
           return {
-            applied: true,
-            rewritten: r.rewritten,
-            moved: r.moved,
-            artifactsMoved: r.artifactsMoved,
-            verified: v.ok,
-            backupDir: r.backupDir,
+            applied: run.applied,
+            rewritten: run.rewritten,
+            moved: run.moved,
+            artifactsMoved: run.artifactsMoved,
+            verified: run.verified,
+            ...(run.backupDir === undefined ? {} : { backupDir: run.backupDir }),
             takesEffect: mode(),
-            summary:
-              `已迁移 ${plan.sessions.length} 个会话（改写 ${r.rewritten} 个日志、移动 ${r.moved} 个目录` +
-              `${r.artifactsMoved > 0 ? `、搬迁 ${r.artifactsMoved} 项产物` : ''}）。\n` +
-              `复核：${v.ok ? '通过' : '失败'}。备份：${r.backupDir}\n${EFFECT_NOTE[mode()]}`,
-            problems: v.problems,
+            summary,
+            problems: run.applied ? run.problems : run.preview.problems,
           }
         },
       }),
@@ -345,17 +321,14 @@ export function registerTools(ctx: Context, config: PluginConfig = {}): Array<()
           ],
         },
         async execute(args) {
-          const manifestPath = join(args.backupDir, 'manifest.json')
-          if (!existsSync(manifestPath)) throw new Error(`no manifest.json in ${args.backupDir}`)
-          const { manifest } = readManifest(args.backupDir)
-          const r = rollback(manifest, { backupDir: args.backupDir })
+          const r = rollbackMigration({ backupRoot: paths.backupRoot }, { backupDir: args.backupDir })
           return {
             restoredFiles: r.restoredFiles,
             restoredArtifacts: r.restoredArtifacts,
-            sessions: manifest.sessions.length,
+            sessions: r.sessions,
             registryRestored: r.registryRestored,
             summary:
-              `已回滚 ${manifest.sessions.length} 个会话、还原 ${r.restoredFiles} 个文件` +
+              `已回滚 ${r.sessions} 个会话、还原 ${r.restoredFiles} 个文件` +
               `${r.restoredArtifacts > 0 ? `、搬回 ${r.restoredArtifacts} 项产物` : ''}并恢复注册表。`,
           }
         },

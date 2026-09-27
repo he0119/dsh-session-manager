@@ -57,7 +57,15 @@ export function applyPlan(plan: RelocationPlan, options: ApplyOptions): ApplyRes
   const artifactMoves = plan.artifacts?.moves ?? []
 
   // 1) 备份（会话目录 + 待搬产物 + 注册表）
-  const backup = createBackup({ backupRoot, registryPath, sessions: plan.sessions, artifacts: artifactMoves, now })
+  const backup = createBackup({
+    backupRoot,
+    registryPath,
+    sessions: plan.sessions,
+    artifacts: artifactMoves,
+    from: plan.from,
+    to: plan.to,
+    now,
+  })
   say(`backup -> ${backup.dir}`)
 
   // 2) 改写日志（原地）

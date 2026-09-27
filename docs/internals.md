@@ -142,6 +142,28 @@ header 声称一个它从未工作过的目录。
 落地时每个文件先写成 `<规范名>.part` 再 rename：`parseSessionLogName` 不认 `.part`，所以中途
 崩溃留下的是「发现阶段会忽略的文件」，而不是一个只有半截日志、看起来却正常的会话。
 
+## 同一份迁移编排，三个入口
+
+迁移这件事有三个入口：离线 CLI、模型工具（4 个里的 3 个）、设置里的「会话管理 → 迁移」分页。
+它们的**编排只有一份**（`src/migrate.ts`：预演 / 执行 / 回滚 / 备份清单），各入口只负责把结果
+翻译成自己的形状。不这样做的代价不是"多写点代码"，而是**同一件事在三个地方给出三种说法**：
+工具说"会迁移 3 条"，界面说"会迁移 4 条"，用户就没有理由相信任何一个。
+
+同一条原则落在两处细节上：
+
+- **界面与工具调的是同一个 `runMigration()`**，`apply:false` 就是预演。所以"预览和实做不一致"
+  在这种结构下不可能发生——它们本来就是同一次计算，只是一个不落盘。
+- **注册表的前置校验（`loadRegistryForWrite`）在这条链路的最前面**：注册表不满足启动不变式时
+  一律拒绝，而不是"先在坏账本上叠一层改动，回头再说"。
+
+界面这一侧另加一条**越界拒绝**：回滚只认 `backupRoot` 下面的目录（`assertBackupDir`）。回滚会按
+清单里的路径搬目录、按字节还原日志、恢复注册表，等于"以清单为准的任意写"；界面能传的字符串
+不该换来这种权力，所以路径检查放在宿主侧，而不是指望前端不乱传。
+
+最后是一个容易被忽略的对称性：`applyPlan` 会删掉空掉的**源**桶（`execute.ts` 第 5 步），
+回滚如果不对称地做，就会在会话根下留下一个空目录。`rollback()` 因此也删空掉的**目标**桶
+（只删确认为空的），`test/migrate.test.ts` 把这条钉住了。
+
 ## Web Client 半边的两条硬约束
 
 **一、产物必须是一个经典脚本。** DSH 的客户端模块系统只认
@@ -199,9 +221,10 @@ ctx 测试全绿。`test/artifact.test.mjs` 与 `test/tools.test.ts` 现在都�
 | 单元 | 启动四条不变式逐类可抓；`reHome` 前后校验 | `test/registry.test.ts` |
 | 单元 | 产物证据分层、存在性求交、嵌套剪枝 | `test/artifacts.test.ts` |
 | 单元 | `.dhsess` 字节往返、包校验的拒绝面、导入预演/落地/冲突跳过 | `test/transfer.test.ts` |
-| 单元 | 界面端点：列会话、导出、导入与各条 400/404/409 | `test/web.test.ts` |
-| 产物契约 | 按模块加载器契约执行 `lib/client.js`：id、导出面、槽位、字典键集、导航文案跟语言走 | `test/client.test.mjs` |
-| 宿主契约 | 在**真实 Cordis fiber** 里加载 `lib/index.js`：激活、可选服务探测、路由随 webServer 到位而挂、卸载摘干净 | `test/artifact.test.mjs` |
+| 单元 | 迁移编排：预演只读、dry-run 零写入、执行后复核、回滚还原、**备份目录越界一律拒** | `test/migrate.test.ts` |
+| 单元 | 界面端点：列会话、导出、导入、迁移预演/落地、备份列表、回滚与各条 400/404/409 | `test/web.test.ts` |
+| 产物契约 | 按模块加载器契约执行 `lib/client.js`：id、导出面、槽位、字典键集、导航文案跟语言走、页内两个分页都在 | `test/client.test.mjs` |
+| 宿主契约 | 在**真实 Cordis fiber** 里加载 `lib/index.js`：激活、可选服务探测、六条路由随 webServer 到位而挂、卸载摘干净 | `test/artifact.test.mjs` |
 | 端到端 | 沙箱内造多帧日志 + 注册表，跑 `plan → apply → verify → rollback`，断言**逐字节**还原 | `test/engine.test.ts` |
 | 契约 | 用**真实 `@deepseek-ai/dsh-tools`** 走 `defineTool`：schema 归一化、实参校验、真实执行（同样跑在真实 fiber 上） | `test/tools.test.ts` |
 | 真实数据 | 本机真实会话日志（多帧）+ 真实注册表（84 个工作区） | `test/real-data.test.ts`、`test/registry.test.ts` |

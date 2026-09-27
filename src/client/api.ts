@@ -147,3 +147,146 @@ export function download(result: ExportResult): void {
   anchor.remove()
   URL.revokeObjectURL(url)
 }
+
+// ---- 会话管理：迁移 / 备份 / 回滚 ----
+
+/** 预演里的一条会话（宿主 `MigrationPreview.sessions`）。 */
+export interface PreviewSession {
+  id: string
+  createdAt: number
+  registered: boolean
+  alreadyAtTarget: boolean
+  sourceDir: string
+  targetDir: string
+  files: number
+  bytes: number
+}
+
+/** 迁移预演的结果（宿主 `MigrationPreview`）。 */
+export interface MigrationPreview {
+  ok: boolean
+  problems: string[]
+  from: string
+  to: string
+  sourceBucket: string
+  targetBucket: string
+  sessions: PreviewSession[]
+  files: number
+  bytes: number
+  artifacts: {
+    moves: number
+    problems: string[]
+    skipped: Array<{ path: string; reason: string; sessionId?: string }>
+  } | null
+  registryChange: {
+    targetId: string
+    targetPath: string
+    createdTarget: boolean
+    added: string[]
+    adoptedFromUnowned: string[]
+    movedFrom: Array<{ workspaceId: string; path: string; sessionIds: string[] }>
+    removedSources: Array<{ workspaceId: string; path: string }>
+    unchanged: boolean
+  } | null
+  summary: string
+}
+
+/** 迁移请求（与宿主 `MigrateRequest` 同形）。 */
+export interface MigrationRequest {
+  mode: 'plan' | 'apply'
+  from: string
+  to: string
+  sessionIds?: string[] | null
+  title?: string
+  includeUnowned?: boolean
+  includeArtifacts?: boolean
+}
+
+/** 迁移响应。 */
+export interface MigrationResponse {
+  mode: 'plan' | 'apply'
+  ok: boolean
+  preview: MigrationPreview
+  applied: boolean
+  rewritten: number
+  moved: number
+  artifactsMoved: number
+  verified: boolean
+  backupDir?: string
+  problems: string[]
+  summary: string
+  takesEffect: 'immediate' | 'restart-required'
+  error?: string
+}
+
+/** 备份清单里的一条。 */
+export interface BackupSummary {
+  dir: string
+  createdAt: string
+  sessions: number
+  artifacts: number
+  from?: string
+  to?: string
+}
+
+/** `GET /backups` 的响应。 */
+export interface BackupsResponse {
+  backupRoot: string
+  backups: BackupSummary[]
+}
+
+/** 回滚响应。 */
+export interface RollbackResponse {
+  mode: 'plan' | 'apply'
+  dryRun: boolean
+  actions: string[]
+  restoredFiles: number
+  restoredArtifacts: number
+  registryRestored: boolean
+  backupDir: string
+  createdAt: string
+  sessions: number
+  artifacts: number
+  takesEffect: 'immediate' | 'restart-required'
+}
+
+/**
+ * 迁移或只预演。
+ *
+ * 预演与落地都可能回非 2xx（计划有问题 → 409；复核没过 → 500），而这两种情况**正文里带着
+ * 完整结果**，所以这里不按 `ok` 提前抛，交给页面把 problems 摆出来。
+ */
+export async function migrate(request: MigrationRequest): Promise<MigrationResponse> {
+  const response = await fetch(`${API_PREFIX}/migrate`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(request),
+  })
+  const text = await response.text()
+  let parsed: MigrationResponse
+  try {
+    parsed = JSON.parse(text) as MigrationResponse
+  } catch {
+    throw new Error(`HTTP ${response.status}：${text.slice(0, 200) || '空响应'}`)
+  }
+  // 判据是"正文里有没有完整结果"，而不是状态码：带 preview 的 409/500 是**结果**（计划有问题 /
+  // 复核没过），页面必须把它摆出来；不带 preview 的 400 是参数被拒，当成异常抛给错误横幅。
+  if (parsed.preview === undefined) throw new Error(parsed.error ?? `HTTP ${response.status}`)
+  return parsed
+}
+
+/** 列出本插件的备份。 */
+export async function fetchBackups(): Promise<BackupsResponse> {
+  return asJson<BackupsResponse>(await fetch(`${API_PREFIX}/backups`, { headers: { accept: 'application/json' } }))
+}
+
+/** 回滚一份备份；`dryRun` 只回动作清单。 */
+export async function rollbackBackup(backupDir: string, dryRun: boolean): Promise<RollbackResponse> {
+  return asJson<RollbackResponse>(
+    await fetch(`${API_PREFIX}/rollback`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ backupDir, dryRun }),
+    }),
+  )
+}

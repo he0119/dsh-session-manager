@@ -7,11 +7,11 @@
 
 > **状态**
 > - ✅ 核心层 / 迁移引擎 / 离线 CLI / 插件外壳与 4 个工具
-> - ✅ 会话导入导出：设置里的一页（`settings.section`）+ `/dsh-session-manager/api` 的 3 个端点
+> - ✅ 会话管理：设置里的一页（`settings.section`，页内分导入导出与迁移）+ 6 个端点
 > - ✅ 工具契约用**真实的 `@deepseek-ai/dsh-tools`** 验证（`defineTool` 归一化 + 实参校验 + 真实执行）
 > - ✅ 会话产物搬迁（`artifacts.mjs`）：证据分层 + 存在性求交 + 嵌套剪枝，可随会话一起回滚
 > - ✅ 源码为 TypeScript，`src/*.ts` → tsdown → `lib/`（构建产物不进 git）；`tsc` 类型检查与构建均通过
-> - ✅ **84 个用例通过 82 条**（含真实日志、真实注册表、端到端回滚的字节级断言、构建产物冒烟；
+> - ✅ **96 个用例通过 94 条**（含真实日志、真实注册表、端到端回滚的字节级断言、构建产物冒烟；
 >   另 2 条按环境变量门控跳过）
 > - ✅ 仓库工程化对齐参考项目：`.gitattributes`(全 LF)、`.gitignore`、`docs/`、双语 README、
 >   `.github/workflows/ci.yml`、`pnpm-workspace.yaml`、`icon.svg`、`LICENSE`、engines/scripts 约定
@@ -65,9 +65,12 @@ node lib/cli.js rollback --backup '<apply 输出的备份目录>'
 | `rollback_session_migration` | 是 | 按备份目录字节级回滚 |
 | `verify_workspace_sessions` | 否 | 复核某目录桶内日志与 header 的一致性 |
 
-### 会话导入导出（Web 界面）
+### 会话管理（Web 界面）
 
-装进 profile 后，**设置** 的左侧导航里会多出一页「会话传输」（本包自带 Web Client 半边）：
+装进 profile 后，**设置** 的左侧导航里会多出一页「会话管理」（本包自带 Web Client 半边），
+页内分两页：
+
+**导入导出**（把会话带走/带回来）
 
 - **导出**：勾选会话 → 浏览器下载一个 `.dhsess` 包。包里是这些会话**所有代次日志的原始字节**
   （逐条带 sha256），不含会话创建过的普通文件。
@@ -75,9 +78,22 @@ node lib/cli.js rollback --backup '<apply 输出的备份目录>'
   跳过、注册表会怎么变）→ 再确认落盘。导入**永不覆盖**：库里已有同 id 的会话只跳过并报告；
   包里没有 cwd 的会话落 `_no-cwd` 分桶，也不挂账本。
 
-端点都在 `/dsh-session-manager/api` 下（`state` / `export` / `import`），写盘只发生在宿主进程里；
-宿主没有 `webServer` 服务时（例如只用工具的前端）插件照常起，只是这一页不出现。
-包的形状与它逐条守住的不变式见 [docs/internals.md](docs/internals.md)。
+**迁移**（把一个工作区的会话搬到另一个目录）
+
+以前只有 CLI 与模型工具能做这件事，现在同一份编排（`src/migrate.ts`，三个入口共用）也摆在界面上：
+
+- 源工作区 / 目标目录（目标必须已存在）、可选的新建工作区标题、是否连带**会话创建过的文件**、
+  是否连带未登记的会话，以及"全部 / 只选其中几条"；
+- **预演**：会话数、日志数、字节数、源桶 → 目标桶、**注册表会怎么变**（新建还是复用目标工作区、
+  登记几条、从哪些工作区搬出、是否移除空工作区）、产物计划与跳过原因；
+- **确认迁移**：改写每个日志 header 的 `cwd`（只动首帧，其余字节不变）→ 搬会话目录 → 重新登记 →
+  **独立复核**（等价于宿主的 corrupt 判据）→ 留下字节级备份；
+- **备份与回滚**：列出本插件的每一份备份（时间、会话数、源 → 目标），先看**回滚动作清单**再确认；
+  回滚把目录、日志字节与注册表一起还原（空掉的目标桶也会删掉，与迁移清理空源桶对称）。
+
+端点都在 `/dsh-session-manager/api` 下（`state` / `export` / `import` / `migrate` / `backups` /
+`rollback`），写盘只发生在宿主进程里；宿主没有 `webServer` 服务时（例如只用工具的前端）插件照常起，
+只是这一页不出现。包的形状、越界与不变式见 [docs/internals.md](docs/internals.md)。
 
 ### 何时生效（双模式）
 
@@ -199,10 +215,11 @@ npx @deepseek-ai/dsh@next plugin --profile desktop add /path/to/dsh-session-mana
 | `src/execute.ts` | 执行 + 独立复核（含产物目标位校验） | 无 |
 | `src/artifacts.ts` | 会话产物提取（证据分层）、规划（求交/剪枝）、搬迁 | 无 |
 | `src/transfer.ts` | `.dhsess` 容器（导出/解析/校验）、导入预演与落地 | 无 |
+| `src/migrate.ts` | 迁移编排：预演 / 执行 / 回滚 / 备份清单（CLI、工具、界面三个入口共用） | 无 |
 | `src/cli.ts` | 离线 CLI（plan/apply/verify/rollback）→ `lib/cli.js` | 无 |
 | `src/tools.ts` | 4 个工具注册 | `dsh-tools` |
-| `src/web.ts` | 界面端点（列会话 / 导出 / 导入），只要求 `{ register }` 形状 | 无 |
-| `src/client/*` | Web Client 半边：设置页、字典、样式、端点调用 → `lib/client.js` | 无 |
+| `src/web.ts` | 界面端点（列会话 / 导出 / 导入 / 迁移 / 备份 / 回滚），只要求 `{ register }` 形状 | 无 |
+| `src/client/*` | Web Client 半边：「会话管理」页（页内分导入导出与迁移）、字典、样式、端点调用 → `lib/client.js` | 无 |
 | `src/index.ts` | 插件入口 `apply(ctx, config)` | `dsh-tools` |
 
 核心层保持零 DSH 依赖，所以既能被插件复用，也能被 CLI 复用，还能被独立测试。

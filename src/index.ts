@@ -12,7 +12,7 @@ import { readFileSync } from 'node:fs'
 
 import type { Context } from '@deepseek-ai/cordis'
 
-import { type PluginConfig, decodeAll, registerTools, resolvePaths } from './tools.ts'
+import { type PluginConfig, decodeAll, effectMode, registerTools, resolvePaths } from './tools.ts'
 import { API_PREFIX, registerWebRoutes, type WebServerLike } from './web.ts'
 
 /** 插件 id（与 cordis.patch.yml 里的 id 对应）。 */
@@ -61,7 +61,13 @@ export function apply(ctx: Context, config: PluginConfig = {}): () => void {
       info('dsh-session-manager：webServer 形状不认，界面端点未挂')
       return
     }
-    const dispose = registerWebRoutes(webServer, { paths, decodeAll, pluginVersion: pluginVersion() })
+    const dispose = registerWebRoutes(webServer, {
+      paths,
+      decodeAll,
+      pluginVersion: pluginVersion(),
+      // "迁移何时生效"要读宿主服务（workspaceRegistry），那件事只在这里做得了。
+      effectMode: () => effectMode(ctx),
+    })
     info(`dsh-session-manager 界面端点已挂：${API_PREFIX}`)
     return dispose
   })
