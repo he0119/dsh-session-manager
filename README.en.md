@@ -1,4 +1,4 @@
-# dsh-session-mover
+# dsh-session-manager
 
 Migrate DSH workspaces and sessions to a new directory: rewrite session-log `cwd`, move the log
 directories, re-home workspace membership, and optionally move the files those sessions created.
@@ -53,7 +53,7 @@ node lib/cli.js verify --to '<target dir>'
 node lib/cli.js rollback --backup '<backup dir printed by apply>'
 ```
 
-Once installed you can also use the bin shim (`dsh-session-mover plan …`).
+Once installed you can also use the bin shim (`dsh-session-manager plan …`).
 
 Defaults are `$DSH_HOME/sessions` and `$DSH_HOME/storages/workspace.json`; override with `--root` /
 `--registry` / `--backup`. `plan` exits 2 when there are problems and never writes.
@@ -83,7 +83,7 @@ is immediate.
 
 ```bash
 # DSH's own plugin command (it creates/populates the profile and maintains deps + lockfile)
-npx @deepseek-ai/dsh@next plugin --profile desktop add /path/to/dsh-session-mover
+npx @deepseek-ai/dsh@next plugin --profile desktop add /path/to/dsh-session-manager
 # then restart DSH
 ```
 

@@ -12,7 +12,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { type PluginConfig, registerTools, resolvePaths } from './tools.ts'
 
 /** 插件 id（与 cordis.patch.yml 里的 id 对应）。 */
-export const name = 'session-mover'
+export const name = 'session-manager'
 
 // workspaceRegistry 不在 inject 里：它只是"能否即时生效"的探测对象，
 // 硬依赖会让没有该服务的 profile 整个插件起不来。
@@ -27,7 +27,7 @@ export function apply(ctx: Context, config: PluginConfig = {}): () => void {
   const disposers = registerTools(ctx, config)
   const logger = (ctx as { logger?: { info?: (message: string) => void } }).logger
   logger?.info?.(
-    `dsh-session-mover 已就绪：sessions=${paths.sessionsRoot} registry=${paths.registryPath} backups=${paths.backupRoot}`,
+    `dsh-session-manager 已就绪：sessions=${paths.sessionsRoot} registry=${paths.registryPath} backups=${paths.backupRoot}`,
   )
   return () => {
     for (const dispose of disposers) {

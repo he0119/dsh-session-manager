@@ -44,7 +44,7 @@ export function resolvePaths(config: PluginConfig = {}): ResolvedPaths {
   return {
     sessionsRoot: config.sessionsRoot ?? join(home, 'sessions'),
     registryPath: config.registryPath ?? join(home, 'storages', 'workspace.json'),
-    backupRoot: config.backupRoot ?? join(home, 'dsh-session-mover-backups'),
+    backupRoot: config.backupRoot ?? join(home, 'dsh-session-manager-backups'),
   }
 }
 

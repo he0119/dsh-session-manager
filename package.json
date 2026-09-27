@@ -1,5 +1,5 @@
 {
-  "name": "dsh-session-mover",
+  "name": "dsh-session-manager",
   "version": "0.1.0",
   "description": "Migrate DSH workspaces and sessions between directories — rewrite session-log cwd, move the log directories, re-home workspace membership, and optionally move the files those sessions created. | 把 DSH 工作区与会话迁移到新目录：改写会话日志 cwd、迁移日志目录、重挂工作区归属，并可选择性搬迁会话中创建的文件。",
   "type": "module",
@@ -8,7 +8,7 @@
   "types": "lib/types/index.d.ts",
   "icon": "./icon.svg",
   "bin": {
-    "dsh-session-mover": "./lib/cli.js"
+    "dsh-session-manager": "./lib/cli.js"
   },
   "exports": {
     ".": {
@@ -39,8 +39,8 @@
   "scripts": {
     "prebuild": "node -e \"require('node:fs').rmSync('lib', { recursive: true, force: true })\"",
     "build": "tsdown --concurrency 1",
-    "build:host": "tsdown --filter dsh-session-mover/host",
-    "build:types": "tsdown --filter dsh-session-mover/types",
+    "build:host": "tsdown --filter dsh-session-manager/host",
+    "build:types": "tsdown --filter dsh-session-manager/types",
     "watch": "tsdown --watch --concurrency 1",
     "typecheck": "tsc -p tsconfig.test.json",
     "prepublishOnly": "tsdown --concurrency 1",

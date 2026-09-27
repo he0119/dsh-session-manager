@@ -47,7 +47,7 @@ function fakeCtx() {
 
 test('产物冒烟：入口字段符合 cordis 契约', { skip }, async () => {
   const mod = await import(pathToFileURL(entry).href)
-  assert.equal(mod.name, 'session-mover', "name 必须与 cordis.patch.yml 的 id 一致")
+  assert.equal(mod.name, 'session-manager', "name 必须与 cordis.patch.yml 的 id 一致")
   assert.deepEqual(mod.inject, ['tools'], '必须 inject tools')
   assert.equal(typeof mod.apply, 'function', '必须导出 apply')
 })

@@ -70,7 +70,7 @@ export function applyPlan(plan: RelocationPlan, options: ApplyOptions): ApplyRes
         say(`unchanged ${f.name} (${s.id})`)
         continue
       }
-      const tmp = `${f.path}.dsh-session-mover.tmp`
+      const tmp = `${f.path}.dsh-session-manager.tmp`
       writeFileSync(tmp, r.buffer)
       // 落盘前复验：临时文件必须能解出期望文本
       const expectedHeader = decodeAll(r.buffer).split('\n')[0]

@@ -86,7 +86,7 @@ function defaults(args: Args): Paths {
   return {
     sessionsRoot: args.root ?? join(home, 'sessions'),
     registryPath: args.registry ?? join(home, 'storages', 'workspace.json'),
-    backupRoot: args.backup ?? join(home, 'dsh-session-mover-backups'),
+    backupRoot: args.backup ?? join(home, 'dsh-session-manager-backups'),
   }
 }
 
@@ -95,13 +95,13 @@ function fail(msg: string): void {
   process.exitCode = 1
 }
 
-const HELP = `dsh-session-mover — 迁移 DSH 会话到另一个工作区目录
+const HELP = `dsh-session-manager — 迁移 DSH 会话到另一个工作区目录
 
 用法：
-  dsh-session-mover plan     --from <源目录> --to <目标目录> [--session <id>]... [--json]
-  dsh-session-mover apply    --from <源目录> --to <目标目录> [--session <id>]...
-  dsh-session-mover verify   --to <目录>
-  dsh-session-mover rollback --backup <备份目录>
+  dsh-session-manager plan     --from <源目录> --to <目标目录> [--session <id>]... [--json]
+  dsh-session-manager apply    --from <源目录> --to <目标目录> [--session <id>]...
+  dsh-session-manager verify   --to <目录>
+  dsh-session-manager rollback --backup <备份目录>
 
 公共选项：
   --root <sessionsRoot>   会话根目录（缺省 $DSH_HOME/sessions）

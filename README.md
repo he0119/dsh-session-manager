@@ -1,4 +1,4 @@
-# dsh-session-mover
+# dsh-session-manager
 
 把 DSH 的工作区与会话迁移到新目录：改写会话日志 `cwd`、迁移日志目录、重挂 workspace 归属，
 并可选择性搬迁"会话中创建的文件"。
@@ -48,7 +48,7 @@ node lib/cli.js verify --to '<目标目录>'
 node lib/cli.js rollback --backup '<apply 输出的备份目录>'
 ```
 
-装好之后也可以直接用 bin（`dsh-session-mover plan …`）。
+装好之后也可以直接用 bin（`dsh-session-manager plan …`）。
 
 缺省路径为 `$DSH_HOME/sessions`、`$DSH_HOME/storages/workspace.json`，
 可用 `--root` / `--registry` / `--backup` 覆盖。`plan` 有问题时退出码 2，不执行任何写。
@@ -76,7 +76,7 @@ node lib/cli.js rollback --backup '<apply 输出的备份目录>'
 
 ```bash
 # 用 DSH 自带的插件命令（它会替你建/填充 profile，并维护依赖与锁文件）
-npx @deepseek-ai/dsh@next plugin --profile desktop add /path/to/dsh-session-mover
+npx @deepseek-ai/dsh@next plugin --profile desktop add /path/to/dsh-session-manager
 # 然后重启 DSH
 ```
 

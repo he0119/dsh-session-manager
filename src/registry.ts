@@ -103,7 +103,7 @@ export function readRegistry(path: string): WorkspaceRegistryState {
  * 警告：宿主进程内持有内存副本，离线落盘需要重启才会被承认，且可能被覆盖。
  */
 export function writeRegistryAtomic(path: string, reg: WorkspaceRegistryState): void {
-  const tmp = `${path}.dsh-session-mover.tmp`
+  const tmp = `${path}.dsh-session-manager.tmp`
   writeFileSync(tmp, JSON.stringify(reg, null, 2) + '\n')
   renameSync(tmp, path)
 }
