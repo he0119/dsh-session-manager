@@ -99,6 +99,30 @@ export function MigrationPanel({ t = fallback, state, reload }: PanelShare): Rea
     () => sessions.filter((session) => from.trim() !== '' && session.cwd === from.trim()),
     [sessions, from],
   )
+
+  // 源目录候选 = 已登记工作区 **+ 库里真有会话的目录**（账本里未必有它：未登记，或记的是旧路径）。
+  // "只迁其中几条"的第一步是先看见这些会话在哪个目录下，所以每个候选都报**库里的条数**——
+  // 账本的登记条数会骗人：同一个目录下可能还有没登记在册的会话（那些默认也会被一起搬走）。
+  const sourceOptions = React.useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const session of sessions) {
+      if (typeof session.cwd !== 'string' || session.cwd === '') continue
+      counts.set(session.cwd, (counts.get(session.cwd) ?? 0) + 1)
+    }
+    const options: { path: string; title?: string; count: number }[] = []
+    const seen = new Set<string>()
+    for (const workspace of workspaces) {
+      if (seen.has(workspace.path)) continue
+      seen.add(workspace.path)
+      options.push({ path: workspace.path, title: workspace.title, count: counts.get(workspace.path) ?? 0 })
+    }
+    for (const [path, count] of [...counts.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+      if (seen.has(path)) continue
+      seen.add(path)
+      options.push({ path, count })
+    }
+    return options
+  }, [sessions, workspaces])
   const chosen = React.useMemo(
     () => (pickMode === 'all' ? matching.map((s) => s.id) : matching.filter((s) => picked.includes(s.id)).map((s) => s.id)),
     [pickMode, matching, picked],
@@ -247,36 +271,44 @@ export function MigrationPanel({ t = fallback, state, reload }: PanelShare): Rea
           </label>
         </div>
 
-        {workspaces.length > 0 && (
+        {(sourceOptions.length > 0 || workspaces.length > 0) && (
           <div className="dsm-controls">
-            <select
-              className="dsm-select"
-              value=""
-              onChange={(event) => {
-                if (event.target.value !== '') setFrom(event.target.value)
-              }}
-            >
-              <option value="">{t('fillFromWorkspace')}</option>
-              {workspaces.map((workspace) => (
-                <option key={workspace.id} value={workspace.path}>
-                  {workspace.title} — {workspace.path}
-                </option>
-              ))}
-            </select>
-            <select
-              className="dsm-select"
-              value=""
-              onChange={(event) => {
-                if (event.target.value !== '') setTo(event.target.value)
-              }}
-            >
-              <option value="">{t('fillToWorkspace')}</option>
-              {workspaces.map((workspace) => (
-                <option key={workspace.id} value={workspace.path}>
-                  {workspace.title} — {workspace.path}
-                </option>
-              ))}
-            </select>
+            {sourceOptions.length > 0 && (
+              <select
+                className="dsm-select"
+                value=""
+                onChange={(event) => {
+                  if (event.target.value === '') return
+                  setFrom(event.target.value)
+                  setPicked([])
+                  setOutcome(null)
+                }}
+              >
+                <option value="">{t('pickSource')}</option>
+                {sourceOptions.map((source) => (
+                  <option key={source.path} value={source.path}>
+                    {source.title === undefined ? source.path : `${source.title} — ${source.path}`} —{' '}
+                    {t('sessionsInDir', { count: source.count })}
+                  </option>
+                ))}
+              </select>
+            )}
+            {workspaces.length > 0 && (
+              <select
+                className="dsm-select"
+                value=""
+                onChange={(event) => {
+                  if (event.target.value !== '') setTo(event.target.value)
+                }}
+              >
+                <option value="">{t('pickTarget')}</option>
+                {workspaces.map((workspace) => (
+                  <option key={workspace.id} value={workspace.path}>
+                    {workspace.title} — {workspace.path}
+                  </option>
+                ))}
+              </select>
+            )}
           </div>
         )}
 
@@ -302,39 +334,62 @@ export function MigrationPanel({ t = fallback, state, reload }: PanelShare): Rea
           </label>
         </div>
 
-        <div className="dsm-options">
-          <label className="dsm-check">
-            <input type="radio" name="dsm-pick" checked={pickMode === 'all'} onChange={() => setPickMode('all')} />
-            <span>{t('allSessions')}</span>
-          </label>
-          <label className="dsm-check">
-            <input type="radio" name="dsm-pick" checked={pickMode === 'subset'} onChange={() => setPickMode('subset')} />
-            <span>{t('selectedCount', { count: chosen.length })}</span>
-          </label>
-          <span className="dsm-hint">
-            {matching.length > 0 ? t('sourceSessions', { count: matching.length }) : t('sourceSessionsNone')}
-          </span>
+        <div className="dsm-field">
+          <span className="dsm-fieldLabel">{t('pickScopeLabel')}</span>
+          <div className="dsm-options">
+            <label className="dsm-check">
+              <input type="radio" name="dsm-pick" checked={pickMode === 'all'} onChange={() => setPickMode('all')} />
+              <span>{t('allSessions')}</span>
+            </label>
+            <label className="dsm-check">
+              <input type="radio" name="dsm-pick" checked={pickMode === 'subset'} onChange={() => setPickMode('subset')} />
+              <span>
+                {pickMode === 'subset' ? t('selectedCount', { count: chosen.length }) : t('pickSubsetLabel')}
+              </span>
+            </label>
+            <span className="dsm-hint">
+              {matching.length > 0 ? t('sourceSessions', { count: matching.length }) : t('sourceSessionsNone')}
+            </span>
+          </div>
         </div>
 
-        {pickMode === 'subset' && matching.length > 0 && (
-          <div className="dsm-list">
-            {matching.map((session) => (
-              <label key={session.id} className="dsm-row dsm-rowPick">
-                <input
-                  type="checkbox"
-                  checked={picked.includes(session.id)}
-                  onChange={() =>
-                    setPicked((current) =>
-                      current.includes(session.id) ? current.filter((id) => id !== session.id) : [...current, session.id],
-                    )
-                  }
-                />
-                <span className="dsm-rowId">{session.id}</span>
-                <span className="dsm-meta">{formatBytes(session.bytes)}</span>
-                <span className="dsm-meta">{formatTime(new Date(session.createdAt).toISOString())}</span>
-              </label>
-            ))}
-          </div>
+        {matching.length > 0 && (
+          <>
+            <div className="dsm-options">
+              <span className="dsm-hint">{pickMode === 'all' ? t('pickTickHint') : t('pickSubsetHint')}</span>
+              {pickMode === 'subset' && (
+                <>
+                  <span className="dsm-spacer" />
+                  <button type="button" className="dsm-button" onClick={() => setPicked(matching.map((session) => session.id))}>
+                    {t('selectAllInSource')}
+                  </button>
+                  <button type="button" className="dsm-button" onClick={() => setPicked([])}>
+                    {t('clearPick')}
+                  </button>
+                </>
+              )}
+            </div>
+            <div className="dsm-list">
+              {matching.map((session) => (
+                <label key={session.id} className="dsm-row dsm-rowPick">
+                  <input
+                    type="checkbox"
+                    checked={pickMode === 'subset' && picked.includes(session.id)}
+                    onChange={() => {
+                      // 在「全部」下勾某一条 = 我指的就是这一条：顺势切到子集，不要求用户先改单选框
+                      if (pickMode === 'all') setPickMode('subset')
+                      setPicked((current) =>
+                        current.includes(session.id) ? current.filter((id) => id !== session.id) : [...current, session.id],
+                      )
+                    }}
+                  />
+                  <span className="dsm-rowId">{session.id}</span>
+                  <span className="dsm-meta">{formatBytes(session.bytes)}</span>
+                  <span className="dsm-meta">{formatTime(new Date(session.createdAt).toISOString())}</span>
+                </label>
+              ))}
+            </div>
+          </>
         )}
 
         <div className="dsm-controls">

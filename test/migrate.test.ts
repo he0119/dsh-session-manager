@@ -19,7 +19,7 @@ import {
   type MigrateDeps,
 } from '../src/migrate.ts'
 import { sessionDir } from '../src/paths.ts'
-import { writeRegistryAtomic } from '../src/registry.ts'
+import { writeRegistryAtomic, readRegistry } from '../src/registry.ts'
 import type { DecodeAll, SessionHeader, WorkspaceRegistryState } from '../src/types.ts'
 import { encodeRawFrame } from '../src/zstd-frame.ts'
 
@@ -34,8 +34,8 @@ interface Sandbox {
   sessionId: string
 }
 
-/** 造一个最小但完整的沙箱：源工作区里一条会话 + 指向它的注册表 + 已存在的目标目录。 */
-function makeSandbox(name: string): Sandbox {
+/** 造一个最小但完整的沙箱：源工作区里若干条会话 + 指向它们的注册表 + 已存在的目标目录。 */
+function makeSandbox(name: string, ids: readonly string[] = ['session-migrate-1']): Sandbox {
   const base = join(import.meta.dirname, '.sandbox', name)
   rmSync(base, { recursive: true, force: true })
   const sessionsRoot = join(base, 'sessions')
@@ -43,22 +43,20 @@ function makeSandbox(name: string): Sandbox {
   mkdirSync(FROM, { recursive: true })
   mkdirSync(TO, { recursive: true })
 
-  const sessionId = 'session-migrate-1'
-  const header: SessionHeader = {
-    type: 'session',
-    version: 4,
-    id: sessionId,
-    createdAt: 1000,
-    cwd: FROM,
-    isSeeded: false,
-    delegationDepth: 0,
-  }
-  const dir = sessionDir(sessionsRoot, FROM, sessionId)
-  mkdirSync(dir, { recursive: true })
-  writeFileSync(
-    join(dir, 'session.v4.jsonl.zstd'),
-    encodeRawFrame(`${JSON.stringify(header)}\n`),
-  )
+  ids.forEach((id, index) => {
+    const header: SessionHeader = {
+      type: 'session',
+      version: 4,
+      id,
+      createdAt: 1000 + index,
+      cwd: FROM,
+      isSeeded: false,
+      delegationDepth: 0,
+    }
+    const dir = sessionDir(sessionsRoot, FROM, id)
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'session.v4.jsonl.zstd'), encodeRawFrame(`${JSON.stringify(header)}\n`))
+  })
 
   const registryPath = join(base, 'workspace.json')
   const registry: WorkspaceRegistryState = {
@@ -69,7 +67,7 @@ function makeSandbox(name: string): Sandbox {
         'ws-from': {
           path: FROM,
           title: 'from',
-          sessionIds: [sessionId],
+          sessionIds: [...ids],
           createdAt: '2026-01-01T00:00:00.000Z',
           updatedAt: '2026-01-01T00:00:00.000Z',
         },
@@ -80,7 +78,7 @@ function makeSandbox(name: string): Sandbox {
 
   return {
     base,
-    sessionId,
+    sessionId: ids[0]!,
     deps: { sessionsRoot, registryPath, backupRoot: join(base, 'backups'), decodeAll },
   }
 }
@@ -148,6 +146,38 @@ test('执行：改写 header.cwd、搬目录、登记目标工作区，并留下
   assert.equal(listed[0]?.from, FROM)
   assert.equal(listed[0]?.to, TO)
 
+  rmSync(sb.base, { recursive: true, force: true })
+})
+
+test('子集：只搬点名的会话，源工作区没被搬空就留在账本里', () => {
+  const sb = makeSandbox('migrate-subset', ['session-keep', 'session-go'])
+  const run = runMigration(sb.deps, { from: FROM, to: TO, sessionIds: ['session-go'] }, { apply: true })
+
+  assert.equal(run.applied, true)
+  assert.equal(run.verified, true, `复核应当通过：${run.problems.join('; ')}`)
+  // 预演与落地看到的是同一份子集
+  assert.deepEqual(run.preview.sessions.map((s) => s.id), ['session-go'])
+  assert.equal(run.moved, 1)
+  // 没被点名的那条必须原地不动
+  assert.equal(existsSync(sessionDir(sb.deps.sessionsRoot, FROM, 'session-keep')), true, '未点名的会话不该被搬走')
+  assert.equal(existsSync(sessionDir(sb.deps.sessionsRoot, FROM, 'session-go')), false)
+  assert.equal(existsSync(sessionDir(sb.deps.sessionsRoot, TO, 'session-go')), true)
+
+  // 账本：只摘走 session-go；源工作区还剩一条，所以必须留着
+  const change = run.preview.registryChange
+  assert.equal(change?.removedSources.length, 0, '源工作区没被搬空，不该从账本上删掉')
+  assert.deepEqual(change?.movedFrom.map((entry) => entry.sessionIds), [['session-go']])
+  assert.deepEqual(readRegistry(sb.deps.registryPath).tables.workspaces['ws-from']?.sessionIds, ['session-keep'])
+
+  rmSync(sb.base, { recursive: true, force: true })
+})
+
+test('子集：点名的会话不在源桶里 → 预演就报问题，而不是静默少搬', () => {
+  const sb = makeSandbox('migrate-subset-unknown', ['session-a'])
+  const preview = previewMigration(sb.deps, { from: FROM, to: TO, sessionIds: ['session-a', 'session-ghost'] })
+
+  assert.equal(preview.ok, false)
+  assert.match(preview.problems.join('; '), /session-ghost not found/)
   rmSync(sb.base, { recursive: true, force: true })
 })
 

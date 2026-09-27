@@ -322,6 +322,36 @@ test('POST /migrate：mode 缺省只预演，预演结果里带上源/目标桶�
   assert.equal(existsSync(sessionDir(sandbox.sessionsRoot, CWD_A, 'session-a')), true)
 })
 
+test('POST /migrate：带 sessionIds 时只搬点名的会话（界面「只选其中几条」走的就是这条路）', async () => {
+  const sandbox = makeSandbox('web-migrate-subset')
+  writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000)
+  writeSession(sandbox.sessionsRoot, 'session-b', CWD_A, 2000)
+
+  const handlers = createApiHandlers(deps(sandbox))
+  const { res, captured } = fakeRes()
+  await handlers['POST /migrate']!(
+    fakeReq(
+      'POST',
+      `${API_PREFIX}/migrate`,
+      Buffer.from(JSON.stringify({ mode: 'apply', from: CWD_A, to: CWD_B, sessionIds: ['session-b'] })),
+    ),
+    res,
+  )
+
+  assert.equal(captured.status, 200)
+  const body = json(captured)
+  assert.equal(body['applied'], true)
+  assert.deepEqual(
+    ((body['preview'] as Record<string, unknown>)['sessions'] as { id: string }[]).map((s) => s.id),
+    ['session-b'],
+  )
+  assert.equal(existsSync(sessionDir(sandbox.sessionsRoot, CWD_A, 'session-a')), true, '未点名的会话必须留在源桶')
+  assert.equal(existsSync(sessionDir(sandbox.sessionsRoot, CWD_A, 'session-b')), false)
+  assert.equal(existsSync(sessionDir(sandbox.sessionsRoot, CWD_B, 'session-b')), true)
+  // 源工作区没被搬空 → 账本里必须还在
+  assert.deepEqual(readRegistry(sandbox.registryPath).tables.workspaces['ws-a']?.sessionIds, ['session-a'])
+})
+
 test('POST /migrate：mode=apply 真搬并回可回滚的备份；注入 effectMode 时如实回报', async () => {
   const sandbox = makeSandbox('web-migrate-apply')
   writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000)

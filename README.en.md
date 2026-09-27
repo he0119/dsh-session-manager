@@ -15,7 +15,7 @@ directories, re-home workspace membership, and optionally move the files those s
 >   back together with the sessions
 > - ✅ Source is TypeScript: `src/*.ts` → tsdown → `lib/` (build output, not committed); `tsc` typecheck
 >   and the build both pass
-> - ✅ **94 of 96 tests pass** (real log files, real registry, end-to-end byte-level rollback assertions,
+> - ✅ **97 of 99 tests pass** (real log files, real registry, end-to-end byte-level rollback assertions,
 >   and a built-artifact smoke test)
 > - ⏳ Pending your go-ahead: install into a profile and restart DSH to load the 4 tools and open that
 >   settings page for real (the page's styling is verified at build/artifact-contract level only — it
@@ -90,9 +90,13 @@ package ships a Web Client half) with two tabs:
 Previously CLI- and tool-only, now the same orchestration (`src/migrate.ts`, shared by all three entry
 points) is on screen:
 
-- source workspace / target directory (must already exist), an optional title for a newly created
-  workspace, whether to carry the **files the sessions created**, whether to carry unregistered
-  sessions, and "all / only these";
+- the source directory can be picked from a dropdown (registered workspaces **plus any directory the
+  library actually holds sessions for**, annotated with that count), so no path has to be typed from memory;
+- target directory (must already exist), an optional title for a newly created workspace, whether to
+  carry the **files the sessions created**, and whether to carry unregistered sessions;
+- **move the whole source directory, or only some of it**: the sessions of the source directory are
+  listed, and ticking any row switches to "only the ticked ones"; one source directory per run (one
+  request, one bucket);
 - **Preview**: session, log and byte counts, source → target bucket, **how the ledger changes** (create
   or reuse the target workspace, how many sessions are added, which workspaces lose them, whether an
   emptied workspace is removed), the artifact plan and its skip reasons;
