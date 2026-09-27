@@ -1,7 +1,7 @@
 // 会话产物：提取（证据分层）、收窄（存在性 + 嵌套剪枝）、搬迁与回滚。
 import assert from 'node:assert/strict'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, win32 } from 'node:path'
 import test from 'node:test'
 
 import { decompress } from 'fzstd'
@@ -72,8 +72,10 @@ test('提取：相对路径按 cwd 解析；工作区外的路径也会被提取
   const text = logText([writeCall('sub\\rel.txt'), writeCall('D:\\elsewhere\\x.txt')])
   const { candidates } = extractArtifactsFromLog(text, { cwd: CWD })
   const paths = candidates.map((c) => c.path).sort()
-  assert.deepEqual(paths, [join(CWD, 'sub', 'rel.txt'), 'D:\\elsewhere\\x.txt'])
-  assert.equal(isInside(join(CWD, 'sub', 'rel.txt'), CWD), true)
+  // 期望值用 win32 那套算：被测行为是「按路径自己的方言解析」，与当前宿主无关——
+  // 宿主的 join 在 Linux 上会给出 `C:\Users\me\Downloads/sub/rel.txt` 这种混着来的串。
+  assert.deepEqual(paths, [win32.join(CWD, 'sub', 'rel.txt'), 'D:\\elsewhere\\x.txt'])
+  assert.equal(isInside(win32.join(CWD, 'sub', 'rel.txt'), CWD), true)
   assert.equal(isInside('D:\\elsewhere\\x.txt', CWD), false)
 })
 
@@ -149,7 +151,8 @@ test('规划：includeKinds 可排除被修改的文件', () => {
 
 test('resolveArtifactPath：绝对保留、相对按 cwd 解析、空值返回 null', () => {
   assert.equal(resolveArtifactPath('D:\\a\\b', CWD), 'D:\\a\\b')
-  assert.equal(resolveArtifactPath('a\\b', CWD), join(CWD, 'a', 'b'))
+  // 同上：cwd 是 Windows 方言，相对路径就按 win32 解析，与宿主平台无关。
+  assert.equal(resolveArtifactPath('a\\b', CWD), win32.join(CWD, 'a', 'b'))
   assert.equal(resolveArtifactPath('', CWD), null)
   assert.equal(resolveArtifactPath(null, CWD), null)
 })

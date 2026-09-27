@@ -11,23 +11,88 @@
 //     不存在的路径不能进搬迁计划；
 //   * **剪掉嵌套**：若某目录要被整体搬走，它内部的文件就不该再单独搬一遍。
 import { cpSync, existsSync as fsExists, mkdirSync, renameSync, rmSync, statSync } from 'node:fs'
-import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
+import { dirname, posix, win32 } from 'node:path'
 
 import type { ArtifactMove, ArtifactSkip } from './types.ts'
 
-/** 路径包含判断（Windows 大小写不敏感由 resolve + relative 承担）。 */
-export function isInside(child: string, parent: string): boolean {
-  const c = resolve(child)
-  const p = resolve(parent)
-  const rel = relative(p, c)
-  return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel)
+// ── 路径方言 ──────────────────────────────────────────────────────────────
+//
+// 会话日志里记的是**当时那台机器**的路径，而这次迁移可能跑在另一个平台上：日志写着
+// `C:\Users\me\Downloads\x.txt`，本进程却在 Linux 上。拿宿主的 `node:path` 直接处理它，
+// `isAbsolute('C:\\…')` 在 Linux 上是 false，于是它被当成相对路径拼到当前工作目录后面
+// （`/repo/C:\Users\me\Downloads/x.txt`）——包含判断、相对化、目标路径会跟着一起错，
+// 而且错得安静：规划看起来成功，产物却指向一个不存在的路径。
+//
+// 所以先认**方言**（盘符 / UNC → win32，`/` 开头 → posix），再用同一方言的实现去算；
+// 相对路径按 `cwd` 的方言解析。两个方言之间没有包含关系——Windows 路径不可能位于一个
+// POSIX 目录里，这时 `isInside` 直接给 false，而不是凑出一个看似合理的相对路径。
+type Flavor = 'win32' | 'posix'
+
+/** 只用得到这几个：够本模块全部算术，也避免 win32/posix 的联合类型在调用点上打架。 */
+interface PathApi {
+  normalize(p: string): string
+  resolve(...p: string[]): string
+  relative(from: string, to: string): string
+  join(...p: string[]): string
+  isAbsolute(p: string): boolean
 }
 
-/** 相对路径按 cwd 解析；绝对路径原样；空值返回 null。 */
+const PATH_API: Record<Flavor, PathApi> = { win32, posix }
+const HOST_FLAVOR: Flavor = process.platform === 'win32' ? 'win32' : 'posix'
+
+const WINDOWS_DRIVE = /^[A-Za-z]:[\\/]/
+/** `\\server\share\…`——日志里出现过的那种 UNC 写法；`//server` 歧义太大，不认。 */
+const WINDOWS_UNC = /^\\\\/
+
+function flavorOf(p: string): Flavor | undefined {
+  if (WINDOWS_DRIVE.test(p) || WINDOWS_UNC.test(p)) return 'win32'
+  if (p.startsWith('/')) return 'posix'
+  return undefined
+}
+
+/** 第一个能定下方言的候选；都没有就落到宿主。 */
+function flavorFor(...candidates: Array<string | undefined>): Flavor {
+  for (const candidate of candidates) {
+    if (!candidate) continue
+    const flavor = flavorOf(candidate)
+    if (flavor) return flavor
+  }
+  return HOST_FLAVOR
+}
+
+function apiOf(flavor: Flavor): PathApi {
+  return PATH_API[flavor]
+}
+
+/**
+ * 把一个已经定过方言的路径规范化。
+ *
+ * 有方言的路径**只做 normalize**：在 Linux 上 `posix.resolve('D:\\a\\b')` 会返回
+ * `/repo/D:\a\b`，那正是这里要避免的"修正"。没有方言（相对路径）才按宿主那套解析。
+ */
+function canonical(p: string, flavor: Flavor): string {
+  const api = apiOf(flavor)
+  return flavorOf(p) ? api.normalize(p) : api.resolve(p)
+}
+
+/** 路径包含判断（同一方言内比较；不同方言恒为 false）。 */
+export function isInside(child: string, parent: string): boolean {
+  const childFlavor = flavorOf(child)
+  const parentFlavor = flavorOf(parent)
+  if (childFlavor && parentFlavor && childFlavor !== parentFlavor) return false
+  const flavor = childFlavor ?? parentFlavor ?? HOST_FLAVOR
+  const api = apiOf(flavor)
+  const rel = api.relative(canonical(parent, flavor), canonical(child, flavor))
+  return rel !== '' && !rel.startsWith('..') && !api.isAbsolute(rel)
+}
+
+/** 相对路径按 cwd 的方言解析；绝对路径按它自己的方言规范化；空值返回 null。 */
 export function resolveArtifactPath(p: string | null | undefined, cwd: string): string | null {
   const s = String(p ?? '')
   if (!s) return null
-  return isAbsolute(s) ? resolve(s) : resolve(cwd, s)
+  const flavor = flavorOf(s) ?? flavorFor(cwd)
+  const api = apiOf(flavor)
+  return flavorOf(s) ? api.normalize(s) : api.resolve(cwd, s)
 }
 
 /** 造物动词的启发式（仅在命令确实提到该路径时才算候选）。 */
@@ -191,8 +256,12 @@ export function planArtifactMoves(options: PlanArtifactOptions): ArtifactPlanRes
   }
 
   for (const m of kept) {
-    m.relative = relative(resolve(fromDir), resolve(m.sourcePath))
-    m.targetPath = join(toDir, m.relative)
+    // 相对化与拼接都用**产物自己的方言**：它已经被 isInside 认可在 fromDir 之内，两者同源。
+    // 用宿主那套算的话，`C:\Users\me\x.txt` 会相对化成一个带盘符的怪串。
+    const flavor = flavorFor(m.sourcePath, fromDir)
+    const api = apiOf(flavor)
+    m.relative = api.relative(canonical(fromDir, flavor), canonical(m.sourcePath, flavor))
+    m.targetPath = apiOf(flavorFor(toDir, m.sourcePath)).join(toDir, m.relative)
     if (exists(m.targetPath)) problems.push(`artifact target already exists: ${m.targetPath}`)
   }
 
