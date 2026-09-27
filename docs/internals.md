@@ -101,6 +101,66 @@ decodeAll(buf[0..i)) + decodeAll(buf[i..)) === decodeAll(buf)
 `effectMode(ctx)` 因此**如实探测**：上游若提供 `workspaceRegistry.reassignSessions` 就走进程内
 即时生效，否则返回 `restart-required`，由工具返回值告诉调用方「必须重启 DSH」。不假装即时生效。
 
+## `.dhsess` 包：一条 gzip 流，而不是 tar
+
+容器是「magic + 清单 + 原始载荷」拼起来再整包 gzip：
+
+```
+gzip( 'DSHSESS1\n' | u32le 清单长度 | 清单 JSON | 各文件的原始字节 )
+```
+
+三个取舍：
+
+- **不用 tar**：这里只需要「清单 + 一段连续载荷」，而 tar 的 512 字节头、路径长度限制与 PAX
+  扩展在这个固定用途上全是负担。tar 换来的好处（`tar -xf` 就能拆）在这里也不成立——拆出来
+  的单帧文件本身还得按宿主的目录布局摆回去。
+- **载荷是原始日志字节，不重新编码**：日志内部本来就是 zstd 帧。解了再压会让「导出的东西」
+  与「磁盘上的东西」不再是一回事，而本包的立足点正是字节级可复原。
+- **整包 gzip，而不是逐文件压**：日志的 zstd 帧大多已是压缩态，逐文件再压收益接近零，却把
+  「解出来看一眼」变成要写代码的事；整包 gzip 对**迁移重写过的 raw-block 帧**（未压缩）是
+  实打实的收益，对已压缩的也只是几十字节。
+
+`readBundle()` 在导入之前逐条校验，任何一条不过就直接拒绝，坏包进不了会话库：
+
+| 校验 | 挡下什么 |
+|---|---|
+| magic 与 `formatVersion` | 不是 `.dhsess`、或是换代后本包读不懂的包 |
+| 每个条目的 `[offset, offset+bytes)` 落在载荷内 | 清单被改坏、偏移溢出 |
+| 每个条目的 sha256 | 载荷被截断或改动了一个字节 |
+| 会话目录名 == `encodeSegment(id)` | 宿主启动时会校验目录名与 header id 一致，不满足的包会污染会话库 |
+
+## 导入为什么「只跳过、不覆盖」
+
+导入是**跨实例**的操作：同一个 id 在源库里是唯一的一条会话，在目标库里可能已经存在（曾经导过、
+或本来就是同一台机器）。三种处理里，覆盖最危险（会顶掉目标库里那条会话的历史），合并语义上不可
+判定（两条日志没有共同的祖先），所以这里只留一条：**冲突只报告**。预演里那条会话标成 skip 并附上
+它在库里的位置，落地时创建数为 0 就直接 409。
+
+无 cwd 的会话（`_no-cwd` 桶）同样不硬塞：保持没有 cwd、不参与注册表重挂。给它编一个 cwd 会让
+header 声称一个它从未工作过的目录。
+
+落地时每个文件先写成 `<规范名>.part` 再 rename：`parseSessionLogName` 不认 `.part`，所以中途
+崩溃留下的是「发现阶段会忽略的文件」，而不是一个只有半截日志、看起来却正常的会话。
+
+## Web Client 半边的两条硬约束
+
+**一、产物必须是一个经典脚本。** DSH 的客户端模块系统只认
+`window.__ModuleLoader__.load({ id, factory })` 这种方式报名的脚本，工厂拿到一个同步的
+`require`，返回的 `module.exports` 就是插件的导出面（`inject` 与 `apply`）。因此 tsdown 的
+client 一份配置是 `format: 'cjs'` 外面套三行（banner/intro/footer），只有平台基线模块
+（`react`、`react/jsx-runtime`）保持 `require`，其余一律内联——客户端模块系统没有旁挂依赖的路由。
+`test/client.test.mjs` 用假的加载器与假 `require` 按这份契约执行 `lib/client.js`：契约错了在
+源码层面看不出来，只有跑一遍产物才知道。
+
+**二、不 require 宿主的 UI 原语包。** 那份包不是稳定契约（`dsh.client.inject` 的条目只用于
+激活排序，不构成依赖保证），而它一旦在某些版本里抛异常，整个槽位条目会被替换成崩溃占位
+（控制台里是 `slot entry crashed in '<slot>'`），用户看到的是空白而不是错误。所以控件全部手写，
+颜色只用 `Theme` 检查面列出的 `--dsw-alias-*` token（每个都带中性回落值，深浅主题自动跟随），
+类名收在自己的 `dsm-` 前缀下。
+
+注册走 `ctx.slots.inject(slot, () => ctx.slots.register(...))` 而不是直接 register：目标槽位
+由设置外壳在运行时声明，那个声明完全可能晚于本插件 `apply`。
+
 ## 验证：哪一层证明什么
 
 | 层 | 证明的事 | 位置 |
@@ -110,6 +170,9 @@ decodeAll(buf[0..i)) + decodeAll(buf[i..)) === decodeAll(buf)
 | 单元 | 保结构改写只动 header；拒绝错 cwd / 非 header / 首帧多行 | `test/session-log.test.mjs` |
 | 单元 | 启动四条不变式逐类可抓；`reHome` 前后校验 | `test/registry.test.mjs` |
 | 单元 | 产物证据分层、存在性求交、嵌套剪枝 | `test/artifacts.test.mjs` |
+| 单元 | `.dhsess` 字节往返、包校验的拒绝面、导入预演/落地/冲突跳过 | `test/transfer.test.ts` |
+| 单元 | 界面端点：列会话、导出、导入与各条 400/404/409 | `test/web.test.ts` |
+| 产物契约 | 按模块加载器契约执行 `lib/client.js`：id、导出面、槽位、字典键集 | `test/client.test.mjs` |
 | 端到端 | 沙箱内造多帧日志 + 注册表，跑 `plan → apply → verify → rollback`，断言**逐字节**还原 | `test/engine.test.mjs` |
 | 契约 | 用**真实 `@deepseek-ai/dsh-tools`** 走 `defineTool`：schema 归一化、实参校验、真实执行 | `test/tools.test.mjs` |
 | 真实数据 | 本机真实会话日志（多帧）+ 真实注册表（84 个工作区） | `test/real-data.test.mjs`、`test/registry.test.mjs` |

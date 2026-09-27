@@ -13,7 +13,7 @@ directories, re-home workspace membership, and optionally move the files those s
 >   back together with the sessions
 > - ✅ Source is TypeScript: `src/*.ts` → tsdown → `lib/` (build output, not committed); `tsc` typecheck
 >   and the build both pass
-> - ✅ **62 tests pass** (real log files, real registry, end-to-end byte-level rollback assertions,
+> - ✅ **79 of 81 tests pass** (real log files, real registry, end-to-end byte-level rollback assertions,
 >   and a built-artifact smoke test)
 > - ⏳ Pending your go-ahead: install into a profile and restart DSH to load the 4 tools for real
 
@@ -66,6 +66,23 @@ Defaults are `$DSH_HOME/sessions` and `$DSH_HOME/storages/workspace.json`; overr
 | `migrate_sessions` | needs `apply:true` | Dry-run by default; performs a byte-level backup and self-verifies after |
 | `rollback_session_migration` | yes | Byte-exact rollback from a backup directory |
 | `verify_workspace_sessions` | no | Check that a directory's bucket agrees with its headers |
+
+### Session import & export (Web UI)
+
+Once installed into a profile, **Settings → Plugins** gains a **Session import & export** page (this
+package ships a Web Client half):
+
+- **Export**: tick sessions → the browser downloads one `.dhsess` bundle. The bundle carries the raw
+  bytes of **every generation** of those logs (each with a sha256), not files the session created.
+- **Import**: pick a bundle and a target workspace → **preview first** (per-session: what will be
+  created, which cwd gets rewritten, what is skipped, how the registry changes) → then confirm. Import
+  **never overwrites**: a session whose id already exists in the library is skipped and reported; a
+  session with no cwd lands in the `_no-cwd` bucket and is not ledgered.
+
+The endpoints live under `/dsh-session-manager/api` (`state` / `export` / `import`) and all writes
+happen inside the host process. A profile without the `webServer` service (tools-only front ends) still
+loads the plugin — the page simply does not appear. See [docs/internals.md](docs/internals.md) for the
+bundle shape and the invariants it enforces.
 
 ### When it takes effect (dual mode)
 
@@ -193,8 +210,11 @@ Block_Type=Raw), making the write path independent of any compressor, external b
 | `src/journal.ts` | byte-level backup manifest and rollback | none |
 | `src/execute.ts` | apply + independent verification | none |
 | `src/artifacts.ts` | artifact extraction (evidence layering), planning, moving | none |
+| `src/transfer.ts` | `.dhsess` container (build/parse/validate), import planning and apply | none |
 | `src/cli.ts` | offline CLI (plan/apply/verify/rollback) → `lib/cli.js` | none |
 | `src/tools.ts` | the 4 tool registrations | `dsh-tools` |
+| `src/web.ts` | UI endpoints (list / export / import); needs only a `{ register }` shape | none |
+| `src/client/*` | Web Client half: settings page, dictionaries, styles, endpoint calls → `lib/client.js` | none |
 | `src/index.ts` | plugin entry `apply(ctx, config)` | `dsh-tools` |
 
 The core stays free of DSH dependencies, so the plugin shell, the CLI and the tests all reuse the same
@@ -217,10 +237,18 @@ See [docs/development.md](docs/development.md) for how the tool-layer tests reso
 `@deepseek-ai/dsh-tools`, and [docs/internals.md](docs/internals.md) for the full rationale.
 
 `test/artifact.test.mjs` smoke-tests the **built artifact**: it loads `lib/index.js` and asserts the
-entry fields, the 4 tool registrations and the `apply()` disposer contract — closing the gap between
-"the source passes" and "the artifact actually loads in a host". It skips when the build is absent;
-`pnpm run build && pnpm test` is the all-green command. Its real-data case is gated behind
-`DSM_SMOKE_WORKSPACE` and additionally asserts that a read-only `plan` created no target bucket.
+entry fields, the 4 tool registrations, the UI endpoint registrations and the `apply()` disposer
+contract — closing the gap between "the source passes" and "the artifact actually loads in a host".
+`test/client.test.mjs` does the same for the Web Client half: it runs `lib/client.js` through a fake
+`window.__ModuleLoader__` following the module-loader contract, and asserts the factory id, the export
+surface, the slot it registers into and that both dictionaries share one key set. Both skip when the
+build is absent; `pnpm run build && pnpm test` is the all-green command. The real-data case is gated
+behind `DSM_SMOKE_WORKSPACE` and additionally asserts that a read-only `plan` created no target bucket.
+
+`test/transfer.test.ts` covers the `.dhsess` byte round-trip, the rejection surface of bundle
+validation (sha256 / truncation / magic / version), import preview and apply, id-collision skip, and
+the no-cwd and plain-v0 branches. `test/web.test.ts` drives the endpoints with fake req/res objects:
+listing, export, import (preview/apply) and every 400/404/409 rejection.
 
 ## License
 

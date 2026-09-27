@@ -9,12 +9,15 @@
 
 ```sh
 pnpm install          # 或 npm install（本机请用 npm，见「本机安装」）
-pnpm run build        # tsdown：src/*.ts -> lib/*.js + lib/types/*.d.ts
+pnpm run build        # tsdown：三份配置 -> lib/index.js + lib/cli.js + lib/types/*.d.ts + lib/client.js
 pnpm test             # = node test/run-all.mjs
-pnpm run typecheck    # = tsc -p tsconfig.test.json
+pnpm run typecheck    # Host 与 Web Client 两个工程：tsconfig.test.json + tsconfig.client.json
 pnpm run check        # typecheck + test
 pnpm run check:package # 打包内容自检（要先 build，见 docs/releasing.md）
 ```
+
+单边重建：`pnpm run build:host` / `build:types` / `build:client`（三份配置共用 `lib/`，
+所以单独重建一端不会删掉另一端）。
 
 带真实数据回归（指向任一含会话桶的 `sessions/` 备份目录）：
 
@@ -96,21 +99,28 @@ Linux/CI 上 symlink 正常，用 `pnpm install` 走 `pnpm-lock.yaml` 即可。
 
 ```
 src/            手写源码（每个文件一个职责，核心层零 DSH 依赖）
-  index.ts        插件入口（挂 tools）
+  index.ts        插件入口（挂 tools，并在有 webServer 时挂界面端点）
   cli.ts          离线 CLI（构建出 lib/cli.js，package.json 的 bin 指向它）
-  tools.ts        4 个工具 + schema
+  tools.ts        4 个工具 + schema + 平台解码器实例
+  web.ts          界面端点（state / export / import），只要求一个 { register } 形状
+  client/         Web Client 半边（设置页 / 字典 / 样式 / 端点调用）-> lib/client.js
   ...             核心层：project-key / paths / zstd-frame / session-log /
-                  discovery / registry / artifacts / plan / journal / execute
+                  discovery / registry / artifacts / transfer / plan / journal / execute
 lib/            构建产物（tsdown 输出，已 gitignore）
 test/           测试（run-all.mjs 是进程内 runner）
 docs/           本目录
-tsdown.config.ts 两份构建配置：host（lib/*.js）与 types（lib/types/*.d.ts）
+tsdown.config.ts 三份构建配置：host（lib/*.js）、types（lib/types/*.d.ts）、client（lib/client.js）
 cordis.patch.yml 插件注册（package.json 的 dsh.bundle.patch 指向它）
+tsconfig.client.json Web Client 自己的类型工程（DOM + JSX；Host 那份没有）
 ```
 
 核心层（`project-key` / `paths` / `zstd-frame` / `session-log` / `discovery` / `registry` /
-`plan` / `journal` / `execute` / `artifacts`）**不依赖 DSH**，所以插件外壳、CLI 与测试三者共用
-同一段代码。只有 `src/tools.ts` 与 `src/index.ts` 依赖 `@deepseek-ai/dsh-tools`。
+`plan` / `journal` / `execute` / `artifacts` / `transfer`）**不依赖 DSH**，所以插件外壳、CLI 与
+测试三者共用同一段代码。只有 `src/tools.ts` 与 `src/index.ts` 依赖 `@deepseek-ai/dsh-tools`，
+`src/web.ts` 连它也不依赖（只认一个 `{ register }` 形状）。
+
+`src/client/**` 不在 Host 端那份 tsconfig 的 include 里：它要 DOM 与 JSX，而 Host 侧没有。
+那条边界是有意的——「浏览器 API 出现在 Host 代码里」在类型层面就不成立。
 
 `lib/` 是产物不是源：改代码改 `src/`，`pnpm run build` 重新生成；`lib/` 不进 git。
 

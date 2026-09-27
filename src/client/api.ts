@@ -1,0 +1,149 @@
+/**
+ * 界面与宿主端点之间的唯一通道。
+ *
+ * 为什么不走 Remote/typert：本页要的是**二进制**（下载一个包、上传一个包），而 Remote 那套是
+ * 结构化调用面；宿主已经为本插件开了自己的路由，同源 `fetch` 是最短路径，也省掉一层描述符。
+ *
+ * 端点由 `src/web.ts` 注册，路径固定在本插件命名空间下（`/dsh-session-manager/api`）。
+ *
+ * @module dsh-session-manager/client/api
+ */
+
+/** 宿主端点前缀（与 `src/web.ts` 的 `API_PREFIX` 必须一致）。 */
+export const API_PREFIX = '/dsh-session-manager/api'
+
+/** 界面上一条会话。 */
+export interface SessionSummary {
+  id: string
+  cwd?: string
+  createdAt: number
+  dir: string
+  workspaceId?: string
+  bytes: number
+  files: Array<{ name: string; bytes: number }>
+}
+
+/** 界面上一个工作区。 */
+export interface WorkspaceSummary {
+  id: string
+  path: string
+  title: string
+  sessionIds: string[]
+}
+
+/** `GET /state` 的响应。 */
+export interface StateResponse {
+  sessionsRoot: string
+  registryPath: string
+  problems: string[]
+  sessions: SessionSummary[]
+  workspaces: WorkspaceSummary[]
+}
+
+/** 导入计划里的一条会话。 */
+export interface ImportEntry {
+  id: string
+  action: 'create' | 'skip'
+  reason?: string
+  fromCwd?: string
+  toCwd?: string
+  dir: string
+  files: Array<{ name: string; bytes: number }>
+}
+
+/** 导入（预演或落地）的响应。 */
+export interface ImportResponse {
+  mode: 'plan' | 'apply'
+  ok: boolean
+  error?: string
+  problems: string[]
+  entries: ImportEntry[]
+  created: string[]
+  rehomed: string[]
+  bytes: number
+  written?: string[]
+  registryWritten?: boolean
+  note?: string
+  bundle?: { createdAt: string; source: { sessionsRoot?: string; pluginVersion?: string }; sessions: number }
+}
+
+/** 把响应体读成 JSON，失败时把人话抛出去（HTTP 层与业务错误都在这里收口）。 */
+async function asJson<T>(response: Response): Promise<T> {
+  const text = await response.text()
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(text)
+  } catch {
+    throw new Error(`HTTP ${response.status}：${text.slice(0, 200) || '空响应'}`)
+  }
+  const body = parsed as { error?: string }
+  if (!response.ok) throw new Error(body.error ?? `HTTP ${response.status}`)
+  return parsed as T
+}
+
+/** 读会话库与工作区清单。 */
+export async function fetchState(): Promise<StateResponse> {
+  return asJson<StateResponse>(await fetch(`${API_PREFIX}/state`, { headers: { accept: 'application/json' } }))
+}
+
+/** 导出的结果：字节 + 宿主给的文件名。 */
+export interface ExportResult {
+  blob: Blob
+  filename: string
+}
+
+/** 导出选中的会话。 */
+export async function exportSessions(sessionIds: readonly string[]): Promise<ExportResult> {
+  const response = await fetch(`${API_PREFIX}/export`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ sessionIds }),
+  })
+  if (!response.ok) {
+    // 失败时宿主回的是 JSON；成功时是二进制，所以只有失败这一支按 JSON 解。
+    await asJson<unknown>(response).catch((error: unknown) => {
+      throw error instanceof Error ? error : new Error(String(error))
+    })
+    throw new Error(`HTTP ${response.status}`)
+  }
+  const disposition = response.headers.get('content-disposition') ?? ''
+  const matched = /filename="([^"]+)"/.exec(disposition)
+  return { blob: await response.blob(), filename: matched?.[1] ?? 'dsh-sessions.dhsess' }
+}
+
+/** 导入一个包：`mode: 'plan'` 只预演不写盘。 */
+export async function importBundle(
+  bytes: ArrayBuffer,
+  targetCwd: string,
+  mode: 'plan' | 'apply',
+): Promise<ImportResponse> {
+  const url = `${API_PREFIX}/import?mode=${mode}&targetCwd=${encodeURIComponent(targetCwd)}`
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/octet-stream' },
+    body: bytes,
+  })
+  // 预演成功回 200，落地冲突回 409——两者都带完整的 JSON 正文，所以不按 ok 提前抛。
+  const text = await response.text()
+  let parsed: ImportResponse
+  try {
+    parsed = JSON.parse(text) as ImportResponse
+  } catch {
+    throw new Error(`HTTP ${response.status}：${text.slice(0, 200) || '空响应'}`)
+  }
+  if (!response.ok && parsed.error === undefined) throw new Error(`HTTP ${response.status}`)
+  return parsed
+}
+
+/** 触发浏览器下载。 */
+export function download(result: ExportResult): void {
+  const url = URL.createObjectURL(result.blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = result.filename
+  anchor.style.display = 'none'
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+  URL.revokeObjectURL(url)
+}

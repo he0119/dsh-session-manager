@@ -10,7 +10,8 @@
 > - ✅ 工具契约用**真实的 `@deepseek-ai/dsh-tools`** 验证（`defineTool` 归一化 + 实参校验 + 真实执行）
 > - ✅ 会话产物搬迁（`artifacts.mjs`）：证据分层 + 存在性求交 + 嵌套剪枝，可随会话一起回滚
 > - ✅ 源码为 TypeScript，`src/*.ts` → tsdown → `lib/`（构建产物不进 git）；`tsc` 类型检查与构建均通过
-> - ✅ **62 个用例全部通过**（含真实日志、真实注册表、端到端回滚的字节级断言、构建产物冒烟）
+> - ✅ **81 个用例通过 79 条**（含真实日志、真实注册表、端到端回滚的字节级断言、构建产物冒烟；
+>   另 2 条按环境变量门控跳过）
 > - ✅ 仓库工程化对齐参考项目：`.gitattributes`(全 LF)、`.gitignore`、`docs/`、双语 README、
 >   `.github/workflows/ci.yml`、`pnpm-workspace.yaml`、`icon.svg`、`LICENSE`、engines/scripts 约定
 > - ⏳ 待你确认：装进哪个 profile 并重启 DSH，在真实实例里加载这 4 个工具
@@ -61,6 +62,20 @@ node lib/cli.js rollback --backup '<apply 输出的备份目录>'
 | `migrate_sessions` | 需 `apply:true` | 默认 dry-run；执行前做字节级备份，事后自动复核 |
 | `rollback_session_migration` | 是 | 按备份目录字节级回滚 |
 | `verify_workspace_sessions` | 否 | 复核某目录桶内日志与 header 的一致性 |
+
+### 会话导入导出（Web 界面）
+
+装进 profile 后，**设置 → 插件** 里会多出一页「会话导入导出」（本包自带 Web Client 半边）：
+
+- **导出**：勾选会话 → 浏览器下载一个 `.dhsess` 包。包里是这些会话**所有代次日志的原始字节**
+  （逐条带 sha256），不含会话创建过的普通文件。
+- **导入**：选包 + 选目标工作区 → **先预演**（逐条列出会创建什么、cwd 会被改写成什么、哪些会被
+  跳过、注册表会怎么变）→ 再确认落盘。导入**永不覆盖**：库里已有同 id 的会话只跳过并报告；
+  包里没有 cwd 的会话落 `_no-cwd` 分桶，也不挂账本。
+
+端点都在 `/dsh-session-manager/api` 下（`state` / `export` / `import`），写盘只发生在宿主进程里；
+宿主没有 `webServer` 服务时（例如只用工具的前端）插件照常起，只是这一页不出现。
+包的形状与它逐条守住的不变式见 [docs/internals.md](docs/internals.md)。
 
 ### 何时生效（双模式）
 
@@ -181,8 +196,11 @@ npx @deepseek-ai/dsh@next plugin --profile desktop add /path/to/dsh-session-mana
 | `src/journal.ts` | 字节级备份清单与回滚 | 无 |
 | `src/execute.ts` | 执行 + 独立复核（含产物目标位校验） | 无 |
 | `src/artifacts.ts` | 会话产物提取（证据分层）、规划（求交/剪枝）、搬迁 | 无 |
+| `src/transfer.ts` | `.dhsess` 容器（导出/解析/校验）、导入预演与落地 | 无 |
 | `src/cli.ts` | 离线 CLI（plan/apply/verify/rollback）→ `lib/cli.js` | 无 |
 | `src/tools.ts` | 4 个工具注册 | `dsh-tools` |
+| `src/web.ts` | 界面端点（列会话 / 导出 / 导入），只要求 `{ register }` 形状 | 无 |
+| `src/client/*` | Web Client 半边：设置页、字典、样式、端点调用 → `lib/client.js` | 无 |
 | `src/index.ts` | 插件入口 `apply(ctx, config)` | `dsh-tools` |
 
 核心层保持零 DSH 依赖，所以既能被插件复用，也能被 CLI 复用，还能被独立测试。
@@ -209,10 +227,16 @@ DSM_FIXTURE=/path/to/backup node test/run-all.mjs
 
 `pnpm test` = `node test/run-all.mjs`；`pnpm run check` = `tsc` 类型检查 + 测试。
 
-`test/artifact.test.mjs` 是**构建产物**冒烟：加载 `lib/index.js`，断言入口字段、4 个工具注册
-与 `apply()` 的卸载函数契约——补上「源码通过」与「产物能装进宿主」之间那一环。产物不存在时跳过；
-`pnpm run build && pnpm test` 是全绿口径。真实数据那一条用 `DSM_SMOKE_WORKSPACE` 门控，会额外断言
-只读 `plan` 没有创建目标桶。
+`test/artifact.test.mjs` 是**构建产物**冒烟：加载 `lib/index.js`，断言入口字段、4 个工具注册、
+界面端点注册与 `apply()` 的卸载函数契约——补上「源码通过」与「产物能装进宿主」之间那一环。
+`test/client.test.mjs` 是同一件事在 Web Client 半边的版本：用假的 `window.__ModuleLoader__`
+按模块加载器的契约执行 `lib/client.js`，断言工厂 id、导出面、注册到的槽位与两份字典的键集。
+两者的产物都不存在时跳过；`pnpm run build && pnpm test` 是全绿口径。
+
+`test/transfer.test.ts` 覆盖 `.dhsess` 的字节往返、包校验的拒绝面（sha256/截断/magic/版本）、
+导入预演与落地、同 id 冲突只跳过、无 cwd 与明文 v0 日志两条分支；`test/web.test.ts` 用假
+req/res 直接打端点，覆盖列会话、导出、导入（预演/落地）与各条 400/404/409 拒绝面。
+真实数据那一条用 `DSM_SMOKE_WORKSPACE` 门控，会额外断言只读 `plan` 没有创建目标桶。
 
 ## 文档
 

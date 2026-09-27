@@ -19,10 +19,15 @@ import { projectKey } from './project-key.ts'
 import { readRegistry, validateRegistry } from './registry.ts'
 import type { DecodeAll, WorkspaceRegistryState } from './types.ts'
 
-/** 平台的 fzstd 解码器（纯 JS、多帧感知）。 */
+/**
+ * 平台的 fzstd 解码器（纯 JS、多帧感知）。
+ *
+ * 导出是为了让 Web 端点那一层用**同一个**解码器实例：`assertMultiFrameAware()` 的探测结论
+ * 只应对一份实现成立，两处各挑一个解码器正是当初「只解首帧」那个坑的入口。
+ */
 import { decompress } from 'fzstd'
 
-const decodeAll: DecodeAll = (buf: Uint8Array): string => Buffer.from(decompress(buf)).toString('utf8')
+export const decodeAll: DecodeAll = (buf: Uint8Array): string => Buffer.from(decompress(buf)).toString('utf8')
 
 /** 插件配置。 */
 export interface PluginConfig {

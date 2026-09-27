@@ -28,16 +28,28 @@ const EXPECTED = [
   'verify_workspace_sessions',
 ]
 
-/** 假的 host ctx：捕获注册的工具。 */
+/** 假的 host ctx：捕获注册的工具与路由。 */
 function fakeCtx() {
   const defs = []
+  const routes = []
+  const removed = []
   return {
     defs,
+    routes,
+    removed,
     ctx: {
       tools: {
         register: (def) => {
           defs.push(def)
           return () => {}
+        },
+      },
+      webServer: {
+        register: (route) => {
+          routes.push(route)
+          return () => {
+            removed.push(route.path)
+          }
         },
       },
       logger: { info: () => {}, warn: () => {}, error: () => {} },
@@ -72,6 +84,37 @@ test('产物冒烟：注册 4 个工具且 schema 已归一化', { skip }, async
   }
 
   dispose() // 不应抛
+})
+
+test('产物冒烟：宿主提供 webServer 时挂上三条界面路由，卸载时摘掉', { skip }, async () => {
+  const { apply } = await import(pathToFileURL(entry).href)
+  const { ctx, routes, removed } = fakeCtx()
+
+  const dispose = apply(ctx, {})
+  assert.deepEqual(
+    routes.map((route) => `${route.kind} ${route.path}`),
+    [
+      'exact /dsh-session-manager/api/state',
+      'exact /dsh-session-manager/api/export',
+      'exact /dsh-session-manager/api/import',
+    ],
+    '界面端点必须都在本插件命名空间下，且是精确路由',
+  )
+  for (const route of routes) assert.equal(typeof route.handler, 'function')
+
+  dispose()
+  assert.deepEqual(removed.sort(), routes.map((route) => route.path).sort(), '卸载必须摘掉每条路由')
+})
+
+test('产物冒烟：没有 webServer 的 profile 也能起来（只有工具）', { skip }, async () => {
+  const { apply } = await import(pathToFileURL(entry).href)
+  const { ctx, defs } = fakeCtx()
+  delete ctx.webServer
+
+  const dispose = apply(ctx, {})
+  assert.equal(typeof dispose, 'function')
+  assert.equal(defs.length, 4, '没有 webServer 时工具照旧注册')
+  dispose()
 })
 
 test('产物冒烟：plan 在真实工作区上只读可用', { skip: realDataSkip }, async () => {

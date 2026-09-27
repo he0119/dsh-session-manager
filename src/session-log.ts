@@ -40,6 +40,67 @@ export function readSessionLog(buf: Buffer, decodeAll: DecodeAll): SessionLog {
   return { text, lines, header }
 }
 
+/** 文本形态 cwd 改写的结果。 */
+export interface RelocateTextResult {
+  /** 改写后的完整正文（`unchanged` 为 true 时与原样相同）。 */
+  text: string
+  header: SessionHeader
+  nextHeader: SessionHeader
+  /** cwd 已是目标值、未做任何改写。 */
+  unchanged?: boolean
+}
+
+/**
+ * 只替换正文首行 header 里的 cwd 值（明文形态）。
+ *
+ * 与帧形态的 [`relocateHeaderCwd`] 共用同一套不变式与同一份 `CWD_FIELD`：改完之后除 cwd 外
+ * header 一个字段都不能变，cwd 必须真的变成目标值。无法切帧的日志（v0 的明文 `session.jsonl`）
+ * 与导入流程里已经解码好的正文都走这里。
+ *
+ * @throws 首行不是合法 header、没有 cwd 字段、或校验不过时抛错（不产出半成品）。
+ */
+export function relocateHeaderCwdText(text: string, to: string, from?: string): RelocateTextResult {
+  const lines = text.split('\n')
+  const firstLine = lines[0]
+  if (!firstLine || !firstLine.includes('"type":"session"')) {
+    throw new Error('session log first line is not a session header')
+  }
+  let header: SessionHeader
+  try {
+    header = JSON.parse(firstLine) as SessionHeader
+  } catch (error) {
+    throw new Error(
+      `session log header is not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
+    )
+  }
+
+  if (header.cwd === to) return { text, header, nextHeader: header, unchanged: true }
+  if (from !== undefined && header.cwd !== from) {
+    throw new Error(`session ${header.id}: header cwd is ${header.cwd}, expected ${from}`)
+  }
+  if (header.cwd === undefined) {
+    throw new Error(`session ${header.id}: header has no cwd to rewrite`)
+  }
+  if (!CWD_FIELD.test(firstLine)) {
+    throw new Error(`session ${header.id}: header line has no cwd field`)
+  }
+
+  lines[0] = firstLine.replace(CWD_FIELD, '"cwd":' + JSON.stringify(to))
+
+  // 校验：除 cwd 外，header 不得发生任何变化（防止正则误伤）。
+  const nextHeader = JSON.parse(lines[0] ?? '{}') as SessionHeader
+  const a: Partial<SessionHeader> = { ...header }
+  const b: Partial<SessionHeader> = { ...nextHeader }
+  delete a.cwd
+  delete b.cwd
+  if (JSON.stringify(a) !== JSON.stringify(b)) {
+    throw new Error(`session ${header.id}: header changed beyond cwd`)
+  }
+  if (nextHeader.cwd !== to) throw new Error(`session ${header.id}: cwd rewrite did not take effect`)
+
+  return { text: lines.join('\n'), header, nextHeader }
+}
+
 /** cwd 改写的结果。 */
 export interface RelocateResult {
   /** 新日志字节（`unchanged` 为 true 时与原样相同）。 */
@@ -99,36 +160,30 @@ export function relocateHeaderCwd(buf: Buffer, options: RelocateOptions): Reloca
   }
 
   const firstLines = split.first.split('\n')
-  const headLine = firstLines[0]
-  if (headLine === undefined || !CWD_FIELD.test(headLine)) {
-    throw new Error(`session ${header.id}: header line has no cwd field`)
-  }
-  firstLines[0] = headLine.replace(CWD_FIELD, '"cwd":' + JSON.stringify(to))
-
-  // 校验：除 cwd 外，header 不得发生任何变化（防止正则误伤）。
-  const nextHeader = JSON.parse(firstLines[0] ?? '{}') as SessionHeader
-  const a: Partial<SessionHeader> = { ...header }
-  const b: Partial<SessionHeader> = { ...nextHeader }
-  delete a.cwd
-  delete b.cwd
-  if (JSON.stringify(a) !== JSON.stringify(b)) {
-    throw new Error(`session ${header.id}: header changed beyond cwd`)
-  }
-  if (nextHeader.cwd !== to) throw new Error(`session ${header.id}: cwd rewrite did not take effect`)
   if (firstLines.length - 1 !== 1) {
     throw new Error(
       `session ${header.id}: first frame carries ${firstLines.length - 1} lines, expected exactly the header`,
     )
   }
 
-  const compressed = compressFrame(firstLines.join('\n'))
+  // 首帧正文交给文本形态的改写：同一套不变式（只有 cwd 变、cwd 真的变了）只留一份实现。
+  const firstFrame = relocateHeaderCwdText(split.first, to, from)
+
+  const compressed = compressFrame(firstFrame.text)
   const buffer = Buffer.concat([compressed, split.rest])
 
   // 自校验：整体解码必须等于「只换掉首行」的期望文本。
-  const expected = [firstLines[0], ...lines.slice(1)].join('\n')
+  const expected = [firstFrame.text.split('\n')[0], ...lines.slice(1)].join('\n')
   if (decodeAll(buffer) !== expected) {
     throw new Error(`session ${header.id}: round-trip mismatch after rewrite`)
   }
 
-  return { buffer, header, nextHeader, boundary: split.boundary, firstFrameBytes: compressed.length, events }
+  return {
+    buffer,
+    header,
+    nextHeader: firstFrame.nextHeader,
+    boundary: split.boundary,
+    firstFrameBytes: compressed.length,
+    events,
+  }
 }

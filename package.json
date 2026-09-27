@@ -16,6 +16,7 @@
       "default": "./lib/index.js"
     },
     "./cli": "./lib/cli.js",
+    "./client": "./lib/client.js",
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json"
   },
@@ -34,15 +35,25 @@
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-renderer",
+        "@deepseek-ai/dsh-client-ui-settings"
+      ]
     }
   },
   "scripts": {
     "prebuild": "node -e \"require('node:fs').rmSync('lib', { recursive: true, force: true })\"",
     "build": "tsdown --concurrency 1",
     "build:host": "tsdown --filter @he0119/dsh-session-manager/host",
+    "build:client": "tsdown --filter @he0119/dsh-session-manager/client",
     "build:types": "tsdown --filter @he0119/dsh-session-manager/types",
     "watch": "tsdown --watch --concurrency 1",
-    "typecheck": "tsc -p tsconfig.test.json",
+    "typecheck": "tsc -p tsconfig.test.json && tsc -p tsconfig.client.json",
     "prepublishOnly": "tsdown --concurrency 1",
     "test": "node test/run-all.mjs",
     "test:runner": "node --test",
@@ -79,6 +90,7 @@
     "@deepseek-ai/dsh-tools": "0.1.5-rc.3",
     "@deepseek-ai/schemastery": "3.18.2",
     "@types/node": "^22.20.0",
+    "@types/react": "^18.3.31",
     "tsdown": "^0.23.0",
     "typescript": "^5.9.0"
   },

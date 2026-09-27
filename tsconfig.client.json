@@ -1,0 +1,27 @@
+{
+  // Web Client 端的类型检查工程：与 Host 端分开，因为它要 DOM 与 JSX，而 Host 端两者都没有
+  // （Host 的 lib 里没有 DOM，把 DOM 放进去会让它在类型层面就"能"引用浏览器 API）。
+  //
+  // moduleResolution 用 bundler：客户端产物由 tsdown 打包，源码里的相对导入带 `.ts`/`.tsx`
+  // 后缀，与 Host 端 nodenext 的口径不同。
+  "compilerOptions": {
+    "target": "es2023",
+    "lib": ["es2023", "dom", "dom.iterable"],
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    // 不自动带 @types/*：客户端只认 react 那一份类型，避免把 node 的类型拖进来（本文件没有
+    // Node 运行时，`process`、`Buffer` 在这里出现就是错的）。
+    "types": [],
+    "noEmit": true,
+    "strict": true,
+    "noUncheckedIndexedAccess": false,
+    "noImplicitOverride": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "allowImportingTsExtensions": true,
+    "jsx": "react-jsx",
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["src/client"]
+}
