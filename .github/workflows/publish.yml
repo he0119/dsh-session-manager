@@ -1,0 +1,173 @@
+name: Publish
+
+# 推一个 v* 标签（例如 v0.1.0）就把该版本发到 npm（trusted publishing），成功后自动建 GitHub Release
+# ——见 docs/releasing.md。
+#
+# 没有 workflow_dispatch：发布只能由标签触发。手动触发会在默认分支上跑，等于凭空指定一个版本发出去，
+# 正是「标签是唯一版本来源」要防的事。要发版就打标签。
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  # 发布前先跑一遍完整检查：标签打错 commit 时挡在 npm 之外。
+  check:
+    uses: ./.github/workflows/ci.yml
+
+  publish:
+    needs: check
+    runs-on: ubuntu-latest
+    permissions:
+      # contents: write 是给最后那步建 Release 的；npm 那两步不需要它。
+      contents: write
+      # 下面两步都要 OIDC：npm 可信发布用它换取短期凭据，provenance 用它签名。
+      id-token: write
+    steps:
+      # fetch-depth: 0 —— 下面的落点校验要判断标签是不是 origin/main 的祖先，浅克隆没有这段历史。
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      # 发布固定使用 Node 24.11：它属于本包 engines 的支持范围，并自带满足可信发布要求（>= 11.5.1）的 npm 11。
+      # pnpm 只负责装依赖与跑构建（版本同样来自 package.json 的 packageManager），
+      # 真正发布的那一步仍然是 npm —— 可信发布与 provenance 是 npm CLI 的能力。
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24.11.0
+          registry-url: https://registry.npmjs.org
+          cache: pnpm
+
+      - name: 校验标签与 package.json
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF#refs/tags/}"
+          version="${tag#v}"
+
+          # 标签必须能解析成 x.y.z（可带预发布后缀）。package.json 已由发布提交写好版本号，这里只核对、不改写：
+          # 对齐会让 workflow 去"修正"一个本该让人看见的不一致，而发布前把差异暴露出来更安全。
+          node -e 'if (!/^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/.test(process.argv[1])) { console.error("无效版本号: " + process.argv[1]); process.exit(1) }' "$version"
+
+          file_version="$(node -p 'require("./package.json").version')"
+          if [ "$file_version" != "$version" ]; then
+            echo "::error::标签是 $tag，但这个提交的 package.json 是 $file_version。标签落在了一个不是发布提交的 commit 上。"
+            exit 1
+          fi
+          echo "标签与 package.json 一致：$version"
+
+      - name: 校验标签落点（在 main 上 · 该提交就是版本提交 · 没被后续提交取代）
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF#refs/tags/}"
+          version="${tag#v}"
+
+          # 取远程那个标签来核对，但**不能**取进 refs/tags/ 里：checkout 在标签上检出的，
+          # 本地已经有同名标签，写进去会被 git 的防覆盖保护拒绝
+          # （`! [rejected] v0.1.0 -> v0.1.0 (would clobber existing tag)`，工作流就此失败）。
+          # 取进一个只用一次的临时命名空间，既不撞本地标签，也只认远程那一份。
+          remote_tag_ref="refs/dsh-remote-tags/${tag}-${GITHUB_RUN_ID}"
+          git fetch --no-tags origin "refs/tags/${tag}:${remote_tag_ref}"
+          tag_sha="$(git rev-parse "${remote_tag_ref}^{commit}")"
+          main_sha="$(git rev-parse origin/main)"
+
+          if ! git merge-base --is-ancestor "$tag_sha" origin/main; then
+            echo "::error::标签 ${tag} 指向的提交 ${tag_sha} 不在 main 上。"
+            exit 1
+          fi
+
+          # 「标签指向的提交里 package.json 就是 vX.Y.Z」——这才是 publish 工作流里那句
+          # 「标签打错 commit 时挡在 npm 之外」真正断言的事。上一步校验的是当前 checkout，
+          # 标签落在版本提交**之后**的某个提交上时，两者仍然相等，只有这一句拦得住。
+          version_in_file="$(git show "${tag_sha}:package.json" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).version))')"
+          if [ "$version_in_file" != "$version" ]; then
+            echo "::error::标签 ${tag} 指向的提交里 package.json 是 ${version_in_file}——这个标签落在版本提交之后的提交上了。"
+            exit 1
+          fi
+
+          # 发布提交必须还在 main 顶端：否则这个版本号已被后来的发布取代，发出去就是往旧版本上倒灌。
+          # 这也顺带禁止了「一个标签对应一段区间」——版本提交之后又推了别的提交再打标签。
+          #
+          # 推标签一般会连 main 一起推（git push --follow-tags），但只推标签时 origin/main 不会动，
+          # 而 job 里那次 fetch 就发生在推标签之后几秒，可能还差一小步。等它追上来：最多两次、每次 10 秒。
+          for attempt in 1 2; do
+            if [ "$main_sha" = "$tag_sha" ]; then break; fi
+            echo "origin/main 还停在 ${main_sha}，等它追上标签……（${attempt}/2）"
+            sleep 10
+            git fetch --no-tags origin main
+            main_sha="$(git rev-parse origin/main)"
+          done
+
+          if [ "$main_sha" != "$tag_sha" ]; then
+            echo "::error::main 顶端是 ${main_sha}，不是标签指向的 ${tag_sha}。"
+            echo "::error::发布提交不再是 main 顶端：要么标签落在旧提交上，要么打完标签之后 main 又前进了。"
+            exit 1
+          fi
+          echo "标签落点校验通过：${tag} -> ${tag_sha}（main 顶端，package.json 就是 ${version}）"
+
+      # lib/ 不进 git，靠 prepublishOnly（tsdown）在发布时现场编译，所以这里必须先装依赖：
+      # check job 里那份 pnpm install 不会跨 job 共享工作目录，少了这一步 prepublishOnly 会因为
+      # 找不到 tsdown 直接失败，发布在打包阶段就死了，根本走不到 OIDC 换 token。
+      # 放在校验之后：标签打错了就没必要花这几分钟装依赖。
+      - run: pnpm install --frozen-lockfile
+
+      # 打包内容自检。用 npm 自己的打包器核对「包里该有的都有、入口不指空气、test/ 不外泄」——
+      # 它和 npm publish 之间只差最后那一下 PUT，所以这里红灯就是发布红灯。
+      # prepublishOnly 此刻还没跑（它由 npm publish 触发），所以先显式构建一次。
+      - run: pnpm run build
+      - run: pnpm run check:package
+
+      # 发布成功的那一刻 registry 上就能查到，所以这里的判断是可靠的。
+      - name: 判断该版本是否已经发布
+        id: check
+        run: |
+          set -euo pipefail
+          version="$(node -p 'require("./package.json").version')"
+          if npm view "@he0119/dsh-session-manager@${version}" version >/dev/null 2>&1; then
+            echo "@he0119/dsh-session-manager@${version} 已经在 npm 上了。"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "即将发布 @he0119/dsh-session-manager@${version}。"
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # --access public 对带 scope 的包是必需的：scoped 包默认 restricted，而 restricted 需要付费组织。
+      # package.json 里的 publishConfig.access 已经声明过一次，这里再显式给一次——发布是唯一不可撤销的动作，
+      # 参数摆在眼前比藏在配置里好。--provenance 附上构建来源证明（要求 package.json 的 repository 指向本仓库）。
+      - name: 发布到 npm
+        if: steps.check.outputs.skip != 'true'
+        run: npm publish --provenance --access public
+
+      - name: 该版本已存在，跳过发布
+        if: steps.check.outputs.skip == 'true'
+        run: echo "无需发布，视为成功。"
+
+      # 发布确认之后才建 Release，所以条目里的版本一定已经在 npm 上，顺序不会倒过来。
+      - name: 创建 GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF#refs/tags/}"
+          version="$(node -p 'require("./package.json").version')"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "${tag} 的 Release 已经存在。"
+            exit 0
+          fi
+          if [ "${{ steps.check.outputs.skip }}" = "true" ]; then
+            note="${tag} 在本次运行之前就已经在 npm 上了；以下是这个标签里包含的改动。"
+          else
+            note="\`@he0119/dsh-session-manager@${version}\` 已发布到 npm（[npm](https://www.npmjs.com/package/@he0119/dsh-session-manager/v/${version})）。"
+          fi
+
+          # 显式给出区间的起点：以发布提交的**父提交**为基准，从那里往上找最近的标签。
+          # 这样版本号提交（chore(release): X.Y.Z）不会出现在自己的变更列表里——
+          # 标签本来就打在版本号提交上，交给 GitHub 自动推断就可能把它算成一项改动。
+          args=(--title "$tag" --verify-tag --latest --generate-notes --notes "$note")
+          prev_tag="$(git describe --tags --abbrev=0 "${tag}^" 2>/dev/null || true)"
+          if [ -n "$prev_tag" ]; then
+            args+=(--notes-start-tag "$prev_tag")
+          fi
+          gh release create "$tag" "${args[@]}"

@@ -81,11 +81,24 @@ is immediate.
 
 ## Installing into a profile
 
+From npm (recommended):
+
 ```bash
 # DSH's own plugin command (it creates/populates the profile and maintains deps + lockfile)
+npx @deepseek-ai/dsh@next plugin --profile desktop add @he0119/dsh-session-manager
+# then restart DSH
+```
+
+From this checkout while developing (`lib/` is not committed, so build first):
+
+```bash
+pnpm run build
 npx @deepseek-ai/dsh@next plugin --profile desktop add /path/to/dsh-session-manager
 # then restart DSH
 ```
+
+Note that `github:` installs are **not** supported here: those build via a `prepare` script, while this
+repository builds in `prepublishOnly` and keeps `lib/` out of git, so a git install gets no artifacts.
 
 Mechanism: `profiles/<name>/cordis.yml` is an empty `[]`; the tree is composed from
 `package.json`'s `dsh.profile.bundles` (each bundle contributes its own `cordis.patch.yml`), then the

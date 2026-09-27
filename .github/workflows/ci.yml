@@ -31,6 +31,9 @@ jobs:
       - run: pnpm run typecheck
       # 构建产物必须真的出得来——tsdown 不做类型检查，所以它与 typecheck 是两件独立的事。
       - run: pnpm run build
+      # 打包内容与入口自洽：产物之外还有一层「包进宿主时缺了什么」，只有过一遍 npm 自己
+      # 的打包器才看得见（见 docs/releasing.md）。放在 build 之后，它依赖 lib/ 存在。
+      - run: pnpm run check:package
       # 这里用的是进程内 runner（test/run-all.mjs），不是 `node --test`：后者为每个测试文件
       # spawn 子进程，在受限环境里会因命名管道不可用而 EPERM。详见 docs/development.md。
       # 工具层那一组会 import 真实（devDependency）的 @deepseek-ai/dsh-tools，因此 CI 会真正跑到它。

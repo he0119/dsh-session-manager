@@ -1,6 +1,7 @@
 # 开发
 
-安装与用法看 [README](../README.md)，「为什么是现在这样」看 [internals.md](internals.md)。
+安装与用法看 [README](../README.md)，「为什么是现在这样」看 [internals.md](internals.md)，
+发版流程看 [releasing.md](releasing.md)。
 
 ## 依赖、构建、测试
 
@@ -12,6 +13,7 @@ pnpm run build        # tsdown：src/*.ts -> lib/*.js + lib/types/*.d.ts
 pnpm test             # = node test/run-all.mjs
 pnpm run typecheck    # = tsc -p tsconfig.test.json
 pnpm run check        # typecheck + test
+pnpm run check:package # 打包内容自检（要先 build，见 docs/releasing.md）
 ```
 
 带真实数据回归（指向任一含会话桶的 `sessions/` 备份目录）：
@@ -143,6 +145,7 @@ npx @deepseek-ai/dsh@next plugin --profile <name> add <本目录>
 ```sh
 pnpm run check        # 类型 + 测试
 pnpm run build        # 确认产物能出来（构建不做类型检查，所以两件事都要做）
+pnpm run check:package # 确认打包内容与入口自洽（依赖上一步的产物）
 ```
 
 涉及工具契约的改动，另外跑 `test/tools.test.ts` 那组；涉及帧/压缩的改动，

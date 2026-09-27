@@ -74,11 +74,24 @@ node lib/cli.js rollback --backup '<apply 输出的备份目录>'
 
 ## 安装到 profile
 
+从 npm 装（推荐）：
+
 ```bash
 # 用 DSH 自带的插件命令（它会替你建/填充 profile，并维护依赖与锁文件）
+npx @deepseek-ai/dsh@next plugin --profile desktop add @he0119/dsh-session-manager
+# 然后重启 DSH
+```
+
+开发时装本目录（`lib/` 不进 git，所以先构建）：
+
+```bash
+pnpm run build
 npx @deepseek-ai/dsh@next plugin --profile desktop add /path/to/dsh-session-manager
 # 然后重启 DSH
 ```
+
+本包**不支持** `github:` 形式的安装（那需要包里有 `prepare` 脚本；本仓库把构建放在
+`prepublishOnly`，`lib/` 不入库，git 装法拿不到产物）。
 
 机制：`profiles/<name>/cordis.yml` 本身是空的 `[]`，实际由「`package.json` 的
 `dsh.profile.bundles`（每个 bundle 贡献自己的 `cordis.patch.yml`）」+「profile 自己的
