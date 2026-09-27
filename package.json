@@ -1,7 +1,7 @@
 {
   "name": "@he0119/dsh-session-manager",
   "version": "0.1.0",
-  "description": "Migrate DSH workspaces and sessions between directories — rewrite session-log cwd, move the log directories, re-home workspace membership, and optionally move the files those sessions created. | 把 DSH 工作区与会话迁移到新目录：改写会话日志 cwd、迁移日志目录、重挂工作区归属，并可选择性搬迁会话中创建的文件。",
+  "description": "DSH 的会话管理插件：设置里的一页，用来导出/导入 .dshsess 会话包，以及把工作区与会话迁移到新目录——改写会话日志 cwd、迁移日志目录、重挂工作区归属，并可选择性搬迁会话创建的文件。",
   "type": "module",
   "packageManager": "pnpm@11.7.0",
   "main": "lib/index.js",
