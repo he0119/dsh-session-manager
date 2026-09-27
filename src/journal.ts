@@ -3,7 +3,7 @@
 // 备份是**执行前**的快照，也是回滚的唯一依据：manifest 记录每个会话的原目录、
 // 目标目录与日志文件，回滚 = 目录搬回 + 文件字节还原 + 注册表还原。
 // 因为备份发生在改写之前，所以它同时是"原状"与"回滚源"，无需第二份副本。
-import { cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmdirSync, rmSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 
 import type { SessionMove } from './types.ts'
@@ -39,6 +39,9 @@ export interface BackupManifest {
   createdAt: string
   registryPath: string
   registryBackup: string
+  /** 这次迁移的源/目标工作区目录（后加的字段，老备份没有）。 */
+  from?: string
+  to?: string
   sessions: BackupSessionEntry[]
   artifacts: BackupArtifactEntry[]
 }
@@ -53,6 +56,10 @@ export interface CreateBackupOptions {
   sessions: ReadonlyArray<Pick<SessionMove, 'id' | 'sourceDir' | 'targetDir' | 'files'>>
   /** 计划搬迁的会话产物。 */
   artifacts?: ReadonlyArray<Pick<BackupArtifactEntry, 'sourcePath' | 'targetPath' | 'isDir'>>
+  /** 本次迁移的源工作区目录，写进清单便于界面展示。 */
+  from?: string
+  /** 本次迁移的目标工作区目录，写进清单便于界面展示。 */
+  to?: string
   /** 注入时间，便于测试。 */
   now?: Date
 }
@@ -65,7 +72,7 @@ export function createBackup(options: CreateBackupOptions): {
   manifestPath: string
   manifest: BackupManifest
 } {
-  const { backupRoot, registryPath, sessions, artifacts = [], now = new Date() } = options
+  const { backupRoot, registryPath, sessions, artifacts = [], from, to, now = new Date() } = options
   const dir = join(backupRoot, stampName(now))
   mkdirSync(join(dir, 'sessions'), { recursive: true })
 
@@ -104,6 +111,8 @@ export function createBackup(options: CreateBackupOptions): {
     createdAt: now.toISOString(),
     registryPath,
     registryBackup,
+    ...(from === undefined ? {} : { from }),
+    ...(to === undefined ? {} : { to }),
     sessions: entries,
     artifacts: artifactEntries,
   }
@@ -186,6 +195,20 @@ export function rollback(
       }
       restoredArtifacts++
     }
+  }
+
+  // 3.5) 空掉的目标桶顺手删掉：apply 在源桶空了时会删（execute.ts 第 5 步），回滚不对称地做
+  // 就会在会话根下留下一个空目录。只删**确认为空**的目录。
+  const emptied = new Set(manifest.sessions.map((s) => dirname(s.targetDir)))
+  for (const bucket of emptied) {
+    if (!existsSync(bucket)) continue
+    try {
+      if (readdirSync(bucket).length > 0) continue
+    } catch {
+      continue
+    }
+    actions.push(`remove empty bucket: ${bucket}`)
+    if (!dryRun) rmdirSync(bucket)
   }
 
   // 4) 注册表

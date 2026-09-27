@@ -90,6 +90,7 @@ const shipped = new Set(manifest.files.map((file) => file.path))
 const REQUIRED = [
   'lib/index.js', // 插件入口（dsh.bundle.patch 的 insert 指向的模块）
   'lib/cli.js', // bin：dsh-session-manager
+  'lib/client.js', // Web Client 半边的经典脚本（dsh.client 指向它）
   'lib/types/index.d.ts', // exports["."].types，工具层的类型来源
   'cordis.patch.yml', // profile 里的 bundle patch
   'package.json',

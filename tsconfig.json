@@ -26,5 +26,9 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["src"]
+  "include": ["src"],
+  // Web Client 端（`src/client`）有自己的工程：它要 DOM 与 JSX，而这一份是 Host 端的
+  // （lib 里没有 DOM）。两份用不同的 tsconfig，正是为了让"浏览器 API 出现在 Host 代码里"
+  // 在类型层面就不成立。`tsconfig.test.json` 继承本文件的 exclude。
+  "exclude": ["src/client"]
 }

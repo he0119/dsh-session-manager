@@ -7,15 +7,19 @@ directories, re-home workspace membership, and optionally move the files those s
 
 > **Status**
 > - ✅ Core library, migration engine, offline CLI, plugin shell and 4 tools
+> - ✅ Session management: one page in Settings (`settings.section`, with import/export and migrate
+>   tabs) plus 6 endpoints under `/dsh-session-manager/api`
 > - ✅ Tool contract verified against the **real `@deepseek-ai/dsh-tools`** (`defineTool` normalization
 >   + argument validation + real execution)
 > - ✅ Session-artifact migration: evidence layering + on-disk intersection + nested pruning, rolled
 >   back together with the sessions
 > - ✅ Source is TypeScript: `src/*.ts` → tsdown → `lib/` (build output, not committed); `tsc` typecheck
 >   and the build both pass
-> - ✅ **62 tests pass** (real log files, real registry, end-to-end byte-level rollback assertions,
+> - ✅ **97 of 99 tests pass** (real log files, real registry, end-to-end byte-level rollback assertions,
 >   and a built-artifact smoke test)
-> - ⏳ Pending your go-ahead: install into a profile and restart DSH to load the 4 tools for real
+> - ⏳ Pending your go-ahead: install into a profile and restart DSH to load the 4 tools and open that
+>   settings page for real (the page's styling is verified at build/artifact-contract level only — it
+>   has not been looked at in a live GUI yet)
 
 ## The problem it solves
 
@@ -66,6 +70,55 @@ Defaults are `$DSH_HOME/sessions` and `$DSH_HOME/storages/workspace.json`; overr
 | `migrate_sessions` | needs `apply:true` | Dry-run by default; performs a byte-level backup and self-verifies after |
 | `rollback_session_migration` | yes | Byte-exact rollback from a backup directory |
 | `verify_workspace_sessions` | no | Check that a directory's bucket agrees with its headers |
+
+### Session management (Web UI)
+
+Once installed into a profile, the **Settings** sidebar gains a **Session management** page (this
+package ships a Web Client half) with two tabs:
+
+**Import & export** (take sessions away, bring them back)
+
+- **Export**: tick sessions → the browser downloads one `.dshsess` bundle. The bundle carries the raw
+  bytes of **every generation** of those logs (each with a sha256), not files the session created. The
+  list is **grouped by directory** (group name = workspace title; a directory no workspace registers
+  shows its path and is marked), and **clicking a group header toggles that whole group** — so "take
+  every session of this workspace away" is one click instead of counting and ticking them one by one.
+- **Import**: pick a bundle and a target workspace → **preview first** (per-session: what will be
+  created, which cwd gets rewritten, what is skipped, how the registry changes) → then confirm. Import
+  **never overwrites**: a session whose id already exists in the library is skipped and reported; a
+  session with no cwd lands in the `_no-cwd` bucket and is not ledgered.
+
+**Migrate** (move one workspace's sessions to another directory)
+
+Previously CLI- and tool-only, now the same orchestration (`src/migrate.ts`, shared by all three entry
+points) is on screen:
+
+- source and target are each a **single dropdown that holds the value** (registered workspaces **plus any
+  directory the library actually holds sessions for**, annotated with that count), so no path has to be
+  typed from memory; a path outside the candidates goes in through **Browse…** or **Type a path**, and is
+  added back as a row. **Browse…** follows whatever capability the host serves: on the desktop it opens the
+  OS directory dialog, in the browser it expands an in-page directory browser (list subdirectories, click
+  your way down), and on a host with no picker the button is simply not shown;
+- the target directory must already exist; there is also an optional title for a newly created workspace,
+  whether to carry the **files the sessions created**, and whether to carry unregistered sessions;
+- **move the whole source directory, or only some of it**: the sessions of the source directory are
+  listed, and ticking any row switches to "only the ticked ones"; one source directory per run (one
+  request, one bucket);
+- **Preview**: session, log and byte counts, source → target bucket, **how the ledger changes** (create
+  or reuse the target workspace, how many sessions are added, which workspaces lose them, whether an
+  emptied workspace is removed), the artifact plan and its skip reasons;
+- **Migrate now**: rewrite each log header `cwd` (first frame only, the rest byte-identical) → move the
+  session directories → re-home the ledger → **independent verification** (the host's own corrupt
+  criterion) → leave a byte-level backup;
+- **Backups & rollback**: every backup this plugin wrote (time, session count, source → target), with
+  the **rollback steps** shown before you confirm; rollback restores directories, log bytes and the
+  ledger together (and removes the emptied target bucket, symmetric with the migration cleaning up an
+  emptied source bucket).
+
+The endpoints live under `/dsh-session-manager/api` (`state` / `export` / `import` / `migrate` /
+`backups` / `rollback`) and all writes happen inside the host process. A profile without the
+`webServer` service (tools-only front ends) still loads the plugin — the page simply does not appear.
+See [docs/internals.md](docs/internals.md) for the bundle shape and the invariants it enforces.
 
 ### When it takes effect (dual mode)
 
@@ -193,8 +246,12 @@ Block_Type=Raw), making the write path independent of any compressor, external b
 | `src/journal.ts` | byte-level backup manifest and rollback | none |
 | `src/execute.ts` | apply + independent verification | none |
 | `src/artifacts.ts` | artifact extraction (evidence layering), planning, moving | none |
+| `src/transfer.ts` | `.dshsess` container (build/parse/validate), import planning and apply | none |
+| `src/migrate.ts` | Migration orchestration: preview / apply / rollback / backup listing (shared by CLI, tools and the UI) | none |
 | `src/cli.ts` | offline CLI (plan/apply/verify/rollback) → `lib/cli.js` | none |
 | `src/tools.ts` | the 4 tool registrations | `dsh-tools` |
+| `src/web.ts` | UI endpoints (list / export / import / migrate / backups / rollback); needs only a `{ register }` shape | none |
+| `src/client/*` | Web Client half: the Session management page (tabs: import/export and migrate), dictionaries, styles, endpoint calls → `lib/client.js` | none |
 | `src/index.ts` | plugin entry `apply(ctx, config)` | `dsh-tools` |
 
 The core stays free of DSH dependencies, so the plugin shell, the CLI and the tests all reuse the same
@@ -217,10 +274,25 @@ See [docs/development.md](docs/development.md) for how the tool-layer tests reso
 `@deepseek-ai/dsh-tools`, and [docs/internals.md](docs/internals.md) for the full rationale.
 
 `test/artifact.test.mjs` smoke-tests the **built artifact**: it loads `lib/index.js` and asserts the
-entry fields, the 4 tool registrations and the `apply()` disposer contract — closing the gap between
-"the source passes" and "the artifact actually loads in a host". It skips when the build is absent;
-`pnpm run build && pnpm test` is the all-green command. Its real-data case is gated behind
-`DSM_SMOKE_WORKSPACE` and additionally asserts that a read-only `plan` created no target bucket.
+entry fields, the 4 tool registrations, the UI endpoint registrations and the `apply()` disposer
+contract — closing the gap between "the source passes" and "the artifact actually loads in a host".
+`test/client.test.mjs` does the same for the Web Client half: it runs `lib/client.js` through a fake
+`window.__ModuleLoader__` following the module-loader contract, and asserts the factory id, the export
+surface, the slot it registers into and that both dictionaries share one key set. Both skip when the
+build is absent; `pnpm run build && pnpm test` is the all-green command. The real-data case is gated
+behind `DSM_SMOKE_WORKSPACE` and additionally asserts that a read-only `plan` created no target bucket.
+
+`test/groups.test.ts` pins the export list's grouping rules (by directory, group order, in-group order,
+duplicate paths, empty-string cwd, no empty groups) and `test/styles.test.mjs` pins five stylesheet
+rules (colors must go through theme tokens, tokens must be on the `Theme` surface, every token needs a
+fallback, tags must never wrap, and a `state-*` token may not be used bare as a text color) — the first
+was added after shipping white-on-white text in the dark theme, the last two after measuring the live
+page in both themes: `state-idle-primary` as text was 1.48:1 on white.
+
+`test/transfer.test.ts` covers the `.dshsess` byte round-trip, the rejection surface of bundle
+validation (sha256 / truncation / magic / version), import preview and apply, id-collision skip, and
+the no-cwd and plain-v0 branches. `test/web.test.ts` drives the endpoints with fake req/res objects:
+listing, export, import (preview/apply) and every 400/404/409 rejection.
 
 ## License
 

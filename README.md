@@ -7,13 +7,16 @@
 
 > **状态**
 > - ✅ 核心层 / 迁移引擎 / 离线 CLI / 插件外壳与 4 个工具
+> - ✅ 会话管理：设置里的一页（`settings.section`，页内分导入导出与迁移）+ 6 个端点
 > - ✅ 工具契约用**真实的 `@deepseek-ai/dsh-tools`** 验证（`defineTool` 归一化 + 实参校验 + 真实执行）
 > - ✅ 会话产物搬迁（`artifacts.mjs`）：证据分层 + 存在性求交 + 嵌套剪枝，可随会话一起回滚
 > - ✅ 源码为 TypeScript，`src/*.ts` → tsdown → `lib/`（构建产物不进 git）；`tsc` 类型检查与构建均通过
-> - ✅ **62 个用例全部通过**（含真实日志、真实注册表、端到端回滚的字节级断言、构建产物冒烟）
+> - ✅ **99 个用例通过 97 条**（含真实日志、真实注册表、端到端回滚的字节级断言、构建产物冒烟；
+>   另 2 条按环境变量门控跳过）
 > - ✅ 仓库工程化对齐参考项目：`.gitattributes`(全 LF)、`.gitignore`、`docs/`、双语 README、
 >   `.github/workflows/ci.yml`、`pnpm-workspace.yaml`、`icon.svg`、`LICENSE`、engines/scripts 约定
-> - ⏳ 待你确认：装进哪个 profile 并重启 DSH，在真实实例里加载这 4 个工具
+> - ⏳ 待你确认：装进哪个 profile 并重启 DSH，在真实实例里加载这 4 个工具、打开设置里那一页
+>   （页面样式只做到构建与产物契约级验证，还没在真实 GUI 里看过）
 
 ## 它解决什么问题
 
@@ -61,6 +64,43 @@ node lib/cli.js rollback --backup '<apply 输出的备份目录>'
 | `migrate_sessions` | 需 `apply:true` | 默认 dry-run；执行前做字节级备份，事后自动复核 |
 | `rollback_session_migration` | 是 | 按备份目录字节级回滚 |
 | `verify_workspace_sessions` | 否 | 复核某目录桶内日志与 header 的一致性 |
+
+### 会话管理（Web 界面）
+
+装进 profile 后，**设置** 的左侧导航里会多出一页「会话管理」（本包自带 Web Client 半边），
+页内分两页：
+
+**导入导出**（把会话带走/带回来）
+
+- **导出**：勾选会话 → 浏览器下载一个 `.dshsess` 包。包里是这些会话**所有代次日志的原始字节**
+  （逐条带 sha256），不含会话创建过的普通文件。列表**按目录分组**（组名是工作区标题，没登记过的
+  目录直接显示路径并标出来），**组头那一下就是整组勾选/取消**——"把这个工作区的会话都带走"因此
+  是一次点击，而不是数一遍再逐条勾。
+- **导入**：选包 + 选目标工作区 → **先预演**（逐条列出会创建什么、cwd 会被改写成什么、哪些会被
+  跳过、注册表会怎么变）→ 再确认落盘。导入**永不覆盖**：库里已有同 id 的会话只跳过并报告；
+  包里没有 cwd 的会话落 `_no-cwd` 分桶，也不挂账本。
+
+**迁移**（把一个工作区的会话搬到另一个目录）
+
+以前只有 CLI 与模型工具能做这件事，现在同一份编排（`src/migrate.ts`，三个入口共用）也摆在界面上：
+
+- 源目录 / 目标目录各是一个**下拉框**（框里的值就是要用的路径），候选＝已登记工作区 **+ 库里真有会话的
+  目录**（后者带会话条数），不必凭记忆手输路径；候选之外的路径走「浏览…」或「手输路径」，
+  选回来若不在候选里就就地补成一条；「浏览…」按宿主给的能力自动选一种：桌面端弹系统目录对话框，
+  浏览器里展开页面内的目录浏览（列子目录、点着往下走），宿主没提供选择器时这个按钮不出现；
+- 目标目录必须已存在；另有可选的新建工作区标题、是否连带**会话创建过的文件**、是否连带未登记的会话；
+- **整个源目录一起搬，或只挑其中几条**：源目录下的会话会列出来，勾任意一条即切到"只选其中几条"，
+  一次只处理一个源目录（一个请求对一个分桶）；
+- **预演**：会话数、日志数、字节数、源桶 → 目标桶、**注册表会怎么变**（新建还是复用目标工作区、
+  登记几条、从哪些工作区搬出、是否移除空工作区）、产物计划与跳过原因；
+- **确认迁移**：改写每个日志 header 的 `cwd`（只动首帧，其余字节不变）→ 搬会话目录 → 重新登记 →
+  **独立复核**（等价于宿主的 corrupt 判据）→ 留下字节级备份；
+- **备份与回滚**：列出本插件的每一份备份（时间、会话数、源 → 目标），先看**回滚动作清单**再确认；
+  回滚把目录、日志字节与注册表一起还原（空掉的目标桶也会删掉，与迁移清理空源桶对称）。
+
+端点都在 `/dsh-session-manager/api` 下（`state` / `export` / `import` / `migrate` / `backups` /
+`rollback`），写盘只发生在宿主进程里；宿主没有 `webServer` 服务时（例如只用工具的前端）插件照常起，
+只是这一页不出现。包的形状、越界与不变式见 [docs/internals.md](docs/internals.md)。
 
 ### 何时生效（双模式）
 
@@ -181,8 +221,12 @@ npx @deepseek-ai/dsh@next plugin --profile desktop add /path/to/dsh-session-mana
 | `src/journal.ts` | 字节级备份清单与回滚 | 无 |
 | `src/execute.ts` | 执行 + 独立复核（含产物目标位校验） | 无 |
 | `src/artifacts.ts` | 会话产物提取（证据分层）、规划（求交/剪枝）、搬迁 | 无 |
+| `src/transfer.ts` | `.dshsess` 容器（导出/解析/校验）、导入预演与落地 | 无 |
+| `src/migrate.ts` | 迁移编排：预演 / 执行 / 回滚 / 备份清单（CLI、工具、界面三个入口共用） | 无 |
 | `src/cli.ts` | 离线 CLI（plan/apply/verify/rollback）→ `lib/cli.js` | 无 |
 | `src/tools.ts` | 4 个工具注册 | `dsh-tools` |
+| `src/web.ts` | 界面端点（列会话 / 导出 / 导入 / 迁移 / 备份 / 回滚），只要求 `{ register }` 形状 | 无 |
+| `src/client/*` | Web Client 半边：「会话管理」页（页内分导入导出与迁移）、字典、样式、端点调用 → `lib/client.js` | 无 |
 | `src/index.ts` | 插件入口 `apply(ctx, config)` | `dsh-tools` |
 
 核心层保持零 DSH 依赖，所以既能被插件复用，也能被 CLI 复用，还能被独立测试。
@@ -209,10 +253,22 @@ DSM_FIXTURE=/path/to/backup node test/run-all.mjs
 
 `pnpm test` = `node test/run-all.mjs`；`pnpm run check` = `tsc` 类型检查 + 测试。
 
-`test/artifact.test.mjs` 是**构建产物**冒烟：加载 `lib/index.js`，断言入口字段、4 个工具注册
-与 `apply()` 的卸载函数契约——补上「源码通过」与「产物能装进宿主」之间那一环。产物不存在时跳过；
-`pnpm run build && pnpm test` 是全绿口径。真实数据那一条用 `DSM_SMOKE_WORKSPACE` 门控，会额外断言
-只读 `plan` 没有创建目标桶。
+`test/artifact.test.mjs` 是**构建产物**冒烟：加载 `lib/index.js`，断言入口字段、4 个工具注册、
+界面端点注册与 `apply()` 的卸载函数契约——补上「源码通过」与「产物能装进宿主」之间那一环。
+`test/client.test.mjs` 是同一件事在 Web Client 半边的版本：用假的 `window.__ModuleLoader__`
+按模块加载器的契约执行 `lib/client.js`，断言工厂 id、导出面、注册到的槽位与两份字典的键集。
+两者的产物都不存在时跳过；`pnpm run build && pnpm test` 是全绿口径。
+
+`test/groups.test.ts` 钉住导出列表的分组规则（按目录、组的顺序、组内定序、重复路径、空串 cwd、
+空组不出现），`test/styles.test.mjs` 钉住样式表的五条纪律（颜色必须走主题 token、token 必须在
+`Theme` 检查面的名单里、每个 token 都得带回落值、标签不许折行、state 色不许裸当文字色）——第一条是
+踩过"深色主题下白底白字"之后加的，后两条是在真实页面里**量**过之后加的：`state-idle-primary` 当
+文字色时白底只有 1.48:1。
+
+`test/transfer.test.ts` 覆盖 `.dshsess` 的字节往返、包校验的拒绝面（sha256/截断/magic/版本）、
+导入预演与落地、同 id 冲突只跳过、无 cwd 与明文 v0 日志两条分支；`test/web.test.ts` 用假
+req/res 直接打端点，覆盖列会话、导出、导入（预演/落地）与各条 400/404/409 拒绝面。
+真实数据那一条用 `DSM_SMOKE_WORKSPACE` 门控，会额外断言只读 `plan` 没有创建目标桶。
 
 ## 文档
 
