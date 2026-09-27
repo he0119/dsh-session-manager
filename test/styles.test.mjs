@@ -1,4 +1,4 @@
-// test/styles.test.mjs — 样式表的三条硬约束（读源码，不看产物）。
+// test/styles.test.mjs — 样式表的四条硬约束（读源码，不看产物）。
 //
 // 为什么值得为它单开一个文件：颜色写错**只会在一种主题下错**，而开发者通常只盯着自己那一种。
 // 真实事故（用户截图报的）：`.dsm-primary` 写死 `color: #fff`，浅色主题下白字配深色填充没毛病，
@@ -13,6 +13,9 @@
 //      改名/换值不通知插件；硬用就得在注释里写明理由，并登记进下面的例外表。
 //   3) 每个 `var(--dsw-alias-*)` 都要带回落值：宿主主题不提供这个 token 时（旧版本、别的
 //      profile）界面还能照常显示，而不是整条声明作废。
+//   4) 标签（`.dsm-tag`）不许折行。真实事故（用户截图报的）：导入预演表的动作列里，
+//      标签是可以按字折行的，于是自动布局把它压到一列只有一个汉字宽——「跳过」竖成两行、
+//      表头「动作」也折了，整张表看着错位。标签是个小块，不该被当成一句话来排版。
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -128,4 +131,17 @@ test('每个 token 都带回落值，主题缺这个 token 时声明不会整条
   // 带回落值的写法是 `var(--token, …)`，所以这个正则只捞得到"光秃秃"的那些。
   const missing = css.match(/var\(--dsw-alias-[a-z0-9-]+\)/g) ?? []
   assert.deepEqual(missing, [], 'var(--token) 少了回落值')
+})
+
+/** 取某个选择器的规则块正文（这份样式表的选择器都顶格写在行首）。 */
+function ruleBody(selector) {
+  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const match = new RegExp(`(?:^|\\n)${escaped}\\s*\\{([^}]*)\\}`).exec(css)
+  return match === null ? null : match[1]
+}
+
+test('标签不许折行：它是小块，不是一句话', () => {
+  const body = ruleBody('.dsm-tag')
+  assert.notEqual(body, null, '找不到 .dsm-tag 规则')
+  assert.match(body, /white-space:\s*nowrap/, '窄列里标签会竖成两行（「跳/过」），必须 nowrap')
 })

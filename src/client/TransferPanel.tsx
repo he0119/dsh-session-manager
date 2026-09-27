@@ -20,13 +20,26 @@
 import * as React from 'react'
 
 import { download, exportSessions, importBundle, type ImportResponse } from './api.ts'
-import type { SessionSummary } from './api.ts'
+import type { ImportEntry, SessionSummary } from './api.ts'
 import { groupSessions, type SessionGroup } from './groups.ts'
-import { translateWith, zh } from './locales.ts'
+import { describeCwd } from './planRows.ts'
+import { translateWith, zh, type Translate } from './locales.ts'
 import type { PanelShare } from './types.ts'
 
 /** 没有注入面时的兜底翻译。 */
 const fallback = translateWith(zh as unknown as Record<string, string>)
+
+/**
+ * cwd 那一格：三支分支在 [planRows.ts](./planRows.ts) 里判，这里只挑文案。
+ *
+ * 跳过的那一支曾经跟着"没有 toCwd"一起被当成"没有 cwd"，把跳过的会话显示成要落 `_no-cwd`。
+ */
+function cwdText(entry: ImportEntry, t: Translate): string {
+  const plan = describeCwd(entry)
+  if (plan.kind === 'skip') return t('cwdSkipped')
+  if (plan.kind === 'keepNoCwd') return t('cwdKeep')
+  return t('cwdRewritten', { from: plan.from, to: plan.to })
+}
 
 function formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes < 0) return '—'
@@ -343,13 +356,15 @@ export function TransferPanel({ t = fallback, state, reload }: PanelShare): Reac
                 {problem}
               </p>
             ))}
-            <table className="dsm-table">
+            {/* 列类名是给列宽用的：这张表是 table-layout: fixed，宽度写在样式里。
+                自动布局在长路径面前会把「跳过」标签挤成一列一个字。 */}
+            <table className="dsm-table dsm-planTable">
               <thead>
                 <tr>
-                  <th>{t('colAction')}</th>
-                  <th>{t('colSession')}</th>
-                  <th>{t('colCwd')}</th>
-                  <th>{t('colBytes')}</th>
+                  <th className="dsm-colAction">{t('colAction')}</th>
+                  <th className="dsm-colSession">{t('colSession')}</th>
+                  <th className="dsm-colCwd">{t('colCwd')}</th>
+                  <th className="dsm-colBytes">{t('colBytes')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -364,11 +379,7 @@ export function TransferPanel({ t = fallback, state, reload }: PanelShare): Reac
                       {entry.id}
                       {entry.reason !== undefined && <div className="dsm-hint">{entry.reason}</div>}
                     </td>
-                    <td className="dsm-meta">
-                      {entry.toCwd === undefined
-                        ? t('cwdKeep')
-                        : t('cwdRewritten', { from: entry.fromCwd ?? '—', to: entry.toCwd })}
-                    </td>
+                    <td className="dsm-cwd">{cwdText(entry, t)}</td>
                     <td className="dsm-meta">{formatBytes(totalBytes(entry.files))}</td>
                   </tr>
                 ))}

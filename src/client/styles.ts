@@ -118,7 +118,7 @@ export const CSS = `
  * 铺上去等于没有反馈。改成把字色兑透明做一层薄雾（宿主外壳自己也这么兑），明暗两套都看得见。
  */
 .dsm-row:hover { background: color-mix(in srgb, var(--dsw-alias-label-primary, #1f2329) 6%, transparent); }
-.dsm-rowId { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.dsm-rowId { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
 .dsm-meta { color: var(--dsw-alias-label-secondary, #646a73); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dsm-empty { padding: 14px; color: var(--dsw-alias-label-secondary, #646a73); }
 .dsm-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
@@ -210,7 +210,17 @@ export const CSS = `
   vertical-align: top;
 }
 .dsm-table th { color: var(--dsw-alias-label-secondary, #646a73); font-weight: 500; }
-.dsm-tag { border-radius: 6px; padding: 0 6px; font-size: 12px; }
+/* 导入预演那张表的列宽**写死**（fixed 布局）：会话那一列吃掉剩余宽度，其余按内容量好。
+   自动布局碰上长路径会算出一个很怪的比例——动作列被挤成两个字宽（「动作」自己都折行），
+   会话列每行只剩十来个字符。列宽是设计，不该由内容的字数决定。 */
+.dsm-planTable { table-layout: fixed; }
+.dsm-planTable .dsm-colAction { width: 72px; }
+.dsm-planTable .dsm-colCwd { width: 32%; }
+.dsm-planTable .dsm-colBytes { width: 88px; }
+/* cwd 那一格里的路径要能断行（fixed 布局下列宽不会再变），否则长路径顶出格子。 */
+.dsm-cwd { color: var(--dsw-alias-label-secondary, #646a73); overflow-wrap: anywhere; }
+/* 标签是个小块：挤在窄列里也不能折成两行（导入预演表的动作列里曾经折成「跳/过」）。 */
+.dsm-tag { border-radius: 6px; padding: 0 6px; font-size: 12px; white-space: nowrap; }
 .dsm-tagCreate { color: var(--dsw-alias-state-success-primary, #2ea121); border: 1px solid currentColor; }
 /* 中性标签：导入预演里的 skip、导出列表里"不是已登记工作区"的目录，都只是"没什么动作"。 */
 .dsm-tagIdle, .dsm-tagSkip { color: var(--dsw-alias-state-idle-primary, #8f959e); border: 1px solid currentColor; }

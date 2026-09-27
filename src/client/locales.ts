@@ -67,6 +67,8 @@ export const zh = {
   actionSkip: '跳过',
   cwdRewritten: '{from} → {to}',
   cwdKeep: '保持无 cwd（落 _no-cwd）',
+  // 跳过的行**没有** toCwd，但那不是"没有 cwd"：它们根本不会被写盘。
+  cwdSkipped: '跳过，不改写',
   applied: '已写入 {count} 条会话（{bytes}）。',
   needSelection: '请先勾选至少一个会话。',
   needFile: '请先选择要导入的 .dshsess 包。',
@@ -195,6 +197,8 @@ export const en: Record<keyof typeof zh, string> = {
   actionSkip: 'skip',
   cwdRewritten: '{from} → {to}',
   cwdKeep: 'stays without cwd (lands in _no-cwd)',
+  // A skipped row has **no** toCwd, but that is not "no cwd": nothing will be written at all.
+  cwdSkipped: 'skipped, unchanged',
   applied: 'Wrote {count} sessions ({bytes}).',
   needSelection: 'Tick at least one session first.',
   needFile: 'Choose a .dshsess bundle first.',
