@@ -1,4 +1,4 @@
-// test/styles.test.mjs — 样式表的四条硬约束（读源码，不看产物）。
+// test/styles.test.mjs — 样式表的五条硬约束（读源码，不看产物）。
 //
 // 为什么值得为它单开一个文件：颜色写错**只会在一种主题下错**，而开发者通常只盯着自己那一种。
 // 真实事故（用户截图报的）：`.dsm-primary` 写死 `color: #fff`，浅色主题下白字配深色填充没毛病，
@@ -16,6 +16,9 @@
 //   4) 标签（`.dsm-tag`）不许折行。真实事故（用户截图报的）：导入预演表的动作列里，
 //      标签是可以按字折行的，于是自动布局把它压到一列只有一个汉字宽——「跳过」竖成两行、
 //      表头「动作」也折了，整张表看着错位。标签是个小块，不该被当成一句话来排版。
+//   5) `state-*` 色不许裸当文字色。真实事故（用 agent-browser 打开真实设置页量出来的）：
+//      `.dsm-tagSkip` 拿 `state-idle-primary` 当字色，白底 1.48:1、深色 2.1:1；`.dsm-warn`
+//      拿 `state-warn-primary` 当字色，白底 2.15:1。state 色是指示色，"看不见"是它的正常值域。
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -41,8 +44,13 @@ function readCss() {
   assert.notEqual(end, -1, 'CSS 模板字面量没有正常收尾（注释里混进了反引号？）')
   const css = source.slice(from, end)
   assert.ok(css.length > 2000, '取出来的 CSS 太短，模板字面量可能被提前截断了')
+  // 报错时要给**文件里的**行号，不是样式表正文里的行号：差一个"模板字面量从第几行开始"。
+  cssLineOffset = source.slice(0, start).split('\n').length
   return css
 }
+
+/** 样式表正文第 1 行在 `styles.ts` 里的行号（`readCss()` 顺手算出来的）。 */
+let cssLineOffset = 0
 
 const css = readCss()
 
@@ -88,13 +96,27 @@ function withoutVar(cssText) {
   return text
 }
 
-/** 逐行抽出 `属性: 值;` 声明（这份样式表里的声明都是一行一条）。 */
+/**
+ * 逐条抽出 `属性: 值;` 声明。
+ *
+ * 早先这版只认"一行一条"的写法（`^\s*属性: 值;$`），于是**单行规则整条漏检**——
+ * `.dsm-warn { color: var(--…); }` 那种写法根本进不了检查。真实事故正好长这样：
+ * `.dsm-tagIdle, .dsm-tagSkip { color: var(--dsw-alias-state-idle-primary, …); … }` 是一整行，
+ * 对比度 1.48:1，而检查全绿。现在按花括号扫：值里不含 `;`/`{`/`}`，所以选择器（`…:hover {`）不会
+ * 被当成声明，单行和多行写法都能捞到。注释先挖成等长空白，免得注释里的 `1.48:1` 被当声明。
+ */
 function declarations(cssText) {
+  const blank = cssText.replace(/\/\*[\s\S]*?\*\//g, (comment) => comment.replace(/[^\n]/g, ' '))
   const out = []
-  cssText.split('\n').forEach((line, index) => {
-    const match = /^\s*([a-z-]+)\s*:\s*([^;]+);\s*$/.exec(line)
-    if (match !== null) out.push({ property: match[1], value: match[2], line: index + 1 })
-  })
+  const pattern = /([a-z-]+)\s*:\s*([^;{}]+);/g
+  let match
+  while ((match = pattern.exec(blank)) !== null) {
+    out.push({
+      property: match[1],
+      value: match[2].trim(),
+      line: cssLineOffset + blank.slice(0, match.index).split('\n').length - 1,
+    })
+  }
   return out
 }
 
@@ -144,4 +166,24 @@ test('标签不许折行：它是小块，不是一句话', () => {
   const body = ruleBody('.dsm-tag')
   assert.notEqual(body, null, '找不到 .dsm-tag 规则')
   assert.match(body, /white-space:\s*nowrap/, '窄列里标签会竖成两行（「跳/过」），必须 nowrap')
+})
+
+test('state 色不许裸当文字色：它是指示色，浅色主题下淡到读不出来', () => {
+  // 真实事故（浏览器里量的，明暗两套都量了）：`.dsm-tagSkip` 拿 `state-idle-primary` 当字色，
+  // 浅色主题 #d4d4d4 在白底上 1.48:1、深色 #545557 在 #232324 上 2.1:1；`.dsm-warn` 拿
+  // `state-warn-primary` 当字色，浅色主题白底 2.15:1。都是"白底白字"那个家族的事故：
+  // 字还在 DOM 里、还能被读屏读出来，只是人看不见——类型检查、产物冒烟、HTTP 核对全抓不到。
+  //
+  // state 色是**指示色**（点、边框、淡填充），色值本身就没按文字对比度选。宿主的警告块也是这个
+  // 分工：`state-warn-tertiary` 当底、`state-warn-label` 当字、`state-warn-primary` 当边。
+  // 检查面只给了 primary 那一档，所以字要自己兑：`color-mix(... 55%, label-primary)`，
+  // 亮色主题往深里走、深色主题往浅里走，一条声明在两套主题里各自走向可读的一侧。
+  const offenders = []
+  for (const { property, value, line } of declarations(css)) {
+    if (property !== 'color') continue
+    if (!value.includes('--dsw-alias-state-')) continue
+    if (value.includes('color-mix(')) continue
+    offenders.push(`第 ${line} 行 ${property}: ${value}`)
+  }
+  assert.deepEqual(offenders, [], 'state 色要当文字色，得先用 color-mix 和 label-primary 兑过')
 })

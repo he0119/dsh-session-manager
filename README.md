@@ -260,8 +260,10 @@ DSM_FIXTURE=/path/to/backup node test/run-all.mjs
 两者的产物都不存在时跳过；`pnpm run build && pnpm test` 是全绿口径。
 
 `test/groups.test.ts` 钉住导出列表的分组规则（按目录、组的顺序、组内定序、重复路径、空串 cwd、
-空组不出现），`test/styles.test.mjs` 钉住样式表的三条纪律（颜色必须走主题 token、token 必须在
-`Theme` 检查面的名单里、每个 token 都得带回落值）——后一条是踩过"深色主题下白底白字"之后加的。
+空组不出现），`test/styles.test.mjs` 钉住样式表的五条纪律（颜色必须走主题 token、token 必须在
+`Theme` 检查面的名单里、每个 token 都得带回落值、标签不许折行、state 色不许裸当文字色）——第一条是
+踩过"深色主题下白底白字"之后加的，后两条是在真实页面里**量**过之后加的：`state-idle-primary` 当
+文字色时白底只有 1.48:1。
 
 `test/transfer.test.ts` 覆盖 `.dshsess` 的字节往返、包校验的拒绝面（sha256/截断/magic/版本）、
 导入预演与落地、同 id 冲突只跳过、无 cwd 与明文 v0 日志两条分支；`test/web.test.ts` 用假

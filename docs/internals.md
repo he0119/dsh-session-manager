@@ -199,8 +199,20 @@ client 一份配置是 `format: 'cjs'` 外面套三行（banner/intro/footer）�
 `var(--dsw-alias-label-primary-foreground, var(--dsw-alias-bg-layer-1, #fff))`：检查面没给这个位置
 token，所以显式挂了回落链（拿不到就退到表面色——brand-primary 在明暗两套里都是表面的反色）。
 同一类的还有悬停底色：`bg-layer-3` 在浅色主题里就是 #fff，铺在白卡片上等于没有反馈，改成把
-`label-primary` 兑 8% 透明的薄雾（宿主外壳自己也这么兑）。这三条纪律由 `test/styles.test.mjs`
-机械核对（颜色必须走 token、token 必须在名单里、token 必须带回落值），反事实都验过会失败。
+`label-primary` 兑 8% 透明的薄雾（宿主外壳自己也这么兑）。还有**state 色**：那四个
+`state-*-primary` 是"指示色"（点、边框、淡填充），色值本身没按文字对比度选，当小字颜色用就会
+在一种主题下淡到看不见——浏览器里量到的：`state-idle-primary` 是 #d4d4d4，白底 **1.48:1**；
+深色主题里它是 #545557，在 #232324 上 **2.1:1**；`state-warn-primary` 是 #f59e0b，白底 **2.15:1**。
+所以文字一律走 `label-*`（浅 5.8:1 / 深 10.4:1），state 色只留在边框和一层淡填充上；非当文字色
+不可时就 `color-mix(in srgb, …, 55%, label-primary)` 兑一下：亮色主题往深里走、深色主题往浅里走，
+**同一条声明在两套主题里各自走向可读的一侧**（实测 warn 5.57:1 / error 9.75:1 / ok 5.82:1）。
+
+这五条纪律由 `test/styles.test.mjs` 机械核对（颜色必须走 token、token 必须在名单里、token 必须带
+回落值、标签不许折行、state 色不许裸当文字色），反事实都验过会失败。**上面这些比值是浏览器里量
+出来的，不是推的**：`agent-browser` 打开真实的设置页，逐个元素取 `getComputedStyle` 的前景色，
+背景色沿祖先链一路 `color-mix` 合成到不透明为止，再按 WCAG 相对亮度算比值，明暗两套主题各跑一遍
+（换主题用 `agent-browser set media dark`，页面认 `prefers-color-scheme`）。对比度推不出来——它
+取决于宿主**当时**给的那套 token 值，只有量了才知道。
 
 注册进 `settings.section`：设置左侧导航里的一页，与「通用 / 模型 / 插件 / 账户 / Agent 预设」
 并列，`order: 30` 排它们之后。相近的槽位有两个，各有一个真问题，所以都没选：

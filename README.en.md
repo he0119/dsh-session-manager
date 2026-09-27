@@ -283,9 +283,11 @@ build is absent; `pnpm run build && pnpm test` is the all-green command. The rea
 behind `DSM_SMOKE_WORKSPACE` and additionally asserts that a read-only `plan` created no target bucket.
 
 `test/groups.test.ts` pins the export list's grouping rules (by directory, group order, in-group order,
-duplicate paths, empty-string cwd, no empty groups) and `test/styles.test.mjs` pins three stylesheet
+duplicate paths, empty-string cwd, no empty groups) and `test/styles.test.mjs` pins five stylesheet
 rules (colors must go through theme tokens, tokens must be on the `Theme` surface, every token needs a
-fallback) — the last one was added after shipping white-on-white text in the dark theme.
+fallback, tags must never wrap, and a `state-*` token may not be used bare as a text color) — the first
+was added after shipping white-on-white text in the dark theme, the last two after measuring the live
+page in both themes: `state-idle-primary` as text was 1.48:1 on white.
 
 `test/transfer.test.ts` covers the `.dshsess` byte round-trip, the rejection surface of bundle
 validation (sha256 / truncation / magic / version), import preview and apply, id-collision skip, and

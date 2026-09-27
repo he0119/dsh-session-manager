@@ -212,21 +212,39 @@ export const CSS = `
 .dsm-table th { color: var(--dsw-alias-label-secondary, #646a73); font-weight: 500; }
 /* 导入预演那张表的列宽**写死**（fixed 布局）：会话那一列吃掉剩余宽度，其余按内容量好。
    自动布局碰上长路径会算出一个很怪的比例——动作列被挤成两个字宽（「动作」自己都折行），
-   会话列每行只剩十来个字符。列宽是设计，不该由内容的字数决定。 */
+   会话列每行只剩十来个字符。列宽是设计，不该由内容的字数决定。
+   单元格要 border-box：默认 content-box 下 padding: 5px 8px 会**加到**列宽上，
+   声明 72px 实占 88px——那 16px 是从"吃掉剩余宽度"的会话列身上扣的。实测修之前：
+   表宽 534px → 动作 88 / 会话 155 / cwd 187 / 大小 104，单行高 271px（会话列里 id 折 3 行、
+   冲突原因折 8 行），20 行就是 5400px 的表。 */
 .dsm-planTable { table-layout: fixed; }
-.dsm-planTable .dsm-colAction { width: 72px; }
-.dsm-planTable .dsm-colCwd { width: 32%; }
-.dsm-planTable .dsm-colBytes { width: 88px; }
+.dsm-planTable th, .dsm-planTable td { box-sizing: border-box; }
+.dsm-planTable .dsm-colAction { width: 60px; }
+.dsm-planTable .dsm-colCwd { width: 26%; }
+.dsm-planTable .dsm-colBytes { width: 68px; }
 /* cwd 那一格里的路径要能断行（fixed 布局下列宽不会再变），否则长路径顶出格子。 */
 .dsm-cwd { color: var(--dsw-alias-label-secondary, #646a73); overflow-wrap: anywhere; }
 /* 标签是个小块：挤在窄列里也不能折成两行（导入预演表的动作列里曾经折成「跳/过」）。 */
 .dsm-tag { border-radius: 6px; padding: 0 6px; font-size: 12px; white-space: nowrap; }
-.dsm-tagCreate { color: var(--dsw-alias-state-success-primary, #2ea121); border: 1px solid currentColor; }
+/* state 色是指示色，不是文字色：它在浅色主题里淡到读不出来。实测（浏览器里量的，两套主题都量了）
+   state-idle-primary = #d4d4d4，白底 1.48:1；深色 #545557 在 #232324 上 2.1:1。
+   state-warn-primary = #f59e0b，白底 2.15:1。所以文字一律走 label 色（浅 5.8:1 / 深 10.4:1），
+   state 色只留在边框和一层淡填充上——绿色「新建」、灰色「跳过」还是那个颜色，字却是读得出来的。 */
+.dsm-tagCreate {
+  color: var(--dsw-alias-label-primary, #1f2329);
+  border: 1px solid var(--dsw-alias-state-success-primary, #2ea121);
+  background: color-mix(in srgb, var(--dsw-alias-state-success-primary, #2ea121) 14%, transparent);
+}
 /* 中性标签：导入预演里的 skip、导出列表里"不是已登记工作区"的目录，都只是"没什么动作"。 */
-.dsm-tagIdle, .dsm-tagSkip { color: var(--dsw-alias-state-idle-primary, #8f959e); border: 1px solid currentColor; }
-.dsm-error { color: var(--dsw-alias-state-error-primary, #d83931); }
-.dsm-warn { color: var(--dsw-alias-state-warn-primary, #d97b00); }
-.dsm-ok { color: var(--dsw-alias-state-success-primary, #2ea121); }
+.dsm-tagIdle, .dsm-tagSkip {
+  color: var(--dsw-alias-label-secondary, #646a73);
+  border: 1px solid var(--dsw-alias-border-l2, rgba(0, 0, 0, 0.12));
+}
+/* state 色非当文字色不可的时候，先和 label-primary 兑一下：亮色主题往深里走、深色主题往浅里走，
+   同一条声明在两套主题里各自走向可读的一侧（浅色主题实测 error 9.6:1 / warn 5.6:1 / ok 8.0:1）。 */
+.dsm-error { color: color-mix(in srgb, var(--dsw-alias-state-error-primary, #d83931) 55%, var(--dsw-alias-label-primary, #1f2329)); }
+.dsm-warn { color: color-mix(in srgb, var(--dsw-alias-state-warn-primary, #d97b00) 55%, var(--dsw-alias-label-primary, #1f2329)); }
+.dsm-ok { color: color-mix(in srgb, var(--dsw-alias-state-success-primary, #2ea121) 55%, var(--dsw-alias-label-primary, #1f2329)); }
 .dsm-banner {
   border: 1px solid currentColor;
   border-radius: 8px;
