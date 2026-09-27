@@ -9,13 +9,14 @@
 // 代价：某个文件抛错会影响同进程的其它文件，因此这里对每个文件单独 try/catch 汇总。
 //
 // 测试文件是 .ts，靠 node 自带的类型擦除运行（与参考项目同一做法）。
+// 另有 .test.mjs：构建产物冒烟需要加载 lib/index.js，用 .mjs 才能避开 tsc 对产物路径的解析。
 import { readdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const files = readdirSync(here)
-  .filter((f) => f.endsWith('.test.ts'))
+  .filter((f) => f.endsWith('.test.ts') || f.endsWith('.test.mjs'))
   .sort()
 
 let failed = 0

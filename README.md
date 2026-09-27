@@ -202,6 +202,11 @@ DSM_FIXTURE=/path/to/backup node test/run-all.mjs
 
 `pnpm test` = `node test/run-all.mjs`；`pnpm run check` = `tsc` 类型检查 + 测试。
 
+`test/artifact.test.mjs` 是**构建产物**冒烟：加载 `lib/index.js`，断言入口字段、4 个工具注册
+与 `apply()` 的卸载函数契约——补上「源码通过」与「产物能装进宿主」之间那一环。产物不存在时跳过；
+`pnpm run build && pnpm test` 是全绿口径。真实数据那一条用 `DSM_SMOKE_WORKSPACE` 门控，会额外断言
+只读 `plan` 没有创建目标桶。
+
 ## 文档
 
 - [docs/internals.md](docs/internals.md)——「为什么是现在这样」：不变式、多帧陷阱、生效模式，

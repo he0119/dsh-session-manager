@@ -22,6 +22,27 @@ DSM_FIXTURE=/path/to/backup pnpm test
 
 没设 `DSM_FIXTURE` 时，`test/real-data.test.ts` 会整组跳过（这是 runner 里那 1 个 `skipped`）。
 
+### 构建产物冒烟（`test/artifact.test.mjs`）
+
+其余测试都直接 import `src/*.ts`，所以**「源码通过」不等于「产物能装进宿主」**。
+`test/artifact.test.mjs` 加载 `lib/index.js`（`package.json` 的 `main`），断言：
+
+- 入口自描述字段与 `cordis.patch.yml` / `inject` 一致（`name`、`inject: ['tools']`）
+- 能注册出 4 个工具，且 `parameters` / `output.render` 形状符合宿主契约
+- `apply()` 返回**单个**卸载函数（Cordis 契约：不是 disposer 数组），调用后不抛
+
+它写成 `.mjs` 而非 `.ts`：要加载 `lib/` 里的产物，用 `.ts` 会让 `tsc` 去解析产物路径。
+产物不存在时整组跳过，所以源码开发不必先构建；`pnpm run build && pnpm test` 才是全绿口径。
+
+真实数据那一条额外用环境变量门控（同样默认跳过）：
+
+```sh
+DSM_SMOKE_WORKSPACE=/path/to/a/real/workspace pnpm test
+```
+
+它会在这个目录上跑一次只读 `plan`，并断言计划自己算出的 `targetBucket` 目录**没有被创建**
+——把「只读」从口头承诺变成可断言的事实。目标桶名取自计划返回值，不硬编码。
+
 ### 本机安装（Windows 沙箱下的实测结论）
 
 pnpm 的 isolated 布局在本机**不可用**：它生成的 junction 目标畸形

@@ -201,6 +201,12 @@ fails with `spawn EPERM` under the DSH Windows sandbox — unrelated to the test
 See [docs/development.md](docs/development.md) for how the tool-layer tests resolve the real
 `@deepseek-ai/dsh-tools`, and [docs/internals.md](docs/internals.md) for the full rationale.
 
+`test/artifact.test.mjs` smoke-tests the **built artifact**: it loads `lib/index.js` and asserts the
+entry fields, the 4 tool registrations and the `apply()` disposer contract — closing the gap between
+"the source passes" and "the artifact actually loads in a host". It skips when the build is absent;
+`pnpm run build && pnpm test` is the all-green command. Its real-data case is gated behind
+`DSM_SMOKE_WORKSPACE` and additionally asserts that a read-only `plan` created no target bucket.
+
 ## License
 
 MIT
