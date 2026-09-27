@@ -7,15 +7,19 @@ directories, re-home workspace membership, and optionally move the files those s
 
 > **Status**
 > - ✅ Core library, migration engine, offline CLI, plugin shell and 4 tools
+> - ✅ Session import & export: one page in Settings (`settings.section`) plus 3 endpoints under
+>   `/dsh-session-manager/api`
 > - ✅ Tool contract verified against the **real `@deepseek-ai/dsh-tools`** (`defineTool` normalization
 >   + argument validation + real execution)
 > - ✅ Session-artifact migration: evidence layering + on-disk intersection + nested pruning, rolled
 >   back together with the sessions
 > - ✅ Source is TypeScript: `src/*.ts` → tsdown → `lib/` (build output, not committed); `tsc` typecheck
 >   and the build both pass
-> - ✅ **79 of 81 tests pass** (real log files, real registry, end-to-end byte-level rollback assertions,
+> - ✅ **81 of 83 tests pass** (real log files, real registry, end-to-end byte-level rollback assertions,
 >   and a built-artifact smoke test)
-> - ⏳ Pending your go-ahead: install into a profile and restart DSH to load the 4 tools for real
+> - ⏳ Pending your go-ahead: install into a profile and restart DSH to load the 4 tools and open that
+>   settings page for real (the page's styling is verified at build/artifact-contract level only — it
+>   has not been looked at in a live GUI yet)
 
 ## The problem it solves
 
@@ -69,7 +73,7 @@ Defaults are `$DSH_HOME/sessions` and `$DSH_HOME/storages/workspace.json`; overr
 
 ### Session import & export (Web UI)
 
-Once installed into a profile, **Settings → Plugins** gains a **Session import & export** page (this
+Once installed into a profile, the **Settings** sidebar gains a **Session transfer** page (this
 package ships a Web Client half):
 
 - **Export**: tick sessions → the browser downloads one `.dhsess` bundle. The bundle carries the raw

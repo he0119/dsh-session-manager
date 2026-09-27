@@ -5,7 +5,8 @@
  * 深浅主题自动跟随。不用任何宿主原语包的类名：那些是打包器哈希出来的私有产物，抄不到也不该抄。
  *
  * 排版照「插件」页那一类管理列表：一个区块一张卡片（发丝描边 + 大圆角）、行高紧凑、
- * 次要文字用 `label-secondary`。
+ * 次要文字用 `label-secondary`。外层的水平留白与滚动由设置外壳给（它那一列是
+ * `padding: 0 24px 24px; overflow-y: auto`），所以这里不再自己加页面级 padding。
  *
  * @module dsh-session-manager/client/styles
  */
@@ -57,7 +58,8 @@ export const CSS = `
   color: #fff;
 }
 .dsm-list {
-  max-height: 320px;
+  /* 整页里不必再用 320px 的小窗：给一个随视口的上限，短列表不留空、长列表不把页面推得很长。 */
+  max-height: min(420px, 42vh);
   overflow: auto;
   border: 1px solid var(--dsw-alias-border-l1, rgba(0, 0, 0, 0.1));
   border-radius: 10px;

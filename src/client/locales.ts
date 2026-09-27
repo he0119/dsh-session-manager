@@ -2,12 +2,12 @@
  * 界面文案：两份语言 + 命名空间。
  *
  * 字典是扁平的 `键 → 文案`，`{name}` 是占位符，与宿主的字典服务同一套口径
- * （`ctx.locale.register(NS, { zh, en })`，页面注册时带 `locale: NS`）。
+ * （`ctx.locale.register(NS, { zh, en })`，注册槽位时带 `locale: NS`）。
  *
  * 刻意**不 import** `@deepseek-ai/dsh-client-locale/client` 的类型：那是宿主 Web 端模块图里的
- * 包，本包只声明它作为运行时依赖（`dsh.client.inject`），不在类型层与它绑死——它改名或换形状
- * 时，本页最多文案回落到键名，不会连页面一起装不进去。代价是字典键没有编译期校验，
- * 由 `test/client.test.mjs` 的键集断言补上。
+ * 包，本包只在 `dsh.client.inject` 里把它排在自己前面（那份清单管模块到达顺序，不是依赖保证），
+ * 不在类型层与它绑死——它改名或换形状时，本页最多文案回落到键名，不会连页面一起装不进去。
+ * 代价是字典键没有编译期校验，由 `test/client.test.mjs` 的键集断言补上。
  *
  * @module dsh-session-manager/client/locales
  */
@@ -20,7 +20,8 @@ export type Translate = (key: string, params?: Record<string, string | number>) 
 
 /** 中文文案。 */
 export const zh = {
-  tab: '会话导入导出',
+  // 设置导航里的那一行，同时也是页面标题——所以取短名，别把「导入导出」塞进导航。
+  title: '会话传输',
   refresh: '刷新',
   loading: '读取中…',
   library: '会话库',
@@ -67,7 +68,7 @@ export const zh = {
 
 /** 英文文案（键集必须与中文完全一致）。 */
 export const en: Record<keyof typeof zh, string> = {
-  tab: 'Session import & export',
+  title: 'Session transfer',
   refresh: 'Refresh',
   loading: 'Loading…',
   library: 'Session library',

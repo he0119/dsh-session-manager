@@ -105,8 +105,8 @@ test('客户端产物：导出面符合客户端插件契约', { skip }, () => {
   assert.equal(typeof mod.apply, 'function')
 })
 
-/** 跑一次 apply，收下所有注册面（第三个与第四个用例共用）。 */
-function mount() {
+/** 跑一次 apply，收下所有注册面（后面几个用例共用）。 */
+function mount({ translate } = {}) {
   const { mod, nodes } = loadBundle()
   const registrations = []
   const dictionaries = []
@@ -127,7 +127,7 @@ function mount() {
       },
       bind(namespace) {
         bound.push(namespace)
-        return t
+        return translate ?? t
       },
     },
     slots: {
@@ -145,17 +145,18 @@ function mount() {
   return { mod, nodes, registrations, dictionaries, effects, injectedSlots, bound, t }
 }
 
-test('客户端产物：apply 注册到「插件」设置区的页，并带上字典与注入面', { skip }, () => {
+test('客户端产物：apply 注册到设置里的一页，并带上字典与注入面', { skip }, () => {
   const { nodes, registrations, dictionaries, effects, injectedSlots, bound, t } = mount()
 
   // 槽位用 inject 等声明到位，而不是直接 register——声明可能晚于本插件 apply。
-  assert.deepEqual(injectedSlots, ['settings.plugins.tab'])
+  assert.deepEqual(injectedSlots, ['settings.section'])
   assert.equal(registrations.length, 1)
   const { registration, component } = registrations[0]
-  assert.equal(registration.name, 'settings.plugins.tab')
+  assert.equal(registration.name, 'settings.section')
   assert.equal(registration.id, 'session-transfer')
   assert.equal(registration.locale, 'dsh-session-manager')
-  assert.equal(typeof registration.order, 'number')
+  // 排官方那几页之后（账户 -10 / 通用 0 / 模型 10 / 插件 15 / Agent 预设 20），不插队。
+  assert.equal(registration.order, 30)
   assert.equal(typeof registration.label(), 'string', 'label 必须是可投影的文案')
   assert.equal(typeof component, 'function', '注册的必须是一个组件')
   // bind 是惰性的（label 与 inject 都是 thunk），上面调用 label() 之后它才被绑过
@@ -174,6 +175,19 @@ test('客户端产物：apply 注册到「插件」设置区的页，并带上�
   // 样式随 effect 注入
   assert.ok(nodes.length >= 1, 'installStyles 应当往 head 里放一个 <style>')
   assert.ok(effects.some((label) => String(label).includes('stylesheet')))
+})
+
+test('客户端产物：导航行的文案跟着语言走（同一个 thunk 每次投影重新取）', { skip }, () => {
+  // 设置外壳投影导航行时走 resolveSlotLabel（是函数就调用），并且订阅了 locale 快照：
+  // 因此这里必须能在不重新注册的前提下换一份文案，否则切语言后导航行会停在旧语言。
+  let active = 'zh'
+  const { registrations } = mount({
+    translate: () => (active === 'zh' ? '会话传输' : 'Session transfer'),
+  })
+  const { label } = registrations[0].registration
+  assert.equal(label(), '会话传输')
+  active = 'en'
+  assert.equal(label(), 'Session transfer')
 })
 
 test('客户端产物：页面组件在初始状态下能渲染成元素（不抛）', { skip }, () => {

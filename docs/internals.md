@@ -158,8 +158,19 @@ client 一份配置是 `format: 'cjs'` 外面套三行（banner/intro/footer）�
 颜色只用 `Theme` 检查面列出的 `--dsw-alias-*` token（每个都带中性回落值，深浅主题自动跟随），
 类名收在自己的 `dsm-` 前缀下。
 
+注册进 `settings.section`：设置左侧导航里的一页，与「通用 / 模型 / 插件 / 账户 / Agent 预设」
+并列，`order: 30` 排它们之后。相近的槽位有两个，各有一个真问题，所以都没选：
+
+- `plugins.detail.section`（插件详情页配置/行列表之后的一段）：归属感最贴，但要按 subject
+  （`item` / `row` / `bundle`）自过滤，而判断依据是**包在插件管理器里的表示形态**；猜错不报错、
+  只是永远不渲染——静默空白最难发现。它还会在包内每一行的页面上各渲染一次，而本页要的是整页宽高。
+- `settings.plugins.tab`（「插件」设置区里的一个页签）：那条页签栏的语义是「插件列表的视图」，
+  一个功能页挤进去属于借位。
+
 注册走 `ctx.slots.inject(slot, () => ctx.slots.register(...))` 而不是直接 register：目标槽位
-由设置外壳在运行时声明，那个声明完全可能晚于本插件 `apply`。
+由设置外壳在运行时声明，那个声明完全可能晚于本插件 `apply`。`label` 给的是 thunk：外壳投影
+导航行时走 `resolveSlotLabel`（是函数就调用），并且订阅了 locale 快照，所以切语言或后到的
+字典都会让那一行重新投影，不必自己重新注册——`test/client.test.mjs` 把这条也钉住了。
 
 ## 验证：哪一层证明什么
 

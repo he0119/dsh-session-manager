@@ -7,14 +7,16 @@
 
 > **状态**
 > - ✅ 核心层 / 迁移引擎 / 离线 CLI / 插件外壳与 4 个工具
+> - ✅ 会话导入导出：设置里的一页（`settings.section`）+ `/dsh-session-manager/api` 的 3 个端点
 > - ✅ 工具契约用**真实的 `@deepseek-ai/dsh-tools`** 验证（`defineTool` 归一化 + 实参校验 + 真实执行）
 > - ✅ 会话产物搬迁（`artifacts.mjs`）：证据分层 + 存在性求交 + 嵌套剪枝，可随会话一起回滚
 > - ✅ 源码为 TypeScript，`src/*.ts` → tsdown → `lib/`（构建产物不进 git）；`tsc` 类型检查与构建均通过
-> - ✅ **81 个用例通过 79 条**（含真实日志、真实注册表、端到端回滚的字节级断言、构建产物冒烟；
+> - ✅ **83 个用例通过 81 条**（含真实日志、真实注册表、端到端回滚的字节级断言、构建产物冒烟；
 >   另 2 条按环境变量门控跳过）
 > - ✅ 仓库工程化对齐参考项目：`.gitattributes`(全 LF)、`.gitignore`、`docs/`、双语 README、
 >   `.github/workflows/ci.yml`、`pnpm-workspace.yaml`、`icon.svg`、`LICENSE`、engines/scripts 约定
-> - ⏳ 待你确认：装进哪个 profile 并重启 DSH，在真实实例里加载这 4 个工具
+> - ⏳ 待你确认：装进哪个 profile 并重启 DSH，在真实实例里加载这 4 个工具、打开设置里那一页
+>   （页面样式只做到构建与产物契约级验证，还没在真实 GUI 里看过）
 
 ## 它解决什么问题
 
@@ -65,7 +67,7 @@ node lib/cli.js rollback --backup '<apply 输出的备份目录>'
 
 ### 会话导入导出（Web 界面）
 
-装进 profile 后，**设置 → 插件** 里会多出一页「会话导入导出」（本包自带 Web Client 半边）：
+装进 profile 后，**设置** 的左侧导航里会多出一页「会话传输」（本包自带 Web Client 半边）：
 
 - **导出**：勾选会话 → 浏览器下载一个 `.dhsess` 包。包里是这些会话**所有代次日志的原始字节**
   （逐条带 sha256），不含会话创建过的普通文件。

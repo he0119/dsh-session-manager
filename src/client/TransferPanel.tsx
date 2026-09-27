@@ -1,5 +1,5 @@
 /**
- * 会话导入导出的页面主体（注册在 设置 → 插件 的一个页里）。
+ * 会话导入导出的页面主体（注册在设置 → 会话传输 这一页）。
  *
  * 这一层只做三件事：读宿主端点、记本地草稿、把结果摆出来。所有判定都在宿主侧
  * （`src/web.ts` + `src/transfer.ts`）：预演返回的就是将要发生的事，页面不自己推算
@@ -171,7 +171,7 @@ export function TransferPanel({ t = fallback }: TransferPanelProps): React.React
   return (
     <section className="dsm-root" data-plugin="dsh-session-manager">
       <header className="dsm-head">
-        <span className="dsm-title">{t('tab')}</span>
+        <span className="dsm-title">{t('title')}</span>
         <span className="dsm-sub">
           {t('library')}：{state?.sessionsRoot ?? ''} · {t('sessionsCount', { count: sessions.length })} ·{' '}
           {t('workspacesCount', { count: workspaces.length })}
