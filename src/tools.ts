@@ -95,6 +95,38 @@ export function effectMode(ctx: unknown): EffectMode {
   return typeof registry?.reassignSessions === 'function' ? 'immediate' : 'restart-required'
 }
 
+/**
+ * 宿主目录选择器的能力种类。
+ *
+ * 宿主的 `directoryPicker` 是个"能力位"服务：`capability()` 返回带 `kind` 的对象，
+ * `native` 那只提供 `pick()`（在**宿主显示器**上弹系统对话框），`browse` 那只提供
+ * `list()`/`createDirectory()`（页面内浏览，路径必须宿主自己够得着）。两者互斥——
+ * 拿 `native` 的能力去 `list()` 会被宿主拒绝，反之亦然。
+ *
+ * 界面因此不能假设"选目录"= 弹对话框：它得先知道这个宿主给的是哪一种，再决定
+ * 「浏览…」按钮到底干什么。种类由宿主报给界面（`GET /state` 的 `pickerKind`），
+ * 而不是让界面去试错——试探在 `native` 宿主上会真的弹出对话框。
+ */
+export type PickerKind = 'browse' | 'native' | null
+
+/**
+ * 读宿主目录选择器的能力种类。
+ * @param ctx - 宿主上下文。
+ * @returns `browse` / `native`；没有该服务或形状不认时 `null`（界面据此隐藏选择入口）。
+ */
+export function directoryPickerKind(ctx: unknown): PickerKind {
+  const picker = optionalService(ctx, 'directoryPicker') as
+    | { capability?: () => { kind?: unknown } }
+    | undefined
+  try {
+    const kind = picker?.capability?.()?.kind
+    return kind === 'browse' || kind === 'native' ? kind : null
+  } catch {
+    // 能力位还没装配好时会抛：按"没有选择器"处理，界面退回到手输路径。
+    return null
+  }
+}
+
 const EFFECT_NOTE: Record<EffectMode, string> = {
   immediate: '注册表变更由 workspaceRegistry 直接承接，无需重启。',
   'restart-required':

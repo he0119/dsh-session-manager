@@ -25,7 +25,7 @@ import {
   type MigrateRequest,
 } from './migrate.ts'
 import { readRegistry, validateRegistry } from './registry.ts'
-import { type EffectMode, type ResolvedPaths } from './tools.ts'
+import { type EffectMode, type PickerKind, type ResolvedPaths } from './tools.ts'
 import {
   applyImport,
   buildBundle,
@@ -70,6 +70,13 @@ export interface ApiDeps {
    * 本模块只认 `{ register() }` 形状，不该知道 Cordis 的存在。
    */
   effectMode?: () => EffectMode
+  /**
+   * 宿主目录选择器的能力种类（`browse` / `native` / `null`）。
+   *
+   * 同 `effectMode`：要读宿主服务，所以由入口探测后注入。界面拿它决定目录字段上的
+   * 「浏览…」是开页面内浏览器还是弹宿主的系统对话框；`null` 时那个按钮根本不出现。
+   */
+  pickerKind?: () => PickerKind
 }
 
 /** 界面要展示的一条会话。 */
@@ -230,6 +237,8 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
       sessionsRoot: paths.sessionsRoot,
       registryPath: paths.registryPath,
       problems,
+      // 目录字段能不能「浏览…」由宿主的能力位决定，界面不试错（见 ApiDeps.pickerKind）。
+      pickerKind: deps.pickerKind?.() ?? null,
       sessions: summarizeSessions(sessions, registry),
       workspaces: summarizeWorkspaces(registry),
     })

@@ -24,7 +24,9 @@ import {
   type MigrationRequest,
   type MigrationResponse,
 } from './api.ts'
-import { translateWith, zh } from './locales.ts'
+import { translateWith, zh, type Translate } from './locales.ts'
+import { DirectoryPicker } from './DirectoryPicker.tsx'
+import { normalizePickedPath } from './directory.ts'
 import type { PanelShare } from './types.ts'
 
 /** 没有注入面时的兜底翻译。 */
@@ -52,10 +54,109 @@ function formatTime(value: string): string {
 /** 会话选择：全部，或从匹配到的会话里勾几条。 */
 type PickMode = 'all' | 'subset'
 
+/** 目录下拉框里的一行。`count` 只有"宿主库里真有会话的目录"才有。 */
+interface PathRow {
+  path: string
+  title?: string
+  count?: number
+}
+
+/** 一行候选的文案：工作区标题（有则带）+ 路径 + 库里的条数（有则带）。 */
+function optionLabel(row: PathRow, t: Translate): string {
+  const head = row.title === undefined ? row.path : `${row.title} — ${row.path}`
+  return row.count === undefined ? head : `${head} — ${t('sessionsInDir', { count: row.count })}`
+}
+
+/** 一个目录字段的入参。 */
+interface PathFieldProps {
+  t: Translate
+  label: string
+  /** 下拉框空值时的提示（"选源目录…"）。 */
+  placeholder: string
+  rows: PathRow[]
+  value: string
+  onChange: (value: string) => void
+  /** 宿主目录选择器的能力种类；`null` = 这个宿主没有选择器，不显示「浏览…」。 */
+  pickerKind: 'browse' | 'native' | null
+  onBrowse: () => void
+  /** 「手输路径」是否展开。 */
+  manualOpen: boolean
+  onToggleManual: () => void
+  /** 展开中的浏览框（没展开就是 null）。 */
+  browser: React.ReactNode
+}
+
+/**
+ * 一个目录字段：**一个值控件**（下拉框自己就是那个值）+ 两条"另选一个值"的路。
+ *
+ * 为什么不是"下拉框只是替文本框挑一个候选"：目录是个任意绝对路径，候选列表永远不可能完整
+ * （目标目录甚至可能还没建）。所以这里的下拉框 `value={value}` 直接就是值，且当前值一定在
+ * 列表里（见调用处的 `sourceRows`/`targetRows`）；「浏览…」走宿主的目录选择器；
+ * 「手输路径」是万能兜底——宿主没有选择器时也能改值。
+ *
+ * 三段控件是并列的兄弟节点而不是把 `<select>` 套进 `<label>`：一个 label 里塞两个可交互控件，
+ * 点哪个都会把焦点给第一个。
+ */
+function PathField({
+  t,
+  label,
+  placeholder,
+  rows,
+  value,
+  onChange,
+  pickerKind,
+  onBrowse,
+  manualOpen,
+  onToggleManual,
+  browser,
+}: PathFieldProps): React.ReactElement {
+  return (
+    <div className="dsm-field">
+      <span className="dsm-fieldLabel">{label}</span>
+      <div className="dsm-controls">
+        <select
+          className="dsm-select dsm-selectPath"
+          aria-label={label}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+        >
+          <option value="">{placeholder}</option>
+          {rows.map((row) => (
+            <option key={row.path} value={row.path}>
+              {optionLabel(row, t)}
+            </option>
+          ))}
+        </select>
+        {pickerKind !== null && (
+          <button type="button" className="dsm-button" onClick={onBrowse}>
+            {t('browse')}
+          </button>
+        )}
+        <button type="button" className="dsm-button" aria-expanded={manualOpen} onClick={onToggleManual}>
+          {manualOpen ? t('collapse') : t('typePath')}
+        </button>
+      </div>
+      {manualOpen && (
+        <input
+          className="dsm-input"
+          type="text"
+          aria-label={label}
+          value={value}
+          placeholder={t('pathPlaceholder')}
+          onChange={(event) => onChange(event.target.value)}
+        />
+      )}
+      {browser}
+    </div>
+  )
+}
+
 /** 迁移页。 */
-export function MigrationPanel({ t = fallback, state, reload }: PanelShare): React.ReactElement {
+export function MigrationPanel({ t = fallback, state, reload, directory }: PanelShare): React.ReactElement {
   const sessions = state?.sessions ?? []
   const workspaces = state?.workspaces ?? []
+  // 宿主有没有目录选择器、是哪一种；`null`（含旧宿主没这个字段）时不显示「浏览…」。
+  const pickerKind = state?.pickerKind ?? null
 
   const [from, setFrom] = React.useState('')
   const [to, setTo] = React.useState('')
@@ -64,6 +165,10 @@ export function MigrationPanel({ t = fallback, state, reload }: PanelShare): Rea
   const [includeUnowned, setIncludeUnowned] = React.useState(true)
   const [pickMode, setPickMode] = React.useState<PickMode>('all')
   const [picked, setPicked] = React.useState<readonly string[]>([])
+
+  // 页面内浏览框挂在哪个字段上，以及「手输路径」展开了哪个字段（同一时刻各一个）。
+  const [picking, setPicking] = React.useState<'from' | 'to' | null>(null)
+  const [manual, setManual] = React.useState<'from' | 'to' | null>(null)
 
   const [outcome, setOutcome] = React.useState<MigrationResponse | null>(null)
   const [busy, setBusy] = React.useState<'plan' | 'apply' | null>(null)
@@ -109,7 +214,7 @@ export function MigrationPanel({ t = fallback, state, reload }: PanelShare): Rea
       if (typeof session.cwd !== 'string' || session.cwd === '') continue
       counts.set(session.cwd, (counts.get(session.cwd) ?? 0) + 1)
     }
-    const options: { path: string; title?: string; count: number }[] = []
+    const options: PathRow[] = []
     const seen = new Set<string>()
     for (const workspace of workspaces) {
       if (seen.has(workspace.path)) continue
@@ -123,6 +228,31 @@ export function MigrationPanel({ t = fallback, state, reload }: PanelShare): Rea
     }
     return options
   }, [sessions, workspaces])
+
+  /**
+   * 下拉框里实际列出来的行 = 上面的候选 **+ 当前值本身**。
+   *
+   * 补这一行是为了让"框里显示的"永远是"真正要用的"：值可能是「浏览…」选回来的、账本和会话都没
+   * 覆盖到的目录（比如刚建的空目录），没有这一行下拉框就只能显示占位符，看着像没选中。
+   */
+  const sourceRows = React.useMemo<PathRow[]>(() => {
+    if (from === '' || sourceOptions.some((option) => option.path === from)) return sourceOptions
+    return [...sourceOptions, { path: from }]
+  }, [sourceOptions, from])
+
+  /** 目标候选：已登记工作区（同一路径只留一条），外加当前值本身。 */
+  const targetRows = React.useMemo<PathRow[]>(() => {
+    const rows: PathRow[] = []
+    const seen = new Set<string>()
+    for (const workspace of workspaces) {
+      if (seen.has(workspace.path)) continue
+      seen.add(workspace.path)
+      rows.push({ path: workspace.path, title: workspace.title })
+    }
+    if (to !== '' && !seen.has(to)) rows.push({ path: to })
+    return rows
+  }, [workspaces, to])
+
   const chosen = React.useMemo(
     () => (pickMode === 'all' ? matching.map((s) => s.id) : matching.filter((s) => picked.includes(s.id)).map((s) => s.id)),
     [pickMode, matching, picked],
@@ -138,6 +268,68 @@ export function MigrationPanel({ t = fallback, state, reload }: PanelShare): Rea
     includeArtifacts,
     ...(title.trim() === '' ? {} : { title: title.trim() }),
   })
+
+  /**
+   * 落一条路径到某个字段：去掉结尾斜杠后当成值（`cwd` 与账本里的路径都不带结尾斜杠，
+   * 留着 `/a/b/` 会凭空多出一个迁不到任何会话的桶）。
+   */
+  const applyPath = (which: 'from' | 'to', raw: string): void => {
+    const path = normalizePickedPath(raw)
+    if (path === '') return
+    if (which === 'from') {
+      setFrom(path)
+      setPicked([])
+    } else {
+      setTo(path)
+    }
+    setOutcome(null)
+    setPicking(null)
+    setManual(null)
+  }
+
+  /**
+   * 「浏览…」：按**宿主报来的能力种类**决定开哪一种，不试错。
+   *
+   * 宿主的目录选择器是能力位服务：`native` 只有 `pick()`（在宿主显示器上弹系统对话框），
+   * `browse` 只有 `list()`（页面自己画浏览器）。在 `browse` 宿主上硬调 `pick()` 会被宿主以
+   * `directory-picker/unavailable` 拒绝——那正是"按钮看着能用、点了必报错"的坑。
+   *
+   * 取消（`null`）什么都不做：取消就是取消，不该把已选的值清掉。
+   */
+  const browse = async (which: 'from' | 'to'): Promise<void> => {
+    const api = directory?.()
+    if (pickerKind === null || api === undefined) {
+      setError(t('browseUnavailable'))
+      return
+    }
+    if (pickerKind === 'browse') {
+      // 再点一次收起，不额外给一个"关闭"按钮。
+      setPicking((current) => (current === which ? null : which))
+      return
+    }
+    try {
+      const picked = await api.pick()
+      if (picked === null || picked === '') return
+      applyPath(which, picked)
+    } catch (cause) {
+      setError(t('browseFailed', { reason: cause instanceof Error ? cause.message : String(cause) }))
+    }
+  }
+
+  /** 某个字段展开中的浏览框；没展开、或选择器服务已卸载时什么都不渲染。 */
+  const browserFor = (which: 'from' | 'to'): React.ReactNode => {
+    const api = directory?.()
+    if (picking !== which || api === undefined) return null
+    return (
+      <DirectoryPicker
+        t={t}
+        api={api}
+        startPath={which === 'from' ? from : to}
+        onPick={(path) => applyPath(which, path)}
+        onClose={() => setPicking(null)}
+      />
+    )
+  }
 
   const run = async (kind: 'plan' | 'apply'): Promise<void> => {
     if (from.trim() === '') {
@@ -241,76 +433,46 @@ export function MigrationPanel({ t = fallback, state, reload }: PanelShare): Rea
         </div>
         <p className="dsm-hint">{t('migrateHint')}</p>
 
+        {/*
+          源/目标各自只有**一个值控件**：下拉框本身就是那个值（`value={from}`/`value={to}`），
+          不是"选一下、填进别处"。任意绝对路径都能进这个框——「浏览…」走宿主自己的目录选择器
+          （能力种类由宿主报来，见 browse()），当前值若不在候选里就地补成一个选项。
+        */}
         <div className="dsm-fields">
-          <label className="dsm-field">
-            <span className="dsm-fieldLabel">{t('fromLabel')}</span>
-            <input
-              className="dsm-input"
-              type="text"
-              value={from}
-              placeholder={t('fromPlaceholder')}
-              onChange={(event) => {
-                setFrom(event.target.value)
-                setPicked([])
-                setOutcome(null)
-              }}
-            />
-          </label>
-          <label className="dsm-field">
-            <span className="dsm-fieldLabel">{t('toLabel')}</span>
-            <input
-              className="dsm-input"
-              type="text"
-              value={to}
-              placeholder={t('toPlaceholder')}
-              onChange={(event) => {
-                setTo(event.target.value)
-                setOutcome(null)
-              }}
-            />
-          </label>
+          <PathField
+            t={t}
+            label={t('fromLabel')}
+            placeholder={t('pickSource')}
+            rows={sourceRows}
+            value={from}
+            pickerKind={pickerKind}
+            onChange={(value) => {
+              setFrom(value)
+              setPicked([])
+              setOutcome(null)
+            }}
+            onBrowse={() => void browse('from')}
+            manualOpen={manual === 'from'}
+            onToggleManual={() => setManual((current) => (current === 'from' ? null : 'from'))}
+            browser={browserFor('from')}
+          />
+          <PathField
+            t={t}
+            label={t('toLabel')}
+            placeholder={t('pickTarget')}
+            rows={targetRows}
+            value={to}
+            pickerKind={pickerKind}
+            onChange={(value) => {
+              setTo(value)
+              setOutcome(null)
+            }}
+            onBrowse={() => void browse('to')}
+            manualOpen={manual === 'to'}
+            onToggleManual={() => setManual((current) => (current === 'to' ? null : 'to'))}
+            browser={browserFor('to')}
+          />
         </div>
-
-        {(sourceOptions.length > 0 || workspaces.length > 0) && (
-          <div className="dsm-controls">
-            {sourceOptions.length > 0 && (
-              <select
-                className="dsm-select"
-                value=""
-                onChange={(event) => {
-                  if (event.target.value === '') return
-                  setFrom(event.target.value)
-                  setPicked([])
-                  setOutcome(null)
-                }}
-              >
-                <option value="">{t('pickSource')}</option>
-                {sourceOptions.map((source) => (
-                  <option key={source.path} value={source.path}>
-                    {source.title === undefined ? source.path : `${source.title} — ${source.path}`} —{' '}
-                    {t('sessionsInDir', { count: source.count })}
-                  </option>
-                ))}
-              </select>
-            )}
-            {workspaces.length > 0 && (
-              <select
-                className="dsm-select"
-                value=""
-                onChange={(event) => {
-                  if (event.target.value !== '') setTo(event.target.value)
-                }}
-              >
-                <option value="">{t('pickTarget')}</option>
-                {workspaces.map((workspace) => (
-                  <option key={workspace.id} value={workspace.path}>
-                    {workspace.title} — {workspace.path}
-                  </option>
-                ))}
-              </select>
-            )}
-          </div>
-        )}
 
         <label className="dsm-field">
           <span className="dsm-fieldLabel">{t('titleLabel')}</span>

@@ -139,6 +139,7 @@ function mount({ translate } = {}) {
   const dictionaries = []
   const effects = []
   const injectedSlots = []
+  const injectedServices = []
   const bound = []
   const t = (key, params) => (params ? `${key}:${JSON.stringify(params)}` : key)
 
@@ -146,6 +147,29 @@ function mount({ translate } = {}) {
     effect(callback, label) {
       effects.push(label)
       return callback()
+    },
+    inject(dependencies, callback) {
+      // 客户端壳里这就是就地起一个带依赖声明的子 fiber；这里只记下依赖并立刻跑一遍回调，
+      // 顺带记下回调拿到的服务，好在用例里核对「浏览…」真的接在宿主选择器上。
+      injectedServices.push({ dependencies })
+      const scoped = {
+        uiWorkspace: {
+          async pickDirectory() {
+            return '/tmp/picked'
+          },
+          async listDirectory(path) {
+            // 宿主 browse 能力的形状：一层目录 + 面包屑（这里只求字段齐，页面能画出来）。
+            return {
+              path: path ?? '/home/tester',
+              home: '/home/tester',
+              crumbs: [{ name: 'home', path: '/home', hidden: false }],
+              entries: [{ name: 'work', path: `${path ?? '/home/tester'}/work`, hidden: false }],
+              truncated: false,
+            }
+          },
+        },
+      }
+      return callback(scoped)
     },
     locale: {
       register(namespace, dicts) {
@@ -169,11 +193,11 @@ function mount({ translate } = {}) {
     },
   })
 
-  return { mod, nodes, recorded, registrations, dictionaries, effects, injectedSlots, bound, t }
+  return { mod, nodes, recorded, registrations, dictionaries, effects, injectedSlots, injectedServices, bound, t }
 }
 
-test('客户端产物：apply 把「会话管理」注册到设置里的一页，并带上字典与注入面', { skip }, () => {
-  const { nodes, registrations, dictionaries, effects, injectedSlots, bound, t } = mount()
+test('客户端产物：apply 把「会话管理」注册到设置里的一页，并带上字典与注入面', { skip }, async () => {
+  const { nodes, registrations, dictionaries, effects, injectedSlots, injectedServices, bound, t } = mount()
 
   // 槽位用 inject 等声明到位，而不是直接 register——声明可能晚于本插件 apply。
   assert.deepEqual(injectedSlots, ['settings.section'])
@@ -191,6 +215,24 @@ test('客户端产物：apply 把「会话管理」注册到设置里的一页�
 
   // 注入面里的 t 就是绑到本命名空间的翻译函数
   assert.equal(registration.inject().t, t)
+
+  // 目录选择器：作为**可选**依赖收（`uiWorkspace` 由别的客户端插件提供，不写进顶层 inject），
+  // 注入面给出的是一个"取当前选择器"的 thunk，点击时才作数。
+  // 跨 realm：产物在另一个 vm 里，它的数组原型与本文件的不是同一个，先摊成宿主数组再比。
+  assert.deepEqual(
+    injectedServices.map((entry) => [...entry.dependencies]),
+    [['uiWorkspace']],
+  )
+  // 两个调用面都要接上：宿主只给其中一个（`native` 给 pick、`browse` 给 list），
+  // 界面按 /state 里的 pickerKind 选一种用，所以这里两个都得能取到。
+  const picker = registration.inject().directory
+  assert.equal(typeof picker, 'function', '界面要能取到宿主目录选择器')
+  const api = picker()
+  assert.equal(typeof api.pick, 'function', '界面要能取到宿主的系统对话框调用')
+  assert.equal(typeof api.list, 'function', '界面要能取到宿主的目录浏览调用')
+  assert.equal(await api.pick(), '/tmp/picked', '取到的就是宿主 uiWorkspace 的 pickDirectory')
+  const listing = await api.list('/home/tester')
+  assert.equal(listing.path, '/home/tester', 'listDirectory 的返回原样透出（路径由宿主说了算）')
 
   // 字典：两份语言、同一个命名空间
   assert.equal(dictionaries.length, 1)
@@ -238,4 +280,6 @@ test('客户端产物：页面组件在初始状态下能渲染成元素（不�
   const element = component(inject())
   assert.equal(typeof element, 'object')
   assert.notEqual(element, null)
+  // 注意首帧只渲染当前那一页（默认「导入导出」），迁移页要点了页签才在树上：
+  // 目录字段的两种分支因此不在这个冒烟用例的射程内，别把断言写在这里骗自己。
 })

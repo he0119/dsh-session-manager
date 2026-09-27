@@ -14,7 +14,14 @@ import { decompress } from 'fzstd'
 
 import { projectKey } from '../src/project-key.ts'
 import { readRegistry } from '../src/registry.ts'
-import { effectMode, registerTools, type MigrateToolResult, type PlanToolResult, type PluginConfig } from '../src/tools.ts'
+import {
+  directoryPickerKind,
+  effectMode,
+  registerTools,
+  type MigrateToolResult,
+  type PlanToolResult,
+  type PluginConfig,
+} from '../src/tools.ts'
 import type { DecodeAll, WorkspaceRegistryState } from '../src/types.ts'
 import { encodeRawFrame } from '../src/zstd-frame.ts'
 
@@ -120,10 +127,11 @@ async function startSibling(host: Context, service: string, value: unknown): Pro
  *
  * @param config - 插件路径配置。
  * @param options.registry - 是否提供 workspaceRegistry，以及它是否有 reassignSessions。
+ * @param options.picker - 是否提供 directoryPicker，以及它报的是哪种能力（`broken` = 形状不认）。
  */
 async function makeHost(
   config: PluginConfig,
-  options: { registry?: 'absent' | 'plain' | 'capable' } = {},
+  options: { registry?: 'absent' | 'plain' | 'capable'; picker?: 'absent' | 'browse' | 'native' | 'broken' } = {},
 ): Promise<{ ctx: Context; defs: CapturedTool[] }> {
   const defs: CapturedTool[] = []
   const host = new Context()
@@ -136,6 +144,13 @@ async function makeHost(
   const mode = options.registry ?? 'absent'
   if (mode !== 'absent') {
     await startSibling(host, 'workspaceRegistry', mode === 'capable' ? { reassignSessions: (): void => {} } : {})
+  }
+  const picker = options.picker ?? 'absent'
+  if (picker === 'browse' || picker === 'native') {
+    // 宿主的目录选择器是"能力位"服务：capability() 报出它这一只是哪一种。
+    await startSibling(host, 'directoryPicker', { capability: () => ({ kind: picker }) })
+  } else if (picker === 'broken') {
+    await startSibling(host, 'directoryPicker', { capability: () => ({ kind: 'something-else' }) })
   }
 
   const fiber = host.plugin({
@@ -185,6 +200,24 @@ test('工具注册：4 个工具，名称与归一化 schema 符合宿主契约'
   // 数组参数带 items
   assert.equal(migrate.parameters.properties?.['sessionIds']?.['type'], 'array')
   assert.deepEqual(migrate.parameters.properties?.['sessionIds']?.['items'], { type: 'string' })
+
+  rmSync(sb.base, { recursive: true, force: true })
+})
+
+test('目录选择器：宿主报哪种能力就照哪种走，没有/形状不认时按"没有"处理', async () => {
+  const sb = makeSandbox('picker')
+  const config = { sessionsRoot: sb.root, registryPath: sb.registryPath, backupRoot: sb.backupRoot }
+
+  // 界面据此决定目录字段上的「浏览…」是开页面内浏览器还是弹系统对话框；
+  // 两者互斥（native 只有 pick、browse 只有 list），所以猜测的代价是按钮点了必报错。
+  assert.equal(directoryPickerKind((await makeHost(config)).ctx), null, '宿主没有该服务')
+  assert.equal(directoryPickerKind((await makeHost(config, { picker: 'browse' })).ctx), 'browse')
+  assert.equal(directoryPickerKind((await makeHost(config, { picker: 'native' })).ctx), 'native')
+  // 认不出的 kind 或压根读不到服务时都退回 null：界面少一个按钮，总好过 /state 整个 500。
+  assert.equal(directoryPickerKind((await makeHost(config, { picker: 'broken' })).ctx), null)
+  assert.equal(directoryPickerKind({}), null)
+  assert.equal(directoryPickerKind(undefined), null)
+  assert.equal(directoryPickerKind({ get: () => ({ capability: () => { throw new Error('还没装配好') } }) }), null)
 
   rmSync(sb.base, { recursive: true, force: true })
 })

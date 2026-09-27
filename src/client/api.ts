@@ -34,6 +34,11 @@ export interface WorkspaceSummary {
 /** `GET /state` 的响应。 */
 export interface StateResponse {
   sessionsRoot: string
+  /**
+   * 宿主目录选择器的能力种类：`native` = 系统对话框、`browse` = 页面内浏览、`null` = 没有。
+   * 目录字段据此决定「浏览…」开哪一种；缺字段（旧宿主）按 `null` 处理。
+   */
+  pickerKind?: 'browse' | 'native' | null
   registryPath: string
   problems: string[]
   sessions: SessionSummary[]

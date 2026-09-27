@@ -89,6 +89,67 @@ export const CSS = `
   max-width: 100%;
 }
 .dsm-file { padding: 3px; }
+/* 目录下拉：撑满一行（旁边留给「浏览…」按钮），长路径由浏览器自己省略，别把布局顶宽。 */
+.dsm-selectPath { flex: 1 1 22rem; min-width: 0; }
+/* 页面内目录浏览框：一个缩进的浅底小面板，和所在字段同宽。 */
+.dsm-browser {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+  padding: 8px 10px;
+  border: 1px solid var(--dsw-alias-border-l2, rgba(0, 0, 0, 0.18));
+  border-radius: 10px;
+  background: var(--dsw-alias-bg-layer-2, transparent);
+}
+.dsm-browserHead { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+/* 当前这一层的完整路径：单行省略（完整值在 title 里），长路径不该把这个框顶宽。 */
+.dsm-browserPath {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dsm-crumbs { display: flex; align-items: center; gap: 2px; flex-wrap: wrap; }
+.dsm-crumb {
+  border: none;
+  background: transparent;
+  color: var(--dsw-alias-brand-primary, #3370ff);
+  font: inherit;
+  padding: 2px 4px;
+  border-radius: 6px;
+  cursor: pointer;
+  max-width: 16rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dsm-crumb:hover:not(:disabled) { background: var(--dsw-alias-bg-layer-3, rgba(0, 0, 0, 0.05)); }
+.dsm-crumb:disabled { color: var(--dsw-alias-label-secondary, #646a73); cursor: default; }
+/* 一层子目录：等宽两列铺开，比竖排一行一览得多。 */
+.dsm-dirList {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr));
+  gap: 2px;
+  max-height: min(260px, 30vh);
+  padding: 4px;
+}
+.dsm-dirEntry {
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  padding: 4px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dsm-dirEntry:hover { background: var(--dsw-alias-bg-layer-3, rgba(0, 0, 0, 0.05)); }
+.dsm-dirEntry:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary, #3370ff); outline-offset: -1px; }
+.dsm-dirHidden { color: var(--dsw-alias-label-secondary, #646a73); }
 .dsm-table { width: 100%; border-collapse: collapse; }
 .dsm-table th, .dsm-table td {
   text-align: left;

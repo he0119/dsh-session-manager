@@ -131,6 +131,23 @@ test('GET /state：列出会话与工作区，带上注册表归属', async () =
   const workspaces = body['workspaces'] as Array<Record<string, unknown>>
   assert.deepEqual(workspaces.map((w) => w['id']), ['ws-a'])
   assert.deepEqual(body['problems'], [])
+  // 没注入探测函数时按"这个宿主没有目录选择器"回：界面据此不显示「浏览…」，
+  // 而不是显示一个点了必被宿主以 directory-picker/unavailable 拒绝的按钮。
+  assert.equal(body['pickerKind'], null)
+})
+
+test('GET /state：宿主的选择器能力种类如实透给界面（native/browse）', async () => {
+  const sandbox = makeSandbox('web-picker')
+
+  const browse = createApiHandlers({ ...deps(sandbox), pickerKind: () => 'browse' })
+  const browseRes = fakeRes()
+  await browse['GET /state']!(fakeReq('GET', `${API_PREFIX}/state`), browseRes.res)
+  assert.equal(json(browseRes.captured)['pickerKind'], 'browse')
+
+  const native = createApiHandlers({ ...deps(sandbox), pickerKind: () => 'native' })
+  const nativeRes = fakeRes()
+  await native['GET /state']!(fakeReq('GET', `${API_PREFIX}/state`), nativeRes.res)
+  assert.equal(json(nativeRes.captured)['pickerKind'], 'native')
 })
 
 test('POST /export：回一个可解析的包，文件名与内容都对', async () => {

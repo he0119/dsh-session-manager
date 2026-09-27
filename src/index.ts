@@ -12,7 +12,14 @@ import { readFileSync } from 'node:fs'
 
 import type { Context } from '@deepseek-ai/cordis'
 
-import { type PluginConfig, decodeAll, effectMode, registerTools, resolvePaths } from './tools.ts'
+import {
+  type PluginConfig,
+  decodeAll,
+  directoryPickerKind,
+  effectMode,
+  registerTools,
+  resolvePaths,
+} from './tools.ts'
 import { API_PREFIX, registerWebRoutes, type WebServerLike } from './web.ts'
 
 /** 插件 id（与 cordis.patch.yml 里的 id 对应）。 */
@@ -67,6 +74,8 @@ export function apply(ctx: Context, config: PluginConfig = {}): () => void {
       pluginVersion: pluginVersion(),
       // "迁移何时生效"要读宿主服务（workspaceRegistry），那件事只在这里做得了。
       effectMode: () => effectMode(ctx),
+      // 同理：目录选择器是"桌面对话框"还是"页面内浏览"，只有宿主自己知道。
+      pickerKind: () => directoryPickerKind(ctx),
     })
     info(`dsh-session-manager 界面端点已挂：${API_PREFIX}`)
     return dispose

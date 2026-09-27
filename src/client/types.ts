@@ -8,6 +8,7 @@
  */
 
 import type { StateResponse } from './api.ts'
+import type { DirectoryApi } from './directory.ts'
 import type { Translate } from './locales.ts'
 
 /** 分页入参。 */
@@ -18,4 +19,10 @@ export interface PanelShare {
   state: StateResponse | null
   /** 重新拉 `/state`（写入成功后调用，让列表与账本归属跟上）。 */
   reload: () => Promise<void>
+  /**
+   * 取当前可用的宿主目录选择器（注入面给的 thunk，见 [directory.ts](./directory.ts)）。
+   * 取到 `undefined` 表示这个宿主没提供选择器，界面要给出提示而不是留一个点了没反应的按钮；
+   * 拿到之后用哪个调用面（`pick` / `list`）由 `state.pickerKind` 决定。
+   */
+  directory?: () => DirectoryApi | undefined
 }

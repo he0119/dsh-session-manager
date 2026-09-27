@@ -25,10 +25,16 @@
  * 类型面也是结构化的（不 import 宿主客户端包的类型）：本包不在类型层与那些包绑死，
  * 代价是 `ctx` 的成员只在运行期成立，由 `test/client.test.mjs` 的注册面断言兜住。
  *
+ * 另有一处**服务借用**：目录字段的「浏览…」走宿主自己的 `uiWorkspace`，而不是本插件
+ * 自己糊一套文件系统访问。它是可选依赖，收在 [directory.ts](./directory.ts) 里；宿主给的
+ * 选择器分 `native`（系统对话框）与 `browse`（页面内浏览）两种能力，界面按宿主报来的
+ * `pickerKind` 选一种，见那里的说明。
+ *
  * @module dsh-session-manager/client
  */
 
 import { ManagerPanel } from './ManagerPanel.tsx'
+import { type DirectoryListing, getDirectoryApi, setDirectoryApi } from './directory.ts'
 import { NS, en, zh, type Translate } from './locales.ts'
 import { installStyles } from './styles.ts'
 
@@ -69,11 +75,36 @@ interface LocaleService {
   bind(namespace: string): Translate
 }
 
+/**
+ * `uiWorkspace` 服务的最小面：本页只用它的目录选择器。
+ *
+ * 两个方法对应宿主能力位的两只（`native` / `browse`），**互斥**——在 `browse` 宿主上
+ * `pickDirectory()` 会被宿主以 `directory-picker/unavailable` 拒绝，反之 `listDirectory()`
+ * 也会。界面用宿主报来的 `pickerKind`（`/state`）选其中一个，不试错。
+ */
+interface UiWorkspaceService {
+  /** 宿主系统对话框（`native` 宿主）：绝对路径，用户取消 `null`。 */
+  pickDirectory(): Promise<string | null>
+  /** 页面内浏览（`browse` 宿主）：列一层子目录；省略路径 = 宿主 home。 */
+  listDirectory(path?: string, signal?: AbortSignal): Promise<DirectoryListing>
+}
+
 /** 客户端根上下文的最小面。 */
 export interface ClientContext {
   effect(callback: () => void | (() => void), label?: string): unknown
   slots: SlotsService
   locale: LocaleService
+  /**
+   * 起一个**带依赖声明**的子 fiber（Cordis 的 `inject`：等价于就地注册一个只声明这些依赖的子插件）。
+   *
+   * 本页用它按需收 `uiWorkspace`：那个服务由别的客户端插件提供，写进本插件的顶层 `inject`
+   * 数组就等于"服务不在，整页都别装"，代价太大；这里声明成可选依赖，服务到位时回调才跑，
+   * 卸载时跑回调返回的清理函数。返回值是那个子 fiber，本模块不用它。
+   */
+  inject(
+    dependencies: readonly string[],
+    callback: (scoped: ClientContext & { uiWorkspace: UiWorkspaceService }) => void | (() => void),
+  ): unknown
 }
 
 /**
@@ -86,6 +117,16 @@ export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dsh-session-manager: dictionaries')
   ctx.effect(() => installStyles(), 'dsh-session-manager: stylesheet')
 
+  // 目录选择器是可选依赖：它在别的客户端插件手上，晚到或不在都不该拖住本页的注册。
+  // 收成 thunk 交给页面，点「浏览…」时才取当前那一个；服务卸载后再点会得到提示而不是空转。
+  ctx.inject(['uiWorkspace'], (scoped) => {
+    setDirectoryApi({
+      pick: () => scoped.uiWorkspace.pickDirectory(),
+      list: (path, signal) => scoped.uiWorkspace.listDirectory(path, signal),
+    })
+    return () => setDirectoryApi(undefined)
+  })
+
   ctx.slots.inject(SECTION_SLOT, () =>
     ctx.slots.register(
       {
@@ -95,7 +136,8 @@ export function apply(ctx: ClientContext): void {
         // thunk：外壳投影导航行时会调用它，切语言后重新投影即可，不必重新注册。
         label: () => ctx.locale.bind(NS)('title'),
         locale: NS,
-        inject: () => ({ t: ctx.locale.bind(NS) }),
+        // 同理给一个**取选择器的函数**：投影时它可能还没到位，点击那一刻才作数。
+        inject: () => ({ t: ctx.locale.bind(NS), directory: () => getDirectoryApi() }),
       },
       ManagerPanel,
     ),

@@ -15,13 +15,20 @@
 import * as React from 'react'
 
 import { fetchState, type StateResponse } from './api.ts'
+import type { DirectoryApi } from './directory.ts'
 import { translateWith, zh, type Translate } from './locales.ts'
 import { MigrationPanel } from './MigrationPanel.tsx'
 import { TransferPanel } from './TransferPanel.tsx'
 
-/** 页面获得的注入面（`t` 由注册时的 `inject()` 给出；缺席时回落到中文，不让页面白屏）。 */
+/**
+ * 页面获得的注入面：`t` 与 `directory` 都由注册时的 `inject()` 给出。
+ *
+ * 两个都可缺席（`t` 缺席时回落到中文、选择器缺席时界面上给提示），为的是注入面一旦变形状
+ * 也只是少个能力，而不是整页白屏。
+ */
 export interface ManagerPanelProps {
   t?: Translate
+  directory?: () => DirectoryApi | undefined
 }
 
 /** 没有注入面时的兜底翻译。 */
@@ -31,7 +38,7 @@ const fallback = translateWith(zh as unknown as Record<string, string>)
 type PanelKey = 'transfer' | 'migrate'
 
 /** 会话管理页。 */
-export function ManagerPanel({ t = fallback }: ManagerPanelProps): React.ReactElement {
+export function ManagerPanel({ t = fallback, directory }: ManagerPanelProps): React.ReactElement {
   const [state, setState] = React.useState<StateResponse | null>(null)
   const [panel, setPanel] = React.useState<PanelKey>('transfer')
   const [busy, setBusy] = React.useState(false)
@@ -108,7 +115,7 @@ export function ManagerPanel({ t = fallback }: ManagerPanelProps): React.ReactEl
       {panel === 'transfer' ? (
         <TransferPanel t={t} state={state} reload={load} />
       ) : (
-        <MigrationPanel t={t} state={state} reload={load} />
+        <MigrationPanel t={t} state={state} reload={load} directory={directory} />
       )}
     </section>
   )

@@ -90,10 +90,14 @@ package ships a Web Client half) with two tabs:
 Previously CLI- and tool-only, now the same orchestration (`src/migrate.ts`, shared by all three entry
 points) is on screen:
 
-- the source directory can be picked from a dropdown (registered workspaces **plus any directory the
-  library actually holds sessions for**, annotated with that count), so no path has to be typed from memory;
-- target directory (must already exist), an optional title for a newly created workspace, whether to
-  carry the **files the sessions created**, and whether to carry unregistered sessions;
+- source and target are each a **single dropdown that holds the value** (registered workspaces **plus any
+  directory the library actually holds sessions for**, annotated with that count), so no path has to be
+  typed from memory; a path outside the candidates goes in through **Browse…** or **Type a path**, and is
+  added back as a row. **Browse…** follows whatever capability the host serves: on the desktop it opens the
+  OS directory dialog, in the browser it expands an in-page directory browser (list subdirectories, click
+  your way down), and on a host with no picker the button is simply not shown;
+- the target directory must already exist; there is also an optional title for a newly created workspace,
+  whether to carry the **files the sessions created**, and whether to carry unregistered sessions;
 - **move the whole source directory, or only some of it**: the sessions of the source directory are
   listed, and ticking any row switches to "only the ticked ones"; one source directory per run (one
   request, one bucket);

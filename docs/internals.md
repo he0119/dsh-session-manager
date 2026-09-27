@@ -200,6 +200,51 @@ client 一份配置是 `format: 'cjs'` 外面套三行（banner/intro/footer）�
 导航行时走 `resolveSlotLabel`（是函数就调用），并且订阅了 locale 快照，所以切语言或后到的
 字典都会让那一行重新投影，不必自己重新注册——`test/client.test.mjs` 把这条也钉住了。
 
+## 界面里的目录字段：一个值控件，加一条按能力选的路
+
+源目录与目标目录都是**任意绝对路径**：源是「会话日志里那个 `cwd` 字符串」，目标是「你想搬到哪儿，
+那个目录可能还没登记过」。这排除了"只能用下拉框"的写法（列表列不全），也排除了"下拉框只负责把
+路径填进另一个文本框"的写法（那是把命令化装成控件：框里永远显示占位符，看着像没选中，而真正生效的
+值在别处）。落地的形状是**一个值控件 + 三条改值的路**：
+
+- 下拉框自己就是那个值（`value={from}` / `value={to}`），候选＝已登记工作区 **+ 库里真有会话的
+  目录**（后者带条数——账本的登记条数会骗人，同一个目录下可能有没登记在册的会话）；
+- **当前值永远在候选里**：值可能是「浏览…」选回来的、账本与会话都没覆盖到的目录，补这一行之后
+  框里显示的永远就是将要用的（否则设置过值也只显示占位符）；
+- **「手输路径」**是万能兜底：展开一个和下拉框同值的文本框。宿主没有目录选择器、或要在
+  候选之外敲一个路径时，它是唯一的路，所以它对每个宿主都在，且只换控件不改语义（两边都是同一个值）；
+- **「浏览…」的行为由宿主报来的能力种类决定**，见下。
+
+### 「浏览…」为什么不能直接调 `uiWorkspace.pickDirectory()`
+
+宿主的目录选择器（`@deepseek-ai/dsh-host-directory-picker`）是一只**互斥的能力位**服务：
+`capability()` 返回 `{ kind: 'native', ... }` 时**只**提供 `pick()`（在宿主显示器上弹系统对话框），
+返回 `{ kind: 'browse', ... }` 时**只**提供 `list()`/`createDirectory()`（页面自己画浏览器）。
+`dsh-api-workspace-controller` 在协议层就把两者分开了：浏览器界面这一侧的 profile 装的是
+`dsh-client-ui-directory-picker-browse`，即 `browse` 那一只——此时硬调 `pickDirectory()` 一定被宿主
+以 `directory-picker/unavailable`（`… needs the native capability; the composed picker serves
+"browse"`）拒绝。也就是说，**"「浏览…」调 `pickDirectory()`"这个写法在浏览器里是必错的**：
+桌面端能用，正是这一点让它在开发机上不容易被察觉。宿主文档给出的默认约定也是"认不出的种类就
+别显示这个入口，而不是让它失败"。
+
+所以本插件的做法是：
+
+- 宿主侧 `directoryPickerKind(ctx)`（[`src/tools.ts`](../src/tools.ts)）读出 `capability().kind`，
+  经 `GET /state` 的 `pickerKind` 字段交给页面；读不到、认不出、或 `capability()` 抛错都退回 `null`；
+- 页面按 `pickerKind` 走：`native` → `pick()` 弹系统对话框；`browse` → 页面内展开一个目录浏览框
+  （[`src/client/DirectoryPicker.tsx`](../src/client/DirectoryPicker.tsx)），数据来自宿主的
+  `listDirectory()`，每一步跳转用的都是宿主返回的 `path`，本插件不碰文件系统、不猜路径；
+- `null`（含旧宿主没有这个字段）→ **不显示**「浏览…」，只留「手输路径」+ 候选列表，并给一句说明。
+
+原则一句话：**不摆一个一定会报错的按钮**。选择器返回值先削掉结尾斜杠（`normalizePickedPath`）：
+会话 `cwd` 与账本路径都不带结尾斜杠，`/a/b/` 会凭空多出一个「不同的桶」，匹配不到任何会话。
+
+`uiWorkspace` 在客户端同样受"Cordis 服务属性必须声明过 inject 才可读"这条规矩管（见下一节）：
+它在别的客户端插件手上，写进本插件顶层 `inject` 就等于"没有它整页都别装"。所以用
+`ctx.inject(['uiWorkspace'], cb)` 把两个调用面（`pick` / `list`）收成一个 thunk 存在
+[`src/client/directory.ts`](../src/client/directory.ts)，界面点「浏览…」时才取当前那一个——服务晚到
+也能用上，服务不在则退回"只有手输路径"的形状。
+
 ## 宿主侧的一条硬约束：可选服务只能用 `ctx.get` / `ctx.inject`
 
 Cordis 的 Context 是个 Proxy，**服务属性只有在当前 fiber 的 `inject` 里声明过才可读**，否则同步抛
