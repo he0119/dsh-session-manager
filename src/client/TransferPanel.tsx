@@ -4,7 +4,7 @@
  * 这一层只做三件事：调宿主端点、记本地草稿、把结果摆出来。所有判定都在宿主侧
  * （`src/web.ts` + `src/transfer.ts`）：预演返回的就是将要发生的事，页面不自己推算
  *
- *   - 导出：勾选 → 宿主打包 → 浏览器下载；
+ *   - 导出：按目录分组的列表里勾选（组头可整组勾）→ 宿主打包 → 浏览器下载；
  *   - 导入：选包 + 选目标工作区 → **预演** → 看清 create/skip 与 cwd 改写 → 确认落盘。
  *
  * 会话库数据由页面骨架（[ManagerPanel.tsx](./ManagerPanel.tsx)）拉好传进来：切分页不该各拉一份，
@@ -20,6 +20,8 @@
 import * as React from 'react'
 
 import { download, exportSessions, importBundle, type ImportResponse } from './api.ts'
+import type { SessionSummary } from './api.ts'
+import { groupSessions, type SessionGroup } from './groups.ts'
 import { translateWith, zh } from './locales.ts'
 import type { PanelShare } from './types.ts'
 
@@ -49,6 +51,40 @@ function formatTime(ms: number): string {
 const totalBytes = (entries: readonly { bytes: number }[]): number =>
   entries.reduce((sum, entry) => sum + (Number.isFinite(entry.bytes) ? entry.bytes : 0), 0)
 
+/**
+ * 组头的三态勾选框。
+ *
+ * `indeterminate` 不是能写进 JSX 的属性（React 明确不支持它）：它是**节点上的状态**，只能赋值，
+ * 所以这里用 ref 在每次渲染后同步。少了这一步，组里勾了一部分时选框只画成"空"，
+ * 用户会以为自己点的"整组勾上"没生效。
+ */
+function GroupCheckbox({
+  checked,
+  indeterminate,
+  label,
+  onToggle,
+}: {
+  checked: boolean
+  indeterminate: boolean
+  label: string
+  onToggle: () => void
+}): React.ReactElement {
+  const ref = React.useRef<HTMLInputElement>(null)
+  React.useEffect(() => {
+    if (ref.current !== null) ref.current.indeterminate = indeterminate
+  }, [indeterminate, checked])
+  return (
+    <input
+      ref={ref}
+      type="checkbox"
+      checked={checked}
+      aria-label={label}
+      title={label}
+      onChange={onToggle}
+    />
+  )
+}
+
 /** 导入导出页。 */
 export function TransferPanel({ t = fallback, state, reload }: PanelShare): React.ReactElement {
   const [selected, setSelected] = React.useState<readonly string[]>([])
@@ -63,6 +99,9 @@ export function TransferPanel({ t = fallback, state, reload }: PanelShare): Reac
   const sessions = state?.sessions ?? []
   const workspaces = state?.workspaces ?? []
   const allSelected = sessions.length > 0 && selected.length === sessions.length
+  // 列表按**目录**分组（不是按账本里的工作区）：同一个目录下常有没登记在册的会话，而用户说的
+  // "把这个工作区的会话带走"指的永远是这个目录。理由与边界见 groups.ts。
+  const groups = React.useMemo(() => groupSessions(sessions, workspaces), [sessions, workspaces])
 
   // 库变了（例如刚导入完）：把已经不在库里的选择摘掉，别让「已选 3」里混着不存在的会话。
   React.useEffect(() => {
@@ -71,6 +110,20 @@ export function TransferPanel({ t = fallback, state, reload }: PanelShare): Reac
 
   const toggle = (id: string): void => {
     setSelected((current) => (current.includes(id) ? current.filter((x) => x !== id) : [...current, id]))
+  }
+
+  /**
+   * 点组头：整组勾上，或整组取消。
+   *
+   * 只勾了一部分时点一下是"补齐"，这是列表的通行手感（Gmail/GitHub 都这样）；想去掉整组，
+   * 再看一眼它变成"全部勾上"之后再点一下即可。一条会话都没勾的组同理是"勾上"。
+   */
+  const toggleGroup = (group: SessionGroup<SessionSummary>): void => {
+    const ids = group.sessions.map((session) => session.id)
+    const whole = ids.every((id) => selected.includes(id))
+    setSelected((current) =>
+      whole ? current.filter((id) => !ids.includes(id)) : [...new Set([...current, ...ids])],
+    )
   }
 
   const run = async (kind: 'export' | 'preview' | 'apply', action: () => Promise<void>): Promise<void> => {
@@ -196,17 +249,45 @@ export function TransferPanel({ t = fallback, state, reload }: PanelShare): Reac
           {sessions.length === 0 ? (
             <p className="dsm-empty">{t('noSessions')}</p>
           ) : (
-            sessions.map((session) => (
-              <label key={session.id} className="dsm-row">
-                <input type="checkbox" checked={selected.includes(session.id)} onChange={() => toggle(session.id)} />
-                <span className="dsm-rowId">{session.id}</span>
-                <span className="dsm-meta" title={session.cwd ?? ''}>
-                  {session.cwd ?? t('noCwd')}
-                </span>
-                <span className="dsm-meta">{formatBytes(session.bytes)}</span>
-                <span className="dsm-meta">{formatTime(session.createdAt)}</span>
-              </label>
-            ))
+            groups.map((group) => {
+              const ids = group.sessions.map((session) => session.id)
+              const picked = ids.filter((id) => selected.includes(id)).length
+              // 组头的名字：登记过就用工作区标题（人认得的名字），没登记就只剩路径可显示。
+              const name = group.title ?? (group.path === '' ? t('noCwdGroup') : group.path)
+              return (
+                // key 用路径；没有 cwd 的那一组路径是空串，换成一个不可能撞上路径的键。
+                <div key={group.path === '' ? '\u0000no-cwd' : group.path} className="dsm-group">
+                  <label className="dsm-groupHead">
+                    <GroupCheckbox
+                      checked={picked === ids.length}
+                      indeterminate={picked > 0 && picked < ids.length}
+                      label={t('selectGroup', { name })}
+                      onToggle={() => toggleGroup(group)}
+                    />
+                    <span className="dsm-groupTitle">{name}</span>
+                    {group.title !== undefined && <span className="dsm-meta">{group.path}</span>}
+                    {group.title === undefined && group.path !== '' && (
+                      <span className="dsm-tag dsm-tagIdle">{t('unregisteredDir')}</span>
+                    )}
+                    <span className="dsm-spacer" />
+                    <span className="dsm-hint">{t('sessionsInDir', { count: ids.length })}</span>
+                    <span className="dsm-hint">{t('selectedCount', { count: picked })}</span>
+                  </label>
+                  {group.sessions.map((session) => (
+                    <label key={session.id} className="dsm-row dsm-rowExport">
+                      <input
+                        type="checkbox"
+                        checked={selected.includes(session.id)}
+                        onChange={() => toggle(session.id)}
+                      />
+                      <span className="dsm-rowId">{session.id}</span>
+                      <span className="dsm-meta">{formatBytes(session.bytes)}</span>
+                      <span className="dsm-meta">{formatTime(session.createdAt)}</span>
+                    </label>
+                  ))}
+                </div>
+              )
+            })
           )}
         </div>
       </div>

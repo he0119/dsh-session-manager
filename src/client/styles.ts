@@ -72,6 +72,30 @@ export const CSS = `
   /* 往表面色混一点点：深色主题里变暗、浅色主题里变亮，两边都像"被按了一下"。 */
   background: color-mix(in srgb, var(--dsw-alias-brand-primary, #3370ff) 88%, var(--dsw-alias-bg-layer-1, #fff));
 }
+/* 一组会话：组头 + 组内若干行。 */
+.dsm-group { display: block; }
+.dsm-group:first-child .dsm-groupHead { border-top: none; }
+/*
+ * 组头是一条"带底色、随列表滚动粘住"的横幅：底色用字色薄雾兑在**卡片表面色**上，于是它既是不透明
+ * 的（粘住时底下的行不会透出来），又在明暗两套主题里都是"比卡片略深/略浅一层"的区分色。
+ * 前一条声明是给不认 color-mix 的浏览器留的退路：没有底色也还读得出来，只是少了横向的分组感。
+ */
+.dsm-groupHead {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 6px 10px;
+  background: var(--dsw-alias-bg-layer-1, transparent);
+  background: color-mix(in srgb, var(--dsw-alias-label-primary, #1f2329) 6%, var(--dsw-alias-bg-layer-1, #fff));
+  border-top: 1px solid var(--dsw-alias-border-l1, rgba(0, 0, 0, 0.06));
+  border-bottom: 1px solid var(--dsw-alias-border-l1, rgba(0, 0, 0, 0.06));
+  cursor: pointer;
+}
+.dsm-groupTitle { font-weight: 600; }
 .dsm-list {
   /* 整页里不必再用 320px 的小窗：给一个随视口的上限，短列表不留空、长列表不把页面推得很长。 */
   max-height: min(420px, 42vh);
@@ -89,7 +113,11 @@ export const CSS = `
   cursor: pointer;
 }
 .dsm-row:last-child { border-bottom: none; }
-.dsm-row:hover { background: var(--dsw-alias-bg-layer-2, rgba(0, 0, 0, 0.03)); }
+/*
+ * 悬停底色同样不能拿表面 token 当"稍深一点"：浅色主题里 bg-layer-1/2/3 **全是同一个白**，
+ * 铺上去等于没有反馈。改成把字色兑透明做一层薄雾（宿主外壳自己也这么兑），明暗两套都看得见。
+ */
+.dsm-row:hover { background: color-mix(in srgb, var(--dsw-alias-label-primary, #1f2329) 6%, transparent); }
 .dsm-rowId { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .dsm-meta { color: var(--dsw-alias-label-secondary, #646a73); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dsm-empty { padding: 14px; color: var(--dsw-alias-label-secondary, #646a73); }
@@ -184,7 +212,8 @@ export const CSS = `
 .dsm-table th { color: var(--dsw-alias-label-secondary, #646a73); font-weight: 500; }
 .dsm-tag { border-radius: 6px; padding: 0 6px; font-size: 12px; }
 .dsm-tagCreate { color: var(--dsw-alias-state-success-primary, #2ea121); border: 1px solid currentColor; }
-.dsm-tagSkip { color: var(--dsw-alias-state-idle-primary, #8f959e); border: 1px solid currentColor; }
+/* 中性标签：导入预演里的 skip、导出列表里"不是已登记工作区"的目录，都只是"没什么动作"。 */
+.dsm-tagIdle, .dsm-tagSkip { color: var(--dsw-alias-state-idle-primary, #8f959e); border: 1px solid currentColor; }
 .dsm-error { color: var(--dsw-alias-state-error-primary, #d83931); }
 .dsm-warn { color: var(--dsw-alias-state-warn-primary, #d97b00); }
 .dsm-ok { color: var(--dsw-alias-state-success-primary, #2ea121); }
@@ -237,7 +266,8 @@ export const CSS = `
 .dsm-input:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary, #3370ff); outline-offset: -1px; }
 .dsm-options { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
 .dsm-check { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
-.dsm-rowPick { grid-template-columns: 24px minmax(120px, 1.4fr) auto auto; }
+/* 勾选式列表行：只有"勾选框 + 内容列"，没有 cwd 那一列（cwd 在组头/字段上，不再一行行重复）。 */
+.dsm-rowPick, .dsm-rowExport { grid-template-columns: 24px minmax(120px, 1.4fr) auto auto; }
 .dsm-result {
   display: flex;
   flex-direction: column;

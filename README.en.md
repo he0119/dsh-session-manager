@@ -79,7 +79,10 @@ package ships a Web Client half) with two tabs:
 **Import & export** (take sessions away, bring them back)
 
 - **Export**: tick sessions → the browser downloads one `.dhsess` bundle. The bundle carries the raw
-  bytes of **every generation** of those logs (each with a sha256), not files the session created.
+  bytes of **every generation** of those logs (each with a sha256), not files the session created. The
+  list is **grouped by directory** (group name = workspace title; a directory no workspace registers
+  shows its path and is marked), and **clicking a group header toggles that whole group** — so "take
+  every session of this workspace away" is one click instead of counting and ticking them one by one.
 - **Import**: pick a bundle and a target workspace → **preview first** (per-session: what will be
   created, which cwd gets rewritten, what is skipped, how the registry changes) → then confirm. Import
   **never overwrites**: a session whose id already exists in the library is skipped and reported; a
@@ -278,6 +281,11 @@ contract — closing the gap between "the source passes" and "the artifact actua
 surface, the slot it registers into and that both dictionaries share one key set. Both skip when the
 build is absent; `pnpm run build && pnpm test` is the all-green command. The real-data case is gated
 behind `DSM_SMOKE_WORKSPACE` and additionally asserts that a read-only `plan` created no target bucket.
+
+`test/groups.test.ts` pins the export list's grouping rules (by directory, group order, in-group order,
+duplicate paths, empty-string cwd, no empty groups) and `test/styles.test.mjs` pins three stylesheet
+rules (colors must go through theme tokens, tokens must be on the `Theme` surface, every token needs a
+fallback) — the last one was added after shipping white-on-white text in the dark theme.
 
 `test/transfer.test.ts` covers the `.dhsess` byte round-trip, the rejection surface of bundle
 validation (sha256 / truncation / magic / version), import preview and apply, id-collision skip, and

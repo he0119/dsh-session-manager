@@ -27,8 +27,16 @@ const skip = ready ? false : 'lib/client.js 不存在，先跑 pnpm run build'
 const code = ready ? readFileSync(bundlePath, 'utf8') : ''
 const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
 
-/** 假的 react：钩子给出初始值，同时把创建出来的元素记下来，供"页签还在吗"这类断言用。 */
-function fakeReact(recorded = []) {
+/**
+ * 假的 react：钩子给出初始值，同时把创建出来的元素记下来，供"页签还在吗"这类断言用。
+ *
+ * `firstNull` 是给"要验证**有数据**时那棵树"用的：页面骨架（ManagerPanel）就是用它自己的
+ * `useState(null)` 持有会话库，而假钩子本来永远停在 null，于是有数据的分支（分组列表、
+ * 各种表格）在冒烟里根本走不到。给了它就只替换**第一次** `useState(null)`——后面那些 null
+ * 状态（错误提示、导入计划…）必须保持空，否则会渲染出不存在的数据。
+ */
+function fakeReact(recorded = [], firstNull = undefined) {
+  let seeded = false
   const record = (type, props) => {
     const element = { type, props: props ?? {} }
     recorded.push(element)
@@ -42,7 +50,13 @@ function fakeReact(recorded = []) {
         ...(props ?? {}),
         ...(children.length === 0 ? {} : { children: children.length > 1 ? children : children[0] }),
       }),
-    useState: (value) => [value, () => {}],
+    useState: (value) => {
+      if (!seeded && value === null && firstNull !== undefined) {
+        seeded = true
+        return [firstNull, () => {}]
+      }
+      return [value, () => {}]
+    },
     useEffect: () => {},
     useRef: (value) => ({ current: value }),
     useCallback: (fn) => fn,
@@ -51,11 +65,20 @@ function fakeReact(recorded = []) {
   }
 }
 
-/** 从元素树里收集所有字符串（文案就是字符串，键回显也是）。 */
+/**
+ * 从元素树里收集所有字符串（文案就是字符串，键回显也是）。
+ *
+ * 遇到**函数组件**就带着 props 调一次再往下走：本文件没有真的渲染器，不这么做的话嵌套的
+ * 页面（默认那一页「导入导出」）永远不在树上，冒烟只能看见骨架那一层，页面里的错就漏过去了。
+ * 假钩子是无状态的，多调一次不会改变什么。
+ */
 function strings(node, out = []) {
   if (typeof node === 'string') out.push(node)
   else if (Array.isArray(node)) for (const item of node) strings(item, out)
-  else if (node !== null && typeof node === 'object') strings(node.props?.children, out)
+  else if (node !== null && typeof node === 'object') {
+    if (typeof node.type === 'function') strings(node.type(node.props), out)
+    else strings(node.props?.children, out)
+  }
   return out
 }
 
@@ -87,7 +110,7 @@ function fakeDocument(nodes) {
 }
 
 /** 按模块加载器的契约执行产物，返回工厂与其 id。 */
-function loadBundle() {
+function loadBundle({ firstNull } = {}) {
   let entry = null
   const nodes = []
   const sandbox = {
@@ -98,7 +121,7 @@ function loadBundle() {
   vm.runInNewContext(code, sandbox, { filename: 'lib/client.js' })
   assert.ok(entry !== null, '产物必须以 window.__ModuleLoader__.load({ id, factory }) 报名')
   const recorded = []
-  const react = fakeReact(recorded)
+  const react = fakeReact(recorded, firstNull)
   const mod = entry.factory((specifier) => {
     if (specifier === 'react') return react
     if (specifier === 'react/jsx-runtime') {
@@ -133,8 +156,8 @@ test('客户端产物：导出面符合客户端插件契约', { skip }, () => {
 })
 
 /** 跑一次 apply，收下所有注册面（后面几个用例共用）。 */
-function mount({ translate } = {}) {
-  const { mod, nodes, recorded } = loadBundle()
+function mount({ translate, state } = {}) {
+  const { mod, nodes, recorded } = loadBundle({ firstNull: state })
   const registrations = []
   const dictionaries = []
   const effects = []
@@ -282,4 +305,47 @@ test('客户端产物：页面组件在初始状态下能渲染成元素（不�
   assert.notEqual(element, null)
   // 注意首帧只渲染当前那一页（默认「导入导出」），迁移页要点了页签才在树上：
   // 目录字段的两种分支因此不在这个冒烟用例的射程内，别把断言写在这里骗自己。
+})
+
+test('客户端产物：导出列表按目录分组，组头就是"整组勾选"的入口', { skip }, () => {
+  const state = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    sessions: [
+      { id: 's-1', cwd: '/home/u/dev/alpha', createdAt: 2, dir: '/home/u/dev/alpha', bytes: 2048, files: [] },
+      { id: 's-2', cwd: '/home/u/dev/alpha', createdAt: 1, dir: '/home/u/dev/alpha', bytes: 1024, files: [] },
+      { id: 's-3', cwd: '/home/u/dev/beta', createdAt: 3, dir: '/home/u/dev/beta', bytes: 512, files: [] },
+      { id: 's-4', createdAt: 4, dir: '_no-cwd', bytes: 256, files: [] },
+    ],
+    workspaces: [{ id: 'w1', path: '/home/u/dev/alpha', title: '工作区甲', sessionIds: ['s-1'] }],
+  }
+  const { registrations, recorded } = mount({ state })
+  const { component, registration } = registrations[0]
+  // 假钩子不会真的 setState，所以这里只验证**结构**：分组、组名、组头的调用面。
+  // 勾选的增删逻辑在 test/groups.test.ts，靠这里的假钩子点不出来。
+  const text = strings(component(registration.inject()))
+
+  assert.ok(text.includes('工作区甲'), '已登记的工作区拿标题当组名')
+  assert.ok(text.includes('/home/u/dev/alpha'), '组名旁边还要给出路径')
+  assert.ok(text.includes('/home/u/dev/beta'), '没登记的目录也要成组（按路径）')
+  assert.ok(text.includes('unregisteredDir'), '没登记的目录要标出来，别让人以为它不在册')
+  assert.ok(text.includes('noCwdGroup'), '没有 cwd 的会话自成一组建在最后')
+  assert.ok(text.some((item) => String(item).startsWith('sessionsInDir:')), '组头要给出这一组有几条')
+
+  // 三组会话 = 三条组头；一条会话一行，行里不再重复 cwd（它已经在组头上）。
+  const heads = recorded.filter((element) => element.props?.className === 'dsm-groupHead')
+  assert.equal(heads.length, 3, '一组一条组头')
+  // 整组勾选的入口是组头上那个框：它的无障碍名字必须说清是哪一组（"整组勾选／取消：工作区甲"），
+  // 否则读屏用户在一堆同名框里分不出点的是谁。文案在 props 里，所以只能从树上取，不在 strings()。
+  const groupBoxes = recorded.filter(
+    (element) => element.type === 'input' && String(element.props?.['aria-label'] ?? '').startsWith('selectGroup:'),
+  )
+  assert.equal(groupBoxes.length, 3, '每条组头一个"整组勾选"的框')
+  assert.ok(
+    groupBoxes.some((element) => String(element.props['aria-label']).includes('工作区甲')),
+    '框的名字里要带上组名',
+  )
+  const rows = recorded.filter((element) => element.type === 'label' && String(element.props?.className).includes('dsm-rowExport'))
+  assert.equal(rows.length, 4, '每条会话一行')
 })

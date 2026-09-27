@@ -37,10 +37,13 @@ export const zh = {
   // ---- 导入导出 ----
   exportTitle: '导出',
   exportHint:
-    '勾选要带走的会话，导出一个 .dhsess 包。包里是会话日志的原始字节，不含会话创建过的普通文件；同一条会话的所有代次日志一起进包。',
-  selectAll: '全选',
+    '勾选要带走的会话，导出一个 .dhsess 包。列表按目录分组，组头那一下是整组勾上／取消。包里是会话日志的原始字节，不含会话创建过的普通文件；同一条会话的所有代次日志一起进包。',
+  selectAll: '全选整库',
   clearAll: '清空',
   selectedCount: '已选 {count}',
+  selectGroup: '整组勾选／取消：{name}',
+  unregisteredDir: '未登记工作区',
+  noCwdGroup: '没有 cwd 的会话',
   exportAction: '导出所选',
   exporting: '打包中…',
   exported: '已导出 {count} 条会话（{bytes}）。',
@@ -162,10 +165,13 @@ export const en: Record<keyof typeof zh, string> = {
 
   exportTitle: 'Export',
   exportHint:
-    'Tick the sessions to take away and download one .dhsess bundle. The bundle carries the raw log bytes (every generation of a session), not files the session created.',
-  selectAll: 'Select all',
+    'Tick the sessions to take away and download one .dhsess bundle. The list is grouped by directory, and each group header toggles its whole group. The bundle carries the raw log bytes (every generation of a session), not files the session created.',
+  selectAll: 'Select whole library',
   clearAll: 'Clear',
   selectedCount: '{count} selected',
+  selectGroup: 'Select or clear this whole group: {name}',
+  unregisteredDir: 'not a registered workspace',
+  noCwdGroup: 'Sessions without a cwd',
   exportAction: 'Export selected',
   exporting: 'Packing…',
   exported: 'Exported {count} sessions ({bytes}).',
