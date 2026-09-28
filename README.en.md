@@ -19,7 +19,7 @@ first and rolled back byte-for-byte afterwards. (Why it has to work that way:
 
 | Entry point | Good for |
 |---|---|
-| The **Session management** page in Settings | Everyday use: tick sessions to export / import; pick a source (a directory or Ungrouped) from a dropdown to migrate; archive or delete single sessions on the **Sessions** tab |
+| The **Session management** page in Settings | Everyday use: archive or delete single sessions on the **Sessions** tab; pick a source (a directory or Ungrouped) from a dropdown to migrate; tick sessions to export / import |
 | 4 model tools | Just say "move this workspace's sessions to `~/dev/xxx`" and let the model preview first, apply second |
 
 Both share one migration implementation, so the count a preview reports is the count you get.
@@ -54,36 +54,31 @@ one-line bump at that point.
 
 ### Settings → Session management
 
-**Transfer** — take sessions away, bring them back
+**Sessions** — manage the whole library row by row
 
-- Rows show a session's **title**, with the full title and the id on hover: a uuid tells a human nothing,
-  and people pick sessions by "the one where I asked about that"; a session with no title falls back to
-  its id. Both the export list and the **Sessions** tab take the whole library, sidebar-hidden sessions
-  (subagent / blank / archived) included — whether a session is worth taking away or deleting is the
-  user's call, and hiding one up front only turns "I know I have that session" into a mystery. Migration
-  is the other way round (see below);
-- **Export**: tick sessions → the browser downloads one `.dshsess` bundle. The bundle carries the raw
-  bytes of **every generation** of those logs (each with a sha256), not files the session created. The
-  list is **grouped by directory** (group name = workspace title; a directory no workspace registers shows
-  its path and is marked), and **clicking a group header toggles that whole group** — so "take every
-  session of this workspace away" is one click. The chevron at the head of a row **folds** the
-  group away (the header and its "N sessions / M selected" stay), and the "Grouped by directory" row above
-  the list carries **Collapse all / Expand all**: folding is a display matter, so "Select whole library"
-  still counts what is listed — clicking an arrow never quietly drops sessions from the export. The two levels never read alike: a group header is a tinted
-  band with a folder glyph, while session rows are indented under it and carry a chat-bubble glyph (a session
-  title is a sentence the user wrote, so it easily looks like a directory name). Sessions no workspace record
-  claims — the ones the shell sidebar parks under Ungrouped — stay with their directory here and carry a small
-  "Ungrouped" tag saying so.
-- **Filter**: the same set as the **Sessions** tab — a row of small chips (subagent / blank / archived /
-  ungrouped / active, each with the count in the library, multiple = either, **All** clears them) plus a
-  **title / id search box**; used together the two are ANDed (search foo, show blank only = blank sessions
-  among foo). The header then reports "showing N / M", and **Select whole library picks what is listed
-  right now**; a group whose rows were all filtered out is not drawn at all (a header with nothing under
-  it looks broken), and a group header reports the filtered count;
-- **Import**: pick a bundle and a target workspace → **preview first** (per session: what will be created,
-  which `cwd` gets rewritten, what is skipped, how the registry changes) → then confirm. Import **never
-  overwrites**: a session whose id already exists is skipped and reported; a session with no `cwd` lands in
-  the `_no-cwd` project directory and is not registered.
+- The list is **grouped by directory** with foldable headers (**Collapse all / Expand all** sit above the
+  list), and clicking a header toggles that whole group — so
+  "archive every session of this old project" is one click. A header carries the workspace title and path,
+  so rows no longer repeat the owner; that width goes to the title instead, and a session no workspace
+  record claims carries a small "Ungrouped" tag (the header is the directory, the tag says the registry
+  does not know this row). Every row shows the title, the byte count and the creation time. Sessions the
+  host sidebar cannot show **are listed here** (the sidebar cannot reach them), each carrying a tag saying
+  why: `subagent` / `blank` / `archived`, plus `active` for a session still live in host memory;
+- **Filter**: a row of small chips — subagent / blank / archived / ungrouped / active, each with the
+  count in the library. Tick several to see several kinds (multiple = either), **All** clears them. The
+  line below is a **title / id search box** (both are searched: "name it by id" and "the one where I asked
+  about that" are both everyday needs). The header then reports "showing N / M", and **Select all picks
+  what is listed right now** (filter to blank, select all, delete them), while ticking survives switching
+  filters;
+- **Archive / Unarchive**: tick rows and put them away or bring them back in one click. It goes through
+  the host's own archiving capability and takes effect **immediately** — the sidebar follows right away,
+  no restart. On a host without that service (non-Web profiles) the buttons are disabled and the page
+  says why;
+- **Delete**: tick rows → **preview** (every session that would go, the file count, where the backup
+  lands) → then confirm. Deleting **backs the session directory up into this plugin's backup root
+  first**, then removes it; the sidebar drops those rows once the host rescans. A session still live in
+  host memory is refused — close it in the host first. Changed your mind? Restore it from
+  **Backups & rollback**.
 
 **Migrate** — move one directory's sessions to another directory
 
@@ -125,31 +120,36 @@ together (and removes the emptied target project directory, symmetric with the m
 emptied source project directory). A delete backup offers **Restore**: it only moves the session
 directories back — deleting never touched the registry.
 
-**Sessions** — manage the whole library row by row
+**Transfer** — take sessions away, bring them back
 
-- The list has the same shape as the **Transfer** tab: **grouped by directory**, headers foldable
-  (**Collapse all / Expand all** sit above the list), and clicking a header toggles that whole group — so
-  "archive every session of this old project" is one click. A header carries the workspace title and path,
-  so rows no longer repeat the owner; that width goes to the title instead, and a session no workspace
-  record claims carries a small "Ungrouped" tag (the header is the directory, the tag says the registry
-  does not know this row). Every row shows the title, the byte count and the creation time. Sessions the
-  host sidebar cannot show **are listed here** (the sidebar cannot reach them), each carrying a tag saying
-  why: `subagent` / `blank` / `archived`, plus `active` for a session still live in host memory;
-- **Filter**: a row of small chips — subagent / blank / archived / ungrouped / active, each with the
-  count in the library. Tick several to see several kinds (multiple = either), **All** clears them. The
-  line below is a **title / id search box** (both are searched: "name it by id" and "the one where I asked
-  about that" are both everyday needs). The header then reports "showing N / M", and **Select all picks
-  what is listed right now** (filter to blank, select all, delete them), while ticking survives switching
-  filters;
-- **Archive / Unarchive**: tick rows and put them away or bring them back in one click. It goes through
-  the host's own archiving capability and takes effect **immediately** — the sidebar follows right away,
-  no restart. On a host without that service (non-Web profiles) the buttons are disabled and the page
-  says why;
-- **Delete**: tick rows → **preview** (every session that would go, the file count, where the backup
-  lands) → then confirm. Deleting **backs the session directory up into this plugin's backup root
-  first**, then removes it; the sidebar drops those rows once the host rescans. A session still live in
-  host memory is refused — close it in the host first. Changed your mind? Restore it from
-  **Backups & rollback**.
+- Rows show a session's **title**, with the full title and the id on hover: a uuid tells a human nothing,
+  and people pick sessions by "the one where I asked about that"; a session with no title falls back to
+  its id. Both the export list and the **Sessions** tab take the whole library, sidebar-hidden sessions
+  (subagent / blank / archived) included — whether a session is worth taking away or deleting is the
+  user's call, and hiding one up front only turns "I know I have that session" into a mystery. Migration
+  is the other way round (see below);
+- **Export**: tick sessions → the browser downloads one `.dshsess` bundle. The bundle carries the raw
+  bytes of **every generation** of those logs (each with a sha256), not files the session created. The
+  list is **grouped by directory** (group name = workspace title; a directory no workspace registers shows
+  its path and is marked), and **clicking a group header toggles that whole group** — so "take every
+  session of this workspace away" is one click. The chevron at the head of a row **folds** the
+  group away (the header and its "N sessions / M selected" stay), and the "Grouped by directory" row above
+  the list carries **Collapse all / Expand all**: folding is a display matter, so "Select whole library"
+  still counts what is listed — clicking an arrow never quietly drops sessions from the export. The two levels never read alike: a group header is a tinted
+  band with a folder glyph, while session rows are indented under it and carry a chat-bubble glyph (a session
+  title is a sentence the user wrote, so it easily looks like a directory name). Sessions no workspace record
+  claims — the ones the shell sidebar parks under Ungrouped — stay with their directory here and carry a small
+  "Ungrouped" tag saying so.
+- **Filter**: the same set as the **Sessions** tab — a row of small chips (subagent / blank / archived /
+  ungrouped / active, each with the count in the library, multiple = either, **All** clears them) plus a
+  **title / id search box**; used together the two are ANDed (search foo, show blank only = blank sessions
+  among foo). The header then reports "showing N / M", and **Select whole library picks what is listed
+  right now**; a group whose rows were all filtered out is not drawn at all (a header with nothing under
+  it looks broken), and a group header reports the filtered count;
+- **Import**: pick a bundle and a target workspace → **preview first** (per session: what will be created,
+  which `cwd` gets rewritten, what is skipped, how the registry changes) → then confirm. Import **never
+  overwrites**: a session whose id already exists is skipped and reported; a session with no `cwd` lands in
+  the `_no-cwd` project directory and is not registered.
 
 A host without the `webServer` service (tools-only front ends) still loads the plugin — the page simply
 does not appear.
