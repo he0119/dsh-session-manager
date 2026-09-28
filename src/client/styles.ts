@@ -56,6 +56,27 @@ export const CSS = `
 .dsm-cardHead { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .dsm-cardTitle { font-weight: 600; }
 .dsm-hint { color: var(--dsw-alias-label-secondary, #646a73); }
+/*
+ * 说明页：词条（dt 词 / dd 解释）与问答共用一个两列网格。词比解释重一档，解释用次要灰；
+ * 词条列不折行（"子代理""未分组"最多四个字），解释列吃掉剩下的宽度。
+ */
+.dsm-defs {
+  display: grid;
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr);
+  gap: 6px 12px;
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.dsm-defs dt { color: var(--dsw-alias-label-primary, #1f2329); font-weight: 600; white-space: nowrap; }
+.dsm-defs dd { margin: 0; color: var(--dsw-alias-label-secondary, #646a73); }
+/* 问答的"问"是一整句话，不能按 nowrap 排——它会顶穿词条列。 */
+.dsm-defsFaq dt { white-space: normal; }
+/* 说明页里那段"会碰什么盘"是并列的几条，用项目符号而不是词条。 */
+.dsm-bullets { margin: 0; padding-left: 18px; color: var(--dsw-alias-label-secondary, #646a73); font-size: 13px; line-height: 1.6; }
+.dsm-bullets li + li { margin-top: 4px; }
+/* 路径这类机器可读的字串：等宽 + 次要灰，避免与正文混成一句。 */
+.dsm-path { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; word-break: break-all; }
 .dsm-button {
   appearance: none;
   border: 1px solid var(--dsw-alias-border-l2, rgba(0, 0, 0, 0.18));

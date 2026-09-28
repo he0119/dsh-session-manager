@@ -37,8 +37,7 @@ export const zh = {
 
   // ---- 传输（导出 / 导入会话包） ----
   exportTitle: '导出',
-  exportHint:
-    '勾选要带走的会话，导出一个 .dshsess 包。列表按目录分组，组头那一下是整组勾上／取消。包里是会话日志的原始字节，不含会话创建过的普通文件；同一条会话的所有代次日志一起进包。',
+  exportHint: '勾选要带走的会话，导出一个 .dshsess 包；列表按目录分组，组头那一下是整组勾上／取消。包里是什么，见「说明」。',
   selectAll: '全选整库',
   clearAll: '清空',
   selectedCount: '已选 {count}',
@@ -84,13 +83,13 @@ export const zh = {
   // ---- 迁移 ----
   migrateTitle: '迁移会话',
   migrateHint:
-    '把会话从一个来源搬到另一个目录（来源可以是某个工作区目录，也可以是「未分组」里那些没人认领的会话）：改写日志 header 的 cwd（只动首帧，其余字节不变）、把会话目录移进目标项目目录、并重新登记工作区注册表。可以整个来源一起搬，也可以只挑其中几条——先预演，看清会写什么，再确认。侧边栏里看不见的会话（子代理 / 空白 / 已归档）不在候选里，所以来源后面的条数会比导出列表少。',
+    '选来源与目标目录，整个来源一起搬或只挑几条——先预演，看清会写什么，再确认。侧边栏里看不见的会话不在候选里，所以这里比「会话」页少。',
   fromLabel: '源目录',
   toLabel: '目标目录',
   pickSource: '选择源目录…',
   ungroupedSource: '未分组',
   unownedSourceHint:
-    '来源是「未分组」：注册表没认领、且有 cwd 的那批会话，可以横跨多个目录，一次全部收进目标工作区。它们的 header 会写上目标目录的 cwd，会话目录搬进目标项目目录并登记在册。没有 cwd 的会话不在这里（header 里没有 cwd 可改写），"连同未分组的会话"与"搬迁会话产物"两个开关因此也不适用。',
+    '「未分组」＝注册表没认领、但有 cwd 的那批会话，可能横跨多个目录，一次全部收进目标工作区。没有 cwd 的会话不在这里，下面两个开关对它不适用。',
   pickTarget: '选择目标目录…',
   browse: '浏览…',
   typePath: '手输路径',
@@ -148,8 +147,7 @@ export const zh = {
 
   // ---- 备份与回滚 ----
   backupTitle: '备份与回滚',
-  backupHint:
-    '每次迁移、每次删除都会先留一份字节级备份。迁移的备份点「回滚」：把会话目录、日志字节与工作区注册表一起还原。删除的备份点「恢复」：只把会话目录搬回原位（删除从头到尾没碰过注册表）。',
+  backupHint: '每次迁移、每次导入落地、每次删除都会先留一份字节级备份；「回滚」与「恢复」把它还原回去。',
   backupRootLabel: '备份根目录',
   noBackups: '还没有备份。',
   backupRow: '{sessions} 条会话 · {artifacts} 项产物',
@@ -171,7 +169,7 @@ export const zh = {
   // ---- 会话（逐条管理：归档与删除） ----
   manageTitle: '会话库',
   manageHint:
-    '这一页对着整个会话库逐条管理。归档＝在侧边栏里收起来（走宿主能力，即时生效）；删除＝先把会话目录备份到本插件的备份根，再删掉它。子代理、空白与已归档的会话也在这里——侧边栏里点不到它们，行上的标签说明它们为什么不显示。',
+    '整个会话库都在这里，侧边栏点不到的那些也在（标签说明原因）。勾选后归档或删除；删除会先备份。分类与代价见「说明」。',
   manageArchiveUnavailable:
     '这个宿主没有 workspaceRegistry 服务（归档是它的能力，只有 Web profile 才有），所以归档按钮不可用；删除不受影响。',
   manageArchive: '归档所选',
@@ -187,7 +185,7 @@ export const zh = {
   manageDeleting: '删除中…',
   manageBackupTo: '备份落在：{dir}（要恢复就去「迁移」页的「备份与回滚」）',
   manageDeleteHint:
-    '删除会先备份、再删掉整个会话目录；删完侧边栏要等宿主重新扫描才会少掉这几条。还活在宿主内存里的会话删不掉——先在宿主里关掉它。',
+    '删除会先把整个会话目录备份到本插件的备份根，再删掉它；还活在宿主内存里的会话删不掉。',
   selectAllSessions: '全选',
   shownCount: '显示 {shown} / {total} 条',
   noMatch: '没有符合筛选条件的会话。',
@@ -204,6 +202,40 @@ export const zh = {
   tagLive: '活动中',
   tagLiveTip: '这条会话还活在宿主内存里（运行中或已打开），删除会被拒绝——先在宿主里关掉它。',
   cancel: '取消',
+
+  // ---- 说明（词条与边界条件：动作页只留"当下要做的决定"） ----
+  tabHelp: '说明',
+  helpHint: '这一页讲清三件事：分类是什么意思、三个分页各管什么、动作会碰到哪些文件。',
+  helpCategoriesTitle: '会话分类',
+  catVisible: '可见',
+  catVisibleTip: '侧边栏正常显示的会话：在册、有内容、没被归档。',
+  helpCategoriesNote:
+    '三种"不显示"的理由由宿主先判（子代理 → 空白 → 已归档），本插件跟它一致；同一条会话可能同时占好几条，行上就挂多枚标签。',
+  helpTabsTitle: '三个分页各管什么',
+  helpTabManage: '对着整个会话库逐条归档或删除，包括侧边栏点不到的那些。',
+  helpTabMigrate: '把一个来源（某个目录，或横跨多目录的「未分组」）的会话搬到另一个目录：改写日志 header 的 cwd（只动首帧，其余字节不变）、把会话目录移进目标项目目录、并重新登记工作区注册表。',
+  helpTabTransfer: '把勾选的会话打成 .dshsess 包带走，或把包里的会话导进某个工作区。',
+  helpDiskTitle: '会碰什么盘',
+  helpDiskBackup: '每次迁移、每次导入落地、每次删除都会先留一份字节级备份；备份根在「迁移 → 备份与回滚」里能看到。',
+  helpDiskRollback: '迁移的备份点「回滚」：把会话目录、日志字节与工作区注册表一起还原。',
+  helpDiskRestore: '删除的备份点「恢复」：只把会话目录搬回原位——删除从头到尾没碰过注册表。',
+  helpDiskSidebar: '归档与删除之后，侧边栏要等宿主重新扫描才会少掉那几行。',
+  helpDiskLive: '还活在宿主内存里（运行中或已打开）的会话删不掉——先在宿主里关掉它。',
+  helpDiskExport: '导出包里是会话日志的原始字节，不含会话创建过的普通文件；同一条会话的所有代次日志一起进包。',
+  helpWhereTitle: '数据从哪来',
+  helpWhereLibrary: '会话库',
+  helpWhereLibraryText: '下面每个会话目录就是一条会话；本插件读它的日志，标题、字节数与可见性都从那里来。',
+  helpWhereRegistry: '工作区注册表',
+  helpWhereRegistryText: '记着哪些会话属于哪个工作区、哪些被归档；「未分组」＝它没有认领的那些会话。',
+  helpFaqTitle: '常见疑问',
+  faqUnownedQ: '为什么这里的「未分组」比侧边栏多？',
+  faqUnownedA: '侧边栏的「未分组」不显示子代理、空白与已归档的会话，而它们也都属于未分组——这里按事实数，那边按能显示的算。',
+  faqDeletedQ: '删掉了，侧边栏为什么还在？',
+  faqDeletedA: '侧边栏要等宿主重新扫描会话库；扫描之前那几行还会在。',
+  faqRestartQ: '迁移完了，为什么提示要重启 DSH？',
+  faqRestartA: '注册表已经落盘，但宿主进程里还持有一份内存副本；不重启的话，旧工作区里新增的会话可能被写到错的地方。',
+  faqRestoreQ: '「回滚」和「恢复」差在哪？',
+  faqRestoreA: '回滚把会话目录、日志字节与注册表一起还原；恢复只把会话目录搬回原位（删除没碰过注册表，也没什么可还原的）。',
 
   // ---- 共同 ----
   failed: '操作失败：{reason}',
@@ -223,8 +255,7 @@ export const en: Record<keyof typeof zh, string> = {
   workspacesCount: '{count} workspaces',
 
   exportTitle: 'Export',
-  exportHint:
-    'Tick the sessions to take away and download one .dshsess bundle. The list is grouped by directory, and each group header toggles its whole group. The bundle carries the raw log bytes (every generation of a session), not files the session created.',
+  exportHint: 'Tick the sessions to take away and download one .dshsess bundle; the list is grouped by directory and a header toggles its whole group. What goes in is explained in Help.',
   selectAll: 'Select whole library',
   clearAll: 'Clear',
   selectedCount: '{count} selected',
@@ -269,13 +300,13 @@ export const en: Record<keyof typeof zh, string> = {
 
   migrateTitle: 'Migrate sessions',
   migrateHint:
-    'Move sessions from one source to another directory (the source is a workspace directory, or the unclaimed sessions under Ungrouped): rewrite each log header cwd (first frame only, the rest stays byte-identical), move the session directories into the target project directory, and re-home the workspace registry. Move the whole source at once, or only a few of them — preview first, then confirm. Sessions the sidebar hides (subagent / blank / archived) are never candidates, which is why the counts after each source are lower than on the export list.',
+    'Pick a source and a target directory; move it all or just a few rows. Preview first, then confirm — sessions the sidebar hides are never candidates here.',
   fromLabel: 'Source directory',
   toLabel: 'Target directory',
   pickSource: 'Choose a source directory…',
   ungroupedSource: 'Ungrouped',
   unownedSourceHint:
-    'The source is Ungrouped: sessions no workspace claims that still have a cwd, possibly spread over several directories — adopt them into the target workspace in one go. Their headers get the target cwd, their directories move into the target project directory, and they get registered. Sessions without a cwd are not listed here (there is no cwd in their header to rewrite), so the "include unregistered sessions" and "move session artifacts" switches do not apply.',
+    'Ungrouped = unclaimed sessions that still have a cwd, across possibly several directories, adopted in one go; the switches below do not apply here.',
   pickTarget: 'Choose a target directory…',
   browse: 'Browse…',
   typePath: 'Type a path',
@@ -335,8 +366,7 @@ export const en: Record<keyof typeof zh, string> = {
   problemsTitle: 'Problems',
 
   backupTitle: 'Backups & rollback',
-  backupHint:
-    'Every migration and every delete takes a byte-level backup first. A migration backup offers Roll back: it restores the session directories, the original log bytes and the workspace registry together. A delete backup offers Restore: it only moves the session directories back (deleting never touched the registry).',
+  backupHint: 'Every migration, every import that lands and every delete leaves a byte-level backup first; Roll back and Restore put it back.',
   backupRootLabel: 'Backup root',
   noBackups: 'No backups yet.',
   backupRow: '{sessions} sessions · {artifacts} artifacts',
@@ -357,7 +387,7 @@ export const en: Record<keyof typeof zh, string> = {
 
   manageTitle: 'Session library',
   manageHint:
-    'Manage the whole library row by row. Archive puts a session away in the sidebar (a host capability, effective immediately); Delete backs the session directory up into this plugin’s backup root first, then removes it. Subagent, blank and archived sessions are listed here too — the sidebar cannot reach them, so each row carries a tag saying why it is hidden.',
+    'The whole library is here, including what the sidebar cannot reach (tags say why). Tick rows, then archive or delete; delete backs up first. Categories and costs are in Help.',
   manageArchiveUnavailable:
     'This host has no workspaceRegistry service (archiving is its capability, Web profiles only), so the archive buttons are disabled; deleting still works.',
   manageArchive: 'Archive selected',
@@ -373,7 +403,7 @@ export const en: Record<keyof typeof zh, string> = {
   manageDeleting: 'Deleting…',
   manageBackupTo: 'Backup lands in: {dir} (restore it from Backups & rollback on the Migrate tab)',
   manageDeleteHint:
-    'Deleting backs the session directory up first, then removes it; the sidebar drops those rows once the host rescans. A session still living in host memory cannot be deleted — close it in the host first.',
+    'Deleting backs the whole session directory up into this plugin’s backup root first, then removes it; a session still living in host memory cannot be deleted.',
   selectAllSessions: 'Select all',
   shownCount: 'showing {shown} / {total}',
   noMatch: 'No session matches the filter.',
@@ -392,6 +422,39 @@ export const en: Record<keyof typeof zh, string> = {
   tagLiveTip:
     'This session is still live in host memory (running or open), so deleting it is refused — close it in the host first.',
   cancel: 'Cancel',
+
+  tabHelp: 'Help',
+  helpHint: 'This page explains three things: what the categories mean, what the three tabs do, and which files the actions touch.',
+  helpCategoriesTitle: 'Session categories',
+  catVisible: 'visible',
+  catVisibleTip: 'A session the sidebar shows normally: registered, non-empty, not archived.',
+  helpCategoriesNote:
+    'The host decides the three hidden reasons first (subagent → blank → archived) and this plugin follows the same order; one session can carry several of them, so a row can show several tags.',
+  helpTabsTitle: 'What the three tabs do',
+  helpTabManage: 'Archive or delete sessions in the whole library, row by row, including the ones the sidebar cannot reach.',
+  helpTabMigrate: 'Move one source (a directory, or the cross-directory Ungrouped) to another directory: rewrite each log header cwd (first frame only, the rest stays byte-identical), move the session directories, and re-home the workspace registry.',
+  helpTabTransfer: 'Pack the ticked sessions into a .dshsess bundle, or import a bundle into a workspace.',
+  helpDiskTitle: 'What gets touched on disk',
+  helpDiskBackup: 'Every migration, every import that lands and every delete leaves a byte-level backup first; the backup root is listed under Migrate → Backups & rollback.',
+  helpDiskRollback: 'A migration backup offers Roll back: session directories, log bytes and the workspace registry are restored together.',
+  helpDiskRestore: 'A delete backup offers Restore: it only moves the session directories back — deleting never touched the registry.',
+  helpDiskSidebar: 'After archiving or deleting, the sidebar drops those rows once the host rescans.',
+  helpDiskLive: 'A session still live in host memory (running or open) cannot be deleted — close it in the host first.',
+  helpDiskExport: 'The bundle holds the raw bytes of the session logs, not the ordinary files a session created; every generation of a session log goes in together.',
+  helpWhereTitle: 'Where the data comes from',
+  helpWhereLibrary: 'Session library',
+  helpWhereLibraryText: 'Each session directory below is one session; this plugin reads its log, and the title, byte count and visibility all come from there.',
+  helpWhereRegistry: 'Workspace registry',
+  helpWhereRegistryText: 'It records which sessions belong to which workspace and which are archived; Ungrouped means the sessions nothing claims.',
+  helpFaqTitle: 'Common questions',
+  faqUnownedQ: 'Why does Ungrouped count more here than in the sidebar?',
+  faqUnownedA: 'The sidebar’s Ungrouped hides subagent, blank and archived sessions, and those are ungrouped too — this page counts facts, the sidebar counts what it can show.',
+  faqDeletedQ: 'I deleted it, why is it still in the sidebar?',
+  faqDeletedA: 'The sidebar waits for the host to rescan the library; those rows stay until it does.',
+  faqRestartQ: 'Why does a migration ask me to restart DSH?',
+  faqRestartA: 'The registry is on disk, but the host process keeps an in-memory copy; without a restart, new sessions in an old workspace may be written to the wrong place.',
+  faqRestoreQ: 'What is the difference between Roll back and Restore?',
+  faqRestoreA: 'Roll back restores session directories, log bytes and the registry together; Restore only moves the session directories back (deleting never touched the registry).',
 
   failed: 'Failed: {reason}',
   dismiss: 'Dismiss',

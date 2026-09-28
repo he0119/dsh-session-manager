@@ -356,6 +356,34 @@ test('客户端产物：apply 把「会话管理」注册到设置里的一页�
   assert.deepEqual(Object.keys(zh).sort(), Object.keys(en).sort(), '两份字典的键集必须一致')
   assert.ok(Object.keys(zh).length > 20, '字典不该是空壳')
 
+  // 说明文字的分工：动作页只写"当下要做的决定"，词条与边界条件（分类含义、谁判的、删完侧边栏为什么
+  // 还在、回滚与恢复的差别…）集中到「说明」页。这条分工靠自觉会漂回去——每加一个功能都想在按钮边上
+  // 多解释一句，攒起来就是读者每次都要扫过去的散文（实测动作页正文曾经 187 / 382 / 144 字，最长一段
+  // 192 字）。这里钉它的机械面：**动作页上的每一段说明都不超过两行**。
+  // 两行的容量按实测的排版算：卡片正文宽约 480px、13px 字体，一行约 36 个汉字；英文按 ~6.5px/字符
+  // 折半，所以两边各给一个上限。超过上限不是"字太多"，是"这段该搬去「说明」页"。
+  const PAGE_PROSE = {
+    zh: 76,
+    en: 175,
+  }
+  const actionKeys = [
+    'exportHint',
+    'importHint',
+    'migrateHint',
+    'unownedSourceHint',
+    'manageHint',
+    'manageDeleteHint',
+    'backupHint',
+    'filterHint',
+  ]
+  for (const [language, cap] of Object.entries(PAGE_PROSE)) {
+    const dictionary = language === 'zh' ? zh : en
+    const over = actionKeys
+      .filter((key) => String(dictionary[key]).length > cap)
+      .map((key) => `${key}=${String(dictionary[key]).length}`)
+    assert.deepEqual(over, [], `${language}：动作页上的说明每段最多两行（更长的就该进「说明」页）`)
+  }
+
   // 样式随 effect 注入
   assert.ok(nodes.length >= 1, 'installStyles 应当往 head 里放一个 <style>')
   assert.ok(effects.some((label) => String(label).includes('stylesheet')))
@@ -388,12 +416,12 @@ test('客户端产物：页面骨架带着三个页内分页（会话 / 迁移 /
   const tabs = recorded.filter((node) => String(node.props?.className) === 'dsm-tab')
   assert.deepEqual(
     tabs.map((node) => strings(node)[0]),
-    ['tabManage', 'tabMigrate', 'tabTransfer'],
-    '顺序是 会话 → 迁移 → 传输',
+    ['tabManage', 'tabMigrate', 'tabTransfer', 'tabHelp'],
+    '顺序是 会话 → 迁移 → 传输 → 说明（三个动作页按日常程度排，参考页垫底）',
   )
   assert.deepEqual(
     tabs.map((node) => node.props['aria-selected']),
-    [true, false, false],
+    [true, false, false, false],
     '默认停在第一个页签',
   )
   assert.ok(text.includes('title'), '页面标题走同一份字典')
@@ -1092,4 +1120,44 @@ test('客户端产物：「会话」页也按目录分组、也能折叠，勾�
     [false, false],
     '收了一组：两个按钮都能用',
   )
+})
+
+// ---- 「说明」页（词条与边界条件）----
+//
+// 这一页的存在理由是"把动作页上的散文搬走"，所以它的验收点有两个：词条**复用了行上那几枚标签的文案**
+// （同一件事在两处各写一份就会漂），以及边界条件确实讲全了（分类、三个分页、碰什么盘、数据从哪来、
+// 常见疑问）。动作页那边由上面那条"每段最多两行"的预算盯着。
+
+test('客户端产物：「说明」页把分类词条、三个分页与边界条件摆出来', { skip }, () => {
+  const state = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    archiveAvailable: true,
+    sessions: [],
+    workspaces: [],
+  }
+  const { registrations, recorded } = mount({ state, panel: 'help' })
+  const text = strings(registrations[0].component(registrations[0].registration.inject()))
+
+  for (const key of ['helpCategoriesTitle', 'helpTabsTitle', 'helpDiskTitle', 'helpWhereTitle', 'helpFaqTitle']) {
+    assert.ok(text.includes(key), `缺少小节「${key}」`)
+  }
+  // 词条与解释成对，且词条就是行上那几枚标签的键
+  const terms = recorded.filter((node) => node.type === 'dt').flatMap((node) => strings(node))
+  for (const key of ['catVisible', 'tagSubagent', 'tagBlank', 'tagArchived', 'tagLive', 'ungroupedSource']) {
+    assert.ok(terms.includes(key), `分类词典缺少「${key}」`)
+  }
+  assert.equal(terms.length, 15, '词条数＝分类 6 + 分页 3 + 数据 2 + 疑问 4')
+  assert.equal(recorded.filter((node) => node.type === 'dd').length, 15, '每条词条都有解释')
+  // 「数据从哪来」两条路径来自 /state，不是写死在文案里
+  assert.ok(
+    text.includes('/home/u/.dsh/sessions') && text.includes('/home/u/.dsh/registry.json'),
+    '两条路径来自 /state',
+  )
+  for (const key of ['faqUnownedQ', 'faqDeletedQ', 'faqRestartQ', 'faqRestoreQ']) {
+    assert.ok(text.includes(key), `常见疑问缺少「${key}」`)
+  }
+  // 说明页不该长成一个"什么都往里塞"的垃圾桶：正文段落本身就是词条/项目符号，没有额外的大段散文
+  assert.ok(text.includes('helpHint'), '页首要有一句话说明这一页讲什么')
 })

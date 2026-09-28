@@ -28,7 +28,7 @@ DSM_FIXTURE=/path/to/backup pnpm test
 ```
 
 没设 `DSM_FIXTURE` 时，`test/real-data.test.ts` 会整组跳过——它是 runner 里默认跳过的两条之一，
-另一条是下面那条 `DSM_SMOKE_WORKSPACE`（所以全绿口径是 195 条里 193 通过、2 跳过）。
+另一条是下面那条 `DSM_SMOKE_WORKSPACE`（所以全绿口径是 196 条里 194 通过、2 跳过）。
 
 ### 构建产物冒烟（`test/artifact.test.mjs`）
 
@@ -133,7 +133,7 @@ tsconfig.client.json Web Client 自己的类型工程（DOM + JSX；Host 那份�
 | `src/remove.ts` | 删除编排：预演（活着的拒删）→ 先备份 → 删目录 → 复核；不碰注册表 | 无 |
 | `src/tools.ts` | 4 个工具注册（+ schema、平台解码器实例、可选服务探测） | `dsh-tools` |
 | `src/web.ts` | 界面端点（state / export / import / migrate / backups / rollback / delete / archive），只要求 `{ register }` 形状 | 无 |
-| `src/client/*` | 浏览器半侧：「会话管理」页（会话 / 迁移 / 传输三个分页）、字典、样式、端点调用 → `lib/client.js`；`sessionList.tsx` 是三个分页共用的列表骨架（行、组头、列表框、筛选条），`sessionFilter.ts` 是它背后的筛选与搜索判据（纯函数） | 无 |
+| `src/client/*` | 浏览器半侧：「会话管理」页（会话 / 迁移 / 传输 / 说明四个分页）、字典、样式、端点调用 → `lib/client.js`；`sessionList.tsx` 是前三个分页共用的列表骨架（行、组头、列表框、筛选条），`sessionFilter.ts` 是它背后的筛选与搜索判据（纯函数），`HelpPanel.tsx` 是那个不碰数据的说明页 | 无 |
 | `src/index.ts` | 插件入口 `apply(ctx, config)` | `dsh-tools` |
 
 核心层（`project-key` / `paths` / `zstd-frame` / `session-log` / `discovery` / `projection-cache` /

@@ -151,6 +151,14 @@ directories back — deleting never touched the registry.
   overwrites**: a session whose id already exists is skipped and reported; a session with no `cwd` lands in
   the `_no-cwd` project directory and is not registered.
 
+**Help** — the vocabulary and the costs in one place: the category dictionary (visible / subagent / blank /
+archived / active / Ungrouped, where Ungrouped means two different things), what the three tabs do, which
+files the actions touch (backups, roll back vs restore, when the sidebar follows), where the data comes from
+(the library and the registry paths), and the common questions (why Ungrouped counts more here than in the
+sidebar, why a deleted session is still in the sidebar, why a migration asks for a restart). The action tabs
+(Sessions / Migrate / Transfer) keep only the decision at hand, so each explanation there stays within two
+lines.
+
 A host without the `webServer` service (tools-only front ends) still loads the plugin — the page simply
 does not appear.
 
