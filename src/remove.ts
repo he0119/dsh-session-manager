@@ -21,6 +21,7 @@ import { existsSync, readdirSync, rmSync, rmdirSync, statSync } from 'node:fs'
 import { dirname } from 'node:path'
 
 import { scanAll, type DiscoveredSession } from './discovery.ts'
+import { familyOf } from './family.ts'
 import { createBackup } from './journal.ts'
 import type { TitleQuery } from './session-title.ts'
 import type { DecodeAll, SessionLogFile } from './types.ts'
@@ -117,66 +118,6 @@ function indexById(sessions: readonly DiscoveredSession[]): Map<string, Discover
   return byId
 }
 
-/** 一条被点名的会话与它牵连出来的后代：`root` 是点名的那一条。 */
-interface FamilyMember {
-  session: DiscoveredSession
-  root: DiscoveredSession
-}
-
-/**
- * 点名几条会话 → 要一起删的**整族**。
- *
- * 顺序：点名的在前（按请求顺序），随后是各自的后代（按层展开），全局去重。这是**向下**的
- * （删父会话就把子代理带走），不向上牵连父——子代理跟着父走，不是父跟着子走。
- *
- * 判据取子会话 header 里的 `parentSession`，而不是父日志里的 `subagent/catalog` 事件：两者在宿主
- * 写出来的库里是同一件事（建子会话时两边一起写，见 session-log.ts 的测试），而 header 在发现阶段
- * 本来就已经解出来了；读 catalog 要把父日志整份解码（一条 6MB 的日志 1～2 秒，见 discovery.ts）。
- *
- * 环（坏数据里 A 的父是 B、B 的父是 A）由 `seen` 兜住，不会转不出来。
- *
- * @param sessions 发现出来的全部会话。
- * @param byId 它们的 id 索引。
- * @param ids 用户点名的会话 id（可含不存在的）。
- * @returns 展开后的整族；点名但不在库里的 id 不出现在这里（由调用方报 problem）。
- */
-function familyOf(
-  sessions: readonly DiscoveredSession[],
-  byId: ReadonlyMap<string, DiscoveredSession>,
-  ids: readonly string[],
-): FamilyMember[] {
-  const childrenOf = new Map<string, DiscoveredSession[]>()
-  for (const session of sessions) {
-    const parent = session.header.parentSession
-    if (parent === undefined || parent === '' || parent === session.id) continue
-    const siblings = childrenOf.get(parent)
-    if (siblings === undefined) childrenOf.set(parent, [session])
-    else siblings.push(session)
-  }
-
-  const family: FamilyMember[] = []
-  const seen = new Set<string>()
-  for (const id of ids) {
-    const root = byId.get(id)
-    if (root === undefined || seen.has(root.id)) continue
-    seen.add(root.id)
-    family.push({ session: root, root })
-    // 一层一层往下展开：`queue` 里是"已经收进来、还没找过孩子"的那些。
-    const queue: DiscoveredSession[] = [root]
-    while (queue.length > 0) {
-      const parent = queue.shift()
-      if (parent === undefined) break
-      for (const child of childrenOf.get(parent.id) ?? []) {
-        if (seen.has(child.id)) continue
-        seen.add(child.id)
-        queue.push(child)
-        family.push({ session: child, root })
-      }
-    }
-  }
-  return family
-}
-
 /**
  * 算出"删这些会话会发生什么"，不写任何字节。
  *
@@ -202,14 +143,17 @@ export function planRemoval(deps: RemoveDeps, request: RemoveRequest): RemovalPl
   const named = new Set(ids)
 
   // 点名但不在库里的：照旧逐条报，不静默跳过（那些 id 也就展开不出什么后代来）。
+  const roots: DiscoveredSession[] = []
   for (const id of ids) {
-    if (!byId.has(id)) problems.push(`session ${id} 不在库里（可能已经被删掉了）`)
+    const session = byId.get(id)
+    if (session === undefined) problems.push(`session ${id} 不在库里（可能已经被删掉了）`)
+    else if (!roots.some((root) => root.id === id)) roots.push(session)
   }
 
   const entries: RemoveEntry[] = []
   /** 每条收进来的会话，它的父会话 id（没有父链接就不进这张表）。 */
   const parentOf = new Map<string, string>()
-  for (const { session, root } of familyOf(discovered, byId, ids)) {
+  for (const { session, root } of familyOf(discovered, roots)) {
     const id = session.id
     // 点名的那些不说"跟着谁"——那是用户自己的选择；只有级联带进来的才说明出处。
     const via = named.has(id)

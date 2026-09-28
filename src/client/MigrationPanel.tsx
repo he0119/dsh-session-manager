@@ -599,6 +599,8 @@ export function MigrationPanel({ t = fallback, state, reload, directory }: Panel
                 bytes: formatBytes(preview.bytes),
               })}
             </p>
+            {/* 级联带进来的子代理要说明白：勾的是一条父会话，清单里却多出几条没勾过的。 */}
+            {preview.cascaded > 0 && <p className="dsm-hint">{t('migrateFamily', { count: preview.cascaded })}</p>}
             <p className="dsm-hint">
               {preview.unowned
                 ? t('migrateProjectDirsUnowned', { projectDirs: preview.sourceProjectDirs.length, to: preview.targetProjectDir })

@@ -472,6 +472,36 @@ test('POST /migrate：带 sessionIds 时只搬点名的会话（界面「只选�
   assert.deepEqual(readRegistry(sandbox.registryPath).tables.workspaces['ws-a']?.sessionIds, ['session-a'])
 })
 
+test('POST /migrate：勾中的父会话把子代理一起带走，条数报在 cascaded 里（界面据此说明）', async () => {
+  const sandbox = makeSandbox('web-migrate-family')
+  writeSession(sandbox.sessionsRoot, 'session-parent', CWD_A, 1000, { title: '父会话' })
+  writeSession(sandbox.sessionsRoot, 'session-child', CWD_A, 1001, { origin: 'subagent', parentSession: 'session-parent' })
+
+  const handlers = createApiHandlers(deps(sandbox))
+  const { res, captured } = fakeRes()
+  await handlers['POST /migrate']!(
+    fakeReq(
+      'POST',
+      `${API_PREFIX}/migrate`,
+      Buffer.from(JSON.stringify({ from: CWD_A, to: CWD_B, sessionIds: ['session-parent'] })),
+    ),
+    res,
+  )
+
+  assert.equal(captured.status, 200)
+  const body = json(captured)
+  const preview = body['preview'] as Record<string, unknown>
+  const sessions = preview['sessions'] as Array<Record<string, unknown>>
+  assert.deepEqual(sessions.map((s) => s['id']), ['session-parent', 'session-child'])
+  // 界面读的就是这个字段：`cascaded > 0` 才多说一句"其中 N 条是子代理会话"
+  assert.equal(preview['cascaded'], 1)
+  // `via` 带着点名那条的标题（有标题时界面用它认人，没有就退到 id）
+  assert.deepEqual(sessions[1]!['via'], { id: 'session-parent', title: '父会话' }, '子代理要带着"是谁把它牵进来的"')
+  assert.equal(sessions[1]!['registered'], false)
+  // 级联不改变成员资格：只有点名的父会话进目标工作区
+  assert.deepEqual((preview['registryChange'] as Record<string, unknown>)['added'], ['session-parent'])
+})
+
 test('POST /migrate：unowned 来源不带 from 也能预演（界面那个跨目录的「未分组」走这条路）', async () => {
   const sandbox = makeSandbox('web-migrate-unowned')
   // session-a 登记在 ws-a 名下，session-b 的 cwd 是同一个目录但谁都没认领 —— 未分组来源只认后者。

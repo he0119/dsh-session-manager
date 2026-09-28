@@ -142,7 +142,14 @@ test('目录来源：子代理 / 空白 / 已归档的会话都不进候选，�
   const sandbox = makeSandbox('hidden-dir-source')
   const preview = previewMigration(deps(sandbox), { from: sandbox.source, to: sandbox.target })
   assert.equal(preview.ok, true, preview.problems.join('; '))
-  assert.deepEqual(preview.sessions.map((s) => s.id), ['session-visible'])
+  // 候选（用户点得到、侧边栏也看得见的那些）只有一条：这里是"界面给的勾选面"。
+  assert.deepEqual(preview.sessions.filter((s) => s.via === undefined).map((s) => s.id), ['session-visible'])
+  // 但计划里还有一条：`session-subagent` 是 `session-visible` 的子代理，**跟着父会话一起搬**——
+  // 它不是候选，是族的一部分（判据与顺序见 src/family.ts）。空白与已归档那两条没有父会话，一个都不跟。
+  assert.deepEqual(preview.sessions.map((s) => s.id), ['session-visible', 'session-subagent'])
+  assert.equal(preview.cascaded, 1)
+  assert.deepEqual(preview.sessions[1]?.via, { id: 'session-visible' })
+  assert.equal(preview.sessions[1]?.registered, false, '子代理从来不在册，跟着搬也不改变成员资格')
   // 目标项目目录名由 cwd 推出，夹具里两个目录不撞 key
   assert.notEqual(projectKey(sandbox.source), projectKey(sandbox.target))
 })
@@ -163,8 +170,10 @@ test('点名叫一条侧边栏不显示的会话：报的是"它被隐藏了"，
     sessionIds: ['session-subagent'],
   })
   assert.equal(preview.ok, false)
+  // 子代理那类给的是**下一步**而不是"我不搬它"：点名它自己不会把它搬走（那是向上的牵连），
+  // 该点名的是它的父会话——所以这句话里带着父会话的 id。
   assert.deepEqual(preview.problems, [
-    'session session-subagent is hidden from the host sidebar (subagent) — migration does not take it',
+    'session session-subagent is a subagent session (it follows its parent) — migrate its parent session-visible instead',
   ])
 
   // 已归档的那条给的是归档这条理由（同一条判据的另一支）
@@ -195,6 +204,11 @@ test('投影缓存缺席（没挂那个域的老宿主）：不凭空判空白�
   // 从候选里悄悄拿掉。
   rmSync(join(sandbox.base, 'storages', 'session_projcache'), { recursive: true, force: true })
   const preview = previewMigration(deps(sandbox), { from: sandbox.source, to: sandbox.target })
-  // 只剩"归档"与"子代理"两条理由还在起作用：空白那条被放回候选。
-  assert.deepEqual(preview.sessions.map((s) => s.id).sort(), ['session-blank', 'session-visible'])
+  // 只剩"归档"与"子代理"两条理由还在起作用：空白那条被放回候选（它与 `session-subagent` 一起，
+  // 后者是跟着 `session-visible` 进来的族成员）。
+  assert.deepEqual(preview.sessions.map((s) => s.id).sort(), ['session-blank', 'session-subagent', 'session-visible'])
+  assert.deepEqual(
+    preview.sessions.filter((s) => s.via === undefined).map((s) => s.id).sort(),
+    ['session-blank', 'session-visible'],
+  )
 })

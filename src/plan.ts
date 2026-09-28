@@ -7,6 +7,7 @@ import { dirname, join } from 'node:path'
 
 import { planArtifactMoves } from './artifacts.ts'
 import { projectDirOf, scanAll, scanProjectDir, type DiscoveredSession } from './discovery.ts'
+import { familyOf } from './family.ts'
 import { projectKey } from './project-key.ts'
 import { reHome, validateRegistry } from './registry.ts'
 import type { TitleQuery } from './session-title.ts'
@@ -95,6 +96,7 @@ export function buildRelocationPlan(options: BuildPlanOptions): RelocationPlan {
       targetProjectDir: '',
       unowned,
       sessions: [],
+      cascaded: 0,
       artifacts: null,
       registryChange: null,
       nextRegistry: null,
@@ -143,18 +145,22 @@ export function buildRelocationPlan(options: BuildPlanOptions): RelocationPlan {
       return false
     })
 
+  const scanOptions = resolveTitle === undefined ? {} : { resolveTitle }
+  // 源目录扫出来的那一份（含侧边栏看不见的：它们不进候选，但选中一条父会话时要把它们当中
+  // "属于这条父会话的子代理"找出来）。
+  let sourceScanned: DiscoveredSession[] = []
   let discovered: DiscoveredSession[] = []
   if (unowned) {
     // 未分组来源：整个库里"谁都没认领"的那些。没有 `cwd` 的排除在外——`relocateHeaderCwd()`
     // 明确拒绝改写一个没有 cwd 的 header（session-log.ts），所以它们根本搬不进来；
     // 界面上那个来源的条数与这里必须一致，于是界面也按同一条判据圈候选（planRows.unownedSessions）。
+    sourceScanned = scanAll(root, decodeAll, scanOptions)
     discovered = splitHidden(
-      scanAll(root, decodeAll, resolveTitle === undefined ? {} : { resolveTitle }).filter(
-        (s) => !owned.has(s.id) && typeof s.cwd === 'string' && s.cwd !== '',
-      ),
+      sourceScanned.filter((s) => !owned.has(s.id) && typeof s.cwd === 'string' && s.cwd !== ''),
     )
   } else if (existsSync(sourceProjectDir)) {
-    discovered = splitHidden(scanProjectDir(sourceProjectDir, decodeAll, resolveTitle === undefined ? {} : { resolveTitle }))
+    sourceScanned = scanProjectDir(sourceProjectDir, decodeAll, scanOptions)
+    discovered = splitHidden(sourceScanned)
     for (const s of discovered) {
       if (s.cwd !== from) problems.push(`session ${s.id}: header cwd ${s.cwd} != ${from}`)
     }
@@ -162,13 +168,22 @@ export function buildRelocationPlan(options: BuildPlanOptions): RelocationPlan {
 
   if (sessionIds) {
     const known = new Set(discovered.map((s) => s.id))
+    // 点名点到一条隐藏的会话时，子代理那类要说清"该点名的是谁"——查的是源目录那一份。
+    const sourceById = new Map(sourceScanned.map((session) => [session.id, session]))
     for (const id of sessionIds) {
       // 点名的会话不在这次来源的候选里：直接报 problem，不静默少搬（未分组来源下，
       // "在册"或"没有 cwd"的会话就落在这里——它们不是这个来源能覆盖的东西）。
       if (known.has(id)) continue
       const reason = hiddenInSource.get(id)
       if (reason !== undefined) {
-        problems.push(`session ${id} is hidden from the host sidebar (${reason}) — migration does not take it`)
+        // 子代理是"跟着父会话走"的那一类（见 family.ts）：点名它自己不会把它搬走（那是向上的
+        // 牵连），该点名的是它的父会话——所以这句话要给出下一步，而不只是"我不搬它"。
+        const parent = sourceById.get(id)?.header.parentSession
+        problems.push(
+          reason === 'subagent' && parent !== undefined
+            ? `session ${id} is a subagent session (it follows its parent) — migrate its parent ${parent} instead`
+            : `session ${id} is hidden from the host sidebar (${reason}) — migration does not take it`,
+        )
         continue
       }
       problems.push(
@@ -185,26 +200,52 @@ export function buildRelocationPlan(options: BuildPlanOptions): RelocationPlan {
     }
   }
 
+  // **子代理跟着父会话走**：选中的每条会话都把它的全部后代一起带走（判据与顺序见 family.ts）。
+  //
+  // 找后代要扫全库：子会话的日志落在它自己 cwd 的项目目录里，而那个 cwd 未必还是父会话现在的 cwd
+  // （父会话被单独迁走过一次，孩子就留在旧目录里了）——只扫源项目目录会漏掉那些，正是要修的那种
+  // "族被拆成两半"。这一遍**不读标题**：全库带标题扫一遍实测 1.7s（本机 41 条），而这一遍只用来看
+  // 父子关系；源目录里那份带着标题，合并时优先取它，于是跨目录的后代没有标题（预演卡片不逐条画
+  // `sessions`，标题只在候选列表里用，那份来自 /state，见 migrate.ts 的 previewOf）。
+  const library = unowned ? sourceScanned : scanAll(root, decodeAll)
+  const merged = new Map<string, DiscoveredSession>()
+  for (const session of library) merged.set(session.id, session)
+  for (const session of sourceScanned) merged.set(session.id, session)
+  const family = familyOf([...merged.values()], selected)
+  const selectedIds = new Set(selected.map((s) => s.id))
+
   // 目标会话目录不得已被占用
   const targetDirs = new Set<string>()
-  const sessions: SessionMove[] = selected.map((s) => {
+  const sessions: SessionMove[] = []
+  for (const { session: s, root: familyRoot } of family) {
+    // 级联带进来的（用户没点名的那几条）要说清出处：预演里会因此多出没勾过的会话。
+    const via = selectedIds.has(s.id)
+      ? undefined
+      : { id: familyRoot.id, ...(familyRoot.title === undefined ? {} : { title: familyRoot.title }) }
+    const owner = via === undefined ? '' : ` (subagent, follows ${via.title ?? via.id})`
     const targetDir = join(targetProjectDir, s.dirName)
-    // 每条会话各自一个源：未分组来源下它们分散在不同的项目目录里。
-    const sessionFrom = unowned ? (s.cwd as string) : from
+    // 每条会话各自一个源：未分组来源下它们分散在不同项目目录里；目录来源下**级联带进来的后代**
+    // 也可能不在源目录里（见上面扫全库那段），它的源只能是自己的 cwd。
+    const sessionFrom = unowned || via !== undefined ? s.cwd : from
+    if (sessionFrom === undefined || sessionFrom === '') {
+      // 没有 cwd 就没法改写 header、也没法定位项目目录（relocateHeaderCwd 明确拒绝）。
+      problems.push(`session ${s.id}${owner} has no cwd to rewrite — migration cannot take it`)
+      continue
+    }
     // `cwd` 已经在目标上的会话（未分组来源下很常见：这条没人认领的会话本来就住在那个目录里，
     // 只是没登记在册）不需要搬任何东西——它的"目标目录"就是自己现在的位置，所以"目标已存在"
     // 在这里不是冲突。这一支在单目录来源下够不到（`from === to` 被上面挡了），
     // 未分组来源下它是**收编**这件事的常态：只补一条注册表记录。
-    const alreadyAtTarget = s.cwd === to
+    const alreadyAtTarget = sessionFrom === to
     if (existsSync(targetDir) && !alreadyAtTarget) problems.push(`target session directory already exists: ${targetDir}`)
     if (targetDirs.has(targetDir)) problems.push(`duplicate target directory: ${targetDir}`)
     targetDirs.add(targetDir)
     // 项目目录名与 header 的 cwd 若已经对不上，说明这条会话落错了项目目录（宿主会判它 corrupt）——搬过去正好
     // 修好，但项目目录名相同却是另一个 cwd 时目标项目目录里会撞车，那种情况在这里挡住。
-    if (unowned && !alreadyAtTarget && projectDirOf(root, sessionFrom) === targetProjectDir) {
-      problems.push(`session ${s.id}: its project directory collides with the target's (${projectKey(to)})`)
+    if ((unowned || via !== undefined) && !alreadyAtTarget && projectDirOf(root, sessionFrom) === targetProjectDir) {
+      problems.push(`session ${s.id}${owner}: its project directory collides with the target's (${projectKey(to)})`)
     }
-    return {
+    sessions.push({
       id: s.id,
       ...(s.title === undefined ? {} : { title: s.title }),
       dirName: s.dirName,
@@ -216,8 +257,9 @@ export function buildRelocationPlan(options: BuildPlanOptions): RelocationPlan {
       targetDir,
       files: s.files,
       registered: owned.has(s.id),
-    }
-  })
+      ...(via === undefined ? {} : { via }),
+    })
+  }
 
   if (sessions.length === 0 && problems.length === 0) problems.push('no sessions selected for migration')
 
@@ -242,8 +284,16 @@ export function buildRelocationPlan(options: BuildPlanOptions): RelocationPlan {
   let nextRegistry: WorkspaceRegistryState | null = null
   if (sessions.length > 0 && regCheck.ok) {
     try {
-      // sessions 已按 createdAt 降序（新→旧，与宿主注册表显示顺序一致），原样追加
-      const result = reHome(registry, { sessionIds: sessions.map((s) => s.id), toPath: to, title })
+      // **成员资格不因为跟着走而改变**：点名的那些照旧全部重挂（未分组的会被"收编"，与以前一致），
+      // 而级联带进来的后代只有在**本来就在册**时才一起改挂——子代理通常从来没在册过（宿主自己也不把
+      // 它算进工作区成员），给它们凭空补一条登记只会让注册表里多出宿主不认的成员。
+      // 排序：宿主注册表里的顺序是"新→旧"，而级联展开会打断这个顺序（父后面跟着它的孩子），
+      // 所以这里按每条会话自己的 createdAt 排回来；只点名时与原来的顺序完全一致。
+      const registryIds = sessions
+        .filter((session) => session.via === undefined || session.registered)
+        .sort((a, b) => b.createdAt - a.createdAt)
+        .map((session) => session.id)
+      const result = reHome(registry, { sessionIds: registryIds, toPath: to, title })
       nextRegistry = result.registry
       registryChange = result.change
     } catch (error) {
@@ -261,6 +311,7 @@ export function buildRelocationPlan(options: BuildPlanOptions): RelocationPlan {
     targetProjectDir,
     unowned,
     sessions,
+    cascaded: sessions.filter((s) => s.via !== undefined).length,
     artifacts,
     registryChange,
     nextRegistry,
@@ -281,6 +332,9 @@ export function describePlan(plan: RelocationPlan): string {
   lines.push(`  -> ${plan.to}`)
   const files = plan.sessions.reduce((n, s) => n + s.files.length, 0)
   lines.push(`  日志文件 ${files} 个；目标项目目录 ${plan.targetProjectDir}`)
+  if (plan.cascaded > 0) {
+    lines.push(`  其中 ${plan.cascaded} 条是子代理会话（跟着点名的父会话一起搬，成员资格不变）`)
+  }
   if (plan.artifacts) {
     lines.push(`  会话产物：待搬 ${plan.artifacts.moves.length} 项、跳过 ${plan.artifacts.skipped.length} 项`)
   }

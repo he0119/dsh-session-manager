@@ -71,6 +71,8 @@ export interface PreviewSession {
   targetDir: string
   files: number
   bytes: number
+  /** 这条是级联带进来的：点名的那个祖先会话（点名的那几条自己没有这一项，见 types.ts 的 SessionMove.via）。 */
+  via?: { id: string; title?: string }
 }
 
 /** 预演结果：界面与工具读的是同一份。 */
@@ -88,6 +90,8 @@ export interface MigrationPreview {
   /** 本次真正会搬动的会话各自所在的源项目目录（去重、排序）——未分组来源下不止一个。 */
   sourceProjectDirs: string[]
   sessions: PreviewSession[]
+  /** 级联带进来的条数：点名的会话的子代理后代（见 `PreviewSession.via`）。 */
+  cascaded: number
   files: number
   bytes: number
   artifacts: {
@@ -166,6 +170,7 @@ function previewOf(plan: RelocationPlan): MigrationPreview {
       targetDir: session.targetDir,
       files: session.files.length,
       bytes: sessionBytes,
+      ...(session.via === undefined ? {} : { via: session.via }),
     }
   })
   return {
@@ -179,6 +184,7 @@ function previewOf(plan: RelocationPlan): MigrationPreview {
     // 未分组来源横跨多个项目目录：把每条会话自己的源项目目录去重报给界面，别让界面拿一个空串去猜。
     sourceProjectDirs: [...new Set(plan.sessions.map((session) => dirname(session.sourceDir)))].sort(),
     sessions,
+    cascaded: plan.cascaded,
     files,
     bytes,
     artifacts: plan.artifacts

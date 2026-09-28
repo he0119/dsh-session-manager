@@ -111,7 +111,13 @@ one-line bump at that point.
 - **candidates line up with the host sidebar**: subagent sessions (nested under their parent), blank
   sessions (never started a turn) and archived sessions are never candidates — a session the sidebar
   cannot show should not be swept along by accident. Naming one of them explicitly makes the preview say
-  it is hidden instead of vaguely claiming it was not found;
+  it is hidden (for a subagent it also tells you to name its parent instead);
+- **Subagents follow their parent session**: ticking a parent **moves its subagent sessions** (and any
+  deeper descendants) with it — each log header's cwd is rewritten and each session directory moves into
+  the target project directory, all in one backup (otherwise the family ends up split across two
+  directories, and a subagent cannot be moved on its own: it is not a candidate, and naming it would be an
+  upward link). Membership does not change: a subagent was not registered, and still is not; the preview
+  reports how many of the sessions are subagents;
 - **Preview**: session, log and byte counts, source → target project directory, **how the registry changes** (create or
   reuse the target workspace, how many sessions are added, which workspaces lose them, whether an emptied
   workspace is removed), the artifact plan and its skip reasons;

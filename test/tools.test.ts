@@ -42,10 +42,12 @@ interface CapturedTool {
 }
 
 let clock = 0
-function makeLog(id: string, cwd: string, n: number): Buffer {
+function makeLog(id: string, cwd: string, n: number, extra: Record<string, unknown> = {}): Buffer {
   const createdAt = ++clock
   const frames = [
-    encodeRawFrame(JSON.stringify({ type: 'session', version: 4, id, createdAt, cwd, isSeeded: false, delegationDepth: 0 }) + '\n'),
+    encodeRawFrame(
+      JSON.stringify({ type: 'session', version: 4, id, createdAt, cwd, isSeeded: false, delegationDepth: 0, ...extra }) + '\n',
+    ),
   ]
   for (let i = 0; i < n; i++) {
     frames.push(
@@ -78,11 +80,18 @@ function makeSandbox(name: string): Sandbox {
   const projectDirName = projectKey(fromDir)
   mkdirSync(join(root, projectDirName, 'session-a'), { recursive: true })
   mkdirSync(join(root, projectDirName, 'session-b'), { recursive: true })
+  // session-a 的子代理：不在册、侧边栏看不见，但**跟着父会话走**——工具层的 `cascaded` 就用它核。
+  mkdirSync(join(root, projectDirName, 'session-child'), { recursive: true })
   mkdirSync(join(root, projectKey(toDir)), { recursive: true })
 
-  const logs: Record<string, Buffer> = { a: makeLog('session-a', fromDir, 8), b: makeLog('session-b', fromDir, 4) }
+  const logs: Record<string, Buffer> = {
+    a: makeLog('session-a', fromDir, 8),
+    b: makeLog('session-b', fromDir, 4),
+    child: makeLog('session-child', fromDir, 3, { origin: 'subagent', parentSession: 'session-a', delegationDepth: 1 }),
+  }
   writeFileSync(join(root, projectDirName, 'session-a', 'session.v4.jsonl.zstd'), logs['a']!)
   writeFileSync(join(root, projectDirName, 'session-b', 'session.v4.jsonl.zstd'), logs['b']!)
+  writeFileSync(join(root, projectDirName, 'session-child', 'session.v4.jsonl.zstd'), logs['child']!)
 
   const registryPath = join(base, 'dsh', 'storages', 'workspace.json')
   mkdirSync(join(base, 'dsh', 'storages'), { recursive: true })
@@ -253,8 +262,10 @@ test('工具端到端：plan(只读) → migrate(dry-run) → migrate(apply) →
   // ---- plan：只读 ----
   const plan = (await run(m.get('plan_session_migration')!, { from: sb.fromDir, to: sb.toDir })) as PlanToolResult
   assert.equal(plan.ok, true, plan.problems.join('; '))
-  assert.equal(plan.sessions, 2)
-  assert.equal(plan.files, 2)
+  // 两条候选 + 跟着 session-a 走的那条子代理
+  assert.equal(plan.sessions, 3)
+  assert.equal(plan.cascaded, 1)
+  assert.equal(plan.files, 3)
   assert.equal(plan.takesEffect, 'restart-required')
   assert.deepEqual(readRegistry(sb.registryPath), sb.registry, 'plan 不得改注册表')
   assert.deepEqual(readFileSync(join(sb.root, sb.projectDirName, 'session-a', 'session.v4.jsonl.zstd')), sb.logs['a'])
@@ -262,14 +273,16 @@ test('工具端到端：plan(只读) → migrate(dry-run) → migrate(apply) →
   // ---- migrate：默认 dry-run ----
   const dry = (await run(m.get('migrate_sessions')!, { from: sb.fromDir, to: sb.toDir })) as MigrateToolResult
   assert.equal(dry.applied, false)
+  assert.equal(dry.cascaded, 1)
   assert.equal(dry.rewritten, 0)
   assert.deepEqual(readRegistry(sb.registryPath), sb.registry, 'dry-run 不得改注册表')
 
   // ---- migrate：apply ----
   const applied = (await run(m.get('migrate_sessions')!, { from: sb.fromDir, to: sb.toDir, apply: true })) as MigrateToolResult
   assert.equal(applied.applied, true)
-  assert.equal(applied.rewritten, 2)
-  assert.equal(applied.moved, 2)
+  assert.equal(applied.cascaded, 1)
+  assert.equal(applied.rewritten, 3)
+  assert.equal(applied.moved, 3)
   assert.equal(applied.verified, true, applied.problems.join('; '))
   assert.ok(applied.backupDir && existsSync(applied.backupDir))
   assert.match(applied.summary, /重启 DSH/)
@@ -287,7 +300,7 @@ test('工具端到端：plan(只读) → migrate(dry-run) → migrate(apply) →
     problems: string[]
   }
   assert.equal(v.ok, true, v.problems.join('; '))
-  assert.equal(v.checked, 2)
+  assert.equal(v.checked, 3)
   assert.equal(v.projectDir, join(sb.root, projectKey(sb.toDir)))
 
   // ---- rollback ----
@@ -296,8 +309,8 @@ test('工具端到端：plan(只读) → migrate(dry-run) → migrate(apply) →
     restoredFiles: number
     registryRestored: boolean
   }
-  assert.equal(rb.sessions, 2)
-  assert.ok(rb.restoredFiles >= 2)
+  assert.equal(rb.sessions, 3)
+  assert.ok(rb.restoredFiles >= 3)
   assert.equal(rb.registryRestored, true)
   assert.deepEqual(readRegistry(sb.registryPath), sb.registry, '注册表须完全还原')
   assert.deepEqual(readFileSync(join(sb.root, sb.projectDirName, 'session-a', 'session.v4.jsonl.zstd')), sb.logs['a'], '日志须逐字节还原')

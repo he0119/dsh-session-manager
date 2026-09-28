@@ -35,10 +35,15 @@ const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
  * `useState(null)` 持有会话库，而假钩子本来永远停在 null，于是有数据的分支（分组列表、
  * 各种表格）在冒烟里根本走不到。给了它就只替换**第一次** `useState(null)`——后面那些 null
  * 状态（错误提示、导入计划…）必须保持空，否则会渲染出不存在的数据。
+ *
+ * `nulls` 是那条规矩的延伸：要往**更后面**的某个 null 状态里种数据（比如迁移页的预演结果，
+ * 见下面的用例），就按顺序把前几个 null 状态写成 null、要种的那个写成值。顺序同样是调用方与
+ * 组件之间的约定，种错了表现为"期望的元素没渲染出来"（当场红），不会静默过。
  */
-function fakeReact(recorded = [], firstNull = undefined, panel = undefined, arrays = [], strings = []) {
-  let seeded = false
+function fakeReact(recorded = [], firstNull = undefined, panel = undefined, arrays = [], strings = [], nulls = []) {
   let seededPanel = false
+  const nullSeeds = firstNull === undefined ? [] : [firstNull]
+  nullSeeds.push(...nulls)
   // 「种」进空数组状态的那些值按顺序发：分页组件里第一个 useState([]) 是勾选集，第二个是筛选条
   // （见 mount 的 arrays 参数）。顺序是调用方与组件之间的约定，所以种错了会当场断言失败，不会静默过。
   const arraySeeds = [...arrays]
@@ -59,9 +64,8 @@ function fakeReact(recorded = [], firstNull = undefined, panel = undefined, arra
         ...(children.length === 0 ? {} : { children: children.length > 1 ? children : children[0] }),
       }),
     useState: (value) => {
-      if (!seeded && value === null && firstNull !== undefined) {
-        seeded = true
-        return [firstNull, () => {}]
+      if (value === null && nullSeeds.length > 0) {
+        return [nullSeeds.shift(), () => {}]
       }
       // 页内分页的状态：假钩子不会点页签，于是除默认那一页之外的 JSX 在冒烟里一次都跑不到。
       // 只替换**第一个** `useState('manage')`（骨架里那个，默认页就是它），其余字符串状态照旧。
@@ -185,7 +189,7 @@ function fakeDocument(nodes) {
 }
 
 /** 按模块加载器的契约执行产物，返回工厂与其 id。 */
-function loadBundle({ firstNull, panel, arrays, strings } = {}) {
+function loadBundle({ firstNull, panel, arrays, strings, nulls } = {}) {
   let entry = null
   const nodes = []
   const sandbox = {
@@ -196,7 +200,7 @@ function loadBundle({ firstNull, panel, arrays, strings } = {}) {
   vm.runInNewContext(code, sandbox, { filename: 'lib/client.js' })
   assert.ok(entry !== null, '产物必须以 window.__ModuleLoader__.load({ id, factory }) 报名')
   const recorded = []
-  const react = fakeReact(recorded, firstNull, panel, arrays, strings)
+  const react = fakeReact(recorded, firstNull, panel, arrays, strings, nulls)
   const mod = entry.factory((specifier) => {
     if (specifier === 'react') return react
     if (specifier === 'react/jsx-runtime') {
@@ -248,8 +252,8 @@ test('客户端产物：导出面符合客户端插件契约', { skip }, () => {
 })
 
 /** 跑一次 apply，收下所有注册面（后面几个用例共用）。 */
-function mount({ translate, state, panel, arrays, strings } = {}) {
-  const { mod, nodes, recorded } = loadBundle({ firstNull: state, panel, arrays, strings })
+function mount({ translate, state, panel, arrays, strings, nulls } = {}) {
+  const { mod, nodes, recorded } = loadBundle({ firstNull: state, panel, arrays, strings, nulls })
   const registrations = []
   const dictionaries = []
   const effects = []
@@ -886,6 +890,81 @@ test('客户端产物：导出页也接了同一套筛选条，筛空的组整�
   )
   assert.equal(labels.length, 1)
   assert.deepEqual(rowParts(labels[0]).tags, ['tagBlank', 'ungroupedSource'], '这一页也挂属性标签')
+})
+
+test('客户端产物：迁移页把"跟着父会话进来的子代理"单独说明（预演卡片）', { skip }, () => {
+  // 预演卡片是点了「预演」之后才渲染的，冒烟里走不到（假钩子给不出点击），所以把 `outcome` 种进去。
+  // null 状态的顺序是：页面骨架的 state（由 mount 的 `state` 种）/ error，然后迁移页的
+  // picking / manual / **outcome** —— 所以 `nulls` 里先补三个 null，第四个才是预演结果。
+  // 种错位置表现为"预演卡片没渲染出来"，当场红。
+  const state = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    pickerKind: 'browse',
+    sessions: [
+      { id: 's-1', cwd: '/home/u/dev/alpha', createdAt: 3, dir: '/home/u/dev/alpha', bytes: 2048, files: [], workspaceId: 'w1' },
+    ],
+    workspaces: [{ id: 'w1', path: '/home/u/dev/alpha', title: '工作区甲', sessionIds: ['s-1'] }],
+  }
+  const previewOf = (cascaded) => ({
+    ok: true,
+    problems: [],
+    from: '/home/u/dev/alpha',
+    to: '/home/u/dev/beta',
+    sourceProjectDir: 'alpha',
+    targetProjectDir: 'beta',
+    unowned: false,
+    sourceProjectDirs: ['/home/u/.dsh/sessions/alpha'],
+    sessions: [
+      // 点名的父会话 + 跟着走的子代理：`via` 指回点名的那个祖先
+      { id: 's-1', createdAt: 3, registered: true, alreadyAtTarget: false, sourceDir: '/a/s-1', targetDir: '/b/s-1', files: 1, bytes: 100 },
+      { id: 's-9', createdAt: 2, registered: false, alreadyAtTarget: false, sourceDir: '/a/s-9', targetDir: '/b/s-9', files: 1, bytes: 100, via: { id: 's-1' } },
+    ].slice(0, cascaded === 0 ? 1 : 2),
+    cascaded,
+    files: 2,
+    bytes: 200,
+    artifacts: null,
+    registryChange: null,
+    summary: 'plan summary',
+  })
+  const outcomeOf = (cascaded) => ({
+    mode: 'plan',
+    ok: true,
+    preview: previewOf(cascaded),
+    applied: false,
+    rewritten: 0,
+    moved: 0,
+    artifactsMoved: 0,
+    verified: false,
+    problems: [],
+    summary: 'plan summary',
+    takesEffect: 'restart-required',
+  })
+
+  const withFamily = mount({
+    state,
+    panel: 'migrate',
+    strings: ['/home/u/dev/alpha', '/home/u/dev/beta'],
+    nulls: [null, null, null, outcomeOf(1)],
+  })
+  const familyText = strings(withFamily.registrations[0].component(withFamily.registrations[0].registration.inject()))
+  assert.ok(familyText.includes('migrateTitle'), '迁移页本体渲染出来了')
+  assert.ok(
+    familyText.some((item) => String(item) === 'migrateFamily:{"count":1}'),
+    '有一条子代理跟着走时，预演卡片要说明它是跟着父会话进来的',
+  )
+
+  // 没有子代理跟随时这句话不该出现（否则每次迁移都多一行噪音）
+  const plain = mount({
+    state,
+    panel: 'migrate',
+    strings: ['/home/u/dev/alpha', '/home/u/dev/beta'],
+    nulls: [null, null, null, outcomeOf(0)],
+  })
+  const plainText = strings(plain.registrations[0].component(plain.registrations[0].registration.inject()))
+  assert.ok(plainText.some((item) => String(item).startsWith('migrateSummary')), '预演卡片照旧渲染')
+  assert.equal(plainText.some((item) => String(item).startsWith('migrateFamily')), false)
 })
 
 test('客户端产物：迁移页只给搜索框、不给类别芯片（那页的列表本来就是候选）', { skip }, () => {

@@ -195,6 +195,8 @@ export function liveSessionIds(ctx: unknown): ReadonlySet<string> {
 export interface PlanToolResult {
   ok: boolean
   sessions: number
+  /** 其中跟着点名会话一起走的子代理会话条数（见 plan.ts 的 `cascaded`）。 */
+  cascaded: number
   files: number
   targetProjectDir: string
   summary: string
@@ -205,6 +207,8 @@ export interface PlanToolResult {
 /** 迁移类工具的返回值。 */
 export interface MigrateToolResult {
   applied: boolean
+  /** 跟着点名会话一起走的子代理会话条数（见 plan.ts 的 `cascaded`）。 */
+  cascaded: number
   rewritten: number
   moved: number
   artifactsMoved: number
@@ -242,7 +246,8 @@ export function registerTools(ctx: Context, config: PluginConfig = {}): Array<()
           'sessions and log files would move, the target session project directory, the workspace-registry ' +
           'change, and any ' +
           'blocking problem (missing target directory, projectKey collision, occupied target directory, invalid ' +
-          'registry). Writes nothing. Call this before migrate_sessions.',
+          'registry). Subagent sessions always follow their parent: naming a subagent is refused, and naming a ' +
+          'parent takes its whole family along. Writes nothing. Call this before migrate_sessions.',
         parameters: {
           from: { type: 'string', required: true, description: 'Source workspace directory (absolute path).' },
           to: {
@@ -253,7 +258,9 @@ export function registerTools(ctx: Context, config: PluginConfig = {}): Array<()
           sessionIds: {
             type: 'array',
             items: { type: 'string' },
-            description: 'Optional: migrate only these session ids (default: every session in the source project directory).',
+            description:
+              'Optional: migrate only these session ids (default: every session in the source project directory). ' +
+              'Subagent descendants always come along with the session they belong to.',
           },
           includeUnowned: {
             type: 'boolean',
@@ -267,6 +274,7 @@ export function registerTools(ctx: Context, config: PluginConfig = {}): Array<()
             properties: {
               ok: { type: 'boolean', required: true },
               sessions: { type: 'integer', required: true },
+              cascaded: { type: 'integer', required: true },
               files: { type: 'integer', required: true },
               targetProjectDir: { type: 'string', required: true },
               summary: { type: 'string', required: true },
@@ -288,6 +296,7 @@ export function registerTools(ctx: Context, config: PluginConfig = {}): Array<()
           return {
             ok: preview.ok,
             sessions: preview.sessions.length,
+            cascaded: preview.cascaded,
             files: preview.files,
             targetProjectDir: preview.targetProjectDir,
             summary: preview.summary,
@@ -309,7 +318,9 @@ export function registerTools(ctx: Context, config: PluginConfig = {}): Array<()
           'zstd frame; the rest stays byte-identical), move the session directories into the target ' +
           'project directory, and ' +
           're-home the workspace registry. Defaults to dry-run; apply:true performs it after taking a byte-level ' +
-          'backup. Refuses on any blocking problem. Offline registry writes take effect after a DSH restart unless ' +
+          'backup. Refuses on any blocking problem. Subagent sessions always follow their parent (naming one is ' +
+          'refused; naming a parent takes its whole family along; their registry membership does not change). ' +
+          'Offline registry writes take effect after a DSH restart unless ' +
           'the host exposes workspaceRegistry.reassignSessions.',
         parameters: {
           from: { type: 'string', required: true, description: 'Source workspace directory (absolute path).' },
@@ -318,7 +329,11 @@ export function registerTools(ctx: Context, config: PluginConfig = {}): Array<()
             required: true,
             description: 'Target workspace directory (absolute path, must already exist).',
           },
-          sessionIds: { type: 'array', items: { type: 'string' }, description: 'Optional: migrate only these session ids.' },
+          sessionIds: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Optional: migrate only these session ids (subagent descendants always come along).',
+          },
           includeUnowned: {
             type: 'boolean',
             description: 'Optional: also migrate unregistered sessions (default true).',
@@ -336,6 +351,7 @@ export function registerTools(ctx: Context, config: PluginConfig = {}): Array<()
             additionalProperties: false,
             properties: {
               applied: { type: 'boolean', required: true },
+              cascaded: { type: 'integer', required: true },
               rewritten: { type: 'integer', required: true },
               moved: { type: 'integer', required: true },
               artifactsMoved: { type: 'integer', required: true },
@@ -369,6 +385,7 @@ export function registerTools(ctx: Context, config: PluginConfig = {}): Array<()
               : run.summary
           return {
             applied: run.applied,
+            cascaded: run.preview.cascaded,
             rewritten: run.rewritten,
             moved: run.moved,
             artifactsMoved: run.artifactsMoved,
