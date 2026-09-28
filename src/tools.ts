@@ -139,7 +139,7 @@ export interface PlanToolResult {
   ok: boolean
   sessions: number
   files: number
-  targetBucket: string
+  targetProjectDir: string
   summary: string
   takesEffect: EffectMode
   problems: string[]
@@ -182,7 +182,8 @@ export function registerTools(ctx: Context, config: PluginConfig = {}): Array<()
         name: 'plan_session_migration',
         description:
           'Read-only plan for migrating DSH sessions from one workspace directory to another. Reports how many ' +
-          'sessions and log files would move, the target session bucket, the workspace-ledger change, and any ' +
+          'sessions and log files would move, the target session project directory, the workspace-registry ' +
+          'change, and any ' +
           'blocking problem (missing target directory, projectKey collision, occupied target directory, invalid ' +
           'registry). Writes nothing. Call this before migrate_sessions.',
         parameters: {
@@ -195,7 +196,7 @@ export function registerTools(ctx: Context, config: PluginConfig = {}): Array<()
           sessionIds: {
             type: 'array',
             items: { type: 'string' },
-            description: 'Optional: migrate only these session ids (default: every session in the source bucket).',
+            description: 'Optional: migrate only these session ids (default: every session in the source project directory).',
           },
           includeUnowned: {
             type: 'boolean',
@@ -210,7 +211,7 @@ export function registerTools(ctx: Context, config: PluginConfig = {}): Array<()
               ok: { type: 'boolean', required: true },
               sessions: { type: 'integer', required: true },
               files: { type: 'integer', required: true },
-              targetBucket: { type: 'string', required: true },
+              targetProjectDir: { type: 'string', required: true },
               summary: { type: 'string', required: true },
               takesEffect: { type: 'string', required: true },
               problems: { type: 'array', required: true, items: { type: 'string' } },
@@ -231,7 +232,7 @@ export function registerTools(ctx: Context, config: PluginConfig = {}): Array<()
             ok: preview.ok,
             sessions: preview.sessions.length,
             files: preview.files,
-            targetBucket: preview.targetBucket,
+            targetProjectDir: preview.targetProjectDir,
             summary: preview.summary,
             takesEffect: mode(),
             problems: preview.problems,
@@ -248,8 +249,9 @@ export function registerTools(ctx: Context, config: PluginConfig = {}): Array<()
         name: 'migrate_sessions',
         description:
           'Migrate DSH sessions between workspace directories: rewrite each session log header cwd (only the first ' +
-          'zstd frame; the rest stays byte-identical), move the session directories into the target bucket, and ' +
-          're-home the workspace ledger. Defaults to dry-run; apply:true performs it after taking a byte-level ' +
+          'zstd frame; the rest stays byte-identical), move the session directories into the target ' +
+          'project directory, and ' +
+          're-home the workspace registry. Defaults to dry-run; apply:true performs it after taking a byte-level ' +
           'backup. Refuses on any blocking problem. Offline registry writes take effect after a DSH restart unless ' +
           'the host exposes workspaceRegistry.reassignSessions.',
         parameters: {
@@ -374,10 +376,11 @@ export function registerTools(ctx: Context, config: PluginConfig = {}): Array<()
       defineTool({
         name: 'verify_workspace_sessions',
         description:
-          'Read-only check that every session log in a directory\'s bucket agrees with its header cwd — the exact ' +
+          'Read-only check that every session log under a directory\'s project directory agrees with its ' +
+          'header cwd — the exact ' +
           'condition the host enforces when it reports "corrupt session log". Use after a migration or a manual move.',
         parameters: {
-          dir: { type: 'string', required: true, description: 'Workspace directory whose session bucket to check.' },
+          dir: { type: 'string', required: true, description: 'Workspace directory whose project directory to check.' },
         },
         output: {
           schema: {
@@ -386,7 +389,7 @@ export function registerTools(ctx: Context, config: PluginConfig = {}): Array<()
             properties: {
               ok: { type: 'boolean', required: true },
               checked: { type: 'integer', required: true },
-              bucket: { type: 'string', required: true },
+              projectDir: { type: 'string', required: true },
               problems: { type: 'array', required: true, items: { type: 'string' } },
               summary: { type: 'string', required: true },
             },
@@ -396,19 +399,19 @@ export function registerTools(ctx: Context, config: PluginConfig = {}): Array<()
           ],
         },
         async execute(args) {
-          const bucket = join(paths.sessionsRoot, projectKey(args.dir))
-          if (!existsSync(bucket)) throw new Error(`session bucket does not exist: ${bucket}`)
+          const projectDir = join(paths.sessionsRoot, projectKey(args.dir))
+          if (!existsSync(projectDir)) throw new Error(`session project directory does not exist: ${projectDir}`)
           const problems: string[] = []
           let checked = 0
-          for (const dirName of readdirSync(bucket)) {
-            const dir = join(bucket, dirName)
+          for (const dirName of readdirSync(projectDir)) {
+            const dir = join(projectDir, dirName)
             if (!statSync(dir).isDirectory()) continue
             for (const name of readdirSync(dir)) {
               if (!name.endsWith('.jsonl.zstd')) continue
               const header = readHeaderQuick(readFileSync(join(dir, name)), decodeAll).header
               if (header.cwd !== args.dir) problems.push(`${dirName}/${name}: header cwd ${header.cwd} != ${args.dir}`)
               if (header.cwd !== undefined && projectKey(header.cwd) !== projectKey(args.dir)) {
-                problems.push(`${dirName}/${name}: bucket does not match header cwd (host would report corrupt session log)`)
+                problems.push(`${dirName}/${name}: project directory does not match header cwd (host would report corrupt session log)`)
               }
               checked++
             }
@@ -416,9 +419,9 @@ export function registerTools(ctx: Context, config: PluginConfig = {}): Array<()
           return {
             ok: problems.length === 0,
             checked,
-            bucket,
+            projectDir,
             problems,
-            summary: `${bucket}\n检查 ${checked} 个日志文件：${problems.length ? `发现 ${problems.length} 个问题` : '全部通过'}`,
+            summary: `${projectDir}\n检查 ${checked} 个日志文件：${problems.length ? `发现 ${problems.length} 个问题` : '全部通过'}`,
           }
         },
       }),

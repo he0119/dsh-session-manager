@@ -60,7 +60,7 @@ interface Sandbox {
   registry: WorkspaceRegistryState
   fromDir: string
   toDir: string
-  bucket: string
+  projectDirName: string
   logs: Record<string, Buffer>
   backupRoot: string
 }
@@ -73,14 +73,14 @@ function makeSandbox(name: string): Sandbox {
   mkdirSync(fromDir, { recursive: true })
   mkdirSync(toDir, { recursive: true })
   const root = join(base, 'dsh', 'sessions')
-  const bucket = projectKey(fromDir)
-  mkdirSync(join(root, bucket, 'session-a'), { recursive: true })
-  mkdirSync(join(root, bucket, 'session-b'), { recursive: true })
+  const projectDirName = projectKey(fromDir)
+  mkdirSync(join(root, projectDirName, 'session-a'), { recursive: true })
+  mkdirSync(join(root, projectDirName, 'session-b'), { recursive: true })
   mkdirSync(join(root, projectKey(toDir)), { recursive: true })
 
   const logs: Record<string, Buffer> = { a: makeLog('session-a', fromDir, 8), b: makeLog('session-b', fromDir, 4) }
-  writeFileSync(join(root, bucket, 'session-a', 'session.v4.jsonl.zstd'), logs['a']!)
-  writeFileSync(join(root, bucket, 'session-b', 'session.v4.jsonl.zstd'), logs['b']!)
+  writeFileSync(join(root, projectDirName, 'session-a', 'session.v4.jsonl.zstd'), logs['a']!)
+  writeFileSync(join(root, projectDirName, 'session-b', 'session.v4.jsonl.zstd'), logs['b']!)
 
   const registryPath = join(base, 'dsh', 'storages', 'workspace.json')
   mkdirSync(join(base, 'dsh', 'storages'), { recursive: true })
@@ -95,7 +95,7 @@ function makeSandbox(name: string): Sandbox {
     },
   }
   writeFileSync(registryPath, JSON.stringify(registry, null, 2) + '\n')
-  return { base, root, registryPath, registry, fromDir, toDir, bucket, logs, backupRoot: join(base, 'backups') }
+  return { base, root, registryPath, registry, fromDir, toDir, projectDirName, logs, backupRoot: join(base, 'backups') }
 }
 
 /**
@@ -255,7 +255,7 @@ test('工具端到端：plan(只读) → migrate(dry-run) → migrate(apply) →
   assert.equal(plan.files, 2)
   assert.equal(plan.takesEffect, 'restart-required')
   assert.deepEqual(readRegistry(sb.registryPath), sb.registry, 'plan 不得改注册表')
-  assert.deepEqual(readFileSync(join(sb.root, sb.bucket, 'session-a', 'session.v4.jsonl.zstd')), sb.logs['a'])
+  assert.deepEqual(readFileSync(join(sb.root, sb.projectDirName, 'session-a', 'session.v4.jsonl.zstd')), sb.logs['a'])
 
   // ---- migrate：默认 dry-run ----
   const dry = (await run(m.get('migrate_sessions')!, { from: sb.fromDir, to: sb.toDir })) as MigrateToolResult
@@ -272,7 +272,7 @@ test('工具端到端：plan(只读) → migrate(dry-run) → migrate(apply) →
   assert.ok(applied.backupDir && existsSync(applied.backupDir))
   assert.match(applied.summary, /重启 DSH/)
 
-  // 注册表：账本转移（按"新→旧"，session-b 的 createdAt 更大）
+  // 注册表：注册表转移（按"新→旧"，session-b 的 createdAt 更大）
   const reg = readRegistry(sb.registryPath)
   assert.deepEqual(reg.tables.workspaces['ws-temp']?.sessionIds, ['session-b', 'session-a'])
   assert.equal(reg.tables.workspaces['ws-dl'], undefined)
@@ -281,12 +281,12 @@ test('工具端到端：plan(只读) → migrate(dry-run) → migrate(apply) →
   const v = (await run(m.get('verify_workspace_sessions')!, { dir: sb.toDir })) as {
     ok: boolean
     checked: number
-    bucket: string
+    projectDir: string
     problems: string[]
   }
   assert.equal(v.ok, true, v.problems.join('; '))
   assert.equal(v.checked, 2)
-  assert.equal(v.bucket, join(sb.root, projectKey(sb.toDir)))
+  assert.equal(v.projectDir, join(sb.root, projectKey(sb.toDir)))
 
   // ---- rollback ----
   const rb = (await run(m.get('rollback_session_migration')!, { backupDir: applied.backupDir })) as {
@@ -298,7 +298,7 @@ test('工具端到端：plan(只读) → migrate(dry-run) → migrate(apply) →
   assert.ok(rb.restoredFiles >= 2)
   assert.equal(rb.registryRestored, true)
   assert.deepEqual(readRegistry(sb.registryPath), sb.registry, '注册表须完全还原')
-  assert.deepEqual(readFileSync(join(sb.root, sb.bucket, 'session-a', 'session.v4.jsonl.zstd')), sb.logs['a'], '日志须逐字节还原')
+  assert.deepEqual(readFileSync(join(sb.root, sb.projectDirName, 'session-a', 'session.v4.jsonl.zstd')), sb.logs['a'], '日志须逐字节还原')
 
   rmSync(sb.base, { recursive: true, force: true })
 })

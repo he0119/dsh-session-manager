@@ -6,7 +6,7 @@
  * ——这里只做组装。
  *
  * 注册进 `settings.section`：设置左侧导航里的一页，与「通用 / 模型 / 插件 / 账户 / Agent 预设」
- * 并列。没有选另外两个相似的槽位，理由是它们各自有一个真问题：
+ * 并列。没有选另外两个相似的 Slot，理由是它们各自有一个真问题：
  *   - `plugins.detail.section`（插件详情页里的一段）归属感最贴，但要按 subject
  *     （`item` / `row` / `bundle`）自过滤，而判断依据是**包在插件管理器里的表示形态**；
  *     猜错不报错，只是永远不渲染——静默空白。它还会在包内每一行的页面上各渲染一次，
@@ -16,7 +16,7 @@
  *
  * 三个刻意的取舍：
  *   - 用 `ctx.slots.inject(...)` 而不是直接 `register`：`settings.section` 由设置外壳在运行时
- *     声明，那个声明完全可能晚于本插件 `apply`，直接注册会撞上「槽位尚未声明」；
+ *     声明，那个声明完全可能晚于本插件 `apply`，直接注册会撞上「Slot 尚未声明」；
  *   - `label` 用 thunk：外壳投影导航行时走 `resolveSlotLabel`（是函数就调用），并且订阅了 locale
  *     快照，切语言或后到的字典都会让那一行重新投影，不必自己重新注册；
  *   - 运行时只 `require` 平台基线模块（`react` / `react/jsx-runtime` /
@@ -35,7 +35,7 @@
  * 一个**改不掉的已知限制**：设置左侧导航那一行的图标由外壳画，插件指定不了。外壳里那张表是
  * 硬编码的 id → 图标映射（`dsh-client-ui-settings-general` 的 `navIcon(id)`：`account` / `models` /
  * `agent-presets` / `plugins` / `archived-sessions` 五个 id，其余一律 `IconSettingsOutlineMedium`），
- * 而槽位注册的入参里根本没有 `icon` 这一项（`settings.section` 的注册选项只有 id / order / label）。
+ * 而 Slot 注册的入参里根本没有 `icon` 这一项（`settings.section` 的注册选项只有 id / order / label）。
  * 于是本页与「通用」共用同一个齿轮图标——不是本插件写错了图标，是外壳给所有人兜底的那一个。
  * 不改 id 去蹭别人的图标：唯一空着的是 `archived-sessions`，它的语义是"归档会话"，蹭它既可能与
  * 内置页撞 id，也是拿图标撒谎。要换图标只能等上游给注册选项加 `icon`（本页的 id 已经稳定，
@@ -52,10 +52,10 @@ import { installStyles } from './styles.ts'
 /** 插件名（客户端模块系统里的 factory id，等于包名）。 */
 export const name = '@he0119/dsh-session-manager'
 
-/** 本页注册的槽位：设置左侧导航里的一页。 */
+/** 本页注册的 Slot：设置左侧导航里的一页。 */
 export const SECTION_SLOT = 'settings.section'
 /**
- * 本页的槽位 id（也是设置外壳 `only` 过滤时用的那个键）。
+ * 本页的 Slot id（也是设置外壳 `only` 过滤时用的那个键）。
  *
  * 叫 `session-manager` 而不是 `session-transfer`：这一页现在同时管"搬会话"和"带走/带回来"，
  * 名字要跟页面一样能覆盖两件事。
@@ -64,7 +64,7 @@ export const SECTION_ID = 'session-manager'
 /** 排在官方那几页之后（账户 -10 / 通用 0 / 模型 10 / 插件 15 / Agent 预设 20），不插队。 */
 export const SECTION_ORDER = 30
 
-/** 槽位注册的入参形状（只取本模块用得到的字段）。 */
+/** Slot 注册的入参形状（只取本模块用得到的字段）。 */
 interface SlotRegistration {
   name: string
   id: string
@@ -155,5 +155,5 @@ export function apply(ctx: ClientContext): void {
   )
 }
 
-/** 依赖的客户端服务：槽位注册面与字典服务。 */
+/** 依赖的客户端服务：Slot 注册面与字典服务。 */
 export const inject = ['slots', 'locale']

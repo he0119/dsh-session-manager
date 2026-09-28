@@ -48,7 +48,7 @@ DSM_FIXTURE=/path/to/backup pnpm test
 DSM_SMOKE_WORKSPACE=/path/to/a/real/workspace pnpm test
 ```
 
-它会在这个目录上跑一次只读 `plan`，并断言计划自己算出的 `targetBucket` 目录**没有被创建**
+它会在这个目录上跑一次只读 `plan`，并断言计划自己算出的 `targetProjectDir` 目录**没有被创建**
 ——把「只读」从口头承诺变成可断言的事实。目标项目目录名取自计划返回值，不硬编码。
 
 ### 本机安装（Windows 沙箱下的实测结论）

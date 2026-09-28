@@ -83,7 +83,7 @@ function makeSandbox(name: string, ids: readonly string[] = ['session-migrate-1'
   }
 }
 
-test('预演：把源桶的会话与注册表变更算出来，一个字节都不写', () => {
+test('预演：把源项目目录的会话与注册表变更算出来，一个字节都不写', () => {
   const sb = makeSandbox('migrate-preview')
   const before = readFileSync(join(sb.deps.registryPath), 'utf8')
 
@@ -96,11 +96,11 @@ test('预演：把源桶的会话与注册表变更算出来，一个字节都�
   assert.equal(preview.registryChange?.targetPath, TO)
   assert.match(preview.summary, /迁移/)
 
-  // 只读的证据：注册表没变、会话还在源桶、目标桶没被建出来
+  // 只读的证据：注册表没变、会话还在源项目目录、目标项目目录没被建出来
   assert.equal(readFileSync(sb.deps.registryPath, 'utf8'), before)
   const dirName = basename(sessionDir(sb.deps.sessionsRoot, FROM, sb.sessionId))
-  assert.equal(existsSync(sessionDir(sb.deps.sessionsRoot, FROM, sb.sessionId)), true, '会话应当还在源桶')
-  assert.equal(existsSync(join(sb.deps.sessionsRoot, preview.targetBucket, dirName)), false, '预演不该建目标会话目录')
+  assert.equal(existsSync(sessionDir(sb.deps.sessionsRoot, FROM, sb.sessionId)), true, '会话应当还在源项目目录')
+  assert.equal(existsSync(join(sb.deps.sessionsRoot, preview.targetProjectDir, dirName)), false, '预演不该建目标会话目录')
   rmSync(sb.base, { recursive: true, force: true })
 })
 
@@ -132,10 +132,10 @@ test('执行：改写 header.cwd、搬目录、登记目标工作区，并留下
   assert.equal(manifest.sessions.length, 1)
   assert.equal(manifest.sessions[0]?.sourceDir, sessionDir(sb.deps.sessionsRoot, FROM, sb.sessionId))
 
-  // 目标分桶里能看到这条会话，且 header.cwd 已改写
+  // 目标项目目录里能看到这条会话，且 header.cwd 已改写
   const dir = sessionDir(sb.deps.sessionsRoot, TO, sb.sessionId)
-  assert.equal(existsSync(dir), true, '会话应当已在目标桶里')
-  assert.equal(existsSync(sessionDir(sb.deps.sessionsRoot, FROM, sb.sessionId)), false, '源桶里那份应当已经搬走')
+  assert.equal(existsSync(dir), true, '会话应当已在目标项目目录里')
+  assert.equal(existsSync(sessionDir(sb.deps.sessionsRoot, FROM, sb.sessionId)), false, '源项目目录里那份应当已经搬走')
   const header = JSON.parse(decodeAll(readFileSync(join(dir, 'session.v4.jsonl.zstd'))).split('\n')[0]!) as { cwd: string }
   assert.equal(header.cwd, TO)
 
@@ -149,7 +149,7 @@ test('执行：改写 header.cwd、搬目录、登记目标工作区，并留下
   rmSync(sb.base, { recursive: true, force: true })
 })
 
-test('子集：只搬点名的会话，源工作区没被搬空就留在账本里', () => {
+test('子集：只搬点名的会话，源工作区没被搬空就留在注册表里', () => {
   const sb = makeSandbox('migrate-subset', ['session-keep', 'session-go'])
   const run = runMigration(sb.deps, { from: FROM, to: TO, sessionIds: ['session-go'] }, { apply: true })
 
@@ -163,16 +163,16 @@ test('子集：只搬点名的会话，源工作区没被搬空就留在账本�
   assert.equal(existsSync(sessionDir(sb.deps.sessionsRoot, FROM, 'session-go')), false)
   assert.equal(existsSync(sessionDir(sb.deps.sessionsRoot, TO, 'session-go')), true)
 
-  // 账本：只摘走 session-go；源工作区还剩一条，所以必须留着
+  // 注册表：只摘走 session-go；源工作区还剩一条，所以必须留着
   const change = run.preview.registryChange
-  assert.equal(change?.removedSources.length, 0, '源工作区没被搬空，不该从账本上删掉')
+  assert.equal(change?.removedSources.length, 0, '源工作区没被搬空，不该从注册表上删掉')
   assert.deepEqual(change?.movedFrom.map((entry) => entry.sessionIds), [['session-go']])
   assert.deepEqual(readRegistry(sb.deps.registryPath).tables.workspaces['ws-from']?.sessionIds, ['session-keep'])
 
   rmSync(sb.base, { recursive: true, force: true })
 })
 
-test('子集：点名的会话不在源桶里 → 预演就报问题，而不是静默少搬', () => {
+test('子集：点名的会话不在源项目目录里 → 预演就报问题，而不是静默少搬', () => {
   const sb = makeSandbox('migrate-subset-unknown', ['session-a'])
   const preview = previewMigration(sb.deps, { from: FROM, to: TO, sessionIds: ['session-a', 'session-ghost'] })
 
@@ -194,18 +194,18 @@ test('回滚：dryRun 只回动作清单，真跑则目录与字节都回到原�
   assert.ok(plan.actions.length > 0, '应当列出将要做的动作')
   assert.equal(existsSync(afterMigrate), true, 'dry-run 不该动目录')
 
-  // 真回滚：目录回源桶、header.cwd 复原、注册表还原
+  // 真回滚：目录回源项目目录、header.cwd 复原、注册表还原
   const done = rollbackMigration(sb.deps, { backupDir })
   assert.equal(done.dryRun, false)
   assert.equal(done.restoredFiles, 1)
   assert.equal(done.registryRestored, true)
   assert.equal(existsSync(afterMigrate), false, '目标位必须已经搬走')
   const back = sessionDir(sb.deps.sessionsRoot, FROM, sb.sessionId)
-  assert.equal(existsSync(back), true, '会话目录必须搬回源桶')
+  assert.equal(existsSync(back), true, '会话目录必须搬回源项目目录')
   const header = JSON.parse(decodeAll(readFileSync(join(back, 'session.v4.jsonl.zstd'))).split('\n')[0]!) as { cwd: string }
   assert.equal(header.cwd, FROM, 'header.cwd 必须逐字节还原成源路径')
-  // 对称性：apply 会删掉空源桶，回滚也该删掉空目标桶（否则会话根下留一个空目录）
-  assert.equal(existsSync(dirname(afterMigrate)), false, '空掉的目标桶应当被删掉')
+  // 对称性：apply 会删掉空源项目目录，回滚也该删掉空目标项目目录（否则会话根下留一个空目录）
+  assert.equal(existsSync(dirname(afterMigrate)), false, '空掉的目标项目目录应当被删掉')
 
   rmSync(sb.base, { recursive: true, force: true })
 })

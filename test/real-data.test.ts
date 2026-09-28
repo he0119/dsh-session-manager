@@ -15,8 +15,8 @@ import type { DecodeAll } from '../src/types.ts'
 const decodeAll: DecodeAll = (buf: Uint8Array): string => Buffer.from(decompress(buf)).toString('utf8')
 
 const FIXTURE = process.env['DSM_FIXTURE']
-const BUCKET = FIXTURE ? join(FIXTURE, 'sessions', '--C-Users-hmy01-Downloads--') : null
-const enabled = Boolean(BUCKET && existsSync(BUCKET))
+const PROJECT_DIR = FIXTURE ? join(FIXTURE, 'sessions', '--C-Users-hmy01-Downloads--') : null
+const enabled = Boolean(PROJECT_DIR && existsSync(PROJECT_DIR))
 const FROM = 'C:\\Users\\hmy01\\Downloads'
 const TO = 'C:\\Users\\hmy01\\Works\\Temp\\dsh-temp'
 
@@ -26,8 +26,8 @@ test(
   () => {
     let files = 0
     let events = 0
-    for (const dir of readdirSync(BUCKET!)) {
-      const sd = join(BUCKET!, dir)
+    for (const dir of readdirSync(PROJECT_DIR!)) {
+      const sd = join(PROJECT_DIR!, dir)
       for (const name of readdirSync(sd)) {
         if (!name.endsWith('.jsonl.zstd')) continue
         const buf = readFileSync(join(sd, name))

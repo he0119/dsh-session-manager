@@ -33,7 +33,7 @@ function makeRoot(name: string): string {
   return join(base, 'sessions')
 }
 
-/** 造一条会话目录（分桶 + 会话目录 + 代次文件），返回可用作导出源的描述。 */
+/** 造一条会话目录（项目目录 + 会话目录 + 代次文件），返回可用作导出源的描述。 */
 function writeSession(
   root: string,
   options: { id: string; cwd?: string; version?: number; compression?: string | null; events?: number },
@@ -185,7 +185,7 @@ test('导入：库里已有同 id 的会话时只跳过、绝不覆盖，且预�
   assert.deepEqual(outcome.written, [])
 })
 
-test('导入：没有 cwd 的会话落 _no-cwd 分桶、不改写、也不动注册表', () => {
+test('导入：没有 cwd 的会话落 _no-cwd 项目目录、不改写、也不动注册表', () => {
   const root = makeRoot('transfer-nocwd')
   const source = writeSession(root, { id: 'session-blank', cwd: undefined, events: 1 })
   const bundle = readBundle(buildBundle([source]))

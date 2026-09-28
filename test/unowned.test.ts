@@ -1,13 +1,13 @@
-// 「未分组」来源：源不是一个目录，而是"账本没认领、且有 cwd"的那批会话（可以横跨多个分桶）。
+// 「未分组」来源：源不是一个目录，而是"注册表没认领、且有 cwd"的那批会话（可以横跨多个项目目录）。
 //
 // 这一支与单目录来源的差别全在**源的定义**上：计划层要对着一整库去圈候选、每条会话的源目录各不
-// 相同、执行阶段要按每条会话自己的桶清理空桶。所以这里用一个"三个目录 + 一个无 cwd 的老会话"
+// 相同、执行阶段要按每条会话自己的项目目录清理空目录。所以这里用一个"三个目录 + 一个无 cwd 的老会话"
 // 的沙箱把这些点逐个钉住，并跑到 apply → verify → rollback（回滚只认清单，跨目录对它是透明的）。
 //
 // cwd 用沙箱里的**真实目录**：计划层会用 existsSync(to) 校验目标目录存在。
 import assert from 'node:assert/strict'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import test from 'node:test'
 
 import { decompress } from 'fzstd'
@@ -60,11 +60,11 @@ interface Sandbox {
 
 /**
  * 沙箱布局：
- *   dirA —— 已登记工作区 ws-a（只认领 session-owned），桶里还混着一条没人认领的 session-orphan-a；
+ *   dirA —— 已登记工作区 ws-a（只认领 session-owned），项目目录里还混着一条没人认领的 session-orphan-a；
  *   dirB / dirC —— 没有工作区记录，各住着一条没人认领的会话；
- *   `_no-cwd` 桶 —— 一条没有 cwd 的未登记会话（不该进「未分组」来源：header 里没有 cwd 可改写）；
- *   dirTarget —— 目标目录，**不在**账本里（于是这次迁移要新建一条工作区记录），
- *               桶里已经住着一条没人认领的 session-orphan-at（cwd 就是它）。
+ *   `_no-cwd` 项目目录 —— 一条没有 cwd 的未登记会话（不该进「未分组」来源：header 里没有 cwd 可改写）；
+ *   dirTarget —— 目标目录，**不在**注册表里（于是这次迁移要新建一条工作区记录），
+ *               项目目录里已经住着一条没人认领的 session-orphan-at（cwd 就是它）。
  */
 function makeSandbox(name: string): Sandbox {
   const base = join(import.meta.dirname, '.sandbox', name)
@@ -83,12 +83,12 @@ function makeSandbox(name: string): Sandbox {
     'session-orphan-b': makeLog('session-orphan-b', dirB, 4),
     'session-orphan-c': makeLog('session-orphan-c', dirC, 3),
     // 这条的 cwd 已经**是**目标目录：没人认领，但它本来就住在那儿（真实库里的常态）。
-    // 收编它只需要补一条账本记录——不搬目录、不改 cwd，回滚时也不能去搬自己的目录。
+    // 收编它只需要补一条注册表记录——不搬目录、不改 cwd，回滚时也不能去搬自己的目录。
     'session-orphan-at': makeLog('session-orphan-at', dirTarget, 5),
     'session-nocwd': makeLog('session-nocwd', undefined, 2),
   }
-  const place = (bucket: string, id: string): void => {
-    const dir = join(root, bucket, dirNameOf(id))
+  const place = (projectDirName: string, id: string): void => {
+    const dir = join(root, projectDirName, dirNameOf(id))
     mkdirSync(dir, { recursive: true })
     writeFileSync(join(dir, 'session.v4.jsonl.zstd'), logs[id]!)
   }
@@ -130,8 +130,8 @@ function makeSandbox(name: string): Sandbox {
     dirTarget,
     logs,
     sessionDir: (id: string) => {
-      for (const bucket of [projectKey(dirA), projectKey(dirB), projectKey(dirC), '_no-cwd', projectKey(dirTarget)]) {
-        const dir = join(root, bucket, dirNameOf(id))
+      for (const projectDirName of [projectKey(dirA), projectKey(dirB), projectKey(dirC), '_no-cwd', projectKey(dirTarget)]) {
+        const dir = join(root, projectDirName, dirNameOf(id))
         if (existsSync(dir)) return dir
       }
       throw new Error(`session ${id} not found in the sandbox`)
@@ -148,7 +148,7 @@ const opts = (sb: Sandbox, extra: Record<string, unknown> = {}) => ({
   ...extra,
 })
 
-test('未分组来源：候选 = 账本没认领且有 cwd 的那些，横跨多个分桶', () => {
+test('未分组来源：候选 = 注册表没认领且有 cwd 的那些，横跨多个项目目录', () => {
   const sb = makeSandbox('unowned-plan')
   const plan = buildRelocationPlan(opts(sb))
 
@@ -156,7 +156,7 @@ test('未分组来源：候选 = 账本没认领且有 cwd 的那些，横跨多
   assert.equal(plan.unowned, true)
   // 源不是一个目录：这两个字段必须是空串，而不是随便挑一个目录当"代表"
   assert.equal(plan.from, '')
-  assert.equal(plan.sourceBucket, '')
+  assert.equal(plan.sourceProjectDir, '')
   assert.deepEqual(
     plan.sessions.map((s: SessionMove) => s.id).sort(),
     ['session-orphan-a', 'session-orphan-at', 'session-orphan-b', 'session-orphan-c'],
@@ -168,7 +168,7 @@ test('未分组来源：候选 = 账本没认领且有 cwd 的那些，横跨多
   assert.equal(fromById.get('session-orphan-b'), sb.dirB)
   assert.equal(fromById.get('session-orphan-c'), sb.dirC)
   assert.equal(fromById.get('session-orphan-at'), sb.dirTarget)
-  // cwd already at the target: no move, no rewrite — the one that only needs a ledger entry
+  // cwd already at the target: no move, no rewrite — the one that only needs a registry entry
   const atTarget = plan.sessions.find((s: SessionMove) => s.id === 'session-orphan-at')!
   assert.equal(atTarget.alreadyAtTarget, true)
   assert.equal(atTarget.sourceDir, atTarget.targetDir, '目标目录就是它自己，这不是"目标被占用"')
@@ -186,7 +186,7 @@ test('未分组来源：候选 = 账本没认领且有 cwd 的那些，横跨多
   assert.deepEqual(plan.nextRegistry?.tables.workspaces['ws-a']?.sessionIds, ['session-owned'])
 })
 
-test('未分组来源：预演把"横跨几个源桶"报出来，且一个字节都不写', () => {
+test('未分组来源：预演把"横跨几个源项目目录"报出来，且一个字节都不写', () => {
   const sb = makeSandbox('unowned-preview')
   const before = readFileSync(join(sb.sessionDir('session-orphan-b'), 'session.v4.jsonl.zstd'))
   const preview = previewMigration(
@@ -196,10 +196,10 @@ test('未分组来源：预演把"横跨几个源桶"报出来，且一个字节
 
   assert.equal(preview.ok, true, preview.problems.join('; '))
   assert.equal(preview.unowned, true)
-  // 源不是一个目录：from / sourceBucket 是空串，界面据此换一句"横跨 N 个源分桶"的说明
+  // 源不是一个目录：from / sourceProjectDir 是空串，界面据此换一句"横跨 N 个源项目目录"的说明
   assert.equal(preview.from, '')
-  assert.equal(preview.sourceBucket, '')
-  assert.deepEqual(preview.sourceBuckets, [
+  assert.equal(preview.sourceProjectDir, '')
+  assert.deepEqual(preview.sourceProjectDirs, [
     join(sb.root, projectKey(sb.dirA)),
     join(sb.root, projectKey(sb.dirB)),
     join(sb.root, projectKey(sb.dirC)),
@@ -212,7 +212,7 @@ test('未分组来源：预演把"横跨几个源桶"报出来，且一个字节
   assert.deepEqual(readFileSync(join(sb.sessionDir('session-orphan-b'), 'session.v4.jsonl.zstd')), before)
 })
 
-test('未分组来源：apply 把会话收进目标工作区，并只清掉自己搬空的分桶', () => {
+test('未分组来源：apply 把会话收进目标工作区，并只清掉自己搬空的项目目录', () => {
   const sb = makeSandbox('unowned-apply')
   const plan = buildRelocationPlan(opts(sb, { title: '收编' }))
   assert.equal(plan.ok, true, plan.problems.join('; '))
@@ -229,10 +229,10 @@ test('未分组来源：apply 把会话收进目标工作区，并只清掉自�
   assert.equal(result.moved, 3)
   assert.equal(result.rewritten, 3)
 
-  // 落位：三条会话都进了目标分桶，header 里的 cwd 都是目标目录
+  // 落位：三条会话都进了目标项目目录，header 里的 cwd 都是目标目录
   for (const id of ['session-orphan-a', 'session-orphan-b', 'session-orphan-c', 'session-orphan-at']) {
     const dir = join(sb.root, projectKey(sb.dirTarget), dirNameOf(id))
-    assert.equal(existsSync(dir), true, `${id} 应该落在目标分桶里`)
+    assert.equal(existsSync(dir), true, `${id} 应该落在目标项目目录里`)
     const header = JSON.parse(decodeAll(readFileSync(join(dir, 'session.v4.jsonl.zstd'))).split('\n')[0]!) as {
       cwd?: string
       id?: string
@@ -249,10 +249,10 @@ test('未分组来源：apply 把会话收进目标工作区，并只清掉自�
     sb.logs['session-orphan-at'],
   )
 
-  // 空桶：dirB / dirC 的各只剩空目录，被删；dirA 还留着在册的那条会话，必须保住
-  assert.equal(existsSync(join(sb.root, projectKey(sb.dirB))), false, '搬空的分桶要删掉')
-  assert.equal(existsSync(join(sb.root, projectKey(sb.dirC))), false, '搬空的分桶要删掉')
-  assert.equal(existsSync(join(sb.root, projectKey(sb.dirA))), true, '还有别的会话的分桶不能删')
+  // 空项目目录：dirB / dirC 的各只剩空目录，被删；dirA 还留着在册的那条会话，必须保住
+  assert.equal(existsSync(join(sb.root, projectKey(sb.dirB))), false, '搬空的项目目录要删掉')
+  assert.equal(existsSync(join(sb.root, projectKey(sb.dirC))), false, '搬空的项目目录要删掉')
+  assert.equal(existsSync(join(sb.root, projectKey(sb.dirA))), true, '还有别的会话的项目目录不能删')
   assert.equal(existsSync(sb.sessionDir('session-owned')), true)
 
   // 注册表：新建的目标记录收下三条，ws-a 原样
@@ -274,12 +274,12 @@ test('未分组来源：apply 把会话收进目标工作区，并只清掉自�
   assert.equal(manifest.to, sb.dirTarget)
   assert.equal(manifest.sessions.length, 4)
   assert.deepEqual(
-    manifest.sessions.map((s) => s.sourceBucket).sort(),
+    manifest.sessions.map((s) => basename(dirname(s.sourceDir))).sort(),
     [projectKey(sb.dirA), projectKey(sb.dirB), projectKey(sb.dirC), projectKey(sb.dirTarget)].sort(),
   )
 })
 
-test('未分组来源：回滚把三条会话按清单搬回原桶、字节还原、注册表还原', () => {
+test('未分组来源：回滚把三条会话按清单搬回原项目目录、字节还原、注册表还原', () => {
   const sb = makeSandbox('unowned-rollback')
   const plan = buildRelocationPlan(opts(sb, { title: '收编' }))
   assert.equal(plan.ok, true, plan.problems.join('; '))
@@ -309,7 +309,7 @@ test('未分组来源：回滚把三条会话按清单搬回原桶、字节还�
   // 回滚后再看一次：在册的那条、无 cwd 的那条始终没被动过
   assert.deepEqual(readFileSync(join(sb.sessionDir('session-owned'), 'session.v4.jsonl.zstd')), sb.logs['session-owned'])
   assert.deepEqual(readFileSync(join(sb.sessionDir('session-nocwd'), 'session.v4.jsonl.zstd')), sb.logs['session-nocwd'])
-  // 目标桶里还有那条原地不动的会话，所以**不能**被删（"只删确认为空的"）
+  // 目标项目目录里还有那条原地不动的会话，所以**不能**被删（"只删确认为空的"）
   assert.equal(existsSync(join(sb.root, projectKey(sb.dirTarget))), true)
   const registry = readRegistry(sb.registryPath)
   assert.deepEqual(Object.keys(registry.tables.workspaces), ['ws-a'])
@@ -326,7 +326,7 @@ test('未分组来源：只搬点名的几条（子集走同一个来源）', ()
 
   const result = applyPlan(plan, { registryPath: sb.registryPath, decodeAll, backupRoot: sb.backupRoot })
   assert.equal(result.moved, 1)
-  // 没被点名的那两条留在原处；只被搬空的那个桶（dirB）被删
+  // 没被点名的那两条留在原处；只被搬空的那个项目目录（dirB）被删
   assert.equal(existsSync(sb.sessionDir('session-orphan-a')), true)
   assert.equal(existsSync(sb.sessionDir('session-orphan-c')), true)
   assert.equal(existsSync(join(sb.root, projectKey(sb.dirB))), false)
@@ -363,7 +363,7 @@ test('未分组来源：参数说不清、点名点错、要搬产物时都如�
 
 test('未分组来源：库里一条这样的会话都没有时，计划结果是"没得搬"而不是崩溃', () => {
   const sb = makeSandbox('unowned-empty')
-  // 把三条候选从账本视角变成"已在册"：全部登记进 ws-a
+  // 把三条候选从注册表视角变成"已在册"：全部登记进 ws-a
   const registry = structuredClone(sb.registry) as WorkspaceRegistryState
   registry.tables.workspaces['ws-a']!.sessionIds = [
     'session-owned',

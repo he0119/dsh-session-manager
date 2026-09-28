@@ -89,7 +89,7 @@ const shipped = new Set(manifest.files.map((file) => file.path))
 //    `files: ["lib", …]` 允许 lib 少几个文件，而少哪个都会在加载时才炸。
 const REQUIRED = [
   'lib/index.js', // 插件入口（dsh.bundle.patch 的 insert 指向的模块）
-  'lib/client.js', // Web Client 半边的经典脚本（dsh.client 指向它）
+  'lib/client.js', // 浏览器半侧的经典脚本（dsh.client 指向它）
   'lib/types/index.d.ts', // exports["."].types，工具层的类型来源
   'cordis.patch.yml', // profile 里的 bundle patch
   'package.json',

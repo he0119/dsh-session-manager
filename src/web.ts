@@ -14,7 +14,7 @@ import { readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 
-import { scanAll, scanBucket, type DiscoveredSession, type ScanOptions } from './discovery.ts'
+import { scanAll, scanProjectDir, type DiscoveredSession, type ScanOptions } from './discovery.ts'
 import {
   assertBackupDir,
   listBackups,
@@ -159,7 +159,7 @@ function loadRegistry(
   }
 }
 
-/** 扫整个会话库（分桶 → 会话）。实现在 discovery.ts，迁移页的「未分组」来源用的是同一个。 */
+/** 扫整个会话库（项目目录 → 会话）。实现在 discovery.ts，迁移页的「未分组」来源用的是同一个。 */
 export const scanLibrary = scanAll
 
 /**
@@ -387,7 +387,7 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
       return
     }
     const fields = (body ?? {}) as Record<string, unknown>
-    // 源有两种：一个目录（from），或者"账本没认领的那些会话"（unowned，即外壳侧边栏的「未分组」，
+    // 源有两种：一个目录（from），或者"注册表没认领的那些会话"（unowned，即外壳侧边栏的「未分组」，
     // 可以横跨多个目录）。两者互斥时由计划层报 problem——那是"参数说不清"，比这里猜一个更诚实。
     const unowned = fields['unowned'] === true
     const from = typeof fields['from'] === 'string' ? fields['from'].trim() : ''
@@ -439,7 +439,7 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
     }
 
     if (!run.preview.ok) {
-      // 计划本身有问题（源桶不存在、目标被占用、cwd 不匹配……）：这是"当前状态不允许"，
+      // 计划本身有问题（源项目目录不存在、目标被占用、cwd 不匹配……）：这是"当前状态不允许"，
       // 用 409 而不是 400——参数可能完全正确，是库的状态说了不行。
       sendJson(res, 409, payload)
       return

@@ -390,7 +390,7 @@ test('registerWebRoutes：注册六条精确路由，方法不对回 405', async
 
 // ---- 会话管理：迁移 / 备份 / 回滚 ----
 
-test('POST /migrate：mode 缺省只预演，预演结果里带上源/目标桶与注册表变更', async () => {
+test('POST /migrate：mode 缺省只预演，预演结果里带上源/目标项目目录与注册表变更', async () => {
   const sandbox = makeSandbox('web-migrate-plan')
   writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000, { title: '要搬走的会话' })
 
@@ -409,13 +409,13 @@ test('POST /migrate：mode 缺省只预演，预演结果里带上源/目标桶�
   assert.equal((preview['sessions'] as unknown[]).length, 1)
   // 预演里也带标题：迁移页挑会话与导入导出页用同一套口径（标题可见、id 退到悬浮提示）。
   assert.equal((preview['sessions'] as Array<Record<string, unknown>>)[0]!['title'], '要搬走的会话')
-  // 桶名是**绝对路径**：join(会话根, projectKey(工作区目录))
-  assert.equal(preview['sourceBucket'], join(sandbox.sessionsRoot, projectKey(CWD_A)))
-  assert.equal(preview['targetBucket'], join(sandbox.sessionsRoot, projectKey(CWD_B)))
+  // 项目目录名是**绝对路径**：join(会话根, projectKey(工作区目录))
+  assert.equal(preview['sourceProjectDir'], join(sandbox.sessionsRoot, projectKey(CWD_A)))
+  assert.equal(preview['targetProjectDir'], join(sandbox.sessionsRoot, projectKey(CWD_B)))
   assert.equal((preview['registryChange'] as Record<string, unknown>)['targetPath'], CWD_B)
   // 没注入 effectMode 时按保守说法回：注册表落盘还要重启才被承认。
   assert.equal(body['takesEffect'], 'restart-required')
-  // 预演不写盘：会话还在源桶
+  // 预演不写盘：会话还在源项目目录
   assert.equal(existsSync(sessionDir(sandbox.sessionsRoot, CWD_A, 'session-a')), true)
 })
 
@@ -442,10 +442,10 @@ test('POST /migrate：带 sessionIds 时只搬点名的会话（界面「只选�
     ((body['preview'] as Record<string, unknown>)['sessions'] as { id: string }[]).map((s) => s.id),
     ['session-b'],
   )
-  assert.equal(existsSync(sessionDir(sandbox.sessionsRoot, CWD_A, 'session-a')), true, '未点名的会话必须留在源桶')
+  assert.equal(existsSync(sessionDir(sandbox.sessionsRoot, CWD_A, 'session-a')), true, '未点名的会话必须留在源项目目录')
   assert.equal(existsSync(sessionDir(sandbox.sessionsRoot, CWD_A, 'session-b')), false)
   assert.equal(existsSync(sessionDir(sandbox.sessionsRoot, CWD_B, 'session-b')), true)
-  // 源工作区没被搬空 → 账本里必须还在
+  // 源工作区没被搬空 → 注册表里必须还在
   assert.deepEqual(readRegistry(sandbox.registryPath).tables.workspaces['ws-a']?.sessionIds, ['session-a'])
 })
 
@@ -466,8 +466,8 @@ test('POST /migrate：unowned 来源不带 from 也能预演（界面那个跨�
   const preview = body['preview'] as Record<string, unknown>
   assert.equal(preview['unowned'], true)
   assert.equal(preview['from'], '')
-  assert.equal(preview['sourceBucket'], '')
-  assert.deepEqual(preview['sourceBuckets'], [join(sandbox.sessionsRoot, projectKey(CWD_A))])
+  assert.equal(preview['sourceProjectDir'], '')
+  assert.deepEqual(preview['sourceProjectDirs'], [join(sandbox.sessionsRoot, projectKey(CWD_A))])
   assert.deepEqual((preview['sessions'] as { id: string }[]).map((s) => s.id), ['session-b'])
   // 预演不写盘
   assert.equal(existsSync(sessionDir(sandbox.sessionsRoot, CWD_A, 'session-b')), true)
@@ -502,7 +502,7 @@ test('POST /migrate：mode=apply 真搬并回可回滚的备份；注入 effectM
   assert.equal(body['takesEffect'], 'immediate')
   assert.equal(typeof body['backupDir'], 'string')
 
-  // 真的搬了：目标桶里有、源桶里没有、header.cwd 已改写
+  // 真的搬了：目标项目目录里有、源项目目录里没有、header.cwd 已改写
   const moved = sessionDir(sandbox.sessionsRoot, CWD_B, 'session-a')
   assert.equal(existsSync(moved), true)
   assert.equal(existsSync(sessionDir(sandbox.sessionsRoot, CWD_A, 'session-a')), false)
@@ -581,11 +581,11 @@ test('POST /migrate：参数与状态问题各自给出可读的拒绝（400 / 4
     String(json(await post(JSON.stringify({ from: CWD_A, to: join(sandbox.base, 'nope') })))['error']),
     /目标工作区目录不存在/,
   )
-  // 状态问题：源桶不存在 → 409（参数没问题，是库的状态说了不行）
-  const missingBucket = await post(JSON.stringify({ from: join(sandbox.base, 'ghost'), to: CWD_B }))
-  assert.equal(missingBucket.status, 409)
-  assert.equal(json(missingBucket)['ok'], false)
-  assert.ok((json(missingBucket)['preview'] as Record<string, unknown>)['problems'])
+  // 状态问题：源项目目录不存在 → 409（参数没问题，是库的状态说了不行）
+  const missingProjectDir = await post(JSON.stringify({ from: join(sandbox.base, 'ghost'), to: CWD_B }))
+  assert.equal(missingProjectDir.status, 409)
+  assert.equal(json(missingProjectDir)['ok'], false)
+  assert.ok((json(missingProjectDir)['preview'] as Record<string, unknown>)['problems'])
 })
 
 test('POST /rollback：只认本插件备份根下的目录', async () => {

@@ -3,9 +3,9 @@ import test from 'node:test'
 
 import { detectProjectKeyCollision, projectKey } from '../src/project-key.ts'
 
-// 以下三个期望值直接取自本机真实存在的会话分桶目录名（宿主自己写出来的），
+// 以下三个期望值直接取自本机真实存在的会话项目目录名（宿主自己写出来的），
 // 因此是"与宿主逐字节一致"的回归锚点。
-test('projectKey 复刻宿主：真实分桶名', () => {
+test('projectKey 复刻宿主：真实项目目录名', () => {
   assert.equal(projectKey('C:\\Users\\hmy01\\Downloads'), '--C-Users-hmy01-Downloads--')
   assert.equal(projectKey('C:\\Users\\hmy01\\Downloads\\tdx-adblock'), '--C-Users-hmy01-Downloads-tdx-adblock--')
   assert.equal(projectKey('C:\\Users\\hmy01\\Works\\Temp\\dsh-temp'), '--C-Users-hmy01-Works-Temp-dsh-temp--')

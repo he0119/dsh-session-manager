@@ -3,9 +3,9 @@
 // 步骤顺序（每一步都在前一步成功后才有意义，失败即中断并保留现场用于回滚）：
 //   1. 备份（注册表 + 全部受影响会话目录 + 待搬产物，字节级）
 //   2. 原地改写各日志首帧的 cwd（临时文件 + rename，成功前不动原文件）
-//   3. 把会话目录移入目标分桶
+//   3. 把会话目录移入目标项目目录
 //   4. 原子落盘注册表
-//   5. 清理空的源分桶
+//   5. 清理空的源项目目录
 //   6. 搬迁会话产物（可选）
 // 事后可用 verifyAppliedPlan() 独立复核。
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmdirSync, writeFileSync } from 'node:fs'
@@ -97,10 +97,10 @@ export function applyPlan(plan: RelocationPlan, options: ApplyOptions): ApplyRes
   let moved = 0
   for (const s of plan.sessions) {
     if (dirname(s.sourceDir) === dirname(s.targetDir)) {
-      say(`already in target bucket: ${basename(s.sourceDir)}`)
+      say(`already in target project directory: ${basename(s.sourceDir)}`)
       continue
     }
-    mkdirSync(plan.targetBucket, { recursive: true })
+    mkdirSync(plan.targetProjectDir, { recursive: true })
     if (existsSync(s.targetDir)) throw new Error(`target already exists, refusing to overwrite: ${s.targetDir}`)
     renameSync(s.sourceDir, s.targetDir)
     moved++
@@ -113,16 +113,16 @@ export function applyPlan(plan: RelocationPlan, options: ApplyOptions): ApplyRes
   writeRegistryAtomic(registryPath, plan.nextRegistry)
   say(`registry written (target workspace ${plan.registryChange?.targetId ?? 'n/a'})`)
 
-  // 5) 清理空桶：**按每条会话自己的**源分桶去重。单个目录来源时这就是那一个桶（与以前等价），
-  //    未分组来源时可以横跨好几个桶。目标桶跳过不删：cwd 已经在目标上的那些会话本来就住在那里
-  //    （step 3 会跳过它们），删掉目标桶就是删掉刚落好的家。
-  const sourceBuckets = new Set(plan.sessions.map((s) => dirname(s.sourceDir)))
-  for (const bucket of sourceBuckets) {
-    if (bucket === plan.targetBucket) continue
-    if (!existsSync(bucket)) continue
-    if (readdirSync(bucket).length > 0) continue
-    rmdirSync(bucket)
-    say(`removed empty bucket ${basename(bucket)}`)
+  // 5) 清理空项目目录：**按每条会话自己的**源项目目录去重。单个目录来源时这就是那一个项目目录（与以前等价），
+  //    未分组来源时可以横跨好几个项目目录。目标项目目录跳过不删：cwd 已经在目标上的那些会话本来就住在那里
+  //    （step 3 会跳过它们），删掉目标项目目录就是删掉刚落好的家。
+  const sourceProjectDirs = new Set(plan.sessions.map((s) => dirname(s.sourceDir)))
+  for (const projectDir of sourceProjectDirs) {
+    if (projectDir === plan.targetProjectDir) continue
+    if (!existsSync(projectDir)) continue
+    if (readdirSync(projectDir).length > 0) continue
+    rmdirSync(projectDir)
+    say(`removed empty project directory ${basename(projectDir)}`)
   }
 
   // 6) 会话产物（可选）
@@ -146,7 +146,7 @@ export function applyPlan(plan: RelocationPlan, options: ApplyOptions): ApplyRes
 }
 
 /**
- * 独立复核：迁移后每个会话都应满足"文件所在分桶 == projectKey(header.cwd)、header.cwd == 目标"。
+ * 独立复核：迁移后每个会话都应满足"文件所在项目目录 == projectKey(header.cwd)、header.cwd == 目标"。
  * 这是宿主的 corrupt 判据的等价检查。
  */
 export function verifyAppliedPlan(
@@ -161,9 +161,9 @@ export function verifyAppliedPlan(
       problems.push(`session ${s.id}: target dir missing ${s.targetDir}`)
       continue
     }
-    const expectedBucket = projectKey(s.to)
-    if (basename(dirname(s.targetDir)) !== expectedBucket) {
-      problems.push(`session ${s.id}: target dir bucket ${basename(dirname(s.targetDir))} != ${expectedBucket}`)
+    const expectedProjectDir = projectKey(s.to)
+    if (basename(dirname(s.targetDir)) !== expectedProjectDir) {
+      problems.push(`session ${s.id}: target dir's project directory ${basename(dirname(s.targetDir))} != ${expectedProjectDir}`)
     }
     for (const f of s.files) {
       const path = join(s.targetDir, f.name)
@@ -177,12 +177,12 @@ export function verifyAppliedPlan(
       }
       if (header.cwd !== s.to) problems.push(`session ${s.id}/${f.name}: header cwd ${header.cwd} != ${s.to}`)
       if (header.id !== s.id) problems.push(`session ${s.id}/${f.name}: header id ${header.id}`)
-      // 宿主的 corrupt 判据：日志文件所在**分桶**必须等于 projectKey(header.cwd)。
-      // 文件的父目录是会话目录，再上一层才是分桶。
-      const fileBucket = basename(dirname(dirname(path)))
-      if (header.cwd !== undefined && projectKey(header.cwd) !== fileBucket) {
+      // 宿主的 corrupt 判据：日志文件所在**项目目录**必须等于 projectKey(header.cwd)。
+      // 文件的父目录是会话目录，再上一层才是项目目录。
+      const fileProjectDir = basename(dirname(dirname(path)))
+      if (header.cwd !== undefined && projectKey(header.cwd) !== fileProjectDir) {
         problems.push(
-          `session ${s.id}/${f.name}: dir/header mismatch (bucket ${fileBucket} != ${projectKey(header.cwd)}; host would report corrupt session log)`,
+          `session ${s.id}/${f.name}: dir/header mismatch (project directory ${fileProjectDir} != ${projectKey(header.cwd)}; host would report corrupt session log)`,
         )
       }
       checked++

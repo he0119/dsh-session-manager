@@ -48,8 +48,8 @@ interface Sandbox {
   logs: Record<string, Buffer>
   fromDir: string
   toDir: string
-  sourceBucket: string
-  targetBucket: string
+  sourceProjectDirName: string
+  targetProjectDir: string
   backupRoot: string
 }
 
@@ -64,19 +64,19 @@ function makeSandbox(name: string, options: { unowned?: boolean } = {}): Sandbox
   mkdirSync(toDir, { recursive: true })
 
   const root = join(base, 'dsh', 'sessions')
-  const sourceBucket = projectKey(fromDir)
-  const targetBucket = projectKey(toDir)
-  mkdirSync(join(root, sourceBucket, 'session-a'), { recursive: true })
-  mkdirSync(join(root, sourceBucket, 'session-b'), { recursive: true })
-  mkdirSync(join(root, targetBucket), { recursive: true })
+  const sourceProjectDirName = projectKey(fromDir)
+  const targetProjectDir = projectKey(toDir)
+  mkdirSync(join(root, sourceProjectDirName, 'session-a'), { recursive: true })
+  mkdirSync(join(root, sourceProjectDirName, 'session-b'), { recursive: true })
+  mkdirSync(join(root, targetProjectDir), { recursive: true })
 
   const logs: Record<string, Buffer> = { a: makeLog('session-a', fromDir, 40), b: makeLog('session-b', fromDir, 12) }
-  writeFileSync(join(root, sourceBucket, 'session-a', 'session.v4.jsonl.zstd'), logs['a']!)
-  writeFileSync(join(root, sourceBucket, 'session-b', 'session.v4.jsonl.zstd'), logs['b']!)
+  writeFileSync(join(root, sourceProjectDirName, 'session-a', 'session.v4.jsonl.zstd'), logs['a']!)
+  writeFileSync(join(root, sourceProjectDirName, 'session-b', 'session.v4.jsonl.zstd'), logs['b']!)
   if (options.unowned) {
-    mkdirSync(join(root, sourceBucket, 'session-c'), { recursive: true })
+    mkdirSync(join(root, sourceProjectDirName, 'session-c'), { recursive: true })
     logs['c'] = makeLog('session-c', fromDir, 3)
-    writeFileSync(join(root, sourceBucket, 'session-c', 'session.v4.jsonl.zstd'), logs['c']!)
+    writeFileSync(join(root, sourceProjectDirName, 'session-c', 'session.v4.jsonl.zstd'), logs['c']!)
   }
 
   const registryPath = join(base, 'dsh', 'storages', 'workspace.json')
@@ -105,7 +105,7 @@ function makeSandbox(name: string, options: { unowned?: boolean } = {}): Sandbox
   }
   writeFileSync(registryPath, JSON.stringify(registry, null, 2) + '\n')
 
-  return { base, root, registryPath, registry, logs, fromDir, toDir, sourceBucket, targetBucket, backupRoot: join(base, 'backups') }
+  return { base, root, registryPath, registry, logs, fromDir, toDir, sourceProjectDirName, targetProjectDir, backupRoot: join(base, 'backups') }
 }
 
 const opts = (sb: Sandbox, extra: Record<string, unknown> = {}) => ({
@@ -119,7 +119,7 @@ const opts = (sb: Sandbox, extra: Record<string, unknown> = {}) => ({
 
 test('端到端：plan → apply → verify → rollback 全链路', () => {
   const sb = makeSandbox('e2e')
-  const srcA = join(sb.root, sb.sourceBucket, 'session-a', 'session.v4.jsonl.zstd')
+  const srcA = join(sb.root, sb.sourceProjectDirName, 'session-a', 'session.v4.jsonl.zstd')
 
   // ---- plan（dry-run：不得写任何字节） ----
   const plan = buildRelocationPlan(opts(sb))
@@ -128,7 +128,7 @@ test('端到端：plan → apply → verify → rollback 全链路', () => {
   assert.equal(plan.registryChange?.added.length, 2)
   assert.equal(plan.registryChange?.createdTarget, false)
   assert.match(describePlan(plan), /迁移 2 个会话/)
-  assert.equal(existsSync(join(sb.root, sb.targetBucket, 'session-a')), false, 'dry-run 不得移动目录')
+  assert.equal(existsSync(join(sb.root, sb.targetProjectDir, 'session-a')), false, 'dry-run 不得移动目录')
   assert.deepEqual(readRegistry(sb.registryPath), sb.registry, 'dry-run 不得改注册表')
   assert.deepEqual(readFileSync(srcA), sb.logs['a'], 'dry-run 不得改日志')
 
@@ -143,7 +143,7 @@ test('端到端：plan → apply → verify → rollback 全链路', () => {
   assert.equal(applied.moved, 2)
   assert.ok(existsSync(join(applied.backupDir, 'manifest.json')))
   assert.ok(existsSync(join(applied.backupDir, 'execution.log')))
-  assert.equal(existsSync(join(sb.root, sb.sourceBucket)), false, '空源桶应被清理')
+  assert.equal(existsSync(join(sb.root, sb.sourceProjectDirName)), false, '空源项目目录应被清理')
 
   // ---- verify（等价于宿主的 corrupt 判据） ----
   const verified = verifyAppliedPlan(plan, { decodeAll })
@@ -151,7 +151,7 @@ test('端到端：plan → apply → verify → rollback 全链路', () => {
   assert.equal(verified.checked, 2)
 
   // 日志：header 换新 cwd，正文逐行不变，旧路径作为历史保留
-  const after = decodeAll(readFileSync(join(sb.root, sb.targetBucket, 'session-a', 'session.v4.jsonl.zstd')))
+  const after = decodeAll(readFileSync(join(sb.root, sb.targetProjectDir, 'session-a', 'session.v4.jsonl.zstd')))
   const before = decodeAll(sb.logs['a']!)
   const aLines = after.split('\n')
   const bLines = before.split('\n')
@@ -160,9 +160,9 @@ test('端到端：plan → apply → verify → rollback 全链路', () => {
   for (let i = 1; i < bLines.length; i++) assert.equal(aLines[i], bLines[i], `正文第 ${i} 行不得改动`)
   assert.ok(after.includes(JSON.stringify(sb.fromDir).slice(1, -1)), '正文里的旧路径是历史事实，必须保留')
 
-  // 注册表：账本转移、空工作区被删、顺序与表键一致
+  // 注册表：注册表转移、空工作区被删、顺序与表键一致
   const reg = readRegistry(sb.registryPath)
-  // 账本按"新→旧"排列（session-b 的 createdAt 更大），追加在既有会话之后
+  // 注册表按"新→旧"排列（session-b 的 createdAt 更大），追加在既有会话之后
   assert.deepEqual(reg.tables.workspaces['ws-temp']?.sessionIds, ['session-live', 'session-b', 'session-a'])
   assert.equal(reg.tables.workspaces['ws-downloads'], undefined)
   assert.deepEqual(reg.global.workspaceIds, ['ws-temp'])
@@ -176,8 +176,8 @@ test('端到端：plan → apply → verify → rollback 全链路', () => {
   // 逐字节回到原状
   assert.deepEqual(readRegistry(sb.registryPath), sb.registry, '注册表必须完全还原')
   assert.deepEqual(readFileSync(srcA), sb.logs['a'], '日志必须逐字节还原')
-  assert.deepEqual(readFileSync(join(sb.root, sb.sourceBucket, 'session-b', 'session.v4.jsonl.zstd')), sb.logs['b'])
-  assert.equal(existsSync(join(sb.root, sb.targetBucket, 'session-a')), false, '目标侧应被清空')
+  assert.deepEqual(readFileSync(join(sb.root, sb.sourceProjectDirName, 'session-b', 'session.v4.jsonl.zstd')), sb.logs['b'])
+  assert.equal(existsSync(join(sb.root, sb.targetProjectDir, 'session-a')), false, '目标侧应被清空')
 
   rmSync(sb.base, { recursive: true, force: true })
 })
@@ -196,7 +196,7 @@ test('未登记会话：默认连带迁移，includeUnowned=false 时报问题',
   rmSync(sb.base, { recursive: true, force: true })
 })
 
-test('计划层拒绝：目标不存在 / 源目标同路径 / 有损桶名碰撞', () => {
+test('计划层拒绝：目标不存在 / 源目标同路径 / 有损项目目录名碰撞', () => {
   const sb = makeSandbox('reject')
 
   const missing = buildRelocationPlan(opts(sb, { to: join(sb.base, 'nope', 'missing') }))
@@ -219,7 +219,7 @@ test('计划层拒绝：目标不存在 / 源目标同路径 / 有损桶名碰�
   rmSync(collideDir, { recursive: true, force: true })
 })
 
-test('applyPlan 拒绝执行有问题的计划；源桶消失后再次计划会如实报错', () => {
+test('applyPlan 拒绝执行有问题的计划；源项目目录消失后再次计划会如实报错', () => {
   const sb = makeSandbox('refuse')
   const bad = buildRelocationPlan(opts(sb, { to: sb.fromDir }))
   assert.equal(bad.ok, false)
@@ -232,14 +232,14 @@ test('applyPlan 拒绝执行有问题的计划；源桶消失后再次计划会�
   applyPlan(plan, { registryPath: sb.registryPath, decodeAll, backupRoot: sb.backupRoot, now: new Date('2026-09-27T00:00:00Z') })
   const again = buildRelocationPlan(opts(sb))
   assert.equal(again.ok, false)
-  assert.match(again.problems.join(';'), /source bucket does not exist/)
+  assert.match(again.problems.join(';'), /source project directory does not exist/)
 
   rmSync(sb.base, { recursive: true, force: true })
 })
 
 test('多帧回归：一条事件一帧，单帧解码器会截断', () => {
   const sb = makeSandbox('frames')
-  const buf = readFileSync(join(sb.root, sb.sourceBucket, 'session-a', 'session.v4.jsonl.zstd'))
+  const buf = readFileSync(join(sb.root, sb.sourceProjectDirName, 'session-a', 'session.v4.jsonl.zstd'))
   let magic = 0
   for (let i = 0; i + 3 < buf.length; i++) {
     if (buf[i] === 0x28 && buf[i + 1] === 0xb5 && buf[i + 2] === 0x2f && buf[i + 3] === 0xfd) magic++

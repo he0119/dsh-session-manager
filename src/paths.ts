@@ -91,11 +91,11 @@ export function sessionLogPath(
 /**
  * 宿主投影缓存的会话记录目录：`<storages>/session_projcache/sessions`。
  *
- * 由 `registryPath` 反推（账本与缓存同在 `<storages>` 下，而配置里只暴露前者）：那个目录里
+ * 由 `registryPath` 反推（注册表与缓存同在 `<storages>` 下，而配置里只暴露前者）：那个目录里
  * 每条会话一个 `<encodeSegment(id)>.json`，是宿主自己列会话时读的东西，标题也在里面
  * （见 session-title.ts）。读不到就当没有缓存——标题照样能从日志里读，只是慢一点。
  *
- * @param registryPath 账本文件路径（`<storages>/workspace.json`）。
+ * @param registryPath 注册表文件路径（`<storages>/workspace.json`）。
  * @returns 缓存记录目录（不保证存在）。
  */
 export function projectionCacheDir(registryPath: string): string {

@@ -1,4 +1,4 @@
-// src/discovery.ts — 会话发现：扫分桶、只解首帧读 header。
+// src/discovery.ts — 会话发现：扫项目目录、只解首帧读 header。
 //
 // 性能取舍：整份解码一条 6MB 日志约 1～2 秒，而发现阶段只需要 header（首个 frame）。
 // 首帧实测仅 ~200 字节，因此这里只解码**候选前缀**，不碰其余帧。
@@ -89,7 +89,7 @@ export function readHeaderQuick(
   return { header, boundary: buf.length, text: firstLine + '\n' }
 }
 
-/** 一个分桶目录下发现的一个会话。 */
+/** 一个项目目录下发现的会话。 */
 export interface DiscoveredSession {
   /** 目录名（应等于 encodeSegment(header.id)）。 */
   dirName: string
@@ -110,7 +110,7 @@ export interface DiscoveredSession {
   title?: string
 }
 
-/** `scanBucket()` 的选项。 */
+/** `scanProjectDir()` 的选项。 */
 export interface ScanOptions {
   /**
    * 读标题。缺席 = 这次扫描不要标题（例如导出时只关心字节，标题是白花的钱）。
@@ -121,16 +121,16 @@ export interface ScanOptions {
 }
 
 /**
- * 扫描一个分桶目录下的全部会话。
- * @param bucketDir 形如 `<root>/--C-Users-me-proj--` 的目录。
+ * 扫描一个项目目录下的全部会话。
+ * @param projectDir 形如 `<root>/--C-Users-me-proj--` 的目录。
  * @param decodeAll 多帧感知解码器。
  * @param options.resolveTitle 读标题的回调（可选）。
- * @returns 会话数组，按 createdAt 降序（新→旧，与宿主账本显示顺序一致）。
+ * @returns 会话数组，按 createdAt 降序（新→旧，与宿主注册表显示顺序一致）。
  */
-export function scanBucket(bucketDir: string, decodeAll: DecodeAll, options: ScanOptions = {}): DiscoveredSession[] {
+export function scanProjectDir(projectDir: string, decodeAll: DecodeAll, options: ScanOptions = {}): DiscoveredSession[] {
   const out: DiscoveredSession[] = []
-  for (const dirName of readdirSync(bucketDir)) {
-    const dir = join(bucketDir, dirName)
+  for (const dirName of readdirSync(projectDir)) {
+    const dir = join(projectDir, dirName)
     if (!statSync(dir).isDirectory()) continue
     const files: SessionLogFile[] = []
     let header: SessionHeader | null = null
@@ -162,36 +162,36 @@ export function scanBucket(bucketDir: string, decodeAll: DecodeAll, options: Sca
   return out
 }
 
-/** 分桶目录路径（cwd → 桶名）。 */
-export function bucketOf(root: string, cwd: string): string {
+/** 项目目录路径（由 cwd 推出项目目录名）。 */
+export function projectDirOf(root: string, cwd: string): string {
   return join(root, projectKey(cwd))
 }
 
 /**
- * 扫**整个**会话库：根下每个分桶各扫一遍，合成一份列表（按 createdAt 降序）。
+ * 扫**整个**会话库：根下每个项目目录各扫一遍，合成一份列表（按 createdAt 降序）。
  *
- * 单个分桶坏掉只跳过它：整页会话列不出来比少一条会话严重得多（界面与迁移的
- * 「未分组」来源都要横跨分桶，所以这一步不能因为一个坏桶就整体失败）。
+ * 单个项目目录坏掉只跳过它：整页会话列不出来比少一条会话严重得多（界面与迁移的
+ * 「未分组」来源都要横跨项目目录，所以这一步不能因为一个坏项目目录就整体失败）。
  */
 export function scanAll(root: string, decodeAll: DecodeAll, options: ScanOptions = {}): DiscoveredSession[] {
   const out: DiscoveredSession[] = []
-  let buckets: string[]
+  let projectDirNames: string[]
   try {
-    buckets = readdirSync(root)
+    projectDirNames = readdirSync(root)
   } catch {
     return out
   }
-  for (const bucket of buckets) {
-    const bucketPath = join(root, bucket)
+  for (const projectDirName of projectDirNames) {
+    const projectDirPath = join(root, projectDirName)
     try {
-      if (!statSync(bucketPath).isDirectory()) continue
+      if (!statSync(projectDirPath).isDirectory()) continue
     } catch {
       continue
     }
     try {
-      out.push(...scanBucket(bucketPath, decodeAll, options))
+      out.push(...scanProjectDir(projectDirPath, decodeAll, options))
     } catch {
-      // 单个分桶坏掉不该让整页打不开：跳过它，界面照旧能用。
+      // 单个项目目录坏掉不该让整页打不开：跳过它，界面照旧能用。
       continue
     }
   }

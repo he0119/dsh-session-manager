@@ -17,7 +17,7 @@ export interface PanelShare {
   t: Translate
   /** 会话库与工作区清单；首帧还没读到时为 null。 */
   state: StateResponse | null
-  /** 重新拉 `/state`（写入成功后调用，让列表与账本归属跟上）。 */
+  /** 重新拉 `/state`（写入成功后调用，让列表与注册表归属跟上）。 */
   reload: () => Promise<void>
   /**
    * 取当前可用的宿主目录选择器（注入面给的 thunk，见 [directory.ts](./directory.ts)）。

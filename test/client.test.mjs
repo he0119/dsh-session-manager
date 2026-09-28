@@ -8,7 +8,7 @@
 //   1) 读产物文本，断言它只 require 平台基线模块（react / react/jsx-runtime /
 //      @deepseek-ai/dsh-client-ui-primitives），且不申请任何非基线模块；
 //   2) 用假的 `window.__ModuleLoader__` + 假 `require` 执行工厂，核对 id 与导出面；
-//   3) 用假 ctx 跑 apply，核对注册到的槽位、id、locale 与注入面；
+//   3) 用假 ctx 跑 apply，核对注册到的 Slot、id、locale 与注入面；
 //   4) 核对两份字典键集完全一致（少一个键就是一处会露出键名的界面）。
 //
 // 产物不存在时整组跳过（源码开发不必先构建）。
@@ -265,7 +265,7 @@ function mount({ translate, state, panel } = {}) {
 test('客户端产物：apply 把「会话管理」注册到设置里的一页，并带上字典与注入面', { skip }, async () => {
   const { nodes, registrations, dictionaries, effects, injectedSlots, injectedServices, bound, t } = mount()
 
-  // 槽位用 inject 等声明到位，而不是直接 register——声明可能晚于本插件 apply。
+  // Slot 用 inject 等声明到位，而不是直接 register——声明可能晚于本插件 apply。
   assert.deepEqual(injectedSlots, ['settings.section'])
   assert.equal(registrations.length, 1)
   const { registration, component } = registrations[0]
@@ -375,7 +375,7 @@ test('客户端产物：页面组件在初始状态下能渲染成元素（不�
   // 目录字段的两种分支因此不在这个冒烟用例的射程内，别把断言写在这里骗自己。
 })
 
-test('客户端产物：迁移页把「未分组」列成独立来源（账本没认领的那批可以一次收编）', { skip }, () => {
+test('客户端产物：迁移页把「未分组」列成独立来源（注册表没认领的那批可以一次收编）', { skip }, () => {
   // 迁移页平时在产物冒烟里跑不到（页签状态停在「导入导出」），所以这里把页签 seed 成 'migrate'。
   // 这一页值得跑一遍：它的来源下拉框现在有两条路（目录 / 未分组），而"未分组"是个**跨目录**的来源
   // ——判据在 planRows.ts（有单测），这里只证明它真的被摆到了界面上、条数用的是库里的口径。
@@ -424,7 +424,7 @@ test('客户端产物：导出列表按目录分组，组头就是"整组勾选"
     registryPath: '/home/u/.dsh/registry.json',
     problems: [],
     sessions: [
-      // `workspaceId` 是宿主按账本成员表填的：有值 = 被某个工作区登记在册，缺省 = 谁都没认领。
+      // `workspaceId` 是宿主按注册表成员表填的：有值 = 被某个工作区登记在册，缺省 = 谁都没认领。
       { id: 's-1', cwd: '/home/u/dev/alpha', createdAt: 2, dir: '/home/u/dev/alpha', bytes: 2048, files: [], workspaceId: 'w1' },
       { id: 's-2', cwd: '/home/u/dev/alpha', createdAt: 1, dir: '/home/u/dev/alpha', bytes: 1024, files: [] },
       { id: 's-3', cwd: '/home/u/dev/beta', createdAt: 3, dir: '/home/u/dev/beta', bytes: 512, files: [] },
@@ -499,7 +499,7 @@ test('客户端产物：导出列表按目录分组，组头就是"整组勾选"
     assert.equal(hints.length, 2, '计数块里正好是"这组几条 / 选中几条"两条')
   }
 
-  // 「未登记在册」这枚标签只该挂给账本没认领的会话（行里 `workspaceId` 缺省的那些）。挂错或漏挂都
+  // 「未登记在册」这枚标签只该挂给注册表没认领的会话（行里 `workspaceId` 缺省的那些）。挂错或漏挂都
   // 不会抛错、不会崩，只会让"外壳侧边栏为什么把这些会话放进未分组"重新变成要靠人对着两个界面猜的
   // 谜——本机上真的被问过一次，所以按行核：先把每行的名字与标签取出来，再按名字对号入座。
   const rowFacts = (node, acc = { label: '', tags: [] }) => {

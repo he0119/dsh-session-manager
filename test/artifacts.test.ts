@@ -166,7 +166,7 @@ interface Sandbox {
   registry: WorkspaceRegistryState
   fromDir: string
   toDir: string
-  bucket: string
+  projectDirName: string
   backupRoot: string
 }
 
@@ -178,8 +178,8 @@ function makeSandbox(name: string): Sandbox {
   mkdirSync(fromDir, { recursive: true })
   mkdirSync(toDir, { recursive: true })
   const root = join(base, 'dsh', 'sessions')
-  const bucket = projectKey(fromDir)
-  mkdirSync(join(root, bucket, 'session-a'), { recursive: true })
+  const projectDirName = projectKey(fromDir)
+  mkdirSync(join(root, projectDirName, 'session-a'), { recursive: true })
   mkdirSync(join(root, projectKey(toDir)), { recursive: true })
 
   // 会话产物：一个目录（含内部文件）、一个独立文件、一个已被删除的文件
@@ -196,7 +196,7 @@ function makeSandbox(name: string): Sandbox {
     { type: 'deliverables/presented', seq: 4, time: 5, data: { turn: 1, files: [{ path: join(fromDir, 'loose.md'), description: 'd' }] } },
   ]
   const frames = [encodeRawFrame(JSON.stringify(header) + '\n'), ...events.map((e) => encodeRawFrame(JSON.stringify(e) + '\n'))]
-  writeFileSync(join(root, bucket, 'session-a', 'session.v4.jsonl.zstd'), Buffer.concat(frames))
+  writeFileSync(join(root, projectDirName, 'session-a', 'session.v4.jsonl.zstd'), Buffer.concat(frames))
 
   const registryPath = join(base, 'dsh', 'storages', 'workspace.json')
   mkdirSync(join(base, 'dsh', 'storages'), { recursive: true })
@@ -211,7 +211,7 @@ function makeSandbox(name: string): Sandbox {
     },
   }
   writeFileSync(registryPath, JSON.stringify(registry, null, 2) + '\n')
-  return { base, root, registryPath, registry, fromDir, toDir, bucket, backupRoot: join(base, 'backups') }
+  return { base, root, registryPath, registry, fromDir, toDir, projectDirName, backupRoot: join(base, 'backups') }
 }
 
 test('集成：includeArtifacts 时产物随会话一起搬，并可字节级回滚', () => {

@@ -52,7 +52,7 @@ test('validateRegistry：能逐类抓出启动会报错的问题', () => {
 
   const dupSession = makeRegistry()
   dupSession.tables.workspaces['ws-temp']!.sessionIds.push('session-a')
-  assert.match(validateRegistry(dupSession).problems.join(';'), /ledgered by both/)
+  assert.match(validateRegistry(dupSession).problems.join(';'), /accounted by both/)
 
   const drift = makeRegistry()
   drift.global.workspaceIds = ['ws-downloads'] // 少了 ws-temp
@@ -67,7 +67,7 @@ test('validateRegistry：能逐类抓出启动会报错的问题', () => {
   assert.match(validateRegistry(dupOrder).problems.join(';'), /duplicate id/)
 })
 
-test('reHome：复用已存在的目标工作区并摘除原账本', () => {
+test('reHome：复用已存在的目标工作区并摘除原注册表', () => {
   const { registry, change } = reHome(makeRegistry(), {
     sessionIds: ['session-a', 'session-b'],
     toPath: 'C:\\Users\\me\\Work\\temp',
@@ -80,7 +80,7 @@ test('reHome：复用已存在的目标工作区并摘除原账本', () => {
     change.movedFrom.map((m) => m.workspaceId),
     ['ws-downloads'],
   )
-  // 原账本清空后默认删除记录与顺序项
+  // 原注册表清空后默认删除记录与顺序项
   assert.deepEqual(
     change.removedSources.map((m) => m.workspaceId),
     ['ws-downloads'],
@@ -102,11 +102,11 @@ test('reHome：目标目录无工作区时新建并前插（与宿主 create 语
   assert.equal(registry.global.workspaceIds[0], 'ws-new', '新工作区应前插')
   assert.equal(registry.tables.workspaces['ws-new']?.title, 'dsh-temp')
   assert.deepEqual(registry.tables.workspaces['ws-new']?.sessionIds, ['session-a'])
-  assert.equal(registry.tables.workspaces['ws-downloads']?.sessionIds.length, 1, '原账本只被摘走 session-a')
+  assert.equal(registry.tables.workspaces['ws-downloads']?.sessionIds.length, 1, '原注册表只被摘走 session-a')
   assert.equal(validateRegistry(registry).ok, true)
 })
 
-test('reHome：removeEmptySources=false 时保留空账本', () => {
+test('reHome：removeEmptySources=false 时保留空注册表', () => {
   const { registry } = reHome(makeRegistry(), {
     sessionIds: ['session-a', 'session-b'],
     toPath: 'C:\\Users\\me\\Work\\temp',

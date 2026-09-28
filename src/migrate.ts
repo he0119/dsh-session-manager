@@ -36,11 +36,11 @@ export interface MigrateRequest {
   /** 目标工作区目录（绝对路径，必须已存在）。 */
   to: string
   /**
-   * 源取"账本没认领且有 cwd 的会话"（外壳侧边栏的「未分组」），而不是某个目录。
-   * 可以横跨多个分桶，所以与 `from` 互斥。
+   * 源取"注册表没认领且有 cwd 的会话"（外壳侧边栏的「未分组」），而不是某个目录。
+   * 可以横跨多个项目目录，所以与 `from` 互斥。
    */
   unowned?: boolean
-  /** 只迁移这些会话；缺省（null）为源桶内全部。 */
+  /** 只迁移这些会话；缺省（null）为源项目目录内全部。 */
   sessionIds?: string[] | null
   /** 目标工作区新建时的标题。 */
   title?: string
@@ -71,13 +71,13 @@ export interface MigrationPreview {
   /** 源工作区目录；未分组来源时是空串（见 `unowned`）。 */
   from: string
   to: string
-  /** 源分桶；未分组来源时是空串（源不是一个目录）。 */
-  sourceBucket: string
-  targetBucket: string
-  /** 源是不是那个跨目录的「未分组」（界面据此换一句分桶说明）。 */
+  /** 源项目目录；未分组来源时是空串（源不是一个目录）。 */
+  sourceProjectDir: string
+  targetProjectDir: string
+  /** 源是不是那个跨目录的「未分组」（界面据此换一句项目目录说明）。 */
   unowned: boolean
-  /** 本次真正会搬动的会话各自所在的源分桶（去重、排序）——未分组来源下不止一个。 */
-  sourceBuckets: string[]
+  /** 本次真正会搬动的会话各自所在的源项目目录（去重、排序）——未分组来源下不止一个。 */
+  sourceProjectDirs: string[]
   sessions: PreviewSession[]
   files: number
   bytes: number
@@ -162,11 +162,11 @@ function previewOf(plan: RelocationPlan): MigrationPreview {
     problems: plan.problems,
     from: plan.from,
     to: plan.to,
-    sourceBucket: plan.sourceBucket,
-    targetBucket: plan.targetBucket,
+    sourceProjectDir: plan.sourceProjectDir,
+    targetProjectDir: plan.targetProjectDir,
     unowned: plan.unowned,
-    // 未分组来源横跨多个桶：把每条会话自己的源桶去重报给界面，别让界面拿一个空串去猜。
-    sourceBuckets: [...new Set(plan.sessions.map((session) => dirname(session.sourceDir)))].sort(),
+    // 未分组来源横跨多个项目目录：把每条会话自己的源项目目录去重报给界面，别让界面拿一个空串去猜。
+    sourceProjectDirs: [...new Set(plan.sessions.map((session) => dirname(session.sourceDir)))].sort(),
     sessions,
     files,
     bytes,

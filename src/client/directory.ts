@@ -58,10 +58,10 @@ export function getDirectoryApi(): DirectoryApi | undefined {
 }
 
 /**
- * 把选择器返回值收拾成可以当"目录桶键"用的形状：去掉结尾的多余斜杠。
+ * 把选择器返回值收拾成可以当"目录项目目录键"用的形状：去掉结尾的多余斜杠。
  *
- * 会话的 `cwd` 与账本里的工作区路径都不带结尾斜杠，而选择器有可能返回 `/a/b/`——
- * 那样会凭空多出一个「不同的桶」，搬迁时匹配不到任何会话。除根目录外一律削掉。
+ * 会话的 `cwd` 与注册表里的工作区路径都不带结尾斜杠，而选择器有可能返回 `/a/b/`——
+ * 那样会凭空多出一个「不同的项目目录」，搬迁时匹配不到任何会话。除根目录外一律削掉。
  */
 export function normalizePickedPath(path: string): string {
   return path.length > 1 ? path.replace(/\/+$/, '') : path

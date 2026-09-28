@@ -12,7 +12,7 @@
  *
  * 样式只在 [styles.ts](./styles.ts) 里定义，颜色只用 `--dsw-alias-*` 主题 token；
  * 控件是手写的原生元素，**不 require 宿主的 UI 原语包**——那份包会随时改，而它一抛异常就会让
- * 整个槽位条目变成崩溃占位（控制台里是 `slot entry crashed in '…'`）。
+ * 整个 Slot 条目变成崩溃占位（控制台里是 `slot entry crashed in '…'`）。
  *
  * @module dsh-session-manager/client/TransferPanel
  */
@@ -113,7 +113,7 @@ export function TransferPanel({ t = fallback, state, reload }: PanelShare): Reac
   const sessions = state?.sessions ?? []
   const workspaces = state?.workspaces ?? []
   const allSelected = sessions.length > 0 && selected.length === sessions.length
-  // 列表按**目录**分组（不是按账本里的工作区）：同一个目录下常有没登记在册的会话，而用户说的
+  // 列表按**目录**分组（不是按注册表里的工作区）：同一个目录下常有没登记在册的会话，而用户说的
   // "把这个工作区的会话带走"指的永远是这个目录。理由与边界见 groups.ts。
   const groups = React.useMemo(() => groupSessions(sessions, workspaces), [sessions, workspaces])
 
@@ -307,7 +307,7 @@ export function TransferPanel({ t = fallback, state, reload }: PanelShare): Reac
                           <span className={label.kind === 'title' ? 'dsm-rowTitle' : 'dsm-rowId'} title={label.tip}>
                             {label.text}
                           </span>
-                          {/* 账本没认领的会话（`workspaceId` 缺省）在这里标出来：它在外壳侧边栏里会落到
+                          {/* 注册表没认领的会话（`workspaceId` 缺省）在这里标出来：它在外壳侧边栏里会落到
                               「未分组」下，而这里按目录分组，所以同一条会话两边的去处不同。少了这枚标签，
                               那个差异就只能靠人对着两个界面猜——本机上真的被问过一次。 */}
                           {session.workspaceId === undefined && (

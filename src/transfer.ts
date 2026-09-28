@@ -38,7 +38,7 @@ export interface ExportSource {
   id: string
   cwd?: string
   createdAt: number
-  /** 会话目录（`<root>/<bucket>/<encodeSegment(id)>`）。 */
+  /** 会话目录（`<root>/<projectDirName>/<encodeSegment(id)>`）。 */
   dir: string
   /** 该目录里的代次日志文件（由 discovery 给出，按代次升序）。 */
   files: readonly SessionLogFile[]
@@ -236,29 +236,29 @@ export function entryBytes(bundle: SessionBundle, entry: BundleFileEntry): Buffe
 /**
  * 扫一遍会话库，收集**已存在的会话目录名**（encodeSegment(id) → 目录路径，取第一个）。
  *
- * 会话 id 在整库里按注册表记账是全局唯一的，所以冲突检测必须扫所有分桶，不能只看目标分桶：
- * 只扫目标分桶会让同一个 id 在库里悄悄出现两份，而宿主的账本只记得住一份。
+ * 会话 id 在整库里按注册表记账是全局唯一的，所以冲突检测必须扫所有项目目录，不能只看目标项目目录：
+ * 只扫目标项目目录会让同一个 id 在库里悄悄出现两份，而宿主的注册表只记得住一份。
  */
 function scanExistingSessionDirs(root: string): Map<string, string> {
   const found = new Map<string, string>()
-  let buckets: string[]
+  let projectDirNames: string[]
   try {
-    buckets = readdirSync(root)
+    projectDirNames = readdirSync(root)
   } catch {
     return found
   }
-  for (const bucket of buckets) {
-    const bucketPath = join(root, bucket)
+  for (const projectDirName of projectDirNames) {
+    const projectDirPath = join(root, projectDirName)
     let entries: string[]
     try {
-      if (!statSync(bucketPath).isDirectory()) continue
-      entries = readdirSync(bucketPath)
+      if (!statSync(projectDirPath).isDirectory()) continue
+      entries = readdirSync(projectDirPath)
     } catch {
       continue
     }
     for (const name of entries) {
       if (found.has(name)) continue
-      const path = join(bucketPath, name)
+      const path = join(projectDirPath, name)
       try {
         if (statSync(path).isDirectory()) found.set(name, path)
       } catch {
@@ -284,7 +284,7 @@ export interface ImportEntry {
   reason?: string
   /** 包里的原 cwd（缺省表示这条会话本来就没有 cwd）。 */
   fromCwd?: string
-  /** 落盘后的 cwd；包里的会话没有 cwd 时保持没有（落 `_no-cwd` 分桶）。 */
+  /** 落盘后的 cwd；包里的会话没有 cwd 时保持没有（落 `_no-cwd` 项目目录）。 */
   toCwd?: string
   /** 目标会话目录。 */
   dir: string
@@ -357,7 +357,7 @@ function bundleTitle(bundle: SessionBundle, session: BundleSession, decodeAll: D
  * 判定顺序（每条会话独立）：
  *   1. 库里已有同 id 的会话目录 → skip。**导入永不覆盖**：冲突只报告，不合并、不顶掉；
  *   2. 其余 → create：日志的 header cwd 改写成 `targetCwd`（原本没有 cwd 的保持没有，
- *      落 `_no-cwd` 分桶，也就不参与注册表重挂）。
+ *      落 `_no-cwd` 项目目录，也就不参与注册表重挂）。
  */
 export function planImport(bundle: SessionBundle, options: ImportOptions): ImportPlan {
   const { root, targetCwd, registry, title, decodeAll, now, newId } = options

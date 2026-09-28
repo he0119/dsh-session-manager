@@ -3,7 +3,7 @@
 // 宿主的 WorkspaceRegistry 在启动时会校验已存状态，以下任一情况都让**启动直接报错**
 // （不是静默降级，所以插件必须自己先守住）：
 //   - 两个 workspace 记录 path 相同
-//   - 同一个 sessionId 出现在多个 workspace 的账本里
+//   - 同一个 sessionId 出现在多个 workspace 的注册表里
 //   - global.workspaceIds 有重复
 //   - global.workspaceIds 的集合 != tables.workspaces 的键集合（顺序漂移）
 //
@@ -84,7 +84,7 @@ export function validateRegistry(reg: unknown): ValidationResult {
     const sessionIds = Array.isArray(rec?.sessionIds) ? rec.sessionIds : []
     for (const sid of sessionIds) {
       const owner = bySession.get(sid)
-      if (owner !== undefined) problems.push(`session ${sid} is ledgered by both ${owner} and ${id}`)
+      if (owner !== undefined) problems.push(`session ${sid} is accounted by both ${owner} and ${id}`)
       else bySession.set(sid, id)
     }
   }
@@ -120,7 +120,7 @@ export interface ReHomeOptions {
   now?: string
   /** 新建工作区 id（便于测试注入）。 */
   newId?: string
-  /** 原账本变空时是否删除该工作区，默认 true。 */
+  /** 原注册表变空时是否删除该工作区，默认 true。 */
   removeEmptySources?: boolean
 }
 
@@ -130,8 +130,8 @@ export interface ReHomeOptions {
  * 语义：
  *   - 目标目录已有工作区则复用；否则新建记录并**前插**到 durable 顺序
  *     （与宿主 WorkspaceRegistry.create() 的"新工作区前插"一致）。
- *   - 会话从原账本移除；原账本变空时默认删除该工作区记录与顺序项。
- *   - 若会话已在目标账本中，视为幂等跳过，不重复追加。
+ *   - 会话从原注册表移除；原注册表变空时默认删除该工作区记录与顺序项。
+ *   - 若会话已在目标注册表中，视为幂等跳过，不重复追加。
  *
  * @throws 传入的注册表已违反启动不变式，或结果会违反时抛错。
  */
@@ -187,7 +187,7 @@ export function reHome(
     createdTarget = true
   }
 
-  // 从原账本摘除
+  // 从原注册表摘除
   const movedFrom: RegistryChange['movedFrom'] = []
   const removedSources: RegistryChange['removedSources'] = []
   for (const [id, rec] of Object.entries(workspaces)) {

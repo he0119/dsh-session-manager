@@ -38,7 +38,7 @@ export const DEFAULT_TITLE_BUDGET_BYTES = 256 * 1024
 export interface TitleQuery {
   id: string
   createdAt: number
-  /** 缺省表示这条会话没有 cwd（落 `_no-cwd` 分桶）。 */
+  /** 缺省表示这条会话没有 cwd（落 `_no-cwd` 项目目录）。 */
   cwd?: string
   /** 该会话的日志文件；只有最新一代会被读。 */
   files: ReadonlyArray<{ path: string; version: number }>

@@ -3,7 +3,7 @@
 // 这一格在用户截图上错过：一次 20 条**全部跳过**的导入，每一行的 cwd 都写着
 // 「保持无 cwd（落 _no-cwd）」，而那些会话明明都有 cwd（截图里第一条就在
 // /home/uy_sun/dev/dsh-aperture），并且它们根本不会被写盘。等于把"什么都不会发生"说成了
-// "你的会话要被丢进无 cwd 桶"。根因是那一格只判断 `toCwd === undefined`——跳过的行按设计也没有
+// "你的会话要被丢进无 cwd 项目目录"。根因是那一格只判断 `toCwd === undefined`——跳过的行按设计也没有
 // `toCwd`（见 `src/transfer.ts` 的 ImportEntry），于是两支不同的情况被合并成了一句错话。
 //
 // 判定抽成了 `src/client/planRows.ts`（纯函数），所以三支分支能在这里逐个钉死。
@@ -83,7 +83,7 @@ test('标题两边的空白裁掉：宿主写进来的可能带换行（提示�
 
 // ---- 迁移页的来源：目录候选与「未分组」（`migrationSourceRows` / `migrationMatching`）----
 //
-// 「未分组」是外壳侧边栏的说法（账本没认领的会话），本插件按目录分组，于是它必须作为一个**单独的
+// 「未分组」是外壳侧边栏的说法（注册表没认领的会话），本插件按目录分组，于是它必须作为一个**单独的
 // 来源**出现，否则那批会话只能一个目录一个目录地勾——"这两个目录里没在册的那两条"本来是一件事。
 // 这一批会跨目录，所以本文件把候选、匹配与那个哨兵值都钉住（界面那层只能靠人眼验收）。
 
@@ -92,7 +92,7 @@ const s = (id: string, cwd: string | undefined, workspaceId?: string) => ({ id, 
 const t = (key: string, params?: Record<string, unknown>): string =>
   params ? `${key}:${JSON.stringify(params)}` : key
 
-test('未分组来源覆盖的会话：账本没认领 + 有 cwd，两个条件缺一不可', () => {
+test('未分组来源覆盖的会话：注册表没认领 + 有 cwd，两个条件缺一不可', () => {
   const list = [
     s('owned', '/a', 'ws-1'),
     s('orphan', '/a'),

@@ -19,7 +19,6 @@ export function stampName(date: Date = new Date()): string {
 export interface BackupSessionEntry {
   id: string
   dirName: string
-  sourceBucket: string
   sourceDir: string
   targetDir: string
   files: string[]
@@ -81,14 +80,13 @@ export function createBackup(options: CreateBackupOptions): {
 
   const entries: BackupSessionEntry[] = []
   for (const s of sessions) {
-    const bucketName = basename(dirname(s.sourceDir))
-    const dest = join(dir, 'sessions', bucketName, basename(s.sourceDir))
+    const projectDirName = basename(dirname(s.sourceDir))
+    const dest = join(dir, 'sessions', projectDirName, basename(s.sourceDir))
     mkdirSync(dirname(dest), { recursive: true })
     cpSync(s.sourceDir, dest, { recursive: true })
     entries.push({
       id: s.id,
       dirName: basename(s.sourceDir),
-      sourceBucket: bucketName,
       sourceDir: s.sourceDir,
       targetDir: s.targetDir,
       files: s.files.map((f) => f.name),
@@ -159,11 +157,11 @@ export function rollback(
     //
     // 「源目录 == 目标目录」的会话要**跳过这一步**：迁移时它一个字节都没挪（`cwd` 本来就在目标上——
     // 未分组来源下这是常态：那条没人认领的会话本来就住在那个目录里，只是没登记在册，迁移只补了
-    // 一条账本记录）。照搬回去等于"先删掉自己、再把自己改名到自己"，`rmSync` 之后 `renameSync`
+    // 一条注册表记录）。照搬回去等于"先删掉自己、再把自己改名到自己"，`rmSync` 之后 `renameSync`
     // 必然 ENOENT——丢的是**唯一一份**会话目录。字节还原照做（内容相同，等于一次无害的复写）。
     if (existsSync(s.targetDir) && s.targetDir !== s.sourceDir) {
-      const sourceBucketDir = dirname(s.sourceDir)
-      if (!dryRun) mkdirSync(sourceBucketDir, { recursive: true })
+      const sourceProjectDir = dirname(s.sourceDir)
+      if (!dryRun) mkdirSync(sourceProjectDir, { recursive: true })
       actions.push(`move back: ${s.targetDir} -> ${s.sourceDir}`)
       if (!dryRun) {
         if (existsSync(s.sourceDir)) rmSync(s.sourceDir, { recursive: true, force: true })
@@ -172,7 +170,8 @@ export function rollback(
     }
     // 2) 字节还原
     for (const name of s.files) {
-      const from = join(backupDir, 'sessions', s.sourceBucket, s.dirName, name)
+      // 清单不再存项目目录名（它就是 `sourceDir` 的父目录名），老备份里那个字段直接忽略。
+      const from = join(backupDir, 'sessions', basename(dirname(s.sourceDir)), s.dirName, name)
       const to = join(s.sourceDir, name)
       if (!existsSync(from)) throw new Error(`backup file missing: ${from}`)
       actions.push(`restore bytes: ${to}`)
@@ -202,18 +201,18 @@ export function rollback(
     }
   }
 
-  // 3.5) 空掉的目标桶顺手删掉：apply 在源桶空了时会删（execute.ts 第 5 步），回滚不对称地做
+  // 3.5) 空掉的目标项目目录顺手删掉：apply 在源项目目录空了时会删（execute.ts 第 5 步），回滚不对称地做
   // 就会在会话根下留下一个空目录。只删**确认为空**的目录。
   const emptied = new Set(manifest.sessions.map((s) => dirname(s.targetDir)))
-  for (const bucket of emptied) {
-    if (!existsSync(bucket)) continue
+  for (const projectDir of emptied) {
+    if (!existsSync(projectDir)) continue
     try {
-      if (readdirSync(bucket).length > 0) continue
+      if (readdirSync(projectDir).length > 0) continue
     } catch {
       continue
     }
-    actions.push(`remove empty bucket: ${bucket}`)
-    if (!dryRun) rmdirSync(bucket)
+    actions.push(`remove empty project directory: ${projectDir}`)
+    if (!dryRun) rmdirSync(projectDir)
   }
 
   // 4) 注册表

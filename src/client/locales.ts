@@ -2,7 +2,7 @@
  * 界面文案：两份语言 + 命名空间。
  *
  * 字典是扁平的 `键 → 文案`，`{name}` 是占位符，与宿主的字典服务同一套口径
- * （`ctx.locale.register(NS, { zh, en })`，注册槽位时带 `locale: NS`）。
+ * （`ctx.locale.register(NS, { zh, en })`，注册 Slot 时带 `locale: NS`）。
  *
  * 刻意**不 import** `@deepseek-ai/dsh-client-locale/client` 的类型：那是宿主 Web 端模块图里的
  * 包，本包只在 `dsh.client.inject` 里把它排在自己前面（那份清单管模块到达顺序，不是依赖保证），
@@ -16,7 +16,7 @@
  * @module dsh-session-manager/client/locales
  */
 
-/** 字典命名空间（同时是注册槽位时的 `locale`）。 */
+/** 字典命名空间（同时是注册 Slot 时的 `locale`）。 */
 export const NS = 'dsh-session-manager'
 
 /** 翻译函数：宿主字典服务 `bind()` 返回的形状。 */
@@ -80,13 +80,13 @@ export const zh = {
   // ---- 迁移 ----
   migrateTitle: '迁移会话',
   migrateHint:
-    '把会话从一个来源搬到另一个目录（来源可以是某个工作区目录，也可以是「未分组」里那些没人认领的会话）：改写日志 header 的 cwd（只动首帧，其余字节不变）、把会话目录移进目标分桶、并重新登记工作区账本。可以整个来源一起搬，也可以只挑其中几条——先预演，看清会写什么，再确认。',
+    '把会话从一个来源搬到另一个目录（来源可以是某个工作区目录，也可以是「未分组」里那些没人认领的会话）：改写日志 header 的 cwd（只动首帧，其余字节不变）、把会话目录移进目标项目目录、并重新登记工作区注册表。可以整个来源一起搬，也可以只挑其中几条——先预演，看清会写什么，再确认。',
   fromLabel: '源目录',
   toLabel: '目标目录',
   pickSource: '选择源目录…',
   ungroupedSource: '未分组',
   unownedSourceHint:
-    '来源是「未分组」：账本没认领、且有 cwd 的那批会话，可以横跨多个目录，一次全部收进目标工作区。它们的 header 会写上目标目录的 cwd，会话目录搬进目标分桶并登记在册。没有 cwd 的会话不在这里（header 里没有 cwd 可改写），"未登记在册的会话"与"搬迁会话产物"两个开关因此也不适用。',
+    '来源是「未分组」：注册表没认领、且有 cwd 的那批会话，可以横跨多个目录，一次全部收进目标工作区。它们的 header 会写上目标目录的 cwd，会话目录搬进目标项目目录并登记在册。没有 cwd 的会话不在这里（header 里没有 cwd 可改写），"未登记在册的会话"与"搬迁会话产物"两个开关因此也不适用。',
   pickTarget: '选择目标目录…',
   browse: '浏览…',
   typePath: '手输路径',
@@ -107,7 +107,7 @@ export const zh = {
   includeArtifacts: '同时搬迁会话创建过的文件（要全量解码，较慢）',
   includeUnowned: '连同未登记在册的会话',
   sourceSessions: '源目录下匹配到 {count} 条会话',
-  sourceSessionsNone: '库里没有 cwd 等于源目录的会话（迁移仍按源分桶里的实际内容进行）',
+  sourceSessionsNone: '库里没有 cwd 等于源目录的会话（迁移仍按源项目目录里的实际内容进行）',
   pickScopeLabel: '迁移范围',
   allSessions: '全部',
   pickSubsetLabel: '只选其中几条',
@@ -122,8 +122,8 @@ export const zh = {
   migrateApply: '确认迁移',
   migrating: '迁移中…',
   migrateSummary: '将迁移 {sessions} 条会话（{files} 个日志，{bytes}）',
-  migrateBuckets: '分桶：{from} → {to}',
-  migrateBucketsUnowned: '未分组横跨 {buckets} 个源分桶 → {to}',
+  migrateProjectDirs: '项目目录：{from} → {to}',
+  migrateProjectDirsUnowned: '未分组横跨 {projectDirs} 个源项目目录 → {to}',
   registryChangeTitle: '注册表变更',
   registryCreateTarget: '登记目标工作区（新建）',
   registryReuseTarget: '登记到已有工作区',
@@ -216,13 +216,13 @@ export const en: Record<keyof typeof zh, string> = {
 
   migrateTitle: 'Migrate sessions',
   migrateHint:
-    'Move sessions from one source to another directory (the source is a workspace directory, or the unclaimed sessions under Ungrouped): rewrite each log header cwd (first frame only, the rest stays byte-identical), move the session directories into the target bucket, and re-home the workspace ledger. Move the whole source at once, or only a few of them — preview first, then confirm.',
+    'Move sessions from one source to another directory (the source is a workspace directory, or the unclaimed sessions under Ungrouped): rewrite each log header cwd (first frame only, the rest stays byte-identical), move the session directories into the target project directory, and re-home the workspace registry. Move the whole source at once, or only a few of them — preview first, then confirm.',
   fromLabel: 'Source directory',
   toLabel: 'Target directory',
   pickSource: 'Choose a source directory…',
   ungroupedSource: 'Ungrouped',
   unownedSourceHint:
-    'The source is Ungrouped: sessions no workspace claims that still have a cwd, possibly spread over several directories — adopt them into the target workspace in one go. Their headers get the target cwd, their directories move into the target bucket, and they get registered. Sessions without a cwd are not listed here (there is no cwd in their header to rewrite), so the "include unregistered sessions" and "move session artifacts" switches do not apply.',
+    'The source is Ungrouped: sessions no workspace claims that still have a cwd, possibly spread over several directories — adopt them into the target workspace in one go. Their headers get the target cwd, their directories move into the target project directory, and they get registered. Sessions without a cwd are not listed here (there is no cwd in their header to rewrite), so the "include unregistered sessions" and "move session artifacts" switches do not apply.',
   pickTarget: 'Choose a target directory…',
   browse: 'Browse…',
   typePath: 'Type a path',
@@ -245,7 +245,7 @@ export const en: Record<keyof typeof zh, string> = {
   includeUnowned: 'Include sessions registered in no workspace',
   sourceSessions: '{count} sessions in the library match the source directory',
   sourceSessionsNone:
-    'No session in the library has this cwd (the migration still works from the source bucket’s actual contents)',
+    'No session in the library has this cwd (the migration still works from the source project directory’s actual contents)',
   pickScopeLabel: 'Scope',
   allSessions: 'All',
   pickSubsetLabel: 'Only the ticked ones',
@@ -260,8 +260,8 @@ export const en: Record<keyof typeof zh, string> = {
   migrateApply: 'Migrate now',
   migrating: 'Migrating…',
   migrateSummary: '{sessions} sessions to migrate ({files} logs, {bytes})',
-  migrateBuckets: 'Buckets: {from} → {to}',
-  migrateBucketsUnowned: 'Ungrouped spans {buckets} source buckets → {to}',
+  migrateProjectDirs: 'Project directory: {from} → {to}',
+  migrateProjectDirsUnowned: 'Ungrouped spans {projectDirs} source project directories → {to}',
   registryChangeTitle: 'Ledger change',
   registryCreateTarget: 'Register the target workspace (new)',
   registryReuseTarget: 'Register into an existing workspace',
@@ -269,21 +269,21 @@ export const en: Record<keyof typeof zh, string> = {
   registryAdopted: '{count} adopted from unowned sessions',
   registryMoved: 'moved out of {count} workspaces',
   registryRemoved: '{count} emptied workspaces removed',
-  registryUnchanged: 'No ledger change needed',
+  registryUnchanged: 'No registry change needed',
   artifactsPlanned: '{count} artifacts to move',
   artifactsSkipped: '{count} artifacts skipped',
   migrateDone: 'Migrated {sessions} sessions: {rewritten} logs rewritten, {moved} directories moved{artifacts}.',
   migrateArtifactsPart: ', {count} artifacts moved',
   verifiedPass: 'verification passed',
   verifiedFail: 'verification FAILED',
-  effectImmediate: 'The host took the ledger change directly; no restart needed.',
+  effectImmediate: 'The host took the registry change directly; no restart needed.',
   effectRestart:
-    'The ledger is on disk, but the host keeps an in-memory copy: restart DSH for it to take effect. Do not add sessions to the old workspace before that.',
+    'The registry is on disk, but the host keeps an in-memory copy: restart DSH for it to take effect. Do not add sessions to the old workspace before that.',
   problemsTitle: 'Problems',
 
   backupTitle: 'Backups & rollback',
   backupHint:
-    'Every migration takes a byte-level backup first. Rollback uses it to restore the session directories, the original log bytes and the workspace ledger together.',
+    'Every migration takes a byte-level backup first. Rollback uses it to restore the session directories, the original log bytes and the workspace registry together.',
   backupRootLabel: 'Backup root',
   noBackups: 'No backups yet.',
   backupRow: '{sessions} sessions · {artifacts} artifacts',
@@ -292,7 +292,7 @@ export const en: Record<keyof typeof zh, string> = {
   rollbackConfirm: 'Confirm rollback',
   rollingBack: 'Rolling back…',
   rollbackActions: '{count} steps this rollback would take (nothing written yet):',
-  rollbackDone: 'Rolled back {sessions} sessions, restored {files} files and the workspace ledger.',
+  rollbackDone: 'Rolled back {sessions} sessions, restored {files} files and the workspace registry.',
   cancel: 'Cancel',
 
   failed: 'Failed: {reason}',

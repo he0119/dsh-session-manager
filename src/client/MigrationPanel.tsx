@@ -203,24 +203,24 @@ export function MigrationPanel({ t = fallback, state, reload, directory }: Panel
     void loadBackups()
   }, [loadBackups])
 
-  // 库里能按 cwd 匹配到的会话——只是给用户一个勾选面；真正迁移哪些由宿主按源分桶算。
-  // 「未分组」来源不是按 cwd 匹配，而是"账本没认领、且有 cwd"的那一批（可以横跨多个目录），
+  // 库里能按 cwd 匹配到的会话——只是给用户一个勾选面；真正迁移哪些由宿主按源项目目录算。
+  // 「未分组」来源不是按 cwd 匹配，而是"注册表没认领、且有 cwd"的那一批（可以横跨多个目录），
   // 判据与宿主侧完全同一条（见 planRows.unownedSessions）。
   const matching = React.useMemo(() => migrationMatching(sessions, from), [sessions, from])
 
   /** 当前来源是不是那个跨目录的「未分组」。 */
   const unownedSource = from === UNOWNED_SOURCE
 
-  // 源目录候选 = 已登记工作区 **+ 库里真有会话的目录**（账本里未必有它：未登记，或记的是旧路径）
+  // 源目录候选 = 已登记工作区 **+ 库里真有会话的目录**（注册表里未必有它：未登记，或记的是旧路径）
   // **+「未分组」**（库里有这类会话时才出现，排在最后：它不是目录，别混进目录堆里）。
   // "只迁其中几条"的第一步是先看见这些会话在哪个目录下，所以每个候选都报**库里的条数**——
-  // 账本的登记条数会骗人：同一个目录下可能还有没登记在册的会话（那些默认也会被一起搬走）。
+  // 注册表的登记条数会骗人：同一个目录下可能还有没登记在册的会话（那些默认也会被一起搬走）。
   const sourceOptions = React.useMemo(() => migrationSourceRows(sessions, workspaces, t), [sessions, workspaces, t])
 
   /**
    * 下拉框里实际列出来的行 = 上面的候选 **+ 当前值本身**。
    *
-   * 补这一行是为了让"框里显示的"永远是"真正要用的"：值可能是「浏览…」选回来的、账本和会话都没
+   * 补这一行是为了让"框里显示的"永远是"真正要用的"：值可能是「浏览…」选回来的、注册表和会话都没
    * 覆盖到的目录（比如刚建的空目录），没有这一行下拉框就只能显示占位符，看着像没选中。
    *
    * 哨兵值（「未分组」）不补：它的行由候选自己给出（带文案），补一个只有哨兵值的行等于把内部的
@@ -270,8 +270,8 @@ export function MigrationPanel({ t = fallback, state, reload, directory }: Panel
   })
 
   /**
-   * 落一条路径到某个字段：去掉结尾斜杠后当成值（`cwd` 与账本里的路径都不带结尾斜杠，
-   * 留着 `/a/b/` 会凭空多出一个迁不到任何会话的桶）。
+   * 落一条路径到某个字段：去掉结尾斜杠后当成值（`cwd` 与注册表里的路径都不带结尾斜杠，
+   * 留着 `/a/b/` 会凭空多出一个迁不到任何会话的项目目录）。
    */
   const applyPath = (which: 'from' | 'to', raw: string): void => {
     const path = normalizePickedPath(raw)
@@ -611,8 +611,8 @@ export function MigrationPanel({ t = fallback, state, reload, directory }: Panel
             </p>
             <p className="dsm-hint">
               {preview.unowned
-                ? t('migrateBucketsUnowned', { buckets: preview.sourceBuckets.length, to: preview.targetBucket })
-                : t('migrateBuckets', { from: preview.sourceBucket, to: preview.targetBucket })}
+                ? t('migrateProjectDirsUnowned', { projectDirs: preview.sourceProjectDirs.length, to: preview.targetProjectDir })
+                : t('migrateProjectDirs', { from: preview.sourceProjectDir, to: preview.targetProjectDir })}
             </p>
 
             {preview.problems.length > 0 && (

@@ -7,7 +7,7 @@
  * `ImportEntry`）：按设计，跳过的行没有 `toCwd`，包里没有 cwd 的会话也没有。原来那一格只判断
  * `toCwd === undefined`，于是把跳过的行显示成「保持无 cwd（落 _no-cwd）」——那些会话明明有 cwd
  * （比如 `/home/uy_sun/dev/dsh-aperture`），而且它们根本不会被写盘。用户看到的是"我的会话要被丢进
- * 无 cwd 桶了"，这是把"什么都不会发生"说成了"会发生一件坏事"。
+ * 无 cwd 项目目录了"，这是把"什么都不会发生"说成了"会发生一件坏事"。
  *
  * 二、一行的"名字"该是标题还是 id（`sessionLabel`）：以前到处显示 `session-9f3c…`，用户认不出是哪条。
  *
@@ -100,12 +100,12 @@ export const UNOWNED_SOURCE = '@unowned'
 export interface SourceSubject {
   /** 会话日志 header 里的 cwd；没有 cwd 的老会话缺省。 */
   readonly cwd?: string
-  /** 宿主按账本成员表填的归属；缺省 = 谁都没认领（见 docs/internals.md 的「未分组」）。 */
+  /** 宿主按注册表成员表填的归属；缺省 = 谁都没认领（见 docs/internals.md 的「未分组」）。 */
   readonly workspaceId?: string
 }
 
 /**
- * 「未分组」来源覆盖的会话：**账本没认领、且有 cwd** 的那些（可以横跨多个目录）。
+ * 「未分组」来源覆盖的会话：**注册表没认领、且有 cwd** 的那些（可以横跨多个目录）。
  *
  * 为什么把"没有 cwd"的排除在外：迁移要改写 header 里的 cwd，而 `relocateHeaderCwd()` 明确拒绝
  * 一个没有 cwd 的 header（换来的是"绝不凭空造一个 cwd"）。这类会话不是这个来源能搬的东西，
@@ -123,7 +123,7 @@ export function unownedSessions<T extends SourceSubject>(sessions: readonly T[])
 export interface PathRow {
   /** 值（也是 React 的 key）：目录路径，或者 UNOWNED_SOURCE。 */
   path: string
-  /** 已登记工作区才有标题（账本里的名字）。 */
+  /** 已登记工作区才有标题（注册表里的名字）。 */
   title?: string
   /** 库里这个来源下的会话条数。 */
   count?: number
@@ -142,10 +142,10 @@ export function optionLabel(row: PathRow, t: Translate): string {
 }
 
 /**
- * 迁移页的源候选：已登记工作区（账本顺序在前）+ 库里真有会话的目录（按路径排序）+
+ * 迁移页的源候选：已登记工作区（注册表顺序在前）+ 库里真有会话的目录（按路径排序）+
  * 「未分组」（库里有这类会话时才出现，排在最后——它不是一个目录，位置上也别混进目录堆里）。
  *
- * 每个候选都报**库里的条数**：账本的登记条数会骗人，同一个目录下可能还有没登记在册的会话
+ * 每个候选都报**库里的条数**：注册表的登记条数会骗人，同一个目录下可能还有没登记在册的会话
  * （那些默认也会被一起搬走），而用户得先看见会话在哪儿。
  *
  * @param sessions 会话库里的全部会话。

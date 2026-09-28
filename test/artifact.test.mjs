@@ -193,8 +193,8 @@ test('产物冒烟：plan 在真实工作区上只读可用', { skip: realDataSk
     // 这条同时钉住"可选服务探测"：effectMode 走 ctx.get，在真实 fiber 上不抛。
     assert.equal(res.takesEffect, 'restart-required')
 
-    // 只读的证据：计划声明的目标桶不该被创建（桶名由计划自己算出，不硬编码）。
-    assert.equal(existsSync(res.targetBucket), false, 'plan 是只读的，不应创建目标桶')
+    // 只读的证据：计划声明的目标项目目录不该被创建（项目目录名由计划自己算出，不硬编码）。
+    assert.equal(existsSync(res.targetProjectDir), false, 'plan 是只读的，不应创建目标项目目录')
   } finally {
     await dispose()
     rmSync(target, { recursive: true, force: true })
