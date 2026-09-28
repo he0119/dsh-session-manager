@@ -1,0 +1,33 @@
+# GitHub 自动生成 Release 日志时的分组规则：publish.yml 里那句 `gh release create --generate-notes`
+# 就是按本文件分节的。
+#
+# 只认 label 与作者，**没有**「按约定式提交分组」这回事——`labels` 里的 `*` 是兜底，不是通配符
+# （GitHub 文档：Use `*` as a catch-all），所以其余每一条都必须是**精确**的标签名。
+# 标签由 .github/workflows/autolabeler.yml 按 PR 标题自动补上，不需要手动打。
+#
+# 匹配是**按顺序**做的、第一个命中即止，因此兜底的「其它改动」必须放最后。
+# 带 ! 的提交会同时命中 breaking-change 与 enhancement/bug，靠这里的顺序让它落进第一节。
+changelog:
+  categories:
+    - title: 💥 破坏性变更
+      labels:
+        - breaking-change
+    - title: ⬆️ 依赖更新
+      labels:
+        - dependencies
+    - title: ✨ 新功能
+      labels:
+        - enhancement
+    - title: 🐛 修复
+      labels:
+        - bug
+    - title: 📖 文档
+      labels:
+        - documentation
+    - title: 🧰 维护
+      labels:
+        - chore
+    # 兜底：收下前面都没命中的 PR。
+    - title: 🧰 其它改动
+      labels:
+        - '*'
