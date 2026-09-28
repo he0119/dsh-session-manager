@@ -41,7 +41,8 @@ type PanelKey = 'transfer' | 'migrate' | 'manage'
 /** 会话管理页。 */
 export function ManagerPanel({ t = fallback, directory }: ManagerPanelProps): React.ReactElement {
   const [state, setState] = React.useState<StateResponse | null>(null)
-  const [panel, setPanel] = React.useState<PanelKey>('transfer')
+  // 默认停在第一个页签（「会话」）：它是这一页的日常视图，另外两页是偶发动作。
+  const [panel, setPanel] = React.useState<PanelKey>('manage')
   const [busy, setBusy] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
 
@@ -94,15 +95,19 @@ export function ManagerPanel({ t = fallback, directory }: ManagerPanelProps): Re
         </p>
       )}
 
+      {/*
+        页签顺序：日常的「会话」在最前、「传输」在最后。顺序与页签、页面本体两处都跟着走对齐，
+        默认页就是第一个（见上面 useState 的初值）。
+      */}
       <div className="dsm-tabs" role="tablist">
         <button
           type="button"
           role="tab"
           className="dsm-tab"
-          aria-selected={panel === 'transfer'}
-          onClick={() => setPanel('transfer')}
+          aria-selected={panel === 'manage'}
+          onClick={() => setPanel('manage')}
         >
-          {t('tabTransfer')}
+          {t('tabManage')}
         </button>
         <button
           type="button"
@@ -117,16 +122,16 @@ export function ManagerPanel({ t = fallback, directory }: ManagerPanelProps): Re
           type="button"
           role="tab"
           className="dsm-tab"
-          aria-selected={panel === 'manage'}
-          onClick={() => setPanel('manage')}
+          aria-selected={panel === 'transfer'}
+          onClick={() => setPanel('transfer')}
         >
-          {t('tabManage')}
+          {t('tabTransfer')}
         </button>
       </div>
 
-      {panel === 'transfer' && <TransferPanel t={t} state={state} reload={load} />}
-      {panel === 'migrate' && <MigrationPanel t={t} state={state} reload={load} directory={directory} />}
       {panel === 'manage' && <ManagePanel t={t} state={state} reload={load} />}
+      {panel === 'migrate' && <MigrationPanel t={t} state={state} reload={load} directory={directory} />}
+      {panel === 'transfer' && <TransferPanel t={t} state={state} reload={load} />}
     </section>
   )
 }

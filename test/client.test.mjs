@@ -63,9 +63,9 @@ function fakeReact(recorded = [], firstNull = undefined, panel = undefined, arra
         seeded = true
         return [firstNull, () => {}]
       }
-      // 页内分页的状态：假钩子不会点页签，于是「迁移」那一页的 JSX 在冒烟里一次都跑不到。
-      // 只替换**第一个** `useState('transfer')`（骨架里那个），其余字符串状态照旧。
-      if (!seededPanel && value === 'transfer' && panel !== undefined) {
+      // 页内分页的状态：假钩子不会点页签，于是除默认那一页之外的 JSX 在冒烟里一次都跑不到。
+      // 只替换**第一个** `useState('manage')`（骨架里那个，默认页就是它），其余字符串状态照旧。
+      if (!seededPanel && value === 'manage' && panel !== undefined) {
         seededPanel = true
         return [panel, () => {}]
       }
@@ -374,8 +374,8 @@ test('客户端产物：导航行的文案跟着语言走（同一个 thunk 每�
   assert.equal(label(), 'Session management')
 })
 
-test('客户端产物：页面骨架带着三个页内分页（传输 / 迁移 / 会话）', { skip }, () => {
-  const { registrations } = mount()
+test('客户端产物：页面骨架带着三个页内分页（会话 / 迁移 / 传输）', { skip }, () => {
+  const { registrations, recorded } = mount()
   const { component } = registrations[0]
   const { inject } = registrations[0].registration
   // 用注入面给的 t（键回显）渲染，于是文案就等于字典键，断言不依赖任何一种语言。
@@ -384,13 +384,25 @@ test('客户端产物：页面骨架带着三个页内分页（传输 / 迁移 /
   assert.ok(text.includes('tabTransfer'), '页内要有「传输」这一页')
   assert.ok(text.includes('tabMigrate'), '页内要有「迁移」这一页')
   assert.ok(text.includes('tabManage'), '页内要有「会话」这一页（逐条归档 / 删除）')
+  // 页签顺序：日常的「会话」在最前、「传输」在最后；默认停在第一个（这一页的日常视图）
+  const tabs = recorded.filter((node) => String(node.props?.className) === 'dsm-tab')
+  assert.deepEqual(
+    tabs.map((node) => strings(node)[0]),
+    ['tabManage', 'tabMigrate', 'tabTransfer'],
+    '顺序是 会话 → 迁移 → 传输',
+  )
+  assert.deepEqual(
+    tabs.map((node) => node.props['aria-selected']),
+    [true, false, false],
+    '默认停在第一个页签',
+  )
   assert.ok(text.includes('title'), '页面标题走同一份字典')
 })
 
 test('客户端产物：页头是页面级标题（h2 + 说明行），不是卡片式的小标题', { skip }, () => {
   // 真实事故（用户报的）：这一页标题曾是 14px 的 `span`，跟内建设置页（`h2` 18px + 13px 说明行）
   // 摆在一起就是两种规格。结构层面的差别得在产物里钉住，不然改样式时很容易又退回 span。
-  const { registrations } = mount()
+  const { registrations, recorded } = mount()
   const { component } = registrations[0]
   const { inject } = registrations[0].registration
   const tree = elements(component(inject()))
@@ -413,7 +425,7 @@ test('客户端产物：页头是页面级标题（h2 + 说明行），不是卡
 })
 
 test('客户端产物：页面组件在初始状态下能渲染成元素（不抛）', { skip }, () => {
-  const { registrations } = mount()
+  const { registrations, recorded } = mount()
   const { component } = registrations[0]
   const { inject } = registrations[0].registration
   // 假 react 的钩子返回初始值，因此走的是「还没读到数据」那一支渲染；
@@ -482,7 +494,7 @@ test('客户端产物：导出列表按目录分组，组头就是"整组勾选"
     ],
     workspaces: [{ id: 'w1', path: '/home/u/dev/alpha', title: '工作区甲', sessionIds: ['s-1'] }],
   }
-  const { registrations, recorded } = mount({ state })
+  const { registrations, recorded } = mount({ state, panel: 'transfer' })
   const { component, registration } = registrations[0]
   // 假钩子不会真的 setState，所以这里只验证**结构**：分组、组名、组头的调用面。
   // 勾选的增删逻辑在 test/groups.test.ts，靠这里的假钩子点不出来。
@@ -807,7 +819,7 @@ test('客户端产物：导出页也接了同一套筛选条，筛空的组整�
     workspaces: [{ id: 'w1', path: '/home/u/dev/alpha', title: '工作区甲', sessionIds: ['a-1'] }],
   }
   // 勾选集是第一个空数组，筛选条是第二个（TransferPanel 里 useSessionFilter 挨着 sessions 定义）
-  const { registrations, recorded } = mount({ state, arrays: [[], ['blank']] })
+  const { registrations, recorded } = mount({ state, panel: 'transfer', arrays: [[], ['blank']] })
   const { component, registration } = registrations[0]
   const text = strings(component(registration.inject()))
 
@@ -934,7 +946,7 @@ test('客户端产物：组头的折叠只影响画不画行，不影响"列出�
   const key = (path) => (path === '' ? '\u0000no-cwd' : path)
 
   // 筛「空白」之后列出来的是 a-1 与 b-1（两个组），收起 alpha 那一组
-  const one = mount({ state, arrays: [[], ['blank'], [key(alpha)]] })
+  const one = mount({ state, panel: 'transfer', arrays: [[], ['blank'], [key(alpha)]] })
   const oneText = strings(one.registrations[0].component(one.registrations[0].registration.inject()))
   const oneRows = one.recorded.filter((node) => typeof node.type === 'function' && node.type.name === 'SessionRow')
   assert.deepEqual(oneRows.map((node) => node.props.session.id), ['b-1'], '收起的那一组不画行')
@@ -994,7 +1006,7 @@ test('客户端产物：组头的折叠只影响画不画行，不影响"列出�
   assert.deepEqual(disabled(one.recorded), [false, false], '收了一组、另一组还开着：两个按钮都能用')
 
   // 一组都没收：全部展开没什么可做
-  const none = mount({ state, arrays: [[], ['blank'], []] })
+  const none = mount({ state, panel: 'transfer', arrays: [[], ['blank'], []] })
   // 一定要走一遍 strings()：只调 component() 只渲染骨架那 12 个元素，页面里的东西一个都不会建出来
   strings(none.registrations[0].component(none.registrations[0].registration.inject()))
   assert.deepEqual(disabled(none.recorded), [false, true], '都没收：全部收起能用、全部展开置灰')
@@ -1005,7 +1017,7 @@ test('客户端产物：组头的折叠只影响画不画行，不影响"列出�
   )
 
   // 两组都收着：全部收起没什么可做，行一条都不画，但"列出来了哪些"仍是 2 条
-  const all = mount({ state, arrays: [[], ['blank'], [key(alpha), key(beta)]] })
+  const all = mount({ state, panel: 'transfer', arrays: [[], ['blank'], [key(alpha), key(beta)]] })
   const allText = strings(all.registrations[0].component(all.registrations[0].registration.inject()))
   assert.deepEqual(disabled(all.recorded), [true, false], '都收着：全部收起置灰、全部展开能用')
   assert.equal(
@@ -1027,7 +1039,7 @@ test('客户端产物：一个组都没有时不摆折叠工具栏', { skip }, (
     workspaces: [],
   }
   // 筛「子代理」（一条都没有）→ 组一个都不剩，收无可收
-  const { registrations, recorded } = mount({ state, arrays: [[], ['subagent'], []] })
+  const { registrations, recorded } = mount({ state, panel: 'transfer', arrays: [[], ['subagent'], []] })
   strings(registrations[0].component(registrations[0].registration.inject()))
   assert.equal(recorded.filter((node) => String(node.props?.className) === 'dsm-groupTools').length, 0)
   assert.ok(
