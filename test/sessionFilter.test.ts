@@ -25,9 +25,8 @@ import {
 const s = (id: string, extra: Partial<SessionFacts> = {}): SessionFacts => ({ id, ...extra })
 
 test('五类判据：各自只看自己那个字段，缺省一律为假', () => {
-  // "什么都不算"的样本得在册：不然它天然命中「未分组」（判据就是 workspaceId 缺省）
-  const owned = s('a', { workspaceId: 'ws-1' })
-  for (const key of FILTER_KEYS as readonly FilterKey[]) assert.equal(matchesFilter(owned, key), false, `${key} 不该命中一条普通会话`)
+  const ordinary = s('a')
+  for (const key of FILTER_KEYS as readonly FilterKey[]) assert.equal(matchesFilter(ordinary, key), false, `${key} 不该命中一条普通会话`)
 
   assert.equal(matchesFilter(s('a', { origin: 'subagent' }), 'subagent'), true)
   // 只有 header 里真是 subagent 才算：别的 origin 值（宿主以后可能加）不算
@@ -36,20 +35,25 @@ test('五类判据：各自只看自己那个字段，缺省一律为假', () =>
   assert.equal(matchesFilter(s('a', { blank: false }), 'blank'), false)
   assert.equal(matchesFilter(s('a', { archived: true }), 'archived'), true)
   assert.equal(matchesFilter(s('a', { live: true }), 'live'), true)
-  // 「未分组」= 注册表没认领：有 workspaceId 就不算，缺省才算
-  assert.equal(matchesFilter(s('a'), 'unowned'), true)
-  assert.equal(matchesFilter(s('a', { workspaceId: 'ws-1' }), 'unowned'), false)
+  // 「未分组」读的是宿主算好的结论（侧边栏那一组），不是任何原始事实的组合：
+  // 缺省＝不在那一组里；只有宿主说在才算。
+  assert.equal(matchesFilter(s('a'), 'unowned'), false)
+  assert.equal(matchesFilter(s('a', { ungrouped: true }), 'unowned'), true)
+  // 子代理即使没在册也不是「未分组」——侧边栏把它嵌在父会话下面，从来不放进那一组。
+  // 这条以前是反的（只看"有没有工作区认领"），所以钉在这里。
+  assert.equal(matchesFilter(s('a', { origin: 'subagent', ungrouped: false }), 'unowned'), false)
+  assert.equal(matchesFilter(s('a', { origin: 'subagent', ungrouped: false }), 'subagent'), true)
   // hasAttribute 只认那四类属性键
   assert.equal(hasAttribute(s('a', { archived: true }), 'archived'), true)
 })
 
 test('筛选：一枚都不勾＝全都要；勾了几枚＝任一命中', () => {
   const list = [
-    s('plain'),
+    s('plain', { ungrouped: true }),
     s('sub', { origin: 'subagent' }),
     s('blank', { blank: true }),
     s('both', { blank: true, archived: true }),
-    s('owned', { workspaceId: 'ws-1' }),
+    s('owned'),
   ]
   assert.deepEqual(filterSessions(list, []).map((x) => x.id), ['plain', 'sub', 'blank', 'both', 'owned'])
   assert.deepEqual(filterSessions(list, ['subagent']).map((x) => x.id), ['sub'])
@@ -58,7 +62,8 @@ test('筛选：一枚都不勾＝全都要；勾了几枚＝任一命中', () =>
   assert.deepEqual(filterSessions(list, ['archived']).map((x) => x.id), ['both'])
   // 多选＝任一命中：勾上两类就是把这两类都摆出来
   assert.deepEqual(filterSessions(list, ['subagent', 'archived']).map((x) => x.id), ['sub', 'both'])
-  assert.deepEqual(filterSessions(list, ['unowned']).map((x) => x.id), ['plain', 'sub', 'blank', 'both'])
+  // 「未分组」只筛出侧边栏那一组里的：`plain` 是，别的都不是（它们各自有别的标签可筛）
+  assert.deepEqual(filterSessions(list, ['unowned']).map((x) => x.id), ['plain'])
   // 原列表不受影响（纯函数）
   assert.equal(list.length, 5)
 })
@@ -83,12 +88,14 @@ test('行上的标签：能挂几枚挂几枚，顺序固定；「未分组」�
 
 test('每一类各有多少条：对整个库数，且一条会话可以同时算进几类', () => {
   const list = [
-    s('plain'),
+    s('plain', { ungrouped: true }),
     s('sub', { origin: 'subagent' }),
     s('both', { blank: true, archived: true, live: true }),
-    s('owned', { workspaceId: 'ws-1', archived: true }),
+    s('owned', { archived: true }),
+    s('stray', { ungrouped: true, archived: true }),
   ]
-  assert.deepEqual(filterCounts(list), { subagent: 1, blank: 1, archived: 2, unowned: 3, live: 1 })
+  // 「未分组」只有 2 条（`plain` 与 `stray`）：`sub`（子代理）与 `both`（空白+已归档）都不在侧边栏那一组里
+  assert.deepEqual(filterCounts(list), { subagent: 1, blank: 1, archived: 3, unowned: 2, live: 1 })
   assert.deepEqual(filterCounts([]), { subagent: 0, blank: 0, archived: 0, unowned: 0, live: 0 })
 })
 

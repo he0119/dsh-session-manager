@@ -137,7 +137,7 @@ tsconfig.client.json Web Client 自己的类型工程（DOM + JSX；Host 那份�
 | `src/discovery.ts` | 项目目录扫描 + 只解首帧读 header（发现阶段快），可注入标题读取器 | 无 |
 | `src/projection-cache.ts` | 读宿主投影缓存的单条记录（标题、`blank` 等列表元数据） | 无 |
 | `src/session-title.ts` | 会话标题：宿主投影缓存优先，缺席时有界地解日志开头 | 无 |
-| `src/visibility.ts` | 侧边栏可见性：子代理 / 空白 / 已归档三条判据（候选与界面共用一份） | 无 |
+| `src/visibility.ts` | 侧边栏可见性与「未分组」判据：子代理 / 空白 / 已归档三条理由（候选与界面共用一份）、`isUngrouped()`＝没认领 **且** 会显示 | 无 |
 | `src/family.ts` | **族**的展开（点名一条会话 → 它自己 + 全部子代理后代），删除与迁移共用 | 无 |
 | `src/plan.ts` | 只读计划：目标推导、阻塞问题、注册表变更（候选只取侧边栏看得见的，选中后再向下展开整族） | 无 |
 | `src/journal.ts` | 字节级备份清单与回滚（迁移与删除两种来源） | 无 |

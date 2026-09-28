@@ -118,7 +118,8 @@ export interface RelocationPlan {
   sourceProjectDir: string
   targetProjectDir: string
   /**
-   * 源是"注册表没认领且有 cwd 的会话"（外壳侧边栏那个「未分组」），而不是某个目录。
+   * 源是"外壳侧边栏那个「未分组」里有 cwd 的会话"（判据见 visibility.ts 的 `isUngrouped()`），
+   * 而不是某个目录。
    *
    * 这一条决定了执行阶段怎么清理源项目目录（按每条会话自己的项目目录，见 execute.ts 第 5 步）与
    * 产物搬迁能不能做（跨目录时拒绝，见 plan.ts 的说明）。

@@ -61,9 +61,9 @@ one-line bump at that point.
 - The list is **grouped by directory** with foldable headers (**Collapse all / Expand all** sit above the
   list), and clicking a header toggles that whole group — so
   "archive every session of this old project" is one click. A header carries the workspace title and path,
-  so rows no longer repeat the owner; that width goes to the title instead, and a session no workspace
-  record claims carries a small "Ungrouped" tag (the header is the directory, the tag says the registry
-  does not know this row). Every row shows the title, the byte count and the creation time. Sessions the
+  so rows no longer repeat the owner; that width goes to the title instead, and a session sitting in the
+  shell sidebar's Ungrouped group carries a small "Ungrouped" tag (the header is the directory, the tag says
+  where the shell puts the row). Every row shows the title, the byte count and the creation time. Sessions the
   host sidebar cannot show **are listed here** (the sidebar cannot reach them), each carrying a tag saying
   why: `subagent` / `blank` / `archived`, plus `active` for a session still live in host memory;
 - **Filter**: a row of small chips — subagent / blank / archived / ungrouped / active, each with the
@@ -94,16 +94,16 @@ one-line bump at that point.
   **plus Ungrouped**, so no path has to be typed from memory. A path outside the candidates goes in through
   **Browse…** or **Type a path**: on the desktop **Browse…** opens the OS directory dialog, in the browser it
   expands an in-page directory browser, and on a host with no picker the button is simply not shown;
-- **the source can also be Ungrouped**: the sessions no workspace claims that still have a `cwd` (the ones
-  the shell sidebar parks under Ungrouped), possibly spread over several directories — adopt them all into
-  the target workspace in one go. It is the only source that spans directories, because "those two
+- **the source can also be Ungrouped**: the sessions with a `cwd` that the shell sidebar parks in its
+  Ungrouped group, possibly spread over several directories — adopt them all into the target workspace in
+  one go. It is the only source that spans directories, because "those two
   unclaimed sessions across two directories" really is one thing. The "carry ungrouped sessions" and
   "move session artifacts" switches do not apply there (the page says so instead of showing switches that
   do nothing);
 - the target directory must already exist; there is also an optional title for a newly created workspace,
   whether to carry the **files the sessions created**, and whether to carry ungrouped sessions;
 - **move the whole source, or only some of it**: the sessions of the source are listed
-  (titles too, ids on hover; under a directory source the unclaimed rows carry an "Ungrouped" tag), with a
+  (titles too, ids on hover; under a directory source the Ungrouped rows carry an "Ungrouped" tag), with a
   **title / id search box** above them to narrow the list, and ticking any row switches to "only the ticked
   ones"; one source per run. This page gets no category chips: its candidates already exclude everything
   the sidebar cannot show, so those categories would always read 0 here — showing them would only look
@@ -150,9 +150,8 @@ directories back — deleting never touched the registry.
   the list carries **Collapse all / Expand all**: folding is a display matter, so "Select whole library"
   still counts what is listed — clicking an arrow never quietly drops sessions from the export. The two levels never read alike: a group header is a tinted
   band with a folder glyph, while session rows are indented under it and carry a chat-bubble glyph (a session
-  title is a sentence the user wrote, so it easily looks like a directory name). Sessions no workspace record
-  claims — the ones the shell sidebar parks under Ungrouped — stay with their directory here and carry a small
-  "Ungrouped" tag saying so.
+  title is a sentence the user wrote, so it easily looks like a directory name). Sessions in the shell
+  sidebar's Ungrouped group stay with their directory here and carry a small "Ungrouped" tag saying so.
 - **Filter**: the same set as the **Sessions** tab — a row of small chips (subagent / blank / archived /
   ungrouped / active, each with the count in the library, multiple = either, **All** clears them) plus a
   **title / id search box**; used together the two are ANDed (search foo, show blank only = blank sessions
@@ -165,10 +164,11 @@ directories back — deleting never touched the registry.
   the `_no-cwd` project directory and is not registered.
 
 **Help** — the vocabulary and the costs in one place: the category dictionary (visible / subagent / blank /
-archived / active / Ungrouped, where Ungrouped means two different things), what the three tabs do, which
-files the actions touch (backups, roll back vs restore, when the sidebar follows), where the data comes from
-(the library and the registry paths), and the common questions (why Ungrouped counts more here than in the
-sidebar, why a deleted session is still in the sidebar, why a migration asks for a restart). The action tabs
+archived / active / Ungrouped, where Ungrouped is exactly the shell sidebar's Ungrouped group: nothing claims
+it and the sidebar shows it), what the three tabs do, which files the actions touch (backups, roll back vs
+restore, when the sidebar follows), where the data comes from (the library and the registry paths), and the
+common questions (which sessions count as Ungrouped, why a deleted session is still in the sidebar, why a
+migration asks for a restart). The action tabs
 (Sessions / Migrate / Transfer) keep only the decision at hand, so each explanation there stays within two
 lines.
 

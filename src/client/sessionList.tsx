@@ -98,8 +98,9 @@ export const ATTRIBUTE_TAGS: Record<AttributeKey, { key: string; tip: string }> 
 /**
  * 「未分组」那枚标签 / 那枚芯片。
  *
- * 一个事实一个名字：外壳侧边栏里那个组、迁移页那个来源、这里这枚标签，说的都是"注册表没认领它"，
- * 所以三处都叫「未分组」（原先列表里叫「未登记在册」，同一件事两个名字）。
+ * 一个事实一个名字：外壳侧边栏里那个组、迁移页那个来源、这里这枚标签，说的都是**侧边栏那一组**
+ * （"谁都没认领它，而且默认视图下它会显示"），所以三处都叫「未分组」，判据也共用
+ * `session.ungrouped`（原先列表里叫「未登记在册」，同一件事两个名字）。
  */
 export const UNGROUPED_TAG = { key: 'ungroupedSource', tip: 'ungroupedTip' }
 
@@ -118,7 +119,7 @@ export function sessionTags(
   options: { ungrouped: boolean },
 ): Array<{ key: string; tip: string }> {
   const tags = attributeKeys(session).map((key) => ATTRIBUTE_TAGS[key])
-  if (options.ungrouped && session.workspaceId === undefined) tags.push(UNGROUPED_TAG)
+  if (options.ungrouped && session.ungrouped === true) tags.push(UNGROUPED_TAG)
   return tags
 }
 

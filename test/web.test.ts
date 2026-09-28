@@ -162,7 +162,7 @@ function deps(
   }
 }
 
-test('GET /state：列出会话与工作区，带上注册表归属', async () => {
+test('GET /state：列出会话与工作区，带上「未分组」的结论', async () => {
   const sandbox = makeSandbox('web-state')
   writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000, { title: '帮我安装到 web-dev 中' })
   writeSession(sandbox.sessionsRoot, 'session-b', CWD_B, 2000)
@@ -177,8 +177,11 @@ test('GET /state：列出会话与工作区，带上注册表归属', async () =
   assert.deepEqual(sessions.map((s) => s['id']).sort(), ['session-a', 'session-b'])
   // 新→旧
   assert.equal(sessions[0]!['id'], 'session-b')
-  assert.equal(sessions.find((s) => s['id'] === 'session-a')!['workspaceId'], 'ws-a')
-  assert.equal(sessions.find((s) => s['id'] === 'session-b')!['workspaceId'], undefined)
+  // 宿主只发结论（侧边栏会不会把它放进「未分组」），不发"有没有工作区认领"那个中间事实：
+  // session-a 在册 → 不是；session-b 谁都没认领、又看得见 → 是。
+  assert.equal(sessions.find((s) => s['id'] === 'session-a')!['ungrouped'], false)
+  assert.equal(sessions.find((s) => s['id'] === 'session-b')!['ungrouped'], true)
+  assert.equal('workspaceId' in sessions[0]!, false, '中间事实不再上线（界面一律读结论）')
   // 标题：界面靠它认会话（id 退到悬浮提示）。缓存不在时读的是日志开头那一段。
   assert.equal(sessions.find((s) => s['id'] === 'session-a')!['title'], '帮我安装到 web-dev 中')
   // 日志里没有标题事件的老会话：字段缺席，界面自己回落到 id（而不是空字符串）
@@ -189,6 +192,37 @@ test('GET /state：列出会话与工作区，带上注册表归属', async () =
   // 没注入探测函数时按"这个宿主没有目录选择器"回：界面据此不显示「浏览…」，
   // 而不是显示一个点了必被宿主以 directory-picker/unavailable 拒绝的按钮。
   assert.equal(body['pickerKind'], null)
+})
+
+test('GET /state：子代理 / 空白 / 已归档即使没在册也不是「未分组」（侧边栏从不把它们放进那一组）', async () => {
+  const sandbox = makeSandbox('web-state-ungrouped')
+  writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000)
+  writeSession(sandbox.sessionsRoot, 'session-child', CWD_A, 1001, { origin: 'subagent', parentSession: 'session-a' })
+  writeSession(sandbox.sessionsRoot, 'session-blank', CWD_A, 1002)
+  writeSession(sandbox.sessionsRoot, 'session-archived', CWD_A, 1003)
+  writeSession(sandbox.sessionsRoot, 'session-stray', CWD_B, 1004)
+  writeProjectionCache(sandbox, 'session-blank', { createdAt: 1002, cwd: CWD_A, blank: true })
+  writeRegistryAtomic(sandbox.registryPath, {
+    ...sandbox.registry,
+    global: { ...sandbox.registry.global, archivedSessionIds: ['session-archived'] },
+  })
+
+  const handlers = createApiHandlers(deps(sandbox))
+  const { res, captured } = fakeRes()
+  await handlers['GET /state']!(fakeReq('GET', `${API_PREFIX}/state`), res)
+  const sessions = (json(captured)['sessions'] ?? []) as Array<Record<string, unknown>>
+  const byId = new Map(sessions.map((s) => [String(s['id']), s]))
+
+  // 只有"谁都没认领 **且** 侧边栏会显示"的那条算「未分组」；它同时说明另外四条为什么不算。
+  assert.deepEqual(
+    sessions.filter((s) => s['ungrouped'] === true).map((s) => s['id']),
+    ['session-stray'],
+  )
+  assert.equal(byId.get('session-a')!['ungrouped'], false, '在册的不算')
+  assert.equal(byId.get('session-child')!['ungrouped'], false, '子代理嵌在父会话下面，不在那一组里')
+  assert.equal(byId.get('session-child')!['hidden'], 'subagent')
+  assert.equal(byId.get('session-blank')!['ungrouped'], false, '空白默认不显示')
+  assert.equal(byId.get('session-archived')!['ungrouped'], false, '已归档在默认归档过滤下不显示')
 })
 
 test('GET /state：标题优先读宿主投影缓存，缓存对不上身份才回落日志', async () => {

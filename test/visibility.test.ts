@@ -6,13 +6,17 @@
 //   - `hiddenReason()` 的**顺序**（宿主的顺序：先子代理、再空白、最后归档）；
 //   - 投影缓存里读到什么（`sessionListMetadata.blank`），读不到/身份对不上时按"会显示"处理；
 //   - `hiddenReasonOf()` 把 header / 注册表 / 缓存三处拼起来的那一步。
+//
+// 外加「未分组」那一条判据（`isUngrouped()`）：它是"谁都没认领 **且** 会显示"的合取，也就是宿主造
+// 「未分组」那一组时用的条件。以前插件在三个地方各答各的（只看"有没有认领"），于是子代理/空白/已归档
+// 那些侧边栏根本不放进那一组的会话也被标成了「未分组」。
 import assert from 'node:assert/strict'
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import test from 'node:test'
 
 import { readProjectionCache } from '../src/projection-cache.ts'
-import { createBlankResolver, hiddenReason, hiddenReasonOf } from '../src/visibility.ts'
+import { createBlankResolver, hiddenReason, hiddenReasonOf, isUngrouped, visibilityFacts } from '../src/visibility.ts'
 
 const SANDBOX = join(import.meta.dirname, '.sandbox', 'visibility')
 
@@ -38,6 +42,29 @@ test('hiddenReason：三条理由按宿主的顺序判，都不成立才是"会�
   assert.equal(hiddenReason({ blank: true, archived: true }), 'blank')
   // `blank` 只有明确 true 才算（undefined = 宿主没说，按会显示处理）。
   assert.equal(hiddenReason({ blank: undefined, archived: undefined }), undefined)
+})
+
+test('isUngrouped：「谁都没认领」与「侧边栏会显示」两件事同时成立才算', () => {
+  // 不成立的两半各自都要判：认领了就不算，看不见（子代理/空白/已归档）也不算。
+  assert.equal(isUngrouped({}), true, '没在册且看得见 = 侧边栏「未分组」那一组里的')
+  assert.equal(isUngrouped({ owned: false }), true)
+  assert.equal(isUngrouped({ owned: true }), false, '被某个工作区认领了就不是未分组')
+  assert.equal(isUngrouped({ origin: 'subagent' }), false, '子代理嵌在父会话下面，侧边栏不把它放进那一组')
+  assert.equal(isUngrouped({ blank: true }), false, '空白会话默认不显示（只有当前那条临时 New Session 例外，那件事插件看不到）')
+  assert.equal(isUngrouped({ archived: true }), false, '已归档在默认归档过滤下不显示')
+  assert.equal(isUngrouped({ origin: 'subagent', owned: true }), false)
+  assert.equal(isUngrouped({ blank: undefined }), true, '宿主没说空白 = 按会显示处理，与 hiddenReason 同口径')
+})
+
+test('visibilityFacts：三件事实只在一处拼（hiddenReasonOf 与 isUngrouped 读的是同一份）', () => {
+  const subject = { id: 'session-a', createdAt: 7, cwd: '/x', header: { origin: 'subagent' as const } }
+  const facts = visibilityFacts(subject, { archived: ['session-a'] })
+  assert.deepEqual(facts, { origin: 'subagent', archived: true }, '空白读取器缺席时 facts 里不带 blank')
+  assert.equal(hiddenReason(facts), 'subagent')
+  assert.equal(hiddenReasonOf(subject, { archived: ['session-a'] }), 'subagent')
+  assert.equal(isUngrouped(facts), false)
+  // 归档集两种形状（数组 / Set）都要认：界面侧给的是 Set
+  assert.equal(visibilityFacts({ id: 'x', createdAt: 1, header: {} }, { archived: new Set(['x']) }).archived, true)
 })
 
 test('readProjectionCache：读 sessionListMetadata.blank，身份对不上就不认', () => {

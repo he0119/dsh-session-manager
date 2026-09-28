@@ -1,18 +1,23 @@
 /**
  * 「会话」页的筛选判据与行上属性标签：纯函数，界面只负责渲染（同 [planRows.ts](./planRows.ts)）。
  *
- * 判据读的是 `/state` 里的**原始事实**（`origin` / `blank` / `archived` / `live` / `workspaceId`），
- * 不是"这一行显示成哪一枚标签"。两者有一处刻意的差别：`hidden` 字段只报**宿主先判的那一条**理由
- * （一条会话既是空白又已归档时，`hidden` 是 `blank`——那是侧边栏不显示它的原因），而筛选与标签问的是
- * "这条会话是什么"。所以筛选「已归档」时那条空白+已归档的会话要被筛出来，行上也要能看到「已归档」
- * 这枚标签：否则用户会看到"筛了归档，却有几行没有归档标签"。
+ * 四类属性读的是 `/state` 里的**原始事实**（`origin` / `blank` / `archived` / `live`），不是"这一行
+ * 显示成哪一枚标签"。两者有一处刻意的差别：`hidden` 字段只报**宿主先判的那一条**理由（一条会话既是
+ * 空白又已归档时，`hidden` 是 `blank`——那是侧边栏不显示它的原因），而筛选与标签问的是"这条会话是
+ * 什么"。所以筛选「已归档」时那条空白+已归档的会话要被筛出来，行上也要能看到「已归档」这枚标签：
+ * 否则用户会看到"筛了归档，却有几行没有归档标签"。
+ *
+ * 「未分组」是**唯一**读结论（`ungrouped`）而不是读原始事实的一类：它的定义就是"外壳侧边栏把它放进
+ * 了「未分组」那一组"（谁都没认领 **且** 默认视图下会显示），要自己从原始事实推就得把宿主的
+ * `sessionVisible()` 再抄一遍——以前正是这么抄错的（只看"有没有认领"，于是子代理/空白/已归档也被
+ * 算成「未分组」）。所以在宿主侧算一次（见 `src/visibility.ts` 的 `isUngrouped()`），这里只读结论。
  *
  * 五类的口径：
  *   - `subagent`：header 里的 `origin === "subagent"`（外壳把它挂在父会话下面）；
  *   - `blank`：宿主投影缓存说它一个 turn 都没开始过；
  *   - `archived`：id 在注册表的归档集里；
- *   - `unowned`：「未分组」——不在任何工作区的登记表里（`workspaceId` 缺省）；这一类的界面对照物
- *     是归属那一格，不另挂标签；
+ *   - `unowned`：「未分组」——外壳侧边栏那一组（`ungrouped`，见上）；这一类的界面对照物是归属那一
+ *     格，不另挂标签；
  *   - `live`：还活在宿主内存里（删除会被拒）。
  *
  * @module dsh-session-manager/client/sessionFilter
@@ -28,7 +33,7 @@ export interface SessionFacts {
   readonly id: string
   /** 折叠出的标题（可能没有，见 `src/session-title.ts`）：搜索时与 id 一起当关键词。 */
   readonly title?: string
-  readonly workspaceId?: string
+  readonly ungrouped?: boolean
   readonly origin?: string
   readonly blank?: boolean
   readonly archived?: boolean
@@ -60,7 +65,7 @@ export function hasAttribute(session: SessionFacts, key: AttributeKey): boolean 
 
 /** 这一条会话符不符合某一类。 */
 export function matchesFilter(session: SessionFacts, key: FilterKey): boolean {
-  if (key === 'unowned') return session.workspaceId === undefined
+  if (key === 'unowned') return session.ungrouped === true
   return hasAttribute(session, key)
 }
 

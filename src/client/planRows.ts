@@ -100,8 +100,8 @@ export const UNOWNED_SOURCE = '@unowned'
 export interface SourceSubject {
   /** 会话日志 header 里的 cwd；没有 cwd 的老会话缺省。 */
   readonly cwd?: string
-  /** 宿主按注册表成员表填的归属；缺省 = 谁都没认领（见 docs/internals.md 的「未分组」）。 */
-  readonly workspaceId?: string
+  /** 宿主算好的"侧边栏会不会把它放进「未分组」"（见 src/visibility.ts 的 `isUngrouped()`）。 */
+  readonly ungrouped?: boolean
   /**
    * 宿主报来的"外壳侧边栏不显示这条会话"的原因（`subagent` / `blank` / `archived`）；缺省 = 会显示。
    *
@@ -112,23 +112,21 @@ export interface SourceSubject {
 }
 
 /**
- * 「未分组」来源覆盖的会话：**注册表没认领、有 cwd、且外壳侧边栏会显示**的那些（可以横跨多个目录）。
+ * 「未分组」来源覆盖的会话：外壳侧边栏那一组里的那些（可以横跨多个目录）。
  *
- * 为什么把"没有 cwd"的排除在外：迁移要改写 header 里的 cwd，而 `relocateHeaderCwd()` 明确拒绝
- * 一个没有 cwd 的 header（换来的是"绝不凭空造一个 cwd"）。这类会话不是这个来源能搬的东西，
- * 所以它们既不进候选、也不算进那个来源的条数——界面上的条数与宿主预演的数字必须是同一个口径。
+ * 判据就是宿主发来的 `ungrouped`（在 `src/visibility.ts` 里算一次）——「未分组」在这个插件里只有一个
+ * 定义，行上的标签、会话页那枚芯片、这个来源读的是同一个字段，不许各自再推一遍。
  *
- * 为什么把"侧边栏不显示"的也排除在外：见 `SourceSubject.hidden`。
+ * 为什么还要**有 cwd**：迁移要改写 header 里的 cwd，而 `relocateHeaderCwd()` 明确拒绝一个没有 cwd 的
+ * header（换来的是"绝不凭空造一个 cwd"）。这类会话不是这个来源能搬的东西，所以它们既不进候选、也不算
+ * 进那个来源的条数——界面上的条数与宿主预演的数字必须是同一个口径。这是这个来源自己的**能力**限制，
+ * 与「未分组」的定义无关（侧边栏那一组里有它们）。
  *
  * @param sessions 会话库里的全部会话。
  */
 export function unownedSessions<T extends SourceSubject>(sessions: readonly T[]): T[] {
   return sessions.filter(
-    (session) =>
-      session.workspaceId === undefined &&
-      session.hidden === undefined &&
-      typeof session.cwd === 'string' &&
-      session.cwd !== '',
+    (session) => session.ungrouped === true && typeof session.cwd === 'string' && session.cwd !== '',
   )
 }
 

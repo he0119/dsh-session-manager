@@ -28,7 +28,8 @@ export interface BuildPlanOptions {
   /** 只迁移这些会话；缺省迁移源项目目录内全部。 */
   sessionIds?: string[] | null
   /**
-   * 源取"注册表没认领且有 `cwd` 的会话"（外壳侧边栏把它们挂在「未分组」下），而不是某个目录。
+   * 源取"外壳侧边栏「未分组」那一组里有 `cwd` 的会话"（判据见 `visibility.ts` 的 `isUngrouped()`），
+   * 而不是某个目录；`cwd` 那一条是这个来源自己的限制（改写 header 需要它）。
    *
    * 与 `from` 互斥：一个是目录、一个是"谁都没认领"，同时给就是两种源，谁也说不清用哪个。
    * 这一支可以横跨多个项目目录，所以每条会话的源目录各不相同（`sessions[].from`），
@@ -151,9 +152,11 @@ export function buildRelocationPlan(options: BuildPlanOptions): RelocationPlan {
   let sourceScanned: DiscoveredSession[] = []
   let discovered: DiscoveredSession[] = []
   if (unowned) {
-    // 未分组来源：整个库里"谁都没认领"的那些。没有 `cwd` 的排除在外——`relocateHeaderCwd()`
-    // 明确拒绝改写一个没有 cwd 的 header（session-log.ts），所以它们根本搬不进来；
-    // 界面上那个来源的条数与这里必须一致，于是界面也按同一条判据圈候选（planRows.unownedSessions）。
+    // 未分组来源：整个库里落在外壳侧边栏「未分组」那一组里的会话——`!owned` **且** 侧边栏会显示它
+    // （两件事的合取就是 `visibility.ts` 的 `isUngrouped()`，也正是下面的 `!owned` + `splitHidden`）。
+    // 没有 `cwd` 的还排除在外：`relocateHeaderCwd()` 明确拒绝改写一个没有 cwd 的 header（session-log.ts），
+    // 所以它们根本搬不进来——那是这个来源自己的**能力**限制，不是「未分组」的定义（侧边栏那一组里有它们）。
+    // 界面上那个来源的条数与这里必须一致，于是界面读的是宿主发来的同一个结论（planRows.unownedSessions）。
     sourceScanned = scanAll(root, decodeAll, scanOptions)
     discovered = splitHidden(
       sourceScanned.filter((s) => !owned.has(s.id) && typeof s.cwd === 'string' && s.cwd !== ''),

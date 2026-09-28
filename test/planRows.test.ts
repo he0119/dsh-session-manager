@@ -84,28 +84,36 @@ test('标题两边的空白裁掉：宿主写进来的可能带换行（提示�
 
 // ---- 迁移页的来源：目录候选与「未分组」（`migrationSourceRows` / `migrationMatching`）----
 //
-// 「未分组」是外壳侧边栏的说法（注册表没认领的会话），本插件按目录分组，于是它必须作为一个**单独的
-// 来源**出现，否则那批会话只能一个目录一个目录地勾——"这两个目录里没在册的那两条"本来是一件事。
-// 这一批会跨目录，所以本文件把候选、匹配与那个哨兵值都钉住（界面那层只能靠人眼验收）。
+// 「未分组」是外壳侧边栏那个组（谁都没认领 **且** 默认视图下会显示），本插件按目录分组，于是它必须
+// 作为一个**单独的来源**出现，否则那批会话只能一个目录一个目录地勾——"这两个目录里没在册的那两条"
+// 本来是一件事。这一批会跨目录，所以本文件把候选、匹配与那个哨兵值都钉住（界面那层只能靠人眼验收）。
 
-/** 只带判据要用的两个字段：cwd 与归属（同源文件里的 SourceSubject）。 */
-const s = (id: string, cwd: string | undefined, workspaceId?: string) => ({ id, cwd, workspaceId })
+/** 只带判据要用的两个字段：cwd 与宿主算好的「未分组」（同源文件里的 SourceSubject）。 */
+const s = (id: string, cwd: string | undefined, ungrouped?: boolean) => ({ id, cwd, ungrouped })
 const t = (key: string, params?: Record<string, unknown>): string =>
   params ? `${key}:${JSON.stringify(params)}` : key
 
-test('未分组来源覆盖的会话：注册表没认领 + 有 cwd，两个条件缺一不可', () => {
+test('未分组来源覆盖的会话：宿主说它在那一组 + 有 cwd，两个条件缺一不可', () => {
   const list = [
-    s('owned', '/a', 'ws-1'),
-    s('orphan', '/a'),
-    s('no-cwd', undefined),
-    s('empty-cwd', ''),
+    s('claimed', '/a', false),
+    s('orphan', '/a', true),
+    s('no-cwd', undefined, true),
+    s('empty-cwd', '', true),
   ]
   assert.deepEqual(unownedSessions(list).map((x) => x.id), ['orphan'])
 })
 
+test('未分组来源不自己推判据：看起来"没在册、也没被隐藏"但宿主没标 ungrouped 的行不收', () => {
+  // 这条夹具是刻意不真实的（真实 /state 会给这种行 ungrouped: true）。它钉的是**界面不许自己再推
+  // 一遍**：以前的判据是"没有 workspaceId 就算未分组"，于是子代理/空白/已归档这些侧边栏根本不放进
+  // 那一组的会话也被算进来了。现在只有宿主说在那一组里才算。
+  const list = [{ id: 'looks-unowned', cwd: '/a' }]
+  assert.deepEqual(unownedSessions(list), [])
+})
+
 test('源候选：已登记工作区在前、其余目录按路径排、未分组在最后且带上条数', () => {
   const rows = migrationSourceRows(
-    [s('owned', '/b', 'ws-1'), s('orphan-1', '/a'), s('orphan-2', '/a'), s('owned-2', '/a', 'ws-2')],
+    [s('owned', '/b', false), s('orphan-1', '/a', true), s('orphan-2', '/a', true), s('owned-2', '/a', false)],
     [{ path: '/b', title: '工作区乙' }],
     t,
   )
@@ -116,8 +124,8 @@ test('源候选：已登记工作区在前、其余目录按路径排、未分�
   ])
 })
 
-test('源候选：没有未登记在册的会话时，那一行不出现（别摆一个点了必然报错的选项）', () => {
-  const rows = migrationSourceRows([s('owned', '/a', 'ws-1')], [{ path: '/a', title: '甲' }], t)
+test('源候选：没有落在「未分组」里的会话时，那一行不出现（别摆一个点了必然报错的选项）', () => {
+  const rows = migrationSourceRows([s('owned', '/a', false)], [{ path: '/a', title: '甲' }], t)
   assert.equal(rows.some((row) => row.path === UNOWNED_SOURCE), false)
 })
 
@@ -127,7 +135,7 @@ test('候选文案：未分组那一行用自己的文案，不把哨兵值漏�
 })
 
 test('源匹配：目录按 cwd 匹配，未分组给的就是跨目录的那一批，空值不匹配任何会话', () => {
-  const list = [s('owned', '/a', 'ws-1'), s('orphan-a', '/a'), s('orphan-b', '/b')]
+  const list = [s('owned', '/a', false), s('orphan-a', '/a', true), s('orphan-b', '/b', true)]
   assert.deepEqual(migrationMatching(list, '/a').map((x) => x.id), ['owned', 'orphan-a'])
   assert.deepEqual(migrationMatching(list, UNOWNED_SOURCE).map((x) => x.id), ['orphan-a', 'orphan-b'])
   assert.deepEqual(migrationMatching(list, ''), [])
@@ -143,29 +151,29 @@ test('哨兵值不像一个路径：目录值永远是绝对路径或空串，�
 // 判据在宿主侧算一次（`src/visibility.ts`），界面只读 `/state` 上的 `hidden` 字段。这里钉住的是
 // "界面照这个字段筛"这一步：漏筛任何一处，界面报的条数就会大于宿主真正会搬的条数。
 
-/** 带 hidden 的行（界面从 /state 拿到的就是这个形状）。 */
-const h = (id: string, cwd: string | undefined, workspaceId?: string, hidden?: string) => ({
+/** 带 hidden 的行（界面从 /state 拿到的就是这个形状：宿主在那一组里 + 看不见的原因）。 */
+const h = (id: string, cwd: string | undefined, ungrouped?: boolean, hidden?: string) => ({
   id,
   cwd,
-  workspaceId,
+  ungrouped,
   hidden,
 })
 
-test('未分组来源：侧边栏不显示的会话不进候选（就算它没在册、也有 cwd）', () => {
+test('未分组来源：只收宿主说在那一组里的那些（子代理 / 空白 / 已归档都不在那一组里）', () => {
   const list = [
-    h('orphan-visible', '/a'),
-    h('orphan-subagent', '/a', undefined, 'subagent'),
-    h('orphan-blank', '/a', undefined, 'blank'),
-    h('orphan-archived', '/a', undefined, 'archived'),
+    h('orphan-visible', '/a', true),
+    h('orphan-subagent', '/a', false, 'subagent'),
+    h('orphan-blank', '/a', false, 'blank'),
+    h('orphan-archived', '/a', false, 'archived'),
   ]
   assert.deepEqual(unownedSessions(list).map((x) => x.id), ['orphan-visible'])
 })
 
 test('目录来源：候选与条数都只数看得见的那批', () => {
   const list = [
-    h('owned', '/a', 'ws-1'),
-    h('owned-archived', '/a', 'ws-1', 'archived'),
-    h('orphan-subagent', '/a', undefined, 'subagent'),
+    h('owned', '/a', false),
+    h('owned-archived', '/a', false, 'archived'),
+    h('orphan-subagent', '/a', false, 'subagent'),
   ]
   assert.deepEqual(migrationMatching(list, '/a').map((x) => x.id), ['owned'])
   // 条数是"会进候选的条数"，不是"库里有几条"
@@ -173,7 +181,7 @@ test('目录来源：候选与条数都只数看得见的那批', () => {
     { path: '/a', title: '甲', count: 1 },
   ])
   // 一个目录里全是看不见的会话：它连候选行都不出现（未登记工作区那一条）
-  const hiddenOnly = [h('orphan-blank', '/b', undefined, 'blank')]
+  const hiddenOnly = [h('orphan-blank', '/b', false, 'blank')]
   assert.deepEqual(migrationSourceRows(hiddenOnly, [], t), [])
 })
 
