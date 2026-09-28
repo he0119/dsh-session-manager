@@ -262,7 +262,7 @@ export const en: Record<keyof typeof zh, string> = {
   migrateSummary: '{sessions} sessions to migrate ({files} logs, {bytes})',
   migrateProjectDirs: 'Project directory: {from} → {to}',
   migrateProjectDirsUnowned: 'Ungrouped spans {projectDirs} source project directories → {to}',
-  registryChangeTitle: 'Ledger change',
+  registryChangeTitle: 'Registry change',
   registryCreateTarget: 'Register the target workspace (new)',
   registryReuseTarget: 'Register into an existing workspace',
   registryAdded: '{count} sessions added',
