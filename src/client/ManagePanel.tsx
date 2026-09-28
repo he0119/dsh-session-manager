@@ -260,10 +260,11 @@ export function ManagePanel({ t = fallback, state, reload }: PanelShare): React.
 
         {sessions.length === 0 ? (
           <p className="dsm-empty">{t('noSessions')}</p>
-        ) : listed.length === 0 ? (
-          <p className="dsm-empty">{t('manageNoMatch')}</p>
         ) : (
-          <div className="dsm-list">
+          // 列表的高度是固定的（见 styles.ts 的 .dsm-listFixed）：连"一条都没筛出来"也画在这个框里，
+          // 否则那个状态会把这一页的高度改回去，外层滚动条又能把它挪动 15px。
+          <div className="dsm-list dsm-listFixed">
+            {listed.length === 0 && <p className="dsm-empty">{t('manageNoMatch')}</p>}
             {listed.map((session) => {
               // 与另外两页同一套口径：显示标题、id 退到悬浮提示（见 planRows.sessionLabel）。
               const label = sessionLabel(session)
