@@ -94,5 +94,11 @@ pnpm typecheck && pnpm build && pnpm test && pnpm check:package
 
 ## Git
 
+- **main 走 PR**：服务端有一条 `default` ruleset——禁删除、禁强推、要求线性历史（merge commit 会被
+  拒，只能 squash / rebase），并要求名为 `check` 的检查通过；没有 bypass，管理员也绕不过。所以改动
+  一律「推分支 → 开 PR → squash 合并」，那个检查名就是 `.github/workflows/ci.yml` 里的 job id
+  `check`（PR 会自动触发同一个工作流）。
+- **PR 标题按约定式提交写**：`.github/workflows/autolabeler.yml` 按 PR 标题给 PR 打标签，Release
+  日志的分组（`.github/release.yml`）只认标签，所以标题要是 `feat: …` / `fix: …` 这种形状。
 - **不要自己 push**（含 `--force`）；改完把状态与下一步命令交给维护者，由他决定。
 - 改写历史前先留一个备份 ref，并在报告里给出新旧 sha 的对应关系，以及"树有没有变化"的核对方式。
