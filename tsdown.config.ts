@@ -16,13 +16,19 @@ const { name: PACKAGE } = JSON.parse(
 ) as { name: string }
 
 /**
- * 浏览器模块表里由宿主提供、产物里保持 `require(...)` 的模块：只有平台基线。
+ * 浏览器模块表里由宿主提供、产物里保持 `require(...)` 的模块：平台基线。
  *
- * 其余一律内联——客户端模块系统只服务 `<包名>/client.js` 这一条经典脚本，没有旁挂依赖的路由。
- * 本插件刻意不 require 宿主的 UI 原语包（那不是稳定契约，且它一抛异常就会让整个槽位条目变成
- * 崩溃占位），所以这里只有 react 两个入口。
+ * 只有基线模块能这样要——客户端模块系统只服务 `<包名>/client.js` 这一条经典脚本，没有旁挂依赖的
+ * 路由，非基线模块得在 `dsh.client.external` 里点名。除了 `react` 两个入口，官方的控件库
+ * `@deepseek-ai/dsh-client-ui-primitives` 同样是基线（官方 52 个客户端包的 bundle 直接 require 它，
+ * 没有一个把它写进 `external`），所以它保持外置：内联进去等于把一份 React 组件复制进产物，还会跟
+ * 宿主那份的 hooks 语义脱钩。
  */
-const CLIENT_EXTERNALS = ['react', 'react/jsx-runtime'] as const
+const CLIENT_EXTERNALS = [
+  'react',
+  'react/jsx-runtime',
+  '@deepseek-ai/dsh-client-ui-primitives',
+] as const
 
 const host: UserConfig = {
   name: `${PACKAGE}/host`,
