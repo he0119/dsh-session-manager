@@ -102,6 +102,7 @@ src/            手写源码（每个文件一个职责，核心层零 DSH 依�
 lib/            构建产物（tsdown 输出，已 gitignore）
 test/           测试（run-all.mjs 是进程内 runner）
 docs/           本目录
+AGENTS.md       给 AI 助手与贡献者的协作约定（提交信息口径、验证清单、界面硬约束）
 tsdown.config.ts 三份构建配置：host（lib/index.js）、types（lib/types/*.d.ts）、client（lib/client.js）
 cordis.patch.yml 插件注册（package.json 的 dsh.bundle.patch 指向它）
 tsconfig.client.json Web Client 自己的类型工程（DOM + JSX；Host 那份没有）
@@ -124,7 +125,7 @@ tsconfig.client.json Web Client 自己的类型工程（DOM + JSX；Host 那份�
 | `src/migrate.ts` | 迁移编排：预演 / 执行 / 回滚 / 备份清单（工具与界面两个入口共用） | 无 |
 | `src/tools.ts` | 4 个工具注册（+ schema、平台解码器实例、可选服务探测） | `dsh-tools` |
 | `src/web.ts` | 界面端点（state / export / import / migrate / backups / rollback），只要求 `{ register }` 形状 | 无 |
-| `src/client/*` | Web Client 半边：「会话管理」页（导入导出 + 迁移两个分页）、字典、样式、端点调用 → `lib/client.js` | 无 |
+| `src/client/*` | 浏览器半侧：「会话管理」页（导入导出 + 迁移两个分页）、字典、样式、端点调用 → `lib/client.js` | 无 |
 | `src/index.ts` | 插件入口 `apply(ctx, config)` | `dsh-tools` |
 
 核心层（`project-key` / `paths` / `zstd-frame` / `session-log` / `discovery` / `session-title` /

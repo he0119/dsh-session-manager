@@ -190,21 +190,25 @@ id，**源工作区只有在被搬空时才从账本上删掉**——搬走一�
 "三个目录 + 一条无 cwd 老会话"的沙箱把这条钉住：只搬空的那两个桶被删，还留着在册会话的那个桶必须
 保住。
 
-## Web Client 半边的两条硬约束
+## 浏览器半侧的两条硬约束
 
-**一、产物必须是一个经典脚本。** DSH 的客户端模块系统只认
-`window.__ModuleLoader__.load({ id, factory })` 这种方式报名的脚本，工厂拿到一个同步的
+**一、产物必须是一个经典脚本。** DSH 的[客户端模块系统](https://deepseek-harness.github.io/deepseek-harness/reference/subsystems/client-modules)
+只认 `window.__ModuleLoader__.load({ id, factory })` 这种方式报名的脚本，工厂拿到一个同步的
 `require`，返回的 `module.exports` 就是插件的导出面（`inject` 与 `apply`）。因此 tsdown 的
 client 一份配置是 `format: 'cjs'` 外面套三行（banner/intro/footer），只有平台基线模块
 （`react`、`react/jsx-runtime`）保持 `require`，其余一律内联——客户端模块系统没有旁挂依赖的路由。
 `test/client.test.mjs` 用假的加载器与假 `require` 按这份契约执行 `lib/client.js`：契约错了在
 源码层面看不出来，只有跑一遍产物才知道。
 
-**二、不 require 宿主的 UI 原语包。** 那份包不是稳定契约（`dsh.client.inject` 的条目只用于
-激活排序，不构成依赖保证），而它一旦在某些版本里抛异常，整个槽位条目会被替换成崩溃占位
-（控制台里是 `slot entry crashed in '<slot>'`），用户看到的是空白而不是错误。所以控件全部手写，
-颜色只用 `Theme` 检查面列出的 `--dsw-alias-*` token（每个都带中性回落值，深浅主题自动跟随），
-类名收在自己的 `dsm-` 前缀下。
+**二、不 require 宿主的 UI 原语包。** 这不是合规问题：官方
+[Web Client](https://deepseek-harness.github.io/deepseek-harness/reference/subsystems/web-client)
+的「包边界」只禁止运行时导入**另一个功能插件**的值，还点名 `ui-primitives` 这类"职责收窄、没有
+功能生命周期的静态 owner"可以共享（官方第一方设置页包就在用它的 `SettingsFormModel`）。躲开它
+换的是**崩溃隔离**：`require` 一个没被送到的模块会让整个槽位条目变成崩溃占位（控制台里是
+`slot entry crashed in '<slot>'`），用户看到的是空白而不是错误。本包因此不申请任何非基线模块
+（`dsh.client` 里没有 `external`——按官方定义 `inject` 只管工厂到达与组合顺序，不是模块请求的
+通道），控件全部手写，颜色只用 `Theme` 检查面列出的 `--dsw-alias-*` token（每个都带中性回落值，
+深浅主题自动跟随），类名收在自己的 `dsm-` 前缀下。
 
 那条"只用检查面的 token"不是洁癖，是踩过的坑：**颜色写死只会在一种主题下错**。真事是
 `.dsm-primary` 写死 `color: #fff`——浅色主题下 `brand-primary` 是近黑（白字没问题），深色主题下它
@@ -241,7 +245,8 @@ token，所以显式挂了回落链（拿不到就退到表面色——brand-pri
 说明必须是 `p`、说明不在标题行里）。
 
 注册进 `settings.section`：设置左侧导航里的一页，与「通用 / 模型 / 插件 / 账户 / Agent 预设」
-并列，`order: 30` 排它们之后。相近的槽位有两个，各有一个真问题，所以都没选：
+并列，`order: 30` 排它们之后（这一形态的官方说明：[新增设置卡片](https://deepseek-harness.github.io/deepseek-harness/reference/cookbook/adding-a-settings-card)，
+那里也把插件包的两侧叫 **Host 半侧** / **浏览器半侧**）。相近的槽位有两个，各有一个真问题，所以都没选：
 
 - `plugins.detail.section`（插件详情页配置/行列表之后的一段）：归属感最贴，但要按 subject
   （`item` / `row` / `bundle`）自过滤，而判断依据是**包在插件管理器里的表示形态**；猜错不报错、
