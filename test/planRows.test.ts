@@ -136,3 +136,42 @@ test('哨兵值不像一个路径：目录值永远是绝对路径或空串，�
   assert.equal(UNOWNED_SOURCE.startsWith('/'), false)
   assert.equal(UNOWNED_SOURCE.includes('\\'), false)
 })
+
+// ---- 侧边栏看不见的会话不进候选（子代理 / 空白 / 已归档）----
+//
+// 判据在宿主侧算一次（`src/visibility.ts`），界面只读 `/state` 上的 `hidden` 字段。这里钉住的是
+// "界面照这个字段筛"这一步：漏筛任何一处，界面报的条数就会大于宿主真正会搬的条数。
+
+/** 带 hidden 的行（界面从 /state 拿到的就是这个形状）。 */
+const h = (id: string, cwd: string | undefined, workspaceId?: string, hidden?: string) => ({
+  id,
+  cwd,
+  workspaceId,
+  hidden,
+})
+
+test('未分组来源：侧边栏不显示的会话不进候选（就算它没在册、也有 cwd）', () => {
+  const list = [
+    h('orphan-visible', '/a'),
+    h('orphan-subagent', '/a', undefined, 'subagent'),
+    h('orphan-blank', '/a', undefined, 'blank'),
+    h('orphan-archived', '/a', undefined, 'archived'),
+  ]
+  assert.deepEqual(unownedSessions(list).map((x) => x.id), ['orphan-visible'])
+})
+
+test('目录来源：候选与条数都只数看得见的那批', () => {
+  const list = [
+    h('owned', '/a', 'ws-1'),
+    h('owned-archived', '/a', 'ws-1', 'archived'),
+    h('orphan-subagent', '/a', undefined, 'subagent'),
+  ]
+  assert.deepEqual(migrationMatching(list, '/a').map((x) => x.id), ['owned'])
+  // 条数是"会进候选的条数"，不是"库里有几条"
+  assert.deepEqual(migrationSourceRows(list, [{ path: '/a', title: '甲' }], t), [
+    { path: '/a', title: '甲', count: 1 },
+  ])
+  // 一个目录里全是看不见的会话：它连候选行都不出现（未登记工作区那一条）
+  const hiddenOnly = [h('orphan-blank', '/b', undefined, 'blank')]
+  assert.deepEqual(migrationSourceRows(hiddenOnly, [], t), [])
+})

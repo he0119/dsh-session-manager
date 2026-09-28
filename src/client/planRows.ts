@@ -96,26 +96,39 @@ export function sessionLabel(subject: LabelSubject): SessionLabel {
  */
 export const UNOWNED_SOURCE = '@unowned'
 
-/** 判断一条会话能不能进「未分组」来源，只用得上这两个字段。 */
+/** 判断一条会话能不能进「未分组」来源，只用得上这三个字段。 */
 export interface SourceSubject {
   /** 会话日志 header 里的 cwd；没有 cwd 的老会话缺省。 */
   readonly cwd?: string
   /** 宿主按注册表成员表填的归属；缺省 = 谁都没认领（见 docs/internals.md 的「未分组」）。 */
   readonly workspaceId?: string
+  /**
+   * 宿主报来的"外壳侧边栏不显示这条会话"的原因（`subagent` / `blank` / `archived`）；缺省 = 会显示。
+   *
+   * 界面上的候选必须与宿主预演的候选是同一批：宿主那一侧按同一条判据（`src/visibility.ts`）把
+   * 侧边栏看不见的会话排除在外，界面若照旧把它们算进条数，用户看到的就是"这里 4 条、搬完 1 条"。
+   */
+  readonly hidden?: string
 }
 
 /**
- * 「未分组」来源覆盖的会话：**注册表没认领、且有 cwd** 的那些（可以横跨多个目录）。
+ * 「未分组」来源覆盖的会话：**注册表没认领、有 cwd、且外壳侧边栏会显示**的那些（可以横跨多个目录）。
  *
  * 为什么把"没有 cwd"的排除在外：迁移要改写 header 里的 cwd，而 `relocateHeaderCwd()` 明确拒绝
  * 一个没有 cwd 的 header（换来的是"绝不凭空造一个 cwd"）。这类会话不是这个来源能搬的东西，
  * 所以它们既不进候选、也不算进那个来源的条数——界面上的条数与宿主预演的数字必须是同一个口径。
  *
+ * 为什么把"侧边栏不显示"的也排除在外：见 `SourceSubject.hidden`。
+ *
  * @param sessions 会话库里的全部会话。
  */
 export function unownedSessions<T extends SourceSubject>(sessions: readonly T[]): T[] {
   return sessions.filter(
-    (session) => session.workspaceId === undefined && typeof session.cwd === 'string' && session.cwd !== '',
+    (session) =>
+      session.workspaceId === undefined &&
+      session.hidden === undefined &&
+      typeof session.cwd === 'string' &&
+      session.cwd !== '',
   )
 }
 
@@ -142,11 +155,12 @@ export function optionLabel(row: PathRow, t: Translate): string {
 }
 
 /**
- * 迁移页的源候选：已登记工作区（注册表顺序在前）+ 库里真有会话的目录（按路径排序）+
+ * 迁移页的源候选：已登记工作区（注册表顺序在前）+ 库里真有候选会话的目录（按路径排序）+
  * 「未分组」（库里有这类会话时才出现，排在最后——它不是一个目录，位置上也别混进目录堆里）。
  *
- * 每个候选都报**库里的条数**：注册表的登记条数会骗人，同一个目录下可能还有没登记在册的会话
- * （那些默认也会被一起搬走），而用户得先看见会话在哪儿。
+ * 每个候选都报**候选条数**（不是库里的会话总数）：注册表的登记条数会骗人，同一个目录下可能还有
+ * 没登记在册的会话（那些默认也会被一起搬走），而用户得先看见会话在哪儿；同时侧边栏看不见的那些
+ * （子代理 / 空白 / 已归档）一个都不算进来，因为它们根本不会被搬（见 `SourceSubject.hidden`）。
  *
  * @param sessions 会话库里的全部会话。
  * @param workspaces 已登记的工作区。
@@ -159,6 +173,7 @@ export function migrationSourceRows(
 ): PathRow[] {
   const counts = new Map<string, number>()
   for (const session of sessions) {
+    if (session.hidden !== undefined) continue
     if (typeof session.cwd !== 'string' || session.cwd === '') continue
     counts.set(session.cwd, (counts.get(session.cwd) ?? 0) + 1)
   }
@@ -182,11 +197,12 @@ export function migrationSourceRows(
 /**
  * 这个来源匹配到的会话（勾选面）。
  *
- * 目录来源按 `cwd` 匹配；「未分组」来源给的就是 `unownedSessions()` 那一批——于是它天然跨目录，
- * 这也是它存在的理由（一个目录一个目录地勾，谁也说不清"这两个目录里没在册的那两条"是一件事）。
+ * 目录来源按 `cwd` 匹配，同样只收侧边栏看得见的那些；「未分组」来源给的就是 `unownedSessions()`
+ * 那一批——于是它天然跨目录，这也是它存在的理由（一个目录一个目录地勾，谁也说不清"这两个目录里
+ * 没在册的那两条"是一件事）。
  */
 export function migrationMatching<T extends SourceSubject>(sessions: readonly T[], from: string): T[] {
   if (from === UNOWNED_SOURCE) return unownedSessions(sessions)
   if (from === '') return []
-  return sessions.filter((session) => session.cwd === from)
+  return sessions.filter((session) => session.cwd === from && session.hidden === undefined)
 }

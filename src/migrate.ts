@@ -10,11 +10,13 @@ import { existsSync, readdirSync, statSync } from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
 
 import { applyPlan, verifyAppliedPlan } from './execute.ts'
-import { readManifest, rollback, type BackupManifest, type RollbackResult } from './journal.ts'
+import { readManifest, rollback, type BackupKind, type BackupManifest, type RollbackResult } from './journal.ts'
+import { projectionCacheDir } from './paths.ts'
 import { buildRelocationPlan, describePlan } from './plan.ts'
 import { readRegistry, validateRegistry } from './registry.ts'
 import type { TitleQuery } from './session-title.ts'
 import type { DecodeAll, RelocationPlan, RegistryChange, WorkspaceRegistryState } from './types.ts'
+import { createBlankResolver } from './visibility.ts'
 
 /** 迁移用到的路径与解码器（与 `ResolvedPaths` 同形，但本模块不认识 tools.ts）。 */
 export interface MigrateDeps {
@@ -27,6 +29,13 @@ export interface MigrateDeps {
    * 缺席就不读——工具层只报数量，不需要。
    */
   resolveTitle?: (query: TitleQuery) => string | undefined
+  /**
+   * 读"宿主判这条会话空白吗"（可选，见 visibility.ts）。
+   *
+   * 缺席时本模块**自己**按 `registryPath` 反推宿主投影缓存目录造一个：迁移动不动某个来源里的会话，
+   * 必须与外壳侧边栏显示的那批对齐，这是**编排层**的口径，不该因为入口是工具还是界面而不同。
+   */
+  resolveBlank?: (query: { id: string; createdAt: number; cwd?: string }) => boolean | undefined
 }
 
 /** 一次迁移/预演的请求。 */
@@ -120,6 +129,8 @@ export interface BackupSummary {
   createdAt: string
   sessions: number
   artifacts: number
+  /** 这份备份是迁移留下的还是删除留下的（老备份没有这个字段 = 迁移，见 journal.ts 的 `BackupKind`）。 */
+  kind: BackupKind
   /** 从清单里的会话目录推出来的源/目标（老备份可能没有会话，则为 undefined）。 */
   from?: string
   to?: string
@@ -179,6 +190,8 @@ function previewOf(plan: RelocationPlan): MigrationPreview {
 }
 
 function buildPlan(deps: MigrateDeps, request: MigrateRequest): RelocationPlan {
+  // 空白判据的默认读取器：界面与工具层因此走同一套候选口径（见 MigrateDeps.resolveBlank）。
+  const resolveBlank = deps.resolveBlank ?? createBlankResolver({ cacheDir: projectionCacheDir(deps.registryPath) })
   return buildRelocationPlan({
     root: deps.sessionsRoot,
     registry: loadRegistryForWrite(deps.registryPath),
@@ -190,6 +203,7 @@ function buildPlan(deps: MigrateDeps, request: MigrateRequest): RelocationPlan {
     title: request.title,
     includeUnowned: request.includeUnowned !== false,
     includeArtifacts: request.includeArtifacts === true,
+    resolveBlank,
     ...(deps.resolveTitle === undefined ? {} : { resolveTitle: deps.resolveTitle }),
   })
 }
@@ -318,6 +332,7 @@ export function listBackups(deps: Pick<MigrateDeps, 'backupRoot'>): BackupSummar
         createdAt: manifest.createdAt,
         sessions: manifest.sessions.length,
         artifacts: (manifest.artifacts ?? []).length,
+        kind: manifest.kind ?? 'migrate',
         ...(manifest.from === undefined ? {} : { from: manifest.from }),
         ...(manifest.to === undefined ? {} : { to: manifest.to }),
       })

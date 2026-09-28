@@ -28,7 +28,7 @@ DSM_FIXTURE=/path/to/backup pnpm test
 ```
 
 没设 `DSM_FIXTURE` 时，`test/real-data.test.ts` 会整组跳过——它是 runner 里默认跳过的两条之一，
-另一条是下面那条 `DSM_SMOKE_WORKSPACE`（所以全绿口径是 151 条里 149 通过、2 跳过）。
+另一条是下面那条 `DSM_SMOKE_WORKSPACE`（所以全绿口径是 179 条里 177 通过、2 跳过）。
 
 ### 构建产物冒烟（`test/artifact.test.mjs`）
 
@@ -121,20 +121,24 @@ tsconfig.client.json Web Client 自己的类型工程（DOM + JSX；Host 那份�
 | `src/session-log.ts` | 单日志读取与**保结构** cwd 改写 | 无 |
 | `src/registry.ts` | 注册表启动不变式校验、`reHome()`、原子落盘 | 无 |
 | `src/discovery.ts` | 项目目录扫描 + 只解首帧读 header（发现阶段快），可注入标题读取器 | 无 |
+| `src/projection-cache.ts` | 读宿主投影缓存的单条记录（标题、`blank` 等列表元数据） | 无 |
 | `src/session-title.ts` | 会话标题：宿主投影缓存优先，缺席时有界地解日志开头 | 无 |
-| `src/plan.ts` | 只读计划：目标推导、阻塞问题、注册表变更 | 无 |
-| `src/journal.ts` | 字节级备份清单与回滚 | 无 |
+| `src/visibility.ts` | 侧边栏可见性：子代理 / 空白 / 已归档三条判据（候选与界面共用一份） | 无 |
+| `src/plan.ts` | 只读计划：目标推导、阻塞问题、注册表变更（候选只取侧边栏看得见的） | 无 |
+| `src/journal.ts` | 字节级备份清单与回滚（迁移与删除两种来源） | 无 |
 | `src/execute.ts` | 执行 + 独立复核（含产物目标位校验） | 无 |
 | `src/artifacts.ts` | 会话产物提取（证据分层）、规划（求交/剪枝）、搬迁 | 无 |
 | `src/transfer.ts` | `.dshsess` 容器（导出/解析/校验）、导入预演与落地 | 无 |
 | `src/migrate.ts` | 迁移编排：预演 / 执行 / 回滚 / 备份清单（工具与界面两个入口共用） | 无 |
+| `src/remove.ts` | 删除编排：预演（活着的拒删）→ 先备份 → 删目录 → 复核；不碰注册表 | 无 |
 | `src/tools.ts` | 4 个工具注册（+ schema、平台解码器实例、可选服务探测） | `dsh-tools` |
-| `src/web.ts` | 界面端点（state / export / import / migrate / backups / rollback），只要求 `{ register }` 形状 | 无 |
-| `src/client/*` | 浏览器半侧：「会话管理」页（导入导出 + 迁移两个分页）、字典、样式、端点调用 → `lib/client.js` | 无 |
+| `src/web.ts` | 界面端点（state / export / import / migrate / backups / rollback / delete / archive），只要求 `{ register }` 形状 | 无 |
+| `src/client/*` | 浏览器半侧：「会话管理」页（导入导出 / 迁移 / 会话三个分页）、字典、样式、端点调用 → `lib/client.js` | 无 |
 | `src/index.ts` | 插件入口 `apply(ctx, config)` | `dsh-tools` |
 
-核心层（`project-key` / `paths` / `zstd-frame` / `session-log` / `discovery` / `session-title` /
-`registry` / `plan` / `journal` / `execute` / `artifacts` / `transfer` / `migrate`）**不依赖 DSH**，
+核心层（`project-key` / `paths` / `zstd-frame` / `session-log` / `discovery` / `projection-cache` /
+`session-title` / `visibility` / `registry` / `plan` / `journal` / `execute` / `artifacts` / `transfer` /
+`migrate` / `remove`）**不依赖 DSH**，
 所以插件外壳与测试共用同一段代码。只有 `src/tools.ts` 与 `src/index.ts` 依赖
 `@deepseek-ai/dsh-tools`，`src/web.ts` 连它也不依赖（只认一个 `{ register }` 形状）。
 

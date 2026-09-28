@@ -133,6 +133,63 @@ const EFFECT_NOTE: Record<EffectMode, string> = {
     '注册表已落盘，但宿主进程内持有内存副本，需重启 DSH 后才会生效；重启前请勿在旧工作区继续新增会话。',
 }
 
+/**
+ * 宿主的归档能力（`ctx.workspaceRegistry` 的 `archiveSession` / `unarchiveSession`）。
+ *
+ * 单独收成一个端口：归档是**宿主的能力**（它一次做完"落盘 + 改内存 + 广播"，侧边栏即时跟着变），
+ * 而本插件的界面层只认形状、不读服务。服务不在（`workspaceRegistry` 挂在 Web profile 上）时
+ * 端口为 `undefined`，界面据此禁用按钮并说明原因，而不是绕过宿主去写注册表文件。
+ */
+export interface RegistryOps {
+  archive(sessionId: string): Promise<void>
+  unarchive(sessionId: string): Promise<void>
+}
+
+/**
+ * 探测宿主的归档能力。
+ * @param ctx - 宿主上下文。
+ * @returns 端口；服务不在或形状不认时 `undefined`。
+ */
+export function archiveOps(ctx: unknown): RegistryOps | undefined {
+  const registry = optionalService(ctx, 'workspaceRegistry') as
+    | { archiveSession?: unknown; unarchiveSession?: unknown }
+    | undefined
+  const archive = registry?.archiveSession
+  const unarchive = registry?.unarchiveSession
+  if (typeof archive !== 'function' || typeof unarchive !== 'function') return undefined
+  return {
+    archive: (sessionId) => Promise.resolve((archive as (id: string) => unknown).call(registry, sessionId)).then(() => undefined),
+    unarchive: (sessionId) =>
+      Promise.resolve((unarchive as (id: string) => unknown).call(registry, sessionId)).then(() => undefined),
+  }
+}
+
+/**
+ * 宿主内存里活着的会话 id（`ctx.sessions.list()`）。
+ *
+ * 删除会拒掉这些会话：宿主手里还有它们的**内存副本与写句柄**，日志被搬走之后它照样会往里写，
+ * 于是磁盘上会出现一条"半条会话"。这与宿主自己拒绝归档一条正在跑的会话是同一件事。
+ *
+ * @param ctx - 宿主上下文。
+ * @returns 活着的会话 id；服务不在或形状不认时是空集（＝判断不了，不是"都不活着"）。
+ */
+export function liveSessionIds(ctx: unknown): ReadonlySet<string> {
+  const store = optionalService(ctx, 'sessions') as { list?: unknown } | undefined
+  const list = store?.list
+  if (typeof list !== 'function') return new Set<string>()
+  try {
+    const ids = new Set<string>()
+    for (const session of (list as () => unknown[]).call(store) ?? []) {
+      const id = (session as { id?: unknown } | null)?.id
+      if (typeof id === 'string') ids.add(id)
+    }
+    return ids
+  } catch {
+    // 列会话不该把"删除"这条路径整个打挂：判断不了就当空集，预演那边也不会谎称它们一定没在跑。
+    return new Set<string>()
+  }
+}
+
 
 /** 计划类工具的返回值。 */
 export interface PlanToolResult {

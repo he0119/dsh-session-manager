@@ -26,8 +26,9 @@ import {
 } from './migrate.ts'
 import { projectionCacheDir } from './paths.ts'
 import { readRegistry, validateRegistry } from './registry.ts'
+import { planRemoval, runRemoval, type RemoveDeps, type RemovalRun } from './remove.ts'
 import { createTitleResolver, type TitleQuery } from './session-title.ts'
-import { type EffectMode, type PickerKind, type ResolvedPaths } from './tools.ts'
+import { type EffectMode, type PickerKind, type RegistryOps, type ResolvedPaths } from './tools.ts'
 import {
   applyImport,
   buildBundle,
@@ -38,6 +39,7 @@ import {
   type ImportOptions,
 } from './transfer.ts'
 import type { DecodeAll, WorkspaceRegistryState } from './types.ts'
+import { createBlankResolver, hiddenReason, type HiddenReason } from './visibility.ts'
 
 /** 本插件占用的路由前缀。 */
 export const API_PREFIX = '/dsh-session-manager/api'
@@ -86,6 +88,21 @@ export interface ApiDeps {
    * 这里留出口子是为了测试能钉住"标题坏了也不影响列出会话"这条边界。
    */
   resolveTitle?: (query: TitleQuery) => string | undefined
+  /**
+   * 读"宿主判这条会话空白吗"（见 visibility.ts）。
+   *
+   * 同 `resolveTitle`：缺省按 `paths.registryPath` 反推投影缓存目录。界面上的「管理」页据此把
+   * 空白会话标出来，迁移页据此把它们排除在候选之外。
+   */
+  resolveBlank?: (query: { id: string; createdAt: number; cwd?: string }) => boolean | undefined
+  /**
+   * 宿主内存里活着的会话 id（`ctx.sessions.list()`，见 src/index.ts）。
+   *
+   * 删除会拒掉这些：宿主手里有内存副本与写句柄，日志被搬走后它还会继续写。缺席 = 判断不了。
+   */
+  liveSessionIds?: () => ReadonlySet<string>
+  /** 宿主的归档能力；缺席 = 这个宿主改不了归档（界面据此禁用那两个按钮）。 */
+  registryOps?: () => RegistryOps | undefined
 }
 
 /** 界面要展示的一条会话。 */
@@ -99,6 +116,16 @@ interface SessionSummary {
   workspaceId?: string
   bytes: number
   files: Array<{ name: string; bytes: number }>
+  /** 外壳侧边栏不显示这条会话的原因（缺省 = 会显示，见 visibility.ts）。 */
+  hidden?: HiddenReason
+  /** 是否在注册表的归档集里（管理页据此决定按钮写「归档」还是「取消归档」）。 */
+  archived: boolean
+  /** 宿主判它"一轮都没开始过"（见 visibility.ts）；缓存缺席时按 `false` 处理，与宿主的冷会话口径一致。 */
+  blank: boolean
+  /** 日志 header 里的 `origin`（只有子代理会话会写）。 */
+  origin?: string
+  /** 宿主内存里活着（删除会拒它）。 */
+  live: boolean
 }
 
 /** 界面要展示的一个工作区。 */
@@ -167,22 +194,48 @@ export const scanLibrary = scanAll
  *
  * `workspaceId` 缺省 = 这条会话的 id 不在任何工作区的登记表里（外壳侧边栏会把它挂到「未分组」下，
  * 见 docs/internals.md）。界面靠它标出"未登记在册"，迁移页的「未分组」来源也用它圈候选。
+ *
+ * `hidden` 是外壳侧边栏"会不会显示这条会话"的判据结果（见 visibility.ts）：三份列表各自要看的东西
+ * 不同——导出照单全收、迁移只收侧边栏看得见的、管理页要把看不见的原因标出来——所以这里一次算清，
+ * 三处都读同一个字段，避免"面板说 4 条、侧边栏显示 1 条"这种对不上的账。
  */
-function summarizeSessions(sessions: readonly DiscoveredSession[], registry: WorkspaceRegistryState | null): SessionSummary[] {
+function summarizeSessions(
+  sessions: readonly DiscoveredSession[],
+  registry: WorkspaceRegistryState | null,
+  options: {
+    archived: ReadonlySet<string>
+    resolveBlank?: (query: { id: string; createdAt: number; cwd?: string }) => boolean | undefined
+    live: ReadonlySet<string>
+  },
+): SessionSummary[] {
   const owner = new Map<string, string>()
   for (const [workspaceId, record] of Object.entries(registry?.tables.workspaces ?? {})) {
     for (const id of record.sessionIds) owner.set(id, workspaceId)
   }
-  return sessions.map((session) => ({
-    id: session.id,
-    ...(session.title === undefined ? {} : { title: session.title }),
-    cwd: session.cwd,
-    createdAt: session.createdAt,
-    dir: session.dir,
-    workspaceId: owner.get(session.id),
-    bytes: session.files.reduce((sum, file) => sum + file.bytes, 0),
-    files: session.files.map((file) => ({ name: file.name, bytes: file.bytes })),
-  }))
+  return sessions.map((session) => {
+    const blank = options.resolveBlank?.({ id: session.id, createdAt: session.createdAt, cwd: session.cwd }) === true
+    const archived = options.archived.has(session.id)
+    const hidden = hiddenReason({
+      ...(session.header.origin === undefined ? {} : { origin: session.header.origin }),
+      blank,
+      archived,
+    })
+    return {
+      id: session.id,
+      ...(session.title === undefined ? {} : { title: session.title }),
+      cwd: session.cwd,
+      createdAt: session.createdAt,
+      dir: session.dir,
+      workspaceId: owner.get(session.id),
+      bytes: session.files.reduce((sum, file) => sum + file.bytes, 0),
+      files: session.files.map((file) => ({ name: file.name, bytes: file.bytes })),
+      archived,
+      blank,
+      ...(session.header.origin === undefined ? {} : { origin: session.header.origin }),
+      live: options.live.has(session.id),
+      ...(hidden === undefined ? {} : { hidden }),
+    }
+  })
 }
 
 function summarizeWorkspaces(registry: WorkspaceRegistryState | null): WorkspaceSummary[] {
@@ -226,6 +279,12 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
   // 所以那里扫库时刻意不传 resolveTitle——别为用不上的东西花钱。
   const resolveTitle =
     deps.resolveTitle ?? createTitleResolver({ cacheDir: projectionCacheDir(paths.registryPath), decodeAll })
+  // 空白判据与标题同源：都读宿主自己那份投影缓存（见 visibility.ts）。界面与迁移计划因此共用一条口径。
+  const resolveBlank =
+    deps.resolveBlank ?? createBlankResolver({ cacheDir: projectionCacheDir(paths.registryPath) })
+  // 宿主内存里活着的会话：删除会拒掉它们。端口缺席时按空集（判断不了）——预演的输出里没有
+  // 任何一处声称"这些一定没在跑"，界面上那句说明也是这么写的。
+  const liveSessionIds = (): ReadonlySet<string> => deps.liveSessionIds?.() ?? new Set<string>()
 
   const state = async (_req: IncomingMessage, res: ServerResponse): Promise<void> => {
     const { registry, problems } = loadRegistry(paths.registryPath)
@@ -236,7 +295,13 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
       problems,
       // 目录字段能不能「浏览…」由宿主的能力位决定，界面不试错（见 ApiDeps.pickerKind）。
       pickerKind: deps.pickerKind?.() ?? null,
-      sessions: summarizeSessions(sessions, registry),
+      // 归档按钮能不能点：这个宿主的 workspaceRegistry 在不在（只有 Web profile 才有它）。
+      archiveAvailable: deps.registryOps?.() !== undefined,
+      sessions: summarizeSessions(sessions, registry, {
+        archived: new Set(registry?.global.archivedSessionIds ?? []),
+        resolveBlank,
+        live: liveSessionIds(),
+      }),
       workspaces: summarizeWorkspaces(registry),
     })
   }
@@ -476,6 +541,111 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
     sendJson(res, 200, { mode: dryRun ? 'plan' : 'apply', ...outcome, takesEffect: takesEffect() })
   }
 
+  const removeDeps: RemoveDeps = {
+    sessionsRoot: paths.sessionsRoot,
+    registryPath: paths.registryPath,
+    backupRoot: paths.backupRoot,
+    decodeAll,
+    resolveTitle,
+    liveSessionIds,
+  }
+
+  /**
+   * 删除会话：`mode=apply` 才真删（**先备份再删**），缺省只预演。
+   *
+   * 恢复不在这里：删掉的那份就在本插件备份根下，走「备份与回滚」那份清单（见 journal.ts 的
+   * `BackupKind`）。删除**不碰注册表**，所以恢复之后登记与归档状态原样还在（见 src/remove.ts）。
+   */
+  const deleteSessions = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+    let body: unknown
+    try {
+      body = await readJson(req)
+    } catch {
+      sendJson(res, 400, { error: '请求体不是合法 JSON' })
+      return
+    }
+    const fields = (body ?? {}) as Record<string, unknown>
+    const ids = fields['sessionIds']
+    if (!Array.isArray(ids) || ids.length === 0) {
+      sendJson(res, 400, { error: '请选择至少一个会话（sessionIds）' })
+      return
+    }
+    const apply = fields['mode'] === 'apply'
+    const run: RemovalRun = runRemoval(removeDeps, { sessionIds: ids.map((id) => String(id)) }, { apply })
+    const payload = {
+      mode: apply ? 'apply' : 'plan',
+      ok: run.plan.ok && (!apply || run.verified),
+      /** 「将会删掉什么」的那份计划（预演与执行同源）。 */
+      preview: run.plan,
+      applied: run.applied,
+      dirsRemoved: run.dirsRemoved,
+      removedProjectDirs: run.removedProjectDirs,
+      verified: run.verified,
+      ...(run.backupDir === undefined ? {} : { backupDir: run.backupDir }),
+      problems: run.plan.ok ? run.problems : run.plan.problems,
+      summary: run.summary,
+    }
+    if (!run.plan.ok) {
+      // 计划本身有问题（会话不在库里、宿主内存里活着、目录已经不在……）：这是"当前状态不允许"，
+      // 用 409 而不是 400——参数可能完全正确，是库的状态说了不行（与 /migrate 同一套口径）。
+      sendJson(res, 409, payload)
+      return
+    }
+    if (apply && !run.verified) {
+      sendJson(res, 500, { ...payload, error: '删除后的复核未通过，请查看 problems 并从备份恢复' })
+      return
+    }
+    sendJson(res, 200, payload)
+  }
+
+  /**
+   * 归档 / 取消归档所选会话（`archived: false` 即取消归档）。
+   *
+   * 走宿主的 `workspaceRegistry`：它一次做完"落盘 + 改内存 + 广播"，侧边栏即时跟着变，所以这里
+   * 如实回报 `immediate`。一条失败不影响其余（逐条收集失败原因）——把每条的状态原样告诉界面，
+   * 比"整体失败、什么都不说"更有用。
+   */
+  const archiveSessions = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+    let body: unknown
+    try {
+      body = await readJson(req)
+    } catch {
+      sendJson(res, 400, { error: '请求体不是合法 JSON' })
+      return
+    }
+    const fields = (body ?? {}) as Record<string, unknown>
+    const ids = Array.isArray(fields['sessionIds']) ? fields['sessionIds'].map((id) => String(id)) : []
+    if (ids.length === 0) {
+      sendJson(res, 400, { error: '请选择至少一个会话（sessionIds）' })
+      return
+    }
+    const archived = fields['archived'] !== false
+    const ops = deps.registryOps?.()
+    if (ops === undefined) {
+      // 非 Web profile 没有这个服务：如实拒绝，而不是写一遍注册表文件（写文件绕过宿主的内存副本，
+      // 既可能被覆盖，也要等重启才被承认——那不是"归档"，是给宿主埋雷）。
+      sendJson(res, 409, { error: '这个宿主没有 workspaceRegistry 服务（归档是它的能力），改不了归档状态' })
+      return
+    }
+    const done: string[] = []
+    const failed: Array<{ id: string; error: string }> = []
+    for (const id of ids) {
+      try {
+        if (archived) await ops.archive(id)
+        else await ops.unarchive(id)
+        done.push(id)
+      } catch (error) {
+        failed.push({ id, error: error instanceof Error ? error.message : String(error) })
+      }
+    }
+    sendJson(res, failed.length === 0 ? 200 : 409, {
+      ok: failed.length === 0,
+      archived: done,
+      failed,
+      takesEffect: 'immediate',
+    })
+  }
+
   return {
     'GET /state': state,
     'POST /export': exportSessions,
@@ -483,6 +653,8 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
     'GET /backups': backups,
     'POST /migrate': migrate,
     'POST /rollback': rollbackBackup,
+    'POST /delete': deleteSessions,
+    'POST /archive': archiveSessions,
   }
 }
 

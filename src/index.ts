@@ -14,9 +14,11 @@ import type { Context } from '@deepseek-ai/cordis'
 
 import {
   type PluginConfig,
+  archiveOps,
   decodeAll,
   directoryPickerKind,
   effectMode,
+  liveSessionIds,
   registerTools,
   resolvePaths,
 } from './tools.ts'
@@ -76,6 +78,12 @@ export function apply(ctx: Context, config: PluginConfig = {}): () => void {
       effectMode: () => effectMode(ctx),
       // 同理：目录选择器是"桌面对话框"还是"页面内浏览"，只有宿主自己知道。
       pickerKind: () => directoryPickerKind(ctx),
+      // 归档与取消归档是宿主的能力（`workspaceRegistry`，Web profile 才有）：这里把两个方法收成
+      // 端口交出去，`src/web.ts` 因此仍然只认一个形状、不认识 Cordis。服务缺席返回 undefined，
+      // 界面据此禁用那两个按钮并说明原因。
+      registryOps: () => archiveOps(ctx),
+      // 删除会拒掉"宿主内存里活着"的会话（它手里还有内存副本与写句柄）。
+      liveSessionIds: () => liveSessionIds(ctx),
     })
     info(`dsh-session-manager 界面端点已挂：${API_PREFIX}`)
     return dispose

@@ -31,6 +31,7 @@ export const zh = {
   loading: '读取中…',
   tabTransfer: '导入导出',
   tabMigrate: '迁移',
+  tabManage: '会话',
   sessionsCount: '{count} 个会话',
   workspacesCount: '{count} 个工作区',
 
@@ -45,7 +46,7 @@ export const zh = {
   unregisteredDir: '未登记工作区',
   unregisteredSession: '未登记在册',
   unregisteredSessionTip:
-    '这条会话的 id 不在任何工作区的登记表里。外壳侧边栏把这类会话挂到「未分组」下（空白与已归档的它不显示，所以那边看着比这里少）。',
+    '这条会话的 id 不在任何工作区的登记表里。外壳侧边栏把这类会话挂到「未分组」下（子代理、空白与已归档的它不显示，所以那边看着比这里少）。',
   noCwdGroup: '没有 cwd 的会话',
   exportAction: '导出所选',
   exporting: '打包中…',
@@ -80,7 +81,7 @@ export const zh = {
   // ---- 迁移 ----
   migrateTitle: '迁移会话',
   migrateHint:
-    '把会话从一个来源搬到另一个目录（来源可以是某个工作区目录，也可以是「未分组」里那些没人认领的会话）：改写日志 header 的 cwd（只动首帧，其余字节不变）、把会话目录移进目标项目目录、并重新登记工作区注册表。可以整个来源一起搬，也可以只挑其中几条——先预演，看清会写什么，再确认。',
+    '把会话从一个来源搬到另一个目录（来源可以是某个工作区目录，也可以是「未分组」里那些没人认领的会话）：改写日志 header 的 cwd（只动首帧，其余字节不变）、把会话目录移进目标项目目录、并重新登记工作区注册表。可以整个来源一起搬，也可以只挑其中几条——先预演，看清会写什么，再确认。侧边栏里看不见的会话（子代理 / 空白 / 已归档）不在候选里，所以来源后面的条数会比导出列表少。',
   fromLabel: '源目录',
   toLabel: '目标目录',
   pickSource: '选择源目录…',
@@ -144,16 +145,55 @@ export const zh = {
 
   // ---- 备份与回滚 ----
   backupTitle: '备份与回滚',
-  backupHint: '每次迁移都会先留一份字节级备份。回滚按它把会话目录、日志字节与工作区注册表一起还原。',
+  backupHint:
+    '每次迁移、每次删除都会先留一份字节级备份。迁移的备份点「回滚」：把会话目录、日志字节与工作区注册表一起还原。删除的备份点「恢复」：只把会话目录搬回原位（删除从头到尾没碰过注册表）。',
   backupRootLabel: '备份根目录',
   noBackups: '还没有备份。',
   backupRow: '{sessions} 条会话 · {artifacts} 项产物',
+  backupKindMigrate: '迁移',
+  backupKindDelete: '删除',
   rollbackAction: '回滚',
   rollbackPreview: '看回滚动作',
   rollbackConfirm: '确认回滚',
   rollingBack: '回滚中…',
   rollbackActions: '以下是回滚会做的 {count} 个动作（还没有写盘）：',
   rollbackDone: '已回滚 {sessions} 条会话、还原 {files} 个文件并恢复注册表。',
+  restoreAction: '恢复',
+  restorePreview: '看恢复动作',
+  restoreConfirm: '确认恢复',
+  restoring: '恢复中…',
+  restoreActions: '以下是恢复会做的 {count} 个动作（还没有写盘）：',
+  restoreDone: '已恢复 {sessions} 条会话、还原 {files} 个文件（注册表未改动）。',
+
+  // ---- 会话（逐条管理：归档与删除） ----
+  manageTitle: '会话库',
+  manageHint:
+    '这一页对着整个会话库逐条管理。归档＝在侧边栏里收起来（走宿主能力，即时生效）；删除＝先把会话目录备份到本插件的备份根，再删掉它。子代理、空白与已归档的会话也在这里——侧边栏里点不到它们，行上的标签说明它们为什么不显示。',
+  manageArchiveUnavailable:
+    '这个宿主没有 workspaceRegistry 服务（归档是它的能力，只有 Web profile 才有），所以归档按钮不可用；删除不受影响。',
+  manageArchive: '归档所选',
+  manageUnarchive: '取消归档',
+  manageArchiving: '处理中…',
+  manageArchiveImmediate: '宿主即时生效，侧边栏马上跟着变。',
+  manageArchived: '已归档 {count} 条会话。',
+  manageUnarchived: '已取消归档 {count} 条会话。',
+  manageArchiveFailed: '有 {count} 条没能改（原因见下）：',
+  manageDeletePreview: '预演删除',
+  manageDeletePlanTitle: '将要删除',
+  manageDeleteApply: '确认删除',
+  manageDeleting: '删除中…',
+  manageBackupTo: '备份落在：{dir}（要恢复就去「迁移」页的「备份与回滚」）',
+  manageDeleteHint:
+    '删除会先备份、再删掉整个会话目录；删完侧边栏要等宿主重新扫描才会少掉这几条。还活在宿主内存里的会话删不掉——先在宿主里关掉它。',
+  selectAllSessions: '全选',
+  tagSubagent: '子代理',
+  tagSubagentTip: '子代理会话：外壳侧边栏把它挂在父会话下面（不是没有位置），所以不列进工作区或「未分组」。',
+  tagBlank: '空白',
+  tagBlankTip: '空白会话：建出来但一轮都没开始过（日志里只有 seed 事件）。侧边栏默认不显示它。',
+  tagArchived: '已归档',
+  tagArchivedTip: '已归档：id 在注册表的归档集里，侧边栏默认把它过滤掉。',
+  tagLive: '活动中',
+  tagLiveTip: '这条会话还活在宿主内存里（运行中或已打开），删除会被拒绝——先在宿主里关掉它。',
   cancel: '取消',
 
   // ---- 共同 ----
@@ -169,6 +209,7 @@ export const en: Record<keyof typeof zh, string> = {
   loading: 'Loading…',
   tabTransfer: 'Import & export',
   tabMigrate: 'Migrate',
+  tabManage: 'Sessions',
   sessionsCount: '{count} sessions',
   workspacesCount: '{count} workspaces',
 
@@ -182,7 +223,7 @@ export const en: Record<keyof typeof zh, string> = {
   unregisteredDir: 'not a registered workspace',
   unregisteredSession: 'not registered',
   unregisteredSessionTip:
-    "This session's id is in no workspace record. The shell sidebar parks such sessions under Ungrouped (it hides blank and archived ones, so that row shows fewer).",
+    "This session's id is in no workspace record. The shell sidebar parks such sessions under Ungrouped (it hides subagent, blank and archived ones, so that row shows fewer).",
   noCwdGroup: 'Sessions without a cwd',
   exportAction: 'Export selected',
   exporting: 'Packing…',
@@ -216,7 +257,7 @@ export const en: Record<keyof typeof zh, string> = {
 
   migrateTitle: 'Migrate sessions',
   migrateHint:
-    'Move sessions from one source to another directory (the source is a workspace directory, or the unclaimed sessions under Ungrouped): rewrite each log header cwd (first frame only, the rest stays byte-identical), move the session directories into the target project directory, and re-home the workspace registry. Move the whole source at once, or only a few of them — preview first, then confirm.',
+    'Move sessions from one source to another directory (the source is a workspace directory, or the unclaimed sessions under Ungrouped): rewrite each log header cwd (first frame only, the rest stays byte-identical), move the session directories into the target project directory, and re-home the workspace registry. Move the whole source at once, or only a few of them — preview first, then confirm. Sessions the sidebar hides (subagent / blank / archived) are never candidates, which is why the counts after each source are lower than on the export list.',
   fromLabel: 'Source directory',
   toLabel: 'Target directory',
   pickSource: 'Choose a source directory…',
@@ -283,16 +324,55 @@ export const en: Record<keyof typeof zh, string> = {
 
   backupTitle: 'Backups & rollback',
   backupHint:
-    'Every migration takes a byte-level backup first. Rollback uses it to restore the session directories, the original log bytes and the workspace registry together.',
+    'Every migration and every delete takes a byte-level backup first. A migration backup offers Roll back: it restores the session directories, the original log bytes and the workspace registry together. A delete backup offers Restore: it only moves the session directories back (deleting never touched the registry).',
   backupRootLabel: 'Backup root',
   noBackups: 'No backups yet.',
   backupRow: '{sessions} sessions · {artifacts} artifacts',
+  backupKindMigrate: 'migration',
+  backupKindDelete: 'delete',
   rollbackAction: 'Roll back',
   rollbackPreview: 'Show rollback steps',
   rollbackConfirm: 'Confirm rollback',
   rollingBack: 'Rolling back…',
   rollbackActions: '{count} steps this rollback would take (nothing written yet):',
   rollbackDone: 'Rolled back {sessions} sessions, restored {files} files and the workspace registry.',
+  restoreAction: 'Restore',
+  restorePreview: 'Show restore steps',
+  restoreConfirm: 'Confirm restore',
+  restoring: 'Restoring…',
+  restoreActions: '{count} steps this restore would take (nothing written yet):',
+  restoreDone: 'Restored {sessions} sessions and {files} files (the registry was left untouched).',
+
+  manageTitle: 'Session library',
+  manageHint:
+    'Manage the whole library row by row. Archive puts a session away in the sidebar (a host capability, effective immediately); Delete backs the session directory up into this plugin’s backup root first, then removes it. Subagent, blank and archived sessions are listed here too — the sidebar cannot reach them, so each row carries a tag saying why it is hidden.',
+  manageArchiveUnavailable:
+    'This host has no workspaceRegistry service (archiving is its capability, Web profiles only), so the archive buttons are disabled; deleting still works.',
+  manageArchive: 'Archive selected',
+  manageUnarchive: 'Unarchive',
+  manageArchiving: 'Working…',
+  manageArchiveImmediate: 'The host applies it immediately, so the sidebar follows right away.',
+  manageArchived: 'Archived {count} sessions.',
+  manageUnarchived: 'Unarchived {count} sessions.',
+  manageArchiveFailed: '{count} could not be changed (reasons below):',
+  manageDeletePreview: 'Preview delete',
+  manageDeletePlanTitle: 'About to delete',
+  manageDeleteApply: 'Delete now',
+  manageDeleting: 'Deleting…',
+  manageBackupTo: 'Backup lands in: {dir} (restore it from Backups & rollback on the Migrate tab)',
+  manageDeleteHint:
+    'Deleting backs the session directory up first, then removes it; the sidebar drops those rows once the host rescans. A session still living in host memory cannot be deleted — close it in the host first.',
+  selectAllSessions: 'Select all',
+  tagSubagent: 'subagent',
+  tagSubagentTip:
+    'Subagent session: the shell sidebar nests it under its parent session (it is not homeless), so it never shows up in a workspace or under Ungrouped.',
+  tagBlank: 'blank',
+  tagBlankTip: 'Blank session: created but never started a turn (only seed events in the log). The sidebar hides it by default.',
+  tagArchived: 'archived',
+  tagArchivedTip: 'Archived: its id is in the registry archive set, which the sidebar filters out by default.',
+  tagLive: 'active',
+  tagLiveTip:
+    'This session is still live in host memory (running or open), so deleting it is refused — close it in the host first.',
   cancel: 'Cancel',
 
   failed: 'Failed: {reason}',
