@@ -26,7 +26,7 @@ export interface SessionSummary {
   /**
    * 外壳侧边栏不显示这条会话的原因（缺省 = 会显示，见 `src/visibility.ts`）。
    *
-   * 判据在宿主侧算一次（`/state`），界面只读结论：导出页照单全收、迁移页只收看得见的、
+   * 判据在宿主侧算一次（`/state`），界面只读结论：传输页照单全收、迁移页只收看得见的、
    * 「会话」页把原因标出来——三处读同一个字段，不会各自算出一套。
    */
   hidden?: 'subagent' | 'blank' | 'archived'

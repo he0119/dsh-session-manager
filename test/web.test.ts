@@ -429,7 +429,7 @@ test('POST /migrate：mode 缺省只预演，预演结果里带上源/目标项�
   assert.equal(body['applied'], false)
   const preview = body['preview'] as Record<string, unknown>
   assert.equal((preview['sessions'] as unknown[]).length, 1)
-  // 预演里也带标题：迁移页挑会话与导入导出页用同一套口径（标题可见、id 退到悬浮提示）。
+  // 预演里也带标题：迁移页挑会话与传输页用同一套口径（标题可见、id 退到悬浮提示）。
   assert.equal((preview['sessions'] as Array<Record<string, unknown>>)[0]!['title'], '要搬走的会话')
   // 项目目录名是**绝对路径**：join(会话根, projectKey(工作区目录))
   assert.equal(preview['sourceProjectDir'], join(sandbox.sessionsRoot, projectKey(CWD_A)))

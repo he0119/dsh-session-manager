@@ -54,7 +54,7 @@ one-line bump at that point.
 
 ### Settings → Session management
 
-**Import & export** — take sessions away, bring them back
+**Transfer** — take sessions away, bring them back
 
 - Rows show a session's **title**, with the full title and the id on hover: a uuid tells a human nothing,
   and people pick sessions by "the one where I asked about that"; a session with no title falls back to

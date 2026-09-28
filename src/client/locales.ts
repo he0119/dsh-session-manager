@@ -10,7 +10,7 @@
  * 代价是字典键没有编译期校验，由 `test/client.test.mjs` 的键集断言补上。
  *
  * 键名按"页面骨架 → 页内分页"分组：`title`/`tabXxx` 是骨架，`exportXxx`/`importXxx` 属于
- * 导入导出页，`migrateXxx`/`backupXxx`/`rollbackXxx` 属于迁移页。**两份语言的键集必须完全一致**
+ * 传输页，`migrateXxx`/`backupXxx`/`rollbackXxx` 属于迁移页。**两份语言的键集必须完全一致**
  * ——少一个键就是一处会露出键名的界面。
  *
  * @module dsh-session-manager/client/locales
@@ -29,13 +29,13 @@ export const zh = {
   library: '会话库',
   refresh: '刷新',
   loading: '读取中…',
-  tabTransfer: '导入导出',
+  tabTransfer: '传输',
   tabMigrate: '迁移',
   tabManage: '会话',
   sessionsCount: '{count} 个会话',
   workspacesCount: '{count} 个工作区',
 
-  // ---- 导入导出 ----
+  // ---- 传输（导出 / 导入会话包） ----
   exportTitle: '导出',
   exportHint:
     '勾选要带走的会话，导出一个 .dshsess 包。列表按目录分组，组头那一下是整组勾上／取消。包里是会话日志的原始字节，不含会话创建过的普通文件；同一条会话的所有代次日志一起进包。',
@@ -207,7 +207,7 @@ export const en: Record<keyof typeof zh, string> = {
   library: 'Session library',
   refresh: 'Refresh',
   loading: 'Loading…',
-  tabTransfer: 'Import & export',
+  tabTransfer: 'Transfer',
   tabMigrate: 'Migrate',
   tabManage: 'Sessions',
   sessionsCount: '{count} sessions',

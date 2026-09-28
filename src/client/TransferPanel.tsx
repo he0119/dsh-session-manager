@@ -1,5 +1,5 @@
 /**
- * 「导入导出」分页：把会话带走（导出 .dshsess）或带回来（导入）。
+ * 「传输」分页：把会话带走（导出 .dshsess）或带回来（导入）。
  *
  * 这一层只做三件事：调宿主端点、记本地草稿、把结果摆出来。所有判定都在宿主侧
  * （`src/web.ts` + `src/transfer.ts`）：预演返回的就是将要发生的事，页面不自己推算
@@ -99,7 +99,7 @@ function GroupCheckbox({
   )
 }
 
-/** 导入导出页。 */
+/** 传输页。 */
 export function TransferPanel({ t = fallback, state, reload }: PanelShare): React.ReactElement {
   const [selected, setSelected] = React.useState<readonly string[]>([])
   const [file, setFile] = React.useState<File | null>(null)

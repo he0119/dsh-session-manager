@@ -49,7 +49,7 @@ npx @deepseek-ai/dsh@next plugin --profile desktop add /path/to/dsh-session-mana
 
 ### 设置 → 会话管理
 
-**导入导出**——把会话带走，再带回来
+**传输**——把会话带走，再带回来
 
 - 列表里的会话显示的是**标题**（鼠标悬浮才给出完整标题与 id）：uuid 对人是零信息，认会话靠的是
   「我上次问那个问题的会话」；读不到标题的老会话回落显示 id。导出列表与「会话」页照单全收、

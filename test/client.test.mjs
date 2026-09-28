@@ -84,7 +84,7 @@ function fakeReact(recorded = [], firstNull = undefined, panel = undefined, firs
  * 从元素树里收集所有字符串（文案就是字符串，键回显也是）。
  *
  * 遇到**函数组件**就带着 props 调一次再往下走：本文件没有真的渲染器，不这么做的话嵌套的
- * 页面（默认那一页「导入导出」）永远不在树上，冒烟只能看见骨架那一层，页面里的错就漏过去了。
+ * 页面（默认那一页「传输」）永远不在树上，冒烟只能看见骨架那一层，页面里的错就漏过去了。
  * 假钩子是无状态的，多调一次不会改变什么。
  */
 function strings(node, out = []) {
@@ -332,14 +332,14 @@ test('客户端产物：导航行的文案跟着语言走（同一个 thunk 每�
   assert.equal(label(), 'Session management')
 })
 
-test('客户端产物：页面骨架带着三个页内分页（导入导出 / 迁移 / 会话）', { skip }, () => {
+test('客户端产物：页面骨架带着三个页内分页（传输 / 迁移 / 会话）', { skip }, () => {
   const { registrations } = mount()
   const { component } = registrations[0]
   const { inject } = registrations[0].registration
   // 用注入面给的 t（键回显）渲染，于是文案就等于字典键，断言不依赖任何一种语言。
   const element = component(inject())
   const text = strings(element)
-  assert.ok(text.includes('tabTransfer'), '页内要有「导入导出」这一页')
+  assert.ok(text.includes('tabTransfer'), '页内要有「传输」这一页')
   assert.ok(text.includes('tabMigrate'), '页内要有「迁移」这一页')
   assert.ok(text.includes('tabManage'), '页内要有「会话」这一页（逐条归档 / 删除）')
   assert.ok(text.includes('title'), '页面标题走同一份字典')
@@ -379,12 +379,12 @@ test('客户端产物：页面组件在初始状态下能渲染成元素（不�
   const element = component(inject())
   assert.equal(typeof element, 'object')
   assert.notEqual(element, null)
-  // 注意首帧只渲染当前那一页（默认「导入导出」），迁移页要点了页签才在树上：
+  // 注意首帧只渲染当前那一页（默认「传输」），迁移页要点了页签才在树上：
   // 目录字段的两种分支因此不在这个冒烟用例的射程内，别把断言写在这里骗自己。
 })
 
 test('客户端产物：迁移页把「未分组」列成独立来源（注册表没认领的那批可以一次收编）', { skip }, () => {
-  // 迁移页平时在产物冒烟里跑不到（页签状态停在「导入导出」），所以这里把页签 seed 成 'migrate'。
+  // 迁移页平时在产物冒烟里跑不到（页签状态停在「传输」），所以这里把页签 seed 成 'migrate'。
   // 这一页值得跑一遍：它的来源下拉框现在有两条路（目录 / 未分组），而"未分组"是个**跨目录**的来源
   // ——判据在 planRows.ts（有单测），这里只证明它真的被摆到了界面上、条数用的是库里的口径。
   const state = {

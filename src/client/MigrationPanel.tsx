@@ -556,7 +556,7 @@ export function MigrationPanel({ t = fallback, state, reload, directory }: Panel
             </div>
             <div className="dsm-list">
               {matching.map((session) => {
-                // 与导入导出页同一套口径：显示标题、id 退到悬浮提示（见 planRows.sessionLabel）。
+                // 与传输页同一套口径：显示标题、id 退到悬浮提示（见 planRows.sessionLabel）。
                 const label = sessionLabel(session)
                 return (
                   <label key={session.id} className="dsm-row dsm-rowPick">
