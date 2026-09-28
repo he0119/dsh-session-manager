@@ -119,6 +119,10 @@ directories back — deleting never touched the registry.
   the byte count and the creation time. Sessions the host sidebar cannot show **are listed here** (the
   sidebar cannot reach them), each carrying a tag saying why: `subagent` / `blank` / `archived`, plus
   `active` for a session still live in host memory;
+- **Filter**: a row of small chips — subagent / blank / archived / ungrouped / active, each with the
+  count in the library. Tick several to see several kinds (multiple = either), **All** clears them. The
+  header then reports "showing N / M", and **Select all picks what is listed right now** (filter to blank,
+  select all, delete them), while ticking survives switching filters;
 - **Archive / Unarchive**: tick rows and put them away or bring them back in one click. It goes through
   the host's own archiving capability and takes effect **immediately** — the sidebar follows right away,
   no restart. On a host without that service (non-Web profiles) the buttons are disabled and the page

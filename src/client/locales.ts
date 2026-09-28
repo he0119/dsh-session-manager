@@ -186,6 +186,11 @@ export const zh = {
   manageDeleteHint:
     '删除会先备份、再删掉整个会话目录；删完侧边栏要等宿主重新扫描才会少掉这几条。还活在宿主内存里的会话删不掉——先在宿主里关掉它。',
   selectAllSessions: '全选',
+  manageShown: '显示 {shown} / {total} 条',
+  manageNoMatch: '没有符合筛选的会话。',
+  filterLabel: '筛选',
+  filterAll: '全部',
+  filterHint: '多选＝任一命中',
   tagSubagent: '子代理',
   tagSubagentTip: '子代理会话：外壳侧边栏把它挂在父会话下面（不是没有位置），所以不列进工作区或「未分组」。',
   tagBlank: '空白',
@@ -363,6 +368,11 @@ export const en: Record<keyof typeof zh, string> = {
   manageDeleteHint:
     'Deleting backs the session directory up first, then removes it; the sidebar drops those rows once the host rescans. A session still living in host memory cannot be deleted — close it in the host first.',
   selectAllSessions: 'Select all',
+  manageShown: 'showing {shown} / {total}',
+  manageNoMatch: 'No session matches the filter.',
+  filterLabel: 'Filter',
+  filterAll: 'All',
+  filterHint: 'multiple = either',
   tagSubagent: 'subagent',
   tagSubagentTip:
     'Subagent session: the shell sidebar nests it under its parent session (it is not homeless), so it never shows up in a workspace or under Ungrouped.',
