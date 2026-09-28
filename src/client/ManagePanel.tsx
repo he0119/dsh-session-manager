@@ -10,6 +10,10 @@
  *     （侧边栏里根本点不到），所以它们以标签的形式标出来，而不是被藏掉；筛选条（子代理 / 空白 /
  *     已归档 / 未分组 / 活动中，多选＝任一命中，外加标题搜索）是同一件事的"只看这几类"，判据在
  *     [sessionFilter.ts](./sessionFilter.ts)；
+ *   - **列表与「传输」页同形**：按目录分组、组头可折叠、组头那一下就是整组勾选（"把这个旧项目的会话
+ *     都归档 / 都删掉"因此是一次点击）。归属因此从行里挪进了组头——行上那六列本来有一列专门写着工作区
+ *     路径，而组头就写着它，重复那一次是白占标题的宽度；注册表没认领的会话仍挂「未分组」小标签（它
+ *     与组头说的是两件事：组头是目录，标签是"注册表不认这条"）；
  *   - **删除分两步**（预演 → 确认），预演把"哪些会话会被删、备份落在哪"摆清楚；执行时**先备份再删**
  *     （见 src/remove.ts），恢复走「迁移」页的「备份与回滚」；
  *   - **归档走宿主能力**（`workspaceRegistry`），一次落盘 + 改内存 + 广播，侧边栏即时跟着变；宿主
@@ -26,26 +30,24 @@ import {
   type DeleteResponse,
   type SessionSummary,
 } from './api.ts'
-import { translateWith, zh, type Translate } from './locales.ts'
+import { translateWith, zh } from './locales.ts'
+import { groupKey, groupSessions } from './groups.ts'
 import { FILTER_KEYS } from './sessionFilter.ts'
 import {
   SessionFilterBar,
+  SessionGroupHead,
+  SessionGroupTools,
   SessionListBox,
   SessionListEmpty,
   SessionRow,
   SessionStaticRow,
+  useGroupCollapse,
   useSessionFilter,
 } from './sessionList.tsx'
 import type { PanelShare } from './types.ts'
 
 /** 没有注入面时的兜底翻译。 */
 const fallback = translateWith(zh as unknown as Record<string, string>)
-
-/** 这一行属于哪个工作区（未登记就写「未分组」，与外壳侧边栏的叫法一致）。 */
-function ownerText(session: SessionSummary, paths: ReadonlyMap<string, string>, t: Translate): string {
-  if (session.workspaceId === undefined) return t('ungroupedSource')
-  return paths.get(session.workspaceId) ?? session.workspaceId
-}
 
 /** 「会话」分页。 */
 export function ManagePanel({ t = fallback, state, reload }: PanelShare): React.ReactElement {
@@ -61,14 +63,23 @@ export function ManagePanel({ t = fallback, state, reload }: PanelShare): React.
   const [plan, setPlan] = React.useState<DeleteResponse | null>(null)
   const [failed, setFailed] = React.useState<Array<{ id: string; error: string }>>([])
 
-  const workspacePaths = React.useMemo(() => {
-    const map = new Map<string, string>()
-    for (const workspace of state?.workspaces ?? []) map.set(workspace.id, workspace.path)
-    return map
-  }, [state])
-
-  /** 当前列出来的那些（筛过之后）。 */
-  const listed = React.useMemo(() => sessions.filter(filter.matches), [sessions, filter.matches])
+  /**
+   * 按目录分组，组内留着筛选之后的那些（空掉的组整组不画：组头底下没有行，看着像坏了）。
+   *
+   * 与「传输」页逐字同形（那边也是这几步），理由见 groups.ts：分组键是目录而不是注册表里的工作区 id，
+   * 因为同一个目录下常有没登记的会话，而用户说"这个工作区的会话"指的是这个目录。
+   */
+  const groups = React.useMemo(
+    () =>
+      groupSessions(sessions, state?.workspaces ?? [])
+        .map((group) => ({ group, sessions: group.sessions.filter(filter.matches) }))
+        .filter((item) => item.sessions.length > 0),
+    [sessions, state, filter.matches],
+  )
+  /** 折叠：只把组内的行收起来，不改"列出来了哪些"（见 TransferPanel 里的同一段说明）。 */
+  const collapse = useGroupCollapse(groups.map((item) => groupKey(item.group.path)))
+  /** 当前列出来的那些（筛过之后，按组摊平）。 */
+  const listed = React.useMemo(() => groups.flatMap((item) => item.sessions), [groups])
 
   // 已被删掉/已不在列表里的 id 不该继续留在选择集里（预演完再刷新时会遇到）。
   const known = React.useMemo(() => new Set(sessions.map((session) => session.id)), [sessions])
@@ -76,6 +87,15 @@ export function ManagePanel({ t = fallback, state, reload }: PanelShare): React.
 
   const toggle = (id: string): void => {
     setSelected((current) => (current.includes(id) ? current.filter((item) => item !== id) : [...current, id]))
+  }
+
+  /** 组头那一下：整组勾上，或整组取消（与「传输」页同一套）。 */
+  const toggleGroup = (sessions: readonly SessionSummary[]): void => {
+    const ids = sessions.map((session) => session.id)
+    const whole = ids.every((id) => selected.includes(id))
+    setSelected((current) =>
+      whole ? current.filter((id) => !ids.includes(id)) : [...new Set([...current, ...ids])],
+    )
   }
 
   const doArchive = async (archived: boolean): Promise<void> => {
@@ -182,29 +202,48 @@ export function ManagePanel({ t = fallback, state, reload }: PanelShare): React.
         {!archiveAvailable && <p className="dsm-hint">{t('manageArchiveUnavailable')}</p>}
 
         {sessions.length > 0 && <SessionFilterBar keys={FILTER_KEYS} filter={filter} t={t} />}
+        {groups.length > 0 && <SessionGroupTools collapse={collapse} t={t} />}
 
         {/* 高度固定：连"一条都没筛出来"（以及库里一条都没有）也画在这个框里，否则那些状态会把
             这一页的高度改回去，外层滚动条又能把整个卡片挪动 15px（见 styles.ts 的 .dsm-listFixed）。 */}
         <SessionListBox fixed>
           {sessions.length === 0 ? (
             <SessionListEmpty text={t('noSessions')} />
+          ) : groups.length === 0 ? (
+            <SessionListEmpty text={t('noMatch')} />
           ) : (
-            <>
-              {listed.length === 0 && <SessionListEmpty text={t('noMatch')} />}
-              {listed.map((session) => (
-                <SessionRow
-                  key={session.id}
-                  session={session}
-                  variant="manage"
-                  checked={picked.includes(session.id)}
-                  onToggle={() => toggle(session.id)}
-                  owner={ownerText(session, workspacePaths, t)}
-                  // 归属那一格写着「未分组」，再挂一枚同名标签是重复。
-                  ungroupedTag={false}
-                  t={t}
-                />
-              ))}
-            </>
+            groups.map(({ group, sessions: shown }) => {
+              const key = groupKey(group.path)
+              // 组头的名字：登记过就用工作区标题（人认得的名字），没登记就只剩路径可显示。
+              const name = group.title ?? (group.path === '' ? t('noCwdGroup') : group.path)
+              const collapsed = collapse.isCollapsed(key)
+              return (
+                <div key={key} className="dsm-group">
+                  <SessionGroupHead
+                    name={name}
+                    title={group.title}
+                    path={group.path}
+                    count={shown.length}
+                    picked={shown.filter((session) => picked.includes(session.id)).length}
+                    collapsed={collapsed}
+                    onToggle={() => toggleGroup(shown)}
+                    onToggleCollapse={() => collapse.toggle(key)}
+                    t={t}
+                  />
+                  {!collapsed &&
+                    shown.map((session) => (
+                      <SessionRow
+                        key={session.id}
+                        session={session}
+                        variant="manage"
+                        checked={picked.includes(session.id)}
+                        onToggle={() => toggle(session.id)}
+                        t={t}
+                      />
+                    ))}
+                </div>
+              )
+            })
           )}
         </SessionListBox>
 

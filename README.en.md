@@ -127,10 +127,14 @@ directories back — deleting never touched the registry.
 
 **Sessions** — manage the whole library row by row
 
-- Every row shows the title, its owner (a workspace path, or "Ungrouped" when no workspace claims it),
-  the byte count and the creation time. Sessions the host sidebar cannot show **are listed here** (the
-  sidebar cannot reach them), each carrying a tag saying why: `subagent` / `blank` / `archived`, plus
-  `active` for a session still live in host memory;
+- The list has the same shape as the **Transfer** tab: **grouped by directory**, headers foldable
+  (**Collapse all / Expand all** sit above the list), and clicking a header toggles that whole group — so
+  "archive every session of this old project" is one click. A header carries the workspace title and path,
+  so rows no longer repeat the owner; that width goes to the title instead, and a session no workspace
+  record claims carries a small "Ungrouped" tag (the header is the directory, the tag says the registry
+  does not know this row). Every row shows the title, the byte count and the creation time. Sessions the
+  host sidebar cannot show **are listed here** (the sidebar cannot reach them), each carrying a tag saying
+  why: `subagent` / `blank` / `archived`, plus `active` for a session still live in host memory;
 - **Filter**: a row of small chips — subagent / blank / archived / ungrouped / active, each with the
   count in the library. Tick several to see several kinds (multiple = either), **All** clears them. The
   line below is a **title / id search box** (both are searched: "name it by id" and "the one where I asked

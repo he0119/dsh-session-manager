@@ -254,12 +254,9 @@ export const CSS = `
 }
 .dsm-row:last-child { border-bottom: none; }
 /*
- * 「会话」页那一行多一列：它在"标题 / 字节 / 时间"之外还要说"这条属于哪个工作区（或未分组）"，
- * 而五列的模板塞第六个孩子会把它挤到下一行去。只换列模板，颜色与圆角仍归 .dsm-row。
+ * 「会话」页那一行曾经多一列（"这条属于哪个工作区"）：那一页现在也按目录分组了，归属进了组头，
+ * 行因此回到与导出列表同一个五列模板——那个类只剩"这是管理页的行"这个标记作用（测试拿它当选择器）。
  */
-.dsm-rowManage {
-  grid-template-columns: 24px 16px minmax(120px, 1.4fr) minmax(96px, 0.9fr) auto auto;
-}
 /* 删除预演里那一行没有勾选框（预演结果不是勾选面），于是少一列，且它不可点。 */
 .dsm-rowDelete {
   grid-template-columns: 16px minmax(120px, 1.4fr) auto auto;

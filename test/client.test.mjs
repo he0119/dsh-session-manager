@@ -107,6 +107,22 @@ function rowParts(node, acc = { label: '', tags: [] }) {
 }
 
 /**
+ * 把一棵子树摊平成元素列表（函数组件带着 props 调一次，同 rowParts）。
+ *
+ * 想在**某一块**里找东西时用它：`recorded` 是整个页面的元素，缩不到局部。
+ */
+function elementsOf(node, out = []) {
+  if (Array.isArray(node)) {
+    for (const item of node) elementsOf(item, out)
+    return out
+  }
+  if (node === null || typeof node !== 'object') return out
+  if (typeof node.type === 'function') return elementsOf(node.type(node.props), out)
+  out.push(node)
+  return elementsOf(node.props?.children, out)
+}
+
+/**
  * 从元素树里收集所有字符串（文案就是字符串，键回显也是）。
  *
  * 遇到**函数组件**就带着 props 调一次再往下走：本文件没有真的渲染器，不这么做的话嵌套的
@@ -588,9 +604,28 @@ test('客户端产物：「会话」页把侧边栏看不见的那三类标出�
   tagged('tagBlank', 'tagBlankTip')
   tagged('tagArchived', 'tagArchivedTip')
   tagged('tagLive', 'tagLiveTip')
-  // 归属那一格：在册的写工作区路径，没在册的写「未分组」（与外壳侧边栏同一套叫法）
-  assert.ok(text.includes('ungroupedSource'), '未登记在册的会话在归属那一格写「未分组」')
-  assert.ok(text.includes('/home/u/dev/alpha'), '在册的会话在归属那一格写工作区路径')
+  // 归属进了组头：按目录分组（组头写工作区标题与路径），行上不再重复那一列
+  const heads = recorded.filter((node) => String(node.props?.className) === 'dsm-groupHead')
+  assert.equal(heads.length, 2, 'alpha 与 beta 各一组')
+  assert.ok(strings(heads[0]).includes('工作区甲'), '登记过的那一组写工作区标题')
+  assert.ok(
+    heads.some((node) => strings(node).includes('/home/u/dev/alpha')),
+    '组头把目录写在路径那一格',
+  )
+  const manageRows = recorded.filter(
+    (node) => node.type === 'label' && String(node.props?.className).includes('dsm-rowManage'),
+  )
+  // 归属那一列没了：五个格子（勾选框 / 标记 / 标题 / 字节 / 时间）。
+  // 数的是**元素**：JSX 里那个 `owner !== undefined && …` 为假时会留一个 false 在 children 里。
+  const cells = (Array.isArray(manageRows[0].props.children) ? manageRows[0].props.children : []).filter(
+    (child) => child !== null && typeof child === 'object',
+  )
+  assert.equal(cells.length, 5, '行里不再有归属那一列（勾选框 / 标记 / 标题 / 字节 / 时间）')
+  assert.deepEqual(
+    rowParts(manageRows.find((row) => strings(row).includes('s-2'))).tags,
+    ['tagSubagent', 'ungroupedSource'],
+    '没在册的那条在行上挂「未分组」（组头说的是目录，标签说的是注册表认不认）',
+  )
   // 归档与删除两组入口都在，且宿主给出归档能力时不显示那句"改不了"
   assert.ok(text.includes('manageArchive') && text.includes('manageUnarchive'), '归档 / 取消归档入口在')
   const actionButton = (key) =>
@@ -678,9 +713,14 @@ test('客户端产物：「会话」页的筛选条把不匹配的行筛掉，�
   const listed = rows.map((row) => strings(row)[0])
   assert.deepEqual(listed, ['s-blank', 's-both'])
   assert.ok(!text.includes('s-owned') && !text.includes('s-sub') && !text.includes('s-live'), '不匹配的行不在树上')
-  // "空白 + 已归档"那条要挂两枚标签：只挂宿主先判的那一枚，筛选就没法自证了
+  // "空白 + 已归档"那条要挂两枚标签：只挂宿主先判的那一枚，筛选就没法自证了。
+  // 第三枚「未分组」是这次的改动带出来的：归属那一段挪进组头之后，行上重新说得清"注册表不认这一条"。
   const both = rows.find((row) => strings(row).includes('s-both'))
-  assert.deepEqual(rowParts(both).tags, ['tagBlank', 'tagArchived'], '既是空白又已归档的那条，两枚标签都挂')
+  assert.deepEqual(
+    rowParts(both).tags,
+    ['tagBlank', 'tagArchived', 'ungroupedSource'],
+    '既是空白又已归档、又没在册的那条，三枚都挂',
+  )
   // 筛过之后头部报"显示了其中几条"，别让人以为库里的会话变少了
   assert.ok(text.includes('shownCount:{"shown":2,"total":5}'), '筛过之后报出 显示 N / M 条')
 
@@ -993,5 +1033,51 @@ test('客户端产物：一个组都没有时不摆折叠工具栏', { skip }, (
   assert.ok(
     recorded.some((node) => String(node.props?.className) === 'dsm-empty' && strings(node).includes('noMatch')),
     '筛空时框里是那句空态',
+  )
+})
+
+test('客户端产物：「会话」页也按目录分组、也能折叠，勾选口径与传输页一致', { skip }, () => {
+  const state = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    archiveAvailable: true,
+    sessions: [
+      { id: 'a-1', cwd: '/home/u/dev/alpha', createdAt: 4, dir: '/home/u/dev/alpha', bytes: 100, files: [], workspaceId: 'w1' },
+      { id: 'a-2', cwd: '/home/u/dev/alpha', createdAt: 3, dir: '/home/u/dev/alpha', bytes: 200, files: [], blank: true },
+      { id: 'b-1', cwd: '/home/u/dev/beta', createdAt: 2, dir: '/home/u/dev/beta', bytes: 300, files: [], blank: true },
+      { id: 'b-2', cwd: '/home/u/dev/beta', createdAt: 1, dir: '/home/u/dev/beta', bytes: 400, files: [], archived: true },
+    ],
+    workspaces: [{ id: 'w1', path: '/home/u/dev/alpha', title: '工作区甲', sessionIds: ['a-1'] }],
+  }
+  // 会话页的空数组状态按顺序是：勾选集、筛选条（useSessionFilter）、失败的删除记录、折叠状态
+  // （useGroupCollapse 在 groups 之后）。种子按这个顺序发，错一位就会当场断言失败，不会静默过。
+  const alpha = '/home/u/dev/alpha'
+  // 筛「空白」→ 列出来的是 a-2 与 b-1（两组），把 alpha 那组收起来
+  const { registrations, recorded } = mount({ state, panel: 'manage', arrays: [[], ['blank'], [], [alpha]] })
+  const text = strings(registrations[0].component(registrations[0].registration.inject()))
+
+  const rowIds = recorded
+    .filter((node) => typeof node.type === 'function' && node.type.name === 'SessionRow')
+    .map((node) => node.props.session.id)
+  assert.deepEqual(rowIds, ['b-1'], '收起的那一组不画行，另一组照画')
+  const heads = recorded.filter((node) => String(node.props?.className) === 'dsm-groupHead')
+  assert.equal(heads.length, 2, '组头一个都不少')
+  assert.ok(text.includes('sessionsInDir:{"count":1}'), '收起的组头照样报"这组几条"')
+  assert.ok(text.includes('shownCount:{"shown":2,"total":4}'), '折叠不改"列出来了哪些"（仍是 2 条）')
+  assert.ok(text.includes('工作区甲'), '组头写工作区标题')
+  // 组头那一下就是整组勾选（勾选集是空的，于是两个组头的选框都没勾上）
+  const boxes = heads.map((node) => elementsOf(node).find((child) => child.type === 'input'))
+  assert.deepEqual(boxes.map((node) => node.props.checked), [false, false], '整组勾选的选框在组头上')
+
+  // 折叠工具栏也在，且与传输页同一个组件
+  const bar = recorded.find((node) => String(node.props?.className) === 'dsm-groupTools')
+  assert.ok(bar, '会话页也给「全部收起 / 全部展开」')
+  assert.deepEqual(
+    elementsOf(bar)
+      .filter((node) => node.type === 'button')
+      .map((node) => node.props.disabled),
+    [false, false],
+    '收了一组：两个按钮都能用',
   )
 })
