@@ -41,9 +41,11 @@ npx @deepseek-ai/dsh@next plugin --profile desktop add /path/to/dsh-session-mana
 
 装完重启 DSH，**设置** 的左侧导航里会多出一页「会话管理」（排在官方那几页之后）。
 本包**不支持** `github:` 形式的安装：仓库把构建放在 `prepublishOnly`、`lib/` 不入库，git 装法拿不到产物。
-宿主版本要 0.1.7-rc.2 及之后的 0.1.x（`engines.dsh` 与两个 DSH peer 都是 `^0.1.7-rc.2`，
-`@deepseek-ai/cordis` 另写 `^4.0.4`）；预发布语义下
-`0.1.8-rc.1` 这类新的 rc 线不在这个范围里，那时要跟着改一行版本声明。
+宿主版本要 0.2.0-rc.1 及之后的 0.2.x（`engines.dsh` 与两个 DSH peer 都是 `^0.2.0-rc.1`，
+`@deepseek-ai/cordis` 另写 `^4.0.4`）。宿主**按 peer 范围决定装不装**：范围收不下运行中的那个版本，
+整条 bundle 会被跳过（日志里是 `skipping profile bundle … is incompatible with dsh …`）。它判范围时带
+`includePrerelease`，所以同一 minor 线上的新 rc（`0.2.1-rc.1`）照旧收得下；换 minor 线
+（`0.3.0-rc.1`）时要跟着改这一行。
 
 ## 使用
 
