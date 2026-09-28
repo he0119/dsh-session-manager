@@ -178,15 +178,18 @@ export function SessionRow({
  *
  * @param className 行标记由调用方给（`.dsm-rowDelete` 是四列，与可勾选的那些不一样）。
  * @param metaTitle 字节那一格的悬浮提示（删除计划里给的是会话目录）。
+ * @param note 名字后面跟一枚小标签（删除预演用它说明"这条是跟着谁来的"）；文案由调用方翻好。
  */
 export function SessionStaticRow({
   session,
   className,
   metaTitle,
+  note,
 }: {
   session: RowSession
   className: string
   metaTitle?: string
+  note?: { text: string; tip: string }
 }): React.ReactElement {
   const label = sessionLabel(session)
   return (
@@ -196,6 +199,11 @@ export function SessionStaticRow({
         <span className={label.kind === 'title' ? 'dsm-rowTitle' : 'dsm-rowId'} title={label.tip}>
           {label.text}
         </span>
+        {note !== undefined && (
+          <span className="dsm-tag dsm-tagIdle" title={note.tip}>
+            {note.text}
+          </span>
+        )}
       </span>
       <span className="dsm-meta" title={metaTitle}>
         {formatBytes(session.bytes)}

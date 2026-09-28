@@ -186,6 +186,12 @@ export const zh = {
   manageBackupTo: '备份落在：{dir}（要恢复就去「迁移」页的「备份与回滚」）',
   manageDeleteHint:
     '删除会先把整个会话目录备份到本插件的备份根，再删掉它；还活在宿主内存里的会话删不掉。',
+  manageDeleteVia: '随父删',
+  manageDeleteViaTip:
+    '这条是子代理会话：它属于你点名的「{name}」（可能隔了几层），所以跟着一起删——不然它留在盘上，就再也没有入口了。',
+  manageDeleteKeptParent: '父留着',
+  manageDeleteKeptParentTip:
+    '这条子代理的父会话「{name}」不在这次删除里：删掉它之后，父会话侧边栏里那一行会点不开。',
   selectAllSessions: '全选',
   shownCount: '显示 {shown} / {total} 条',
   noMatch: '没有符合筛选条件的会话。',
@@ -219,6 +225,8 @@ export const zh = {
   helpDiskBackup: '每次迁移、每次导入落地、每次删除都会先留一份字节级备份；备份根在「迁移 → 备份与回滚」里能看到。',
   helpDiskRollback: '迁移的备份点「回滚」：把会话目录、日志字节与工作区注册表一起还原。',
   helpDiskRestore: '删除的备份点「恢复」：只把会话目录搬回原位——删除从头到尾没碰过注册表。',
+  helpDiskFamily:
+    '子代理跟着父会话走：删除父会话时，它的子代理会话一起删（预演里逐条列出，一个备份装整族）；只删子代理也行，但父会话侧边栏里那一行从此点不开。',
   helpDiskSidebar: '归档与删除之后，侧边栏要等宿主重新扫描才会少掉那几行。',
   helpDiskLive: '还活在宿主内存里（运行中或已打开）的会话删不掉——先在宿主里关掉它。',
   helpDiskExport: '导出包里是会话日志的原始字节，不含会话创建过的普通文件；同一条会话的所有代次日志一起进包。',
@@ -404,6 +412,12 @@ export const en: Record<keyof typeof zh, string> = {
   manageBackupTo: 'Backup lands in: {dir} (restore it from Backups & rollback on the Migrate tab)',
   manageDeleteHint:
     'Deleting backs the whole session directory up into this plugin’s backup root first, then removes it; a session still living in host memory cannot be deleted.',
+  manageDeleteVia: 'with parent',
+  manageDeleteViaTip:
+    'This is a subagent session: it belongs to “{name}”, one of the sessions you ticked (possibly a few levels up), so it is deleted with it — left behind, it would have no way back in.',
+  manageDeleteKeptParent: 'parent kept',
+  manageDeleteKeptParentTip:
+    'The parent session “{name}” of this subagent is not part of this delete: afterwards that line under the parent will no longer open.',
   selectAllSessions: 'Select all',
   shownCount: 'showing {shown} / {total}',
   noMatch: 'No session matches the filter.',
@@ -438,6 +452,8 @@ export const en: Record<keyof typeof zh, string> = {
   helpDiskBackup: 'Every migration, every import that lands and every delete leaves a byte-level backup first; the backup root is listed under Migrate → Backups & rollback.',
   helpDiskRollback: 'A migration backup offers Roll back: session directories, log bytes and the workspace registry are restored together.',
   helpDiskRestore: 'A delete backup offers Restore: it only moves the session directories back — deleting never touched the registry.',
+  helpDiskFamily:
+    'Subagents follow their parent session: deleting a parent deletes its subagent sessions with it (listed row by row in the preview, one backup holds the whole family); deleting a subagent alone is allowed, but that line under its parent will never open again.',
   helpDiskSidebar: 'After archiving or deleting, the sidebar drops those rows once the host rescans.',
   helpDiskLive: 'A session still live in host memory (running or open) cannot be deleted — close it in the host first.',
   helpDiskExport: 'The bundle holds the raw bytes of the session logs, not the ordinary files a session created; every generation of a session log goes in together.',

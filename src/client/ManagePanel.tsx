@@ -32,6 +32,7 @@ import {
 } from './api.ts'
 import { translateWith, zh } from './locales.ts'
 import { groupKey, groupSessions } from './groups.ts'
+import { deleteFamilyNote } from './planRows.ts'
 import { FILTER_KEYS } from './sessionFilter.ts'
 import {
   SessionFilterBar,
@@ -300,6 +301,8 @@ export function ManagePanel({ t = fallback, state, reload }: PanelShare): React.
                 session={entry}
                 className="dsm-row dsm-rowDelete"
                 metaTitle={entry.dir}
+                // 级联带进来的条目在清单里是"没勾过却要一起删"的那些，得在行上说明出处。
+                note={deleteFamilyNote(entry, t)}
               />
             ))}
           </SessionListBox>

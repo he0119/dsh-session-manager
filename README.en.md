@@ -80,7 +80,12 @@ one-line bump at that point.
   lands) → then confirm. Deleting **backs the session directory up into this plugin's backup root
   first**, then removes it; the sidebar drops those rows once the host rescans. A session still live in
   host memory is refused — close it in the host first. Changed your mind? Restore it from
-  **Backups & rollback**.
+  **Backups & rollback**;
+- **Subagents follow their parent session**: ticking a parent takes its subagent sessions (and any
+  deeper descendants) with it — the preview lists them row by row, marked as going with the parent, and
+  one backup holds the whole family (once the parent's log is gone a subagent has no way back into the
+  sidebar, so leaving it on disk just makes it invisible). Deleting a subagent alone is allowed; the
+  preview says that its line under the parent will never open again.
 
 **Migrate** — move one directory's sessions to another directory
 

@@ -53,7 +53,7 @@ function writeSession(
   id: string,
   cwd: string,
   createdAt: number,
-  options: { title?: string; origin?: 'subagent' } = {},
+  options: { title?: string; origin?: 'subagent'; parentSession?: string } = {},
 ): void {
   const header: SessionHeader = {
     type: 'session',
@@ -62,8 +62,9 @@ function writeSession(
     createdAt,
     cwd,
     isSeeded: false,
-    delegationDepth: 0,
+    delegationDepth: options.parentSession === undefined ? 0 : 1,
     ...(options.origin === undefined ? {} : { origin: options.origin }),
+    ...(options.parentSession === undefined ? {} : { parentSession: options.parentSession }),
   }
   const lines = [
     JSON.stringify(header),
@@ -709,6 +710,29 @@ test('POST /delete：预演不写盘、落地先备份再删，二者共用同�
   assert.equal(existsSync(dir), false, '落地之后会话目录该没了')
   // 备份落在本插件的备份根下（「备份与回滚」那张卡读的就是它）
   assert.equal(existsSync(applyBody['backupDir'] as string), true)
+})
+
+test('POST /delete：删父会话时把子代理一起带上，预演里带着出处字段', async () => {
+  const sandbox = makeSandbox('web-delete-family')
+  writeSession(sandbox.sessionsRoot, 'session-parent', CWD_A, 1000, { title: '父会话' })
+  writeSession(sandbox.sessionsRoot, 'session-child', CWD_A, 2000, { title: '子代理', origin: 'subagent', parentSession: 'session-parent' })
+
+  const handlers = createApiHandlers(deps(sandbox))
+  const { res, captured } = fakeRes()
+  await handlers['POST /delete']!(
+    fakeReq('POST', `${API_PREFIX}/delete`, Buffer.from(JSON.stringify({ sessionIds: ['session-parent'], mode: 'plan' }))),
+    res,
+  )
+  assert.equal(captured.status, 200)
+  const preview = json(captured)['preview'] as Record<string, unknown>
+  // 界面读的就是这几个字段（见 src/client/api.ts 的 DeleteEntry）：条数、级联计数与"跟着谁来的"
+  assert.equal(preview['cascaded'], 1)
+  const entries = preview['entries'] as Array<Record<string, unknown>>
+  assert.deepEqual(entries.map((entry) => entry['id']), ['session-parent', 'session-child'])
+  assert.equal(entries[0]!['via'], undefined)
+  assert.deepEqual(entries[1]!['via'], { id: 'session-parent', title: '父会话' })
+  assert.equal(entries[1]!['origin'], 'subagent')
+  assert.match(String(json(captured)['summary']), /其中 1 条是子代理会话/)
 })
 
 test('POST /delete：状态不允许（会话不在库里）用 409 并把完整计划带回来', async () => {

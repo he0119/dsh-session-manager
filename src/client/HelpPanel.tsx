@@ -42,11 +42,12 @@ const TAB_LINES = [
   ['tabTransfer', 'helpTabTransfer'],
 ] as const
 
-/** 会碰什么盘：一次写全备份、回滚 / 恢复、侧边栏重扫、内存里的会话、包内容。 */
+/** 会碰什么盘：一次写全备份、回滚 / 恢复、子代理跟着父会话走、侧边栏重扫、内存里的会话、包内容。 */
 const DISK_LINES = [
   'helpDiskBackup',
   'helpDiskRollback',
   'helpDiskRestore',
+  'helpDiskFamily',
   'helpDiskSidebar',
   'helpDiskLive',
   'helpDiskExport',
