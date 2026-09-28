@@ -89,6 +89,24 @@ function strings(node, out = []) {
   return out
 }
 
+/**
+ * 树里所有宿主元素（`type` 是字符串的那些），深度优先。
+ *
+ * `strings()` 只看得见文字，看不出"标题是 `h2` 还是 `span`"这种结构差别——而页头那份规格恰恰
+ * 是结构（`h2` 独占一行 + `p` 说明行），所以单开一个只收元素的走法。
+ */
+function elements(node, out = []) {
+  if (Array.isArray(node)) for (const item of node) elements(item, out)
+  else if (node !== null && typeof node === 'object') {
+    if (typeof node.type === 'function') elements(node.type(node.props), out)
+    else if (typeof node.type === 'string') {
+      out.push(node)
+      elements(node.props?.children, out)
+    }
+  }
+  return out
+}
+
 /** 极小的假 document：够 installStyles 用。 */
 function fakeDocument(nodes) {
   const head = {
@@ -308,6 +326,31 @@ test('客户端产物：页面骨架带着两个页内分页（导入导出 / �
   assert.ok(text.includes('tabTransfer'), '页内要有「导入导出」这一页')
   assert.ok(text.includes('tabMigrate'), '页内要有「迁移」这一页')
   assert.ok(text.includes('title'), '页面标题走同一份字典')
+})
+
+test('客户端产物：页头是页面级标题（h2 + 说明行），不是卡片式的小标题', { skip }, () => {
+  // 真实事故（用户报的）：这一页标题曾是 14px 的 `span`，跟内建设置页（`h2` 18px + 13px 说明行）
+  // 摆在一起就是两种规格。结构层面的差别得在产物里钉住，不然改样式时很容易又退回 span。
+  const { registrations } = mount()
+  const { component } = registrations[0]
+  const { inject } = registrations[0].registration
+  const tree = elements(component(inject()))
+
+  const heading = tree.find((node) => node.props?.className === 'dsm-title')
+  assert.equal(heading?.type, 'h2', '页面标题必须是 h2（内建页就是 h2）')
+  assert.ok(strings(heading).includes('title'), '标题文案走字典')
+  assert.equal(tree.some((node) => node.props?.className === 'dsm-sub'), false, '旧的 .dsm-sub 不该再出现')
+
+  const intro = tree.find((node) => node.props?.className === 'dsm-intro')
+  assert.equal(intro?.type, 'p', '说明行是 p')
+  assert.ok(
+    strings(intro).some((text) => text.includes('library')),
+    '说明行里带着会话库信息（路径与条数）',
+  )
+  // 标题行里只有标题、弹簧与刷新按钮：说明不在这一行里，否则又变成"挤在一行"。
+  const row = tree.find((node) => node.props?.className === 'dsm-titleRow')
+  assert.equal(row?.type, 'div', '标题行是一个 div')
+  assert.ok(!strings(row).some((text) => text.includes('library')), '说明行不在标题行里')
 })
 
 test('客户端产物：页面组件在初始状态下能渲染成元素（不抛）', { skip }, () => {

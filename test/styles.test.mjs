@@ -76,14 +76,22 @@ const THEME_TOKENS = new Set([
 ])
 
 /**
- * 登记在案的例外：检查面没给、但确实需要的那一个，且**必须带回落链**。
+ * 登记在案的例外：检查面没给、但确实需要的那些，且**必须带回落链**。
  *
- * `--dsw-alias-label-primary-foreground` 是宿主填充按钮自己的前景色（浅色主题 #fff、深色主题
- * #0f1115），也就是"填充按钮上该用什么字色"的唯一正解；检查面没有它，于是 `.dsm-primary`
- * 写成 `var(--dsw-alias-label-primary-foreground, var(--dsw-alias-bg-layer-1, #fff))`：
- * 拿不到就退到表面色——`brand-primary` 在明暗两套里都是表面的反色，拿表面色当字色读得出来。
+ * - `--dsw-alias-label-primary-foreground` 是宿主填充按钮自己的前景色（浅色主题 #fff、深色主题
+ *   #0f1115），也就是"填充按钮上该用什么字色"的唯一正解；检查面没有它，于是 `.dsm-primary`
+ *   写成 `var(--dsw-alias-label-primary-foreground, var(--dsw-alias-bg-layer-1, #fff))`：
+ *   拿不到就退到表面色——`brand-primary` 在明暗两套里都是表面的反色，拿表面色当字色读得出来。
+ * - `--dsw-alias-label-tertiary`（浅色主题 #81858c）是**内建设置页说明行的本色**。在真实设置页里
+ *   量过：「内置插件」那一页的 `p` 说明行计算色正是 rgb(129,133,140)，也就是这个 token 在本页作用域
+ *   里的解析值；字号/布局都对上了，颜色差一档就会看出"这页和别的页不是一套"。检查面只列到
+ *   `label-secondary`（#61666b，比它深一档），所以要登记。回落退到 `label-secondary`：仍是次要
+ *   文字色，只是稍深一点，缺 token 的老版本上不会读不出来。
  */
-const REGISTERED_EXCEPTIONS = new Set(['--dsw-alias-label-primary-foreground'])
+const REGISTERED_EXCEPTIONS = new Set([
+  '--dsw-alias-label-primary-foreground',
+  '--dsw-alias-label-tertiary',
+])
 
 /** 把 `var(...)` 整段挖掉，剩下的才是"没走 token"的字面量。嵌套的 var 多跑几轮就挖干净了。 */
 function withoutVar(cssText) {
@@ -186,4 +194,23 @@ test('state 色不许裸当文字色：它是指示色，浅色主题下淡到�
     offenders.push(`第 ${line} 行 ${property}: ${value}`)
   }
   assert.deepEqual(offenders, [], 'state 色要当文字色，得先用 color-mix 和 label-primary 兑过')
+})
+
+test('页头照内建设置页的规格：18px/600 的 h2 标题 + 下面一档灰的说明行', () => {
+  // 为什么钉它：这一页的页头是**手写**的（客户端半边刻意不 require 上游那套设置页原语），
+  // 规格只能照量出来的数字抄。抄错的后果就是真实事故里那种"看着不对但没人说得清哪不对"——
+  // 用户就是这么发现标题格式与本页不一致的：内建页是 h2/18px、说明行 12px 之后、列布局。
+  const head = ruleBody('.dsm-head')
+  assert.notEqual(head, null, '找不到 .dsm-head 规则')
+  assert.match(head, /flex-direction:\s*column/, '标题与说明要上下排（内建页就是列布局），不该挤成一行')
+  assert.match(head, /gap:\s*12px/, '标题与说明之间是 12px，与内建页的节奏一致')
+
+  const title = ruleBody('.dsm-title')
+  assert.notEqual(title, null, '找不到 .dsm-title 规则')
+  assert.match(title, /font-size:\s*18px/, '页面标题是 18px（与「内置插件」那一页同规格）')
+  assert.match(title, /font-weight:\s*600/)
+
+  const intro = ruleBody('.dsm-intro')
+  assert.notEqual(intro, null, '找不到 .dsm-intro 规则')
+  assert.match(intro, /--dsw-alias-label-tertiary/, '说明行用 label-tertiary，与内建页的说明行同色')
 })

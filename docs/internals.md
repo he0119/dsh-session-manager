@@ -229,6 +229,17 @@ token，所以显式挂了回落链（拿不到就退到表面色——brand-pri
 （换主题用 `agent-browser set media dark`，页面认 `prefers-color-scheme`）。对比度推不出来——它
 取决于宿主**当时**给的那套 token 值，只有量了才知道。
 
+**页头是这条纪律的延长线，也是踩过的坑**：内建设置页（如「内置插件」）的页头由
+`@deepseek-ai/dsh-client-ui-settings-general` 的原语渲染（类名是 `pbvGtq_` 这类打包哈希），我们
+不 require 它，于是页头只能手写、规格只能**去真实设置页里量**：`h2` 18px/600 的标题独占一行，
+下面隔 12px 跟一行 13px 的说明行，整体是 `display:flex; flex-direction:column; gap:12px`。
+这里原先写成 14px 的 `span` 加一行 `row` 布局，用户一眼就看出来"和内置插件那页不是一套"。
+说明行的颜色是 `--dsw-alias-label-tertiary`（浅色主题 **#81858c**，量的就是那一页 `p` 说明行的
+计算色），而检查面只列到 `label-secondary`（#61666b，深一档）——所以它进了
+`test/styles.test.mjs` 的例外表并带回落链。规格现在有两处钉着：`test/styles.test.mjs` 查
+`font-size/flex-direction/说明行的 token`，`test/client.test.mjs` 查结构（标题必须是 `h2`、
+说明必须是 `p`、说明不在标题行里）。
+
 注册进 `settings.section`：设置左侧导航里的一页，与「通用 / 模型 / 插件 / 账户 / Agent 预设」
 并列，`order: 30` 排它们之后。相近的槽位有两个，各有一个真问题，所以都没选：
 

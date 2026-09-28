@@ -8,9 +8,17 @@
  *
  * 不用任何宿主原语包的类名：那些是打包器哈希出来的私有产物，抄不到也不该抄。
  *
- * 排版照「插件」页那一类管理列表：一个区块一张卡片（发丝描边 + 大圆角）、行高紧凑、
- * 次要文字用 `label-secondary`。外层的水平留白与滚动由设置外壳给（它那一列是
- * `padding: 0 24px 24px; overflow-y: auto`），所以这里不再自己加页面级 padding。
+ * 排版分两层，都是**照着设置外壳自己的页量出来的**（不是估的）：
+ *
+ * - **页头**照内建设置页（如「内置插件」）的节奏：`h2` 18px/600 的标题独占一行，下面 12px 跟一行
+ *   13px 的说明（用 `label-tertiary`——内建页那一行的计算色就是它解析出来的 `#81858c`），再往下
+ *   才是内容。上游那套页头是 `@deepseek-ai/dsh-client-ui-settings-general` 的原语渲染的（类名
+ *   是 `pbvGtq_` 这种打包哈希），本插件刻意不 require 它，所以规格只能这样抄过来。
+ * - **卡片**照「插件」页那一类管理列表：一个区块一张卡片（发丝描边 + 大圆角）、行高紧凑、
+ *   次要文字用 `label-secondary`。
+ *
+ * 外层的水平留白与滚动由设置外壳给（它那一列是 `padding: 0 24px 24px; overflow-y: auto`），
+ * 所以这里不再自己加页面级 padding。
  *
  * @module dsh-session-manager/client/styles
  */
@@ -28,9 +36,13 @@ export const CSS = `
   font-size: 13px;
   line-height: 20px;
 }
-.dsm-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
-.dsm-title { font-size: 14px; font-weight: 600; }
-.dsm-sub { color: var(--dsw-alias-label-secondary, #646a73); }
+.dsm-head { display: flex; flex-direction: column; gap: 12px; }
+.dsm-titleRow { display: flex; align-items: baseline; gap: 12px; }
+.dsm-title { margin: 0; font-size: 18px; font-weight: 600; line-height: 1.2; }
+.dsm-intro {
+  margin: 0;
+  color: var(--dsw-alias-label-tertiary, var(--dsw-alias-label-secondary, #646a73));
+}
 .dsm-spacer { flex: 1 1 auto; }
 .dsm-card {
   border: 1px solid var(--dsw-alias-border-l1, rgba(0, 0, 0, 0.1));

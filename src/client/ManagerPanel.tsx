@@ -70,15 +70,17 @@ export function ManagerPanel({ t = fallback, directory }: ManagerPanelProps): Re
   return (
     <section className="dsm-root" data-plugin="dsh-session-manager">
       <header className="dsm-head">
-        <span className="dsm-title">{t('title')}</span>
-        <span className="dsm-sub">
+        <div className="dsm-titleRow">
+          <h2 className="dsm-title">{t('title')}</h2>
+          <span className="dsm-spacer" />
+          <button type="button" className="dsm-button" onClick={() => void load()} disabled={busy}>
+            {busy ? t('loading') : t('refresh')}
+          </button>
+        </div>
+        <p className="dsm-intro">
           {t('library')}：{state?.sessionsRoot ?? ''} · {t('sessionsCount', { count: sessions })} ·{' '}
           {t('workspacesCount', { count: workspaces })}
-        </span>
-        <span className="dsm-spacer" />
-        <button type="button" className="dsm-button" onClick={() => void load()} disabled={busy}>
-          {busy ? t('loading') : t('refresh')}
-        </button>
+        </p>
       </header>
 
       {error !== null && (
