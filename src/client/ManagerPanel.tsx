@@ -17,6 +17,7 @@ import * as React from 'react'
 import { fetchState, type StateResponse } from './api.ts'
 import type { DirectoryApi } from './directory.ts'
 import { translateWith, zh, type Translate } from './locales.ts'
+import { HelpPanel } from './HelpPanel.tsx'
 import { ManagePanel } from './ManagePanel.tsx'
 import { MigrationPanel } from './MigrationPanel.tsx'
 import { TransferPanel } from './TransferPanel.tsx'
@@ -36,7 +37,7 @@ export interface ManagerPanelProps {
 const fallback = translateWith(zh as unknown as Record<string, string>)
 
 /** 页内分页。 */
-type PanelKey = 'transfer' | 'migrate' | 'manage'
+type PanelKey = 'transfer' | 'migrate' | 'manage' | 'help'
 
 /** 会话管理页。 */
 export function ManagerPanel({ t = fallback, directory }: ManagerPanelProps): React.ReactElement {
@@ -96,8 +97,9 @@ export function ManagerPanel({ t = fallback, directory }: ManagerPanelProps): Re
       )}
 
       {/*
-        页签顺序：日常的「会话」在最前、「传输」在最后。顺序与页签、页面本体两处都跟着走对齐，
-        默认页就是第一个（见上面 useState 的初值）。
+        页签顺序：三个动作页按日常程度排（会话 → 迁移 → 传输），最后的「说明」是名词解释与边界条件
+        ——它是一次性读的参考，不该挤在动作页上（详见 HelpPanel.tsx 的取舍）。顺序与页签、页面本体
+        两处都跟着走对齐，默认页就是第一个（见上面 useState 的初值）。
       */}
       <div className="dsm-tabs" role="tablist">
         <button
@@ -127,11 +129,21 @@ export function ManagerPanel({ t = fallback, directory }: ManagerPanelProps): Re
         >
           {t('tabTransfer')}
         </button>
+        <button
+          type="button"
+          role="tab"
+          className="dsm-tab"
+          aria-selected={panel === 'help'}
+          onClick={() => setPanel('help')}
+        >
+          {t('tabHelp')}
+        </button>
       </div>
 
       {panel === 'manage' && <ManagePanel t={t} state={state} reload={load} />}
       {panel === 'migrate' && <MigrationPanel t={t} state={state} reload={load} directory={directory} />}
       {panel === 'transfer' && <TransferPanel t={t} state={state} reload={load} />}
+      {panel === 'help' && <HelpPanel t={t} state={state} reload={load} />}
     </section>
   )
 }
