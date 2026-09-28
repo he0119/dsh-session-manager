@@ -17,7 +17,7 @@
 
 import * as React from 'react'
 
-import { SessionIcon, WorkspaceIcon } from './icons.tsx'
+import { ChevronIcon, SessionIcon, WorkspaceIcon } from './icons.tsx'
 import { sessionLabel } from './planRows.ts'
 import {
   attributeKeys,
@@ -240,14 +240,26 @@ export interface SessionGroupHeadProps {
   /** 这一组**列出来的**有几条（筛过之后就是筛剩下的）。 */
   count: number
   picked: number
+  /** 收起状态（只影响画不画组内的行，不影响"列出来了哪些"）。 */
+  collapsed: boolean
   onToggle: () => void
+  onToggleCollapse: () => void
   t: Translate
 }
 
 /**
- * 按目录分组时的组头：整组勾选的入口，外加这一组的条数与已选数。
+ * 按目录分组时的组头：折叠开关、整组勾选的入口，外加这一组的条数与已选数。
  *
- * 右侧那两串数字是**一整块**：宁可让路径截断，也不要把它拆到第二行去（那样组长成两行，看着像坏掉了）。
+ * 折叠开关在**最前**（树的惯例：左缘是"这一组能不能折"的位置）。它换来的是组内那些行整体多缩进一格：
+ * 组头的勾选框与组内行的勾选框差 16px，"行挂在组头下面"这件事才读得出来，而组头自己的内容因此右移了
+ * 一个开关的宽度（见 styles.ts 里 .dsm-group > .dsm-row 的 padding-left 与它的注释）。
+ *
+ * 右端那两串数字是**一整块**：宁可让路径截断，也不要把它拆到第二行去（那样组长成两行，看着像坏掉了）。
+ * 收起时这两串数字照样在——一个目录收起来之后，"里面有几条、勾了几条"正是最该看见的东西。
+ *
+ * 结构上组头是"一个 div 装着按钮与 label"，而不是"一个 label 包住一切"：折叠标记必须是按钮（可聚焦、
+ * 带 `aria-expanded`），而 label 里放按钮是非法嵌套（labelable 元素只能是被标注的那一个），点击行为
+ * 也会两头打架。于是整组勾选那一块单独包成 label（点组头其余任意一处仍等于勾上／取消整组）。
  */
 export function SessionGroupHead({
   name,
@@ -255,32 +267,98 @@ export function SessionGroupHead({
   path,
   count,
   picked,
+  collapsed,
   onToggle,
+  onToggleCollapse,
   t,
 }: SessionGroupHeadProps): React.ReactElement {
   return (
-    <label className="dsm-groupHead">
-      <GroupCheckbox
-        checked={count > 0 && picked === count}
-        indeterminate={picked > 0 && picked < count}
-        label={t('selectGroup', { name })}
-        onToggle={onToggle}
-      />
-      <WorkspaceIcon />
-      <span className="dsm-groupTitle" title={name}>
-        {name}
-      </span>
-      {title !== undefined && (
-        <span className="dsm-groupPath" title={path}>
-          {path}
+    <div className="dsm-groupHead">
+      <button
+        type="button"
+        className="dsm-groupToggle"
+        aria-expanded={!collapsed}
+        aria-label={t('toggleGroupLabel', { name })}
+        title={t('toggleGroupLabel', { name })}
+        onClick={onToggleCollapse}
+      >
+        <ChevronIcon />
+      </button>
+      <label className="dsm-groupPick">
+        <GroupCheckbox
+          checked={count > 0 && picked === count}
+          indeterminate={picked > 0 && picked < count}
+          label={t('selectGroup', { name })}
+          onToggle={onToggle}
+        />
+        <WorkspaceIcon />
+        <span className="dsm-groupTitle" title={name}>
+          {name}
         </span>
-      )}
-      {title === undefined && path !== '' && <span className="dsm-tag dsm-tagIdle">{t('unregisteredDir')}</span>}
-      <span className="dsm-groupCounts">
-        <span className="dsm-hint">{t('sessionsInDir', { count })}</span>
-        <span className="dsm-hint">{t('selectedCount', { count: picked })}</span>
-      </span>
-    </label>
+        {title !== undefined && (
+          <span className="dsm-groupPath" title={path}>
+            {path}
+          </span>
+        )}
+        {title === undefined && path !== '' && <span className="dsm-tag dsm-tagIdle">{t('unregisteredDir')}</span>}
+        <span className="dsm-groupCounts">
+          <span className="dsm-hint">{t('sessionsInDir', { count })}</span>
+          <span className="dsm-hint">{t('selectedCount', { count: picked })}</span>
+        </span>
+      </label>
+    </div>
+  )
+}
+
+/**
+ * 折叠状态：一堆组的键，收起的是哪几个。
+ *
+ * 只存**收起的**那些（空集合 = 全都展开）：默认全展开是最常见的用法，而"全部展开"于是等于清空。
+ * 键是路径（`groups.groupKey`），所以筛掉又筛回来、换个筛选条件，收起状态都跟着那个目录走。
+ *
+ * @param keys 眼下列出来的那些组的键。收起／展开全部只对它们生效——不画出来的组是什么状态，看不出来，
+ *   也不必记住；筛回来时它是展开的，反而更符合"我刚切了个筛选"的预期。
+ */
+export interface GroupCollapse {
+  readonly isCollapsed: (key: string) => boolean
+  /** 眼下这些组全都收着（"全部收起"因此没什么可做）。 */
+  readonly allCollapsed: boolean
+  /** 眼下至少收着一组（"全部展开"才有意义）。 */
+  readonly anyCollapsed: boolean
+  readonly toggle: (key: string) => void
+  readonly collapseAll: () => void
+  readonly expandAll: () => void
+}
+
+export function useGroupCollapse(keys: readonly string[]): GroupCollapse {
+  const [collapsed, setCollapsed] = React.useState<readonly string[]>([])
+  const toggle = React.useCallback((key: string): void => {
+    setCollapsed((current) => (current.includes(key) ? current.filter((item) => item !== key) : [...current, key]))
+  }, [])
+  const collapseAll = React.useCallback((): void => setCollapsed([...keys]), [keys])
+  const expandAll = React.useCallback((): void => setCollapsed([]), [])
+  return {
+    isCollapsed: (key) => collapsed.includes(key),
+    allCollapsed: keys.length > 0 && keys.every((key) => collapsed.includes(key)),
+    anyCollapsed: keys.some((key) => collapsed.includes(key)),
+    toggle,
+    collapseAll,
+    expandAll,
+  }
+}
+
+/** 分组列表的工具栏：一句话说明分组方式，加一对"全部收起 / 全部展开"。 */
+export function SessionGroupTools({ collapse, t }: { collapse: GroupCollapse; t: Translate }): React.ReactElement {
+  return (
+    <div className="dsm-groupTools">
+      <span className="dsm-hint">{t('groupedByDir')}</span>
+      <button type="button" className="dsm-button" disabled={collapse.allCollapsed} onClick={collapse.collapseAll}>
+        {t('collapseAll')}
+      </button>
+      <button type="button" className="dsm-button" disabled={!collapse.anyCollapsed} onClick={collapse.expandAll}>
+        {t('expandAll')}
+      </button>
+    </div>
   )
 }
 

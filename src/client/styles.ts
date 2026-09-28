@@ -117,13 +117,54 @@ export const CSS = `
    * 换行是**最后**的手段，截断才是。
    */
   flex-wrap: nowrap;
-  padding: 8px 10px;
+  /* 左边只留 4px：最前面那个折叠开关自己就是"这一组的左缘"，留 10px 会让它离边框太远。 */
+  padding: 8px 10px 8px 4px;
+  /* 组头自己不是点整组的地方（那一块是里面的 .dsm-groupPick），鼠标形状跟着那个 label 走。 */
+  cursor: default;
   background: var(--dsw-alias-bg-layer-1, transparent);
   background: color-mix(in srgb, var(--dsw-alias-label-primary, #1f2329) 12%, var(--dsw-alias-bg-layer-1, #fff));
   border-top: 1px solid var(--dsw-alias-border-l2, rgba(0, 0, 0, 0.12));
   border-bottom: 1px solid var(--dsw-alias-border-l2, rgba(0, 0, 0, 0.12));
+}
+/*
+ * 组头里"点一下就是整组勾选／取消"的那一块：勾选框、标记、名字、路径、右侧那两串数字。
+ *
+ * 它独占组头除折叠按钮以外的全部宽度（点击面因此仍是整行），路径的让位规则也在这个 flex 行里生效。
+ */
+.dsm-groupPick {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   cursor: pointer;
 }
+/*
+ * 组头右端的折叠开关：一个 20px 的方形按钮（够得着、能聚焦），图形是 12px 的尖角。
+ * 收起时把尖角转成朝右——图形只有一份，状态由 aria-expanded 表达（读屏与视觉同一个来源）。
+ */
+.dsm-groupToggle {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary, #646a73);
+  cursor: pointer;
+}
+.dsm-groupToggle:hover { background: var(--dsw-alias-bg-layer-2, rgba(0, 0, 0, 0.06)); }
+.dsm-groupToggle[aria-expanded='false'] .dsm-chevron { transform: rotate(-90deg); }
+.dsm-chevron { display: block; }
+/*
+ * 分组列表的工具栏（"按目录分组" ＋ 全部收起 / 全部展开）：自己占一行、靠左排。
+ * 靠左是刻意的：挂到右边缘的东西会随容器宽度动，而卡片宽度会被外层滚动条一进一出改掉 15px。
+ */
+.dsm-groupTools { display: flex; align-items: center; gap: 6px; }
 /*
  * 组头里的名字：它就是这一行的主角，不折行；实在挤不下时截断（截断了还有悬浮提示补全）。
  */
@@ -163,13 +204,16 @@ export const CSS = `
   white-space: nowrap;
 }
 /* 组头上的标签（"未登记目录"）也是不可压的：它的字不能折行，压窄了就会溢出自己的框。 */
-.dsm-groupHead > .dsm-tag { flex: none; }
+.dsm-groupPick > .dsm-tag { flex: none; }
 /*
  * 组内的会话行：整行缩进一格（勾选框也跟着走，读起来就是"挂在组头下面"），左缘那条 2px 的导引线
  * 逐行相接，成一条竖线。它压在整个列表的左边界上，正是"这一组"的范围。
  */
 .dsm-group > .dsm-row {
-  padding-left: 26px;
+  /* 48px = 组头内容左缘（4px 内边距 + 20px 开关 + 8px 间距）再让 16px：
+     组头的勾选框与组内行的勾选框恒差这 16px，"行挂在组头下面"才读得出来。
+     代价是行里的标题少了 22px 宽——这一档是量着调的，改开关尺寸时要跟着改。 */
+  padding-left: 48px;
   box-shadow: inset 2px 0 0 0 color-mix(in srgb, var(--dsw-alias-label-primary, #1f2329) 14%, transparent);
 }
 /* 两级图形标记的共用部分：颜色跟着所在处的字色档次走，尺寸由 SVG 自己定。 */

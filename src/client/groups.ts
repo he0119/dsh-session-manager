@@ -22,6 +22,16 @@
  * 这个没有 DOM 的工程里检查，于是浏览器代码在 Host 工程里报 TS2584（找不到 `document`）。
  * 纯函数不绑在响应形状上，这个坑就绕开了；页面那边传 `SessionSummary[]` 进来天然兼容（结构化类型）。
  */
+/**
+ * 一个组的稳定键：就是它的路径。
+ *
+ * 没有 cwd 的那一组路径是空串，换成一个不可能撞上真实路径的键——React 的 key 与折叠状态都拿它当
+ * 身份，两处各写一遍迟早会不一致。
+ */
+export function groupKey(path: string): string {
+  return path === '' ? '\u0000no-cwd' : path
+}
+
 export interface GroupableSession {
   readonly id: string
   readonly cwd?: string

@@ -66,7 +66,10 @@ one-line bump at that point.
   bytes of **every generation** of those logs (each with a sha256), not files the session created. The
   list is **grouped by directory** (group name = workspace title; a directory no workspace registers shows
   its path and is marked), and **clicking a group header toggles that whole group** — so "take every
-  session of this workspace away" is one click. The two levels never read alike: a group header is a tinted
+  session of this workspace away" is one click. The chevron at the head of a row **folds** the
+  group away (the header and its "N sessions / M selected" stay), and the "Grouped by directory" row above
+  the list carries **Collapse all / Expand all**: folding is a display matter, so "Select whole library"
+  still counts what is listed — clicking an arrow never quietly drops sessions from the export. The two levels never read alike: a group header is a tinted
   band with a folder glyph, while session rows are indented under it and carry a chat-bubble glyph (a session
   title is a sentence the user wrote, so it easily looks like a directory name). Sessions no workspace record
   claims — the ones the shell sidebar parks under Ungrouped — stay with their directory here and carry a small

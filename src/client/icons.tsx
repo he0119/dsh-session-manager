@@ -13,6 +13,35 @@
  */
 
 /**
+ * 折叠标记：一个朝下的尖角，收起时在 CSS 里转成朝右（图形只有一份，状态用 `aria-expanded` 表达）。
+ *
+ * 画在组头右端、紧挨"这组几条"之后：组头左边那一串（勾选框、标记、名字、路径）是"这一组是什么"，
+ * 右边这一处是"这一组展开没有"——折叠控件塞在左边会顶掉勾选框的位置，而组内那些行正是靠缩进对齐
+ * 到组头的勾选框来读的。
+ */
+export function ChevronIcon() {
+  return (
+    <svg
+      className="dsm-chevron"
+      viewBox="0 0 16 16"
+      width="12"
+      height="12"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path
+        d="M4 6.25 8 10.25 12 6.25"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+
+/**
  * 工作区标记：一个文件夹轮廓，画在设置里那种组头（工作区名 + 路径）的最前面。
  *
  * 图形本身不说话（`aria-hidden`）：组头的无障碍名字来自它自己的文案，屏幕阅读器不需要再听一遍

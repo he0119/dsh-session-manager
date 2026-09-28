@@ -12,7 +12,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { groupSessions } from '../src/client/groups.ts'
+import { groupKey, groupSessions } from '../src/client/groups.ts'
 
 // 注意这里**不 import** `src/client/api.ts` 的响应类型：Host 侧的 typecheck 工程
 // `exclude` 了 `src/client`，但 import 会把它拉进来在"没有 DOM 的工程"里检查
@@ -108,4 +108,12 @@ test('分组：cwd 缺失与空串是同一组（空串不是一条路径）', (
 
 test('分组：空库给出空列表（页面据此显示"还没有会话"）', () => {
   assert.deepEqual(groupSessions([], registry), [])
+})
+
+test('组的稳定键：路径本身，没有 cwd 的那一组换成一个撞不上的键', () => {
+  // key 与折叠状态都拿它当身份（见 sessionList.useGroupCollapse），所以哨兵只写一处
+  assert.equal(groupKey('/home/u/dev/alpha'), '/home/u/dev/alpha')
+  assert.equal(groupKey(''), '\u0000no-cwd', '没有 cwd 的那一组不能用空串：折叠状态与 React key 都靠它')
+  // 真实路径不可能是这个（NUL 不在文件名的字符集里），所以撞不上
+  assert.ok(!groupKey('').includes('/'))
 })
