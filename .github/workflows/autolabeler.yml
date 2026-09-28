@@ -1,0 +1,26 @@
+name: Autolabeler
+
+# 只做一件事：按 PR 标题（约定式提交）给 PR 补标签，供 .github/release.yml 给 Release 日志分组。
+# PR 标题本来就是 `feat: …` 这种形状，所以规则直接读标题，不需要新约定。
+#
+# fork 来的 PR 拿不到写权限，打不上标签；真有外部贡献者时改成 pull_request_target。
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+permissions:
+  contents: read
+
+jobs:
+  label:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      # 这里用的是 release-drafter 的 autolabeler：本仓库不用它起草 Release（版本号由发布提交决定），
+      # 只借它这条标签规则引擎——按标题写正则补标签，正是 GitHub 原生没有的那一半。
+      # config-name 指到本仓库自己那份，免得它去找并不存在的 release-drafter.yml。
+      - uses: release-drafter/release-drafter/autolabeler@v7
+        with:
+          config-name: autolabeler.yml

@@ -145,6 +145,8 @@ jobs:
         run: echo "无需发布，视为成功。"
 
       # 发布确认之后才建 Release，所以条目里的版本一定已经在 npm 上，顺序不会倒过来。
+      # 日志用 GitHub 自己生成的，分组规则看 .github/release.yml——它只认 label，而标签由
+      # .github/workflows/autolabeler.yml 按 PR 标题补上。
       - name: 创建 GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

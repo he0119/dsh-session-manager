@@ -1,0 +1,23 @@
+# Autolabeler 的规则表：按 PR 标题（约定式提交）与分支名补标签。
+#
+# 这份标签只服务一件事：.github/release.yml 用它给 Release 日志分组。GitHub 原生没有
+# 「按约定式提交分组」，所以补标签这一步必须有人做——就是本文件。
+#
+# 一条规则里的 title / branch / body / files 是**独立**匹配的，命中任意一个就打上该标签。
+autolabeler:
+  # 带 ! 的提交同时也会命中下面的 enhancement / bug，交给 .github/release.yml 的顺序决定落哪一节。
+  - label: 'breaking-change'
+    title: ['/^[a-z]+(\([^)]*\))?!:/i']
+  - label: 'enhancement'
+    title: ['/^feat(\([^)]*\))?:/i']
+  - label: 'bug'
+    title: ['/^fix(\([^)]*\))?:/i']
+  - label: 'documentation'
+    title: ['/^docs(\([^)]*\))?:/i']
+  - label: 'chore'
+    title: ['/^(chore|ci|build|refactor|test|style|perf)(\([^)]*\))?:/i']
+  # dependabot / renovate 的标题通常不符合约定式提交，靠分支名兜住。
+  # 本仓库还没接这两个机器人，规则先摆着：真接上了不用回来改这份文件。
+  - label: 'dependencies'
+    title: ['/^(chore|build|fix)\(deps(-dev)?\):/i']
+    branch: ['/^dependabot\//', '/^renovate\//']
