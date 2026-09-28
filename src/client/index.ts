@@ -1,7 +1,7 @@
 /**
  * `dsh-session-manager` 的 Web Client 端：把「会话管理」注册成设置里的独立一页。
  *
- * 页面主体在 [ManagerPanel.tsx](./ManagerPanel.tsx)（页内分「导入导出」与「迁移」两页），
+ * 页面主体在 [ManagerPanel.tsx](./ManagerPanel.tsx)（页内分「传输」「迁移」「会话」三页），
  * 文案在 [locales.ts](./locales.ts)，端点调用在 [api.ts](./api.ts)，样式在 [styles.ts](./styles.ts)
  * ——这里只做组装。
  *

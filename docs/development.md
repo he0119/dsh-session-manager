@@ -133,7 +133,7 @@ tsconfig.client.json Web Client 自己的类型工程（DOM + JSX；Host 那份�
 | `src/remove.ts` | 删除编排：预演（活着的拒删）→ 先备份 → 删目录 → 复核；不碰注册表 | 无 |
 | `src/tools.ts` | 4 个工具注册（+ schema、平台解码器实例、可选服务探测） | `dsh-tools` |
 | `src/web.ts` | 界面端点（state / export / import / migrate / backups / rollback / delete / archive），只要求 `{ register }` 形状 | 无 |
-| `src/client/*` | 浏览器半侧：「会话管理」页（导入导出 / 迁移 / 会话三个分页）、字典、样式、端点调用 → `lib/client.js` | 无 |
+| `src/client/*` | 浏览器半侧：「会话管理」页（传输 / 迁移 / 会话三个分页）、字典、样式、端点调用 → `lib/client.js` | 无 |
 | `src/index.ts` | 插件入口 `apply(ctx, config)` | `dsh-tools` |
 
 核心层（`project-key` / `paths` / `zstd-frame` / `session-log` / `discovery` / `projection-cache` /

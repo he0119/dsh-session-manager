@@ -1,4 +1,4 @@
-// 会话导入导出：容器的字节往返、包校验的拒绝面、导入预演与落地、冲突与无 cwd 的分支。
+// 会话包传输：容器的字节往返、包校验的拒绝面、导入预演与落地、冲突与无 cwd 的分支。
 import assert from 'node:assert/strict'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
