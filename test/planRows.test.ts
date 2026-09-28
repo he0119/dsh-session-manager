@@ -12,6 +12,7 @@ import test from 'node:test'
 
 import {
   UNOWNED_SOURCE,
+  deleteFamilyNote,
   describeCwd,
   migrationMatching,
   migrationSourceRows,
@@ -174,4 +175,39 @@ test('目录来源：候选与条数都只数看得见的那批', () => {
   // 一个目录里全是看不见的会话：它连候选行都不出现（未登记工作区那一条）
   const hiddenOnly = [h('orphan-blank', '/b', undefined, 'blank')]
   assert.deepEqual(migrationSourceRows(hiddenOnly, [], t), [])
+})
+
+// ---- 删除预演：「这条是怎么进来的」 ----
+//
+// 删除会沿父子关系向下展开（见 `src/remove.ts` 的 `familyOf()`），所以预演清单里会出现用户**没勾过**
+// 的会话。行上那枚标签就是它的解释：不挂，用户只会看到"我明明只选了一条，怎么要删三条"。
+
+test('级联带进来的行：说"随父会话删"，提示里点名是哪一条（有标题用标题）', () => {
+  assert.deepEqual(deleteFamilyNote({ via: { id: 'session-p', title: '搬家那次' } }, t), {
+    text: 'manageDeleteVia',
+    tip: 'manageDeleteViaTip:{"name":"搬家那次"}',
+  })
+  // 读不到标题就退回 id：提示里至少还有一个能对得上日志的名字
+  assert.deepEqual(deleteFamilyNote({ via: { id: 'session-p' } }, t), {
+    text: 'manageDeleteVia',
+    tip: 'manageDeleteViaTip:{"name":"session-p"}',
+  })
+  // 标题是空白串与没有标题同一条路（`sessionLabel` 也是这个口径）
+  assert.deepEqual(deleteFamilyNote({ via: { id: 'session-p', title: '  ' } }, t)?.tip, 'manageDeleteViaTip:{"name":"session-p"}')
+})
+
+test('只删子、留着父：说"父会话留着"，且不点"随父会话删"', () => {
+  assert.deepEqual(deleteFamilyNote({ keptParent: { id: 'session-p', title: '父' } }, t), {
+    text: 'manageDeleteKeptParent',
+    tip: 'manageDeleteKeptParentTip:{"name":"父"}',
+  })
+})
+
+test('两种情形都没有时不挂标签；两种同时有时先说"跟着谁来的"', () => {
+  assert.equal(deleteFamilyNote({}, t), undefined)
+  // 父会话本身活着被挡下时会出现这种组合：这一行"为什么会进清单"更该被说出来
+  assert.equal(
+    deleteFamilyNote({ via: { id: 'session-root' }, keptParent: { id: 'session-p' } }, t)?.text,
+    'manageDeleteVia',
+  )
 })

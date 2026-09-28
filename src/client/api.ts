@@ -351,6 +351,12 @@ export interface DeleteEntry {
   bytes: number
   /** 宿主内存里活着（这种会被预演挡下，正常不会出现在条目里）。 */
   live: boolean
+  /** 日志 header 里的 `origin`（子代理会话写 `subagent`）。 */
+  origin?: string
+  /** 级联带进来的：点名的那个祖先会话（点名的那几条自己没有这一项，见宿主 `RemoveEntry.via`）。 */
+  via?: { id: string; title?: string }
+  /** 这条子代理的父会话还在库里、却不在这次删除里：删完父会话那一行会点不开。 */
+  keptParent?: { id: string; title?: string }
 }
 
 /** 删除（预演或落地）的响应。 */

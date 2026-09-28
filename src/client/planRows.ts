@@ -194,6 +194,55 @@ export function migrationSourceRows(
   return options
 }
 
+// ---- 删除预演：「这条是怎么进来的」 ----
+
+/** 删除预演里一条会话的出处只用得上这两个字段。 */
+export interface DeleteFamilySubject {
+  /** 级联带进来的：用户点名的那个祖先会话（宿主 `RemoveEntry.via`）。 */
+  readonly via?: { readonly id: string; readonly title?: string }
+  /** 这条子代理的父会话还在库里、却不在这次删除里（宿主 `RemoveEntry.keptParent`）。 */
+  readonly keptParent?: { readonly id: string; readonly title?: string }
+}
+
+/** 一个出处怎么称呼：有标题用标题，没有才用 id（与 `sessionLabel` 同一套口径）。 */
+function referentName(referent: { readonly id: string; readonly title?: string }): string {
+  const title = referent.title?.trim()
+  return title === undefined || title === '' ? referent.id : title
+}
+
+/**
+ * 删除预演里那枚"这条是怎么进来的"标签。
+ *
+ * 删除会**沿着父子关系向下展开**（见 `src/remove.ts`），所以预演清单里会冒出用户没勾过的会话；
+ * 这枚标签就是它们的解释——"跟着 <点名的会话> 一起删"。只删子、留着父的那种，说明的是另一件事：
+ * 父会话侧边栏里那一行会点不开。两件事都可能落到同一行上（父会话本身活着被挡下时），此时先报
+ * "跟着谁来的"——那一条更接近"这条为什么会出现在清单里"。
+ *
+ * 标签文案刻意短（「随父删」/「父留着」）：它挂在名字右边且 `flex: none`，占的宽度就是从标题里扣的。
+ * 在真实 dev GUI 里量的（真实列表 534px 宽、名字列 305px，浅深两套主题同值）：四字的「随父会话删」
+ * 吃 74px、名字只剩 225px，两字的吃 50px、名字剩 249px；英文 "goes with parent" 吃 115px、名字只剩
+ * 184px，短一档的 "with parent" 吃 83px。省掉的那半句在悬浮提示里，预演摘要还会整句说一遍。
+ *
+ * @param subject 出处字段（宿主已经算好，界面只负责显示）。
+ * @param t 翻译。
+ * @returns 标签文案与悬浮提示；两种情形都没有时 `undefined`（不挂标签）。
+ */
+export function deleteFamilyNote(
+  subject: DeleteFamilySubject,
+  t: Translate,
+): { text: string; tip: string } | undefined {
+  if (subject.via !== undefined) {
+    return { text: t('manageDeleteVia'), tip: t('manageDeleteViaTip', { name: referentName(subject.via) }) }
+  }
+  if (subject.keptParent !== undefined) {
+    return {
+      text: t('manageDeleteKeptParent'),
+      tip: t('manageDeleteKeptParentTip', { name: referentName(subject.keptParent) }),
+    }
+  }
+  return undefined
+}
+
 /**
  * 这个来源匹配到的会话（勾选面）。
  *
