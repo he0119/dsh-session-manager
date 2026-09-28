@@ -81,7 +81,7 @@ pnpm version 0.2.0 --no-git-tag-version -m "chore(release): %s"
 # ↑ 只改 package.json 并提交。pnpm-lock.yaml 不记录本包的版本号，因此不必跟着改；
 #   它只跑 preversion/version/postversion 三个钩子，不会触发本包的 prepublishOnly（tsdown），
 #   因此不会顺带构建。
-git push origin HEAD:refs/heads/release-0.2.0
+git push origin HEAD:refs/heads/chore/release-0.2.0
 gh pr create --base main --fill          # 单个提交，标题直接取提交信息
 gh pr merge --rebase --delete-branch
 

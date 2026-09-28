@@ -96,9 +96,13 @@ pnpm typecheck && pnpm build && pnpm test && pnpm check:package
 
 - **main 走 PR**：服务端有一条 `default` ruleset——禁删除、禁强推、要求线性历史（merge commit 会被
   拒，只能 squash / rebase），并要求名为 `check` 的检查通过；没有 bypass，管理员也绕不过。所以改动
-  一律「推分支 → 开 PR → squash 合并」，那个检查名就是 `.github/workflows/ci.yml` 里的 job id
-  `check`（PR 会自动触发同一个工作流）。
+  一律「推分支 → 开 PR → 合并」，那个检查名就是 `.github/workflows/ci.yml` 里的 job id `check`
+  （PR 会自动触发同一个工作流）。合并方式默认 **rebase**：一次逻辑改动一个提交，squash 会把一个分支
+  上的几件事压成一笔，粒度就没了。
+- **分支名带类型前缀**：`fix/ledger-label`、`chore/release-notes`、`docs/releasing` 这种，前缀用这个
+  分支最终要合的那个提交的类型。仓库里的自动化只读 PR 标题（不看分支名），这条是给人的顺序感。
 - **PR 标题按约定式提交写**：`.github/workflows/autolabeler.yml` 按 PR 标题给 PR 打标签，Release
-  日志的分组（`.github/release.yml`）只认标签，所以标题要是 `feat: …` / `fix: …` 这种形状。
+  日志的分组（`.github/release.yml`）只认标签，所以标题要是 `feat: …` / `fix: …` 这种形状；PR 里的
+  每个提交同样是这套格式——rebase 合并后它们原样进 main，squash 之后 main 上只剩 PR 标题。
 - **不要自己 push**（含 `--force`）；改完把状态与下一步命令交给维护者，由他决定。
 - 改写历史前先留一个备份 ref，并在报告里给出新旧 sha 的对应关系，以及"树有没有变化"的核对方式。
