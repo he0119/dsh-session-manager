@@ -694,3 +694,41 @@ test('客户端产物：「会话」页的筛选条把不匹配的行筛掉，�
   assert.equal(captions.length, 1, '说明句自己一行')
   assert.equal(captions[0].type, 'p', '自己一行的说明句是块级元素，不参与胶囊那行的换行')
 })
+
+test('客户端产物：「会话」页一条都没筛出来时，那个固定的列表框还在（高度不跟着筛选变）', { skip }, () => {
+  // 列表高度是固定的（styles.ts 的 .dsm-list）：筛空时如果把框换成一句 <p>，这一页的高度就跟着筛选
+  // 变，设置弹窗外层那条滚动条又会一进一出，占位滚动条的环境里卡片右边缘就跟着挪 15px。所以空态必须
+  // 画在框**里面**。这里种一个库里没有的类别（夹具里没有"活动中"的会话）来走到那个分支。
+  const state = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    archiveAvailable: true,
+    sessions: [
+      { id: 's-owned', cwd: '/home/u/dev/alpha', createdAt: 2, dir: '/home/u/dev/alpha', bytes: 100, files: [], workspaceId: 'w1' },
+      { id: 's-blank', cwd: '/home/u/dev/beta', createdAt: 1, dir: '/home/u/dev/beta', bytes: 200, files: [], blank: true },
+    ],
+    workspaces: [{ id: 'w1', path: '/home/u/dev/alpha', title: '工作区甲', sessionIds: ['s-owned'] }],
+  }
+  const { registrations, recorded } = mount({ state, panel: 'manage', arrays: [[], ['live']] })
+  const { component, registration } = registrations[0]
+  const text = strings(component(registration.inject()))
+
+  const lists = recorded.filter((node) => String(node.props?.className ?? '').split(/\s+/).includes('dsm-list'))
+  assert.equal(lists.length, 1, '列表框还在（高度固定的那个框）')
+  const empties = recorded.filter((node) => String(node.props?.className) === 'dsm-empty')
+  assert.equal(empties.length, 1, '空态的说明只有一条')
+  assert.ok(strings(empties[0]).includes('manageNoMatch'), '空态说的是"没有符合筛选的会话"')
+  // 空态必须是框的子节点，不能是它的兄弟（换成兄弟就等于把框撤了）
+  assert.ok(
+    String(lists[0].props.className).includes('dsm-listFixed'),
+    '「会话」页那个框还得是固定高度的那一款（其余两页的列表照旧按内容长）',
+  )
+  const children = Array.isArray(lists[0].props.children) ? lists[0].props.children : [lists[0].props.children]
+  assert.ok(
+    children.some((child) => child !== null && typeof child === 'object' && child.props?.className === 'dsm-empty'),
+    '空态画在列表框里面',
+  )
+  assert.ok(!text.includes('s-owned') && !text.includes('s-blank'), '没有匹配的行被列出来')
+  assert.ok(text.includes('manageShown:{"shown":0,"total":2}'), '头部照样报 显示 0 / 2 条')
+})
