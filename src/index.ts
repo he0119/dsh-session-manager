@@ -6,7 +6,7 @@
 // 见 optionalService() 的注释（Cordis 会为此同步抛错，本插件曾因此在真实 profile 里起不来）。
 //
 // 本包的核心（project-key | paths | zstd-frame | session-log | discovery | registry |
-// plan | journal | execute | artifacts | transfer）保持**零 DSH 依赖**，可独立测试与在 CLI 里复用；
+// plan | journal | execute | artifacts | transfer）保持**零 DSH 依赖**，可独立测试，也能被工具层与界面共用；
 // 只有本文件、tools.ts 与 web.ts 依赖宿主（web.ts 只依赖一个 `{ register() }` 形状，不 import 宿主包）。
 import { readFileSync } from 'node:fs'
 

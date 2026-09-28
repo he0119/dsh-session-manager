@@ -42,7 +42,7 @@ export interface BuildPlanOptions {
   /**
    * 读会话标题（可选）：界面挑会话时按标题认人（见 session-title.ts）。
    *
-   * 缺席 = 这次计划不要标题（CLI 与工具层只报数量，不需要），因此发现阶段一分钱都不多花。
+   * 缺席 = 这次计划不要标题（工具层只报数量，不需要），因此发现阶段一分钱都不多花。
    */
   resolveTitle?: (query: TitleQuery) => string | undefined
 }
@@ -233,7 +233,7 @@ export function buildRelocationPlan(options: BuildPlanOptions): RelocationPlan {
   }
 }
 
-/** 人类可读的计划摘要（CLI 与工具返回值共用）。 */
+/** 人类可读的计划摘要（工具返回值与预演摘要共用）。 */
 export function describePlan(plan: RelocationPlan): string {
   const lines: string[] = []
   lines.push(`迁移 ${plan.sessions.length} 个会话：`)

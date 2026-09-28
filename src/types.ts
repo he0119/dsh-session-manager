@@ -3,7 +3,7 @@
  *
  * 这里刻意只用**结构化**类型描述宿主的数据形态，不 import 宿主的类型包：
  * 核心层（除 tools/index 外）保持零 DSH 依赖正是本包的设计目标之一，
- * 这样同一段代码能被插件外壳、离线 CLI 与测试三方共用。
+ * 这样同一段代码能被插件外壳与测试共用。
  */
 
 /** 会话日志首行的 header（对应宿主 HEADER_REQUIRED_KEYS / HEADER_OPTIONAL_KEYS）。 */

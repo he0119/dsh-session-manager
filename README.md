@@ -18,9 +18,8 @@ Ungrouped，重则加载时报 `corrupt session log`。本插件把「改 header
 |---|---|
 | 设置里的「会话管理」页 | 日常使用：勾选导出 / 导入会话包，用下拉框选来源（目录或「未分组」）做迁移，看预演、确认、回滚 |
 | 4 个模型工具 | 直接跟会话说「把这个工作区的会话搬到 `~/dev/xxx`」，由模型先预演再落盘 |
-| 离线 CLI | DSH 没启动时，或者要写脚本批处理 |
 
-三个入口的迁移编排是同一份代码，所以预演里说会迁移几条，实做就是几条。
+两个入口的迁移编排是同一份代码，所以预演里说会迁移几条，实做就是几条。
 
 ## 安装
 
@@ -93,32 +92,6 @@ npx @deepseek-ai/dsh@next plugin --profile desktop add /path/to/dsh-session-mana
 | `migrate_sessions` | 需 `apply:true` | 默认 dry-run；执行前做字节级备份，事后自动复核 |
 | `rollback_session_migration` | 是 | 按备份目录字节级回滚 |
 | `verify_workspace_sessions` | 否 | 复核某目录桶内日志与 header 的一致性 |
-
-### 离线 CLI
-
-CLI 由构建产出（`lib/cli.js`），装好之后也可以直接用 bin（`dsh-session-manager …`）：
-
-```bash
-pnpm install && pnpm run build
-
-# 只读计划：不写任何字节；计划有问题时退出码 2
-node lib/cli.js plan   --from '<源目录>' --to '<目标目录>'
-
-# 执行：先字节级备份，再改写首帧、移动目录、原子落盘注册表
-node lib/cli.js apply  --from '<源目录>' --to '<目标目录>'
-
-# 只搬点名的几条（--session 可重复），--json 输出机器可读的计划
-node lib/cli.js plan   --from '<源目录>' --to '<目标目录>' --session <会话 id> --json
-
-# 复核：目标桶里每个日志是否与 header cwd 一致
-node lib/cli.js verify --to '<目标目录>'
-
-# 回滚：目录搬回 + 文件字节还原 + 注册表还原
-node lib/cli.js rollback --backup '<apply 输出的备份目录>'
-```
-
-缺省路径是 `$DSH_HOME/sessions`、`$DSH_HOME/storages/workspace.json`，备份落在
-`$DSH_HOME/dsh-session-manager-backups`；用 `--root` / `--registry` / `--backup` 覆盖。
 
 ## 注意事项
 

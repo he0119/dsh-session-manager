@@ -3,7 +3,7 @@
  *
  * 这个脚本断言三件在测试里测不到、却只有发布那一刻才会暴露的事：
  *
- * 1. 运行期文件一个都不少（`lib/index.js`、`lib/cli.js`、`lib/types/`、`cordis.patch.yml`…）；
+ * 1. 运行期文件一个都不少（`lib/index.js`、`lib/client.js`、`lib/types/`、`cordis.patch.yml`…）；
  * 2. `main` / `types` / `bin` / `exports` / `dsh.bundle.patch` 指向的每个路径**都在包里**——
  *    入口指着空气是「装进宿主才报错」的那类事故，本地测试全绿也照样发生；
  * 3. `test/`、`src/`、`docs/` 这些不该外泄的目录没有被带进包。
@@ -89,7 +89,6 @@ const shipped = new Set(manifest.files.map((file) => file.path))
 //    `files: ["lib", …]` 允许 lib 少几个文件，而少哪个都会在加载时才炸。
 const REQUIRED = [
   'lib/index.js', // 插件入口（dsh.bundle.patch 的 insert 指向的模块）
-  'lib/cli.js', // bin：dsh-session-manager
   'lib/client.js', // Web Client 半边的经典脚本（dsh.client 指向它）
   'lib/types/index.d.ts', // exports["."].types，工具层的类型来源
   'cordis.patch.yml', // profile 里的 bundle patch
@@ -122,10 +121,10 @@ for (const path of entryPaths) {
   assert.ok(shipped.has(path), `package.json 指向了包外路径：${path}`)
 }
 
-// 2b. 产物内部的相对依赖也必须在包里。tsdown 会把两个入口共用的代码抽成带哈希的 chunk
+// 2b. 产物内部的相对依赖也必须在包里。tsdown 会把入口用到的代码抽成带哈希的 chunk
 //     （如 lib/plan-V3Pci92H.js）——哈希名一变，白名单式断言就失效，所以这里直接读产物里
 //     的 import 说明符、按入口所在目录解析（打包清单里的路径是包根相对的），再核对一次。
-for (const entry of ['lib/index.js', 'lib/cli.js']) {
+for (const entry of ['lib/index.js']) {
   const source = readFileSync(join(root, entry), 'utf8')
   for (const [, specifier] of source.matchAll(/(?:from|import\()\s*['"](\.\/[^'"]+)['"]/g)) {
     // posix：npm 的打包清单一律用 `/` 分隔，Windows 上 join 会给出 `\` 而永远对不上。

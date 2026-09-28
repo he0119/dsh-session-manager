@@ -9,7 +9,7 @@
 
 ```sh
 pnpm install          # 或 npm install（本机请用 npm，见「本机安装」）
-pnpm run build        # tsdown：三份配置 -> lib/index.js + lib/cli.js + lib/types/*.d.ts + lib/client.js
+pnpm run build        # tsdown：三份配置 -> lib/index.js + lib/types/*.d.ts + lib/client.js
 pnpm test             # = node test/run-all.mjs
 pnpm run typecheck    # Host 与 Web Client 两个工程：tsconfig.test.json + tsconfig.client.json
 pnpm run check        # typecheck + test
@@ -102,7 +102,7 @@ src/            手写源码（每个文件一个职责，核心层零 DSH 依�
 lib/            构建产物（tsdown 输出，已 gitignore）
 test/           测试（run-all.mjs 是进程内 runner）
 docs/           本目录
-tsdown.config.ts 三份构建配置：host（lib/*.js）、types（lib/types/*.d.ts）、client（lib/client.js）
+tsdown.config.ts 三份构建配置：host（lib/index.js）、types（lib/types/*.d.ts）、client（lib/client.js）
 cordis.patch.yml 插件注册（package.json 的 dsh.bundle.patch 指向它）
 tsconfig.client.json Web Client 自己的类型工程（DOM + JSX；Host 那份没有）
 ```
@@ -121,8 +121,7 @@ tsconfig.client.json Web Client 自己的类型工程（DOM + JSX；Host 那份�
 | `src/execute.ts` | 执行 + 独立复核（含产物目标位校验） | 无 |
 | `src/artifacts.ts` | 会话产物提取（证据分层）、规划（求交/剪枝）、搬迁 | 无 |
 | `src/transfer.ts` | `.dshsess` 容器（导出/解析/校验）、导入预演与落地 | 无 |
-| `src/migrate.ts` | 迁移编排：预演 / 执行 / 回滚 / 备份清单（CLI、工具、界面三个入口共用） | 无 |
-| `src/cli.ts` | 离线 CLI（plan/apply/verify/rollback）→ `lib/cli.js` | 无 |
+| `src/migrate.ts` | 迁移编排：预演 / 执行 / 回滚 / 备份清单（工具与界面两个入口共用） | 无 |
 | `src/tools.ts` | 4 个工具注册（+ schema、平台解码器实例、可选服务探测） | `dsh-tools` |
 | `src/web.ts` | 界面端点（state / export / import / migrate / backups / rollback），只要求 `{ register }` 形状 | 无 |
 | `src/client/*` | Web Client 半边：「会话管理」页（导入导出 + 迁移两个分页）、字典、样式、端点调用 → `lib/client.js` | 无 |
@@ -130,7 +129,7 @@ tsconfig.client.json Web Client 自己的类型工程（DOM + JSX；Host 那份�
 
 核心层（`project-key` / `paths` / `zstd-frame` / `session-log` / `discovery` / `session-title` /
 `registry` / `plan` / `journal` / `execute` / `artifacts` / `transfer` / `migrate`）**不依赖 DSH**，
-所以插件外壳、CLI 与测试三者共用同一段代码。只有 `src/tools.ts` 与 `src/index.ts` 依赖
+所以插件外壳与测试共用同一段代码。只有 `src/tools.ts` 与 `src/index.ts` 依赖
 `@deepseek-ai/dsh-tools`，`src/web.ts` 连它也不依赖（只认一个 `{ register }` 形状）。
 
 `src/client/**` 不在 Host 端那份 tsconfig 的 include 里：它要 DOM 与 JSX，而 Host 侧没有。

@@ -11,7 +11,7 @@
 //   global: { initialized, workspaceIds[], archivedSessionIds[], pendingMutation? }
 //   tables: { workspaces: { [id]: { path, title, sessionIds[], createdAt, updatedAt } } }
 //
-// 注意：宿主进程内持有该注册表的内存副本，离线改写会被之后的宿主写入覆盖，
+// 注意：宿主进程内持有该注册表的内存副本，绕过它直接改写文件会被之后的宿主写入覆盖，
 // 因此落盘后需要重启生效；能在进程内走 ctx.workspaceRegistry 时不要用本模块落盘。
 import { randomUUID } from 'node:crypto'
 import { readFileSync, renameSync, writeFileSync } from 'node:fs'
@@ -100,7 +100,7 @@ export function readRegistry(path: string): WorkspaceRegistryState {
 /**
  * 原子落盘（临时文件 + rename），保持宿主的 2 空格缩进与结尾换行。
  *
- * 警告：宿主进程内持有内存副本，离线落盘需要重启才会被承认，且可能被覆盖。
+ * 警告：宿主进程内持有内存副本，绕过它直接落盘需要重启才会被承认，且可能被覆盖。
  */
 export function writeRegistryAtomic(path: string, reg: WorkspaceRegistryState): void {
   const tmp = `${path}.dsh-session-manager.tmp`

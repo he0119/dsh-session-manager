@@ -1,6 +1,6 @@
 /**
- * 构建配置：Host 端沿用官方包的产物形状 —— 源码打成一个 ESM `lib/index.js`（外加 CLI 的
- * `lib/cli.js`），所有包依赖保持外部，声明按源码模块输出到 `lib/types/`；Web Client 端另外出一份
+ * 构建配置：Host 端沿用官方包的产物形状 —— 源码打成一个 ESM `lib/index.js`，
+ * 所有包依赖保持外部，声明按源码模块输出到 `lib/types/`；Web Client 端另外出一份
  * `lib/client.js`，遵守 DSH 客户端模块系统的经典脚本契约（见下）。
  *
  * 注意 Host 的 `deps.neverBundle: true`：Cordis、DSH 与普通 npm 依赖都由安装环境解析，
@@ -26,8 +26,8 @@ const CLIENT_EXTERNALS = ['react', 'react/jsx-runtime'] as const
 
 const host: UserConfig = {
   name: `${PACKAGE}/host`,
-  // 两个入口：插件本体与离线 CLI（CLI 的 shebang 写在源码首行，产物保留）。
-  entry: { index: 'src/index.ts', cli: 'src/cli.ts' },
+  // 一个入口：插件本体（离线 CLI 已经删掉，见 docs/internals.md 的「同一份迁移编排，两个入口」）。
+  entry: { index: 'src/index.ts' },
   tsconfig: 'tsconfig.json',
   outDir: 'lib',
   format: 'esm',
@@ -93,7 +93,7 @@ const client: UserConfig = {
   dts: false,
   sourcemap: true,
   fixedExtension: false,
-  // Host 端的 lib/index.js、lib/cli.js 也在同一个目录里，默认的 clean 会把它们一起删掉。
+  // Host 端的 lib/index.js 也在同一个目录里，默认的 clean 会把它一起删掉。
   clean: false,
   deps: {
     neverBundle: [...CLIENT_EXTERNALS],

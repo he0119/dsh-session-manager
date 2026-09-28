@@ -7,15 +7,11 @@
   "main": "lib/index.js",
   "types": "lib/types/index.d.ts",
   "icon": "./icon.svg",
-  "bin": {
-    "dsh-session-manager": "./lib/cli.js"
-  },
   "exports": {
     ".": {
       "types": "./lib/types/index.d.ts",
       "default": "./lib/index.js"
     },
-    "./cli": "./lib/cli.js",
     "./client": "./lib/client.js",
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json"

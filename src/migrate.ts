@@ -1,8 +1,8 @@
 // src/migrate.ts — 迁移的宿主侧编排：预演 / 执行 / 回滚 / 备份清单。
 //
-// 为什么单独一层：同一套动作有**三个入口**（离线 CLI、模型工具、设置里的界面）。编排只写一遍，
+// 为什么单独一层：同一套动作有**两个入口**（模型工具、设置里的界面）。编排只写一遍，
 // 各入口只负责把结果翻译成自己的形状——否则"工具说会这样、界面说会那样"迟早会发生。
-// 本模块保持**零 DSH 依赖**（不 import cordis / dsh-tools），因此 CLI 与测试都可以直接用。
+// 本模块保持**零 DSH 依赖**（不 import cordis / dsh-tools），因此测试可以直接用它。
 //
 // 计划仍然是一等产物：预演与执行走同一个 `buildRelocationPlan()`，界面看到的预演结果就是
 // 执行时会做的事；回滚只依据备份清单，不认识计划。
@@ -24,7 +24,7 @@ export interface MigrateDeps {
   decodeAll: DecodeAll
   /**
    * 读会话标题（可选）：预演结果里带上它，界面挑会话时按标题认人（见 session-title.ts）。
-   * 缺席就不读——CLI 与工具层只报数量，不需要。
+   * 缺席就不读——工具层只报数量，不需要。
    */
   resolveTitle?: (query: TitleQuery) => string | undefined
 }

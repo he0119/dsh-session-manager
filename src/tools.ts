@@ -3,7 +3,7 @@
 // 设计取向：
 //   * 读操作（plan / verify）永不写盘；
 //   * 写操作（migrate / rollback）默认 dry-run，必须显式 apply:true；
-//   * 每个写操作的返回值都说明"何时生效"——因为离线改注册表需要重启 DSH，
+//   * 每个写操作的返回值都说明"何时生效"——因为绕过宿主直接改注册表可能需要重启 DSH，
 //     除非上游提供了 workspaceRegistry.reassignSessions（见 effectMode()）。
 import type { Context } from '@deepseek-ai/cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
@@ -88,7 +88,7 @@ export function optionalService(ctx: unknown, name: string): unknown {
 
 /**
  * 迁移何时生效：上游若提供 reassignSessions 就能进程内即时生效，
- * 否则离线落盘必须重启 DSH 才会被承认（宿主持有内存副本）。
+ * 否则直接落盘必须重启 DSH 才会被承认（宿主持有内存副本）。
  */
 export function effectMode(ctx: unknown): EffectMode {
   const registry = optionalService(ctx, 'workspaceRegistry') as { reassignSessions?: unknown } | undefined
@@ -166,7 +166,7 @@ export function registerTools(ctx: Context, config: PluginConfig = {}): Array<()
   const paths = resolvePaths(config)
   const mode = (): EffectMode => effectMode(ctx)
   // 预演/执行/回滚都走 src/migrate.ts 那一份编排，界面端点用的是同一个 deps 形状——
-  // 三个入口（CLI / 工具 / 界面）因此不会各写一套。
+  // 两个入口（工具 / 界面）因此不会各写一套。
   const deps: MigrateDeps = {
     sessionsRoot: paths.sessionsRoot,
     registryPath: paths.registryPath,

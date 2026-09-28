@@ -21,9 +21,8 @@ first and rolled back byte-for-byte afterwards. (Why it has to work that way:
 |---|---|
 | The **Session management** page in Settings | Everyday use: tick sessions to export / import, pick a source (a directory or Ungrouped) from a dropdown to migrate, preview, confirm, roll back |
 | 4 model tools | Just say "move this workspace's sessions to `~/dev/xxx`" and let the model preview first, apply second |
-| The offline CLI | When DSH is not running, or when you want to script it |
 
-All three share one migration implementation, so the count a preview reports is the count you get.
+Both share one migration implementation, so the count a preview reports is the count you get.
 
 ## Install
 
@@ -112,32 +111,6 @@ does not appear.
 | `migrate_sessions` | needs `apply:true` | Dry-run by default; performs a byte-level backup and self-verifies after |
 | `rollback_session_migration` | yes | Byte-exact rollback from a backup directory |
 | `verify_workspace_sessions` | no | Check that a directory's bucket agrees with its headers |
-
-### Offline CLI
-
-The CLI is built to `lib/cli.js`; once installed you can also use the bin shim (`dsh-session-manager …`):
-
-```bash
-pnpm install && pnpm run build
-
-# Read-only plan: writes nothing; exit code 2 when the plan has problems
-node lib/cli.js plan   --from '<source dir>' --to '<target dir>'
-
-# Execute: byte-level backup first, then rewrite the first frame, move dirs, write the registry
-node lib/cli.js apply  --from '<source dir>' --to '<target dir>'
-
-# Only the named sessions (--session repeats); --json prints a machine-readable plan
-node lib/cli.js plan   --from '<source dir>' --to '<target dir>' --session <session id> --json
-
-# Verify: every log in the target bucket agrees with its header cwd
-node lib/cli.js verify --to '<target dir>'
-
-# Roll back: move dirs back + restore file bytes + restore the registry
-node lib/cli.js rollback --backup '<backup dir printed by apply>'
-```
-
-Defaults are `$DSH_HOME/sessions` and `$DSH_HOME/storages/workspace.json`, with backups under
-`$DSH_HOME/dsh-session-manager-backups`; override them with `--root` / `--registry` / `--backup`.
 
 ## Things to know
 

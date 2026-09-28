@@ -323,7 +323,7 @@ export interface ImportOptions {
    * 解码器：给了才会读包里的标题（`ImportEntry.title`）。
    *
    * 可选是因为它只影响**展示**：包已经整份在内存里，折叠标题不需要碰盘，但要多解一段字节；
-   * 不关心标题的调用方（工具层/CLI）不传，就一个字节都不解。
+   * 不关心标题的调用方（工具层）不传，就一个字节都不解。
    */
   decodeAll?: DecodeAll
   now?: string
