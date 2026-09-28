@@ -242,7 +242,7 @@ export const CSS = `
   white-space: nowrap;
 }
 /*
- * 行里"名字 + 小标签（未登记在册）"的这一格：标签紧跟在名字右边，不参与省略。
+ * 行里"名字 + 小标签（未分组）"的这一格：标签紧跟在名字右边，不参与省略。
  *
  * 名字这一格从"网格的一格"变成了"一格里的 flex 行"，所以两件事得补上：名字要 flex: 1 1 auto
  * 才会去吃掉标签之外的空档，标签要 flex: none 才不会被压变形。整格 min-width: 0 是外层网格
@@ -436,15 +436,30 @@ export const CSS = `
  * 由 aria-pressed 表达，所以颜色只是辅助——色觉不同的人靠描边粗细与 aria 状态照样分得清。
  */
 /*
- * 筛选条：一排胶囊。那句"多选＝任一命中"**不在这一行里**，它是下面自己一行（见 ManagePanel）。
- * 两种放法都会让它筛一下跳一下：
- *   - 用 spacer 顶到右端——它的位置等于容器的右边缘，而设置弹窗里那 15px 的滚动条一进一出就会挪动
- *     这条边（实测旧写法挪 9px，装了经典滚动条的环境是 15px）；
- *   - 紧跟胶囊同一行——位置是稳了，但这一行的剩余宽度只剩三十来px，容器再窄一点就换行，那个句子
- *     会整行掉到第二行（实测换行阈值 30px，一次滚动条切换就够越过去）。
- * 单占一行则两边都不占：它的左边是固定的，而胶囊那一行的余量一下宽出九十来px，切换滚动条越不过去。
+ * 筛选条分两行（见 sessionList.tsx 的 SessionFilterBar）：
+ *   第一行 = 「筛选」+ 一排类别胶囊；第二行 = 搜索框 + 那句说明。
+ * 为什么不让说明句/搜索框跟胶囊挤一行：它们只要挂在容器右边缘附近，位置就跟着容器的宽度变，而设置
+ * 弹窗里那条 15px 的滚动条一进一出就会改宽度——实测旧写法（说明句用 spacer 顶到右端）一次挪 9px，
+ * 装了占位滚动条的环境是 15px；改成紧跟胶囊也还是不稳（那一行只剩三十来 px 余量，窄一点就整行换行，
+ * 实测换行阈值 30px）。两行之后：胶囊那行的余量宽出九十来 px（阈值 135px），搜索框与说明句都在固定
+ * 的左边界上，容器怎么变都不动。
  */
 .dsm-filters { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.dsm-filterSearch { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+/* 搜索框：与 .dsm-select / .dsm-file 同一套皮（边框、底色、圆角都走 token）。 */
+.dsm-search {
+  appearance: none;
+  border: 1px solid var(--dsw-alias-border-l2, rgba(0, 0, 0, 0.18));
+  background: var(--dsw-alias-bg-layer-2, transparent);
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  line-height: 18px;
+  border-radius: 8px;
+  padding: 1px 8px;
+  width: 180px;
+}
+.dsm-search::placeholder { color: var(--dsw-alias-label-secondary, #646a73); }
 .dsm-filter {
   appearance: none;
   border: 1px solid var(--dsw-alias-border-l2, rgba(0, 0, 0, 0.18));

@@ -36,12 +36,15 @@ const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
  * 各种表格）在冒烟里根本走不到。给了它就只替换**第一次** `useState(null)`——后面那些 null
  * 状态（错误提示、导入计划…）必须保持空，否则会渲染出不存在的数据。
  */
-function fakeReact(recorded = [], firstNull = undefined, panel = undefined, arrays = []) {
+function fakeReact(recorded = [], firstNull = undefined, panel = undefined, arrays = [], strings = []) {
   let seeded = false
   let seededPanel = false
   // 「种」进空数组状态的那些值按顺序发：分页组件里第一个 useState([]) 是勾选集，第二个是筛选条
   // （见 mount 的 arrays 参数）。顺序是调用方与组件之间的约定，所以种错了会当场断言失败，不会静默过。
   const arraySeeds = [...arrays]
+  // 空串状态同样按顺序种（见 mount 的 strings 参数）：迁移页第一个空串是「源目录」，传输页第一个是
+  // 导入目标、第二个才是搜索词，会话页第一个就是搜索词——各用例里写清自己种的是哪一个。
+  const stringSeeds = [...strings]
   const record = (type, props) => {
     const element = { type, props: props ?? {} }
     recorded.push(element)
@@ -71,6 +74,9 @@ function fakeReact(recorded = [], firstNull = undefined, panel = undefined, arra
       if (arraySeeds.length > 0 && Array.isArray(value) && value.length === 0) {
         return [arraySeeds.shift(), () => {}]
       }
+      if (stringSeeds.length > 0 && value === '') {
+        return [stringSeeds.shift(), () => {}]
+      }
       return [value, () => {}]
     },
     useEffect: () => {},
@@ -79,6 +85,25 @@ function fakeReact(recorded = [], firstNull = undefined, panel = undefined, arra
     useMemo: (fn) => fn(),
     Fragment: Symbol('Fragment'),
   }
+}
+
+/**
+ * 一行里显示出来的文案与标签。
+ *
+ * 与 strings() 同理：遇到函数组件要带着 props 调一次才看得见里面（行是共用组件渲染的，
+ * 见 sessionList.tsx 的 SessionRow）。
+ */
+function rowParts(node, acc = { label: '', tags: [] }) {
+  if (Array.isArray(node)) {
+    for (const item of node) rowParts(item, acc)
+    return acc
+  }
+  if (node === null || typeof node !== 'object') return acc
+  if (typeof node.type === 'function') return rowParts(node.type(node.props), acc)
+  const className = String(node.props?.className ?? '')
+  if (className.includes('dsm-tag')) acc.tags.push(node.props?.children)
+  if (className === 'dsm-rowTitle' || className === 'dsm-rowId') acc.label = String(node.props?.children)
+  return rowParts(node.props?.children, acc)
 }
 
 /**
@@ -144,7 +169,7 @@ function fakeDocument(nodes) {
 }
 
 /** 按模块加载器的契约执行产物，返回工厂与其 id。 */
-function loadBundle({ firstNull, panel, arrays } = {}) {
+function loadBundle({ firstNull, panel, arrays, strings } = {}) {
   let entry = null
   const nodes = []
   const sandbox = {
@@ -155,7 +180,7 @@ function loadBundle({ firstNull, panel, arrays } = {}) {
   vm.runInNewContext(code, sandbox, { filename: 'lib/client.js' })
   assert.ok(entry !== null, '产物必须以 window.__ModuleLoader__.load({ id, factory }) 报名')
   const recorded = []
-  const react = fakeReact(recorded, firstNull, panel, arrays)
+  const react = fakeReact(recorded, firstNull, panel, arrays, strings)
   const mod = entry.factory((specifier) => {
     if (specifier === 'react') return react
     if (specifier === 'react/jsx-runtime') {
@@ -207,8 +232,8 @@ test('客户端产物：导出面符合客户端插件契约', { skip }, () => {
 })
 
 /** 跑一次 apply，收下所有注册面（后面几个用例共用）。 */
-function mount({ translate, state, panel, arrays } = {}) {
-  const { mod, nodes, recorded } = loadBundle({ firstNull: state, panel, arrays })
+function mount({ translate, state, panel, arrays, strings } = {}) {
+  const { mod, nodes, recorded } = loadBundle({ firstNull: state, panel, arrays, strings })
   const registrations = []
   const dictionaries = []
   const effects = []
@@ -511,25 +536,13 @@ test('客户端产物：导出列表按目录分组，组头就是"整组勾选"
   // 「未登记在册」这枚标签只该挂给注册表没认领的会话（行里 `workspaceId` 缺省的那些）。挂错或漏挂都
   // 不会抛错、不会崩，只会让"外壳侧边栏为什么把这些会话放进未分组"重新变成要靠人对着两个界面猜的
   // 谜——本机上真的被问过一次，所以按行核：先把每行的名字与标签取出来，再按名字对号入座。
-  const rowFacts = (node, acc = { label: '', tags: [] }) => {
-    if (Array.isArray(node)) {
-      for (const item of node) rowFacts(item, acc)
-      return acc
-    }
-    if (node === null || typeof node !== 'object') return acc
-    if (typeof node.type === 'function') return rowFacts(node.type(node.props), acc)
-    const className = String(node.props?.className ?? '')
-    if (className.includes('dsm-tag')) acc.tags.push(node.props?.children)
-    if (className === 'dsm-rowTitle' || className === 'dsm-rowId') acc.label = String(node.props?.children)
-    return rowFacts(node.props?.children, acc)
-  }
-  const tagsByLabel = new Map(rows.map((row) => [rowFacts(row).label, rowFacts(row).tags]))
+  const tagsByLabel = new Map(rows.map((row) => [rowParts(row).label, rowParts(row).tags]))
   assert.deepEqual(tagsByLabel.get('s-1'), [], '登记在册的会话不挂标签')
   // s-1 与 s-2 在同一个目录、同一组里：登记在册与没登记在册混在一组是常态（真实库里就是这样），
   // 标签得精确到行，不能按组一刀切。
-  assert.deepEqual(tagsByLabel.get('s-2'), ['unregisteredSession'], '同目录里未登记在册的那条要单独标出来')
-  assert.deepEqual(tagsByLabel.get('s-3'), ['unregisteredSession'], '没登记的工作区下的会话同样没在册')
-  assert.deepEqual(tagsByLabel.get('s-4'), ['unregisteredSession'], '没有 cwd 的会话当然也不在任何登记表里')
+  assert.deepEqual(tagsByLabel.get('s-2'), ['ungroupedSource'], '同目录里未登记在册（「未分组」）的那条要单独标出来')
+  assert.deepEqual(tagsByLabel.get('s-3'), ['ungroupedSource'], '没登记的工作区下的会话同样没有归属')
+  assert.deepEqual(tagsByLabel.get('s-4'), ['ungroupedSource'], '没有 cwd 的会话当然也在「未分组」那一类里')
 })
 
 // ---- 「会话」页（逐条归档 / 删除）----
@@ -656,7 +669,7 @@ test('客户端产物：「会话」页的筛选条把不匹配的行筛掉，�
   assert.equal(chip('tagSubagent')?.props?.['aria-pressed'], false, '没勾的那几类不是选中态')
   // 每一类的说明走悬浮提示（与行上的标签同一份文案）
   assert.equal(chip('tagBlank')?.props?.title, 'tagBlankTip')
-  assert.equal(chip('ungroupedSource')?.props?.title, 'unregisteredSessionTip')
+  assert.equal(chip('ungroupedSource')?.props?.title, 'ungroupedTip')
 
   // 列表：只剩空白那两条（筛选＝任一命中），其余三类不在树上
   const rows = recorded.filter(
@@ -666,21 +679,10 @@ test('客户端产物：「会话」页的筛选条把不匹配的行筛掉，�
   assert.deepEqual(listed, ['s-blank', 's-both'])
   assert.ok(!text.includes('s-owned') && !text.includes('s-sub') && !text.includes('s-live'), '不匹配的行不在树上')
   // "空白 + 已归档"那条要挂两枚标签：只挂宿主先判的那一枚，筛选就没法自证了
-  // （遍历照 export 那个用例的写法：函数组件要自己带着 props 调一次才看得见里面）
-  const rowTags = (node, out = []) => {
-    if (Array.isArray(node)) {
-      for (const item of node) rowTags(item, out)
-      return out
-    }
-    if (node === null || typeof node !== 'object') return out
-    if (typeof node.type === 'function') return rowTags(node.type(node.props), out)
-    if (String(node.props?.className ?? '').includes('dsm-tag')) out.push(node.props.children)
-    return rowTags(node.props?.children, out)
-  }
   const both = rows.find((row) => strings(row).includes('s-both'))
-  assert.deepEqual(rowTags(both), ['tagBlank', 'tagArchived'], '既是空白又已归档的那条，两枚标签都挂')
+  assert.deepEqual(rowParts(both).tags, ['tagBlank', 'tagArchived'], '既是空白又已归档的那条，两枚标签都挂')
   // 筛过之后头部报"显示了其中几条"，别让人以为库里的会话变少了
-  assert.ok(text.includes('manageShown:{"shown":2,"total":5}'), '筛过之后报出 显示 N / M 条')
+  assert.ok(text.includes('shownCount:{"shown":2,"total":5}'), '筛过之后报出 显示 N / M 条')
 
   // 说明句「多选＝任一命中」必须**自己一行**（筛选条后面那个 <p>），不能挤在胶囊那一行里。
   // 挤回去不会报错、不会崩，只会让它重新跟着容器右边缘跑：外层滚动条一进一出就让这条边的位置变
@@ -688,11 +690,17 @@ test('客户端产物：「会话」页的筛选条把不匹配的行筛掉，�
   // 位置这种东西没法在这里量，所以按结构核：它在不在 .dsm-filters 里面。
   const filterRow = recorded.find((node) => String(node.props?.className) === 'dsm-filters')
   assert.equal(strings(filterRow).includes('filterHint'), false, '说明句不在胶囊那一行里')
-  const captions = recorded.filter(
-    (node) => String(node.props?.className) === 'dsm-hint' && strings(node).includes('filterHint'),
+  const searchRow = recorded.find((node) => String(node.props?.className) === 'dsm-filterSearch')
+  assert.ok(strings(searchRow).includes('filterHint'), '说明句与胶囊不在同一行（都在固定的左边界上）')
+  // 搜索框本身：值的来源是筛选状态，占位符与无障碍名字走字典（它们是 props，strings() 看不见）
+  const search = recorded.find((node) => String(node.props?.className) === 'dsm-search')
+  assert.equal(search?.props?.type, 'search', '搜索框是原生 input[type=search]（自带清空按钮）')
+  assert.equal(search?.props?.placeholder, 'searchPlaceholder', '占位符说明它搜什么')
+  assert.equal(search?.props?.['aria-label'], 'searchPlaceholder', '搜索框要有无障碍名字')
+  assert.ok(
+    (Array.isArray(searchRow.props.children) ? searchRow.props.children : [searchRow.props.children]).includes(search),
+    '搜索框在搜索那一行里',
   )
-  assert.equal(captions.length, 1, '说明句自己一行')
-  assert.equal(captions[0].type, 'p', '自己一行的说明句是块级元素，不参与胶囊那行的换行')
 })
 
 test('客户端产物：「会话」页一条都没筛出来时，那个固定的列表框还在（高度不跟着筛选变）', { skip }, () => {
@@ -718,17 +726,152 @@ test('客户端产物：「会话」页一条都没筛出来时，那个固定�
   assert.equal(lists.length, 1, '列表框还在（高度固定的那个框）')
   const empties = recorded.filter((node) => String(node.props?.className) === 'dsm-empty')
   assert.equal(empties.length, 1, '空态的说明只有一条')
-  assert.ok(strings(empties[0]).includes('manageNoMatch'), '空态说的是"没有符合筛选的会话"')
+  assert.ok(strings(empties[0]).includes('noMatch'), '空态说的是"没有符合筛选条件的会话"')
   // 空态必须是框的子节点，不能是它的兄弟（换成兄弟就等于把框撤了）
   assert.ok(
     String(lists[0].props.className).includes('dsm-listFixed'),
     '「会话」页那个框还得是固定高度的那一款（其余两页的列表照旧按内容长）',
   )
-  const children = Array.isArray(lists[0].props.children) ? lists[0].props.children : [lists[0].props.children]
+  // 空态是共用组件（sessionList.tsx 的 SessionListEmpty），所以要看的是**它渲染出来**的 .dsm-empty
+   // 是不是落在这个框里面——函数组件得带着 props 调一次才看得见（同本文件其它遍历）。
+  const walk = (node, out = []) => {
+    if (Array.isArray(node)) {
+      for (const item of node) walk(item, out)
+      return out
+    }
+    if (node === null || typeof node !== 'object') return out
+    if (typeof node.type === 'function') return walk(node.type(node.props), out)
+    out.push(node)
+    return walk(node.props?.children, out)
+  }
+  const inside = walk(lists[0].props.children)
   assert.ok(
-    children.some((child) => child !== null && typeof child === 'object' && child.props?.className === 'dsm-empty'),
+    inside.some((node) => String(node.props?.className) === 'dsm-empty'),
     '空态画在列表框里面',
   )
   assert.ok(!text.includes('s-owned') && !text.includes('s-blank'), '没有匹配的行被列出来')
-  assert.ok(text.includes('manageShown:{"shown":0,"total":2}'), '头部照样报 显示 0 / 2 条')
+  assert.ok(text.includes('shownCount:{"shown":0,"total":2}'), '头部照样报 显示 0 / 2 条')
+})
+
+test('客户端产物：导出页也接了同一套筛选条，筛空的组整组不画、组头条数跟着筛', { skip }, () => {
+  const state = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    sessions: [
+      { id: 'a-1', cwd: '/home/u/dev/alpha', createdAt: 4, dir: '/home/u/dev/alpha', bytes: 100, files: [], workspaceId: 'w1' },
+      { id: 'a-2', cwd: '/home/u/dev/alpha', createdAt: 3, dir: '/home/u/dev/alpha', bytes: 200, files: [], blank: true },
+      { id: 'b-1', cwd: '/home/u/dev/beta', createdAt: 2, dir: '/home/u/dev/beta', bytes: 300, files: [] },
+      { id: 'b-2', cwd: '/home/u/dev/beta', createdAt: 1, dir: '/home/u/dev/beta', bytes: 400, files: [], origin: 'subagent' },
+    ],
+    workspaces: [{ id: 'w1', path: '/home/u/dev/alpha', title: '工作区甲', sessionIds: ['a-1'] }],
+  }
+  // 勾选集是第一个空数组，筛选条是第二个（TransferPanel 里 useSessionFilter 挨着 sessions 定义）
+  const { registrations, recorded } = mount({ state, arrays: [[], ['blank']] })
+  const { component, registration } = registrations[0]
+  const text = strings(component(registration.inject()))
+
+  // 这一页列的是**整个库**（隐藏会话也在），所以五类芯片都有意义，计数对整个库数
+  const chips = recorded.filter((node) => String(node.props?.className) === 'dsm-filter')
+  assert.deepEqual(chips.map((node) => strings(node).join('')), [
+    'filterAll',
+    'tagSubagent',
+    'tagBlank',
+    'tagArchived',
+    'ungroupedSource',
+    'tagLive',
+  ])
+  assert.equal(
+    recorded
+      .filter((node) => String(node.props?.className) === 'dsm-filterCount')
+      .map((node) => String(node.props.children))
+      .join(','),
+    '1,1,0,3,0',
+    '子代理 1 / 空白 1 / 已归档 0 / 未分组 3 / 活动中 0（只有 a-1 在册）',
+  )
+  assert.ok(text.includes('shownCount:{"shown":1,"total":4}'), '筛过之后报 显示 1 / 4 条')
+
+  // 筛空的那一组整组不画（组头底下没有行，看着像坏了），留下那组报的是筛剩下的条数
+  const heads = recorded.filter((node) => String(node.props?.className) === 'dsm-groupHead')
+  assert.equal(heads.length, 1, '筛空的组不画组头')
+  assert.ok(strings(heads[0]).includes('工作区甲'), '留下的是 alpha 那组')
+  assert.ok(text.includes('sessionsInDir:{"count":1}'), '组头报的是筛剩下的条数')
+
+  // 行出自共用组件（sessionList.tsx 的 SessionRow），标签也走共用判据：空白 + 未分组两枚都挂
+  const rowEls = recorded.filter((node) => typeof node.type === 'function' && node.type.name === 'SessionRow')
+  assert.equal(rowEls.length, 1, '筛过之后只有一行')
+  assert.equal(rowEls[0].props.variant, 'export')
+  const labels = recorded.filter(
+    (node) => node.type === 'label' && String(node.props?.className).includes('dsm-rowExport'),
+  )
+  assert.equal(labels.length, 1)
+  assert.deepEqual(rowParts(labels[0]).tags, ['tagBlank', 'ungroupedSource'], '这一页也挂属性标签')
+})
+
+test('客户端产物：迁移页只给搜索框、不给类别芯片（那页的列表本来就是候选）', { skip }, () => {
+  const state = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    sessions: [
+      { id: 'a-1', cwd: '/home/u/dev/alpha', createdAt: 3, dir: '/home/u/dev/alpha', bytes: 100, files: [] },
+      { id: 'a-2', cwd: '/home/u/dev/alpha', createdAt: 2, dir: '/home/u/dev/alpha', bytes: 200, files: [], origin: 'subagent', hidden: 'subagent' },
+      { id: 'b-1', cwd: '/home/u/dev/beta', createdAt: 1, dir: '/home/u/dev/beta', bytes: 300, files: [] },
+    ],
+    workspaces: [],
+  }
+  // 迁移页第一个空串状态是「源目录」（MigrationPanel 的 useState('') 顺序：from → to → title → 搜索词）
+  const { registrations, recorded } = mount({ state, panel: 'migrate', strings: ['/home/u/dev/alpha'] })
+  const { component, registration } = registrations[0]
+  strings(component(registration.inject()))
+
+  assert.equal(recorded.filter((node) => String(node.props?.className) === 'dsm-filter').length, 0, '不给类别芯片')
+  assert.ok(
+    recorded.some((node) => String(node.props?.className) === 'dsm-search'),
+    '给搜索框',
+  )
+  // 候选只剩"侧边栏看得见的那条"：隐藏会话按设计不进候选，所以五类芯片在这页永远是 0
+  const rowEls = recorded.filter((node) => typeof node.type === 'function' && node.type.name === 'SessionRow')
+  assert.deepEqual(rowEls.map((node) => node.props.session.id), ['a-1'])
+  assert.equal(rowEls[0].props.variant, 'pick')
+  assert.equal(rowEls[0].props.ungroupedTag, true, '目录来源下，没在册的那条要挂「未分组」')
+})
+
+test('客户端产物：「会话」页的搜索框按标题或 id 筛，筛空时空态还是画在同一个框里', { skip }, () => {
+  const state = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    archiveAvailable: true,
+    sessions: [
+      { id: 's-1', title: '重构迁移编排', cwd: '/home/u/dev/alpha', createdAt: 2, dir: '/home/u/dev/alpha', bytes: 100, files: [], workspaceId: 'w1' },
+      { id: 's-2', title: '别的东西', cwd: '/home/u/dev/alpha', createdAt: 1, dir: '/home/u/dev/alpha', bytes: 200, files: [], workspaceId: 'w1' },
+    ],
+    workspaces: [{ id: 'w1', path: '/home/u/dev/alpha', title: '工作区甲', sessionIds: ['s-1', 's-2'] }],
+  }
+  // 会话页第一个空串状态就是搜索词（勾选集是第一个空数组，useSessionFilter 紧跟着它）
+  const hit = mount({ state, panel: 'manage', strings: ['迁移'] })
+  const hitText = strings(hit.registrations[0].component(hit.registrations[0].registration.inject()))
+  assert.ok(hitText.includes('shownCount:{"shown":1,"total":2}'), '按标题搜到了那一条')
+  assert.deepEqual(
+    hit.recorded
+      .filter((node) => typeof node.type === 'function' && node.type.name === 'SessionRow')
+      .map((node) => node.props.session.id),
+    ['s-1'],
+  )
+
+  // 搜不到时：空态照样画在那个高度固定的框里，头部报 显示 0 / 2（框还在，整页高度就不变）
+  const miss = mount({ state, panel: 'manage', strings: ['zzz-没有这条'] })
+  const missText = strings(miss.registrations[0].component(miss.registrations[0].registration.inject()))
+  assert.ok(missText.includes('shownCount:{"shown":0,"total":2}'), '搜不到也照样报条数')
+  const lists = miss.recorded.filter((node) =>
+    String(node.props?.className ?? '').split(/\s+/).includes('dsm-list'),
+  )
+  assert.equal(lists.length, 1, '列表框还在')
+  assert.ok(
+    miss.recorded.some(
+      (node) => String(node.props?.className) === 'dsm-empty' && strings(node).includes('noMatch'),
+    ),
+    '空态画在框里',
+  )
 })

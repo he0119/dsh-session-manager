@@ -53,7 +53,7 @@ export interface MigrateRequest {
   sessionIds?: string[] | null
   /** 目标工作区新建时的标题。 */
   title?: string
-  /** 是否连带未登记在册的会话（默认 true）。 */
+  /** 是否连带未分组的会话（注册表没认领的那些，默认 true）。 */
   includeUnowned?: boolean
   /** 是否同时搬迁会话创建过的文件（默认 false）。 */
   includeArtifacts?: boolean

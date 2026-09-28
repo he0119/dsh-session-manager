@@ -13,6 +13,7 @@ import {
   filterSessions,
   hasAttribute,
   matchesFilter,
+  matchesQuery,
   type FilterKey,
   type SessionFacts,
 } from '../src/client/sessionFilter.ts'
@@ -89,4 +90,40 @@ test('每一类各有多少条：对整个库数，且一条会话可以同时�
   ]
   assert.deepEqual(filterCounts(list), { subagent: 1, blank: 1, archived: 2, unowned: 3, live: 1 })
   assert.deepEqual(filterCounts([]), { subagent: 0, blank: 0, archived: 0, unowned: 0, live: 0 })
+})
+
+test('关键词命中：标题与 id 都搜，大小写不敏感，空白串 = 没有关键词', () => {
+  const session = s('session-9F3C-abcd', { title: '重构迁移编排' })
+  // 标题
+  assert.equal(matchesQuery(session, '迁移'), true)
+  assert.equal(matchesQuery(session, '  迁移  '), true, '两头的空白不算数')
+  assert.equal(matchesQuery(session, '别的'), false)
+  // id：标题命中的同时也永远能按 id 找（"报 bug 要指名道姓"那条路）
+  assert.equal(matchesQuery(session, '9f3c'), true, 'id 搜起来不区分大小写')
+  assert.equal(matchesQuery(session, 'SESSION-9F3C'), true)
+  // 没有关键词 = 全都算命中
+  assert.equal(matchesQuery(session, ''), true)
+  assert.equal(matchesQuery(session, '   '), true)
+  // 没有标题（老会话）时只剩 id 可搜，不会因为 title 缺省就抛
+  const bare = s('session-plain')
+  assert.equal(matchesQuery(bare, 'plain'), true)
+  assert.equal(matchesQuery(bare, '迁移'), false)
+})
+
+test('关键词与类别是两条独立的轴：都要过（与，不是或）', () => {
+  const list = [
+    s('a', { title: '重构迁移', blank: true }),
+    s('b', { title: '重构迁移', live: true }),
+    s('c', { title: '别的活', blank: true }),
+  ]
+  // 关键词单独用
+  assert.deepEqual(filterSessions(list, [], '迁移').map((x) => x.id), ['a', 'b'])
+  // 类别单独用
+  assert.deepEqual(filterSessions(list, ['blank']).map((x) => x.id), ['a', 'c'])
+  // 一起用：标题里有"迁移" **且** 是空白
+  assert.deepEqual(filterSessions(list, ['blank'], '迁移').map((x) => x.id), ['a'])
+  // 组合起来什么都剩不下时就是空列表，不是"退回全都要"
+  assert.deepEqual(filterSessions(list, ['archived'], '迁移').map((x) => x.id), [])
+  // 空关键词与空类别都不改变结果
+  assert.equal(filterSessions(list, [], '').length, 3)
 })

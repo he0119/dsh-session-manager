@@ -26,6 +26,8 @@
  */
 export interface SessionFacts {
   readonly id: string
+  /** 折叠出的标题（可能没有，见 `src/session-title.ts`）：搜索时与 id 一起当关键词。 */
+  readonly title?: string
   readonly workspaceId?: string
   readonly origin?: string
   readonly blank?: boolean
@@ -76,6 +78,31 @@ export function attributeKeys(session: SessionFacts): AttributeKey[] {
 }
 
 /**
+ * 关键词命中：**标题与 id 都算**。
+ *
+ * id 永远在，标题可能没有（老会话、日志里就没有标题事件），所以两个都搜——按 id 指名道姓与按标题
+ * 回忆"我上次问的那个"都是真实需求，区别只是行上显示哪一个（见 `planRows.sessionLabel`）。
+ * 大小写不敏感；空白串 = 没有关键词。
+ */
+export function matchesQuery(session: SessionFacts, query: string): boolean {
+  const needle = query.trim().toLowerCase()
+  if (needle === '') return true
+  if ((session.title ?? '').toLowerCase().includes(needle)) return true
+  return session.id.toLowerCase().includes(needle)
+}
+
+/**
+ * 这一条该不该出现在筛过之后的列表里：关键词与类别**都要**过。
+ *
+ * 两者是两条独立的轴（"搜 foo" ＋ "只看空白"= foo 里的空白），所以是「与」而不是「或」。
+ */
+export function matchesFilters(session: SessionFacts, keys: readonly FilterKey[], query = ''): boolean {
+  if (!matchesQuery(session, query)) return false
+  if (keys.length === 0) return true
+  return keys.some((key) => matchesFilter(session, key))
+}
+
+/**
  * 筛选后的列表。
  *
  * 一枚都没勾 = 全都要；勾了几枚 = **任一命中**（"把这几类都摆出来"是勾选面的直觉，而这几类两两之间
@@ -84,9 +111,9 @@ export function attributeKeys(session: SessionFacts): AttributeKey[] {
 export function filterSessions<T extends SessionFacts>(
   sessions: readonly T[],
   keys: readonly FilterKey[],
+  query = '',
 ): T[] {
-  if (keys.length === 0) return [...sessions]
-  return sessions.filter((session) => keys.some((key) => matchesFilter(session, key)))
+  return sessions.filter((session) => matchesFilters(session, keys, query))
 }
 
 /** 每一类各有多少条（对整个库数，不随当前筛选变化——数字会跳的计数没人信得过）。 */
