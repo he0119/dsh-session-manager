@@ -354,7 +354,7 @@ export const CSS = `
   border: 1px solid var(--dsw-alias-border-l2, rgba(0, 0, 0, 0.12));
 }
 /* state 色非当文字色不可的时候，先和 label-primary 兑一下：亮色主题往深里走、深色主题往浅里走，
-   同一条声明在两套主题里各自走向可读的一侧（浅色主题实测 error 9.6:1 / warn 5.6:1 / ok 8.0:1）。 */
+   同一条声明在两套主题里各自走向可读的一侧（浅色主题实测 warn 5.57:1 / error 9.75:1 / ok 5.82:1）。 */
 .dsm-error { color: color-mix(in srgb, var(--dsw-alias-state-error-primary, #d83931) 55%, var(--dsw-alias-label-primary, #1f2329)); }
 .dsm-warn { color: color-mix(in srgb, var(--dsw-alias-state-warn-primary, #d97b00) 55%, var(--dsw-alias-label-primary, #1f2329)); }
 .dsm-ok { color: color-mix(in srgb, var(--dsw-alias-state-success-primary, #2ea121) 55%, var(--dsw-alias-label-primary, #1f2329)); }

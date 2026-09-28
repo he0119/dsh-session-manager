@@ -8,10 +8,10 @@ sessions as `.dshsess` bundles.
 [中文](README.md) | English
 
 In DSH, "which workspace a session belongs to" is not an editable field — it is derived from the `cwd`
-in the session log header. The host exposes no move / reassign API, and it rejects a log whose bucket
+in the session log header. The host exposes no move / reassign API, and it rejects a log whose project directory
 disagrees with its `cwd`. So moving directories by hand either drops sessions into Ungrouped or makes
 them fail to load with `corrupt session log`. This plugin does all three things together — **rewrite the
-header `cwd` + move the log directory + re-home the workspace ledger** — and every step can be previewed
+header `cwd` + move the log directory + re-home the workspace registry** — and every step can be previewed
 first and rolled back byte-for-byte afterwards. (Why it has to work that way:
 [docs/internals.md](docs/internals.md).)
 
@@ -45,6 +45,10 @@ npx @deepseek-ai/dsh@next plugin --profile desktop add /path/to/dsh-session-mana
 After the restart, **Settings** gains a **Session management** page in the left navigation (ordered after
 the built-in pages). `github:` installs are **not** supported here: the build runs in `prepublishOnly` and
 `lib/` is kept out of git, so a git install gets no artifacts.
+The host must be 0.1.7-rc.2 or a later 0.1.x (`engines.dsh` and the two DSH peers are `^0.1.7-rc.2`;
+`@deepseek-ai/cordis` is `^4.0.4`); under
+prerelease rules a new rc line such as `0.1.8-rc.1` falls outside that range, so that declaration needs a
+one-line bump at that point.
 
 ## Usage
 
@@ -67,7 +71,7 @@ the built-in pages). `github:` installs are **not** supported here: the build ru
 - **Import**: pick a bundle and a target workspace → **preview first** (per session: what will be created,
   which `cwd` gets rewritten, what is skipped, how the registry changes) → then confirm. Import **never
   overwrites**: a session whose id already exists is skipped and reported; a session with no `cwd` lands in
-  the `_no-cwd` bucket and is not ledgered.
+  the `_no-cwd` project directory and is not registered.
 
 **Migrate** — move one directory's sessions to another directory
 
@@ -87,18 +91,18 @@ the built-in pages). `github:` installs are **not** supported here: the build ru
 - **move the whole source, or only some of it**: the sessions of the source are listed
   (titles too, ids on hover; under a directory source the unclaimed rows carry a "not registered" tag), and
   ticking any row switches to "only the ticked ones"; one source per run;
-- **Preview**: session, log and byte counts, source → target bucket, **how the ledger changes** (create or
+- **Preview**: session, log and byte counts, source → target project directory, **how the registry changes** (create or
   reuse the target workspace, how many sessions are added, which workspaces lose them, whether an emptied
   workspace is removed), the artifact plan and its skip reasons;
 - **Confirm**: rewrite each log header `cwd` (first frame only, the rest byte-identical) → move the session
-  directories → re-home the ledger → **independent verification** (the host's own corrupt criterion) → leave
+  directories → re-home the registry → **independent verification** (the host's own corrupt criterion) → leave
   a byte-level backup. Afterwards the page tells you whether the change took effect immediately or
   **requires a DSH restart**.
 
 **Backups & rollback** — below the migrate tab, every backup this plugin wrote (time, session count,
 source → target), with the **rollback steps** shown before you confirm. Rollback restores the session
-directories, the log bytes and the workspace ledger together (and removes the emptied target bucket,
-symmetric with the migration cleaning up an emptied source bucket).
+directories, the log bytes and the workspace registry together (and removes the emptied target project
+directory, symmetric with the migration cleaning up an emptied source project directory).
 
 A host without the `webServer` service (tools-only front ends) still loads the plugin — the page simply
 does not appear.
@@ -107,10 +111,10 @@ does not appear.
 
 | Tool | Writes | Purpose |
 |---|---|---|
-| `plan_session_migration` | no | Read-only plan: session/file counts, target bucket, ledger change, blockers |
+| `plan_session_migration` | no | Read-only plan: session/file counts, target project directory, registry change, blockers |
 | `migrate_sessions` | needs `apply:true` | Dry-run by default; performs a byte-level backup and self-verifies after |
 | `rollback_session_migration` | yes | Byte-exact rollback from a backup directory |
-| `verify_workspace_sessions` | no | Check that a directory's bucket agrees with its headers |
+| `verify_workspace_sessions` | no | Check that a project directory agrees with its headers |
 
 ## Things to know
 
@@ -123,7 +127,7 @@ does not appear.
 - **Only the first frame is rewritten**: only the header frame is recompressed, the remaining frames stay
   byte-identical, and rollback restores everything byte-for-byte (including the session artifacts, when you
   ask for them).
-- **Paths**: neither session `cwd` values nor ledger paths carry a trailing slash; `projectKey` folds `/`,
+- **Paths**: neither session `cwd` values nor registry paths carry a trailing slash; `projectKey` folds `/`,
   `\` and `:` into `-`, so a few paths collide in that encoding — the plan layer blocks those up front.
 - **Plugin config**: the optional `sessionsRoot` / `registryPath` / `backupRoot` fields override the default
   paths above.

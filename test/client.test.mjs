@@ -5,7 +5,8 @@
 // 全都看不出来——只有把产物按模块加载器的方式跑一遍才知道。
 //
 // 本文件因此做四件事：
-//   1) 读产物文本，断言它只 require 平台基线模块（react / react/jsx-runtime）；
+//   1) 读产物文本，断言它只 require 平台基线模块（react / react/jsx-runtime /
+//      @deepseek-ai/dsh-client-ui-primitives），且不申请任何非基线模块；
 //   2) 用假的 `window.__ModuleLoader__` + 假 `require` 执行工厂，核对 id 与导出面；
 //   3) 用假 ctx 跑 apply，核对注册到的槽位、id、locale 与注入面；
 //   4) 核对两份字典键集完全一致（少一个键就是一处会露出键名的界面）。
@@ -163,9 +164,17 @@ function loadBundle({ firstNull, panel } = {}) {
 
 test('客户端产物：只 require 平台基线模块，id 与包名一致', { skip }, () => {
   const requires = [...code.matchAll(/require\("([^"]+)"\)/g)].map((match) => match[1])
-  assert.deepEqual([...new Set(requires)].sort(), ['react', 'react/jsx-runtime'])
-  // 反面证据：宿主 UI 原语包不是稳定契约，一 require 就会把整页绑在它上面。
-  assert.equal(/dsh-client-ui-primitives/.test(code), false, '不该 require 宿主的 UI 原语包')
+  // 平台基线模块：官方客户端包共用、不必写进 `dsh.client.external`。控件库是其中之一
+  // （0.1.7-rc.2 这一代里，60 个 `dsh-client-*` 包有 46 个直接 require 它，没有一个声明成 external）。
+  const baseline = ['react', 'react/jsx-runtime', '@deepseek-ai/dsh-client-ui-primitives']
+  for (const specifier of new Set(requires)) {
+    assert.ok(
+      baseline.includes(specifier),
+      `产物 require 了非基线模块 ${specifier}：要用它就得先写进 dsh.client.external`,
+    )
+  }
+  // 反面证据：非基线模块必须在 `dsh.client.external` 里点名申请，本包一个都没申请。
+  assert.deepEqual(pkg.dsh?.client?.external ?? [], [], '本包不该申请非基线模块')
 
   const { entry } = loadBundle()
   assert.equal(entry.id, pkg.name, '工厂 id 必须是包名')

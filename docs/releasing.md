@@ -37,12 +37,14 @@ Trusted Publisher。也就是说 `@he0119/dsh-session-manager` 的**第一个版
 npm login                      # 以 he0119 登录，需要 2FA
 pnpm run build                 # lib/ 不进 git，先出产物
 npm publish --access public    # 不加 --provenance：本机没有 OIDC，签不出证明
+#    ↑ 发出去的就是 package.json 里那个版本（当前 `0.0.1`）：先 pnpm version 改号再发，
+#      别用 npm publish 顺手发一个 git 里没有的版本
 
 # 2) 去 npm 包设置页登记 Trusted Publisher（表格见下一节）
 #    https://www.npmjs.com/package/@he0119/dsh-session-manager/access
 
 # 3) 之后再发版就走标签：本地 npm 登录状态可以退出，CI 不再需要任何 token
-pnpm version 0.1.1 -m "chore(release): %s"
+pnpm version 0.1.0 -m "chore(release): %s"
 git push --follow-tags
 ```
 
@@ -133,9 +135,10 @@ GitHub 在 Release 页面建标签时，会把它落在**当刻 main 的 HEAD** 
 ## 发布前的包内容自检
 
 `pnpm run check:package`（`scripts/check-package.mjs`）用 **npm 自己的打包器**（`npm pack --dry-run`）
-核对四件事：运行期文件一个不少、`main`/`types`/`bin`/`exports`/`dsh.bundle.patch` 指向的路径都在包里、
-产物内部的相对 import（tsdown 抽出来的带哈希 chunk）没指到包外、`test/` 与 `src/` 没有外泄；外加一条
-跨文件不变式——`cordis.patch.yml` 里 insert 的 `name` 必须等于 `package.json` 的包名。
+核对四件事：运行期文件一个不少、`main`/`types`/`exports`/`dsh.bundle.patch` 指向的路径都在包里、
+产物内部的相对 import（tsdown 抽出来的带哈希 chunk）没指到包外，`src/`、`test/`、`docs/`、
+`scripts/`、`.github/` 与 `tsconfig*` 都没有外泄；外加一条跨文件不变式——`cordis.patch.yml` 里
+insert 的 `name` 必须等于 `package.json` 的包名。
 
 它复述的是 npm 的打包规则里**最容易被误以为不需要检查**的那部分：入口指着一个没被打进包的文件，
 本地测试全绿、装进宿主才报错。CI 与 Publish 都会跑它，所以它对发布是硬门禁。
@@ -145,7 +148,8 @@ GitHub 在 Release 页面建标签时，会把它落在**当刻 main 的 HEAD** 
 
 ## 工作流一览
 
-- `.github/workflows/ci.yml`：PR、推 main 时跑 `typecheck` / `build` / `test` / `check:package`（Node 22.19；与本包 `engines` 的下限一致）。
+- `.github/workflows/ci.yml`：PR、推 main 时跑 `typecheck` / `build` / `check:package` / `test`
+  （Node 22.19.0，与本包 `engines` 的下限一致；`check:package` 排在自己构建出产物之后）。
 - `.github/workflows/publish.yml`：推 `v*` 标签时先复用一遍上面的检查，再依次做三道落点校验、
   打包自检、发布到 npm、建 Release。发布 job 里额外跑一次 `pnpm install --frozen-lockfile`，
   因为 `lib/` 靠 `prepublishOnly` 现场编译，而 check job 的依赖不跨 job 共享。

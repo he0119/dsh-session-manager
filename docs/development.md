@@ -5,7 +5,9 @@
 
 ## 依赖、构建、测试
 
-本包运行时只有一个依赖（`fzstd`，纯 JS 的多帧 zstd 解码器）。
+运行期依赖分两类：npm 依赖只有 `fzstd`（纯 JS 的多帧 zstd 解码器）；其余都是**宿主提供**的 peer
+——`@deepseek-ai/cordis`、`@deepseek-ai/dsh-tools`、`@deepseek-ai/dsh-client-ui-primitives`，三个都
+写成 `^0.1.7-rc.2` 这一代的范围，`devDependencies` 里带着同代副本供构建与测试使用。
 
 ```sh
 pnpm install          # 或 npm install（本机请用 npm，见「本机安装」）
@@ -19,13 +21,14 @@ pnpm run check:package # 打包内容自检（要先 build，见 docs/releasing.
 单边重建：`pnpm run build:host` / `build:types` / `build:client`（三份配置共用 `lib/`，
 所以单独重建一端不会删掉另一端）。
 
-带真实数据回归（指向任一含会话桶的 `sessions/` 备份目录）：
+带真实数据回归（指向任一含会话项目目录的 `sessions/` 备份目录）：
 
 ```sh
 DSM_FIXTURE=/path/to/backup pnpm test
 ```
 
-没设 `DSM_FIXTURE` 时，`test/real-data.test.ts` 会整组跳过（这是 runner 里那 1 个 `skipped`）。
+没设 `DSM_FIXTURE` 时，`test/real-data.test.ts` 会整组跳过——它是 runner 里默认跳过的两条之一，
+另一条是下面那条 `DSM_SMOKE_WORKSPACE`（所以全绿口径是 151 条里 149 通过、2 跳过）。
 
 ### 构建产物冒烟（`test/artifact.test.mjs`）
 
@@ -46,7 +49,7 @@ DSM_SMOKE_WORKSPACE=/path/to/a/real/workspace pnpm test
 ```
 
 它会在这个目录上跑一次只读 `plan`，并断言计划自己算出的 `targetBucket` 目录**没有被创建**
-——把「只读」从口头承诺变成可断言的事实。目标桶名取自计划返回值，不硬编码。
+——把「只读」从口头承诺变成可断言的事实。目标项目目录名取自计划返回值，不硬编码。
 
 ### 本机安装（Windows 沙箱下的实测结论）
 
@@ -103,7 +106,8 @@ lib/            构建产物（tsdown 输出，已 gitignore）
 test/           测试（run-all.mjs 是进程内 runner）
 docs/           本目录
 AGENTS.md       给 AI 助手与贡献者的协作约定（提交信息口径、验证清单、界面硬约束）
-tsdown.config.ts 三份构建配置：host（lib/index.js）、types（lib/types/*.d.ts）、client（lib/client.js）
+tsdown.config.ts 三份构建配置：host（lib/index.js）、types（lib/types/*.d.ts）、client（lib/client.js，
+                平台基线模块 react / react-jsx-runtime / dsh-client-ui-primitives 保持 require，其余内联）
 cordis.patch.yml 插件注册（package.json 的 dsh.bundle.patch 指向它）
 tsconfig.client.json Web Client 自己的类型工程（DOM + JSX；Host 那份没有）
 ```
@@ -111,13 +115,14 @@ tsconfig.client.json Web Client 自己的类型工程（DOM + JSX；Host 那份�
 | 源文件 | 职责 | DSH 依赖 |
 |---|---|---|
 | `src/project-key.ts` | 逐字符复刻宿主 `projectKey()` + 有损碰撞检测 | 无 |
+| `src/types.ts` | 贯穿各层的共享类型（计划、产物、注册表视图等） | 无 |
 | `src/paths.ts` | `encodeSegment()`、代次文件名、会话目录/日志路径 | 无 |
 | `src/zstd-frame.ts` | raw 帧编码、首帧边界定位、多帧感知守卫 | 无 |
 | `src/session-log.ts` | 单日志读取与**保结构** cwd 改写 | 无 |
 | `src/registry.ts` | 注册表启动不变式校验、`reHome()`、原子落盘 | 无 |
-| `src/discovery.ts` | 分桶扫描 + 只解首帧读 header（发现阶段快），可注入标题读取器 | 无 |
+| `src/discovery.ts` | 项目目录扫描 + 只解首帧读 header（发现阶段快），可注入标题读取器 | 无 |
 | `src/session-title.ts` | 会话标题：宿主投影缓存优先，缺席时有界地解日志开头 | 无 |
-| `src/plan.ts` | 只读计划：目标推导、阻塞问题、账本变更 | 无 |
+| `src/plan.ts` | 只读计划：目标推导、阻塞问题、注册表变更 | 无 |
 | `src/journal.ts` | 字节级备份清单与回滚 | 无 |
 | `src/execute.ts` | 执行 + 独立复核（含产物目标位校验） | 无 |
 | `src/artifacts.ts` | 会话产物提取（证据分层）、规划（求交/剪枝）、搬迁 | 无 |

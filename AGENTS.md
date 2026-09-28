@@ -19,7 +19,7 @@
 ## 官方文档
 
 上游口径以官方文档站为准（<https://deepseek-harness.github.io/deepseek-harness/>，中英双语）。与本包
-关系最近的三页：
+关系最近的四页：
 
 - [Web Client](https://deepseek-harness.github.io/deepseek-harness/reference/subsystems/web-client)：
   「包边界」规定功能插件包之间不得运行时互导值（跨包走 Cordis service 或 Slots），`ui-primitives`
@@ -28,6 +28,8 @@
 - [客户端模块](https://deepseek-harness.github.io/deepseek-harness/reference/subsystems/client-modules)：
   客户端产物的经典脚本契约，以及 `dsh.client` 里 `inject`（工厂到达与组合顺序）与 `external`
   （非基线模块请求）的分工。
+- [客户端 Slots](https://deepseek-harness.github.io/deepseek-harness/reference/subsystems/slots)：
+  Slot / 注入 / 渲染的生命周期；本插件的设置页就是注册进 `settings.section` 的一个 Slot。
 - [新增设置卡片](https://deepseek-harness.github.io/deepseek-harness/reference/cookbook/adding-a-settings-card)：
   设置页卡片怎么按命名空间配对两侧。官方中文把插件包的两侧叫 **Host 半侧** / **浏览器半侧**，
   英文文档里是 "Host half" / "browser half"，本仓库跟这个说法（不是"半边"，也不是"客户端侧"）。
@@ -63,14 +65,17 @@ pnpm typecheck && pnpm build && pnpm test && pnpm check:package
 
 ## 界面与样式的硬约束
 
-- 浏览器半侧只 `require` `react` 与 `react/jsx-runtime`；**不 require 宿主的 UI 原语包**——官方允许
-  依赖 `ui-primitives` 这类无生命周期的静态 owner，我们躲开它是换**崩溃隔离**（模块没送到时整个
-  槽位条目会变成崩溃占位），完整理由见 `docs/internals.md`。
+- 浏览器半侧只 `require` **平台基线模块**：`react`、`react/jsx-runtime`、官方控件库
+  `@deepseek-ai/dsh-client-ui-primitives`——这三个在 `tsdown.config.ts` 的 `CLIENT_EXTERNALS` 里保持
+  外置，其余内联。控件改用官方控件库（peer 与 devDep 已接线，手写控件逐步替换）；要引非基线模块
+  必须在 `dsh.client.external` 里点名。基线模块的 API 变化由 `peerDependencies` 的版本范围拦在激活，
+  不会静默走形；`Slot` 条目渲染抛错只会留下一个空 `div`，所以渲染路径上别做会抛的事。
 - 颜色只用宿主 `Theme` 检查面列出的 `--dsw-alias-*`（`cordis_inspect_query` → client / Theme /
   listTokens），每条声明都带中性回落值；名单外的 token 要登记进 `test/styles.test.mjs` 的例外表
   并写明理由（现有两例：`label-primary-foreground`、`label-tertiary`）。
-- 页头照内建设置页的规格：`h2` 18px/600 独占一行，隔 12px 一行 13px 说明（`label-tertiary`），
-  整体列布局；规格由 `test/styles.test.mjs` 与 `test/client.test.mjs` 两处钉住。
+- 页头与页内分页**没有官方原语可用**（官方设置页自己手写 `h2` / `p` / 本地 CSS），照内建设置页的规格
+  写：`h2` 18px/600 独占一行，隔 12px 一行 13px 说明（`label-tertiary`），整体列布局；规格由
+  `test/styles.test.mjs` 与 `test/client.test.mjs` 两处钉住。
 - `src/client/styles.ts` 的 CSS 正文里**不许出现反引号**（模板字面量会被提前截断，报错落在很远处）；
   类名一律 `dsm-` 前缀。
 - 中英两份字典的键集必须一致（`test/client.test.mjs` 会核）。
