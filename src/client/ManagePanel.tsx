@@ -253,10 +253,10 @@ export function ManagePanel({ t = fallback, state, reload }: PanelShare): React.
                 <span className="dsm-filterCount">{counts[key]}</span>
               </button>
             ))}
-            <span className="dsm-spacer" />
-            <span className="dsm-hint">{t('filterHint')}</span>
           </div>
         )}
+        {/* 自己一行，不跟胶囊抢同一行的剩余宽度（理由见 styles.ts 的 .dsm-filters 注释）。 */}
+        {sessions.length > 0 && <p className="dsm-hint">{t('filterHint')}</p>}
 
         {sessions.length === 0 ? (
           <p className="dsm-empty">{t('noSessions')}</p>
