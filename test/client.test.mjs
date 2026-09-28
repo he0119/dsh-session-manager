@@ -875,3 +875,123 @@ test('客户端产物：「会话」页的搜索框按标题或 id 筛，筛空�
     '空态画在框里',
   )
 })
+
+test('客户端产物：组头的折叠只影响画不画行，不影响"列出来了哪些"', { skip }, () => {
+  const state = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    sessions: [
+      { id: 'a-1', cwd: '/home/u/dev/alpha', createdAt: 4, dir: '/home/u/dev/alpha', bytes: 100, files: [], blank: true },
+      { id: 'a-2', cwd: '/home/u/dev/alpha', createdAt: 3, dir: '/home/u/dev/alpha', bytes: 200, files: [] },
+      { id: 'b-1', cwd: '/home/u/dev/beta', createdAt: 2, dir: '/home/u/dev/beta', bytes: 300, files: [], blank: true },
+    ],
+    workspaces: [],
+  }
+  // 传输页里三个空数组状态按顺序是：勾选集、筛选条、折叠状态（各自的 useState 顺序）
+  const alpha = '/home/u/dev/alpha'
+  const beta = '/home/u/dev/beta'
+  const key = (path) => (path === '' ? '\u0000no-cwd' : path)
+
+  // 筛「空白」之后列出来的是 a-1 与 b-1（两个组），收起 alpha 那一组
+  const one = mount({ state, arrays: [[], ['blank'], [key(alpha)]] })
+  const oneText = strings(one.registrations[0].component(one.registrations[0].registration.inject()))
+  const oneRows = one.recorded.filter((node) => typeof node.type === 'function' && node.type.name === 'SessionRow')
+  assert.deepEqual(oneRows.map((node) => node.props.session.id), ['b-1'], '收起的那一组不画行')
+  const heads = one.recorded.filter((node) => String(node.props?.className) === 'dsm-groupHead')
+  assert.equal(heads.length, 2, '组头一个都不少（收起来的是行，不是整个组）')
+  assert.ok(oneText.includes('sessionsInDir:{"count":1}'), '收起的组头照样报"这组几条"')
+  assert.ok(
+    oneText.includes('shownCount:{"shown":2,"total":3}'),
+    '头部照样按列出来的算（2 条），折叠不改"算不算"',
+  )
+
+  // 折叠开关：右端那个按钮，状态写在 aria-expanded 上（读屏与视觉同一个来源）
+  const toggles = one.recorded.filter((node) => String(node.props?.className) === 'dsm-groupToggle')
+  assert.equal(toggles.length, 2, '每组一个折叠开关')
+  assert.equal(
+    heads[0].props.children[0].props?.className,
+    'dsm-groupToggle',
+    '折叠开关在组头最前（树的惯例：左缘就是"这一组能不能折"的位置）',
+  )
+  assert.deepEqual(
+    toggles.map((node) => node.props['aria-expanded']),
+    [false, true],
+    '收起的那组 false，另一组 true',
+  )
+  assert.ok(
+    toggles.every((node) => node.props.type === 'button' && String(node.props['aria-label']).includes('toggleGroupLabel')),
+    '是可聚焦的按钮，且带无障碍名字',
+  )
+  // 按钮不能塞进"点一下整组勾选"那个 label 里：labelable 元素只能是被标注的那一个
+  const picks = one.recorded.filter((node) => String(node.props?.className) === 'dsm-groupPick')
+  assert.equal(picks.length, 2, '整组勾选那一块仍是 label')
+  const walk = (node, out = []) => {
+    if (Array.isArray(node)) {
+      for (const item of node) walk(item, out)
+      return out
+    }
+    if (node === null || typeof node !== 'object') return out
+    if (typeof node.type === 'function') return walk(node.type(node.props), out)
+    out.push(node)
+    return walk(node.props?.children, out)
+  }
+  assert.equal(
+    walk(picks[0]).filter((node) => node.type === 'button').length,
+    0,
+    '折叠按钮不在整组勾选的 label 里面（非法嵌套，点击行为也会打架）',
+  )
+
+  // 工具栏：全部收起 / 全部展开的可用状态跟着眼下的收起情况走。
+  // 只看工具栏那一块里的按钮——卡片头部也有两个 .dsm-button，不能一起数进来。
+  const disabled = (recorded) => {
+    const bar = recorded.find((node) => String(node.props?.className) === 'dsm-groupTools')
+    assert.ok(bar, '有组就该有折叠工具栏')
+    return walk(bar)
+      .filter((node) => node.type === 'button')
+      .map((node) => node.props.disabled)
+  }
+  assert.deepEqual(disabled(one.recorded), [false, false], '收了一组、另一组还开着：两个按钮都能用')
+
+  // 一组都没收：全部展开没什么可做
+  const none = mount({ state, arrays: [[], ['blank'], []] })
+  // 一定要走一遍 strings()：只调 component() 只渲染骨架那 12 个元素，页面里的东西一个都不会建出来
+  strings(none.registrations[0].component(none.registrations[0].registration.inject()))
+  assert.deepEqual(disabled(none.recorded), [false, true], '都没收：全部收起能用、全部展开置灰')
+  assert.equal(
+    none.recorded.filter((node) => typeof node.type === 'function' && node.type.name === 'SessionRow').length,
+    2,
+    '没收起时两组都画出来',
+  )
+
+  // 两组都收着：全部收起没什么可做，行一条都不画，但"列出来了哪些"仍是 2 条
+  const all = mount({ state, arrays: [[], ['blank'], [key(alpha), key(beta)]] })
+  const allText = strings(all.registrations[0].component(all.registrations[0].registration.inject()))
+  assert.deepEqual(disabled(all.recorded), [true, false], '都收着：全部收起置灰、全部展开能用')
+  assert.equal(
+    all.recorded.filter((node) => typeof node.type === 'function' && node.type.name === 'SessionRow').length,
+    0,
+  )
+  assert.ok(allText.includes('shownCount:{"shown":2,"total":3}'), '全收着也照样报"显示 2 / 3 条"')
+  assert.ok(allText.includes('sessionsInDir:{"count":1}'), '组头的条数不因为收起而变')
+})
+
+test('客户端产物：一个组都没有时不摆折叠工具栏', { skip }, () => {
+  const state = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    sessions: [
+      { id: 'a-1', cwd: '/home/u/dev/alpha', createdAt: 1, dir: '/home/u/dev/alpha', bytes: 100, files: [] },
+    ],
+    workspaces: [],
+  }
+  // 筛「子代理」（一条都没有）→ 组一个都不剩，收无可收
+  const { registrations, recorded } = mount({ state, arrays: [[], ['subagent'], []] })
+  strings(registrations[0].component(registrations[0].registration.inject()))
+  assert.equal(recorded.filter((node) => String(node.props?.className) === 'dsm-groupTools').length, 0)
+  assert.ok(
+    recorded.some((node) => String(node.props?.className) === 'dsm-empty' && strings(node).includes('noMatch')),
+    '筛空时框里是那句空态',
+  )
+})

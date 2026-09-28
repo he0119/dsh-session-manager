@@ -47,6 +47,10 @@ export const zh = {
   ungroupedTip:
     '这条会话的 id 不在任何工作区的登记表里。外壳侧边栏把这类会话挂到「未分组」下（子代理、空白与已归档的它不显示，所以那边看着比这里少）。',
   noCwdGroup: '没有 cwd 的会话',
+  groupedByDir: '按目录分组',
+  collapseAll: '全部收起',
+  expandAll: '全部展开',
+  toggleGroupLabel: '展开／收起这一组：{name}',
   exportAction: '导出所选',
   exporting: '打包中…',
   exported: '已导出 {count} 条会话（{bytes}）。',
@@ -229,6 +233,10 @@ export const en: Record<keyof typeof zh, string> = {
   ungroupedTip:
     "This session's id is in no workspace record. The shell sidebar parks such sessions under Ungrouped (it hides subagent, blank and archived ones, so that row shows fewer).",
   noCwdGroup: 'Sessions without a cwd',
+  groupedByDir: 'Grouped by directory',
+  collapseAll: 'Collapse all',
+  expandAll: 'Expand all',
+  toggleGroupLabel: 'Expand or collapse this group: {name}',
   exportAction: 'Export selected',
   exporting: 'Packing…',
   exported: 'Exported {count} sessions ({bytes}).',

@@ -22,17 +22,19 @@ import * as React from 'react'
 
 import { download, exportSessions, importBundle, type ImportResponse } from './api.ts'
 import type { ImportEntry, SessionSummary } from './api.ts'
-import { groupSessions } from './groups.ts'
+import { groupKey, groupSessions } from './groups.ts'
 import { describeCwd, sessionLabel } from './planRows.ts'
 import { FILTER_KEYS } from './sessionFilter.ts'
 import {
   SessionFilterBar,
   SessionGroupHead,
+  SessionGroupTools,
   SessionListBox,
   SessionListEmpty,
   SessionRow,
   formatBytes,
   totalBytes,
+  useGroupCollapse,
   useSessionFilter,
 } from './sessionList.tsx'
 import { translateWith, zh, type Translate } from './locales.ts'
@@ -82,6 +84,14 @@ export function TransferPanel({ t = fallback, state, reload }: PanelShare): Reac
   )
   /** 眼下列出来的那些（筛过之后，按组摊平）。 */
   const listed = React.useMemo(() => groups.flatMap((item) => item.sessions), [groups])
+  /**
+   * 折叠：只是把组内的行收起来，**不改"列出来了哪些"**。
+   *
+   * 收起来的是"画不画"，不是"算不算"：头部照样报「显示 N / M 条」，「全选整库」照样选这些组里的会话
+   * （组头上"这组几条 / 勾了几条"一直在，收起一个目录之后这两串数字正是最该看见的）。反过来做——让
+   * 折叠把行从全选里摘出去——就会变成"点一下箭头悄悄改了要导出的东西"，那才是真难查。
+   */
+  const collapse = useGroupCollapse(groups.map((item) => groupKey(item.group.path)))
   const allSelected = listed.length > 0 && listed.every((session) => selected.includes(session.id))
 
   // 库变了（例如刚导入完）：把已经不在库里的选择摘掉，别让「已选 3」里混着不存在的会话。
@@ -232,6 +242,8 @@ export function TransferPanel({ t = fallback, state, reload }: PanelShare): Reac
         <p className="dsm-hint">{t('exportHint')}</p>
 
         {sessions.length > 0 && <SessionFilterBar keys={FILTER_KEYS} filter={filter} t={t} />}
+        {/* 一个组都没有（筛空了或库里是空的）时不摆这对按钮：没有可收起的东西。 */}
+        {groups.length > 0 && <SessionGroupTools collapse={collapse} t={t} />}
 
         <SessionListBox fixed>
           {sessions.length === 0 ? (
@@ -241,31 +253,36 @@ export function TransferPanel({ t = fallback, state, reload }: PanelShare): Reac
             <SessionListEmpty text={t('noMatch')} />
           ) : (
             groups.map(({ group, sessions: shown }) => {
+              const key = groupKey(group.path)
               const picked = shown.filter((session) => selected.includes(session.id)).length
               // 组头的名字：登记过就用工作区标题（人认得的名字），没登记就只剩路径可显示。
               const name = group.title ?? (group.path === '' ? t('noCwdGroup') : group.path)
+              const collapsed = collapse.isCollapsed(key)
               return (
-                // key 用路径；没有 cwd 的那一组路径是空串，换成一个不可能撞上路径的键。
-                <div key={group.path === '' ? '\u0000no-cwd' : group.path} className="dsm-group">
+                // key 与折叠状态同一个身份（`groupKey`），免得两处各写一遍哨兵。
+                <div key={key} className="dsm-group">
                   <SessionGroupHead
                     name={name}
                     title={group.title}
                     path={group.path}
                     count={shown.length}
                     picked={picked}
+                    collapsed={collapsed}
                     onToggle={() => toggleGroup(shown)}
+                    onToggleCollapse={() => collapse.toggle(key)}
                     t={t}
                   />
-                  {shown.map((session) => (
-                    <SessionRow
-                      key={session.id}
-                      session={session}
-                      variant="export"
-                      checked={selected.includes(session.id)}
-                      onToggle={() => toggle(session.id)}
-                      t={t}
-                    />
-                  ))}
+                  {!collapsed &&
+                    shown.map((session) => (
+                      <SessionRow
+                        key={session.id}
+                        session={session}
+                        variant="export"
+                        checked={selected.includes(session.id)}
+                        onToggle={() => toggle(session.id)}
+                        t={t}
+                      />
+                    ))}
                 </div>
               )
             })

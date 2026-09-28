@@ -214,3 +214,35 @@ test('页头照内建设置页的规格：18px/600 的 h2 标题 + 下面一档�
   assert.notEqual(intro, null, '找不到 .dsm-intro 规则')
   assert.match(intro, /--dsw-alias-label-tertiary/, '说明行用 label-tertiary，与内建页的说明行同色')
 })
+
+test('组内行的缩进由组头那几个尺寸推出来：组头的勾选框恒在行勾选框左边 16px', () => {
+  // 为什么钉它：折叠开关从组头右端挪到**最前**之后，组头的内容整体右移了一个开关的宽度，组内那些行
+  // 的缩进必须跟着加同样多。少加了会怎样：组头的勾选框跑到组内行的**右边**去，"这些行挂在这个组头
+  // 下面"当场读反（这条是量出来的：改回 26px 时组头勾选框 x=504、行勾选框 x=498）。
+  // 几何值本身是量着调的，所以这里钉的不是某一个 px 数，而是**它们之间的关系**。
+  const head = ruleBody('.dsm-groupHead')
+  const toggle = ruleBody('.dsm-groupToggle')
+  const row = ruleBody('.dsm-group > .dsm-row')
+  assert.notEqual(head, null, '找不到 .dsm-groupHead 规则')
+  assert.notEqual(toggle, null, '找不到 .dsm-groupToggle 规则')
+  assert.notEqual(row, null, '找不到 .dsm-group > .dsm-row 规则')
+
+  const px = (body, pattern, what) => {
+    const match = pattern.exec(body)
+    assert.notEqual(match, null, `读不到${what}`)
+    return Number(match[1])
+  }
+  // 四值 padding 的第四个是左边（上 右 下 左）
+  const padLeft = px(head, /padding:\s*[\d.]+px\s+[\d.]+px\s+[\d.]+px\s+([\d.]+)px/, '组头的左内边距')
+  const gap = px(head, /gap:\s*([\d.]+)px/, '组头的间距')
+  const toggleWidth = px(toggle, /width:\s*([\d.]+)px/, '折叠开关的宽度')
+  const rowPad = px(row, /padding-left:\s*([\d.]+)px/, '组内行的左内边距')
+
+  // 16px 就是这个层级差（本来是 26px 与组头 10px 内边距凑出来的，见 styles.ts 的注释）
+  assert.equal(
+    rowPad,
+    padLeft + toggleWidth + gap + 16,
+    '组内行的缩进要等于"组头内容左缘 + 16px"，否则组头的勾选框会跑到行勾选框右边',
+  )
+  assert.ok(padLeft <= 6, '组头左内边距要小：最前面那个折叠开关自己就是这一组的左缘')
+})
