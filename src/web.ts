@@ -10,11 +10,11 @@
 //
 // 与 webServer 服务解耦：本模块只要求一个 `{ register(route) }`，测试里用假 req/res 直接打
 // handler，不必起 HTTP 服务。路由路径固定在本插件命名空间下，`(kind, path)` 与别的插件不会撞。
-import { readdirSync, statSync } from 'node:fs'
+import { statSync } from 'node:fs'
 import { join } from 'node:path'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 
-import { scanAll, scanProjectDir, type DiscoveredSession, type ScanOptions } from './discovery.ts'
+import { scanAll, type DiscoveredSession } from './discovery.ts'
 import {
   assertBackupDir,
   listBackups,
@@ -26,7 +26,7 @@ import {
 } from './migrate.ts'
 import { projectionCacheDir } from './paths.ts'
 import { readRegistry, validateRegistry } from './registry.ts'
-import { planRemoval, runRemoval, type RemoveDeps, type RemovalRun } from './remove.ts'
+import { runRemoval, type RemoveDeps, type RemovalRun } from './remove.ts'
 import { createTitleResolver, type TitleQuery } from './session-title.ts'
 import { type EffectMode, type PickerKind, type RegistryOps, type ResolvedPaths } from './tools.ts'
 import {
@@ -193,7 +193,7 @@ export const scanLibrary = scanAll
  * 把发现结果与注册表对起来，得到界面要的行。
  *
  * `workspaceId` 缺省 = 这条会话的 id 不在任何工作区的登记表里（外壳侧边栏会把它挂到「未分组」下，
- * 见 docs/internals.md）。界面靠它标出"未登记在册"，迁移页的「未分组」来源也用它圈候选。
+ * 见 docs/internals.md）。界面靠它标出「未分组」那一类，迁移页的「未分组」来源也用它圈候选。
  *
  * `hidden` 是外壳侧边栏"会不会显示这条会话"的判据结果（见 visibility.ts）：三份列表各自要看的东西
  * 不同——导出照单全收、迁移只收侧边栏看得见的、管理页要把看不见的原因标出来——所以这里一次算清，
