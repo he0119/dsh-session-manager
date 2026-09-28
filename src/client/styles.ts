@@ -418,6 +418,34 @@ export const CSS = `
 }
 .dsm-input:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary, #3370ff); outline-offset: -1px; }
 .dsm-options { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+/*
+ * 「会话」页的筛选条：与行上的小标签同一套视觉（一排小胶囊），选中的那一枚用品牌色描边 + 淡填充。
+ * 描边与填充都走 token：brand-primary 在深浅两套主题里都是能读出来的强调色，而"选中"这件事同时
+ * 由 aria-pressed 表达，所以颜色只是辅助——色觉不同的人靠描边粗细与 aria 状态照样分得清。
+ */
+.dsm-filters { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.dsm-filter {
+  appearance: none;
+  border: 1px solid var(--dsw-alias-border-l2, rgba(0, 0, 0, 0.18));
+  background: none;
+  color: var(--dsw-alias-label-secondary, #646a73);
+  font: inherit;
+  font-size: 12px;
+  line-height: 18px;
+  border-radius: 6px;
+  padding: 0 8px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.dsm-filter:hover:not([aria-pressed='true']) { color: var(--dsw-alias-label-primary, #1f2329); }
+.dsm-filter[aria-pressed='true'] {
+  color: var(--dsw-alias-label-primary, #1f2329);
+  border-color: var(--dsw-alias-brand-primary, #3370ff);
+  background: color-mix(in srgb, var(--dsw-alias-brand-primary, #3370ff) 12%, transparent);
+}
+.dsm-filter:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary, #3370ff); outline-offset: 1px; }
+/* 每类各有多少条：数字比标签淡一档，读起来仍走 label-secondary（同 .dsm-tag 的理由）。 */
+.dsm-filterCount { color: var(--dsw-alias-label-secondary, #646a73); margin-left: 5px; }
 .dsm-check { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
 .dsm-result {
   display: flex;

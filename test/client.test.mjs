@@ -36,10 +36,12 @@ const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
  * 各种表格）在冒烟里根本走不到。给了它就只替换**第一次** `useState(null)`——后面那些 null
  * 状态（错误提示、导入计划…）必须保持空，否则会渲染出不存在的数据。
  */
-function fakeReact(recorded = [], firstNull = undefined, panel = undefined, firstArray = undefined) {
+function fakeReact(recorded = [], firstNull = undefined, panel = undefined, arrays = []) {
   let seeded = false
   let seededPanel = false
-  let seededArray = false
+  // 「种」进空数组状态的那些值按顺序发：分页组件里第一个 useState([]) 是勾选集，第二个是筛选条
+  // （见 mount 的 arrays 参数）。顺序是调用方与组件之间的约定，所以种错了会当场断言失败，不会静默过。
+  const arraySeeds = [...arrays]
   const record = (type, props) => {
     const element = { type, props: props ?? {} }
     recorded.push(element)
@@ -64,11 +66,10 @@ function fakeReact(recorded = [], firstNull = undefined, panel = undefined, firs
         seededPanel = true
         return [panel, () => {}]
       }
-      // 勾选集：分页组件自己的第一个 `useState([])`。不给它种子，"按钮禁没禁用"就只能撞上
+      // 勾选集 / 筛选条：分页组件自己的 `useState([])`。不给勾选集种子，"按钮禁没禁用"就只能撞上
       // "一条都没勾所以禁用"这条分支，断言等于没测到宿主能力那件事（见下面那个用例的注释）。
-      if (!seededArray && firstArray !== undefined && Array.isArray(value) && value.length === 0) {
-        seededArray = true
-        return [firstArray, () => {}]
+      if (arraySeeds.length > 0 && Array.isArray(value) && value.length === 0) {
+        return [arraySeeds.shift(), () => {}]
       }
       return [value, () => {}]
     },
@@ -143,7 +144,7 @@ function fakeDocument(nodes) {
 }
 
 /** 按模块加载器的契约执行产物，返回工厂与其 id。 */
-function loadBundle({ firstNull, panel, firstArray } = {}) {
+function loadBundle({ firstNull, panel, arrays } = {}) {
   let entry = null
   const nodes = []
   const sandbox = {
@@ -154,7 +155,7 @@ function loadBundle({ firstNull, panel, firstArray } = {}) {
   vm.runInNewContext(code, sandbox, { filename: 'lib/client.js' })
   assert.ok(entry !== null, '产物必须以 window.__ModuleLoader__.load({ id, factory }) 报名')
   const recorded = []
-  const react = fakeReact(recorded, firstNull, panel, firstArray)
+  const react = fakeReact(recorded, firstNull, panel, arrays)
   const mod = entry.factory((specifier) => {
     if (specifier === 'react') return react
     if (specifier === 'react/jsx-runtime') {
@@ -206,8 +207,8 @@ test('客户端产物：导出面符合客户端插件契约', { skip }, () => {
 })
 
 /** 跑一次 apply，收下所有注册面（后面几个用例共用）。 */
-function mount({ translate, state, panel, selection } = {}) {
-  const { mod, nodes, recorded } = loadBundle({ firstNull: state, panel, firstArray: selection })
+function mount({ translate, state, panel, arrays } = {}) {
+  const { mod, nodes, recorded } = loadBundle({ firstNull: state, panel, arrays })
   const registrations = []
   const dictionaries = []
   const effects = []
@@ -547,7 +548,8 @@ test('客户端产物：「会话」页把侧边栏看不见的那三类标出�
     archiveAvailable: true,
     sessions: [
       { id: 's-1', cwd: '/home/u/dev/alpha', createdAt: 5, dir: '/home/u/dev/alpha', bytes: 2048, files: [], workspaceId: 'w1' },
-      { id: 's-2', cwd: '/home/u/dev/alpha', createdAt: 4, dir: '/home/u/dev/alpha', bytes: 1024, files: [], hidden: 'subagent' },
+      // 子代理会话在 /state 里带**两个**字段：origin 是 header 里的事实，hidden 是宿主先判的理由
+      { id: 's-2', cwd: '/home/u/dev/alpha', createdAt: 4, dir: '/home/u/dev/alpha', bytes: 1024, files: [], origin: 'subagent', hidden: 'subagent' },
       { id: 's-3', cwd: '/home/u/dev/alpha', createdAt: 3, dir: '/home/u/dev/alpha', bytes: 900, files: [], blank: true, hidden: 'blank' },
       { id: 's-4', cwd: '/home/u/dev/beta', createdAt: 2, dir: '/home/u/dev/beta', bytes: 512, files: [], archived: true, hidden: 'archived' },
       { id: 's-5', cwd: '/home/u/dev/beta', createdAt: 1, dir: '/home/u/dev/beta', bytes: 256, files: [], live: true },
@@ -555,7 +557,7 @@ test('客户端产物：「会话」页把侧边栏看不见的那三类标出�
     workspaces: [{ id: 'w1', path: '/home/u/dev/alpha', title: '工作区甲', sessionIds: ['s-1'] }],
   }
   // 勾一条（假钩子给不出点击，只能把勾选集种进去）：否则"按钮是否禁用"永远撞在"一条都没勾"上
-  const { registrations, recorded } = mount({ state, panel: 'manage', selection: ['s-1'] })
+  const { registrations, recorded } = mount({ state, panel: 'manage', arrays: [['s-1']] })
   const { component } = registrations[0]
   const { inject } = registrations[0].registration
   const text = strings(component(inject()))
@@ -595,7 +597,7 @@ test('客户端产物：「会话」页在宿主没有归档能力时禁用入�
     workspaces: [],
   }
   // 勾上一条：这样"归档按钮禁用"就只可能来自宿主没有那个能力，而不是"一条都没勾"
-  const { registrations, recorded } = mount({ state, panel: 'manage', selection: ['s-1'] })
+  const { registrations, recorded } = mount({ state, panel: 'manage', arrays: [['s-1']] })
   const { component } = registrations[0]
   const { inject } = registrations[0].registration
   const text = strings(component(inject()))
@@ -607,4 +609,76 @@ test('客户端产物：「会话」页在宿主没有归档能力时禁用入�
   assert.equal(button('manageUnarchive')?.props?.['disabled'], true, '取消归档同理')
   // 删除不依赖宿主的归档服务，所以入口照旧在（空选择下它也禁用，但那是另一条理由，界面上另有说明）
   assert.ok(button('manageDeletePreview'), '删除入口照旧在')
+})
+
+test('客户端产物：「会话」页的筛选条把不匹配的行筛掉，选中态挂在 aria-pressed 上', { skip }, () => {
+  // 假钩子点不出 setState（见上面那个用例的注释），所以筛选条也靠"种"：第一个空数组是勾选集、
+  // 第二个是筛选条（ManagePanel 里两个 useState([]) 的顺序），这里把它种成「空白」。
+  const state = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    archiveAvailable: true,
+    sessions: [
+      { id: 's-owned', cwd: '/home/u/dev/alpha', createdAt: 5, dir: '/home/u/dev/alpha', bytes: 100, files: [], workspaceId: 'w1' },
+      { id: 's-sub', cwd: '/home/u/dev/alpha', createdAt: 4, dir: '/home/u/dev/alpha', bytes: 200, files: [], origin: 'subagent' },
+      { id: 's-blank', cwd: '/home/u/dev/beta', createdAt: 3, dir: '/home/u/dev/beta', bytes: 300, files: [], blank: true },
+      { id: 's-both', cwd: '/home/u/dev/beta', createdAt: 2, dir: '/home/u/dev/beta', bytes: 400, files: [], blank: true, archived: true },
+      { id: 's-live', cwd: '/home/u/dev/beta', createdAt: 1, dir: '/home/u/dev/beta', bytes: 500, files: [], live: true },
+    ],
+    workspaces: [{ id: 'w1', path: '/home/u/dev/alpha', title: '工作区甲', sessionIds: ['s-owned'] }],
+  }
+  const { registrations, recorded } = mount({ state, panel: 'manage', arrays: [[], ['blank']] })
+  const { component } = registrations[0]
+  const { inject } = registrations[0].registration
+  const element = component(inject())
+  const text = strings(element)
+
+  // 筛选条：一枚「全部」+ 五类，各自带上库里的条数（对整个库数，不随当前筛选跳）
+  const chips = recorded.filter((node) => String(node.props?.className) === 'dsm-filter')
+  assert.equal(chips.length, 6, '「全部」+ 五类')
+  const chip = (label) => chips.find((node) => strings(node).includes(label))
+  assert.deepEqual(chips.map((node) => strings(node).join('')), [
+    'filterAll',
+    'tagSubagent',
+    'tagBlank',
+    'tagArchived',
+    'ungroupedSource',
+    'tagLive',
+  ])
+  // 每类各有多少条（对整个库数）：数字是 React 直接渲染的数字节点，strings() 只收字符串，所以单看这里
+  const counts = recorded
+    .filter((node) => String(node.props?.className) === 'dsm-filterCount')
+    .map((node) => String(node.props.children))
+  assert.deepEqual(counts, ['1', '2', '1', '4', '1'], '子代理 1 / 空白 2 / 已归档 1 / 未分组 4 / 活动中 1')
+  assert.equal(chip('filterAll')?.props?.['aria-pressed'], false, '筛着的时候「全部」不是选中态')
+  assert.equal(chip('tagBlank')?.props?.['aria-pressed'], true, '种进去的那一类要显示成选中')
+  assert.equal(chip('tagSubagent')?.props?.['aria-pressed'], false, '没勾的那几类不是选中态')
+  // 每一类的说明走悬浮提示（与行上的标签同一份文案）
+  assert.equal(chip('tagBlank')?.props?.title, 'tagBlankTip')
+  assert.equal(chip('ungroupedSource')?.props?.title, 'unregisteredSessionTip')
+
+  // 列表：只剩空白那两条（筛选＝任一命中），其余三类不在树上
+  const rows = recorded.filter(
+    (node) => node.type === 'label' && String(node.props?.className).includes('dsm-rowManage'),
+  )
+  const listed = rows.map((row) => strings(row)[0])
+  assert.deepEqual(listed, ['s-blank', 's-both'])
+  assert.ok(!text.includes('s-owned') && !text.includes('s-sub') && !text.includes('s-live'), '不匹配的行不在树上')
+  // "空白 + 已归档"那条要挂两枚标签：只挂宿主先判的那一枚，筛选就没法自证了
+  // （遍历照 export 那个用例的写法：函数组件要自己带着 props 调一次才看得见里面）
+  const rowTags = (node, out = []) => {
+    if (Array.isArray(node)) {
+      for (const item of node) rowTags(item, out)
+      return out
+    }
+    if (node === null || typeof node !== 'object') return out
+    if (typeof node.type === 'function') return rowTags(node.type(node.props), out)
+    if (String(node.props?.className ?? '').includes('dsm-tag')) out.push(node.props.children)
+    return rowTags(node.props?.children, out)
+  }
+  const both = rows.find((row) => strings(row).includes('s-both'))
+  assert.deepEqual(rowTags(both), ['tagBlank', 'tagArchived'], '既是空白又已归档的那条，两枚标签都挂')
+  // 筛过之后头部报"显示了其中几条"，别让人以为库里的会话变少了
+  assert.ok(text.includes('manageShown:{"shown":2,"total":5}'), '筛过之后报出 显示 N / M 条')
 })
