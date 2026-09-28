@@ -45,9 +45,11 @@ npx @deepseek-ai/dsh@next plugin --profile desktop add /path/to/dsh-session-mana
 After the restart, **Settings** gains a **Session management** page in the left navigation (ordered after
 the built-in pages). `github:` installs are **not** supported here: the build runs in `prepublishOnly` and
 `lib/` is kept out of git, so a git install gets no artifacts.
-The host must be 0.1.7-rc.2 or a later 0.1.x (`engines.dsh` and the two DSH peers are `^0.1.7-rc.2`;
-`@deepseek-ai/cordis` is `^4.0.4`); under
-prerelease rules a new rc line such as `0.1.8-rc.1` falls outside that range, so that declaration needs a
+The host must be 0.2.0-rc.1 or a later 0.2.x (`engines.dsh` and the two DSH peers are `^0.2.0-rc.1`;
+`@deepseek-ai/cordis` is `^4.0.4`). The host **decides whether to load the plugin from those peer ranges**:
+if the running version falls outside them the whole bundle is skipped (the log line is
+`skipping profile bundle … is incompatible with dsh …`). Ranges are evaluated with `includePrerelease`, so
+a new rc on the same minor line (`0.2.1-rc.1`) is still accepted; a new minor line (`0.3.0-rc.1`) needs a
 one-line bump at that point.
 
 ## Usage

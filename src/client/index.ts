@@ -35,7 +35,7 @@
  * 一个**改不掉的已知限制**：设置左侧导航那一行的图标由外壳画，插件指定不了。外壳里那张表是
  * 硬编码的 id → 图标映射（`dsh-client-ui-settings-general` 的 `navIcon(id)`：`account` / `models` /
  * `agent-presets` / `plugins` / `archived-sessions` 五个 id，其余一律 `IconSettingsOutlineMedium`），
- * 而 Slot 注册的入参里根本没有 `icon` 这一项（`settings.section` 的注册选项只有 id / order / label）。
+ * 而 Slot 注册的入参里根本没有 `icon` 这一项（外壳投影导航行时只读 `id` / `order` / `label` 三项）。
  * 于是本页与「通用」共用同一个齿轮图标——不是本插件写错了图标，是外壳给所有人兜底的那一个。
  * 不改 id 去蹭别人的图标：唯一空着的是 `archived-sessions`，它的语义是"归档会话"，蹭它既可能与
  * 内置页撞 id，也是拿图标撒谎。要换图标只能等上游给注册选项加 `icon`（本页的 id 已经稳定，

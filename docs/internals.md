@@ -205,7 +205,7 @@ client 一份配置是 `format: 'cjs'` 外面套三行（banner/intro/footer）�
 [Web Client](https://deepseek-harness.github.io/deepseek-harness/reference/subsystems/web-client)
 页点名可以共享的 `@deepseek-ai/dsh-client-ui-primitives`——官方给 Web Client 写的共享 React 原子
 组件库（Button / Checkbox / Tag / Switch / Input / Modal / SettingsForm…，zero Cordis）。它是
-**平台基线**，用之前不必声明：0.1.7-rc.2 这一代里，官方 60 个 `dsh-client-*` 包中有 46 个的产物
+**平台基线**，用之前不必声明：0.2.0-rc.1 这一代里，官方 62 个 `dsh-client-*` 包中有 47 个的产物
 直接 `require` 它，而没有任何一个包把它写进 `dsh.client.external`。本包也已经接上（peer + devDep +
 构建外置，见 `tsdown.config.ts` 的 `CLIENT_EXTERNALS`），只是源码还没 import 它——产物里现在仍只有
 `require('react')` 与 `require('react/jsx-runtime')`，手写的控件在逐个换掉。它必须保持外置：内联等于
@@ -214,10 +214,18 @@ client 一份配置是 `format: 'cjs'` 外面套三行（banner/intro/footer）�
 
 代价是跟上游的版本节奏绑在一起：模块表按 specifier 分发、没有版本协商，控件 API 改了编译期发现
 不了。所以 `engines.dsh` 与两个 DSH peer（`@deepseek-ai/dsh-tools`、
-`@deepseek-ai/dsh-client-ui-primitives`）都写 `^0.1.7-rc.2`（`@deepseek-ai/cordis` 按自己那条线写
-`^4.0.4`），同代副本进 `devDependencies` 供构建，版本对不上时拦在激活；真遇到改名删导出，`Slot` 条目
-会渲染成一个空 `div`（控制台里是
-`slot entry crashed in '<slot>'`），用户看到的是空白而不是错误。
+`@deepseek-ai/dsh-client-ui-primitives`）都写 `^0.2.0-rc.1`（`@deepseek-ai/cordis` 按自己那条线写
+`^4.0.4`），同代副本进 `devDependencies` 供构建；真遇到改名删导出，`Slot` 条目会渲染成一个空 `div`
+（控制台里是 `slot entry crashed in '<slot>'`），用户看到的是空白而不是错误。
+
+**peer 范围不只是声明，是宿主的装配门。** 宿主（`dsh-app-boot` 的
+`evaluatePluginCompatibility`）逐个看包名以 `@deepseek-ai/dsh` 或 `@deepseek-ai/dsh-` 开头的 peer，
+用 semver **带 `includePrerelease`** 去判运行中的那个版本收不收得下——收不下就整条 bundle 不装，
+日志里一句 `skipping profile bundle "<包名>": Plugin <包名>@<版本> is incompatible with dsh <版本>`，
+其余什么也不说（插件自己的 `apply` 根本没跑）。`@deepseek-ai/cordis` 不在这个前缀里，所以那条线不设门。
+包管理器判 peer 用的是默认语义，两者对 rc 的宽严不同：默认语义只认同 minor 同 patch 的 rc，宿主的门
+还收同 minor 的任意 rc——`^0.2.0-rc.1` 收得下 `0.2.1-rc.1`，收不下 `0.3.0-rc.1`（换 minor 线时要改这
+一行）。0.2.0 之前本包声明的还是 `^0.1.7-rc.2`，升到 0.2.0 宿主后整页消失，就是这道门拦的。
 
 颜色的纪律不因控件库而变：只用 `Theme` 检查面列出的 `--dsw-alias-*` token（每个都带中性回落值，
 深浅主题自动跟随），类名收在自己的 `dsm-` 前缀下。

@@ -13,5 +13,32 @@
 #   npm**，见 docs/development.md「本机安装」。这条设置保留给能正常识别它的 pnpm（CI 即如此）。
 node-linker: hoisted
 
+# 供应链策略的放行名单。
+#
+# pnpm 11 默认执行一条策略：发布不满 minimumReleaseAge（24 小时）的版本不许进安装结果，连
+# `--frozen-lockfile` 也会在装之前把锁文件里的条目逐条验一遍，命中就
+# `ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION`（CI 就是这么红的）。本仓库跟着上游的 rc 走，新 rc 一发布
+# 就得跟上，所以这一代（0.2.0-rc.1）的条目要逐条放行。每条都**精确到版本**、只对那一个版本生效：
+# 等这一代过了 24 小时的窗口，整段可以删掉——它是"换 rc 线当天"的临时放行，不是长期设置。
+minimumReleaseAgeExclude:
+  - '@deepseek-ai/dsh-agent@0.2.0-rc.1'
+  - '@deepseek-ai/dsh-brand@0.2.0-rc.1'
+  - '@deepseek-ai/dsh-client-ui-primitives@0.2.0-rc.1'
+  - '@deepseek-ai/dsh-invariants@0.2.0-rc.1'
+  - '@deepseek-ai/dsh-llm@0.2.0-rc.1'
+  - '@deepseek-ai/dsh-ptc-runtime@0.2.0-rc.1'
+  - '@deepseek-ai/dsh-sandbox-policy@0.2.0-rc.1'
+  - '@deepseek-ai/dsh-sandbox@0.2.0-rc.1'
+  - '@deepseek-ai/dsh-scope@0.2.0-rc.1'
+  - '@deepseek-ai/dsh-session-projection@0.2.0-rc.1'
+  - '@deepseek-ai/dsh-session@0.2.0-rc.1'
+  - '@deepseek-ai/dsh-system-prompt@0.2.0-rc.1'
+  - '@deepseek-ai/dsh-timeout@0.2.0-rc.1'
+  - '@deepseek-ai/dsh-tools@0.2.0-rc.1'
+  - '@deepseek-ai/dsh-typert-protocol@0.2.0-rc.1'
+  - '@deepseek-ai/dsh-user-approval@0.2.0-rc.1'
+  - '@deepseek-ai/dsh-util-crypto@0.2.0-rc.1'
+  - '@deepseek-ai/dsh-util-values@0.2.0-rc.1'
+
 # pnpm 10+ 默认拦住任何自带安装/构建脚本的依赖。本仓库的依赖都不带安装脚本；
 # 将来若引入带安装脚本的依赖，pnpm 会打印一份待填模板，届时再逐条核对原因放行。

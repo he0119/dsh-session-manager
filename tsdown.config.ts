@@ -20,8 +20,8 @@ const { name: PACKAGE } = JSON.parse(
  *
  * 只有基线模块能这样要——客户端模块系统只服务 `<包名>/client.js` 这一条经典脚本，没有旁挂依赖的
  * 路由，非基线模块得在 `dsh.client.external` 里点名。除了 `react` 两个入口，官方的控件库
- * `@deepseek-ai/dsh-client-ui-primitives` 同样是基线（0.1.7-rc.2 这一代里，官方 60 个 `dsh-client-*`
- * 包有 46 个的产物直接 require 它，没有一个把它写进 `external`），所以它保持外置：内联进去等于把一份 React 组件复制进产物，还会跟
+ * `@deepseek-ai/dsh-client-ui-primitives` 同样是基线（0.2.0-rc.1 这一代里，官方 62 个 `dsh-client-*`
+ * 包有 47 个的产物直接 require 它，没有一个把它写进 `external`），所以它保持外置：内联进去等于把一份 React 组件复制进产物，还会跟
  * 宿主那份的 hooks 语义脱钩。
  */
 const CLIENT_EXTERNALS = [

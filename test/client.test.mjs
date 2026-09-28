@@ -214,7 +214,7 @@ function loadBundle({ firstNull, panel, arrays, strings } = {}) {
 test('客户端产物：只 require 平台基线模块，id 与包名一致', { skip }, () => {
   const requires = [...code.matchAll(/require\("([^"]+)"\)/g)].map((match) => match[1])
   // 平台基线模块：官方客户端包共用、不必写进 `dsh.client.external`。控件库是其中之一
-  // （0.1.7-rc.2 这一代里，60 个 `dsh-client-*` 包有 46 个直接 require 它，没有一个声明成 external）。
+  // （0.2.0-rc.1 这一代里，62 个 `dsh-client-*` 包有 47 个直接 require 它，没有一个声明成 external）。
   const baseline = ['react', 'react/jsx-runtime', '@deepseek-ai/dsh-client-ui-primitives']
   for (const specifier of new Set(requires)) {
     assert.ok(

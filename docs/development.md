@@ -6,8 +6,10 @@
 ## 依赖、构建、测试
 
 运行期依赖分两类：npm 依赖只有 `fzstd`（纯 JS 的多帧 zstd 解码器）；其余都是**宿主提供**的 peer
-——`@deepseek-ai/cordis`、`@deepseek-ai/dsh-tools`、`@deepseek-ai/dsh-client-ui-primitives`，三个都
-写成 `^0.1.7-rc.2` 这一代的范围，`devDependencies` 里带着同代副本供构建与测试使用。
+——`@deepseek-ai/cordis`、`@deepseek-ai/dsh-tools`、`@deepseek-ai/dsh-client-ui-primitives`，两个 DSH
+peer 写成 `^0.2.0-rc.1` 这一代的范围（`@deepseek-ai/cordis` 按自己那条线写 `^4.0.4`），
+`devDependencies` 里带着同代副本供构建与测试使用。`engines.dsh`、两个 DSH peer、两个同名
+`devDependency` 写的是同一条范围，而宿主只认 peer 那两处，改版本时别漏（`test/manifest.test.mjs` 会核）。
 
 ```sh
 pnpm install          # 或 npm install（本机请用 npm，见「本机安装」）
@@ -21,6 +23,11 @@ pnpm run check:package # 打包内容自检（要先 build，见 docs/releasing.
 单边重建：`pnpm run build:host` / `build:types` / `build:client`（三份配置共用 `lib/`，
 所以单独重建一端不会删掉另一端）。
 
+`pnpm install` 之前会先过一遍 pnpm 11 的供应链策略：发布不满 24 小时的版本默认不许进安装结果，连
+`--frozen-lockfile` 也会逐条验锁文件并失败（`ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION`，CI 上就是
+这个）。跟着上游换 rc 线时因此要在 `pnpm-workspace.yaml` 的 `minimumReleaseAgeExclude` 里把那一代逐条
+放行；条目精确到版本，过了窗口就能整段删掉。
+
 带真实数据回归（指向任一含会话项目目录的 `sessions/` 备份目录）：
 
 ```sh
@@ -28,7 +35,14 @@ DSM_FIXTURE=/path/to/backup pnpm test
 ```
 
 没设 `DSM_FIXTURE` 时，`test/real-data.test.ts` 会整组跳过——它是 runner 里默认跳过的两条之一，
-另一条是下面那条 `DSM_SMOKE_WORKSPACE`（所以全绿口径是 196 条里 194 通过、2 跳过）。
+另一条是下面那条 `DSM_SMOKE_WORKSPACE`（所以全绿口径是 198 条里 196 通过、2 跳过）。
+
+### 版本声明自检（`test/manifest.test.mjs`）
+
+`engines.dsh`、两个 DSH peer 与两个同名 `devDependency` 是同一个代次的三个副本，**门只认 peer
+那两处**：宿主（`dsh-app-boot` 的 `evaluatePluginCompatibility`）按 peer 范围判运行中的版本收不收得下，
+收不下就整条 bundle 不装（日志里一行 `skipping profile bundle …`，插件自己的 `apply` 根本没跑）。
+所以这一个文件核"三处写的是同一条范围"与"这条范围收得下 `node_modules` 里装到的那一代"。
 
 ### 构建产物冒烟（`test/artifact.test.mjs`）
 
