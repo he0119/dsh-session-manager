@@ -68,6 +68,13 @@ export interface SessionMove {
   targetDir: string
   files: SessionLogFile[]
   registered: boolean
+  /**
+   * 这条是**级联**带进来的：`via` 是用户点名、把它牵进来的那条祖先会话。
+   *
+   * 点名的那几条自己没有这个字段——哪怕它同时又是别人的后代（"点名"比"顺带"更该被说出来）。
+   * 成员资格不因为跟着走而改变，见 `RelocationPlan.cascaded`。
+   */
+  via?: { id: string; title?: string }
 }
 
 /** 会话目录里的一个代次日志文件。 */
@@ -118,6 +125,8 @@ export interface RelocationPlan {
    */
   unowned: boolean
   sessions: SessionMove[]
+  /** 级联带进来的条数：点名的会话的子代理后代（见 `SessionMove.via`）。 */
+  cascaded: number
   artifacts: { moves: ArtifactMove[]; problems: string[]; skipped: ArtifactSkip[] } | null
   registryChange: RegistryChange | null
   nextRegistry: WorkspaceRegistryState | null
