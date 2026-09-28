@@ -190,7 +190,7 @@ export const zh = {
   manageNoMatch: '没有符合筛选的会话。',
   filterLabel: '筛选',
   filterAll: '全部',
-  filterHint: '多选＝任一命中',
+  filterHint: '勾上几枚就看几类（多选＝任一命中）；一枚也不勾＝全都列出来',
   tagSubagent: '子代理',
   tagSubagentTip: '子代理会话：外壳侧边栏把它挂在父会话下面（不是没有位置），所以不列进工作区或「未分组」。',
   tagBlank: '空白',
@@ -372,7 +372,7 @@ export const en: Record<keyof typeof zh, string> = {
   manageNoMatch: 'No session matches the filter.',
   filterLabel: 'Filter',
   filterAll: 'All',
-  filterHint: 'multiple = either',
+  filterHint: 'tick several to see several kinds (multiple = either); none ticked = everything',
   tagSubagent: 'subagent',
   tagSubagentTip:
     'Subagent session: the shell sidebar nests it under its parent session (it is not homeless), so it never shows up in a workspace or under Ungrouped.',

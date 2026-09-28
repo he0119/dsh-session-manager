@@ -242,7 +242,8 @@ token，所以显式挂了回落链（拿不到就退到表面色——brand-pri
 回落值、标签不许折行、state 色不许裸当文字色），反事实都验过会失败。**上面这些比值是浏览器里量
 出来的，不是推的**：`agent-browser` 打开真实的设置页，逐个元素取 `getComputedStyle` 的前景色，
 背景色沿祖先链一路 `color-mix` 合成到不透明为止，再按 WCAG 相对亮度算比值，明暗两套主题各跑一遍
-（换主题用 `agent-browser set media dark`，页面认 `prefers-color-scheme`）。对比度推不出来——它
+（换主题可以在设置里点「深色 / 浅色」，也可以把主题设成「跟随系统」后 `agent-browser set media dark`，
+页面认 `prefers-color-scheme`）。对比度推不出来——它
 取决于宿主**当时**给的那套 token 值，只有量了才知道。
 
 **页头是这条纪律的延长线，也是踩过的坑**：官方设置页的页头**没有原语可用**——
@@ -256,6 +257,16 @@ token，所以显式挂了回落链（拿不到就退到表面色——brand-pri
 `test/styles.test.mjs` 的例外表并带回落链。规格现在有两处钉着：`test/styles.test.mjs` 查
 `font-size/flex-direction/说明行的 token`，`test/client.test.mjs` 查结构（标题必须是 `h2`、
 说明必须是 `p`、说明不在标题行里）。
+
+**版面上还有一条同类纪律：一句说明别挂在"会被滚动条挪动的边上"。** 坑出在「会话」页筛选条末尾那句
+「多选＝任一命中」：起先用 `spacer` 顶到右端，它的位置就等于容器的右边缘——设置弹窗内容区那条滚动条
+一进一出，内容宽度变 15px，这句话跟着平移（这台机器的 Chrome 滚动条不占位，量到的位移是 9px；装了
+占位滚动条的环境是 15px）。改成紧跟胶囊的同一行，横向是稳了，可那一行只剩三十来 px 的余量，容器再窄
+一点就整行换行、句子跳一行。现在它自己占一行（`<p>`，在 `.dsm-filters` 后面）：左边固定不动，胶囊那
+一行的余量也一下宽出九十来 px——同样的刺激下换行阈值从 30px 变成 135px，一次滚动条切换越不过去。
+`.dsm-list` 另加了 `scrollbar-gutter: stable`：装了占位滚动条的环境里，列表溢出与否都不再改变行宽。
+这条在 `test/client.test.mjs` 里按结构钉住（说明句不在 `.dsm-filters` 里、且是 `p`）——位置本身在这种
+环境里量不出来，但"又挤回那一行"这个退化会被抓住。
 
 注册进 `settings.section`：设置左侧导航里的一页，与「通用 / 模型 / 插件 / 账户 / Agent 预设」
 并列，`order: 30` 排它们之后（这一形态的官方说明：[新增设置卡片](https://deepseek-harness.github.io/deepseek-harness/reference/cookbook/adding-a-settings-card)，

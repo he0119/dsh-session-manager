@@ -681,4 +681,16 @@ test('客户端产物：「会话」页的筛选条把不匹配的行筛掉，�
   assert.deepEqual(rowTags(both), ['tagBlank', 'tagArchived'], '既是空白又已归档的那条，两枚标签都挂')
   // 筛过之后头部报"显示了其中几条"，别让人以为库里的会话变少了
   assert.ok(text.includes('manageShown:{"shown":2,"total":5}'), '筛过之后报出 显示 N / M 条')
+
+  // 说明句「多选＝任一命中」必须**自己一行**（筛选条后面那个 <p>），不能挤在胶囊那一行里。
+  // 挤回去不会报错、不会崩，只会让它重新跟着容器右边缘跑：外层滚动条一进一出就让这条边的位置变
+  // （实测旧写法 9px；装了经典滚动条的环境是 15px），胶囊行余量也只剩三十来px、窄一点就整行换行。
+  // 位置这种东西没法在这里量，所以按结构核：它在不在 .dsm-filters 里面。
+  const filterRow = recorded.find((node) => String(node.props?.className) === 'dsm-filters')
+  assert.equal(strings(filterRow).includes('filterHint'), false, '说明句不在胶囊那一行里')
+  const captions = recorded.filter(
+    (node) => String(node.props?.className) === 'dsm-hint' && strings(node).includes('filterHint'),
+  )
+  assert.equal(captions.length, 1, '说明句自己一行')
+  assert.equal(captions[0].type, 'p', '自己一行的说明句是块级元素，不参与胶囊那行的换行')
 })
