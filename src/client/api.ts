@@ -20,7 +20,13 @@ export interface SessionSummary {
   cwd?: string
   createdAt: number
   dir: string
-  workspaceId?: string
+  /**
+   * 外壳侧边栏会把它放进「未分组」那一组（宿主按 `src/visibility.ts` 的 `isUngrouped()` 算好发过来）。
+   *
+   * 界面不再自己从"有没有工作区认领"推：那样推出来的「未分组」把子代理、空白、已归档也算进去，
+   * 而侧边栏从来不把它们放进那一组（它默认压根不显示它们）。
+   */
+  ungrouped?: boolean
   bytes: number
   files: Array<{ name: string; bytes: number }>
   /**

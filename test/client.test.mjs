@@ -479,9 +479,9 @@ test('客户端产物：迁移页把「未分组」列成独立来源（注册�
     problems: [],
     pickerKind: 'browse',
     sessions: [
-      { id: 's-1', cwd: '/home/u/dev/alpha', createdAt: 3, dir: '/home/u/dev/alpha', bytes: 2048, files: [], workspaceId: 'w1' },
-      { id: 's-2', cwd: '/home/u/dev/alpha', createdAt: 2, dir: '/home/u/dev/alpha', bytes: 1024, files: [] },
-      { id: 's-3', cwd: '/home/u/dev/beta', createdAt: 1, dir: '/home/u/dev/beta', bytes: 512, files: [] },
+      { id: 's-1', cwd: '/home/u/dev/alpha', createdAt: 3, dir: '/home/u/dev/alpha', bytes: 2048, files: [], ungrouped: false },
+      { id: 's-2', cwd: '/home/u/dev/alpha', createdAt: 2, dir: '/home/u/dev/alpha', bytes: 1024, files: [], ungrouped: true },
+      { id: 's-3', cwd: '/home/u/dev/beta', createdAt: 1, dir: '/home/u/dev/beta', bytes: 512, files: [], ungrouped: true },
     ],
     workspaces: [{ id: 'w1', path: '/home/u/dev/alpha', title: '工作区甲', sessionIds: ['s-1'] }],
   }
@@ -499,7 +499,7 @@ test('客户端产物：迁移页把「未分组」列成独立来源（注册�
   assert.ok(paths.includes('/home/u/dev/beta'), '没登记的目录（库里有会话）也是候选')
   const unowned = options.find((element) => element.props?.value === '@unowned')
   assert.ok(unowned, '源下拉框里必须有「未分组」这一行')
-  // 条数 = 库里"没被任何工作区认领、且有 cwd"的会话数（s-2 与 s-3），不是某个目录的条数
+  // 条数 = 库里"侧边栏会放进「未分组」、且有 cwd"的会话数（s-2 与 s-3），不是某个目录的条数
   assert.ok(
     text.some((item) => String(item).includes('ungroupedSource') && String(item).includes('sessionsInDir:{"count":2}')),
     '未分组那一行要报出跨目录的条数',
@@ -518,11 +518,13 @@ test('客户端产物：导出列表按目录分组，组头就是"整组勾选"
     registryPath: '/home/u/.dsh/registry.json',
     problems: [],
     sessions: [
-      // `workspaceId` 是宿主按注册表成员表填的：有值 = 被某个工作区登记在册，缺省 = 谁都没认领。
-      { id: 's-1', cwd: '/home/u/dev/alpha', createdAt: 2, dir: '/home/u/dev/alpha', bytes: 2048, files: [], workspaceId: 'w1' },
-      { id: 's-2', cwd: '/home/u/dev/alpha', createdAt: 1, dir: '/home/u/dev/alpha', bytes: 1024, files: [] },
-      { id: 's-3', cwd: '/home/u/dev/beta', createdAt: 3, dir: '/home/u/dev/beta', bytes: 512, files: [] },
-      { id: 's-4', createdAt: 4, dir: '_no-cwd', bytes: 256, files: [] },
+      // `ungrouped` 是宿主算好的结论（侧边栏会不会把它放进「未分组」）：s-1 在册 →
+      // false；s-2 / s-3 / s-4 谁都没认领又看得见 → true。**没有 cwd 也算**（那是迁移来源自己的
+      // 能力限制，不是「未分组」的定义）。
+      { id: 's-1', cwd: '/home/u/dev/alpha', createdAt: 2, dir: '/home/u/dev/alpha', bytes: 2048, files: [], ungrouped: false },
+      { id: 's-2', cwd: '/home/u/dev/alpha', createdAt: 1, dir: '/home/u/dev/alpha', bytes: 1024, files: [], ungrouped: true },
+      { id: 's-3', cwd: '/home/u/dev/beta', createdAt: 3, dir: '/home/u/dev/beta', bytes: 512, files: [], ungrouped: true },
+      { id: 's-4', createdAt: 4, dir: '_no-cwd', bytes: 256, files: [], ungrouped: true },
     ],
     workspaces: [{ id: 'w1', path: '/home/u/dev/alpha', title: '工作区甲', sessionIds: ['s-1'] }],
   }
@@ -593,16 +595,16 @@ test('客户端产物：导出列表按目录分组，组头就是"整组勾选"
     assert.equal(hints.length, 2, '计数块里正好是"这组几条 / 选中几条"两条')
   }
 
-  // 「未登记在册」这枚标签只该挂给注册表没认领的会话（行里 `workspaceId` 缺省的那些）。挂错或漏挂都
-  // 不会抛错、不会崩，只会让"外壳侧边栏为什么把这些会话放进未分组"重新变成要靠人对着两个界面猜的
-  // 谜——本机上真的被问过一次，所以按行核：先把每行的名字与标签取出来，再按名字对号入座。
+  // 「未分组」这枚标签只该挂给**侧边栏那一组**里的会话（宿主算好的 `ungrouped`）。挂错或漏挂都不会
+  // 抛错、不会崩，只会让"外壳侧边栏为什么把这些会话放进未分组"重新变成要靠人对着两个界面猜的谜——
+  // 本机上真的被问过一次，所以按行核：先把每行的名字与标签取出来，再按名字对号入座。
   const tagsByLabel = new Map(rows.map((row) => [rowParts(row).label, rowParts(row).tags]))
   assert.deepEqual(tagsByLabel.get('s-1'), [], '登记在册的会话不挂标签')
-  // s-1 与 s-2 在同一个目录、同一组里：登记在册与没登记在册混在一组是常态（真实库里就是这样），
+  // s-1 与 s-2 在同一个目录、同一组里：在册与不在册混在一组是常态（真实库里就是这样），
   // 标签得精确到行，不能按组一刀切。
-  assert.deepEqual(tagsByLabel.get('s-2'), ['ungroupedSource'], '同目录里未登记在册（「未分组」）的那条要单独标出来')
-  assert.deepEqual(tagsByLabel.get('s-3'), ['ungroupedSource'], '没登记的工作区下的会话同样没有归属')
-  assert.deepEqual(tagsByLabel.get('s-4'), ['ungroupedSource'], '没有 cwd 的会话当然也在「未分组」那一类里')
+  assert.deepEqual(tagsByLabel.get('s-2'), ['ungroupedSource'], '同目录里在「未分组」那一组的那条要单独标出来')
+  assert.deepEqual(tagsByLabel.get('s-3'), ['ungroupedSource'], '另一个目录里的同样标出来')
+  assert.deepEqual(tagsByLabel.get('s-4'), ['ungroupedSource'], '没有 cwd 的也在那一组里（标签与迁移来源的 cwd 要求无关）')
 })
 
 // ---- 「会话」页（逐条归档 / 删除）----
@@ -620,12 +622,14 @@ test('客户端产物：「会话」页把侧边栏看不见的那三类标出�
     problems: [],
     archiveAvailable: true,
     sessions: [
-      { id: 's-1', cwd: '/home/u/dev/alpha', createdAt: 5, dir: '/home/u/dev/alpha', bytes: 2048, files: [], workspaceId: 'w1' },
-      // 子代理会话在 /state 里带**两个**字段：origin 是 header 里的事实，hidden 是宿主先判的理由
-      { id: 's-2', cwd: '/home/u/dev/alpha', createdAt: 4, dir: '/home/u/dev/alpha', bytes: 1024, files: [], origin: 'subagent', hidden: 'subagent' },
-      { id: 's-3', cwd: '/home/u/dev/alpha', createdAt: 3, dir: '/home/u/dev/alpha', bytes: 900, files: [], blank: true, hidden: 'blank' },
-      { id: 's-4', cwd: '/home/u/dev/beta', createdAt: 2, dir: '/home/u/dev/beta', bytes: 512, files: [], archived: true, hidden: 'archived' },
-      { id: 's-5', cwd: '/home/u/dev/beta', createdAt: 1, dir: '/home/u/dev/beta', bytes: 256, files: [], live: true },
+      { id: 's-1', cwd: '/home/u/dev/alpha', createdAt: 5, dir: '/home/u/dev/alpha', bytes: 2048, files: [], ungrouped: false },
+      // 子代理会话在 /state 里带**三个**字段：origin 是 header 里的事实，hidden 是宿主先判的理由，
+      // ungrouped 是"侧边栏会不会把它放进「未分组」"——子代理嵌在父会话下面，答案是否。
+      { id: 's-2', cwd: '/home/u/dev/alpha', createdAt: 4, dir: '/home/u/dev/alpha', bytes: 1024, files: [], origin: 'subagent', hidden: 'subagent', ungrouped: false },
+      { id: 's-3', cwd: '/home/u/dev/alpha', createdAt: 3, dir: '/home/u/dev/alpha', bytes: 900, files: [], blank: true, hidden: 'blank', ungrouped: false },
+      { id: 's-4', cwd: '/home/u/dev/beta', createdAt: 2, dir: '/home/u/dev/beta', bytes: 512, files: [], archived: true, hidden: 'archived', ungrouped: false },
+      // 谁都没认领、又看得见的那条：侧边栏的「未分组」里就是它
+      { id: 's-5', cwd: '/home/u/dev/beta', createdAt: 1, dir: '/home/u/dev/beta', bytes: 256, files: [], live: true, ungrouped: true },
     ],
     workspaces: [{ id: 'w1', path: '/home/u/dev/alpha', title: '工作区甲', sessionIds: ['s-1'] }],
   }
@@ -665,10 +669,17 @@ test('客户端产物：「会话」页把侧边栏看不见的那三类标出�
     (child) => child !== null && typeof child === 'object',
   )
   assert.equal(cells.length, 5, '行里不再有归属那一列（勾选框 / 标记 / 标题 / 字节 / 时间）')
+  // 子代理**不是**「未分组」：它确实没在册，但侧边栏把它嵌在父会话下面，从来不放进那一组。
+  // 这条以前是反的（判据只看"有没有认领"），所以两行都钉住。
   assert.deepEqual(
     rowParts(manageRows.find((row) => strings(row).includes('s-2'))).tags,
-    ['tagSubagent', 'ungroupedSource'],
-    '没在册的那条在行上挂「未分组」（组头说的是目录，标签说的是注册表认不认）',
+    ['tagSubagent'],
+    '子代理只挂「子代理」——它不在侧边栏的「未分组」那一组里',
+  )
+  assert.deepEqual(
+    rowParts(manageRows.find((row) => strings(row).includes('s-5'))).tags,
+    ['tagLive', 'ungroupedSource'],
+    '真正落在侧边栏「未分组」里的那条才挂「未分组」',
   )
   // 归档与删除两组入口都在，且宿主给出归档能力时不显示那句"改不了"
   assert.ok(text.includes('manageArchive') && text.includes('manageUnarchive'), '归档 / 取消归档入口在')
@@ -712,11 +723,11 @@ test('客户端产物：「会话」页的筛选条把不匹配的行筛掉，�
     problems: [],
     archiveAvailable: true,
     sessions: [
-      { id: 's-owned', cwd: '/home/u/dev/alpha', createdAt: 5, dir: '/home/u/dev/alpha', bytes: 100, files: [], workspaceId: 'w1' },
-      { id: 's-sub', cwd: '/home/u/dev/alpha', createdAt: 4, dir: '/home/u/dev/alpha', bytes: 200, files: [], origin: 'subagent' },
-      { id: 's-blank', cwd: '/home/u/dev/beta', createdAt: 3, dir: '/home/u/dev/beta', bytes: 300, files: [], blank: true },
-      { id: 's-both', cwd: '/home/u/dev/beta', createdAt: 2, dir: '/home/u/dev/beta', bytes: 400, files: [], blank: true, archived: true },
-      { id: 's-live', cwd: '/home/u/dev/beta', createdAt: 1, dir: '/home/u/dev/beta', bytes: 500, files: [], live: true },
+      { id: 's-owned', cwd: '/home/u/dev/alpha', createdAt: 5, dir: '/home/u/dev/alpha', bytes: 100, files: [], ungrouped: false },
+      { id: 's-sub', cwd: '/home/u/dev/alpha', createdAt: 4, dir: '/home/u/dev/alpha', bytes: 200, files: [], origin: 'subagent', ungrouped: false },
+      { id: 's-blank', cwd: '/home/u/dev/beta', createdAt: 3, dir: '/home/u/dev/beta', bytes: 300, files: [], blank: true, ungrouped: false },
+      { id: 's-both', cwd: '/home/u/dev/beta', createdAt: 2, dir: '/home/u/dev/beta', bytes: 400, files: [], blank: true, archived: true, ungrouped: false },
+      { id: 's-live', cwd: '/home/u/dev/beta', createdAt: 1, dir: '/home/u/dev/beta', bytes: 500, files: [], live: true, ungrouped: true },
     ],
     workspaces: [{ id: 'w1', path: '/home/u/dev/alpha', title: '工作区甲', sessionIds: ['s-owned'] }],
   }
@@ -742,7 +753,8 @@ test('客户端产物：「会话」页的筛选条把不匹配的行筛掉，�
   const counts = recorded
     .filter((node) => String(node.props?.className) === 'dsm-filterCount')
     .map((node) => String(node.props.children))
-  assert.deepEqual(counts, ['1', '2', '1', '4', '1'], '子代理 1 / 空白 2 / 已归档 1 / 未分组 4 / 活动中 1')
+  // 「未分组」只有 1 条（s-live）：s-sub（子代理）与两条空白都不在侧边栏那一组里——这正是这次的改动
+  assert.deepEqual(counts, ['1', '2', '1', '1', '1'], '子代理 1 / 空白 2 / 已归档 1 / 未分组 1 / 活动中 1')
   assert.equal(chip('filterAll')?.props?.['aria-pressed'], false, '筛着的时候「全部」不是选中态')
   assert.equal(chip('tagBlank')?.props?.['aria-pressed'], true, '种进去的那一类要显示成选中')
   assert.equal(chip('tagSubagent')?.props?.['aria-pressed'], false, '没勾的那几类不是选中态')
@@ -758,13 +770,9 @@ test('客户端产物：「会话」页的筛选条把不匹配的行筛掉，�
   assert.deepEqual(listed, ['s-blank', 's-both'])
   assert.ok(!text.includes('s-owned') && !text.includes('s-sub') && !text.includes('s-live'), '不匹配的行不在树上')
   // "空白 + 已归档"那条要挂两枚标签：只挂宿主先判的那一枚，筛选就没法自证了。
-  // 第三枚「未分组」是这次的改动带出来的：归属那一段挪进组头之后，行上重新说得清"注册表不认这一条"。
+  // 它**不**挂「未分组」：侧边栏默认视图里压根不显示它，更不会把它放进「未分组」那一组。
   const both = rows.find((row) => strings(row).includes('s-both'))
-  assert.deepEqual(
-    rowParts(both).tags,
-    ['tagBlank', 'tagArchived', 'ungroupedSource'],
-    '既是空白又已归档、又没在册的那条，三枚都挂',
-  )
+  assert.deepEqual(rowParts(both).tags, ['tagBlank', 'tagArchived'], '既是空白又已归档的那条挂两枚，且都不是「未分组」')
   // 筛过之后头部报"显示了其中几条"，别让人以为库里的会话变少了
   assert.ok(text.includes('shownCount:{"shown":2,"total":5}'), '筛过之后报出 显示 N / M 条')
 
@@ -797,7 +805,7 @@ test('客户端产物：「会话」页一条都没筛出来时，那个固定�
     problems: [],
     archiveAvailable: true,
     sessions: [
-      { id: 's-owned', cwd: '/home/u/dev/alpha', createdAt: 2, dir: '/home/u/dev/alpha', bytes: 100, files: [], workspaceId: 'w1' },
+      { id: 's-owned', cwd: '/home/u/dev/alpha', createdAt: 2, dir: '/home/u/dev/alpha', bytes: 100, files: [], ungrouped: false },
       { id: 's-blank', cwd: '/home/u/dev/beta', createdAt: 1, dir: '/home/u/dev/beta', bytes: 200, files: [], blank: true },
     ],
     workspaces: [{ id: 'w1', path: '/home/u/dev/alpha', title: '工作区甲', sessionIds: ['s-owned'] }],
@@ -843,10 +851,10 @@ test('客户端产物：导出页也接了同一套筛选条，筛空的组整�
     registryPath: '/home/u/.dsh/registry.json',
     problems: [],
     sessions: [
-      { id: 'a-1', cwd: '/home/u/dev/alpha', createdAt: 4, dir: '/home/u/dev/alpha', bytes: 100, files: [], workspaceId: 'w1' },
-      { id: 'a-2', cwd: '/home/u/dev/alpha', createdAt: 3, dir: '/home/u/dev/alpha', bytes: 200, files: [], blank: true },
-      { id: 'b-1', cwd: '/home/u/dev/beta', createdAt: 2, dir: '/home/u/dev/beta', bytes: 300, files: [] },
-      { id: 'b-2', cwd: '/home/u/dev/beta', createdAt: 1, dir: '/home/u/dev/beta', bytes: 400, files: [], origin: 'subagent' },
+      { id: 'a-1', cwd: '/home/u/dev/alpha', createdAt: 4, dir: '/home/u/dev/alpha', bytes: 100, files: [], ungrouped: false },
+      { id: 'a-2', cwd: '/home/u/dev/alpha', createdAt: 3, dir: '/home/u/dev/alpha', bytes: 200, files: [], blank: true, ungrouped: false },
+      { id: 'b-1', cwd: '/home/u/dev/beta', createdAt: 2, dir: '/home/u/dev/beta', bytes: 300, files: [], ungrouped: true },
+      { id: 'b-2', cwd: '/home/u/dev/beta', createdAt: 1, dir: '/home/u/dev/beta', bytes: 400, files: [], origin: 'subagent', ungrouped: false },
     ],
     workspaces: [{ id: 'w1', path: '/home/u/dev/alpha', title: '工作区甲', sessionIds: ['a-1'] }],
   }
@@ -870,8 +878,8 @@ test('客户端产物：导出页也接了同一套筛选条，筛空的组整�
       .filter((node) => String(node.props?.className) === 'dsm-filterCount')
       .map((node) => String(node.props.children))
       .join(','),
-    '1,1,0,3,0',
-    '子代理 1 / 空白 1 / 已归档 0 / 未分组 3 / 活动中 0（只有 a-1 在册）',
+    '1,1,0,1,0',
+    '子代理 1 / 空白 1 / 已归档 0 / 未分组 1（b-1）/ 活动中 0',
   )
   assert.ok(text.includes('shownCount:{"shown":1,"total":4}'), '筛过之后报 显示 1 / 4 条')
 
@@ -881,7 +889,7 @@ test('客户端产物：导出页也接了同一套筛选条，筛空的组整�
   assert.ok(strings(heads[0]).includes('工作区甲'), '留下的是 alpha 那组')
   assert.ok(text.includes('sessionsInDir:{"count":1}'), '组头报的是筛剩下的条数')
 
-  // 行出自共用组件（sessionList.tsx 的 SessionRow），标签也走共用判据：空白 + 未分组两枚都挂
+  // 行出自共用组件（sessionList.tsx 的 SessionRow），标签也走共用判据
   const rowEls = recorded.filter((node) => typeof node.type === 'function' && node.type.name === 'SessionRow')
   assert.equal(rowEls.length, 1, '筛过之后只有一行')
   assert.equal(rowEls[0].props.variant, 'export')
@@ -889,7 +897,8 @@ test('客户端产物：导出页也接了同一套筛选条，筛空的组整�
     (node) => node.type === 'label' && String(node.props?.className).includes('dsm-rowExport'),
   )
   assert.equal(labels.length, 1)
-  assert.deepEqual(rowParts(labels[0]).tags, ['tagBlank', 'ungroupedSource'], '这一页也挂属性标签')
+  // a-2 是空白：它不挂「未分组」（侧边栏默认视图里根本没显示它）
+  assert.deepEqual(rowParts(labels[0]).tags, ['tagBlank'], '这一页也挂属性标签，且「未分组」只给侧边栏那一组')
 })
 
 test('客户端产物：迁移页把"跟着父会话进来的子代理"单独说明（预演卡片）', { skip }, () => {
@@ -903,7 +912,7 @@ test('客户端产物：迁移页把"跟着父会话进来的子代理"单独说
     problems: [],
     pickerKind: 'browse',
     sessions: [
-      { id: 's-1', cwd: '/home/u/dev/alpha', createdAt: 3, dir: '/home/u/dev/alpha', bytes: 2048, files: [], workspaceId: 'w1' },
+      { id: 's-1', cwd: '/home/u/dev/alpha', createdAt: 3, dir: '/home/u/dev/alpha', bytes: 2048, files: [], ungrouped: false },
     ],
     workspaces: [{ id: 'w1', path: '/home/u/dev/alpha', title: '工作区甲', sessionIds: ['s-1'] }],
   }
@@ -1003,8 +1012,8 @@ test('客户端产物：「会话」页的搜索框按标题或 id 筛，筛空�
     problems: [],
     archiveAvailable: true,
     sessions: [
-      { id: 's-1', title: '重构迁移编排', cwd: '/home/u/dev/alpha', createdAt: 2, dir: '/home/u/dev/alpha', bytes: 100, files: [], workspaceId: 'w1' },
-      { id: 's-2', title: '别的东西', cwd: '/home/u/dev/alpha', createdAt: 1, dir: '/home/u/dev/alpha', bytes: 200, files: [], workspaceId: 'w1' },
+      { id: 's-1', title: '重构迁移编排', cwd: '/home/u/dev/alpha', createdAt: 2, dir: '/home/u/dev/alpha', bytes: 100, files: [], ungrouped: false },
+      { id: 's-2', title: '别的东西', cwd: '/home/u/dev/alpha', createdAt: 1, dir: '/home/u/dev/alpha', bytes: 200, files: [], ungrouped: false },
     ],
     workspaces: [{ id: 'w1', path: '/home/u/dev/alpha', title: '工作区甲', sessionIds: ['s-1', 's-2'] }],
   }
@@ -1162,7 +1171,7 @@ test('客户端产物：「会话」页也按目录分组、也能折叠，勾�
     problems: [],
     archiveAvailable: true,
     sessions: [
-      { id: 'a-1', cwd: '/home/u/dev/alpha', createdAt: 4, dir: '/home/u/dev/alpha', bytes: 100, files: [], workspaceId: 'w1' },
+      { id: 'a-1', cwd: '/home/u/dev/alpha', createdAt: 4, dir: '/home/u/dev/alpha', bytes: 100, files: [], ungrouped: false },
       { id: 'a-2', cwd: '/home/u/dev/alpha', createdAt: 3, dir: '/home/u/dev/alpha', bytes: 200, files: [], blank: true },
       { id: 'b-1', cwd: '/home/u/dev/beta', createdAt: 2, dir: '/home/u/dev/beta', bytes: 300, files: [], blank: true },
       { id: 'b-2', cwd: '/home/u/dev/beta', createdAt: 1, dir: '/home/u/dev/beta', bytes: 400, files: [], archived: true },

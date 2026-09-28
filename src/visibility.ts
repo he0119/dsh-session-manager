@@ -60,13 +60,13 @@ export interface VisibilityOptions {
 }
 
 /**
- * 给一条会话判"侧边栏会不会显示"。
+ * 把一条会话与注册表的口径归结成**三件事实**（判据的输入只有这一份，别处不许各拼一份）。
  *
  * @param subject 会话（要 id / createdAt / cwd / header.origin）。
  * @param options 归档集与空白读取器。
- * @returns 原因；`undefined` = 会显示。
+ * @returns `origin` / `blank` / `archived` 三个事实。
  */
-export function hiddenReasonOf(subject: VisibilitySubject, options: VisibilityOptions = {}): HiddenReason | undefined {
+export function visibilityFacts(subject: VisibilitySubject, options: VisibilityOptions = {}): VisibilityFacts {
   const archived = options.archived
   const isArchived =
     archived === undefined
@@ -74,13 +74,48 @@ export function hiddenReasonOf(subject: VisibilitySubject, options: VisibilityOp
       : Array.isArray(archived)
         ? (archived as readonly string[]).includes(subject.id)
         : (archived as ReadonlySet<string>).has(subject.id)
-  return hiddenReason({
+  return {
     ...(subject.header.origin === undefined ? {} : { origin: subject.header.origin }),
     ...(options.resolveBlank === undefined
       ? {}
       : { blank: options.resolveBlank({ id: subject.id, createdAt: subject.createdAt, cwd: subject.cwd }) }),
     archived: isArchived,
-  })
+  }
+}
+
+/**
+ * 给一条会话判"侧边栏会不会显示"。
+ *
+ * @param subject 会话（要 id / createdAt / cwd / header.origin）。
+ * @param options 归档集与空白读取器。
+ * @returns 原因；`undefined` = 会显示。
+ */
+export function hiddenReasonOf(subject: VisibilitySubject, options: VisibilityOptions = {}): HiddenReason | undefined {
+  return hiddenReason(visibilityFacts(subject, options))
+}
+
+/** 判「未分组」要多知道的一件事：这条会话有没有被某个工作区认领。 */
+export interface UngroupedFacts extends VisibilityFacts {
+  /** 它的 id 是否在某个工作区记录的 `sessionIds` 里。 */
+  owned?: boolean
+}
+
+/**
+ * 这条会话在外壳侧边栏里是不是落在「未分组」那一组里。
+ *
+ * 宿主的算法（`dsh-client-ui-workspace` 里造组的那一步）：把每个工作区记录 `sessionIds` 里的 id 收进
+ * 一张 `accounted` 表，剩下的那些里再过一遍 `sessionVisible()` —— 通过了才成为「未分组」那一组。
+ * 所以「未分组」是**两件事同时成立**：谁都没认领它，**而且**默认视图下侧边栏会显示它。子代理会话
+ * 嵌在父会话下面、空白（除当前那条临时 New Session）与已归档默认都不显示，它们因此都不是「未分组」
+ * 的成员——哪怕它们同样没在册。
+ *
+ * 这条判据是「未分组」在本插件里的**唯一**定义：行上那枚标签、会话页那枚筛选芯片、迁移页那个来源
+ * 都读它（来源还要额外要求有 `cwd`：那个来源要改写 header，没有 cwd 的会话它搬不动，见 planRows.ts）。
+ * 以前这三处各答各的（两处只看 `workspaceId` 缺省），于是子代理行上挂着「未分组」，而侧边栏从来没
+ * 把它放进过那一组。
+ */
+export function isUngrouped(facts: UngroupedFacts): boolean {
+  return facts.owned !== true && hiddenReason(facts) === undefined
 }
 
 /**

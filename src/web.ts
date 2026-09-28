@@ -39,7 +39,7 @@ import {
   type ImportOptions,
 } from './transfer.ts'
 import type { DecodeAll, WorkspaceRegistryState } from './types.ts'
-import { createBlankResolver, hiddenReason, type HiddenReason } from './visibility.ts'
+import { createBlankResolver, hiddenReason, isUngrouped, type HiddenReason } from './visibility.ts'
 
 /** 本插件占用的路由前缀。 */
 export const API_PREFIX = '/dsh-session-manager/api'
@@ -113,7 +113,8 @@ interface SessionSummary {
   cwd?: string
   createdAt: number
   dir: string
-  workspaceId?: string
+  /** 外壳侧边栏会把它放进「未分组」那一组（判据见 visibility.ts 的 `isUngrouped()`）。 */
+  ungrouped: boolean
   bytes: number
   files: Array<{ name: string; bytes: number }>
   /** 外壳侧边栏不显示这条会话的原因（缺省 = 会显示，见 visibility.ts）。 */
@@ -192,8 +193,10 @@ export const scanLibrary = scanAll
 /**
  * 把发现结果与注册表对起来，得到界面要的行。
  *
- * `workspaceId` 缺省 = 这条会话的 id 不在任何工作区的登记表里（外壳侧边栏会把它挂到「未分组」下，
- * 见 docs/internals.md）。界面靠它标出「未分组」那一类，迁移页的「未分组」来源也用它圈候选。
+ * `ungrouped` = 这条会话在外壳侧边栏里落在「未分组」那一组里（判据与理由见 visibility.ts 的
+ * `isUngrouped()`）。行上的标签、会话页那枚筛选芯片、迁移页那个来源都读它——**不再**发"有没有工作区
+ * 认领"这个中间事实：以前那三处各自拿它去推「未分组」，于是子代理/空白/已归档这些侧边栏根本不放进
+ * 那一组的会话也被标成了「未分组」。
  *
  * `hidden` 是外壳侧边栏"会不会显示这条会话"的判据结果（见 visibility.ts）：三份列表各自要看的东西
  * 不同——导出照单全收、迁移只收侧边栏看得见的、管理页要把看不见的原因标出来——所以这里一次算清，
@@ -215,18 +218,15 @@ function summarizeSessions(
   return sessions.map((session) => {
     const blank = options.resolveBlank?.({ id: session.id, createdAt: session.createdAt, cwd: session.cwd }) === true
     const archived = options.archived.has(session.id)
-    const hidden = hiddenReason({
-      ...(session.header.origin === undefined ? {} : { origin: session.header.origin }),
-      blank,
-      archived,
-    })
+    const facts = { ...(session.header.origin === undefined ? {} : { origin: session.header.origin }), blank, archived }
+    const hidden = hiddenReason(facts)
     return {
       id: session.id,
       ...(session.title === undefined ? {} : { title: session.title }),
       cwd: session.cwd,
       createdAt: session.createdAt,
       dir: session.dir,
-      workspaceId: owner.get(session.id),
+      ungrouped: isUngrouped({ ...facts, owned: owner.has(session.id) }),
       bytes: session.files.reduce((sum, file) => sum + file.bytes, 0),
       files: session.files.map((file) => ({ name: file.name, bytes: file.bytes })),
       archived,
