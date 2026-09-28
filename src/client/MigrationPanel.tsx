@@ -183,7 +183,11 @@ export function MigrationPanel({ t = fallback, state, reload, directory }: Panel
   const [backupRoot, setBackupRoot] = React.useState('')
   const [backupError, setBackupError] = React.useState<string | null>(null)
   const [rollbackBusy, setRollbackBusy] = React.useState<string | null>(null)
-  const [rollbackPlan, setRollbackPlan] = React.useState<{ dir: string; actions: string[] } | null>(null)
+  const [rollbackPlan, setRollbackPlan] = React.useState<{
+    dir: string
+    kind: BackupSummary['kind']
+    actions: string[]
+  } | null>(null)
 
   const loadBackups = React.useCallback(async (): Promise<void> => {
     try {
@@ -379,12 +383,12 @@ export function MigrationPanel({ t = fallback, state, reload, directory }: Panel
   const planned = preview !== null && preview.ok
   const registry = preview?.registryChange ?? null
 
-  const showRollbackPlan = async (dir: string): Promise<void> => {
+  const showRollbackPlan = async (dir: string, kind: BackupSummary['kind']): Promise<void> => {
     setRollbackBusy(dir)
     setBackupError(null)
     try {
       const response = await rollbackBackup(dir, true)
-      setRollbackPlan({ dir, actions: response.actions })
+      setRollbackPlan({ dir, kind, actions: response.actions })
     } catch (cause) {
       setBackupError(cause instanceof Error ? cause.message : String(cause))
     } finally {
@@ -397,8 +401,14 @@ export function MigrationPanel({ t = fallback, state, reload, directory }: Panel
     setBackupError(null)
     try {
       const response = await rollbackBackup(dir, false)
+      const kind = rollbackPlan?.kind
       setRollbackPlan(null)
-      setNotice(t('rollbackDone', { sessions: response.sessions, files: response.restoredFiles }))
+      setNotice(
+        t(kind === 'delete' ? 'restoreDone' : 'rollbackDone', {
+          sessions: response.sessions,
+          files: response.restoredFiles,
+        }),
+      )
       setOutcome(null)
       await reload()
       await loadBackups()
@@ -699,7 +709,13 @@ export function MigrationPanel({ t = fallback, state, reload, directory }: Panel
             {backups.map((backup) => (
               <div key={backup.dir} className="dsm-backupRow">
                 <div className="dsm-backupMain">
-                  <span className="dsm-rowId">{formatTime(backup.createdAt)}</span>
+                  <span className="dsm-rowId">
+                    {formatTime(backup.createdAt)}
+                    {/* 这份备份是迁移留下的还是删除留下的：删除的那份点「恢复」，迁移的那份点「回滚」。 */}
+                    <span className="dsm-tag dsm-tagIdle">
+                      {backup.kind === 'delete' ? t('backupKindDelete') : t('backupKindMigrate')}
+                    </span>
+                  </span>
                   <span className="dsm-hint">{t('backupRow', { sessions: backup.sessions, artifacts: backup.artifacts })}</span>
                   {(backup.from !== undefined || backup.to !== undefined) && (
                     <span className="dsm-meta" title={backup.dir}>
@@ -710,10 +726,16 @@ export function MigrationPanel({ t = fallback, state, reload, directory }: Panel
                 <button
                   type="button"
                   className="dsm-button"
-                  onClick={() => void showRollbackPlan(backup.dir)}
+                  onClick={() => void showRollbackPlan(backup.dir, backup.kind)}
                   disabled={rollbackBusy !== null}
                 >
-                  {rollbackPlan?.dir === backup.dir ? t('rollbackAction') : t('rollbackPreview')}
+                  {rollbackPlan?.dir === backup.dir
+                    ? backup.kind === 'delete'
+                      ? t('restoreAction')
+                      : t('rollbackAction')
+                    : backup.kind === 'delete'
+                      ? t('restorePreview')
+                      : t('rollbackPreview')}
                 </button>
               </div>
             ))}
@@ -722,7 +744,11 @@ export function MigrationPanel({ t = fallback, state, reload, directory }: Panel
 
         {rollbackPlan !== null && (
           <div className="dsm-result">
-            <p className="dsm-warn">{t('rollbackActions', { count: rollbackPlan.actions.length })}</p>
+            <p className="dsm-warn">
+              {rollbackPlan.kind === 'delete'
+                ? t('restoreActions', { count: rollbackPlan.actions.length })
+                : t('rollbackActions', { count: rollbackPlan.actions.length })}
+            </p>
             <ul className="dsm-listPlain">
               {rollbackPlan.actions.map((action) => (
                 <li key={action}>{action}</li>
@@ -735,7 +761,13 @@ export function MigrationPanel({ t = fallback, state, reload, directory }: Panel
                 onClick={() => void doRollback(rollbackPlan.dir)}
                 disabled={rollbackBusy !== null}
               >
-                {rollbackBusy === rollbackPlan.dir ? t('rollingBack') : t('rollbackConfirm')}
+                {rollbackBusy === rollbackPlan.dir
+                  ? rollbackPlan.kind === 'delete'
+                    ? t('restoring')
+                    : t('rollingBack')
+                  : rollbackPlan.kind === 'delete'
+                    ? t('restoreConfirm')
+                    : t('rollbackConfirm')}
               </button>
               <button type="button" className="dsm-button" onClick={() => setRollbackPlan(null)} disabled={rollbackBusy !== null}>
                 {t('cancel')}

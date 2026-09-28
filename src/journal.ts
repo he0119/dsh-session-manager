@@ -32,12 +32,26 @@ export interface BackupArtifactEntry {
   backupPath: string
 }
 
+/**
+ * 这份备份是哪一类操作留下的。
+ *
+ * `migrate`：会话从 A 目录搬到 B 目录（备份里那份是"原状"，回滚 = 搬回去 + 还原字节）。
+ * `delete`：会话被删掉（备份里那份是**唯一一份**，回滚 = 把它搬回原位）。
+ *
+ * 两者的差别不是文案：`delete` 的会话记录里 `targetDir` 指向备份目录内的那份副本，于是回滚的第一步
+ * （"把目标搬回源"）恰好就是"把备份里的整个会话目录搬回去"；而字节还原那一步要因此容忍"备份里的
+ * 文件已经不在了"（它刚被搬走）。老备份没有这个字段，按 `migrate` 处理。
+ */
+export type BackupKind = 'migrate' | 'delete'
+
 /** 备份清单。 */
 export interface BackupManifest {
   version: number
   createdAt: string
   registryPath: string
   registryBackup: string
+  /** 这次备份是哪一类操作留下的（老备份没有这个字段 = 迁移）。 */
+  kind?: BackupKind
   /** 这次迁移的源/目标工作区目录（后加的字段，老备份没有）。 */
   from?: string
   to?: string
@@ -51,10 +65,17 @@ export interface CreateBackupOptions {
   backupRoot: string
   /** workspace.json 路径。 */
   registryPath: string
-  /** 计划中的会话（需含 sourceDir / targetDir / files）。 */
-  sessions: ReadonlyArray<Pick<SessionMove, 'id' | 'sourceDir' | 'targetDir' | 'files'>>
+  /**
+   * 计划中的会话（需含 sourceDir / files）。
+   *
+   * `targetDir` 只有迁移才需要：删除没有"目标目录"，那时它由本函数填成备份目录内那份副本的路径
+   * （见 `BackupKind`）。
+   */
+  sessions: ReadonlyArray<Pick<SessionMove, 'id' | 'sourceDir' | 'files'> & { targetDir?: string }>
   /** 计划搬迁的会话产物。 */
   artifacts?: ReadonlyArray<Pick<BackupArtifactEntry, 'sourcePath' | 'targetPath' | 'isDir'>>
+  /** 这次备份属于哪一类操作（缺省 `migrate`）。 */
+  kind?: BackupKind
   /** 本次迁移的源工作区目录，写进清单便于界面展示。 */
   from?: string
   /** 本次迁移的目标工作区目录，写进清单便于界面展示。 */
@@ -71,7 +92,7 @@ export function createBackup(options: CreateBackupOptions): {
   manifestPath: string
   manifest: BackupManifest
 } {
-  const { backupRoot, registryPath, sessions, artifacts = [], from, to, now = new Date() } = options
+  const { backupRoot, registryPath, sessions, artifacts = [], kind = 'migrate', from, to, now = new Date() } = options
   const dir = join(backupRoot, stampName(now))
   mkdirSync(join(dir, 'sessions'), { recursive: true })
 
@@ -88,7 +109,8 @@ export function createBackup(options: CreateBackupOptions): {
       id: s.id,
       dirName: basename(s.sourceDir),
       sourceDir: s.sourceDir,
-      targetDir: s.targetDir,
+      // 删除：备份里那份副本就是"回滚时搬回去的那一份"，所以目标目录记它。
+      targetDir: kind === 'delete' ? dest : (s.targetDir ?? s.sourceDir),
       files: s.files.map((f) => f.name),
     })
   }
@@ -109,6 +131,7 @@ export function createBackup(options: CreateBackupOptions): {
     createdAt: now.toISOString(),
     registryPath,
     registryBackup,
+    kind,
     ...(from === undefined ? {} : { from }),
     ...(to === undefined ? {} : { to }),
     sessions: entries,
@@ -142,6 +165,10 @@ export interface RollbackResult {
  *   2. 用备份逐文件字节还原（撤销 cwd 改写）
  *   3. 会话产物搬回
  *   4. 还原注册表
+ *
+ * 「删除」备份（`kind === 'delete'`）复用同一条路，语义是"把备份里那一份搬回原位"：第 1 步就是
+ * 整个会话目录的还原（见 `BackupKind`），第 2 步因此可能发现备份里那份已经不在了（刚被第 1 步搬走），
+ * 第 4 步按删除的语义跳过。
  */
 export function rollback(
   manifest: BackupManifest,
@@ -173,7 +200,17 @@ export function rollback(
       // 清单不再存项目目录名（它就是 `sourceDir` 的父目录名），老备份里那个字段直接忽略。
       const from = join(backupDir, 'sessions', basename(dirname(s.sourceDir)), s.dirName, name)
       const to = join(s.sourceDir, name)
-      if (!existsSync(from)) throw new Error(`backup file missing: ${from}`)
+      if (!existsSync(from)) {
+        // 「删除」备份的恢复路径：第 1 步已经把备份里那整个会话目录搬回原位（它的 `targetDir` 就是
+        // 备份内那份副本），于是 `from` 随之不存在——但字节已经在 `to` 上了，这不是"备份坏了"。
+        // 只有两边都没有才是真的缺文件，照旧抛错。
+        if (existsSync(to)) {
+          actions.push(`bytes already in place: ${to}`)
+          restoredFiles++
+          continue
+        }
+        throw new Error(`backup file missing: ${from}`)
+      }
       actions.push(`restore bytes: ${to}`)
       if (!dryRun) cpSync(from, to)
       restoredFiles++
@@ -216,10 +253,17 @@ export function rollback(
   }
 
   // 4) 注册表
-  if (manifest.registryBackup && existsSync(manifest.registryBackup)) {
+  //
+  // 「删除」备份恢复**不还原注册表**：删除从头到尾没碰过它（会话的登记、归档、置顶都原地留着），
+  // 而备份里的那份快照是删除那一刻的——照搬回去会把"删除之后用户做的其它变更"一起抹掉。
+  let registryRestored = false
+  if (manifest.kind === 'delete') {
+    actions.push(`registry untouched: delete backup (${manifest.registryPath})`)
+  } else if (manifest.registryBackup && existsSync(manifest.registryBackup)) {
     actions.push(`restore registry: ${manifest.registryPath}`)
     if (!dryRun) cpSync(manifest.registryBackup, manifest.registryPath)
+    registryRestored = true
   }
 
-  return { actions, restoredFiles, restoredArtifacts, registryRestored: true, dryRun }
+  return { actions, restoredFiles, restoredArtifacts, registryRestored, dryRun }
 }

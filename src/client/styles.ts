@@ -198,6 +198,18 @@ export const CSS = `
 }
 .dsm-row:last-child { border-bottom: none; }
 /*
+ * 「会话」页那一行多一列：它在"标题 / 字节 / 时间"之外还要说"这条属于哪个工作区（或未分组）"，
+ * 而五列的模板塞第六个孩子会把它挤到下一行去。只换列模板，颜色与圆角仍归 .dsm-row。
+ */
+.dsm-rowManage {
+  grid-template-columns: 24px 16px minmax(120px, 1.4fr) minmax(96px, 0.9fr) auto auto;
+}
+/* 删除预演里那一行没有勾选框（预演结果不是勾选面），于是少一列，且它不可点。 */
+.dsm-rowDelete {
+  grid-template-columns: 16px minmax(120px, 1.4fr) auto auto;
+  cursor: default;
+}
+/*
  * 悬停底色同样不能拿表面 token 当"稍深一点"：浅色主题里 bg-layer-1/2/3 **全是同一个白**，
  * 铺上去等于没有反馈。改成把字色兑透明做一层薄雾（宿主外壳自己也这么兑），明暗两套都看得见。
  */

@@ -53,9 +53,18 @@ function writeSession(
   id: string,
   cwd: string,
   createdAt: number,
-  options: { title?: string } = {},
+  options: { title?: string; origin?: 'subagent' } = {},
 ): void {
-  const header: SessionHeader = { type: 'session', version: 4, id, createdAt, cwd, isSeeded: false, delegationDepth: 0 }
+  const header: SessionHeader = {
+    type: 'session',
+    version: 4,
+    id,
+    createdAt,
+    cwd,
+    isSeeded: false,
+    delegationDepth: 0,
+    ...(options.origin === undefined ? {} : { origin: options.origin }),
+  }
   const lines = [
     JSON.stringify(header),
     JSON.stringify({ type: 'user/message', seq: 0, data: {} }),
@@ -73,17 +82,24 @@ function writeSession(
   )
 }
 
-/** 写一份宿主的投影缓存记录（宿主自己列会话时读它，标题也在里面）。 */
-function writeProjectionCache(sandbox: Sandbox, id: string, record: { createdAt: number; cwd?: string; title?: string }): void {
+/** 写一份宿主的投影缓存记录（宿主自己列会话时读它，标题与空白判据都在里面）。 */
+function writeProjectionCache(
+  sandbox: Sandbox,
+  id: string,
+  record: { createdAt: number; cwd?: string; title?: string; blank?: boolean },
+): void {
   const dir = join(sandbox.base, 'session_projcache', 'sessions')
   mkdirSync(dir, { recursive: true })
+  const rows: Record<string, unknown> = {}
+  if (record.title !== undefined) rows['title'] = { ver: 1, seq: 1, val: record.title }
+  if (record.blank !== undefined) rows['sessionListMetadata'] = { ver: 1, seq: 1, val: { blank: record.blank, lastPromptAt: null } }
   writeFileSync(
     join(dir, `${id}.json`),
     JSON.stringify({
       version: 7,
       record: {
         identity: { formatVersion: 4, createdAt: record.createdAt, ...(record.cwd === undefined ? {} : { cwd: record.cwd }) },
-        rows: record.title === undefined ? {} : { title: { ver: 1, seq: 1, val: record.title } },
+        rows,
       },
     }),
   )
@@ -132,12 +148,16 @@ function json(res: Captured): Record<string, unknown> {
   return JSON.parse(res.body.toString('utf8')) as Record<string, unknown>
 }
 
-function deps(sandbox: Sandbox): Parameters<typeof createApiHandlers>[0] {
+function deps(
+  sandbox: Sandbox,
+  extra: Partial<Parameters<typeof createApiHandlers>[0]> = {},
+): Parameters<typeof createApiHandlers>[0] {
   return {
     paths: { sessionsRoot: sandbox.sessionsRoot, registryPath: sandbox.registryPath, backupRoot: join(sandbox.base, 'backups') },
     decodeAll,
     now: () => new Date('2026-09-27T00:00:00.000Z'),
     pluginVersion: '0.0.0-test',
+    ...extra,
   }
 }
 
@@ -362,7 +382,7 @@ test('POST /import：包坏了、目标目录不合法、库已存在同 id，�
   assert.match(String(json(conflictApply.captured)['error']), /没有可导入的会话/)
 })
 
-test('registerWebRoutes：注册六条精确路由，方法不对回 405', async () => {
+test('registerWebRoutes：注册八条精确路由，方法不对回 405', async () => {
   const sandbox = makeSandbox('web-routes')
   const routes: WebRouteLike[] = []
   const dispose = registerWebRoutes(
@@ -378,6 +398,8 @@ test('registerWebRoutes：注册六条精确路由，方法不对回 405', async
       `exact ${API_PREFIX}/backups`,
       `exact ${API_PREFIX}/migrate`,
       `exact ${API_PREFIX}/rollback`,
+      `exact ${API_PREFIX}/delete`,
+      `exact ${API_PREFIX}/archive`,
     ],
   )
 
@@ -603,4 +625,197 @@ test('POST /rollback：只认本插件备份根下的目录', async () => {
   const empty = join(sandbox.base, 'backups', 'empty')
   mkdirSync(empty, { recursive: true })
   assert.match(String(json(await post({ backupDir: empty }))['error']), /没有 manifest\.json/)
+})
+
+// ---- 会话管理：可见性字段 / 删除 / 归档 ----
+
+test('GET /state：会话行带上"侧边栏为什么不显示"，以及归档能力位', async () => {
+  const sandbox = makeSandbox('web-state-visibility')
+  writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000)
+  // 子代理会话：header 里带 origin，侧边栏把它嵌在父会话下面
+  writeSession(sandbox.sessionsRoot, 'session-sub', CWD_A, 2000, { origin: 'subagent' })
+  // 空白会话：宿主投影缓存说它一轮都没开始过
+  writeSession(sandbox.sessionsRoot, 'session-blank', CWD_B, 3000)
+  writeProjectionCache(sandbox, 'session-a', { createdAt: 1000, cwd: CWD_A, blank: false })
+  writeProjectionCache(sandbox, 'session-blank', { createdAt: 3000, cwd: CWD_B, blank: true })
+  // 已归档：id 在注册表的归档集里（同时仍在 ws-a 的登记表里，归档不动记账）
+  const registry = readRegistry(sandbox.registryPath)
+  registry.global.archivedSessionIds = ['session-a']
+  writeRegistryAtomic(sandbox.registryPath, registry)
+
+  const handlers = createApiHandlers(deps(sandbox, { liveSessionIds: () => new Set(['session-sub']) }))
+  const { res, captured } = fakeRes()
+  await handlers['GET /state']!(fakeReq('GET', `${API_PREFIX}/state`), res)
+
+  const body = json(captured)
+  const rows = new Map((body['sessions'] as Array<Record<string, unknown>>).map((row) => [row['id'], row]))
+  // 已归档（缓存里 blank: false，所以理由只能是归档）
+  assert.equal(rows.get('session-a')!['hidden'], 'archived')
+  assert.equal(rows.get('session-a')!['archived'], true)
+  assert.equal(rows.get('session-a')!['blank'], false)
+  // 子代理：理由来自 header，先于归档判
+  assert.equal(rows.get('session-sub')!['hidden'], 'subagent')
+  assert.equal(rows.get('session-sub')!['origin'], 'subagent')
+  // 空白：理由来自宿主投影缓存
+  assert.equal(rows.get('session-blank')!['hidden'], 'blank')
+  assert.equal(rows.get('session-blank')!['blank'], true)
+  // 活着的那条（删除要拒它）
+  assert.equal(rows.get('session-sub')!['live'], true)
+  assert.equal(rows.get('session-blank')!['live'], false)
+  // 宿主没给归档能力位时按"改不了"（界面据此禁用按钮）
+  assert.equal(body['archiveAvailable'], false)
+})
+
+test('GET /state：注入归档端口后 archiveAvailable 为 true', async () => {
+  const sandbox = makeSandbox('web-state-archive-flag')
+  const handlers = createApiHandlers(
+    deps(sandbox, { registryOps: () => ({ archive: async () => {}, unarchive: async () => {} }) }),
+  )
+  const { res, captured } = fakeRes()
+  await handlers['GET /state']!(fakeReq('GET', `${API_PREFIX}/state`), res)
+  assert.equal(json(captured)['archiveAvailable'], true)
+})
+
+test('POST /delete：预演不写盘、落地先备份再删，二者共用同一份计划', async () => {
+  const sandbox = makeSandbox('web-delete')
+  const dir = sessionDir(sandbox.sessionsRoot, CWD_A, 'session-a')
+  writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000, { title: '不要了的会话' })
+
+  const handlers = createApiHandlers(deps(sandbox))
+  const post = async (body: unknown): Promise<Captured> => {
+    const { res, captured } = fakeRes()
+    await handlers['POST /delete']!(fakeReq('POST', `${API_PREFIX}/delete`, Buffer.from(JSON.stringify(body))), res)
+    return captured
+  }
+
+  const planned = await post({ sessionIds: ['session-a'], mode: 'plan' })
+  assert.equal(planned.status, 200)
+  const planBody = json(planned)
+  assert.equal(planBody['mode'], 'plan')
+  assert.equal(planBody['applied'], false)
+  const preview = planBody['preview'] as Record<string, unknown>
+  assert.deepEqual((preview['entries'] as Array<Record<string, unknown>>).map((entry) => entry['id']), ['session-a'])
+  assert.equal((preview['entries'] as Array<Record<string, unknown>>)[0]!['title'], '不要了的会话')
+  assert.equal((preview['entries'] as Array<Record<string, unknown>>)[0]!['dir'], dir)
+  assert.equal(existsSync(dir), true, '预演不许动磁盘')
+
+  const applied = await post({ sessionIds: ['session-a'], mode: 'apply' })
+  assert.equal(applied.status, 200)
+  const applyBody = json(applied)
+  assert.equal(applyBody['applied'], true)
+  assert.equal(applyBody['verified'], true)
+  assert.match(String(applyBody['summary']), /已删除 1 个会话/)
+  assert.equal(typeof applyBody['backupDir'], 'string')
+  assert.equal(existsSync(dir), false, '落地之后会话目录该没了')
+  // 备份落在本插件的备份根下（「备份与回滚」那张卡读的就是它）
+  assert.equal(existsSync(applyBody['backupDir'] as string), true)
+})
+
+test('POST /delete：状态不允许（会话不在库里）用 409 并把完整计划带回来', async () => {
+  const sandbox = makeSandbox('web-delete-guard')
+  const handlers = createApiHandlers(deps(sandbox))
+
+  const { res, captured } = fakeRes()
+  await handlers['POST /delete']!(
+    fakeReq('POST', `${API_PREFIX}/delete`, Buffer.from(JSON.stringify({ sessionIds: ['session-ghost'], mode: 'apply' }))),
+    res,
+  )
+  assert.equal(captured.status, 409)
+  const body = json(captured)
+  assert.equal(body['ok'], false)
+  assert.equal((body['preview'] as Record<string, unknown>)['ok'], false)
+  assert.match(String((body['problems'] as string[]).join('\n')), /不在库里/)
+
+  // 空选择是"参数说不清"，走 400
+  const empty = fakeRes()
+  await handlers['POST /delete']!(
+    fakeReq('POST', `${API_PREFIX}/delete`, Buffer.from(JSON.stringify({ sessionIds: [] }))),
+    empty.res,
+  )
+  assert.equal(empty.captured.status, 400)
+})
+
+test('POST /archive：逐条调用宿主服务，部分失败不影响其余，并把失败原因摆出来', async () => {
+  const sandbox = makeSandbox('web-archive')
+  const calls: Array<{ op: string; id: string }> = []
+  const handlers = createApiHandlers(
+    deps(sandbox, {
+      registryOps: () => ({
+        archive: async (id: string) => {
+          calls.push({ op: 'archive', id })
+          if (id === 'session-busy') throw new Error('cannot archive session: the session is active (turn)')
+        },
+        unarchive: async (id: string) => {
+          calls.push({ op: 'unarchive', id })
+        },
+      }),
+    }),
+  )
+
+  const post = async (body: unknown): Promise<Captured> => {
+    const { res, captured } = fakeRes()
+    await handlers['POST /archive']!(fakeReq('POST', `${API_PREFIX}/archive`, Buffer.from(JSON.stringify(body))), res)
+    return captured
+  }
+
+  const done = await post({ sessionIds: ['session-a', 'session-busy'], archived: true })
+  assert.deepEqual(calls, [
+    { op: 'archive', id: 'session-a' },
+    { op: 'archive', id: 'session-busy' },
+  ])
+  // 一条被宿主拒了：整体报 409，但成功的那条与失败的原因都在正文里
+  assert.equal(done.status, 409)
+  const body = json(done)
+  assert.equal(body['ok'], false)
+  assert.deepEqual(body['archived'], ['session-a'])
+  assert.deepEqual(body['failed'], [
+    { id: 'session-busy', error: 'cannot archive session: the session is active (turn)' },
+  ])
+  assert.equal(body['takesEffect'], 'immediate')
+
+  const undone = await post({ sessionIds: ['session-a'], archived: false })
+  assert.equal(undone.status, 200)
+  assert.equal(json(undone)['ok'], true)
+  assert.deepEqual(calls[calls.length - 1], { op: 'unarchive', id: 'session-a' })
+})
+
+test('POST /archive：宿主没有 workspaceRegistry 时如实拒绝（不绕过去写注册表文件）', async () => {
+  const sandbox = makeSandbox('web-archive-unavailable')
+  const handlers = createApiHandlers(deps(sandbox))
+  const { res, captured } = fakeRes()
+  await handlers['POST /archive']!(
+    fakeReq('POST', `${API_PREFIX}/archive`, Buffer.from(JSON.stringify({ sessionIds: ['session-a'] }))),
+    res,
+  )
+  assert.equal(captured.status, 409)
+  assert.match(String(json(captured)['error']), /workspaceRegistry/)
+})
+
+test('POST /rollback：删除备份走恢复（注册表不动），迁移备份照旧还原注册表', async () => {
+  const sandbox = makeSandbox('web-rollback-delete')
+  writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000)
+  const handlers = createApiHandlers(deps(sandbox))
+
+  const created = fakeRes()
+  await handlers['POST /delete']!(
+    fakeReq('POST', `${API_PREFIX}/delete`, Buffer.from(JSON.stringify({ sessionIds: ['session-a'], mode: 'apply' }))),
+    created.res,
+  )
+  const backupDir = json(created.captured)['backupDir'] as string
+
+  // 备份列表要能看出这份是"删除"留下的（界面据此把按钮写成「恢复」）
+  const listed = fakeRes()
+  await handlers['GET /backups']!(fakeReq('GET', `${API_PREFIX}/backups`), listed.res)
+  const backups = json(listed.captured)['backups'] as Array<Record<string, unknown>>
+  assert.equal(backups.find((backup) => backup['dir'] === backupDir)!['kind'], 'delete')
+
+  const rolled = fakeRes()
+  await handlers['POST /rollback']!(
+    fakeReq('POST', `${API_PREFIX}/rollback`, Buffer.from(JSON.stringify({ backupDir }))),
+    rolled.res,
+  )
+  assert.equal(rolled.captured.status, 200)
+  const outcome = json(rolled.captured)
+  assert.equal(outcome['registryRestored'], false)
+  assert.equal(existsSync(sessionDir(sandbox.sessionsRoot, CWD_A, 'session-a')), true)
 })

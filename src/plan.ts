@@ -6,11 +6,12 @@ import { existsSync, readFileSync, statSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
 import { planArtifactMoves } from './artifacts.ts'
-import { projectDirOf, scanAll, scanProjectDir } from './discovery.ts'
+import { projectDirOf, scanAll, scanProjectDir, type DiscoveredSession } from './discovery.ts'
 import { projectKey } from './project-key.ts'
 import { reHome, validateRegistry } from './registry.ts'
 import type { TitleQuery } from './session-title.ts'
 import type { DecodeAll, RelocationPlan, SessionMove, WorkspaceRegistryState } from './types.ts'
+import { hiddenReasonOf, type HiddenReason } from './visibility.ts'
 
 /** `buildRelocationPlan()` 的选项。 */
 export interface BuildPlanOptions {
@@ -45,6 +46,13 @@ export interface BuildPlanOptions {
    * 缺席 = 这次计划不要标题（工具层只报数量，不需要），因此发现阶段一分钱都不多花。
    */
   resolveTitle?: (query: TitleQuery) => string | undefined
+  /**
+   * 读"宿主判这条会话空白吗"（可选，见 visibility.ts）。
+   *
+   * 缺席 = 这次不判空白（按"显示"处理）。**有它才会**把空白会话排除在候选之外，理由见下面
+   * `hiddenOf()` 的说明：这一层的候选必须与外壳侧边栏显示的那些对齐。
+   */
+  resolveBlank?: (query: { id: string; createdAt: number; cwd?: string }) => boolean | undefined
 }
 
 /**
@@ -64,6 +72,7 @@ export function buildRelocationPlan(options: BuildPlanOptions): RelocationPlan {
     includeUnowned = true,
     includeArtifacts = false,
     resolveTitle,
+    resolveBlank,
   } = options
   const from = (options.from ?? '').trim()
   const problems: string[] = []
@@ -115,16 +124,37 @@ export function buildRelocationPlan(options: BuildPlanOptions): RelocationPlan {
     for (const sid of rec.sessionIds) owned.add(sid)
   }
 
-  let discovered: ReturnType<typeof scanProjectDir> = []
+  // 侧边栏看不见的那三类（子代理 / 空白 / 已归档）不进候选：迁移列表的范围必须与"用户在外壳里
+  // 看得见的那批"对齐，否则面板报的条数与侧边栏不一致，而这个来源里也没有任何东西能解释差额
+  // （判据与理由都在 visibility.ts）。要搬一条已归档的会话，先去「会话」页取消归档。
+  const archived = new Set<string>(registry?.global?.archivedSessionIds ?? [])
+  const hiddenOf = (session: DiscoveredSession): HiddenReason | undefined =>
+    hiddenReasonOf(session, {
+      archived,
+      ...(resolveBlank === undefined ? {} : { resolveBlank }),
+    })
+  /** 源里**因为侧边栏不显示**而没进候选的会话：点名点到它们时，问题说明要比"找不到"准确得多。 */
+  const hiddenInSource = new Map<string, HiddenReason>()
+  const splitHidden = (all: DiscoveredSession[]): DiscoveredSession[] =>
+    all.filter((session) => {
+      const reason = hiddenOf(session)
+      if (reason === undefined) return true
+      hiddenInSource.set(session.id, reason)
+      return false
+    })
+
+  let discovered: DiscoveredSession[] = []
   if (unowned) {
     // 未分组来源：整个库里"谁都没认领"的那些。没有 `cwd` 的排除在外——`relocateHeaderCwd()`
     // 明确拒绝改写一个没有 cwd 的 header（session-log.ts），所以它们根本搬不进来；
     // 界面上那个来源的条数与这里必须一致，于是界面也按同一条判据圈候选（planRows.unownedSessions）。
-    discovered = scanAll(root, decodeAll, resolveTitle === undefined ? {} : { resolveTitle }).filter(
-      (s) => !owned.has(s.id) && typeof s.cwd === 'string' && s.cwd !== '',
+    discovered = splitHidden(
+      scanAll(root, decodeAll, resolveTitle === undefined ? {} : { resolveTitle }).filter(
+        (s) => !owned.has(s.id) && typeof s.cwd === 'string' && s.cwd !== '',
+      ),
     )
   } else if (existsSync(sourceProjectDir)) {
-    discovered = scanProjectDir(sourceProjectDir, decodeAll, resolveTitle === undefined ? {} : { resolveTitle })
+    discovered = splitHidden(scanProjectDir(sourceProjectDir, decodeAll, resolveTitle === undefined ? {} : { resolveTitle }))
     for (const s of discovered) {
       if (s.cwd !== from) problems.push(`session ${s.id}: header cwd ${s.cwd} != ${from}`)
     }
@@ -135,11 +165,15 @@ export function buildRelocationPlan(options: BuildPlanOptions): RelocationPlan {
     for (const id of sessionIds) {
       // 点名的会话不在这次来源的候选里：直接报 problem，不静默少搬（未分组来源下，
       // "在册"或"没有 cwd"的会话就落在这里——它们不是这个来源能覆盖的东西）。
-      if (!known.has(id)) {
-        problems.push(
-          unowned ? `session ${id} is not an unowned session with a cwd` : `session ${id} not found in ${sourceProjectDir}`,
-        )
+      if (known.has(id)) continue
+      const reason = hiddenInSource.get(id)
+      if (reason !== undefined) {
+        problems.push(`session ${id} is hidden from the host sidebar (${reason}) — migration does not take it`)
+        continue
       }
+      problems.push(
+        unowned ? `session ${id} is not an unowned session with a cwd` : `session ${id} not found in ${sourceProjectDir}`,
+      )
     }
   }
 

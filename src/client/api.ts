@@ -23,6 +23,21 @@ export interface SessionSummary {
   workspaceId?: string
   bytes: number
   files: Array<{ name: string; bytes: number }>
+  /**
+   * 外壳侧边栏不显示这条会话的原因（缺省 = 会显示，见 `src/visibility.ts`）。
+   *
+   * 判据在宿主侧算一次（`/state`），界面只读结论：导出页照单全收、迁移页只收看得见的、
+   * 「会话」页把原因标出来——三处读同一个字段，不会各自算出一套。
+   */
+  hidden?: 'subagent' | 'blank' | 'archived'
+  /** 在注册表的归档集里（「会话」页据此决定按钮写「归档」还是「取消归档」）。 */
+  archived?: boolean
+  /** 宿主判它"一轮都没开始过"（见 `src/visibility.ts`）。 */
+  blank?: boolean
+  /** 日志 header 里的 `origin`（只有子代理会话会写）。 */
+  origin?: string
+  /** 宿主内存里活着（删除会拒它）。 */
+  live?: boolean
 }
 
 /** 界面上一个工作区。 */
@@ -41,6 +56,11 @@ export interface StateResponse {
    * 目录字段据此决定「浏览…」开哪一种；缺字段（旧宿主）按 `null` 处理。
    */
   pickerKind?: 'browse' | 'native' | null
+  /**
+   * 这个宿主能不能改归档（`workspaceRegistry` 在不在，只有 Web profile 才有它）；
+   * 缺字段（旧宿主）按 `false` 处理——按钮禁用比点了没反应好。
+   */
+  archiveAvailable?: boolean
   registryPath: string
   problems: string[]
   sessions: SessionSummary[]
@@ -249,6 +269,8 @@ export interface BackupSummary {
   createdAt: string
   sessions: number
   artifacts: number
+  /** 这份备份是迁移留下的还是删除留下的（老备份缺字段 = 迁移）。 */
+  kind?: 'migrate' | 'delete'
   from?: string
   to?: string
 }
@@ -313,4 +335,107 @@ export async function rollbackBackup(backupDir: string, dryRun: boolean): Promis
       body: JSON.stringify({ backupDir, dryRun }),
     }),
   )
+}
+
+// ---- 会话管理：删除 / 归档 ----
+
+/** 删除预演里的一条会话（宿主 `RemovalPlan.entries`）。 */
+export interface DeleteEntry {
+  id: string
+  /** 折叠出的标题；没有时界面显示 id。 */
+  title?: string
+  createdAt: number
+  /** 会被整个删掉的会话目录。 */
+  dir: string
+  files: Array<{ name: string; bytes: number }>
+  bytes: number
+  /** 宿主内存里活着（这种会被预演挡下，正常不会出现在条目里）。 */
+  live: boolean
+}
+
+/** 删除（预演或落地）的响应。 */
+export interface DeleteResponse {
+  mode: 'plan' | 'apply'
+  ok: boolean
+  preview: {
+    ok: boolean
+    problems: string[]
+    entries: DeleteEntry[]
+    files: number
+    bytes: number
+    /** 备份根（执行时真实落下的那一个在 `backupDir`）。 */
+    backupRoot: string
+  }
+  applied: boolean
+  dirsRemoved: number
+  removedProjectDirs: string[]
+  verified: boolean
+  backupDir?: string
+  problems: string[]
+  summary: string
+  error?: string
+}
+
+/**
+ * 删除会话（`mode: 'apply'` 才真删，且**先备份再删**）。
+ *
+ * 与 `migrate()` 同一套判据：正文里带 `preview` 的 409/500 是**结果**（计划不 ok / 复核没过），
+ * 页面必须把它摆出来；不带 `preview` 的才是异常。
+ */
+export async function deleteSessions(
+  sessionIds: readonly string[],
+  mode: 'plan' | 'apply',
+): Promise<DeleteResponse> {
+  const response = await fetch(`${API_PREFIX}/delete`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ sessionIds, mode }),
+  })
+  const text = await response.text()
+  let parsed: DeleteResponse
+  try {
+    parsed = JSON.parse(text) as DeleteResponse
+  } catch {
+    throw new Error(`HTTP ${response.status}：${text.slice(0, 200) || '空响应'}`)
+  }
+  if (parsed.preview === undefined) throw new Error(parsed.error ?? `HTTP ${response.status}`)
+  return parsed
+}
+
+/** 归档或取消归档的响应。 */
+export interface ArchiveResponse {
+  ok: boolean
+  /** 成功的那些 id。 */
+  archived: string[]
+  /** 逐条的失败原因（一条失败不影响其余）。 */
+  failed: Array<{ id: string; error: string }>
+  /** 宿主服务"落盘 + 改内存 + 广播"一次做完，所以必然即时生效。 */
+  takesEffect: 'immediate'
+  error?: string
+}
+
+/**
+ * 归档或取消归档所选会话。
+ *
+ * 走宿主能力，所以**不需要重启**；宿主不在（非 Web profile）时接口回 409 且不带 `failed`，
+ * 那时按异常抛给错误横幅（区别于"部分失败"那种要逐条摆出来的结果）。
+ */
+export async function archiveSessions(
+  sessionIds: readonly string[],
+  archived: boolean,
+): Promise<ArchiveResponse> {
+  const response = await fetch(`${API_PREFIX}/archive`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ sessionIds, archived }),
+  })
+  const text = await response.text()
+  let parsed: ArchiveResponse
+  try {
+    parsed = JSON.parse(text) as ArchiveResponse
+  } catch {
+    throw new Error(`HTTP ${response.status}：${text.slice(0, 200) || '空响应'}`)
+  }
+  if (!Array.isArray(parsed.failed)) throw new Error(parsed.error ?? `HTTP ${response.status}`)
+  return parsed
 }

@@ -36,9 +36,10 @@ const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
  * 各种表格）在冒烟里根本走不到。给了它就只替换**第一次** `useState(null)`——后面那些 null
  * 状态（错误提示、导入计划…）必须保持空，否则会渲染出不存在的数据。
  */
-function fakeReact(recorded = [], firstNull = undefined, panel = undefined) {
+function fakeReact(recorded = [], firstNull = undefined, panel = undefined, firstArray = undefined) {
   let seeded = false
   let seededPanel = false
+  let seededArray = false
   const record = (type, props) => {
     const element = { type, props: props ?? {} }
     recorded.push(element)
@@ -62,6 +63,12 @@ function fakeReact(recorded = [], firstNull = undefined, panel = undefined) {
       if (!seededPanel && value === 'transfer' && panel !== undefined) {
         seededPanel = true
         return [panel, () => {}]
+      }
+      // 勾选集：分页组件自己的第一个 `useState([])`。不给它种子，"按钮禁没禁用"就只能撞上
+      // "一条都没勾所以禁用"这条分支，断言等于没测到宿主能力那件事（见下面那个用例的注释）。
+      if (!seededArray && firstArray !== undefined && Array.isArray(value) && value.length === 0) {
+        seededArray = true
+        return [firstArray, () => {}]
       }
       return [value, () => {}]
     },
@@ -136,7 +143,7 @@ function fakeDocument(nodes) {
 }
 
 /** 按模块加载器的契约执行产物，返回工厂与其 id。 */
-function loadBundle({ firstNull, panel } = {}) {
+function loadBundle({ firstNull, panel, firstArray } = {}) {
   let entry = null
   const nodes = []
   const sandbox = {
@@ -147,7 +154,7 @@ function loadBundle({ firstNull, panel } = {}) {
   vm.runInNewContext(code, sandbox, { filename: 'lib/client.js' })
   assert.ok(entry !== null, '产物必须以 window.__ModuleLoader__.load({ id, factory }) 报名')
   const recorded = []
-  const react = fakeReact(recorded, firstNull, panel)
+  const react = fakeReact(recorded, firstNull, panel, firstArray)
   const mod = entry.factory((specifier) => {
     if (specifier === 'react') return react
     if (specifier === 'react/jsx-runtime') {
@@ -199,8 +206,8 @@ test('客户端产物：导出面符合客户端插件契约', { skip }, () => {
 })
 
 /** 跑一次 apply，收下所有注册面（后面几个用例共用）。 */
-function mount({ translate, state, panel } = {}) {
-  const { mod, nodes, recorded } = loadBundle({ firstNull: state, panel })
+function mount({ translate, state, panel, selection } = {}) {
+  const { mod, nodes, recorded } = loadBundle({ firstNull: state, panel, firstArray: selection })
   const registrations = []
   const dictionaries = []
   const effects = []
@@ -325,7 +332,7 @@ test('客户端产物：导航行的文案跟着语言走（同一个 thunk 每�
   assert.equal(label(), 'Session management')
 })
 
-test('客户端产物：页面骨架带着两个页内分页（导入导出 / 迁移）', { skip }, () => {
+test('客户端产物：页面骨架带着三个页内分页（导入导出 / 迁移 / 会话）', { skip }, () => {
   const { registrations } = mount()
   const { component } = registrations[0]
   const { inject } = registrations[0].registration
@@ -334,6 +341,7 @@ test('客户端产物：页面骨架带着两个页内分页（导入导出 / �
   const text = strings(element)
   assert.ok(text.includes('tabTransfer'), '页内要有「导入导出」这一页')
   assert.ok(text.includes('tabMigrate'), '页内要有「迁移」这一页')
+  assert.ok(text.includes('tabManage'), '页内要有「会话」这一页（逐条归档 / 删除）')
   assert.ok(text.includes('title'), '页面标题走同一份字典')
 })
 
@@ -521,4 +529,82 @@ test('客户端产物：导出列表按目录分组，组头就是"整组勾选"
   assert.deepEqual(tagsByLabel.get('s-2'), ['unregisteredSession'], '同目录里未登记在册的那条要单独标出来')
   assert.deepEqual(tagsByLabel.get('s-3'), ['unregisteredSession'], '没登记的工作区下的会话同样没在册')
   assert.deepEqual(tagsByLabel.get('s-4'), ['unregisteredSession'], '没有 cwd 的会话当然也不在任何登记表里')
+})
+
+// ---- 「会话」页（逐条归档 / 删除）----
+//
+// 这一页的存在理由就是"侧边栏里点不到的那些会话"（子代理 / 空白 / 已归档），所以它的验收点有两个：
+// 三类隐藏理由都摆在行上，以及归档入口遇不到宿主能力时如实禁用（而不是留一个点了报错的按钮）。
+//
+// 断言走 `recorded`（假 createElement 记下的**全部**元素）而不是走树：分页组件的根是 Fragment，
+// 树走法在 Fragment 处停住，看不见分页内部的元素（`strings()` 看得见，因为它另一个分支会下探）。
+
+test('客户端产物：「会话」页把侧边栏看不见的那三类标出来，并给出归档与删除入口', { skip }, () => {
+  const state = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    archiveAvailable: true,
+    sessions: [
+      { id: 's-1', cwd: '/home/u/dev/alpha', createdAt: 5, dir: '/home/u/dev/alpha', bytes: 2048, files: [], workspaceId: 'w1' },
+      { id: 's-2', cwd: '/home/u/dev/alpha', createdAt: 4, dir: '/home/u/dev/alpha', bytes: 1024, files: [], hidden: 'subagent' },
+      { id: 's-3', cwd: '/home/u/dev/alpha', createdAt: 3, dir: '/home/u/dev/alpha', bytes: 900, files: [], blank: true, hidden: 'blank' },
+      { id: 's-4', cwd: '/home/u/dev/beta', createdAt: 2, dir: '/home/u/dev/beta', bytes: 512, files: [], archived: true, hidden: 'archived' },
+      { id: 's-5', cwd: '/home/u/dev/beta', createdAt: 1, dir: '/home/u/dev/beta', bytes: 256, files: [], live: true },
+    ],
+    workspaces: [{ id: 'w1', path: '/home/u/dev/alpha', title: '工作区甲', sessionIds: ['s-1'] }],
+  }
+  // 勾一条（假钩子给不出点击，只能把勾选集种进去）：否则"按钮是否禁用"永远撞在"一条都没勾"上
+  const { registrations, recorded } = mount({ state, panel: 'manage', selection: ['s-1'] })
+  const { component } = registrations[0]
+  const { inject } = registrations[0].registration
+  const text = strings(component(inject()))
+
+  assert.ok(text.includes('tabManage'), '页签停在「会话」这一页')
+  assert.ok(text.includes('manageTitle') && text.includes('manageHint'), '页面本体渲染出来了')
+  // 三类隐藏理由各挂各的标签：**标签文字**是子节点，**为什么不显示**在悬浮提示里，两处都核
+  const tagged = (key, tip) => {
+    const node = recorded.find((element) => element.type === 'span' && strings(element).includes(key))
+    assert.ok(node, `缺少「${key}」这枚标签`)
+    assert.equal(node.props?.title, tip, `「${key}」要说清它为什么不显示`)
+    assert.equal(node.props?.className, 'dsm-tag dsm-tagIdle', '标签走统一的那套中性样式')
+  }
+  tagged('tagSubagent', 'tagSubagentTip')
+  tagged('tagBlank', 'tagBlankTip')
+  tagged('tagArchived', 'tagArchivedTip')
+  tagged('tagLive', 'tagLiveTip')
+  // 归属那一格：在册的写工作区路径，没在册的写「未分组」（与外壳侧边栏同一套叫法）
+  assert.ok(text.includes('ungroupedSource'), '未登记在册的会话在归属那一格写「未分组」')
+  assert.ok(text.includes('/home/u/dev/alpha'), '在册的会话在归属那一格写工作区路径')
+  // 归档与删除两组入口都在，且宿主给出归档能力时不显示那句"改不了"
+  assert.ok(text.includes('manageArchive') && text.includes('manageUnarchive'), '归档 / 取消归档入口在')
+  const actionButton = (key) =>
+    recorded.find((element) => element.type === 'button' && strings(element).includes(key))
+  assert.equal(actionButton('manageArchive')?.props?.['disabled'], false, '宿主有归档能力时按钮可用')
+  assert.ok(text.includes('manageDeletePreview') && text.includes('manageDeleteHint'), '删除入口与说明在')
+  assert.ok(!text.includes('manageArchiveUnavailable'), '宿主有归档能力时不该显示"改不了归档"那句')
+})
+
+test('客户端产物：「会话」页在宿主没有归档能力时禁用入口并说明原因', { skip }, () => {
+  const state = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    archiveAvailable: false,
+    sessions: [{ id: 's-1', cwd: '/home/u/dev/alpha', createdAt: 1, dir: '/home/u/dev/alpha', bytes: 1, files: [] }],
+    workspaces: [],
+  }
+  // 勾上一条：这样"归档按钮禁用"就只可能来自宿主没有那个能力，而不是"一条都没勾"
+  const { registrations, recorded } = mount({ state, panel: 'manage', selection: ['s-1'] })
+  const { component } = registrations[0]
+  const { inject } = registrations[0].registration
+  const text = strings(component(inject()))
+  assert.ok(text.includes('manageArchiveUnavailable'), '要说清为什么归档按钮不可用')
+
+  const button = (key) =>
+    recorded.find((element) => element.type === 'button' && strings(element).includes(key))
+  assert.equal(button('manageArchive')?.props?.['disabled'], true, '没有归档能力时归档按钮要真的禁用')
+  assert.equal(button('manageUnarchive')?.props?.['disabled'], true, '取消归档同理')
+  // 删除不依赖宿主的归档服务，所以入口照旧在（空选择下它也禁用，但那是另一条理由，界面上另有说明）
+  assert.ok(button('manageDeletePreview'), '删除入口照旧在')
 })

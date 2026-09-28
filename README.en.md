@@ -19,7 +19,7 @@ first and rolled back byte-for-byte afterwards. (Why it has to work that way:
 
 | Entry point | Good for |
 |---|---|
-| The **Session management** page in Settings | Everyday use: tick sessions to export / import, pick a source (a directory or Ungrouped) from a dropdown to migrate, preview, confirm, roll back |
+| The **Session management** page in Settings | Everyday use: tick sessions to export / import; pick a source (a directory or Ungrouped) from a dropdown to migrate; archive or delete single sessions on the **Sessions** tab |
 | 4 model tools | Just say "move this workspace's sessions to `~/dev/xxx`" and let the model preview first, apply second |
 
 Both share one migration implementation, so the count a preview reports is the count you get.
@@ -58,7 +58,10 @@ one-line bump at that point.
 
 - Rows show a session's **title**, with the full title and the id on hover: a uuid tells a human nothing,
   and people pick sessions by "the one where I asked about that"; a session with no title falls back to
-  its id;
+  its id. Both the export list and the **Sessions** tab take the whole library, sidebar-hidden sessions
+  (subagent / blank / archived) included — whether a session is worth taking away or deleting is the
+  user's call, and hiding one up front only turns "I know I have that session" into a mystery. Migration
+  is the other way round (see below);
 - **Export**: tick sessions → the browser downloads one `.dshsess` bundle. The bundle carries the raw
   bytes of **every generation** of those logs (each with a sha256), not files the session created. The
   list is **grouped by directory** (group name = workspace title; a directory no workspace registers shows
@@ -91,6 +94,10 @@ one-line bump at that point.
 - **move the whole source, or only some of it**: the sessions of the source are listed
   (titles too, ids on hover; under a directory source the unclaimed rows carry a "not registered" tag), and
   ticking any row switches to "only the ticked ones"; one source per run;
+- **candidates line up with the host sidebar**: subagent sessions (nested under their parent), blank
+  sessions (never started a turn) and archived sessions are never candidates — a session the sidebar
+  cannot show should not be swept along by accident. Naming one of them explicitly makes the preview say
+  it is hidden instead of vaguely claiming it was not found;
 - **Preview**: session, log and byte counts, source → target project directory, **how the registry changes** (create or
   reuse the target workspace, how many sessions are added, which workspaces lose them, whether an emptied
   workspace is removed), the artifact plan and its skip reasons;
@@ -99,10 +106,28 @@ one-line bump at that point.
   a byte-level backup. Afterwards the page tells you whether the change took effect immediately or
   **requires a DSH restart**.
 
-**Backups & rollback** — below the migrate tab, every backup this plugin wrote (time, session count,
-source → target), with the **rollback steps** shown before you confirm. Rollback restores the session
-directories, the log bytes and the workspace registry together (and removes the emptied target project
-directory, symmetric with the migration cleaning up an emptied source project directory).
+**Backups & rollback** — below the migrate tab, every backup this plugin wrote (time, **migration** or
+**delete**, session count, source → target), with the steps shown before you confirm. A migration backup
+offers **Roll back**: it restores the session directories, the log bytes and the workspace registry
+together (and removes the emptied target project directory, symmetric with the migration cleaning up an
+emptied source project directory). A delete backup offers **Restore**: it only moves the session
+directories back — deleting never touched the registry.
+
+**Sessions** — manage the whole library row by row
+
+- Every row shows the title, its owner (a workspace path, or "Ungrouped" when no workspace claims it),
+  the byte count and the creation time. Sessions the host sidebar cannot show **are listed here** (the
+  sidebar cannot reach them), each carrying a tag saying why: `subagent` / `blank` / `archived`, plus
+  `active` for a session still live in host memory;
+- **Archive / Unarchive**: tick rows and put them away or bring them back in one click. It goes through
+  the host's own archiving capability and takes effect **immediately** — the sidebar follows right away,
+  no restart. On a host without that service (non-Web profiles) the buttons are disabled and the page
+  says why;
+- **Delete**: tick rows → **preview** (every session that would go, the file count, where the backup
+  lands) → then confirm. Deleting **backs the session directory up into this plugin's backup root
+  first**, then removes it; the sidebar drops those rows once the host rescans. A session still live in
+  host memory is refused — close it in the host first. Changed your mind? Restore it from
+  **Backups & rollback**.
 
 A host without the `webServer` service (tools-only front ends) still loads the plugin — the page simply
 does not appear.

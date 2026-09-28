@@ -1,10 +1,10 @@
 /**
- * 「会话管理」页的骨架：一条标题行 + 页内分页，把两件事收在同一页里。
+ * 「会话管理」页的骨架：一条标题行 + 页内分页，把三件事收在同一页里。
  *
- * 为什么是页内分页而不是两个设置分节：导出/导入与迁移都是"对着同一个会话库做一件事"，共用一份
- * 库状态（`/state` 只拉一次）、共用一句"库在哪、有多少条"的说明，分开成两页反而每次都要重新
- * 认一遍上下文。页面本体分别是 [TransferPanel.tsx](./TransferPanel.tsx) 与
- * [MigrationPanel.tsx](./MigrationPanel.tsx)。
+ * 为什么是页内分页而不是三个设置分节：导出/导入、迁移、逐条管理都是"对着同一个会话库做一件事"，
+ * 共用一份库状态（`/state` 只拉一次）、共用一句"库在哪、有多少条"的说明，分开成三页反而每次都要
+ * 重新认一遍上下文。页面本体分别是 [TransferPanel.tsx](./TransferPanel.tsx)、
+ * [MigrationPanel.tsx](./MigrationPanel.tsx) 与 [ManagePanel.tsx](./ManagePanel.tsx)。
  *
  * 分页切换会**卸载**另一个分页：本地草稿（勾选、预演结果）随之清掉。这是有意的——一个预演结果
  * 不该在切走再切回来之后还留着，让人以为它还是刚刚算出来的那份。
@@ -17,6 +17,7 @@ import * as React from 'react'
 import { fetchState, type StateResponse } from './api.ts'
 import type { DirectoryApi } from './directory.ts'
 import { translateWith, zh, type Translate } from './locales.ts'
+import { ManagePanel } from './ManagePanel.tsx'
 import { MigrationPanel } from './MigrationPanel.tsx'
 import { TransferPanel } from './TransferPanel.tsx'
 
@@ -35,7 +36,7 @@ export interface ManagerPanelProps {
 const fallback = translateWith(zh as unknown as Record<string, string>)
 
 /** 页内分页。 */
-type PanelKey = 'transfer' | 'migrate'
+type PanelKey = 'transfer' | 'migrate' | 'manage'
 
 /** 会话管理页。 */
 export function ManagerPanel({ t = fallback, directory }: ManagerPanelProps): React.ReactElement {
@@ -112,13 +113,20 @@ export function ManagerPanel({ t = fallback, directory }: ManagerPanelProps): Re
         >
           {t('tabMigrate')}
         </button>
+        <button
+          type="button"
+          role="tab"
+          className="dsm-tab"
+          aria-selected={panel === 'manage'}
+          onClick={() => setPanel('manage')}
+        >
+          {t('tabManage')}
+        </button>
       </div>
 
-      {panel === 'transfer' ? (
-        <TransferPanel t={t} state={state} reload={load} />
-      ) : (
-        <MigrationPanel t={t} state={state} reload={load} directory={directory} />
-      )}
+      {panel === 'transfer' && <TransferPanel t={t} state={state} reload={load} />}
+      {panel === 'migrate' && <MigrationPanel t={t} state={state} reload={load} directory={directory} />}
+      {panel === 'manage' && <ManagePanel t={t} state={state} reload={load} />}
     </section>
   )
 }

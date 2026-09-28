@@ -15,8 +15,10 @@ import { decompress } from 'fzstd'
 import { projectKey } from '../src/project-key.ts'
 import { readRegistry } from '../src/registry.ts'
 import {
+  archiveOps,
   directoryPickerKind,
   effectMode,
+  liveSessionIds,
   registerTools,
   type MigrateToolResult,
   type PlanToolResult,
@@ -332,4 +334,50 @@ test('工具渲染：render 返回原生内容块', async () => {
   assert.ok(blocks[0]?.text.includes('迁移'))
 
   rmSync(sb.base, { recursive: true, force: true })
+})
+
+test('归档端口：服务在且形状对就交出去，缺席/形状不认时给 undefined（界面据此禁用按钮）', async () => {
+  const host = new Context()
+  await startSibling(host, 'tools', { register: (): (() => void) => () => {} })
+
+  // 只有一半能力（缺 unarchiveSession）＝形状不认，不能交付：交付了界面就会显示一个点了报错的按钮。
+  await startSibling(host, 'workspaceRegistry', { archiveSession: (): void => {} })
+  const half = host.plugin({ name: 'half', inject: ['tools'], apply: (ctx: Context) => {} })
+  await half.await()
+  assert.equal(archiveOps(half.ctx), undefined)
+
+  // 两位都在：交出去的端口要真的把调用转给宿主服务（这里拿它当台账）。
+  const calls: string[] = []
+  const host2 = new Context()
+  await startSibling(host2, 'tools', { register: (): (() => void) => () => {} })
+  await startSibling(host2, 'workspaceRegistry', {
+    archiveSession: (id: string) => { calls.push(`archive:${id}`) },
+    unarchiveSession: (id: string) => { calls.push(`unarchive:${id}`) },
+  })
+  const fiber = host2.plugin({ name: 'full', inject: ['tools'], apply: (ctx: Context) => {} })
+  await fiber.await()
+  const ops = archiveOps(fiber.ctx)
+  assert.ok(ops, '两位都在时该交付')
+  await ops.archive('session-a')
+  await ops.unarchive('session-b')
+  assert.deepEqual(calls, ['archive:session-a', 'unarchive:session-b'])
+
+  // 形状完全不认识时也不许抛（`/state` 会读它）。
+  assert.equal(archiveOps({}), undefined)
+  assert.equal(archiveOps(undefined), undefined)
+  assert.equal(archiveOps({ get: () => ({ archiveSession: 'not a function' }) }), undefined)
+})
+
+test('活着的会话：读宿主内存 store 的 id；没有那个服务时按空集（判断不了，不是"都不活着"）', async () => {
+  const host = new Context()
+  await startSibling(host, 'tools', { register: (): (() => void) => () => {} })
+  await startSibling(host, 'sessions', { list: () => [{ id: 'session-live' }, { id: 'session-open' }, {}] })
+  const fiber = host.plugin({ name: 'live', inject: ['tools'], apply: (ctx: Context) => {} })
+  await fiber.await()
+
+  assert.deepEqual([...liveSessionIds(fiber.ctx)].sort(), ['session-live', 'session-open'])
+  // 服务缺席 / ctx 形状不对 / list 抛错：一律空集——删除那条路径不该因为读不到内存 store 就整个打挂。
+  assert.equal(liveSessionIds({}).size, 0)
+  assert.equal(liveSessionIds(undefined).size, 0)
+  assert.equal(liveSessionIds({ get: () => ({ list: () => { throw new Error('store 还没装好') } }) }).size, 0)
 })

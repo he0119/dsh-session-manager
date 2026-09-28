@@ -19,10 +19,9 @@
 // 只认字段**形状**、不认版本号。宿主要哪天换了格式，这里自然读不到而回落到日志，页面不受影响。
 //
 // @module dsh-session-manager/session-title
-import { closeSync, fstatSync, openSync, readFileSync, readSync } from 'node:fs'
-import { join } from 'node:path'
+import { closeSync, fstatSync, openSync, readSync } from 'node:fs'
 
-import { encodeSegment } from './paths.ts'
+import { readProjectionCache } from './projection-cache.ts'
 import type { DecodeAll } from './types.ts'
 import { ZSTD_MAGIC } from './zstd-frame.ts'
 
@@ -166,38 +165,17 @@ export function readLogTitle(
 /**
  * 从宿主的投影缓存记录里读标题。
  *
- * 只认形状：`{ record: { identity: { createdAt, cwd }, rows: { title: { val } } } }`。identity 必须与
- * 磁盘上这条会话对得上（createdAt + cwd）——id 相同但属于另一条生命周期的记录（删了重建、缓存残留）
- * 会被这份校验挡掉，宁可不给标题，也不显示别人的标题。
+ * 文件格式、身份校验与坏数据兜底都在 projection-cache.ts（那边同时给 visibility.ts 读空白判据）：
+ * 只认形状 `{ record: { identity: { createdAt, cwd }, rows: { title: { val } } } }`，identity 必须与
+ * 磁盘上这条会话对得上——id 相同但属于另一条生命周期的记录（删了重建、缓存残留）会被挡掉，
+ * 宁可不给标题，也不显示别人的标题。
  *
  * @param cacheDir 缓存目录（见 paths.projectionCacheDir）。
  * @param query 会话身份。
  * @returns 标题，或 undefined（文件不在、格式不认识、身份对不上）。
  */
 export function readCachedTitle(cacheDir: string, query: { id: string; createdAt: number; cwd?: string }): string | undefined {
-  let raw: string
-  try {
-    raw = readFileSync(join(cacheDir, `${encodeSegment(query.id)}.json`), 'utf8')
-  } catch {
-    return undefined
-  }
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(raw)
-  } catch {
-    return undefined
-  }
-  const record = (parsed as { record?: unknown } | null)?.record as
-    | { identity?: { createdAt?: unknown; cwd?: unknown }; rows?: { title?: { val?: unknown } } }
-    | undefined
-  const identity = record?.identity
-  if (identity === undefined || identity === null || typeof identity !== 'object') return undefined
-  if (identity.createdAt !== query.createdAt) return undefined
-  if ((identity.cwd ?? undefined) !== (query.cwd ?? undefined)) return undefined
-  const value = record?.rows?.title?.val
-  if (typeof value !== 'string') return undefined
-  const title = value.trim()
-  return title === '' ? undefined : title
+  return readProjectionCache(cacheDir, query)?.title
 }
 
 /** `createTitleResolver()` 的入参。 */
