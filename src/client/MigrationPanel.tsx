@@ -24,41 +24,29 @@ import {
   type MigrationRequest,
   type MigrationResponse,
 } from './api.ts'
+import {
+  SessionFilterBar,
+  SessionListBox,
+  SessionListEmpty,
+  SessionRow,
+  formatBytes,
+  formatStamp,
+  useSessionFilter,
+} from './sessionList.tsx'
 import { translateWith, zh, type Translate } from './locales.ts'
 import { DirectoryPicker } from './DirectoryPicker.tsx'
 import { normalizePickedPath } from './directory.ts'
-import { SessionIcon } from './icons.tsx'
 import {
   UNOWNED_SOURCE,
   migrationMatching,
   migrationSourceRows,
   optionLabel,
-  sessionLabel,
   type PathRow,
 } from './planRows.ts'
 import type { PanelShare } from './types.ts'
 
 /** 没有注入面时的兜底翻译。 */
 const fallback = translateWith(zh as unknown as Record<string, string>)
-
-function formatBytes(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes < 0) return '—'
-  const units = ['B', 'KB', 'MB', 'GB']
-  let value = bytes
-  let unit = 0
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024
-    unit++
-  }
-  return `${unit === 0 ? value : value.toFixed(1)} ${units[unit]}`
-}
-
-function formatTime(value: string): string {
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  const pad = (n: number): string => String(n).padStart(2, '0')
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`
-}
 
 /** 会话选择：全部，或从匹配到的会话里勾几条。 */
 type PickMode = 'all' | 'subset'
@@ -212,6 +200,15 @@ export function MigrationPanel({ t = fallback, state, reload, directory }: Panel
   // 判据与宿主侧完全同一条（见 planRows.unownedSessions）。
   const matching = React.useMemo(() => migrationMatching(sessions, from), [sessions, from])
 
+  /**
+   * 筛选：这一页**只给搜索框**，不给类别芯片。
+   *
+   * 列表里那些本来就是"侧边栏看得见的候选"（`migrationMatching` 已经排掉了隐藏会话），子代理 / 空白 /
+   * 已归档三类在这一页永远是 0——摆出来只会让人以为筛选坏了。搜索按标题或 id 找那几条要搬的。
+   */
+  const filter = useSessionFilter(matching)
+  const listed = React.useMemo(() => matching.filter(filter.matches), [matching, filter.matches])
+
   /** 当前来源是不是那个跨目录的「未分组」。 */
   const unownedSource = from === UNOWNED_SOURCE
 
@@ -259,7 +256,7 @@ export function MigrationPanel({ t = fallback, state, reload, directory }: Panel
    * 请求体：全部（或匹配不到）时 `sessionIds` 传 null，让宿主按源的实际内容迁移。
    *
    * 「未分组」来源在这里翻译：`from` 传空串、`unowned: true`（哨兵值只活在界面里）。
-   * 那个来源下的会话**全是**未登记在册的，所以"连同未登记在册的会话"这个开关对它没有意义，
+   * 那个来源下的会话**全是**没在册的，所以"连同未分组的会话"这个开关对它没有意义，
    * 一律按 true 发（复选框在这个来源下也不显示）；产物搬迁同理不发（跨目录时宿主会拒）。
    */
   const request = (mode: 'plan' | 'apply'): MigrationRequest => ({
@@ -501,7 +498,7 @@ export function MigrationPanel({ t = fallback, state, reload, directory }: Panel
 
         {/*
           「未分组」来源下这两个开关都没有意义，所以不显示（而不是显示成"能点但没用"）：
-          那批会话本来就全是未登记在册的，而产物搬迁要一个"源目录"作基准、跨目录的源给不出来。
+          那批会话本来就全都没在册，而产物搬迁要一个"源目录"作基准、跨目录的源给不出来。
           请求里照样按 true / false 发（见 request()），于是界面上看不见的东西也不会改变行为。
         */}
         {unownedSource ? (
@@ -540,6 +537,7 @@ export function MigrationPanel({ t = fallback, state, reload, directory }: Panel
 
         {matching.length > 0 && (
           <>
+            <SessionFilterBar keys={[]} filter={filter} t={t} />
             <div className="dsm-options">
               <span className="dsm-hint">{pickMode === 'all' ? t('pickTickHint') : t('pickSubsetHint')}</span>
               {pickMode === 'subset' && (
@@ -554,45 +552,27 @@ export function MigrationPanel({ t = fallback, state, reload, directory }: Panel
                 </>
               )}
             </div>
-            <div className="dsm-list">
-              {matching.map((session) => {
-                // 与传输页同一套口径：显示标题、id 退到悬浮提示（见 planRows.sessionLabel）。
-                const label = sessionLabel(session)
-                return (
-                  <label key={session.id} className="dsm-row dsm-rowPick">
-                    <input
-                      type="checkbox"
-                      checked={pickMode === 'subset' && picked.includes(session.id)}
-                      onChange={() => {
-                        // 在「全部」下勾某一条 = 我指的就是这一条：顺势切到子集，不要求用户先改单选框
-                        if (pickMode === 'all') setPickMode('subset')
-                        setPicked((current) =>
-                          current.includes(session.id) ? current.filter((id) => id !== session.id) : [...current, session.id],
-                        )
-                      }}
-                    />
-                    <SessionIcon />
-                    {/*
-                      目录来源下，同一个目录里混着"在册"和"没在册"的会话（真实库就是这样），
-                      而没在册的那批正是「未分组」来源能整批带走的东西，所以逐行标出来；切到
-                      「未分组」来源时每一行都不在册，标了等于没标，于是不标。
-                    */}
-                    <span className="dsm-rowLabel">
-                      <span className={label.kind === 'title' ? 'dsm-rowTitle' : 'dsm-rowId'} title={label.tip}>
-                        {label.text}
-                      </span>
-                      {!unownedSource && session.workspaceId === undefined && (
-                        <span className="dsm-tag dsm-tagIdle" title={t('unregisteredSessionTip')}>
-                          {t('unregisteredSession')}
-                        </span>
-                      )}
-                    </span>
-                    <span className="dsm-meta">{formatBytes(session.bytes)}</span>
-                    <span className="dsm-meta">{formatTime(new Date(session.createdAt).toISOString())}</span>
-                  </label>
-                )
-              })}
-            </div>
+            <SessionListBox fixed>
+              {listed.length === 0 && <SessionListEmpty text={t('noMatch')} />}
+              {listed.map((session) => (
+                <SessionRow
+                  key={session.id}
+                  session={session}
+                  variant="pick"
+                  checked={pickMode === 'subset' && picked.includes(session.id)}
+                  onToggle={() => {
+                    // 在「全部」下勾某一条 = 我指的就是这一条：顺势切到子集，不要求用户先改单选框
+                    if (pickMode === 'all') setPickMode('subset')
+                    setPicked((current) =>
+                      current.includes(session.id) ? current.filter((id) => id !== session.id) : [...current, session.id],
+                    )
+                  }}
+                  // 切到「未分组」来源时每一行都不在册，标了等于没标，于是不挂这枚标签。
+                  ungroupedTag={!unownedSource}
+                  t={t}
+                />
+              ))}
+            </SessionListBox>
           </>
         )}
 
@@ -710,7 +690,7 @@ export function MigrationPanel({ t = fallback, state, reload, directory }: Panel
               <div key={backup.dir} className="dsm-backupRow">
                 <div className="dsm-backupMain">
                   <span className="dsm-rowId">
-                    {formatTime(backup.createdAt)}
+                    {formatStamp(backup.createdAt)}
                     {/* 这份备份是迁移留下的还是删除留下的：删除的那份点「恢复」，迁移的那份点「回滚」。 */}
                     <span className="dsm-tag dsm-tagIdle">
                       {backup.kind === 'delete' ? t('backupKindDelete') : t('backupKindMigrate')}

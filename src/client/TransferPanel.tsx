@@ -8,7 +8,8 @@
  *   - 导入：选包 + 选目标工作区 → **预演** → 看清 create/skip 与 cwd 改写 → 确认落盘。
  *
  * 会话库数据由页面骨架（[ManagerPanel.tsx](./ManagerPanel.tsx)）拉好传进来：切分页不该各拉一份，
- * 也不该出现"两个分页对同一个库给出不同数字"。
+ * 也不该出现"两个分页对同一个库给出不同数字"。列表行、组头、列表框与筛选条都出自
+ * [sessionList.tsx](./sessionList.tsx)——三个分页的行是同一套解剖结构。
  *
  * 样式只在 [styles.ts](./styles.ts) 里定义，颜色只用 `--dsw-alias-*` 主题 token；
  * 控件是手写的原生元素，**不 require 宿主的 UI 原语包**——那份包会随时改，而它一抛异常就会让
@@ -21,9 +22,19 @@ import * as React from 'react'
 
 import { download, exportSessions, importBundle, type ImportResponse } from './api.ts'
 import type { ImportEntry, SessionSummary } from './api.ts'
-import { groupSessions, type SessionGroup } from './groups.ts'
-import { SessionIcon, WorkspaceIcon } from './icons.tsx'
+import { groupSessions } from './groups.ts'
 import { describeCwd, sessionLabel } from './planRows.ts'
+import { FILTER_KEYS } from './sessionFilter.ts'
+import {
+  SessionFilterBar,
+  SessionGroupHead,
+  SessionListBox,
+  SessionListEmpty,
+  SessionRow,
+  formatBytes,
+  totalBytes,
+  useSessionFilter,
+} from './sessionList.tsx'
 import { translateWith, zh, type Translate } from './locales.ts'
 import type { PanelShare } from './types.ts'
 
@@ -42,63 +53,6 @@ function cwdText(entry: ImportEntry, t: Translate): string {
   return t('cwdRewritten', { from: plan.from, to: plan.to })
 }
 
-function formatBytes(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes < 0) return '—'
-  const units = ['B', 'KB', 'MB', 'GB']
-  let value = bytes
-  let unit = 0
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024
-    unit++
-  }
-  return `${unit === 0 ? value : value.toFixed(1)} ${units[unit]}`
-}
-
-function formatTime(ms: number): string {
-  if (!Number.isFinite(ms) || ms <= 0) return '—'
-  const date = new Date(ms)
-  if (Number.isNaN(date.getTime())) return '—'
-  const pad = (n: number): string => String(n).padStart(2, '0')
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`
-}
-
-const totalBytes = (entries: readonly { bytes: number }[]): number =>
-  entries.reduce((sum, entry) => sum + (Number.isFinite(entry.bytes) ? entry.bytes : 0), 0)
-
-/**
- * 组头的三态勾选框。
- *
- * `indeterminate` 不是能写进 JSX 的属性（React 明确不支持它）：它是**节点上的状态**，只能赋值，
- * 所以这里用 ref 在每次渲染后同步。少了这一步，组里勾了一部分时选框只画成"空"，
- * 用户会以为自己点的"整组勾上"没生效。
- */
-function GroupCheckbox({
-  checked,
-  indeterminate,
-  label,
-  onToggle,
-}: {
-  checked: boolean
-  indeterminate: boolean
-  label: string
-  onToggle: () => void
-}): React.ReactElement {
-  const ref = React.useRef<HTMLInputElement>(null)
-  React.useEffect(() => {
-    if (ref.current !== null) ref.current.indeterminate = indeterminate
-  }, [indeterminate, checked])
-  return (
-    <input
-      ref={ref}
-      type="checkbox"
-      checked={checked}
-      aria-label={label}
-      title={label}
-      onChange={onToggle}
-    />
-  )
-}
-
 /** 传输页。 */
 export function TransferPanel({ t = fallback, state, reload }: PanelShare): React.ReactElement {
   const [selected, setSelected] = React.useState<readonly string[]>([])
@@ -112,10 +66,23 @@ export function TransferPanel({ t = fallback, state, reload }: PanelShare): Reac
 
   const sessions = state?.sessions ?? []
   const workspaces = state?.workspaces ?? []
-  const allSelected = sessions.length > 0 && selected.length === sessions.length
+  /** 筛选条：类别芯片 + 标题搜索。这一页列的是**整个库**（隐藏会话也在），所以五类芯片都有意义。 */
+  const filter = useSessionFilter(sessions)
   // 列表按**目录**分组（不是按注册表里的工作区）：同一个目录下常有没登记在册的会话，而用户说的
   // "把这个工作区的会话带走"指的永远是这个目录。理由与边界见 groups.ts。
-  const groups = React.useMemo(() => groupSessions(sessions, workspaces), [sessions, workspaces])
+  //
+  // 筛选之后**空掉的组不画**（组头底下没有行，看着像坏了），组头报的条数也就是筛剩下的那些——
+  // 于是"整组勾选"勾的正是眼前这一组。
+  const groups = React.useMemo(
+    () =>
+      groupSessions(sessions, workspaces)
+        .map((group) => ({ group, sessions: group.sessions.filter(filter.matches) }))
+        .filter((item) => item.sessions.length > 0),
+    [sessions, workspaces, filter.matches],
+  )
+  /** 眼下列出来的那些（筛过之后，按组摊平）。 */
+  const listed = React.useMemo(() => groups.flatMap((item) => item.sessions), [groups])
+  const allSelected = listed.length > 0 && listed.every((session) => selected.includes(session.id))
 
   // 库变了（例如刚导入完）：把已经不在库里的选择摘掉，别让「已选 3」里混着不存在的会话。
   React.useEffect(() => {
@@ -132,8 +99,8 @@ export function TransferPanel({ t = fallback, state, reload }: PanelShare): Reac
    * 只勾了一部分时点一下是"补齐"，这是列表的通行手感（Gmail/GitHub 都这样）；想去掉整组，
    * 再看一眼它变成"全部勾上"之后再点一下即可。一条会话都没勾的组同理是"勾上"。
    */
-  const toggleGroup = (group: SessionGroup<SessionSummary>): void => {
-    const ids = group.sessions.map((session) => session.id)
+  const toggleGroup = (group: readonly SessionSummary[]): void => {
+    const ids = group.map((session) => session.id)
     const whole = ids.every((id) => selected.includes(id))
     setSelected((current) =>
       whole ? current.filter((id) => !ids.includes(id)) : [...new Set([...current, ...ids])],
@@ -239,12 +206,17 @@ export function TransferPanel({ t = fallback, state, reload }: PanelShare): Reac
         <div className="dsm-cardHead">
           <span className="dsm-cardTitle">{t('exportTitle')}</span>
           <span className="dsm-hint">{t('selectedCount', { count: selected.length })}</span>
+          {filter.active && (
+            <span className="dsm-hint">{t('shownCount', { shown: listed.length, total: sessions.length })}</span>
+          )}
           <span className="dsm-spacer" />
           <button
             type="button"
             className="dsm-button"
-            onClick={() => setSelected(allSelected ? [] : sessions.map((session) => session.id))}
-            disabled={sessions.length === 0}
+            // 筛过之后"全选/清空"针对的是**眼下列出来的**那些：勾选面看到什么就选什么，
+            // 已经勾上的不会因为切筛选而丢（头部一直报着"已选几条"）。
+            onClick={() => setSelected(allSelected ? [] : listed.map((session) => session.id))}
+            disabled={listed.length === 0}
           >
             {allSelected ? t('clearAll') : t('selectAll')}
           </button>
@@ -259,73 +231,46 @@ export function TransferPanel({ t = fallback, state, reload }: PanelShare): Reac
         </div>
         <p className="dsm-hint">{t('exportHint')}</p>
 
-        <div className="dsm-list">
+        {sessions.length > 0 && <SessionFilterBar keys={FILTER_KEYS} filter={filter} t={t} />}
+
+        <SessionListBox fixed>
           {sessions.length === 0 ? (
-            <p className="dsm-empty">{t('noSessions')}</p>
+            <SessionListEmpty text={t('noSessions')} />
+          ) : groups.length === 0 ? (
+            // 高度固定，空态画在框里（见 styles.ts 的 .dsm-listFixed）
+            <SessionListEmpty text={t('noMatch')} />
           ) : (
-            groups.map((group) => {
-              const ids = group.sessions.map((session) => session.id)
-              const picked = ids.filter((id) => selected.includes(id)).length
+            groups.map(({ group, sessions: shown }) => {
+              const picked = shown.filter((session) => selected.includes(session.id)).length
               // 组头的名字：登记过就用工作区标题（人认得的名字），没登记就只剩路径可显示。
               const name = group.title ?? (group.path === '' ? t('noCwdGroup') : group.path)
               return (
                 // key 用路径；没有 cwd 的那一组路径是空串，换成一个不可能撞上路径的键。
                 <div key={group.path === '' ? '\u0000no-cwd' : group.path} className="dsm-group">
-                  <label className="dsm-groupHead">
-                    <GroupCheckbox
-                      checked={picked === ids.length}
-                      indeterminate={picked > 0 && picked < ids.length}
-                      label={t('selectGroup', { name })}
-                      onToggle={() => toggleGroup(group)}
+                  <SessionGroupHead
+                    name={name}
+                    title={group.title}
+                    path={group.path}
+                    count={shown.length}
+                    picked={picked}
+                    onToggle={() => toggleGroup(shown)}
+                    t={t}
+                  />
+                  {shown.map((session) => (
+                    <SessionRow
+                      key={session.id}
+                      session={session}
+                      variant="export"
+                      checked={selected.includes(session.id)}
+                      onToggle={() => toggle(session.id)}
+                      t={t}
                     />
-                    <WorkspaceIcon />
-                    <span className="dsm-groupTitle" title={name}>{name}</span>
-                    {group.title !== undefined && <span className="dsm-groupPath" title={group.path}>{group.path}</span>}
-                    {group.title === undefined && group.path !== '' && (
-                      <span className="dsm-tag dsm-tagIdle">{t('unregisteredDir')}</span>
-                    )}
-                    {/* 右侧那两串数字是**一整块**：宁可让路径截断，也不要把它拆到第二行去（那样组头
-                        会长成两行，看着像坏掉了）。它靠 margin-left: auto 贴右边，不再用撑开的空档。 */}
-                    <span className="dsm-groupCounts">
-                      <span className="dsm-hint">{t('sessionsInDir', { count: ids.length })}</span>
-                      <span className="dsm-hint">{t('selectedCount', { count: picked })}</span>
-                    </span>
-                  </label>
-                  {group.sessions.map((session) => {
-                    // 行上显示标题，id 退到悬浮提示（见 planRows.sessionLabel）。
-                    const label = sessionLabel(session)
-                    return (
-                      <label key={session.id} className="dsm-row dsm-rowExport">
-                        <input
-                          type="checkbox"
-                          checked={selected.includes(session.id)}
-                          onChange={() => toggle(session.id)}
-                        />
-                        <SessionIcon />
-                        {/* 标题与小标签同占一格：标签跟着名字走，名字自己负责省略（见 .dsm-rowLabel）。 */}
-                        <span className="dsm-rowLabel">
-                          <span className={label.kind === 'title' ? 'dsm-rowTitle' : 'dsm-rowId'} title={label.tip}>
-                            {label.text}
-                          </span>
-                          {/* 注册表没认领的会话（`workspaceId` 缺省）在这里标出来：它在外壳侧边栏里会落到
-                              「未分组」下，而这里按目录分组，所以同一条会话两边的去处不同。少了这枚标签，
-                              那个差异就只能靠人对着两个界面猜——本机上真的被问过一次。 */}
-                          {session.workspaceId === undefined && (
-                            <span className="dsm-tag dsm-tagIdle" title={t('unregisteredSessionTip')}>
-                              {t('unregisteredSession')}
-                            </span>
-                          )}
-                        </span>
-                        <span className="dsm-meta">{formatBytes(session.bytes)}</span>
-                        <span className="dsm-meta">{formatTime(session.createdAt)}</span>
-                      </label>
-                    )
-                  })}
+                  ))}
                 </div>
               )
             })
           )}
-        </div>
+        </SessionListBox>
       </div>
 
       <div className="dsm-card">

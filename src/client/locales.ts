@@ -44,8 +44,7 @@ export const zh = {
   selectedCount: '已选 {count}',
   selectGroup: '整组勾选／取消：{name}',
   unregisteredDir: '未登记工作区',
-  unregisteredSession: '未登记在册',
-  unregisteredSessionTip:
+  ungroupedTip:
     '这条会话的 id 不在任何工作区的登记表里。外壳侧边栏把这类会话挂到「未分组」下（子代理、空白与已归档的它不显示，所以那边看着比这里少）。',
   noCwdGroup: '没有 cwd 的会话',
   exportAction: '导出所选',
@@ -87,7 +86,7 @@ export const zh = {
   pickSource: '选择源目录…',
   ungroupedSource: '未分组',
   unownedSourceHint:
-    '来源是「未分组」：注册表没认领、且有 cwd 的那批会话，可以横跨多个目录，一次全部收进目标工作区。它们的 header 会写上目标目录的 cwd，会话目录搬进目标项目目录并登记在册。没有 cwd 的会话不在这里（header 里没有 cwd 可改写），"未登记在册的会话"与"搬迁会话产物"两个开关因此也不适用。',
+    '来源是「未分组」：注册表没认领、且有 cwd 的那批会话，可以横跨多个目录，一次全部收进目标工作区。它们的 header 会写上目标目录的 cwd，会话目录搬进目标项目目录并登记在册。没有 cwd 的会话不在这里（header 里没有 cwd 可改写），"连同未分组的会话"与"搬迁会话产物"两个开关因此也不适用。',
   pickTarget: '选择目标目录…',
   browse: '浏览…',
   typePath: '手输路径',
@@ -106,7 +105,7 @@ export const zh = {
   titleLabel: '新建工作区标题（可选）',
   titlePlaceholder: '目标目录还没登记过时用',
   includeArtifacts: '同时搬迁会话创建过的文件（要全量解码，较慢）',
-  includeUnowned: '连同未登记在册的会话',
+  includeUnowned: '连同未分组的会话',
   sourceSessions: '源目录下匹配到 {count} 条会话',
   sourceSessionsNone: '库里没有 cwd 等于源目录的会话（迁移仍按源项目目录里的实际内容进行）',
   pickScopeLabel: '迁移范围',
@@ -186,11 +185,12 @@ export const zh = {
   manageDeleteHint:
     '删除会先备份、再删掉整个会话目录；删完侧边栏要等宿主重新扫描才会少掉这几条。还活在宿主内存里的会话删不掉——先在宿主里关掉它。',
   selectAllSessions: '全选',
-  manageShown: '显示 {shown} / {total} 条',
-  manageNoMatch: '没有符合筛选的会话。',
+  shownCount: '显示 {shown} / {total} 条',
+  noMatch: '没有符合筛选条件的会话。',
   filterLabel: '筛选',
   filterAll: '全部',
-  filterHint: '勾上几枚就看几类（多选＝任一命中）；一枚也不勾＝全都列出来',
+  filterHint: '多选＝任一命中；不勾＝不限类别',
+  searchPlaceholder: '搜索标题或 ID',
   tagSubagent: '子代理',
   tagSubagentTip: '子代理会话：外壳侧边栏把它挂在父会话下面（不是没有位置），所以不列进工作区或「未分组」。',
   tagBlank: '空白',
@@ -226,8 +226,7 @@ export const en: Record<keyof typeof zh, string> = {
   selectedCount: '{count} selected',
   selectGroup: 'Select or clear this whole group: {name}',
   unregisteredDir: 'not a registered workspace',
-  unregisteredSession: 'not registered',
-  unregisteredSessionTip:
+  ungroupedTip:
     "This session's id is in no workspace record. The shell sidebar parks such sessions under Ungrouped (it hides subagent, blank and archived ones, so that row shows fewer).",
   noCwdGroup: 'Sessions without a cwd',
   exportAction: 'Export selected',
@@ -288,7 +287,7 @@ export const en: Record<keyof typeof zh, string> = {
   titleLabel: 'Title for a new workspace (optional)',
   titlePlaceholder: 'Used when the target directory is not registered yet',
   includeArtifacts: 'Also move files the sessions created (decodes whole logs, slower)',
-  includeUnowned: 'Include sessions registered in no workspace',
+  includeUnowned: 'Include ungrouped sessions',
   sourceSessions: '{count} sessions in the library match the source directory',
   sourceSessionsNone:
     'No session in the library has this cwd (the migration still works from the source project directory’s actual contents)',
@@ -368,11 +367,12 @@ export const en: Record<keyof typeof zh, string> = {
   manageDeleteHint:
     'Deleting backs the session directory up first, then removes it; the sidebar drops those rows once the host rescans. A session still living in host memory cannot be deleted — close it in the host first.',
   selectAllSessions: 'Select all',
-  manageShown: 'showing {shown} / {total}',
-  manageNoMatch: 'No session matches the filter.',
+  shownCount: 'showing {shown} / {total}',
+  noMatch: 'No session matches the filter.',
   filterLabel: 'Filter',
   filterAll: 'All',
-  filterHint: 'tick several to see several kinds (multiple = either); none ticked = everything',
+  filterHint: 'multiple = either; none = any kind',
+  searchPlaceholder: 'Search title or ID',
   tagSubagent: 'subagent',
   tagSubagentTip:
     'Subagent session: the shell sidebar nests it under its parent session (it is not homeless), so it never shows up in a workspace or under Ungrouped.',

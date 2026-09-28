@@ -70,7 +70,13 @@ one-line bump at that point.
   band with a folder glyph, while session rows are indented under it and carry a chat-bubble glyph (a session
   title is a sentence the user wrote, so it easily looks like a directory name). Sessions no workspace record
   claims — the ones the shell sidebar parks under Ungrouped — stay with their directory here and carry a small
-  "not registered" tag saying so.
+  "Ungrouped" tag saying so.
+- **Filter**: the same set as the **Sessions** tab — a row of small chips (subagent / blank / archived /
+  ungrouped / active, each with the count in the library, multiple = either, **All** clears them) plus a
+  **title / id search box**; used together the two are ANDed (search foo, show blank only = blank sessions
+  among foo). The header then reports "showing N / M", and **Select whole library picks what is listed
+  right now**; a group whose rows were all filtered out is not drawn at all (a header with nothing under
+  it looks broken), and a group header reports the filtered count;
 - **Import**: pick a bundle and a target workspace → **preview first** (per session: what will be created,
   which `cwd` gets rewritten, what is skipped, how the registry changes) → then confirm. Import **never
   overwrites**: a session whose id already exists is skipped and reported; a session with no `cwd` lands in
@@ -86,14 +92,17 @@ one-line bump at that point.
 - **the source can also be Ungrouped**: the sessions no workspace claims that still have a `cwd` (the ones
   the shell sidebar parks under Ungrouped), possibly spread over several directories — adopt them all into
   the target workspace in one go. It is the only source that spans directories, because "those two
-  unclaimed sessions across two directories" really is one thing. The "carry unregistered sessions" and
+  unclaimed sessions across two directories" really is one thing. The "carry ungrouped sessions" and
   "move session artifacts" switches do not apply there (the page says so instead of showing switches that
   do nothing);
 - the target directory must already exist; there is also an optional title for a newly created workspace,
-  whether to carry the **files the sessions created**, and whether to carry unregistered sessions;
+  whether to carry the **files the sessions created**, and whether to carry ungrouped sessions;
 - **move the whole source, or only some of it**: the sessions of the source are listed
-  (titles too, ids on hover; under a directory source the unclaimed rows carry a "not registered" tag), and
-  ticking any row switches to "only the ticked ones"; one source per run;
+  (titles too, ids on hover; under a directory source the unclaimed rows carry an "Ungrouped" tag), with a
+  **title / id search box** above them to narrow the list, and ticking any row switches to "only the ticked
+  ones"; one source per run. This page gets no category chips: its candidates already exclude everything
+  the sidebar cannot show, so those categories would always read 0 here — showing them would only look
+  like a broken filter;
 - **candidates line up with the host sidebar**: subagent sessions (nested under their parent), blank
   sessions (never started a turn) and archived sessions are never candidates — a session the sidebar
   cannot show should not be swept along by accident. Naming one of them explicitly makes the preview say
@@ -121,8 +130,10 @@ directories back — deleting never touched the registry.
   `active` for a session still live in host memory;
 - **Filter**: a row of small chips — subagent / blank / archived / ungrouped / active, each with the
   count in the library. Tick several to see several kinds (multiple = either), **All** clears them. The
-  header then reports "showing N / M", and **Select all picks what is listed right now** (filter to blank,
-  select all, delete them), while ticking survives switching filters;
+  line below is a **title / id search box** (both are searched: "name it by id" and "the one where I asked
+  about that" are both everyday needs). The header then reports "showing N / M", and **Select all picks
+  what is listed right now** (filter to blank, select all, delete them), while ticking survives switching
+  filters;
 - **Archive / Unarchive**: tick rows and put them away or bring them back in one click. It goes through
   the host's own archiving capability and takes effect **immediately** — the sidebar follows right away,
   no restart. On a host without that service (non-Web profiles) the buttons are disabled and the page

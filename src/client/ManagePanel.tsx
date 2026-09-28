@@ -2,12 +2,13 @@
  * 「会话」分页：对着整个会话库逐条管理——归档 / 取消归档、删除。
  *
  * 与另外两页的分工：传输页是"把会话带走"、迁移页是"把会话挪个目录并登记"，这一页是"这条会话我
- * 不要了 / 先收起来"。三页共用同一份 `/state`（页面骨架只拉一次），所以列表、标签、条数不会各说各话。
+ * 不要了 / 先收起来"。三页共用同一份 `/state`（页面骨架只拉一次）与同一套列表骨架
+ * （[sessionList.tsx](./sessionList.tsx)），所以行、标签、条数、筛选条不会各说各话。
  *
  * 三个刻意的设计：
  *   - **全库都在这里**，包括外壳侧边栏不显示的子代理 / 空白 / 已归档会话：这一页恰恰是用来收拾它们的
  *     （侧边栏里根本点不到），所以它们以标签的形式标出来，而不是被藏掉；筛选条（子代理 / 空白 /
- *     已归档 / 未分组 / 活动中，多选＝任一命中）是同一件事的"只看这几类"，判据在
+ *     已归档 / 未分组 / 活动中，多选＝任一命中，外加标题搜索）是同一件事的"只看这几类"，判据在
  *     [sessionFilter.ts](./sessionFilter.ts)；
  *   - **删除分两步**（预演 → 确认），预演把"哪些会话会被删、备份落在哪"摆清楚；执行时**先备份再删**
  *     （见 src/remove.ts），恢复走「迁移」页的「备份与回滚」；
@@ -26,62 +27,19 @@ import {
   type SessionSummary,
 } from './api.ts'
 import { translateWith, zh, type Translate } from './locales.ts'
-import { SessionIcon } from './icons.tsx'
-import { sessionLabel } from './planRows.ts'
+import { FILTER_KEYS } from './sessionFilter.ts'
 import {
-  FILTER_KEYS,
-  attributeKeys,
-  filterCounts,
-  filterSessions,
-  type AttributeKey,
-  type FilterKey,
-} from './sessionFilter.ts'
+  SessionFilterBar,
+  SessionListBox,
+  SessionListEmpty,
+  SessionRow,
+  SessionStaticRow,
+  useSessionFilter,
+} from './sessionList.tsx'
 import type { PanelShare } from './types.ts'
 
 /** 没有注入面时的兜底翻译。 */
 const fallback = translateWith(zh as unknown as Record<string, string>)
-
-function formatBytes(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes < 0) return '—'
-  const units = ['B', 'KB', 'MB', 'GB']
-  let value = bytes
-  let unit = 0
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024
-    unit++
-  }
-  return `${unit === 0 ? value : value.toFixed(1)} ${units[unit]}`
-}
-
-function formatTime(ms: number): string {
-  const date = new Date(ms)
-  if (Number.isNaN(date.getTime())) return '—'
-  const pad = (n: number): string => String(n).padStart(2, '0')
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`
-}
-
-/**
- * 行上的属性标签 → 字典键（文案 + "这条会话为什么是这样"的说明）。
- *
- * 这条会话**能挂几枚就挂几枚**（空白且已归档的两枚都挂）：标签既是"侧边栏为什么不显示它"的答案，
- * 也是"这条会话是什么"的标记，而筛选条正是按后者工作的——只挂宿主先判的那一枚，筛「已归档」时就会
- * 冒出几行没有归档标签的会话。
- */
-const ATTRIBUTE_LABELS: Record<AttributeKey, { tag: string; tip: string }> = {
-  subagent: { tag: 'tagSubagent', tip: 'tagSubagentTip' },
-  blank: { tag: 'tagBlank', tip: 'tagBlankTip' },
-  archived: { tag: 'tagArchived', tip: 'tagArchivedTip' },
-  live: { tag: 'tagLive', tip: 'tagLiveTip' },
-}
-
-/** 筛选条上的文案：四类属性与行上标签用同一份文案，「未分组」复用归属那一格的文案与说明。 */
-const FILTER_LABELS: Record<FilterKey, { label: string; tip: string }> = {
-  subagent: { label: 'tagSubagent', tip: 'tagSubagentTip' },
-  blank: { label: 'tagBlank', tip: 'tagBlankTip' },
-  archived: { label: 'tagArchived', tip: 'tagArchivedTip' },
-  live: { label: 'tagLive', tip: 'tagLiveTip' },
-  unowned: { label: 'ungroupedSource', tip: 'unregisteredSessionTip' },
-}
 
 /** 这一行属于哪个工作区（未登记就写「未分组」，与外壳侧边栏的叫法一致）。 */
 function ownerText(session: SessionSummary, paths: ReadonlyMap<string, string>, t: Translate): string {
@@ -95,8 +53,8 @@ export function ManagePanel({ t = fallback, state, reload }: PanelShare): React.
   const archiveAvailable = state?.archiveAvailable === true
 
   const [selected, setSelected] = React.useState<readonly string[]>([])
-  /** 筛选条：一枚都不勾 = 全都列出来（见 sessionFilter.filterSessions）。 */
-  const [filters, setFilters] = React.useState<readonly FilterKey[]>([])
+  /** 筛选条：一枚芯片都不勾、关键词为空 = 全都列出来（见 sessionFilter.matchesFilters）。 */
+  const filter = useSessionFilter(sessions)
   const [busy, setBusy] = React.useState<'archive' | 'unarchive' | 'plan' | 'apply' | null>(null)
   const [error, setError] = React.useState<string | null>(null)
   const [notice, setNotice] = React.useState<string | null>(null)
@@ -109,14 +67,8 @@ export function ManagePanel({ t = fallback, state, reload }: PanelShare): React.
     return map
   }, [state])
 
-  /** 当前列出来的那些（筛选之后）。 */
-  const listed = React.useMemo(() => filterSessions(sessions, filters), [sessions, filters])
-  /** 每一类各有多少条：对整个库数，不随当前筛选跳（会跳的计数没人信得过）。 */
-  const counts = React.useMemo(() => filterCounts(sessions), [sessions])
-
-  const toggleFilter = (key: FilterKey): void => {
-    setFilters((current) => (current.includes(key) ? current.filter((item) => item !== key) : [...current, key]))
-  }
+  /** 当前列出来的那些（筛过之后）。 */
+  const listed = React.useMemo(() => sessions.filter(filter.matches), [sessions, filter.matches])
 
   // 已被删掉/已不在列表里的 id 不该继续留在选择集里（预演完再刷新时会遇到）。
   const known = React.useMemo(() => new Set(sessions.map((session) => session.id)), [sessions])
@@ -209,8 +161,8 @@ export function ManagePanel({ t = fallback, state, reload }: PanelShare): React.
         <div className="dsm-cardHead">
           <span className="dsm-cardTitle">{t('manageTitle')}</span>
           <span className="dsm-hint">{t('selectedCount', { count: picked.length })}</span>
-          {filters.length > 0 && (
-            <span className="dsm-hint">{t('manageShown', { shown: listed.length, total: sessions.length })}</span>
+          {filter.active && (
+            <span className="dsm-hint">{t('shownCount', { shown: listed.length, total: sessions.length })}</span>
           )}
           <span className="dsm-spacer" />
           <button
@@ -229,73 +181,32 @@ export function ManagePanel({ t = fallback, state, reload }: PanelShare): React.
         <p className="dsm-hint">{t('manageHint')}</p>
         {!archiveAvailable && <p className="dsm-hint">{t('manageArchiveUnavailable')}</p>}
 
-        {sessions.length > 0 && (
-          <div className="dsm-filters">
-            <span className="dsm-hint">{t('filterLabel')}</span>
-            <button
-              type="button"
-              className="dsm-filter"
-              aria-pressed={filters.length === 0}
-              onClick={() => setFilters([])}
-            >
-              {t('filterAll')}
-            </button>
-            {FILTER_KEYS.map((key) => (
-              <button
-                key={key}
-                type="button"
-                className="dsm-filter"
-                aria-pressed={filters.includes(key)}
-                title={t(FILTER_LABELS[key].tip)}
-                onClick={() => toggleFilter(key)}
-              >
-                {t(FILTER_LABELS[key].label)}
-                <span className="dsm-filterCount">{counts[key]}</span>
-              </button>
-            ))}
-          </div>
-        )}
-        {/* 自己一行，不跟胶囊抢同一行的剩余宽度（理由见 styles.ts 的 .dsm-filters 注释）。 */}
-        {sessions.length > 0 && <p className="dsm-hint">{t('filterHint')}</p>}
+        {sessions.length > 0 && <SessionFilterBar keys={FILTER_KEYS} filter={filter} t={t} />}
 
-        {sessions.length === 0 ? (
-          <p className="dsm-empty">{t('noSessions')}</p>
-        ) : (
-          // 列表的高度是固定的（见 styles.ts 的 .dsm-listFixed）：连"一条都没筛出来"也画在这个框里，
-          // 否则那个状态会把这一页的高度改回去，外层滚动条又能把它挪动 15px。
-          <div className="dsm-list dsm-listFixed">
-            {listed.length === 0 && <p className="dsm-empty">{t('manageNoMatch')}</p>}
-            {listed.map((session) => {
-              // 与另外两页同一套口径：显示标题、id 退到悬浮提示（见 planRows.sessionLabel）。
-              const label = sessionLabel(session)
-              return (
-                <label key={session.id} className="dsm-row dsm-rowManage">
-                  <input type="checkbox" checked={picked.includes(session.id)} onChange={() => toggle(session.id)} />
-                  <SessionIcon />
-                  <span className="dsm-rowLabel">
-                    <span className={label.kind === 'title' ? 'dsm-rowTitle' : 'dsm-rowId'} title={label.tip}>
-                      {label.text}
-                    </span>
-                    {/*
-                      侧边栏看不到的那几类、以及"还活在宿主内存里"的那一类，各挂一枚标签：这一页正是
-                      用来收拾它们的，藏起来等于假装没有。能挂几枚挂几枚（见 ATTRIBUTE_LABELS）。
-                    */}
-                    {attributeKeys(session).map((key) => (
-                      <span key={key} className="dsm-tag dsm-tagIdle" title={t(ATTRIBUTE_LABELS[key].tip)}>
-                        {t(ATTRIBUTE_LABELS[key].tag)}
-                      </span>
-                    ))}
-                  </span>
-                  <span className="dsm-meta" title={session.cwd ?? ''}>
-                    {ownerText(session, workspacePaths, t)}
-                  </span>
-                  <span className="dsm-meta">{formatBytes(session.bytes)}</span>
-                  <span className="dsm-meta">{formatTime(session.createdAt)}</span>
-                </label>
-              )
-            })}
-          </div>
-        )}
+        {/* 高度固定：连"一条都没筛出来"（以及库里一条都没有）也画在这个框里，否则那些状态会把
+            这一页的高度改回去，外层滚动条又能把整个卡片挪动 15px（见 styles.ts 的 .dsm-listFixed）。 */}
+        <SessionListBox fixed>
+          {sessions.length === 0 ? (
+            <SessionListEmpty text={t('noSessions')} />
+          ) : (
+            <>
+              {listed.length === 0 && <SessionListEmpty text={t('noMatch')} />}
+              {listed.map((session) => (
+                <SessionRow
+                  key={session.id}
+                  session={session}
+                  variant="manage"
+                  checked={picked.includes(session.id)}
+                  onToggle={() => toggle(session.id)}
+                  owner={ownerText(session, workspacePaths, t)}
+                  // 归属那一格写着「未分组」，再挂一枚同名标签是重复。
+                  ungroupedTag={false}
+                  t={t}
+                />
+              ))}
+            </>
+          )}
+        </SessionListBox>
 
         <div className="dsm-controls">
           <button
@@ -343,25 +254,16 @@ export function ManagePanel({ t = fallback, state, reload }: PanelShare): React.
             </div>
           )}
           <p className="dsm-hint">{t('manageBackupTo', { dir: plan.backupDir ?? plan.preview.backupRoot })}</p>
-          <div className="dsm-list">
-            {plan.preview.entries.map((entry) => {
-              const label = sessionLabel(entry)
-              return (
-                <div key={entry.id} className="dsm-row dsm-rowDelete">
-                  <SessionIcon />
-                  <span className="dsm-rowLabel">
-                    <span className={label.kind === 'title' ? 'dsm-rowTitle' : 'dsm-rowId'} title={label.tip}>
-                      {label.text}
-                    </span>
-                  </span>
-                  <span className="dsm-meta" title={entry.dir}>
-                    {formatBytes(entry.bytes)}
-                  </span>
-                  <span className="dsm-meta">{formatTime(entry.createdAt)}</span>
-                </div>
-              )
-            })}
-          </div>
+          <SessionListBox>
+            {plan.preview.entries.map((entry) => (
+              <SessionStaticRow
+                key={entry.id}
+                session={entry}
+                className="dsm-row dsm-rowDelete"
+                metaTitle={entry.dir}
+              />
+            ))}
+          </SessionListBox>
           <div className="dsm-controls">
             <button
               type="button"

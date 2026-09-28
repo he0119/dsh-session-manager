@@ -36,7 +36,7 @@ export interface BuildPlanOptions {
   unowned?: boolean
   /** 目标工作区新建时的标题。 */
   title?: string
-  /** 是否连带源项目目录中未登记在册的会话（默认 true；未分组来源下无意义——那批本来就是未登记）。 */
+  /** 是否连带源项目目录中未分组的会话（默认 true；未分组来源下无意义——那批本来就没在册）。 */
   includeUnowned?: boolean
   /** 是否同时规划"会话中创建的文件"的搬迁（默认 false；需要全量解码，较慢）。 */
   includeArtifacts?: boolean
