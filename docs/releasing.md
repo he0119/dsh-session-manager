@@ -4,7 +4,7 @@
 （Trusted Publishing）上，成功后自动建 GitHub Release。本机不需要任何 npm token，也没有
 `workflow_dispatch` 入口——手动触发会在默认分支上跑，等于凭空指定一个版本发出去。
 
-发一次版就一条命令：`pnpm version` 改版本号并打标签，`git push --follow-tags` 推上去。
+发一次版是两步：版本号提交走 PR 合进 main，再给合并后的那个提交打标签、只推标签（见「一次发布」）。
 
 依赖与构建走 pnpm（`packageManager` 钉在 `pnpm@11.7.0`），发布链路上仍有两处是 npm：`npm view` 查线上
 版本、`npm publish` 真发布——可信发布与 provenance 是 npm CLI 的能力，工作流里那两步没有换。
@@ -43,9 +43,7 @@ npm publish --access public    # 不加 --provenance：本机没有 OIDC，签�
 # 2) 去 npm 包设置页登记 Trusted Publisher（表格见下一节）
 #    https://www.npmjs.com/package/@he0119/dsh-session-manager/access
 
-# 3) 之后再发版就走标签：本地 npm 登录状态可以退出，CI 不再需要任何 token
-pnpm version 0.1.0 -m "chore(release): %s"
-git push --follow-tags
+# 3) 之后再发版就走标签（步骤见「一次发布」）：本地 npm 登录状态可以退出，CI 不再需要任何 token
 ```
 
 首版手动发出来的那个版本没有 provenance 证明（`dist.attestations` 为空），后面的版本都有；
@@ -73,16 +71,25 @@ git push --follow-tags
 
 ## 一次发布
 
-main 上没有强制 PR 的 ruleset，所以发布提交与标签都直接在本地做、一起推上去：
+main 只接受 PR（服务端那条 ruleset 见 [AGENTS.md](../AGENTS.md) 的 Git 一节），所以发布分两步：版本号
+提交走 PR 合进 main，再给合并后的那个提交打标签、单独把标签推上去。
 
 ```sh
-# 工作目录必须是干净的，否则 pnpm version 会拒绝（它会把改动混进发布提交里）。
-pnpm version 0.2.0 -m "chore(release): %s"
-# ↑ 一次做三件事：改 package.json、提交、打注解标签 v0.2.0（`pnpm version -m` 打的就是注解标签）。
-#   pnpm-lock.yaml 不记录本包的版本号，因此不必跟着改。
-#   它只跑 preversion/version/postversion 三个钩子，不会触发本包的 prepublishOnly（tsdown），因此不会顺带构建。
+# 1) 版本号提交走 PR 合进 main。--no-git-tag-version 是必须的：标签不能在分支上打（合并会换 SHA）。
+#    工作目录必须是干净的，否则 pnpm version 会拒绝（它会把改动混进发布提交里）。
+pnpm version 0.2.0 --no-git-tag-version -m "chore(release): %s"
+# ↑ 只改 package.json 并提交。pnpm-lock.yaml 不记录本包的版本号，因此不必跟着改；
+#   它只跑 preversion/version/postversion 三个钩子，不会触发本包的 prepublishOnly（tsdown），
+#   因此不会顺带构建。
+git push origin HEAD:refs/heads/release-0.2.0
+gh pr create --base main --fill          # 单个提交，标题直接取提交信息
+gh pr merge --rebase --delete-branch
 
-git push --follow-tags          # 提交与标签一起推上去，Publish 工作流接手
+# 2) 拉下合并后的 main，在**它**上面打标签，然后只推标签。
+git fetch origin
+git switch main && git merge --ff-only origin/main
+git tag -a v0.2.0 -m "v0.2.0"
+git push origin v0.2.0          # 只推标签：Publish 工作流接手
 
 npm view @he0119/dsh-session-manager version   # 几分钟后确认线上的版本
 ```
@@ -90,16 +97,29 @@ npm view @he0119/dsh-session-manager version   # 几分钟后确认线上的版�
 `0.2.0` 也可以写成 `patch` / `minor` / `major`，由你决定升幅（见下）。`-m` 里的 `%s` 会被替换成
 版本号，所以提交信息是 `chore(release): 0.2.0`。
 
-如果哪天要开 PR 走审查：`pnpm version 0.2.0 --no-git-tag-version` → 提交 → 推送分支 → 合并，
-然后再 `git tag -a v0.2.0` 打标签。多出来的那一步是必要的，因为合并方式（squash）会换掉提交 SHA，
-`pnpm version` 顺手打的那个标签随后就指错了地方。
+合并方式用 **Rebase** 或 **Squash**：ruleset 要求线性历史，merge commit 会被拒。两者都会换掉提交
+SHA，所以标签一律**合并之后**再打——在分支上用 `pnpm version` 顺手打的那个标签，合并后就指错了地方。
+
+## Release 日志怎么分组
+
+Release 条目里的变更列表由 GitHub 自动生成（`gh release create --generate-notes`），分节规则写在
+`.github/release.yml`：💥 破坏性变更 / ⬆️ 依赖更新 / ✨ 新功能 / 🐛 修复 / 📖 文档 / 🧰 维护，
+没命中的落进「🧰 其它改动」。
+
+它**只认 label**——GitHub 没有「按约定式提交分组」这回事，所以补标签这一步由
+`.github/workflows/autolabeler.yml` 做：release-drafter 的 autolabeler 读 PR 标题，按
+`.github/autolabeler.yml` 里的正则打标签。因此 **PR 标题必须写成约定式提交**（`feat: …`、`fix: …`），
+写成「修个 bug」只会进兜底那一节。
+
+两个已知边界：fork 来的 PR 拿不到写权限，打不上标签；`chore!:` 这种同时命中破坏性变更与维护的标题，
+落进哪一节由 `.github/release.yml` 里的**顺序**决定——它就是靠顺序把破坏性变更提到最前面的。
 
 ## 为什么标签要在本地打、且必须打在 main 顶端
 
 GitHub 在 Release 页面建标签时，会把它落在**当刻 main 的 HEAD** 上——如果发布提交之后又合并了别的
 改动，标签就指到跟版本号无关的提交上，发布证明（provenance）记的是一段包含杂项的区间。本地打标签
-没有这个问题：标签落点是你自己指定的那个提交，而 `pnpm version` 更是把「改版本号」与「打标签」
-绑在同一个提交上。
+没有这个问题：标签落点是你自己指定的那个提交，`git tag -a v0.2.0` 打的就是刚合进 main 的那个版本
+提交。
 
 为了让这条规则可执行，Publish 工作流在发 npm 之前做三道硬校验，任何一道不过就**在 npm 之前失败**：
 
@@ -109,8 +129,8 @@ GitHub 在 Release 页面建标签时，会把它落在**当刻 main 的 HEAD** 
 | 标签指向的提交是 `origin/main` 的祖先 | 标签打在没合进 main 的分支上 |
 | 标签指向的提交仍**等于** main 顶端 | 版本号已被后续发布取代（发出去就是往旧版本上倒灌） |
 
-`pnpm version` + `push --follow-tags` 这套天然满足三道：标签与版本号在同一个提交上、这个提交就是
-你刚推的 main 顶端。
+「合并之后再打标签」这套天然满足三道：标签与版本号在同一个提交上，而这个提交就是 main 顶端——
+刚合完 PR 就打标签，中间别插别的改动。
 
 第三道意味着「一个标签对应一个提交」：**推完标签就别再往 main 推东西了**，否则要么校验失败，要么
 你得确认那个新提交该不该进这一版。顺序上先推标签，再继续改代码。
@@ -153,3 +173,5 @@ insert 的 `name` 必须等于 `package.json` 的包名。
 - `.github/workflows/publish.yml`：推 `v*` 标签时先复用一遍上面的检查，再依次做三道落点校验、
   打包自检、发布到 npm、建 Release。发布 job 里额外跑一次 `pnpm install --frozen-lockfile`，
   因为 `lib/` 靠 `prepublishOnly` 现场编译，而 check job 的依赖不跨 job 共享。
+- `.github/workflows/autolabeler.yml`：PR 打开 / 重开 / 更新时按标题补标签，供
+  `.github/release.yml` 给 Release 日志分组（fork 的 PR 打不上标签）。
