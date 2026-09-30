@@ -31,7 +31,7 @@ import {
   type SessionSummary,
 } from './api.ts'
 import { translateWith, zh } from './locales.ts'
-import { groupKey, groupSessions, nestSessions } from './groups.ts'
+import { groupKey, groupSessions, lockedParentOf, nestSessions } from './groups.ts'
 import { deleteFamilyNote, parentDirNote } from './planRows.ts'
 import { FILTER_KEYS } from './sessionFilter.ts'
 import {
@@ -87,13 +87,31 @@ export function ManagePanel({ t = fallback, state, reload }: PanelShare): React.
   const known = React.useMemo(() => new Set(sessions.map((session) => session.id)), [sessions])
   const picked = React.useMemo(() => selected.filter((id) => known.has(id)), [selected, known])
 
-  const toggle = (id: string): void => {
+  /**
+   * 这一行能不能单独勾：子代理跟着父会话走（父会话还在库里时就只能跟着它）。
+   *
+   * 判据在 `groups.ts` 的 `lockedParentOf()` 里，与宿主那几条路（remove.ts、web.ts 的归档与导出）
+   * 同源——能勾的集合就是"单独操作不会被拒的集合"。
+   */
+  const lockOf = React.useMemo(() => {
+    const byId = new Map(sessions.map((session) => [session.id, session]))
+    return (session: SessionSummary): { tip: string } | undefined => {
+      const parent = lockedParentOf(session, byId)
+      return parent === undefined ? undefined : { tip: t('lockedSubagentTip', { name: parent.title ?? parent.id }) }
+    }
+  }, [sessions, t])
+  const selectable = (session: SessionSummary): boolean => lockOf(session) === undefined
+
+  const toggle = (session: SessionSummary): void => {
+    if (!selectable(session)) return
+    const id = session.id
     setSelected((current) => (current.includes(id) ? current.filter((item) => item !== id) : [...current, id]))
   }
 
-  /** 组头那一下：整组勾上，或整组取消（与「传输」页同一套）。 */
+  /** 组头那一下：整组勾上，或整组取消（与「传输」页同一套）。不能单独勾的那些不参与。 */
   const toggleGroup = (sessions: readonly SessionSummary[]): void => {
-    const ids = sessions.map((session) => session.id)
+    const ids = sessions.filter(selectable).map((session) => session.id)
+    if (ids.length === 0) return
     const whole = ids.every((id) => selected.includes(id))
     setSelected((current) =>
       whole ? current.filter((id) => !ids.includes(id)) : [...new Set([...current, ...ids])],
@@ -190,9 +208,10 @@ export function ManagePanel({ t = fallback, state, reload }: PanelShare): React.
           <button
             type="button"
             className="dsm-button"
-            // 筛过之后再点「全选」，要的是"这几类都选上"，不是"把看不见的也选上"。
-            onClick={() => setSelected(listed.map((session) => session.id))}
-            disabled={listed.length === 0}
+            // 筛过之后再点「全选」，要的是"这几类都选上"，不是"把看不见的也选上"；不能单独勾的那些
+            // 也不进来：子代理跟着父会话走，勾父会话就等于勾了它。
+            onClick={() => setSelected(listed.filter(selectable).map((session) => session.id))}
+            disabled={listed.filter(selectable).length === 0}
           >
             {t('selectAllSessions')}
           </button>
@@ -239,9 +258,10 @@ export function ManagePanel({ t = fallback, state, reload }: PanelShare): React.
                         session={row.session}
                         variant="manage"
                         checked={picked.includes(row.session.id)}
-                        onToggle={() => toggle(row.session.id)}
+                        onToggle={() => toggle(row.session)}
                         depth={row.depth}
                         note={parentDirNote(row, t)}
+                        locked={lockOf(row.session)}
                         t={t}
                       />
                     ))}

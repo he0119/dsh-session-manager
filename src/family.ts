@@ -26,6 +26,36 @@ export interface FamilyMember {
 }
 
 /**
+ * 找出"被单独点名的子代理"：`parentSession` 指向的父会话**还在库里**、又不在这次点名的集合里。
+ *
+ * 这类请求一律拒绝，而不是把它当成一次普通操作：子代理跟着父会话走（见文件头），单独动它等于把族
+ * 拆开——删掉它，父会话日志里的 `subagent/catalog` 还指着一条不存在的会话；搬走它，父会话的日志在
+ * 旧目录、它的日志在新目录；导出它，包里那条 catalog 指向一个不在包里的会话。
+ *
+ * 父会话**不在库里**的（孤儿）不算：没有可跟随的会话，它只能被单独收拾，而收下它并不拆开任何东西。
+ *
+ * @param sessions 手上有的全部会话（发现出来的整库）。
+ * @param named 这次点名的 id 集合。
+ * @returns 需要拒绝的 `{ id, parentId }`，顺序跟着 `named` 的迭代顺序（调用方据此逐条报错）。
+ */
+export function loneSubagents(
+  sessions: readonly DiscoveredSession[],
+  named: ReadonlySet<string>,
+): Array<{ id: string; parentId: string }> {
+  const byId = new Map(sessions.map((session) => [session.id, session]))
+  const out: Array<{ id: string; parentId: string }> = []
+  for (const id of named) {
+    const session = byId.get(id)
+    if (session === undefined || session.header.origin !== 'subagent') continue
+    const parentId = session.header.parentSession
+    if (parentId === undefined || parentId === '' || named.has(parentId)) continue
+    if (!byId.has(parentId)) continue
+    out.push({ id, parentId })
+  }
+  return out
+}
+
+/**
  * 点名几条会话 → 整族。
  *
  * 顺序：点名的在前（按传入顺序），随后是各自的子代理（按层展开），全局去重。所以"点名的排在最前、

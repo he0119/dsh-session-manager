@@ -204,18 +204,6 @@ test('级联带进来的行：说"随父会话删"，提示里点名是哪一条
   assert.deepEqual(deleteFamilyNote({ via: { id: 'session-p', title: '  ' } }, t)?.tip, 'manageDeleteViaTip:{"name":"session-p"}')
 })
 
-test('只删子、留着父：说"父会话留着"，且不点"随父会话删"', () => {
-  assert.deepEqual(deleteFamilyNote({ keptParent: { id: 'session-p', title: '父' } }, t), {
-    text: 'manageDeleteKeptParent',
-    tip: 'manageDeleteKeptParentTip:{"name":"父"}',
-  })
-})
-
-test('两种情形都没有时不挂标签；两种同时有时先说"跟着谁来的"', () => {
+test('没有出处时不挂标签（点名的那几条就是这样）', () => {
   assert.equal(deleteFamilyNote({}, t), undefined)
-  // 父会话本身活着被挡下时会出现这种组合：这一行"为什么会进清单"更该被说出来
-  assert.equal(
-    deleteFamilyNote({ via: { id: 'session-root' }, keptParent: { id: 'session-p' } }, t)?.text,
-    'manageDeleteVia',
-  )
 })

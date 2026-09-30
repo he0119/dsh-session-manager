@@ -147,6 +147,13 @@ export interface SessionRowProps {
   depth?: number
   /** 名字后面跟一枚小标签（父会话在别的目录组里时用它说明父在哪儿）；文案由调用方翻好。 */
   note?: { text: string; tip: string }
+  /**
+   * 这一行不能单独勾：子代理跟着父会话走（要动它得勾上面那条父会话，见 family.ts）。
+   *
+   * 勾选框**禁用**而不是"允许勾但拒绝执行"：能勾的集合就该是"单独操作不会被拒的集合"，
+   * 否则用户只能靠试错发现自己点错了。提示里写明该勾哪一条。
+   */
+  locked?: { tip: string }
   t: Translate
 }
 
@@ -160,6 +167,7 @@ export function SessionRow({
   ungroupedTag = true,
   depth = 0,
   note,
+  locked,
   t,
 }: SessionRowProps): React.ReactElement {
   // 行上显示标题、id 退到悬浮提示（见 planRows.sessionLabel）。
@@ -167,7 +175,13 @@ export function SessionRow({
   const tags = sessionTags(session, { ungrouped: ungroupedTag })
   return (
     <label className={`${ROW_CLASS[variant]}${nestClass(depth)}`}>
-      <input type="checkbox" checked={checked} onChange={onToggle} />
+      <input
+        type="checkbox"
+        checked={checked}
+        disabled={locked !== undefined}
+        title={locked?.tip}
+        onChange={onToggle}
+      />
       <SessionIcon />
       {/* 标题与标签同占一格：标签跟着名字走，名字自己负责省略（见 .dsm-rowLabel）。 */}
       <span className="dsm-rowLabel">

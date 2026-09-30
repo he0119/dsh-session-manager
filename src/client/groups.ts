@@ -172,6 +172,26 @@ function subagentParent(session: NestableSession): string | undefined {
   return parent
 }
 
+/**
+ * 这条会话能不能**单独**操作（勾选 / 归档 / 删除 / 导出）？不能时返回那条"它得跟着走"的父会话。
+ *
+ * 判据是"父会话**还在库里**"——不在库里的孤儿没有可跟随的会话，只能被单独收拾。这与宿主那几条路
+ * 完全同源（`src/family.ts` 的 `loneSubagents()`）：界面禁用的集合，就是宿主会拒绝的集合。所以两个
+ * 面板都用它算 `SessionRow` 的 `locked`，别各自再写一份。
+ *
+ * @param session 待判定的会话。
+ * @param library 整个库（不筛）：父会话在不在这里只与库有关，与"当前筛选/折叠"无关。
+ * @returns 它得跟着走的那条父会话；能单独操作时 `undefined`。
+ */
+export function lockedParentOf<S extends NestableSession>(
+  session: S,
+  library: ReadonlyMap<string, S>,
+): S | undefined {
+  const parent = subagentParent(session)
+  if (parent === undefined) return undefined
+  return library.get(parent)
+}
+
 /** 缩进后的一行。 */
 export interface NestedRow<S extends NestableSession = NestableSession> {
   readonly session: S

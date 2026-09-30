@@ -324,6 +324,35 @@ test('POST /export：会话不在库里就 404，空选择就 400', async () => 
   assert.equal(badJson.captured.status, 400)
 })
 
+test('POST /export：单独导出子代理被拒；点名父会话时子代理跟着进包，条数报在响应头里', async () => {
+  const sandbox = makeSandbox('web-export-subagent')
+  writeSession(sandbox.sessionsRoot, 'session-parent', CWD_A, 1000, { title: '父会话' })
+  writeSession(sandbox.sessionsRoot, 'session-child', CWD_A, 2000, { origin: 'subagent', parentSession: 'session-parent' })
+  const handlers = createApiHandlers(deps(sandbox))
+  const post = async (ids: string[]): Promise<Captured> => {
+    const { res, captured } = fakeRes()
+    await handlers['POST /export']!(
+      fakeReq('POST', `${API_PREFIX}/export`, Buffer.from(JSON.stringify({ sessionIds: ids }))),
+      res,
+    )
+    return captured
+  }
+
+  const refused = await post(['session-child'])
+  assert.equal(refused.status, 400)
+  assert.match(String(json(refused)['error']), /请改点名它的父会话 父会话（session-parent）/)
+
+  const packed = await post(['session-parent'])
+  assert.equal(packed.status, 200)
+  const { readBundle } = await import('../src/transfer.ts')
+  const bundle = readBundle(packed.body)
+  assert.deepEqual(bundle.sessions.map((session) => session.id), ['session-parent', 'session-child'])
+  assert.match(packed.headers['content-disposition'] ?? '', /dsh-sessions-2-/)
+  // 界面那句"已导出 N 条"读的就是这两个头（勾一条父会话时它比勾选数多）
+  assert.equal(packed.headers['x-dsh-session-count'], '2')
+  assert.ok(Number(packed.headers['x-dsh-session-bytes']) > 0)
+})
+
 test('POST /import：预演不写盘，落地后会话与注册表一起落盘', async () => {
   const source = makeSandbox('web-import-source')
   writeSession(source.sessionsRoot, 'session-a', CWD_A, 1000, { title: '被导出的会话' })
@@ -868,6 +897,48 @@ test('POST /archive：逐条调用宿主服务，部分失败不影响其余，�
   assert.equal(undone.status, 200)
   assert.equal(json(undone)['ok'], true)
   assert.deepEqual(calls[calls.length - 1], { op: 'unarchive', id: 'session-a' })
+})
+
+test('POST /archive：单独归档一条子代理被拒，点名父会话时子代理跟着一起归档', async () => {
+  const sandbox = makeSandbox('web-archive-subagent')
+  writeSession(sandbox.sessionsRoot, 'session-parent', CWD_A, 1000, { title: '父会话' })
+  writeSession(sandbox.sessionsRoot, 'session-child', CWD_A, 2000, { origin: 'subagent', parentSession: 'session-parent' })
+  const calls: Array<{ op: string; id: string }> = []
+  const handlers = createApiHandlers(
+    deps(sandbox, {
+      registryOps: () => ({
+        archive: async (id: string) => {
+          calls.push({ op: 'archive', id })
+        },
+        unarchive: async (id: string) => {
+          calls.push({ op: 'unarchive', id })
+        },
+      }),
+    }),
+  )
+  const post = async (body: unknown): Promise<Captured> => {
+    const { res, captured } = fakeRes()
+    await handlers['POST /archive']!(fakeReq('POST', `${API_PREFIX}/archive`, Buffer.from(JSON.stringify(body))), res)
+    return captured
+  }
+
+  // 子代理跟着父会话走：单独点它一律拒，并指名该点谁（宿主的归档服务一次都不该被调到）
+  const lone = await post({ sessionIds: ['session-child'], archived: true })
+  assert.equal(lone.status, 400)
+  assert.match(
+    String(json(lone)['error']),
+    /session-child 是子代理会话（它跟着父会话走）：请改点名它的父会话 父会话（session-parent）/,
+  )
+  assert.deepEqual(calls, [], '被拒的请求一条都不该动')
+
+  // 点名父会话：子代理跟着一起归档（族是一个单位）
+  const family = await post({ sessionIds: ['session-parent'], archived: true })
+  assert.equal(family.status, 200)
+  assert.deepEqual(calls, [
+    { op: 'archive', id: 'session-parent' },
+    { op: 'archive', id: 'session-child' },
+  ])
+  assert.deepEqual(json(family)['archived'], ['session-parent', 'session-child'])
 })
 
 test('POST /archive：宿主没有 workspaceRegistry 时如实拒绝（不绕过去写注册表文件）', async () => {

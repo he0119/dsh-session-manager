@@ -77,8 +77,9 @@ one-line bump at that point.
   filters;
 - **Archive / Unarchive**: tick rows and put them away or bring them back in one click. It goes through
   the host's own archiving capability and takes effect **immediately** — the sidebar follows right away,
-  no restart. On a host without that service (non-Web profiles) the buttons are disabled and the page
-  says why;
+  no restart. Ticking a parent session archives its subagents with it (the family is the unit; why, see
+  the delete bullet below). On a host without that service (non-Web profiles) the buttons are disabled
+  and the page says why;
 - **Delete**: tick rows → **preview** (every session that would go, the file count, where the backup
   lands) → then confirm. Deleting **backs the session directory up into this plugin's backup root
   first**, then removes it; the sidebar drops those rows once the host rescans. A session still live in
@@ -87,10 +88,14 @@ one-line bump at that point.
 - **Subagents follow their parent session**: ticking a parent takes its subagent sessions (and any
   deeper descendants) with it — the preview lists them row by row, marked as going with the parent, and
   one backup holds the whole family (once the parent's log is gone a subagent has no way back into the
-  sidebar, so leaving it on disk just makes it invisible). Deleting a subagent alone is allowed; the
-  preview says that its line under the parent will never open again. **A forked session does not
-  count**: it is a self-contained ordinary session (the source's history was copied into its own log),
-  it still opens once the parent is gone, so it is not taken along.
+  sidebar, so leaving it on disk just makes it invisible). **A subagent cannot be deleted, archived or
+  exported on its own**: its checkbox is greyed out (the tooltip names the parent session to tick), and
+  calling the endpoint directly is refused with that same pointer — deleting it alone would leave the
+  parent's log with a catalog entry pointing at a session that no longer exists. An orphan (its parent
+  is no longer in the library) is the exception: there is nothing to follow, so it can be cleaned up on
+  its own. **A forked session does not count**: it is a self-contained ordinary session (the source's
+  history was copied into its own log), it still opens once the parent is gone, so it is not taken
+  along.
 
 **Migrate** — move one directory's sessions to another directory
 
@@ -118,7 +123,8 @@ one-line bump at that point.
   cannot show should not be swept along by accident. Naming one of them explicitly makes the preview say
   it is hidden (for a subagent it also tells you to name its parent instead);
 - **Subagents follow their parent session**: ticking a parent **moves its subagent sessions** (and any
-  deeper descendants) with it — each log header's cwd is rewritten and each session directory moves into
+  deeper descendants) with it (archiving and exporting work the same way: the subagents are archived, or
+  packed into the bundle, together with the parent) — each log header's cwd is rewritten and each session directory moves into
   the target project directory, all in one backup (otherwise the family ends up split across two
   directories, and a subagent cannot be moved on its own: it is not a candidate, and naming it would be an
   upward link). **A forked session does not count** either (it is self-contained, and it still opens
