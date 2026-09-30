@@ -125,6 +125,13 @@ interface SessionSummary {
   blank: boolean
   /** 日志 header 里的 `origin`（只有子代理会话会写）。 */
   origin?: string
+  /**
+   * 日志 header 里的 `parentSession`：这条子代理会话挂在哪条会话下面。
+   *
+   * 界面据此把子代理缩进到父会话的下一级（见 client/groups.ts 的 `nestSessions()`）。判据与删除/迁移的
+   * 级联展开是同一个字段——列表里看到的父子关系与"删/搬会带上谁"因此不会各说各话。
+   */
+  parentSession?: string
   /** 宿主内存里活着（删除会拒它）。 */
   live: boolean
 }
@@ -232,6 +239,9 @@ function summarizeSessions(
       archived,
       blank,
       ...(session.header.origin === undefined ? {} : { origin: session.header.origin }),
+      ...(session.header.parentSession === undefined
+        ? {}
+        : { parentSession: session.header.parentSession }),
       live: options.live.has(session.id),
       ...(hidden === undefined ? {} : { hidden }),
     }

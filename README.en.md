@@ -63,7 +63,10 @@ one-line bump at that point.
   "archive every session of this old project" is one click. A header carries the workspace title and path,
   so rows no longer repeat the owner; that width goes to the title instead, and a session sitting in the
   shell sidebar's Ungrouped group carries a small "Ungrouped" tag (the header is the directory, the tag says
-  where the shell puts the row). Every row shows the title, the byte count and the creation time. Sessions the
+  where the shell puts the row). **Subagent sessions are indented one level under their parent** (they
+  follow it; when the parent lives in another directory group the row stays in its own group, indented, and
+  says where the parent is), so which row belongs to which never has to be guessed from tags. Every row
+  shows the title, the byte count and the creation time. Sessions the
   host sidebar cannot show **are listed here** (the sidebar cannot reach them), each carrying a tag saying
   why: `subagent` / `blank` / `archived`, plus `active` for a session still live in host memory;
 - **Filter**: a row of small chips — subagent / blank / archived / ungrouped / active, each with the
@@ -150,8 +153,10 @@ directories back — deleting never touched the registry.
   the list carries **Collapse all / Expand all**: folding is a display matter, so "Select whole library"
   still counts what is listed — clicking an arrow never quietly drops sessions from the export. The two levels never read alike: a group header is a tinted
   band with a folder glyph, while session rows are indented under it and carry a chat-bubble glyph (a session
-  title is a sentence the user wrote, so it easily looks like a directory name). Sessions in the shell
-  sidebar's Ungrouped group stay with their directory here and carry a small "Ungrouped" tag saying so.
+  title is a sentence the user wrote, so it easily looks like a directory name). Subagent sessions sit one
+  level deeper, under their parent session (the parent-child links here are the very tree that decides who
+  a delete or a migration takes with it); sessions in the shell sidebar's Ungrouped group stay with their
+  directory here and carry a small "Ungrouped" tag saying so.
 - **Filter**: the same set as the **Sessions** tab — a row of small chips (subagent / blank / archived /
   ungrouped / active, each with the count in the library, multiple = either, **All** clears them) plus a
   **title / id search box**; used together the two are ANDed (search foo, show blank only = blank sessions

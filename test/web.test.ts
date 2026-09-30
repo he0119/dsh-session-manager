@@ -221,6 +221,9 @@ test('GET /state：子代理 / 空白 / 已归档即使没在册也不是「未�
   assert.equal(byId.get('session-a')!['ungrouped'], false, '在册的不算')
   assert.equal(byId.get('session-child')!['ungrouped'], false, '子代理嵌在父会话下面，不在那一组里')
   assert.equal(byId.get('session-child')!['hidden'], 'subagent')
+  // 界面靠这个字段把子代理缩进到父会话的下一级（判据与删除 / 迁移的级联展开是同一个 header 字段）
+  assert.equal(byId.get('session-child')!['parentSession'], 'session-a')
+  assert.equal('parentSession' in byId.get('session-a')!, false, '普通会话没有这个字段（不是空串）')
   assert.equal(byId.get('session-blank')!['ungrouped'], false, '空白默认不显示')
   assert.equal(byId.get('session-archived')!['ungrouped'], false, '已归档在默认归档过滤下不显示')
 })

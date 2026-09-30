@@ -237,6 +237,70 @@ export const CSS = `
   padding-left: 48px;
   box-shadow: inset 2px 0 0 0 color-mix(in srgb, var(--dsw-alias-label-primary, #1f2329) 14%, transparent);
 }
+/*
+ * 子代理行：缩进到父会话的下一级（列表里的父子关系与删除 / 迁移的级联展开是同一棵树，见
+ * groups.ts 的 nestSessions）。
+ *
+ * 手段与上面组头那一档同一套：**再缩进一格 + 一条导引线**。线画在父行内容左缘那一格（组内行是
+ * 48px，也就是父行勾选框的左边），于是同一屏里出现两条平行的竖线：外面那条是"这一组的范围"，
+ * 里面那条是"这几行挂在上面那条父会话下面"。层次不能只挂在缩进上——窄屏、长标题、色觉差异下，
+ * 最先被压没的正是缩进。
+ *
+ * 一格 24px：正好是行里勾选框那一列的宽度，父行与子行的勾选框因此差一格，一眼看得出谁在谁下面。
+ * 级数在 groups.ts 封顶（MAX_NEST_DEPTH），所以这里只写到三级。
+ */
+/*
+ * 导引线用**底图**画，不用 box-shadow：inset 阴影的语义是"从左边起画 Npx 宽的带"，只适合画贴着左缘
+ * 的那一条（组界线就是 2px）。要画在第 50px 上，就得先铺 52px 的带、再把它左边的 50px 擦掉——而
+ * box-shadow 只能叠、不能擦。底图上一条 2px 的色标正好是这件事。
+ * 因此 .dsm-row:hover 只能改 background-color（写成 background 简写会把底图一起清掉，悬停时导引线
+ * 一闪就没了）。
+ */
+.dsm-group > .dsm-row.dsm-rowNest1 {
+  padding-left: 72px;
+  background-image: linear-gradient(
+    to right,
+    transparent 0,
+    transparent 50px,
+    color-mix(in srgb, var(--dsw-alias-label-primary, #1f2329) 14%, transparent) 50px,
+    color-mix(in srgb, var(--dsw-alias-label-primary, #1f2329) 14%, transparent) 52px,
+    transparent 52px
+  );
+}
+.dsm-group > .dsm-row.dsm-rowNest2 {
+  padding-left: 96px;
+  background-image: linear-gradient(
+    to right,
+    transparent 0,
+    transparent 50px,
+    color-mix(in srgb, var(--dsw-alias-label-primary, #1f2329) 14%, transparent) 50px,
+    color-mix(in srgb, var(--dsw-alias-label-primary, #1f2329) 14%, transparent) 52px,
+    transparent 52px,
+    transparent 74px,
+    color-mix(in srgb, var(--dsw-alias-label-primary, #1f2329) 14%, transparent) 74px,
+    color-mix(in srgb, var(--dsw-alias-label-primary, #1f2329) 14%, transparent) 76px,
+    transparent 76px
+  );
+}
+.dsm-group > .dsm-row.dsm-rowNest3 {
+  padding-left: 120px;
+  background-image: linear-gradient(
+    to right,
+    transparent 0,
+    transparent 50px,
+    color-mix(in srgb, var(--dsw-alias-label-primary, #1f2329) 14%, transparent) 50px,
+    color-mix(in srgb, var(--dsw-alias-label-primary, #1f2329) 14%, transparent) 52px,
+    transparent 52px,
+    transparent 74px,
+    color-mix(in srgb, var(--dsw-alias-label-primary, #1f2329) 14%, transparent) 74px,
+    color-mix(in srgb, var(--dsw-alias-label-primary, #1f2329) 14%, transparent) 76px,
+    transparent 76px,
+    transparent 98px,
+    color-mix(in srgb, var(--dsw-alias-label-primary, #1f2329) 14%, transparent) 98px,
+    color-mix(in srgb, var(--dsw-alias-label-primary, #1f2329) 14%, transparent) 100px,
+    transparent 100px
+  );
+}
 /* 两级图形标记的共用部分：颜色跟着所在处的字色档次走，尺寸由 SVG 自己定。 */
 .dsm-levelIcon { flex: none; display: block; color: var(--dsw-alias-label-secondary, #646a73); }
 /* 工作区那一个跟它自己的标题同色（组头是"重"的那一级），会话那一个留在次要色上。 */
@@ -284,10 +348,31 @@ export const CSS = `
   cursor: default;
 }
 /*
+ * 删除预演清单里"随父会话删"的那些：也缩进一级，让"哪几条是点名的父会话带进来的"不用读标签就看得出
+ * （宿主给的顺序已经是"点名的在前、随后是各自的后代"，见 family.ts 的 familyOf）。
+ *
+ * 这一份清单不按目录分组，所以基准是行自己的 10px 内边距而不是上面那 48px；导引线画在父行内容左缘
+ * （10px），子行再往里让一格（24px）。
+ */
+.dsm-rowDelete.dsm-rowNest1 {
+  padding-left: 34px;
+  /* 同上面组内行：导引线走底图，别用 box-shadow（那是"从左边起 Npx 宽的带"） */
+  background-image: linear-gradient(
+    to right,
+    transparent 0,
+    transparent 10px,
+    color-mix(in srgb, var(--dsw-alias-label-primary, #1f2329) 14%, transparent) 10px,
+    color-mix(in srgb, var(--dsw-alias-label-primary, #1f2329) 14%, transparent) 12px,
+    transparent 12px
+  );
+}
+.dsm-rowDelete.dsm-rowNest2 { padding-left: 58px; }
+.dsm-rowDelete.dsm-rowNest3 { padding-left: 82px; }
+/*
  * 悬停底色同样不能拿表面 token 当"稍深一点"：浅色主题里 bg-layer-1/2/3 **全是同一个白**，
  * 铺上去等于没有反馈。改成把字色兑透明做一层薄雾（宿主外壳自己也这么兑），明暗两套都看得见。
  */
-.dsm-row:hover { background: color-mix(in srgb, var(--dsw-alias-label-primary, #1f2329) 6%, transparent); }
+.dsm-row:hover { background-color: color-mix(in srgb, var(--dsw-alias-label-primary, #1f2329) 6%, transparent); }
 .dsm-rowId { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
 /*
  * 行上的标题：正文字体（id 才走等宽），单行省略。

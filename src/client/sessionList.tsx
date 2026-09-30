@@ -45,6 +45,17 @@ const ROW_CLASS: Record<RowVariant, string> = {
   manage: 'dsm-row dsm-rowManage',
 }
 
+/**
+ * 缩进一级的行标记（`depth` = 0 时不加）。
+ *
+ * 级数在 `groups.ts` 里已经封顶（`MAX_NEST_DEPTH`），这里再夹一道只是防止调用方给出别的数：
+ * 类名写错不会报错、不会崩，只会让那一行**不缩进**（父子关系看着断了），所以两处都写死。
+ */
+export function nestClass(depth: number): string {
+  if (!Number.isFinite(depth) || depth <= 0) return ''
+  return ` dsm-rowNest${Math.min(Math.floor(depth), 3)}`
+}
+
 export function formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes < 0) return '—'
   const units = ['B', 'KB', 'MB', 'GB']
@@ -132,6 +143,10 @@ export interface SessionRowProps {
   owner?: string
   /** 「未分组」那枚标签在这一页有没有信息量（见 sessionTags）。 */
   ungroupedTag?: boolean
+  /** 缩进级数：这条会话是子代理、挂在上面那张父行下面时 > 0（见 groups.nestSessions）。 */
+  depth?: number
+  /** 名字后面跟一枚小标签（父会话在别的目录组里时用它说明父在哪儿）；文案由调用方翻好。 */
+  note?: { text: string; tip: string }
   t: Translate
 }
 
@@ -143,13 +158,15 @@ export function SessionRow({
   onToggle,
   owner,
   ungroupedTag = true,
+  depth = 0,
+  note,
   t,
 }: SessionRowProps): React.ReactElement {
   // 行上显示标题、id 退到悬浮提示（见 planRows.sessionLabel）。
   const label = sessionLabel(session)
   const tags = sessionTags(session, { ungrouped: ungroupedTag })
   return (
-    <label className={ROW_CLASS[variant]}>
+    <label className={`${ROW_CLASS[variant]}${nestClass(depth)}`}>
       <input type="checkbox" checked={checked} onChange={onToggle} />
       <SessionIcon />
       {/* 标题与标签同占一格：标签跟着名字走，名字自己负责省略（见 .dsm-rowLabel）。 */}
@@ -162,6 +179,11 @@ export function SessionRow({
             {t(tag.key)}
           </span>
         ))}
+        {note !== undefined && (
+          <span className="dsm-tag dsm-tagIdle" title={note.tip}>
+            {note.text}
+          </span>
+        )}
       </span>
       {owner !== undefined && (
         <span className="dsm-meta" title={session.cwd ?? ''}>
@@ -180,21 +202,24 @@ export function SessionRow({
  * @param className 行标记由调用方给（`.dsm-rowDelete` 是四列，与可勾选的那些不一样）。
  * @param metaTitle 字节那一格的悬浮提示（删除计划里给的是会话目录）。
  * @param note 名字后面跟一枚小标签（删除预演用它说明"这条是跟着谁来的"）；文案由调用方翻好。
+ * @param depth 缩进级数（删除计划里"随父会话删"的那些缩进到点名的那条下面，见 groups.nestClass）。
  */
 export function SessionStaticRow({
   session,
   className,
   metaTitle,
   note,
+  depth = 0,
 }: {
   session: RowSession
   className: string
   metaTitle?: string
   note?: { text: string; tip: string }
+  depth?: number
 }): React.ReactElement {
   const label = sessionLabel(session)
   return (
-    <div className={className}>
+    <div className={`${className}${nestClass(depth)}`}>
       <SessionIcon />
       <span className="dsm-rowLabel">
         <span className={label.kind === 'title' ? 'dsm-rowTitle' : 'dsm-rowId'} title={label.tip}>

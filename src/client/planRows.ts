@@ -242,6 +242,26 @@ export function deleteFamilyNote(
 }
 
 /**
+ * 「父会话在别的目录里」那枚标签（列表里缩进的那条子代理用）。
+ *
+ * 分组键是目录，而子代理的日志落在**它自己 cwd** 的项目目录里——那个 cwd 未必还是父会话现在的 cwd
+ * （父会话被单独迁走过一次就长成这样）。这种子代理只能留在它自己的目录组里，缩进说明了父子关系，
+ * 这枚标签说明"父不在这里"。完整的父目录在悬浮提示里：标签是 `flex: none`，占的宽度从标题里扣。
+ *
+ * @param row 缩进后的一行（`groups.NestedRow` 的结构化形状）。
+ * @param t 翻译。
+ * @returns 标签文案与悬浮提示；父会话就在本组、或不在当前视图里时 `undefined`（不挂标签）。
+ */
+export function parentDirNote(
+  row: { readonly parentPath?: string },
+  t: Translate,
+): { text: string; tip: string } | undefined {
+  const path = row.parentPath
+  if (path === undefined || path === '') return undefined
+  return { text: t('tagParentElsewhere'), tip: t('tagParentElsewhereTip', { path }) }
+}
+
+/**
  * 这个来源匹配到的会话（勾选面）。
  *
  * 目录来源按 `cwd` 匹配，同样只收侧边栏看得见的那些；「未分组」来源给的就是 `unownedSessions()`

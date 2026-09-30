@@ -42,6 +42,8 @@ export interface SessionSummary {
   blank?: boolean
   /** 日志 header 里的 `origin`（只有子代理会话会写）。 */
   origin?: string
+  /** 日志 header 里的 `parentSession`：这条子代理挂在哪条会话下面（列表据此缩进一级）。 */
+  parentSession?: string
   /** 宿主内存里活着（删除会拒它）。 */
   live?: boolean
 }

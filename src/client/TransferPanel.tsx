@@ -22,8 +22,8 @@ import * as React from 'react'
 
 import { download, exportSessions, importBundle, type ImportResponse } from './api.ts'
 import type { ImportEntry, SessionSummary } from './api.ts'
-import { groupKey, groupSessions } from './groups.ts'
-import { describeCwd, sessionLabel } from './planRows.ts'
+import { groupKey, groupSessions, nestSessions } from './groups.ts'
+import { describeCwd, parentDirNote, sessionLabel } from './planRows.ts'
 import { FILTER_KEYS } from './sessionFilter.ts'
 import {
   SessionFilterBar,
@@ -75,15 +75,17 @@ export function TransferPanel({ t = fallback, state, reload }: PanelShare): Reac
   //
   // 筛选之后**空掉的组不画**（组头底下没有行，看着像坏了），组头报的条数也就是筛剩下的那些——
   // 于是"整组勾选"勾的正是眼前这一组。
-  const groups = React.useMemo(
-    () =>
-      groupSessions(sessions, workspaces)
-        .map((group) => ({ group, sessions: group.sessions.filter(filter.matches) }))
-        .filter((item) => item.sessions.length > 0),
-    [sessions, workspaces, filter.matches],
-  )
-  /** 眼下列出来的那些（筛过之后，按组摊平）。 */
-  const listed = React.useMemo(() => groups.flatMap((item) => item.sessions), [groups])
+  const groups = React.useMemo(() => {
+    const filtered = groupSessions(sessions, workspaces)
+      .map((group) => ({ group, sessions: group.sessions.filter(filter.matches) }))
+      .filter((item) => item.sessions.length > 0)
+    // 子代理缩进到父会话的下一级；缩进在**筛完之后**才算（父被筛掉时子按普通行画），理由与三条边界
+    // 见 groups.ts 的 nestSessions。
+    const visible = new Set(filtered.flatMap((item) => item.sessions.map((session) => session.id)))
+    return filtered.map((item) => ({ group: item.group, rows: nestSessions(item.sessions, sessions, visible) }))
+  }, [sessions, workspaces, filter.matches])
+  /** 眼下列出来的那些（筛过之后，按组摊平）。缩进只改画法，不改"列出来了哪些"。 */
+  const listed = React.useMemo(() => groups.flatMap((item) => item.rows.map((row) => row.session)), [groups])
   /**
    * 折叠：只是把组内的行收起来，**不改"列出来了哪些"**。
    *
@@ -252,9 +254,9 @@ export function TransferPanel({ t = fallback, state, reload }: PanelShare): Reac
             // 高度固定，空态画在框里（见 styles.ts 的 .dsm-listFixed）
             <SessionListEmpty text={t('noMatch')} />
           ) : (
-            groups.map(({ group, sessions: shown }) => {
+            groups.map(({ group, rows }) => {
               const key = groupKey(group.path)
-              const picked = shown.filter((session) => selected.includes(session.id)).length
+              const picked = rows.filter((row) => selected.includes(row.session.id)).length
               // 组头的名字：登记过就用工作区标题（人认得的名字），没登记就只剩路径可显示。
               const name = group.title ?? (group.path === '' ? t('noCwdGroup') : group.path)
               const collapsed = collapse.isCollapsed(key)
@@ -265,21 +267,23 @@ export function TransferPanel({ t = fallback, state, reload }: PanelShare): Reac
                     name={name}
                     title={group.title}
                     path={group.path}
-                    count={shown.length}
+                    count={rows.length}
                     picked={picked}
                     collapsed={collapsed}
-                    onToggle={() => toggleGroup(shown)}
+                    onToggle={() => toggleGroup(rows.map((row) => row.session))}
                     onToggleCollapse={() => collapse.toggle(key)}
                     t={t}
                   />
                   {!collapsed &&
-                    shown.map((session) => (
+                    rows.map((row) => (
                       <SessionRow
-                        key={session.id}
-                        session={session}
+                        key={row.session.id}
+                        session={row.session}
                         variant="export"
-                        checked={selected.includes(session.id)}
-                        onToggle={() => toggle(session.id)}
+                        checked={selected.includes(row.session.id)}
+                        onToggle={() => toggle(row.session.id)}
+                        depth={row.depth}
+                        note={parentDirNote(row, t)}
                         t={t}
                       />
                     ))}

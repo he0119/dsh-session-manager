@@ -194,6 +194,9 @@ export const zh = {
   manageDeleteKeptParent: '父留着',
   manageDeleteKeptParentTip:
     '这条子代理的父会话「{name}」不在这次删除里：删掉它之后，父会话侧边栏里那一行会点不开。',
+  tagParentElsewhere: '父在别目录',
+  tagParentElsewhereTip:
+    '这条子代理的父会话在 {path}，不在这个目录组里：子代理的日志落在它自己的 cwd 下，父会话被单独迁走过一次就会长成这样。',
   selectAllSessions: '全选',
   shownCount: '显示 {shown} / {total} 条',
   noMatch: '没有符合筛选条件的会话。',
@@ -422,6 +425,9 @@ export const en: Record<keyof typeof zh, string> = {
   manageDeleteKeptParent: 'parent kept',
   manageDeleteKeptParentTip:
     'The parent session “{name}” of this subagent is not part of this delete: afterwards that line under the parent will no longer open.',
+  tagParentElsewhere: 'parent elsewhere',
+  tagParentElsewhereTip:
+    'This subagent’s parent session lives in {path}, outside this directory group: a subagent log sits under its own cwd, which is what happens once the parent was migrated on its own.',
   selectAllSessions: 'Select all',
   shownCount: 'showing {shown} / {total}',
   noMatch: 'No session matches the filter.',
