@@ -29,21 +29,43 @@ const decodeAll: DecodeAll = (buf: Uint8Array): string => Buffer.from(decompress
 
 // ---- 展开判据本身 ----
 
-/** 只带 `familyOf()` 要用的两个字段：id 与 header.parentSession。 */
-const session = (id: string, parentSession?: string): DiscoveredSession =>
-  ({
+/**
+ * 只带 `familyOf()` 要用的那几个字段：id、header.parentSession、header.origin。
+ *
+ * 给了 `parentSession` 的默认写成**子代理**（`origin: "subagent"`，真实库里这两条一起写）；要造
+ * 「有父指针但不是子代理」的分叉用 `fork()`。
+ */
+const session = (id: string, parentSession?: string, options: { subagent?: boolean } = {}): DiscoveredSession => {
+  const asSubagent = parentSession !== undefined && options.subagent !== false
+  return {
     id,
     dirName: id,
     dir: `/sessions/p/${id}`,
     cwd: '/p',
     createdAt: 1,
-    header: { type: 'session', version: 4, id, createdAt: 1, isSeeded: false, delegationDepth: 0, ...(parentSession === undefined ? {} : { parentSession }) },
+    header: {
+      type: 'session',
+      version: 4,
+      id,
+      createdAt: 1,
+      isSeeded: false,
+      delegationDepth: 0,
+      ...(parentSession === undefined ? {} : { parentSession }),
+      ...(asSubagent ? { origin: 'subagent' as const } : {}),
+    },
     files: [],
-  }) as DiscoveredSession
+  } as DiscoveredSession
+}
+
+/**
+ * 分叉：`sessions.fork()` 出来的会话——有 `parentSession`、没有 `origin`、`isSeeded: true`。
+ * 它是一份自洽的普通会话（源会话的已完成轮次被拷进它自己的日志），不跟着父走。
+ */
+const fork = (id: string, parentSession: string): DiscoveredSession => session(id, parentSession, { subagent: false })
 
 const idsOf = (members: ReturnType<typeof familyOf>): string[] => members.map((member) => member.session.id)
 
-test('展开：点名的一条在前，随后是全部后代（多级），同一条只出现一次', () => {
+test('展开：点名的一条在前，随后是全部子代理后代（多级），同一条只出现一次', () => {
   const library = [
     session('P'),
     session('c1', 'P'),
@@ -70,6 +92,15 @@ test('展开：点名两条时各自成族、共享的后代不重复；父与�
   const named = familyOf(library, [library[2]!, library[0]!])
   assert.deepEqual(idsOf(named), ['shared', 'P'])
   assert.equal(named.find((member) => member.session.id === 'shared')?.root.id, 'shared')
+})
+
+test('展开：分叉不跟着父走（父被删 / 被迁都不带它），但分叉自己的子代理照旧跟着它', () => {
+  const library = [session('P'), session('c1', 'P'), fork('f1', 'P'), session('g1', 'f1'), fork('f2', 'c1')]
+  const family = familyOf(library, [library[0]!])
+  assert.deepEqual(idsOf(family), ['P', 'c1'], 'f1 是分叉（独立会话），f2 挂在子代理 c1 下面但也是分叉——都不进来')
+
+  const fromFork = familyOf(library, [library[2]!])
+  assert.deepEqual(idsOf(fromFork), ['f1', 'g1'], '点名分叉时，挂在它下面的子代理跟着它走')
 })
 
 test('展开：坏数据里的环不会转不出来；自己指向自己也不算一条边', () => {
