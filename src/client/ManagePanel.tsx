@@ -31,8 +31,8 @@ import {
   type SessionSummary,
 } from './api.ts'
 import { translateWith, zh } from './locales.ts'
-import { groupKey, groupSessions } from './groups.ts'
-import { deleteFamilyNote } from './planRows.ts'
+import { groupKey, groupSessions, nestSessions } from './groups.ts'
+import { deleteFamilyNote, parentDirNote } from './planRows.ts'
 import { FILTER_KEYS } from './sessionFilter.ts'
 import {
   SessionFilterBar,
@@ -70,17 +70,18 @@ export function ManagePanel({ t = fallback, state, reload }: PanelShare): React.
    * 与「传输」页逐字同形（那边也是这几步），理由见 groups.ts：分组键是目录而不是注册表里的工作区 id，
    * 因为同一个目录下常有没登记的会话，而用户说"这个工作区的会话"指的是这个目录。
    */
-  const groups = React.useMemo(
-    () =>
-      groupSessions(sessions, state?.workspaces ?? [])
-        .map((group) => ({ group, sessions: group.sessions.filter(filter.matches) }))
-        .filter((item) => item.sessions.length > 0),
-    [sessions, state, filter.matches],
-  )
+  const groups = React.useMemo(() => {
+    const filtered = groupSessions(sessions, state?.workspaces ?? [])
+      .map((group) => ({ group, sessions: group.sessions.filter(filter.matches) }))
+      .filter((item) => item.sessions.length > 0)
+    // 缩进在**筛完之后**才算：父被筛掉时子按普通行画（见 groups.nestSessions 的三条边界）。
+    const visible = new Set(filtered.flatMap((item) => item.sessions.map((session) => session.id)))
+    return filtered.map((item) => ({ group: item.group, rows: nestSessions(item.sessions, sessions, visible) }))
+  }, [sessions, state, filter.matches])
   /** 折叠：只把组内的行收起来，不改"列出来了哪些"（见 TransferPanel 里的同一段说明）。 */
   const collapse = useGroupCollapse(groups.map((item) => groupKey(item.group.path)))
-  /** 当前列出来的那些（筛过之后，按组摊平）。 */
-  const listed = React.useMemo(() => groups.flatMap((item) => item.sessions), [groups])
+  /** 当前列出来的那些（筛过之后，按组摊平）。缩进只改画法，不改"列出来了哪些"。 */
+  const listed = React.useMemo(() => groups.flatMap((item) => item.rows.map((row) => row.session)), [groups])
 
   // 已被删掉/已不在列表里的 id 不该继续留在选择集里（预演完再刷新时会遇到）。
   const known = React.useMemo(() => new Set(sessions.map((session) => session.id)), [sessions])
@@ -213,7 +214,7 @@ export function ManagePanel({ t = fallback, state, reload }: PanelShare): React.
           ) : groups.length === 0 ? (
             <SessionListEmpty text={t('noMatch')} />
           ) : (
-            groups.map(({ group, sessions: shown }) => {
+            groups.map(({ group, rows }) => {
               const key = groupKey(group.path)
               // 组头的名字：登记过就用工作区标题（人认得的名字），没登记就只剩路径可显示。
               const name = group.title ?? (group.path === '' ? t('noCwdGroup') : group.path)
@@ -224,21 +225,23 @@ export function ManagePanel({ t = fallback, state, reload }: PanelShare): React.
                     name={name}
                     title={group.title}
                     path={group.path}
-                    count={shown.length}
-                    picked={shown.filter((session) => picked.includes(session.id)).length}
+                    count={rows.length}
+                    picked={rows.filter((row) => picked.includes(row.session.id)).length}
                     collapsed={collapsed}
-                    onToggle={() => toggleGroup(shown)}
+                    onToggle={() => toggleGroup(rows.map((row) => row.session))}
                     onToggleCollapse={() => collapse.toggle(key)}
                     t={t}
                   />
                   {!collapsed &&
-                    shown.map((session) => (
+                    rows.map((row) => (
                       <SessionRow
-                        key={session.id}
-                        session={session}
+                        key={row.session.id}
+                        session={row.session}
                         variant="manage"
-                        checked={picked.includes(session.id)}
-                        onToggle={() => toggle(session.id)}
+                        checked={picked.includes(row.session.id)}
+                        onToggle={() => toggle(row.session.id)}
+                        depth={row.depth}
+                        note={parentDirNote(row, t)}
                         t={t}
                       />
                     ))}
@@ -301,7 +304,10 @@ export function ManagePanel({ t = fallback, state, reload }: PanelShare): React.
                 session={entry}
                 className="dsm-row dsm-rowDelete"
                 metaTitle={entry.dir}
-                // 级联带进来的条目在清单里是"没勾过却要一起删"的那些，得在行上说明出处。
+                // 级联带进来的条目在清单里是"没勾过却要一起删"的那些，得在行上说明出处；
+                // 同时缩进一级：宿主给的顺序是"点名的在前、随后是各自的后代"（familyOf 的 BFS），
+                // 缩进之后"哪几条是它带进来的"不用读标签也看得出。
+                depth={entry.via === undefined ? 0 : 1}
                 note={deleteFamilyNote(entry, t)}
               />
             ))}

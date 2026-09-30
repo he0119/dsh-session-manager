@@ -522,7 +522,7 @@ test('客户端产物：导出列表按目录分组，组头就是"整组勾选"
       // false；s-2 / s-3 / s-4 谁都没认领又看得见 → true。**没有 cwd 也算**（那是迁移来源自己的
       // 能力限制，不是「未分组」的定义）。
       { id: 's-1', cwd: '/home/u/dev/alpha', createdAt: 2, dir: '/home/u/dev/alpha', bytes: 2048, files: [], ungrouped: false },
-      { id: 's-2', cwd: '/home/u/dev/alpha', createdAt: 1, dir: '/home/u/dev/alpha', bytes: 1024, files: [], ungrouped: true },
+      { id: 's-2', cwd: '/home/u/dev/alpha', createdAt: 1, dir: '/home/u/dev/alpha', bytes: 1024, files: [], ungrouped: true, parentSession: 's-1' },
       { id: 's-3', cwd: '/home/u/dev/beta', createdAt: 3, dir: '/home/u/dev/beta', bytes: 512, files: [], ungrouped: true },
       { id: 's-4', createdAt: 4, dir: '_no-cwd', bytes: 256, files: [], ungrouped: true },
     ],
@@ -605,6 +605,13 @@ test('客户端产物：导出列表按目录分组，组头就是"整组勾选"
   assert.deepEqual(tagsByLabel.get('s-2'), ['ungroupedSource'], '同目录里在「未分组」那一组的那条要单独标出来')
   assert.deepEqual(tagsByLabel.get('s-3'), ['ungroupedSource'], '另一个目录里的同样标出来')
   assert.deepEqual(tagsByLabel.get('s-4'), ['ungroupedSource'], '没有 cwd 的也在那一组里（标签与迁移来源的 cwd 要求无关）')
+  // 缩进这套两个分页各接一遍线（「会话」页在 ManagePanel、这里是 TransferPanel），所以各钉一处：
+  // s-2 的父指针指向同组的 s-1，它就该挂一级缩进的类名。
+  const nestedRow = rows.find((row) => rowParts(row).label === 's-2')
+  assert.ok(
+    String(nestedRow.props.className).includes('dsm-rowNest1'),
+    '导出页也把子代理缩进到父会话的下一级',
+  )
 })
 
 // ---- 「会话」页（逐条归档 / 删除）----
@@ -688,6 +695,66 @@ test('客户端产物：「会话」页把侧边栏看不见的那三类标出�
   assert.equal(actionButton('manageArchive')?.props?.['disabled'], false, '宿主有归档能力时按钮可用')
   assert.ok(text.includes('manageDeletePreview') && text.includes('manageDeleteHint'), '删除入口与说明在')
   assert.ok(!text.includes('manageArchiveUnavailable'), '宿主有归档能力时不该显示"改不了归档"那句')
+})
+
+test('客户端产物：子代理缩进到父会话的下一级（同一组 / 父在别的组 / 父被筛掉）', { skip }, () => {
+  // 列表里的父子关系与删除 / 迁移的级联展开是同一个字段（header 的 `parentSession`）。缩进错了不会抛错、
+  // 不会崩，只会让"删父会话会带上谁"与眼睛看到的对不上，所以按行核顺序与缩进类名。
+  const sessions = [
+    // alpha 组：父 → 子 → 孙，外加一条无关的（它排在子树之后：顶层按新→旧）
+    { id: 'p1', cwd: '/home/u/dev/alpha', createdAt: 5, dir: '/home/u/dev/alpha', bytes: 100, files: [], archived: true },
+    { id: 'c1', cwd: '/home/u/dev/alpha', createdAt: 4, dir: '/home/u/dev/alpha', bytes: 200, files: [], origin: 'subagent', hidden: 'subagent', parentSession: 'p1' },
+    { id: 'c2', cwd: '/home/u/dev/alpha', createdAt: 3, dir: '/home/u/dev/alpha', bytes: 300, files: [], origin: 'subagent', hidden: 'subagent', parentSession: 'c1' },
+    { id: 'lone', cwd: '/home/u/dev/alpha', createdAt: 2, dir: '/home/u/dev/alpha', bytes: 400, files: [] },
+    // beta 组：这条子代理的父会话在 alpha（父被单独迁走过一次就会长成这样）
+    { id: 'x1', cwd: '/home/u/dev/beta', createdAt: 1, dir: '/home/u/dev/beta', bytes: 500, files: [], origin: 'subagent', hidden: 'subagent', parentSession: 'p1' },
+  ]
+  const state = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    archiveAvailable: true,
+    sessions,
+    workspaces: [{ id: 'w1', path: '/home/u/dev/alpha', title: '工作区甲', sessionIds: [] }],
+  }
+  const rowsOf = (recorded) =>
+    recorded
+      .filter((node) => node.type === 'label' && String(node.props?.className).includes('dsm-rowManage'))
+      .map((row) => ({
+        label: rowParts(row).label,
+        tags: rowParts(row).tags,
+        // 缩进由类名表达（样式在 styles.ts 里按级数给缩进与导引线）
+        nest: (String(row.props.className).match(/dsm-rowNest(\d)/) ?? [])[1] ?? '0',
+      }))
+
+  /** 渲染一页：假钩子不自动跑，得自己带着注入面调一次（同本文件别处的写法）。 */
+  const render = (mounted) => {
+    const { component, registration } = mounted.registrations[0]
+    const element = component(registration.inject())
+    return { recorded: mounted.recorded, text: strings(element) }
+  }
+
+  // ① 不筛：父在前、子紧随其后，子挂一级、孙挂两级；父在别的组的那条留在自己组里挂一级并说明父在哪儿
+  const first = render(mount({ state, panel: 'manage' }))
+  const text = first.text
+  assert.deepEqual(rowsOf(first.recorded), [
+    { label: 'p1', tags: ['tagArchived'], nest: '0' },
+    { label: 'c1', tags: ['tagSubagent'], nest: '1' },
+    { label: 'c2', tags: ['tagSubagent'], nest: '2' },
+    { label: 'lone', tags: [], nest: '0' },
+    { label: 'x1', tags: ['tagSubagent', 'tagParentElsewhere'], nest: '1' },
+  ])
+  // 缩进只改画法：组头报的条数还是这一组有几条会话（子代理照样算）
+  assert.ok(text.some((item) => String(item).includes('sessionsInDir:{"count":4}')), 'alpha 组 4 条')
+  assert.ok(text.some((item) => String(item).includes('sessionsInDir:{"count":1}')), 'beta 组 1 条')
+
+  // ② 只筛「子代理」：父会话被筛走，子代理按普通行画（不凭空多一级）；孙的父还在，于是只它缩进
+  const second = render(mount({ state, panel: 'manage', arrays: [[], ['subagent']] }))
+  assert.deepEqual(rowsOf(second.recorded), [
+    { label: 'c1', tags: ['tagSubagent'], nest: '0' },
+    { label: 'c2', tags: ['tagSubagent'], nest: '1' },
+    { label: 'x1', tags: ['tagSubagent'], nest: '0' },
+  ])
 })
 
 test('客户端产物：「会话」页在宿主没有归档能力时禁用入口并说明原因', { skip }, () => {
