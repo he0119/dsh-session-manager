@@ -16,7 +16,7 @@ import test from 'node:test'
 import { decompress } from 'fzstd'
 
 import { applyPlan, verifyAppliedPlan } from '../src/execute.ts'
-import { familyOf } from '../src/family.ts'
+import { familyOf, loneSubagents } from '../src/family.ts'
 import { readManifest, rollback } from '../src/journal.ts'
 import { buildRelocationPlan } from '../src/plan.ts'
 import { projectKey } from '../src/project-key.ts'
@@ -101,6 +101,16 @@ test('展开：分叉不跟着父走（父被删 / 被迁都不带它），但�
 
   const fromFork = familyOf(library, [library[2]!])
   assert.deepEqual(idsOf(fromFork), ['f1', 'g1'], '点名分叉时，挂在它下面的子代理跟着它走')
+})
+
+test('单独点名的子代理：父会话还在库里、又没被点名时才挑出来', () => {
+  const library = [session('P'), session('c1', 'P'), session('g1', 'c1'), fork('f1', 'P'), session('orphan', 'gone')]
+  assert.deepEqual(loneSubagents(library, new Set(['c1'])), [{ id: 'c1', parentId: 'P' }])
+  assert.deepEqual(loneSubagents(library, new Set(['g1'])), [{ id: 'g1', parentId: 'c1' }], '隔一层也一样')
+  assert.deepEqual(loneSubagents(library, new Set(['c1', 'P'])), [], '父会话也在这次点名里，就不是"单独"')
+  assert.deepEqual(loneSubagents(library, new Set(['orphan'])), [], '父会话不在库里的孤儿没有可跟随的会话')
+  assert.deepEqual(loneSubagents(library, new Set(['f1'])), [], '分叉不是子代理，这条规则管不到它')
+  assert.deepEqual(loneSubagents(library, new Set(['P'])), [], '普通会话本来就该被单独点名')
 })
 
 test('展开：坏数据里的环不会转不出来；自己指向自己也不算一条边', () => {

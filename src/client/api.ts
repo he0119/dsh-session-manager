@@ -124,9 +124,21 @@ export async function fetchState(): Promise<StateResponse> {
 }
 
 /** 导出的结果：字节 + 宿主给的文件名。 */
+/** 读一个数字响应头：缺席或不是数字时返回 `undefined`（界面据此回落自己算的那份）。 */
+function numberHeader(response: Response, name: string): number | undefined {
+  const raw = response.headers.get(name)
+  if (raw === null) return undefined
+  const value = Number(raw)
+  return Number.isFinite(value) ? value : undefined
+}
+
 export interface ExportResult {
   blob: Blob
   filename: string
+  /** 包里实际有几条会话（宿主回报）：勾一条父会话时它的子代理跟着进包，比勾选数多。 */
+  count?: number
+  /** 包里日志的总字节数（宿主回报）；缺席时界面按勾中的那些算。 */
+  bytes?: number
 }
 
 /** 导出选中的会话。 */
@@ -145,8 +157,16 @@ export async function exportSessions(sessionIds: readonly string[]): Promise<Exp
   }
   const disposition = response.headers.get('content-disposition') ?? ''
   const matched = /filename="([^"]+)"/.exec(disposition)
+  // 包里到底几条 / 多少字节：界面那句"已导出 N 条"说的是包里的东西，而包里可能多了跟来的子代理。
+  const count = numberHeader(response, 'x-dsh-session-count')
+  const bytes = numberHeader(response, 'x-dsh-session-bytes')
   // 文件名以宿主的 Content-Disposition 为准；这条兜底只在没有响应头时用，后缀与它保持一致。
-  return { blob: await response.blob(), filename: matched?.[1] ?? 'dsh-sessions.dshsess' }
+  return {
+    blob: await response.blob(),
+    filename: matched?.[1] ?? 'dsh-sessions.dshsess',
+    ...(count === undefined ? {} : { count }),
+    ...(bytes === undefined ? {} : { bytes }),
+  }
 }
 
 /** 导入一个包：`mode: 'plan'` 只预演不写盘。 */
@@ -367,8 +387,6 @@ export interface DeleteEntry {
   origin?: string
   /** 级联带进来的：点名的那个祖先会话（点名的那几条自己没有这一项，见宿主 `RemoveEntry.via`）。 */
   via?: { id: string; title?: string }
-  /** 这条子代理的父会话还在库里、却不在这次删除里：删完父会话那一行会点不开。 */
-  keptParent?: { id: string; title?: string }
 }
 
 /** 删除（预演或落地）的响应。 */

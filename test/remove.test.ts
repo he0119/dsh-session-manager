@@ -257,7 +257,6 @@ test('级联：点名父会话 → 全部后代一起进计划（多级、跨项
     const entry = plan.entries.find((item) => item.id === id)!
     assert.deepEqual(entry.via, { id: 'session-parent', title: '父会话' }, `${id} 要说清是跟着谁来的`)
     assert.equal(entry.origin, 'subagent')
-    assert.equal(entry.keptParent, undefined, '父会话在计划里，就没有"父会话留着"这回事')
   }
   // 预演摘要要把多出来的条数说出来，否则用户只会看到"我只勾了一条、它要删四条"
   const run = runRemoval(deps(sandbox), { sessionIds: ['session-parent'] }, { apply: false })
@@ -281,28 +280,45 @@ test('级联：多级同族一起删时，执行把整族装进同一份备份�
   assert.deepEqual(manifest.sessions.map((s) => s.id).sort(), ['session-child', 'session-grand', 'session-parent'])
 })
 
-test('只删一条子代理：父会话留着 → 行上点明父会话下面会留一个点不开的条目', () => {
+test('只删一条子代理：父会话还在库里 → 拒绝，并告诉用户该点名谁', () => {
   const sandbox = makeSandbox('remove-child-only')
   writeSession(sandbox, 'session-parent', 1000, { title: '父会话' })
   writeSubagent(sandbox, 'session-child', 'session-parent', 2000, { title: '子代理' })
 
   const plan = planRemoval(deps(sandbox), { sessionIds: ['session-child'] })
-  assert.equal(plan.ok, true, plan.problems.join('; '))
-  assert.deepEqual(plan.entries.map((entry) => entry.id), ['session-child'])
-  assert.equal(plan.cascaded, 0)
-  assert.deepEqual(plan.entries[0]!.keptParent, { id: 'session-parent', title: '父会话' })
-  // 向上不牵连：删子代理不会把父会话一起删
-  assert.equal(plan.entries.some((entry) => entry.id === 'session-parent'), false)
+  assert.equal(plan.ok, false, '子代理不能被单独操作')
+  assert.equal(plan.entries.length, 0, '拒绝的计划里不该有要删的条目')
+  assert.match(plan.problems.join('; '), /session-child 是子代理会话（它跟着父会话走）：请改点名它的父会话 父会话（session-parent）/)
+
+  // 点了父会话就不一样了：子代理跟着它一起走
+  const withParent = planRemoval(deps(sandbox), { sessionIds: ['session-parent'] })
+  assert.equal(withParent.ok, true, withParent.problems.join('; '))
+  assert.deepEqual(withParent.entries.map((entry) => entry.id), ['session-parent', 'session-child'])
 })
 
-test('孤儿（父会话已经不在库里）：没有"父会话留着"这条提示，也不报错', () => {
+test('嵌套的单独子代理：拒掉外层之后，里层的父也一起退出计划，于是同样被拒', () => {
+  const sandbox = makeSandbox('remove-lone-nested')
+  writeSession(sandbox, 'session-p', 1000)
+  writeSubagent(sandbox, 'session-r', 'session-p', 2000)
+  writeSubagent(sandbox, 'session-m', 'session-r', 3000)
+  writeSubagent(sandbox, 'session-x', 'session-m', 4000)
+
+  // 点名 session-r（父 session-p 没点名）与它子树里的 session-x：两条都算"单独"，整个计划一条都不该列
+  const plan = planRemoval(deps(sandbox), { sessionIds: ['session-r', 'session-x'] })
+  assert.equal(plan.ok, false)
+  assert.deepEqual(plan.entries, [], '被拒的那些不该出现在"要删的东西"里')
+  assert.equal(plan.problems.length, 2, plan.problems.join('; '))
+  assert.match(plan.problems.join('; '), /session-r 是子代理会话/)
+  assert.match(plan.problems.join('; '), /session-x 是子代理会话/)
+})
+
+test('孤儿（父会话已经不在库里）：没有可跟随的会话，允许单独收拾', () => {
   const sandbox = makeSandbox('remove-orphan')
   writeSubagent(sandbox, 'session-orphan', 'session-gone', 1000)
 
   const plan = planRemoval(deps(sandbox), { sessionIds: ['session-orphan'] })
   assert.equal(plan.ok, true, plan.problems.join('; '))
   assert.equal(plan.entries.length, 1)
-  assert.equal(plan.entries[0]!.keptParent, undefined)
 })
 
 test('父子都被点名：两条都算"点名"，谁也不是顺带进来的', () => {

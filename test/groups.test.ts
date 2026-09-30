@@ -12,7 +12,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { MAX_NEST_DEPTH, groupKey, groupSessions, nestSessions } from '../src/client/groups.ts'
+import { MAX_NEST_DEPTH, groupKey, groupSessions, lockedParentOf, nestSessions } from '../src/client/groups.ts'
 
 // 注意这里**不 import** `src/client/api.ts` 的响应类型：Host 侧的 typecheck 工程
 // `exclude` 了 `src/client`，但 import 会把它拉进来在"没有 DOM 的工程"里检查
@@ -232,4 +232,20 @@ test('缩进：级数封顶（更深的链条按最后一级算，别把标题�
     ['s4', 3],
     ['s5', MAX_NEST_DEPTH],
   ])
+})
+
+test('能不能单独勾：只有"子代理 + 父会话在库里"才不能（判据与宿主那几条路同源）', () => {
+  const parent = link('p', undefined)
+  const child = link('c', 'p')
+  const grand = link('g', 'c')
+  const orphan = link('o', 'gone')
+  const fork = forkLink('f', 'p')
+  const library = new Map([parent, child, grand, orphan, fork].map((session) => [session.id, session]))
+
+  assert.equal(lockedParentOf(child, library)?.id, 'p', '子代理要跟着父会话，不能单独勾')
+  assert.equal(lockedParentOf(grand, library)?.id, 'c', '隔一层也一样（父是它那一级的父）')
+  assert.equal(lockedParentOf(parent, library), undefined, '普通会话照旧能单独勾')
+  assert.equal(lockedParentOf(orphan, library), undefined, '父会话不在库里的孤儿没有可跟随的会话')
+  assert.equal(lockedParentOf(fork, library), undefined, '分叉不是子代理，照旧能单独勾')
+  assert.equal(lockedParentOf(child, new Map()), undefined, '库是空的（父不在里面）时也不能把它锁死')
 })

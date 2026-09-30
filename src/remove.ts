@@ -21,7 +21,7 @@ import { existsSync, readdirSync, rmSync, rmdirSync, statSync } from 'node:fs'
 import { dirname } from 'node:path'
 
 import { scanAll, type DiscoveredSession } from './discovery.ts'
-import { familyOf } from './family.ts'
+import { familyOf, loneSubagents } from './family.ts'
 import { createBackup } from './journal.ts'
 import type { TitleQuery } from './session-title.ts'
 import type { DecodeAll, SessionLogFile } from './types.ts'
@@ -73,14 +73,6 @@ export interface RemoveEntry {
    * 点名的那几条自己没有这个字段——哪怕它同时又是别人的后代（"点名"比"顺带"更该被说出来）。
    */
   via?: { id: string; title?: string }
-  /**
-   * 这条是子代理，而它的父会话还在库里、又不在这次删除里。
-   *
-   * 子会话在外壳侧边栏里只挂在父会话的 `subagentCatalog` 下（见 visibility.ts），所以只删子、
-   * 留着父，父下面会留下一个点不开的条目。这是**提示而不是拦截**：父会话已经不在库里的孤儿没有
-   * 这个问题，而"这条子代理我就是要单独删掉"也是正当需求。
-   */
-  keptParent?: { id: string; title?: string }
 }
 
 /** 删除计划：界面看到的预演结果就是执行时会做的事。 */
@@ -143,16 +135,36 @@ export function planRemoval(deps: RemoveDeps, request: RemoveRequest): RemovalPl
   const named = new Set(ids)
 
   // 点名但不在库里的：照旧逐条报，不静默跳过（那些 id 也就展开不出什么后代来）。
-  const roots: DiscoveredSession[] = []
+  let roots: DiscoveredSession[] = []
   for (const id of ids) {
     const session = byId.get(id)
     if (session === undefined) problems.push(`session ${id} 不在库里（可能已经被删掉了）`)
     else if (!roots.some((root) => root.id === id)) roots.push(session)
   }
 
+  // 单独点名一条子代理（父会话还在库里、又不会被这次操作带上）：拒掉，并告诉用户该点名谁。子代理
+  // 跟着父会话走，只删它会把父会话日志里那条 catalog 留成"指着一条不存在的会话"（见 family.ts）。
+  //
+  // 判据是"父会话在不在**这次展开出来**的集合里"，而不是"有没有同时点名"：坏数据里的环（A 的父是 B、
+  // B 的父是 A）从任一条展开都会把另一条带进来，那不算拆族。所以这里迭代到不动点——每轮至少确定一条
+  // 要拒的，最多点几条就几轮。
+  const refused = new Map<string, string>()
+  for (;;) {
+    const planned = new Set(familyOf(discovered, roots).map(({ session }) => session.id))
+    const lone = loneSubagents(discovered, named).filter((item) => !refused.has(item.id) && !planned.has(item.parentId))
+    if (lone.length === 0) break
+    for (const item of lone) refused.set(item.id, item.parentId)
+    roots = roots.filter((root) => !refused.has(root.id))
+  }
+  for (const id of ids) {
+    const parentId = refused.get(id)
+    if (parentId === undefined) continue
+    const parent = byId.get(parentId)
+    const owner = parent?.title === undefined ? parentId : `${parent.title}（${parentId}）`
+    problems.push(`session ${id} 是子代理会话（它跟着父会话走）：请改点名它的父会话 ${owner}`)
+  }
+
   const entries: RemoveEntry[] = []
-  /** 每条收进来的会话，它的父会话 id（没有父链接就不进这张表）。 */
-  const parentOf = new Map<string, string>()
   for (const { session, root } of familyOf(discovered, roots)) {
     const id = session.id
     // 点名的那些不说"跟着谁"——那是用户自己的选择；只有级联带进来的才说明出处。
@@ -171,8 +183,6 @@ export function planRemoval(deps: RemoveDeps, request: RemoveRequest): RemovalPl
       problems.push(`session ${id} 的目录已经不在了：${session.dir}${owner}`)
       continue
     }
-    const parentSession = session.header.parentSession
-    if (parentSession !== undefined) parentOf.set(id, parentSession)
     entries.push({
       id: session.id,
       ...(session.title === undefined ? {} : { title: session.title }),
@@ -184,17 +194,6 @@ export function planRemoval(deps: RemoveDeps, request: RemoveRequest): RemovalPl
       ...(session.header.origin === undefined ? {} : { origin: session.header.origin }),
       ...(via === undefined ? {} : { via }),
     })
-  }
-
-  // 删了子、留着父：父会话侧边栏里那一行会点不开（catalog 里还记着这个孩子）。父已经不在库里的
-  // 孤儿没有这一条——它没有 catalog 会指过来。
-  const planned = new Set(entries.map((entry) => entry.id))
-  for (const entry of entries) {
-    const parentId = parentOf.get(entry.id)
-    if (parentId === undefined || planned.has(parentId)) continue
-    const parent = byId.get(parentId)
-    if (parent === undefined) continue
-    entry.keptParent = { id: parent.id, ...(parent.title === undefined ? {} : { title: parent.title }) }
   }
 
   const files = entries.reduce((sum, entry) => sum + entry.files.length, 0)

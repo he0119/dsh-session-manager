@@ -22,7 +22,7 @@ import * as React from 'react'
 
 import { download, exportSessions, importBundle, type ImportResponse } from './api.ts'
 import type { ImportEntry, SessionSummary } from './api.ts'
-import { groupKey, groupSessions, nestSessions } from './groups.ts'
+import { groupKey, groupSessions, lockedParentOf, nestSessions } from './groups.ts'
 import { describeCwd, parentDirNote, sessionLabel } from './planRows.ts'
 import { FILTER_KEYS } from './sessionFilter.ts'
 import {
@@ -101,7 +101,22 @@ export function TransferPanel({ t = fallback, state, reload }: PanelShare): Reac
     setSelected((current) => current.filter((id) => sessions.some((session) => session.id === id)))
   }, [sessions])
 
-  const toggle = (id: string): void => {
+  /**
+   * 这一行能不能单独勾：子代理跟着父会话走（父会话还在库里时就只能跟着它）。判据与「会话」页共用
+   * `groups.ts` 的 `lockedParentOf()`，与宿主那条导出路的拒绝判据同源。
+   */
+  const lockOf = React.useMemo(() => {
+    const byId = new Map(sessions.map((session) => [session.id, session]))
+    return (session: SessionSummary): { tip: string } | undefined => {
+      const parent = lockedParentOf(session, byId)
+      return parent === undefined ? undefined : { tip: t('lockedSubagentTip', { name: parent.title ?? parent.id }) }
+    }
+  }, [sessions, t])
+  const selectable = (session: SessionSummary): boolean => lockOf(session) === undefined
+
+  const toggle = (session: SessionSummary): void => {
+    if (!selectable(session)) return
+    const id = session.id
     setSelected((current) => (current.includes(id) ? current.filter((x) => x !== id) : [...current, id]))
   }
 
@@ -112,7 +127,8 @@ export function TransferPanel({ t = fallback, state, reload }: PanelShare): Reac
    * 再看一眼它变成"全部勾上"之后再点一下即可。一条会话都没勾的组同理是"勾上"。
    */
   const toggleGroup = (group: readonly SessionSummary[]): void => {
-    const ids = group.map((session) => session.id)
+    const ids = group.filter(selectable).map((session) => session.id)
+    if (ids.length === 0) return
     const whole = ids.every((id) => selected.includes(id))
     setSelected((current) =>
       whole ? current.filter((id) => !ids.includes(id)) : [...new Set([...current, ...ids])],
@@ -141,7 +157,13 @@ export function TransferPanel({ t = fallback, state, reload }: PanelShare): Reac
       const result = await exportSessions(selected)
       download(result)
       const chosen = sessions.filter((session) => selected.includes(session.id))
-      setNotice(t('exported', { count: chosen.length, bytes: formatBytes(totalBytes(chosen)) }))
+      // 包里的条数与字节以宿主回报的为准：勾一条父会话时，它的子代理跟着进包，比勾选数多。
+      setNotice(
+        t('exported', {
+          count: result.count ?? chosen.length,
+          bytes: formatBytes(result.bytes ?? totalBytes(chosen)),
+        }),
+      )
     })
   }
 
@@ -227,8 +249,9 @@ export function TransferPanel({ t = fallback, state, reload }: PanelShare): Reac
             className="dsm-button"
             // 筛过之后"全选/清空"针对的是**眼下列出来的**那些：勾选面看到什么就选什么，
             // 已经勾上的不会因为切筛选而丢（头部一直报着"已选几条"）。
-            onClick={() => setSelected(allSelected ? [] : listed.map((session) => session.id))}
-            disabled={listed.length === 0}
+            // 不能单独勾的那些不进来：子代理跟着父会话走，勾父会话就等于勾了它。
+            onClick={() => setSelected(allSelected ? [] : listed.filter(selectable).map((session) => session.id))}
+            disabled={listed.filter(selectable).length === 0}
           >
             {allSelected ? t('clearAll') : t('selectAll')}
           </button>
@@ -281,9 +304,10 @@ export function TransferPanel({ t = fallback, state, reload }: PanelShare): Reac
                         session={row.session}
                         variant="export"
                         checked={selected.includes(row.session.id)}
-                        onToggle={() => toggle(row.session.id)}
+                        onToggle={() => toggle(row.session)}
                         depth={row.depth}
                         note={parentDirNote(row, t)}
+                        locked={lockOf(row.session)}
                         t={t}
                       />
                     ))}

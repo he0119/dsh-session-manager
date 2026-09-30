@@ -754,6 +754,52 @@ test('客户端产物：子代理缩进到父会话的下一级（同一组 / �
   ])
 })
 
+test('客户端产物：子代理行的勾选框禁用（跟着父会话走），全选也只勾能单独勾的那些', { skip }, () => {
+  // 能勾的集合必须与"单独操作不会被拒的集合"一致（宿主那几条路的判据见 family.ts 的 loneSubagents）：
+  // 否则用户只能靠"点下去被拒"发现自己点错了。分叉与孤儿都能单独勾——分叉不是子代理，孤儿没有可跟随的会话。
+  const sessions = [
+    { id: 'p1', title: '父会话', cwd: '/home/u/dev/alpha', createdAt: 5, dir: '/home/u/dev/alpha', bytes: 100, files: [] },
+    { id: 'c1', cwd: '/home/u/dev/alpha', createdAt: 4, dir: '/home/u/dev/alpha', bytes: 200, files: [], origin: 'subagent', hidden: 'subagent', parentSession: 'p1' },
+    { id: 'f1', cwd: '/home/u/dev/alpha', createdAt: 3, dir: '/home/u/dev/alpha', bytes: 300, files: [], parentSession: 'p1' },
+    { id: 'o1', cwd: '/home/u/dev/alpha', createdAt: 2, dir: '/home/u/dev/alpha', bytes: 400, files: [], origin: 'subagent', hidden: 'subagent', parentSession: 'gone' },
+  ]
+  const state = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    archiveAvailable: true,
+    sessions,
+    workspaces: [{ id: 'w1', path: '/home/u/dev/alpha', title: '工作区甲', sessionIds: [] }],
+  }
+  const render = (mounted) => {
+    const { component, registration } = mounted.registrations[0]
+    return { recorded: mounted.recorded, text: strings(component(registration.inject())) }
+  }
+
+  const first = render(mount({ state, panel: 'manage' }))
+  const rows = first.recorded.filter(
+    (node) => node.type === 'label' && String(node.props?.className).includes('dsm-rowManage'),
+  )
+  const inputOf = (label) => {
+    const row = rows.find((node) => rowParts(node).label === label)
+    assert.ok(row !== undefined, `${label} 这一行要在`)
+    return elementsOf(row).find((element) => element.type === 'input')?.props ?? {}
+  }
+  assert.equal(inputOf('c1').disabled, true, '子代理不能单独勾')
+  assert.equal(inputOf('c1').title, 'lockedSubagentTip:{"name":"父会话"}', '提示里写明该勾哪一条')
+  assert.notEqual(inputOf('父会话').disabled, true, '父会话能勾（它就是那个"上面那条"）')
+  assert.notEqual(inputOf('f1').disabled, true, '分叉不是子代理，照旧能单独勾')
+  assert.notEqual(inputOf('o1').disabled, true, '孤儿没有可跟随的会话，照旧能单独勾')
+
+  // 筛到只剩"不能单独勾"的那些：一个能勾的都没有，「全选」要真的禁用（把孤儿摘掉，它能单独勾）
+  const lockedOnly = { ...state, sessions: sessions.filter((session) => session.id !== 'o1') }
+  const second = render(mount({ state: lockedOnly, panel: 'manage', arrays: [[], ['subagent']] }))
+  const selectAll = second.recorded.find(
+    (element) => element.type === 'button' && strings(element).includes('selectAllSessions'),
+  )
+  assert.equal(selectAll?.props?.['disabled'], true, '列出来的全是不能单独勾的子代理时，「全选」禁用')
+})
+
 test('客户端产物：导出页也把子代理缩进到父会话的下一级（两个分页各接一遍线）', { skip }, () => {
   // 缩进这套接了两遍线（「会话」页在 ManagePanel、传输页在 TransferPanel），所以两处各钉一次。
   const state = {

@@ -138,14 +138,14 @@ tsconfig.client.json Web Client 自己的类型工程（DOM + JSX；Host 那份�
 | `src/projection-cache.ts` | 读宿主投影缓存的单条记录（标题、`blank` 等列表元数据） | 无 |
 | `src/session-title.ts` | 会话标题：宿主投影缓存优先，缺席时有界地解日志开头 | 无 |
 | `src/visibility.ts` | 侧边栏可见性与「未分组」判据：子代理 / 空白 / 已归档三条理由（候选与界面共用一份）、`isUngrouped()`＝没认领 **且** 会显示 | 无 |
-| `src/family.ts` | **族**的展开（点名一条会话 → 它自己 + 全部子代理后代），删除与迁移共用 | 无 |
+| `src/family.ts` | **族**的展开（点名一条会话 → 它自己 + 全部子代理后代）与「单独点名的子代理」判据（`loneSubagents()`），删除 / 迁移 / 归档 / 导出共用 | 无 |
 | `src/plan.ts` | 只读计划：目标推导、阻塞问题、注册表变更（候选只取侧边栏看得见的，选中后再向下展开整族） | 无 |
 | `src/journal.ts` | 字节级备份清单与回滚（迁移与删除两种来源） | 无 |
 | `src/execute.ts` | 执行 + 独立复核（含产物目标位校验） | 无 |
 | `src/artifacts.ts` | 会话产物提取（证据分层）、规划（求交/剪枝）、搬迁 | 无 |
 | `src/transfer.ts` | `.dshsess` 容器（导出/解析/校验）、导入预演与落地 | 无 |
 | `src/migrate.ts` | 迁移编排：预演 / 执行 / 回滚 / 备份清单（工具与界面两个入口共用） | 无 |
-| `src/remove.ts` | 删除编排：预演（活着的拒删；点名一条就按 `family.ts` 把它的**全部子代理后代**一起展开）→ 先备份 → 删目录 → 复核；不碰注册表 | 无 |
+| `src/remove.ts` | 删除编排：预演（活着的拒删、单独点名子代理拒掉；点名一条就按 `family.ts` 把它的**全部子代理**一起展开）→ 先备份 → 删目录 → 复核；不碰注册表 | 无 |
 | `src/tools.ts` | 4 个工具注册（+ schema、平台解码器实例、可选服务探测） | `dsh-tools` |
 | `src/web.ts` | 界面端点（state / export / import / migrate / backups / rollback / delete / archive），只要求 `{ register }` 形状 | 无 |
 | `src/client/*` | 浏览器半侧：「会话管理」页（会话 / 迁移 / 传输 / 说明四个分页）、字典、样式、端点调用 → `lib/client.js`；`sessionList.tsx` 是前三个分页共用的列表骨架（行、组头、列表框、筛选条），`sessionFilter.ts` 是它背后的筛选与搜索判据（纯函数），`groups.ts` 是列表的组织规则（按目录分组、组内把子代理缩进到父会话下一级，都是纯函数），`HelpPanel.tsx` 是那个不碰数据的说明页 | 无 |

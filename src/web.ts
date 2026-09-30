@@ -24,6 +24,7 @@ import {
   type MigrateDeps,
   type MigrateRequest,
 } from './migrate.ts'
+import { familyOf, loneSubagents } from './family.ts'
 import { projectionCacheDir } from './paths.ts'
 import { readRegistry, validateRegistry } from './registry.ts'
 import { runRemoval, type RemoveDeps, type RemovalRun } from './remove.ts'
@@ -198,6 +199,57 @@ function loadRegistry(
 export const scanLibrary = scanAll
 
 /**
+ * 这次点名的会话里有没有"单独的子代理"（父会话还在库里、又不会被一起带上），有就给出拒绝文案。
+ *
+ * 子代理跟着父会话走（见 family.ts）：单独归档 / 导出它，要么在父会话的 `subagent/catalog` 里留下
+ * 一条指着不存在会话的条目，要么打出一个父会话不在里面的包。所以这几条路都直接拒，并指名该点谁。
+ * 删除那条路在自己的编排里做同一件事（文案在 remove.ts，多一条父会话标题）。
+ */
+function loneSubagentError(
+  all: readonly DiscoveredSession[],
+  ids: readonly string[],
+  resolveTitle?: (query: TitleQuery) => string | undefined,
+): string | undefined {
+  const byId = new Map(all.map((session) => [session.id, session]))
+  const lone = loneSubagents(all, new Set(ids))
+  if (lone.length === 0) return undefined
+  return lone
+    .map((item) => {
+      const parent = byId.get(item.parentId)
+      // 拒绝这条路上才去读父会话的标题（整库带标题扫一遍要 1.7s，见 discovery.ts 的取舍）：
+      // 只有一条会话、而且只在这条罕见的错误分支上读。
+      const title =
+        parent === undefined
+          ? undefined
+          : (resolveTitle?.({
+              id: parent.id,
+              createdAt: parent.createdAt,
+              ...(parent.cwd === undefined ? {} : { cwd: parent.cwd }),
+              files: parent.files.map((file) => ({ path: file.path, version: file.version })),
+            }) ?? parent.title)
+      const owner = title === undefined || title.trim() === '' ? item.parentId : `${title.trim()}（${item.parentId}）`
+      return `session ${item.id} 是子代理会话（它跟着父会话走）：请改点名它的父会话 ${owner}`
+    })
+    .join('；')
+}
+
+/**
+ * 点名的那批 id → 实际要动手的那批：点名的在前，随后是各自跟来的子代理（`familyOf()`）。
+ *
+ * 库里找不到的 id 原样留着（调用方照旧逐条报"不在库里"，不静默少做一件事）。
+ */
+function withSubagents(all: readonly DiscoveredSession[], ids: readonly string[]): string[] {
+  const byId = new Map(all.map((session) => [session.id, session]))
+  const known = new Set(byId.keys())
+  const roots = ids.flatMap((id) => {
+    const session = byId.get(id)
+    return session === undefined ? [] : [session]
+  })
+  const expanded = familyOf(all, roots).map(({ session }) => session.id)
+  return [...ids.filter((id) => !known.has(id)), ...expanded]
+}
+
+/**
  * 把发现结果与注册表对起来，得到界面要的行。
  *
  * `ungrouped` = 这条会话在外壳侧边栏里落在「未分组」那一组里（判据与理由见 visibility.ts 的
@@ -333,22 +385,33 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
 
     const all = scanLibrary(paths.sessionsRoot, decodeAll)
     const byId = new Map(all.map((session) => [session.id, session]))
-    const missing = ids.filter((id) => !byId.has(String(id)))
+    const named: string[] = ids.map((id) => String(id))
+    const missing = named.filter((id) => !byId.has(id))
     if (missing.length > 0) {
       sendJson(res, 404, { error: `这些会话不在库里：${missing.join(', ')}` })
       return
     }
+    // 子代理不单独打包：它跟着父会话进包，否则包里那条 catalog 会指向一个包内不存在的会话。
+    const lone = loneSubagentError(all, named, resolveTitle)
+    if (lone !== undefined) {
+      sendJson(res, 400, { error: lone })
+      return
+    }
 
-    const sources = ids.map((id) => {
-      const session = byId.get(String(id))!
+    const sources = withSubagents(all, named).map((id) => {
+      const session = byId.get(id)!
       return { id: session.id, cwd: session.cwd, createdAt: session.createdAt, dir: session.dir, files: session.files }
     })
     const at = now()
     const source: BundleSourceInfo = { sessionsRoot: paths.sessionsRoot, pluginVersion: deps.pluginVersion }
     const bundle = buildBundle(sources, { now: at.toISOString(), source })
+    const bytes = sources.reduce((sum, item) => sum + item.files.reduce((s, file) => s + file.bytes, 0), 0)
     sendBytes(res, 200, bundle, {
       'content-type': 'application/octet-stream',
       'content-disposition': `attachment; filename="${fileName(sources.length, at)}"`,
+      // 包里到底几条 / 多少字节：界面那句"已导出 N 条"要说的是**包里的**，勾一条父会话时它比勾选数多
+      'x-dsh-session-count': String(sources.length),
+      'x-dsh-session-bytes': String(bytes),
     })
   }
 
@@ -630,6 +693,14 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
       return
     }
     const archived = fields['archived'] !== false
+    // 子代理不单独动：勾父会话时它跟着一起归档 / 取消归档（族是一个单位，见 family.ts）。
+    const all = scanLibrary(paths.sessionsRoot, decodeAll)
+    const lone = loneSubagentError(all, ids, resolveTitle)
+    if (lone !== undefined) {
+      sendJson(res, 400, { error: lone })
+      return
+    }
+    const targets = [...new Set(withSubagents(all, ids))]
     const ops = deps.registryOps?.()
     if (ops === undefined) {
       // 非 Web profile 没有这个服务：如实拒绝，而不是写一遍注册表文件（写文件绕过宿主的内存副本，
@@ -639,7 +710,7 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
     }
     const done: string[] = []
     const failed: Array<{ id: string; error: string }> = []
-    for (const id of ids) {
+    for (const id of targets) {
       try {
         if (archived) await ops.archive(id)
         else await ops.unarchive(id)
