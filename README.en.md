@@ -88,7 +88,9 @@ one-line bump at that point.
   deeper descendants) with it — the preview lists them row by row, marked as going with the parent, and
   one backup holds the whole family (once the parent's log is gone a subagent has no way back into the
   sidebar, so leaving it on disk just makes it invisible). Deleting a subagent alone is allowed; the
-  preview says that its line under the parent will never open again.
+  preview says that its line under the parent will never open again. **A forked session does not
+  count**: it is a self-contained ordinary session (the source's history was copied into its own log),
+  it still opens once the parent is gone, so it is not taken along.
 
 **Migrate** — move one directory's sessions to another directory
 
@@ -119,8 +121,9 @@ one-line bump at that point.
   deeper descendants) with it — each log header's cwd is rewritten and each session directory moves into
   the target project directory, all in one backup (otherwise the family ends up split across two
   directories, and a subagent cannot be moved on its own: it is not a candidate, and naming it would be an
-  upward link). Membership does not change: a subagent was not registered, and still is not; the preview
-  reports how many of the sessions are subagents;
+  upward link). **A forked session does not count** either (it is self-contained, and it still opens
+  after the parent has moved). Membership does not change: a subagent was not registered, and still is
+  not; the preview reports how many of the sessions are subagents;
 - **Preview**: session, log and byte counts, source → target project directory, **how the registry changes** (create or
   reuse the target workspace, how many sessions are added, which workspaces lose them, whether an emptied
   workspace is removed), the artifact plan and its skip reasons;

@@ -120,12 +120,28 @@ test('组的稳定键：路径本身，没有 cwd 的那一组换成一个撞不
 
 // ---- 子代理缩进到父会话的下一级（`nestSessions`）----
 //
-// 这一层是**显示**关系：列表里的父子与删除/迁移的级联展开读的是同一个字段（header 的 `parentSession`），
-// 所以缩进错了不会抛错、不会崩，只会让"删父会话会带上谁"与眼睛看到的对不上。三条边界各自钉一条。
+// 这一层是**显示**关系：列表里的父子与删除/迁移的级联展开读的是同一条边（`parentSession` +
+// `origin === "subagent"`），所以缩进错了不会抛错、不会崩，只会让"删父会话会带上谁"与眼睛看到的对不上。
+// 边界各自钉一条。
 
-/** 造一条带父指针的会话（缩进只用到 id / parentSession / cwd / createdAt）。 */
-function link(id: string, parentSession?: string, cwd = '/home/u/dev/alpha') {
-  return { id, ...(parentSession === undefined ? {} : { parentSession }), cwd, createdAt: 1 }
+/**
+ * 造一条带父指针的会话（缩进只用到 id / parentSession / origin / cwd / createdAt）。
+ * 给了 `parentSession` 的默认是**子代理**（`origin: "subagent"`）；分叉用 `forkLink()`。
+ */
+function link(id: string, parentSession?: string, cwd = '/home/u/dev/alpha', options: { subagent?: boolean } = {}) {
+  const asSubagent = parentSession !== undefined && options.subagent !== false
+  return {
+    id,
+    ...(parentSession === undefined ? {} : { parentSession }),
+    ...(asSubagent ? { origin: 'subagent' } : {}),
+    cwd,
+    createdAt: 1,
+  }
+}
+
+/** 分叉：有 `parentSession`、没有 `origin`（`sessions.fork()` 出来的那种自洽会话），不该缩进。 */
+function forkLink(id: string, parentSession: string, cwd = '/home/u/dev/alpha') {
+  return link(id, parentSession, cwd, { subagent: false })
 }
 
 test('缩进：子代理排在父会话后面、缩进一级，孙代再深一级', () => {
@@ -166,6 +182,30 @@ test('缩进：父会话没在当前视图里（被筛掉 / 不在库里）时�
   // 父会话的 cwd 是空串：仍然是缩进一级，只是没有可写的目录
   const noCwd = nestSessions([link('child', 'parent')], [link('parent', undefined, ''), link('child', 'parent')], new Set(['parent', 'child']))
   assert.deepEqual(noCwd.map((row) => [row.session.id, row.depth, row.parentPath]), [['child', 1, undefined]])
+})
+
+test('缩进：分叉按普通行画不缩进，而它自己的子代理照旧缩进到它下面', () => {
+  const rows = nestSessions(
+    [forkLink('fork', 'parent'), link('parent'), link('sub', 'fork')],
+    [link('parent'), forkLink('fork', 'parent'), link('sub', 'fork')],
+    new Set(['parent', 'fork', 'sub']),
+  )
+  assert.deepEqual(rows.map((row) => [row.session.id, row.depth]), [
+    ['fork', 0],
+    ['sub', 1],
+    ['parent', 0],
+  ], '分叉是顶层行（顺序仍按输入），它的子代理跟着它缩进一级')
+
+  // 分叉排在父后面（真实库里分叉通常比父新）也不能被收进父的子树里
+  const after = nestSessions(
+    [link('parent'), forkLink('fork', 'parent')],
+    [link('parent'), forkLink('fork', 'parent')],
+    new Set(['parent', 'fork']),
+  )
+  assert.deepEqual(after.map((row) => [row.session.id, row.depth]), [
+    ['parent', 0],
+    ['fork', 0],
+  ], '父在前也一样：分叉不缩进')
 })
 
 test('缩进：坏数据里的环不会让会话消失，也不会无限递归', () => {
