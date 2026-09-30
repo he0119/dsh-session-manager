@@ -37,7 +37,7 @@ Trusted Publisher。也就是说 `@he0119/dsh-session-manager` 的**第一个版
 npm login                      # 以 he0119 登录，需要 2FA
 pnpm run build                 # lib/ 不进 git，先出产物
 npm publish --access public    # 不加 --provenance：本机没有 OIDC，签不出证明
-#    ↑ 发出去的就是 package.json 里那个版本（当前 `0.0.1`）：先 pnpm version 改号再发，
+#    ↑ 发出去的就是 package.json 里那个版本：先 pnpm version 改号再发，
 #      别用 npm publish 顺手发一个 git 里没有的版本
 
 # 2) 去 npm 包设置页登记 Trusted Publisher（表格见下一节）
@@ -75,11 +75,13 @@ main 只接受 PR（服务端那条 ruleset 见 [AGENTS.md](../AGENTS.md) 的 Gi
 提交走 PR 合进 main，再给合并后的那个提交打标签、单独把标签推上去。
 
 ```sh
-# 1) 版本号提交走 PR 合进 main。--no-git-tag-version 是必须的：标签不能在分支上打（合并会换 SHA）。
-#    工作目录必须是干净的，否则 pnpm version 会拒绝（它会把改动混进发布提交里）。
-pnpm version 0.2.0 --no-git-tag-version -m "chore(release): %s"
-# ↑ 只改 package.json 并提交。pnpm-lock.yaml 不记录本包的版本号，因此不必跟着改；
-#   它只跑 preversion/version/postversion 三个钩子，不会触发本包的 prepublishOnly（tsdown），
+# 1) 版本号提交走 PR 合进 main。--no-git-tag-version 同时禁掉提交与标签（`pnpm version --help` 里写的就是
+#    "Don't create a commit or tag"），所以它只改 package.json，提交得自己补一步，`-m` 在这个组合下不起作用。
+#    工作目录必须是干净的，否则 pnpm version 会拒绝（ERR_PNPM_UNCLEAN_WORKING_TREE，未跟踪的新文件也算脏）。
+pnpm version 0.2.0 --no-git-tag-version
+git add package.json && git commit -m "chore(release): 0.2.0"
+# ↑ 发布提交只动 package.json 这一个文件。pnpm-lock.yaml 不记录本包的版本号，因此不必跟着改；
+#   pnpm version 只跑 preversion/version/postversion 三个钩子，不触发本包的 prepublishOnly（tsdown），
 #   因此不会顺带构建。
 git push origin HEAD:refs/heads/chore/release-0.2.0
 gh pr create --base main --fill          # 单个提交，标题直接取提交信息
@@ -94,11 +96,13 @@ git push origin v0.2.0          # 只推标签：Publish 工作流接手
 npm view @he0119/dsh-session-manager version   # 几分钟后确认线上的版本
 ```
 
-`0.2.0` 也可以写成 `patch` / `minor` / `major`，由你决定升幅（见下）。`-m` 里的 `%s` 会被替换成
-版本号，所以提交信息是 `chore(release): 0.2.0`。
+`0.2.0` 也可以写成 `patch` / `minor` / `major`，由你决定升幅（见下）。发布提交的信息由上面那句
+`git commit -m` 给出；`pnpm version` 自己的 `-m` 只在它代为提交时起作用，而 `--no-git-tag-version`
+下它根本不提交。
 
 合并方式用 **Rebase** 或 **Squash**：ruleset 要求线性历史，merge commit 会被拒。两者都会换掉提交
-SHA，所以标签一律**合并之后**再打——在分支上用 `pnpm version` 顺手打的那个标签，合并后就指错了地方。
+SHA，所以标签一律**合并之后**再打——在分支上打的标签会落在被丢弃的那个提交上，合并后 main 上再也
+找不到它。
 
 ## Release 日志怎么分组
 
@@ -145,7 +149,8 @@ GitHub 在 Release 页面建标签时，会把它落在**当刻 main 的 HEAD** 
 ## 版本号在哪、怎么算
 
 **`package.json` 是版本号的唯一来源**，标签只是它的复述——工作流只核对、不改写。改动它的是
-`pnpm version`，它把「改版本号」「提交」「打标签」合成一个动作，因此版本号与标签天然指着同一个提交。
+`pnpm version`，而提交与标签是分开的两步（`--no-git-tag-version` 只让它改号，见「一次发布」），所以
+版本号与标签指着同一个提交这件事，靠的是「合并之后再打标签」这个顺序，不是靠工具顺手打上。
 
 升幅由人决定（`pnpm version major|minor|patch|0.2.0`），**没有任何东西自动推算**。
 
