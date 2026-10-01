@@ -115,5 +115,4 @@ pnpm typecheck && pnpm build && pnpm test && pnpm check:package
 - **PR 标题按约定式提交写**：`.github/workflows/autolabeler.yml` 按 PR 标题给 PR 打标签，Release
   日志的分组（`.github/release.yml`）只认标签，所以标题要是 `feat: …` / `fix: …` 这种形状；PR 里的
   每个提交同样是这套格式——rebase 合并后它们原样进 main，squash 之后 main 上只剩 PR 标题。
-- **不要自己 push**（含 `--force`）；改完把状态与下一步命令交给维护者，由他决定。
 - 改写历史前先留一个备份 ref，并在报告里给出新旧 sha 的对应关系，以及"树有没有变化"的核对方式。
