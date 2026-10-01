@@ -216,8 +216,10 @@ sync:
 This section is also editable **in the interface**: in the card on Settings → “Session management” → “Sync”, the URL, machine id, username, password reference, timeout and mapping are
 edited directly, and Save writes them into the profile document (`~/.dsh/profiles/<name>/cordis.patch.yml`).
 `sync` is a volatile field, so a change takes effect **without a restart**; the three path fields
-(`sessionsRoot` / `registryPath` / `backupRoot`) stay file-only. Write the mapping as one
-`remote cwd = local directory` per line, with `#` starting a comment line.
+(`sessionsRoot` / `registryPath` / `backupRoot`) stay file-only. Path mappings are added and removed row
+by row: the left side is the cwd the remote recorded, the right side a directory on this machine. That left
+side must match the other machine’s path character for character, so once you have previewed, the form
+offers the cwds it saw as suggestions instead of making you copy them by hand.
 
 The remote layout is `machines/<machineId>/index.json` (which sessions this machine contributed) plus
 `machines/<machineId>/<id>.dshsess` (one bundle per session). **One slot per machine**: WebDAV has no

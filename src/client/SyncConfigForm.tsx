@@ -9,8 +9,9 @@
  *     文档），逐字提交会让每次击键都变成一次文档写入，而用户根本没法预览自己写了什么；
  *   - **只提交改动过的字段**：没动过的字段不发编辑，否则用户层里会攒下一堆"等于默认值"的覆盖，
  *     界面上那些字段从此都顶着「已覆盖」徽标（判据见 syncForm.ts 的 draftOps）；
- *   - **映射表用文本行**：一行一条 `远端路径 = 本机目录`。宿主那套表单原语只有文本/数字两种字段
- *     规格，字典类型没有现成控件；文本行至少能一眼看全、能整段复制粘贴，坏行还能指到行号。
+ *   - **映射表是一行一行的**：远端 cwd 与本机目录各一个输入框，行可以增删。远端那一侧必须**逐字**
+ *     对上别的机器记下的 cwd，所以它带一份从上次预演里收来的候选（`remoteCwds`）——这些路径靠人背
+ *     是靠不住的，抄错一个字符就是"没配映射，跳过"。
  *
  * @module dsh-session-manager/client/SyncConfigForm
  */
@@ -24,6 +25,7 @@ import {
   getSyncConfigApi,
   syncSectionOf,
   type MappingProblem,
+  type MappingRow,
   type SyncDraft,
   type SyncFormSnapshot,
 } from './syncForm.ts'
@@ -32,8 +34,6 @@ import type { Translate } from './locales.ts'
 /** 问题的文案：码 → 句子（这一层才有语言）。 */
 function problemText(problem: MappingProblem, t: Translate): string {
   switch (problem.code) {
-    case 'mapNoSeparator':
-      return t('syncMapNoSeparator', { line: problem.line, text: problem.text })
     case 'mapNoFrom':
       return t('syncMapNoFrom', { line: problem.line })
     case 'mapNoTo':
@@ -78,7 +78,16 @@ function Field({
  * `overridden` 是"用户层里已经有了这一项"——它不比较值，因为一个等于默认值的覆盖仍然是覆盖。
  * 用户点了「恢复默认」之后那个徽标才会消失。
  */
-export function SyncConfigForm({ t, onSaved }: { t: Translate; onSaved?: () => void }): React.ReactElement | null {
+export function SyncConfigForm({
+  t,
+  onSaved,
+  remoteCwds = [],
+}: {
+  t: Translate
+  onSaved?: () => void
+  /** 上次预演里见过的远端 cwd：给"远端"那一栏当候选，省得手抄一条长路径。 */
+  remoteCwds?: readonly string[]
+}): React.ReactElement | null {
   const api = getSyncConfigApi()
   const [snapshot, setSnapshot] = React.useState<SyncFormSnapshot | undefined>(api?.getSnapshot())
   const [draft, setDraft] = React.useState<SyncDraft | undefined>(undefined)
@@ -109,6 +118,19 @@ export function SyncConfigForm({ t, onSaved }: { t: Translate; onSaved?: () => v
   const edit = (patch: Partial<SyncDraft>): void => {
     setFailed(false)
     setDraft({ ...view, ...patch })
+  }
+  /** 改第 n 行的一侧；留空由保存前的校验去挡（不是每敲一下就报错）。 */
+  const editMapping = (index: number, patch: Partial<MappingRow>): void => {
+    setFailed(false)
+    setDraft({ ...view, mapping: view.mapping.map((row, at) => (at === index ? { ...row, ...patch } : row)) })
+  }
+  const addMapping = (): void => {
+    setFailed(false)
+    setDraft({ ...view, mapping: [...view.mapping, { from: '', to: '' }] })
+  }
+  const removeMapping = (index: number): void => {
+    setFailed(false)
+    setDraft({ ...view, mapping: view.mapping.filter((_row, at) => at !== index) })
   }
   const ops = draftOps(view, section)
   const dirty = ops.length > 0
@@ -172,17 +194,54 @@ export function SyncConfigForm({ t, onSaved }: { t: Translate; onSaved?: () => v
           placeholder="DSH_DAV_PASSWORD"
         />
       </div>
-      <label className="dsm-field">
+      <div className="dsm-field">
         <span className="dsm-fieldLabel">{t('syncFieldMapping')}</span>
-        <textarea
-          className="dsm-input dsm-textarea"
-          rows={3}
-          value={view.mapping}
-          placeholder={'/home/alice/dev/proj = /opt/work/proj'}
-          onChange={(event) => edit({ mapping: event.target.value })}
-        />
-        <span className="dsm-hint">{t('syncFieldMappingHint')}</span>
-      </label>
+        {view.mapping.length === 0 && <span className="dsm-hint">{t('syncFieldMappingEmpty')}</span>}
+        {view.mapping.length > 0 && (
+          <div className="dsm-mapRows">
+            {view.mapping.map((row, index) => (
+              <div className="dsm-mapRow" key={index}>
+                <input
+                  className="dsm-input"
+                  type="text"
+                  list={remoteCwds.length > 0 ? 'dsm-mapRemoteCwds' : undefined}
+                  aria-label={t('syncMapRemoteLabel', { line: index + 1 })}
+                  placeholder="/home/alice/dev/proj"
+                  value={row.from}
+                  onChange={(event) => editMapping(index, { from: event.target.value })}
+                />
+                <span className="dsm-mapArrow" aria-hidden="true">
+                  →
+                </span>
+                <input
+                  className="dsm-input"
+                  type="text"
+                  aria-label={t('syncMapLocalLabel', { line: index + 1 })}
+                  placeholder="/opt/work/proj"
+                  value={row.to}
+                  onChange={(event) => editMapping(index, { to: event.target.value })}
+                />
+                <button type="button" className="dsm-button" onClick={() => removeMapping(index)}>
+                  {t('syncMapRemove')}
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        {remoteCwds.length > 0 && (
+          <datalist id="dsm-mapRemoteCwds">
+            {remoteCwds.map((cwd) => (
+              <option key={cwd} value={cwd} />
+            ))}
+          </datalist>
+        )}
+        <div className="dsm-controls">
+          <button type="button" className="dsm-button" onClick={addMapping}>
+            {t('syncMapAdd')}
+          </button>
+          <span className="dsm-hint">{t('syncFieldMappingHint')}</span>
+        </div>
+      </div>
 
       <div className="dsm-controls">
         <button type="button" className="dsm-button dsm-primary" onClick={save} disabled={!canSave}>

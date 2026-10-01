@@ -10,8 +10,9 @@ import {
   draftFrom,
   draftOps,
   draftProblems,
-  formatMapping,
-  parseMapping,
+  mappingProblems,
+  mappingRows,
+  mappingValue,
   SYNC_SECTION,
   syncSectionOf,
 } from '../src/client/syncForm.ts'
@@ -20,32 +21,48 @@ test('同步设置：entry id 是 profile 里那个 insert 的 id', () => {
   assert.equal(SYNC_SECTION, 'session-manager')
 })
 
-test('同步设置：映射表按「远端 = 本机」一行一条，用 = 而不是 :（Windows 路径里有冒号）', () => {
-  assert.equal(
-    formatMapping({ '/home/alice/dev/proj': '/opt/work/proj', 'C:\\work\\proj': 'D:\\work\\proj' }),
-    '/home/alice/dev/proj = /opt/work/proj\nC:\\work\\proj = D:\\work\\proj',
+test('同步设置：映射表是行，顺序跟着文档走（看到的顺序就是配置里的顺序）', () => {
+  // 故意让插入顺序与"排序结果"不同（`/z` 先进、`/a` 后进）：钉住"不重排"。
+  assert.deepEqual(
+    mappingRows({ '/z/proj': '/opt/z', '/a/proj': '/opt/a', 'C:\\work\\proj': 'D:\\work\\proj' }),
+    [
+      { from: '/z/proj', to: '/opt/z' },
+      { from: '/a/proj', to: '/opt/a' },
+      { from: 'C:\\work\\proj', to: 'D:\\work\\proj' },
+    ],
   )
-  // 不是字典的值一律当空：读到一个坏形状时画空行，比画出 "undefined" 强。
-  assert.equal(formatMapping(undefined), '')
-  assert.equal(formatMapping(['a']), '')
-  assert.equal(formatMapping(null), '')
-
-  const parsed = parseMapping('# 注释\n\n/home/alice/dev/proj = /opt/work/proj\n  C:\\a  =  D:\\b  ')
-  assert.deepEqual(parsed, { ok: true, value: { '/home/alice/dev/proj': '/opt/work/proj', 'C:\\a': 'D:\\b' } })
+  // 不是字典的值一律当空表：读到一个坏形状时画一行都没有，比画出 "undefined" 强。
+  assert.deepEqual(mappingRows(undefined), [])
+  assert.deepEqual(mappingRows(['a']), [])
+  assert.deepEqual(mappingRows(null), [])
 })
 
-test('同步设置：坏行指到行号，而不是悄悄丢掉那一条', () => {
-  assert.deepEqual(parseMapping('/home/a/one'), {
-    ok: false,
-    problem: { code: 'mapNoSeparator', line: 1, text: '/home/a/one' },
-  })
-  assert.deepEqual(parseMapping('ok = /x\n = /y'), { ok: false, problem: { code: 'mapNoFrom', line: 2 } })
-  assert.deepEqual(parseMapping('ok = /x\n/z = '), { ok: false, problem: { code: 'mapNoTo', line: 2 } })
+test('同步设置：两边都空的行不算一条（点了添加又改主意不该存不下去）', () => {
+  assert.deepEqual(mappingValue([{ from: '  ', to: '' }]), {})
+  assert.deepEqual(
+    mappingValue([
+      { from: '/home/alice/dev/proj', to: '/opt/work/proj' },
+      { from: '', to: '' },
+      { from: ' /p ', to: ' /q ' },
+    ]),
+    { '/home/alice/dev/proj': '/opt/work/proj', '/p': '/q' },
+  )
+})
+
+test('同步设置：行的问题指到行号（缺一侧、重复的远端），空行不算错', () => {
+  assert.deepEqual(mappingProblems([{ from: '', to: '' }]), [])
+  assert.deepEqual(mappingProblems([{ from: '/p', to: '/q' }]), [])
+  assert.deepEqual(mappingProblems([{ from: '/p', to: '' }]), [{ code: 'mapNoTo', line: 1 }])
+  assert.deepEqual(mappingProblems([{ from: '', to: '/q' }]), [{ code: 'mapNoFrom', line: 1 }])
   // 同一个远端两条：后一条会盖掉前一条，那正是"我以为改了这一条"的来源
-  assert.deepEqual(parseMapping('/p = /a\n/p = /b'), {
-    ok: false,
-    problem: { code: 'mapDuplicate', line: 2, from: '/p' },
-  })
+  assert.deepEqual(
+    mappingProblems([
+      { from: '/p', to: '/a' },
+      { from: '', to: '' },
+      { from: '/p', to: '/b' },
+    ]),
+    [{ code: 'mapDuplicate', line: 3, from: '/p' }],
+  )
 })
 
 test('同步设置：只提交改动过的字段，清空等于退回组合层（unset）', () => {
@@ -60,12 +77,19 @@ test('同步设置：只提交改动过的字段，清空等于退回组合层�
   assert.deepEqual(draftOps({ ...draft, timeoutMs: '5000' }, value), [
     { op: 'set', path: ['sync', 'timeoutMs'], value: 5000 },
   ])
-  assert.deepEqual(draftOps({ ...draft, mapping: '' }, value), [{ op: 'unset', path: ['sync', 'mapping'] }])
-  assert.deepEqual(draftOps({ ...draft, mapping: '/p = /a\n/q = /b' }, value), [
-    { op: 'set', path: ['sync', 'mapping'], value: { '/p': '/a', '/q': '/b' } },
-  ])
-  // 映射草稿坏了：不发编辑（保存被 draftProblems 挡住），而不是发一条空表把用户的映射抹掉。
-  assert.deepEqual(draftOps({ ...draft, mapping: 'bad line' }, value), [])
+  assert.deepEqual(draftOps({ ...draft, mapping: [] }, value), [{ op: 'unset', path: ['sync', 'mapping'] }])
+  assert.deepEqual(
+    draftOps({ ...draft, mapping: [{ from: '/p', to: '/a' }, { from: '/q', to: '/b' }] }, value),
+    [{ op: 'set', path: ['sync', 'mapping'], value: { '/p': '/a', '/q': '/b' } }],
+  )
+  // 顺序不同、内容一样：不算改动（比较走规范形式，不靠字典的插入顺序）
+  assert.deepEqual(
+    draftOps({ ...draft, mapping: mappingRows({ '/p': '/a' }) }, value),
+    [],
+    '同一份映射换个顺序不算改过',
+  )
+  // 有问题的行在场：不发编辑（保存被 draftProblems 挡住），而不是发一条空表把用户的映射抹掉。
+  assert.deepEqual(draftOps({ ...draft, mapping: [{ from: '/p', to: '' }] }, value), [])
 })
 
 test('同步设置：草稿里能当场看出来的问题（挡住保存，且说得清是哪个码）', () => {
@@ -73,9 +97,10 @@ test('同步设置：草稿里能当场看出来的问题（挡住保存，且�
   assert.deepEqual(draftProblems(draft), [])
   assert.deepEqual(draftProblems({ ...draft, timeoutMs: '0' }), [{ code: 'timeoutNotPositive' }])
   assert.deepEqual(draftProblems({ ...draft, timeoutMs: '30s' }), [{ code: 'timeoutNotPositive' }])
-  const bad = draftProblems({ ...draft, mapping: '/a = /b\nbroken' })
+  const bad = draftProblems({ ...draft, mapping: [{ from: '/a', to: '/b' }, { from: '/a', to: '/c' }] })
   assert.equal(bad.length, 1)
   assert.equal(bad[0].code, 'mapping')
+  assert.deepEqual(bad[0], { code: 'mapping', problem: { code: 'mapDuplicate', line: 2, from: '/a' } })
 })
 
 test('同步设置：接缝没给出值时不编造（空节 → 空草稿）', () => {
@@ -86,7 +111,7 @@ test('同步设置：接缝没给出值时不编造（空节 → 空草稿）', 
     machineId: '',
     username: '',
     passwordRef: '',
-    mapping: '',
+    mapping: [],
     timeoutMs: '',
   })
 })

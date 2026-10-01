@@ -576,8 +576,11 @@ export const CSS = `
   box-sizing: border-box;
 }
 .dsm-input:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary, #3370ff); outline-offset: -1px; }
-/* 映射表是"一行一条"，等宽更看得出对齐；只允许纵向拉伸，别把卡片顶宽。 */
-.dsm-textarea { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; resize: vertical; }
+/* 路径映射：一行一条，左右各一个输入框、右边一个删除；窄屏时整行换行而不是把输入框压扁。 */
+.dsm-mapRows { display: flex; flex-direction: column; gap: 6px; }
+.dsm-mapRow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.dsm-mapRow > .dsm-input { flex: 1 1 12rem; min-width: 0; }
+.dsm-mapArrow { color: var(--dsw-alias-label-secondary, #646a73); }
 /* 同步设置表单：字段一列排开，配对的两个字段并排一行（窄屏自动换行）。 */
 .dsm-syncForm { display: flex; flex-direction: column; gap: 10px; margin: 4px 0 2px; }
 .dsm-syncRow { display: flex; gap: 12px; flex-wrap: wrap; }

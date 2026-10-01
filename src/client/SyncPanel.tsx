@@ -127,6 +127,19 @@ export function SyncPanel({ t = fallback, state, reload }: PanelShare): React.Re
         ...syncPlan.push.filter((entry) => entry.action === 'skip' && entry.code !== 'identical'),
       ]
   const syncClean = syncPlan !== null && syncPulls.length === 0 && syncPushes.length === 0 && syncKept.length === 0
+  /**
+   * 上次预演里见过的远端 cwd：交给映射表当候选。
+   *
+   * 它解决的是这一栏唯一真正难的地方——远端那一侧必须**逐字**对上别的机器记下的路径，而那条路径
+   * 靠人背是靠不住的（抄错一个字符，结果就是"没配映射，跳过"）。没预演过时它是空的，行为退回手填。
+   */
+  const remoteCwds = [
+    ...new Set(
+      [...(syncPlan?.pull ?? []).map((entry) => entry.fromCwd), ...(syncPlan?.push ?? []).map((entry) => entry.cwd)].filter(
+        (cwd): cwd is string => typeof cwd === 'string' && cwd !== '',
+      ),
+    ),
+  ]
 
   return (
     <>
@@ -172,7 +185,7 @@ export function SyncPanel({ t = fallback, state, reload }: PanelShare): React.Re
           {syncInfo === null ? t('syncOffHint') : t('syncHint', { mappings: syncInfo.mappings })}
         </p>
         {/* 配置表单就在预演/确认旁边：改完 URL 立刻能预演一次。宿主没有设置接缝时这一块自己说明。 */}
-        <SyncConfigForm t={t} onSaved={() => void reload()} />
+        <SyncConfigForm t={t} onSaved={() => void reload()} remoteCwds={remoteCwds} />
 
         {sync !== null && syncPlan !== null && (
           <div>

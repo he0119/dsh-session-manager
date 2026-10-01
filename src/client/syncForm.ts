@@ -67,57 +67,76 @@ export function getSyncConfigApi(): SyncConfigApi | undefined {
   return api
 }
 
-/**
- * 把映射表格式化成草稿文本：一行一条，`远端路径 = 本机目录`。
- *
- * 用 `=` 而不是 `:` 作分隔符：Windows 路径里带冒号（`C:\work`），拿它当分隔符就没法解析了。
- */
-export function formatMapping(value: unknown): string {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return ''
-  return Object.entries(value as Record<string, unknown>)
-    .map(([from, to]) => `${from} = ${typeof to === 'string' ? to : ''}`)
-    .join('\n')
+/** 映射表里的一行草稿：左边是远端记下的 cwd，右边是这台机器上的目录。 */
+export interface MappingRow {
+  from: string
+  to: string
 }
 
 /**
- * 一段草稿的解析结果：能用，或者一个**指到行号的问题**（保存被它挡住，而不是悄悄丢掉）。
+ * 配置里的映射（字典）→ 行，**保持文档里的顺序**。
+ *
+ * 不按 key 重排：界面上看到的顺序就是配置文件里的顺序，新加的一行保存后也还留在原地。文档顺序本身
+ * 是稳定的（YAML 的键序），而"改没改"的判据走 `canonical()` 的排序形式，不依赖这个顺序。
+ */
+export function mappingRows(value: unknown): MappingRow[] {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return []
+  return Object.entries(value as Record<string, unknown>).map(([from, to]) => ({
+    from,
+    to: typeof to === 'string' ? to : '',
+  }))
+}
+
+/** 映射表的规范形式：只用来判"到底改没改"，比较时不受两条来路的顺序影响。 */
+function canonical(mapping: Record<string, string>): string {
+  return JSON.stringify(Object.entries(mapping).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+}
+
+/** 行 → 配置里的映射。两边都空的行忽略（点了「添加一行」又改主意的用户不该因此存不下去）。 */
+export function mappingValue(rows: readonly MappingRow[]): Record<string, string> {
+  const value: Record<string, string> = {}
+  for (const row of rows) {
+    const from = row.from.trim()
+    const to = row.to.trim()
+    if (from === '' && to === '') continue
+    value[from] = to
+  }
+  return value
+}
+
+/**
+ * 一段映射草稿的问题：能用，或者一个**指到行号的问题**（保存被它挡住，而不是悄悄丢掉）。
  *
  * 问题用码而不是句子：这一层不给文案，界面按码去字典里取——中文界面里冒出英文、或者反过来，都是
  * 最容易被当成 bug 的那种。
  */
 export type MappingProblem =
-  | { code: 'mapNoSeparator'; line: number; text: string }
   | { code: 'mapNoFrom'; line: number }
   | { code: 'mapNoTo'; line: number }
   | { code: 'mapDuplicate'; line: number; from: string }
 
-export type MappingParse = { ok: true; value: Record<string, string> } | { ok: false; problem: MappingProblem }
-
 /**
- * 解析映射草稿。
+ * 检查映射表的每一行。
  *
- * 规则少但要写清：空行忽略；`#` 开头是注释；每行必须有一个 `=`；两侧去空白；左边（远端路径）不能为空；
- * 同一个远端路径出现两次算错——那是"我以为改了这一条、其实被后一条盖掉了"的经典来源。
+ * 只检查"动过的行"（至少填了一边）：点了「添加一行」还没填的空行不算错。同一个远端出现两次算错——
+ * 那是"我以为改了这一条、其实被另一条盖掉了"的经典来源。
  *
- * @param text 草稿文本。
- * @returns 解析出的映射表，或一条能指到行号的错误。
+ * @param rows 草稿里的行。
+ * @returns 问题列表，行号从 1 起。
  */
-export function parseMapping(text: string): MappingParse {
-  const value: Record<string, string> = {}
-  const lines = text.split('\n')
-  for (const [index, raw] of lines.entries()) {
-    const line = raw.trim()
-    if (line === '' || line.startsWith('#')) continue
-    const at = line.indexOf('=')
-    if (at < 0) return { ok: false, problem: { code: 'mapNoSeparator', line: index + 1, text: line } }
-    const from = line.slice(0, at).trim()
-    const to = line.slice(at + 1).trim()
-    if (from === '') return { ok: false, problem: { code: 'mapNoFrom', line: index + 1 } }
-    if (to === '') return { ok: false, problem: { code: 'mapNoTo', line: index + 1 } }
-    if (Object.hasOwn(value, from)) return { ok: false, problem: { code: 'mapDuplicate', line: index + 1, from } }
-    value[from] = to
+export function mappingProblems(rows: readonly MappingRow[]): MappingProblem[] {
+  const problems: MappingProblem[] = []
+  const seen = new Set<string>()
+  for (const [index, row] of rows.entries()) {
+    const from = row.from.trim()
+    const to = row.to.trim()
+    if (from === '' && to === '') continue
+    if (from === '') problems.push({ code: 'mapNoFrom', line: index + 1 })
+    else if (seen.has(from)) problems.push({ code: 'mapDuplicate', line: index + 1, from })
+    else seen.add(from)
+    if (to === '') problems.push({ code: 'mapNoTo', line: index + 1 })
   }
-  return { ok: true, value }
+  return problems
 }
 
 /** 一份表单草稿：与磁盘上的值分开，保存时才写。 */
@@ -126,7 +145,7 @@ export interface SyncDraft {
   machineId: string
   username: string
   passwordRef: string
-  mapping: string
+  mapping: MappingRow[]
   timeoutMs: string
 }
 
@@ -142,7 +161,7 @@ export function draftFrom(value: SyncSectionValue): SyncDraft {
     machineId: value.machineId ?? '',
     username: value.username ?? '',
     passwordRef: value.passwordRef ?? '',
-    mapping: formatMapping(value.mapping),
+    mapping: mappingRows(value.mapping),
     timeoutMs: value.timeoutMs === undefined ? '' : String(value.timeoutMs),
   }
 }
@@ -176,12 +195,15 @@ export function draftOps(draft: SyncDraft, value: SyncSectionValue): SyncPathOp[
     ops.push(timeout === '' ? { op: 'unset', path: ['sync', 'timeoutMs'] } : { op: 'set', path: ['sync', 'timeoutMs'], value: Number(timeout) })
   }
 
-  if (draft.mapping !== formatMapping(value.mapping)) {
-    const parsed = parseMapping(draft.mapping)
-    if (parsed.ok) {
-      const keys = Object.keys(parsed.value)
-      ops.push(keys.length === 0 ? { op: 'unset', path: ['sync', 'mapping'] } : { op: 'set', path: ['sync', 'mapping'], value: parsed.value })
-    }
+  // 映射整表一次写：它是「一整套对应关系」，拆成逐条编辑反而会出现"删了又写回来"的中间态。
+  // 有问题的行在场时不发编辑（保存本来就被 draftProblems 挡住了）。
+  const next = mappingValue(draft.mapping)
+  if (mappingProblems(draft.mapping).length === 0 && canonical(next) !== canonical(mappingValue(mappingRows(value.mapping)))) {
+    ops.push(
+      Object.keys(next).length === 0
+        ? { op: 'unset', path: ['sync', 'mapping'] }
+        : { op: 'set', path: ['sync', 'mapping'], value: next },
+    )
   }
   return ops
 }
@@ -198,7 +220,6 @@ export function draftProblems(draft: SyncDraft): DraftProblem[] {
   const problems: DraftProblem[] = []
   const timeout = draft.timeoutMs.trim()
   if (timeout !== '' && (!/^\d+$/.test(timeout) || Number(timeout) <= 0)) problems.push({ code: 'timeoutNotPositive' })
-  const mapping = parseMapping(draft.mapping)
-  if (!mapping.ok) problems.push({ code: 'mapping', problem: mapping.problem })
+  for (const problem of mappingProblems(draft.mapping)) problems.push({ code: 'mapping', problem })
   return problems
 }

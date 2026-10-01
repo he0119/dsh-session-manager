@@ -1468,15 +1468,19 @@ test('客户端产物：同步设置表单按 entry id 向设置接缝取控制�
     mounted.recorded.some((node) => node.type === 'input' && node.props?.value === 'https://dav.example.com/dsh'),
     'URL 是从接缝里读出来的，不是页面自己存的',
   )
-  const areas = mounted.recorded.filter((node) => node.type === 'textarea')
-  assert.equal(areas.length, 1, '映射表是一段文本')
-  assert.equal(areas[0].props.value, '/home/alice/dev/proj = /opt/work/proj', '映射表按一列「远端 = 本机」画')
+  // 映射表是行：左右各一个输入框，值分别来自接缝里的那一对键值
+  const mappingInputs = mounted.recorded.filter(
+    (node) => node.type === 'input' && (node.props?.value === '/home/alice/dev/proj' || node.props?.value === '/opt/work/proj'),
+  )
+  assert.equal(mappingInputs.length, 2, '映射表按「远端 cwd → 本机目录」两个输入框画')
+  assert.ok(!mounted.recorded.some((node) => node.type === 'textarea'), '映射表不再是一段文本')
+  assert.ok(text.includes('syncMapAdd'), '有「添加一行」')
 
   // 宿主没提供设置接缝（例如只装了设置外壳）：这一块要自己说明，而不是画一张点了没用的表单
   const bare = mount({ state, panel: 'sync' })
   const bareText = strings(bare.registrations[0].component(bare.registrations[0].registration.inject()))
   assert.ok(bareText.includes('syncFormUnavailable'), '没接缝时说清只能在配置里改')
-  assert.equal(bare.recorded.filter((node) => node.type === 'textarea').length, 0, '没接缝时不画表单')
+  assert.ok(!bareText.includes('syncMapAdd'), '没接缝时不画表单')
 })
 
 test('客户端产物：同步独占「同步」分页，传输页不再有那张同步卡片', { skip }, () => {
