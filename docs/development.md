@@ -1,7 +1,7 @@
 # 开发
 
-安装与用法看 [README](../README.md)，「为什么是现在这样」看 [internals.md](internals.md)，
-发版流程看 [releasing.md](releasing.md)。
+安装与用法看 [README](../README.md)，决策的依据看 [.agents/notes/](../.agents/notes/AGENTS.md)
+（[internals.md](internals.md) 是按主题的索引），发版流程看 [releasing.md](releasing.md)。
 
 ## 依赖、构建、测试
 

@@ -13,7 +13,7 @@ disagrees with its `cwd`. So moving directories by hand either drops sessions in
 them fail to load with `corrupt session log`. This plugin does all three things together — **rewrite the
 header `cwd` + move the log directory + re-home the workspace registry** — and every step can be previewed
 first and rolled back byte-for-byte afterwards. (Why it has to work that way:
-[docs/internals.md](docs/internals.md).)
+[.agents/notes/implemented/](.agents/notes/implemented), in Chinese.)
 
 ## What it gives you
 
@@ -216,9 +216,10 @@ does not appear.
 
 ## Docs
 
-- [docs/internals.md](docs/internals.md) — why it is the way it is: the silent data loss of multi-frame
-  zstd, the startup invariants, the lossy-encoding collision, the `.dshsess` container trade-offs, the
-  effect mode, and the UI decisions
+- [.agents/notes/](.agents/notes/AGENTS.md) — the reasoning behind each decision and what was rejected
+  (Chinese): the silent data loss of multi-frame zstd, the startup invariants, the lossy-encoding
+  collision, the `.dshsess` container trade-offs, the effect mode, and the UI decisions
+- [docs/internals.md](docs/internals.md) — a decision map indexing the notes above by topic
 - [docs/development.md](docs/development.md) — local workflow: deps, build, tests, a dev instance
 - [docs/releasing.md](docs/releasing.md) — release process
 
