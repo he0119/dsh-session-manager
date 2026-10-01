@@ -10,7 +10,7 @@ DSH 的会话管理插件：把工作区与会话**搬到新目录**，以及把
 宿主既没有 move / reassign API，也不接受项目目录与 `cwd` 不一致的日志。所以手工搬目录，轻则会话变成
 Ungrouped，重则加载时报 `corrupt session log`。本插件把「改 header cwd + 移动日志目录 + 重挂工作区注册表」
 三件事一起做，并且每一步都能先预演、事后能逐字节回滚。（为什么必须这样，见
-[docs/internals.md](docs/internals.md)。）
+[.agents/notes/implemented/](.agents/notes/implemented)。）
 
 ## 它能做什么
 
@@ -165,8 +165,9 @@ npx @deepseek-ai/dsh@next plugin --profile desktop add /path/to/dsh-session-mana
 
 ## 文档
 
-- [docs/internals.md](docs/internals.md)——为什么是现在这样：多帧 zstd 的静默丢数据、启动不变式、
-  有损编码的碰撞、`.dshsess` 容器的取舍、生效模式，以及界面上的那些取舍
+- [.agents/notes/](.agents/notes/AGENTS.md)——每条决策的依据与被放弃的做法（中文）：多帧 zstd 的静默
+  丢数据、启动不变式、有损编码的碰撞、`.dshsess` 容器的取舍、生效模式，以及界面上的那些取舍
+- [docs/internals.md](docs/internals.md)——决策地图：按主题索引到上面那些笔记
 - [docs/development.md](docs/development.md)——本地流程：依赖、构建、测试、开发实例
 - [docs/releasing.md](docs/releasing.md)——发版流程
 
