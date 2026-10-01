@@ -48,6 +48,7 @@ import { ManagerPanel } from './ManagerPanel.tsx'
 import { type DirectoryListing, getDirectoryApi, setDirectoryApi } from './directory.ts'
 import { NS, en, zh, type Translate } from './locales.ts'
 import { installStyles } from './styles.ts'
+import { SYNC_SECTION, setSyncConfigApi, type SyncConfigApi } from './syncForm.ts'
 
 /** 插件名（客户端模块系统里的 factory id，等于包名）。 */
 export const name = '@he0119/dsh-session-manager'
@@ -78,6 +79,16 @@ interface SlotRegistration {
 interface SlotsService {
   inject(slot: string, callback: () => unknown): unknown
   register(registration: SlotRegistration, component: unknown): () => void
+}
+
+/**
+ * `configForms` 服务的最小面：按命名空间取本插件那一节的读写控制器。
+ *
+ * 这是宿主的设置接缝：读的是生效配置（组合层 + 用户层），写的是用户层——也就是设置对话框里
+ * 「Open configuration file」打开的那份文档。插件不另存一份，配置只有一个来源。
+ */
+interface ConfigFormsService {
+  get(namespace: string): SyncConfigApi | undefined
 }
 
 /** `locale` 服务的最小面。 */
@@ -128,7 +139,18 @@ export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dsh-session-manager: dictionaries')
   ctx.effect(() => installStyles(), 'dsh-session-manager: stylesheet')
 
-  // 目录选择器是可选依赖：它在别的客户端插件手上，晚到或不在都不该拖住本页的注册。
+  // 设置接缝是可选依赖：它由插件管理器提供，缺席（例如只装了设置外壳的宿主）时同步设置表单自己
+  // 说明"这个宿主不能在界面里改"，而不是让整页装不上。取到的那一份控制器就是宿主给本插件这一节
+  // 的读写面，原样收下——不包一层转发，免得两处形状各自漂移。
+  ctx.inject(['configForms'], (scoped) => {
+    const forms = (scoped as ClientContext & { configForms?: ConfigFormsService }).configForms
+    const controller = forms?.get(SYNC_SECTION)
+    if (controller === undefined) return undefined
+    setSyncConfigApi(controller)
+    return () => setSyncConfigApi(undefined)
+  })
+
+  // 目录选择器同样是可选依赖：它在别的客户端插件手上，晚到或不在都不该拖住本页的注册。
   // 收成 thunk 交给页面，点「浏览…」时才取当前那一个；服务卸载后再点会得到提示而不是空转。
   ctx.inject(['uiWorkspace'], (scoped) => {
     setDirectoryApi({

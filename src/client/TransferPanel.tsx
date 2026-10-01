@@ -37,6 +37,7 @@ import {
   useGroupCollapse,
   useSessionFilter,
 } from './sessionList.tsx'
+import { SyncConfigForm } from './SyncConfigForm.tsx'
 import { translateWith, zh, type Translate } from './locales.ts'
 import type { PanelShare } from './types.ts'
 
@@ -518,6 +519,8 @@ export function TransferPanel({ t = fallback, state, reload }: PanelShare): Reac
         <p className="dsm-hint">
           {syncInfo === null ? t('syncOffHint') : t('syncHint', { mappings: syncInfo.mappings })}
         </p>
+        {/* 配置表单就在预演/确认旁边：改完 URL 立刻能预演一次。宿主没有设置接缝时这一块自己说明。 */}
+        <SyncConfigForm t={t} />
 
         {sync !== null && syncPlan !== null && (
           <div>

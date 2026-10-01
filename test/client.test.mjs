@@ -252,7 +252,7 @@ test('客户端产物：导出面符合客户端插件契约', { skip }, () => {
 })
 
 /** 跑一次 apply，收下所有注册面（后面几个用例共用）。 */
-function mount({ translate, state, panel, arrays, strings, nulls } = {}) {
+function mount({ translate, state, panel, arrays, strings, nulls, configForms } = {}) {
   const { mod, nodes, recorded } = loadBundle({ firstNull: state, panel, arrays, strings, nulls })
   const registrations = []
   const dictionaries = []
@@ -272,6 +272,8 @@ function mount({ translate, state, panel, arrays, strings, nulls } = {}) {
       // 顺带记下回调拿到的服务，好在用例里核对「浏览…」真的接在宿主选择器上。
       injectedServices.push({ dependencies })
       const scoped = {
+        // 设置接缝（`configForms`）按用例给：不给就等于宿主没提供它，同步设置表单要自己说明。
+        ...(configForms === undefined ? {} : { configForms }),
         uiWorkspace: {
           async pickDirectory() {
             return '/tmp/picked'
@@ -340,7 +342,7 @@ test('客户端产物：apply 把「会话管理」注册到设置里的一页�
   // 跨 realm：产物在另一个 vm 里，它的数组原型与本文件的不是同一个，先摊成宿主数组再比。
   assert.deepEqual(
     injectedServices.map((entry) => [...entry.dependencies]),
-    [['uiWorkspace']],
+    [['configForms'], ['uiWorkspace']],
   )
   // 两个调用面都要接上：宿主只给其中一个（`native` 给 pick、`browse` 给 list），
   // 界面按 /state 里的 pickerKind 选一种用，所以这里两个都得能取到。
@@ -1418,4 +1420,59 @@ test('客户端产物：传输页的同步块——没配置只说明，配置�
   assert.ok(onText.includes('syncWhere:{"url":"https://dav.example.com/dsh","machine":"robot-a"}'), '要报出远端与机器名')
   assert.ok(onText.includes('syncHint:{"mappings":2}'), '要报出映射条数')
   assert.deepEqual(buttonTexts(on).filter((label) => label.startsWith('sync')), ['syncPreview', 'syncApply'])
+})
+
+test('客户端产物：同步设置表单按 entry id 向设置接缝取控制器，宿主没提供时说实话', { skip }, () => {
+  const state = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    sync: { url: 'https://dav.example.com/dsh', machineId: 'robot-a', mappings: 1 },
+    sessions: [],
+    workspaces: [],
+  }
+  const asked = []
+  const controller = {
+    getSnapshot: () => ({
+      status: 'ready',
+      writable: true,
+      revision: 7,
+      value: {
+        sync: {
+          url: 'https://dav.example.com/dsh',
+          machineId: 'robot-a',
+          timeoutMs: 30000,
+          mapping: { '/home/alice/dev/proj': '/opt/work/proj' },
+        },
+      },
+    }),
+    subscribe: () => () => {},
+    mutate: async () => true,
+  }
+  const mounted = mount({
+    state,
+    panel: 'transfer',
+    configForms: {
+      get(namespace) {
+        asked.push(namespace)
+        return controller
+      },
+    },
+  })
+  const text = strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
+  assert.deepEqual(asked, ['session-manager'], '按 profile 里那个 insert 的 id 取控制器')
+  assert.ok(text.includes('syncFieldMapping'), '映射字段在场')
+  assert.ok(
+    mounted.recorded.some((node) => node.type === 'input' && node.props?.value === 'https://dav.example.com/dsh'),
+    'URL 是从接缝里读出来的，不是页面自己存的',
+  )
+  const areas = mounted.recorded.filter((node) => node.type === 'textarea')
+  assert.equal(areas.length, 1, '映射表是一段文本')
+  assert.equal(areas[0].props.value, '/home/alice/dev/proj = /opt/work/proj', '映射表按一列「远端 = 本机」画')
+
+  // 宿主没提供设置接缝（例如只装了设置外壳）：这一块要自己说明，而不是画一张点了没用的表单
+  const bare = mount({ state, panel: 'transfer' })
+  const bareText = strings(bare.registrations[0].component(bare.registrations[0].registration.inject()))
+  assert.ok(bareText.includes('syncFormUnavailable'), '没接缝时说清只能在配置里改')
+  assert.equal(bare.recorded.filter((node) => node.type === 'textarea').length, 0, '没接缝时不画表单')
 })

@@ -213,6 +213,13 @@ sync:
   timeoutMs: 30000                         # optional
 ```
 
+This section is also editable **in the interface**: on the sync card at the bottom of Settings →
+“Session management” → “Transfer”, the URL, machine id, username, password reference, timeout and mapping are
+edited directly, and Save writes them into the profile document (`~/.dsh/profiles/<name>/cordis.patch.yml`).
+`sync` is a volatile field, so a change takes effect **without a restart**; the three path fields
+(`sessionsRoot` / `registryPath` / `backupRoot`) stay file-only. Write the mapping as one
+`remote cwd = local directory` per line, with `#` starting a comment line.
+
 The remote layout is `machines/<machineId>/index.json` (which sessions this machine contributed) plus
 `machines/<machineId>/<id>.dshsess` (one bundle per session). **One slot per machine**: WebDAV has no
 locking, so each machine writes only its own slot and reads every slot — nothing overwrites anything else.

@@ -24,9 +24,9 @@ import {
   registerTools,
   type MigrateToolResult,
   type PlanToolResult,
-  type PluginConfig,
   type SyncToolResult,
 } from '../src/tools.ts'
+import type { PluginConfig } from '../src/config.ts'
 import type { DecodeAll, WorkspaceRegistryState } from '../src/types.ts'
 import { encodeRawFrame } from '../src/zstd-frame.ts'
 import { putRemoteSession, startDavFixture } from './dav-fixture.ts'

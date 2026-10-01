@@ -576,6 +576,12 @@ export const CSS = `
   box-sizing: border-box;
 }
 .dsm-input:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary, #3370ff); outline-offset: -1px; }
+/* 映射表是"一行一条"，等宽更看得出对齐；只允许纵向拉伸，别把卡片顶宽。 */
+.dsm-textarea { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; resize: vertical; }
+/* 同步设置表单：字段一列排开，配对的两个字段并排一行（窄屏自动换行）。 */
+.dsm-syncForm { display: flex; flex-direction: column; gap: 10px; margin: 4px 0 2px; }
+.dsm-syncRow { display: flex; gap: 12px; flex-wrap: wrap; }
+.dsm-syncRow > .dsm-field { flex: 1 1 16rem; min-width: 0; }
 .dsm-options { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
 /*
  * 「会话」页的筛选条：与行上的小标签同一套视觉（一排小胶囊），选中的那一枚用品牌色描边 + 淡填充。

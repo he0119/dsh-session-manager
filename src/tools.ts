@@ -6,6 +6,8 @@
 //   * 每个写操作的返回值都说明"何时生效"——因为绕过宿主直接改注册表可能需要重启 DSH，
 //     除非上游提供了 workspaceRegistry.reassignSessions（见 effectMode()）。
 import type { Context } from '@deepseek-ai/cordis'
+
+import { syncSection, type PluginConfig, type PluginConfigInput, type SyncConfig } from './config.ts'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { homedir, hostname } from 'node:os'
@@ -33,34 +35,6 @@ import { decompress } from 'fzstd'
 
 export const decodeAll: DecodeAll = (buf: Uint8Array): string => Buffer.from(decompress(buf)).toString('utf8')
 
-/** 插件配置里的 WebDAV 同步块（见 README 的「同步」一节）。 */
-export interface SyncConfig {
-  /** 远端资源根（WebDAV 集合地址）；不配这一项就等于没开同步。 */
-  url: string
-  /** 这台机器的标识；缺省取主机名。两台机器用同一个 id 会互相盖掉对方的格子。 */
-  machineId?: string
-  username?: string
-  /**
-   * 密码的**引用**（环境变量名），不是密码本身。
-   *
-   * 与 DSH 自己的口径一致：配置里只放引用，值由宿主的 credentials 服务解析；没有那个服务时退到
-   * `process.env`。于是配置备份、同步、截图都不会把密码带走。
-   */
-  passwordRef?: string
-  /** 显式映射：远端 `cwd` → 本机目录（`/home/alice/dev/proj: /opt/work/proj`）。 */
-  mapping?: Record<string, string>
-  /** 单次请求超时（毫秒），缺省 30000。 */
-  timeoutMs?: number
-}
-
-/** 插件配置。 */
-export interface PluginConfig {
-  sessionsRoot?: string
-  registryPath?: string
-  backupRoot?: string
-  sync?: SyncConfig
-}
-
 /** 界面要知道的同步配置（只有非敏感字段，没有密码）。 */
 export interface SyncInfo {
   url: string
@@ -77,7 +51,7 @@ export interface ResolvedPaths {
 }
 
 /** 从插件配置与 $DSH_HOME 解析默认路径。 */
-export function resolvePaths(config: PluginConfig = {}): ResolvedPaths {
+export function resolvePaths(config: PluginConfigInput = {}): ResolvedPaths {
   const home = process.env['DSH_HOME'] ?? join(homedir(), '.dsh')
   return {
     sessionsRoot: config.sessionsRoot ?? join(home, 'sessions'),
@@ -97,11 +71,11 @@ export interface SyncRuntime {
 
 /**
  * 界面能看的同步配置（非敏感）。
- * @param config 插件配置。
+ * @param config 插件配置（活引用或普通对象）。
  * @returns 配了 `sync.url` 才有返回值。
  */
-export function describeSyncConfig(config: PluginConfig = {}): SyncInfo | undefined {
-  const sync = config.sync
+export function describeSyncConfig(config: PluginConfigInput = {}): SyncInfo | undefined {
+  const sync = syncSection(config)
   if (sync === undefined || typeof sync.url !== 'string' || sync.url.trim() === '') return undefined
   return {
     url: sync.url.trim(),
@@ -141,12 +115,13 @@ async function resolveSecret(ctx: unknown, ref: string): Promise<string | undefi
 
 /**
  * 造一次同步的运行时。
+ * 配置每次都从活引用里现读（见 src/config.ts）：界面上改完 URL 与映射，下一次调用就用新值。
  * @param ctx 宿主上下文（只用来解析密码引用）。
- * @param config 插件配置。
+ * @param config 插件配置（活引用或普通对象）。
  * @returns 远端与设置；没配 `sync.url` 时 undefined（界面据此说明"没配置"，工具据此拒掉这次调用）。
  */
-export async function syncRuntime(ctx: unknown, config: PluginConfig = {}): Promise<SyncRuntime | undefined> {
-  const sync = config.sync
+export async function syncRuntime(ctx: unknown, config: PluginConfigInput = {}): Promise<SyncRuntime | undefined> {
+  const sync = syncSection(config)
   if (sync === undefined || typeof sync.url !== 'string' || sync.url.trim() === '') return undefined
   const password = sync.passwordRef === undefined ? undefined : await resolveSecret(ctx, sync.passwordRef)
   const settings: SyncSettings = {
@@ -373,7 +348,7 @@ export interface MigrateToolResult {
  * 注册 4 个工具。
  * @returns cordis effect disposer 列表（宿主热卸载时逐个调用）。
  */
-export function registerTools(ctx: Context, config: PluginConfig = {}): Array<() => void> {
+export function registerTools(ctx: Context, config: PluginConfigInput = {}): Array<() => void> {
   const paths = resolvePaths(config)
   const mode = (): EffectMode => effectMode(ctx)
   // 预演/执行/回滚都走 src/migrate.ts 那一份编排，界面端点用的是同一个 deps 形状——

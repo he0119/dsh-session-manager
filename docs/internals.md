@@ -39,6 +39,8 @@
 
 - [WebDAV 同步是运输层，只增不覆盖](../.agents/notes/implemented/feature/2026-10-01-webdav-sync-is-a-transport.md)：
   远端只放包与索引（一机一格），落地复用导入那条编排，同 id 只跳过。
+- [同步配置在页面里就地可改，只有 sync 是活字段](../.agents/notes/implemented/architecture/2026-10-01-sync-config-is-live-in-the-page.md)：
+  表单读写 profile 那份配置文档，映射表是一段「一行一条」的文本，三个路径字段刻意不做成活的。
 - `src/dav.ts` 是那四种方法与 Basic 鉴权（含宽容的多状态响应解析），`src/sync.ts` 是索引、计划与落地，
   `src/tools.ts` 的 `sync_sessions` 与 `src/web.ts` 的 `GET|POST /sync` 调同一份 `runSync()`。
 

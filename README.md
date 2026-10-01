@@ -165,6 +165,12 @@ sync:
   timeoutMs: 30000                         # 可选
 ```
 
+这一节**也能在界面里改**：设置 →「会话管理」→「传输」分页底部的同步卡片，URL、机器名、账号、
+密码引用、超时与映射表都能直接编辑，按「保存」写进 profile 那份配置文档
+（`~/.dsh/profiles/<name>/cordis.patch.yml`）。`sync` 是活字段，改完**不用重启**就生效；三个路径字段
+（`sessionsRoot` / `registryPath` / `backupRoot`）仍然只在配置文件里。映射表按「一行一条
+`远端 cwd = 本机目录`」填，`#` 开头的行是注释。
+
 远端布局：`machines/<machineId>/index.json` 是这台机器贡献了哪些会话，`machines/<machineId>/<id>.dshsess`
 是一条会话一个包。**一机一格**：WebDAV 没有锁，每台机器只写自己那一格、读别人的全部，就不会互相盖掉。
 
