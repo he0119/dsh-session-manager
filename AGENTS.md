@@ -110,6 +110,8 @@ pnpm typecheck && pnpm build && pnpm test && pnpm check:package
   一律「推分支 → 开 PR → 合并」，那个检查名就是 `.github/workflows/ci.yml` 里的 job id `check`
   （PR 会自动触发同一个工作流）。合并方式默认 **rebase**：一次逻辑改动一个提交，squash 会把一个分支
   上的几件事压成一笔，粒度就没了。
+- **没有明确指示不合并**：推分支、开 PR、把 PR 链接与验证结果交出来是默认动作；合并这件事要等维护者
+  明说——那个 `check` 绿了也只说明「可以合」，不说明「该我合」。
 - **分支名带类型前缀**：`fix/ledger-label`、`chore/release-notes`、`docs/releasing` 这种，前缀用这个
   分支最终要合的那个提交的类型。仓库里的自动化只读 PR 标题（不看分支名），这条是给人的顺序感。
 - **PR 标题按约定式提交写**：`.github/workflows/autolabeler.yml` 按 PR 标题给 PR 打标签，Release
