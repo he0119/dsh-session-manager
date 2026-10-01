@@ -221,6 +221,19 @@ by row: the left side is the cwd the remote recorded, the right side a directory
 side must match the other machine’s path character for character, so once you have previewed, the form
 offers the cwds it saw as suggestions instead of making you copy them by hand.
 
+**One configuration for every machine**: each entry in the remote index also carries a **project identity** —
+the repository’s git remote (canonicalised to `host/owner/repo`) plus the session cwd relative to the
+repository root. On a pull, the local side matches that identity against its own candidate directories (session
+cwds and the paths registered as workspaces) and lands the session at `local repository root + relative path`.
+All machines can therefore share a **literally identical** configuration (same `url`, no `machineId` so it
+defaults to the hostname, empty `mapping`), and the same repository cloned at `/home/alice/dev/proj` and
+`/opt/work/proj` still matches. Conversely, two different repositories that happen to share a directory name
+are not treated as one project. No git, not a repository, no remote, or the project missing locally — all fall
+back to the mapping table below, and the preview names the repository it could not resolve.
+
+`mapping` and the identity **coexist**: an explicit mapping wins (what you configured is where it lands), the
+identity is the automatic path. So non-git directories, or forcing a different destination, still use mappings.
+
 The remote layout is `machines/<machineId>/index.json` (which sessions this machine contributed) plus
 `machines/<machineId>/<id>.dshsess` (one bundle per session). **One slot per machine**: WebDAV has no
 locking, so each machine writes only its own slot and reads every slot — nothing overwrites anything else.

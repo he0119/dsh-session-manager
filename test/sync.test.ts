@@ -25,6 +25,7 @@ import {
   type RemoteSessionEntry,
   type SyncSettings,
 } from '../src/sync.ts'
+import type { GitRunner } from '../src/repo.ts'
 import type { DecodeAll, SessionHeader, WorkspaceRegistryState } from '../src/types.ts'
 import { encodeRawFrame } from '../src/zstd-frame.ts'
 import { startDavFixture } from './dav-fixture.ts'
@@ -107,7 +108,7 @@ async function syncMachine(
   machine: Machine,
   dav: ReturnType<typeof createDavClient>,
   config: SyncSettings,
-  options: { apply: boolean; titles?: Record<string, string> },
+  options: { apply: boolean; titles?: Record<string, string>; git?: GitRunner },
 ): Promise<Awaited<ReturnType<typeof runSync>>> {
   return runSync(
     {
@@ -117,6 +118,7 @@ async function syncMachine(
       registryPath: machine.registryPath,
       decodeAll,
       ...(options.titles === undefined ? {} : { resolveTitle: ({ id }: { id: string }) => options.titles?.[id] }),
+      ...(options.git === undefined ? {} : { git: options.git }),
       pluginVersion: '0.0.1-test',
       now: () => new Date('2026-10-01T00:00:00.000Z'),
     },
@@ -129,6 +131,33 @@ function readHeader(machine: Machine, cwd: string, id: string): SessionHeader {
   const buf = readFileSync(join(sessionDir(machine.sessionsRoot, cwd, id), 'session.v4.jsonl.zstd'))
   const [first] = decodeAll(buf).split('\n')
   return JSON.parse(first ?? '{}') as SessionHeader
+}
+
+/** 把一条路径登记成工作区（"我在这台机器上打开过这个项目"）。 */
+function registerWorkspace(machine: Machine, path: string): void {
+  const registry = readRegistry(machine.registryPath)
+  const id = 'ws-1'
+  registry.tables.workspaces[id] = {
+    path,
+    title: 'proj',
+    sessionIds: [],
+    createdAt: new Date(1000).toISOString(),
+    updatedAt: new Date(1000).toISOString(),
+  }
+  registry.global.workspaceIds = [id]
+  writeRegistryAtomic(machine.registryPath, registry)
+}
+
+/** 假的 git：按目录回答"这里的仓库是什么"，省得测试真去建仓库。 */
+function fakeGit(answers: Record<string, { root: string; url: string }>): GitRunner {
+  return async (args, cwd) => {
+    const answer = answers[cwd]
+    if (answer === undefined) throw new Error(`不是仓库：${cwd}`)
+    if (args[0] === 'rev-parse') return `${answer.root}\n`
+    if (args[0] === 'remote') return 'origin\n'
+    if (args[0] === 'config') return `${answer.url}\n`
+    throw new Error(`unexpected ${args.join(' ')}`)
+  }
 }
 
 // ── 计划（纯计算） ────────────────────────────────────────────────────────
@@ -162,7 +191,16 @@ function fakeSession(id: string, entries: Array<[string, number]>, title?: strin
 }
 
 function remoteOf(
-  entries: Array<{ machine: string; id: string; cwd?: string; title?: string; createdAt?: number; files: FileFingerprint[] }>,
+  entries: Array<{
+    machine: string
+    id: string
+    cwd?: string
+    title?: string
+    createdAt?: number
+    files: FileFingerprint[]
+    repo?: string
+    repoPath?: string
+  }>,
 ): RemoteLibrary {
   const map = new Map<string, RemoteSessionEntry>()
   const indexes = new Map<string, { machineId: string; entries: Array<Omit<RemoteSessionEntry, 'machine'>> }>()
@@ -487,6 +525,141 @@ test('sync：端到端——扫描出来的会话与指纹能被远端读回认�
     const mine = local[0]?.files.map((file) => fileFingerprint(file.path, file.version)) ?? []
     assert.equal(relation(mine, remote.entries.get('s1')?.files ?? []), 'identical')
     assert.ok(existsSync(join(fixture.root, remoteIndexPath('robot-a'))))
+  } finally {
+    await fixture.close()
+    rmSync(SANDBOX, { recursive: true, force: true })
+  }
+})
+
+test('sync：项目身份——一条映射都不配也能落地（两台机器共用同一份配置）', () => {
+  const remote = remoteOf([
+    {
+      machine: 'robot-a',
+      id: 's1',
+      cwd: '/home/alice/dev/proj/packages/web',
+      createdAt: 1,
+      files: [fp(1, 'aa')],
+      repo: 'github.com/o/r',
+      repoPath: 'packages/web',
+    },
+  ])
+  const plan = planSync({
+    local: [],
+    remote,
+    mapping: new Map(),
+    repos: new Map([['github.com/o/r', '/work/proj']]),
+    isDirectory: () => true,
+  })
+  assert.equal(plan.pull[0]?.toCwd, '/work/proj/packages/web', '仓库根 + 仓库内相对路径')
+  assert.deepEqual(plan.pullIds, ['s1'])
+  assert.equal(plan.pull[0]?.action, 'create')
+
+  // 仓库根自己（repoPath 是 `.`）：落回根，不拼出多余的一层
+  const rootOnly = planSync({
+    local: [],
+    remote: remoteOf([
+      { machine: 'robot-a', id: 's2', cwd: '/home/alice/dev/proj', createdAt: 1, files: [fp(1, 'bb')], repo: 'github.com/o/r', repoPath: '.' },
+    ]),
+    mapping: new Map(),
+    repos: new Map([['github.com/o/r', '/work/proj']]),
+    isDirectory: () => true,
+  })
+  assert.equal(rootOnly.pull[0]?.toCwd, '/work/proj')
+})
+
+test('sync：项目身份——显式映射优先；本机认不出这个项目就跳过并指名仓库', () => {
+  const remote = remoteOf([
+    {
+      machine: 'robot-a',
+      id: 's1',
+      cwd: '/home/alice/dev/proj/packages/web',
+      createdAt: 1,
+      files: [fp(1, 'aa')],
+      repo: 'github.com/o/r',
+      repoPath: 'packages/web',
+    },
+  ])
+  // 用户配了映射：按他说的落，不会因为"本机恰好也有这个仓库"而改道
+  const explicit = planSync({
+    local: [],
+    remote,
+    mapping: new Map([['/home/alice/dev/proj/packages/web', '/somewhere/else']]),
+    repos: new Map([['github.com/o/r', '/work/proj']]),
+    isDirectory: () => true,
+  })
+  assert.equal(explicit.pull[0]?.toCwd, '/somewhere/else')
+
+  // 本机没有这个项目：跳过，理由里点名仓库（用户据此知道该在本机打开哪个项目）
+  const unknown = planSync({ local: [], remote, mapping: new Map(), repos: new Map(), isDirectory: () => true })
+  assert.equal(unknown.pull[0]?.action, 'skip')
+  assert.equal(unknown.pull[0]?.code, 'no-mapping')
+  assert.match(unknown.pull[0]?.reason ?? '', /github\.com\/o\/r/)
+
+  // 老索引（没有身份那两项）+ 空映射：照旧跳过，不因为新机制出现就改变老行为
+  const legacy = planSync({
+    local: [],
+    remote: remoteOf([{ machine: 'robot-a', id: 's1', cwd: '/home/alice/dev/proj', createdAt: 1, files: [fp(1, 'aa')] }]),
+    mapping: new Map(),
+    repos: new Map([['github.com/o/r', '/work/proj']]),
+    isDirectory: () => true,
+  })
+  assert.equal(legacy.pull[0]?.action, 'skip')
+  assert.equal(legacy.pull[0]?.code, 'no-mapping')
+  assert.doesNotMatch(legacy.pull[0]?.reason ?? '', /也没在本机找到仓库/)
+})
+
+test('sync：端到端——两个不同路径的克隆靠 git remote 认成同一个项目', async () => {
+  rmSync(SANDBOX, { recursive: true, force: true })
+  mkdirSync(SANDBOX, { recursive: true })
+  const fixture = await startDavFixture({ root: join(SANDBOX, 'dav') })
+  const dav = createDavClient({ baseUrl: fixture.url })
+  const a = makeMachine('robot-a')
+  const b = makeMachine('robot-b')
+  // 两台机器上同一个仓库：A 在 robot-a/proj，B 在 robot-b/proj——路径不同，remote 相同
+  const aSub = join(a.cwd, 'packages', 'web')
+  const bSub = join(b.cwd, 'packages', 'web')
+  for (const dir of [aSub, bSub]) mkdirSync(dir, { recursive: true })
+  registerWorkspace(a, a.cwd)
+  registerWorkspace(b, b.cwd)
+  const url = 'git@github.com:he0119/demo-proj.git'
+  const gitA = fakeGit({ [aSub]: { root: a.cwd, url } })
+  const gitB = fakeGit({ [b.cwd]: { root: b.cwd, url } })
+  // 两边都是同一份配置：同样的 url、同样的空映射（machineId 缺省时连它也一样）
+  const config: SyncSettings = { url: '', machineId: 'robot-a', mapping: {} }
+  try {
+    writeSession(a, 's1', 1000, { cwd: aSub })
+    await syncMachine(a, dav, { ...config, machineId: 'robot-a' }, { apply: true, git: gitA })
+    const remote = await readRemoteLibrary(dav, { ...config, machineId: 'robot-b' })
+    assert.equal(remote.entries.get('s1')?.repo, 'github.com/he0119/demo-proj', '推上去的索引带着项目身份')
+    assert.equal(remote.entries.get('s1')?.repoPath, 'packages/web', '以及仓库内相对路径')
+
+    const outcome = await syncMachine(b, dav, { ...config, machineId: 'robot-b' }, { apply: true, git: gitB })
+    assert.deepEqual(outcome.pulled, ['s1'])
+    const local = scanAll(b.sessionsRoot, decodeAll)
+    assert.equal(local.length, 1)
+    assert.equal(local[0]?.cwd, bSub, 'cwd 改写成这台机器的克隆路径（中间那条映射一个字都没配）')
+    assert.equal(readHeader(b, bSub, 's1').cwd, bSub, '落地那条会话的 header 也是新路径')
+    assert.notEqual(bSub, aSub)
+  } finally {
+    await fixture.close()
+    rmSync(SANDBOX, { recursive: true, force: true })
+  }
+})
+
+test('sync：项目身份——索引里不写 remote 原文（凭据不进远端）', async () => {
+  rmSync(SANDBOX, { recursive: true, force: true })
+  mkdirSync(SANDBOX, { recursive: true })
+  const fixture = await startDavFixture({ root: join(SANDBOX, 'dav') })
+  const dav = createDavClient({ baseUrl: fixture.url })
+  const a = makeMachine('robot-a')
+  try {
+    writeSession(a, 's1', 1000)
+    const git = fakeGit({ [a.cwd]: { root: a.cwd, url: 'https://alice:ghp_secrettoken@github.com/o/r.git' } })
+    await syncMachine(a, dav, settings(a, { machineId: 'robot-a' }), { apply: true, git })
+    const index = readFileSync(join(fixture.root, remoteIndexPath('robot-a')), 'utf8')
+    assert.match(index, /github\.com\/o\/r/, '身份写进了索引')
+    assert.doesNotMatch(index, /ghp_secrettoken/, '令牌不进索引')
+    assert.doesNotMatch(index, /alice@/, '用户名也不进索引')
   } finally {
     await fixture.close()
     rmSync(SANDBOX, { recursive: true, force: true })

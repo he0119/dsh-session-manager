@@ -17,10 +17,12 @@
 // 就把包重推一次——此时两边共有的代次逐条一致，远端那份确实是本地这份的前缀，覆盖不会丢数据。
 import { createHash } from 'node:crypto'
 import { readFileSync, statSync } from 'node:fs'
+import { join } from 'node:path'
 
 import type { DavPort } from './dav.ts'
 import { scanAll, type DiscoveredSession } from './discovery.ts'
 import { encodeSegment } from './paths.ts'
+import { createGitRunner, repoLocation, type GitRunner, type RepoLocation } from './repo.ts'
 import { readRegistry, validateRegistry } from './registry.ts'
 import type { TitleQuery } from './session-title.ts'
 import { applyImport, buildBundle, planImport, readBundle, type ExportSource, type ImportOptions } from './transfer.ts'
@@ -62,6 +64,10 @@ export interface RemoteSessionEntry {
   id: string
   cwd?: string
   title?: string
+  /** 跨机器的项目身份（仓库 remote 规范化之后，见 [repo.ts](./repo.ts)）；老索引没有这一项。 */
+  repo?: string
+  /** 会话的 cwd 在仓库根之下的相对路径（POSIX 分隔符，仓库根是 `.`）。 */
+  repoPath?: string
   createdAt: number
   files: FileFingerprint[]
   /** 贡献这条记录的机器 id（拉包时要知道去哪个格子取）。 */
@@ -264,10 +270,27 @@ export interface SyncPlanInput {
   local: readonly DiscoveredSession[]
   remote: RemoteLibrary
   mapping: ReadonlyMap<string, string>
+  /**
+   * 身份 → 本机仓库根（`repoLocation()` 扫出来的）。
+   *
+   * 两张表的分工：`mapping` 是用户显式配的（他说了算），`repos` 是从本机磁盘上认出来的项目。显式的
+   * 先赢——配了映射就按映射落地，不会因为"本机恰好也有这个仓库"而改道。两边都没有就跳过（照旧）。
+   */
+  repos?: ReadonlyMap<string, string>
   /** 算指纹；计划阶段只对"两边都有"的会话算（整库哈希不该被白算）。 */
   hashFile?: (path: string, version: number) => FileFingerprint
   /** 目标目录是不是真的存在（映射对不上真实目录就不落地）。 */
   isDirectory?: (path: string) => boolean
+}
+
+/**
+ * 本机仓库根 + 仓库内相对路径 → 落地目录。
+ *
+ * 相对路径来自**别的机器**（那边记的是 POSIX 分隔符），这里交给 `join` 归一化：同一平台内是拼路径，
+ * 跨平台时 `join` 会把 `/` 当分隔符处理，落到本机该有的形状。
+ */
+function joinRepoPath(root: string, repoPath: string | undefined): string {
+  return repoPath === undefined || repoPath === '.' ? root : join(root, repoPath)
 }
 
 /** 默认的目录判据。 */
@@ -322,13 +345,19 @@ export function planSync(input: SyncPlanInput): SyncPlan {
       bytesIn += bytes
       continue
     }
-    const target = input.mapping.get(entry.cwd)
+    // 落地顺序：显式映射（用户配了就算数）→ 仓库身份 + 仓库内相对路径（配置不必每台机器一份）→ 跳过。
+    const viaRepo = entry.repo === undefined ? undefined : input.repos?.get(entry.repo)
+    const target =
+      input.mapping.get(entry.cwd) ??
+      (viaRepo === undefined ? undefined : joinRepoPath(viaRepo, entry.repoPath))
     if (target === undefined) {
       pull.push({
         ...base,
         action: 'skip',
         code: 'no-mapping',
-        reason: `没有 ${entry.cwd} → 本机的同步映射，先补映射再同步`,
+        reason:
+          `没有 ${entry.cwd} → 本机的同步映射，先补映射再同步` +
+          (entry.repo === undefined ? '' : `；也没在本机找到仓库 ${entry.repo}`),
       })
       continue
     }
@@ -448,6 +477,8 @@ export function parseIndex(text: string, machine: string, problems: string[]): R
       id: entry.id,
       ...(typeof entry.cwd === 'string' && entry.cwd !== '' ? { cwd: entry.cwd } : {}),
       ...(typeof entry.title === 'string' && entry.title !== '' ? { title: entry.title } : {}),
+      ...(typeof entry.repo === 'string' && entry.repo !== '' ? { repo: entry.repo } : {}),
+      ...(typeof entry.repoPath === 'string' && entry.repoPath !== '' ? { repoPath: entry.repoPath } : {}),
       createdAt: typeof entry.createdAt === 'number' ? entry.createdAt : 0,
       files,
     })
@@ -533,6 +564,8 @@ export interface SyncDeps {
   resolveTitle?: (query: TitleQuery) => string | undefined
   pluginVersion?: string
   now?: () => Date
+  /** 跑 git 的入口（读项目身份用）；缺省是真去跑 git。测试里注入一个假的，不必真建仓库。 */
+  git?: GitRunner
 }
 
 /** 读注册表；读不到按"没有注册表"处理（会话照旧落地，只是不进工作区分组）。 */
@@ -549,6 +582,22 @@ function readRegistryLoose(path: string): { registry?: WorkspaceRegistryState; p
       problem: `读不到注册表 ${path}（本次拉下来的会话会落成未分组）：${error instanceof Error ? error.message : String(error)}`,
     }
   }
+}
+
+/**
+ * 本机的候选项目目录：会话的 cwd + 注册表里登记的工作区路径（去重、排序）。
+ *
+ * 为什么是这两处：会话的 cwd 是"我在这儿干过活"的地方，注册表路径是"我把它当工作区"的地方——一个
+ * 项目只要在这里出现过，就能被认出来。排序是为了让"同一个身份认到哪个根"这件事有确定答案。
+ */
+function repoCandidates(deps: SyncDeps, local: readonly DiscoveredSession[]): string[] {
+  const dirs = new Set<string>()
+  for (const session of local) if (session.cwd !== undefined && session.cwd !== '') dirs.add(session.cwd)
+  const loose = readRegistryLoose(deps.registryPath)
+  for (const record of Object.values(loose.registry?.tables.workspaces ?? {})) {
+    if (typeof record.path === 'string' && record.path !== '') dirs.add(record.path)
+  }
+  return [...dirs].sort()
 }
 
 /**
@@ -571,7 +620,32 @@ export async function runSync(deps: SyncDeps, options: { apply: boolean }): Prom
   )
   const remote = await readRemoteLibrary(deps.dav, deps.settings)
   const normalized = normalizeMapping(deps.settings.mapping)
-  const plan = planSync({ local, remote, mapping: normalized.mapping })
+
+  /*
+   * 项目身份（git remote）：本机的哪些目录是同一个项目。
+   *
+   * 只在真用得上时问 git——远端有带身份的条目，或者本机这次要推东西——否则整库同步会被一串
+   * `git rev-parse` 拖慢，而它一条都用不到。同一个目录只问一次（`locate` 缓存），因为一次同步里
+   * 会话数远多于项目数。
+   */
+  const git = deps.git ?? createGitRunner()
+  const located = new Map<string, Promise<RepoLocation | undefined>>()
+  const locate = (dir: string): Promise<RepoLocation | undefined> => {
+    const cached = located.get(dir)
+    if (cached !== undefined) return cached
+    const pending = repoLocation(dir, git)
+    located.set(dir, pending)
+    return pending
+  }
+  const repos = new Map<string, string>()
+  if ([...remote.entries.values()].some((entry) => entry.repo !== undefined)) {
+    for (const dir of repoCandidates(deps, local)) {
+      const found = await locate(dir)
+      // 同一个身份在本机只认第一个（候选目录已排序）：结果要确定，不随扫描顺序变。
+      if (found !== undefined && !repos.has(found.repo)) repos.set(found.repo, found.root)
+    }
+  }
+  const plan = planSync({ local, remote, mapping: normalized.mapping, repos })
   plan.problems.unshift(...normalized.problems)
   plan.problems.push(...remote.problems)
   plan.ok = plan.problems.length === 0
@@ -653,10 +727,13 @@ export async function runSync(deps: SyncDeps, options: { apply: boolean }): Prom
         },
       })
       await deps.dav.put(remoteBundlePath(deps.settings.machineId, entry.id), bundle)
+      // 身份是"这条会话属于哪个项目"的机器无关说法：别的机器凭它 + 仓库内相对路径落地，不必配映射。
+      const found = session.cwd === undefined ? undefined : await locate(session.cwd)
       ownEntries.set(entry.id, {
         id: session.id,
         ...(session.cwd === undefined ? {} : { cwd: session.cwd }),
         ...(session.title === undefined ? {} : { title: session.title }),
+        ...(found === undefined ? {} : { repo: found.repo, repoPath: found.repoPath }),
         createdAt: session.createdAt,
         files: fingerprints(session, fileFingerprint),
       })
