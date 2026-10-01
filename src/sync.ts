@@ -24,6 +24,7 @@ import { scanAll, type DiscoveredSession } from './discovery.ts'
 import { encodeSegment } from './paths.ts'
 import { createGitRunner, repoLocation, type GitRunner, type RepoLocation } from './repo.ts'
 import { readRegistry, validateRegistry } from './registry.ts'
+import { relocateHeaderCwd, relocateHeaderCwdText } from './session-log.ts'
 import type { TitleQuery } from './session-title.ts'
 import { applyImport, buildBundle, planImport, readBundle, type ExportSource, type ImportOptions } from './transfer.ts'
 import type { DecodeAll, WorkspaceRegistryState } from './types.ts'
@@ -86,7 +87,7 @@ export interface RemoteIndex {
 export interface RemoteLibrary {
   /** 读到索引的机器 id（按目录名排序）。 */
   machines: string[]
-  /** id → 条目；同一个 id 有多台机器贡献时，按机器 id 排序取第一个，保证结果确定。 */
+  /** id → 条目；同一个 id 有多台机器贡献时取领先的那份，否则按机器 id 排序取第一个（结果确定）。 */
   entries: Map<string, RemoteSessionEntry>
   /** 各机器的索引（推送时要在自己那份上做增量）。 */
   indexes: Map<string, RemoteIndex>
@@ -151,12 +152,59 @@ export function fileFingerprint(path: string, version: number): FileFingerprint 
   return { version, bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') }
 }
 
-/** 会话各代次日志的指纹。 */
+/**
+ * 会话各代次日志的指纹。
+ *
+ * `hashFile` 收 `compression` 是因为"与 cwd 无关的内容指纹"要先按压缩形态解出首帧（见
+ * [contentFingerprint]）；只按字节哈希的实现忽略这个参数即可。
+ */
 function fingerprints(
   session: DiscoveredSession,
-  hashFile: (path: string, version: number) => FileFingerprint,
+  hashFile: (path: string, version: number, compression: string | null) => FileFingerprint,
 ): FileFingerprint[] {
-  return session.files.map((file) => hashFile(file.path, file.version))
+  return session.files.map((file) => hashFile(file.path, file.version, file.compression))
+}
+
+/** 用来比较的内容指纹里，header 的 cwd 归一化成的占位符（NUL 不可能出现在真实路径里）。 */
+const CWD_PLACEHOLDER = '\u0000dsm-sync-cwd'
+
+/** 把 header 的 cwd 抹成占位符之后的内容字节；认不出的形态原样返回（退回按字节比）。 */
+function contentBytes(bytes: Buffer, compression: string | null, decodeAll: DecodeAll): Buffer {
+  try {
+    return compression === 'zstd'
+      ? relocateHeaderCwd(bytes, { to: CWD_PLACEHOLDER, decodeAll }).buffer
+      : Buffer.from(relocateHeaderCwdText(bytes.toString('utf8'), CWD_PLACEHOLDER).text, 'utf8')
+  } catch {
+    return bytes
+  }
+}
+
+/**
+ * 与"这台机器上的 cwd"无关的内容指纹。
+ *
+ * 落地会把别人的 cwd 改写成这台机器的路径（库目录名与 header 的 `cwd` 绑死，不改写就落不下来），
+ * 于是同一份会话在两台机器上的**字节不同**。判据要是按字节比，拉下来的那份会被判成"两边各自写过"：
+ * 报告里的理由是错的（其实是同一份），更要紧的是它在那台机器上**继续写之后也推不回去**——新代次永远
+ * 留在本机。所以索引里存的是把 cwd 归一化之后的哈希：cwd 是"这份会话在这台机器上落在哪儿"，不是
+ * "这是哪份会话"。
+ *
+ * `bytes` 仍然是文件的真实字节数（报告里的体积得是真数）。
+ *
+ * @param path 日志文件路径。
+ * @param version 代次。
+ * @param compression 压缩形态（`zstd` 走保结构的帧改写，明文走同义的行改写）。
+ * @param decodeAll 多帧感知解码器。
+ * @returns 指纹。
+ */
+export function contentFingerprint(
+  path: string,
+  version: number,
+  compression: string | null,
+  decodeAll: DecodeAll,
+): FileFingerprint {
+  const bytes = readFileSync(path)
+  const content = contentBytes(bytes, compression, decodeAll)
+  return { version, bytes: bytes.length, sha256: createHash('sha256').update(content).digest('hex') }
 }
 
 /** 两条会话的代次集合是否完全一样。 */
@@ -278,7 +326,7 @@ export interface SyncPlanInput {
    */
   repos?: ReadonlyMap<string, string>
   /** 算指纹；计划阶段只对"两边都有"的会话算（整库哈希不该被白算）。 */
-  hashFile?: (path: string, version: number) => FileFingerprint
+  hashFile?: (path: string, version: number, compression: string | null) => FileFingerprint
   /** 目标目录是不是真的存在（映射对不上真实目录就不落地）。 */
   isDirectory?: (path: string) => boolean
 }
@@ -494,7 +542,8 @@ export function parseIndex(text: string, machine: string, problems: string[]): R
 /**
  * 读远端：列机器格、逐格读索引、按 id 取并集。
  *
- * 同一个 id 有多台机器贡献时按目录名排序取第一个（排序保证结果确定）。某个格子读不到只记问题，
+ * 同一个 id 有多台机器贡献时取**领先**的那份（代次超集且共有代次一致），没有领先关系就按目录名排序取
+ * 第一个（排序保证结果确定）。某个格子读不到只记问题，
  * 不阻塞其它格子。
  * @param dav 远端。
  * @param settings 同步设置（只需要机器格所在的资源根）。
@@ -529,8 +578,20 @@ export async function readRemoteLibrary(dav: DavPort, settings: SyncSettings): P
     if (index === undefined) continue
     indexes.set(dirName, index)
     for (const entry of index.entries) {
-      if (entries.has(entry.id)) continue // 先到先得，`machines` 已排序
-      entries.set(entry.id, { ...entry, machine: dirName })
+      const full = { ...entry, machine: dirName }
+      const existing = entries.get(entry.id)
+      if (existing === undefined) {
+        entries.set(entry.id, full)
+        continue
+      }
+      /*
+       * 同一个 id 有多台贡献时：**领先**的那份赢（代次是另一个的超集、且共有代次内容一致）。
+       *
+       * "格子名排序取第一个"在只增不覆盖下本来够用——但一台机器把拉下来的会话继续写下去之后，它的格子
+       * 里是更长的那份，而格子名恰好排在前面时，别处拉到的会是旧的那份（缺最新代次，还看不出少）。
+       * 内容一致或两边各自写过时仍然按格子名排序取第一个（`machines` 已排序，结果确定）。
+       */
+      if (relation(full.files, existing.files) === 'local-ahead') entries.set(entry.id, full)
     }
   }
   return { machines, entries, indexes, problems }
@@ -645,7 +706,10 @@ export async function runSync(deps: SyncDeps, options: { apply: boolean }): Prom
       if (found !== undefined && !repos.has(found.repo)) repos.set(found.repo, found.root)
     }
   }
-  const plan = planSync({ local, remote, mapping: normalized.mapping, repos })
+  // 指纹走"与 cwd 无关"的那份：落地会改写 cwd，按字节比会把拉下来的那份判成"两边各自写过"。
+  const contentHash = (path: string, version: number, compression: string | null): FileFingerprint =>
+    contentFingerprint(path, version, compression, deps.decodeAll)
+  const plan = planSync({ local, remote, mapping: normalized.mapping, repos, hashFile: contentHash })
   plan.problems.unshift(...normalized.problems)
   plan.problems.push(...remote.problems)
   plan.ok = plan.problems.length === 0
@@ -735,7 +799,7 @@ export async function runSync(deps: SyncDeps, options: { apply: boolean }): Prom
         ...(session.title === undefined ? {} : { title: session.title }),
         ...(found === undefined ? {} : { repo: found.repo, repoPath: found.repoPath }),
         createdAt: session.createdAt,
-        files: fingerprints(session, fileFingerprint),
+        files: fingerprints(session, contentHash),
       })
       pushed.push({ id: entry.id, action: entry.action })
       bytesOut += bundle.length

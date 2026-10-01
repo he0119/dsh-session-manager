@@ -1,6 +1,8 @@
 // WebDAV 同步：计划是纯计算，落地打一个真的 WebDAV 夹具（两台假机器各一个库）。
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { dirname } from 'node:path'
 import { join } from 'node:path'
 import test from 'node:test'
 
@@ -12,6 +14,9 @@ import { sessionDir } from '../src/paths.ts'
 import { projectKey } from '../src/project-key.ts'
 import { readRegistry, writeRegistryAtomic } from '../src/registry.ts'
 import {
+  SYNC_INDEX_FILE,
+  contentFingerprint,
+  SYNC_MACHINES_DIR,
   fileFingerprint,
   normalizeMapping,
   parseIndex,
@@ -522,7 +527,8 @@ test('sync：端到端——扫描出来的会话与指纹能被远端读回认�
     await syncMachine(a, dav, settings(a, { machineId: 'robot-a' }), { apply: true })
     const local = scanAll(a.sessionsRoot, decodeAll)
     const remote = await readRemoteLibrary(dav, settings(a, { machineId: 'robot-a' }))
-    const mine = local[0]?.files.map((file) => fileFingerprint(file.path, file.version)) ?? []
+    const mine =
+      local[0]?.files.map((file) => contentFingerprint(file.path, file.version, file.compression, decodeAll)) ?? []
     assert.equal(relation(mine, remote.entries.get('s1')?.files ?? []), 'identical')
     assert.ok(existsSync(join(fixture.root, remoteIndexPath('robot-a'))))
   } finally {
@@ -660,6 +666,94 @@ test('sync：项目身份——索引里不写 remote 原文（凭据不进远�
     assert.match(index, /github\.com\/o\/r/, '身份写进了索引')
     assert.doesNotMatch(index, /ghp_secrettoken/, '令牌不进索引')
     assert.doesNotMatch(index, /alice@/, '用户名也不进索引')
+  } finally {
+    await fixture.close()
+    rmSync(SANDBOX, { recursive: true, force: true })
+  }
+})
+
+test('sync：拉下来之后继续写，还推得回去（判据不看 cwd，只看内容）', async () => {
+  rmSync(SANDBOX, { recursive: true, force: true })
+  mkdirSync(SANDBOX, { recursive: true })
+  const fixture = await startDavFixture({ root: join(SANDBOX, 'dav') })
+  const dav = createDavClient({ baseUrl: fixture.url })
+  const a = makeMachine('robot-a')
+  const b = makeMachine('robot-b')
+  // A 那边的会话在 `/home/alice/dev/proj`，B 落地时会被改写成 b.cwd —— 两份的**字节不同**
+  const remoteCwd = '/home/alice/dev/proj'
+  const gitNone: GitRunner = async () => {
+    throw new Error('没有身份可用')
+  }
+  try {
+    writeSession(a, 's1', 1000, { cwd: remoteCwd })
+    await syncMachine(a, dav, settings(a, { machineId: 'robot-a' }), { apply: true, git: gitNone })
+    const pulled = await syncMachine(
+      b,
+      dav,
+      settings(b, { machineId: 'robot-b', mapping: { [remoteCwd]: b.cwd } }),
+      { apply: true, git: gitNone },
+    )
+    assert.deepEqual(pulled.pulled, ['s1'])
+    const file = scanAll(b.sessionsRoot, decodeAll)[0]?.files[0]
+    assert.ok(file !== undefined)
+    assert.notEqual(
+      createHash('sha256').update(readFileSync(file.path)).digest('hex'),
+      readFileSync(join(fixture.root, remoteIndexPath('robot-a')), 'utf8').match(/"sha256": "([^"]+)"/)?.[1],
+      '两边的字节确实不同（cwd 被改写过），判据得绕开它',
+    )
+
+    // 再预演一次：拉下来的这份就是远端那份，判"内容一致"，而不是"两边各自写过"
+    const again = await syncMachine(b, dav, settings(b, { machineId: 'robot-b', mapping: {} }), { apply: false, git: gitNone })
+    assert.equal(again.plan.push.length, 1)
+    assert.equal(again.plan.push[0]?.code, 'identical')
+
+    // 在这台机器上继续写：多一个 v5（宿主就是往同一批文件上追加一帧）
+    const appended = Buffer.concat([readFileSync(file.path), encodeRawFrame('{"type":"event","seq":5}\n')])
+    writeFileSync(join(dirname(file.path), 'session.v5.jsonl.zstd'), appended)
+    const pushed = await syncMachine(b, dav, settings(b, { machineId: 'robot-b', mapping: {} }), { apply: true, git: gitNone })
+    assert.deepEqual(pushed.pushed, [{ id: 's1', action: 'update' }], '本机领先就该重推，而不是因为 cwd 不同判成 diverged')
+    const bIndex = await readRemoteLibrary(dav, settings(b, { machineId: 'robot-b' }))
+    assert.equal(bIndex.indexes.get('robot-b')?.entries[0]?.files.length, 2, 'B 的格子里是它自己的两个代次')
+  } finally {
+    await fixture.close()
+    rmSync(SANDBOX, { recursive: true, force: true })
+  }
+})
+
+test('sync：同一个 id 有多台贡献时，联集取领先的那份（不是格子名排前面的）', async () => {
+  // robot-a 只有 v4，robot-b 有 v4+v5 且共有代次一致 → 拉回来的应该是 robot-b 那份
+  const shared = fp(4, 'aaaa')
+  const longer = fp(5, 'bbbb')
+  const remote = remoteOf([
+    { machine: 'robot-a', id: 's1', cwd: '/x', createdAt: 1, files: [shared] },
+    { machine: 'robot-b', id: 's1', cwd: '/x', createdAt: 1, files: [shared, longer] },
+  ])
+  // remoteOf 直接建联集时是"后来的覆盖"？不是——它按传入顺序 set，这里显式核对 readRemoteLibrary 的
+  // 判据用的是同一套：直接调 relation 层面的等价断言。
+  assert.equal(remote.entries.get('s1')?.files.length, 2, '测试脚手架本身按传入顺序覆盖，真判据在 readRemoteLibrary')
+
+  rmSync(SANDBOX, { recursive: true, force: true })
+  mkdirSync(SANDBOX, { recursive: true })
+  const fixture = await startDavFixture({ root: join(SANDBOX, 'dav') })
+  const dav = createDavClient({ baseUrl: fixture.url })
+  try {
+    const shortIndex = { unit: 'dsh-session-manager/sync', version: 1, machineId: 'robot-a', entries: [{ id: 's1', cwd: '/x', createdAt: 1, files: [shared] }] }
+    const longIndex = {
+      unit: 'dsh-session-manager/sync',
+      version: 1,
+      machineId: 'robot-b',
+      entries: [{ id: 's1', cwd: '/x', createdAt: 1, files: [shared, longer] }],
+    }
+    for (const [machine, payload] of [
+      ['robot-a', shortIndex],
+      ['robot-b', longIndex],
+    ] as const) {
+      mkdirSync(join(fixture.root, SYNC_MACHINES_DIR, machine), { recursive: true })
+      writeFileSync(join(fixture.root, `${SYNC_MACHINES_DIR}/${machine}/${SYNC_INDEX_FILE}`), JSON.stringify(payload))
+    }
+    const library = await readRemoteLibrary(dav, settings(makeMachine('robot-c'), { machineId: 'robot-c' }))
+    assert.equal(library.entries.get('s1')?.machine, 'robot-b', '领先的那份（v5 在这台机器上）')
+    assert.equal(library.entries.get('s1')?.files.length, 2)
   } finally {
     await fixture.close()
     rmSync(SANDBOX, { recursive: true, force: true })

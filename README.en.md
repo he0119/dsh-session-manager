@@ -243,9 +243,14 @@ push M" and lists every session, where it would land and what was left alone and
 pulls and pushes. The rules and edges:
 
 - **Add-only**: a session id that already exists locally is never pulled, and a remote copy that is newer
-  than yours is left alone too — the report says whether it is "remote is ahead" or "both sides wrote";
-- **A strictly-ahead local copy is re-uploaded**: the versions both sides share are byte-identical, so the
-  remote copy really is a prefix of yours and refreshing it loses nothing;
+  than yours is left alone too — the report says whether it is "remote is ahead" or "both sides wrote". The
+  judgement is a generation fingerprint **independent of the cwd**: landing always rewrites the other
+  machine's cwd (library directory names are bound to the header `cwd`), and comparing raw bytes would call
+  a pulled copy "both sides wrote" — pushing a continuation of it back would then never happen;
+- **A strictly-ahead local copy is re-uploaded**: the versions both sides share match apart from the cwd, so
+  the remote copy really is a prefix of yours and refreshing it loses nothing; when more than one machine
+  contributed the same id, the pulling side takes the **ahead** copy rather than the one whose slot name
+  sorts first;
 - **Two machines that each continued the same session never merge**: to keep chatting on both, agree that a
   session is continued on one machine only;
 - A session you delete disappears from your own index on the next push (the remote bundle is not deleted),
