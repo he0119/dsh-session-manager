@@ -69,10 +69,23 @@ export interface StateResponse {
    * 缺字段（旧宿主）按 `false` 处理——按钮禁用比点了没反应好。
    */
   archiveAvailable?: boolean
+  /**
+   * WebDAV 同步的非敏感配置（宿主插件配置里的 `sync` 块）；没配时是 `null`。
+   * 缺字段（旧宿主）同样按"没配置"处理。
+   */
+  sync?: SyncInfo | null
   registryPath: string
   problems: string[]
   sessions: SessionSummary[]
   workspaces: WorkspaceSummary[]
+}
+
+/** 同步往哪儿去、这台机器叫什么（宿主 `SyncInfo`，不含任何凭据）。 */
+export interface SyncInfo {
+  url: string
+  machineId: string
+  /** 显式映射的条数；映射内容在插件配置里，界面只报条数。 */
+  mappings: number
 }
 
 /** 导入计划里的一条会话。 */
@@ -204,6 +217,92 @@ export function download(result: ExportResult): void {
   anchor.click()
   anchor.remove()
   URL.revokeObjectURL(url)
+}
+
+// ---- WebDAV 同步 ----
+
+/** 一次同步里"会拉下来"的一条。 */
+export interface SyncPullEntry {
+  id: string
+  title?: string
+  fromCwd?: string
+  toCwd?: string
+  /** 贡献这条的机器。 */
+  machine: string
+  bytes: number
+  action: 'create' | 'skip'
+  /** 机器可读的分类：界面按它挑文案（`reason` 是给模型看的细节）。 */
+  code: 'missing' | 'no-mapping' | 'missing-target'
+  reason?: string
+}
+
+/** 一次同步里"会推上去"的一条。 */
+export interface SyncPushEntry {
+  id: string
+  title?: string
+  cwd?: string
+  bytes: number
+  action: 'upload' | 'update' | 'skip'
+  code: 'missing' | 'local-ahead' | 'identical' | 'remote-ahead' | 'diverged'
+  /** 远端那份由哪台机器贡献（"远端领先 / 两边各自写过"要指名道姓）。 */
+  machine?: string
+  reason?: string
+}
+
+/** 同步计划（宿主 `SyncPlan`）。 */
+export interface SyncPlan {
+  ok: boolean
+  problems: string[]
+  pull: SyncPullEntry[]
+  push: SyncPushEntry[]
+  pullIds: string[]
+  pushIds: string[]
+  bytesIn: number
+  bytesOut: number
+  localCount: number
+  remoteCount: number
+  machines: string[]
+}
+
+/** `GET|POST /sync` 的响应。 */
+export interface SyncResponse {
+  mode: 'plan' | 'apply'
+  remote: { url: string; machineId: string }
+  plan: SyncPlan
+  applied: boolean
+  pulled: string[]
+  pushed: Array<{ id: string; action: 'upload' | 'update' }>
+  bytesIn: number
+  bytesOut: number
+  registryWritten: boolean
+  indexWritten: boolean
+  problems: string[]
+  /** 这次落地要不要重启 DSH 才被承认（与迁移/导入同一套口径）。 */
+  takesEffect: 'immediate' | 'restart-required'
+  error?: string
+}
+
+/** 预演一次同步（读远端，什么都不写）。 */
+export async function fetchSyncPlan(): Promise<SyncResponse> {
+  return asJson<SyncResponse>(await fetch(`${API_PREFIX}/sync`, { headers: { accept: 'application/json' } }))
+}
+
+/** 真的跑一次同步（拉 + 推）。 */
+export async function applySync(): Promise<SyncResponse> {
+  const response = await fetch(`${API_PREFIX}/sync?mode=apply`, {
+    method: 'POST',
+    headers: { accept: 'application/json' },
+  })
+  const text = await response.text()
+  let parsed: SyncResponse
+  try {
+    parsed = JSON.parse(text) as SyncResponse
+  } catch {
+    throw new Error(`HTTP ${response.status}：${text.slice(0, 200) || '空响应'}`)
+  }
+  // 落地成功时正文里可能有"某一条没拉成"的问题清单，那是 200；非 2xx 只有"没配置同步"或内部错误。
+  if (!response.ok) throw new Error(parsed.error ?? `HTTP ${response.status}`)
+  return parsed
 }
 
 // ---- 会话管理：迁移 / 备份 / 回滚 ----

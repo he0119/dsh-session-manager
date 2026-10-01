@@ -16,11 +16,13 @@ import {
   type PluginConfig,
   archiveOps,
   decodeAll,
+  describeSyncConfig,
   directoryPickerKind,
   effectMode,
   liveSessionIds,
   registerTools,
   resolvePaths,
+  syncRuntime,
 } from './tools.ts'
 import { API_PREFIX, registerWebRoutes, type WebServerLike } from './web.ts'
 
@@ -84,6 +86,9 @@ export function apply(ctx: Context, config: PluginConfig = {}): () => void {
       registryOps: () => archiveOps(ctx),
       // 删除会拒掉"宿主内存里活着"的会话（它手里还有内存副本与写句柄）。
       liveSessionIds: () => liveSessionIds(ctx),
+      // WebDAV 同步：运行时按需造（每次请求重新解析密码引用），/state 只看非敏感的那几个字段。
+      sync: () => syncRuntime(ctx, config),
+      syncInfo: () => describeSyncConfig(config),
     })
     info(`dsh-session-manager 界面端点已挂：${API_PREFIX}`)
     return dispose

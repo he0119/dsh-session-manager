@@ -1,0 +1,494 @@
+// WebDAV 同步：计划是纯计算，落地打一个真的 WebDAV 夹具（两台假机器各一个库）。
+import assert from 'node:assert/strict'
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import test from 'node:test'
+
+import { decompress } from 'fzstd'
+
+import { createDavClient } from '../src/dav.ts'
+import { scanAll, type DiscoveredSession } from '../src/discovery.ts'
+import { sessionDir } from '../src/paths.ts'
+import { projectKey } from '../src/project-key.ts'
+import { readRegistry, writeRegistryAtomic } from '../src/registry.ts'
+import {
+  fileFingerprint,
+  normalizeMapping,
+  parseIndex,
+  planSync,
+  readRemoteLibrary,
+  relation,
+  remoteIndexPath,
+  runSync,
+  type FileFingerprint,
+  type RemoteLibrary,
+  type RemoteSessionEntry,
+  type SyncSettings,
+} from '../src/sync.ts'
+import type { DecodeAll, SessionHeader, WorkspaceRegistryState } from '../src/types.ts'
+import { encodeRawFrame } from '../src/zstd-frame.ts'
+import { startDavFixture } from './dav-fixture.ts'
+
+const decodeAll: DecodeAll = (buf: Uint8Array): string => Buffer.from(decompress(buf)).toString('utf8')
+const SANDBOX = join(import.meta.dirname, '.sandbox', 'sync')
+
+// ── 假机器 ────────────────────────────────────────────────────────────────
+
+interface Machine {
+  base: string
+  cwd: string
+  sessionsRoot: string
+  registryPath: string
+}
+
+/** 造一台机器：一个真实存在的工作区目录、一个空的会话库、一份登记了它的注册表。 */
+function makeMachine(name: string): Machine {
+  const base = join(SANDBOX, name)
+  rmSync(base, { recursive: true, force: true })
+  const cwd = join(base, 'proj')
+  mkdirSync(cwd, { recursive: true })
+  const sessionsRoot = join(base, 'sessions')
+  mkdirSync(sessionsRoot, { recursive: true })
+  const registryPath = join(base, 'workspace.json')
+  const registry: WorkspaceRegistryState = {
+    unit: { name: 'workspace', version: 2 },
+    global: { initialized: true, workspaceIds: [], archivedSessionIds: [], pinnedSessionIds: [] },
+    tables: { workspaces: {} },
+  }
+  writeRegistryAtomic(registryPath, registry)
+  return { base, cwd, sessionsRoot, registryPath }
+}
+
+/** 往一台机器的库里写一条会话（格式与宿主写的一致：多帧 zstd 的 raw block）。 */
+function writeSession(machine: Machine, id: string, createdAt: number, options: { title?: string; cwd?: string } = {}): void {
+  const header: SessionHeader = {
+    type: 'session',
+    version: 4,
+    id,
+    createdAt,
+    cwd: options.cwd ?? machine.cwd,
+    isSeeded: false,
+    delegationDepth: 0,
+  }
+  const lines = [JSON.stringify(header), JSON.stringify({ type: 'user/message', seq: 0, data: {} })]
+  if (options.title !== undefined) {
+    lines.push(JSON.stringify({ type: 'session/title', seq: 1, data: { title: options.title, source: { kind: 'fallback' } } }))
+  }
+  const dir = sessionDir(machine.sessionsRoot, header.cwd, id)
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, 'session.v4.jsonl.zstd'), Buffer.concat(lines.map((line) => encodeRawFrame(`${line}\n`))))
+}
+
+/** 给一条已有会话再加一代日志（宿主续写会话就是这个形状：同一个目录里多一个 `session.vN`）。 */
+function addGeneration(machine: Machine, id: string, version: number): void {
+  const dir = sessionDir(machine.sessionsRoot, machine.cwd, id)
+  const header: SessionHeader = {
+    type: 'session',
+    version,
+    id,
+    createdAt: 1000,
+    cwd: machine.cwd,
+    isSeeded: false,
+    delegationDepth: 0,
+  }
+  writeFileSync(
+    join(dir, `session.v${version}.jsonl.zstd`),
+    Buffer.concat([JSON.stringify(header), '\n'].map((line) => encodeRawFrame(line))),
+  )
+}
+
+/** 这台机器的同步设置。 */
+function settings(machine: Machine, overrides: Partial<SyncSettings> = {}): SyncSettings {
+  return { url: '', machineId: 'robot-a', mapping: {}, ...overrides }
+}
+
+/** 用一台机器的库跑一次同步。 */
+async function syncMachine(
+  machine: Machine,
+  dav: ReturnType<typeof createDavClient>,
+  config: SyncSettings,
+  options: { apply: boolean; titles?: Record<string, string> },
+): Promise<Awaited<ReturnType<typeof runSync>>> {
+  return runSync(
+    {
+      dav,
+      settings: config,
+      sessionsRoot: machine.sessionsRoot,
+      registryPath: machine.registryPath,
+      decodeAll,
+      ...(options.titles === undefined ? {} : { resolveTitle: ({ id }: { id: string }) => options.titles?.[id] }),
+      pluginVersion: '0.0.1-test',
+      now: () => new Date('2026-10-01T00:00:00.000Z'),
+    },
+    { apply: options.apply },
+  )
+}
+
+/** 读一条日志的首帧（header）。 */
+function readHeader(machine: Machine, cwd: string, id: string): SessionHeader {
+  const buf = readFileSync(join(sessionDir(machine.sessionsRoot, cwd, id), 'session.v4.jsonl.zstd'))
+  const [first] = decodeAll(buf).split('\n')
+  return JSON.parse(first ?? '{}') as SessionHeader
+}
+
+// ── 计划（纯计算） ────────────────────────────────────────────────────────
+
+function fp(version: number, sha: string, bytes = 10): FileFingerprint {
+  return { version, bytes, sha256: sha }
+}
+
+/**
+ * 造一条发现出来的会话（只填计划用得上的那几个字段）。
+ * @param entries `[sha, 代次]`，配合假哈希用。
+ */
+function fakeSession(id: string, entries: Array<[string, number]>, title?: string): DiscoveredSession {
+  const createdAt = 1000
+  return {
+    dirName: `~${id}`,
+    dir: `/sessions/${id}`,
+    id,
+    cwd: '/opt/work/proj',
+    createdAt,
+    header: { type: 'session', version: 4, id, createdAt, cwd: '/opt/work/proj', isSeeded: false, delegationDepth: 0 },
+    files: entries.map(([sha, version]) => ({
+      name: `session.v${version}.jsonl.zstd`,
+      path: `${sha}@${version}`,
+      version,
+      compression: 'zstd',
+      bytes: 1,
+    })),
+    ...(title === undefined ? {} : { title }),
+  }
+}
+
+function remoteOf(
+  entries: Array<{ machine: string; id: string; cwd?: string; title?: string; createdAt?: number; files: FileFingerprint[] }>,
+): RemoteLibrary {
+  const map = new Map<string, RemoteSessionEntry>()
+  const indexes = new Map<string, { machineId: string; entries: Array<Omit<RemoteSessionEntry, 'machine'>> }>()
+  for (const entry of entries) {
+    const { machine, createdAt, ...rest } = entry
+    const full = { ...rest, createdAt: createdAt ?? 0 }
+    map.set(entry.id, { ...full, machine })
+    const index = indexes.get(machine) ?? { machineId: machine, entries: [] }
+    index.entries.push(full)
+    indexes.set(machine, index)
+  }
+  return { machines: [...indexes.keys()].sort(), entries: map, indexes, problems: [] }
+}
+
+test('sync：映射归一化去掉结尾斜杠，空值与重名如实报', () => {
+  const { mapping, problems } = normalizeMapping({
+    '/home/a/dev/proj/': '/opt/work/proj/',
+    '  /srv/x  ': '  /srv/y  ',
+    '': '/nowhere',
+    '/empty': '   ',
+    '/dup/': '/one',
+    '/dup': '/two',
+  })
+  assert.deepEqual(
+    [...mapping.entries()],
+    [
+      ['/home/a/dev/proj', '/opt/work/proj'],
+      ['/srv/x', '/srv/y'],
+      ['/dup', '/one'],
+    ],
+  )
+  assert.equal(problems.length, 3)
+  assert.match(problems.join('\n'), /空的来源路径/)
+  assert.match(problems.join('\n'), /目标是空路径/)
+  assert.match(problems.join('\n'), /出现了两次/)
+})
+
+test('sync：relation 区分一致 / 本机领先 / 远端领先 / 分叉', () => {
+  const v0 = fp(0, 'a')
+  const v1 = fp(1, 'b')
+  const v1other = fp(1, 'c')
+  assert.equal(relation([v0, v1], [v0, v1]), 'identical')
+  assert.equal(relation([v0, v1], [v0]), 'local-ahead')
+  assert.equal(relation([v0], [v0, v1]), 'remote-ahead')
+  assert.equal(relation([v0, v1], [v0, v1other]), 'diverged')
+  assert.equal(relation([v0, v1], [v0, fp(2, 'd')]), 'diverged')
+})
+
+test('sync：计划——远端独有要拉，没有映射 / 目标不存在都跳过并说明', () => {
+  const dirs = new Set(['/opt/work/proj'])
+  const plan = planSync({
+    local: [],
+    remote: remoteOf([
+      { machine: 'robot-a', id: 's1', cwd: '/home/a/dev/proj', files: [fp(0, 'a')] },
+      { machine: 'robot-a', id: 's2', cwd: '/home/other/proj', files: [fp(0, 'b')] },
+      { machine: 'robot-a', id: 's3', files: [fp(0, 'c')] },
+      { machine: 'robot-a', id: 's4', cwd: '/gone/proj', files: [fp(0, 'd')] },
+    ]),
+    mapping: new Map([
+      ['/home/a/dev/proj', '/opt/work/proj'],
+      ['/gone/proj', '/opt/gone'],
+    ]),
+    isDirectory: (path) => dirs.has(path),
+  })
+  assert.deepEqual(plan.pullIds, ['s1', 's3'])
+  assert.deepEqual(
+    plan.pull.map((entry) => `${entry.id}:${entry.action}`),
+    ['s1:create', 's2:skip', 's3:create', 's4:skip'],
+  )
+  assert.equal(plan.pull[0]?.toCwd, '/opt/work/proj')
+  assert.match(plan.pull[1]?.reason ?? '', /没有 \/home\/other\/proj → 本机的同步映射/)
+  assert.match(plan.pull[3]?.reason ?? '', /目标目录不存在/)
+  assert.equal(plan.ok, false, '映射指到不存在的目录是阻塞问题')
+  assert.match(plan.problems.join('\n'), /但那不是一个存在的目录/)
+  assert.equal(plan.bytesIn, 20, 's1 与 s3 各 10 字节')
+})
+
+test('sync：计划——本机独有要推，本机领先重推，远端领先与分叉都不动', () => {
+  // 计划阶段只为"两边都有"的会话算指纹，所以这里的假哈希把 sha 编进文件路径里：
+  // `path` 是 `sha@version`，`fakeHash` 再把它拆回来。
+  const fakeHash = (path: string, version: number): FileFingerprint => ({
+    version,
+    bytes: 1,
+    sha256: path.split('@')[0] ?? '',
+  })
+  const plan = planSync({
+    local: [
+      fakeSession('only-local', [['x', 0]], '本机独有'),
+      fakeSession('behind', [['a', 0], ['b', 1]]),
+      fakeSession('same', [['a', 0]]),
+      fakeSession('ahead', [['a', 0]]),
+      fakeSession('fork', [['a', 0], ['zzz', 1]]),
+    ],
+    remote: remoteOf([
+      { machine: 'robot-b', id: 'behind', cwd: '/home/b/proj', files: [fp(0, 'a')] },
+      { machine: 'robot-b', id: 'same', cwd: '/home/b/proj', files: [fp(0, 'a')] },
+      { machine: 'robot-b', id: 'ahead', cwd: '/home/b/proj', files: [fp(0, 'a'), fp(1, 'b')] },
+      { machine: 'robot-b', id: 'fork', cwd: '/home/b/proj', files: [fp(0, 'a'), fp(1, 'b')] },
+    ]),
+    mapping: new Map(),
+    hashFile: fakeHash,
+  })
+  assert.deepEqual(plan.pushIds.sort(), ['behind', 'only-local'])
+  const byId = new Map(plan.push.map((entry) => [entry.id, entry]))
+  assert.equal(byId.get('only-local')?.action, 'upload')
+  assert.equal(byId.get('only-local')?.title, '本机独有')
+  assert.equal(byId.get('behind')?.action, 'update', '本机严格领先 → 重推刷新')
+  assert.equal(byId.get('same')?.action, 'skip')
+  assert.equal(byId.get('ahead')?.action, 'skip')
+  assert.match(byId.get('ahead')?.reason ?? '', /robot-b 那份更新/)
+  assert.equal(byId.get('fork')?.action, 'skip')
+  assert.match(byId.get('fork')?.reason ?? '', /两边各自写过/)
+  assert.deepEqual(plan.pullIds, [], '两边都有的会话一条都不拉')
+})
+
+test('sync：索引解析宽容——坏 JSON / 缺 id / 没有代次都不炸整次同步', () => {
+  const problems: string[] = []
+  assert.equal(parseIndex('{不是 JSON', 'robot-a', problems), undefined)
+  assert.match(problems.join('\n'), /不是合法 JSON/)
+
+  const index = parseIndex(
+    JSON.stringify({
+      entries: [
+        { files: [{ version: 0, bytes: 1, sha256: 'a' }] },
+        { id: 'no-files', files: [] },
+        { id: 'ok', cwd: '/home/a/proj', title: '标题', createdAt: 5, files: [{ version: 0, bytes: 3, sha256: 'b' }] },
+      ],
+    }),
+    'robot-a',
+    problems,
+  )
+  assert.deepEqual(
+    index?.entries.map((entry) => entry.id),
+    ['ok'],
+  )
+  assert.match(problems.join('\n'), /没有 id/)
+  assert.match(problems.join('\n'), /没有任何代次记录/)
+})
+
+// ── 落地（真服务） ────────────────────────────────────────────────────────
+
+test('sync：端到端——A 推、B 拉，cwd 改写成 B 的路径且注册表跟着登记', async () => {
+  rmSync(SANDBOX, { recursive: true, force: true })
+  mkdirSync(SANDBOX, { recursive: true })
+  const fixture = await startDavFixture({ root: join(SANDBOX, 'dav') })
+  const dav = createDavClient({ baseUrl: fixture.url })
+  const a = makeMachine('robot-a')
+  const b = makeMachine('robot-b')
+  try {
+    writeSession(a, 's1', 1000, { title: '第一条' })
+    writeSession(a, 's2', 2000)
+    writeSession(a, 's3', 3000, { cwd: join(a.base, 'elsewhere') }) // B 没有它的映射
+
+    const pushed = await syncMachine(a, dav, settings(a, { machineId: 'robot-a' }), {
+      apply: true,
+      titles: { s1: '第一条' },
+    })
+    assert.deepEqual(pushed.pushed.map((entry) => entry.id).sort(), ['s1', 's2', 's3'])
+    assert.equal(pushed.indexWritten, true)
+    assert.equal(pushed.registryWritten, false, '推的那一侧不碰注册表')
+
+    // 远端索引里带着标题与代次指纹
+    const remote = await readRemoteLibrary(dav, settings(a, { machineId: 'robot-a' }))
+    assert.deepEqual(remote.machines, ['robot-a'])
+    assert.equal(remote.entries.get('s1')?.title, '第一条')
+    assert.equal(remote.entries.get('s2')?.files.length, 1)
+
+    const bConfig = settings(b, { machineId: 'robot-b', mapping: { [a.cwd]: b.cwd } })
+    const preview = await syncMachine(b, dav, bConfig, { apply: false })
+    assert.deepEqual([...preview.plan.pullIds].sort(), ['s1', 's2'])
+    assert.deepEqual(preview.plan.pushIds, [])
+    assert.match(
+      preview.plan.pull.find((entry) => entry.id === 's3')?.reason ?? '',
+      /没有 .*elsewhere → 本机的同步映射/,
+    )
+
+    const pulled = await syncMachine(b, dav, bConfig, { apply: true })
+    assert.deepEqual(pulled.pulled.sort(), ['s1', 's2'])
+    assert.equal(pulled.registryWritten, true)
+    assert.equal(pulled.indexWritten, true, '拉完也要写自己那一格（把所有自己的会话列出来）')
+
+    // 落地位置与 cwd：按 B 的路径重新算项目目录
+    for (const id of ['s1', 's2']) {
+      assert.ok(existsSync(join(sessionDir(b.sessionsRoot, b.cwd, id), 'session.v4.jsonl.zstd')))
+      assert.equal(readHeader(b, b.cwd, id).cwd, b.cwd)
+    }
+    assert.equal(existsSync(join(b.sessionsRoot, projectKey(a.cwd))), false, 'A 的项目目录不该在 B 上出现')
+
+    // 注册表：B 上新建了指向本机路径的工作区，拉下来的会话登记在里面
+    const registry = readRegistry(b.registryPath)
+    const record = Object.values(registry.tables.workspaces).find((item) => item.path === b.cwd)
+    assert.ok(record, 'B 上应当登记了目标工作区')
+    assert.deepEqual([...record.sessionIds].sort(), ['s1', 's2'])
+    assert.equal(registry.global.workspaceIds.length, 1)
+
+    // 第二次同步：两边都不动
+    const again = await syncMachine(b, dav, bConfig, { apply: true })
+    assert.deepEqual(again.pulled, [])
+    assert.deepEqual(again.pushed, [])
+    const aPlan = await syncMachine(a, dav, settings(a, { machineId: 'robot-a' }), { apply: false })
+    assert.deepEqual(aPlan.plan.pullIds, [])
+    assert.deepEqual(aPlan.plan.pushIds, [])
+  } finally {
+    await fixture.close()
+    rmSync(SANDBOX, { recursive: true, force: true })
+  }
+})
+
+test('sync：端到端——两边各推各的互不覆盖；本机领先时重推刷新', async () => {
+  rmSync(SANDBOX, { recursive: true, force: true })
+  mkdirSync(SANDBOX, { recursive: true })
+  const fixture = await startDavFixture({ root: join(SANDBOX, 'dav') })
+  const dav = createDavClient({ baseUrl: fixture.url })
+  const a = makeMachine('robot-a')
+  const b = makeMachine('robot-b')
+  try {
+    writeSession(a, 'a1', 1000)
+    writeSession(b, 'b1', 1500)
+    const aConfig = settings(a, { machineId: 'robot-a', mapping: { [b.cwd]: a.cwd } })
+    const bConfig = settings(b, { machineId: 'robot-b', mapping: { [a.cwd]: b.cwd } })
+
+    await syncMachine(a, dav, aConfig, { apply: true })
+    await syncMachine(b, dav, bConfig, { apply: true })
+    // 各自推了自己的那条、也拉了对方那条
+    const remote = await readRemoteLibrary(dav, settings(a, { machineId: 'robot-a' }))
+    assert.deepEqual([...remote.entries.keys()].sort(), ['a1', 'b1'])
+    assert.deepEqual(remote.machines, ['robot-a', 'robot-b'])
+    // 两台机器的格子各写各的：A 的索引里不该有 b1
+    assert.deepEqual(
+      remote.indexes.get('robot-a')?.entries.map((entry) => entry.id),
+      ['a1'],
+    )
+    assert.deepEqual(
+      remote.indexes.get('robot-b')?.entries.map((entry) => entry.id),
+      ['b1'],
+    )
+
+    // A 上 a1 多出一代（本机严格领先）→ 下一次同步重推，而不是跳过
+    addGeneration(a, 'a1', 5)
+    const grown = await syncMachine(a, dav, aConfig, { apply: false })
+    assert.deepEqual(grown.plan.pushIds, ['a1'])
+    assert.equal(grown.plan.push.find((entry) => entry.id === 'a1')?.action, 'update')
+    assert.match(grown.plan.push.find((entry) => entry.id === 'a1')?.reason ?? '', /远端停在 v4，本机到 v4–v5/)
+
+    const applied = await syncMachine(a, dav, aConfig, { apply: true })
+    assert.deepEqual(applied.pushed, [{ id: 'a1', action: 'update' }])
+    const refreshed = await readRemoteLibrary(dav, settings(a, { machineId: 'robot-a' }))
+    assert.equal(refreshed.entries.get('a1')?.files.length, 2, '重推后远端记录到两代')
+
+    // B 那边已经有 a1 了（同 id）→ 第二次同步不拉它，也不覆盖本机
+    const bAgain = await syncMachine(b, dav, bConfig, { apply: false })
+    assert.deepEqual(bAgain.plan.pullIds, [])
+  } finally {
+    await fixture.close()
+    rmSync(SANDBOX, { recursive: true, force: true })
+  }
+})
+
+test('sync：端到端——坏包只记问题，不挡住同一批里其它会话', async () => {
+  rmSync(SANDBOX, { recursive: true, force: true })
+  mkdirSync(SANDBOX, { recursive: true })
+  const fixture = await startDavFixture({ root: join(SANDBOX, 'dav') })
+  const dav = createDavClient({ baseUrl: fixture.url })
+  const a = makeMachine('robot-a')
+  const b = makeMachine('robot-b')
+  try {
+    writeSession(a, 'good', 1000)
+    writeSession(a, 'bad', 2000)
+    await syncMachine(a, dav, settings(a, { machineId: 'robot-a' }), { apply: true })
+
+    // 把远端那份 bad 的包砸坏（模拟传输损坏 / 别的工具写脏）
+    const badPath = join(fixture.root, 'machines', 'robot-a', 'bad.dshsess')
+    writeFileSync(badPath, Buffer.from('这不是一个 gzip 包'))
+
+    const outcome = await syncMachine(b, dav, settings(b, { machineId: 'robot-b', mapping: { [a.cwd]: b.cwd } }), {
+      apply: true,
+    })
+    assert.deepEqual(outcome.pulled, ['good'])
+    assert.equal(outcome.problems.length, 1)
+    assert.match(outcome.problems[0] ?? '', /拉 bad 失败/)
+    assert.ok(existsSync(join(sessionDir(b.sessionsRoot, b.cwd, 'good'), 'session.v4.jsonl.zstd')))
+  } finally {
+    await fixture.close()
+    rmSync(SANDBOX, { recursive: true, force: true })
+  }
+})
+
+test('sync：端到端——远端索引点名的包不在时只记问题', async () => {
+  rmSync(SANDBOX, { recursive: true, force: true })
+  mkdirSync(SANDBOX, { recursive: true })
+  const fixture = await startDavFixture({ root: join(SANDBOX, 'dav') })
+  const dav = createDavClient({ baseUrl: fixture.url })
+  const a = makeMachine('robot-a')
+  const b = makeMachine('robot-b')
+  try {
+    writeSession(a, 'gone', 1000)
+    await syncMachine(a, dav, settings(a, { machineId: 'robot-a' }), { apply: true })
+    rmSync(join(fixture.root, 'machines', 'robot-a', 'gone.dshsess'))
+
+    const outcome = await syncMachine(b, dav, settings(b, { machineId: 'robot-b', mapping: { [a.cwd]: b.cwd } }), {
+      apply: true,
+    })
+    assert.deepEqual(outcome.pulled, [])
+    assert.match(outcome.problems.join('\n'), /拉 gone 失败/)
+  } finally {
+    await fixture.close()
+    rmSync(SANDBOX, { recursive: true, force: true })
+  }
+})
+
+test('sync：端到端——扫描出来的会话与指纹能被远端读回认出（同源校验）', async () => {
+  rmSync(SANDBOX, { recursive: true, force: true })
+  mkdirSync(SANDBOX, { recursive: true })
+  const fixture = await startDavFixture({ root: join(SANDBOX, 'dav') })
+  const dav = createDavClient({ baseUrl: fixture.url })
+  const a = makeMachine('robot-a')
+  try {
+    writeSession(a, 's1', 1000)
+    await syncMachine(a, dav, settings(a, { machineId: 'robot-a' }), { apply: true })
+    const local = scanAll(a.sessionsRoot, decodeAll)
+    const remote = await readRemoteLibrary(dav, settings(a, { machineId: 'robot-a' }))
+    const mine = local[0]?.files.map((file) => fileFingerprint(file.path, file.version)) ?? []
+    assert.equal(relation(mine, remote.entries.get('s1')?.files ?? []), 'identical')
+    assert.ok(existsSync(join(fixture.root, remoteIndexPath('robot-a'))))
+  } finally {
+    await fixture.close()
+    rmSync(SANDBOX, { recursive: true, force: true })
+  }
+})

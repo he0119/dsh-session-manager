@@ -1373,16 +1373,49 @@ test('客户端产物：「说明」页把分类词条、三个分页与边界�
   for (const key of ['catVisible', 'tagSubagent', 'tagBlank', 'tagArchived', 'tagLive', 'ungroupedSource']) {
     assert.ok(terms.includes(key), `分类词典缺少「${key}」`)
   }
-  assert.equal(terms.length, 15, '词条数＝分类 6 + 分页 3 + 数据 2 + 疑问 4')
-  assert.equal(recorded.filter((node) => node.type === 'dd').length, 15, '每条词条都有解释')
+  assert.equal(terms.length, 16, '词条数＝分类 6 + 分页 3 + 数据 2 + 疑问 5')
+  assert.equal(recorded.filter((node) => node.type === 'dd').length, 16, '每条词条都有解释')
   // 「数据从哪来」两条路径来自 /state，不是写死在文案里
   assert.ok(
     text.includes('/home/u/.dsh/sessions') && text.includes('/home/u/.dsh/registry.json'),
     '两条路径来自 /state',
   )
-  for (const key of ['faqUnownedQ', 'faqDeletedQ', 'faqRestartQ', 'faqRestoreQ']) {
+  for (const key of ['faqUnownedQ', 'faqDeletedQ', 'faqRestartQ', 'faqRestoreQ', 'faqForkQ']) {
     assert.ok(text.includes(key), `常见疑问缺少「${key}」`)
   }
+  // 同步那条边界也在这一页上（动作页只留用得到的句子）：同步只往库里加、不覆盖
+  assert.ok(text.includes('helpDiskSync'), '会碰什么盘那节要写上同步')
   // 说明页不该长成一个"什么都往里塞"的垃圾桶：正文段落本身就是词条/项目符号，没有额外的大段散文
   assert.ok(text.includes('helpHint'), '页首要有一句话说明这一页讲什么')
+})
+
+test('客户端产物：传输页的同步块——没配置只说明，配置了才摆按钮', { skip }, () => {
+  const base = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    sessions: [],
+    workspaces: [],
+  }
+  const text = (mounted) => strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
+  const buttonTexts = (mounted) =>
+    mounted.recorded
+      .filter((node) => node.type === 'button')
+      .map((node) => strings(node).join(''))
+
+  // 没配置：一句话说明怎么配，一个按钮都不摆（点了没反应的按钮比不摆更糟）
+  const off = mount({ state: base, panel: 'transfer' })
+  assert.ok(text(off).includes('syncOffHint'), '没配置时要说明怎么配')
+  assert.ok(!buttonTexts(off).includes('syncPreview'), '没配置时不该出现同步按钮')
+  assert.ok(!buttonTexts(off).includes('syncApply'), '没配置时不该出现同步按钮')
+
+  // 配置了：远端与这台机器报出来，预演与确认两个按钮都在
+  const on = mount({
+    state: { ...base, sync: { url: 'https://dav.example.com/dsh', machineId: 'robot-a', mappings: 2 } },
+    panel: 'transfer',
+  })
+  const onText = text(on)
+  assert.ok(onText.includes('syncWhere:{"url":"https://dav.example.com/dsh","machine":"robot-a"}'), '要报出远端与机器名')
+  assert.ok(onText.includes('syncHint:{"mappings":2}'), '要报出映射条数')
+  assert.deepEqual(buttonTexts(on).filter((label) => label.startsWith('sync')), ['syncPreview', 'syncApply'])
 })

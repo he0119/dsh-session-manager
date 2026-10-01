@@ -234,6 +234,8 @@ export const zh = {
   helpDiskSidebar: '归档与删除之后，侧边栏要等宿主重新扫描才会少掉那几行。',
   helpDiskLive: '还活在宿主内存里（运行中或已打开）的会话删不掉——先在宿主里关掉它。',
   helpDiskExport: '导出包里是会话日志的原始字节，不含会话创建过的普通文件；同一条会话的所有代次日志一起进包。',
+  helpDiskSync:
+    '同步只往本机库里**加**：远端那条会话的 id 已经在库里就不拉，本机独有的才推上去；一条会话因此不会被另一边顶掉。远端只放包与自己那份索引，删掉的会话下一次推送就从自己的索引里消失（远端那份包不主动删）。',
   helpWhereTitle: '数据从哪来',
   helpWhereLibrary: '会话库',
   helpWhereLibraryText: '下面每个会话目录就是一条会话；本插件读它的日志，标题、字节数与可见性都从那里来。',
@@ -248,6 +250,33 @@ export const zh = {
   faqRestartA: '注册表已经落盘，但宿主进程里还持有一份内存副本；不重启的话，旧工作区里新增的会话可能被写到错的地方。',
   faqRestoreQ: '「回滚」和「恢复」差在哪？',
   faqRestoreA: '回滚把会话目录、日志字节与注册表一起还原；恢复只把会话目录搬回原位（删除没碰过注册表，也没什么可还原的）。',
+  faqForkQ: '同一条会话在两台机器上都聊过，怎么办？',
+  faqForkA: '两条都不动、各留各的：同步按 id 认会话，遇到库里已有的 id 一律不拉，所以两台机器各自续写出来的那一份不会合流。想让两边都能接着聊，就约定一条会话只在一台机器上继续，另一台只用同步来的副本回看（预演会把这种「两边各自写过」标出来）。',
+
+  // ---- WebDAV 同步 ----
+  syncTitle: 'WebDAV 同步',
+  syncWhere: '远端 {url} · 这台机器 {machine}',
+  syncHint:
+    '按插件配置里的映射同步：把别处推来的会话拉到本机，把本机独有的推上去。远端放的是一个个 .dshsess 包，拉下来时会按映射改写成这台机器的路径。同一个 id 只跳过、不覆盖。映射 {mappings} 条。',
+  syncOffHint:
+    '没配置同步：在插件配置里填 sync.url（WebDAV 集合地址）与 mapping（「远端 cwd → 本机目录」）之后，这一块才会出现按钮。',
+  syncPreview: '预演同步',
+  syncApply: '确认同步',
+  syncSummary: '会拉 {pull} 条、会推 {push} 条（本机 {local} 条，远端 {remote} 条）',
+  syncMachines: '远端机器：{machines}',
+  syncApplied: '已拉 {pulled} 条、已推 {pushed} 条（落地 {bytesIn}，上传 {bytesOut}）。',
+  syncNothing: '两边一样，没有要同步的。',
+  syncPullHead: '会拉下来（{count} 条）',
+  syncPushHead: '会推上去（{count} 条）',
+  syncKeptHead: '两边都有、这次不动（{count} 条）',
+  syncCodeMissingPull: '远端有、本机没有',
+  syncCodeMissingPush: '本机有、远端没有',
+  syncCodeLocalAhead: '本机更新，重推刷新',
+  syncCodeRemoteAhead: '远端更新（{machine}）',
+  syncCodeDiverged: '两边各自写过（{machine}）',
+  syncCodeNoMapping: '缺映射：{from}',
+  syncCodeMissingTarget: '目标目录不存在：{to}',
+  syncNote: '{name}：{why}',
 
   // ---- 共同 ----
   failed: '操作失败：{reason}',
@@ -465,6 +494,8 @@ export const en: Record<keyof typeof zh, string> = {
   helpDiskSidebar: 'After archiving or deleting, the sidebar drops those rows once the host rescans.',
   helpDiskLive: 'A session still live in host memory (running or open) cannot be deleted — close it in the host first.',
   helpDiskExport: 'The bundle holds the raw bytes of the session logs, not the ordinary files a session created; every generation of a session log goes in together.',
+  helpDiskSync:
+    'Sync only adds to the local library: a session whose id is already here is not pulled, and only sessions this machine alone has are pushed, so neither side overwrites the other. The remote holds bundles plus each machine’s own index; a session you delete disappears from your index on the next push (the remote bundle itself is not deleted).',
   helpWhereTitle: 'Where the data comes from',
   helpWhereLibrary: 'Session library',
   helpWhereLibraryText: 'Each session directory below is one session; this plugin reads its log, and the title, byte count and visibility all come from there.',
@@ -479,6 +510,33 @@ export const en: Record<keyof typeof zh, string> = {
   faqRestartA: 'The registry is on disk, but the host process keeps an in-memory copy; without a restart, new sessions in an old workspace may be written to the wrong place.',
   faqRestoreQ: 'What is the difference between Roll back and Restore?',
   faqRestoreA: 'Roll back restores session directories, log bytes and the registry together; Restore only moves the session directories back (deleting never touched the registry).',
+  faqForkQ: 'The same session was continued on two machines. Now what?',
+  faqForkA: 'Both copies stay put: sync keys sessions by id, and an id that already exists locally is never pulled, so two machines that each continued the same session never merge. To keep chatting on both, agree that one session is continued on one machine only, and use the synced copy on the other for reading (a preview marks these "both sides wrote" cases).',
+
+  // ---- WebDAV sync ----
+  syncTitle: 'WebDAV sync',
+  syncWhere: 'Remote {url} · this machine {machine}',
+  syncHint:
+    'Syncs through the mapping in the plugin configuration: pulls what other machines pushed, pushes what only this machine has. The remote holds one .dshsess bundle per session, and a pull rewrites the cwd to this machine’s mapped directory. A session id that already exists is skipped, never overwritten. {mappings} mapping(s).',
+  syncOffHint:
+    'Sync is not configured: set sync.url (the WebDAV collection) and mapping ("remote cwd → local directory") in the plugin configuration, and the buttons for this block appear.',
+  syncPreview: 'Preview sync',
+  syncApply: 'Sync now',
+  syncSummary: 'Pull {pull}, push {push} (local {local}, remote {remote})',
+  syncMachines: 'Remote machines: {machines}',
+  syncApplied: 'Pulled {pulled}, pushed {pushed} ({bytesIn} written, {bytesOut} uploaded).',
+  syncNothing: 'Both sides are in sync.',
+  syncPullHead: 'To pull ({count})',
+  syncPushHead: 'To push ({count})',
+  syncKeptHead: 'On both sides, left alone ({count})',
+  syncCodeMissingPull: 'on the remote, not here',
+  syncCodeMissingPush: 'here, not on the remote',
+  syncCodeLocalAhead: 'local is ahead, re-uploaded',
+  syncCodeRemoteAhead: 'remote is ahead ({machine})',
+  syncCodeDiverged: 'both sides wrote ({machine})',
+  syncCodeNoMapping: 'no mapping for {from}',
+  syncCodeMissingTarget: 'target directory missing: {to}',
+  syncNote: '{name}: {why}',
 
   failed: 'Failed: {reason}',
   dismiss: 'Dismiss',

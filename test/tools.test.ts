@@ -1,5 +1,5 @@
 // 工具层验证：用**真实的 @deepseek-ai/dsh-tools** 调 defineTool，
-// 确认 4 个工具的定义能通过宿主的参数/输出 schema 归一化，并且真的能跑通。
+// 确认 5 个工具的定义能通过宿主的参数/输出 schema 归一化，并且真的能跑通。
 //
 // defineTool 在注册前就会把 parameters / output.schema 转成 JSON Schema，
 // 形状不对即抛错；execute 又会先按 parameters 校验实参。
@@ -12,8 +12,10 @@ import test from 'node:test'
 import { Context } from '@deepseek-ai/cordis'
 import { decompress } from 'fzstd'
 
+import { createDavClient } from '../src/dav.ts'
 import { projectKey } from '../src/project-key.ts'
 import { readRegistry } from '../src/registry.ts'
+import { remoteBundlePath, remoteIndexPath } from '../src/sync.ts'
 import {
   archiveOps,
   directoryPickerKind,
@@ -23,9 +25,11 @@ import {
   type MigrateToolResult,
   type PlanToolResult,
   type PluginConfig,
+  type SyncToolResult,
 } from '../src/tools.ts'
 import type { DecodeAll, WorkspaceRegistryState } from '../src/types.ts'
 import { encodeRawFrame } from '../src/zstd-frame.ts'
+import { putRemoteSession, startDavFixture } from './dav-fixture.ts'
 
 const decodeAll: DecodeAll = (buf: Uint8Array): string => Buffer.from(decompress(buf)).toString('utf8')
 
@@ -183,13 +187,19 @@ async function run(tool: CapturedTool, args: Record<string, unknown>): Promise<u
   return tool.execute(args, {})
 }
 
-test('工具注册：4 个工具，名称与归一化 schema 符合宿主契约', async () => {
+test('工具注册：5 个工具，名称与归一化 schema 符合宿主契约', async () => {
   const sb = makeSandbox('tools')
   const { defs } = await makeHost({ sessionsRoot: sb.root, registryPath: sb.registryPath, backupRoot: sb.backupRoot })
 
-  assert.equal(defs.length, 4)
+  assert.equal(defs.length, 5)
   const m = byName(defs)
-  for (const n of ['plan_session_migration', 'migrate_sessions', 'rollback_session_migration', 'verify_workspace_sessions']) {
+  for (const n of [
+    'plan_session_migration',
+    'migrate_sessions',
+    'rollback_session_migration',
+    'verify_workspace_sessions',
+    'sync_sessions',
+  ]) {
     const d = m.get(n)
     assert.ok(d, `缺少工具 ${n}`)
     assert.equal(typeof d.description, 'string')
@@ -393,4 +403,75 @@ test('活着的会话：读宿主内存 store 的 id；没有那个服务时按�
   assert.equal(liveSessionIds({}).size, 0)
   assert.equal(liveSessionIds(undefined).size, 0)
   assert.equal(liveSessionIds({ get: () => ({ list: () => { throw new Error('store 还没装好') } }) }).size, 0)
+})
+
+test('sync_sessions：没配 sync.url 时如实说"没配置"（不发任何请求）', async () => {
+  const sb = makeSandbox('tools-sync-off')
+  const { defs } = await makeHost({ sessionsRoot: sb.root, registryPath: sb.registryPath, backupRoot: sb.backupRoot })
+  const result = (await run(byName(defs).get('sync_sessions')!, {})) as SyncToolResult
+  assert.equal(result.ok, false)
+  assert.equal(result.applied, false)
+  assert.match(result.problems.join('\n'), /没有配置 WebDAV 同步/)
+  rmSync(sb.base, { recursive: true, force: true })
+})
+
+test('sync_sessions：预演只读、apply 才落地；远端那条按映射改写成目标路径', async () => {
+  const sb = makeSandbox('tools-sync')
+  const fixture = await startDavFixture({ root: join(sb.base, 'dav') })
+  const uploader = createDavClient({ baseUrl: fixture.url })
+  const foreignCwd = join(sb.base, 'foreign')
+  mkdirSync(foreignCwd, { recursive: true })
+  const id = 'remote-1'
+  try {
+    // 远端那台机器贡献的一条会话：打一个真的包放上去（格式与「导出」一模一样）。
+    const dir = join(sb.base, 'foreign-sessions', projectKey(foreignCwd), id)
+    mkdirSync(dir, { recursive: true })
+    const logPath = join(dir, 'session.v4.jsonl.zstd')
+    writeFileSync(logPath, makeLog(id, foreignCwd, 2))
+    await putRemoteSession(uploader, 'robot-b', {
+      id,
+      cwd: foreignCwd,
+      createdAt: 1,
+      logPath,
+      logName: 'session.v4.jsonl.zstd',
+      logVersion: 4,
+    })
+
+    const config: PluginConfig = {
+      sessionsRoot: sb.root,
+      registryPath: sb.registryPath,
+      backupRoot: sb.backupRoot,
+      sync: { url: fixture.url, machineId: 'robot-a', mapping: { [foreignCwd]: sb.toDir } },
+    }
+    const { defs } = await makeHost(config)
+    const sync = byName(defs).get('sync_sessions')!
+
+    const preview = (await run(sync, {})) as SyncToolResult
+    assert.equal(preview.applied, false)
+    assert.deepEqual(preview.pulled, [id])
+    assert.deepEqual(preview.pushed.sort(), ['session-a', 'session-b', 'session-child'], '本机三条都要推')
+    assert.equal(preview.machines.includes('robot-b'), true)
+    assert.equal(
+      existsSync(join(sb.root, projectKey(sb.toDir), id)),
+      false,
+      '预演不落地：库里不该多出这条',
+    )
+
+    const applied = (await run(sync, { apply: true })) as SyncToolResult
+    assert.equal(applied.applied, true)
+    assert.deepEqual(applied.pulled, [id])
+    assert.equal(applied.ok, true)
+    assert.equal(applied.takesEffect, 'restart-required', '没有 workspaceRegistry 时要如实说需要重启')
+
+    const landed = join(sb.root, projectKey(sb.toDir), id, 'session.v4.jsonl.zstd')
+    assert.ok(existsSync(landed), 'apply 之后应当落在映射到的目标项目目录里')
+    const header = JSON.parse(decodeAll(readFileSync(landed)).split('\n')[0] ?? '{}') as { cwd?: string }
+    assert.equal(header.cwd, sb.toDir, 'header 的 cwd 要改写成这台机器的路径')
+    // 推上去的那几条也真的在远端：索引与包都写了自己那一格
+    assert.ok(existsSync(join(fixture.root, remoteIndexPath('robot-a'))))
+    assert.ok(existsSync(join(fixture.root, remoteBundlePath('robot-a', 'session-a'))))
+  } finally {
+    await fixture.close()
+    rmSync(sb.base, { recursive: true, force: true })
+  }
 })

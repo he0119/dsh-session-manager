@@ -35,6 +35,13 @@
 - [删掉离线 CLI](../.agents/notes/implemented/simplification/2026-09-28-retire-the-offline-cli.md)：
   少一份对外契约，离线能力该另起一个不依赖宿主进程的入口。
 
+## 跨机器同步
+
+- [WebDAV 同步是运输层，只增不覆盖](../.agents/notes/implemented/feature/2026-10-01-webdav-sync-is-a-transport.md)：
+  远端只放包与索引（一机一格），落地复用导入那条编排，同 id 只跳过。
+- `src/dav.ts` 是那四种方法与 Basic 鉴权（含宽容的多状态响应解析），`src/sync.ts` 是索引、计划与落地，
+  `src/tools.ts` 的 `sync_sessions` 与 `src/web.ts` 的 `GET|POST /sync` 调同一份 `runSync()`。
+
 ## 什么算一族
 
 - [族的那条边只有子代理，分叉不算](../.agents/notes/implemented/architecture/2026-09-30-only-subagent-edges-are-family.md)：

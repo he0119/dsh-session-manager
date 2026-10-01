@@ -51,6 +51,7 @@ const DISK_LINES = [
   'helpDiskSidebar',
   'helpDiskLive',
   'helpDiskExport',
+  'helpDiskSync',
 ] as const
 
 /** 常见疑问：问答同上一条同一个形状（dt 问、dd 答）。 */
@@ -59,6 +60,7 @@ const FAQ = [
   ['faqDeletedQ', 'faqDeletedA'],
   ['faqRestartQ', 'faqRestartA'],
   ['faqRestoreQ', 'faqRestoreA'],
+  ['faqForkQ', 'faqForkA'],
 ] as const
 
 /** 一张卡片：标题 + 正文，动作页那些卡片同一个外壳。 */

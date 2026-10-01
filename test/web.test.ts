@@ -11,9 +11,11 @@ import { decompress } from 'fzstd'
 import { sessionDir } from '../src/paths.ts'
 import { projectKey } from '../src/project-key.ts'
 import { readRegistry, validateRegistry, writeRegistryAtomic } from '../src/registry.ts'
+import { createDavClient } from '../src/dav.ts'
 import type { DecodeAll, SessionHeader, WorkspaceRegistryState } from '../src/types.ts'
 import { API_PREFIX, createApiHandlers, registerWebRoutes, type WebRouteLike } from '../src/web.ts'
 import { encodeRawFrame } from '../src/zstd-frame.ts'
+import { putRemoteSession, startDavFixture } from './dav-fixture.ts'
 
 const decodeAll: DecodeAll = (buf: Uint8Array): string => Buffer.from(decompress(buf)).toString('utf8')
 
@@ -449,7 +451,7 @@ test('POST /import：包坏了、目标目录不合法、库已存在同 id，�
   assert.match(String(json(conflictApply.captured)['error']), /没有可导入的会话/)
 })
 
-test('registerWebRoutes：注册八条精确路由，方法不对回 405', async () => {
+test('registerWebRoutes：注册九条精确路由，方法不对回 405', async () => {
   const sandbox = makeSandbox('web-routes')
   const routes: WebRouteLike[] = []
   const dispose = registerWebRoutes(
@@ -462,6 +464,8 @@ test('registerWebRoutes：注册八条精确路由，方法不对回 405', async
       `exact ${API_PREFIX}/state`,
       `exact ${API_PREFIX}/export`,
       `exact ${API_PREFIX}/import`,
+      // `/sync` 两种方法共用一条（宿主的 register 对重复 path 会抛错）
+      `exact ${API_PREFIX}/sync`,
       `exact ${API_PREFIX}/backups`,
       `exact ${API_PREFIX}/migrate`,
       `exact ${API_PREFIX}/rollback`,
@@ -474,6 +478,16 @@ test('registerWebRoutes：注册八条精确路由，方法不对回 405', async
   const { res, captured } = fakeRes()
   await exportRoute.handler(fakeReq('GET', `${API_PREFIX}/export`), res)
   assert.equal(captured.status, 405)
+
+  // 一条路由两种方法：表里的每一种都放行，别的仍然 405
+  const syncRoute = routes.find((route) => route.path.endsWith('/sync'))!
+  const allowed = fakeRes()
+  await syncRoute.handler(fakeReq('GET', `${API_PREFIX}/sync`), allowed.res)
+  assert.equal(allowed.captured.status, 409, '方法放行了，只是这个宿主没配置同步')
+  const rejected = fakeRes()
+  await syncRoute.handler(fakeReq('DELETE', `${API_PREFIX}/sync`), rejected.res)
+  assert.equal(rejected.captured.status, 405)
+  assert.match(String(json(rejected.captured)['error']), /只接受 GET \/ POST/)
   dispose()
 })
 
@@ -980,4 +994,103 @@ test('POST /rollback：删除备份走恢复（注册表不动），迁移备份
   const outcome = json(rolled.captured)
   assert.equal(outcome['registryRestored'], false)
   assert.equal(existsSync(sessionDir(sandbox.sessionsRoot, CWD_A, 'session-a')), true)
+})
+
+// ---- WebDAV 同步 ----
+
+test('GET /state：带上同步配置的非敏感字段；没配时是 null', async () => {
+  const sandbox = makeSandbox('web-sync-state')
+  const plain = fakeRes()
+  await createApiHandlers(deps(sandbox))['GET /state']!(fakeReq('GET', `${API_PREFIX}/state`), plain.res)
+  assert.equal(json(plain.captured)['sync'], null, '没配置同步就是 null（界面据此不画那个区块）')
+
+  const configured = fakeRes()
+  await createApiHandlers(
+    deps(sandbox, {
+      syncInfo: () => ({ url: 'https://dav.example.com/dsh', machineId: 'robot-a', mappings: 2 }),
+    }),
+  )['GET /state']!(fakeReq('GET', `${API_PREFIX}/state`), configured.res)
+  assert.deepEqual(json(configured.captured)['sync'], {
+    url: 'https://dav.example.com/dsh',
+    machineId: 'robot-a',
+    mappings: 2,
+  })
+})
+
+test('GET|POST /sync：这个宿主没配置同步时 409，且没有一个字节被写', async () => {
+  const sandbox = makeSandbox('web-sync-off')
+  writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000)
+  const handlers = createApiHandlers(deps(sandbox))
+  for (const method of ['GET', 'POST']) {
+    const { res, captured } = fakeRes()
+    await handlers['GET|POST /sync']!(fakeReq(method, `${API_PREFIX}/sync`), res)
+    assert.equal(captured.status, 409)
+    assert.match(String(json(captured)['error']), /没有配置 WebDAV 同步/)
+  }
+  assert.deepEqual(readRegistry(sandbox.registryPath).tables.workspaces['ws-a']?.sessionIds, ['session-a'])
+})
+
+test('POST /sync?mode=apply：预演不落地，apply 拉下远端那条并登记进本机工作区', async () => {
+  const sandbox = makeSandbox('web-sync')
+  writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000)
+  const fixture = await startDavFixture({ root: join(sandbox.base, 'dav') })
+  const dav = createDavClient({ baseUrl: fixture.url })
+  const foreign = join(sandbox.base, 'foreign')
+  mkdirSync(foreign, { recursive: true })
+  const foreignRoot = join(sandbox.base, 'foreign-sessions')
+  try {
+    writeSession(foreignRoot, 'session-remote', foreign, 1500, { title: '远端那条' })
+    await putRemoteSession(dav, 'robot-b', {
+      id: 'session-remote',
+      cwd: foreign,
+      createdAt: 1500,
+      title: '远端那条',
+      logPath: join(sessionDir(foreignRoot, foreign, 'session-remote'), 'session.v4.jsonl.zstd'),
+      logName: 'session.v4.jsonl.zstd',
+      logVersion: 4,
+    })
+
+    const handlers = createApiHandlers(
+      deps(sandbox, {
+        sync: async () => ({
+          settings: { url: fixture.url, machineId: 'robot-a', mapping: { [foreign]: CWD_A } },
+          dav,
+        }),
+      }),
+    )
+
+    const preview = fakeRes()
+    await handlers['GET|POST /sync']!(fakeReq('GET', `${API_PREFIX}/sync`), preview.res)
+    assert.equal(preview.captured.status, 200)
+    const plan = json(preview.captured)
+    assert.equal(plan['mode'], 'plan')
+    assert.equal(plan['applied'], false)
+    assert.deepEqual(plan['plan'] && (plan['plan'] as Record<string, unknown>)['pullIds'], ['session-remote'])
+    assert.equal(
+      existsSync(sessionDir(sandbox.sessionsRoot, CWD_A, 'session-remote')),
+      false,
+      '预演一个字节都不落地',
+    )
+
+    const applied = fakeRes()
+    await handlers['GET|POST /sync']!(fakeReq('POST', `${API_PREFIX}/sync?mode=apply`), applied.res)
+    assert.equal(applied.captured.status, 200)
+    const outcome = json(applied.captured)
+    assert.equal(outcome['mode'], 'apply')
+    assert.equal(outcome['applied'], true)
+    assert.deepEqual(outcome['pulled'], ['session-remote'])
+    assert.equal(outcome['registryWritten'], true)
+    // 没有 effectMode 注入时按保守说法回（"重启最稳妥"）
+    assert.equal(outcome['takesEffect'], 'restart-required')
+
+    const landed = join(sessionDir(sandbox.sessionsRoot, CWD_A, 'session-remote'), 'session.v4.jsonl.zstd')
+    const header = JSON.parse(decodeAll(readFileSync(landed)).split('\n')[0] ?? '{}') as { cwd?: string }
+    assert.equal(header.cwd, CWD_A, 'cwd 要改写成这台机器的路径')
+    const registry = readRegistry(sandbox.registryPath)
+    assert.deepEqual([...(registry.tables.workspaces['ws-a']?.sessionIds ?? [])].sort(), ['session-a', 'session-remote'])
+    assert.equal(validateRegistry(registry).ok, true, '同步完的注册表仍然满足启动不变式')
+  } finally {
+    await fixture.close()
+    rmSync(sandbox.base, { recursive: true, force: true })
+  }
 })

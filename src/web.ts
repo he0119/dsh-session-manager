@@ -29,7 +29,8 @@ import { projectionCacheDir } from './paths.ts'
 import { readRegistry, validateRegistry } from './registry.ts'
 import { runRemoval, type RemoveDeps, type RemovalRun } from './remove.ts'
 import { createTitleResolver, type TitleQuery } from './session-title.ts'
-import { type EffectMode, type PickerKind, type RegistryOps, type ResolvedPaths } from './tools.ts'
+import { runSync } from './sync.ts'
+import { type EffectMode, type PickerKind, type RegistryOps, type ResolvedPaths, type SyncInfo, type SyncRuntime } from './tools.ts'
 import {
   applyImport,
   buildBundle,
@@ -104,6 +105,20 @@ export interface ApiDeps {
   liveSessionIds?: () => ReadonlySet<string>
   /** 宿主的归档能力；缺席 = 这个宿主改不了归档（界面据此禁用那两个按钮）。 */
   registryOps?: () => RegistryOps | undefined
+  /**
+   * 造一次 WebDAV 同步的运行时（远端 + 设置）；没配置同步时返回 undefined。
+   *
+   * 每次调用都重新解析密码引用：DSH 的口径是"每次操作解析一次引用"，换了环境变量不必重启插件。
+   * 要读宿主服务（credentials），所以同 `effectMode` 一样由入口注入。
+   */
+  sync?: () => Promise<SyncRuntime | undefined>
+  /**
+   * 同步配置里的非敏感字段（界面用来显示"同步到哪儿、这台机器叫什么"）。
+   *
+   * 与 `sync` 分开：`/state` 每帧都要看它一眼，而 `sync()` 会去解析凭据引用（还可能发网络请求前的
+   * 准备工作），不该被列一次会话就触发。
+   */
+  syncInfo?: () => SyncInfo | undefined
 }
 
 /** 界面要展示的一条会话。 */
@@ -333,7 +348,7 @@ function fileName(count: number, at: Date): string {
   return `dsh-sessions-${count}-${stamp}.dshsess`
 }
 
-/** 界面用的全部 handler，键是 `METHOD 路径后缀`。 */
+/** 界面用的全部 handler，键是 `METHOD 路径后缀`；方法可以写成 `GET|POST`（`/sync` 两种都要）。 */
 export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingMessage, res: ServerResponse) => Promise<void>> {
   const { paths, decodeAll } = deps
   const now = deps.now ?? ((): Date => new Date())
@@ -359,6 +374,8 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
       pickerKind: deps.pickerKind?.() ?? null,
       // 归档按钮能不能点：这个宿主的 workspaceRegistry 在不在（只有 Web profile 才有它）。
       archiveAvailable: deps.registryOps?.() !== undefined,
+      // 同步卡片：没有配置就是 null（界面据此说明"没配置 sync.url"，而不是画一个点了没反应的按钮）。
+      sync: deps.syncInfo?.() ?? null,
       sessions: summarizeSessions(sessions, registry, {
         archived: new Set(registry?.global.archivedSessionIds ?? []),
         resolveBlank,
@@ -614,6 +631,47 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
     sendJson(res, 200, { mode: dryRun ? 'plan' : 'apply', ...outcome, takesEffect: takesEffect() })
   }
 
+  /**
+   * WebDAV 同步：`?mode=apply` 才真跑（拉 + 推），缺省只预演（读远端，什么都不写）。
+   *
+   * 拉下来的会话走的是**导入那条编排**（`runSync()` 内部调 `planImport/applyImport`），所以这里与
+   * 导入端点同一套边界：包必须自校验通过、同 id 只跳过、`_no-cwd` 直接落项目目录。
+   */
+  const syncSessions = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+    const url = new URL(req.url ?? '/', 'http://localhost')
+    const apply = url.searchParams.get('mode') === 'apply'
+    const runtime = await deps.sync?.()
+    if (runtime === undefined) {
+      sendJson(res, 409, { error: '这个宿主没有配置 WebDAV 同步（插件配置里的 sync.url 是空的）' })
+      return
+    }
+    try {
+      const outcome = await runSync(
+        {
+          dav: runtime.dav,
+          settings: runtime.settings,
+          sessionsRoot: paths.sessionsRoot,
+          registryPath: paths.registryPath,
+          decodeAll,
+          resolveTitle,
+          ...(deps.pluginVersion === undefined ? {} : { pluginVersion: deps.pluginVersion }),
+          ...(deps.now === undefined ? {} : { now: deps.now }),
+        },
+        { apply },
+      )
+      sendJson(res, 200, {
+        mode: apply ? 'apply' : 'plan',
+        remote: { url: runtime.settings.url, machineId: runtime.settings.machineId },
+        ...outcome,
+        problems: [...outcome.plan.problems, ...outcome.problems],
+        // 只有真的往库里落了会话才谈得上"要不要重启"；纯推送不改本机任何东西。
+        takesEffect: apply && outcome.pulled.length > 0 ? takesEffect() : 'immediate',
+      })
+    } catch (error) {
+      sendJson(res, 500, { error: error instanceof Error ? error.message : String(error) })
+    }
+  }
+
   const removeDeps: RemoveDeps = {
     sessionsRoot: paths.sessionsRoot,
     registryPath: paths.registryPath,
@@ -731,6 +789,8 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
     'GET /state': state,
     'POST /export': exportSessions,
     'POST /import': importSessions,
+    // 一个资源两种方法写一条：宿主的 `register()` 对重复的 (kind, path) 直接抛错。
+    'GET|POST /sync': syncSessions,
     'GET /backups': backups,
     'POST /migrate': migrate,
     'POST /rollback': rollbackBackup,
@@ -747,15 +807,16 @@ export function registerWebRoutes(server: WebServerLike, deps: ApiDeps): () => v
   const handlers = createApiHandlers(deps)
   const disposers: Array<() => void> = []
   for (const [key, handler] of Object.entries(handlers)) {
-    const [method, suffix] = key.split(' ')
+    const [methods, suffix] = key.split(' ')
+    const allowed = (methods ?? '').split('|')
     disposers.push(
       server.register({
         kind: 'exact',
         path: `${API_PREFIX}${suffix}`,
         handler: async (req, res) => {
-          if ((req.method ?? 'GET').toUpperCase() !== method) {
+          if (!allowed.includes((req.method ?? 'GET').toUpperCase())) {
             res.writeHead(405, { 'content-type': 'application/json; charset=utf-8' })
-            res.end(JSON.stringify({ error: `${suffix} 只接受 ${method}` }))
+            res.end(JSON.stringify({ error: `${suffix} 只接受 ${allowed.join(' / ')}` }))
             return
           }
           try {

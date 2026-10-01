@@ -35,7 +35,7 @@ DSM_FIXTURE=/path/to/backup pnpm test
 ```
 
 没设 `DSM_FIXTURE` 时，`test/real-data.test.ts` 会整组跳过——它是 runner 里默认跳过的两条之一，
-另一条是下面那条 `DSM_SMOKE_WORKSPACE`（所以全绿口径是 198 条里 196 通过、2 跳过）。
+另一条是下面那条 `DSM_SMOKE_WORKSPACE`（所以全绿口径是 265 条里 263 通过、2 跳过）。
 
 ### 版本声明自检（`test/manifest.test.mjs`）
 
@@ -50,7 +50,7 @@ DSM_FIXTURE=/path/to/backup pnpm test
 `test/artifact.test.mjs` 加载 `lib/index.js`（`package.json` 的 `main`），断言：
 
 - 入口自描述字段与 `cordis.patch.yml` / `inject` 一致（`name`、`inject: ['tools']`）
-- 能注册出 4 个工具，且 `parameters` / `output.render` 形状符合宿主契约
+- 能注册出 5 个工具，且 `parameters` / `output.render` 形状符合宿主契约
 - `apply()` 返回**单个**卸载函数（Cordis 契约：不是 disposer 数组），调用后不抛
 
 它写成 `.mjs` 而非 `.ts`：要加载 `lib/` 里的产物，用 `.ts` 会让 `tsc` 去解析产物路径。
@@ -144,16 +144,18 @@ tsconfig.client.json Web Client 自己的类型工程（DOM + JSX；Host 那份�
 | `src/execute.ts` | 执行 + 独立复核（含产物目标位校验） | 无 |
 | `src/artifacts.ts` | 会话产物提取（证据分层）、规划（求交/剪枝）、搬迁 | 无 |
 | `src/transfer.ts` | `.dshsess` 容器（导出/解析/校验）、导入预演与落地 | 无 |
+| `src/dav.ts` | WebDAV 客户端：PROPFIND / GET / PUT / MKCOL + Basic 鉴权 + 多状态响应解析 | 无 |
+| `src/sync.ts` | WebDAV 同步编排：远端索引、映射、计划（四种关系）、拉与推（复用 transfer 的导入落地） | 无 |
 | `src/migrate.ts` | 迁移编排：预演 / 执行 / 回滚 / 备份清单（工具与界面两个入口共用） | 无 |
 | `src/remove.ts` | 删除编排：预演（活着的拒删、单独点名子代理拒掉；点名一条就按 `family.ts` 把它的**全部子代理**一起展开）→ 先备份 → 删目录 → 复核；不碰注册表 | 无 |
-| `src/tools.ts` | 4 个工具注册（+ schema、平台解码器实例、可选服务探测） | `dsh-tools` |
-| `src/web.ts` | 界面端点（state / export / import / migrate / backups / rollback / delete / archive），只要求 `{ register }` 形状 | 无 |
+| `src/tools.ts` | 5 个工具注册（+ schema、平台解码器实例、可选服务探测、同步配置与运行时） | `dsh-tools` |
+| `src/web.ts` | 界面端点（state / export / import / sync / migrate / backups / rollback / delete / archive），只要求 `{ register }` 形状 | 无 |
 | `src/client/*` | 浏览器半侧：「会话管理」页（会话 / 迁移 / 传输 / 说明四个分页）、字典、样式、端点调用 → `lib/client.js`；`sessionList.tsx` 是前三个分页共用的列表骨架（行、组头、列表框、筛选条），`sessionFilter.ts` 是它背后的筛选与搜索判据（纯函数），`groups.ts` 是列表的组织规则（按目录分组、组内把子代理缩进到父会话下一级，都是纯函数），`HelpPanel.tsx` 是那个不碰数据的说明页 | 无 |
 | `src/index.ts` | 插件入口 `apply(ctx, config)` | `dsh-tools` |
 
 核心层（`project-key` / `paths` / `zstd-frame` / `session-log` / `discovery` / `projection-cache` /
 `session-title` / `visibility` / `registry` / `plan` / `journal` / `execute` / `artifacts` / `transfer` /
-`migrate` / `remove`）**不依赖 DSH**，
+`dav` / `sync` / `migrate` / `remove`）**不依赖 DSH**，
 所以插件外壳与测试共用同一段代码。只有 `src/tools.ts` 与 `src/index.ts` 依赖
 `@deepseek-ai/dsh-tools`，`src/web.ts` 连它也不依赖（只认一个 `{ register }` 形状）。
 
