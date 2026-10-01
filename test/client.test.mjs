@@ -408,7 +408,7 @@ test('客户端产物：导航行的文案跟着语言走（同一个 thunk 每�
   assert.equal(label(), 'Session management')
 })
 
-test('客户端产物：页面骨架带着三个页内分页（会话 / 迁移 / 传输）', { skip }, () => {
+test('客户端产物：页面骨架带着四个动作页（会话 / 迁移 / 传输 / 同步）与说明页', { skip }, () => {
   const { registrations, recorded } = mount()
   const { component } = registrations[0]
   const { inject } = registrations[0].registration
@@ -418,16 +418,17 @@ test('客户端产物：页面骨架带着三个页内分页（会话 / 迁移 /
   assert.ok(text.includes('tabTransfer'), '页内要有「传输」这一页')
   assert.ok(text.includes('tabMigrate'), '页内要有「迁移」这一页')
   assert.ok(text.includes('tabManage'), '页内要有「会话」这一页（逐条归档 / 删除）')
-  // 页签顺序：日常的「会话」在最前、「传输」在最后；默认停在第一个（这一页的日常视图）
+  assert.ok(text.includes('tabSync'), '页内要有「同步」这一页（WebDAV）')
+  // 页签顺序：日常的「会话」在最前；「同步」紧挨「传输」（它落地走的是导入那条编排）；说明垫底
   const tabs = recorded.filter((node) => String(node.props?.className) === 'dsm-tab')
   assert.deepEqual(
     tabs.map((node) => strings(node)[0]),
-    ['tabManage', 'tabMigrate', 'tabTransfer', 'tabHelp'],
-    '顺序是 会话 → 迁移 → 传输 → 说明（三个动作页按日常程度排，参考页垫底）',
+    ['tabManage', 'tabMigrate', 'tabTransfer', 'tabSync', 'tabHelp'],
+    '顺序是 会话 → 迁移 → 传输 → 同步 → 说明（动作页按日常程度排，参考页垫底）',
   )
   assert.deepEqual(
     tabs.map((node) => node.props['aria-selected']),
-    [true, false, false, false],
+    [true, false, false, false, false],
     '默认停在第一个页签',
   )
   assert.ok(text.includes('title'), '页面标题走同一份字典')
@@ -1355,7 +1356,7 @@ test('客户端产物：「会话」页也按目录分组、也能折叠，勾�
 // （同一件事在两处各写一份就会漂），以及边界条件确实讲全了（分类、三个分页、碰什么盘、数据从哪来、
 // 常见疑问）。动作页那边由上面那条"每段最多两行"的预算盯着。
 
-test('客户端产物：「说明」页把分类词条、三个分页与边界条件摆出来', { skip }, () => {
+test('客户端产物：「说明」页把分类词条、四个分页与边界条件摆出来', { skip }, () => {
   const state = {
     sessionsRoot: '/home/u/.dsh/sessions',
     registryPath: '/home/u/.dsh/registry.json',
@@ -1375,8 +1376,9 @@ test('客户端产物：「说明」页把分类词条、三个分页与边界�
   for (const key of ['catVisible', 'tagSubagent', 'tagBlank', 'tagArchived', 'tagLive', 'ungroupedSource']) {
     assert.ok(terms.includes(key), `分类词典缺少「${key}」`)
   }
-  assert.equal(terms.length, 16, '词条数＝分类 6 + 分页 3 + 数据 2 + 疑问 5')
-  assert.equal(recorded.filter((node) => node.type === 'dd').length, 16, '每条词条都有解释')
+  assert.equal(terms.length, 17, '词条数＝分类 6 + 分页 4 + 数据 2 + 疑问 5')
+  assert.equal(recorded.filter((node) => node.type === 'dd').length, 17, '每条词条都有解释')
+  assert.ok(terms.includes('tabSync'), '分页那一节要写到「同步」这一页')
   // 「数据从哪来」两条路径来自 /state，不是写死在文案里
   assert.ok(
     text.includes('/home/u/.dsh/sessions') && text.includes('/home/u/.dsh/registry.json'),
@@ -1391,7 +1393,7 @@ test('客户端产物：「说明」页把分类词条、三个分页与边界�
   assert.ok(text.includes('helpHint'), '页首要有一句话说明这一页讲什么')
 })
 
-test('客户端产物：传输页的同步块——没配置只说明，配置了才摆按钮', { skip }, () => {
+test('客户端产物：同步页的同步块——没配置只说明，配置了才摆按钮', { skip }, () => {
   const base = {
     sessionsRoot: '/home/u/.dsh/sessions',
     registryPath: '/home/u/.dsh/registry.json',
@@ -1406,7 +1408,7 @@ test('客户端产物：传输页的同步块——没配置只说明，配置�
       .map((node) => strings(node).join(''))
 
   // 没配置：一句话说明怎么配，一个按钮都不摆（点了没反应的按钮比不摆更糟）
-  const off = mount({ state: base, panel: 'transfer' })
+  const off = mount({ state: base, panel: 'sync' })
   assert.ok(text(off).includes('syncOffHint'), '没配置时要说明怎么配')
   assert.ok(!buttonTexts(off).includes('syncPreview'), '没配置时不该出现同步按钮')
   assert.ok(!buttonTexts(off).includes('syncApply'), '没配置时不该出现同步按钮')
@@ -1414,7 +1416,7 @@ test('客户端产物：传输页的同步块——没配置只说明，配置�
   // 配置了：远端与这台机器报出来，预演与确认两个按钮都在
   const on = mount({
     state: { ...base, sync: { url: 'https://dav.example.com/dsh', machineId: 'robot-a', mappings: 2 } },
-    panel: 'transfer',
+    panel: 'sync',
   })
   const onText = text(on)
   assert.ok(onText.includes('syncWhere:{"url":"https://dav.example.com/dsh","machine":"robot-a"}'), '要报出远端与机器名')
@@ -1451,7 +1453,7 @@ test('客户端产物：同步设置表单按 entry id 向设置接缝取控制�
   }
   const mounted = mount({
     state,
-    panel: 'transfer',
+    panel: 'sync',
     configForms: {
       get(namespace) {
         asked.push(namespace)
@@ -1471,8 +1473,36 @@ test('客户端产物：同步设置表单按 entry id 向设置接缝取控制�
   assert.equal(areas[0].props.value, '/home/alice/dev/proj = /opt/work/proj', '映射表按一列「远端 = 本机」画')
 
   // 宿主没提供设置接缝（例如只装了设置外壳）：这一块要自己说明，而不是画一张点了没用的表单
-  const bare = mount({ state, panel: 'transfer' })
+  const bare = mount({ state, panel: 'sync' })
   const bareText = strings(bare.registrations[0].component(bare.registrations[0].registration.inject()))
   assert.ok(bareText.includes('syncFormUnavailable'), '没接缝时说清只能在配置里改')
   assert.equal(bare.recorded.filter((node) => node.type === 'textarea').length, 0, '没接缝时不画表单')
+})
+
+test('客户端产物：同步独占「同步」分页，传输页不再有那张同步卡片', { skip }, () => {
+  const state = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    sync: { url: 'https://dav.example.com/dsh', machineId: 'robot-a', mappings: 2 },
+    sessions: [],
+    workspaces: [],
+  }
+  // 分页各自渲染一次：假钩子不点页签，所以「哪一页上有哪张卡片」只能这样量。
+  const syncText = strings(
+    (() => {
+      const mounted = mount({ state, panel: 'sync' })
+      return mounted.registrations[0].component(mounted.registrations[0].registration.inject())
+    })(),
+  )
+  const transferText = strings(
+    (() => {
+      const mounted = mount({ state, panel: 'transfer' })
+      return mounted.registrations[0].component(mounted.registrations[0].registration.inject())
+    })(),
+  )
+  assert.ok(syncText.includes('syncTitle'), '「同步」分页上要有同步卡片')
+  assert.ok(syncText.includes('syncPreview'), '且带着预演按钮（配置在，按钮就在）')
+  assert.ok(!transferText.includes('syncTitle'), '传输页上不该再有同步卡片')
+  assert.ok(!transferText.includes('syncPreview'), '传输页上不该再有预演按钮')
 })

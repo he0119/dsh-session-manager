@@ -1,7 +1,7 @@
 /**
  * 「同步设置」表单：URL、机器名、账号、密码引用、超时与映射表，直接改 profile 里那一节。
  *
- * 放在传输页的同步卡片里，与预演/确认挨着——改完 URL 就能立刻预演一次，不必在两页之间来回跳。
+ * 放在「同步」分页的卡片里，与预演/确认挨着——改完 URL 就能立刻预演一次，不必跳到别处。
  * 读写面在 [syncForm.ts](./syncForm.ts)（宿主的设置接缝），这里只管画与暂存。
  *
  * 三条刻意的取舍：
@@ -78,7 +78,7 @@ function Field({
  * `overridden` 是"用户层里已经有了这一项"——它不比较值，因为一个等于默认值的覆盖仍然是覆盖。
  * 用户点了「恢复默认」之后那个徽标才会消失。
  */
-export function SyncConfigForm({ t }: { t: Translate }): React.ReactElement | null {
+export function SyncConfigForm({ t, onSaved }: { t: Translate; onSaved?: () => void }): React.ReactElement | null {
   const api = getSyncConfigApi()
   const [snapshot, setSnapshot] = React.useState<SyncFormSnapshot | undefined>(api?.getSnapshot())
   const [draft, setDraft] = React.useState<SyncDraft | undefined>(undefined)
@@ -122,8 +122,12 @@ export function SyncConfigForm({ t }: { t: Translate }): React.ReactElement | nu
       .mutate(ops, snapshot.revision)
       .then((accepted) => {
         // 被接受：草稿落回"跟随磁盘"（下一次投影就是刚写下的值）；被拒：留着草稿，让用户自己看。
-        if (accepted) setDraft(undefined)
-        else setFailed(true)
+        if (accepted) {
+          setDraft(undefined)
+          // 让外面重读一次宿主状态：第一次配好 URL 时，同步卡片上的预演/确认按钮是照着 /state 画的，
+          // 不重读就还是"没配置"的样子（用户刚存完却看不见按钮，会以为没生效）。
+          onSaved?.()
+        } else setFailed(true)
       })
       .catch(() => setFailed(true))
       .finally(() => setSaving(false))

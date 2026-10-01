@@ -23,7 +23,7 @@ still works.
 
 | Entry point | Good for |
 |---|---|
-| The **Session management** page in Settings | Everyday use: archive or delete single sessions on the **Sessions** tab; pick a source (a directory or Ungrouped) from a dropdown to migrate; tick sessions to export / import; preview and run a WebDAV sync at the bottom of the **Transfer** tab |
+| The **Session management** page in Settings | Everyday use: archive or delete single sessions on the **Sessions** tab; pick a source (a directory or Ungrouped) from a dropdown to migrate; tick sessions to export / import; preview and run a WebDAV sync on the **Sync** tab |
 | 5 model tools | Just say "move this workspace's sessions to `~/dev/xxx`" and let the model preview first, apply second |
 
 Both share one migration implementation, so the count a preview reports is the count you get.
@@ -187,7 +187,7 @@ it and the sidebar shows it), what the three tabs do, which files the actions to
 restore, when the sidebar follows), where the data comes from (the library and the registry paths), and the
 common questions (which sessions count as Ungrouped, why a deleted session is still in the sidebar, why a
 migration asks for a restart). The action tabs
-(Sessions / Migrate / Transfer) keep only the decision at hand, so each explanation there stays within two
+(Sessions / Migrate / Transfer / Sync) keep only the decision at hand, so each explanation there stays within two
 lines.
 
 A host without the `webServer` service (tools-only front ends) still loads the plugin — the page simply
@@ -213,8 +213,7 @@ sync:
   timeoutMs: 30000                         # optional
 ```
 
-This section is also editable **in the interface**: on the sync card at the bottom of Settings →
-“Session management” → “Transfer”, the URL, machine id, username, password reference, timeout and mapping are
+This section is also editable **in the interface**: in the card on Settings → “Session management” → “Sync”, the URL, machine id, username, password reference, timeout and mapping are
 edited directly, and Save writes them into the profile document (`~/.dsh/profiles/<name>/cordis.patch.yml`).
 `sync` is a volatile field, so a change takes effect **without a restart**; the three path fields
 (`sessionsRoot` / `registryPath` / `backupRoot`) stay file-only. Write the mapping as one
@@ -224,7 +223,7 @@ The remote layout is `machines/<machineId>/index.json` (which sessions this mach
 `machines/<machineId>/<id>.dshsess` (one bundle per session). **One slot per machine**: WebDAV has no
 locking, so each machine writes only its own slot and reads every slot — nothing overwrites anything else.
 
-At the bottom of the **Transfer** tab, **Preview sync** (reads the remote, writes nothing) reports "pull N /
+On the **Sync** tab, **Preview sync** (reads the remote, writes nothing) reports "pull N /
 push M" and lists every session, where it would land and what was left alone and why; **Sync now** actually
 pulls and pushes. The rules and edges:
 

@@ -30,6 +30,7 @@ export const zh = {
   refresh: '刷新',
   loading: '读取中…',
   tabTransfer: '传输',
+  tabSync: '同步',
   tabMigrate: '迁移',
   tabManage: '会话',
   sessionsCount: '{count} 个会话',
@@ -225,6 +226,7 @@ export const zh = {
   helpTabManage: '对着整个会话库逐条归档或删除，包括侧边栏点不到的那些。',
   helpTabMigrate: '把一个来源（某个目录，或横跨多目录的「未分组」）的会话搬到另一个目录：改写日志 header 的 cwd（只动首帧，其余字节不变）、把会话目录移进目标项目目录、并重新登记工作区注册表。勾中的会话会把它的子代理会话一起带走（见下面「子代理跟着父会话走」）。',
   helpTabTransfer: '把勾选的会话打成 .dshsess 包带走，或把包里的会话导进某个工作区。',
+  helpTabSync: '按 WebDAV 配置在几台机器之间同步：预演只读远端（报出会拉几条、会推几条，逐条说清落地目录与为什么没动），确认才真拉真推。远端地址、机器名与路径映射就在这一页改，改完不用重启。',
   helpDiskTitle: '会碰什么盘',
   helpDiskBackup: '每次迁移、每次导入落地、每次删除都会先留一份字节级备份；备份根在「迁移 → 备份与回滚」里能看到。',
   helpDiskRollback: '迁移的备份点「回滚」：把会话目录、日志字节与工作区注册表一起还原。',
@@ -259,7 +261,7 @@ export const zh = {
   syncHint:
     '按插件配置里的映射同步：把别处推来的会话拉到本机，把本机独有的推上去。远端放的是一个个 .dshsess 包，拉下来时会按映射改写成这台机器的路径。同一个 id 只跳过、不覆盖。映射 {mappings} 条。',
   syncOffHint:
-    '没配置同步：在插件配置里填 sync.url（WebDAV 集合地址）与 mapping（「远端 cwd → 本机目录」）之后，这一块才会出现按钮。',
+    '没配置同步：在下面那张表单里填远端地址（WebDAV 集合）与路径映射（一行一条「远端 cwd = 本机目录」）并保存，预演与确认就会出现。',
   syncPreview: '预演同步',
   syncApply: '确认同步',
   syncSummary: '会拉 {pull} 条、会推 {push} 条（本机 {local} 条，远端 {remote} 条）',
@@ -317,6 +319,7 @@ export const en: Record<keyof typeof zh, string> = {
   refresh: 'Refresh',
   loading: 'Loading…',
   tabTransfer: 'Transfer',
+  tabSync: 'Sync',
   tabMigrate: 'Migrate',
   tabManage: 'Sessions',
   sessionsCount: '{count} sessions',
@@ -512,6 +515,7 @@ export const en: Record<keyof typeof zh, string> = {
   helpTabManage: 'Archive or delete sessions in the whole library, row by row, including the ones the sidebar cannot reach.',
   helpTabMigrate: 'Move one source (a directory, or the cross-directory Ungrouped) to another directory: rewrite each log header cwd (first frame only, the rest stays byte-identical), move the session directories, and re-home the workspace registry. A ticked session takes its subagent sessions along (see Subagents follow their parent session below).',
   helpTabTransfer: 'Pack the ticked sessions into a .dshsess bundle, or import a bundle into a workspace.',
+  helpTabSync: 'Sync between machines through the WebDAV configuration: Preview only reads the remote (how many to pull, how many to push, where each one lands and why it stays put); Sync now does the transfer. The remote URL, machine id and path mapping are edited on this page, and take effect without a restart.',
   helpDiskTitle: 'What gets touched on disk',
   helpDiskBackup: 'Every migration, every import that lands and every delete leaves a byte-level backup first; the backup root is listed under Migrate → Backups & rollback.',
   helpDiskRollback: 'A migration backup offers Roll back: session directories, log bytes and the workspace registry are restored together.',
@@ -546,7 +550,7 @@ export const en: Record<keyof typeof zh, string> = {
   syncHint:
     'Syncs through the mapping in the plugin configuration: pulls what other machines pushed, pushes what only this machine has. The remote holds one .dshsess bundle per session, and a pull rewrites the cwd to this machine’s mapped directory. A session id that already exists is skipped, never overwritten. {mappings} mapping(s).',
   syncOffHint:
-    'Sync is not configured: set sync.url (the WebDAV collection) and mapping ("remote cwd → local directory") in the plugin configuration, and the buttons for this block appear.',
+    'Sync is not configured: fill in the remote URL (the WebDAV collection) and the path mapping (one "remote cwd = local directory" per line) in the form below and save, and Preview and Sync now appear.',
   syncPreview: 'Preview sync',
   syncApply: 'Sync now',
   syncSummary: 'Pull {pull}, push {push} (local {local}, remote {remote})',

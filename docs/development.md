@@ -151,7 +151,7 @@ tsconfig.client.json Web Client 自己的类型工程（DOM + JSX；Host 那份�
 | `src/remove.ts` | 删除编排：预演（活着的拒删、单独点名子代理拒掉；点名一条就按 `family.ts` 把它的**全部子代理**一起展开）→ 先备份 → 删目录 → 复核；不碰注册表 | 无 |
 | `src/tools.ts` | 5 个工具注册（+ schema、平台解码器实例、可选服务探测、同步配置与运行时） | `dsh-tools` |
 | `src/web.ts` | 界面端点（state / export / import / sync / migrate / backups / rollback / delete / archive），只要求 `{ register }` 形状 | 无 |
-| `src/client/*` | 浏览器半侧：「会话管理」页（会话 / 迁移 / 传输 / 说明四个分页）、字典、样式、端点调用 → `lib/client.js`；`sessionList.tsx` 是前三个分页共用的列表骨架（行、组头、列表框、筛选条），`sessionFilter.ts` 是它背后的筛选与搜索判据（纯函数），`groups.ts` 是列表的组织规则（按目录分组、组内把子代理缩进到父会话下一级，都是纯函数），`HelpPanel.tsx` 是那个不碰数据的说明页，`syncForm.ts` 是同步设置的读写面（宿主设置接缝 `configForms`）与映射草稿的解析（纯函数），`SyncConfigForm.tsx` 是那张表单（画在传输页的同步卡片里） | 无 |
+| `src/client/*` | 浏览器半侧：「会话管理」页（会话 / 迁移 / 传输 / 同步 / 说明五个分页）、字典、样式、端点调用 → `lib/client.js`；`sessionList.tsx` 是前三个分页共用的列表骨架（行、组头、列表框、筛选条），`sessionFilter.ts` 是它背后的筛选与搜索判据（纯函数），`groups.ts` 是列表的组织规则（按目录分组、组内把子代理缩进到父会话下一级，都是纯函数），`HelpPanel.tsx` 是那个不碰数据的说明页，`SyncPanel.tsx` 是「同步」分页（预演 / 确认与两张计划表），`syncForm.ts` 是同步设置的读写面（宿主设置接缝 `configForms`）与映射草稿的解析（纯函数），`SyncConfigForm.tsx` 是那张表单 | 无 |
 | `src/index.ts` | 插件入口 `apply(ctx, config)` | `dsh-tools` |
 
 核心层（`project-key` / `paths` / `zstd-frame` / `session-log` / `discovery` / `projection-cache` /

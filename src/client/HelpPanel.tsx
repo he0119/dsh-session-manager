@@ -35,11 +35,12 @@ const CATEGORIES = [
   ['ungroupedSource', 'ungroupedTip'],
 ] as const
 
-/** 三个分页各管什么：与页签同一个顺序（会话 → 迁移 → 传输）。 */
+/** 四个分页各管什么：与页签同一个顺序（会话 → 迁移 → 传输 → 同步）。 */
 const TAB_LINES = [
   ['tabManage', 'helpTabManage'],
   ['tabMigrate', 'helpTabMigrate'],
   ['tabTransfer', 'helpTabTransfer'],
+  ['tabSync', 'helpTabSync'],
 ] as const
 
 /** 会碰什么盘：一次写全备份、回滚 / 恢复、子代理跟着父会话走、侧边栏重扫、内存里的会话、包内容。 */
