@@ -1,5 +1,6 @@
 // WebDAV 同步：计划是纯计算，落地打一个真的 WebDAV 夹具（两台假机器各一个库）。
 import assert from 'node:assert/strict'
+import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
@@ -754,6 +755,45 @@ test('sync：同一个 id 有多台贡献时，联集取领先的那份（不是
     const library = await readRemoteLibrary(dav, settings(makeMachine('robot-c'), { machineId: 'robot-c' }))
     assert.equal(library.entries.get('s1')?.machine, 'robot-b', '领先的那份（v5 在这台机器上）')
     assert.equal(library.entries.get('s1')?.files.length, 2)
+  } finally {
+    await fixture.close()
+    rmSync(SANDBOX, { recursive: true, force: true })
+  }
+})
+
+test('sync：端到端——真 git 认身份，两台机器仓库路径不同、映射为空', async () => {
+  rmSync(SANDBOX, { recursive: true, force: true })
+  mkdirSync(SANDBOX, { recursive: true })
+  const fixture = await startDavFixture({ root: join(SANDBOX, 'dav') })
+  const dav = createDavClient({ baseUrl: fixture.url })
+  const a = makeMachine('robot-a')
+  const b = makeMachine('robot-b')
+  // 两台机器上各一个**真的**仓库：路径不同、remote 相同（不注入 git，走 createGitRunner）
+  const url = 'git@github.com:he0119/demo-proj.git'
+  const aSub = join(a.cwd, 'packages', 'web')
+  const bSub = join(b.cwd, 'packages', 'web')
+  mkdirSync(aSub, { recursive: true })
+  mkdirSync(bSub, { recursive: true })
+  for (const dir of [a.cwd, b.cwd]) {
+    execFileSync('git', ['init', '--quiet', '--initial-branch=main'], { cwd: dir })
+    execFileSync('git', ['remote', 'add', 'origin', url], { cwd: dir })
+  }
+  // B 上这个项目只以"登记过的工作区"出现（库里还没有会话）——候选目录的另一半来源
+  registerWorkspace(b, b.cwd)
+  // 除了 machineId（同一台宿主上跑两个实例，主机名会撞），两边是同一份配置：url 相同、映射为空
+  const config: SyncSettings = { url: '', machineId: 'robot-a', mapping: {} }
+  try {
+    writeSession(a, 's1', 1000, { cwd: aSub })
+    await syncMachine(a, dav, config, { apply: true })
+    const remote = await readRemoteLibrary(dav, { ...config, machineId: 'robot-b' })
+    assert.equal(remote.entries.get('s1')?.repo, 'github.com/he0119/demo-proj', '真 git 读出来的身份')
+    assert.equal(remote.entries.get('s1')?.repoPath, 'packages/web', '仓库内相对路径')
+
+    const outcome = await syncMachine(b, dav, { ...config, machineId: 'robot-b' }, { apply: true })
+    assert.deepEqual(outcome.pulled, ['s1'], '一条映射都没配，靠身份落地')
+    assert.equal(scanAll(b.sessionsRoot, decodeAll)[0]?.cwd, bSub)
+    assert.equal(readHeader(b, bSub, 's1').cwd, bSub, '落地那条会话的 header 也是本机克隆里的路径')
+    assert.notEqual(aSub, bSub)
   } finally {
     await fixture.close()
     rmSync(SANDBOX, { recursive: true, force: true })
