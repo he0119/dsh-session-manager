@@ -204,7 +204,7 @@ Config (the `sync` block of the plugin configuration):
 
 ```yaml
 sync:
-  url: https://dav.example.com/dsh        # WebDAV collection (the only place this plugin uses; it creates its own machine slots)
+  url: https://dav.example.com/dsh        # WebDAV address (a server root works); the plugin creates dsh-session-manager/ under it
   machineId: robot-a                       # optional, defaults to the hostname; never share one id across machines
   username: alice                          # optional (Basic)
   passwordRef: DSH_DAV_PASSWORD            # optional: an **environment-variable name**, resolved by the host credential service or process.env
@@ -234,9 +234,11 @@ back to the mapping table below, and the preview names the repository it could n
 `mapping` and the identity **coexist**: an explicit mapping wins (what you configured is where it lands), the
 identity is the automatic path. So non-git directories, or forcing a different destination, still use mappings.
 
-The remote layout is `machines/<machineId>/index.json` (which sessions this machine contributed) plus
-`machines/<machineId>/<id>.dshsess` (one bundle per session). **One slot per machine**: WebDAV has no
-locking, so each machine writes only its own slot and reads every slot — nothing overwrites anything else.
+The remote layout is `dsh-session-manager/<machineId>/index.json` (which sessions this machine contributed)
+plus `dsh-session-manager/<machineId>/<id>.dshsess` (one bundle per session). The plugin creates that
+namespace under `url` itself, so `url` may be a WebDAV server or account root. **One slot per machine**:
+WebDAV has no locking, so each machine writes only its own slot and reads every slot — nothing overwrites
+anything else.
 
 On the **Sync** tab, **Preview sync** (reads the remote, writes nothing) reports "pull N /
 push M" and lists every session, where it would land and what was left alone and why; **Sync now** actually

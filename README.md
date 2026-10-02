@@ -156,7 +156,7 @@ npx @deepseek-ai/dsh@next plugin --profile desktop add /path/to/dsh-session-mana
 
 ```yaml
 sync:
-  url: https://dav.example.com/dsh        # WebDAV 集合地址（本插件只用它这一处，机器格自己建）
+  url: https://dav.example.com/dsh        # WebDAV 地址（服务器根也行）；插件在它下面自建 dsh-session-manager/
   machineId: robot-a                       # 可选，缺省取主机名；两台机器别用同一个 id
   username: alice                          # 可选（Basic）
   passwordRef: DSH_DAV_PASSWORD            # 可选：**环境变量名**，值由宿主凭据服务或 process.env 解析
@@ -183,8 +183,10 @@ sync:
 `mapping` 与身份**共存**：显式映射优先（配了就按配的落），身份是自动那条路。所以非 git 目录、
 或者想强制落到别处，仍然靠映射。
 
-远端布局：`machines/<machineId>/index.json` 是这台机器贡献了哪些会话，`machines/<machineId>/<id>.dshsess`
-是一条会话一个包。**一机一格**：WebDAV 没有锁，每台机器只写自己那一格、读别人的全部，就不会互相盖掉。
+远端布局：插件在 `url` 下面自建一层自己的命名空间，`dsh-session-manager/<machineId>/index.json` 是
+这台机器贡献了哪些会话，`dsh-session-manager/<machineId>/<id>.dshsess` 是一条会话一个包——所以 `url`
+可以直接填 WebDAV 的服务器根或账号根，不必自己写这一层。**一机一格**：WebDAV 没有锁，每台机器只写
+自己那一格、读别人的全部，就不会互相盖掉。
 
 在「同步」分页：**预演同步**（读远端，什么都不写）会报出「会拉 N 条 / 会推 M 条」，逐条列出会话、
 它要落到哪个目录、哪些没动和为什么；**确认同步**才真拉真推。规则与边界：

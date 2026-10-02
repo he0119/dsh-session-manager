@@ -18,9 +18,12 @@ Status: implemented
 `applyImport`），由它把 `cwd` 改写成这台机器的路径。
 
 ```
-<url>/machines/<machineId>/index.json                这台机器贡献了哪些会话
-<url>/machines/<machineId>/<encodeSegment(id).dshsess>  一条会话一个包
+<url>/dsh-session-manager/<machineId>/index.json                这台机器贡献了哪些会话
+<url>/dsh-session-manager/<machineId>/<encodeSegment(id).dshsess>  一条会话一个包
 ```
+
+最上面那层 `dsh-session-manager/` 是插件自己的命名空间、机器格直接放在它下面，由代码固定（为什么不靠
+用户在 URL 里写，见[远端第一层是插件自己的命名空间](../architecture/2026-10-02-remote-namespace-is-the-plugins.md)）。
 
 - **一机一格**：WebDAV 没有锁，多台机器共写一份 `index.json` 就是"后写的盖掉先写的"。每台机器只写
   自己那一格、读别人的全部（同一 id 由多台贡献时取**领先**的那份：代次是另一个的超集且共有代次内容

@@ -17,13 +17,14 @@ import { readRegistry, writeRegistryAtomic } from '../src/registry.ts'
 import {
   SYNC_INDEX_FILE,
   contentFingerprint,
-  SYNC_MACHINES_DIR,
+  SYNC_NAMESPACE_DIR,
   fileFingerprint,
   normalizeMapping,
   parseIndex,
   planSync,
   readRemoteLibrary,
   relation,
+  remoteBundlePath,
   remoteIndexPath,
   runSync,
   type FileFingerprint,
@@ -220,6 +221,13 @@ function remoteOf(
   }
   return { machines: [...indexes.keys()].sort(), entries: map, indexes, problems: [] }
 }
+
+test('sync：远端路径的第一层是插件命名空间，机器格在它下面', () => {
+  assert.equal(remoteIndexPath('robot-a'), 'dsh-session-manager/robot-a/index.json')
+  assert.equal(remoteBundlePath('robot-a', 'session-a'), 'dsh-session-manager/robot-a/session-a.dshsess')
+  // 机器名不是安全路径段时按 encodeSegment 编码（与宿主目录名的口径一致）
+  assert.equal(remoteIndexPath('robot/a'), 'dsh-session-manager/robot~002Fa/index.json')
+})
 
 test('sync：映射归一化去掉结尾斜杠，空值与重名如实报', () => {
   const { mapping, problems } = normalizeMapping({
@@ -478,7 +486,7 @@ test('sync：端到端——坏包只记问题，不挡住同一批里其它会�
     await syncMachine(a, dav, settings(a, { machineId: 'robot-a' }), { apply: true })
 
     // 把远端那份 bad 的包砸坏（模拟传输损坏 / 别的工具写脏）
-    const badPath = join(fixture.root, 'machines', 'robot-a', 'bad.dshsess')
+    const badPath = join(fixture.root, SYNC_NAMESPACE_DIR, 'robot-a', 'bad.dshsess')
     writeFileSync(badPath, Buffer.from('这不是一个 gzip 包'))
 
     const outcome = await syncMachine(b, dav, settings(b, { machineId: 'robot-b', mapping: { [a.cwd]: b.cwd } }), {
@@ -504,7 +512,7 @@ test('sync：端到端——远端索引点名的包不在时只记问题', asyn
   try {
     writeSession(a, 'gone', 1000)
     await syncMachine(a, dav, settings(a, { machineId: 'robot-a' }), { apply: true })
-    rmSync(join(fixture.root, 'machines', 'robot-a', 'gone.dshsess'))
+    rmSync(join(fixture.root, SYNC_NAMESPACE_DIR, 'robot-a', 'gone.dshsess'))
 
     const outcome = await syncMachine(b, dav, settings(b, { machineId: 'robot-b', mapping: { [a.cwd]: b.cwd } }), {
       apply: true,
@@ -749,8 +757,11 @@ test('sync：同一个 id 有多台贡献时，联集取领先的那份（不是
       ['robot-a', shortIndex],
       ['robot-b', longIndex],
     ] as const) {
-      mkdirSync(join(fixture.root, SYNC_MACHINES_DIR, machine), { recursive: true })
-      writeFileSync(join(fixture.root, `${SYNC_MACHINES_DIR}/${machine}/${SYNC_INDEX_FILE}`), JSON.stringify(payload))
+      mkdirSync(join(fixture.root, SYNC_NAMESPACE_DIR, machine), { recursive: true })
+      writeFileSync(
+        join(fixture.root, `${SYNC_NAMESPACE_DIR}/${machine}/${SYNC_INDEX_FILE}`),
+        JSON.stringify(payload),
+      )
     }
     const library = await readRemoteLibrary(dav, settings(makeMachine('robot-c'), { machineId: 'robot-c' }))
     assert.equal(library.entries.get('s1')?.machine, 'robot-b', '领先的那份（v5 在这台机器上）')
