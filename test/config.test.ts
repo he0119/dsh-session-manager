@@ -6,8 +6,24 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { Config, syncSection, type PluginConfigInput } from '../src/config.ts'
-import { describeSyncConfig, syncRuntime } from '../src/tools.ts'
+import { Config, DEFAULT_PASSWORD_REF, SyncConfigSchema, syncSection, type PluginConfigInput } from '../src/config.ts'
+import { describeSyncConfig, passwordRefOf, syncRuntime } from '../src/tools.ts'
+
+/**
+ * 从 schemastery 的 `toJSON()` 里读一个字段的 `meta`。
+ *
+ * 那份 JSON 是**摊平**的：`toJSON()` 给出 `{ uid, refs }`，`refs` 按编号存节点，根节点在
+ * `refs[uid]` 上；对象节点的 `dict` 把字段名映射到编号。所以不能按
+ * `json.dict.passwordRef.meta` 那样点下去。
+ */
+function fieldMeta(schema: unknown, field: string): Record<string, unknown> | undefined {
+  const flat = (schema as {
+    toJSON(): { uid?: number; refs?: Record<string, { dict?: Record<string, number>; meta?: Record<string, unknown> }> }
+  }).toJSON()
+  const root = flat.refs?.[String(flat.uid)]
+  const index = root?.dict?.[field]
+  return index === undefined ? undefined : flat.refs?.[String(index)]?.meta
+}
 
 test('配置 schema：只有 sync 那一节是活引用，三个路径字段是普通值', () => {
   const parsed = Config({
@@ -74,4 +90,38 @@ test('配置 schema：活引用与普通对象给出同一份值（两种来路�
   assert.deepEqual(describeSyncConfig(plain), describeSyncConfig(live as unknown as PluginConfigInput))
   assert.equal(describeSyncConfig(plain)?.machineId, 'm')
   assert.equal(describeSyncConfig(plain)?.mappings, 1)
+})
+
+test('配置 schema：只有 passwordRef 声明成凭据引用（配置携带引用，值归凭据提供方）', () => {
+  // 官方口径的那枚标记（`z.string().role('credential-ref')`，官方那几个要密钥的插件都这么写）。
+  // 钉住它是因为标错/漏标的代价不对称：漏标没有任何运行期症状，只有"以后谁按角色做通用表单"时才
+  // 发现这一项被当成了普通值。
+  assert.equal(fieldMeta(SyncConfigSchema, 'passwordRef')?.['role'], 'credential-ref')
+  for (const field of ['url', 'machineId', 'username', 'timeoutMs']) {
+    assert.equal(fieldMeta(SyncConfigSchema, field)?.['role'], undefined, `${field} 不是凭据引用`)
+  }
+  // 引用名缺席时按缺省名解析：界面把密码写在这个名字下，用户不必先给变量起名字。
+  assert.equal(DEFAULT_PASSWORD_REF, 'DSH_DAV_PASSWORD')
+  assert.equal(fieldMeta(SyncConfigSchema, 'passwordRef')?.['default'], undefined, '缺省名由代码兜，不进 schema 默认值')
+})
+
+test('配置：这次同步按哪个引用名取密码（与界面同一套规则）', () => {
+  assert.equal(passwordRefOf({ url: 'https://x' }), DEFAULT_PASSWORD_REF)
+  assert.equal(passwordRefOf({ url: 'https://x', passwordRef: '  ' }), DEFAULT_PASSWORD_REF)
+  assert.equal(passwordRefOf({ url: 'https://x', passwordRef: 'MY_DAV_PASSWORD' }), 'MY_DAV_PASSWORD')
+})
+
+test('配置：没写 passwordRef 时也去解析缺省引用名（界面存下的密码要读得到）', async () => {
+  const asked: string[] = []
+  const ctx = {
+    get: (name: string) => (name === 'credentials' ? { resolve: async (ref: string) => { asked.push(ref); return { value: 'hunter2' } } } : undefined),
+  }
+  const runtime = await syncRuntime(ctx, { sync: { url: 'https://dav.example.com/dsh' } })
+  assert.deepEqual(asked, [DEFAULT_PASSWORD_REF], '按缺省名问凭据服务')
+  assert.equal(runtime?.settings.password, 'hunter2', '解析出来的值进这次同步的设置')
+
+  // 配置里写了引用名：按它问，不看缺省名。
+  asked.length = 0
+  await syncRuntime(ctx, { sync: { url: 'https://dav.example.com/dsh', passwordRef: 'MY_DAV_PASSWORD' } })
+  assert.deepEqual(asked, ['MY_DAV_PASSWORD'])
 })

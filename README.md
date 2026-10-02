@@ -159,18 +159,24 @@ sync:
   url: https://dav.example.com/dsh        # WebDAV 地址（服务器根也行）；插件在它下面自建 dsh-session-manager/
   machineId: robot-a                       # 可选，缺省取主机名；两台机器别用同一个 id
   username: alice                          # 可选（Basic）
-  passwordRef: DSH_DAV_PASSWORD            # 可选：**环境变量名**，值由宿主凭据服务或 process.env 解析
+  passwordRef: DSH_DAV_PASSWORD            # 可选：**凭据引用名**（环境变量名）；留空就用 DSH_DAV_PASSWORD
   mapping:                                 # 显式映射：远端 cwd → 本机目录（两台机器各写各的）
     /home/alice/dev/proj: /opt/work/proj
   timeoutMs: 30000                         # 可选
 ```
 
 这一节**也能在界面里改**：设置 →「会话管理」→「同步」分页（这张表单在卡片里），URL、机器名、账号、
-密码引用、超时与映射表都能直接编辑，按「保存」写进 profile 那份配置文档
+密码、超时与映射表都能直接编辑，按「保存」写进 profile 那份配置文档
 （`~/.dsh/profiles/<name>/cordis.patch.yml`）。`sync` 是活字段，改完**不用重启**就生效；三个路径字段
 （`sessionsRoot` / `registryPath` / `backupRoot`）仍然只在配置文件里。路径映射在表单里**逐行增删**：
 左边是远端记下的 cwd，右边是这台机器上的目录；远端那一栏必须逐字对上别的机器记下的路径，所以预演过
 一次之后它会把这些 cwd 列成候选，不用手抄。
+
+**密码在那张表单里直接填**：那是个只写的输入框，按「保存」把密码写进宿主机凭据库
+（`$DSH_HOME/.credentials.yaml`），配置文件里始终只有引用名——值不回显，界面只报「已配置 / 未配置」。
+引用名不在这张表单上：它就是配置里的 `sync.passwordRef`（缺省 `DSH_DAV_PASSWORD`），要换名字（或者
+本来就用环境变量）在插件配置页那份通用表单里改。启动环境里已有的同名变量会遮住写入，这时界面把密码
+框标成不可改。
 
 **多机共用一份配置**：远端索引里每条会话还记着**项目身份**——仓库的 git remote（规范化成
 `host/owner/repo`）与会话 cwd 在仓库根之下的相对路径。拉的时候先用本机的候选目录（会话的 cwd +
@@ -229,7 +235,8 @@ sync:
   极少数路径会因此编码碰撞，这种情况计划层会直接拦下。
 - **插件配置**：`sessionsRoot` / `registryPath` / `backupRoot` 三个可选字段可覆盖上述默认路径；
   `sync` 块配 WebDAV 同步（`url` / `machineId` / `username` / `passwordRef` / `mapping` / `timeoutMs`）。
-  密码只放**引用**（环境变量名），配置文件里没有明文。
+  密码只放**引用**（环境变量名），配置文件里没有明文：界面上直接填的密码进的是宿主机凭据库
+  （`$DSH_HOME/.credentials.yaml`），不是这份配置。
 
 ## 文档
 

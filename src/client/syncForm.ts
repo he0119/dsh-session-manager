@@ -20,6 +20,15 @@
 /** 本插件在 profile 里的 entry id：设置接缝按它寻址（`cordis.patch.yml` 里那个 insert 的 id）。 */
 export const SYNC_SECTION = 'session-manager'
 
+/**
+ * `passwordRef` 没写时用的凭据引用名，与核心层 `src/config.ts` 的 `DEFAULT_PASSWORD_REF` 同一个值。
+ *
+ * 这里是**副本**而不是 import：浏览器半侧不 import 核心层（那会把 schemastery 之类拖进客户端产物），
+ * 同一个形状的两侧各留一份字面量是本包既有的做法（`api.ts` 的 `API_PREFIX` 同理）。
+ * `test/sync-form.test.ts` 钉住两份相等——算不出同一个名字，界面存进去的密码宿主就不会去读。
+ */
+export const DEFAULT_PASSWORD_REF = 'DSH_DAV_PASSWORD'
+
 /** 一节同步设置的可读值（只有界面要用的那几个字段）。 */
 export interface SyncSectionValue {
   url?: string
@@ -139,12 +148,16 @@ export function mappingProblems(rows: readonly MappingRow[]): MappingProblem[] {
   return problems
 }
 
-/** 一份表单草稿：与磁盘上的值分开，保存时才写。 */
+/**
+ * 一份表单草稿：与磁盘上的值分开，保存时才写。
+ *
+ * 没有 `passwordRef`：那一栏不在这张表单上（引用名属于插件配置，见 [passwordRefOf](#passwordrefof)），
+ * 所以草稿里也不该有一份"表单版本"的引用名——它只会与磁盘上那份悄悄分叉。
+ */
 export interface SyncDraft {
   url: string
   machineId: string
   username: string
-  passwordRef: string
   mapping: MappingRow[]
   timeoutMs: string
 }
@@ -154,13 +167,42 @@ export function syncSectionOf(snapshot: SyncFormSnapshot | undefined): SyncSecti
   return snapshot?.value?.sync ?? {}
 }
 
+/**
+ * 这次表单按哪个引用名读写密码：配置里写了就用它，没写（或只有空白）用缺省名。
+ *
+ * 引用名**只来自插件配置**（`sync.passwordRef`，在插件配置页那份 volatile 表单里改），这张表单上
+ * 没有它那一栏——这是官方那几个要密钥的卡片的口径（网页搜索那张卡只摆密钥，`apiKeyEnv` 留在配置里）：
+ * 卡片问的是"密码是什么"，"放在哪个名字下"是配置的事。
+ *
+ * 与核心层 `passwordRefOf()`（src/tools.ts）同一套规则：两边得算出同一个名字，否则界面存进去的
+ * 密码宿主不会去读。
+ * @param value 当前生效的那一节。
+ * @returns 凭据引用名（环境变量名）。
+ */
+export function passwordRefOf(value: Pick<SyncSectionValue, 'passwordRef'>): string {
+  const declared = value.passwordRef?.trim() ?? ''
+  return declared === '' ? DEFAULT_PASSWORD_REF : declared
+}
+
+/**
+ * 密码框里的草稿 → 这次保存要写进凭据库的值。
+ *
+ * 空白（含只有空格）表示"这次不写"——留着已存的那一个，而不是拿空值去覆盖它：那既是官方那个
+ * 只写控件的口径（空草稿不写），也是"改 URL 时不想动密码"这条最平常的用法。
+ * @param draft 密码框里的原文。
+ * @returns 要写的密码；空白时 undefined。
+ */
+export function passwordValueOf(draft: string): string | undefined {
+  const typed = draft.trim()
+  return typed === '' ? undefined : typed
+}
+
 /** 快照 → 草稿（打开表单、以及放弃编辑时都回到这里）。 */
 export function draftFrom(value: SyncSectionValue): SyncDraft {
   return {
     url: value.url ?? '',
     machineId: value.machineId ?? '',
     username: value.username ?? '',
-    passwordRef: value.passwordRef ?? '',
     mapping: mappingRows(value.mapping),
     timeoutMs: value.timeoutMs === undefined ? '' : String(value.timeoutMs),
   }
@@ -172,13 +214,16 @@ export function draftFrom(value: SyncSectionValue): SyncDraft {
  * 只在**真的改了**的字段上发编辑（空草稿发 `unset`，让它退回组合层）：一次保存里混进几个没动过的
  * 字段，就会在用户层留下一堆"其实等于默认值"的覆盖，而界面上那些字段从此都顶着"已覆盖"徽标。
  *
+ * `passwordRef` 不在这份草稿里（表单上没有那一栏），所以这里也不会去写它——它只由插件配置页那份
+ * 通用表单改。
+ *
  * @param draft 草稿。
  * @param value 当前生效值。
  * @returns 路径编辑；全都一样时是空数组。
  */
 export function draftOps(draft: SyncDraft, value: SyncSectionValue): SyncPathOp[] {
   const ops: SyncPathOp[] = []
-  const text = (key: 'url' | 'machineId' | 'username' | 'passwordRef'): void => {
+  const text = (key: 'url' | 'machineId' | 'username'): void => {
     const next = draft[key].trim()
     const before = value[key] ?? ''
     if (next === before) return
@@ -187,7 +232,6 @@ export function draftOps(draft: SyncDraft, value: SyncSectionValue): SyncPathOp[
   text('url')
   text('machineId')
   text('username')
-  text('passwordRef')
 
   const timeout = draft.timeoutMs.trim()
   const beforeTimeout = value.timeoutMs === undefined ? '' : String(value.timeoutMs)
@@ -222,4 +266,39 @@ export function draftProblems(draft: SyncDraft): DraftProblem[] {
   if (timeout !== '' && (!/^\d+$/.test(timeout) || Number(timeout) <= 0)) problems.push({ code: 'timeoutNotPositive' })
   for (const problem of mappingProblems(draft.mapping)) problems.push({ code: 'mapping', problem })
   return problems
+}
+
+/**
+ * 一次保存要发出去的两件事：配置文档里的路径编辑，以及要写进凭据库的那一笔密码。
+ *
+ * 两件事走的是**两条不同的通道**——编辑走设置接缝（写用户层的配置文档），密码走宿主机的凭据服务
+ * （值不进配置）——所以这里把它们一起算好交给界面，界面只管按顺序发。写密码用的引用名取自**生效值**
+ * （`passwordRefOf`）：表单上没有引用名那一栏，它只由插件配置决定，所以保存与解析读的是同一份。
+ */
+export interface SyncSavePlan {
+  /** 发往设置接缝的路径编辑。 */
+  ops: SyncPathOp[]
+  /** 要写进凭据库的那一笔；密码框留空、或宿主没有凭据服务时不发。 */
+  password?: { ref: string; value: string }
+}
+
+/**
+ * 草稿 + 生效值 + 密码框 → 这次保存的全部写入。
+ * @param draft 草稿。
+ * @param value 当前生效值。
+ * @param password 密码框里的原文（空白表示这次不动密码）。
+ * @param credentialsAvailable 宿主有没有给出凭据服务（没有就只改配置，密码那一笔不发）。
+ * @returns 两部分写入；都为空就是不脏。
+ */
+export function savePlan(
+  draft: SyncDraft,
+  value: SyncSectionValue,
+  password: string,
+  credentialsAvailable: boolean,
+): SyncSavePlan {
+  const typed = passwordValueOf(password)
+  return {
+    ops: draftOps(draft, value),
+    ...(credentialsAvailable && typed !== undefined ? { password: { ref: passwordRefOf(value), value: typed } } : {}),
+  }
 }

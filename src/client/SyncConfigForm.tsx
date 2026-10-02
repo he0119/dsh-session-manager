@@ -1,14 +1,22 @@
 /**
- * 「同步设置」表单：URL、机器名、账号、密码引用、超时与映射表，直接改 profile 里那一节。
+ * 「同步设置」表单：URL、机器名、账号、密码、超时与映射表，直接改 profile 里那一节。
  *
  * 放在「同步」分页的卡片里，与预演/确认挨着——改完 URL 就能立刻预演一次，不必跳到别处。
- * 读写面在 [syncForm.ts](./syncForm.ts)（宿主的设置接缝），这里只管画与暂存。
+ * 读写面在 [syncForm.ts](./syncForm.ts)（宿主的设置接缝），密码的写入面在
+ * [credentials.ts](./credentials.ts)（宿主的凭据服务），这里只管画与暂存。
  *
- * 三条刻意的取舍：
+ * 四条刻意的取舍：
  *   - **保存是显式的**：输入框只改草稿，按「保存」才写。写下去的是用户层（设置对话框里那份配置
  *     文档），逐字提交会让每次击键都变成一次文档写入，而用户根本没法预览自己写了什么；
  *   - **只提交改动过的字段**：没动过的字段不发编辑，否则用户层里会攒下一堆"等于默认值"的覆盖，
  *     界面上那些字段从此都顶着「已覆盖」徽标（判据见 syncForm.ts 的 draftOps）；
+ *   - **密码直接输入、值不进配置**：那个框是官方控件库的只写控件（`SettingsSecretField`），保存时
+ *     把输入的密码写进宿主机凭据库（`remote.credentials` 的 `set`），配置里只有引用名——与 DSH 自己
+ *     的口径一致（配置携带引用，值归凭据提供方）。所以那个框永远从空白开始：没有任何一条读路径会把
+ *     值送回来，界面只能报"配没配、能不能写"（`describe`）。留空 = 不动已存的那一个；
+ *   - **引用名不在这张表单上**：`sync.passwordRef` 属于插件配置（在插件配置页那份 volatile 表单里改），
+ *     卡片只问"密码是什么"——官方那几个要密钥的卡片也是这个分法（网页搜索那张卡只摆密钥，`apiKeyEnv`
+ *     留在配置里）。引用名缺席时按 `DSH_DAV_PASSWORD` 解析，见 syncForm.ts 的 `passwordRefOf`；
  *   - **映射表是一行一行的**：远端 cwd 与本机目录各一个输入框，行可以增删。远端那一侧必须**逐字**
  *     对上别的机器记下的 cwd，所以它带一份从上次预演里收来的候选（`remoteCwds`）——这些路径靠人背
  *     是靠不住的，抄错一个字符就是"没配映射，跳过"。
@@ -18,11 +26,15 @@
 
 import * as React from 'react'
 
+import { SettingsSecretField } from '@deepseek-ai/dsh-client-ui-primitives'
+
+import { getCredentialsApi, type CredentialInfo } from './credentials.ts'
 import {
   draftFrom,
-  draftOps,
   draftProblems,
   getSyncConfigApi,
+  passwordRefOf,
+  savePlan,
   syncSectionOf,
   type MappingProblem,
   type MappingRow,
@@ -89,10 +101,19 @@ export function SyncConfigForm({
   remoteCwds?: readonly string[]
 }): React.ReactElement | null {
   const api = getSyncConfigApi()
+  // 凭据服务每次渲染现取：它由别的客户端插件提供，可能晚于本页挂载（取到的那一组方法见
+  // credentials.ts）。宿主没提供时那个密码框不画，只说明"密码只能走环境变量"。
+  const credentials = getCredentialsApi()
   const [snapshot, setSnapshot] = React.useState<SyncFormSnapshot | undefined>(api?.getSnapshot())
   const [draft, setDraft] = React.useState<SyncDraft | undefined>(undefined)
+  const [password, setPassword] = React.useState('')
+  const [credential, setCredential] = React.useState<CredentialInfo>({ configured: false, writable: true })
+  // 写完一次密码要重问一次 `describe`（值不回来，只有那个"配没配"的徽标要跟着变）。
+  const [credentialGen, setCredentialGen] = React.useState(0)
   const [saving, setSaving] = React.useState(false)
   const [failed, setFailed] = React.useState(false)
+  /** 宿主拒了这一笔凭据写入时的原话（例如引用被启动环境里的值遮住）。 */
+  const [credentialError, setCredentialError] = React.useState<string | undefined>(undefined)
 
   // 订阅：宿主那边配置一变（别处改了同一份文档、或保存被接受）就重新投影。没装读写面时订阅不了，
   // 也就没有别的来路会改这一份，因此不必假装订阅。
@@ -105,7 +126,29 @@ export function SyncConfigForm({
   const section = syncSectionOf(snapshot)
   React.useEffect(() => {
     setDraft((current) => current ?? draftFrom(syncSectionOf(api?.getSnapshot())))
-  }, [api, section.url, section.machineId, section.username, section.passwordRef, section.timeoutMs, section.mapping])
+  }, [api, section.url, section.machineId, section.username, section.timeoutMs, section.mapping])
+
+  // 密码写进哪个引用名由**插件配置**决定（表单上没有那一栏，与官方那些要密钥的卡片同一个口径：
+  // 卡片问"密码是什么"，"放在哪个名字下"是配置的事）。配置里换了引用名，下一帧就按新名字问状态。
+  const passwordRef = passwordRefOf(section)
+  React.useEffect(() => {
+    if (credentials === undefined) return undefined
+    let live = true
+    void credentials.describe([passwordRef]).then(
+      (result) => {
+        if (!live) return
+        // 问不到（宿主没装凭据提供方、连接刚断）：按"没配、写得进去"画，写入那一步会给出原话。
+        const info = result.ok ? result.value[passwordRef] : undefined
+        setCredential({ configured: info?.configured ?? false, writable: info?.writable ?? true })
+      },
+      () => {
+        if (live) setCredential({ configured: false, writable: true })
+      },
+    )
+    return () => {
+      live = false
+    }
+  }, [credentials, passwordRef, credentialGen])
 
   if (api === undefined || snapshot === undefined) {
     return <p className="dsm-hint">{t('syncFormUnavailable')}</p>
@@ -132,27 +175,60 @@ export function SyncConfigForm({
     setFailed(false)
     setDraft({ ...view, mapping: view.mapping.filter((_row, at) => at !== index) })
   }
-  const ops = draftOps(view, section)
-  const dirty = ops.length > 0
+  const editPassword = (text: string): void => {
+    setFailed(false)
+    setCredentialError(undefined)
+    setPassword(text)
+  }
+  const discard = (): void => {
+    setFailed(false)
+    setCredentialError(undefined)
+    setPassword('')
+    setDraft(undefined)
+  }
+  // 一次保存要发的两件事一起算（见 syncForm.ts 的 savePlan）：配置文档里的编辑，以及要写进宿主机
+  // 凭据库的那一笔密码。密码走的是另一条通道，所以这里不是"多一个字段"而是"多一件事"。
+  const plan = savePlan(view, section, password, credentials !== undefined)
+  const dirty = plan.ops.length > 0 || plan.password !== undefined
   const canSave = snapshot.writable && dirty && problems.length === 0 && !saving
 
   const save = (): void => {
     if (!canSave) return
     setSaving(true)
     setFailed(false)
-    void api
-      .mutate(ops, snapshot.revision)
-      .then((accepted) => {
-        // 被接受：草稿落回"跟随磁盘"（下一次投影就是刚写下的值）；被拒：留着草稿，让用户自己看。
-        if (accepted) {
+    setCredentialError(undefined)
+    void (async () => {
+      try {
+        // 配置先写：它被拒时（版本冲突、值非法）密码也先别存——两份改动是一起按下的。
+        if (plan.ops.length > 0) {
+          const accepted = await api.mutate(plan.ops, snapshot.revision)
+          // 被接受：草稿落回"跟随磁盘"（下一次投影就是刚写下的值）；被拒：留着草稿，让用户自己看。
+          if (!accepted) {
+            setFailed(true)
+            return
+          }
           setDraft(undefined)
-          // 让外面重读一次宿主状态：第一次配好 URL 时，同步卡片上的预演/确认按钮是照着 /state 画的，
-          // 不重读就还是"没配置"的样子（用户刚存完却看不见按钮，会以为没生效）。
-          onSaved?.()
-        } else setFailed(true)
-      })
-      .catch(() => setFailed(true))
-      .finally(() => setSaving(false))
+        }
+        if (credentials !== undefined && plan.password !== undefined) {
+          const written = await credentials.set(plan.password.ref, plan.password.value)
+          if (!written.ok) {
+            // 宿主拒了就说它的原话（引用被环境遮住、文档只读…），并且留着输入的内容让用户改。
+            setCredentialError(written.error.message)
+            setFailed(true)
+            return
+          }
+          setPassword('')
+          setCredentialGen((generation) => generation + 1)
+        }
+        // 让外面重读一次宿主状态：第一次配好 URL 时，同步卡片上的预演/确认按钮是照着 /state 画的，
+        // 不重读就还是"没配置"的样子（用户刚存完却看不见按钮，会以为没生效）。
+        onSaved?.()
+      } catch {
+        setFailed(true)
+      } finally {
+        setSaving(false)
+      }
+    })()
   }
 
   return (
@@ -179,21 +255,25 @@ export function SyncConfigForm({
           placeholder="30000"
         />
       </div>
-      <div className="dsm-syncRow">
-        <Field
-          label={t('syncFieldUser')}
-          hint={t('syncFieldUserHint')}
-          value={view.username}
-          onChange={(username) => edit({ username })}
+      <Field
+        label={t('syncFieldUser')}
+        hint={t('syncFieldUserHint')}
+        value={view.username}
+        onChange={(username) => edit({ username })}
+      />
+      {credentials === undefined && <p className="dsm-hint">{t('syncPasswordUnavailable')}</p>}
+      {credentials !== undefined && (
+        <SettingsSecretField
+          id="dsm-dav-password"
+          label={t('syncFieldPasswordValue')}
+          hint={credential.writable ? t('syncFieldPasswordValueHint') : t('syncPasswordShadowed')}
+          text={password}
+          disabled={!snapshot.writable || !credential.writable}
+          configured={credential.configured}
+          stateLabel={credential.configured ? t('syncPasswordSet') : t('syncPasswordUnset')}
+          onEdit={editPassword}
         />
-        <Field
-          label={t('syncFieldPassword')}
-          hint={t('syncFieldPasswordHint')}
-          value={view.passwordRef}
-          onChange={(passwordRef) => edit({ passwordRef })}
-          placeholder="DSH_DAV_PASSWORD"
-        />
-      </div>
+      )}
       <div className="dsm-field">
         <span className="dsm-fieldLabel">{t('syncFieldMapping')}</span>
         {view.mapping.length === 0 && <span className="dsm-hint">{t('syncFieldMappingEmpty')}</span>}
@@ -247,7 +327,7 @@ export function SyncConfigForm({
         <button type="button" className="dsm-button dsm-primary" onClick={save} disabled={!canSave}>
           {saving ? t('saving') : t('save')}
         </button>
-        <button type="button" className="dsm-button" onClick={() => setDraft(undefined)} disabled={!dirty}>
+        <button type="button" className="dsm-button" onClick={discard} disabled={!dirty}>
           {t('discard')}
         </button>
         {!snapshot.writable && <span className="dsm-warn">{t('syncFormReadOnly')}</span>}
@@ -257,6 +337,7 @@ export function SyncConfigForm({
           </span>
         ))}
         {failed && <span className="dsm-warn">{t('saveFailed')}</span>}
+        {credentialError !== undefined && <span className="dsm-warn">{credentialError}</span>}
         {snapshot.writable && dirty && problems.length === 0 && !failed && <span className="dsm-hint">{t('unsaved')}</span>}
       </div>
     </div>

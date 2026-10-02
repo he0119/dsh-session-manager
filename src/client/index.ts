@@ -45,6 +45,7 @@
  */
 
 import { ManagerPanel } from './ManagerPanel.tsx'
+import { type CredentialsApi, setCredentialsApi } from './credentials.ts'
 import { type DirectoryListing, getDirectoryApi, setDirectoryApi } from './directory.ts'
 import { NS, en, zh, type Translate } from './locales.ts'
 import { installStyles } from './styles.ts'
@@ -119,13 +120,16 @@ export interface ClientContext {
   /**
    * 起一个**带依赖声明**的子 fiber（Cordis 的 `inject`：等价于就地注册一个只声明这些依赖的子插件）。
    *
-   * 本页用它按需收 `uiWorkspace`：那个服务由别的客户端插件提供，写进本插件的顶层 `inject`
-   * 数组就等于"服务不在，整页都别装"，代价太大；这里声明成可选依赖，服务到位时回调才跑，
-   * 卸载时跑回调返回的清理函数。返回值是那个子 fiber，本模块不用它。
+   * 本页用它按需收 `uiWorkspace` 与 `remote.credentials`：那两个服务由别的客户端插件提供，写进
+   * 本插件的顶层 `inject` 数组就等于"服务不在，整页都别装"，代价太大；这里声明成可选依赖，服务
+   * 到位时回调才跑，卸载时跑回调返回的清理函数。返回值是那个子 fiber，本模块不用它。
+   *
+   * 依赖名与回调拿到的服务由调用方自己配对（泛型参数），本模块不认识具体服务——那种"只在运行期
+   * 成立"的形状是本包客户端半侧的统一口径（类型面不 import 宿主客户端包）。
    */
-  inject(
+  inject<T extends object>(
     dependencies: readonly string[],
-    callback: (scoped: ClientContext & { uiWorkspace: UiWorkspaceService }) => void | (() => void),
+    callback: (scoped: ClientContext & T) => void | (() => void),
   ): unknown
 }
 
@@ -142,9 +146,8 @@ export function apply(ctx: ClientContext): void {
   // 设置接缝是可选依赖：它由插件管理器提供，缺席（例如只装了设置外壳的宿主）时同步设置表单自己
   // 说明"这个宿主不能在界面里改"，而不是让整页装不上。取到的那一份控制器就是宿主给本插件这一节
   // 的读写面，原样收下——不包一层转发，免得两处形状各自漂移。
-  ctx.inject(['configForms'], (scoped) => {
-    const forms = (scoped as ClientContext & { configForms?: ConfigFormsService }).configForms
-    const controller = forms?.get(SYNC_SECTION)
+  ctx.inject<{ configForms?: ConfigFormsService }>(['configForms'], (scoped) => {
+    const controller = scoped.configForms?.get(SYNC_SECTION)
     if (controller === undefined) return undefined
     setSyncConfigApi(controller)
     return () => setSyncConfigApi(undefined)
@@ -152,13 +155,29 @@ export function apply(ctx: ClientContext): void {
 
   // 目录选择器同样是可选依赖：它在别的客户端插件手上，晚到或不在都不该拖住本页的注册。
   // 收成 thunk 交给页面，点「浏览…」时才取当前那一个；服务卸载后再点会得到提示而不是空转。
-  ctx.inject(['uiWorkspace'], (scoped) => {
+  ctx.inject<{ uiWorkspace: UiWorkspaceService }>(['uiWorkspace'], (scoped) => {
     setDirectoryApi({
       pick: () => scoped.uiWorkspace.pickDirectory(),
       list: (path, signal) => scoped.uiWorkspace.listDirectory(path, signal),
     })
     return () => setDirectoryApi(undefined)
   })
+
+  // 凭据服务（`remote.credentials`，宿主 Remote 面的一员）同样是可选依赖：宿主没装凭据提供方
+  // （例如没有 `dsh-credentials-local` 的 profile）时，同步表单要说明"密码只能走环境变量"，而不是
+  // 让整页装不上。两个依赖名都声明：命名空间服务挂在 `remote` 下面，官方客户端插件也是这么写的。
+  ctx.inject<{ remote?: { credentials?: CredentialsApi } }>(
+    ['remote', 'remote.credentials'],
+    (scoped) => {
+      const namespace = scoped.remote?.credentials
+      if (namespace === undefined) return undefined
+      setCredentialsApi({
+        describe: (refs) => namespace.describe(refs),
+        set: (ref, value) => namespace.set(ref, value),
+      })
+      return () => setCredentialsApi(undefined)
+    },
+  )
 
   ctx.slots.inject(SECTION_SLOT, () =>
     ctx.slots.register(

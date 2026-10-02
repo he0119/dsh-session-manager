@@ -3,19 +3,26 @@
 // 这一层是纯函数（不 import React、也不 import 宿主客户端包），所以能直接单测：真正会在用户层留下
 // 痕迹的是 `draftOps()` 发出去的那几条路径编辑——只提交改动过的字段、空草稿发 unset，这两条规矩
 // 写错了不会当场报错，只会在配置文档里攒下一堆"等于默认值"的覆盖，界面从此满屏「已覆盖」。
+//
+// `savePlan()` 是同一件事的另一半：密码那一笔走宿主机凭据库而不是配置文档，写错引用名不会有任何
+// 报错（密码存进去了，同步却照旧因为"没配密码"而 401），所以这里把"写哪个名字、什么时候不写"钉住。
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  DEFAULT_PASSWORD_REF,
   draftFrom,
   draftOps,
   draftProblems,
   mappingProblems,
   mappingRows,
   mappingValue,
+  passwordRefOf,
+  savePlan,
   SYNC_SECTION,
   syncSectionOf,
 } from '../src/client/syncForm.ts'
+import { DEFAULT_PASSWORD_REF as CORE_DEFAULT_PASSWORD_REF } from '../src/config.ts'
 
 test('同步设置：entry id 是 profile 里那个 insert 的 id', () => {
   assert.equal(SYNC_SECTION, 'session-manager')
@@ -110,8 +117,61 @@ test('同步设置：接缝没给出值时不编造（空节 → 空草稿）', 
     url: 'https://x',
     machineId: '',
     username: '',
-    passwordRef: '',
     mapping: [],
     timeoutMs: '',
   })
+})
+
+test('同步设置：密码写进哪个引用名——配置里写了用它，留空用缺省名', () => {
+  assert.equal(DEFAULT_PASSWORD_REF, 'DSH_DAV_PASSWORD', '缺省名是对外名字，改了等于换一个凭据')
+  // 浏览器半侧与核心层各留一份同值副本（那一侧不 import 核心层）：算出不同的名字，界面存进去的
+  // 密码这边就不会去读，而两处各自看都是"对"的。
+  assert.equal(DEFAULT_PASSWORD_REF, CORE_DEFAULT_PASSWORD_REF, '两侧的缺省引用名必须同一个')
+  assert.equal(passwordRefOf({}), DEFAULT_PASSWORD_REF)
+  assert.equal(passwordRefOf({ passwordRef: '' }), DEFAULT_PASSWORD_REF)
+  assert.equal(passwordRefOf({ passwordRef: '   ' }), DEFAULT_PASSWORD_REF, '只有空白等于没写')
+  assert.equal(passwordRefOf({ passwordRef: 'MY_DAV_PASSWORD' }), 'MY_DAV_PASSWORD')
+  assert.equal(passwordRefOf({ passwordRef: '  MY_DAV_PASSWORD  ' }), 'MY_DAV_PASSWORD', '前后空白不算名字的一部分')
+})
+
+test('同步设置：引用名不归这张表单（草稿里没有它，也就不会去写它）', () => {
+  const value = { url: 'https://dav.example.com/dsh', passwordRef: 'MY_DAV_PASSWORD' }
+  const draft = draftFrom(value)
+  // 那一栏在插件配置页那份通用表单上：这张卡的草稿里没有它，于是改不动它、也不会把它写成 unset
+  // （写下去就是把别人的引用名抹掉——密码还在凭据库里，同步却再也找不到它）。
+  assert.equal('passwordRef' in draft, false)
+  assert.deepEqual(draftOps(draft, value), [])
+  assert.deepEqual(draftOps({ ...draft, url: 'https://two.example/dsh' }, value), [
+    { op: 'set', path: ['sync', 'url'], value: 'https://two.example/dsh' },
+  ])
+})
+
+test('同步设置：留空的密码不写、输了的才写，且写进配置里那个引用名', () => {
+  const value = { url: 'https://dav.example.com/dsh', passwordRef: 'MY_DAV_PASSWORD' }
+  const draft = draftFrom(value)
+
+  // 空白（含只有空格）：这一笔不发，已存的那一个留着——改 URL 时最平常的用法。
+  for (const blank of ['', ' ', '\t']) {
+    assert.equal(savePlan(draft, value, blank, true).password, undefined, `"${blank}" 不该发凭据写入`)
+  }
+  assert.deepEqual(savePlan(draft, value, 'hunter2', true).password, {
+    ref: 'MY_DAV_PASSWORD',
+    value: 'hunter2',
+  })
+  // 引用名取自**生效值**：插件配置里换了个名字，这一笔就落在新名字下。
+  const renamed = { url: 'https://dav.example.com/dsh', passwordRef: 'NEW_REF' }
+  assert.deepEqual(savePlan(draftFrom(renamed), renamed, 'hunter2', true).password, {
+    ref: 'NEW_REF',
+    value: 'hunter2',
+  })
+  // 配置里没写引用名：落到缺省名上（与核心层 passwordRefOf 同一套规则）。
+  const bare = { url: 'https://dav.example.com/dsh' }
+  assert.deepEqual(savePlan(draftFrom(bare), bare, 'hunter2', true).password, {
+    ref: DEFAULT_PASSWORD_REF,
+    value: 'hunter2',
+  })
+  // 宿主没有凭据服务：只发配置编辑，不假装能存密码。
+  assert.equal(savePlan(draft, value, 'hunter2', false).password, undefined)
+  // 只有密码变了也算脏（配置编辑可以是空数组），否则「保存」按钮永远点不亮。
+  assert.deepEqual(savePlan(draft, value, 'hunter2', true).ops, [])
 })

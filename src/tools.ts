@@ -7,7 +7,7 @@
 //     除非上游提供了 workspaceRegistry.reassignSessions（见 effectMode()）。
 import type { Context } from '@deepseek-ai/cordis'
 
-import { syncSection, type PluginConfig, type PluginConfigInput, type SyncConfig } from './config.ts'
+import { DEFAULT_PASSWORD_REF, syncSection, type PluginConfig, type PluginConfigInput, type SyncConfig } from './config.ts'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { homedir, hostname } from 'node:os'
@@ -91,6 +91,19 @@ function machineIdOf(sync: SyncConfig): string {
 }
 
 /**
+ * 这次同步按哪个引用名取密码：配置里写了就用它，没写（或只有空白）用缺省名。
+ *
+ * 与界面同一套规则（[SyncConfigForm](../client/SyncConfigForm.tsx) 把密码写在这个名字下）：
+ * 用户不填引用名时两边都得算出同一个名字，否则界面存进去的密码这边不会去读。
+ * @param sync 同步那一节。
+ * @returns 凭据引用名（环境变量名）。
+ */
+export function passwordRefOf(sync: SyncConfig): string {
+  const declared = sync.passwordRef?.trim() ?? ''
+  return declared === '' ? DEFAULT_PASSWORD_REF : declared
+}
+
+/**
  * 解析一个密码引用。
  *
  * 先问宿主的 credentials 服务（DSH 的口径：配置里放引用，值由服务解析），拿不到再退到
@@ -123,7 +136,7 @@ async function resolveSecret(ctx: unknown, ref: string): Promise<string | undefi
 export async function syncRuntime(ctx: unknown, config: PluginConfigInput = {}): Promise<SyncRuntime | undefined> {
   const sync = syncSection(config)
   if (sync === undefined || typeof sync.url !== 'string' || sync.url.trim() === '') return undefined
-  const password = sync.passwordRef === undefined ? undefined : await resolveSecret(ctx, sync.passwordRef)
+  const password = await resolveSecret(ctx, passwordRefOf(sync))
   const settings: SyncSettings = {
     url: sync.url.trim().replace(/(.)\/+$/, '$1'),
     machineId: machineIdOf(sync),

@@ -210,6 +210,22 @@ function loadBundle({ firstNull, panel, arrays, strings, nulls } = {}) {
         Fragment: react.Fragment,
       }
     }
+    // 平台基线模块之一（官方控件库）。本产物只用得上那个**只写**的密码控件：真正的那个是 React
+    // 组件，这里照它的 props 造一个 `input[type=password]`，并把 props 原样记进 `recorded`
+    // ——用例要核对的是"徽标说配没配、能不能写"这些**入参**，不是官方控件内部怎么画。
+    if (specifier === '@deepseek-ai/dsh-client-ui-primitives') {
+      return {
+        SettingsSecretField: (props) =>
+          react.createElement('input', {
+            type: 'password',
+            id: props.id,
+            value: props.text,
+            disabled: props.disabled,
+            'data-state': props.stateLabel,
+            'data-configured': props.configured,
+          }),
+      }
+    }
     throw new Error(`产物 require 了平台模块表里没有的模块：${specifier}`)
   })
   return { entry, mod, nodes, recorded }
@@ -252,7 +268,7 @@ test('客户端产物：导出面符合客户端插件契约', { skip }, () => {
 })
 
 /** 跑一次 apply，收下所有注册面（后面几个用例共用）。 */
-function mount({ translate, state, panel, arrays, strings, nulls, configForms } = {}) {
+function mount({ translate, state, panel, arrays, strings, nulls, configForms, credentials } = {}) {
   const { mod, nodes, recorded } = loadBundle({ firstNull: state, panel, arrays, strings, nulls })
   const registrations = []
   const dictionaries = []
@@ -269,11 +285,14 @@ function mount({ translate, state, panel, arrays, strings, nulls, configForms } 
     },
     inject(dependencies, callback) {
       // 客户端壳里这就是就地起一个带依赖声明的子 fiber；这里只记下依赖并立刻跑一遍回调，
-      // 顺带记下回调拿到的服务，好在用例里核对「浏览…」真的接在宿主选择器上。
+      // 顺带记下回调拿到的服务，好在用例里核对「浏览…」真的接在宿主选择器上、密码框真的接在
+      // 宿主机凭据服务上（`remote.credentials`）。
       injectedServices.push({ dependencies })
       const scoped = {
         // 设置接缝（`configForms`）按用例给：不给就等于宿主没提供它，同步设置表单要自己说明。
         ...(configForms === undefined ? {} : { configForms }),
+        // 凭据服务同理：不给就等于宿主没装凭据提供方，密码框那一块要说明"只能走环境变量"。
+        ...(credentials === undefined ? {} : { remote: { credentials } }),
         uiWorkspace: {
           async pickDirectory() {
             return '/tmp/picked'
@@ -337,12 +356,13 @@ test('客户端产物：apply 把「会话管理」注册到设置里的一页�
   // 注入面里的 t 就是绑到本命名空间的翻译函数
   assert.equal(registration.inject().t, t)
 
-  // 目录选择器：作为**可选**依赖收（`uiWorkspace` 由别的客户端插件提供，不写进顶层 inject），
-  // 注入面给出的是一个"取当前选择器"的 thunk，点击时才作数。
+  // 目录选择器与凭据服务：都作为**可选**依赖收（由别的客户端插件提供，不写进顶层 inject），
+  // 服务不在时整页照装——只是对应那一块要自己说明。凭据那两个名字都声明：命名空间服务挂在
+  // `remote` 下面，官方的客户端插件（网页搜索那张卡）也是这么写的。
   // 跨 realm：产物在另一个 vm 里，它的数组原型与本文件的不是同一个，先摊成宿主数组再比。
   assert.deepEqual(
     injectedServices.map((entry) => [...entry.dependencies]),
-    [['configForms'], ['uiWorkspace']],
+    [['configForms'], ['uiWorkspace'], ['remote', 'remote.credentials']],
   )
   // 两个调用面都要接上：宿主只给其中一个（`native` 给 pick、`browse` 给 list），
   // 界面按 /state 里的 pickerKind 选一种用，所以这里两个都得能取到。
@@ -1376,15 +1396,15 @@ test('客户端产物：「说明」页把分类词条、四个分页与边界�
   for (const key of ['catVisible', 'tagSubagent', 'tagBlank', 'tagArchived', 'tagLive', 'ungroupedSource']) {
     assert.ok(terms.includes(key), `分类词典缺少「${key}」`)
   }
-  assert.equal(terms.length, 17, '词条数＝分类 6 + 分页 4 + 数据 2 + 疑问 5')
-  assert.equal(recorded.filter((node) => node.type === 'dd').length, 17, '每条词条都有解释')
+  assert.equal(terms.length, 18, '词条数＝分类 6 + 分页 4 + 数据 2 + 疑问 6')
+  assert.equal(recorded.filter((node) => node.type === 'dd').length, 18, '每条词条都有解释')
   assert.ok(terms.includes('tabSync'), '分页那一节要写到「同步」这一页')
   // 「数据从哪来」两条路径来自 /state，不是写死在文案里
   assert.ok(
     text.includes('/home/u/.dsh/sessions') && text.includes('/home/u/.dsh/registry.json'),
     '两条路径来自 /state',
   )
-  for (const key of ['faqUnownedQ', 'faqDeletedQ', 'faqRestartQ', 'faqRestoreQ', 'faqForkQ']) {
+  for (const key of ['faqUnownedQ', 'faqDeletedQ', 'faqRestartQ', 'faqRestoreQ', 'faqForkQ', 'faqPasswordQ']) {
     assert.ok(text.includes(key), `常见疑问缺少「${key}」`)
   }
   // 同步那条边界也在这一页上（动作页只留用得到的句子）：同步只往库里加、不覆盖
@@ -1444,12 +1464,22 @@ test('客户端产物：同步设置表单按 entry id 向设置接缝取控制�
           url: 'https://dav.example.com/dsh',
           machineId: 'robot-a',
           timeoutMs: 30000,
+          passwordRef: 'MY_DAV_PASSWORD',
           mapping: { '/home/alice/dev/proj': '/opt/work/proj' },
         },
       },
     }),
     subscribe: () => () => {},
     mutate: async () => true,
+  }
+  // 宿主机凭据服务的形状（`remote.credentials`）：`describe` 只说"配没配、能不能写"，没有值。
+  const credentials = {
+    async describe(refs) {
+      return { ok: true, value: Object.fromEntries(refs.map((ref) => [ref, { configured: true, writable: true, source: 'file' }])) }
+    },
+    async set() {
+      return { ok: true, value: undefined }
+    },
   }
   const mounted = mount({
     state,
@@ -1460,6 +1490,7 @@ test('客户端产物：同步设置表单按 entry id 向设置接缝取控制�
         return controller
       },
     },
+    credentials,
   })
   const text = strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
   assert.deepEqual(asked, ['session-manager'], '按 profile 里那个 insert 的 id 取控制器')
@@ -1476,11 +1507,43 @@ test('客户端产物：同步设置表单按 entry id 向设置接缝取控制�
   assert.ok(!mounted.recorded.some((node) => node.type === 'textarea'), '映射表不再是一段文本')
   assert.ok(text.includes('syncMapAdd'), '有「添加一行」')
 
+  // 密码：官方控件库那个**只写**控件（`SettingsSecretField`），不是本页手写的 dsm-input。
+  // 假钩子不跑 useEffect，所以这里量的是首帧：`describe` 的答案还没回来之前按"未配置"画，
+  // 并且输入框从空白开始——没有任何读路径会把值送回来（`describe` 只回 {configured, writable}）。
+  const secret = mounted.recorded.find((node) => node.props?.id === 'dsm-dav-password')?.props
+  assert.ok(secret !== undefined, '宿主给了凭据服务就摆出密码控件')
+  assert.equal(secret.label, 'syncFieldPasswordValue')
+  assert.equal(secret.text, '', '只写控件从空白开始：值不会从宿主那边回来')
+  assert.equal(secret.stateLabel, 'syncPasswordUnset', '首帧按未配置画，describe 回来之后再改')
+  assert.equal(secret.configured, false)
+  assert.equal(secret.disabled, false)
+  assert.ok(!text.includes('syncPasswordUnavailable'), '有凭据服务时不摆那句"只能走环境变量"')
+
+  // 引用名（`sync.passwordRef`）不在这张表单上：它是插件配置的事，卡片只问"密码是什么"。
+  // 摆出来就等于给配置里那一项开第二个编辑口，而这两个口很容易悄悄分叉。
+  assert.ok(!text.includes('syncFieldPassword'), '不该有「密码引用」那一栏')
+  assert.ok(
+    !mounted.recorded.some((node) => node.props?.value === 'MY_DAV_PASSWORD'),
+    '接缝里的引用名原样出现在输入框里，就是那一栏又回来了',
+  )
+
   // 宿主没提供设置接缝（例如只装了设置外壳）：这一块要自己说明，而不是画一张点了没用的表单
   const bare = mount({ state, panel: 'sync' })
   const bareText = strings(bare.registrations[0].component(bare.registrations[0].registration.inject()))
   assert.ok(bareText.includes('syncFormUnavailable'), '没接缝时说清只能在配置里改')
   assert.ok(!bareText.includes('syncMapAdd'), '没接缝时不画表单')
+
+  // 有接缝、没有凭据服务（宿主没装凭据提供方）：表单照画，只是密码那一块说清只能走环境变量，
+  // 不摆一个按下去必然被拒的输入框。
+  const noCredentials = mount({
+    state,
+    panel: 'sync',
+    configForms: { get: () => controller },
+  })
+  const noCredentialsText = strings(noCredentials.registrations[0].component(noCredentials.registrations[0].registration.inject()))
+  assert.ok(noCredentialsText.includes('syncPasswordUnavailable'), '没凭据服务时说清密码只能走环境变量')
+  assert.ok(!noCredentials.recorded.some((node) => node.props?.id === 'dsm-dav-password'), '也不摆那个控件')
+  assert.ok(noCredentialsText.includes('syncMapAdd'), '其余字段照旧能改')
 })
 
 test('客户端产物：同步独占「同步」分页，传输页不再有那张同步卡片', { skip }, () => {
