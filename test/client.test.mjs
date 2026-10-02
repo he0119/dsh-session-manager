@@ -130,7 +130,7 @@ function elementsOf(node, out = []) {
  * 从元素树里收集所有字符串（文案就是字符串，键回显也是）。
  *
  * 遇到**函数组件**就带着 props 调一次再往下走：本文件没有真的渲染器，不这么做的话嵌套的
- * 页面（默认那一页「传输」）永远不在树上，冒烟只能看见骨架那一层，页面里的错就漏过去了。
+ * 页面（默认那一页「会话」）永远不在树上，冒烟只能看见骨架那一层，页面里的错就漏过去了。
  * 假钩子是无状态的，多调一次不会改变什么。
  */
 function strings(node, out = []) {
@@ -252,7 +252,7 @@ test('客户端产物：导出面符合客户端插件契约', { skip }, () => {
 })
 
 /** 跑一次 apply，收下所有注册面（后面几个用例共用）。 */
-function mount({ translate, state, panel, arrays, strings, nulls } = {}) {
+function mount({ translate, state, panel, arrays, strings, nulls, configForms } = {}) {
   const { mod, nodes, recorded } = loadBundle({ firstNull: state, panel, arrays, strings, nulls })
   const registrations = []
   const dictionaries = []
@@ -272,6 +272,8 @@ function mount({ translate, state, panel, arrays, strings, nulls } = {}) {
       // 顺带记下回调拿到的服务，好在用例里核对「浏览…」真的接在宿主选择器上。
       injectedServices.push({ dependencies })
       const scoped = {
+        // 设置接缝（`configForms`）按用例给：不给就等于宿主没提供它，同步设置表单要自己说明。
+        ...(configForms === undefined ? {} : { configForms }),
         uiWorkspace: {
           async pickDirectory() {
             return '/tmp/picked'
@@ -340,7 +342,7 @@ test('客户端产物：apply 把「会话管理」注册到设置里的一页�
   // 跨 realm：产物在另一个 vm 里，它的数组原型与本文件的不是同一个，先摊成宿主数组再比。
   assert.deepEqual(
     injectedServices.map((entry) => [...entry.dependencies]),
-    [['uiWorkspace']],
+    [['configForms'], ['uiWorkspace']],
   )
   // 两个调用面都要接上：宿主只给其中一个（`native` 给 pick、`browse` 给 list），
   // 界面按 /state 里的 pickerKind 选一种用，所以这里两个都得能取到。
@@ -406,7 +408,7 @@ test('客户端产物：导航行的文案跟着语言走（同一个 thunk 每�
   assert.equal(label(), 'Session management')
 })
 
-test('客户端产物：页面骨架带着三个页内分页（会话 / 迁移 / 传输）', { skip }, () => {
+test('客户端产物：页面骨架带着四个动作页（会话 / 迁移 / 传输 / 同步）与说明页', { skip }, () => {
   const { registrations, recorded } = mount()
   const { component } = registrations[0]
   const { inject } = registrations[0].registration
@@ -416,16 +418,17 @@ test('客户端产物：页面骨架带着三个页内分页（会话 / 迁移 /
   assert.ok(text.includes('tabTransfer'), '页内要有「传输」这一页')
   assert.ok(text.includes('tabMigrate'), '页内要有「迁移」这一页')
   assert.ok(text.includes('tabManage'), '页内要有「会话」这一页（逐条归档 / 删除）')
-  // 页签顺序：日常的「会话」在最前、「传输」在最后；默认停在第一个（这一页的日常视图）
+  assert.ok(text.includes('tabSync'), '页内要有「同步」这一页（WebDAV）')
+  // 页签顺序：日常的「会话」在最前；「同步」紧挨「传输」（它落地走的是导入那条编排）；说明垫底
   const tabs = recorded.filter((node) => String(node.props?.className) === 'dsm-tab')
   assert.deepEqual(
     tabs.map((node) => strings(node)[0]),
-    ['tabManage', 'tabMigrate', 'tabTransfer', 'tabHelp'],
-    '顺序是 会话 → 迁移 → 传输 → 说明（三个动作页按日常程度排，参考页垫底）',
+    ['tabManage', 'tabMigrate', 'tabTransfer', 'tabSync', 'tabHelp'],
+    '顺序是 会话 → 迁移 → 传输 → 同步 → 说明（动作页按日常程度排，参考页垫底）',
   )
   assert.deepEqual(
     tabs.map((node) => node.props['aria-selected']),
-    [true, false, false, false],
+    [true, false, false, false, false],
     '默认停在第一个页签',
   )
   assert.ok(text.includes('title'), '页面标题走同一份字典')
@@ -1353,7 +1356,7 @@ test('客户端产物：「会话」页也按目录分组、也能折叠，勾�
 // （同一件事在两处各写一份就会漂），以及边界条件确实讲全了（分类、三个分页、碰什么盘、数据从哪来、
 // 常见疑问）。动作页那边由上面那条"每段最多两行"的预算盯着。
 
-test('客户端产物：「说明」页把分类词条、三个分页与边界条件摆出来', { skip }, () => {
+test('客户端产物：「说明」页把分类词条、四个分页与边界条件摆出来', { skip }, () => {
   const state = {
     sessionsRoot: '/home/u/.dsh/sessions',
     registryPath: '/home/u/.dsh/registry.json',
@@ -1373,16 +1376,137 @@ test('客户端产物：「说明」页把分类词条、三个分页与边界�
   for (const key of ['catVisible', 'tagSubagent', 'tagBlank', 'tagArchived', 'tagLive', 'ungroupedSource']) {
     assert.ok(terms.includes(key), `分类词典缺少「${key}」`)
   }
-  assert.equal(terms.length, 15, '词条数＝分类 6 + 分页 3 + 数据 2 + 疑问 4')
-  assert.equal(recorded.filter((node) => node.type === 'dd').length, 15, '每条词条都有解释')
+  assert.equal(terms.length, 17, '词条数＝分类 6 + 分页 4 + 数据 2 + 疑问 5')
+  assert.equal(recorded.filter((node) => node.type === 'dd').length, 17, '每条词条都有解释')
+  assert.ok(terms.includes('tabSync'), '分页那一节要写到「同步」这一页')
   // 「数据从哪来」两条路径来自 /state，不是写死在文案里
   assert.ok(
     text.includes('/home/u/.dsh/sessions') && text.includes('/home/u/.dsh/registry.json'),
     '两条路径来自 /state',
   )
-  for (const key of ['faqUnownedQ', 'faqDeletedQ', 'faqRestartQ', 'faqRestoreQ']) {
+  for (const key of ['faqUnownedQ', 'faqDeletedQ', 'faqRestartQ', 'faqRestoreQ', 'faqForkQ']) {
     assert.ok(text.includes(key), `常见疑问缺少「${key}」`)
   }
+  // 同步那条边界也在这一页上（动作页只留用得到的句子）：同步只往库里加、不覆盖
+  assert.ok(text.includes('helpDiskSync'), '会碰什么盘那节要写上同步')
   // 说明页不该长成一个"什么都往里塞"的垃圾桶：正文段落本身就是词条/项目符号，没有额外的大段散文
   assert.ok(text.includes('helpHint'), '页首要有一句话说明这一页讲什么')
+})
+
+test('客户端产物：同步页的同步块——没配置只说明，配置了才摆按钮', { skip }, () => {
+  const base = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    sessions: [],
+    workspaces: [],
+  }
+  const text = (mounted) => strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
+  const buttonTexts = (mounted) =>
+    mounted.recorded
+      .filter((node) => node.type === 'button')
+      .map((node) => strings(node).join(''))
+
+  // 没配置：一句话说明怎么配，一个按钮都不摆（点了没反应的按钮比不摆更糟）
+  const off = mount({ state: base, panel: 'sync' })
+  assert.ok(text(off).includes('syncOffHint'), '没配置时要说明怎么配')
+  assert.ok(!buttonTexts(off).includes('syncPreview'), '没配置时不该出现同步按钮')
+  assert.ok(!buttonTexts(off).includes('syncApply'), '没配置时不该出现同步按钮')
+
+  // 配置了：远端与这台机器报出来，预演与确认两个按钮都在
+  const on = mount({
+    state: { ...base, sync: { url: 'https://dav.example.com/dsh', machineId: 'robot-a', mappings: 2 } },
+    panel: 'sync',
+  })
+  const onText = text(on)
+  assert.ok(onText.includes('syncWhere:{"url":"https://dav.example.com/dsh","machine":"robot-a"}'), '要报出远端与机器名')
+  assert.ok(onText.includes('syncHint:{"mappings":2}'), '要报出映射条数')
+  assert.deepEqual(buttonTexts(on).filter((label) => label.startsWith('sync')), ['syncPreview', 'syncApply'])
+})
+
+test('客户端产物：同步设置表单按 entry id 向设置接缝取控制器，宿主没提供时说实话', { skip }, () => {
+  const state = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    sync: { url: 'https://dav.example.com/dsh', machineId: 'robot-a', mappings: 1 },
+    sessions: [],
+    workspaces: [],
+  }
+  const asked = []
+  const controller = {
+    getSnapshot: () => ({
+      status: 'ready',
+      writable: true,
+      revision: 7,
+      value: {
+        sync: {
+          url: 'https://dav.example.com/dsh',
+          machineId: 'robot-a',
+          timeoutMs: 30000,
+          mapping: { '/home/alice/dev/proj': '/opt/work/proj' },
+        },
+      },
+    }),
+    subscribe: () => () => {},
+    mutate: async () => true,
+  }
+  const mounted = mount({
+    state,
+    panel: 'sync',
+    configForms: {
+      get(namespace) {
+        asked.push(namespace)
+        return controller
+      },
+    },
+  })
+  const text = strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
+  assert.deepEqual(asked, ['session-manager'], '按 profile 里那个 insert 的 id 取控制器')
+  assert.ok(text.includes('syncFieldMapping'), '映射字段在场')
+  assert.ok(
+    mounted.recorded.some((node) => node.type === 'input' && node.props?.value === 'https://dav.example.com/dsh'),
+    'URL 是从接缝里读出来的，不是页面自己存的',
+  )
+  // 映射表是行：左右各一个输入框，值分别来自接缝里的那一对键值
+  const mappingInputs = mounted.recorded.filter(
+    (node) => node.type === 'input' && (node.props?.value === '/home/alice/dev/proj' || node.props?.value === '/opt/work/proj'),
+  )
+  assert.equal(mappingInputs.length, 2, '映射表按「远端 cwd → 本机目录」两个输入框画')
+  assert.ok(!mounted.recorded.some((node) => node.type === 'textarea'), '映射表不再是一段文本')
+  assert.ok(text.includes('syncMapAdd'), '有「添加一行」')
+
+  // 宿主没提供设置接缝（例如只装了设置外壳）：这一块要自己说明，而不是画一张点了没用的表单
+  const bare = mount({ state, panel: 'sync' })
+  const bareText = strings(bare.registrations[0].component(bare.registrations[0].registration.inject()))
+  assert.ok(bareText.includes('syncFormUnavailable'), '没接缝时说清只能在配置里改')
+  assert.ok(!bareText.includes('syncMapAdd'), '没接缝时不画表单')
+})
+
+test('客户端产物：同步独占「同步」分页，传输页不再有那张同步卡片', { skip }, () => {
+  const state = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    sync: { url: 'https://dav.example.com/dsh', machineId: 'robot-a', mappings: 2 },
+    sessions: [],
+    workspaces: [],
+  }
+  // 分页各自渲染一次：假钩子不点页签，所以「哪一页上有哪张卡片」只能这样量。
+  const syncText = strings(
+    (() => {
+      const mounted = mount({ state, panel: 'sync' })
+      return mounted.registrations[0].component(mounted.registrations[0].registration.inject())
+    })(),
+  )
+  const transferText = strings(
+    (() => {
+      const mounted = mount({ state, panel: 'transfer' })
+      return mounted.registrations[0].component(mounted.registrations[0].registration.inject())
+    })(),
+  )
+  assert.ok(syncText.includes('syncTitle'), '「同步」分页上要有同步卡片')
+  assert.ok(syncText.includes('syncPreview'), '且带着预演按钮（配置在，按钮就在）')
+  assert.ok(!transferText.includes('syncTitle'), '传输页上不该再有同步卡片')
+  assert.ok(!transferText.includes('syncPreview'), '传输页上不该再有预演按钮')
 })

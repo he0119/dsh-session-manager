@@ -2,8 +2,8 @@
 
 # dsh-session-manager
 
-A session manager for DSH: **move** workspaces and sessions to a new directory, and **export / import**
-sessions as `.dshsess` bundles.
+A session manager for DSH: **move** workspaces and sessions to a new directory, **export / import**
+sessions as `.dshsess` bundles, and **sync** them across machines over **WebDAV**.
 
 [中文](README.md) | English
 
@@ -15,12 +15,16 @@ header `cwd` + move the log directory + re-home the workspace registry** — and
 first and rolled back byte-for-byte afterwards. (Why it has to work that way:
 [.agents/notes/implemented/](.agents/notes/implemented), in Chinese.)
 
+Sync takes the same road: the remote holds only `.dshsess` bundles, and a pull rewrites the `cwd` to
+**this machine's** mapped directory, so the same project living in different directories on two machines
+still works.
+
 ## What it gives you
 
 | Entry point | Good for |
 |---|---|
-| The **Session management** page in Settings | Everyday use: archive or delete single sessions on the **Sessions** tab; pick a source (a directory or Ungrouped) from a dropdown to migrate; tick sessions to export / import |
-| 4 model tools | Just say "move this workspace's sessions to `~/dev/xxx`" and let the model preview first, apply second |
+| The **Session management** page in Settings | Everyday use: archive or delete single sessions on the **Sessions** tab; pick a source (a directory or Ungrouped) from a dropdown to migrate; tick sessions to export / import; preview and run a WebDAV sync on the **Sync** tab |
+| 5 model tools | Just say "move this workspace's sessions to `~/dev/xxx`" and let the model preview first, apply second |
 
 Both share one migration implementation, so the count a preview reports is the count you get.
 
@@ -183,11 +187,80 @@ it and the sidebar shows it), what the three tabs do, which files the actions to
 restore, when the sidebar follows), where the data comes from (the library and the registry paths), and the
 common questions (which sessions count as Ungrouped, why a deleted session is still in the sidebar, why a
 migration asks for a restart). The action tabs
-(Sessions / Migrate / Transfer) keep only the decision at hand, so each explanation there stays within two
+(Sessions / Migrate / Transfer / Sync) keep only the decision at hand, so each explanation there stays within two
 lines.
 
 A host without the `webServer` service (tools-only front ends) still loads the plugin — the page simply
 does not appear.
+
+### Sync (WebDAV)
+
+The same project usually lives in different directories on different machines (`/home/alice/dev/proj` vs
+`/opt/work/proj`), so syncing the session library itself cannot work: a library's directory names are bound
+to the header `cwd`. Instead the remote is a relay — it holds `.dshsess` bundles, and landing one still goes
+through the import path, which rewrites the `cwd` to this machine's mapped directory.
+
+Config (the `sync` block of the plugin configuration):
+
+```yaml
+sync:
+  url: https://dav.example.com/dsh        # WebDAV collection (the only place this plugin uses; it creates its own machine slots)
+  machineId: robot-a                       # optional, defaults to the hostname; never share one id across machines
+  username: alice                          # optional (Basic)
+  passwordRef: DSH_DAV_PASSWORD            # optional: an **environment-variable name**, resolved by the host credential service or process.env
+  mapping:                                 # explicit mapping: remote cwd → local directory (each machine writes its own)
+    /home/alice/dev/proj: /opt/work/proj
+  timeoutMs: 30000                         # optional
+```
+
+This section is also editable **in the interface**: in the card on Settings → “Session management” → “Sync”, the URL, machine id, username, password reference, timeout and mapping are
+edited directly, and Save writes them into the profile document (`~/.dsh/profiles/<name>/cordis.patch.yml`).
+`sync` is a volatile field, so a change takes effect **without a restart**; the three path fields
+(`sessionsRoot` / `registryPath` / `backupRoot`) stay file-only. Path mappings are added and removed row
+by row: the left side is the cwd the remote recorded, the right side a directory on this machine. That left
+side must match the other machine’s path character for character, so once you have previewed, the form
+offers the cwds it saw as suggestions instead of making you copy them by hand.
+
+**One configuration for every machine**: each entry in the remote index also carries a **project identity** —
+the repository’s git remote (canonicalised to `host/owner/repo`) plus the session cwd relative to the
+repository root. On a pull, the local side matches that identity against its own candidate directories (session
+cwds and the paths registered as workspaces) and lands the session at `local repository root + relative path`.
+All machines can therefore share a **literally identical** configuration (same `url`, no `machineId` so it
+defaults to the hostname, empty `mapping`), and the same repository cloned at `/home/alice/dev/proj` and
+`/opt/work/proj` still matches. Conversely, two different repositories that happen to share a directory name
+are not treated as one project. No git, not a repository, no remote, or the project missing locally — all fall
+back to the mapping table below, and the preview names the repository it could not resolve.
+
+`mapping` and the identity **coexist**: an explicit mapping wins (what you configured is where it lands), the
+identity is the automatic path. So non-git directories, or forcing a different destination, still use mappings.
+
+The remote layout is `machines/<machineId>/index.json` (which sessions this machine contributed) plus
+`machines/<machineId>/<id>.dshsess` (one bundle per session). **One slot per machine**: WebDAV has no
+locking, so each machine writes only its own slot and reads every slot — nothing overwrites anything else.
+
+On the **Sync** tab, **Preview sync** (reads the remote, writes nothing) reports "pull N /
+push M" and lists every session, where it would land and what was left alone and why; **Sync now** actually
+pulls and pushes. The rules and edges:
+
+- **Add-only**: a session id that already exists locally is never pulled, and a remote copy that is newer
+  than yours is left alone too — the report says whether it is "remote is ahead" or "both sides wrote". The
+  judgement is a generation fingerprint **independent of the cwd**: landing always rewrites the other
+  machine's cwd (library directory names are bound to the header `cwd`), and comparing raw bytes would call
+  a pulled copy "both sides wrote" — pushing a continuation of it back would then never happen;
+- **A strictly-ahead local copy is re-uploaded**: the versions both sides share match apart from the cwd, so
+  the remote copy really is a prefix of yours and refreshing it loses nothing; when more than one machine
+  contributed the same id, the pulling side takes the **ahead** copy rather than the one whose slot name
+  sorts first;
+- **Two machines that each continued the same session never merge**: to keep chatting on both, agree that a
+  session is continued on one machine only;
+- A session you delete disappears from your own index on the next push (the remote bundle is not deleted),
+  and copies other machines already took are unaffected;
+- A session without a `cwd` gets no invented path (it lands under `_no-cwd`, same as import); a `cwd` with no
+  mapping is skipped and listed;
+- Pulled sessions need a host rescan to appear in the sidebar — restarting DSH is the surest way (the same
+  registry-on-disk semantics as migration).
+
+Sync also goes through a plan: the `sync_sessions` tool previews by default and only writes with `apply:true`.
 
 ### Model tools
 
@@ -197,6 +270,7 @@ does not appear.
 | `migrate_sessions` | needs `apply:true` | Dry-run by default; performs a byte-level backup and self-verifies after |
 | `rollback_session_migration` | yes | Byte-exact rollback from a backup directory |
 | `verify_workspace_sessions` | no | Check that a project directory agrees with its headers |
+| `sync_sessions` | needs `apply:true` | Sync with the WebDAV remote (pull what other machines pushed, push what only this machine has); dry-run by default |
 
 ## Things to know
 
@@ -211,14 +285,18 @@ does not appear.
   ask for them).
 - **Paths**: neither session `cwd` values nor registry paths carry a trailing slash; `projectKey` folds `/`,
   `\` and `:` into `-`, so a few paths collide in that encoding — the plan layer blocks those up front.
+- **Sync only adds**: a remote copy that is ahead of yours is never pulled, and two machines that each
+  continued the same session never merge (see the Sync section).
 - **Plugin config**: the optional `sessionsRoot` / `registryPath` / `backupRoot` fields override the default
-  paths above.
+  paths above; a `sync` block configures WebDAV sync (`url` / `machineId` / `username` / `passwordRef` /
+  `mapping` / `timeoutMs`). A password is only ever a **reference** (an environment-variable name), never
+  plaintext in the config file.
 
 ## Docs
 
 - [.agents/notes/](.agents/notes/AGENTS.md) — the reasoning behind each decision and what was rejected
   (Chinese): the silent data loss of multi-frame zstd, the startup invariants, the lossy-encoding
-  collision, the `.dshsess` container trade-offs, the effect mode, and the UI decisions
+  collision, the `.dshsess` container trade-offs, the effect mode, why sync only adds, and the UI decisions
 - [docs/internals.md](docs/internals.md) — a decision map indexing the notes above by topic
 - [docs/development.md](docs/development.md) — local workflow: deps, build, tests, a dev instance
 - [docs/releasing.md](docs/releasing.md) — release process

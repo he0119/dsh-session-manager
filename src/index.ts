@@ -12,17 +12,24 @@ import { readFileSync } from 'node:fs'
 
 import type { Context } from '@deepseek-ai/cordis'
 
+import { Config, type PluginConfigInput } from './config.ts'
 import {
-  type PluginConfig,
   archiveOps,
   decodeAll,
+  describeSyncConfig,
   directoryPickerKind,
   effectMode,
   liveSessionIds,
   registerTools,
   resolvePaths,
+  syncRuntime,
 } from './tools.ts'
 import { API_PREFIX, registerWebRoutes, type WebServerLike } from './web.ts'
+
+// 配置 schema 必须从入口导出：Loader 拿它校验 profile 里那一节，设置接缝拿它在插件管理器里生成
+// 那张表单（没有 schema 的插件根本不出现在那一页上）。**只有 `sync` 那一节是 volatile**，所以表单
+// 里只有它可改、且改完立即生效；三个路径字段留在配置文件里（理由见 src/config.ts）。
+export { Config } from './config.ts'
 
 /** 插件 id（与 cordis.patch.yml 里的 id 对应）。 */
 export const name = 'session-manager'
@@ -50,7 +57,7 @@ function pluginVersion(): string | undefined {
  * Cordis 插件入口。
  * @returns 卸载函数：宿主热卸载时逐个注销已注册的工具与路由。
  */
-export function apply(ctx: Context, config: PluginConfig = {}): () => void {
+export function apply(ctx: Context, config: PluginConfigInput = {}): () => void {
   const paths = resolvePaths(config)
   const disposers = registerTools(ctx, config)
 
@@ -84,6 +91,9 @@ export function apply(ctx: Context, config: PluginConfig = {}): () => void {
       registryOps: () => archiveOps(ctx),
       // 删除会拒掉"宿主内存里活着"的会话（它手里还有内存副本与写句柄）。
       liveSessionIds: () => liveSessionIds(ctx),
+      // WebDAV 同步：运行时按需造（每次请求重新解析密码引用），/state 只看非敏感的那几个字段。
+      sync: () => syncRuntime(ctx, config),
+      syncInfo: () => describeSyncConfig(config),
     })
     info(`dsh-session-manager 界面端点已挂：${API_PREFIX}`)
     return dispose

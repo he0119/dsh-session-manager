@@ -35,11 +35,12 @@ const CATEGORIES = [
   ['ungroupedSource', 'ungroupedTip'],
 ] as const
 
-/** 三个分页各管什么：与页签同一个顺序（会话 → 迁移 → 传输）。 */
+/** 四个分页各管什么：与页签同一个顺序（会话 → 迁移 → 传输 → 同步）。 */
 const TAB_LINES = [
   ['tabManage', 'helpTabManage'],
   ['tabMigrate', 'helpTabMigrate'],
   ['tabTransfer', 'helpTabTransfer'],
+  ['tabSync', 'helpTabSync'],
 ] as const
 
 /** 会碰什么盘：一次写全备份、回滚 / 恢复、子代理跟着父会话走、侧边栏重扫、内存里的会话、包内容。 */
@@ -51,6 +52,7 @@ const DISK_LINES = [
   'helpDiskSidebar',
   'helpDiskLive',
   'helpDiskExport',
+  'helpDiskSync',
 ] as const
 
 /** 常见疑问：问答同上一条同一个形状（dt 问、dd 答）。 */
@@ -59,6 +61,7 @@ const FAQ = [
   ['faqDeletedQ', 'faqDeletedA'],
   ['faqRestartQ', 'faqRestartA'],
   ['faqRestoreQ', 'faqRestoreA'],
+  ['faqForkQ', 'faqForkA'],
 ] as const
 
 /** 一张卡片：标题 + 正文，动作页那些卡片同一个外壳。 */

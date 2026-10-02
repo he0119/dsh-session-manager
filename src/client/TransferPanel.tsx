@@ -7,6 +7,9 @@
  *   - 导出：按目录分组的列表里勾选（组头可整组勾）→ 宿主打包 → 浏览器下载；
  *   - 导入：选包 + 选目标工作区 → **预演** → 看清 create/skip 与 cwd 改写 → 确认落盘。
  *
+ * WebDAV 同步**不在这里**：它是一条常设通道（远端地址、机器名、映射表、预演与确认），与本页的正交，
+ * 见 [SyncPanel.tsx](./SyncPanel.tsx)。两件事挤在一页时，同步那块只能排在导出列表与导入预演表之后。
+ *
  * 会话库数据由页面骨架（[ManagerPanel.tsx](./ManagerPanel.tsx)）拉好传进来：切分页不该各拉一份，
  * 也不该出现"两个分页对同一个库给出不同数字"。列表行、组头、列表框与筛选条都出自
  * [sessionList.tsx](./sessionList.tsx)——三个分页的行是同一套解剖结构。
@@ -210,6 +213,13 @@ export function TransferPanel({ t = fallback, state, reload }: PanelShare): Reac
   const createCount = plan?.entries.filter((entry) => entry.action === 'create').length ?? 0
   const skipCount = plan?.entries.filter((entry) => entry.action === 'skip').length ?? 0
 
+  /**
+   * 同步：先预演（读远端，什么都不写），确认之后才拉 + 推。
+   *
+   * 落地的按钮不按"计划里有几条"禁用：一次空转的 apply 只会重写自己那一格的索引，而按条数禁用会
+   * 在"只想刷新索引/远端那份落后了"的时候把按钮捏死。真正会拦人的是没配置同步——那种情况压根
+   * 不画按钮。
+   */
   return (
     <>
       {error !== null && (
@@ -406,6 +416,7 @@ export function TransferPanel({ t = fallback, state, reload }: PanelShare): Reac
           </div>
         )}
       </div>
+
     </>
   )
 }

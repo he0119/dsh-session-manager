@@ -1,16 +1,19 @@
-// src/tools.ts — 暴露给模型的 4 个工具。
+// src/tools.ts — 暴露给模型的 5 个工具。
 //
 // 设计取向：
 //   * 读操作（plan / verify）永不写盘；
-//   * 写操作（migrate / rollback）默认 dry-run，必须显式 apply:true；
+//   * 写操作（migrate / rollback / sync）默认 dry-run，必须显式 apply:true；
 //   * 每个写操作的返回值都说明"何时生效"——因为绕过宿主直接改注册表可能需要重启 DSH，
 //     除非上游提供了 workspaceRegistry.reassignSessions（见 effectMode()）。
 import type { Context } from '@deepseek-ai/cordis'
+
+import { syncSection, type PluginConfig, type PluginConfigInput, type SyncConfig } from './config.ts'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
-import { homedir } from 'node:os'
+import { homedir, hostname } from 'node:os'
 import { join } from 'node:path'
 
+import { createDavClient, type DavPort } from './dav.ts'
 import { readHeaderQuick } from './discovery.ts'
 import {
   previewMigration,
@@ -19,6 +22,7 @@ import {
   type MigrateDeps,
 } from './migrate.ts'
 import { projectKey } from './project-key.ts'
+import { runSync, type SyncPlan, type SyncSettings } from './sync.ts'
 import type { DecodeAll } from './types.ts'
 
 /**
@@ -31,11 +35,12 @@ import { decompress } from 'fzstd'
 
 export const decodeAll: DecodeAll = (buf: Uint8Array): string => Buffer.from(decompress(buf)).toString('utf8')
 
-/** 插件配置。 */
-export interface PluginConfig {
-  sessionsRoot?: string
-  registryPath?: string
-  backupRoot?: string
+/** 界面要知道的同步配置（只有非敏感字段，没有密码）。 */
+export interface SyncInfo {
+  url: string
+  machineId: string
+  /** 映射条数；映射表本身在配置里，界面只报条数。 */
+  mappings: number
 }
 
 /** 解析后的默认路径。 */
@@ -46,7 +51,7 @@ export interface ResolvedPaths {
 }
 
 /** 从插件配置与 $DSH_HOME 解析默认路径。 */
-export function resolvePaths(config: PluginConfig = {}): ResolvedPaths {
+export function resolvePaths(config: PluginConfigInput = {}): ResolvedPaths {
   const home = process.env['DSH_HOME'] ?? join(homedir(), '.dsh')
   return {
     sessionsRoot: config.sessionsRoot ?? join(home, 'sessions'),
@@ -57,6 +62,126 @@ export function resolvePaths(config: PluginConfig = {}): ResolvedPaths {
 
 /** 迁移何时生效。 */
 export type EffectMode = 'immediate' | 'restart-required'
+
+/** 一次同步要用的远端与设置。 */
+export interface SyncRuntime {
+  settings: SyncSettings
+  dav: DavPort
+}
+
+/**
+ * 界面能看的同步配置（非敏感）。
+ * @param config 插件配置（活引用或普通对象）。
+ * @returns 配了 `sync.url` 才有返回值。
+ */
+export function describeSyncConfig(config: PluginConfigInput = {}): SyncInfo | undefined {
+  const sync = syncSection(config)
+  if (sync === undefined || typeof sync.url !== 'string' || sync.url.trim() === '') return undefined
+  return {
+    url: sync.url.trim(),
+    machineId: machineIdOf(sync),
+    mappings: Object.keys(sync.mapping ?? {}).length,
+  }
+}
+
+/** 这台机器的标识：配置优先，缺省主机名。 */
+function machineIdOf(sync: SyncConfig): string {
+  const configured = sync.machineId?.trim()
+  return configured === undefined || configured === '' ? hostname() : configured
+}
+
+/**
+ * 解析一个密码引用。
+ *
+ * 先问宿主的 credentials 服务（DSH 的口径：配置里放引用，值由服务解析），拿不到再退到
+ * `process.env`——没有那个服务的 profile 也能用（往环境变量里放密码）。
+ * @param ctx 宿主上下文（探测式读取，缺席不影响）。
+ * @param ref 环境变量名。
+ * @returns 密码；两边都没有就是 undefined。
+ */
+async function resolveSecret(ctx: unknown, ref: string): Promise<string | undefined> {
+  const credentials = optionalService(ctx, 'credentials') as
+    | { resolve?: (reference: string) => Promise<{ value?: unknown } | undefined> }
+    | undefined
+  try {
+    const resolved = await credentials?.resolve?.(ref)
+    if (typeof resolved?.value === 'string' && resolved.value !== '') return resolved.value
+  } catch {
+    // 服务在但解析失败（引用没配、来源冲突）：退到环境变量，而不是让整次同步起不来。
+  }
+  const fromEnv = process.env[ref]
+  return fromEnv === undefined || fromEnv === '' ? undefined : fromEnv
+}
+
+/**
+ * 造一次同步的运行时。
+ * 配置每次都从活引用里现读（见 src/config.ts）：界面上改完 URL 与映射，下一次调用就用新值。
+ * @param ctx 宿主上下文（只用来解析密码引用）。
+ * @param config 插件配置（活引用或普通对象）。
+ * @returns 远端与设置；没配 `sync.url` 时 undefined（界面据此说明"没配置"，工具据此拒掉这次调用）。
+ */
+export async function syncRuntime(ctx: unknown, config: PluginConfigInput = {}): Promise<SyncRuntime | undefined> {
+  const sync = syncSection(config)
+  if (sync === undefined || typeof sync.url !== 'string' || sync.url.trim() === '') return undefined
+  const password = sync.passwordRef === undefined ? undefined : await resolveSecret(ctx, sync.passwordRef)
+  const settings: SyncSettings = {
+    url: sync.url.trim().replace(/(.)\/+$/, '$1'),
+    machineId: machineIdOf(sync),
+    mapping: sync.mapping ?? {},
+    ...(sync.username === undefined || sync.username === '' ? {} : { username: sync.username }),
+    ...(password === undefined ? {} : { password }),
+    ...(sync.timeoutMs === undefined ? {} : { timeoutMs: sync.timeoutMs }),
+  }
+  return {
+    settings,
+    dav: createDavClient({
+      baseUrl: settings.url,
+      ...(settings.username === undefined ? {} : { username: settings.username }),
+      ...(settings.password === undefined ? {} : { password: settings.password }),
+      ...(settings.timeoutMs === undefined ? {} : { timeoutMs: settings.timeoutMs }),
+    }),
+  }
+}
+
+/** 同步工具的返回值。 */
+export interface SyncToolResult {
+  ok: boolean
+  applied: boolean
+  pulled: string[]
+  pushed: string[]
+  /** 什么都没动的那几条与原因（远端领先、分叉、缺映射……）。 */
+  notes: string[]
+  bytesIn: number
+  bytesOut: number
+  machines: string[]
+  takesEffect: EffectMode
+  summary: string
+  problems: string[]
+}
+
+/**
+ * 计划里"没动"的条目（推与拉两侧的 skip）压成一行行说明。
+ *
+ * `identical`（"远端已经有这一份"）不进来：整库同步时它是最多也最没信息量的一类，几百行"这条不用推"
+ * 会把真正要看的那几条淹掉。
+ */
+function planNotes(plan: SyncPlan): string[] {
+  const notes: string[] = []
+  for (const entry of plan.pull) {
+    if (entry.action === 'skip') notes.push(`不拉 ${entry.id}：${entry.reason ?? ''}`)
+  }
+  for (const entry of plan.push) {
+    if (entry.action === 'skip' && entry.code !== 'identical') notes.push(`不推 ${entry.id}：${entry.reason ?? ''}`)
+  }
+  return notes
+}
+
+/** 一次同步的一句话结论。 */
+function describeSync(plan: SyncPlan, pulled: readonly string[], pushed: readonly string[], applied: boolean): string {
+  const head = `${applied ? '已同步' : '预演'}：拉 ${plan.pullIds.length} 条、推 ${plan.pushIds.length} 条（本机 ${plan.localCount} 条，远端 ${plan.remoteCount} 条，来自 ${plan.machines.join('、') || '还没有机器'}）`
+  if (!applied) return head
+  return `${head}。实际落地：拉 ${pulled.length} 条、推 ${pushed.length} 条`
+}
 
 /**
  * 探测一个**可选**宿主服务。
@@ -223,7 +348,7 @@ export interface MigrateToolResult {
  * 注册 4 个工具。
  * @returns cordis effect disposer 列表（宿主热卸载时逐个调用）。
  */
-export function registerTools(ctx: Context, config: PluginConfig = {}): Array<() => void> {
+export function registerTools(ctx: Context, config: PluginConfigInput = {}): Array<() => void> {
   const paths = resolvePaths(config)
   const mode = (): EffectMode => effectMode(ctx)
   // 预演/执行/回滚都走 src/migrate.ts 那一份编排，界面端点用的是同一个 deps 形状——
@@ -496,6 +621,95 @@ export function registerTools(ctx: Context, config: PluginConfig = {}): Array<()
             projectDir,
             problems,
             summary: `${projectDir}\n检查 ${checked} 个日志文件：${problems.length ? `发现 ${problems.length} 个问题` : '全部通过'}`,
+          }
+        },
+      }),
+    ),
+  )
+
+  // ---- WebDAV 同步（默认只预演） ----
+  disposers.push(
+    ctx.tools.register(
+      defineTool({
+        name: 'sync_sessions',
+        description:
+          'Sync DSH sessions with the WebDAV remote configured in this plugin (sync.url): pull the sessions ' +
+          'other machines contributed and push the local ones the remote does not have yet. Pulled sessions ' +
+          'land through the same import path as the settings page, so each log header cwd is rewritten to the ' +
+          'mapped directory of THIS machine (the remote stores portable .dshsess bundles, never a raw session ' +
+          'library). Add-only: a session id that already exists locally is never pulled, a remote copy that is ' +
+          'ahead is only reported, and a local copy that is strictly ahead of the remote is re-uploaded. ' +
+          'Defaults to dry-run; apply:true performs it. Configure the remote and the cwd mapping in the plugin ' +
+          'configuration; without sync.url the call reports that nothing is configured.',
+        parameters: {
+          apply: {
+            type: 'boolean',
+            description: 'Optional: true performs the sync (default false = only compute and report the plan).',
+          },
+        },
+        output: {
+          schema: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              ok: { type: 'boolean', required: true },
+              applied: { type: 'boolean', required: true },
+              pulled: { type: 'array', required: true, items: { type: 'string' } },
+              pushed: { type: 'array', required: true, items: { type: 'string' } },
+              notes: { type: 'array', required: true, items: { type: 'string' } },
+              bytesIn: { type: 'integer', required: true },
+              bytesOut: { type: 'integer', required: true },
+              machines: { type: 'array', required: true, items: { type: 'string' } },
+              takesEffect: { type: 'string', required: true },
+              summary: { type: 'string', required: true },
+              problems: { type: 'array', required: true, items: { type: 'string' } },
+            },
+          },
+          render: (_args: unknown, value: unknown) => [
+            { type: 'text' as const, text: String((value as SyncToolResult).summary) },
+          ],
+        },
+        async execute(args): Promise<SyncToolResult> {
+          const runtime = await syncRuntime(ctx, config)
+          if (runtime === undefined) {
+            return {
+              ok: false,
+              applied: false,
+              pulled: [],
+              pushed: [],
+              notes: [],
+              bytesIn: 0,
+              bytesOut: 0,
+              machines: [],
+              takesEffect: 'immediate',
+              summary: '没有配置 WebDAV 同步：插件配置里的 sync.url 是空的。',
+              problems: ['没有配置 WebDAV 同步（插件配置的 sync.url）'],
+            }
+          }
+          const outcome = await runSync(
+            {
+              dav: runtime.dav,
+              settings: runtime.settings,
+              sessionsRoot: paths.sessionsRoot,
+              registryPath: paths.registryPath,
+              decodeAll,
+            },
+            { apply: args.apply === true },
+          )
+          const pushedIds = outcome.applied ? outcome.pushed.map((entry) => entry.id) : outcome.plan.pushIds
+          return {
+            ok: outcome.plan.ok && outcome.problems.length === 0,
+            applied: outcome.applied,
+            pulled: outcome.applied ? outcome.pulled : outcome.plan.pullIds,
+            pushed: pushedIds,
+            notes: planNotes(outcome.plan),
+            bytesIn: outcome.applied ? outcome.bytesIn : outcome.plan.bytesIn,
+            bytesOut: outcome.applied ? outcome.bytesOut : outcome.plan.bytesOut,
+            machines: outcome.plan.machines,
+            // 只有真的往库里落了会话才谈得上"要不要重启"；纯推送不改本机任何东西。
+            takesEffect: outcome.applied && outcome.pulled.length > 0 ? mode() : 'immediate',
+            summary: describeSync(outcome.plan, outcome.pulled, pushedIds, outcome.applied),
+            problems: [...outcome.plan.problems, ...outcome.problems],
           }
         },
       }),
