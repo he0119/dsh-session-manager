@@ -2,8 +2,12 @@
 //
 // 远端不是"库"，只是一批包加一份索引：
 //
-//   <url>/machines/<machineId>/index.json       这台机器贡献了哪些会话
-//   <url>/machines/<machineId>/<encodeSegment(id)>.dshsess   一条会话一个包
+//   <url>/dsh-session-manager/<machineId>/index.json       这台机器贡献了哪些会话
+//   <url>/dsh-session-manager/<machineId>/<encodeSegment(id)>.dshsess   一条会话一个包
+//
+// 最上面那一层插件命名空间（`SYNC_NAMESPACE_DIR`）由本插件独占、机器格直接放在它下面：`url` 因此可以
+// 填服务器根或账号根，而不是必须精确指到一个专供本插件的集合。命名空间与机器格都由 `put()` 的逐层
+// MKCOL 自建。
 //
 // 为什么远端不能直接放会话库：库里的目录名是 `projectKey(cwd)`，header 里的 `cwd` 又与目录名绑死
 // （见 paths.ts）。两台机器的同一个项目路径不同，字节级的库互不相认。所以这里只放大包，落地一律
@@ -29,8 +33,8 @@ import type { TitleQuery } from './session-title.ts'
 import { applyImport, buildBundle, planImport, readBundle, type ExportSource, type ImportOptions } from './transfer.ts'
 import type { DecodeAll, WorkspaceRegistryState } from './types.ts'
 
-/** 远端放机器格的目录名。 */
-export const SYNC_MACHINES_DIR = 'machines'
+/** 远端本插件独占的那层目录（相对资源根），机器格就放在它下面：`url` 可以填服务器/账号根。 */
+export const SYNC_NAMESPACE_DIR = 'dsh-session-manager'
 /** 每台机器自己的索引文件名。 */
 export const SYNC_INDEX_FILE = 'index.json'
 /** 会话包的后缀（与界面上导出的文件同名同格式）。 */
@@ -138,12 +142,12 @@ export function machineDirName(machineId: string): string {
 
 /** 某个格子里那条会话的包路径（相对资源根）。 */
 export function remoteBundlePath(machineId: string, id: string): string {
-  return `${SYNC_MACHINES_DIR}/${machineDirName(machineId)}/${encodeSegment(id)}${SYNC_BUNDLE_EXT}`
+  return `${SYNC_NAMESPACE_DIR}/${machineDirName(machineId)}/${encodeSegment(id)}${SYNC_BUNDLE_EXT}`
 }
 
 /** 某个格子的索引路径（相对资源根）。 */
 export function remoteIndexPath(machineId: string): string {
-  return `${SYNC_MACHINES_DIR}/${machineDirName(machineId)}/${SYNC_INDEX_FILE}`
+  return `${SYNC_NAMESPACE_DIR}/${machineDirName(machineId)}/${SYNC_INDEX_FILE}`
 }
 
 /** 默认的文件指纹：整文件 sha256。 */
@@ -555,19 +559,19 @@ export async function readRemoteLibrary(dav: DavPort, settings: SyncSettings): P
   const indexes = new Map<string, RemoteIndex>()
   let machines: string[] = []
   try {
-    const listed = await dav.list(SYNC_MACHINES_DIR)
+    const listed = await dav.list(SYNC_NAMESPACE_DIR)
     machines = listed
       .filter((entry) => entry.kind === 'collection')
       .map((entry) => entry.name)
       .sort()
   } catch (error) {
-    problems.push(`列远端 ${SYNC_MACHINES_DIR}/ 失败：${error instanceof Error ? error.message : String(error)}`)
+    problems.push(`列远端 ${SYNC_NAMESPACE_DIR}/ 失败：${error instanceof Error ? error.message : String(error)}`)
     return { machines, entries, indexes, problems }
   }
   for (const dirName of machines) {
     let text: string
     try {
-      text = (await dav.get(`${SYNC_MACHINES_DIR}/${dirName}/${SYNC_INDEX_FILE}`)).toString('utf8')
+      text = (await dav.get(`${SYNC_NAMESPACE_DIR}/${dirName}/${SYNC_INDEX_FILE}`)).toString('utf8')
     } catch (error) {
       // 404 = 这台机器还没推过东西（或推了一半）：不算问题，它这次不贡献任何会话。
       if ((error as { status?: number } | null)?.status === 404) continue
