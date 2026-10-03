@@ -21,7 +21,11 @@ import {
   savePlan,
   SYNC_SECTION,
   syncSectionOf,
+  testVerdict,
+  type SyncTestOutcome,
+  type SyncTestSentence,
 } from '../src/client/syncForm.ts'
+import { en, zh } from '../src/client/locales.ts'
 import { DEFAULT_PASSWORD_REF as CORE_DEFAULT_PASSWORD_REF } from '../src/config.ts'
 
 test('同步设置：entry id 是 profile 里那个 insert 的 id', () => {
@@ -174,4 +178,57 @@ test('同步设置：留空的密码不写、输了的才写，且写进配置�
   assert.equal(savePlan(draft, value, 'hunter2', false).password, undefined)
   // 只有密码变了也算脏（配置编辑可以是空数组），否则「保存」按钮永远点不亮。
   assert.deepEqual(savePlan(draft, value, 'hunter2', true).ops, [])
+})
+
+test('同步设置：测试连接的结论翻成哪一句（判定在宿主侧，这一层只挑句子）', () => {
+  const base: SyncTestOutcome = {
+    code: 'ok',
+    status: 207,
+    namespaceExists: false,
+    machines: [],
+    entries: 0,
+    username: 'webdav',
+    hasPassword: true,
+  }
+  const cases: Array<[string, SyncTestOutcome, SyncTestSentence]> = [
+    // 连得上：三种情形分开说——还没有这一层 / 有但还没机器推过 / 已经有机器格
+    ['还没建命名空间', { ...base }, { key: 'syncTestOkFirst' }],
+    ['命名空间在、但空', { ...base, namespaceExists: true }, { key: 'syncTestOkEmpty' }],
+    [
+      '已有机器格',
+      { ...base, namespaceExists: true, machines: ['robot-a', 'robot-b'], entries: 2 },
+      { key: 'syncTestOk', params: { machines: 'robot-a, robot-b' } },
+    ],
+    // 401 三句：没填用户名 / 引用名里没有值 / 服务器不认这套——处置完全不同，不能混
+    ['没填用户名', { ...base, code: 'unauthenticated', status: 401, username: null }, { key: 'syncTestNoUser', params: { status: 401 } }],
+    [
+      '引用名里没有值',
+      { ...base, code: 'unauthenticated', status: 401, hasPassword: false },
+      { key: 'syncTestNoPassword', params: { ref: 'DSH_DAV_PASSWORD' } },
+    ],
+    ['凭据不对', { ...base, code: 'unauthenticated', status: 401 }, { key: 'syncTestUnauthorized', params: { status: 401 } }],
+    ['没权限', { ...base, code: 'forbidden', status: 403 }, { key: 'syncTestForbidden', params: { status: 403 } }],
+    ['地址不对', { ...base, code: 'notFound', status: 404 }, { key: 'syncTestNotFound', params: { status: 404 } }],
+    ['不是 WebDAV', { ...base, code: 'unsupported', status: 405 }, { key: 'syncTestUnsupported', params: { status: 405 } }],
+    ['连不上', { ...base, code: 'unreachable', status: 0, detail: 'fetch failed' }, { key: 'syncTestUnreachable', params: { detail: 'fetch failed' } }],
+    [
+      '服务器出错',
+      { ...base, code: 'serverError', status: 503, detail: 'x' },
+      { key: 'syncTestServerError', params: { status: 503, detail: 'x' } },
+    ],
+    [
+      '认不出来的码也照实说',
+      { ...base, code: 'wat', status: 418, detail: 'teapot' },
+      { key: 'syncTestOther', params: { status: 418, detail: 'teapot' } },
+    ],
+  ]
+  for (const [name, outcome, expected] of cases) {
+    const sentence = testVerdict(outcome, 'DSH_DAV_PASSWORD')
+    assert.deepEqual(sentence, expected, name)
+    // 句子真在字典里：键写错了界面上会露出键名（`t()` 找不到就回落到键），而两种语言都得有。
+    assert.ok(sentence.key in zh, `${name}：中文缺 ${sentence.key}`)
+    assert.ok(sentence.key in en, `${name}：英文缺 ${sentence.key}`)
+  }
+  // 认不出来的码不许悄悄说成"连得上"
+  assert.notEqual(testVerdict({ ...base, code: 'wat', status: 418, detail: 'teapot' }, 'REF').key, 'syncTestOk')
 })

@@ -228,6 +228,13 @@ the configuration’s own `sync.passwordRef` (`DSH_DAV_PASSWORD` by default), so
 (or at a variable you already export) is done on the generic plugin-config form. A variable present in the
 launching environment shadows the write, and the password input is then shown as read-only.
 
+**Once it is configured, press “Test connection”**: it probes the remote once, read-only (two PROPFINDs,
+nothing is written), and answers with one sentence — reachable or not, authenticated or not, right address or
+not; on an authentication failure it separates “no username”, “the reference has no value” and “the server
+rejects this username/password”. It tests the **saved** configuration (the host runtime reads the config live),
+so the button is disabled while there are unsaved edits. Write permission is not tested here: the first sync
+creates that collection anyway, and a test should not leave anything on someone’s server.
+
 **One configuration for every machine**: each entry in the remote index also carries a **project identity** —
 the repository’s git remote (canonicalised to `host/owner/repo`) plus the session cwd relative to the
 repository root. On a pull, the local side matches that identity against its own candidate directories (session

@@ -29,7 +29,7 @@ import { projectionCacheDir } from './paths.ts'
 import { readRegistry, validateRegistry } from './registry.ts'
 import { runRemoval, type RemoveDeps, type RemovalRun } from './remove.ts'
 import { createTitleResolver, type TitleQuery } from './session-title.ts'
-import { runSync } from './sync.ts'
+import { runSync, testSyncConnection } from './sync.ts'
 import { type EffectMode, type PickerKind, type RegistryOps, type ResolvedPaths, type SyncInfo, type SyncRuntime } from './tools.ts'
 import {
   applyImport,
@@ -632,17 +632,36 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
   }
 
   /**
-   * WebDAV 同步：`?mode=apply` 才真跑（拉 + 推），缺省只预演（读远端，什么都不写）。
+   * WebDAV 同步：`?mode=apply` 才真跑（拉 + 推），`?mode=test` 只探一次连通性，缺省只预演（读远端，
+   * 什么都不写）。
    *
    * 拉下来的会话走的是**导入那条编排**（`runSync()` 内部调 `planImport/applyImport`），所以这里与
    * 导入端点同一套边界：包必须自校验通过、同 id 只跳过、`_no-cwd` 直接落项目目录。
    */
   const syncSessions = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     const url = new URL(req.url ?? '/', 'http://localhost')
-    const apply = url.searchParams.get('mode') === 'apply'
+    const mode = url.searchParams.get('mode')
+    const apply = mode === 'apply'
     const runtime = await deps.sync?.()
     if (runtime === undefined) {
       sendJson(res, 409, { error: '这个宿主没有配置 WebDAV 同步（插件配置里的 sync.url 是空的）' })
+      return
+    }
+    if (mode === 'test') {
+      // 只读探一次：判定在 sync.ts，这里补上"这次有没有带凭据"两个事实——界面据此把 401 分成
+      // "没配上密码"与"服务器不认这套"，那两句的处置完全不同。
+      try {
+        const result = await testSyncConnection(runtime.dav)
+        sendJson(res, 200, {
+          mode: 'test',
+          remote: { url: runtime.settings.url, machineId: runtime.settings.machineId },
+          ...result,
+          username: runtime.settings.username ?? null,
+          hasPassword: runtime.settings.password !== undefined,
+        })
+      } catch (error) {
+        sendJson(res, 500, { error: error instanceof Error ? error.message : String(error) })
+      }
       return
     }
     try {

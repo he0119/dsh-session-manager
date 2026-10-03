@@ -12,6 +12,7 @@ import { sessionDir } from '../src/paths.ts'
 import { projectKey } from '../src/project-key.ts'
 import { readRegistry, validateRegistry, writeRegistryAtomic } from '../src/registry.ts'
 import { createDavClient } from '../src/dav.ts'
+import { SYNC_NAMESPACE_DIR } from '../src/sync.ts'
 import type { DecodeAll, SessionHeader, WorkspaceRegistryState } from '../src/types.ts'
 import { API_PREFIX, createApiHandlers, registerWebRoutes, type WebRouteLike } from '../src/web.ts'
 import { encodeRawFrame } from '../src/zstd-frame.ts'
@@ -1027,7 +1028,84 @@ test('GET|POST /sync：这个宿主没配置同步时 409，且没有一个字�
     assert.equal(captured.status, 409)
     assert.match(String(json(captured)['error']), /没有配置 WebDAV 同步/)
   }
+  // 「测试连接」走同一个 409：没有 url 就没有可探的远端（这句比"PROPFIND 失败"有用得多）。
+  const probe = fakeRes()
+  await handlers['GET|POST /sync']!(fakeReq('GET', `${API_PREFIX}/sync?mode=test`), probe.res)
+  assert.equal(probe.captured.status, 409)
+  assert.match(String(json(probe.captured)['error']), /没有配置 WebDAV 同步/)
   assert.deepEqual(readRegistry(sandbox.registryPath).tables.workspaces['ws-a']?.sessionIds, ['session-a'])
+})
+
+test('GET /sync?mode=test：只读探一次，把结论与"这次有没有凭据"一起回给界面', async () => {
+  const sandbox = makeSandbox('web-sync-test')
+  writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000)
+  const fixture = await startDavFixture({
+    root: join(sandbox.base, 'dav'),
+    auth: { username: 'webdav', password: 's3cret' },
+  })
+  const runtimeOf = (client: ReturnType<typeof createDavClient>, password: string | undefined) =>
+    deps(sandbox, {
+      sync: async () => ({
+        settings: {
+          url: fixture.url,
+          machineId: 'robot-a',
+          mapping: {},
+          username: 'webdav',
+          ...(password === undefined ? {} : { password }),
+        },
+        dav: client,
+      }),
+    })
+  try {
+    // 凭据不对：结论是 401，而"这次到底有没有密码"是另一件事——界面据此把 401 分成"还没填密码"
+    // 与"服务器不认这套"，那两句的处置完全不同。
+    const wrong = fakeRes()
+    await createApiHandlers(runtimeOf(createDavClient({ baseUrl: fixture.url, username: 'webdav', password: 'nope' }), undefined))[
+      'GET|POST /sync'
+    ]!(fakeReq('GET', `${API_PREFIX}/sync?mode=test`), wrong.res)
+    assert.equal(wrong.captured.status, 200)
+    const denied = json(wrong.captured)
+    assert.equal(denied['mode'], 'test')
+    assert.equal(denied['code'], 'unauthenticated')
+    assert.equal(denied['status'], 401)
+    assert.equal(denied['hasPassword'], false, '这套设置里没有密码')
+    assert.equal(denied['username'], 'webdav')
+    assert.deepEqual(denied['machines'], [])
+    assert.equal(denied['remote'] && (denied['remote'] as Record<string, unknown>)['url'], fixture.url)
+    // 只读：凭据没过，第二次 PROPFIND 根本不发。
+    assert.deepEqual(fixture.requests, ['PROPFIND /dav/'])
+
+    // 凭据对了、远端还是空的：成功，且说得清"这一层还没建"。
+    fixture.requests.length = 0
+    const good = createDavClient({ baseUrl: fixture.url, username: 'webdav', password: 's3cret' })
+    const ok = fakeRes()
+    await createApiHandlers(runtimeOf(good, 's3cret'))['GET|POST /sync']!(
+      fakeReq('GET', `${API_PREFIX}/sync?mode=test`),
+      ok.res,
+    )
+    const first = json(ok.captured)
+    assert.equal(first['code'], 'ok')
+    assert.equal(first['namespaceExists'], false)
+    assert.equal(first['hasPassword'], true)
+    assert.deepEqual(fixture.requests, ['PROPFIND /dav/', `PROPFIND /dav/${SYNC_NAMESPACE_DIR}`])
+
+    // 远端已经有机器格：报出来。
+    await good.ensure(`${SYNC_NAMESPACE_DIR}/robot-a`)
+    const listed = fakeRes()
+    await createApiHandlers(runtimeOf(good, 's3cret'))['GET|POST /sync']!(
+      fakeReq('GET', `${API_PREFIX}/sync?mode=test`),
+      listed.res,
+    )
+    assert.deepEqual(json(listed.captured)['machines'], ['robot-a'])
+    // 只读：这一轮里除了那两次 PROPFIND 与前面建目录的 MKCOL，没有 PUT / GET / DELETE。
+    assert.deepEqual(
+      fixture.requests.filter((line) => !line.startsWith('PROPFIND') && !line.startsWith('MKCOL')),
+      [],
+    )
+  } finally {
+    await fixture.close()
+    rmSync(sandbox.base, { recursive: true, force: true })
+  }
 })
 
 test('POST /sync?mode=apply：预演不落地，apply 拉下远端那条并登记进本机工作区', async () => {

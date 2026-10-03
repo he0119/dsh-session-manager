@@ -127,6 +127,73 @@ test('dav：传输层失败（连不上的地址）报 status 0 而不是崩掉'
   assert.equal(error.status, 0)
 })
 
+test('dav：probe 只读地看清资源根、集合与里面有什么（两次 PROPFIND，一个字节都不写）', async () => {
+  await withFixture('probe', async (fixture, client) => {
+    await client.ensure('machines/robot-a')
+    const before = fixture.requests.length
+    assert.deepEqual(await client.probe('machines'), {
+      rootStatus: 207,
+      rootOk: true,
+      collectionStatus: 207,
+      collectionExists: true,
+      entries: [{ name: 'robot-a', kind: 'collection' }],
+    })
+    // "只读"是这条功能的承诺，所以钉住它发的是什么：恰好两次 PROPFIND。
+    assert.deepEqual(
+      fixture.requests.slice(before).map((line) => line.split(' ')[0]),
+      ['PROPFIND', 'PROPFIND'],
+    )
+  })
+})
+
+test('dav：probe 把"这一层还没建"与"认证不过 / 地址不对 / 连不上"分开报', async () => {
+  // 资源根在、要探的集合还没有：404 是正常的第一次（同步会 MKCOL 出来），不是失败。
+  await withFixture('probe-missing', async (_fixture, client) => {
+    assert.deepEqual(await client.probe('machines'), {
+      rootStatus: 207,
+      rootOk: true,
+      collectionStatus: 404,
+      collectionExists: false,
+      entries: [],
+    })
+  })
+
+  // 凭据不对：401 出在资源根那一次上，后面那次不发。
+  await withFixture(
+    'probe-401',
+    async (fixture, client) => {
+      const before = fixture.requests.length
+      const probe = await client.probe('machines')
+      assert.equal(probe.rootStatus, 401)
+      assert.equal(probe.rootOk, false)
+      assert.equal(probe.collectionStatus, 0, '资源根就没过，不再问第二次')
+      assert.deepEqual(probe.entries, [])
+      assert.match(String(probe.detail), /401/)
+      assert.equal(fixture.requests.length - before, 1)
+    },
+    { auth: { username: 'alice', password: 's3cret' }, clientAuth: { username: 'alice', password: 'wrong' } },
+  )
+
+  // 地址不对（资源根之外）：404。
+  const root = freshRoot('probe-404')
+  const fixture = await startDavFixture({ root })
+  try {
+    const client = createDavClient({ baseUrl: `${fixture.url}-typo` })
+    const probe = await client.probe('machines')
+    assert.equal(probe.rootStatus, 404)
+    assert.equal(probe.rootOk, false)
+  } finally {
+    await fixture.close()
+    rmSync(root, { recursive: true, force: true })
+  }
+
+  // 连不上：状态码 0 + 原始原因（不抛异常——探测要的是结论）。
+  const unreachable = await createDavClient({ baseUrl: 'http://127.0.0.1:1/dav', timeoutMs: 2_000 }).probe('machines')
+  assert.equal(unreachable.rootStatus, 0)
+  assert.equal(unreachable.rootOk, false)
+  assert.ok(typeof unreachable.detail === 'string' && unreachable.detail.length > 0)
+})
+
 test('dav：多状态响应解析对前缀、绝对 URL 与实体转义都宽容', () => {
   const xml = [
     '<?xml version="1.0" encoding="utf-8"?>',

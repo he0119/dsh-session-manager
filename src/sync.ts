@@ -544,6 +544,99 @@ export function parseIndex(text: string, machine: string, problems: string[]): R
 }
 
 /**
+ * 一次连通性探测的结论码。
+ *
+ * 判定在宿主侧（这里），**文案在浏览器半侧**：同一个码在两种语言里是两句话，而宿主不该猜用户装了哪
+ * 一种；网络层的原始原因（状态行、`getaddrinfo ENOTFOUND`）原样走 `detail`，那部分本来就翻不了。
+ */
+export type SyncTestCode =
+  /** 资源根应答了、认证过了：远端这就通了（命名空间还没建也算通，第一次同步会自建）。 */
+  | 'ok'
+  /** 401：服务器要认证，而它不认这套（或压根没带上凭据）。 */
+  | 'unauthenticated'
+  /** 403：认证过了，但这个账号没这个权限。 */
+  | 'forbidden'
+  /** 404：地址上没这个资源——多半是 `sync.url` 写错了。 */
+  | 'notFound'
+  /** 405 / 501：服务器不接受 PROPFIND，这不像一个 WebDAV 地址。 */
+  | 'unsupported'
+  /** 状态码为 0：DNS、连接、TLS 或超时。 */
+  | 'unreachable'
+  /** 5xx：服务器自己出错了。 */
+  | 'serverError'
+  /** 认不出的状态码：如实报出来，不硬塞进上面任何一类。 */
+  | 'other'
+
+/** 「测试连接」的结论（不含文案）。 */
+export interface SyncTestResult {
+  code: SyncTestCode
+  /** 判定依据的那个状态码（传输层错误为 0）。 */
+  status: number
+  /** 命名空间集合已经存在。 */
+  namespaceExists: boolean
+  /** 命名空间里已经有的机器格（按名字排序）；不存在时为空。 */
+  machines: string[]
+  /** 命名空间的直接子项数（文件也算）。 */
+  entries: number
+  /** 原始原因一句话；连得上时不带。 */
+  detail?: string
+}
+
+/** 状态码 → 结论码（`detail` 与"带没带凭据"由调用方补）。 */
+function classifyStatus(status: number): SyncTestCode {
+  if (status === 0) return 'unreachable'
+  if (status === 401) return 'unauthenticated'
+  if (status === 403) return 'forbidden'
+  if (status === 404) return 'notFound'
+  if (status === 405 || status === 501) return 'unsupported'
+  if (status >= 500) return 'serverError'
+  return 'other'
+}
+
+/**
+ * 测一次能不能连上远端：**只读**，不改远端任何东西。
+ *
+ * 两次 PROPFIND（资源根 Depth 0 + 本插件的命名空间 Depth 1）。为什么不顺手 MKCOL 一下命名空间、
+ * 甚至 PUT 一个探针文件来把"写权限"也验了：测试不该改远端——第一次同步本来就会 MKCOL 那一次，而
+ * 往别人的服务器上留文件（还得指望删掉）不是"测连接"该做的事。代价是只读共享会测出"连得上"，
+ * 直到确认那一步才失败；界面那句话里说清了这次探测没写任何东西。
+ *
+ * @param dav 远端。
+ * @returns 结论码、判定依据的状态码，以及命名空间里已有的机器格。
+ */
+export async function testSyncConnection(dav: DavPort): Promise<SyncTestResult> {
+  const probe = await dav.probe(SYNC_NAMESPACE_DIR)
+  // 失败的那个状态码：资源根没过就是它；资源根过了，命名空间除 404（还没建）以外的状态才算失败。
+  const failed = !probe.rootOk
+    ? probe.rootStatus
+    : probe.collectionStatus === 207 || probe.collectionStatus === 404
+      ? undefined
+      : probe.collectionStatus
+  if (failed !== undefined) {
+    return {
+      code: classifyStatus(failed),
+      status: failed,
+      namespaceExists: false,
+      machines: [],
+      entries: 0,
+      ...(probe.detail === undefined ? {} : { detail: probe.detail }),
+    }
+  }
+  const machines = probe.entries
+    .filter((entry) => entry.kind === 'collection')
+    .map((entry) => entry.name)
+    .sort()
+  return {
+    code: 'ok',
+    status: 207,
+    namespaceExists: probe.collectionExists,
+    machines,
+    entries: probe.entries.length,
+    ...(probe.detail === undefined ? {} : { detail: probe.detail }),
+  }
+}
+
+/**
  * 读远端：列机器格、逐格读索引、按 id 取并集。
  *
  * 同一个 id 有多台机器贡献时取**领先**的那份（代次超集且共有代次一致），没有领先关系就按目录名排序取

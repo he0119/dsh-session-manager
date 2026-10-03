@@ -28,6 +28,7 @@ import * as React from 'react'
 
 import { SettingsSecretField } from '@deepseek-ai/dsh-client-ui-primitives'
 
+import { testSync, type SyncTestResponse } from './api.ts'
 import { getCredentialsApi, type CredentialInfo } from './credentials.ts'
 import {
   draftFrom,
@@ -36,6 +37,7 @@ import {
   passwordRefOf,
   savePlan,
   syncSectionOf,
+  testVerdict,
   type MappingProblem,
   type MappingRow,
   type SyncDraft,
@@ -114,6 +116,11 @@ export function SyncConfigForm({
   const [failed, setFailed] = React.useState(false)
   /** 宿主拒了这一笔凭据写入时的原话（例如引用被启动环境里的值遮住）。 */
   const [credentialError, setCredentialError] = React.useState<string | undefined>(undefined)
+  // 「测试连接」：结果只用 `null` 当"还没测过"，好让冒烟用例把这个状态种出来（见 test/client.test.mjs）。
+  const [testing, setTesting] = React.useState(false)
+  const [testResult, setTestResult] = React.useState<SyncTestResponse | null>(null)
+  /** 那次测试请求本身没走通（宿主没配同步、连接断了）时的原话；与上面的"测出来的结论"是两件事。 */
+  const [testError, setTestError] = React.useState<string | undefined>(undefined)
 
   // 订阅：宿主那边配置一变（别处改了同一份文档、或保存被接受）就重新投影。没装读写面时订阅不了，
   // 也就没有别的来路会改这一份，因此不必假装订阅。
@@ -158,31 +165,42 @@ export function SyncConfigForm({
 
   const view = draft ?? draftFrom(section)
   const problems = draftProblems(view)
+  /** 草稿一动，上一次的测试结论就过期了：它说的是当时那份已保存的配置。 */
+  const clearTest = (): void => {
+    setTestResult(null)
+    setTestError(undefined)
+  }
   const edit = (patch: Partial<SyncDraft>): void => {
     setFailed(false)
+    clearTest()
     setDraft({ ...view, ...patch })
   }
   /** 改第 n 行的一侧；留空由保存前的校验去挡（不是每敲一下就报错）。 */
   const editMapping = (index: number, patch: Partial<MappingRow>): void => {
     setFailed(false)
+    clearTest()
     setDraft({ ...view, mapping: view.mapping.map((row, at) => (at === index ? { ...row, ...patch } : row)) })
   }
   const addMapping = (): void => {
     setFailed(false)
+    clearTest()
     setDraft({ ...view, mapping: [...view.mapping, { from: '', to: '' }] })
   }
   const removeMapping = (index: number): void => {
     setFailed(false)
+    clearTest()
     setDraft({ ...view, mapping: view.mapping.filter((_row, at) => at !== index) })
   }
   const editPassword = (text: string): void => {
     setFailed(false)
     setCredentialError(undefined)
+    clearTest()
     setPassword(text)
   }
   const discard = (): void => {
     setFailed(false)
     setCredentialError(undefined)
+    clearTest()
     setPassword('')
     setDraft(undefined)
   }
@@ -191,6 +209,28 @@ export function SyncConfigForm({
   const plan = savePlan(view, section, password, credentials !== undefined)
   const dirty = plan.ops.length > 0 || plan.password !== undefined
   const canSave = snapshot.writable && dirty && problems.length === 0 && !saving
+
+  // 「测试连接」测的是**已保存的**配置：宿主的运行时按配置现读（密码也从凭据库里现解析），所以草稿
+  // 还没保存时先别测——否则会拿旧地址、旧密码测出一个结论，而用户以为测的是刚敲进去的那一份。
+  const canTest = !dirty && !saving && !testing && view.url.trim() !== ''
+  const testConnection = (): void => {
+    if (!canTest) return
+    setTesting(true)
+    setTestError(undefined)
+    setTestResult(null)
+    void testSync().then(
+      (result) => {
+        setTesting(false)
+        setTestResult(result)
+      },
+      (error: unknown) => {
+        setTesting(false)
+        setTestError(error instanceof Error ? error.message : String(error))
+      },
+    )
+  }
+  // 结论码 → 句子：判定在宿主侧，句子在字典里（见 syncForm.ts 的 testVerdict）。
+  const verdict = testResult === null ? undefined : testVerdict(testResult, passwordRef)
 
   const save = (): void => {
     if (!canSave) return
@@ -208,6 +248,8 @@ export function SyncConfigForm({
             return
           }
           setDraft(undefined)
+          // 配置变了，上一次的测试结论说的是旧的地址/机器名：清掉，别让两句话并排摆着。
+          clearTest()
         }
         if (credentials !== undefined && plan.password !== undefined) {
           const written = await credentials.set(plan.password.ref, plan.password.value)
@@ -219,6 +261,7 @@ export function SyncConfigForm({
           }
           setPassword('')
           setCredentialGen((generation) => generation + 1)
+          clearTest()
         }
         // 让外面重读一次宿主状态：第一次配好 URL 时，同步卡片上的预演/确认按钮是照着 /state 画的，
         // 不重读就还是"没配置"的样子（用户刚存完却看不见按钮，会以为没生效）。
@@ -340,6 +383,21 @@ export function SyncConfigForm({
         {credentialError !== undefined && <span className="dsm-warn">{credentialError}</span>}
         {snapshot.writable && dirty && problems.length === 0 && !failed && <span className="dsm-hint">{t('unsaved')}</span>}
       </div>
+
+      {/*
+       * 配好之后先探一次：认证过不过、地址对不对。测的是**已保存的**配置（宿主的运行时按配置现读），
+       * 所以有草稿时按钮是禁用的，那句话也换成"先保存"。
+       */}
+      <div className="dsm-controls">
+        <button type="button" className="dsm-button" onClick={testConnection} disabled={!canTest}>
+          {testing ? t('syncTestRunning') : t('syncTest')}
+        </button>
+        <span className="dsm-hint">{dirty ? t('syncTestDirty') : t('syncTestHint')}</span>
+      </div>
+      {testError !== undefined && <p className="dsm-warn">{testError}</p>}
+      {verdict !== undefined && (
+        <p className={testResult?.code === 'ok' ? 'dsm-ok' : 'dsm-warn'}>{t(verdict.key, verdict.params)}</p>
+      )}
     </div>
   )
 }
