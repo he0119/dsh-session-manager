@@ -302,3 +302,62 @@ export function savePlan(
     ...(credentialsAvailable && typed !== undefined ? { password: { ref: passwordRefOf(value), value: typed } } : {}),
   }
 }
+
+/**
+ * 「测试连接」的结论里界面用得上的那几个字段（宿主响应的形状见 api.ts 的 `SyncTestResponse`）。
+ *
+ * 只留结构、不 import 那一侧：与 `SyncSectionValue` 同一个口径，宿主多带几个字段也不影响这里。
+ */
+export interface SyncTestOutcome {
+  code: string
+  status: number
+  namespaceExists: boolean
+  machines: readonly string[]
+  entries: number
+  detail?: string
+  username: string | null
+  hasPassword: boolean
+}
+
+/** 一句界面文案：字典键 + 占位符（`t(key, params)`）。 */
+export interface SyncTestSentence {
+  key: string
+  params?: Record<string, string | number>
+}
+
+/**
+ * 结论 → 一句话：判定在宿主侧给的 `code` 上，这一层只挑句子（句子在字典里，两种语言各一份）。
+ *
+ * 401 分成三句，因为处置完全不同：没填用户名 / 引用名里没有值 / 服务器不认这套。前两句是"缺东西"，
+ * 第三句才是"名字或密码不对"——把它们混成一句，用户就只能在服务器与配置之间来回猜。
+ *
+ * @param outcome 宿主给的结论。
+ * @param passwordRef 这次用的是哪个凭据引用名（界面自己算出来的那个，与宿主同一条规则）。
+ * @returns 字典键与占位符。
+ */
+export function testVerdict(outcome: SyncTestOutcome, passwordRef: string): SyncTestSentence {
+  const detail = outcome.detail ?? ''
+  switch (outcome.code) {
+    case 'ok':
+      if (!outcome.namespaceExists) return { key: 'syncTestOkFirst' }
+      if (outcome.machines.length === 0) return { key: 'syncTestOkEmpty' }
+      return { key: 'syncTestOk', params: { machines: outcome.machines.join(', ') } }
+    case 'unauthenticated':
+      if (outcome.username === null) return { key: 'syncTestNoUser', params: { status: outcome.status } }
+      if (!outcome.hasPassword) return { key: 'syncTestNoPassword', params: { ref: passwordRef } }
+      return { key: 'syncTestUnauthorized', params: { status: outcome.status } }
+    case 'forbidden':
+      return { key: 'syncTestForbidden', params: { status: outcome.status } }
+    case 'notFound':
+      return { key: 'syncTestNotFound', params: { status: outcome.status } }
+    case 'unsupported':
+      return { key: 'syncTestUnsupported', params: { status: outcome.status } }
+    case 'unreachable':
+      return { key: 'syncTestUnreachable', params: { detail } }
+    case 'serverError':
+      return { key: 'syncTestServerError', params: { status: outcome.status, detail } }
+    default:
+      // 认不出来的码也照实说：带上状态码与原始原因，好过悄悄显示成"成功"。
+      return { key: 'syncTestOther', params: { status: outcome.status, detail } }
+  }
+}

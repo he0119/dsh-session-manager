@@ -9,7 +9,7 @@ import test from 'node:test'
 
 import { decompress } from 'fzstd'
 
-import { createDavClient } from '../src/dav.ts'
+import { createDavClient, type DavPort } from '../src/dav.ts'
 import { scanAll, type DiscoveredSession } from '../src/discovery.ts'
 import { sessionDir } from '../src/paths.ts'
 import { projectKey } from '../src/project-key.ts'
@@ -27,6 +27,7 @@ import {
   remoteBundlePath,
   remoteIndexPath,
   runSync,
+  testSyncConnection,
   type FileFingerprint,
   type RemoteLibrary,
   type RemoteSessionEntry,
@@ -805,6 +806,131 @@ test('sync：端到端——真 git 认身份，两台机器仓库路径不同�
     assert.equal(scanAll(b.sessionsRoot, decodeAll)[0]?.cwd, bSub)
     assert.equal(readHeader(b, bSub, 's1').cwd, bSub, '落地那条会话的 header 也是本机克隆里的路径')
     assert.notEqual(aSub, bSub)
+  } finally {
+    await fixture.close()
+    rmSync(SANDBOX, { recursive: true, force: true })
+  }
+})
+
+// ── 测试连接（只读探一次） ────────────────────────────────────────────────
+
+/** 拿一组"探到的东西"造一个远端面：分类是纯判定，不必每次都起真服务。 */
+function probeStub(probe: {
+  rootStatus: number
+  rootOk: boolean
+  collectionStatus: number
+  collectionExists: boolean
+  entries?: Array<{ name: string; kind: 'collection' | 'file' }>
+  detail?: string
+}): DavPort {
+  return {
+    baseUrl: 'https://dav.example.com/dsh',
+    list: async () => [],
+    get: async () => Buffer.alloc(0),
+    put: async () => {},
+    ensure: async () => {},
+    probe: async () => ({ entries: [], ...probe }),
+  }
+}
+
+test('sync：测试连接把每种失败分开（码 + 判定依据的状态码，不抛）', async () => {
+  const unauthorizedProbe = { rootStatus: 401, rootOk: false, collectionStatus: 0, collectionExists: false, detail: 'PROPFIND … 返回 401 Unauthorized' }
+  const cases: Array<[string, Parameters<typeof probeStub>[0], number]> = [
+    ['401 认证失败', unauthorizedProbe, 401],
+    ['403 没权限', { rootStatus: 403, rootOk: false, collectionStatus: 0, collectionExists: false }, 403],
+    ['404 地址不对', { rootStatus: 404, rootOk: false, collectionStatus: 0, collectionExists: false }, 404],
+    ['405 不支持 PROPFIND', { rootStatus: 405, rootOk: false, collectionStatus: 0, collectionExists: false }, 405],
+    ['501 没实现', { rootStatus: 501, rootOk: false, collectionStatus: 0, collectionExists: false }, 501],
+    ['503 服务器出错', { rootStatus: 503, rootOk: false, collectionStatus: 0, collectionExists: false }, 503],
+    ['418 认不出来也照实报', { rootStatus: 418, rootOk: false, collectionStatus: 0, collectionExists: false }, 418],
+    ['连不上（状态码 0）', { rootStatus: 0, rootOk: false, collectionStatus: 0, collectionExists: false, detail: 'fetch failed' }, 0],
+  ]
+  const codes = {
+    401: 'unauthenticated',
+    403: 'forbidden',
+    404: 'notFound',
+    405: 'unsupported',
+    501: 'unsupported',
+    503: 'serverError',
+    418: 'other',
+    0: 'unreachable',
+  } as const
+  for (const [name, probe, status] of cases) {
+    const result = await testSyncConnection(probeStub(probe))
+    assert.equal(result.code, codes[status as keyof typeof codes], name)
+    assert.equal(result.status, status, name)
+    assert.deepEqual(result.machines, [], name)
+    assert.equal(result.namespaceExists, false, name)
+  }
+  // 原始原因原样带出去（界面要把它显示出来），认不出来的码也一样。
+  const unauthorized = await testSyncConnection(probeStub(unauthorizedProbe))
+  assert.match(String(unauthorized.detail), /401/)
+})
+
+test('sync：测试连接把"命名空间还没建"当成功，并列出已有的机器格', async () => {
+  // 资源根过了、这一层还没有：成功，且说得清"还没有"。
+  const first = await testSyncConnection(
+    probeStub({ rootStatus: 207, rootOk: true, collectionStatus: 404, collectionExists: false }),
+  )
+  assert.deepEqual(first, { code: 'ok', status: 207, namespaceExists: false, machines: [], entries: 0 })
+
+  // 资源根过了、这一层也在：把里面的机器格按名字报出来（文件不算机器格）。
+  const existing = await testSyncConnection(
+    probeStub({
+      rootStatus: 207,
+      rootOk: true,
+      collectionStatus: 207,
+      collectionExists: true,
+      entries: [
+        { name: 'robot-b', kind: 'collection' },
+        { name: 'robot-a', kind: 'collection' },
+        { name: 'stray.txt', kind: 'file' },
+      ],
+    }),
+  )
+  assert.deepEqual(existing, {
+    code: 'ok',
+    status: 207,
+    namespaceExists: true,
+    machines: ['robot-a', 'robot-b'],
+    entries: 3,
+  })
+
+  // 命名空间那一次不是 404 也不是 207（例如 403）：那才是失败，码取自它。
+  const denied = await testSyncConnection(
+    probeStub({ rootStatus: 207, rootOk: true, collectionStatus: 403, collectionExists: false }),
+  )
+  assert.equal(denied.code, 'forbidden')
+  assert.equal(denied.status, 403)
+})
+
+test('sync：测试连接打真服务——空远端、已有机器格、凭据不对三种情形', async () => {
+  rmSync(SANDBOX, { recursive: true, force: true })
+  mkdirSync(SANDBOX, { recursive: true })
+  const root = join(SANDBOX, 'probe-dav')
+  const fixture = await startDavFixture({ root, auth: { username: 'webdav', password: 's3cret' } })
+  try {
+    const good = createDavClient({ baseUrl: fixture.url, username: 'webdav', password: 's3cret' })
+    const empty = await testSyncConnection(good)
+    assert.deepEqual(empty, { code: 'ok', status: 207, namespaceExists: false, machines: [], entries: 0 })
+
+    // 远端已经有这台机器的格子：报出来（这是"地址对不对"最直接的证据）。
+    await good.ensure(`${SYNC_NAMESPACE_DIR}/robot-a`)
+
+    const before = fixture.requests.length
+    const withMachine = await testSyncConnection(good)
+    assert.deepEqual(withMachine.machines, ['robot-a'])
+    assert.equal(withMachine.namespaceExists, true)
+    // 只读：两次 PROPFIND，没有 MKCOL / PUT / GET。
+    assert.deepEqual(
+      fixture.requests.slice(before).map((line) => line.split(' ')[0]),
+      ['PROPFIND', 'PROPFIND'],
+    )
+
+    const wrong = createDavClient({ baseUrl: fixture.url, username: 'webdav', password: 'nope' })
+    const denied = await testSyncConnection(wrong)
+    assert.equal(denied.code, 'unauthenticated')
+    assert.equal(denied.status, 401)
   } finally {
     await fixture.close()
     rmSync(SANDBOX, { recursive: true, force: true })

@@ -305,6 +305,47 @@ export async function applySync(): Promise<SyncResponse> {
   return parsed
 }
 
+/** `GET|POST /sync?mode=test` 的响应：一次只读探测的结论（判定码在宿主侧，句子在界面）。 */
+export interface SyncTestResponse {
+  mode: 'test'
+  remote: { url: string; machineId: string }
+  code:
+    | 'ok'
+    | 'unauthenticated'
+    | 'forbidden'
+    | 'notFound'
+    | 'unsupported'
+    | 'unreachable'
+    | 'serverError'
+    | 'other'
+  /** 判定依据的状态码；传输层错误（DNS / 连接 / TLS / 超时）为 0。 */
+  status: number
+  /** 远端已经有 `dsh-session-manager/` 这一层。 */
+  namespaceExists: boolean
+  /** 这一层里已有的机器格（按名字排序）。 */
+  machines: string[]
+  /** 这一层里的直接子项数。 */
+  entries: number
+  /** 失败时的原始一句话（状态行或异常消息）；连得上时不带。 */
+  detail?: string
+  /** 这次用的用户名；没配就是 `null`。 */
+  username: string | null
+  /** 这次到底有没有拿到密码（值不会回来，只有"有没有"）。 */
+  hasPassword: boolean
+}
+
+/**
+ * 探一次远端：只读两次 PROPFIND，不改远端任何东西。
+ *
+ * 按**已保存的**配置测（宿主运行时按配置现读、密码从凭据库现解析），所以界面上有未保存的草稿时不该
+ * 调它——那会拿旧地址、旧密码测出一个结论。
+ */
+export async function testSync(): Promise<SyncTestResponse> {
+  return asJson<SyncTestResponse>(
+    await fetch(`${API_PREFIX}/sync?mode=test`, { headers: { accept: 'application/json' } }),
+  )
+}
+
 // ---- 会话管理：迁移 / 备份 / 回滚 ----
 
 /** 预演里的一条会话（宿主 `MigrationPreview.sessions`）。 */

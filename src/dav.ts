@@ -38,6 +38,27 @@ export interface DavEntry {
   bytes?: number
 }
 
+/**
+ * 一次连通性探测看到的东西。
+ *
+ * 只读：两次 PROPFIND（资源根 Depth 0、目标集合 Depth 1），不对远端做任何写。判定（这是不是
+ * "认证失败"、要不要提"命名空间还没建"）不在这里——这一层只报协议事实，翻译成语义在 sync.ts。
+ */
+export interface DavProbe {
+  /** 资源根那次 PROPFIND 的状态码；传输层错误（DNS / 连接 / TLS / 超时）为 0。 */
+  rootStatus: number
+  /** 资源根应答了 207：地址是对的、认证也过了。 */
+  rootOk: boolean
+  /** 目标集合那次 PROPFIND 的状态码；资源根就没成时为 0（没走到这一步）。 */
+  collectionStatus: number
+  /** 目标集合存在（那次 PROPFIND 回了 207）。 */
+  collectionExists: boolean
+  /** 目标集合的直接子项（不存在或没走到时为空数组）。 */
+  entries: DavEntry[]
+  /** 失败时的原始一句话（状态行或异常消息）；成功时不带。 */
+  detail?: string
+}
+
 /** 远端资源的最小面。测试用夹具实现它，`createDavClient()` 也实现它。 */
 export interface DavPort {
   /** 资源根地址（报告里显示用）。 */
@@ -50,6 +71,8 @@ export interface DavPort {
   put(path: string, bytes: Buffer): Promise<void>
   /** 保证一个集合存在（逐层 MKCOL，已存在不算错）。 */
   ensure(collection: string): Promise<void>
+  /** 只读探一次：资源根在不在、认证过不过、这个集合在不在（不改远端任何东西）。 */
+  probe(collection: string): Promise<DavProbe>
 }
 
 /** `createDavClient()` 的选项。 */
@@ -215,6 +238,67 @@ export function createDavClient(options: DavOptions): DavPort {
     }
   }
 
+  /**
+   * 一次探测请求：非 207 不抛，把状态码与一句话带回去。
+   *
+   * 探测要的是"看到了什么"（401 还是 404 还是连不上），不是异常——异常在这一层被翻译成 `status: 0`
+   * 与原始消息，判定交给上层（`testSyncConnection()`）。
+   */
+  async function attempt(path: string, depth: string): Promise<{ status: number; text?: string; detail?: string }> {
+    try {
+      const response = await request('PROPFIND', path, {
+        headers: { depth, 'content-type': 'application/xml; charset=utf-8' },
+        body: PROPFIND_BODY,
+      })
+      if (response.status === 207) return { status: 207, text: await response.text() }
+      return {
+        status: response.status,
+        detail: `PROPFIND ${urlOf(path)} 返回 ${response.status} ${response.statusText}`,
+      }
+    } catch (error) {
+      return { status: 0, detail: error instanceof Error ? error.message : String(error) }
+    }
+  }
+
+  async function probe(collection: string): Promise<DavProbe> {
+    // 先问资源根本身：地址写错（404）与认证不过（401）是两种完全不同的处置。
+    const root = await attempt('', '0')
+    if (root.status !== 207) {
+      return {
+        rootStatus: root.status,
+        rootOk: false,
+        collectionStatus: 0,
+        collectionExists: false,
+        entries: [],
+        ...(root.detail === undefined ? {} : { detail: root.detail }),
+      }
+    }
+    // 再问目标集合：404 = 这一层还没建（第一次同步会自建），不算失败。
+    const target = await attempt(collection, '1')
+    if (target.status !== 207) {
+      return {
+        rootStatus: 207,
+        rootOk: true,
+        collectionStatus: target.status,
+        collectionExists: false,
+        entries: [],
+        // 404 单独说清了（还没建），不再叠一句"返回 404"：那不是失败。
+        ...(target.status === 404 || target.detail === undefined ? {} : { detail: target.detail }),
+      }
+    }
+    const relative = joinPath(collection)
+    return {
+      rootStatus: 207,
+      rootOk: true,
+      collectionStatus: 207,
+      collectionExists: true,
+      entries: parseMultiStatus(target.text ?? '', {
+        path: decodeURIComponent(new URL(urlOf(collection)).pathname),
+        relative,
+      }),
+    }
+  }
+
   return {
     baseUrl: base,
 
@@ -270,5 +354,7 @@ export function createDavClient(options: DavOptions): DavPort {
     },
 
     ensure,
+
+    probe,
   }
 }

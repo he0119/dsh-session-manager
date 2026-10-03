@@ -189,13 +189,16 @@ function fakeDocument(nodes) {
 }
 
 /** 按模块加载器的契约执行产物，返回工厂与其 id。 */
-function loadBundle({ firstNull, panel, arrays, strings, nulls } = {}) {
+function loadBundle({ firstNull, panel, arrays, strings, nulls, fetch } = {}) {
   let entry = null
   const nodes = []
   const sandbox = {
     window: { __ModuleLoader__: { load: (value) => { entry = value } } },
     document: fakeDocument(nodes),
     console,
+    // 默认**没有** fetch：渲染路径不该发请求，给不了就当它不存在，省得漏掉一次真网络调用。
+    // 用例要核对"点这个按钮打了哪个端点"时显式给一个假 fetch（见「测试连接」那条）。
+    ...(fetch === undefined ? {} : { fetch }),
   }
   vm.runInNewContext(code, sandbox, { filename: 'lib/client.js' })
   assert.ok(entry !== null, '产物必须以 window.__ModuleLoader__.load({ id, factory }) 报名')
@@ -268,8 +271,8 @@ test('客户端产物：导出面符合客户端插件契约', { skip }, () => {
 })
 
 /** 跑一次 apply，收下所有注册面（后面几个用例共用）。 */
-function mount({ translate, state, panel, arrays, strings, nulls, configForms, credentials } = {}) {
-  const { mod, nodes, recorded } = loadBundle({ firstNull: state, panel, arrays, strings, nulls })
+function mount({ translate, state, panel, arrays, strings, nulls, configForms, credentials, fetch } = {}) {
+  const { mod, nodes, recorded } = loadBundle({ firstNull: state, panel, arrays, strings, nulls, fetch })
   const registrations = []
   const dictionaries = []
   const effects = []
@@ -1544,6 +1547,133 @@ test('客户端产物：同步设置表单按 entry id 向设置接缝取控制�
   assert.ok(noCredentialsText.includes('syncPasswordUnavailable'), '没凭据服务时说清密码只能走环境变量')
   assert.ok(!noCredentials.recorded.some((node) => node.props?.id === 'dsm-dav-password'), '也不摆那个控件')
   assert.ok(noCredentialsText.includes('syncMapAdd'), '其余字段照旧能改')
+})
+
+test('客户端产物：同步设置里的「测试连接」——按钮、只读提示与三种结论', { skip }, async () => {
+  const state = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    sync: { url: 'https://dav.example.com/dsh', machineId: 'robot-a', mappings: 1 },
+    sessions: [],
+    workspaces: [],
+  }
+  const controller = {
+    getSnapshot: () => ({
+      status: 'ready',
+      writable: true,
+      revision: 4,
+      value: { sync: { url: 'https://dav.example.com/dsh', machineId: 'robot-a', timeoutMs: 30000, mapping: {} } },
+    }),
+    subscribe: () => () => {},
+    mutate: async () => true,
+  }
+  const credentials = {
+    async describe(refs) {
+      return { ok: true, value: Object.fromEntries(refs.map((ref) => [ref, { configured: false, writable: true }])) }
+    },
+    async set() {
+      return { ok: true, value: undefined }
+    },
+  }
+  const render = (extra = {}) => {
+    const mounted = mount({ state, panel: 'sync', configForms: { get: () => controller }, credentials, ...extra })
+    return { mounted, text: strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject())) }
+  }
+  // 假钩子不会点按钮，所以"结论行"由 `nulls` 按顺序种进去：第一个种子被骨架的会话库状态（`state`）
+  // 吃掉，接着五个分别是骨架的错误、同步页的预演结果 / busy / 错误 / 通知，第六个才是这张表单的
+  // 测试结论（顺序见 ManagerPanel / SyncPanel / SyncConfigForm 里 useState 的先后）。
+  const outcomeOf = (outcome) => render({ nulls: [null, null, null, null, null, outcome] })
+
+  const fresh = render()
+  assert.ok(fresh.text.some((item) => item === 'syncTest'), '有「测试连接」按钮')
+  assert.ok(fresh.text.some((item) => item === 'syncTestHint'), '旁边说明这次探测是只读的')
+  assert.equal(fresh.text.includes('syncTestDirty'), false, '没有草稿时不摆"先保存"那句')
+  const testButton = fresh.mounted.recorded.find((node) => node.type === 'button' && node.props?.children === 'syncTest')
+  assert.ok(testButton !== undefined, '按钮是个真的 button')
+  assert.equal(testButton.props.disabled, false, '配了 url、又没有草稿：可以直接测')
+  assert.equal(fresh.text.some((item) => String(item).startsWith('syncTestOk')), false, '没测之前不摆结论')
+
+  // 401 且库里没有密码：这是最常见的那一次失败，说清"引用名里没有值"（而不是笼统的"认证失败"）。
+  const denied = outcomeOf({
+    mode: 'test',
+    remote: { url: 'https://dav.example.com/dsh', machineId: 'robot-a' },
+    code: 'unauthenticated',
+    status: 401,
+    namespaceExists: false,
+    machines: [],
+    entries: 0,
+    detail: 'PROPFIND https://dav.example.com/dsh/dsh-session-manager 返回 401 Unauthorized',
+    username: 'webdav',
+    hasPassword: false,
+  })
+  const deniedLine = 'syncTestNoPassword:{"ref":"DSH_DAV_PASSWORD"}'
+  assert.ok(denied.text.some((item) => item === deniedLine), '没密码的 401 要说清是引用名里没有值')
+  assert.ok(
+    denied.mounted.recorded.some((node) => node.props?.className === 'dsm-warn' && node.props?.children === deniedLine),
+    '失败那行用警示色',
+  )
+
+  const reachable = outcomeOf({
+    mode: 'test',
+    remote: { url: 'https://dav.example.com/dsh', machineId: 'robot-a' },
+    code: 'ok',
+    status: 207,
+    namespaceExists: true,
+    machines: ['robot-a', 'robot-b'],
+    entries: 2,
+    username: 'webdav',
+    hasPassword: true,
+  })
+  const okLine = 'syncTestOk:{"machines":"robot-a, robot-b"}'
+  assert.ok(reachable.text.some((item) => item === okLine), '连得上时把远端已有的机器格列出来')
+  assert.ok(
+    reachable.mounted.recorded.some((node) => node.props?.className === 'dsm-ok' && node.props?.children === okLine),
+    '成功那行用成功色',
+  )
+
+  // 有未保存的改动时测的不是刚敲进去的那一份：按钮禁用，那句话也换成"先保存"。草稿本身种不进假
+  // 钩子（它的初值是 `undefined`，只有 `null` 与 `''` 能被种），但"刚敲了密码还没保存"同样是脏的
+  // ——密码框正好是这条渲染路径上第一个 `useState('')`，用它把表单弄脏。
+  const edited = render({ strings: ['s3cret'] })
+  assert.ok(edited.text.some((item) => item === 'syncTestDirty'), '有草稿时那句改成"先保存"')
+  assert.equal(edited.text.includes('syncTestHint'), false, '脏的时候不再说"只读探测"')
+  const editedButton = edited.mounted.recorded.find(
+    (node) => node.type === 'button' && node.props?.children === 'syncTest',
+  )
+  assert.equal(editedButton.props.disabled, true, '测的是已保存的配置：有草稿就先别测')
+
+  // 点一下按钮：打的是 `/sync?mode=test`（端点写错的话这一条会红——结论行本身是宿主回的，测不到它）。
+  const calls = []
+  const clicked = render({
+    fetch: async (url) => {
+      calls.push(String(url))
+      return { ok: true, status: 200, text: async () => JSON.stringify({ mode: 'test', code: 'ok' }) }
+    },
+  })
+  const clickable = clicked.mounted.recorded.find(
+    (node) => node.type === 'button' && node.props?.children === 'syncTest',
+  )
+  clickable.props.onClick()
+  await Promise.resolve()
+  assert.deepEqual(calls, ['/dsh-session-manager/api/sync?mode=test'], '按钮打的就是那个只读探测端点')
+
+  const unreachable = outcomeOf({
+    mode: 'test',
+    remote: { url: 'https://dav.example.com/dsh', machineId: 'robot-a' },
+    code: 'unreachable',
+    status: 0,
+    namespaceExists: false,
+    machines: [],
+    entries: 0,
+    detail: 'fetch failed',
+    username: null,
+    hasPassword: false,
+  })
+  assert.ok(
+    unreachable.text.some((item) => item === 'syncTestUnreachable:{"detail":"fetch failed"}'),
+    '连不上时把原始原因原样带出来',
+  )
 })
 
 test('客户端产物：同步独占「同步」分页，传输页不再有那张同步卡片', { skip }, () => {
