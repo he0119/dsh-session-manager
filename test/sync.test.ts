@@ -547,6 +547,42 @@ test('sync：端到端——扫描出来的会话与指纹能被远端读回认�
   }
 })
 
+test('contentFingerprint：cwd 不同、内容相同的两份会话哈希相同，且等于冻结值', () => {
+  // 冻结值来自"解整篇 + 自校验"的旧实现：换实现不许改哈希口径，否则远端索引里已发布的
+  // 指纹会被判成"两边各自写过"。同一份夹具用两个 cwd 各算一次，钉住"cwd 无关"。
+  const FROZEN = 'f22b7f75e4cc10d9b3dd31fabfe99c168c27756dbdc89fceebe1a51792422d3a'
+  const dir = join(SANDBOX, 'fingerprint')
+  rmSync(dir, { recursive: true, force: true })
+  mkdirSync(dir, { recursive: true })
+  const make = (cwd: string): string => {
+    const header: SessionHeader = {
+      type: 'session',
+      version: 4,
+      id: 'session-abc',
+      createdAt: 1,
+      cwd,
+      isSeeded: false,
+      delegationDepth: 0,
+    }
+    const path = join(dir, `${cwd.replaceAll('/', '_')}.zstd`)
+    writeFileSync(
+      path,
+      Buffer.concat([
+        encodeRawFrame(JSON.stringify(header) + '\n'),
+        encodeRawFrame('{"type":"turn/start","seq":0}\n'),
+        encodeRawFrame('{"type":"turn/end","seq":1}\n'),
+      ]),
+    )
+    return path
+  }
+  const mine = contentFingerprint(make('/home/u/dev/one'), 1, 'zstd', decodeAll)
+  const theirs = contentFingerprint(make('/home/u/dev/two'), 1, 'zstd', decodeAll)
+  assert.equal(mine.sha256, FROZEN)
+  assert.equal(theirs.sha256, FROZEN, 'cwd 不同不该改哈希')
+  assert.equal(mine.bytes, 210, 'bytes 仍是文件的真实长度')
+  rmSync(dir, { recursive: true, force: true })
+})
+
 test('sync：项目身份——一条映射都不配也能落地（两台机器共用同一份配置）', () => {
   const remote = remoteOf([
     {

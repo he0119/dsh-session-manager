@@ -3,9 +3,9 @@ import test from 'node:test'
 
 import { decompress } from 'fzstd'
 
-import { readSessionLog, relocateHeaderCwd } from '../src/session-log.ts'
+import { readSessionLog, relocateHeaderCwd, relocateHeaderCwdShallow } from '../src/session-log.ts'
 import type { DecodeAll, SessionHeader } from '../src/types.ts'
-import { encodeRawFrame } from '../src/zstd-frame.ts'
+import { encodeRawFrame, splitFirstFrameFast } from '../src/zstd-frame.ts'
 
 const decodeAll: DecodeAll = (buf: Uint8Array): string => Buffer.from(decompress(buf)).toString('utf8')
 
@@ -103,6 +103,58 @@ test('relocateHeaderCwd：首帧含多行时拒绝（假定首帧只承载 heade
     encodeRawFrame('{}\n'),
   ])
   assert.throws(() => relocateHeaderCwd(twoLines, { from: FROM, to: TO, decodeAll }), /expected exactly the header/)
+})
+
+test('relocateHeaderCwdShallow：产出与 relocateHeaderCwd 逐字节一致', () => {
+  const buf = makeLog(header, events)
+  const strict = relocateHeaderCwd(buf, { from: FROM, to: TO, decodeAll })
+  const shallow = relocateHeaderCwdShallow(buf, { from: FROM, to: TO, decodeAll })
+  assert.deepEqual(shallow.buffer, strict.buffer)
+  assert.equal(shallow.boundary, strict.boundary)
+  assert.equal(shallow.nextHeader.cwd, TO)
+  assert.equal(shallow.header.cwd, FROM)
+})
+
+test('relocateHeaderCwdShallow：首帧含多行时与严格实现一样拒绝', () => {
+  const twoLines = Buffer.concat([
+    encodeRawFrame(JSON.stringify(header) + '\n' + '{"type":"turn/start"}\n'),
+    encodeRawFrame('{}\n'),
+  ])
+  assert.throws(() => relocateHeaderCwdShallow(twoLines, { from: FROM, to: TO, decodeAll }), /expected exactly the header/)
+})
+
+test('relocateHeaderCwdShallow：cwd 已是目标值时原样返回', () => {
+  const buf = makeLog(header, events)
+  const r = relocateHeaderCwdShallow(buf, { from: FROM, to: FROM, decodeAll })
+  assert.equal(r.unchanged, true)
+  assert.deepEqual(r.buffer, buf)
+  assert.equal(r.boundary, 0)
+})
+
+test('relocateHeaderCwdShallow：header 无 cwd 时拒绝', () => {
+  const { cwd: _omitted, ...noCwd } = header
+  assert.throws(
+    () => relocateHeaderCwdShallow(makeLog(noCwd, events), { from: undefined, to: TO, decodeAll }),
+    /no cwd/,
+  )
+})
+
+test('relocateHeaderCwdShallow：尾部有坏帧时照样产出（严格实现会因整篇解码失败而拒绝）', () => {
+  // 这是两者有意保留的差别：严格实现要保证"写出去的字节整体可解码"，浅改写只读、不写。
+  const good = makeLog(header, events)
+  const broken = Buffer.concat([good, Buffer.from([0x28, 0xb5, 0x2f, 0xfd, 0xff, 0xff, 0xff, 0xff])])
+  assert.throws(() => relocateHeaderCwd(broken, { from: FROM, to: TO, decodeAll }))
+  const shallow = relocateHeaderCwdShallow(broken, { from: FROM, to: TO, decodeAll })
+  // 首帧之外（含那段坏字节）逐字节原样保留：新首帧长度与旧的不同，所以按"尾巴长度"对齐。
+  const split = splitFirstFrameFast(broken, decodeAll)
+  assert.ok(split)
+  const rest = split.rest
+  assert.deepEqual(shallow.buffer.subarray(shallow.buffer.length - rest.length), rest)
+  const rewrittenHeader = JSON.parse(
+    decodeAll(shallow.buffer.subarray(0, shallow.buffer.length - rest.length)).trim(),
+  ) as SessionHeader
+  assert.equal(rewrittenHeader.cwd, TO)
+  assert.equal(rewrittenHeader.id, header.id)
 })
 
 test('relocateHeaderCwd：保留 header 的可选字段与顺序', () => {

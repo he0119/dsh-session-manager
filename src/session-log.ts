@@ -3,7 +3,7 @@
 // 核心不变式：只改写首行 header 的 cwd 值，其余字节在语义与字节两个层面都不变。
 // 会话正文里出现的旧路径属于**历史事实**（当时确实写在旧目录），保持原样。
 import type { CompressFrame, DecodeAll, SessionHeader } from './types.ts'
-import { encodeRawFrame, splitFirstFrame } from './zstd-frame.ts'
+import { encodeRawFrame, splitFirstFrame, splitFirstFrameFast } from './zstd-frame.ts'
 
 /** 首个 header 行里的 cwd 值（JSON 字符串字面量，含引号）。 */
 const CWD_FIELD = /"cwd":"(?:[^"\\]|\\.)*"/
@@ -185,5 +185,56 @@ export function relocateHeaderCwd(buf: Buffer, options: RelocateOptions): Reloca
     boundary: split.boundary,
     firstFrameBytes: compressed.length,
     events,
+  }
+}
+
+/** 浅改写（只解首帧）的结果。 */
+export interface RelocateShallowResult {
+  /** 新日志字节（`unchanged` 为 true 时与原样相同）。 */
+  buffer: Buffer
+  /** 原 header。 */
+  header: SessionHeader
+  /** 改写后的 header。 */
+  nextHeader: SessionHeader
+  /** 首帧结束的字节偏移（`unchanged` 时为 0）。 */
+  boundary: number
+  /** cwd 已是目标值、未做任何改写。 */
+  unchanged?: boolean
+}
+
+/**
+ * 只改 header 的 cwd，且**只解首帧**：给"读一读就算"的用途（内容指纹）用。
+ *
+ * 与 [`relocateHeaderCwd`] 同一套不变式——同一份 `CWD_FIELD`、同样要求首帧只承载 header 一行、
+ * 同样只在 cwd 与目标不同时才产出新字节——差别只有两处，都是为了不白花钱：
+ *
+ *   1. 不做"改写结果整体可解码"的自校验：那份校验保护的是**写出去的字节**，而这条路一个字节都不写；
+ *   2. 不整篇解码：首帧之外的内容既不解、也不参与改写，原样拼回去。
+ *
+ * 于是同一条会话的产出与 [`relocateHeaderCwd`] 逐字节相同（`test/session-log.test.ts` 逐份比对），
+ * 但 6 MB 的日志从"解四遍"降到"解首帧一遍"。
+ *
+ * @throws 首帧切不出来、首帧不止一行、header 无 cwd、或 cwd 之外发生变化时抛错（不产出半成品）。
+ */
+export function relocateHeaderCwdShallow(buf: Buffer, options: RelocateOptions): RelocateShallowResult {
+  const { from, to, decodeAll, compressFrame = encodeRawFrame } = options
+  const split = splitFirstFrameFast(buf, decodeAll)
+  if (!split) throw new Error('could not locate a first-frame boundary')
+
+  const firstLines = split.first.split('\n')
+  if (firstLines.length - 1 !== 1) {
+    throw new Error(`first frame carries ${firstLines.length - 1} lines, expected exactly the header`)
+  }
+
+  const firstFrame = relocateHeaderCwdText(split.first, to, from)
+  if (firstFrame.unchanged) {
+    return { buffer: buf, header: firstFrame.header, nextHeader: firstFrame.nextHeader, boundary: 0, unchanged: true }
+  }
+
+  return {
+    buffer: Buffer.concat([compressFrame(firstFrame.text), split.rest]),
+    header: firstFrame.header,
+    nextHeader: firstFrame.nextHeader,
+    boundary: split.boundary,
   }
 }
