@@ -213,7 +213,7 @@ export function SyncPanel({ t = fallback, state, reload }: PanelShare): React.Re
             {syncPulls.length > 0 && (
               <>
                 <p className="dsm-hint">{t('syncPullHead', { count: syncPulls.length })}</p>
-                <table className="dsm-table dsm-planTable">
+                <table className="dsm-table dsm-planTable dsm-syncPlanTable">
                   <thead>
                     <tr>
                       <th className="dsm-colAction">{t('colAction')}</th>
@@ -226,7 +226,9 @@ export function SyncPanel({ t = fallback, state, reload }: PanelShare): React.Re
                     {syncPulls.map((entry) => (
                       <tr key={entry.id}>
                         <td>
-                          <span className="dsm-tag dsm-tagCreate">{t('syncCodeMissingPull')}</span>
+                          <span className="dsm-tag dsm-tagCreate" title={t('syncCodeMissingPull')}>
+                            {t('syncTagPull')}
+                          </span>
                         </td>
                         <td>
                           <span className="dsm-rowTitle" title={entry.id}>
@@ -249,7 +251,7 @@ export function SyncPanel({ t = fallback, state, reload }: PanelShare): React.Re
             {syncPushes.length > 0 && (
               <>
                 <p className="dsm-hint">{t('syncPushHead', { count: syncPushes.length })}</p>
-                <table className="dsm-table dsm-planTable">
+                <table className="dsm-table dsm-planTable dsm-syncPlanTable">
                   <thead>
                     <tr>
                       <th className="dsm-colAction">{t('colAction')}</th>
@@ -262,8 +264,11 @@ export function SyncPanel({ t = fallback, state, reload }: PanelShare): React.Re
                     {syncPushes.map((entry) => (
                       <tr key={entry.id}>
                         <td>
-                          <span className={`dsm-tag ${entry.code === 'local-ahead' ? 'dsm-tagSkip' : 'dsm-tagCreate'}`}>
-                            {entry.code === 'local-ahead' ? t('syncCodeLocalAhead') : t('syncCodeMissingPush')}
+                          <span
+                            className={`dsm-tag ${entry.code === 'local-ahead' ? 'dsm-tagSkip' : 'dsm-tagCreate'}`}
+                            title={entry.code === 'local-ahead' ? t('syncCodeLocalAhead') : t('syncCodeMissingPush')}
+                          >
+                            {entry.code === 'local-ahead' ? t('syncTagRepush') : t('syncTagPush')}
                           </span>
                         </td>
                         <td>

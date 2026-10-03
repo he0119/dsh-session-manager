@@ -1676,6 +1676,80 @@ test('客户端产物：同步设置里的「测试连接」——按钮、只�
   )
 })
 
+test('客户端产物：同步预演的动作列只放动词，整句解释挂在 title 上', { skip }, () => {
+  // 真实事故（用户截图报的）：动作列沿用导入预演那 60px，而它装的是「本机有、远端没有」这种短语
+  // （实测 110px，en 158px），nowrap 直接画到后面那一列的会话名上。现在这一列只放动词，整句留在
+  // title 里；列宽与兜底规则在 styles.ts（由 test/styles.test.mjs 钉住）。
+  const state = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    sync: { url: 'https://dav.example.com/dsh', machineId: 'robot-a', mappings: 0 },
+    sessions: [],
+    workspaces: [],
+  }
+  const response = {
+    mode: 'plan',
+    remote: { url: 'https://dav.example.com/dsh', machineId: 'robot-a' },
+    plan: {
+      ok: true,
+      problems: [],
+      pull: [
+        { id: 'session-a', machine: 'robot-b', bytes: 100, action: 'create', code: 'missing', fromCwd: '/home/b/dev/x' },
+      ],
+      push: [
+        { id: 'session-b', bytes: 200, action: 'upload', code: 'missing', cwd: '/home/u/dev/x' },
+        { id: 'session-c', bytes: 300, action: 'update', code: 'local-ahead', cwd: '/home/u/dev/x' },
+        { id: 'session-d', bytes: 400, action: 'skip', code: 'diverged', machine: 'robot-b', cwd: '/home/u/dev/x' },
+      ],
+      pullIds: ['session-a'],
+      pushIds: ['session-b', 'session-c'],
+      bytesIn: 100,
+      bytesOut: 500,
+      localCount: 4,
+      remoteCount: 1,
+      machines: ['robot-b'],
+    },
+    applied: false,
+    pulled: [],
+    pushed: [],
+    bytesIn: 0,
+    bytesOut: 0,
+    registryWritten: false,
+    indexWritten: false,
+    problems: [],
+    takesEffect: 'immediate',
+  }
+  // 第一个种子被骨架的会话库状态吃掉，第二个才是同步页的预演结果（见 ManagerPanel / SyncPanel 的
+  // useState 先后）。
+  const mounted = mount({ state, panel: 'sync', nulls: [null, response] })
+  const tree = mounted.registrations[0].component(mounted.registrations[0].registration.inject())
+  const text = strings(tree)
+
+  // 两张表都带上"同步预演"这个变体类：列宽由它自己那条规则给（styles.ts 的 .dsm-syncPlanTable）。
+  const tables = mounted.recorded.filter((node) => node.type === 'table')
+  assert.equal(
+    tables.filter((node) => String(node.props?.className).includes('dsm-syncPlanTable')).length,
+    2,
+    '拉表与推表都要带变体类，否则列宽还是导入预演那 60px',
+  )
+
+  // 动作列：看得见的是动词，整句在 title 里。
+  const tagOf = (visible, title) =>
+    mounted.recorded.find((node) => node.props?.children === visible && node.props?.title === title)
+  assert.ok(tagOf('syncTagPull', 'syncCodeMissingPull'), '拉表那颗标签是「拉下来」，整句在 title 上')
+  assert.ok(tagOf('syncTagPush', 'syncCodeMissingPush'), '推表新推的那颗是「推上去」')
+  assert.ok(tagOf('syncTagRepush', 'syncCodeLocalAhead'), '本机领先的那颗是「重推刷新」')
+
+  // 整句不许再当动作列的可见文字（它会把邻居那一列压掉）；它还留在「这次不动」那段说明里。
+  assert.equal(text.includes('syncCodeMissingPush'), false, '动作列不再放整句')
+  assert.equal(text.includes('syncCodeMissingPull'), false)
+  assert.ok(
+    text.some((item) => String(item).startsWith('syncNote:') && String(item).includes('syncCodeDiverged')),
+    '「这次不动」那段照旧给整句（那里是整行说明，不是窄列）',
+  )
+})
+
 test('客户端产物：同步独占「同步」分页，传输页不再有那张同步卡片', { skip }, () => {
   const state = {
     sessionsRoot: '/home/u/.dsh/sessions',

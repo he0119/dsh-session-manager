@@ -280,6 +280,11 @@ export const zh = {
   syncCodeDiverged: '两边各自写过（{machine}）',
   syncCodeNoMapping: '缺映射：{from}',
   syncCodeMissingTarget: '目标目录不存在：{to}',
+  // 预演表的动作列只有 60~88px 宽（见 styles.ts 的 .dsm-syncPlanTable）：那一列里放**动作**，
+  // 上面那几句"为什么"留给「这次不动」那一段的整句说明，悬停时由 title 补充。
+  syncTagPull: '拉下来',
+  syncTagPush: '推上去',
+  syncTagRepush: '重推刷新',
   syncNote: '{name}：{why}',
 
   // 同步设置表单（宿主设置接缝）
@@ -595,6 +600,12 @@ export const en: Record<keyof typeof zh, string> = {
   syncCodeDiverged: 'both sides wrote ({machine})',
   syncCodeNoMapping: 'no mapping for {from}',
   syncCodeMissingTarget: 'target directory missing: {to}',
+  // The plan table's action column is 60-88px wide (see .dsm-syncPlanTable in styles.ts): that column
+  // holds the **action**; the "why" sentences above stay for the "left alone" list, and the title
+  // attribute carries them on hover.
+  syncTagPull: 'Pull',
+  syncTagPush: 'Push',
+  syncTagRepush: 'Re-push',
   syncNote: '{name}: {why}',
 
   // Sync settings form (the host settings seam)
