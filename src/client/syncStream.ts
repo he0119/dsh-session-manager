@@ -15,18 +15,22 @@
  * 同步进行中的一条进度事件（宿主 `SyncProgress`）。
  *
  * `done` 是**已经做完**的条数——事件发在开始处理下一条之前，所以正在处理的是第 `done + 1` 条。
+ *
+ * 六段各有各的分母：`scan` / `remote` / `repo` / `compare` 是算计划的四段（预演就有），
+ * `pull` / `push` 是真写盘的两段。`id` 与 `label` 只有写盘那两段有（"正在处理某一条"），算计划那四段
+ * 只报做到哪儿。
  */
 export interface SyncProgressEvent {
-  /** 这一段是拉还是推。 */
-  phase: 'pull' | 'push'
+  /** 这一段是什么（见上）。 */
+  phase: 'scan' | 'remote' | 'repo' | 'compare' | 'pull' | 'push'
   /** 这一段一共多少条。 */
   total: number
   /** 这一段已经做完几条。 */
   done: number
-  /** 正在处理的那条会话 id。 */
-  id: string
+  /** 正在处理的那条会话 id（算计划那四段没有）。 */
+  id?: string
   /** 界面上怎么称呼它（标题优先，读不到退回 id）。 */
-  label: string
+  label?: string
 }
 
 /**

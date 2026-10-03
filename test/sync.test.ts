@@ -140,6 +140,64 @@ async function syncMachine(
   )
 }
 
+/**
+ * 只留**写盘**那两段的进度（拉 / 推）。
+ *
+ * 算计划的三段（扫本机 / 读远端索引 / 比对内容）每次都报，`planPhases()` 单看它们——两者混在
+ * 一起比，任何一处改动都会让另一处的失败信息看不出说的是谁。
+ */
+function writePhases(events: readonly SyncProgress[]): string[] {
+  return events
+    .filter((event) => event.phase === 'pull' || event.phase === 'push')
+    .map((event) => `${event.phase} ${event.done}/${event.total}`)
+}
+
+/** 只留算计划那三段的进度。 */
+function planPhases(events: readonly SyncProgress[]): string[] {
+  return events
+    .filter(
+      (event) =>
+        event.phase === 'scan' || event.phase === 'remote' || event.phase === 'repo' || event.phase === 'compare',
+    )
+    .map((event) => `${event.phase} ${event.done}/${event.total}`)
+}
+
+test('scanAll：进度分母是"这次要尝试的条目数"，跨项目目录也是同一个分母', () => {
+  // 分母数少了（比如只数真会话）进度条会停在 33%；数多了又永远走不到头；而**按项目目录分别报**
+  // 会让进度条每换一个目录就跳回 0。这里的库跨两个项目目录：A 里两条会话 + 一个只有临时文件的
+  // 目录 + 一个普通文件（4 个条目），B 里一条会话（1 个条目）——分母是 5，一条条数到 4。
+  const machine = makeMachine('scan-progress')
+  try {
+    writeSession(machine, 'one', 1000)
+    writeSession(machine, 'two', 2000)
+    const elsewhere = join(machine.base, 'other')
+    mkdirSync(elsewhere, { recursive: true })
+    writeSession(machine, 'three', 3000, { cwd: elsewhere })
+    const projectDir = dirname(sessionDir(machine.sessionsRoot, machine.cwd, 'one'))
+    mkdirSync(join(projectDir, 'half-written'), { recursive: true })
+    writeFileSync(join(projectDir, 'stray.txt'), 'not a session')
+
+    const seen: string[] = []
+    const sessions = scanAll(machine.sessionsRoot, decodeAll, {
+      onProgress: (done, total) => seen.push(`${done}/${total}`),
+    })
+    // 目录遍历顺序由文件系统给，所以只钉形状：每条报一次、分母不变、done 从 0 数到 total - 1。
+    assert.deepEqual(
+      seen.map((entry) => entry.split('/')[1]),
+      ['5', '5', '5', '5', '5'],
+      '分母是整库要尝试的条目数（跨项目目录累加，含那两个不成会话的条目）',
+    )
+    assert.deepEqual(
+      seen.map((entry) => Number(entry.split('/')[0])),
+      [0, 1, 2, 3, 4],
+      'done 从 0 数起：事件发在开始处理那一条之前（与同步那两段同一个口径）',
+    )
+    assert.equal(sessions.length, 3, '不成会话的条目只是让进度走一格，不进结果')
+  } finally {
+    rmSync(machine.base, { recursive: true, force: true })
+  }
+})
+
 /** 读一条日志的首帧（header）。 */
 function readHeader(machine: Machine, cwd: string, id: string): SessionHeader {
   const buf = readFileSync(join(sessionDir(machine.sessionsRoot, cwd, id), 'session.v4.jsonl.zstd'))
@@ -691,8 +749,19 @@ test('sync：端到端——两个不同路径的克隆靠 git remote 认成同�
     assert.equal(remote.entries.get('s1')?.repo, 'github.com/he0119/demo-proj', '推上去的索引带着项目身份')
     assert.equal(remote.entries.get('s1')?.repoPath, 'packages/web', '以及仓库内相对路径')
 
-    const outcome = await syncMachine(b, dav, { ...config, machineId: 'robot-b' }, { apply: true, git: gitB })
+    const probing: SyncProgress[] = []
+    const outcome = await syncMachine(b, dav, { ...config, machineId: 'robot-b' }, {
+      apply: true,
+      git: gitB,
+      onProgress: (event) => probing.push(event),
+    })
     assert.deepEqual(outcome.pulled, ['s1'])
+    // 认仓库身份那一段（真机上它比前两段加起来还长：每个候选目录一个 git 进程）也要报进度。
+    assert.deepEqual(
+      planPhases(probing),
+      ['remote 0/0', 'repo 0/1'],
+      '本机还没有会话、注册表里有一个工作区：扫本机没有条目可数，候选目录就那一个',
+    )
     const local = scanAll(b.sessionsRoot, decodeAll)
     assert.equal(local.length, 1)
     assert.equal(local[0]?.cwd, bSub, 'cwd 改写成这台机器的克隆路径（中间那条映射一个字都没配）')
@@ -1012,13 +1081,21 @@ test('sync：每开始处理一条报一次进度，拉与推各自一段', asyn
       onProgress: (event) => pushing.push(event),
     })
     assert.deepEqual(
-      pushing.map((event) => `${event.phase} ${event.done}/${event.total}`),
+      writePhases(pushing),
       ['push 0/3', 'push 1/3', 'push 2/3'],
       '推那一段：三条各报一次，done 从 0 数起（事件发在开始处理那条之前）',
     )
-    assert.deepEqual([...new Set(pushing.map((event) => event.id))].sort(), ['far', 'one', 'two'])
+    assert.deepEqual(
+      [...new Set(pushing.filter((event) => event.phase === 'push').map((event) => event.id))].sort(),
+      ['far', 'one', 'two'],
+    )
     assert.equal(pushing.find((event) => event.id === 'one')?.label, '第一条', 'label 用读到的标题')
     assert.equal(pushing.find((event) => event.id === 'two')?.label, 'two', '读不到标题就退回 id')
+    assert.deepEqual(
+      planPhases(pushing),
+      ['scan 0/3', 'scan 1/3', 'scan 2/3', 'remote 0/0'],
+      '落地前先算计划：本机三条会话各报一次、远端索引前后各一条——按下确认后到第一条推上去之间不空等',
+    )
 
     const pulling: SyncProgress[] = []
     const outcome = await syncMachine(b, dav, settings(b, { machineId: 'robot-b', mapping: { [a.cwd]: b.cwd } }), {
@@ -1028,11 +1105,20 @@ test('sync：每开始处理一条报一次进度，拉与推各自一段', asyn
     })
     assert.deepEqual([...outcome.pulled].sort(), ['one', 'two'])
     assert.deepEqual(
-      pulling.map((event) => `${event.phase} ${event.done}/${event.total}`),
+      planPhases(pulling),
+      ['remote 0/0'],
+      '本机库是空的：扫本机一段一条都数不到，就不报（分母 0 的进度条闪一下只是噪声）',
+    )
+    assert.deepEqual(
+      writePhases(pulling),
       ['pull 0/2', 'pull 1/2'],
       '拉那一段同样逐条报，分母排掉落不下来的那条（`far`：没配映射），也不掺进推送那一段',
     )
-    assert.deepEqual([...new Set(pulling.map((event) => event.id))].sort(), ['one', 'two'], 'skip 的那条不报进度')
+    assert.deepEqual(
+      [...new Set(pulling.filter((event) => event.phase === 'pull').map((event) => event.id))].sort(),
+      ['one', 'two'],
+      'skip 的那条不报进度',
+    )
     assert.equal(pulling.find((event) => event.id === 'one')?.label, '第一条', '远端记的标题跟着包一起过来')
 
     // 再同步一次：库里有同 id、远端那份也一样，全是 skip。
@@ -1042,7 +1128,12 @@ test('sync：每开始处理一条报一次进度，拉与推各自一段', asyn
       git: gitNone,
       onProgress: (event) => again.push(event),
     })
-    assert.deepEqual(again, [], '跳过的那些不进分母，也不报进度——报了进度条就永远走不满')
+    assert.deepEqual(writePhases(again), [], '跳过的那些不进分母，也不报进度——报了进度条就永远走不满')
+    assert.deepEqual(
+      planPhases(again),
+      ['scan 0/2', 'scan 1/2', 'remote 0/0', 'compare 0/2', 'compare 1/2'],
+      '全都跳过时也要报算计划那三段：时间照花（读本机、读远端、逐条比对内容），只是没有写盘那两段',
+    )
   } finally {
     await fixture.close()
     rmSync(SANDBOX, { recursive: true, force: true })

@@ -96,11 +96,19 @@ export function SyncConfigForm({
   t,
   onSaved,
   remoteCwds = [],
+  machineDefault,
 }: {
   t: Translate
   onSaved?: () => void
   /** 上次同步的计划里见过的远端 cwd：给"远端"那一栏当候选，省得手抄一条长路径。 */
   remoteCwds?: readonly string[]
+  /**
+   * 机器名那一栏的**缺省值**（宿主解析出来的：没配就是主机名）。
+   *
+   * 那一栏留空不等于"没有机器名"——宿主会拿主机名顶上，所以灰字要把它写出来，与「超时」那一栏的
+   * 30000 同一个口径。卡片标题原来也印一遍这个名字，现在只在这里认。
+   */
+  machineDefault?: string
 }): React.ReactElement | null {
   const api = getSyncConfigApi()
   // 凭据服务每次渲染现取：它由别的客户端插件提供，可能晚于本页挂载（取到的那一组方法见
@@ -289,6 +297,8 @@ export function SyncConfigForm({
           hint={t('syncFieldMachineHint')}
           value={view.machineId}
           onChange={(machineId) => edit({ machineId })}
+          // 留空时宿主用主机名顶上：把那个名字写成灰字，用户才知道"空着会叫什么"。
+          placeholder={machineDefault ?? ''}
         />
         <Field
           label={t('syncFieldTimeout')}

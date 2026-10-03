@@ -37,6 +37,13 @@ export interface ConfirmDialogProps {
   busy: boolean
   /** 计划还在算：正文是一行说明，主按钮禁用。 */
   planning?: boolean
+  /**
+   * 算计划期间正文里摆什么（缺省是一句「预演中…」）。
+   *
+   * 给得出具体进度的调用方（同步预演要先扫本机、读远端、逐条比对内容，冷的时候几秒）用进度条顶掉
+   * 那句静态说明；删除/迁移这类一次就回来的预演不必给，一句「预演中…」更省事。
+   */
+  planningDetail?: React.ReactNode
   /** 计划没取到时的原话（宿主或网络层的异常），摆在正文里并禁用主按钮。 */
   error?: string | null
   /**
@@ -68,6 +75,7 @@ export function ConfirmDialog({
   busyLabel,
   busy,
   planning = false,
+  planningDetail,
   error = null,
   disabled = false,
   onConfirm,
@@ -100,7 +108,7 @@ export function ConfirmDialog({
     >
       {/* 正文自己再包一层：官方 `.body` 是纵向 flex 但不给块间距，而这里摆的是段落 + 清单 + 表格。 */}
       <div className="dsm-dialogBody">
-        {planning && <p className="dsm-hint">{t('previewing')}</p>}
+        {planning && (planningDetail ?? <p className="dsm-hint">{t('previewing')}</p>)}
         {error !== null && <p className="dsm-error">{error}</p>}
         {children}
       </div>

@@ -266,7 +266,7 @@ export const zh = {
 
   // ---- WebDAV 同步 ----
   syncTitle: 'WebDAV 同步',
-  syncWhere: '远端 {url} · 这台机器 {machine}',
+  syncWhere: '远端 {url}',
   syncHint:
     '按插件配置里的映射同步：把别处推来的会话拉到本机，把本机独有的推上去。远端放的是一个个 .dshsess 包，拉下来时会按映射改写成这台机器的路径。同一个 id 只跳过、不覆盖。映射 {mappings} 条。',
   syncOffHint:
@@ -276,6 +276,9 @@ export const zh = {
   syncRunning: '正在同步',
   syncBusy: '同步中…',
   syncPreparing: '正在读取远端索引…',
+  syncScanning: '正在扫描本机会话 {current} / {total}',
+  syncMatchingRepos: '正在核对本机仓库 {current} / {total}',
+  syncComparing: '正在比对内容 {current} / {total}',
   syncPulling: '正在拉取 {current} / {total}',
   syncPushing: '正在推送 {current} / {total}',
   syncProgressNote: '同步只增不覆盖：中断了再点一次「同步」会接着补齐，所以这里没有「取消」。',
@@ -311,7 +314,7 @@ export const zh = {
   syncFieldUrl: '远端地址',
   syncFieldUrlHint: 'WebDAV 地址，可以填服务器根（插件在它下面自建 dsh-session-manager/）；清空就等于关掉同步。',
   syncFieldMachine: '机器名',
-  syncFieldMachineHint: '这台机器的标识，缺省取主机名；两台机器别用同一个。',
+  syncFieldMachineHint: '这台机器的标识，留空就按框里那个灰字（本机主机名）；两台机器别用同一个。',
   syncFieldTimeout: '超时（毫秒）',
   syncFieldTimeoutHint: '单次请求的上限，缺省 30000。',
   syncFieldUser: '用户名',
@@ -603,7 +606,7 @@ export const en: Record<keyof typeof zh, string> = {
 
   // ---- WebDAV sync ----
   syncTitle: 'WebDAV sync',
-  syncWhere: 'Remote {url} · this machine {machine}',
+  syncWhere: 'Remote {url}',
   syncHint:
     'Syncs through the mapping in the plugin configuration: pulls what other machines pushed, pushes what only this machine has. The remote holds one .dshsess bundle per session, and a pull rewrites the cwd to this machine’s mapped directory. A session id that already exists is skipped, never overwritten. {mappings} mapping(s).',
   syncOffHint:
@@ -613,6 +616,9 @@ export const en: Record<keyof typeof zh, string> = {
   syncRunning: 'Syncing',
   syncBusy: 'Syncing…',
   syncPreparing: 'Reading the remote index…',
+  syncScanning: 'Scanning local sessions {current} / {total}',
+  syncMatchingRepos: 'Matching local repositories {current} / {total}',
+  syncComparing: 'Comparing contents {current} / {total}',
   syncPulling: 'Pulling {current} / {total}',
   syncPushing: 'Pushing {current} / {total}',
   syncProgressNote: 'Sync only adds, never overwrites: if it stops, sync again and it carries on where it left off — that is why there is no Cancel here.',
@@ -648,7 +654,7 @@ export const en: Record<keyof typeof zh, string> = {
   syncFieldUrl: 'Remote URL',
   syncFieldUrlHint: 'The WebDAV address; a server root works (the plugin creates dsh-session-manager/ under it). Clearing it turns sync off.',
   syncFieldMachine: 'Machine id',
-  syncFieldMachineHint: 'This machine’s identity, the hostname by default; never share one across machines.',
+  syncFieldMachineHint: 'This machine’s identity; leave it empty for the greyed-out hostname; never share one across machines.',
   syncFieldTimeout: 'Timeout (ms)',
   syncFieldTimeoutHint: 'Per-request limit, 30000 by default.',
   syncFieldUser: 'Username',

@@ -53,6 +53,15 @@ test('interpretSyncEvent：三种事件各解释成什么', () => {
     kind: 'progress',
     progress: { phase: 'push', total: 84, done: 12, id: 's-1', label: '一' },
   })
+  // 算计划那三段没有 id / label（不是"正在处理某一条"），解释器照原样传过去，界面按 phase 说话。
+  assert.deepEqual(interpretSyncEvent('{"type":"progress","progress":{"phase":"scan","total":85,"done":42}}'), {
+    kind: 'progress',
+    progress: { phase: 'scan', total: 85, done: 42 },
+  })
+  assert.deepEqual(interpretSyncEvent('{"type":"progress","progress":{"phase":"compare","total":12,"done":7}}'), {
+    kind: 'progress',
+    progress: { phase: 'compare', total: 12, done: 7 },
+  })
   const result = interpretSyncEvent('{"type":"result","result":{"mode":"apply","applied":true}}')
   assert.equal(result?.kind, 'result')
   assert.deepEqual(result?.kind === 'result' ? result.result : null, { mode: 'apply', applied: true })

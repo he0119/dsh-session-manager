@@ -125,6 +125,57 @@ function syncWhere(entry: SyncRow): string {
   }
 }
 
+/**
+ * 进度那行字。
+ *
+ * `done` 是**已经做完**的条数、事件发在开始处理下一条之前，所以正在处理的是第 `done + 1` 条——与
+ * 进度条的 `current` 同一个数，两处必须一起变。读远端索引是一次网络往返，没有"第几条"可讲，所以那
+ * 一段是固定的一句（`syncPreparing`）。
+ */
+function progressTextOf(t: Translate, progress: SyncProgressEvent): string {
+  switch (progress.phase) {
+    case 'scan':
+      return t('syncScanning', { current: progress.done + 1, total: progress.total })
+    case 'repo':
+      return t('syncMatchingRepos', { current: progress.done + 1, total: progress.total })
+    case 'compare':
+      return t('syncComparing', { current: progress.done + 1, total: progress.total })
+    case 'remote':
+      return t('syncPreparing')
+    case 'pull':
+      return t('syncPulling', { current: progress.done + 1, total: progress.total })
+    case 'push':
+      return t('syncPushing', { current: progress.done + 1, total: progress.total })
+  }
+}
+
+/**
+ * 进度条 + 那行字（+ 正在处理的那一条）。
+ *
+ * 算计划那四段（扫本机 / 读远端 / 认仓库 / 比对内容）没有"某一条"可讲，`label` 缺席时不摆那一行——
+ * 预演与落地共用这一段，落地那边前四个阶段也是这个形状。
+ */
+function ProgressBlock({
+  t,
+  progress,
+}: {
+  t: Translate
+  progress: SyncProgressEvent
+}): React.ReactElement {
+  const text = progressTextOf(t, progress)
+  // "只增不覆盖、再点一次接着补齐"那句话只在真写盘的两段有意义：预演阶段还没有东西可覆盖。
+  const writing = progress.phase === 'pull' || progress.phase === 'push'
+  return (
+    <>
+      {/* 分母是 0 的那一段（读一次远端索引）没有"第几条"：只摆那句话，不摆条。 */}
+      {progress.total > 0 && <ProgressBar current={progress.done + 1} total={progress.total} label={text} />}
+      <p className="dsm-hint">{text}</p>
+      {progress.label === undefined ? null : <p className="dsm-rowTitle">{progress.label}</p>}
+      {writing && <p className="dsm-hint">{t('syncProgressNote')}</p>}
+    </>
+  )
+}
+
 /** 同步页。 */
 export function SyncPanel({ t = fallback, state, reload }: PanelShare): React.ReactElement {
   /** 最近一次计划或结果：映射表的远端候选与弹窗正文都读它（关掉弹窗之后候选还得在）。 */
@@ -159,7 +210,8 @@ export function SyncPanel({ t = fallback, state, reload }: PanelShare): React.Re
     setError(null)
     setNotice(null)
     setFailures([])
-    void fetchSyncPlan().then(
+    setProgress(null)
+    void fetchSyncPlan(setProgress).then(
       (response) => {
         setBusy(null)
         setSync(response)
@@ -241,19 +293,6 @@ export function SyncPanel({ t = fallback, state, reload }: PanelShare): React.Re
   ]
   /** 计划还在算：正文暂时不画（`sync` 里可能还留着上一次的那份结果，摆出来会被当成这次的）。 */
   const planning = dialog === 'plan' && busy === 'plan'
-  /**
-   * 进度那行字：「正在拉取 3 / 5」。
-   *
-   * `done` 是**已经做完**的条数，而事件是在开始处理下一条之前发的，所以正在处理的是第 `done + 1`
-   * 条——与进度条的 `current` 同一个数，两处必须一起变。
-   */
-  const progressText =
-    progress === null
-      ? ''
-      : t(progress.phase === 'pull' ? 'syncPulling' : 'syncPushing', {
-          current: progress.done + 1,
-          total: progress.total,
-        })
 
   return (
     <>
@@ -286,7 +325,7 @@ export function SyncPanel({ t = fallback, state, reload }: PanelShare): React.Re
         <div className="dsm-cardHead">
           <span className="dsm-cardTitle">{t('syncTitle')}</span>
           {syncInfo !== null && (
-            <span className="dsm-hint">{t('syncWhere', { url: syncInfo.url, machine: syncInfo.machineId })}</span>
+            <span className="dsm-hint">{t('syncWhere', { url: syncInfo.url })}</span>
           )}
           {syncInfo !== null && <span className="dsm-spacer" />}
           {syncInfo !== null && (
@@ -300,7 +339,14 @@ export function SyncPanel({ t = fallback, state, reload }: PanelShare): React.Re
           {syncInfo === null ? t('syncOffHint') : t('syncHint', { mappings: syncInfo.mappings })}
         </p>
         {/* 配置表单就在「同步」旁边：改完 URL 立刻能同步一次。宿主没有设置接缝时这一块自己说明。 */}
-        <SyncConfigForm t={t} onSaved={() => void reload()} remoteCwds={remoteCwds} />
+        <SyncConfigForm
+          t={t}
+          onSaved={() => void reload()}
+          remoteCwds={remoteCwds}
+          // 机器名那一栏的灰字：宿主解析出来的缺省值（没配就是主机名）。摆在这儿比摆回标题上近——
+          // 要改的就在同一行，不必先回标题里认一遍这台机器叫什么。
+          machineDefault={syncInfo === null ? undefined : syncInfo.machineId}
+        />
       </div>
 
       {/* 同步弹窗：计划与「确认」同框（见 ConfirmDialog.tsx 的说明）。 */}
@@ -313,21 +359,19 @@ export function SyncPanel({ t = fallback, state, reload }: PanelShare): React.Re
           busyLabel={t('syncBusy')}
           busy={busy === 'apply'}
           planning={planning}
+          // 预演那几秒不是在空等：先扫本机、再读远端索引、最后逐条比对内容。算到哪一步摆哪一步的进度
+          // （还没有事件时退回 ConfirmDialog 那句「预演中…」）。
+          planningDetail={progress === null ? undefined : <ProgressBlock t={t} progress={progress} />}
           error={null}
           onConfirm={doSyncApply}
           onCancel={() => setDialog(null)}
         >
+        {/* 落地：前面三个阶段（算计划）与后面两段（拉 / 推）报的是同一套事件，画法也一样。 */}
         {busy === 'apply' &&
           (progress === null ? (
             <p className="dsm-hint">{t('syncPreparing')}</p>
           ) : (
-            <>
-              <ProgressBar current={progress.done + 1} total={progress.total} label={progressText} />
-              <p className="dsm-hint">{progressText}</p>
-              {/* 当前这条：一条几 MB 的包会在这上面停一会儿，那正是"在动"的证据。 */}
-              <p className="dsm-rowTitle">{progress.label}</p>
-              <p className="dsm-hint">{t('syncProgressNote')}</p>
-            </>
+            <ProgressBlock t={t} progress={progress} />
           ))}
         {busy !== 'apply' && !planning && sync !== null && syncPlan !== null && (
           <div>

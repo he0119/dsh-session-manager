@@ -29,7 +29,7 @@ import { projectionCacheDir } from './paths.ts'
 import { readRegistry, validateRegistry } from './registry.ts'
 import { runRemoval, type RemoveDeps, type RemovalRun } from './remove.ts'
 import { createTitleResolver, type TitleQuery } from './session-title.ts'
-import { runSync, testSyncConnection, type SyncOutcome } from './sync.ts'
+import { runSync, testSyncConnection, type SyncOutcome, type SyncProgress } from './sync.ts'
 import { type EffectMode, type PickerKind, type RegistryOps, type ResolvedPaths, type SyncInfo, type SyncRuntime } from './tools.ts'
 import {
   applyImport,
@@ -712,32 +712,24 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
     })
 
     /*
-     * 落地那一次走事件流：`{type:'progress'}` 每条一次、`{type:'result'}` 收尾、`{type:'error'}` 兜底。
+     * 预演与落地都走事件流：`{type:'progress'}` 每做一条一次、`{type:'result'}` 收尾、`{type:'error'}`
+     * 兜底。预演也要进度——它得先扫本机（每条会话读头、折标题）、再读远端索引、最后逐条比对内容，
+     * 冷启动时这几秒里界面原来只有一句"预演中…"；落地那边同样受益，按下确认后到第一条拉下来之间
+     * 算的还是这三个阶段。
+     *
      * 流一旦开始，HTTP 状态就已经发出去了（200），所以这一段的错误只能靠事件说——客户端按
      * `content-type` 区分"流"与"一次性 JSON"（没配置同步那类错发生在写头之前，仍然是 JSON +
      * 409/500）。
      */
-    if (apply) {
-      sendEventStream(res)
-      try {
-        const outcome = await runSync(syncDeps, {
-          apply: true,
-          onProgress: (progress) => sendEvent(res, { type: 'progress', progress }),
-        })
-        sendEvent(res, { type: 'result', result: payloadOf(outcome) })
-      } catch (error) {
-        sendEvent(res, { type: 'error', error: error instanceof Error ? error.message : String(error) })
-      }
-      res.end()
-      return
-    }
-
-    // 预演还是一次性 JSON：它只读远端索引、回一份计划，没有"做到第几条"可讲。
+    sendEventStream(res)
     try {
-      sendJson(res, 200, payloadOf(await runSync(syncDeps, { apply: false })))
+      const onProgress = (progress: SyncProgress): void => sendEvent(res, { type: 'progress', progress })
+      const outcome = await runSync(syncDeps, apply ? { apply: true, onProgress } : { apply: false, onProgress })
+      sendEvent(res, { type: 'result', result: payloadOf(outcome) })
     } catch (error) {
-      sendJson(res, 500, { error: error instanceof Error ? error.message : String(error) })
+      sendEvent(res, { type: 'error', error: error instanceof Error ? error.message : String(error) })
     }
+    res.end()
   }
 
   const removeDeps: RemoveDeps = {

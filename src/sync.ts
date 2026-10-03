@@ -701,20 +701,32 @@ export async function readRemoteLibrary(dav: DavPort, settings: SyncSettings): P
  * 界面不能只有一个"同步中…"。事件按**每开始处理一条**发一次（不是每完成一条），所以 `done` 是
  * 已经做完的条数，界面拿 `done + 1` 说"正在处理第几条"，进度条因此一路走到最后一格。
  *
- * 拉与推各自是一段（`phase`），两段的 `total` 不同：合起来算一个百分比只会骗人（先拉的 3 条与
- * 后推的 84 条不是同一个分母）。
+ * 六段（`phase`）各有各的分母，合起来算一个百分比只会骗人：算计划要先扫本机、再读远端索引、再逐个
+ * 目录认本机仓库的身份（真机量到这一段比前两段加起来还长：13 个目录跑一轮 `git rev-parse` 约
+ * 0.2 秒）、最后逐条比对内容，然后落地再分拉与推两段（先拉的 3 条与后推的 84 条同样不是一个分母）。
+ * **预演与落地报的是同一套事件**：落地那边也要先算一遍计划，用户按下确认后到第一条拉下来之间那段
+ * 空档，靠的就是前面这四个阶段。
  */
 export interface SyncProgress {
-  /** 这一段是拉还是推。 */
-  phase: 'pull' | 'push'
-  /** 这一段一共多少条（计划里定下、真会做的那些；跳过的没算进来）。 */
+  /**
+   * 这一段是什么：
+   *   - `scan` / `remote` / `repo` / `compare`：算计划的四段（预演与落地都有）；
+   *   - `pull` / `push`：真写盘的两段（只有落地有）。
+   */
+  phase: 'scan' | 'remote' | 'repo' | 'compare' | 'pull' | 'push'
+  /**
+   * 这一段一共多少条（计划里定下、真会做的那些；跳过的没算进来）。
+   *
+   * `0` 表示这一段**没有条数可讲**（例如读一次远端索引）：界面只摆那句话，不摆进度条——画一条
+   * 1/1 的会让人以为"已经做完了"，而它其实还在等。
+   */
   total: number
   /** 这一段已经做完几条。 */
   done: number
-  /** 正在开始处理的那条会话 id。 */
-  id: string
+  /** 正在开始处理的那条会话 id（`scan` / `remote` / `compare` 没有"某一条"，缺席）。 */
+  id?: string
   /** 界面上怎么称呼它（标题优先，读不到退回 id）——与清单里同一套口径。 */
-  label: string
+  label?: string
 }
 
 /** 落地的结果。 */
@@ -790,8 +802,9 @@ function repoCandidates(deps: SyncDeps, local: readonly DiscoveredSession[]): st
  *
  * @param deps 远端、设置与本地库的位置。
  * @param options.apply 为 false 只算计划（除了读远端，什么都不写）。
- * @param options.onProgress 每开始处理一条调一次（见 `SyncProgress`）；调用方拿它推进度条。回调
- *   同步调用、不 await，所以它自己不许抛（`src/web.ts` 那一侧把它写进 SSE 响应）。
+ * @param options.onProgress 每开始处理一条调一次（见 `SyncProgress`）；调用方拿它推进度条。预演与
+ *   落地报的是同一套事件（算计划的四段 + 写盘的两段）。回调同步调用、不 await，所以它自己不许抛
+ *   （`src/web.ts` 那一侧把它写进 SSE 响应）。
  * @returns 结果；单条失败只记进 `problems`，不半路放弃整次同步。
  */
 export async function runSync(
@@ -799,11 +812,15 @@ export async function runSync(
   options: { apply: boolean; onProgress?: (event: SyncProgress) => void },
 ): Promise<SyncOutcome> {
   const problems: string[] = []
-  const local = scanAll(
-    deps.sessionsRoot,
-    deps.decodeAll,
-    deps.resolveTitle === undefined ? {} : { resolveTitle: deps.resolveTitle },
-  )
+  const report = options.onProgress
+  // 第一段：扫本机。冷启动时这一段是大头（每条会话要读头、折标题），所以它值得一条进度。
+  const local = scanAll(deps.sessionsRoot, deps.decodeAll, {
+    ...(deps.resolveTitle === undefined ? {} : { resolveTitle: deps.resolveTitle }),
+    ...(report === undefined ? {} : { onProgress: (done, total) => report({ phase: 'scan', done, total }) }),
+  })
+  // 第二段：读远端索引。一次网络往返，没有"第几条"可讲——`total: 0` 就是"这一段没有分母"，
+  // 界面只摆那句"正在读取远端索引…"、不摆条（画一条 1/1 的会让人以为已经做完了）。
+  report?.({ phase: 'remote', done: 0, total: 0 })
   const remote = await readRemoteLibrary(deps.dav, deps.settings)
   const normalized = normalizeMapping(deps.settings.mapping)
 
@@ -825,8 +842,12 @@ export async function runSync(
   }
   const repos = new Map<string, string>()
   if ([...remote.entries.values()].some((entry) => entry.repo !== undefined)) {
-    for (const dir of repoCandidates(deps, local)) {
-      const found = await locate(dir)
+    const candidates = repoCandidates(deps, local)
+    for (let index = 0; index < candidates.length; index += 1) {
+      // 第三段：逐个候选目录问一次 git。目录数不多，但每个目录要起一个 git 进程——真机上这一段
+      // 比扫本机与读远端索引加起来还长，没有进度的话进度条会停在这儿半秒。
+      report?.({ phase: 'repo', done: index, total: candidates.length })
+      const found = await locate(candidates[index] as string)
       // 同一个身份在本机只认第一个（候选目录已排序）：结果要确定，不随扫描顺序变。
       if (found !== undefined && !repos.has(found.repo)) repos.set(found.repo, found.root)
     }
@@ -834,7 +855,22 @@ export async function runSync(
   // 指纹走"与 cwd 无关"的那份：落地会改写 cwd，按字节比会把拉下来的那份判成"两边各自写过"。
   const contentHash = (path: string, version: number, compression: string | null): FileFingerprint =>
     contentFingerprint(path, version, compression, deps.decodeAll)
-  const plan = planSync({ local, remote, mapping: normalized.mapping, repos, hashFile: contentHash })
+  //
+  // 第四段（比对）的分母：**两边都有**的那些会话的文件数。本机独有的那些只算字节、不读内容，
+  // 所以不进分母——不然进度条会停在一半（这正是 `SyncProgress` 一句"各有各的分母"的意思）。
+  const compareTotal = local.reduce(
+    (sum, session) => (remote.entries.has(session.id) ? sum + session.files.length : sum),
+    0,
+  )
+  let compared = 0
+  /** 算计划时用的指纹：同一件事顺带报"比对到第几条"。 */
+  const planHash = (path: string, version: number, compression: string | null): FileFingerprint => {
+    report?.({ phase: 'compare', done: compared, total: compareTotal })
+    const fingerprint = contentHash(path, version, compression)
+    compared += 1
+    return fingerprint
+  }
+  const plan = planSync({ local, remote, mapping: normalized.mapping, repos, hashFile: planHash })
   plan.problems.unshift(...normalized.problems)
   plan.problems.push(...remote.problems)
   plan.ok = plan.problems.length === 0

@@ -1490,8 +1490,10 @@ test('客户端产物：同步页的同步块——没配置只说明，配置�
     panel: 'sync',
   })
   const onText = text(on)
-  assert.ok(onText.includes('syncWhere:{"url":"https://dav.example.com/dsh","machine":"robot-a"}'), '要报出远端与机器名')
+  assert.ok(onText.includes('syncWhere:{"url":"https://dav.example.com/dsh"}'), '卡片标题只报远端')
   assert.ok(onText.includes('syncHint:{"mappings":2}'), '要报出映射条数')
+  // 机器名不再重复印在标题上：它挪到了机器名那一栏的**灰字**里（宿主解析出来的缺省值，没配就是
+  // 主机名），与「超时」那一栏的 30000 同一个口径——留空不等于没有值。那一栏归表单那条用例钉。
   // 一个动作一个按钮：弹窗里的「确认同步」只有开了弹窗才在树上，卡片头上只有「同步」这一个入口。
   assert.deepEqual(buttonTexts(on).filter((label) => label.startsWith('sync')), ['syncAction'])
 })
@@ -1513,8 +1515,8 @@ test('客户端产物：同步设置表单按 entry id 向设置接缝取控制�
       revision: 7,
       value: {
         sync: {
+          // 机器名**没配过**（接缝里就没有这一项）：真实场景就是这个样子，缺省值由宿主解析。
           url: 'https://dav.example.com/dsh',
-          machineId: 'robot-a',
           timeoutMs: 30000,
           passwordRef: 'MY_DAV_PASSWORD',
           mapping: { '/home/alice/dev/proj': '/opt/work/proj' },
@@ -1551,6 +1553,15 @@ test('客户端产物：同步设置表单按 entry id 向设置接缝取控制�
     mounted.recorded.some((node) => node.type === 'input' && node.props?.value === 'https://dav.example.com/dsh'),
     'URL 是从接缝里读出来的，不是页面自己存的',
   )
+  // 机器名那一栏：接缝里没这一项（没配过），宿主状态里解析出来是 robot-a —— 框里应当是**空的**、
+  // 灰字是那个名字。灰字不是值：它不会进草稿，保存时也不会被写成一条"等于缺省值"的覆盖
+  // （覆盖会把这一栏从此顶上一个「已覆盖」徽标，见 syncForm.ts 的 draftOps）。
+  const machineInput = mounted.recorded.find(
+    (node) => node.type === 'input' && node.props?.placeholder === 'robot-a',
+  )
+  assert.ok(machineInput !== undefined, '机器名那一栏的灰字是宿主解析出来的缺省值')
+  assert.equal(machineInput.props.value, '', '没配过就画成空的——灰字只是缺省，不是值')
+
   // 映射表是行：左右各一个输入框，值分别来自接缝里的那一对键值
   const mappingInputs = mounted.recorded.filter(
     (node) => node.type === 'input' && (node.props?.value === '/home/alice/dev/proj' || node.props?.value === '/opt/work/proj'),
@@ -2144,7 +2155,7 @@ test('客户端产物：落地时弹窗正文换成进度条（第几条 / 共�
   const pullingText = strings(pulling.registrations[0].component(pulling.registrations[0].registration.inject()))
   assert.ok(pullingText.includes('syncPulling:{"current":1,"total":3}'), '拉那一段说「正在拉取」')
 
-  // 还没收到第一条事件（宿主在算计划：读远端索引、扫本机库、比指纹）。
+  // 还没收到第一条事件（宿主刚起来，什么都没开始报）。
   const preparing = mount({ state, panel: 'sync', nulls: [null, null, 'apply', 'apply'] })
   const preparingText = strings(preparing.registrations[0].component(preparing.registrations[0].registration.inject()))
   assert.ok(preparingText.includes('syncPreparing'), '那一段说"正在读取远端索引…"')
@@ -2153,6 +2164,43 @@ test('客户端产物：落地时弹窗正文换成进度条（第几条 / 共�
     false,
     '还不知道总数就不画条（画一条 0/0 的只会让人以为卡住了）',
   )
+
+  /*
+   * 算计划那三段（预演就有，落地也先走一遍）：扫本机 / 读远端索引 / 比对内容。
+   *
+   * `dialog` 与 `busy` 都种成 'plan'：假钩子不会点按钮，预演那一段只能这样走进去。进度事件里的
+   * `done` 同样是"已经做完的条数"，所以界面上的第几条是 `done + 1`。
+   */
+  const phaseOf = (progress) => {
+    const mounted = mount({ state, panel: 'sync', nulls: [null, null, 'plan', 'plan', null, null, progress] })
+    return {
+      mounted,
+      text: strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject())),
+      bar: mounted.recorded.find((node) => String(node.props?.className) === 'dsm-progress'),
+    }
+  }
+
+  const scanning = phaseOf({ phase: 'scan', done: 42, total: 85 })
+  assert.equal(scanning.bar.props['aria-valuenow'], 43, '扫到第 43 条（done 是已经扫完的条数）')
+  assert.equal(scanning.bar.props['aria-valuemax'], 85, '分母是这次要尝试的条目数')
+  assert.ok(scanning.text.includes('syncScanning:{"current":43,"total":85}'), '预演时说"正在扫描本机会话"')
+  assert.equal(scanning.text.includes('previewing'), false, '有具体进度就不摆那句静态的「预演中…」')
+  assert.equal(scanning.mounted.recorded.some((node) => node.type === 'table'), false, '计划还没回来，不画表')
+  assert.equal(scanning.text.includes('syncProgressNote'), false, '预演阶段还没有东西可覆盖，不摆那句"只增不覆盖"')
+
+  // 读远端索引是一次往返，没有"第几条"可讲（宿主给的分母是 0）：固定一句话，**不摆条**——画一条
+  // 1/1 的会让人以为已经做完了，而它其实还在等。
+  const remote = phaseOf({ phase: 'remote', done: 0, total: 0 })
+  assert.ok(remote.text.includes('syncPreparing'), '读远端索引那一段就说"正在读取远端索引…"')
+  assert.equal(remote.bar, undefined, '分母是 0 的那一段不画进度条')
+
+  // 认本机仓库身份：每个候选目录一个 git 进程，真机上这一段比前两段加起来还长。
+  const matching = phaseOf({ phase: 'repo', done: 4, total: 13 })
+  assert.ok(matching.text.includes('syncMatchingRepos:{"current":5,"total":13}'), '认仓库时说的是"正在核对本机仓库"')
+
+  // 比对内容：分母是两边都有那些会话的文件数。
+  const comparing = phaseOf({ phase: 'compare', done: 7, total: 12 })
+  assert.ok(comparing.text.includes('syncComparing:{"current":8,"total":12}'), '比对时说的是"正在比对内容"')
 })
 
 test('客户端产物：确认同步打的是落地端点，读的是一条事件流而不是等一次性 JSON', { skip }, async () => {
@@ -2247,5 +2295,98 @@ test('客户端产物：确认同步打的是落地端点，读的是一条事�
   )
   assert.equal(calls.some((call) => call.text === true), false, '事件流不走一次性 text()')
   assert.equal(index, chunks.length, '两块事件都被读出来了')
+  assert.ok(reads >= chunks.length + 1, '一直读到 done（不是读一块就收手）')
+})
+
+test('客户端产物：同步预演读的也是一条事件流（不是等一次性 JSON）', { skip }, async () => {
+  // 预演也要进度：它得先扫本机、再读远端索引、最后逐条比对内容，冷启动时那几秒界面原来只有一句
+  // "预演中…"。宿主两条路回的是同一个形状，所以这里钉的就是"点「同步」打的是那个端点、读的是流"。
+  const state = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    sync: { url: 'https://dav.example.com/dsh', machineId: 'robot-a', mappings: 0 },
+    sessions: [],
+    workspaces: [],
+  }
+  const calls = []
+  // 收尾那条给一份**完整**的 SyncResponse：界面接着会读 `plan` 它们。
+  const result = {
+    mode: 'plan',
+    remote: { url: 'https://dav.example.com/dsh', machineId: 'robot-a' },
+    plan: {
+      ok: true,
+      problems: [],
+      pull: [],
+      push: [],
+      pullIds: [],
+      pushIds: [],
+      bytesIn: 0,
+      bytesOut: 0,
+      localCount: 0,
+      remoteCount: 0,
+      machines: [],
+    },
+    applied: false,
+    pulled: [],
+    pushed: [],
+    bytesIn: 0,
+    bytesOut: 0,
+    registryWritten: false,
+    indexWritten: false,
+    problems: [],
+    takesEffect: 'immediate',
+  }
+  const chunks = [
+    'data: {"type":"progress","progress":{"phase":"scan","total":3,"done":0}}\n\n',
+    'data: {"type":"progress","progress":{"phase":"remote","total":1,"done":1}}\n\n',
+    `data: {"type":"result","result":${JSON.stringify(result)}}\n\n`,
+  ]
+  let index = 0
+  let reads = 0
+  const mounted = mount({
+    state,
+    panel: 'sync',
+    fetch: async (url, init) => {
+      calls.push({ url: String(url), method: init?.method, accept: init?.headers?.accept })
+      return {
+        ok: true,
+        status: 200,
+        headers: {
+          get: (name) => {
+            calls.push({ header: name })
+            return 'text/event-stream; charset=utf-8'
+          },
+        },
+        body: {
+          getReader: () => ({
+            read: async () => {
+              reads += 1
+              return index < chunks.length ? { done: false, value: new TextEncoder().encode(chunks[index++]) } : { done: true }
+            },
+          }),
+        },
+        // 一次性那条路必须**没被走到**：走错的话这里会被调用，用例当场红。
+        text: async () => {
+          calls.push({ text: true })
+          return ''
+        },
+      }
+    },
+  })
+
+  strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
+  const open = mounted.recorded.find((node) => node.type === 'button' && node.props?.children === 'syncAction')
+  assert.ok(open !== undefined, '卡片头上那个「同步」就是预演的入口')
+  open.props.onClick()
+  for (let tries = 0; tries < 50 && index < chunks.length; tries += 1) {
+    await new Promise((resolve) => setImmediate(resolve))
+  }
+
+  assert.deepEqual(calls.filter((call) => call.url !== undefined), [
+    { url: '/dsh-session-manager/api/sync', method: 'GET', accept: 'text/event-stream' },
+  ])
+  assert.equal(calls.some((call) => call.text === true), false, '预演也不走一次性 text()')
+  assert.equal(index, chunks.length, '三条事件都读出来了（含算计划的那两条）')
   assert.ok(reads >= chunks.length + 1, '一直读到 done（不是读一块就收手）')
 })

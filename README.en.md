@@ -221,7 +221,8 @@ sync:
 ```
 
 This section is also editable **in the interface**: in the card on Settings → “Session management” → “Sync”, the URL, machine id, username, password, timeout and mapping are
-edited directly, and Save writes them into the profile document (`~/.dsh/profiles/<name>/cordis.patch.yml`).
+edited directly (a field left empty uses the default shown in grey: the machine id falls back to the
+hostname, the timeout to 30000 ms), and Save writes them into the profile document (`~/.dsh/profiles/<name>/cordis.patch.yml`).
 `sync` is a volatile field, so a change takes effect **without a restart**; the three path fields
 (`sessionsRoot` / `registryPath` / `backupRoot`) stay file-only. Path mappings are added and removed row
 by row: the left side is the cwd the remote recorded, the right side a directory on this machine. That left

@@ -1169,7 +1169,26 @@ test('POST /sync?mode=apply：预演不落地，apply 走事件流拉下远端�
     const preview = fakeRes()
     await handlers['GET|POST /sync']!(fakeReq('GET', `${API_PREFIX}/sync`), preview.res)
     assert.equal(preview.captured.status, 200)
-    const plan = json(preview.captured)
+    assert.equal(
+      preview.captured.headers['content-type'],
+      'text/event-stream; charset=utf-8',
+      '预演也走事件流：它要扫本机、读远端、逐条比对，冷的时候几秒，界面得说出做到哪儿了',
+    )
+    const previewStream = events(preview.captured)
+    assert.deepEqual(
+      previewStream.map((event) => event['type']),
+      ['progress', 'progress', 'result'],
+      '预演报的是算计划的三段：扫本机的 1 条、读远端索引 1 条，再收尾',
+    )
+    assert.deepEqual(
+      previewStream.filter((event) => event['type'] === 'progress').map((event) => event['progress']),
+      [
+        { phase: 'scan', total: 1, done: 0 },
+        { phase: 'remote', total: 0, done: 0 },
+      ],
+      '读远端索引那一段没有分母（total: 0）：界面只说"正在读取远端索引…"。预演没有 pull/push——那两段要真写盘；本机与远端没有同 id 的会话，比对那段一个文件都不用读',
+    )
+    const plan = previewStream.find((event) => event['type'] === 'result')?.['result'] as Record<string, unknown>
     assert.equal(plan['mode'], 'plan')
     assert.equal(plan['applied'], false)
     assert.deepEqual(plan['plan'] && (plan['plan'] as Record<string, unknown>)['pullIds'], ['session-remote'])
@@ -1190,16 +1209,18 @@ test('POST /sync?mode=apply：预演不落地，apply 走事件流拉下远端�
     const stream = events(applied.captured)
     assert.deepEqual(
       stream.map((event) => event['type']),
-      ['progress', 'progress', 'result'],
-      '本机有 session-a（远端没有）要推、远端有 session-remote（本机没有）要拉：两段各一条，再收尾',
+      ['progress', 'progress', 'progress', 'progress', 'result'],
+      '先报算计划的三段（扫本机、读远端索引），再报拉与推各一条，最后收尾',
     )
     assert.deepEqual(
       stream.filter((event) => event['type'] === 'progress').map((event) => event['progress']),
       [
+        { phase: 'scan', total: 1, done: 0 },
+        { phase: 'remote', total: 0, done: 0 },
         { phase: 'pull', total: 1, done: 0, id: 'session-remote', label: '远端那条' },
         { phase: 'push', total: 1, done: 0, id: 'session-a', label: 'session-a' },
       ],
-      '每条开始处理前一条事件：先拉后推，done 从 0 数起，label 标题优先',
+      '算计划的三段在前（按下确认后到第一条拉下来之间那段空档就靠它），每条开始处理前一条事件：先拉后推，done 从 0 数起，label 标题优先',
     )
     const outcome = stream.find((event) => event['type'] === 'result')?.['result'] as Record<string, unknown>
     assert.equal(outcome['mode'], 'apply')
