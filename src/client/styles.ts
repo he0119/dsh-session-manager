@@ -504,6 +504,25 @@ export const CSS = `
 .dsm-planTable { table-layout: fixed; }
 .dsm-planTable th, .dsm-planTable td { box-sizing: border-box; }
 .dsm-planTable .dsm-colAction { width: 60px; }
+/* 同步预演那两张表（拉 / 推）的动作列装的是「重推刷新」这种动词短语，比导入预演的两个字长一档，
+   所以这两张表自己量一个列宽：实测 12px 字号下最宽的一个是 en 'Re-push' 63px、zh「重推刷新」62px，
+   加单元格左右各 8px padding 是 79px，再留约 9px 余量。列宽仍然是**设计**（fixed 布局），只是这
+   张表的设计跟着它自己的内容走；会话那一列照旧吃掉剩下的宽度（列宽从 60 → 88px，那一列少 28px）。
+   真实事故（用户截图报的）：这一列还是 60px 时，标签「本机有、远端没有」实测 110px（en 那句
+   158px），顶出格子 114px、压住后面那一列 98px —— 标签是 nowrap 的，装不下就直接画在邻居身上。 */
+.dsm-syncPlanTable .dsm-colAction { width: 88px; }
+/* 兜底：预演表的标签再长也不许顶出格子。列宽是设计，标签的长短是文案——两者对不上时宁可让这一格
+   自己截断（完整的那句在 title 里），也不要让邻居的会话名被压掉一半。三处都要：max-width 限宽、
+   overflow 截断、box-sizing: border-box 让限的是**整个标签**（默认 content-box 下 max-width 只管文字
+   那一层，左右 6px padding 与 2px 边框照样多顶出去 14px）。实测：把整句标签塞进这一格，加这三条之后
+   标签右缘停在格子内容边界以内、文字截断（scrollWidth > clientWidth），不再碰到下一列。 */
+.dsm-planTable .dsm-tag {
+  box-sizing: border-box;
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .dsm-planTable .dsm-colCwd { width: 26%; }
 .dsm-planTable .dsm-colBytes { width: 68px; }
 /* cwd 那一格里的路径要能断行（fixed 布局下列宽不会再变），否则长路径顶出格子。 */

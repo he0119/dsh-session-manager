@@ -102,6 +102,8 @@
   任意绝对路径要一个值控件，而目录选择器是一只互斥的能力位服务。
 - [动作页只留当下要做的决定](../.agents/notes/implemented/architecture/2026-09-28-help-page-owns-the-glossary.md)：
   词条进「说明」页，并钉了一条两行的上限。
+- [预演表的动作列只放动作](../.agents/notes/implemented/bug-fix/2026-10-03-action-column-holds-a-verb.md)：
+  窄列装不下整句时改文案与列宽，不是让标签顶到邻居身上（附一条"顶不出去"的兜底）。
 
 ## Host 半侧的约束
 
