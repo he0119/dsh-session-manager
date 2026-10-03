@@ -71,6 +71,7 @@ export const zh = {
   colSession: '会话',
   colCwd: 'cwd',
   colBytes: '大小',
+  colNote: '说明',
   actionCreate: '创建',
   actionSkip: '跳过',
   cwdRewritten: '{from} → {to}',
@@ -293,12 +294,15 @@ export const zh = {
   syncCodeDiverged: '两边各自写过（{machine}）',
   syncCodeNoMapping: '缺映射：{from}',
   syncCodeMissingTarget: '目标目录不存在：{to}',
-  // 计划表的动作列只有 60~88px 宽（见 styles.ts 的 .dsm-syncPlanTable）：那一列里放**动作**，
-  // 上面那几句"为什么"留给「这次不动」那一段的整句说明，悬停时由 title 补充。
+  // 三张计划表的状态列只有 88~122px 宽（见 styles.ts 的 .dsm-syncPlanTable / .dsm-keptTable）：
+  // 那一列里放**短标签**，上面那几句"为什么"一律挂在标签的 title 上，悬停看得到。
   syncTagPull: '拉下来',
   syncTagPush: '推上去',
   syncTagRepush: '重推刷新',
-  syncNote: '{name}：{why}',
+  syncTagDiverged: '两边各自写过',
+  syncTagRemoteAhead: '远端更新',
+  syncTagNoMapping: '缺映射',
+  syncTagMissingTarget: '目标目录缺失',
 
   // 同步设置表单（宿主设置接缝）
   syncFormLoading: '正在读配置…',
@@ -403,6 +407,7 @@ export const en: Record<keyof typeof zh, string> = {
   colSession: 'Session',
   colCwd: 'cwd',
   colBytes: 'Size',
+  colNote: 'Note',
   actionCreate: 'create',
   actionSkip: 'skip',
   cwdRewritten: '{from} → {to}',
@@ -626,13 +631,15 @@ export const en: Record<keyof typeof zh, string> = {
   syncCodeDiverged: 'both sides wrote ({machine})',
   syncCodeNoMapping: 'no mapping for {from}',
   syncCodeMissingTarget: 'target directory missing: {to}',
-  // The plan table's action column is 60-88px wide (see .dsm-syncPlanTable in styles.ts): that column
-  // holds the **action**; the "why" sentences above stay for the "left alone" list, and the title
-  // attribute carries them on hover.
+  // The three plan tables' status column is 88-122px wide (see .dsm-syncPlanTable / .dsm-keptTable in
+  // styles.ts): that column holds a **short tag**; the "why" sentences above hang on its title.
   syncTagPull: 'Pull',
   syncTagPush: 'Push',
   syncTagRepush: 'Re-push',
-  syncNote: '{name}: {why}',
+  syncTagDiverged: 'Both wrote',
+  syncTagRemoteAhead: 'Remote ahead',
+  syncTagNoMapping: 'No mapping',
+  syncTagMissingTarget: 'No target dir',
 
   // Sync settings form (the host settings seam)
   syncFormLoading: 'Reading the configuration…',

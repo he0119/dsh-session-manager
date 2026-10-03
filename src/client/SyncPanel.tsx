@@ -88,6 +88,43 @@ function syncWhy(entry: SyncRow, t: Translate): string {
   }
 }
 
+/**
+ * 「没动」那一类的短标签：状态进标签，整句（`syncWhy()`）挂在它的 `title` 上。
+ *
+ * 与拉/推两张表同一口径：窄列里放不下整句，而**状态与会话名必须是两种东西**——挤成一行同色同号的
+ * 文字时，一列"某某：两边各自写过（robot-b）"读起来分不出哪个是状态、哪个是会话。认不出来的码退回
+ * 整句（宁可挤，也不要显示成一个生词）。
+ */
+function syncTag(entry: SyncRow, t: Translate): string {
+  switch (entry.code) {
+    case 'remote-ahead':
+      return t('syncTagRemoteAhead')
+    case 'diverged':
+      return t('syncTagDiverged')
+    case 'no-mapping':
+      return t('syncTagNoMapping')
+    case 'missing-target':
+      return t('syncTagMissingTarget')
+    default:
+      return syncWhy(entry, t)
+  }
+}
+
+/**
+ * 「没动」那一行右边那一格：要用户动手的那两类给**路径**（缺的那条映射、不存在的那个目录），
+ * 其余给"是哪台机器持有的另一份"。
+ */
+function syncWhere(entry: SyncRow): string {
+  switch (entry.code) {
+    case 'no-mapping':
+      return entry.fromCwd ?? ''
+    case 'missing-target':
+      return entry.toCwd ?? ''
+    default:
+      return entry.machine ?? ''
+  }
+}
+
 /** 同步页。 */
 export function SyncPanel({ t = fallback, state, reload }: PanelShare): React.ReactElement {
   /** 最近一次计划或结果：映射表的远端候选与弹窗正文都读它（关掉弹窗之后候选还得在）。 */
@@ -388,11 +425,34 @@ export function SyncPanel({ t = fallback, state, reload }: PanelShare): React.Re
             {syncKept.length > 0 && (
               <>
                 <p className="dsm-hint">{t('syncKeptHead', { count: syncKept.length })}</p>
-                {syncKept.map((entry) => (
-                  <p key={entry.id} className="dsm-hint">
-                    {t('syncNote', { name: syncName(entry), why: syncWhy(entry, t) })}
-                  </p>
-                ))}
+                {/* 与拉/推两张表同一种画法：状态列放标签、会话单独一列——挤成一行同色的说明时，
+                    状态与会话名分不出来（用户截图报的）。整句仍在标签的 title 上。 */}
+                <table className="dsm-table dsm-planTable dsm-syncPlanTable dsm-keptTable">
+                  <thead>
+                    <tr>
+                      <th className="dsm-colAction">{t('colAction')}</th>
+                      <th className="dsm-colSession">{t('colSession')}</th>
+                      <th className="dsm-colCwd">{t('colNote')}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {syncKept.map((entry) => (
+                      <tr key={entry.id}>
+                        <td>
+                          <span className="dsm-tag dsm-tagSkip" title={syncWhy(entry, t)}>
+                            {syncTag(entry, t)}
+                          </span>
+                        </td>
+                        <td>
+                          <span className="dsm-rowTitle" title={entry.id}>
+                            {syncName(entry)}
+                          </span>
+                        </td>
+                        <td className="dsm-cwd">{syncWhere(entry)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </>
             )}
           </div>

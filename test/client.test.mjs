@@ -1725,10 +1725,12 @@ test('客户端产物：同步设置里的「测试连接」——按钮、只�
   )
 })
 
-test('客户端产物：同步预演的动作列只放动词，整句解释挂在 title 上', { skip }, () => {
-  // 真实事故（用户截图报的）：动作列沿用导入预演那 60px，而它装的是「本机有、远端没有」这种短语
-  // （实测 110px，en 158px），nowrap 直接画到后面那一列的会话名上。现在这一列只放动词，整句留在
-  // title 里；列宽与兜底规则在 styles.ts（由 test/styles.test.mjs 钉住）。
+test('客户端产物：同步预演三张表的状态列只放短标签，整句解释挂在 title 上', { skip }, () => {
+  // 两次真实事故（都是用户截图报的）：一是动作列沿用导入预演那 60px，而它装的是「本机有、远端没有」
+  // 这种短语（实测 110px，en 158px），nowrap 直接画到后面那一列的会话名上；二是「这次不动」那一段
+  // 把状态与会话名拼成同一句同色同号的文字（原来的 `syncNote`），三行读下来分不出哪个是状态、哪个
+  // 是会话。现在三张表一个口径：状态列放短标签、会话单独一列，整句留在 title 里；列宽与兜底规则在
+  // styles.ts（由 test/styles.test.mjs 钉住）。
   const state = {
     sessionsRoot: '/home/u/.dsh/sessions',
     registryPath: '/home/u/.dsh/registry.json',
@@ -1778,9 +1780,17 @@ test('客户端产物：同步预演的动作列只放动词，整句解释挂�
   const tables = mounted.recorded.filter((node) => node.type === 'table')
   assert.equal(
     tables.filter((node) => String(node.props?.className).includes('dsm-syncPlanTable')).length,
-    2,
-    '拉表与推表都要带变体类，否则列宽还是导入预演那 60px',
+    3,
+    '拉表、推表与「这次不动」那张表都要带变体类，否则列宽还是导入预演那 60px',
   )
+  assert.ok(
+    tables.some((node) => String(node.props?.className).includes('dsm-keptTable')),
+    '「这次不动」也是一张表（状态一列、会话一列、说明一列），不是一整行说明',
+  )
+  const keptHeaders = mounted.recorded
+    .filter((node) => node.type === 'th' && node.props?.children === 'colNote')
+    .length
+  assert.equal(keptHeaders, 1, '那张表的第三列表头是「说明」')
 
   // 动作列：看得见的是动词，整句在 title 里。
   const tagOf = (visible, title) =>
@@ -1788,14 +1798,23 @@ test('客户端产物：同步预演的动作列只放动词，整句解释挂�
   assert.ok(tagOf('syncTagPull', 'syncCodeMissingPull'), '拉表那颗标签是「拉下来」，整句在 title 上')
   assert.ok(tagOf('syncTagPush', 'syncCodeMissingPush'), '推表新推的那颗是「推上去」')
   assert.ok(tagOf('syncTagRepush', 'syncCodeLocalAhead'), '本机领先的那颗是「重推刷新」')
+  assert.ok(
+    mounted.recorded.some(
+      (node) => node.props?.children === 'syncTagDiverged' && String(node.props?.title).startsWith('syncCodeDiverged'),
+    ),
+    '「这次不动」那颗是「两边各自写过」，整句（带机器名）在 title 上',
+  )
 
-  // 整句不许再当动作列的可见文字（它会把邻居那一列压掉）；它还留在「这次不动」那段说明里。
+  // 整句不许再当可见文字（它会把邻居那一列压掉；挤在同一句里还会让状态与会话名分不出来）。
   assert.equal(text.includes('syncCodeMissingPush'), false, '动作列不再放整句')
   assert.equal(text.includes('syncCodeMissingPull'), false)
-  assert.ok(
-    text.some((item) => String(item).startsWith('syncNote:') && String(item).includes('syncCodeDiverged')),
-    '「这次不动」那段照旧给整句（那里是整行说明，不是窄列）',
+  assert.equal(text.includes('syncCodeDiverged'), false, '「这次不动」也不再整句可见')
+  assert.equal(
+    text.some((item) => String(item).includes('syncCodeDiverged') && String(item).includes('session-d')),
+    false,
+    '状态与会话名不许挤在同一个文本节点里——那正是分不出两者的原因',
   )
+  assert.ok(text.includes('session-d'), '会话名照旧是那一行看得见的文字')
 
   // 计划还没回来的那一段：弹窗开着、正文是"预演中…"，确认禁用（别让上一次那份计划冒充这一次的）。
   const waiting = mount({ state, panel: 'sync', nulls: [null, response, 'plan', 'plan'] })

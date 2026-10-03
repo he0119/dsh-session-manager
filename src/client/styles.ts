@@ -511,6 +511,10 @@ export const CSS = `
    真实事故（用户截图报的）：这一列还是 60px 时，标签「本机有、远端没有」实测 110px（en 那句
    158px），顶出格子 114px、压住后面那一列 98px —— 标签是 nowrap 的，装不下就直接画在邻居身上。 */
 .dsm-syncPlanTable .dsm-colAction { width: 88px; }
+/* 「这次不动」那张表的状态列装的是「两边各自写过」这种短语，比拉/推两张表的动词长一档：真机
+   （dev GUI）量到最宽的一颗是 en "Remote ahead" 94.7px、zh「两边各自写过」86px（都含左右 padding
+   与 2px 边框）。取 122px：内容区 106px，最宽那颗还剩 11px 余量，与拉/推那张表的 9px 同一档。 */
+.dsm-keptTable .dsm-colAction { width: 122px; }
 /* 兜底：计划表的标签再长也不许顶出格子。列宽是设计，标签的长短是文案——两者对不上时宁可让这一格
    自己截断（完整的那句在 title 里），也不要让邻居的会话名被压掉一半。三处都要：max-width 限宽、
    overflow 截断、box-sizing: border-box 让限的是**整个标签**（默认 content-box 下 max-width 只管文字
