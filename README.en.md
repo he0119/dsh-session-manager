@@ -263,7 +263,10 @@ anything else.
 
 On the **Sync** tab, **Sync** first computes a read-only plan in a dialog (it reads the remote and writes
 nothing), reporting "pull N / push M" and listing every session, where it would land and what was left alone
-and why; **Sync now** in that dialog actually pulls and pushes. The rules and edges:
+and why; **Sync now** in that dialog actually pulls and pushes. While it runs, the dialog body becomes a
+progress bar with "Pushing 12 / 84" and the title of the session in flight — the denominator is the number of
+items that leg will really do (skipped ones are not counted), and pulling and pushing each get their own pass.
+The rules and edges:
 
 - **Add-only**: a session id that already exists locally is never pulled, and a remote copy that is newer
   than yours is left alone too — the report says whether it is "remote is ahead" or "both sides wrote". The

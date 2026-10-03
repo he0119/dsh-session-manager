@@ -689,6 +689,26 @@ export const CSS = `
 /* 底部那对按钮同上：footer 在我们那层 body 之外，字号也会继承文档根的 16px（量到 16px / 34px 高，
    页面上的同一个类名是 13px / 30px 高）。同一个 .dsm-button 在弹窗里与页面里得是一个规格。 */
 .dsm-dialog .dsm-button { font-size: 13px; }
+/*
+ * 进度条：同步这种"按条走网络"的长动作（整库可能上百条）用它回答"做到第几条了"。
+ *
+ * 轨道走 border-l2 而不是 bg-layer-*：浅色主题里那三级底色是同一个白，铺在白底弹窗上等于没有轨道
+ * （行悬停底色那里踩过同一个坑）。填充走 brand-primary，与主按钮同一支颜色。
+ */
+.dsm-progress {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--dsw-alias-border-l2, rgba(0, 0, 0, 0.12));
+  overflow: hidden;
+}
+.dsm-progressFill {
+  height: 100%;
+  background: var(--dsw-alias-brand-primary, #1f2329);
+  transition: width 120ms linear;
+}
+@media (prefers-reduced-motion: reduce) {
+  .dsm-progressFill { transition: none; }
+}
 .dsm-listPlain {
   margin: 0;
   padding-left: 18px;

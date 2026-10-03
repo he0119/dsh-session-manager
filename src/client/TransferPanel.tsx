@@ -18,9 +18,10 @@
  * 也不该出现"两个分页对同一个库给出不同数字"。列表行、组头、列表框与筛选条都出自
  * [sessionList.tsx](./sessionList.tsx)——三个分页的行是同一套解剖结构。
  *
- * 样式只在 [styles.ts](./styles.ts) 里定义，颜色只用 `--dsw-alias-*` 主题 token；
- * 控件是手写的原生元素，**不 require 宿主的 UI 原语包**——那份包会随时改，而它一抛异常就会让
- * 整个 Slot 条目变成崩溃占位（控制台里是 `slot entry crashed in '…'`）。
+ * 样式只在 [styles.ts](./styles.ts) 里定义，颜色只用 `--dsw-alias-*` 主题 token；控件以手写的原生
+ * 元素为主，确认弹窗外壳走官方控件库的 `Modal`（[ConfirmDialog.tsx](./ConfirmDialog.tsx) 里说了为
+ * 什么）。渲染路径上不许做会抛的事——抛出去整个 Slot 条目会变成崩溃占位（控制台里是
+ * `slot entry crashed in '…'`）。
  *
  * @module dsh-session-manager/client/TransferPanel
  */

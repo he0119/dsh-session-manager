@@ -31,6 +31,7 @@ import {
   type FileFingerprint,
   type RemoteLibrary,
   type RemoteSessionEntry,
+  type SyncProgress,
   type SyncSettings,
 } from '../src/sync.ts'
 import type { GitRunner } from '../src/repo.ts'
@@ -116,7 +117,12 @@ async function syncMachine(
   machine: Machine,
   dav: ReturnType<typeof createDavClient>,
   config: SyncSettings,
-  options: { apply: boolean; titles?: Record<string, string>; git?: GitRunner },
+  options: {
+    apply: boolean
+    titles?: Record<string, string>
+    git?: GitRunner
+    onProgress?: (event: SyncProgress) => void
+  },
 ): Promise<Awaited<ReturnType<typeof runSync>>> {
   return runSync(
     {
@@ -130,7 +136,7 @@ async function syncMachine(
       pluginVersion: '0.0.1-test',
       now: () => new Date('2026-10-01T00:00:00.000Z'),
     },
-    { apply: options.apply },
+    { apply: options.apply, ...(options.onProgress === undefined ? {} : { onProgress: options.onProgress }) },
   )
 }
 
@@ -967,6 +973,76 @@ test('sync：测试连接打真服务——空远端、已有机器格、凭据�
     const denied = await testSyncConnection(wrong)
     assert.equal(denied.code, 'unauthenticated')
     assert.equal(denied.status, 401)
+  } finally {
+    await fixture.close()
+    rmSync(SANDBOX, { recursive: true, force: true })
+  }
+})
+
+// 同步是这个插件里唯一"按条走网络"的长动作：本机几百条会话时，一次整库同步就是几百次往返。进度事件
+// 是界面在那几十秒里唯一能看的东西，所以这里钉住它的形状与顺序——**发在开始处理一条之前**（`done`
+// 是已经做完的条数），跳过的那些不进分母（否则进度条永远走不满）。
+
+test('sync：每开始处理一条报一次进度，拉与推各自一段', async () => {
+  rmSync(SANDBOX, { recursive: true, force: true })
+  mkdirSync(SANDBOX, { recursive: true })
+  const fixture = await startDavFixture({ root: join(SANDBOX, 'dav') })
+  const dav = createDavClient({ baseUrl: fixture.url })
+  const a = makeMachine('robot-a')
+  const b = makeMachine('robot-b')
+  // 这一条只关心"按条报进度"，不要 git 身份那一路掺进来：沙箱本身就在一个仓库里，认得出身份的话
+  // `far` 会靠"同一个仓库 + 相对路径"落到本机，它就从"落不下来"变成"能拉"了。
+  const gitNone: GitRunner = async () => {
+    throw new Error('没有身份可用')
+  }
+  try {
+    writeSession(a, 'one', 1000)
+    writeSession(a, 'two', 2000)
+    // 第三条在另一个目录里：b 没有它的映射，于是它在计划里是一条 `skip`（落不下来）。进度分母必须
+    // 把它排掉——否则界面上会出现"拉到 3 / 3 完成"但库里只多了两条。
+    const far = join(SANDBOX, 'far-project')
+    mkdirSync(far, { recursive: true })
+    writeSession(a, 'far', 3000, { cwd: far })
+
+    const pushing: SyncProgress[] = []
+    await syncMachine(a, dav, settings(a, { machineId: 'robot-a' }), {
+      apply: true,
+      titles: { one: '第一条' },
+      git: gitNone,
+      onProgress: (event) => pushing.push(event),
+    })
+    assert.deepEqual(
+      pushing.map((event) => `${event.phase} ${event.done}/${event.total}`),
+      ['push 0/3', 'push 1/3', 'push 2/3'],
+      '推那一段：三条各报一次，done 从 0 数起（事件发在开始处理那条之前）',
+    )
+    assert.deepEqual([...new Set(pushing.map((event) => event.id))].sort(), ['far', 'one', 'two'])
+    assert.equal(pushing.find((event) => event.id === 'one')?.label, '第一条', 'label 用读到的标题')
+    assert.equal(pushing.find((event) => event.id === 'two')?.label, 'two', '读不到标题就退回 id')
+
+    const pulling: SyncProgress[] = []
+    const outcome = await syncMachine(b, dav, settings(b, { machineId: 'robot-b', mapping: { [a.cwd]: b.cwd } }), {
+      apply: true,
+      git: gitNone,
+      onProgress: (event) => pulling.push(event),
+    })
+    assert.deepEqual([...outcome.pulled].sort(), ['one', 'two'])
+    assert.deepEqual(
+      pulling.map((event) => `${event.phase} ${event.done}/${event.total}`),
+      ['pull 0/2', 'pull 1/2'],
+      '拉那一段同样逐条报，分母排掉落不下来的那条（`far`：没配映射），也不掺进推送那一段',
+    )
+    assert.deepEqual([...new Set(pulling.map((event) => event.id))].sort(), ['one', 'two'], 'skip 的那条不报进度')
+    assert.equal(pulling.find((event) => event.id === 'one')?.label, '第一条', '远端记的标题跟着包一起过来')
+
+    // 再同步一次：库里有同 id、远端那份也一样，全是 skip。
+    const again: SyncProgress[] = []
+    await syncMachine(b, dav, settings(b, { machineId: 'robot-b', mapping: { [a.cwd]: b.cwd } }), {
+      apply: true,
+      git: gitNone,
+      onProgress: (event) => again.push(event),
+    })
+    assert.deepEqual(again, [], '跳过的那些不进分母，也不报进度——报了进度条就永远走不满')
   } finally {
     await fixture.close()
     rmSync(SANDBOX, { recursive: true, force: true })

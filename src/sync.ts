@@ -694,6 +694,29 @@ export async function readRemoteLibrary(dav: DavPort, settings: SyncSettings): P
   return { machines, entries, indexes, problems }
 }
 
+/**
+ * 一次同步进行中的一条进度事件。
+ *
+ * 同步是这个插件里唯一"按条走网络"的长动作：本机有几百条会话时，一次整库同步就是几百次往返，
+ * 界面不能只有一个"同步中…"。事件按**每开始处理一条**发一次（不是每完成一条），所以 `done` 是
+ * 已经做完的条数，界面拿 `done + 1` 说"正在处理第几条"，进度条因此一路走到最后一格。
+ *
+ * 拉与推各自是一段（`phase`），两段的 `total` 不同：合起来算一个百分比只会骗人（先拉的 3 条与
+ * 后推的 84 条不是同一个分母）。
+ */
+export interface SyncProgress {
+  /** 这一段是拉还是推。 */
+  phase: 'pull' | 'push'
+  /** 这一段一共多少条（计划里定下、真会做的那些；跳过的没算进来）。 */
+  total: number
+  /** 这一段已经做完几条。 */
+  done: number
+  /** 正在开始处理的那条会话 id。 */
+  id: string
+  /** 界面上怎么称呼它（标题优先，读不到退回 id）——与清单里同一套口径。 */
+  label: string
+}
+
 /** 落地的结果。 */
 export interface SyncOutcome {
   plan: SyncPlan
@@ -767,9 +790,14 @@ function repoCandidates(deps: SyncDeps, local: readonly DiscoveredSession[]): st
  *
  * @param deps 远端、设置与本地库的位置。
  * @param options.apply 为 false 只算计划（除了读远端，什么都不写）。
+ * @param options.onProgress 每开始处理一条调一次（见 `SyncProgress`）；调用方拿它推进度条。回调
+ *   同步调用、不 await，所以它自己不许抛（`src/web.ts` 那一侧把它写进 SSE 响应）。
  * @returns 结果；单条失败只记进 `problems`，不半路放弃整次同步。
  */
-export async function runSync(deps: SyncDeps, options: { apply: boolean }): Promise<SyncOutcome> {
+export async function runSync(
+  deps: SyncDeps,
+  options: { apply: boolean; onProgress?: (event: SyncProgress) => void },
+): Promise<SyncOutcome> {
   const problems: string[] = []
   const local = scanAll(
     deps.sessionsRoot,
@@ -836,8 +864,17 @@ export async function runSync(deps: SyncDeps, options: { apply: boolean }): Prom
   const loose = readRegistryLoose(deps.registryPath)
   if (loose.problem !== undefined) problems.push(loose.problem)
   let registry = loose.registry
-  for (const entry of plan.pull) {
-    if (entry.action !== 'create') continue
+  // 只把"真会拉"的那些算进进度分母：跳过的（库里有同 id、没配映射…）不计，否则进度条永远走不满。
+  const pullJobs = plan.pull.filter((entry) => entry.action === 'create')
+  for (let index = 0; index < pullJobs.length; index += 1) {
+    const entry = pullJobs[index] as SyncPullEntry
+    options.onProgress?.({
+      phase: 'pull',
+      total: pullJobs.length,
+      done: index,
+      id: entry.id,
+      label: entry.title ?? entry.id,
+    })
     try {
       const bytes = await deps.dav.get(remoteBundlePath(entry.machine, entry.id))
       const bundle = readBundle(bytes)
@@ -868,10 +905,18 @@ export async function runSync(deps: SyncDeps, options: { apply: boolean }): Prom
     // （远端那份包不主动删；别的机器自己那份记录照旧）。
     if (byId.has(entry.id)) ownEntries.set(entry.id, entry)
   }
-  for (const entry of plan.push) {
-    if (entry.action !== 'upload' && entry.action !== 'update') continue
+  const pushJobs = plan.push.filter((entry) => entry.action === 'upload' || entry.action === 'update')
+  for (let index = 0; index < pushJobs.length; index += 1) {
+    const entry = pushJobs[index] as SyncPushEntry
     const session = byId.get(entry.id)
     if (session === undefined) continue
+    options.onProgress?.({
+      phase: 'push',
+      total: pushJobs.length,
+      done: index,
+      id: entry.id,
+      label: session.title ?? entry.title ?? entry.id,
+    })
     try {
       const source: ExportSource = {
         id: session.id,
@@ -898,7 +943,8 @@ export async function runSync(deps: SyncDeps, options: { apply: boolean }): Prom
         createdAt: session.createdAt,
         files: fingerprints(session, contentHash),
       })
-      pushed.push({ id: entry.id, action: entry.action })
+      // 到这里只剩 upload / update 两种（上面筛过），写成三元的形状让类型也跟着收窄。
+      pushed.push({ id: entry.id, action: entry.action === 'update' ? 'update' : 'upload' })
       bytesOut += bundle.length
     } catch (error) {
       problems.push(`推 ${entry.id} 失败：${error instanceof Error ? error.message : String(error)}`)

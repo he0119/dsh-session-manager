@@ -13,18 +13,30 @@
  * （`src/web.ts` + `src/sync.ts`）：计划返回的就是将要发生的事，页面不自己推算。会话库数据由页面
  * 骨架（[ManagerPanel.tsx](./ManagerPanel.tsx)）拉好传进来，切分页不各拉一份。
  *
- * 样式只在 [styles.ts](./styles.ts) 里定义，颜色只用 `--dsw-alias-*` 主题 token；控件是手写的原生
- * 元素，**不 require 宿主的 UI 原语包**——那份包会随时改，而它一抛异常就会让整个 Slot 条目变成崩溃
- * 占位（控制台里是 `slot entry crashed in '…'`）。唯一的例外是同步设置的读写面，它走
- * [SyncConfigForm.tsx](./SyncConfigForm.tsx)，那里说明了为什么。
+ * 落地那一次是**流式**的：宿主按条推事件，正文换成进度条与"正在推送 12 / 84"（见
+ * [api.ts](./api.ts) 的 `applySync` 与 [ProgressBar.tsx](./ProgressBar.tsx)）。同步是这个插件里唯一
+ * "按条走网络"的动作，一次整库同步可能是几十秒，而在此之前界面只有一句"同步中…"。
+ *
+ * 样式只在 [styles.ts](./styles.ts) 里定义，颜色只用 `--dsw-alias-*` 主题 token；控件以手写的原生
+ * 元素为主，确认弹窗外壳走官方控件库的 `Modal`（[ConfirmDialog.tsx](./ConfirmDialog.tsx) 里说了
+ * 为什么）。渲染路径上不许做会抛的事——抛出去整个 Slot 条目会变成崩溃占位（控制台里是
+ * `slot entry crashed in '…'`）。
  *
  * @module dsh-session-manager/client/SyncPanel
  */
 
 import * as React from 'react'
 
-import { applySync, fetchSyncPlan, type SyncPullEntry, type SyncPushEntry, type SyncResponse } from './api.ts'
+import {
+  applySync,
+  fetchSyncPlan,
+  type SyncProgressEvent,
+  type SyncPullEntry,
+  type SyncPushEntry,
+  type SyncResponse,
+} from './api.ts'
 import { ConfirmDialog } from './ConfirmDialog.tsx'
+import { ProgressBar } from './ProgressBar.tsx'
 import { formatBytes } from './sessionList.tsx'
 import { SyncConfigForm } from './SyncConfigForm.tsx'
 import { translateWith, zh, type Translate } from './locales.ts'
@@ -87,6 +99,13 @@ export function SyncPanel({ t = fallback, state, reload }: PanelShare): React.Re
   const [notice, setNotice] = React.useState<string | null>(null)
   /** 落地时逐条失败的原因（宿主只把成功的那些算进 pulled/pushed，失败的在这里）。 */
   const [failures, setFailures] = React.useState<readonly string[]>([])
+  /**
+   * 落地进行到哪了：宿主每开始处理一条推一条事件（见 api.ts 的 `applySync`）。
+   *
+   * `null` 有两种时候——还没开始、以及刚开始那一段（宿主在算计划：读远端索引、扫本机库、比指纹，
+   * 没有逐条可报）。后者界面显示"正在读取远端索引…"，所以这里不需要第三个状态位。
+   */
+  const [progress, setProgress] = React.useState<SyncProgressEvent | null>(null)
 
   /** 同步配置（宿主插件配置里的 `sync` 块）；`null` 或字段缺席都按"没配置"处理，只画一句说明。 */
   const syncInfo = state?.sync ?? null
@@ -125,10 +144,12 @@ export function SyncPanel({ t = fallback, state, reload }: PanelShare): React.Re
   const doSyncApply = (): void => {
     setBusy('apply')
     setError(null)
-    void applySync().then(
+    setProgress(null)
+    void applySync(setProgress).then(
       (result) => {
         setBusy(null)
         setDialog(null)
+        setProgress(null)
         setSync(result)
         setFailures(result.problems)
         if (result.pulled.length > 0 || result.pushed.length > 0) {
@@ -151,6 +172,7 @@ export function SyncPanel({ t = fallback, state, reload }: PanelShare): React.Re
       (cause) => {
         setBusy(null)
         setDialog(null)
+        setProgress(null)
         setError(t('failed', { reason: reasonOf(cause) }))
       },
     )
@@ -182,6 +204,19 @@ export function SyncPanel({ t = fallback, state, reload }: PanelShare): React.Re
   ]
   /** 计划还在算：正文暂时不画（`sync` 里可能还留着上一次的那份结果，摆出来会被当成这次的）。 */
   const planning = dialog === 'plan' && busy === 'plan'
+  /**
+   * 进度那行字：「正在拉取 3 / 5」。
+   *
+   * `done` 是**已经做完**的条数，而事件是在开始处理下一条之前发的，所以正在处理的是第 `done + 1`
+   * 条——与进度条的 `current` 同一个数，两处必须一起变。
+   */
+  const progressText =
+    progress === null
+      ? ''
+      : t(progress.phase === 'pull' ? 'syncPulling' : 'syncPushing', {
+          current: progress.done + 1,
+          total: progress.total,
+        })
 
   return (
     <>
@@ -235,16 +270,29 @@ export function SyncPanel({ t = fallback, state, reload }: PanelShare): React.Re
       {dialog !== null && (
         <ConfirmDialog
           t={t}
-          title={t('syncDialogTitle')}
+          // 落地那一段标题也换掉：这时候已经不是"将要"了，正文里正跑着进度。
+          title={t(busy === 'apply' ? 'syncRunning' : 'syncDialogTitle')}
           confirmLabel={t('syncApply')}
-          busyLabel={t('applying')}
+          busyLabel={t('syncBusy')}
           busy={busy === 'apply'}
           planning={planning}
           error={null}
           onConfirm={doSyncApply}
           onCancel={() => setDialog(null)}
         >
-        {!planning && sync !== null && syncPlan !== null && (
+        {busy === 'apply' &&
+          (progress === null ? (
+            <p className="dsm-hint">{t('syncPreparing')}</p>
+          ) : (
+            <>
+              <ProgressBar current={progress.done + 1} total={progress.total} label={progressText} />
+              <p className="dsm-hint">{progressText}</p>
+              {/* 当前这条：一条几 MB 的包会在这上面停一会儿，那正是"在动"的证据。 */}
+              <p className="dsm-rowTitle">{progress.label}</p>
+              <p className="dsm-hint">{t('syncProgressNote')}</p>
+            </>
+          ))}
+        {busy !== 'apply' && !planning && sync !== null && syncPlan !== null && (
           <div>
             <p className={syncPlan.ok && sync.problems.length === 0 ? 'dsm-ok' : 'dsm-warn'}>
               {t('syncSummary', {

@@ -196,6 +196,11 @@ function loadBundle({ firstNull, panel, arrays, strings, nulls, fetch } = {}) {
     window: { __ModuleLoader__: { load: (value) => { entry = value } } },
     document: fakeDocument(nodes),
     console,
+    // 浏览器里这两样是全局的：同步的落地走事件流，读流那一步要按 UTF-8 解码（api.ts 里 new 的是
+    // TextDecoder）。vm 的新上下文默认什么都不给，少一个就会在"读流"那一步抛 ReferenceError，而它
+    // 只会表现成"进度没出现"，看不出是环境缺件。
+    TextDecoder,
+    TextEncoder,
     // 默认**没有** fetch：渲染路径不该发请求，给不了就当它不存在，省得漏掉一次真网络调用。
     // 用例要核对"点这个按钮打了哪个端点"时显式给一个假 fetch（见「测试连接」那条）。
     ...(fetch === undefined ? {} : { fetch }),
@@ -1625,9 +1630,9 @@ test('客户端产物：同步设置里的「测试连接」——按钮、只�
     return { mounted, text: strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject())) }
   }
   // 假钩子不会点按钮，所以"结论行"由 `nulls` 按顺序种进去：第一个种子被骨架的会话库状态（`state`）
-  // 吃掉，接着六个分别是骨架的错误，同步页的 sync / 弹窗开关 / busy / 错误 / 通知，第七个才是这张
-  // 表单的测试结论（顺序见 ManagerPanel / SyncPanel / SyncConfigForm 里 useState 的先后）。
-  const outcomeOf = (outcome) => render({ nulls: [null, null, null, null, null, null, outcome] })
+  // 吃掉，接着七个分别是骨架的错误，同步页的 sync / 弹窗开关 / busy / 错误 / 通知 / 进度，第八个
+  // 才是这张表单的测试结论（顺序见 ManagerPanel / SyncPanel / SyncConfigForm 里 useState 的先后）。
+  const outcomeOf = (outcome) => render({ nulls: [null, null, null, null, null, null, null, outcome] })
 
   const fresh = render()
   assert.ok(fresh.text.some((item) => item === 'syncTest'), '有「测试连接」按钮')
@@ -2068,4 +2073,160 @@ test('客户端产物：回滚弹窗先摆动作清单再确认（清单就是�
     ['cancel', 'rollbackConfirm'],
     '底部是「取消 / 确认回滚」',
   )
+})
+
+// ---- 同步的进度 ----
+//
+// 同步是这个插件里唯一"按条走网络"的长动作：整库同步可能是几百次往返、几十秒。宿主按条推事件
+// （见 src/web.ts 的 sendEventStream），界面把弹窗正文换成进度条。下面两条分别钉住"进度怎么画"与
+// "确认按钮真的接在那条事件流上"。
+
+test('客户端产物：落地时弹窗正文换成进度条（第几条 / 共几条 + 当前那一条）', { skip }, () => {
+  const state = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    sync: { url: 'https://dav.example.com/dsh', machineId: 'robot-a', mappings: 0 },
+    sessions: [],
+    workspaces: [],
+  }
+  const progressOf = (phase, done, total, label) => ({ phase, done, total, id: 's-1', label })
+  // 顺序：骨架的错误 → 同步页的 sync / 弹窗开关 / busy / error / notice → **progress**（第 6 个
+  // `useState(null)`）。`busy` 种成 'apply'：假钩子不会点按钮，落地那一段只能这样走进去。
+  const mounted = mount({
+    state,
+    panel: 'sync',
+    nulls: [null, null, 'apply', 'apply', null, null, progressOf('push', 12, 84, '会话九')],
+  })
+  const recorded = mounted.recorded
+  const text = strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
+
+  const bar = recorded.find((node) => String(node.props?.className) === 'dsm-progress')
+  assert.ok(bar !== undefined, '进度条本体在弹窗正文里')
+  assert.equal(bar.props['aria-valuenow'], 13, '正在处理第 13 条（done 是**已经做完**的条数）')
+  assert.equal(bar.props['aria-valuemax'], 84, '分母是这一段要做的总条数')
+  assert.equal(bar.props['aria-label'], 'syncPushing:{"current":13,"total":84}', '可读名就是那句计数')
+  const fill = recorded.find((node) => String(node.props?.className) === 'dsm-progressFill')
+  assert.equal(fill.props.style.width, `${(13 / 84) * 100}%`, '填充宽度按 13/84 算，不是写死的')
+  assert.ok(text.includes('syncPushing:{"current":13,"total":84}'), '正文里写清正在推送第几条')
+  assert.ok(text.includes('会话九'), '当前那一条的标题也在（一条几 MB 的包会在这停一会儿）')
+  assert.ok(text.includes('syncProgressNote'), '并说明为什么这里没有「取消」')
+  assert.equal(recorded.some((node) => node.type === 'table'), false, '落地时不再画计划表（那张表说的是"将要"）')
+  assert.equal(primaryOf(recorded).props.children, 'syncBusy', '确认按钮变成"同步中…"')
+  assert.equal(primaryOf(recorded).props.disabled, true, '落地时确认按钮禁用（不能按第二下）')
+  assert.equal(cancelOf(recorded).props.disabled, true, '取消也禁用：中途撒手会在宿主侧留下半截状态')
+
+  // 拉那一段用另一句：两段分母不同，文案得跟着 phase 走。
+  const pulling = mount({
+    state,
+    panel: 'sync',
+    nulls: [null, null, 'apply', 'apply', null, null, progressOf('pull', 0, 3, 'session-a')],
+  })
+  const pullingText = strings(pulling.registrations[0].component(pulling.registrations[0].registration.inject()))
+  assert.ok(pullingText.includes('syncPulling:{"current":1,"total":3}'), '拉那一段说「正在拉取」')
+
+  // 还没收到第一条事件（宿主在算计划：读远端索引、扫本机库、比指纹）。
+  const preparing = mount({ state, panel: 'sync', nulls: [null, null, 'apply', 'apply'] })
+  const preparingText = strings(preparing.registrations[0].component(preparing.registrations[0].registration.inject()))
+  assert.ok(preparingText.includes('syncPreparing'), '那一段说"正在读取远端索引…"')
+  assert.equal(
+    preparing.recorded.some((node) => String(node.props?.className) === 'dsm-progress'),
+    false,
+    '还不知道总数就不画条（画一条 0/0 的只会让人以为卡住了）',
+  )
+})
+
+test('客户端产物：确认同步打的是落地端点，读的是一条事件流而不是等一次性 JSON', { skip }, async () => {
+  const state = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    sync: { url: 'https://dav.example.com/dsh', machineId: 'robot-a', mappings: 0 },
+    sessions: [],
+    workspaces: [],
+  }
+  const calls = []
+  // 收尾那条给一份**完整**的 SyncResponse：界面接着会读 `pulled` / `pushed` / `plan` 它们（缺一个就是
+  // "真实宿主不会这么回，但界面不该当场崩"这件事的反面教材）。
+  const result = {
+    mode: 'apply',
+    remote: { url: 'https://dav.example.com/dsh', machineId: 'robot-a' },
+    plan: {
+      ok: true,
+      problems: [],
+      pull: [],
+      push: [],
+      pullIds: [],
+      pushIds: [],
+      bytesIn: 0,
+      bytesOut: 0,
+      localCount: 0,
+      remoteCount: 0,
+      machines: [],
+    },
+    applied: true,
+    pulled: [],
+    pushed: [],
+    bytesIn: 0,
+    bytesOut: 0,
+    registryWritten: false,
+    indexWritten: true,
+    problems: [],
+    takesEffect: 'immediate',
+  }
+  const chunks = [
+    'data: {"type":"progress","progress":{"phase":"push","total":2,"done":0,"id":"s-1","label":"一"}}\n\n',
+    `data: {"type":"result","result":${JSON.stringify(result)}}\n\n`,
+  ]
+  let index = 0
+  let reads = 0
+  // 弹窗开着（dialog='apply'）、还没点确认（busy=null）：主按钮就是那个入口。
+  const mounted = mount({
+    state,
+    panel: 'sync',
+    nulls: [null, null, 'apply'],
+    fetch: async (url, init) => {
+      calls.push({ url: String(url), method: init?.method, accept: init?.headers?.accept })
+      return {
+        ok: true,
+        status: 200,
+        headers: {
+          get: (name) => {
+            calls.push({ header: name })
+            return 'text/event-stream; charset=utf-8'
+          },
+        },
+        body: {
+          getReader: () => ({
+            read: async () => {
+              reads += 1
+              return index < chunks.length ? { done: false, value: new TextEncoder().encode(chunks[index++]) } : { done: true }
+            },
+          }),
+        },
+        // 一次性那条路必须**没被走到**：走错的话这里会被调用，用例当场红。
+        text: async () => {
+          calls.push({ text: true })
+          return ''
+        },
+      }
+    },
+  })
+
+  // 没有渲染器：得自己把页面组件调一次，还得**走一遍树**（`strings` 遇到函数组件会带着 props 调它），
+  // 否则 SyncPanel 只是个没被展开的元素，里面的按钮压根没进 `recorded`。
+  strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
+  primaryOf(mounted.recorded).props.onClick()
+  for (let tries = 0; tries < 50 && index < chunks.length; tries += 1) await new Promise((resolve) => setImmediate(resolve))
+
+  assert.deepEqual(calls.filter((call) => call.url !== undefined), [
+    { url: '/dsh-session-manager/api/sync?mode=apply', method: 'POST', accept: 'text/event-stream' },
+  ])
+  assert.ok(
+    calls.some((call) => call.header === 'content-type'),
+    '先问 content-type：流还没开始就被挡下时（没配置同步）回的是一次性 JSON',
+  )
+  assert.equal(calls.some((call) => call.text === true), false, '事件流不走一次性 text()')
+  assert.equal(index, chunks.length, '两块事件都被读出来了')
+  assert.ok(reads >= chunks.length + 1, '一直读到 done（不是读一块就收手）')
 })

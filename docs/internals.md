@@ -107,6 +107,8 @@
   窄列装不下整句时改文案与列宽，不是让标签顶到邻居身上（附一条"顶不出去"的兜底）。
 - [写盘动作是一个按钮开一个确认弹窗](../.agents/notes/implemented/architecture/2026-10-03-one-click-confirm-dialog.md)：
   计划与"做不做"这个决定同框；只有会写盘的动作问，归档与导出不问。
+- [同步的落地进度走 SSE 事件流](../.agents/notes/implemented/architecture/2026-10-03-sync-progress-streams-over-sse.md)：
+  `mode=apply` 按条报进度，拉与推各自一段；跳过的那些不进分母，也没有中途取消。
 
 ## Host 半侧的约束
 
