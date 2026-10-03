@@ -130,9 +130,16 @@ interface Captured {
 function fakeRes(): { res: ServerResponse; captured: Captured } {
   const captured: Captured = { status: 0, headers: {}, body: Buffer.alloc(0) }
   let headersSent = false
+  let ended = false
+  const push = (chunk: Buffer | string): void => {
+    captured.body = Buffer.concat([captured.body, Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)])
+  }
   const res = {
     get headersSent(): boolean {
       return headersSent
+    },
+    get writableEnded(): boolean {
+      return ended
     },
     writeHead(status: number, headers?: Record<string, string>) {
       captured.status = status
@@ -140,12 +147,34 @@ function fakeRes(): { res: ServerResponse; captured: Captured } {
       headersSent = true
       return res
     },
+    // SSE 要的正是这两下：多次 `write` 累积成一条流，`end` 收尾。一次性响应只调用一次 `end`，
+    // 语义与原来一致（原来那个实现是覆盖，这里换成追加）。
+    write(chunk: Buffer | string) {
+      push(chunk)
+      return true
+    },
     end(chunk?: Buffer | string) {
-      if (chunk !== undefined) captured.body = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+      if (chunk !== undefined) push(chunk)
       headersSent = true
+      ended = true
     },
   }
   return { res: res as unknown as ServerResponse, captured }
+}
+
+/**
+ * 把一次响应体拆成 SSE 事件（`data:` 行，事件之间空行）。
+ *
+ * 同步的落地那一次走的就是这个形状（见 src/web.ts 的 sendEventStream）：`progress` 每条一次、
+ * `result` 收尾。
+ */
+function events(res: Captured): Array<Record<string, unknown>> {
+  return res.body
+    .toString('utf8')
+    .split('\n\n')
+    .map((block) => block.split('\n').find((line) => line.startsWith('data:')))
+    .filter((line): line is string => line !== undefined)
+    .map((line) => JSON.parse(line.slice('data:'.length).trim()) as Record<string, unknown>)
 }
 
 function json(res: Captured): Record<string, unknown> {
@@ -1108,7 +1137,7 @@ test('GET /sync?mode=test：只读探一次，把结论与"这次有没有凭据
   }
 })
 
-test('POST /sync?mode=apply：预演不落地，apply 拉下远端那条并登记进本机工作区', async () => {
+test('POST /sync?mode=apply：预演不落地，apply 走事件流拉下远端那条并登记进本机工作区', async () => {
   const sandbox = makeSandbox('web-sync')
   writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000)
   const fixture = await startDavFixture({ root: join(sandbox.base, 'dav') })
@@ -1140,7 +1169,26 @@ test('POST /sync?mode=apply：预演不落地，apply 拉下远端那条并登�
     const preview = fakeRes()
     await handlers['GET|POST /sync']!(fakeReq('GET', `${API_PREFIX}/sync`), preview.res)
     assert.equal(preview.captured.status, 200)
-    const plan = json(preview.captured)
+    assert.equal(
+      preview.captured.headers['content-type'],
+      'text/event-stream; charset=utf-8',
+      '预演也走事件流：它要扫本机、读远端、逐条比对，冷的时候几秒，界面得说出做到哪儿了',
+    )
+    const previewStream = events(preview.captured)
+    assert.deepEqual(
+      previewStream.map((event) => event['type']),
+      ['progress', 'progress', 'result'],
+      '预演报的是算计划的三段：扫本机的 1 条、读远端索引 1 条，再收尾',
+    )
+    assert.deepEqual(
+      previewStream.filter((event) => event['type'] === 'progress').map((event) => event['progress']),
+      [
+        { phase: 'scan', total: 1, done: 0 },
+        { phase: 'remote', total: 0, done: 0 },
+      ],
+      '读远端索引那一段没有分母（total: 0）：界面只说"正在读取远端索引…"。预演没有 pull/push——那两段要真写盘；本机与远端没有同 id 的会话，比对那段一个文件都不用读',
+    )
+    const plan = previewStream.find((event) => event['type'] === 'result')?.['result'] as Record<string, unknown>
     assert.equal(plan['mode'], 'plan')
     assert.equal(plan['applied'], false)
     assert.deepEqual(plan['plan'] && (plan['plan'] as Record<string, unknown>)['pullIds'], ['session-remote'])
@@ -1153,7 +1201,28 @@ test('POST /sync?mode=apply：预演不落地，apply 拉下远端那条并登�
     const applied = fakeRes()
     await handlers['GET|POST /sync']!(fakeReq('POST', `${API_PREFIX}/sync?mode=apply`), applied.res)
     assert.equal(applied.captured.status, 200)
-    const outcome = json(applied.captured)
+    assert.equal(
+      applied.captured.headers['content-type'],
+      'text/event-stream; charset=utf-8',
+      '落地那一次是事件流（界面靠它显示"正在推送 12 / 84"）',
+    )
+    const stream = events(applied.captured)
+    assert.deepEqual(
+      stream.map((event) => event['type']),
+      ['progress', 'progress', 'progress', 'progress', 'result'],
+      '先报算计划的三段（扫本机、读远端索引），再报拉与推各一条，最后收尾',
+    )
+    assert.deepEqual(
+      stream.filter((event) => event['type'] === 'progress').map((event) => event['progress']),
+      [
+        { phase: 'scan', total: 1, done: 0 },
+        { phase: 'remote', total: 0, done: 0 },
+        { phase: 'pull', total: 1, done: 0, id: 'session-remote', label: '远端那条' },
+        { phase: 'push', total: 1, done: 0, id: 'session-a', label: 'session-a' },
+      ],
+      '算计划的三段在前（按下确认后到第一条拉下来之间那段空档就靠它），每条开始处理前一条事件：先拉后推，done 从 0 数起，label 标题优先',
+    )
+    const outcome = stream.find((event) => event['type'] === 'result')?.['result'] as Record<string, unknown>
     assert.equal(outcome['mode'], 'apply')
     assert.equal(outcome['applied'], true)
     assert.deepEqual(outcome['pulled'], ['session-remote'])

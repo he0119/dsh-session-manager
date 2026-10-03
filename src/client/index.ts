@@ -1,7 +1,7 @@
 /**
  * `dsh-session-manager` 的 Web Client 端：把「会话管理」注册成设置里的独立一页。
  *
- * 页面主体在 [ManagerPanel.tsx](./ManagerPanel.tsx)（页内分「传输」「迁移」「会话」三页），
+ * 页面主体在 [ManagerPanel.tsx](./ManagerPanel.tsx)（页内分「会话」「迁移」「传输」「同步」「说明」五个分页），
  * 文案在 [locales.ts](./locales.ts)，端点调用在 [api.ts](./api.ts)，样式在 [styles.ts](./styles.ts)
  * ——这里只做组装。
  *
@@ -10,7 +10,7 @@
  *   - `plugins.detail.section`（插件详情页里的一段）归属感最贴，但要按 subject
  *     （`item` / `row` / `bundle`）自过滤，而判断依据是**包在插件管理器里的表示形态**；
  *     猜错不报错，只是永远不渲染——静默空白。它还会在包内每一行的页面上各渲染一次，
- *     而本页要的是整页宽高（会话表 + 预演表），塞进 `gap: 32px` 的 section 列会挤。
+ *     而本页要的是整页宽高（会话表 + 计划表），塞进 `gap: 32px` 的 section 列会挤。
  *   - `settings.plugins.tab`（「插件」设置区里的一个页签）那条页签栏的语义是「插件列表的视图」，
  *     一个功能页挤进去属于借位。
  *

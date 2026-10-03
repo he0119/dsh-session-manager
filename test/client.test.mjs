@@ -196,6 +196,11 @@ function loadBundle({ firstNull, panel, arrays, strings, nulls, fetch } = {}) {
     window: { __ModuleLoader__: { load: (value) => { entry = value } } },
     document: fakeDocument(nodes),
     console,
+    // 浏览器里这两样是全局的：同步的落地走事件流，读流那一步要按 UTF-8 解码（api.ts 里 new 的是
+    // TextDecoder）。vm 的新上下文默认什么都不给，少一个就会在"读流"那一步抛 ReferenceError，而它
+    // 只会表现成"进度没出现"，看不出是环境缺件。
+    TextDecoder,
+    TextEncoder,
     // 默认**没有** fetch：渲染路径不该发请求，给不了就当它不存在，省得漏掉一次真网络调用。
     // 用例要核对"点这个按钮打了哪个端点"时显式给一个假 fetch（见「测试连接」那条）。
     ...(fetch === undefined ? {} : { fetch }),
@@ -213,9 +218,10 @@ function loadBundle({ firstNull, panel, arrays, strings, nulls, fetch } = {}) {
         Fragment: react.Fragment,
       }
     }
-    // 平台基线模块之一（官方控件库）。本产物只用得上那个**只写**的密码控件：真正的那个是 React
-    // 组件，这里照它的 props 造一个 `input[type=password]`，并把 props 原样记进 `recorded`
-    // ——用例要核对的是"徽标说配没配、能不能写"这些**入参**，不是官方控件内部怎么画。
+    // 平台基线模块之一（官方控件库）。本产物用得上两样：那个**只写**的密码控件，以及确认弹窗用的
+    // `Modal`。真正的它们都是 React 组件，这里照 props 造一个 `input[type=password]` / 一个
+    // `[role=dialog]`，并把 props 原样记进 `recorded`——用例要核对的是"徽标说配没配、能不能写""弹窗
+    // 开没开、标题是什么、正文摆了什么、底部那两个按钮是谁"这些**入参**，不是官方控件内部怎么画。
     if (specifier === '@deepseek-ai/dsh-client-ui-primitives') {
       return {
         SettingsSecretField: (props) =>
@@ -227,6 +233,26 @@ function loadBundle({ firstNull, panel, arrays, strings, nulls, fetch } = {}) {
             'data-state': props.stateLabel,
             'data-configured': props.configured,
           }),
+        // `Modal` 的替身：真那个会 createPortal 到 body、管 Escape 与焦点归还，这里没有渲染器也没有
+        // DOM；用例只关心它的四处入参——`open`（回 null 的契约）、`title`、`children` 与 `footer`。
+        Modal: (props) =>
+          props.open === false
+            ? null
+            : react.createElement(
+                'div',
+                {
+                  role: 'dialog',
+                  'aria-modal': 'true',
+                  'aria-label': props.title,
+                  className: props.className,
+                  'data-close-label': props.closeLabel,
+                },
+                react.createElement('h2', { className: 'dsm-fakeDialogTitle' }, props.title),
+                props.children,
+                props.footer === undefined
+                  ? null
+                  : react.createElement('div', { className: 'dsm-fakeDialogFooter' }, props.footer),
+              ),
       }
     }
     throw new Error(`产物 require 了平台模块表里没有的模块：${specifier}`)
@@ -713,7 +739,7 @@ test('客户端产物：「会话」页把侧边栏看不见的那三类标出�
   const actionButton = (key) =>
     recorded.find((element) => element.type === 'button' && strings(element).includes(key))
   assert.equal(actionButton('manageArchive')?.props?.['disabled'], false, '宿主有归档能力时按钮可用')
-  assert.ok(text.includes('manageDeletePreview') && text.includes('manageDeleteHint'), '删除入口与说明在')
+  assert.ok(actionButton('manageDelete') !== undefined && text.includes('manageDeleteHint'), '删除入口与说明在')
   assert.ok(!text.includes('manageArchiveUnavailable'), '宿主有归档能力时不该显示"改不了归档"那句')
 })
 
@@ -874,7 +900,7 @@ test('客户端产物：「会话」页在宿主没有归档能力时禁用入�
   assert.equal(button('manageArchive')?.props?.['disabled'], true, '没有归档能力时归档按钮要真的禁用')
   assert.equal(button('manageUnarchive')?.props?.['disabled'], true, '取消归档同理')
   // 删除不依赖宿主的归档服务，所以入口照旧在（空选择下它也禁用，但那是另一条理由，界面上另有说明）
-  assert.ok(button('manageDeletePreview'), '删除入口照旧在')
+  assert.ok(button('manageDelete') !== undefined, '删除入口照旧在')
 })
 
 test('客户端产物：「会话」页的筛选条把不匹配的行筛掉，选中态挂在 aria-pressed 上', { skip }, () => {
@@ -1064,11 +1090,11 @@ test('客户端产物：导出页也接了同一套筛选条，筛空的组整�
   assert.deepEqual(rowParts(labels[0]).tags, ['tagBlank'], '这一页也挂属性标签，且「未分组」只给侧边栏那一组')
 })
 
-test('客户端产物：迁移页把"跟着父会话进来的子代理"单独说明（预演卡片）', { skip }, () => {
-  // 预演卡片是点了「预演」之后才渲染的，冒烟里走不到（假钩子给不出点击），所以把 `outcome` 种进去。
-  // null 状态的顺序是：页面骨架的 state（由 mount 的 `state` 种）/ error，然后迁移页的
-  // picking / manual / **outcome** —— 所以 `nulls` 里先补三个 null，第四个才是预演结果。
-  // 种错位置表现为"预演卡片没渲染出来"，当场红。
+test('客户端产物：迁移弹窗——计划逐条列出会话，跟着父会话进来的那些挂「随父迁」', { skip }, () => {
+  // 弹窗是点了「迁移」之后才在树上的，冒烟里走不到（假钩子给不出点击），所以把 `pending` 种进去。
+  // null 状态的顺序：页面骨架的 error（`state` 由 mount 的 `firstNull` 种）/ 迁移页的
+  // picking / manual / **pending**——所以 `nulls` 里先补三个 null，第四个才是那份计划。
+  // 种错位置表现为"弹窗没渲染出来"，当场红。
   const state = {
     sessionsRoot: '/home/u/.dsh/sessions',
     registryPath: '/home/u/.dsh/registry.json',
@@ -1113,30 +1139,53 @@ test('客户端产物：迁移页把"跟着父会话进来的子代理"单独说
     summary: 'plan summary',
     takesEffect: 'restart-required',
   })
+  /** 种一份计划进弹窗（`pending` 的位置见上面的注释）。 */
+  const withPlan = (cascaded) => {
+    const mounted = mount({
+      state,
+      panel: 'migrate',
+      strings: ['/home/u/dev/alpha', '/home/u/dev/beta'],
+      nulls: [null, null, null, { response: outcomeOf(cascaded), error: null }],
+    })
+    const tree = mounted.registrations[0].component(mounted.registrations[0].registration.inject())
+    return { mounted, tree, text: strings(tree) }
+  }
 
-  const withFamily = mount({
-    state,
-    panel: 'migrate',
-    strings: ['/home/u/dev/alpha', '/home/u/dev/beta'],
-    nulls: [null, null, null, outcomeOf(1)],
-  })
-  const familyText = strings(withFamily.registrations[0].component(withFamily.registrations[0].registration.inject()))
-  assert.ok(familyText.includes('migrateTitle'), '迁移页本体渲染出来了')
+  const withFamily = withPlan(1)
+  assert.ok(withFamily.text.includes('migrateTitle'), '迁移页本体渲染出来了')
   assert.ok(
-    familyText.some((item) => String(item) === 'migrateFamily:{"count":1}'),
-    '有一条子代理跟着走时，预演卡片要说明它是跟着父会话进来的',
+    withFamily.text.some((item) => String(item) === 'migrateFamily:{"count":1}'),
+    '有一条子代理跟着走时，弹窗里要说明它是跟着父会话进来的',
+  )
+  // 弹窗本体：标题、逐条清单（含"随父迁"那枚标签）、底部那对按钮
+  const dialogs = withFamily.mounted.recorded.filter((node) => node.props?.role === 'dialog')
+  assert.equal(dialogs.length, 1, '迁移页上只有一个弹窗')
+  assert.equal(dialogs[0].props['aria-label'], 'migrateDialogTitle', '标题说的是那个动作')
+  const rows = withFamily.mounted.recorded.filter(
+    (node) => typeof node.type === 'string' && String(node.props?.className).includes('dsm-rowPlan'),
+  )
+  assert.deepEqual(rows.map((row) => rowParts(row).label), ['s-1', 's-9'], '清单里逐条列出会搬走的会话')
+  assert.deepEqual(rowParts(rows[0]).tags, [], '点名的那些没有出处标签')
+  assert.deepEqual(rowParts(rows[1]).tags, ['migrateVia'], '级联进来的挂「随父迁」（不是「随父删」）')
+  assert.equal(
+    (String(rows[1].props.className).match(/dsm-rowNest(\d)/) ?? [])[1],
+    '1',
+    '级联进来的缩进一级（与上面那条父会话的关系一眼看得出）',
+  )
+  const footer = withFamily.mounted.recorded.find((node) => String(node.props?.className) === 'dsm-fakeDialogFooter')
+  assert.deepEqual(
+    // 底部那对按钮在 ConfirmDialog 里是一个 Fragment，得摊平了看（elementsOf 会下探 children）。
+    elementsOf(footer)
+      .filter((node) => node.type === 'button')
+      .map((button) => strings(button)[0]),
+    ['cancel', 'migrateApply'],
+    '底部是「取消 / 确认迁移」，确认那个是唯一的落地入口',
   )
 
-  // 没有子代理跟随时这句话不该出现（否则每次迁移都多一行噪音）
-  const plain = mount({
-    state,
-    panel: 'migrate',
-    strings: ['/home/u/dev/alpha', '/home/u/dev/beta'],
-    nulls: [null, null, null, outcomeOf(0)],
-  })
-  const plainText = strings(plain.registrations[0].component(plain.registrations[0].registration.inject()))
-  assert.ok(plainText.some((item) => String(item).startsWith('migrateSummary')), '预演卡片照旧渲染')
-  assert.equal(plainText.some((item) => String(item).startsWith('migrateFamily')), false)
+  // 没有子代理跟随时那句话不该出现（否则每次迁移都多一行噪音）
+  const plain = withPlan(0)
+  assert.ok(plain.text.some((item) => String(item).startsWith('migrateSummary')), '弹窗正文照旧渲染')
+  assert.equal(plain.text.some((item) => String(item).startsWith('migrateFamily')), false)
 })
 
 test('客户端产物：迁移页只给搜索框、不给类别芯片（那页的列表本来就是候选）', { skip }, () => {
@@ -1433,8 +1482,7 @@ test('客户端产物：同步页的同步块——没配置只说明，配置�
   // 没配置：一句话说明怎么配，一个按钮都不摆（点了没反应的按钮比不摆更糟）
   const off = mount({ state: base, panel: 'sync' })
   assert.ok(text(off).includes('syncOffHint'), '没配置时要说明怎么配')
-  assert.ok(!buttonTexts(off).includes('syncPreview'), '没配置时不该出现同步按钮')
-  assert.ok(!buttonTexts(off).includes('syncApply'), '没配置时不该出现同步按钮')
+  assert.ok(!buttonTexts(off).includes('syncAction'), '没配置时不该出现同步按钮')
 
   // 配置了：远端与这台机器报出来，预演与确认两个按钮都在
   const on = mount({
@@ -1442,9 +1490,12 @@ test('客户端产物：同步页的同步块——没配置只说明，配置�
     panel: 'sync',
   })
   const onText = text(on)
-  assert.ok(onText.includes('syncWhere:{"url":"https://dav.example.com/dsh","machine":"robot-a"}'), '要报出远端与机器名')
+  assert.ok(onText.includes('syncWhere:{"url":"https://dav.example.com/dsh"}'), '卡片标题只报远端')
   assert.ok(onText.includes('syncHint:{"mappings":2}'), '要报出映射条数')
-  assert.deepEqual(buttonTexts(on).filter((label) => label.startsWith('sync')), ['syncPreview', 'syncApply'])
+  // 机器名不再重复印在标题上：它挪到了机器名那一栏的**灰字**里（宿主解析出来的缺省值，没配就是
+  // 主机名），与「超时」那一栏的 30000 同一个口径——留空不等于没有值。那一栏归表单那条用例钉。
+  // 一个动作一个按钮：弹窗里的「确认同步」只有开了弹窗才在树上，卡片头上只有「同步」这一个入口。
+  assert.deepEqual(buttonTexts(on).filter((label) => label.startsWith('sync')), ['syncAction'])
 })
 
 test('客户端产物：同步设置表单按 entry id 向设置接缝取控制器，宿主没提供时说实话', { skip }, () => {
@@ -1464,8 +1515,8 @@ test('客户端产物：同步设置表单按 entry id 向设置接缝取控制�
       revision: 7,
       value: {
         sync: {
+          // 机器名**没配过**（接缝里就没有这一项）：真实场景就是这个样子，缺省值由宿主解析。
           url: 'https://dav.example.com/dsh',
-          machineId: 'robot-a',
           timeoutMs: 30000,
           passwordRef: 'MY_DAV_PASSWORD',
           mapping: { '/home/alice/dev/proj': '/opt/work/proj' },
@@ -1502,6 +1553,15 @@ test('客户端产物：同步设置表单按 entry id 向设置接缝取控制�
     mounted.recorded.some((node) => node.type === 'input' && node.props?.value === 'https://dav.example.com/dsh'),
     'URL 是从接缝里读出来的，不是页面自己存的',
   )
+  // 机器名那一栏：接缝里没这一项（没配过），宿主状态里解析出来是 robot-a —— 框里应当是**空的**、
+  // 灰字是那个名字。灰字不是值：它不会进草稿，保存时也不会被写成一条"等于缺省值"的覆盖
+  // （覆盖会把这一栏从此顶上一个「已覆盖」徽标，见 syncForm.ts 的 draftOps）。
+  const machineInput = mounted.recorded.find(
+    (node) => node.type === 'input' && node.props?.placeholder === 'robot-a',
+  )
+  assert.ok(machineInput !== undefined, '机器名那一栏的灰字是宿主解析出来的缺省值')
+  assert.equal(machineInput.props.value, '', '没配过就画成空的——灰字只是缺省，不是值')
+
   // 映射表是行：左右各一个输入框，值分别来自接缝里的那一对键值
   const mappingInputs = mounted.recorded.filter(
     (node) => node.type === 'input' && (node.props?.value === '/home/alice/dev/proj' || node.props?.value === '/opt/work/proj'),
@@ -1581,9 +1641,9 @@ test('客户端产物：同步设置里的「测试连接」——按钮、只�
     return { mounted, text: strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject())) }
   }
   // 假钩子不会点按钮，所以"结论行"由 `nulls` 按顺序种进去：第一个种子被骨架的会话库状态（`state`）
-  // 吃掉，接着五个分别是骨架的错误、同步页的预演结果 / busy / 错误 / 通知，第六个才是这张表单的
-  // 测试结论（顺序见 ManagerPanel / SyncPanel / SyncConfigForm 里 useState 的先后）。
-  const outcomeOf = (outcome) => render({ nulls: [null, null, null, null, null, outcome] })
+  // 吃掉，接着七个分别是骨架的错误，同步页的 sync / 弹窗开关 / busy / 错误 / 通知 / 进度，第八个
+  // 才是这张表单的测试结论（顺序见 ManagerPanel / SyncPanel / SyncConfigForm 里 useState 的先后）。
+  const outcomeOf = (outcome) => render({ nulls: [null, null, null, null, null, null, null, outcome] })
 
   const fresh = render()
   assert.ok(fresh.text.some((item) => item === 'syncTest'), '有「测试连接」按钮')
@@ -1676,10 +1736,12 @@ test('客户端产物：同步设置里的「测试连接」——按钮、只�
   )
 })
 
-test('客户端产物：同步预演的动作列只放动词，整句解释挂在 title 上', { skip }, () => {
-  // 真实事故（用户截图报的）：动作列沿用导入预演那 60px，而它装的是「本机有、远端没有」这种短语
-  // （实测 110px，en 158px），nowrap 直接画到后面那一列的会话名上。现在这一列只放动词，整句留在
-  // title 里；列宽与兜底规则在 styles.ts（由 test/styles.test.mjs 钉住）。
+test('客户端产物：同步预演三张表的状态列只放短标签，整句解释挂在 title 上', { skip }, () => {
+  // 两次真实事故（都是用户截图报的）：一是动作列沿用导入预演那 60px，而它装的是「本机有、远端没有」
+  // 这种短语（实测 110px，en 158px），nowrap 直接画到后面那一列的会话名上；二是「这次不动」那一段
+  // 把状态与会话名拼成同一句同色同号的文字（原来的 `syncNote`），三行读下来分不出哪个是状态、哪个
+  // 是会话。现在三张表一个口径：状态列放短标签、会话单独一列，整句留在 title 里；列宽与兜底规则在
+  // styles.ts（由 test/styles.test.mjs 钉住）。
   const state = {
     sessionsRoot: '/home/u/.dsh/sessions',
     registryPath: '/home/u/.dsh/registry.json',
@@ -1720,9 +1782,8 @@ test('客户端产物：同步预演的动作列只放动词，整句解释挂�
     problems: [],
     takesEffect: 'immediate',
   }
-  // 第一个种子被骨架的会话库状态吃掉，第二个才是同步页的预演结果（见 ManagerPanel / SyncPanel 的
-  // useState 先后）。
-  const mounted = mount({ state, panel: 'sync', nulls: [null, response] })
+  // 顺序：骨架的错误 → 同步页的 sync（那份计划）→ 弹窗开关（种成 'plan'，计划表只在弹窗里画）。
+  const mounted = mount({ state, panel: 'sync', nulls: [null, response, 'plan'] })
   const tree = mounted.registrations[0].component(mounted.registrations[0].registration.inject())
   const text = strings(tree)
 
@@ -1730,9 +1791,17 @@ test('客户端产物：同步预演的动作列只放动词，整句解释挂�
   const tables = mounted.recorded.filter((node) => node.type === 'table')
   assert.equal(
     tables.filter((node) => String(node.props?.className).includes('dsm-syncPlanTable')).length,
-    2,
-    '拉表与推表都要带变体类，否则列宽还是导入预演那 60px',
+    3,
+    '拉表、推表与「这次不动」那张表都要带变体类，否则列宽还是导入预演那 60px',
   )
+  assert.ok(
+    tables.some((node) => String(node.props?.className).includes('dsm-keptTable')),
+    '「这次不动」也是一张表（状态一列、会话一列、说明一列），不是一整行说明',
+  )
+  const keptHeaders = mounted.recorded
+    .filter((node) => node.type === 'th' && node.props?.children === 'colNote')
+    .length
+  assert.equal(keptHeaders, 1, '那张表的第三列表头是「说明」')
 
   // 动作列：看得见的是动词，整句在 title 里。
   const tagOf = (visible, title) =>
@@ -1740,13 +1809,38 @@ test('客户端产物：同步预演的动作列只放动词，整句解释挂�
   assert.ok(tagOf('syncTagPull', 'syncCodeMissingPull'), '拉表那颗标签是「拉下来」，整句在 title 上')
   assert.ok(tagOf('syncTagPush', 'syncCodeMissingPush'), '推表新推的那颗是「推上去」')
   assert.ok(tagOf('syncTagRepush', 'syncCodeLocalAhead'), '本机领先的那颗是「重推刷新」')
+  assert.ok(
+    mounted.recorded.some(
+      (node) => node.props?.children === 'syncTagDiverged' && String(node.props?.title).startsWith('syncCodeDiverged'),
+    ),
+    '「这次不动」那颗是「两边各自写过」，整句（带机器名）在 title 上',
+  )
 
-  // 整句不许再当动作列的可见文字（它会把邻居那一列压掉）；它还留在「这次不动」那段说明里。
+  // 整句不许再当可见文字（它会把邻居那一列压掉；挤在同一句里还会让状态与会话名分不出来）。
   assert.equal(text.includes('syncCodeMissingPush'), false, '动作列不再放整句')
   assert.equal(text.includes('syncCodeMissingPull'), false)
-  assert.ok(
-    text.some((item) => String(item).startsWith('syncNote:') && String(item).includes('syncCodeDiverged')),
-    '「这次不动」那段照旧给整句（那里是整行说明，不是窄列）',
+  assert.equal(text.includes('syncCodeDiverged'), false, '「这次不动」也不再整句可见')
+  assert.equal(
+    text.some((item) => String(item).includes('syncCodeDiverged') && String(item).includes('session-d')),
+    false,
+    '状态与会话名不许挤在同一个文本节点里——那正是分不出两者的原因',
+  )
+  assert.ok(text.includes('session-d'), '会话名照旧是那一行看得见的文字')
+
+  // 计划还没回来的那一段：弹窗开着、正文是"预演中…"，确认禁用（别让上一次那份计划冒充这一次的）。
+  const waiting = mount({ state, panel: 'sync', nulls: [null, response, 'plan', 'plan'] })
+  const waitingRecorded = waiting.recorded
+  const waitingText = strings(waiting.registrations[0].component(waiting.registrations[0].registration.inject()))
+  assert.ok(waitingText.includes('previewing'), '计划在路上时正文是"预演中…"')
+  assert.equal(
+    waitingText.some((item) => String(item).startsWith('syncSummary')),
+    false,
+    '计划路上的那一段不摆旧计划（上次那份的表会被当成这次的）',
+  )
+  assert.equal(
+    primaryOf(waitingRecorded).props.disabled,
+    true,
+    '计划没到手时确认按钮禁用——这一条靠 ConfirmDialog 的 planning，同步页不给 disabled',
   )
 })
 
@@ -1773,7 +1867,526 @@ test('客户端产物：同步独占「同步」分页，传输页不再有那�
     })(),
   )
   assert.ok(syncText.includes('syncTitle'), '「同步」分页上要有同步卡片')
-  assert.ok(syncText.includes('syncPreview'), '且带着预演按钮（配置在，按钮就在）')
+  assert.ok(syncText.includes('syncAction'), '且带着同步按钮（配置在，按钮就在）')
   assert.ok(!transferText.includes('syncTitle'), '传输页上不该再有同步卡片')
-  assert.ok(!transferText.includes('syncPreview'), '传输页上不该再有预演按钮')
+  assert.ok(!transferText.includes('syncAction'), '传输页上不该再有同步按钮')
+})
+
+// ---- 确认弹窗：一个动作一个入口 ----
+//
+// 这次改动把"先点预演、看页面上的结果、再点确认"换成了"点动作 → 弹窗里看清单 → 确认或取消"。
+// 下面几条钉住三件事：① 每个会写盘的动作只有一个入口（页面上不再有独立的预演按钮）；② 弹窗里摆的
+// 是宿主那份计划（清单、问题、备份位置），主按钮在计划不 ok 时真的禁用；③ 级联进来的行有出处标签。
+
+/** 弹窗里的主按钮（footer 里带 `dsm-primary` 的那个）。 */
+function primaryOf(recorded) {
+  return elementsOf(recorded.find((node) => String(node.props?.className) === 'dsm-fakeDialogFooter')).find(
+    (node) => node.type === 'button' && String(node.props?.className).includes('dsm-primary'),
+  )
+}
+
+/** 弹窗里的取消按钮。 */
+function cancelOf(recorded) {
+  return elementsOf(recorded.find((node) => String(node.props?.className) === 'dsm-fakeDialogFooter')).find(
+    (node) => node.type === 'button' && !String(node.props?.className).includes('dsm-primary'),
+  )
+}
+
+test('客户端产物：会写盘的四个动作各自只有一个入口，预演不占页面按钮', { skip }, () => {
+  const state = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    archiveAvailable: true,
+    sync: { url: 'https://dav.example.com/dsh', machineId: 'robot-a', mappings: 1 },
+    sessions: [{ id: 's-1', cwd: '/home/u/dev/alpha', createdAt: 1, dir: '/home/u/dev/alpha', bytes: 1, files: [] }],
+    workspaces: [{ id: 'w1', path: '/home/u/dev/alpha', title: '工作区甲', sessionIds: ['s-1'] }],
+  }
+  const panelText = (panel) => {
+    const mounted = mount({ state, panel })
+    return strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
+  }
+  const manage = panelText('manage')
+  const transfer = panelText('transfer')
+  const migrate = panelText('migrate')
+  const sync = panelText('sync')
+
+  // 页面上只剩"那个动作"本身；`previewing`（"预演中…"）只该出现在开着的弹窗里，页面上一律没有。
+  for (const text of [manage, transfer, migrate, sync]) {
+    assert.equal(text.includes('previewing'), false, '关着弹窗时页面上不该有"预演中…"')
+  }
+  assert.ok(manage.includes('manageDelete'), '「会话」页的写入口是「删除所选」')
+  assert.ok(transfer.includes('importAction'), '传输页的写入口是「导入」（导出不问）')
+  assert.ok(migrate.includes('migrateAction'), '迁移页的写入口是「迁移」')
+  assert.ok(sync.includes('syncAction'), '同步页的写入口是「同步」')
+})
+
+test('客户端产物：删除弹窗摆出清单与备份位置，计划不 ok 时确认按钮禁用', { skip }, () => {
+  const state = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    archiveAvailable: true,
+    sessions: [
+      { id: 's-1', cwd: '/home/u/dev/alpha', createdAt: 5, dir: '/home/u/dev/alpha', bytes: 2048, files: [] },
+      { id: 's-9', cwd: '/home/u/dev/alpha', createdAt: 4, dir: '/home/u/dev/alpha', bytes: 1024, files: [], origin: 'subagent', hidden: 'subagent', parentSession: 's-1' },
+    ],
+    workspaces: [{ id: 'w1', path: '/home/u/dev/alpha', title: '工作区甲', sessionIds: ['s-1'] }],
+  }
+  const planOf = (ok) => ({
+    mode: 'plan',
+    ok,
+    preview: {
+      ok,
+      problems: ok ? [] : ['s-9 还活在宿主内存里'],
+      entries: [
+        { id: 's-1', createdAt: 5, dir: '/home/u/.dsh/sessions/alpha/s-1', files: [], bytes: 2048, live: false },
+        { id: 's-9', createdAt: 4, dir: '/home/u/.dsh/sessions/alpha/s-9', files: [], bytes: 1024, live: true, via: { id: 's-1' } },
+      ],
+      files: 0,
+      bytes: 3072,
+      backupRoot: '/home/u/.dsh/dsh-session-manager-backups',
+    },
+    applied: false,
+    dirsRemoved: 0,
+    removedProjectDirs: [],
+    verified: false,
+    // 计划不 ok 时宿主把 plan.problems 提到顶层（见 web.ts 的删除端点），界面读的就是这一份。
+    problems: ok ? [] : ['s-9 还活在宿主内存里'],
+    summary: '将删除 2 条会话',
+    takesEffect: 'restart-required',
+  })
+  // null 顺序：骨架的 error / 会话页的 busy / error / notice / **pending**（勾选集由 arrays 种）。
+  const mounted = (ok) =>
+    mount({ state, panel: 'manage', arrays: [['s-1']], nulls: [null, null, null, null, { plan: planOf(ok), error: null }] })
+  const render = (ok) => {
+    const item = mounted(ok)
+    return { recorded: item.recorded, text: strings(item.registrations[0].component(item.registrations[0].registration.inject())) }
+  }
+
+  const good = render(true)
+  const dialogs = good.recorded.filter((node) => node.props?.role === 'dialog')
+  assert.equal(dialogs.length, 1, '点删除之后页面上只有一个弹窗')
+  assert.equal(dialogs[0].props['aria-label'], 'manageDeletePlanTitle', '标题说的是那个动作')
+  assert.ok(good.text.some((item) => String(item) === '将删除 2 条会话'), '弹窗里摆的是宿主给的那份摘要')
+  const rows = good.recorded.filter(
+    (node) => typeof node.type === 'string' && String(node.props?.className).includes('dsm-rowPlan'),
+  )
+  assert.deepEqual(rows.map((row) => rowParts(row).label), ['s-1', 's-9'], '清单逐条列出会被删的会话')
+  assert.deepEqual(rowParts(rows[1]).tags, ['manageDeleteVia'], '级联进来的挂「随父删」')
+  assert.equal(primaryOf(good.recorded).props.disabled, false, '计划 ok 时确认可用')
+  assert.ok(strings(cancelOf(good.recorded)).includes('cancel'), '旁边是「取消」')
+  assert.ok(
+    good.text.some((item) => String(item).startsWith('manageBackupTo') && String(item).includes('dsh-session-manager-backups')),
+    '备份落在哪要写在弹窗里（要恢复时知道去哪找）',
+  )
+
+  const bad = render(false)
+  assert.ok(bad.text.some((item) => String(item) === 's-9 还活在宿主内存里'), '计划里的问题清单照旧摆出来')
+  assert.equal(primaryOf(bad.recorded).props.disabled, true, '计划不 ok 时确认按钮禁用（不能一边报问题一边让删）')
+
+  // 计划还没回来那一段（弹窗已经被点开、宿主还没答）：正文是"预演中…"，确认同样禁用——这一格不能
+  // 出现"清单还没到手就能按确认"的窗口。
+  const waiting = mount({
+    state,
+    panel: 'manage',
+    arrays: [['s-1']],
+    nulls: [null, null, null, null, { plan: null, error: null }],
+  })
+  const waitingRecorded = waiting.recorded
+  const waitingText = strings(waiting.registrations[0].component(waiting.registrations[0].registration.inject()))
+  assert.ok(waitingText.includes('previewing'), '计划在路上时正文是"预演中…"')
+  assert.equal(primaryOf(waitingRecorded).props.disabled, true, '计划没到手时确认按钮禁用')
+})
+
+test('客户端产物：导入弹窗里摆的是那张预演表，全是跳过时确认按钮禁用', { skip }, () => {
+  const state = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    sessions: [],
+    workspaces: [{ id: 'w1', path: '/home/u/dev/beta', title: '工作区乙', sessionIds: [] }],
+  }
+  const planOf = (action) => ({
+    mode: 'plan',
+    ok: true,
+    problems: [],
+    entries: [
+      { id: 's-1', action, dir: '/home/u/.dsh/sessions/beta/s-1', fromCwd: '/home/u/dev/alpha', toCwd: '/home/u/dev/beta', files: [{ name: 'a.log', bytes: 10 }] },
+    ],
+    created: [],
+    rehomed: [],
+    bytes: 10,
+  })
+  // null 顺序：骨架的 error / 传输页的 file / payload / **pending**（目标工作区由第二个空串种）。
+  const mounted = (action) =>
+    mount({
+      state,
+      panel: 'transfer',
+      strings: ['', '/home/u/dev/beta'],
+      nulls: [null, null, null, { plan: planOf(action), error: null }],
+    })
+  const render = (action) => {
+    const item = mounted(action)
+    return { recorded: item.recorded, text: strings(item.registrations[0].component(item.registrations[0].registration.inject())) }
+  }
+
+  const create = render('create')
+  const table = create.recorded.find(
+    (node) => node.type === 'table' && String(node.props?.className).includes('dsm-planTable'),
+  )
+  assert.ok(table !== undefined, '弹窗里是那张导入计划表（列宽规则也挂在它身上）')
+  assert.ok(create.text.some((item) => String(item).startsWith('planSummary')), '表头那句话照旧在')
+  assert.equal(primaryOf(create.recorded).props.children, 'apply', '确认按钮走「确认导入」那一条')
+  assert.equal(primaryOf(create.recorded).props.disabled, false, '有会创建的条目时确认可用')
+
+  const skip = render('skip')
+  assert.ok(
+    skip.recorded.some((node) => node.type === 'table'),
+    '全是跳过时表还在（要看得到"为什么跳过"）',
+  )
+  assert.equal(primaryOf(skip.recorded).props.disabled, true, '一条都不会创建时确认按钮禁用')
+})
+
+test('客户端产物：回滚弹窗先摆动作清单再确认（清单就是那次真实写入的形状）', { skip }, () => {
+  const backup = {
+    dir: '/home/u/.dsh/dsh-session-manager-backups/2026-10-03T08-00-00',
+    createdAt: '2026-10-03T08:00:00.000Z',
+    sessions: 2,
+    artifacts: 0,
+    kind: 'migrate',
+    from: '/home/u/dev/alpha',
+    to: '/home/u/dev/beta',
+  }
+  const state = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    sessions: [],
+    workspaces: [],
+  }
+  // null 顺序：骨架的 error / 迁移页的 picking / manual / pending / busy / error / notice / effect /
+  // backupError / rollbackBusy / **rollbackDialog**（备份清单由第二个数组种）。
+  const item = mount({
+    state,
+    panel: 'migrate',
+    arrays: [[], [backup]],
+    nulls: [
+      null, null, null, null, null, null, null, null, null, null,
+      {
+        backup,
+        plan: {
+          mode: 'plan',
+          dryRun: true,
+          actions: ['把 s-1 搬回 /home/u/dev/alpha', '还原注册表'],
+          restoredFiles: 0,
+          restoredArtifacts: 0,
+          registryRestored: false,
+          backupDir: backup.dir,
+          createdAt: backup.createdAt,
+          sessions: 2,
+          artifacts: 0,
+          takesEffect: 'restart-required',
+        },
+        error: null,
+      },
+    ],
+  })
+  const text = strings(item.registrations[0].component(item.registrations[0].registration.inject()))
+  const dialogs = item.recorded.filter((node) => node.props?.role === 'dialog')
+  assert.equal(dialogs.length, 1, '点「回滚」只开一个弹窗（不再有"看回滚动作"那一步）')
+  assert.equal(dialogs[0].props['aria-label'], 'rollbackDialogTitle', '标题说的是那个动作')
+  assert.ok(text.some((item) => String(item).startsWith('rollbackActions')), '那句"以下是回滚会做的 N 个动作"照旧在')
+  assert.ok(text.some((item) => String(item) === '把 s-1 搬回 /home/u/dev/alpha'), '动作清单逐条摆出来')
+  assert.deepEqual(
+    strings(cancelOf(item.recorded)).concat(strings(primaryOf(item.recorded))),
+    ['cancel', 'rollbackConfirm'],
+    '底部是「取消 / 确认回滚」',
+  )
+})
+
+// ---- 同步的进度 ----
+//
+// 同步是这个插件里唯一"按条走网络"的长动作：整库同步可能是几百次往返、几十秒。宿主按条推事件
+// （见 src/web.ts 的 sendEventStream），界面把弹窗正文换成进度条。下面两条分别钉住"进度怎么画"与
+// "确认按钮真的接在那条事件流上"。
+
+test('客户端产物：落地时弹窗正文换成进度条（第几条 / 共几条 + 当前那一条）', { skip }, () => {
+  const state = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    sync: { url: 'https://dav.example.com/dsh', machineId: 'robot-a', mappings: 0 },
+    sessions: [],
+    workspaces: [],
+  }
+  const progressOf = (phase, done, total, label) => ({ phase, done, total, id: 's-1', label })
+  // 顺序：骨架的错误 → 同步页的 sync / 弹窗开关 / busy / error / notice → **progress**（第 6 个
+  // `useState(null)`）。`busy` 种成 'apply'：假钩子不会点按钮，落地那一段只能这样走进去。
+  const mounted = mount({
+    state,
+    panel: 'sync',
+    nulls: [null, null, 'apply', 'apply', null, null, progressOf('push', 12, 84, '会话九')],
+  })
+  const recorded = mounted.recorded
+  const text = strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
+
+  const bar = recorded.find((node) => String(node.props?.className) === 'dsm-progress')
+  assert.ok(bar !== undefined, '进度条本体在弹窗正文里')
+  assert.equal(bar.props['aria-valuenow'], 13, '正在处理第 13 条（done 是**已经做完**的条数）')
+  assert.equal(bar.props['aria-valuemax'], 84, '分母是这一段要做的总条数')
+  assert.equal(bar.props['aria-label'], 'syncPushing:{"current":13,"total":84}', '可读名就是那句计数')
+  const fill = recorded.find((node) => String(node.props?.className) === 'dsm-progressFill')
+  assert.equal(fill.props.style.width, `${(13 / 84) * 100}%`, '填充宽度按 13/84 算，不是写死的')
+  assert.ok(text.includes('syncPushing:{"current":13,"total":84}'), '正文里写清正在推送第几条')
+  assert.ok(text.includes('会话九'), '当前那一条的标题也在（一条几 MB 的包会在这停一会儿）')
+  assert.ok(text.includes('syncProgressNote'), '并说明为什么这里没有「取消」')
+  assert.equal(recorded.some((node) => node.type === 'table'), false, '落地时不再画计划表（那张表说的是"将要"）')
+  assert.equal(primaryOf(recorded).props.children, 'syncBusy', '确认按钮变成"同步中…"')
+  assert.equal(primaryOf(recorded).props.disabled, true, '落地时确认按钮禁用（不能按第二下）')
+  assert.equal(cancelOf(recorded).props.disabled, true, '取消也禁用：中途撒手会在宿主侧留下半截状态')
+
+  // 拉那一段用另一句：两段分母不同，文案得跟着 phase 走。
+  const pulling = mount({
+    state,
+    panel: 'sync',
+    nulls: [null, null, 'apply', 'apply', null, null, progressOf('pull', 0, 3, 'session-a')],
+  })
+  const pullingText = strings(pulling.registrations[0].component(pulling.registrations[0].registration.inject()))
+  assert.ok(pullingText.includes('syncPulling:{"current":1,"total":3}'), '拉那一段说「正在拉取」')
+
+  // 还没收到第一条事件（宿主刚起来，什么都没开始报）。
+  const preparing = mount({ state, panel: 'sync', nulls: [null, null, 'apply', 'apply'] })
+  const preparingText = strings(preparing.registrations[0].component(preparing.registrations[0].registration.inject()))
+  assert.ok(preparingText.includes('syncPreparing'), '那一段说"正在读取远端索引…"')
+  assert.equal(
+    preparing.recorded.some((node) => String(node.props?.className) === 'dsm-progress'),
+    false,
+    '还不知道总数就不画条（画一条 0/0 的只会让人以为卡住了）',
+  )
+
+  /*
+   * 算计划那三段（预演就有，落地也先走一遍）：扫本机 / 读远端索引 / 比对内容。
+   *
+   * `dialog` 与 `busy` 都种成 'plan'：假钩子不会点按钮，预演那一段只能这样走进去。进度事件里的
+   * `done` 同样是"已经做完的条数"，所以界面上的第几条是 `done + 1`。
+   */
+  const phaseOf = (progress) => {
+    const mounted = mount({ state, panel: 'sync', nulls: [null, null, 'plan', 'plan', null, null, progress] })
+    return {
+      mounted,
+      text: strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject())),
+      bar: mounted.recorded.find((node) => String(node.props?.className) === 'dsm-progress'),
+    }
+  }
+
+  const scanning = phaseOf({ phase: 'scan', done: 42, total: 85 })
+  assert.equal(scanning.bar.props['aria-valuenow'], 43, '扫到第 43 条（done 是已经扫完的条数）')
+  assert.equal(scanning.bar.props['aria-valuemax'], 85, '分母是这次要尝试的条目数')
+  assert.ok(scanning.text.includes('syncScanning:{"current":43,"total":85}'), '预演时说"正在扫描本机会话"')
+  assert.equal(scanning.text.includes('previewing'), false, '有具体进度就不摆那句静态的「预演中…」')
+  assert.equal(scanning.mounted.recorded.some((node) => node.type === 'table'), false, '计划还没回来，不画表')
+  assert.equal(scanning.text.includes('syncProgressNote'), false, '预演阶段还没有东西可覆盖，不摆那句"只增不覆盖"')
+
+  // 读远端索引是一次往返，没有"第几条"可讲（宿主给的分母是 0）：固定一句话，**不摆条**——画一条
+  // 1/1 的会让人以为已经做完了，而它其实还在等。
+  const remote = phaseOf({ phase: 'remote', done: 0, total: 0 })
+  assert.ok(remote.text.includes('syncPreparing'), '读远端索引那一段就说"正在读取远端索引…"')
+  assert.equal(remote.bar, undefined, '分母是 0 的那一段不画进度条')
+
+  // 认本机仓库身份：每个候选目录一个 git 进程，真机上这一段比前两段加起来还长。
+  const matching = phaseOf({ phase: 'repo', done: 4, total: 13 })
+  assert.ok(matching.text.includes('syncMatchingRepos:{"current":5,"total":13}'), '认仓库时说的是"正在核对本机仓库"')
+
+  // 比对内容：分母是两边都有那些会话的文件数。
+  const comparing = phaseOf({ phase: 'compare', done: 7, total: 12 })
+  assert.ok(comparing.text.includes('syncComparing:{"current":8,"total":12}'), '比对时说的是"正在比对内容"')
+})
+
+test('客户端产物：确认同步打的是落地端点，读的是一条事件流而不是等一次性 JSON', { skip }, async () => {
+  const state = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    sync: { url: 'https://dav.example.com/dsh', machineId: 'robot-a', mappings: 0 },
+    sessions: [],
+    workspaces: [],
+  }
+  const calls = []
+  // 收尾那条给一份**完整**的 SyncResponse：界面接着会读 `pulled` / `pushed` / `plan` 它们（缺一个就是
+  // "真实宿主不会这么回，但界面不该当场崩"这件事的反面教材）。
+  const result = {
+    mode: 'apply',
+    remote: { url: 'https://dav.example.com/dsh', machineId: 'robot-a' },
+    plan: {
+      ok: true,
+      problems: [],
+      pull: [],
+      push: [],
+      pullIds: [],
+      pushIds: [],
+      bytesIn: 0,
+      bytesOut: 0,
+      localCount: 0,
+      remoteCount: 0,
+      machines: [],
+    },
+    applied: true,
+    pulled: [],
+    pushed: [],
+    bytesIn: 0,
+    bytesOut: 0,
+    registryWritten: false,
+    indexWritten: true,
+    problems: [],
+    takesEffect: 'immediate',
+  }
+  const chunks = [
+    'data: {"type":"progress","progress":{"phase":"push","total":2,"done":0,"id":"s-1","label":"一"}}\n\n',
+    `data: {"type":"result","result":${JSON.stringify(result)}}\n\n`,
+  ]
+  let index = 0
+  let reads = 0
+  // 弹窗开着（dialog='apply'）、还没点确认（busy=null）：主按钮就是那个入口。
+  const mounted = mount({
+    state,
+    panel: 'sync',
+    nulls: [null, null, 'apply'],
+    fetch: async (url, init) => {
+      calls.push({ url: String(url), method: init?.method, accept: init?.headers?.accept })
+      return {
+        ok: true,
+        status: 200,
+        headers: {
+          get: (name) => {
+            calls.push({ header: name })
+            return 'text/event-stream; charset=utf-8'
+          },
+        },
+        body: {
+          getReader: () => ({
+            read: async () => {
+              reads += 1
+              return index < chunks.length ? { done: false, value: new TextEncoder().encode(chunks[index++]) } : { done: true }
+            },
+          }),
+        },
+        // 一次性那条路必须**没被走到**：走错的话这里会被调用，用例当场红。
+        text: async () => {
+          calls.push({ text: true })
+          return ''
+        },
+      }
+    },
+  })
+
+  // 没有渲染器：得自己把页面组件调一次，还得**走一遍树**（`strings` 遇到函数组件会带着 props 调它），
+  // 否则 SyncPanel 只是个没被展开的元素，里面的按钮压根没进 `recorded`。
+  strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
+  primaryOf(mounted.recorded).props.onClick()
+  for (let tries = 0; tries < 50 && index < chunks.length; tries += 1) await new Promise((resolve) => setImmediate(resolve))
+
+  assert.deepEqual(calls.filter((call) => call.url !== undefined), [
+    { url: '/dsh-session-manager/api/sync?mode=apply', method: 'POST', accept: 'text/event-stream' },
+  ])
+  assert.ok(
+    calls.some((call) => call.header === 'content-type'),
+    '先问 content-type：流还没开始就被挡下时（没配置同步）回的是一次性 JSON',
+  )
+  assert.equal(calls.some((call) => call.text === true), false, '事件流不走一次性 text()')
+  assert.equal(index, chunks.length, '两块事件都被读出来了')
+  assert.ok(reads >= chunks.length + 1, '一直读到 done（不是读一块就收手）')
+})
+
+test('客户端产物：同步预演读的也是一条事件流（不是等一次性 JSON）', { skip }, async () => {
+  // 预演也要进度：它得先扫本机、再读远端索引、最后逐条比对内容，冷启动时那几秒界面原来只有一句
+  // "预演中…"。宿主两条路回的是同一个形状，所以这里钉的就是"点「同步」打的是那个端点、读的是流"。
+  const state = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    sync: { url: 'https://dav.example.com/dsh', machineId: 'robot-a', mappings: 0 },
+    sessions: [],
+    workspaces: [],
+  }
+  const calls = []
+  // 收尾那条给一份**完整**的 SyncResponse：界面接着会读 `plan` 它们。
+  const result = {
+    mode: 'plan',
+    remote: { url: 'https://dav.example.com/dsh', machineId: 'robot-a' },
+    plan: {
+      ok: true,
+      problems: [],
+      pull: [],
+      push: [],
+      pullIds: [],
+      pushIds: [],
+      bytesIn: 0,
+      bytesOut: 0,
+      localCount: 0,
+      remoteCount: 0,
+      machines: [],
+    },
+    applied: false,
+    pulled: [],
+    pushed: [],
+    bytesIn: 0,
+    bytesOut: 0,
+    registryWritten: false,
+    indexWritten: false,
+    problems: [],
+    takesEffect: 'immediate',
+  }
+  const chunks = [
+    'data: {"type":"progress","progress":{"phase":"scan","total":3,"done":0}}\n\n',
+    'data: {"type":"progress","progress":{"phase":"remote","total":1,"done":1}}\n\n',
+    `data: {"type":"result","result":${JSON.stringify(result)}}\n\n`,
+  ]
+  let index = 0
+  let reads = 0
+  const mounted = mount({
+    state,
+    panel: 'sync',
+    fetch: async (url, init) => {
+      calls.push({ url: String(url), method: init?.method, accept: init?.headers?.accept })
+      return {
+        ok: true,
+        status: 200,
+        headers: {
+          get: (name) => {
+            calls.push({ header: name })
+            return 'text/event-stream; charset=utf-8'
+          },
+        },
+        body: {
+          getReader: () => ({
+            read: async () => {
+              reads += 1
+              return index < chunks.length ? { done: false, value: new TextEncoder().encode(chunks[index++]) } : { done: true }
+            },
+          }),
+        },
+        // 一次性那条路必须**没被走到**：走错的话这里会被调用，用例当场红。
+        text: async () => {
+          calls.push({ text: true })
+          return ''
+        },
+      }
+    },
+  })
+
+  strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
+  const open = mounted.recorded.find((node) => node.type === 'button' && node.props?.children === 'syncAction')
+  assert.ok(open !== undefined, '卡片头上那个「同步」就是预演的入口')
+  open.props.onClick()
+  for (let tries = 0; tries < 50 && index < chunks.length; tries += 1) {
+    await new Promise((resolve) => setImmediate(resolve))
+  }
+
+  assert.deepEqual(calls.filter((call) => call.url !== undefined), [
+    { url: '/dsh-session-manager/api/sync', method: 'GET', accept: 'text/event-stream' },
+  ])
+  assert.equal(calls.some((call) => call.text === true), false, '预演也不走一次性 text()')
+  assert.equal(index, chunks.length, '三条事件都读出来了（含算计划的那两条）')
+  assert.ok(reads >= chunks.length + 1, '一直读到 done（不是读一块就收手）')
 })

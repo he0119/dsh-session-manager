@@ -190,6 +190,13 @@ test('预演表的动作列：同步那张表自己量列宽，标签再长也�
   assert.notEqual(tag, null, '预演表的标签要有兜底规则')
   assert.match(tag ?? '', /max-width:\s*100%/, '标签要限宽，否则顶出格子压住邻居')
   assert.match(tag ?? '', /overflow:\s*hidden/, '限了宽还要截断，不然文字照旧画在格子外面')
+
+  // 「这次不动」那张表的状态列装的是「两边各自写过」这种短语，比动词长一档：真机（dev GUI）量到最宽
+  // 的一颗是 en "Remote ahead" 94.7px（zh「两边各自写过」86px），加单元格左右 8px padding 是 110.7px。
+  const keptRule = ruleBody('.dsm-keptTable .dsm-colAction')
+  assert.notEqual(keptRule, null, '「这次不动」那张表的状态列要单独声明列宽')
+  const keptWidth = Number(/width:\s*([\d.]+)px/.exec(keptRule ?? '')?.[1])
+  assert.ok(keptWidth >= 111, `状态列声明了 ${keptWidth}px，装不下最长的那颗标签（要 ≥111px）`)
 })
 
 test('state 色不许裸当文字色：它是指示色，浅色主题下淡到读不出来', () => {

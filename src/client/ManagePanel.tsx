@@ -14,8 +14,9 @@
  *     都归档 / 都删掉"因此是一次点击）。归属因此从行里挪进了组头——行上那六列本来有一列专门写着工作区
  *     路径，而组头就写着它，重复那一次是白占标题的宽度；注册表没认领的会话仍挂「未分组」小标签（它
  *     与组头说的是两件事：组头是目录，标签是"注册表不认这条"）；
- *   - **删除分两步**（预演 → 确认），预演把"哪些会话会被删、备份落在哪"摆清楚；执行时**先备份再删**
- *     （见 src/remove.ts），恢复走「迁移」页的「备份与回滚」；
+ *   - **删除那一下就把清单摆出来**：点「删除所选」开确认弹窗，里面是"哪些会话会被删、备份落在哪"，
+ *     确认才落盘（见 [ConfirmDialog.tsx](./ConfirmDialog.tsx)）；执行时**先备份再删**（见 src/remove.ts），
+ *     恢复走「迁移」页的「备份与回滚」；
  *   - **归档走宿主能力**（`workspaceRegistry`），一次落盘 + 改内存 + 广播，侧边栏即时跟着变；宿主
  *     没有这个能力时按钮禁用并说明原因，而不是绕过宿主去写注册表文件。
  *
@@ -30,6 +31,7 @@ import {
   type DeleteResponse,
   type SessionSummary,
 } from './api.ts'
+import { ConfirmDialog } from './ConfirmDialog.tsx'
 import { translateWith, zh } from './locales.ts'
 import { groupKey, groupSessions, lockedParentOf, nestSessions } from './groups.ts'
 import { deleteFamilyNote, parentDirNote } from './planRows.ts'
@@ -58,10 +60,16 @@ export function ManagePanel({ t = fallback, state, reload }: PanelShare): React.
   const [selected, setSelected] = React.useState<readonly string[]>([])
   /** 筛选条：一枚芯片都不勾、关键词为空 = 全都列出来（见 sessionFilter.matchesFilters）。 */
   const filter = useSessionFilter(sessions)
-  const [busy, setBusy] = React.useState<'archive' | 'unarchive' | 'plan' | 'apply' | null>(null)
+  const [busy, setBusy] = React.useState<'archive' | 'unarchive' | 'apply' | null>(null)
   const [error, setError] = React.useState<string | null>(null)
   const [notice, setNotice] = React.useState<string | null>(null)
-  const [plan, setPlan] = React.useState<DeleteResponse | null>(null)
+  /**
+   * 删除弹窗：`null` = 没开；开了之后先是一份空壳（计划还在算），算完填进去。
+   *
+   * 计划与"弹窗开没开"合成一个状态，是因为它俩本来就是一回事：没有弹窗就没有要看的计划，取消
+   * （或落地成功）之后那份计划也不该留在页面上——它说的是按下去那一刻的库，留着只会让人以为它还算数。
+   */
+  const [pending, setPending] = React.useState<{ plan: DeleteResponse | null; error: string | null } | null>(null)
   const [failed, setFailed] = React.useState<Array<{ id: string; error: string }>>([])
 
   /**
@@ -83,7 +91,7 @@ export function ManagePanel({ t = fallback, state, reload }: PanelShare): React.
   /** 当前列出来的那些（筛过之后，按组摊平）。缩进只改画法，不改"列出来了哪些"。 */
   const listed = React.useMemo(() => groups.flatMap((item) => item.rows.map((row) => row.session)), [groups])
 
-  // 已被删掉/已不在列表里的 id 不该继续留在选择集里（预演完再刷新时会遇到）。
+  // 已被删掉/已不在列表里的 id 不该继续留在选择集里（弹窗里删完再刷新时会遇到）。
   const known = React.useMemo(() => new Set(sessions.map((session) => session.id)), [sessions])
   const picked = React.useMemo(() => selected.filter((id) => known.has(id)), [selected, known])
 
@@ -142,28 +150,60 @@ export function ManagePanel({ t = fallback, state, reload }: PanelShare): React.
     }
   }
 
-  const runDelete = async (mode: 'plan' | 'apply'): Promise<void> => {
-    setBusy(mode)
+  /**
+   * 点「删除所选」：开弹窗，同时把只读的删除计划取回来。
+   *
+   * 计划是**只读**的一次计算（`mode: 'plan'` 不落盘，见 src/remove.ts），所以这一步可以放心地替用户
+   * 做掉——他还没承诺任何事。取回来之前弹窗里只有一行"预演中…"，落地按钮是禁用的。
+   *
+   * 计划回来时弹窗可能已经被取消掉了（用户在这几百毫秒里按了 Escape）：`current === null` 时原地
+   * 作废，不然一个已经被关掉的弹窗会被打印出来的计划**重新打开**。
+   */
+  const openDelete = (): void => {
+    if (picked.length === 0) return
     setError(null)
-    if (mode === 'plan') {
-      setNotice(null)
-      setFailed([])
-    }
-    try {
-      const response = await deleteSessions(picked, mode)
-      setPlan(response)
-      if (mode === 'apply' && response.applied) {
-        setNotice(response.summary)
-        setSelected([])
-        setPlan(null)
-        await reload()
-      }
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause))
-      setPlan(null)
-    } finally {
-      setBusy(null)
-    }
+    setNotice(null)
+    setFailed([])
+    setPending({ plan: null, error: null })
+    void deleteSessions(picked, 'plan').then(
+      (response) => setPending((current) => (current === null ? current : { ...current, plan: response })),
+      (cause) =>
+        setPending((current) =>
+          current === null ? current : { plan: null, error: cause instanceof Error ? cause.message : String(cause) },
+        ),
+    )
+  }
+
+  /**
+   * 弹窗里按「确认删除」：真删（先备份再删，见 src/remove.ts）。
+   *
+   * 失败有两种，各归各的地方：
+   *   - **计划本身不 ok / 复核没过**：正文里带着完整结果，把它摆回弹窗里（问题清单当场更新），用户
+   *     看着新的问题清单决定下一步；
+   *   - **请求本身没走通**（网络、HTTP 参数）：抛给页面顶部的错误横幅，弹窗关掉——那种错留在一个
+   *     只剩下"取消"的弹窗里没有意义。
+   */
+  const applyDelete = (): void => {
+    setBusy('apply')
+    setError(null)
+    void deleteSessions(picked, 'apply').then(
+      (response) => {
+        setBusy(null)
+        if (response.applied) {
+          setNotice(response.summary)
+          setSelected([])
+          setPending(null)
+          void reload()
+          return
+        }
+        setPending((current) => (current === null ? current : { ...current, plan: response }))
+      },
+      (cause) => {
+        setBusy(null)
+        setPending(null)
+        setError(cause instanceof Error ? cause.message : String(cause))
+      },
+    )
   }
 
   return (
@@ -292,60 +332,62 @@ export function ManagePanel({ t = fallback, state, reload }: PanelShare): React.
           <button
             type="button"
             className="dsm-button"
-            onClick={() => void runDelete('plan')}
+            onClick={openDelete}
             disabled={busy !== null || picked.length === 0}
           >
-            {busy === 'plan' ? t('previewing') : t('manageDeletePreview')}
+            {t('manageDelete')}
           </button>
         </div>
         <p className="dsm-hint">{t('manageDeleteHint')}</p>
       </div>
 
-      {plan !== null && (
-        <div className="dsm-card">
-          <div className="dsm-cardHead">
-            <span className="dsm-cardTitle">{t('manageDeletePlanTitle')}</span>
-          </div>
-          <p className={plan.preview.ok ? 'dsm-ok' : 'dsm-warn'}>{plan.summary}</p>
-          {plan.problems.length > 0 && (
-            <div className="dsm-problems">
-              {plan.problems.map((problem) => (
-                <p key={problem} className="dsm-warn">
-                  {problem}
-                </p>
-              ))}
-            </div>
+      {/* 删除弹窗：清单与「确认」在同一块地方（见 ConfirmDialog.tsx 的说明）。 */}
+      {pending !== null && (
+        <ConfirmDialog
+          t={t}
+          title={t('manageDeletePlanTitle')}
+          confirmLabel={t('manageDeleteApply')}
+          busyLabel={t('manageDeleting')}
+          busy={busy === 'apply'}
+          planning={pending.plan === null && pending.error === null}
+          error={pending.error}
+          disabled={pending.plan === null || !pending.plan.preview.ok}
+          onConfirm={applyDelete}
+          onCancel={() => setPending(null)}
+        >
+          {pending.plan !== null && (
+            <>
+              <p className={pending.plan.preview.ok ? 'dsm-ok' : 'dsm-warn'}>{pending.plan.summary}</p>
+              {pending.plan.problems.length > 0 && (
+                <div className="dsm-problems">
+                  {pending.plan.problems.map((problem) => (
+                    <p key={problem} className="dsm-warn">
+                      {problem}
+                    </p>
+                  ))}
+                </div>
+              )}
+              <p className="dsm-hint">
+                {t('manageBackupTo', { dir: pending.plan.backupDir ?? pending.plan.preview.backupRoot })}
+              </p>
+              <SessionListBox>
+                {pending.plan.preview.entries.map((entry) => (
+                  <SessionStaticRow
+                    key={entry.id}
+                    session={entry}
+                    className="dsm-row dsm-rowPlan"
+                    metaTitle={entry.dir}
+                    // 级联带进来的条目在清单里是"没勾过却要一起删"的那些，得在行上说明出处；
+                    // 同时缩进一级：宿主给的顺序是"点名的在前、随后是各自的后代"（familyOf 的 BFS），
+                    // 缩进之后"哪几条是它带进来的"不用读标签也看得出。
+                    depth={entry.via === undefined ? 0 : 1}
+                    note={deleteFamilyNote(entry, t)}
+                  />
+                ))}
+              </SessionListBox>
+            </>
           )}
-          <p className="dsm-hint">{t('manageBackupTo', { dir: plan.backupDir ?? plan.preview.backupRoot })}</p>
-          <SessionListBox>
-            {plan.preview.entries.map((entry) => (
-              <SessionStaticRow
-                key={entry.id}
-                session={entry}
-                className="dsm-row dsm-rowDelete"
-                metaTitle={entry.dir}
-                // 级联带进来的条目在清单里是"没勾过却要一起删"的那些，得在行上说明出处；
-                // 同时缩进一级：宿主给的顺序是"点名的在前、随后是各自的后代"（familyOf 的 BFS），
-                // 缩进之后"哪几条是它带进来的"不用读标签也看得出。
-                depth={entry.via === undefined ? 0 : 1}
-                note={deleteFamilyNote(entry, t)}
-              />
-            ))}
-          </SessionListBox>
-          <div className="dsm-controls">
-            <button
-              type="button"
-              className="dsm-button dsm-primary"
-              onClick={() => void runDelete('apply')}
-              disabled={busy !== null || !plan.preview.ok}
-            >
-              {busy === 'apply' ? t('manageDeleting') : t('manageDeleteApply')}
-            </button>
-            <button type="button" className="dsm-button" onClick={() => setPlan(null)} disabled={busy !== null}>
-              {t('cancel')}
-            </button>
-          </div>
-        </div>
+        </ConfirmDialog>
       )}
     </>
   )

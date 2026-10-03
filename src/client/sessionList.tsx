@@ -211,12 +211,13 @@ export function SessionRow({
 }
 
 /**
- * 只读的一行：删除预演里那份"将要被删掉"的清单用它（没有勾选框，也不该能点）。
+ * 只读的一行：确认弹窗里那份计划清单用它（没有勾选框，也不该能点）——删除的"将要被删掉"、迁移的
+ * "将要被搬走"都是它。
  *
- * @param className 行标记由调用方给（`.dsm-rowDelete` 是四列，与可勾选的那些不一样）。
- * @param metaTitle 字节那一格的悬浮提示（删除计划里给的是会话目录）。
- * @param note 名字后面跟一枚小标签（删除预演用它说明"这条是跟着谁来的"）；文案由调用方翻好。
- * @param depth 缩进级数（删除计划里"随父会话删"的那些缩进到点名的那条下面，见 groups.nestClass）。
+ * @param className 行标记由调用方给（`.dsm-rowPlan` 是四列，与可勾选的那些不一样）。
+ * @param metaTitle 字节那一格的悬浮提示（删除计划里给的是会话目录，迁移计划里是源会话目录）。
+ * @param note 名字后面跟一枚小标签（清单用它说明"这条是跟着谁来的"）；文案由调用方翻好。
+ * @param depth 缩进级数（级联带进来的那些缩进到点名的那条下面，见 groups.nestClass）。
  */
 export function SessionStaticRow({
   session,

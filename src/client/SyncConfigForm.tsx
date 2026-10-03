@@ -1,7 +1,7 @@
 /**
  * 「同步设置」表单：URL、机器名、账号、密码、超时与映射表，直接改 profile 里那一节。
  *
- * 放在「同步」分页的卡片里，与预演/确认挨着——改完 URL 就能立刻预演一次，不必跳到别处。
+ * 放在「同步」分页的卡片里，与「同步」挨着——改完 URL 就能立刻同步一次（先看弹窗里那份计划），不必跳到别处。
  * 读写面在 [syncForm.ts](./syncForm.ts)（宿主的设置接缝），密码的写入面在
  * [credentials.ts](./credentials.ts)（宿主的凭据服务），这里只管画与暂存。
  *
@@ -18,7 +18,7 @@
  *     卡片只问"密码是什么"——官方那几个要密钥的卡片也是这个分法（网页搜索那张卡只摆密钥，`apiKeyEnv`
  *     留在配置里）。引用名缺席时按 `DSH_DAV_PASSWORD` 解析，见 syncForm.ts 的 `passwordRefOf`；
  *   - **映射表是一行一行的**：远端 cwd 与本机目录各一个输入框，行可以增删。远端那一侧必须**逐字**
- *     对上别的机器记下的 cwd，所以它带一份从上次预演里收来的候选（`remoteCwds`）——这些路径靠人背
+ *     对上别的机器记下的 cwd，所以它带一份从上次同步的计划里收来的候选（`remoteCwds`）——这些路径靠人背
  *     是靠不住的，抄错一个字符就是"没配映射，跳过"。
  *
  * @module dsh-session-manager/client/SyncConfigForm
@@ -96,11 +96,19 @@ export function SyncConfigForm({
   t,
   onSaved,
   remoteCwds = [],
+  machineDefault,
 }: {
   t: Translate
   onSaved?: () => void
-  /** 上次预演里见过的远端 cwd：给"远端"那一栏当候选，省得手抄一条长路径。 */
+  /** 上次同步的计划里见过的远端 cwd：给"远端"那一栏当候选，省得手抄一条长路径。 */
   remoteCwds?: readonly string[]
+  /**
+   * 机器名那一栏的**缺省值**（宿主解析出来的：没配就是主机名）。
+   *
+   * 那一栏留空不等于"没有机器名"——宿主会拿主机名顶上，所以灰字要把它写出来，与「超时」那一栏的
+   * 30000 同一个口径。卡片标题原来也印一遍这个名字，现在只在这里认。
+   */
+  machineDefault?: string
 }): React.ReactElement | null {
   const api = getSyncConfigApi()
   // 凭据服务每次渲染现取：它由别的客户端插件提供，可能晚于本页挂载（取到的那一组方法见
@@ -263,7 +271,7 @@ export function SyncConfigForm({
           setCredentialGen((generation) => generation + 1)
           clearTest()
         }
-        // 让外面重读一次宿主状态：第一次配好 URL 时，同步卡片上的预演/确认按钮是照着 /state 画的，
+        // 让外面重读一次宿主状态：第一次配好 URL 时，同步卡片上那个「同步」按钮是照着 /state 画的，
         // 不重读就还是"没配置"的样子（用户刚存完却看不见按钮，会以为没生效）。
         onSaved?.()
       } catch {
@@ -289,6 +297,8 @@ export function SyncConfigForm({
           hint={t('syncFieldMachineHint')}
           value={view.machineId}
           onChange={(machineId) => edit({ machineId })}
+          // 留空时宿主用主机名顶上：把那个名字写成灰字，用户才知道"空着会叫什么"。
+          placeholder={machineDefault ?? ''}
         />
         <Field
           label={t('syncFieldTimeout')}

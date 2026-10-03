@@ -9,6 +9,12 @@
  * @module dsh-session-manager/client/api
  */
 
+import { SseFrames, interpretSyncEvent, type SyncProgressEvent } from './syncStream.ts'
+
+// 事件流的分帧与解释在 syncStream.ts（那份文件与 DOM 无关，所以 Host 侧的测试图能直接引它）。类型
+// 从这里转出去，界面那一侧只认 api.ts 一个入口。
+export type { SyncProgressEvent }
+
 /** 宿主端点前缀（与 `src/web.ts` 的 `API_PREFIX` 必须一致）。 */
 export const API_PREFIX = '/dsh-session-manager/api'
 
@@ -282,27 +288,96 @@ export interface SyncResponse {
   error?: string
 }
 
-/** 预演一次同步（读远端，什么都不写）。 */
-export async function fetchSyncPlan(): Promise<SyncResponse> {
-  return asJson<SyncResponse>(await fetch(`${API_PREFIX}/sync`, { headers: { accept: 'application/json' } }))
+/**
+ * 预演一次同步（读远端，什么都不写），边算边报进度。
+ *
+ * 宿主对预演与落地回的都是 **SSE**：预演要先扫本机（每条会话读头、折标题）、再读远端索引、最后逐条
+ * 比对内容，冷启动时那几秒里界面原来只有一句"预演中…"；落地的理由是上百条各一次网络往返。事件形状
+ * 两条路完全一样，所以下面 `readSyncResponse()` 一份就够。
+ *
+ * @param onProgress 每收到一条进度事件调一次。
+ * @returns 计划；问题在 `problems` 里，连接层的失败抛原话。
+ */
+export async function fetchSyncPlan(onProgress?: (event: SyncProgressEvent) => void): Promise<SyncResponse> {
+  const response = await fetch(`${API_PREFIX}/sync`, {
+    method: 'GET',
+    headers: { accept: 'text/event-stream' },
+  })
+  return readSyncResponse(response, onProgress, '预演')
 }
 
-/** 真的跑一次同步（拉 + 推）。 */
-export async function applySync(): Promise<SyncResponse> {
-  const response = await fetch(`${API_PREFIX}/sync?mode=apply`, {
-    method: 'POST',
-    headers: { accept: 'application/json' },
-  })
+/**
+ * 一次性响应：流还没开始就被挡下（没配置同步、方法不对、内部错误）时宿主回的还是普通 JSON，
+ * 带状态码。这里保持与其它端点同一套口径。
+ */
+async function readOneShot(response: Response): Promise<SyncResponse> {
   const text = await response.text()
-  let parsed: SyncResponse
+  let parsed: SyncResponse | null = null
   try {
     parsed = JSON.parse(text) as SyncResponse
   } catch {
-    throw new Error(`HTTP ${response.status}：${text.slice(0, 200) || '空响应'}`)
+    // 不是 JSON：下面统一把原文截一段报出去，比"解析失败"有用。
   }
-  // 落地成功时正文里可能有"某一条没拉成"的问题清单，那是 200；非 2xx 只有"没配置同步"或内部错误。
-  if (!response.ok) throw new Error(parsed.error ?? `HTTP ${response.status}`)
+  if (!response.ok) throw new Error(parsed?.error ?? `HTTP ${response.status}：${text.slice(0, 200) || '空响应'}`)
+  if (parsed === null) throw new Error(`HTTP ${response.status}：${text.slice(0, 200) || '空响应'}`)
   return parsed
+}
+
+/**
+ * 按 `content-type` 把一次同步的响应读出来：事件流就边读边报进度，一次性 JSON 就整份解析。
+ *
+ * @param response 宿主回的那份响应。
+ * @param onProgress 进度事件的回调（只有流走得到）。
+ * @param what 出错时的主语（「预演」/「同步」）。
+ */
+async function readSyncResponse(
+  response: Response,
+  onProgress: ((event: SyncProgressEvent) => void) | undefined,
+  what: string,
+): Promise<SyncResponse> {
+  // 流开始之前的错（没配置同步、内部错误）仍然是一次性 JSON。
+  const contentType = response.headers.get('content-type') ?? ''
+  if (!contentType.includes('text/event-stream')) return await readOneShot(response)
+
+  const reader = response.body?.getReader()
+  if (reader === undefined) throw new Error(`这次${what}没有可读的事件流（浏览器不支持流式响应）`)
+  // 分帧与解释都在 syncStream.ts（纯字符串处理，没有 DOM）；这里只负责把字节读出来喂进去。
+  const frames = new SseFrames()
+  const decoder = new TextDecoder()
+  let result: SyncResponse | null = null
+  let failure: string | null = null
+  const handle = (data: string): void => {
+    const event = interpretSyncEvent(data)
+    if (event === null) return
+    if (event.kind === 'progress') onProgress?.(event.progress)
+    else if (event.kind === 'result') result = event.result as SyncResponse
+    else failure = event.message
+  }
+
+  for (;;) {
+    const { value, done } = await reader.read()
+    if (done) break
+    for (const data of frames.push(decoder.decode(value, { stream: true }))) handle(data)
+  }
+  for (const data of frames.flush()) handle(data)
+
+  if (failure !== null) throw new Error(failure)
+  if (result === null) throw new Error(`${what}没有回结果（连接提前断了？）`)
+  return result
+}
+
+/**
+ * 真的跑一次同步（拉 + 推），边跑边报进度。
+ *
+ * @param onProgress 每收到一条进度事件调一次（算计划的四段与写盘的两段走同一个回调）。
+ * @returns 落地结果；单条失败在 `problems` 里，不是抛错。
+ */
+export async function applySync(onProgress?: (event: SyncProgressEvent) => void): Promise<SyncResponse> {
+  const response = await fetch(`${API_PREFIX}/sync?mode=apply`, {
+    method: 'POST',
+    headers: { accept: 'text/event-stream' },
+  })
+  return readSyncResponse(response, onProgress, '同步')
 }
 
 /** `GET|POST /sync?mode=test` 的响应：一次只读探测的结论（判定码在宿主侧，句子在界面）。 */

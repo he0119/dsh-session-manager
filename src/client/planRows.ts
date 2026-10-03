@@ -105,7 +105,7 @@ export interface SourceSubject {
   /**
    * 宿主报来的"外壳侧边栏不显示这条会话"的原因（`subagent` / `blank` / `archived`）；缺省 = 会显示。
    *
-   * 界面上的候选必须与宿主预演的候选是同一批：宿主那一侧按同一条判据（`src/visibility.ts`）把
+   * 界面上的候选必须与宿主那份计划的候选是同一批：宿主那一侧按同一条判据（`src/visibility.ts`）把
    * 侧边栏看不见的会话排除在外，界面若照旧把它们算进条数，用户看到的就是"这里 4 条、搬完 1 条"。
    */
   readonly hidden?: string
@@ -119,7 +119,7 @@ export interface SourceSubject {
  *
  * 为什么还要**有 cwd**：迁移要改写 header 里的 cwd，而 `relocateHeaderCwd()` 明确拒绝一个没有 cwd 的
  * header（换来的是"绝不凭空造一个 cwd"）。这类会话不是这个来源能搬的东西，所以它们既不进候选、也不算
- * 进那个来源的条数——界面上的条数与宿主预演的数字必须是同一个口径。这是这个来源自己的**能力**限制，
+ * 进那个来源的条数——界面上的条数与宿主那份计划的数字必须是同一个口径。这是这个来源自己的**能力**限制，
  * 与「未分组」的定义无关（侧边栏那一组里有它们）。
  *
  * @param sessions 会话库里的全部会话。
@@ -192,11 +192,11 @@ export function migrationSourceRows(
   return options
 }
 
-// ---- 删除预演：「这条是怎么进来的」 ----
+// ---- 计划清单：「这条是怎么进来的」 ----
 
-/** 删除预演里一条会话的出处只用得上这个字段。 */
-export interface DeleteFamilySubject {
-  /** 级联带进来的：用户点名的那个祖先会话（宿主 `RemoveEntry.via`）。 */
+/** 计划清单里一条会话的出处只用得上这个字段。 */
+export interface FamilySubject {
+  /** 级联带进来的：用户点名的那个祖先会话（宿主 `RemoveEntry.via` / `SessionMove.via`）。 */
   readonly via?: { readonly id: string; readonly title?: string }
 }
 
@@ -207,29 +207,50 @@ function referentName(referent: { readonly id: string; readonly title?: string }
 }
 
 /**
- * 删除预演里那枚"这条是怎么进来的"标签。
+ * 计划清单里那枚"这条是怎么进来的"标签。
  *
- * 删除会**沿着父子关系向下展开**（见 `src/remove.ts`），所以预演清单里会冒出用户没勾过的会话；
- * 这枚标签就是它们的解释——"跟着 <点名的会话> 一起删"。单独点一条子代理会被拒（子代理跟着父会话
- * 走，见 family.ts），所以这里只有这一种出处。
+ * 删除与迁移都会**沿着父子关系向下展开**（见 `src/remove.ts` 的 `familyOf()` 与 `src/migrate.ts`），
+ * 所以清单里会冒出用户没勾过的会话；这枚标签就是它们的解释——"跟着 <点名的会话> 一起走"。判据与
+ * 称呼只写这一处，动词由调用方给（删除说「随父删」、迁移说「随父迁」）。
+ *
+ * @param subject 出处字段（宿主已经算好，界面只负责显示）。
+ * @param t 翻译。
+ * @param keys 标签文案与提示的字典键。
+ * @returns 标签文案与悬浮提示；没有出处时 `undefined`（不挂标签）。
+ */
+function familyNote(
+  subject: FamilySubject,
+  t: Translate,
+  keys: { readonly text: string; readonly tip: string },
+): { text: string; tip: string } | undefined {
+  if (subject.via === undefined) return undefined
+  return { text: t(keys.text), tip: t(keys.tip, { name: referentName(subject.via) }) }
+}
+
+/**
+ * 删除计划清单里那枚"随父会话删"标签。
  *
  * 标签文案刻意短（「随父删」）：它挂在名字右边且 `flex: none`，占的宽度就是从标题里扣的。
  * 在真实 dev GUI 里量的（真实列表 534px 宽、名字列 305px，浅深两套主题同值）：四字的「随父会话删」
  * 吃 74px、名字只剩 225px，两字的吃 50px、名字剩 249px；英文 "goes with parent" 吃 115px、名字只剩
- * 184px，短一档的 "with parent" 吃 83px。省掉的那半句在悬浮提示里，预演摘要还会整句说一遍。
+ * 184px，短一档的 "with parent" 吃 83px。省掉的那半句在悬浮提示里，弹窗里的摘要还会整句说一遍。
  *
  * @param subject 出处字段（宿主已经算好，界面只负责显示）。
  * @param t 翻译。
- * @returns 标签文案与悬浮提示；两种情形都没有时 `undefined`（不挂标签）。
+ * @returns 标签文案与悬浮提示；点名的那几条自己没有 `via`，于是 `undefined`（不挂标签）。
  */
-export function deleteFamilyNote(
-  subject: DeleteFamilySubject,
-  t: Translate,
-): { text: string; tip: string } | undefined {
-  if (subject.via !== undefined) {
-    return { text: t('manageDeleteVia'), tip: t('manageDeleteViaTip', { name: referentName(subject.via) }) }
-  }
-  return undefined
+export function deleteFamilyNote(subject: FamilySubject, t: Translate): { text: string; tip: string } | undefined {
+  return familyNote(subject, t, { text: 'manageDeleteVia', tip: 'manageDeleteViaTip' })
+}
+
+/**
+ * 迁移计划清单里那一枚（「随父迁」）。
+ *
+ * 与删除那份分开是因为动词不同：迁移不删掉它，只是把它一起搬走——在那张清单上说「随父删」就是一句
+ * 错话，而这两张清单里的 `via` 是同一个字段（宿主两张计划各自的 `via`）。
+ */
+export function migrateFamilyNote(subject: FamilySubject, t: Translate): { text: string; tip: string } | undefined {
+  return familyNote(subject, t, { text: 'migrateVia', tip: 'migrateViaTip' })
 }
 
 /**

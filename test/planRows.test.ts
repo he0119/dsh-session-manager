@@ -14,6 +14,7 @@ import {
   UNOWNED_SOURCE,
   deleteFamilyNote,
   describeCwd,
+  migrateFamilyNote,
   migrationMatching,
   migrationSourceRows,
   optionLabel,
@@ -206,4 +207,22 @@ test('级联带进来的行：说"随父会话删"，提示里点名是哪一条
 
 test('没有出处时不挂标签（点名的那几条就是这样）', () => {
   assert.equal(deleteFamilyNote({}, t), undefined)
+})
+
+// 迁移那份清单里的同一枚标签：判据与称呼是同一处（`familyNote`），只有动词不同——迁移不删掉它，只是
+// 把它一起搬走，说「随父删」就是一句错话（界面上的动作与标签必须说同一件事）。
+test('迁移清单里：说"随父迁"，提示里点名是哪一条', () => {
+  assert.deepEqual(migrateFamilyNote({ via: { id: 'session-p', title: '搬家那次' } }, t), {
+    text: 'migrateVia',
+    tip: 'migrateViaTip:{"name":"搬家那次"}',
+  })
+  // 读不到标题同样退回 id（与删除那份同一个 `referentName`）
+  assert.deepEqual(migrateFamilyNote({ via: { id: 'session-p' } }, t), {
+    text: 'migrateVia',
+    tip: 'migrateViaTip:{"name":"session-p"}',
+  })
+})
+
+test('迁移清单里没有出处时也不挂标签', () => {
+  assert.equal(migrateFamilyNote({}, t), undefined)
 })

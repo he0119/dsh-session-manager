@@ -118,6 +118,17 @@ export interface ScanOptions {
    * 抛错按"这条没有标题"处理：标题是装饰，不该让整页会话列不出来。
    */
   resolveTitle?: (query: TitleQuery) => string | undefined
+  /**
+   * 扫到一条之前报一次（同步预演与落地的进度条用）。
+   *
+   * `done` 是**已经扫完**的条数——事件发在开始处理第 `done + 1` 条之前，与同步那两段
+   * （`SyncProgress`）同一个口径，界面两处都用 `done + 1` 说"正在处理第几条"。
+   *
+   * `total` 是**这次要尝试的条目数**：先 readdir 数一遍再扫，所以进度条会恰好走满（数进去的条目都
+   * 会 stat 一次，只有临时文件的目录也算一格，它同样要花时间）。`scanProjectDir()` 单独调用时
+   * `total` 是这个项目目录里的条目数，`scanAll()` 会把它接成整个库的分母。
+   */
+  onProgress?: (done: number, total: number) => void
 }
 
 /**
@@ -129,7 +140,11 @@ export interface ScanOptions {
  */
 export function scanProjectDir(projectDir: string, decodeAll: DecodeAll, options: ScanOptions = {}): DiscoveredSession[] {
   const out: DiscoveredSession[] = []
-  for (const dirName of readdirSync(projectDir)) {
+  const names = readdirSync(projectDir)
+  let index = 0
+  for (const dirName of names) {
+    options.onProgress?.(index, names.length)
+    index += 1
     const dir = join(projectDir, dirName)
     if (!statSync(dir).isDirectory()) continue
     const files: SessionLogFile[] = []
@@ -181,6 +196,13 @@ export function scanAll(root: string, decodeAll: DecodeAll, options: ScanOptions
   } catch {
     return out
   }
+  /*
+   * 先把"这次要 stat 的条目"数出来：进度条的分母，也是为什么整库扫描会多一轮 readdir。
+   *
+   * 只有 readdir，不读任何日志，相对扫描本身可以忽略；换来的是分母**确定**——进度条会恰好走满，
+   * 不会像"边扫边猜总数"那样停在 80% 或者越过 100%。
+   */
+  const projectDirs: Array<{ path: string; entries: number }> = []
   for (const projectDirName of projectDirNames) {
     const projectDirPath = join(root, projectDirName)
     try {
@@ -188,8 +210,29 @@ export function scanAll(root: string, decodeAll: DecodeAll, options: ScanOptions
     } catch {
       continue
     }
+    let entries = 0
     try {
-      out.push(...scanProjectDir(projectDirPath, decodeAll, options))
+      entries = readdirSync(projectDirPath).length
+    } catch {
+      // 读不动就按 0 计：真去扫时它同样会失败、同样被跳过。
+    }
+    projectDirs.push({ path: projectDirPath, entries })
+  }
+  const total = projectDirs.reduce((sum, dir) => sum + dir.entries, 0)
+  let scanned = 0
+  for (const projectDir of projectDirs) {
+    const base = scanned
+    scanned += projectDir.entries
+    try {
+      out.push(
+        ...scanProjectDir(projectDir.path, decodeAll, {
+          ...options,
+          // 项目目录级的条数换成整库的：一次同步是"扫 85 条"，不是"扫 12 个项目目录各若干条"。
+          ...(options.onProgress === undefined
+            ? {}
+            : { onProgress: (done: number) => options.onProgress?.(base + done, total) }),
+        }),
+      )
     } catch {
       // 单个项目目录坏掉不该让整页打不开：跳过它，界面照旧能用。
       continue

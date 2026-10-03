@@ -29,7 +29,7 @@ import { projectionCacheDir } from './paths.ts'
 import { readRegistry, validateRegistry } from './registry.ts'
 import { runRemoval, type RemoveDeps, type RemovalRun } from './remove.ts'
 import { createTitleResolver, type TitleQuery } from './session-title.ts'
-import { runSync, testSyncConnection } from './sync.ts'
+import { runSync, testSyncConnection, type SyncOutcome, type SyncProgress } from './sync.ts'
 import { type EffectMode, type PickerKind, type RegistryOps, type ResolvedPaths, type SyncInfo, type SyncRuntime } from './tools.ts'
 import {
   applyImport,
@@ -192,6 +192,33 @@ function sendJson(res: ServerResponse, status: number, value: unknown): void {
 function sendBytes(res: ServerResponse, status: number, body: Buffer, headers: Record<string, string>): void {
   res.writeHead(status, { 'content-length': String(body.length), 'cache-control': 'no-store', ...headers })
   res.end(body)
+}
+
+/**
+ * 把响应切成事件流（SSE）。
+ *
+ * 为什么这里需要流：同步是唯一"按条走网络"的长动作——一次整库同步可能是几百次往返，界面只有一句
+ * "同步中…"时，用户没有任何办法判断它在推进还是卡住了。宿主 `webServer` 的路由 handler
+ * **owning the full response lifecycle**（`WebRoute.handler` 的契约原文，允许一直握着响应，SSE
+ * 就是它举的例子），所以这里可以直接写。
+ *
+ * `x-accel-buffering: no` 是给反向代理看的：默认它们会攒够一段缓冲才转发，攒着就等于没有进度。
+ * 压缩中间件按 `content-type` 前缀判断并从压缩里**豁免** SSE（宿主那一层的 filter 里写死的），
+ * 所以这里不必再管 gzip。
+ */
+function sendEventStream(res: ServerResponse): void {
+  res.writeHead(200, {
+    'content-type': 'text/event-stream; charset=utf-8',
+    'cache-control': 'no-store',
+    connection: 'keep-alive',
+    'x-accel-buffering': 'no',
+  })
+}
+
+/** 写一条 SSE 事件（事件体是一行 JSON，形状为 `{ type, ... }`）。 */
+function sendEvent(res: ServerResponse, event: unknown): void {
+  if (res.writableEnded) return
+  res.write(`data: ${JSON.stringify(event)}\n\n`)
 }
 
 /** 读注册表；文件缺失或坏掉都只记为问题，不拦住"列出会话"。 */
@@ -664,31 +691,45 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
       }
       return
     }
-    try {
-      const outcome = await runSync(
-        {
-          dav: runtime.dav,
-          settings: runtime.settings,
-          sessionsRoot: paths.sessionsRoot,
-          registryPath: paths.registryPath,
-          decodeAll,
-          resolveTitle,
-          ...(deps.pluginVersion === undefined ? {} : { pluginVersion: deps.pluginVersion }),
-          ...(deps.now === undefined ? {} : { now: deps.now }),
-        },
-        { apply },
-      )
-      sendJson(res, 200, {
-        mode: apply ? 'apply' : 'plan',
-        remote: { url: runtime.settings.url, machineId: runtime.settings.machineId },
-        ...outcome,
-        problems: [...outcome.plan.problems, ...outcome.problems],
-        // 只有真的往库里落了会话才谈得上"要不要重启"；纯推送不改本机任何东西。
-        takesEffect: apply && outcome.pulled.length > 0 ? takesEffect() : 'immediate',
-      })
-    } catch (error) {
-      sendJson(res, 500, { error: error instanceof Error ? error.message : String(error) })
+    const syncDeps = {
+      dav: runtime.dav,
+      settings: runtime.settings,
+      sessionsRoot: paths.sessionsRoot,
+      registryPath: paths.registryPath,
+      decodeAll,
+      resolveTitle,
+      ...(deps.pluginVersion === undefined ? {} : { pluginVersion: deps.pluginVersion }),
+      ...(deps.now === undefined ? {} : { now: deps.now }),
     }
+    /** 预演与落地回同一份形状的结果，界面两条路都用同一套解析。 */
+    const payloadOf = (outcome: SyncOutcome): Record<string, unknown> => ({
+      mode: apply ? 'apply' : 'plan',
+      remote: { url: runtime.settings.url, machineId: runtime.settings.machineId },
+      ...outcome,
+      problems: [...outcome.plan.problems, ...outcome.problems],
+      // 只有真的往库里落了会话才谈得上"要不要重启"；纯推送不改本机任何东西。
+      takesEffect: apply && outcome.pulled.length > 0 ? takesEffect() : 'immediate',
+    })
+
+    /*
+     * 预演与落地都走事件流：`{type:'progress'}` 每做一条一次、`{type:'result'}` 收尾、`{type:'error'}`
+     * 兜底。预演也要进度——它得先扫本机（每条会话读头、折标题）、再读远端索引、最后逐条比对内容，
+     * 冷启动时这几秒里界面原来只有一句"预演中…"；落地那边同样受益，按下确认后到第一条拉下来之间
+     * 算的还是这三个阶段。
+     *
+     * 流一旦开始，HTTP 状态就已经发出去了（200），所以这一段的错误只能靠事件说——客户端按
+     * `content-type` 区分"流"与"一次性 JSON"（没配置同步那类错发生在写头之前，仍然是 JSON +
+     * 409/500）。
+     */
+    sendEventStream(res)
+    try {
+      const onProgress = (progress: SyncProgress): void => sendEvent(res, { type: 'progress', progress })
+      const outcome = await runSync(syncDeps, apply ? { apply: true, onProgress } : { apply: false, onProgress })
+      sendEvent(res, { type: 'result', result: payloadOf(outcome) })
+    } catch (error) {
+      sendEvent(res, { type: 'error', error: error instanceof Error ? error.message : String(error) })
+    }
+    res.end()
   }
 
   const removeDeps: RemoveDeps = {

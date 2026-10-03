@@ -103,8 +103,13 @@
   任意绝对路径要一个值控件，而目录选择器是一只互斥的能力位服务。
 - [动作页只留当下要做的决定](../.agents/notes/implemented/architecture/2026-09-28-help-page-owns-the-glossary.md)：
   词条进「说明」页，并钉了一条两行的上限。
-- [预演表的动作列只放动作](../.agents/notes/implemented/bug-fix/2026-10-03-action-column-holds-a-verb.md)：
-  窄列装不下整句时改文案与列宽，不是让标签顶到邻居身上（附一条"顶不出去"的兜底）。
+- [预演表的状态列只放短标签，整句挂 title](../.agents/notes/implemented/bug-fix/2026-10-03-status-column-holds-a-short-tag.md)：
+  窄列装不下整句时改文案与列宽，不是让标签顶到邻居身上；三段清单同形，状态与会话名分成两列。
+- [写盘动作是一个按钮开一个确认弹窗](../.agents/notes/implemented/architecture/2026-10-03-one-click-confirm-dialog.md)：
+  计划与"做不做"这个决定同框；只有会写盘的动作问，归档与导出不问。
+- [同步的预演与落地都走 SSE 报进度](../.agents/notes/implemented/architecture/2026-10-03-sync-progress-streams-over-sse.md)：
+  预演与落地回同一个事件流形状；算计划的四段各有各的分母（没有分母的那段不画条），写盘分拉与推两段，
+  跳过的那些不进分母，也没有中途取消。
 
 ## Host 半侧的约束
 

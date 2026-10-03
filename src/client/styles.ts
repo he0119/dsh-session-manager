@@ -342,19 +342,19 @@ export const CSS = `
  * 「会话」页那一行曾经多一列（"这条属于哪个工作区"）：那一页现在也按目录分组了，归属进了组头，
  * 行因此回到与导出列表同一个五列模板——那个类只剩"这是管理页的行"这个标记作用（测试拿它当选择器）。
  */
-/* 删除预演里那一行没有勾选框（预演结果不是勾选面），于是少一列，且它不可点。 */
-.dsm-rowDelete {
+/* 计划清单里那一行没有勾选框（清单不是勾选面），于是少一列，且它不可点。 */
+.dsm-rowPlan {
   grid-template-columns: 16px minmax(120px, 1.4fr) auto auto;
   cursor: default;
 }
 /*
- * 删除预演清单里"随父会话删"的那些：也缩进一级，让"哪几条是点名的父会话带进来的"不用读标签就看得出
- * （宿主给的顺序已经是"点名的在前、随后是各自的后代"，见 family.ts 的 familyOf）。
+ * 计划清单里级联带进来的那些（"随父删" / "随父迁"）：也缩进一级，让"哪几条是点名的父会话带进来的"
+ * 不用读标签就看得出（宿主给的顺序已经是"点名的在前、随后是各自的后代"，见 family.ts 的 familyOf）。
  *
  * 这一份清单不按目录分组，所以基准是行自己的 10px 内边距而不是上面那 48px；导引线画在父行内容左缘
  * （10px），子行再往里让一格（24px）。
  */
-.dsm-rowDelete.dsm-rowNest1 {
+.dsm-rowPlan.dsm-rowNest1 {
   padding-left: 34px;
   /* 同上面组内行：导引线走底图，别用 box-shadow（那是"从左边起 Npx 宽的带"） */
   background-image: linear-gradient(
@@ -366,8 +366,8 @@ export const CSS = `
     transparent 12px
   );
 }
-.dsm-rowDelete.dsm-rowNest2 { padding-left: 58px; }
-.dsm-rowDelete.dsm-rowNest3 { padding-left: 82px; }
+.dsm-rowPlan.dsm-rowNest2 { padding-left: 58px; }
+.dsm-rowPlan.dsm-rowNest3 { padding-left: 82px; }
 /*
  * 悬停底色同样不能拿表面 token 当"稍深一点"：浅色主题里 bg-layer-1/2/3 **全是同一个白**，
  * 铺上去等于没有反馈。改成把字色兑透明做一层薄雾（宿主外壳自己也这么兑），明暗两套都看得见。
@@ -494,7 +494,7 @@ export const CSS = `
   vertical-align: top;
 }
 .dsm-table th { color: var(--dsw-alias-label-secondary, #646a73); font-weight: 500; }
-/* 导入预演那张表的列宽**写死**（fixed 布局）：会话那一列吃掉剩余宽度，其余按内容量好。
+/* 导入计划那张表的列宽**写死**（fixed 布局）：会话那一列吃掉剩余宽度，其余按内容量好。
    自动布局碰上长路径会算出一个很怪的比例——动作列被挤成两个字宽（「动作」自己都折行），
    会话列每行只剩十来个字符。列宽是设计，不该由内容的字数决定。
    单元格要 border-box：默认 content-box 下 padding: 5px 8px 会**加到**列宽上，
@@ -504,14 +504,18 @@ export const CSS = `
 .dsm-planTable { table-layout: fixed; }
 .dsm-planTable th, .dsm-planTable td { box-sizing: border-box; }
 .dsm-planTable .dsm-colAction { width: 60px; }
-/* 同步预演那两张表（拉 / 推）的动作列装的是「重推刷新」这种动词短语，比导入预演的两个字长一档，
+/* 同步计划那两张表（拉 / 推）的动作列装的是「重推刷新」这种动词短语，比导入计划的两个字长一档，
    所以这两张表自己量一个列宽：实测 12px 字号下最宽的一个是 en 'Re-push' 63px、zh「重推刷新」62px，
    加单元格左右各 8px padding 是 79px，再留约 9px 余量。列宽仍然是**设计**（fixed 布局），只是这
    张表的设计跟着它自己的内容走；会话那一列照旧吃掉剩下的宽度（列宽从 60 → 88px，那一列少 28px）。
    真实事故（用户截图报的）：这一列还是 60px 时，标签「本机有、远端没有」实测 110px（en 那句
    158px），顶出格子 114px、压住后面那一列 98px —— 标签是 nowrap 的，装不下就直接画在邻居身上。 */
 .dsm-syncPlanTable .dsm-colAction { width: 88px; }
-/* 兜底：预演表的标签再长也不许顶出格子。列宽是设计，标签的长短是文案——两者对不上时宁可让这一格
+/* 「这次不动」那张表的状态列装的是「两边各自写过」这种短语，比拉/推两张表的动词长一档：真机
+   （dev GUI）量到最宽的一颗是 en "Remote ahead" 94.7px、zh「两边各自写过」86px（都含左右 padding
+   与 2px 边框）。取 122px：内容区 106px，最宽那颗还剩 11px 余量，与拉/推那张表的 9px 同一档。 */
+.dsm-keptTable .dsm-colAction { width: 122px; }
+/* 兜底：计划表的标签再长也不许顶出格子。列宽是设计，标签的长短是文案——两者对不上时宁可让这一格
    自己截断（完整的那句在 title 里），也不要让邻居的会话名被压掉一半。三处都要：max-width 限宽、
    overflow 截断、box-sizing: border-box 让限的是**整个标签**（默认 content-box 下 max-width 只管文字
    那一层，左右 6px padding 与 2px 边框照样多顶出去 14px）。实测：把整句标签塞进这一格，加这三条之后
@@ -527,7 +531,7 @@ export const CSS = `
 .dsm-planTable .dsm-colBytes { width: 68px; }
 /* cwd 那一格里的路径要能断行（fixed 布局下列宽不会再变），否则长路径顶出格子。 */
 .dsm-cwd { color: var(--dsw-alias-label-secondary, #646a73); overflow-wrap: anywhere; }
-/* 标签是个小块：挤在窄列里也不能折成两行（导入预演表的动作列里曾经折成「跳/过」）。 */
+/* 标签是个小块：挤在窄列里也不能折成两行（导入计划表的动作列里曾经折成「跳/过」）。 */
 .dsm-tag { border-radius: 6px; padding: 0 6px; font-size: 12px; white-space: nowrap; }
 /* state 色是指示色，不是文字色：它在浅色主题里淡到读不出来。实测（浏览器里量的，两套主题都量了）
    state-idle-primary = #d4d4d4，白底 1.48:1；深色 #545557 在 #232324 上 2.1:1。
@@ -538,7 +542,7 @@ export const CSS = `
   border: 1px solid var(--dsw-alias-state-success-primary, #2ea121);
   background: color-mix(in srgb, var(--dsw-alias-state-success-primary, #2ea121) 14%, transparent);
 }
-/* 中性标签：导入预演里的 skip、导出列表里"不是已登记工作区"的目录，都只是"没什么动作"。 */
+/* 中性标签：导入计划里的 skip、导出列表里"不是已登记工作区"的目录，都只是"没什么动作"。 */
 .dsm-tagIdle, .dsm-tagSkip {
   color: var(--dsw-alias-label-secondary, #646a73);
   border: 1px solid var(--dsw-alias-border-l2, rgba(0, 0, 0, 0.12));
@@ -658,12 +662,56 @@ export const CSS = `
 /* 每类各有多少条：数字比标签淡一档，读起来仍走 label-secondary（同 .dsm-tag 的理由）。 */
 .dsm-filterCount { color: var(--dsw-alias-label-secondary, #646a73); margin-left: 5px; }
 .dsm-check { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
-.dsm-result {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  border-top: 1px solid var(--dsw-alias-border-l1, rgba(0, 0, 0, 0.08));
-  padding-top: 8px;
+/*
+ * 确认弹窗：官方 Modal 给遮罩、卡片、标题栏与焦点归还（ConfirmDialog.tsx 里说明了为什么必须用它），
+ * 这里只调两件事——宽度与滚动。
+ *
+ * 宽度：官方那张卡是 min(380px, 100%)，按"一句话 + 两个按钮"量的；本页的正文里是计划清单（会话行、
+ * 计划表、动作列表），380px 会把标题与 cwd 挤没。640px 是按最长的那几行量的：计划清单里那四列
+ * （勾选框位 / 名字 / 字节 / 时间）在这个宽度下不用截断。
+ *
+ * 重复写两遍类名（.dsm-dialog.dsm-dialog）是为了压过官方那张卡自己的宽度声明：两边都是单类选择器，
+ * 谁生效取决于样式表的先后顺序，而官方那份是宿主注入的、顺序不由本插件决定；提一档特异性就不会随
+ * 加载顺序变。
+ *
+ * 滚动：官方的卡片是 overflow: hidden 的纵向 flex 容器，正文那一层得自己写 min-height: 0 才能
+ * 被压缩（flex 项默认的 min-height: auto 会撑到内容高度），overflow-y: auto 才有意义。标题栏跟着
+ * 正文一起滚——清单再长也顶不出卡片，因为卡片本身限了 max-height: 100%（官方那份 Modal.module.css
+ * 的注释就是这么要求的：消费者用 max-height: 100% 限高，别自己算视口）。
+ */
+.dsm-dialog.dsm-dialog { width: min(640px, 100%); max-height: 100%; }
+.dsm-dialogContent { min-height: 0; overflow-y: auto; }
+/*
+ * 正文那一层：块与块之间的节奏（官方那层 body 是纵向 flex 但不给间距）、以及**字号**。
+ *
+ * 字号必须自己写：官方 Modal 会 portal 到 document.body，于是弹窗落在那套 .dsm-root（13px）之外，
+ * 正文会继承文档根的 16px——同一条会话行在弹窗里与在页面里长得不一样（在真实 dev GUI 里量过：
+ * 不写这一条时弹窗里的行 16px、行高更大，页面里的行 13px）。弹窗里摆的就是页面上的那几个组件，
+ * 两处必须同规格。
+ */
+.dsm-dialogBody { display: flex; flex-direction: column; gap: 8px; font-size: 13px; line-height: 20px; }
+/* 底部那对按钮同上：footer 在我们那层 body 之外，字号也会继承文档根的 16px（量到 16px / 34px 高，
+   页面上的同一个类名是 13px / 30px 高）。同一个 .dsm-button 在弹窗里与页面里得是一个规格。 */
+.dsm-dialog .dsm-button { font-size: 13px; }
+/*
+ * 进度条：同步这种"按条走网络"的长动作（整库可能上百条）用它回答"做到第几条了"。
+ *
+ * 轨道走 border-l2 而不是 bg-layer-*：浅色主题里那三级底色是同一个白，铺在白底弹窗上等于没有轨道
+ * （行悬停底色那里踩过同一个坑）。填充走 brand-primary，与主按钮同一支颜色。
+ */
+.dsm-progress {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--dsw-alias-border-l2, rgba(0, 0, 0, 0.12));
+  overflow: hidden;
+}
+.dsm-progressFill {
+  height: 100%;
+  background: var(--dsw-alias-brand-primary, #1f2329);
+  transition: width 120ms linear;
+}
+@media (prefers-reduced-motion: reduce) {
+  .dsm-progressFill { transition: none; }
 }
 .dsm-listPlain {
   margin: 0;
