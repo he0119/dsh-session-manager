@@ -129,6 +129,48 @@ export function splitFirstFrame(
 }
 
 /**
+ * 低成本定位首帧边界：只解候选前缀，**不**整篇解码、不做 `head + tail === full` 那份自洽校验。
+ *
+ * 与 [`splitFirstFrame`] 的差别只有那一份校验，而它在这里是多余的：截断的帧会被解码器拒绝
+ * （fzstd 报 `unexpected EOF`），所以"候选前缀能解出、且以换行结尾"这个判据本身已经够用。那份校验
+ * 要求整篇解码外加一次尾部解码，一条 6 MB 的会话要多花两秒——只读用途（内容指纹）不该为它买单。
+ *
+ * **只读用途**用它；要把切分结果拿去改写并落盘（`relocateHeaderCwd`）时仍然用 [`splitFirstFrame`]：
+ * 那条路上多花的时间买的是"写出去的字节整体可解码"。
+ *
+ * @param buf 完整日志字节。
+ * @param decodeAll 多帧感知解码器。
+ * @returns 切分结果；`rest` 是其余帧的原始字节，不做任何重编码。
+ */
+export function splitFirstFrameFast(buf: Buffer, decodeAll: DecodeAll): FirstFrameSplit | null {
+  // 不预先算出全部候选（`frameStartCandidates` 会扫完整篇）：首帧边界通常就在文件开头几百字节处，
+  // 逐字节找到即返回，于是扫描量与文件大小无关。
+  for (let i = 1; i <= buf.length; i += 1) {
+    const atEnd = i === buf.length
+    if (
+      !atEnd &&
+      !(
+        buf[i] === ZSTD_MAGIC[0] &&
+        buf[i + 1] === ZSTD_MAGIC[1] &&
+        buf[i + 2] === ZSTD_MAGIC[2] &&
+        buf[i + 3] === ZSTD_MAGIC[3]
+      )
+    ) {
+      continue
+    }
+    let head: string
+    try {
+      head = decodeAll(buf.subarray(0, i))
+    } catch {
+      continue // 截断帧：解码器抛错，跳过
+    }
+    if (!atEnd && !head.endsWith('\n')) continue
+    return { first: head, rest: buf.subarray(i), boundary: i }
+  }
+  return null
+}
+
+/**
  * 主动探测解码器是否为"多帧感知"。
  *
  * 这是把导致数据丢失的静默截断变成启动期硬失败的守卫：构造两个 raw 帧，

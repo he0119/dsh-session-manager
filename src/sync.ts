@@ -28,7 +28,7 @@ import { scanAll, type DiscoveredSession } from './discovery.ts'
 import { encodeSegment } from './paths.ts'
 import { createGitRunner, repoLocation, type GitRunner, type RepoLocation } from './repo.ts'
 import { readRegistry, validateRegistry } from './registry.ts'
-import { relocateHeaderCwd, relocateHeaderCwdText } from './session-log.ts'
+import { relocateHeaderCwdShallow, relocateHeaderCwdText } from './session-log.ts'
 import type { TitleQuery } from './session-title.ts'
 import { applyImport, buildBundle, planImport, readBundle, type ExportSource, type ImportOptions } from './transfer.ts'
 import type { DecodeAll, WorkspaceRegistryState } from './types.ts'
@@ -176,7 +176,7 @@ const CWD_PLACEHOLDER = '\u0000dsm-sync-cwd'
 function contentBytes(bytes: Buffer, compression: string | null, decodeAll: DecodeAll): Buffer {
   try {
     return compression === 'zstd'
-      ? relocateHeaderCwd(bytes, { to: CWD_PLACEHOLDER, decodeAll }).buffer
+      ? relocateHeaderCwdShallow(bytes, { to: CWD_PLACEHOLDER, decodeAll }).buffer
       : Buffer.from(relocateHeaderCwdText(bytes.toString('utf8'), CWD_PLACEHOLDER).text, 'utf8')
   } catch {
     return bytes
