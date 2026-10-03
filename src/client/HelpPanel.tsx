@@ -62,6 +62,7 @@ const FAQ = [
   ['faqRestartQ', 'faqRestartA'],
   ['faqRestoreQ', 'faqRestoreA'],
   ['faqForkQ', 'faqForkA'],
+  ['faqPasswordQ', 'faqPasswordA'],
 ] as const
 
 /** 一张卡片：标题 + 正文，动作页那些卡片同一个外壳。 */

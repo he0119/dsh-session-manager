@@ -38,7 +38,7 @@
 ## 跨机器同步
 
 - [WebDAV 同步是运输层，只增不覆盖](../.agents/notes/implemented/feature/2026-10-01-webdav-sync-is-a-transport.md)：
-  远端只放包与索引（一机一格），落地复用导入那条编排，同 id 只跳过。
+  远端只放包与索引（一机一格），落地复用导入那条编排，同 id 只跳过；密码只放引用，值进宿主机凭据库。
 - [远端第一层是插件自己的命名空间](../.agents/notes/implemented/architecture/2026-10-02-remote-namespace-is-the-plugins.md)：
   `url` 之下固定一层 `dsh-session-manager/`，机器格直接放在里面（逐层 MKCOL 自建），于是 `url` 可以是
   服务器根。

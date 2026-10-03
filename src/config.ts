@@ -45,7 +45,12 @@ export interface SyncConfig {
    * 密码的**引用**（环境变量名），不是密码本身。
    *
    * 与 DSH 自己的口径一致：配置里只放引用，值由宿主的 credentials 服务解析；没有那个服务时退到
-   * `process.env`。于是配置备份、同步、截图都不会把密码带走——那张表单里也一样，它填的是引用名。
+   * `process.env`。于是配置备份、同步、截图都不会把密码带走。
+   *
+   * 界面上的密码框（[SyncConfigForm](./client/SyncConfigForm.tsx)）把用户直接输入的密码写进
+   * 宿主机凭据服务、写在这个引用名下——所以这一项缺席时按 {@link DEFAULT_PASSWORD_REF} 解析，
+   * 用户不必先给变量起个名字。这一项本身不在那张表单上（卡片只问密码是什么），要换引用名就在插件
+   * 配置里改这一项。
    */
   passwordRef?: string
   /** 显式映射：远端 `cwd` → 本机目录（`/home/alice/dev/proj: /opt/work/proj`）。 */
@@ -63,17 +68,31 @@ export interface PluginConfig {
 }
 
 /**
+ * `passwordRef` 缺席时用的凭据引用名。
+ *
+ * 界面把用户直接输入的密码写进宿主机凭据服务时得有一个引用名，而"先让用户给变量起个名字"是多余的
+ * 一步；这一份名字同时也是往环境变量里放密码那条路要走的名字（与 DSH 的其他凭据引用同一套语法：
+ * POSIX 环境变量名）。
+ *
+ * 浏览器半侧在 `src/client/syncForm.ts` 里有一份同值副本（那一侧不 import 核心层，见那里的说明），
+ * `test/sync-form.test.ts` 钉住两份相等。
+ */
+export const DEFAULT_PASSWORD_REF = 'DSH_DAV_PASSWORD'
+
+/**
  * 同步那一节的 schema。
  *
  * 整节 volatile：这是设置面里唯一"改了立即生效"的一节。字段都不带默认值——缺席要好过拿一个空串
  * 冒充"用户填了空"，`url` 为空与没配这一节在行为上是同一件事（工具与界面都按"没配置"处理）。
+ * `passwordRef` 是唯一的例外读法：它缺席时由代码按 {@link DEFAULT_PASSWORD_REF} 取值（是"用哪个
+ * 引用名"而不是"密码填了什么"，schema 默认值会让它进那份表单，反而多出一个要用户确认的覆盖）。
  */
 export const SyncConfigSchema = z
   .object({
     url: z.string(),
     machineId: z.string(),
     username: z.string(),
-    passwordRef: z.string(),
+    passwordRef: z.string().role('credential-ref'),
     mapping: z.dict(z.string()),
     timeoutMs: z.number().step(1).min(1),
   })

@@ -207,19 +207,26 @@ sync:
   url: https://dav.example.com/dsh        # WebDAV address (a server root works); the plugin creates dsh-session-manager/ under it
   machineId: robot-a                       # optional, defaults to the hostname; never share one id across machines
   username: alice                          # optional (Basic)
-  passwordRef: DSH_DAV_PASSWORD            # optional: an **environment-variable name**, resolved by the host credential service or process.env
+  passwordRef: DSH_DAV_PASSWORD            # optional: a **credential reference** (an environment-variable name); blank uses DSH_DAV_PASSWORD
   mapping:                                 # explicit mapping: remote cwd → local directory (each machine writes its own)
     /home/alice/dev/proj: /opt/work/proj
   timeoutMs: 30000                         # optional
 ```
 
-This section is also editable **in the interface**: in the card on Settings → “Session management” → “Sync”, the URL, machine id, username, password reference, timeout and mapping are
+This section is also editable **in the interface**: in the card on Settings → “Session management” → “Sync”, the URL, machine id, username, password, timeout and mapping are
 edited directly, and Save writes them into the profile document (`~/.dsh/profiles/<name>/cordis.patch.yml`).
 `sync` is a volatile field, so a change takes effect **without a restart**; the three path fields
 (`sessionsRoot` / `registryPath` / `backupRoot`) stay file-only. Path mappings are added and removed row
 by row: the left side is the cwd the remote recorded, the right side a directory on this machine. That left
 side must match the other machine’s path character for character, so once you have previewed, the form
 offers the cwds it saw as suggestions instead of making you copy them by hand.
+
+**The password goes in that same form**: it is a write-only input, and Save stores it in the host credential
+store (`$DSH_HOME/.credentials.yaml`); the configuration file only ever carries the reference, the value is
+never echoed back, and the form reports just “configured / not set”. The reference is not on that form: it is
+the configuration’s own `sync.passwordRef` (`DSH_DAV_PASSWORD` by default), so pointing at a name of your own
+(or at a variable you already export) is done on the generic plugin-config form. A variable present in the
+launching environment shadows the write, and the password input is then shown as read-only.
 
 **One configuration for every machine**: each entry in the remote index also carries a **project identity** —
 the repository’s git remote (canonicalised to `host/owner/repo`) plus the session cwd relative to the
@@ -292,7 +299,8 @@ Sync also goes through a plan: the `sync_sessions` tool previews by default and 
 - **Plugin config**: the optional `sessionsRoot` / `registryPath` / `backupRoot` fields override the default
   paths above; a `sync` block configures WebDAV sync (`url` / `machineId` / `username` / `passwordRef` /
   `mapping` / `timeoutMs`). A password is only ever a **reference** (an environment-variable name), never
-  plaintext in the config file.
+  plaintext in the config file: a password typed in the interface goes to the host credential store
+  (`$DSH_HOME/.credentials.yaml`), not to this configuration.
 
 ## Docs
 

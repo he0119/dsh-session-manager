@@ -49,4 +49,7 @@ Status: implemented
   `configEditor.edit()`：它在 `reconcileProfilePatches()` 之后重新核对 entry 身份，覆盖层提供的那个
   条目可能就此认不出来。这是宿主的行为，本插件不去绕它，只在文档里说清。
 - `passwordRef` 是**环境变量名**而不是密码：密码仍然不进配置文档，由宿主凭据服务或 `process.env` 解析。
+  表单里那个密码框是只写的（官方控件库的 `SettingsSecretField`），保存时经 `remote.credentials` 写进
+  宿主机凭据库；引用名那一栏不在这张表单上（在插件配置里改）。理由与边界见
+  [密码只放引用](../feature/2026-10-01-webdav-sync-is-a-transport.md)。
 - 界面里改完 URL 不影响**正在跑的那一次**同步，下一次预演/确认才用新值（配置按快照读）。
