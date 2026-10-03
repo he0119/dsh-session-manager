@@ -105,6 +105,8 @@
   词条进「说明」页，并钉了一条两行的上限。
 - [预演表的动作列只放动作](../.agents/notes/implemented/bug-fix/2026-10-03-action-column-holds-a-verb.md)：
   窄列装不下整句时改文案与列宽，不是让标签顶到邻居身上（附一条"顶不出去"的兜底）。
+- [写盘动作是一个按钮开一个确认弹窗](../.agents/notes/implemented/architecture/2026-10-03-one-click-confirm-dialog.md)：
+  计划与"做不做"这个决定同框；只有会写盘的动作问，归档与导出不问。
 
 ## Host 半侧的约束
 

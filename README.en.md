@@ -11,8 +11,8 @@ In DSH, "which workspace a session belongs to" is not an editable field — it i
 in the session log header. The host exposes no move / reassign API, and it rejects a log whose project directory
 disagrees with its `cwd`. So moving directories by hand either drops sessions into Ungrouped or makes
 them fail to load with `corrupt session log`. This plugin does all three things together — **rewrite the
-header `cwd` + move the log directory + re-home the workspace registry** — and every step can be previewed
-first and rolled back byte-for-byte afterwards. (Why it has to work that way:
+header `cwd` + move the log directory + re-home the workspace registry** — showing you that plan before it
+writes anything, and rolling back byte-for-byte afterwards. (Why it has to work that way:
 [.agents/notes/implemented/](.agents/notes/implemented), in Chinese.)
 
 Sync takes the same road: the remote holds only `.dshsess` bundles, and a pull rewrites the `cwd` to
@@ -23,10 +23,15 @@ still works.
 
 | Entry point | Good for |
 |---|---|
-| The **Session management** page in Settings | Everyday use: archive or delete single sessions on the **Sessions** tab; pick a source (a directory or Ungrouped) from a dropdown to migrate; tick sessions to export / import; preview and run a WebDAV sync on the **Sync** tab |
+| The **Session management** page in Settings | Everyday use: archive or delete single sessions on the **Sessions** tab; pick a source (a directory or Ungrouped) from a dropdown to migrate; tick sessions to export / import; run a WebDAV sync on the **Sync** tab |
 | 5 model tools | Just say "move this workspace's sessions to `~/dev/xxx`" and let the model preview first, apply second |
 
-Both share one migration implementation, so the count a preview reports is the count you get.
+Both share one migration implementation, so the count the dialog reports is the count you get.
+
+Every write action on the page (delete / migrate / import / sync / roll back) is **one button that opens one
+confirmation dialog**: the dialog shows the read-only plan (which sessions, where they land, where the backup
+goes, what is wrong), and only Confirm writes — Cancel changes nothing. The model tools still take two calls
+(`plan` then `apply`), so the model looks before it writes.
 
 ## Install
 
@@ -84,13 +89,13 @@ one-line bump at that point.
   no restart. Ticking a parent session archives its subagents with it (the family is the unit; why, see
   the delete bullet below). On a host without that service (non-Web profiles) the buttons are disabled
   and the page says why;
-- **Delete**: tick rows → **preview** (every session that would go, the file count, where the backup
-  lands) → then confirm. Deleting **backs the session directory up into this plugin's backup root
+- **Delete**: tick rows → **Delete selected** opens a dialog listing every session that would go, the
+  file count and where the backup lands → confirm there. Deleting **backs the session directory up into this plugin's backup root
   first**, then removes it; the sidebar drops those rows once the host rescans. A session still live in
   host memory is refused — close it in the host first. Changed your mind? Restore it from
   **Backups & rollback**;
 - **Subagents follow their parent session**: ticking a parent takes its subagent sessions (and any
-  deeper descendants) with it — the preview lists them row by row, marked as going with the parent, and
+  deeper descendants) with it — the dialog lists them row by row, marked as going with the parent, and
   one backup holds the whole family (once the parent's log is gone a subagent has no way back into the
   sidebar, so leaving it on disk just makes it invisible). **A subagent cannot be deleted, archived or
   exported on its own**: its checkbox is greyed out (the tooltip names the parent session to tick), and
@@ -124,7 +129,7 @@ one-line bump at that point.
   like a broken filter;
 - **candidates line up with the host sidebar**: subagent sessions (nested under their parent), blank
   sessions (never started a turn) and archived sessions are never candidates — a session the sidebar
-  cannot show should not be swept along by accident. Naming one of them explicitly makes the preview say
+  cannot show should not be swept along by accident. Naming one of them explicitly makes the plan say
   it is hidden (for a subagent it also tells you to name its parent instead);
 - **Subagents follow their parent session**: ticking a parent **moves its subagent sessions** (and any
   deeper descendants) with it (archiving and exporting work the same way: the subagents are archived, or
@@ -133,19 +138,20 @@ one-line bump at that point.
   directories, and a subagent cannot be moved on its own: it is not a candidate, and naming it would be an
   upward link). **A forked session does not count** either (it is self-contained, and it still opens
   after the parent has moved). Membership does not change: a subagent was not registered, and still is
-  not; the preview reports how many of the sessions are subagents;
-- **Preview**: session, log and byte counts, source → target project directory, **how the registry changes** (create or
-  reuse the target workspace, how many sessions are added, which workspaces lose them, whether an emptied
-  workspace is removed), the artifact plan and its skip reasons;
-- **Confirm**: rewrite each log header `cwd` (first frame only, the rest byte-identical) → move the session
+  not; the plan reports how many of the sessions are subagents;
+- **Migrate opens the dialog**, which shows row by row the sessions that move (subagents that come along are
+  indented one level and tagged "with parent"), the session / log / byte counts, source → target project
+  directory, **how the registry changes** (create or reuse the target workspace, how many sessions are added,
+  which workspaces lose them, whether an emptied workspace is removed), the artifact plan and its skip reasons;
+- **Confirm** then rewrites each log header `cwd` (first frame only, the rest byte-identical) → move the session
   directories → re-home the registry → **independent verification** (the host's own corrupt criterion) → leave
   a byte-level backup. Afterwards the page tells you whether the change took effect immediately or
   **requires a DSH restart**.
 
 **Backups & rollback** — below the migrate tab, every backup this plugin wrote (time, **migration** or
 **delete**, session count, source → target), with the steps shown before you confirm. A migration backup
-offers **Roll back**: it restores the session directories, the log bytes and the workspace registry
-together (and removes the emptied target project directory, symmetric with the migration cleaning up an
+offers **Roll back**, which first lists the steps in a dialog and only then restores the session
+directories, the log bytes and the workspace registry together (and removes the emptied target project directory, symmetric with the migration cleaning up an
 emptied source project directory). A delete backup offers **Restore**: it only moves the session
 directories back — deleting never touched the registry.
 
@@ -176,9 +182,10 @@ directories back — deleting never touched the registry.
   among foo). The header then reports "showing N / M", and **Select whole library picks what is listed
   right now**; a group whose rows were all filtered out is not drawn at all (a header with nothing under
   it looks broken), and a group header reports the filtered count;
-- **Import**: pick a bundle and a target workspace → **preview first** (per session: what will be created,
-  which `cwd` gets rewritten, what is skipped, how the registry changes) → then confirm. Import **never
-  overwrites**: a session whose id already exists is skipped and reported; a session with no `cwd` lands in
+- **Import**: pick a bundle and a target workspace → **Import** opens a dialog listing, per session, what will
+  be created, which `cwd` gets rewritten, what is skipped and how the registry changes → confirm there (with
+  nothing to create the confirm button is greyed out). Export never asks: it only packs bytes for download and
+  touches nothing locally. Import **never overwrites**: a session whose id already exists is skipped and reported; a session with no `cwd` lands in
   the `_no-cwd` project directory and is not registered.
 
 **Help** — the vocabulary and the costs in one place: the category dictionary (visible / subagent / blank /
@@ -218,8 +225,8 @@ edited directly, and Save writes them into the profile document (`~/.dsh/profile
 `sync` is a volatile field, so a change takes effect **without a restart**; the three path fields
 (`sessionsRoot` / `registryPath` / `backupRoot`) stay file-only. Path mappings are added and removed row
 by row: the left side is the cwd the remote recorded, the right side a directory on this machine. That left
-side must match the other machine’s path character for character, so once you have previewed, the form
-offers the cwds it saw as suggestions instead of making you copy them by hand.
+side must match the other machine’s path character for character, so once you have synced (and the plan in the
+dialog has seen them), the form offers those cwds as suggestions instead of making you copy them by hand.
 
 **The password goes in that same form**: it is a write-only input, and Save stores it in the host credential
 store (`$DSH_HOME/.credentials.yaml`); the configuration file only ever carries the reference, the value is
@@ -243,7 +250,7 @@ All machines can therefore share a **literally identical** configuration (same `
 defaults to the hostname, empty `mapping`), and the same repository cloned at `/home/alice/dev/proj` and
 `/opt/work/proj` still matches. Conversely, two different repositories that happen to share a directory name
 are not treated as one project. No git, not a repository, no remote, or the project missing locally — all fall
-back to the mapping table below, and the preview names the repository it could not resolve.
+back to the mapping table below, and the plan names the repository it could not resolve.
 
 `mapping` and the identity **coexist**: an explicit mapping wins (what you configured is where it lands), the
 identity is the automatic path. So non-git directories, or forcing a different destination, still use mappings.
@@ -254,9 +261,9 @@ namespace under `url` itself, so `url` may be a WebDAV server or account root. *
 WebDAV has no locking, so each machine writes only its own slot and reads every slot — nothing overwrites
 anything else.
 
-On the **Sync** tab, **Preview sync** (reads the remote, writes nothing) reports "pull N /
-push M" and lists every session, where it would land and what was left alone and why; **Sync now** actually
-pulls and pushes. The rules and edges:
+On the **Sync** tab, **Sync** first computes a read-only plan in a dialog (it reads the remote and writes
+nothing), reporting "pull N / push M" and listing every session, where it would land and what was left alone
+and why; **Sync now** in that dialog actually pulls and pushes. The rules and edges:
 
 - **Add-only**: a session id that already exists locally is never pulled, and a remote copy that is newer
   than yours is left alone too — the report says whether it is "remote is ahead" or "both sides wrote". The
@@ -294,8 +301,8 @@ Sync also goes through a plan: the `sync_sessions` tool previews by default and 
   exposes `workspaceRegistry.reassignSessions()`, the plugin takes effect immediately and says so; otherwise
   both the tools and the page tell you to restart — and until you do, do not add sessions under the old
   workspace.
-- **Look before it writes**: `plan` and the page's **preview** write nothing; every real write is preceded by
-  a byte-level backup.
+- **Look before it writes**: `plan` and the page's dialog (which shows that same `plan`) write nothing; every
+  real write is preceded by a byte-level backup.
 - **Only the first frame is rewritten**: only the header frame is recompressed, the remaining frames stay
   byte-identical, and rollback restores everything byte-for-byte (including the session artifacts, when you
   ask for them).

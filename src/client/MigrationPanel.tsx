@@ -1,15 +1,15 @@
 /**
  * 「迁移」分页：把某个工作区目录下的会话整体搬到另一个目录。
  *
- * Host 半侧的编排在 `src/migrate.ts`，端点在同名路由下；这一层只做三件事：收参数、把**预演结果**
- * 摆清楚、按用户的确认分两步走（预演 → 落地）。所有判定都在宿主侧——页面不自己推算会不会成功，
- * 也不自己拼路径。
+ * Host 半侧的编排在 `src/migrate.ts`，端点在同名路由下；这一层只做三件事：收参数、把**计划**摆清楚、
+ * 按用户的确认落地。所有判定都在宿主侧——页面不自己推算会不会成功，也不自己拼路径。
  *
  * 两个刻意的设计：
- *   - **两步走写在同一张卡里**：预演与落地的响应是同一个形状（`mode` 区分），所以"看到的就是
- *     将要发生的"，不存在预览一套、实做另一套；
+ *   - **计划与确认同框**：点「迁移」开确认弹窗（见 [ConfirmDialog.tsx](./ConfirmDialog.tsx)），里面
+ *     就是 `mode: 'plan'` 的响应（同样的形状、同样的数字），落地按钮在同一个弹窗里；"看到的就是将要
+ *     发生的"因此不依赖用户记住上一屏，取消则是关掉弹窗、页面回到按之前的样子；
  *   - 回滚给一份**动作清单**再确认：回滚会搬目录、按字节还原日志、恢复注册表，等于一次真实写入，
- *     因此先 `dryRun` 把动作列出来，用户点确认才动手。
+ *     所以开弹窗时先 `dryRun` 把动作列出来，用户点确认才动手。
  *
  * @module dsh-session-manager/client/MigrationPanel
  */
@@ -23,12 +23,15 @@ import {
   type BackupSummary,
   type MigrationRequest,
   type MigrationResponse,
+  type RollbackResponse,
 } from './api.ts'
+import { ConfirmDialog } from './ConfirmDialog.tsx'
 import {
   SessionFilterBar,
   SessionListBox,
   SessionListEmpty,
   SessionRow,
+  SessionStaticRow,
   formatBytes,
   formatStamp,
   useSessionFilter,
@@ -38,6 +41,7 @@ import { DirectoryPicker } from './DirectoryPicker.tsx'
 import { normalizePickedPath } from './directory.ts'
 import {
   UNOWNED_SOURCE,
+  migrateFamilyNote,
   migrationMatching,
   migrationSourceRows,
   optionLabel,
@@ -47,6 +51,18 @@ import type { PanelShare } from './types.ts'
 
 /** 没有注入面时的兜底翻译。 */
 const fallback = translateWith(zh as unknown as Record<string, string>)
+
+/** 异常 → 一句话（弹窗正文与横幅共用）。 */
+function reasonOf(cause: unknown): string {
+  return cause instanceof Error ? cause.message : String(cause)
+}
+
+/** 一次落地之后的结论：复核过没过、备份在哪、要不要重启（原样透出宿主报的三件事）。 */
+interface MigrationEffect {
+  verified: boolean
+  backupDir?: string
+  takesEffect: MigrationResponse['takesEffect']
+}
 
 /** 会话选择：全部，或从匹配到的会话里勾几条。 */
 type PickMode = 'all' | 'subset'
@@ -162,19 +178,31 @@ export function MigrationPanel({ t = fallback, state, reload, directory }: Panel
   const [picking, setPicking] = React.useState<'from' | 'to' | null>(null)
   const [manual, setManual] = React.useState<'from' | 'to' | null>(null)
 
-  const [outcome, setOutcome] = React.useState<MigrationResponse | null>(null)
-  const [busy, setBusy] = React.useState<'plan' | 'apply' | null>(null)
+  /**
+   * 迁移弹窗：`null` = 没开；开了先是一份空壳（计划还在算）。
+   *
+   * 与「会话」页的删除弹窗同一套形状（计划 + 异常合成一个状态）：没有弹窗就没有要看的计划，取消
+   * （或落地成功）之后那份计划也不该留在页面上。
+   */
+  const [pending, setPending] = React.useState<{ response: MigrationResponse | null; error: string | null } | null>(
+    null,
+  )
+  const [busy, setBusy] = React.useState<'apply' | null>(null)
   const [error, setError] = React.useState<string | null>(null)
   const [notice, setNotice] = React.useState<string | null>(null)
+  /** 上一次落地之后的结论（复核 / 备份 / 生效方式）：弹窗关了之后它还得在页面上留着。 */
+  const [effect, setEffect] = React.useState<MigrationEffect | null>(null)
 
   const [backups, setBackups] = React.useState<BackupSummary[]>([])
   const [backupRoot, setBackupRoot] = React.useState('')
   const [backupError, setBackupError] = React.useState<string | null>(null)
+  /** 正在算回滚动作 / 正在回滚的那份备份目录（按钮据此禁用）。 */
   const [rollbackBusy, setRollbackBusy] = React.useState<string | null>(null)
-  const [rollbackPlan, setRollbackPlan] = React.useState<{
-    dir: string
-    kind: BackupSummary['kind']
-    actions: string[]
+  /** 回滚 / 恢复弹窗：动作清单与确认按钮在同一块地方（同 ConfirmDialog.tsx 的说明）。 */
+  const [rollbackDialog, setRollbackDialog] = React.useState<{
+    backup: BackupSummary
+    plan: RollbackResponse | null
+    error: string | null
   } | null>(null)
 
   const loadBackups = React.useCallback(async (): Promise<void> => {
@@ -283,7 +311,7 @@ export function MigrationPanel({ t = fallback, state, reload, directory }: Panel
     } else {
       setTo(path)
     }
-    setOutcome(null)
+    setEffect(null)
     setPicking(null)
     setManual(null)
   }
@@ -335,7 +363,15 @@ export function MigrationPanel({ t = fallback, state, reload, directory }: Panel
     )
   }
 
-  const run = async (kind: 'plan' | 'apply'): Promise<void> => {
+  /**
+   * 点「迁移」：开弹窗，同时把只读的迁移计划取回来（`mode: 'plan'`，不落盘）。
+   *
+   * 参数不齐时不开口：`needFrom` / `needTo` / `needMigrateSelection` 三句先摆在页面的错误横幅里——
+   * 那是"还没到能算计划的地步"，摆进弹窗只会让用户先看一个空框再看到一句抱怨。
+   *
+   * 计划回来时弹窗可能已经被取消掉了：`current === null` 时原地作废（同「会话」页的删除弹窗）。
+   */
+  const openMigrate = (): void => {
     if (from.trim() === '') {
       setError(t('needFrom'))
       return
@@ -344,17 +380,41 @@ export function MigrationPanel({ t = fallback, state, reload, directory }: Panel
       setError(t('needTo'))
       return
     }
-    if (kind === 'apply' && pickMode === 'subset' && chosen.length === 0) {
+    if (pickMode === 'subset' && chosen.length === 0) {
       setError(t('needMigrateSelection'))
       return
     }
-    setBusy(kind)
     setError(null)
     setNotice(null)
-    try {
-      const response = await migrate(request(kind))
-      setOutcome(response)
-      if (response.applied) {
+    setPending({ response: null, error: null })
+    void migrate(request('plan')).then(
+      (response) => setPending((current) => (current === null ? current : { ...current, response })),
+      (cause) => setPending((current) => (current === null ? current : { response: null, error: reasonOf(cause) })),
+    )
+  }
+
+  /**
+   * 弹窗里按「确认迁移」：真的搬（宿主那边是同一个 `buildRelocationPlan()`，只是这次落盘并复核）。
+   *
+   * 落地失败但正文里带着完整结果（计划不 ok / 复核没过）时把那份结果摆回弹窗里——用户正看着清单，
+   * 新的问题清单就该出现在同一个位置；请求本身没走通（网络、参数被拒）才抛给页面横幅并关掉弹窗。
+   */
+  const applyMigration = (): void => {
+    setBusy('apply')
+    setError(null)
+    void migrate(request('apply')).then(
+      (response) => {
+        setBusy(null)
+        if (!response.applied) {
+          setPending((current) => (current === null ? current : { ...current, response }))
+          return
+        }
+        setPending(null)
+        setEffect({
+          verified: response.verified,
+          ...(response.backupDir === undefined ? {} : { backupDir: response.backupDir }),
+          takesEffect: response.takesEffect,
+        })
         setNotice(
           t('migrateDone', {
             sessions: response.preview.sessions.length,
@@ -366,54 +426,67 @@ export function MigrationPanel({ t = fallback, state, reload, directory }: Panel
             ' ' +
             (response.verified ? t('verifiedPass') : t('verifiedFail')),
         )
-        await reload()
-        await loadBackups()
-      }
-    } catch (cause) {
-      setError(t('failed', { reason: cause instanceof Error ? cause.message : String(cause) }))
-    } finally {
-      setBusy(null)
-    }
+        void reload().then(() => loadBackups())
+      },
+      (cause) => {
+        setBusy(null)
+        setPending(null)
+        setError(t('failed', { reason: reasonOf(cause) }))
+      },
+    )
   }
 
-  const preview = outcome?.preview ?? null
+  const preview = pending?.response?.preview ?? null
   const planned = preview !== null && preview.ok
   const registry = preview?.registryChange ?? null
 
-  const showRollbackPlan = async (dir: string, kind: BackupSummary['kind']): Promise<void> => {
-    setRollbackBusy(dir)
+  /**
+   * 点备份行上的「回滚」/「恢复」：开弹窗，同时把只读的动作清单取回来（`dryRun: true` 不写盘）。
+   *
+   * 动作清单是回滚这件事唯一能让用户预先看到的东西（会话目录搬回哪、日志从哪还原、注册表动不动），
+   * 所以它必须与确认按钮同框——这正是原来"看回滚动作 → 再点一下回滚"两步之间的那段距离。
+   */
+  const openRollback = (backup: BackupSummary): void => {
     setBackupError(null)
-    try {
-      const response = await rollbackBackup(dir, true)
-      setRollbackPlan({ dir, kind, actions: response.actions })
-    } catch (cause) {
-      setBackupError(cause instanceof Error ? cause.message : String(cause))
-    } finally {
-      setRollbackBusy(null)
-    }
+    setRollbackDialog({ backup, plan: null, error: null })
+    setRollbackBusy(backup.dir)
+    void rollbackBackup(backup.dir, true).then(
+      (response) =>
+        setRollbackDialog((current) =>
+          current === null || current.backup.dir !== backup.dir ? current : { ...current, plan: response },
+        ),
+      (cause) =>
+        setRollbackDialog((current) =>
+          current === null || current.backup.dir !== backup.dir
+            ? current
+            : { ...current, plan: null, error: reasonOf(cause) },
+        ),
+    ).finally(() => setRollbackBusy(null))
   }
 
-  const doRollback = async (dir: string): Promise<void> => {
-    setRollbackBusy(dir)
+  /** 弹窗里按「确认回滚 / 确认恢复」：写盘并还原。 */
+  const applyRollback = (backup: BackupSummary): void => {
+    setRollbackBusy(backup.dir)
     setBackupError(null)
-    try {
-      const response = await rollbackBackup(dir, false)
-      const kind = rollbackPlan?.kind
-      setRollbackPlan(null)
-      setNotice(
-        t(kind === 'delete' ? 'restoreDone' : 'rollbackDone', {
-          sessions: response.sessions,
-          files: response.restoredFiles,
-        }),
-      )
-      setOutcome(null)
-      await reload()
-      await loadBackups()
-    } catch (cause) {
-      setBackupError(cause instanceof Error ? cause.message : String(cause))
-    } finally {
-      setRollbackBusy(null)
-    }
+    void rollbackBackup(backup.dir, false).then(
+      (response) => {
+        setRollbackBusy(null)
+        setRollbackDialog(null)
+        setNotice(
+          t(backup.kind === 'delete' ? 'restoreDone' : 'rollbackDone', {
+            sessions: response.sessions,
+            files: response.restoredFiles,
+          }),
+        )
+        setEffect(null)
+        void reload().then(() => loadBackups())
+      },
+      (cause) => {
+        setRollbackBusy(null)
+        setRollbackDialog(null)
+        setBackupError(reasonOf(cause))
+      },
+    )
   }
 
   return (
@@ -459,7 +532,7 @@ export function MigrationPanel({ t = fallback, state, reload, directory }: Panel
             onChange={(value) => {
               setFrom(value)
               setPicked([])
-              setOutcome(null)
+              setEffect(null)
             }}
             onBrowse={() => void browse('from')}
             manualOpen={manual === 'from'}
@@ -476,7 +549,7 @@ export function MigrationPanel({ t = fallback, state, reload, directory }: Panel
             pickerKind={pickerKind}
             onChange={(value) => {
               setTo(value)
-              setOutcome(null)
+              setEffect(null)
             }}
             onBrowse={() => void browse('to')}
             manualOpen={manual === 'to'}
@@ -577,95 +650,126 @@ export function MigrationPanel({ t = fallback, state, reload, directory }: Panel
         )}
 
         <div className="dsm-controls">
-          <button type="button" className="dsm-button" onClick={() => void run('plan')} disabled={busy !== null}>
-            {busy === 'plan' ? t('previewing') : t('migratePreview')}
-          </button>
           <button
             type="button"
             className="dsm-button dsm-primary"
-            onClick={() => void run('apply')}
-            disabled={busy !== null || !planned}
+            onClick={openMigrate}
+            disabled={busy !== null}
           >
-            {busy === 'apply' ? t('migrating') : t('migrateApply')}
+            {t('migrateAction')}
           </button>
         </div>
 
-        {preview !== null && (
-          <div className="dsm-result">
-            <p className={preview.ok ? 'dsm-ok' : 'dsm-warn'}>
-              {t('migrateSummary', {
-                sessions: preview.sessions.length,
-                files: preview.files,
-                bytes: formatBytes(preview.bytes),
-              })}
+        {/* 落地之后的结论：弹窗关了，这三件事（复核 / 备份位置 / 生效方式）还得留在页面上。 */}
+        {effect !== null && (
+          <div className="dsm-effect">
+            <p className={effect.verified ? 'dsm-ok' : 'dsm-warn'}>
+              {effect.verified ? t('verifiedPass') : t('verifiedFail')}
+              {effect.backupDir !== undefined ? ` · ${effect.backupDir}` : ''}
             </p>
-            {/* 级联带进来的子代理要说明白：勾的是一条父会话，清单里却多出几条没勾过的。 */}
-            {preview.cascaded > 0 && <p className="dsm-hint">{t('migrateFamily', { count: preview.cascaded })}</p>}
-            <p className="dsm-hint">
-              {preview.unowned
-                ? t('migrateProjectDirsUnowned', { projectDirs: preview.sourceProjectDirs.length, to: preview.targetProjectDir })
-                : t('migrateProjectDirs', { from: preview.sourceProjectDir, to: preview.targetProjectDir })}
+            <p className={effect.takesEffect === 'immediate' ? 'dsm-hint' : 'dsm-warn'}>
+              {effect.takesEffect === 'immediate' ? t('effectImmediate') : t('effectRestart')}
             </p>
-
-            {preview.problems.length > 0 && (
-              <div className="dsm-problems">
-                <p className="dsm-warn">
-                  {t('problemsTitle')}（{preview.problems.length}）
-                </p>
-                <ul className="dsm-listPlain">
-                  {preview.problems.map((problem) => (
-                    <li key={problem}>{problem}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            {planned && (
-              <div className="dsm-registry">
-                <p className="dsm-fields-label">{t('registryChangeTitle')}</p>
-                <ul className="dsm-listPlain">
-                  {registry === null || registry.unchanged ? (
-                    <li>{t('registryUnchanged')}</li>
-                  ) : (
-                    <>
-                      <li>{registry.createdTarget ? t('registryCreateTarget') : t('registryReuseTarget')}</li>
-                      {registry.added.length > 0 && <li>{t('registryAdded', { count: registry.added.length })}</li>}
-                      {registry.adoptedFromUnowned.length > 0 && (
-                        <li>{t('registryAdopted', { count: registry.adoptedFromUnowned.length })}</li>
-                      )}
-                      {registry.movedFrom.length > 0 && <li>{t('registryMoved', { count: registry.movedFrom.length })}</li>}
-                      {registry.removedSources.length > 0 && (
-                        <li>{t('registryRemoved', { count: registry.removedSources.length })}</li>
-                      )}
-                    </>
-                  )}
-                </ul>
-              </div>
-            )}
-
-            {preview.artifacts !== null && (
-              <p className="dsm-hint">
-                {t('artifactsPlanned', { count: preview.artifacts.moves })}
-                {preview.artifacts.skipped.length > 0
-                  ? ` · ${t('artifactsSkipped', { count: preview.artifacts.skipped.length })}`
-                  : ''}
-              </p>
-            )}
-
-            {outcome?.applied === true && (
-              <div className="dsm-effect">
-                <p className={outcome.verified ? 'dsm-ok' : 'dsm-warn'}>
-                  {outcome.verified ? t('verifiedPass') : t('verifiedFail')}
-                  {outcome.backupDir !== undefined ? ` · ${outcome.backupDir}` : ''}
-                </p>
-                <p className={outcome.takesEffect === 'immediate' ? 'dsm-hint' : 'dsm-warn'}>
-                  {outcome.takesEffect === 'immediate' ? t('effectImmediate') : t('effectRestart')}
-                </p>
-              </div>
-            )}
           </div>
         )}
       </div>
+
+      {/* 迁移弹窗：计划与「确认」同框（见 ConfirmDialog.tsx 的说明）。 */}
+      {pending !== null && (
+        <ConfirmDialog
+          t={t}
+          title={t('migrateDialogTitle')}
+          confirmLabel={t('migrateApply')}
+          busyLabel={t('migrating')}
+          busy={busy === 'apply'}
+          planning={pending.response === null && pending.error === null}
+          error={pending.error}
+          disabled={!planned}
+          onConfirm={applyMigration}
+          onCancel={() => setPending(null)}
+        >
+          {preview !== null && (
+            <>
+              <p className={preview.ok ? 'dsm-ok' : 'dsm-warn'}>
+                {t('migrateSummary', {
+                  sessions: preview.sessions.length,
+                  files: preview.files,
+                  bytes: formatBytes(preview.bytes),
+                })}
+              </p>
+              {/* 级联带进来的子代理要说明白：勾的是一条父会话，清单里却多出几条没勾过的。 */}
+              {preview.cascaded > 0 && <p className="dsm-hint">{t('migrateFamily', { count: preview.cascaded })}</p>}
+              <p className="dsm-hint">
+                {preview.unowned
+                  ? t('migrateProjectDirsUnowned', { projectDirs: preview.sourceProjectDirs.length, to: preview.targetProjectDir })
+                  : t('migrateProjectDirs', { from: preview.sourceProjectDir, to: preview.targetProjectDir })}
+              </p>
+
+              {preview.problems.length > 0 && (
+                <div className="dsm-problems">
+                  <p className="dsm-warn">
+                    {t('problemsTitle')}（{preview.problems.length}）
+                  </p>
+                  <ul className="dsm-listPlain">
+                    {preview.problems.map((problem) => (
+                      <li key={problem}>{problem}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {planned && (
+                <div className="dsm-registry">
+                  <p className="dsm-fields-label">{t('registryChangeTitle')}</p>
+                  <ul className="dsm-listPlain">
+                    {registry === null || registry.unchanged ? (
+                      <li>{t('registryUnchanged')}</li>
+                    ) : (
+                      <>
+                        <li>{registry.createdTarget ? t('registryCreateTarget') : t('registryReuseTarget')}</li>
+                        {registry.added.length > 0 && <li>{t('registryAdded', { count: registry.added.length })}</li>}
+                        {registry.adoptedFromUnowned.length > 0 && (
+                          <li>{t('registryAdopted', { count: registry.adoptedFromUnowned.length })}</li>
+                        )}
+                        {registry.movedFrom.length > 0 && <li>{t('registryMoved', { count: registry.movedFrom.length })}</li>}
+                        {registry.removedSources.length > 0 && (
+                          <li>{t('registryRemoved', { count: registry.removedSources.length })}</li>
+                        )}
+                      </>
+                    )}
+                  </ul>
+                </div>
+              )}
+
+              {preview.artifacts !== null && (
+                <p className="dsm-hint">
+                  {t('artifactsPlanned', { count: preview.artifacts.moves })}
+                  {preview.artifacts.skipped.length > 0
+                    ? ` · ${t('artifactsSkipped', { count: preview.artifacts.skipped.length })}`
+                    : ''}
+                </p>
+              )}
+
+              {/* 逐条列出会被搬走的会话：摘要报的是数字，这里才是"哪几条"。 */}
+              {preview.sessions.length > 0 && (
+                <SessionListBox>
+                  {preview.sessions.map((session) => (
+                    <SessionStaticRow
+                      key={session.id}
+                      session={session}
+                      className="dsm-row dsm-rowPlan"
+                      metaTitle={session.sourceDir}
+                      // 级联进来的那些缩进一级并挂「随父迁」：勾的是一条父会话，清单里却多出几条（同删除清单）。
+                      depth={session.via === undefined ? 0 : 1}
+                      note={migrateFamilyNote(session, t)}
+                    />
+                  ))}
+                </SessionListBox>
+              )}
+            </>
+          )}
+        </ConfirmDialog>
+      )}
 
       <div className="dsm-card">
         <div className="dsm-cardHead">
@@ -708,56 +812,47 @@ export function MigrationPanel({ t = fallback, state, reload, directory }: Panel
                 <button
                   type="button"
                   className="dsm-button"
-                  onClick={() => void showRollbackPlan(backup.dir, backup.kind)}
+                  onClick={() => openRollback(backup)}
                   disabled={rollbackBusy !== null}
                 >
-                  {rollbackPlan?.dir === backup.dir
-                    ? backup.kind === 'delete'
-                      ? t('restoreAction')
-                      : t('rollbackAction')
-                    : backup.kind === 'delete'
-                      ? t('restorePreview')
-                      : t('rollbackPreview')}
+                  {backup.kind === 'delete' ? t('restoreAction') : t('rollbackAction')}
                 </button>
               </div>
             ))}
           </div>
         )}
-
-        {rollbackPlan !== null && (
-          <div className="dsm-result">
-            <p className="dsm-warn">
-              {rollbackPlan.kind === 'delete'
-                ? t('restoreActions', { count: rollbackPlan.actions.length })
-                : t('rollbackActions', { count: rollbackPlan.actions.length })}
-            </p>
-            <ul className="dsm-listPlain">
-              {rollbackPlan.actions.map((action) => (
-                <li key={action}>{action}</li>
-              ))}
-            </ul>
-            <div className="dsm-controls">
-              <button
-                type="button"
-                className="dsm-button dsm-primary"
-                onClick={() => void doRollback(rollbackPlan.dir)}
-                disabled={rollbackBusy !== null}
-              >
-                {rollbackBusy === rollbackPlan.dir
-                  ? rollbackPlan.kind === 'delete'
-                    ? t('restoring')
-                    : t('rollingBack')
-                  : rollbackPlan.kind === 'delete'
-                    ? t('restoreConfirm')
-                    : t('rollbackConfirm')}
-              </button>
-              <button type="button" className="dsm-button" onClick={() => setRollbackPlan(null)} disabled={rollbackBusy !== null}>
-                {t('cancel')}
-              </button>
-            </div>
-          </div>
-        )}
       </div>
+
+      {/* 回滚 / 恢复弹窗：动作清单与「确认」同框（见 ConfirmDialog.tsx 的说明）。 */}
+      {rollbackDialog !== null && (
+        <ConfirmDialog
+          t={t}
+          title={t(rollbackDialog.backup.kind === 'delete' ? 'restoreDialogTitle' : 'rollbackDialogTitle')}
+          confirmLabel={t(rollbackDialog.backup.kind === 'delete' ? 'restoreConfirm' : 'rollbackConfirm')}
+          busyLabel={t(rollbackDialog.backup.kind === 'delete' ? 'restoring' : 'rollingBack')}
+          busy={rollbackBusy === rollbackDialog.backup.dir}
+          planning={rollbackDialog.plan === null && rollbackDialog.error === null}
+          error={rollbackDialog.error}
+          disabled={rollbackDialog.plan === null}
+          onConfirm={() => applyRollback(rollbackDialog.backup)}
+          onCancel={() => setRollbackDialog(null)}
+        >
+          {rollbackDialog.plan !== null && (
+            <>
+              <p className="dsm-warn">
+                {t(rollbackDialog.backup.kind === 'delete' ? 'restoreActions' : 'rollbackActions', {
+                  count: rollbackDialog.plan.actions.length,
+                })}
+              </p>
+              <ul className="dsm-listPlain">
+                {rollbackDialog.plan.actions.map((action) => (
+                  <li key={action}>{action}</li>
+                ))}
+              </ul>
+            </>
+          )}
+        </ConfirmDialog>
+      )}
     </>
   )
 }

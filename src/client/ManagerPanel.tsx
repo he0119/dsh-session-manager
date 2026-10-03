@@ -6,7 +6,7 @@
  * 重新认一遍上下文。页面本体分别是 [TransferPanel.tsx](./TransferPanel.tsx)、
  * [MigrationPanel.tsx](./MigrationPanel.tsx) 与 [ManagePanel.tsx](./ManagePanel.tsx)。
  *
- * 分页切换会**卸载**另一个分页：本地草稿（勾选、预演结果）随之清掉。这是有意的——一个预演结果
+ * 分页切换会**卸载**另一个分页：本地草稿（勾选、弹窗里那份计划）随之清掉。这是有意的——一份计划
  * 不该在切走再切回来之后还留着，让人以为它还是刚刚算出来的那份。
  *
  * @module dsh-session-manager/client/ManagerPanel

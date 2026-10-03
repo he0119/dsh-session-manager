@@ -2,13 +2,17 @@
  * 「传输」分页：把会话带走（导出 .dshsess）或带回来（导入）。
  *
  * 这一层只做三件事：调宿主端点、记本地草稿、把结果摆出来。所有判定都在宿主侧
- * （`src/web.ts` + `src/transfer.ts`）：预演返回的就是将要发生的事，页面不自己推算
+ * （`src/web.ts` + `src/transfer.ts`）：计划返回的就是将要发生的事，页面不自己推算
  *
  *   - 导出：按目录分组的列表里勾选（组头可整组勾）→ 宿主打包 → 浏览器下载；
- *   - 导入：选包 + 选目标工作区 → **预演** → 看清 create/skip 与 cwd 改写 → 确认落盘。
+ *   - 导入：选包 + 选目标工作区 → 点「导入」开确认弹窗（看清 create/skip 与 cwd 改写）→ 确认才落盘。
  *
- * WebDAV 同步**不在这里**：它是一条常设通道（远端地址、机器名、映射表、预演与确认），与本页的正交，
- * 见 [SyncPanel.tsx](./SyncPanel.tsx)。两件事挤在一页时，同步那块只能排在导出列表与导入预演表之后。
+ * 导出那一个**不问**：它只把已有字节打成包给浏览器下载，不改本机任何东西，弹一次窗只是多一次点击。
+ * 会写盘的那个（导入）才需要先看清再确认——这条分界与「会话」页里归档（即时）和删除（弹窗）的分界
+ * 是同一条。
+ *
+ * WebDAV 同步**不在这里**：它是一条常设通道（远端地址、机器名、映射表与确认弹窗），与本页的正交，
+ * 见 [SyncPanel.tsx](./SyncPanel.tsx)。两件事挤在一页时，同步那块只能排在导出列表与导入计划表之后。
  *
  * 会话库数据由页面骨架（[ManagerPanel.tsx](./ManagerPanel.tsx)）拉好传进来：切分页不该各拉一份，
  * 也不该出现"两个分页对同一个库给出不同数字"。列表行、组头、列表框与筛选条都出自
@@ -25,6 +29,7 @@ import * as React from 'react'
 
 import { download, exportSessions, importBundle, type ImportResponse } from './api.ts'
 import type { ImportEntry, SessionSummary } from './api.ts'
+import { ConfirmDialog } from './ConfirmDialog.tsx'
 import { groupKey, groupSessions, lockedParentOf, nestSessions } from './groups.ts'
 import { describeCwd, parentDirNote, sessionLabel } from './planRows.ts'
 import { FILTER_KEYS } from './sessionFilter.ts'
@@ -64,8 +69,14 @@ export function TransferPanel({ t = fallback, state, reload }: PanelShare): Reac
   const [file, setFile] = React.useState<File | null>(null)
   const [payload, setPayload] = React.useState<ArrayBuffer | null>(null)
   const [target, setTarget] = React.useState('')
-  const [plan, setPlan] = React.useState<ImportResponse | null>(null)
-  const [busy, setBusy] = React.useState<'export' | 'preview' | 'apply' | null>(null)
+  /**
+   * 导入弹窗：`null` = 没开；开了先是一份空壳（计划还在算）。
+   *
+   * 与另外两页同一套形状（见 [ConfirmDialog.tsx](./ConfirmDialog.tsx)）：计划与弹窗开没开合成一个
+   * 状态，取消之后那份计划不会留在页面上。
+   */
+  const [pending, setPending] = React.useState<{ plan: ImportResponse | null; error: string | null } | null>(null)
+  const [busy, setBusy] = React.useState<'export' | 'apply' | null>(null)
   const [error, setError] = React.useState<string | null>(null)
   const [notice, setNotice] = React.useState<string | null>(null)
 
@@ -138,7 +149,7 @@ export function TransferPanel({ t = fallback, state, reload }: PanelShare): Reac
     )
   }
 
-  const run = async (kind: 'export' | 'preview' | 'apply', action: () => Promise<void>): Promise<void> => {
+  const run = async (kind: 'export', action: () => Promise<void>): Promise<void> => {
     setBusy(kind)
     setError(null)
     setNotice(null)
@@ -173,7 +184,7 @@ export function TransferPanel({ t = fallback, state, reload }: PanelShare): Reac
   const pickFile = (event: React.ChangeEvent<HTMLInputElement>): void => {
     const picked = event.target.files?.[0] ?? null
     setFile(picked)
-    setPlan(null)
+    setPending(null)
     setError(null)
     setNotice(null)
     if (picked === null) {
@@ -186,7 +197,15 @@ export function TransferPanel({ t = fallback, state, reload }: PanelShare): Reac
       .catch((cause: unknown) => setError(t('failed', { reason: cause instanceof Error ? cause.message : String(cause) })))
   }
 
-  const doPreview = (): void => {
+  /**
+   * 点「导入」：开弹窗，同时把只读的导入计划取回来（`mode=plan` 不写盘）。
+   *
+   * 包与目标工作区都得先有：缺哪个就在页面横幅上说出缺的那个（`needFile` / `needWorkspace`），而不是
+   * 先弹一个空框再抱怨——那一步的错与"计划有什么问题"不是一件事。
+   *
+   * 计划回来时弹窗可能已经被取消掉了：`current === null` 时原地作废（同「会话」页的删除弹窗）。
+   */
+  const openImport = (): void => {
     if (file === null || payload === null) {
       setError(t('needFile'))
       return
@@ -195,31 +214,51 @@ export function TransferPanel({ t = fallback, state, reload }: PanelShare): Reac
       setError(t('needWorkspace'))
       return
     }
-    void run('preview', async () => setPlan(await importBundle(payload, target, 'plan')))
+    setError(null)
+    setNotice(null)
+    setPending({ plan: null, error: null })
+    void importBundle(payload, target, 'plan').then(
+      (plan) => setPending((current) => (current === null ? current : { ...current, plan })),
+      (cause) =>
+        setPending((current) =>
+          current === null ? current : { plan: null, error: cause instanceof Error ? cause.message : String(cause) },
+        ),
+    )
   }
-
-  const doApply = (): void => {
-    if (payload === null || target === '') return
-    void run('apply', async () => {
-      const result = await importBundle(payload, target, 'apply')
-      setPlan(result)
-      if (result.written && result.written.length > 0) {
-        setNotice(t('applied', { count: result.written.length, bytes: formatBytes(result.bytes) }))
-        await reload()
-      }
-    })
-  }
-
-  const createCount = plan?.entries.filter((entry) => entry.action === 'create').length ?? 0
-  const skipCount = plan?.entries.filter((entry) => entry.action === 'skip').length ?? 0
 
   /**
-   * 同步：先预演（读远端，什么都不写），确认之后才拉 + 推。
+   * 弹窗里按「确认导入」：真写盘。
    *
-   * 落地的按钮不按"计划里有几条"禁用：一次空转的 apply 只会重写自己那一格的索引，而按条数禁用会
-   * 在"只想刷新索引/远端那份落后了"的时候把按钮捏死。真正会拦人的是没配置同步——那种情况压根
-   * 不画按钮。
+   * 一条都没写进去（计划里全是 skip，或落地被拒）时把结果摆回弹窗里：冲突原因就在 `problems` 与每行的
+   * `reason` 上，用户得看着它改包或改目标，而不是只收到一句"没写成功"。
    */
+  const applyImport = (): void => {
+    if (payload === null || target === '') return
+    setBusy('apply')
+    setError(null)
+    void importBundle(payload, target, 'apply').then(
+      (result) => {
+        setBusy(null)
+        if (result.written !== undefined && result.written.length > 0) {
+          setPending(null)
+          setNotice(t('applied', { count: result.written.length, bytes: formatBytes(result.bytes) }))
+          void reload()
+          return
+        }
+        setPending((current) => (current === null ? current : { ...current, plan: result }))
+      },
+      (cause) => {
+        setBusy(null)
+        setPending(null)
+        setError(t('failed', { reason: cause instanceof Error ? cause.message : String(cause) }))
+      },
+    )
+  }
+
+  const createCount = pending?.plan?.entries.filter((entry) => entry.action === 'create').length ?? 0
+  const skipCount = pending?.plan?.entries.filter((entry) => entry.action === 'skip').length ?? 0
+  const plan = pending?.plan ?? null
+
   return (
     <>
       {error !== null && (
@@ -344,7 +383,7 @@ export function TransferPanel({ t = fallback, state, reload }: PanelShare): Reac
             value={target}
             onChange={(event) => {
               setTarget(event.target.value)
-              setPlan(null)
+              setPending(null)
             }}
           >
             <option value="">{t('pickWorkspace')}</option>
@@ -354,69 +393,83 @@ export function TransferPanel({ t = fallback, state, reload }: PanelShare): Reac
               </option>
             ))}
           </select>
-          <button type="button" className="dsm-button" onClick={doPreview} disabled={busy !== null || file === null}>
-            {busy === 'preview' ? t('previewing') : t('preview')}
-          </button>
           <button
             type="button"
             className="dsm-button dsm-primary"
-            onClick={doApply}
-            disabled={busy !== null || createCount === 0}
+            onClick={openImport}
+            disabled={busy !== null || file === null}
           >
-            {busy === 'apply' ? t('applying') : t('apply')}
+            {t('importAction')}
           </button>
         </div>
 
-        {plan !== null && (
-          <div>
-            <p className={plan.ok ? 'dsm-ok' : 'dsm-warn'}>
-              {t('planSummary', { create: createCount, skip: skipCount, bytes: formatBytes(plan.bytes) })}
-              {plan.error !== undefined ? ` · ${plan.error}` : ''}
-            </p>
-            {plan.note !== undefined && <p className="dsm-hint">{plan.note}</p>}
-            {(plan.problems ?? []).map((problem) => (
-              <p key={problem} className="dsm-warn">
-                {problem}
-              </p>
-            ))}
-            {/* 列类名是给列宽用的：这张表是 table-layout: fixed，宽度写在样式里。
-                自动布局在长路径面前会把「跳过」标签挤成一列一个字。 */}
-            <table className="dsm-table dsm-planTable">
-              <thead>
-                <tr>
-                  <th className="dsm-colAction">{t('colAction')}</th>
-                  <th className="dsm-colSession">{t('colSession')}</th>
-                  <th className="dsm-colCwd">{t('colCwd')}</th>
-                  <th className="dsm-colBytes">{t('colBytes')}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {plan.entries.map((entry) => {
-                  const label = sessionLabel(entry)
-                  return (
-                    <tr key={entry.id}>
-                      <td>
-                        <span className={`dsm-tag ${entry.action === 'create' ? 'dsm-tagCreate' : 'dsm-tagSkip'}`}>
-                          {entry.action === 'create' ? t('actionCreate') : t('actionSkip')}
-                        </span>
-                      </td>
-                      <td>
-                        <span className={label.kind === 'title' ? 'dsm-rowTitle' : 'dsm-rowId'} title={label.tip}>
-                          {label.text}
-                        </span>
-                        {entry.reason !== undefined && <div className="dsm-hint">{entry.reason}</div>}
-                      </td>
-                      <td className="dsm-cwd">{cwdText(entry, t)}</td>
-                      <td className="dsm-meta">{formatBytes(totalBytes(entry.files))}</td>
+        {/*
+          弹窗里的正文：计划只读、不改本机任何东西，所以「取消」不会留下半个动作（同 ConfirmDialog.tsx）。
+          列类名是给列宽用的：这张表是 table-layout: fixed，宽度写在样式里。
+          自动布局在长路径面前会把「跳过」标签挤成一列一个字。
+        */}
+        {pending !== null && (
+          <ConfirmDialog
+            t={t}
+            title={t('importDialogTitle')}
+            confirmLabel={t('apply')}
+            busyLabel={t('applying')}
+            busy={busy === 'apply'}
+            planning={plan === null && pending.error === null}
+            error={pending.error}
+            disabled={plan === null || !plan.ok || createCount === 0}
+            onConfirm={applyImport}
+            onCancel={() => setPending(null)}
+          >
+            {plan !== null && (
+              <>
+                <p className={plan.ok ? 'dsm-ok' : 'dsm-warn'}>
+                  {t('planSummary', { create: createCount, skip: skipCount, bytes: formatBytes(plan.bytes) })}
+                  {plan.error !== undefined ? ` · ${plan.error}` : ''}
+                </p>
+                {plan.note !== undefined && <p className="dsm-hint">{plan.note}</p>}
+                {(plan.problems ?? []).map((problem) => (
+                  <p key={problem} className="dsm-warn">
+                    {problem}
+                  </p>
+                ))}
+                <table className="dsm-table dsm-planTable">
+                  <thead>
+                    <tr>
+                      <th className="dsm-colAction">{t('colAction')}</th>
+                      <th className="dsm-colSession">{t('colSession')}</th>
+                      <th className="dsm-colCwd">{t('colCwd')}</th>
+                      <th className="dsm-colBytes">{t('colBytes')}</th>
                     </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
+                  </thead>
+                  <tbody>
+                    {plan.entries.map((entry) => {
+                      const label = sessionLabel(entry)
+                      return (
+                        <tr key={entry.id}>
+                          <td>
+                            <span className={`dsm-tag ${entry.action === 'create' ? 'dsm-tagCreate' : 'dsm-tagSkip'}`}>
+                              {entry.action === 'create' ? t('actionCreate') : t('actionSkip')}
+                            </span>
+                          </td>
+                          <td>
+                            <span className={label.kind === 'title' ? 'dsm-rowTitle' : 'dsm-rowId'} title={label.tip}>
+                              {label.text}
+                            </span>
+                            {entry.reason !== undefined && <div className="dsm-hint">{entry.reason}</div>}
+                          </td>
+                          <td className="dsm-cwd">{cwdText(entry, t)}</td>
+                          <td className="dsm-meta">{formatBytes(totalBytes(entry.files))}</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </>
+            )}
+          </ConfirmDialog>
         )}
       </div>
-
     </>
   )
 }
