@@ -418,7 +418,7 @@ test('sync_sessions：没配 sync.url 时如实说"没配置"（不发任何请�
 
 test('sync_sessions：空白会话不上传（工具侧也读宿主投影缓存），并在 notes 里报一句', async () => {
   // 工具与界面两条路各建一份编排，但"宿主说这条空不空白"必须是同一个来源（注册表旁边的投影缓存）。
-  // 这条钉住工具侧真的接上了那个来源：接错了的表现是空白会话被推上去。
+  // 这条钉住工具侧真的接上了那个来源：接错了的表现是空白会话被推送。
   const sb = makeSandbox('tools-sync-blank')
   const fixture = await startDavFixture({ root: join(sb.base, 'dav') })
   try {

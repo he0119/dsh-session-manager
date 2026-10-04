@@ -154,7 +154,7 @@ function replaceCodeKey(code: SyncPullEntry['code']): string {
  * 「会推送」那张表里一行挂哪颗标签、整句是什么。
  *
  * 三件事共用这张表：本机独有（推一条新的）、本机领先（重推刷新远端）、两边各自写过而本机更晚（分叉·
- * 重推）。后两者都是"重推"，但后者要让用户知道"远端也有一份、本机这份更晚，推上去会把它那格刷成最新"，
+ * 重推）。后两者都是"重推"，但后者要让用户知道"远端也有一份、本机这份更晚，推送会把它那格刷成最新"，
  * 所以标签与整句都分开。码认不出来时退回"推一条新的"那一套（与拉取表的兜底同一条规则）。
  */
 function pushTag(entry: SyncPushEntry, t: Translate): { label: string; title: string; repush: boolean } {

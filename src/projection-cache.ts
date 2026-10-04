@@ -43,7 +43,7 @@ export interface ProjectionCacheRecord {
   /**
    * 最后一条**消息**的时间（`timeContext.lastMessageTime`，毫秒时间戳）；不是有限数就没有。
    *
-   * 比 {@link lastPromptAt} 细：agent 自己写进去的那些也算"动过"。推上去之后本机又跑了几轮、两边
+   * 比 {@link lastPromptAt} 细：agent 自己写进去的那些也算"动过"。推送之后本机又跑了几轮、两边
    * 内容各自长出来时，两边的提问时间往往一样，靠这枚钟才分得出高下（见 src/sync.ts 的「谁更新」）。
    */
   lastMessageAt?: number
