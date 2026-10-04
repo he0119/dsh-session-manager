@@ -16,7 +16,7 @@ import {
   matchesQuery,
   type FilterKey,
   type SessionFacts,
-} from '../src/client/sessionFilter.ts'
+} from '../src/client/logic/sessionFilter.ts'
 
 // 同 planRows.test.ts：不 import `src/client/api.ts`（它会把 src/client 拉进没有 DOM 的 Host 工程）。
 // 判据声明的 `SessionFacts` 只要求它真正读的那几个字段，所以夹具就是最小形状。

@@ -9,7 +9,7 @@
  * @module dsh-session-manager/client/api
  */
 
-import { SseFrames, interpretSyncEvent, type SyncProgressEvent } from './syncStream.ts'
+import { SseFrames, interpretSyncEvent, type SyncProgressEvent } from './logic/syncStream.ts'
 
 // 事件流的分帧与解释在 syncStream.ts（那份文件与 DOM 无关，所以 Host 侧的测试图能直接引它）。类型
 // 从这里转出去，界面那一侧只认 api.ts 一个入口。

@@ -1,6 +1,6 @@
 // test/syncGroups.test.ts — 「同步」弹窗那三张计划表的分组规则。
 //
-// 分组是纯函数（`src/client/syncGroups.ts`），边界在这里钉死；页面只负责把组画出来。
+// 分组是纯函数（`src/client/logic/syncGroups.ts`），边界在这里钉死；页面只负责把组画出来。
 // 重点不是"能分组"，而是那几条容易被后来的改动磨掉的规矩：
 //
 //   - 分组键取的是**本机那个目录**（拉取看落地后的 `toCwd`、推看 `cwd`）：用户是从"我哪个项目
@@ -14,8 +14,8 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { groupKey, orderProjectPaths, workspaceTitles } from '../src/client/groups.ts'
-import { groupSyncRows, syncProjectOf, syncPullTip } from '../src/client/syncGroups.ts'
+import { groupKey, orderProjectPaths, workspaceTitles } from '../src/client/logic/groups.ts'
+import { groupSyncRows, syncProjectOf, syncPullTip } from '../src/client/logic/syncGroups.ts'
 
 // 同 groups.test.ts：不 import `src/client/api.ts`（它会把 src/client 拉进没有 DOM 的 Host 工程）。
 

@@ -28,12 +28,12 @@
 
 import * as React from 'react'
 
-import { download, exportSessions, importBundle, type ImportResponse } from './api.ts'
-import type { ImportEntry, SessionSummary } from './api.ts'
+import { download, exportSessions, importBundle, type ImportResponse } from '../api.ts'
+import type { ImportEntry, SessionSummary } from '../api.ts'
 import { ConfirmDialog } from './ConfirmDialog.tsx'
-import { groupKey, groupSessions, lockedParentOf, nestSessions } from './groups.ts'
-import { describeCwd, parentDirNote, pathLabel, sessionLabel } from './planRows.ts'
-import { FILTER_KEYS } from './sessionFilter.ts'
+import { groupKey, groupSessions, lockedParentOf, nestSessions } from '../logic/groups.ts'
+import { describeCwd, parentDirNote, pathLabel, sessionLabel } from '../logic/planRows.ts'
+import { FILTER_KEYS } from '../logic/sessionFilter.ts'
 import {
   SessionFilterBar,
   SessionGroupHead,
@@ -46,8 +46,8 @@ import {
   useGroupCollapse,
   useSessionFilter,
 } from './sessionList.tsx'
-import { translateWith, zh, type Translate } from './locales.ts'
-import type { PanelShare } from './types.ts'
+import { translateWith, zh, type Translate } from '../logic/locales.ts'
+import type { PanelShare } from '../types.ts'
 
 /** 没有注入面时的兜底翻译。 */
 const fallback = translateWith(zh as unknown as Record<string, string>)

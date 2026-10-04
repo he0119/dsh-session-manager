@@ -28,8 +28,8 @@ import * as React from 'react'
 
 import { SettingsSecretField } from '@deepseek-ai/dsh-client-ui-primitives'
 
-import { testSync, type SyncTestResponse } from './api.ts'
-import { getCredentialsApi, type CredentialInfo } from './credentials.ts'
+import { testSync, type SyncTestResponse } from '../api.ts'
+import { getCredentialsApi, type CredentialInfo } from '../credentials.ts'
 import {
   draftFrom,
   draftProblems,
@@ -42,8 +42,8 @@ import {
   type MappingRow,
   type SyncDraft,
   type SyncFormSnapshot,
-} from './syncForm.ts'
-import type { Translate } from './locales.ts'
+} from '../logic/syncForm.ts'
+import type { Translate } from '../logic/locales.ts'
 
 /** 问题的文案：码 → 句子（这一层才有语言）。 */
 function problemText(problem: MappingProblem, t: Translate): string {

@@ -46,21 +46,21 @@ Status: implemented
   用不带上报的那份（`contentHash`）——否则收尾时会再冒出一条 `compare` 事件，界面上的条会跳回 0。
 - **流开始之前的错仍是一次性 JSON**：没配同步（409）、`mode=test` 这些在 `sendEventStream` 之前就返回
   了。客户端按 `content-type` 分流，所以同一个端点两种形状都认。
-- **界面把弹窗正文换成进度条**：`src/client/ProgressBar.tsx`（手写的 6px 轨道，颜色只走检查面的
-  token）+ 「正在推送 22 / 84」+ 当前那一条的标题 + 一句"中断了再点一次会接着补齐"。弹窗标题从
-  「将要同步」换成「正在同步」，按钮从「导入中…」换成「同步中…」——落地时它已经不是"将要"了。
-  预演那条路上弹窗标题是「将要同步」（它确实还没写盘），正文在计划回来之前就是这段进度。
+- **界面把弹窗正文换成进度条**：`src/client/components/ProgressBar.tsx`（手写的 6px 轨道，颜色只
+  走检查面的 token）+ 「正在推送 22 / 84」+ 当前那一条的标题 + 一句"中断了再点一次会接着补齐"。
+  弹窗标题从「将要同步」换成「正在同步」，按钮从「导入中…」换成「同步中…」——落地时它已经不是"将
+  要"了。预演那条路上弹窗标题是「将要同步」（它确实还没写盘），正文在计划回来之前就是这段进度。
 - **浏览器半侧只有一个读流的实现**：`fetchSyncPlan` 与 `applySync` 都走
   `src/client/api.ts` 的 `readSyncResponse(response, onProgress, what)`——先按 `content-type` 分流，
   是事件流就逐条 `interpretSyncEvent`，否则退回一次性 JSON。错误文案带上 `what`（"预演" / "同步"），
   两条路的失败提示因此是同一种句子。
 - **没有「取消」**：中途撒手会在宿主侧留下半截状态（远端可能已经收下几个包）。同步是只增不覆盖、可
   重复的，再点一次就接着补齐——这句写在弹窗正文里，取消键在落地期间保持禁用。
-- **分帧与解释放在与 DOM 无关的 `src/client/syncStream.ts`**：一次 `response.body` 的读取边界与事件
-  边界无关，一条事件被拆在两次读取之间是常态（中文标题还会让 UTF-8 多字节跨块），所以"攒够一条才吐"
-  是有状态的。它放在单独一个文件里，是因为 Host 侧那份 tsconfig **没有 DOM**（那条边界让"浏览器 API
-  出现在 Host 代码里"在类型层面就不成立）——把纯字符串处理与 `fetch`/`response.body` 分开，测试就
-  能直接 import 它；真正的读流留在 `src/client/api.ts`。
+- **分帧与解释放在与 DOM 无关的 `src/client/logic/syncStream.ts`**：一次 `response.body` 的读取
+  边界与事件边界无关，一条事件被拆在两次读取之间是常态（中文标题还会让 UTF-8 多字节跨块），所以
+  "攒够一条才吐" 是有状态的。它放在单独一个文件里，是因为 Host 侧那份 tsconfig **没有 DOM**（那
+  条边界让"浏览器 API 出现在 Host 代码里"在类型层面就不成立）——把纯字符串处理与
+  `fetch`/`response.body` 分开，测试就能直接 import 它；真正的读流留在 `src/client/api.ts`。
 
 ## Alternatives considered
 

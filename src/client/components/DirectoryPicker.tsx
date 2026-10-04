@@ -17,8 +17,8 @@
 
 import * as React from 'react'
 
-import { normalizePickedPath, type DirectoryApi, type DirectoryListing } from './directory.ts'
-import type { Translate } from './locales.ts'
+import { normalizePickedPath, type DirectoryApi, type DirectoryListing } from '../directory.ts'
+import type { Translate } from '../logic/locales.ts'
 
 /** 入参。 */
 export interface DirectoryPickerProps {

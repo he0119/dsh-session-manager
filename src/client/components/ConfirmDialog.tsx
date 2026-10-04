@@ -23,7 +23,7 @@ import * as React from 'react'
 
 import { Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 
-import type { Translate } from './locales.ts'
+import type { Translate } from '../logic/locales.ts'
 
 export interface ConfirmDialogProps {
   t: Translate

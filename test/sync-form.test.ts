@@ -24,8 +24,8 @@ import {
   testVerdict,
   type SyncTestOutcome,
   type SyncTestSentence,
-} from '../src/client/syncForm.ts'
-import { en, zh } from '../src/client/locales.ts'
+} from '../src/client/logic/syncForm.ts'
+import { en, zh } from '../src/client/logic/locales.ts'
 import { DEFAULT_PASSWORD_REF as CORE_DEFAULT_PASSWORD_REF } from '../src/config.ts'
 
 test('同步设置：entry id 是 profile 里那个 insert 的 id', () => {

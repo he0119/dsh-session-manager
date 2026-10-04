@@ -23,7 +23,7 @@ Status: implemented
 页面（读不到、认不出、或 `capability()` 抛错都退回 `null`）；页面按它走：
 
 - `native` → `pick()` 弹系统对话框；
-- `browse` → 页面内展开一个目录浏览框（`src/client/DirectoryPicker.tsx`），数据来自宿主的
+- `browse` → 页面内展开一个目录浏览框（`src/client/components/DirectoryPicker.tsx`），数据来自宿主的
   `listDirectory()`，每一步跳转用的都是宿主返回的 `path`，本插件不碰文件系统、不猜路径；
 - `null`（含旧宿主没有这个字段）→ **不显示**「浏览…」，只留「手输路径」+ 候选列表，并给一句说明。
 

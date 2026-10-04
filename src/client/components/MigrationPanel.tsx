@@ -24,7 +24,7 @@ import {
   type MigrationRequest,
   type MigrationResponse,
   type RollbackResponse,
-} from './api.ts'
+} from '../api.ts'
 import { ConfirmDialog } from './ConfirmDialog.tsx'
 import {
   SessionFilterBar,
@@ -36,9 +36,9 @@ import {
   formatStamp,
   useSessionFilter,
 } from './sessionList.tsx'
-import { translateWith, zh, type Translate } from './locales.ts'
+import { translateWith, zh, type Translate } from '../logic/locales.ts'
 import { DirectoryPicker } from './DirectoryPicker.tsx'
-import { normalizePickedPath } from './directory.ts'
+import { normalizePickedPath } from '../directory.ts'
 import {
   UNOWNED_SOURCE,
   migrateFamilyNote,
@@ -46,8 +46,8 @@ import {
   migrationSourceRows,
   optionLabel,
   type PathRow,
-} from './planRows.ts'
-import type { PanelShare } from './types.ts'
+} from '../logic/planRows.ts'
+import type { PanelShare } from '../types.ts'
 
 /** 没有注入面时的兜底翻译。 */
 const fallback = translateWith(zh as unknown as Record<string, string>)

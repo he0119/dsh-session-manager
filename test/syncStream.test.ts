@@ -1,15 +1,15 @@
-// 同步事件流的分帧与解释（src/client/syncStream.ts）。
+// 同步事件流的分帧与解释（src/client/logic/syncStream.ts）。
 //
 // 这一层是"进度条能不能动"的全部要害：一次 `response.body` 读取的边界与事件边界毫无关系，一条事件
 // 被拆在两次读取之间是常态，中文标题还会让 UTF-8 的多字节跨块。解析写得糙一点，表现就是进度停在
 // 第 0 条、或者整次同步报一个莫名其妙的解析错误。
 //
 // 分帧与解释放在一个与 DOM 无关的文件里，正是为了能这样直接测（Host 侧那份 tsconfig 没有 DOM，见
-// src/client/syncStream.ts 顶上的说明）。
+// src/client/logic/syncStream.ts 顶上的说明）。
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { SseFrames, interpretSyncEvent } from '../src/client/syncStream.ts'
+import { SseFrames, interpretSyncEvent } from '../src/client/logic/syncStream.ts'
 
 /** 一次喂完所有块，收集事件体（多块 = 模拟一次读取只拿到半条）。 */
 function collect(chunks: string[]): string[] {

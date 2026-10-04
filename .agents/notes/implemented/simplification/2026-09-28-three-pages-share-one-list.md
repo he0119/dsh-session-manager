@@ -15,9 +15,9 @@ Status: implemented
 
 ## Decision
 
-共用的边界划在**一行的解剖结构**与**列表的框**上，只在 `src/client/sessionList.tsx` 里写一遍。
-各页自己的东西留在各页：传输页按目录分组的组头、会话页的归属那一格与删除计划、迁移页的「全部 / 子集」
-单选框与备份回滚。
+共用的边界划在**一行的解剖结构**与**列表的框**上，只在 `src/client/components/sessionList.tsx`
+里写一遍。各页自己的东西留在各页：传输页按目录分组的组头、会话页的归属那一格与删除计划、迁移页
+的「全部 / 子集」单选框与备份回滚。
 
 ## Alternatives considered
 

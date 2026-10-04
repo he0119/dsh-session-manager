@@ -1949,7 +1949,7 @@ test('客户端产物：同步预演三张表的状态列只放短标签，整�
 
 test('客户端产物：同步预演三张表按项目分组，路径只在组头上说一次', { skip }, () => {
   // 为什么分组：一次整库同步的计划里同一个目录会连着出现十几条，逐行印一遍同样的路径只是把人绕进去，
-  // 还从会话名那一列扣宽度。分组键的规则在 src/client/syncGroups.ts（test/syncGroups.test.ts 逐条钉
+  // 还从会话名那一列扣宽度。分组键的规则在 src/client/logic/syncGroups.ts（test/syncGroups.test.ts 逐条钉
   // 着），这里只管"组画出来没有、路径是不是只出现在组头、行里还剩下什么"。
   const state = {
     sessionsRoot: '/home/u/.dsh/sessions',

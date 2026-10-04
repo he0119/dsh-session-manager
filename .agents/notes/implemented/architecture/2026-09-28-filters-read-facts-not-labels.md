@@ -14,7 +14,8 @@ Status: implemented
 ## Decision
 
 筛选与标签共用一套**事实**字段（`origin` / `blank` / `archived` / `live`，见
-`src/client/sessionFilter.ts`），不共用 `hidden`。标签**能挂几枚挂几枚**，筛选读原始事实，两边自洽。
+`src/client/logic/sessionFilter.ts`），不共用 `hidden`。标签**能挂几枚挂几枚**，
+筛选读原始事实，两边自洽。
 
 「未分组」是这条规矩的**唯一例外**：它读的正是宿主的结论（`ungrouped`）。因为它问的不是「这条会话是
 什么」，而是「侧边栏把它放在哪儿」——那件事只有宿主知道。

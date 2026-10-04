@@ -14,9 +14,9 @@
 
 import * as React from 'react'
 
-import { fetchState, type StateResponse } from './api.ts'
-import type { DirectoryApi } from './directory.ts'
-import { translateWith, zh, type Translate } from './locales.ts'
+import { fetchState, type StateResponse } from '../api.ts'
+import type { DirectoryApi } from '../directory.ts'
+import { translateWith, zh, type Translate } from '../logic/locales.ts'
 import { HelpPanel } from './HelpPanel.tsx'
 import { ManagePanel } from './ManagePanel.tsx'
 import { MigrationPanel } from './MigrationPanel.tsx'

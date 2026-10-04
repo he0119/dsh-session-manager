@@ -1,6 +1,6 @@
 // test/groups.test.ts — 导出列表的分组规则。
 //
-// 分组是纯函数（`src/client/groups.ts`），所以边界能在这里钉死；页面里只负责把组画出来。
+// 分组是纯函数（`src/client/logic/groups.ts`），所以边界能在这里钉死；页面里只负责把组画出来。
 // 重点不是"能分组"，而是那几条容易被后来的改动磨掉的规矩：
 //
 //   - 分组键是**目录**，不是注册表里的工作区 id：同一个目录下常有没登记的会话，
@@ -12,7 +12,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { MAX_NEST_DEPTH, groupKey, groupSessions, lockedParentOf, nestSessions } from '../src/client/groups.ts'
+import { MAX_NEST_DEPTH, groupKey, groupSessions, lockedParentOf, nestSessions } from '../src/client/logic/groups.ts'
 
 // 注意这里**不 import** `src/client/api.ts` 的响应类型：Host 侧的 typecheck 工程
 // `exclude` 了 `src/client`，但 import 会把它拉进来在"没有 DOM 的工程"里检查

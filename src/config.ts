@@ -74,7 +74,7 @@ export interface PluginConfig {
  * 一步；这一份名字同时也是往环境变量里放密码那条路要走的名字（与 DSH 的其他凭据引用同一套语法：
  * POSIX 环境变量名）。
  *
- * 浏览器半侧在 `src/client/syncForm.ts` 里有一份同值副本（那一侧不 import 核心层，见那里的说明），
+ * 浏览器半侧在 `src/client/logic/syncForm.ts` 里有一份同值副本（那一侧不 import 核心层，见那里的说明），
  * `test/sync-form.test.ts` 钉住两份相等。
  */
 export const DEFAULT_PASSWORD_REF = 'DSH_DAV_PASSWORD'
