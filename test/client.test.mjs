@@ -411,6 +411,39 @@ test('客户端产物：apply 把「会话管理」注册到设置里的一页�
   assert.deepEqual(Object.keys(zh).sort(), Object.keys(en).sort(), '两份字典的键集必须一致')
   assert.ok(Object.keys(zh).length > 20, '字典不该是空壳')
 
+  /*
+   * 拉取 / 推送两张表的动作标签：那一列是 88px（单元格左右各 8px padding → 标签可用 70px），标签自己
+   * 还有左右各 6px padding 与 1px 边框。真机（dev GUI）在这一列上量到：zh「分叉·重推」75px、en
+   * 'Replace local' 88px、'No mapping' 83px、'目标目录缺失' 87px —— 都超过 70px，画出来是「分叉…」
+   * 这种省略号（用户截图报过），而装得下的那些是 49~63px（「分叉重推」「覆盖本机」「重推刷新」
+   * 'Re-push' 'Replace' 'Forked' 'No map' 'No dir'）。
+   *
+   * 这里用同一把尺子钉住：非 ASCII 字符（汉字、间隔号）按 12px、其余按 6.5px，加上标签自己的
+   * 14px（padding + 边框），超过 70px 就是"会被截断"。估算式对上面那批实测值最多高估 11px、最多
+   * 低估 5px，所以它抓的是差得远的那种（实测 75px 以上），而不是一两个像素的边界。「这次不动」那张
+   * 表是 122px 的列，装的是「两边各自写过」这种更长的短语，不在这条里。
+   */
+  const SYNC_ACTION_LABELS = [
+    'syncTagPull',
+    'syncTagPush',
+    'syncTagRepush',
+    'syncTagLocalNewer',
+    'syncTagReplace',
+    'syncTagNoMapping',
+    'syncTagMissingTarget',
+  ]
+  const labelWidth = (text) =>
+    [...text].reduce((sum, ch) => sum + (ch.charCodeAt(0) > 0x7f ? 12 : 6.5), 14)
+  for (const [language, dictionary] of [
+    ['zh', zh],
+    ['en', en],
+  ]) {
+    const tooWide = SYNC_ACTION_LABELS.map((key) => ({ key, text: String(dictionary[key]) }))
+      .filter((entry) => labelWidth(entry.text) > 70)
+      .map((entry) => `${entry.key}="${entry.text}"`)
+    assert.deepEqual(tooWide, [], `${language}：拉取/推送两张表的动作标签要装得进 88px 那一列`)
+  }
+
   // 说明文字的分工：动作页只写"当下要做的决定"，词条与边界条件（分类含义、谁判的、删完侧边栏为什么
   // 还在、回滚与恢复的差别…）集中到「说明」页。这条分工靠自觉会漂回去——每加一个功能都想在按钮边上
   // 多解释一句，攒起来就是读者每次都要扫过去的散文（实测动作页正文曾经 187 / 382 / 144 字，最长一段
@@ -2019,7 +2052,7 @@ test('客户端产物：会拉取那张表分得清「拉一条新的」与「�
   assert.ok(tagOf('syncTagPull', 'syncCodeMissingPull'), '从无到有那条照旧是「拉取」')
   // 覆盖本机那份：标签说的是动作，title 说清"谁更新、会拿谁换掉本机这份"。
   assert.ok(tagOf('syncTagReplace', 'syncCodeReplaceNewer'), '覆盖那条挂「覆盖本机」+ 它自己那句整句')
-  assert.ok(tagOf('syncTagLocalNewer', 'syncCodeLocalNewer'), '分叉里本机更晚那条是「分叉·重推」')
+  assert.ok(tagOf('syncTagLocalNewer', 'syncCodeLocalNewer'), '分叉里本机更晚那条是「分叉重推」')
   assert.equal(
     mounted.recorded.some(
       (node) => node.props?.children === 'syncTagReplace' && node.props?.title === 'syncCodeReplaceAhead',

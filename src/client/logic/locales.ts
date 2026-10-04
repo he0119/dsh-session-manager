@@ -308,12 +308,12 @@ export const zh = {
   syncTagPull: '拉取',
   syncTagPush: '推送',
   syncTagRepush: '重推刷新',
-  syncTagLocalNewer: '分叉·重推',
+  syncTagLocalNewer: '分叉重推',
   syncTagReplace: '覆盖本机',
   syncTagDiverged: '两边各自写过',
   syncTagRemoteAhead: '远端更新',
   syncTagNoMapping: '缺映射',
-  syncTagMissingTarget: '目标目录缺失',
+  syncTagMissingTarget: '目标缺失',
   syncSkippedBlank: '跳过 {count} 条空白会话（建出来但一轮都没开始过），它们不参与同步。',
 
   // 同步设置表单（宿主设置接缝）
@@ -657,12 +657,12 @@ export const en: Record<keyof typeof zh, string> = {
   syncTagPull: 'Pull',
   syncTagPush: 'Push',
   syncTagRepush: 'Re-push',
-  syncTagLocalNewer: 'Forked · re-push',
-  syncTagReplace: 'Replace local',
+  syncTagLocalNewer: 'Forked',
+  syncTagReplace: 'Replace',
   syncTagDiverged: 'Both wrote',
   syncTagRemoteAhead: 'Remote ahead',
-  syncTagNoMapping: 'No mapping',
-  syncTagMissingTarget: 'No target dir',
+  syncTagNoMapping: 'No map',
+  syncTagMissingTarget: 'No dir',
   syncSkippedBlank: 'Skipping {count} blank session(s) (created but never started); they take no part in sync.',
 
   // Sync settings form (the host settings seam)
