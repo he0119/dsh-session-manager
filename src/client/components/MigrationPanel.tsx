@@ -57,6 +57,23 @@ function reasonOf(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause)
 }
 
+/**
+ * 这份备份点下去是「恢复」还是「回滚」。
+ *
+ * 判据是"原来那份还在不在原地"：删除与同步时覆盖本机那份（`delete` / `replace`）都是**备份里那份
+ * 搬回去**，属恢复；迁移是"搬走那份搬回来"，属回滚。老备份没有 kind 字段，按迁移处理。
+ */
+function isRestore(backup: Pick<BackupSummary, 'kind'>): boolean {
+  return backup.kind !== undefined && backup.kind !== 'migrate'
+}
+
+/** 这份备份是哪一类操作留下的（三种各一枚标签）。 */
+function backupKindLabel(backup: Pick<BackupSummary, 'kind'>): 'backupKindMigrate' | 'backupKindDelete' | 'backupKindReplace' {
+  if (backup.kind === 'delete') return 'backupKindDelete'
+  if (backup.kind === 'replace') return 'backupKindReplace'
+  return 'backupKindMigrate'
+}
+
 /** 一次落地之后的结论：复核过没过、备份在哪、要不要重启（原样透出宿主报的三件事）。 */
 interface MigrationEffect {
   verified: boolean
@@ -483,7 +500,7 @@ export function MigrationPanel({ t = fallback, state, reload, directory }: Panel
         setRollbackBusy(null)
         setRollbackDialog(null)
         setNotice(
-          t(backup.kind === 'delete' ? 'restoreDone' : 'rollbackDone', {
+          t(isRestore(backup) ? 'restoreDone' : 'rollbackDone', {
             sessions: response.sessions,
             files: response.restoredFiles,
           }),
@@ -809,7 +826,7 @@ export function MigrationPanel({ t = fallback, state, reload, directory }: Panel
                     {formatStamp(backup.createdAt)}
                     {/* 这份备份是迁移留下的还是删除留下的：删除的那份点「恢复」，迁移的那份点「回滚」。 */}
                     <span className="dsm-tag dsm-tagIdle">
-                      {backup.kind === 'delete' ? t('backupKindDelete') : t('backupKindMigrate')}
+                      {t(backupKindLabel(backup))}
                     </span>
                   </span>
                   <span className="dsm-hint">{t('backupRow', { sessions: backup.sessions, artifacts: backup.artifacts })}</span>
@@ -825,7 +842,7 @@ export function MigrationPanel({ t = fallback, state, reload, directory }: Panel
                   onClick={() => openRollback(backup)}
                   disabled={rollbackBusy !== null}
                 >
-                  {backup.kind === 'delete' ? t('restoreAction') : t('rollbackAction')}
+                  {t(isRestore(backup) ? 'restoreAction' : 'rollbackAction')}
                 </button>
               </div>
             ))}
@@ -837,9 +854,9 @@ export function MigrationPanel({ t = fallback, state, reload, directory }: Panel
       {rollbackDialog !== null && (
         <ConfirmDialog
           t={t}
-          title={t(rollbackDialog.backup.kind === 'delete' ? 'restoreDialogTitle' : 'rollbackDialogTitle')}
-          confirmLabel={t(rollbackDialog.backup.kind === 'delete' ? 'restoreConfirm' : 'rollbackConfirm')}
-          busyLabel={t(rollbackDialog.backup.kind === 'delete' ? 'restoring' : 'rollingBack')}
+          title={t(isRestore(rollbackDialog.backup) ? 'restoreDialogTitle' : 'rollbackDialogTitle')}
+          confirmLabel={t(isRestore(rollbackDialog.backup) ? 'restoreConfirm' : 'rollbackConfirm')}
+          busyLabel={t(isRestore(rollbackDialog.backup) ? 'restoring' : 'rollingBack')}
           busy={rollbackBusy === rollbackDialog.backup.dir}
           planning={rollbackDialog.plan === null && rollbackDialog.error === null}
           error={rollbackDialog.error}
@@ -850,7 +867,7 @@ export function MigrationPanel({ t = fallback, state, reload, directory }: Panel
           {rollbackDialog.plan !== null && (
             <>
               <p className="dsm-warn">
-                {t(rollbackDialog.backup.kind === 'delete' ? 'restoreActions' : 'rollbackActions', {
+                {t(isRestore(rollbackDialog.backup) ? 'restoreActions' : 'rollbackActions', {
                   count: rollbackDialog.plan.actions.length,
                 })}
               </p>

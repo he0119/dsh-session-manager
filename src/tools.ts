@@ -22,8 +22,10 @@ import {
   type MigrateDeps,
 } from './migrate.ts'
 import { projectKey } from './project-key.ts'
+import { projectionCacheDir } from './paths.ts'
 import { runSync, type SyncPlan, type SyncSettings } from './sync.ts'
 import type { DecodeAll } from './types.ts'
+import { createSessionMetaResolver } from './visibility.ts'
 
 /**
  * 平台的 fzstd 解码器（纯 JS、多帧感知）。
@@ -161,8 +163,10 @@ export interface SyncToolResult {
   ok: boolean
   applied: boolean
   pulled: string[]
+  /** `pulled` 里有多少条是**覆盖本机原来那份**（旧的已进备份）。 */
+  replaced: string[]
   pushed: string[]
-  /** 什么都没动的那几条与原因（远端领先、分叉、缺映射……）。 */
+  /** 什么都没动的那几条与原因（远端领先、分叉、缺映射……），外加跳过的空白会话。 */
   notes: string[]
   bytesIn: number
   bytesOut: number
@@ -173,7 +177,8 @@ export interface SyncToolResult {
 }
 
 /**
- * 计划里"没动"的条目（推送与拉取两侧的 skip）压成一行行说明。
+ * 计划里"没动"的条目（推送与拉取两侧的 skip）压成一行行说明，外加两条**方向相反**的特别说明：
+ * 「覆盖本机」是拉取侧里唯一会动本机已有内容的一类（旧的进备份），空白会话则是整类不参与同步。
  *
  * `identical`（"远端已经有这一份"）不进来：整库同步时它是最多也最没信息量的一类，几百行"这条不用推送"
  * 会把真正要看的那几条淹掉。
@@ -182,18 +187,31 @@ function planNotes(plan: SyncPlan): string[] {
   const notes: string[] = []
   for (const entry of plan.pull) {
     if (entry.action === 'skip') notes.push(`不拉取 ${entry.id}：${entry.reason ?? ''}`)
+    else if (entry.action === 'replace') notes.push(`覆盖本机 ${entry.id}：${entry.reason ?? ''}`)
   }
   for (const entry of plan.push) {
     if (entry.action === 'skip' && entry.code !== 'identical') notes.push(`不推送 ${entry.id}：${entry.reason ?? ''}`)
+  }
+  if (plan.blank.length > 0) {
+    notes.push(`跳过 ${plan.blank.length} 条空白会话（建出来但一轮都没开始过）：${plan.blank.join('、')}`)
   }
   return notes
 }
 
 /** 一次同步的一句话结论。 */
-function describeSync(plan: SyncPlan, pulled: readonly string[], pushed: readonly string[], applied: boolean): string {
+function describeSync(
+  plan: SyncPlan,
+  pulled: readonly string[],
+  replaced: readonly string[],
+  pushed: readonly string[],
+  applied: boolean,
+): string {
   const head = `${applied ? '已同步' : '预演'}：拉取 ${plan.pullIds.length} 条、推送 ${plan.pushIds.length} 条（本机 ${plan.localCount} 条，远端 ${plan.remoteCount} 条，来自 ${plan.machines.join('、') || '还没有机器'}）`
   if (!applied) return head
-  return `${head}。实际落地：拉取 ${pulled.length} 条、推送 ${pushed.length} 条`
+  // 拉取里有多少条是"换掉本机原来那份"值得单独报：旧的进备份了，用户可能想恢复回去。
+  const overwrote =
+    replaced.length === 0 ? '' : `，其中 ${replaced.length} 条覆盖了本机原来那份（旧的那份已进备份）`
+  return `${head}。实际落地：拉取 ${pulled.length} 条、推送 ${pushed.length} 条${overwrote}`
 }
 
 /**
@@ -650,8 +668,11 @@ export function registerTools(ctx: Context, config: PluginConfigInput = {}): Arr
           'other machines contributed and push the local ones the remote does not have yet. Pulled sessions ' +
           'land through the same import path as the settings page, so each log header cwd is rewritten to the ' +
           'mapped directory of THIS machine (the remote stores portable .dshsess bundles, never a raw session ' +
-          'library). Add-only: a session id that already exists locally is never pulled, a remote copy that is ' +
-          'ahead is only reported, and a local copy that is strictly ahead of the remote is re-uploaded. ' +
+          'library). When both sides hold the same id, contents and the host-projected last-activity time decide ' +
+          'who is newer: identical stays put, a local copy that is strictly ahead is re-uploaded, a remote copy ' +
+          'that is ahead or a both-wrote case where the remote is newer backs the local copy up and then replaces ' +
+          'it, and a both-wrote case where the local copy is newer is re-uploaded. Blank sessions (created but ' +
+          'never started) are neither uploaded nor kept in this machine index. ' +
           'Defaults to dry-run; apply:true performs it. Configure the remote and the cwd mapping in the plugin ' +
           'configuration; without sync.url the call reports that nothing is configured.',
         parameters: {
@@ -668,6 +689,7 @@ export function registerTools(ctx: Context, config: PluginConfigInput = {}): Arr
               ok: { type: 'boolean', required: true },
               applied: { type: 'boolean', required: true },
               pulled: { type: 'array', required: true, items: { type: 'string' } },
+              replaced: { type: 'array', required: true, items: { type: 'string' } },
               pushed: { type: 'array', required: true, items: { type: 'string' } },
               notes: { type: 'array', required: true, items: { type: 'string' } },
               bytesIn: { type: 'integer', required: true },
@@ -689,6 +711,7 @@ export function registerTools(ctx: Context, config: PluginConfigInput = {}): Arr
               ok: false,
               applied: false,
               pulled: [],
+              replaced: [],
               pushed: [],
               notes: [],
               bytesIn: 0,
@@ -705,7 +728,12 @@ export function registerTools(ctx: Context, config: PluginConfigInput = {}): Arr
               settings: runtime.settings,
               sessionsRoot: paths.sessionsRoot,
               registryPath: paths.registryPath,
+              backupRoot: paths.backupRoot,
               decodeAll,
+              // 空白与最后活动时间读宿主投影缓存（与界面那条路同一个来源，见 visibility.ts）。
+              sessionMeta: createSessionMetaResolver({ cacheDir: projectionCacheDir(paths.registryPath) }),
+              // 覆盖本机那份之前要问一句"这条还在跑吗"（与删除同一条理由：宿主手里有它的写句柄）。
+              liveSessionIds: () => liveSessionIds(ctx),
             },
             { apply: args.apply === true },
           )
@@ -714,6 +742,7 @@ export function registerTools(ctx: Context, config: PluginConfigInput = {}): Arr
             ok: outcome.plan.ok && outcome.problems.length === 0,
             applied: outcome.applied,
             pulled: outcome.applied ? outcome.pulled : outcome.plan.pullIds,
+            replaced: outcome.applied ? outcome.replaced : [],
             pushed: pushedIds,
             notes: planNotes(outcome.plan),
             bytesIn: outcome.applied ? outcome.bytesIn : outcome.plan.bytesIn,
@@ -721,7 +750,7 @@ export function registerTools(ctx: Context, config: PluginConfigInput = {}): Arr
             machines: outcome.plan.machines,
             // 只有真的往库里落了会话才谈得上"要不要重启"；纯推送不改本机任何东西。
             takesEffect: outcome.applied && outcome.pulled.length > 0 ? mode() : 'immediate',
-            summary: describeSync(outcome.plan, outcome.pulled, pushedIds, outcome.applied),
+            summary: describeSync(outcome.plan, outcome.pulled, outcome.replaced, pushedIds, outcome.applied),
             problems: [...outcome.plan.problems, ...outcome.problems],
           }
         },

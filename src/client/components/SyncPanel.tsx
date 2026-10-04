@@ -90,6 +90,8 @@ function syncWhy(entry: SyncRow, t: Translate): string {
       return t(entry.action === 'create' ? 'syncCodeMissingPull' : 'syncCodeMissingPush')
     case 'local-ahead':
       return t('syncCodeLocalAhead')
+    case 'local-newer':
+      return t('syncCodeLocalNewer')
     case 'remote-ahead':
       return t('syncCodeRemoteAhead', { machine: entry.machine ?? '' })
     case 'diverged':
@@ -116,12 +118,52 @@ function syncTag(entry: SyncRow, t: Translate): string {
       return t('syncTagRemoteAhead')
     case 'diverged':
       return t('syncTagDiverged')
+    case 'local-newer':
+      return t('syncTagLocalNewer')
     case 'no-mapping':
       return t('syncTagNoMapping')
     case 'missing-target':
       return t('syncTagMissingTarget')
     default:
       return syncWhy(entry, t)
+  }
+}
+
+/**
+ * 「会拉取」里的**覆盖行**用哪句整句当 title。
+ *
+ * 覆盖本机那份是三张表里唯一会动本机已有内容的动作，所以那一列不能只说「拉取」：标签说的是动作
+ * （「覆盖本机」），title 说清"谁更新、会拿谁换掉本机这份"。码认不出来就退回标签本身（与 `syncWhy()`
+ * 同一条兜底规则：宁可挤，也不显示成一个生词）。
+ */
+function replaceCodeKey(code: SyncPullEntry['code']): string {
+  switch (code) {
+    case 'remote-ahead':
+      return 'syncCodeReplaceAhead'
+    case 'remote-newer':
+      return 'syncCodeReplaceNewer'
+    case 'blank-local':
+      return 'syncCodeReplaceBlank'
+    default:
+      return 'syncTagReplace'
+  }
+}
+
+/**
+ * 「会推送」那张表里一行挂哪颗标签、整句是什么。
+ *
+ * 三件事共用这张表：本机独有（推一条新的）、本机领先（重推刷新远端）、两边各自写过而本机更晚（分叉·
+ * 重推）。后两者都是"重推"，但后者要让用户知道"远端也有一份、本机这份更晚，推上去会把它那格刷成最新"，
+ * 所以标签与整句都分开。码认不出来时退回"推一条新的"那一套（与拉取表的兜底同一条规则）。
+ */
+function pushTag(entry: SyncPushEntry, t: Translate): { label: string; title: string; repush: boolean } {
+  switch (entry.code) {
+    case 'local-ahead':
+      return { label: t('syncTagRepush'), title: t('syncCodeLocalAhead'), repush: true }
+    case 'local-newer':
+      return { label: t('syncTagLocalNewer'), title: t('syncCodeLocalNewer'), repush: true }
+    default:
+      return { label: t('syncTagPush'), title: t('syncCodeMissingPush'), repush: false }
   }
 }
 
@@ -227,7 +269,7 @@ function ProgressBlock({
   progress: SyncProgressEvent
 }): React.ReactElement {
   const text = progressTextOf(t, progress)
-  // "只增不覆盖、再点一次接着补齐"那句话只在真写盘的两段有意义：预演阶段还没有东西可覆盖。
+  // "中断了再点一次接着补齐"那句话只在真写盘的两段有意义：预演阶段还没有东西可写。
   const writing = progress.phase === 'pull' || progress.phase === 'push'
   return (
     <>
@@ -313,6 +355,8 @@ export function SyncPanel({ t = fallback, state, reload }: PanelShare): React.Re
               bytesIn: formatBytes(result.bytesIn),
               bytesOut: formatBytes(result.bytesOut),
             }) +
+              // 覆盖本机原来那份是这次同步里唯一"本机内容被换掉"的部分，值得单独说一句（旧的进备份了）。
+              (result.replaced.length === 0 ? '' : ` ${t('syncAppliedReplaced', { count: result.replaced.length })}`) +
               // 拉取来的会话进没进宿主内存里的那份注册表：这句只在真的有东西落盘时才有意义。
               (result.pulled.length === 0
                 ? ''
@@ -332,8 +376,11 @@ export function SyncPanel({ t = fallback, state, reload }: PanelShare): React.Re
   }
 
   const syncPlan = sync?.plan ?? null
-  const syncPulls = syncPlan?.pull.filter((entry) => entry.action === 'create') ?? []
+  // 覆盖本机那份也摆在「会拉取」这张表里（它同样是往本机落内容），只是行上挂一颗不同的标签。
+  const syncPulls = syncPlan?.pull.filter((entry) => entry.action !== 'skip') ?? []
   const syncPushes = syncPlan?.push.filter((entry) => entry.action !== 'skip') ?? []
+  // 空白会话不进那三张表，只在正文里报一句：它们没有内容可同步，逐条列出来只是把表撑长。
+  const syncBlank = syncPlan?.blank?.length ?? 0
   // 只留"有信息量"的没动项：`identical` 是"远端已经有这一份"，整库同步时它是最多也最没用的一类。
   const syncKept: SyncKeptRow[] =
     syncPlan === null
@@ -462,6 +509,8 @@ export function SyncPanel({ t = fallback, state, reload }: PanelShare): React.Re
               })}
               {syncPlan.machines.length > 0 ? ` · ${t('syncMachines', { machines: syncPlan.machines.join('、') })}` : ''}
             </p>
+            {/* 空白会话不进那三张表：它们的去处只有这一句（没有内容可同步，也没有"为什么不动"可讲）。 */}
+            {syncBlank > 0 && <p className="dsm-hint">{t('syncSkippedBlank', { count: syncBlank })}</p>}
             {sync.problems.map((problem) => (
               <p key={problem} className="dsm-warn">
                 {problem}
@@ -487,11 +536,16 @@ export function SyncPanel({ t = fallback, state, reload }: PanelShare): React.Re
                       <PlanGroupHead group={group} columns={3} repo={state?.repos?.[group.path]} t={t} />
                       {group.rows.map((entry) => {
                         const label = sessionLabel(entry)
+                        // 覆盖本机那份单独一颗标签、另挂一条整句：它跟"从无到有拉一条"不是一回事。
+                        const replace = entry.action === 'replace'
                         return (
                           <tr key={entry.id}>
                             <td>
-                              <span className="dsm-tag dsm-tagCreate" title={t('syncCodeMissingPull')}>
-                                {t('syncTagPull')}
+                              <span
+                                className={`dsm-tag ${replace ? 'dsm-tagSkip' : 'dsm-tagCreate'}`}
+                                title={t(replace ? replaceCodeKey(entry.code) : 'syncCodeMissingPull')}
+                              >
+                                {t(replace ? 'syncTagReplace' : 'syncTagPull')}
                               </span>
                             </td>
                             <SessionCell label={label} tip={syncPullTip(entry, label.tip, t)} />
@@ -521,14 +575,12 @@ export function SyncPanel({ t = fallback, state, reload }: PanelShare): React.Re
                       <PlanGroupHead group={group} columns={3} repo={state?.repos?.[group.path]} t={t} />
                       {group.rows.map((entry) => {
                         const label = sessionLabel(entry)
+                        const tag = pushTag(entry, t)
                         return (
                           <tr key={entry.id}>
                             <td>
-                              <span
-                                className={`dsm-tag ${entry.code === 'local-ahead' ? 'dsm-tagSkip' : 'dsm-tagCreate'}`}
-                                title={entry.code === 'local-ahead' ? t('syncCodeLocalAhead') : t('syncCodeMissingPush')}
-                              >
-                                {entry.code === 'local-ahead' ? t('syncTagRepush') : t('syncTagPush')}
+                              <span className={`dsm-tag ${tag.repush ? 'dsm-tagSkip' : 'dsm-tagCreate'}`} title={tag.title}>
+                                {tag.label}
                               </span>
                             </td>
                             <SessionCell label={label} tip={label.tip} />

@@ -18,6 +18,8 @@ import {
   runMigration,
   type MigrateDeps,
 } from '../src/migrate.ts'
+import { scanAll } from '../src/discovery.ts'
+import { createBackup } from '../src/journal.ts'
 import { sessionDir } from '../src/paths.ts'
 import { writeRegistryAtomic, readRegistry } from '../src/registry.ts'
 import type { DecodeAll, SessionHeader, WorkspaceRegistryState } from '../src/types.ts'
@@ -206,6 +208,44 @@ test('回滚：dryRun 只回动作清单，真跑则目录与字节都回到原�
   assert.equal(header.cwd, FROM, 'header.cwd 必须逐字节还原成源路径')
   // 对称性：apply 会删掉空源项目目录，回滚也该删掉空目标项目目录（否则会话根下留一个空目录）
   assert.equal(existsSync(dirname(afterMigrate)), false, '空掉的目标项目目录应当被删掉')
+
+  rmSync(sb.base, { recursive: true, force: true })
+})
+
+test('覆盖前那份备份：目录像删除那样搬回，注册表像迁移那样一起还原', () => {
+  // 同步"覆盖本机那份"走的是同一条备份路（`kind: 'replace'`），但语义与删除那份**不一样**：
+  // 覆盖会把会话搬到一个新目录（远端那份的 cwd 可能不同）并 reHome 它在注册表里的登记，所以回滚必须
+  // 连注册表一起还原——只搬目录会让登记停在被覆盖之后的那份路径上。
+  const sb = makeSandbox('migrate-replace')
+  const dir = sessionDir(sb.deps.sessionsRoot, FROM, sb.sessionId)
+  const session = scanAll(sb.deps.sessionsRoot, decodeAll).find((item) => item.id === sb.sessionId)!
+  const backup = createBackup({
+    backupRoot: sb.deps.backupRoot,
+    registryPath: sb.deps.registryPath,
+    kind: 'replace',
+    now: new Date('2026-10-05T08:00:00.000Z'),
+    sessions: [{ id: sb.sessionId, sourceDir: dir, files: session.files }],
+  })
+  const manifest = JSON.parse(readFileSync(backup.manifestPath, 'utf8')) as { kind: string; sessions: Array<{ targetDir: string }> }
+  assert.equal(manifest.kind, 'replace')
+  assert.match(manifest.sessions[0]?.targetDir ?? '', /backups/, '目标目录是备份里那份副本（同删除），不是原位')
+
+  // 模拟覆盖：本机那份被换掉（目录没了），注册表被 reHome 到另一个目录。
+  rmSync(dir, { recursive: true, force: true })
+  const registry = readRegistry(sb.deps.registryPath)
+  registry.tables.workspaces['ws-from'] = {
+    ...registry.tables.workspaces['ws-from']!,
+    sessionIds: [],
+  }
+  writeRegistryAtomic(sb.deps.registryPath, registry)
+
+  const listed = listBackups(sb.deps).find((item) => item.dir === backup.dir)
+  assert.equal(listed?.kind, 'replace', '清单里如实报"覆盖前"那一类')
+
+  const done = rollbackMigration(sb.deps, { backupDir: backup.dir })
+  assert.equal(done.registryRestored, true, '覆盖那条要连注册表一起还原')
+  assert.equal(existsSync(dir), true, '被换掉的那份要搬回原位')
+  assert.deepEqual(readRegistry(sb.deps.registryPath).tables.workspaces['ws-from']?.sessionIds, [sb.sessionId])
 
   rmSync(sb.base, { recursive: true, force: true })
 })

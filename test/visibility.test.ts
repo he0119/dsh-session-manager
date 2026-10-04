@@ -16,7 +16,14 @@ import { join } from 'node:path'
 import test from 'node:test'
 
 import { readProjectionCache } from '../src/projection-cache.ts'
-import { createBlankResolver, hiddenReason, hiddenReasonOf, isUngrouped, visibilityFacts } from '../src/visibility.ts'
+import {
+  createBlankResolver,
+  createSessionMetaResolver,
+  hiddenReason,
+  hiddenReasonOf,
+  isUngrouped,
+  visibilityFacts,
+} from '../src/visibility.ts'
 
 const SANDBOX = join(import.meta.dirname, '.sandbox', 'visibility')
 
@@ -96,6 +103,47 @@ test('readProjectionCache：字段不是布尔 / 文件坏了 / 记录不存在�
 test('createBlankResolver：没有缓存目录时永远说"不知道"（不许凭空判空白）', () => {
   const resolver = createBlankResolver({})
   assert.equal(resolver({ id: 'session-a', createdAt: 1, cwd: '/x' }), undefined)
+})
+
+test('readProjectionCache / createSessionMetaResolver：空白与最后活动时间一次读出来', () => {
+  const dir = resetSandbox()
+  writeCache(dir, 'session-live', {
+    record: {
+      identity: { createdAt: 1000, cwd: '/tmp/x' },
+      rows: { sessionListMetadata: { ver: 1, seq: 9, val: { blank: false, lastPromptAt: 1790609083301 } } },
+    },
+  })
+  // 空白那条没有活动时间（`lastPromptAt: null`）——只有数字才算数，别把 null 当成 0。
+  writeCache(dir, 'session-blank', {
+    record: {
+      identity: { createdAt: 2000, cwd: '/tmp/x' },
+      rows: { sessionListMetadata: { ver: 1, seq: 3, val: { blank: true, lastPromptAt: null } } },
+    },
+  })
+  // 时间字段形状不对（字符串 / NaN）：按"读不到"处理，不当成 0 或字符串带出去。
+  writeCache(dir, 'session-weird', {
+    record: {
+      identity: { createdAt: 3000, cwd: '/tmp/x' },
+      rows: { sessionListMetadata: { val: { lastPromptAt: '昨天' } } },
+    },
+  })
+  assert.deepEqual(readProjectionCache(dir, { id: 'session-live', createdAt: 1000, cwd: '/tmp/x' }), {
+    blank: false,
+    lastPromptAt: 1790609083301,
+  })
+  const meta = createSessionMetaResolver({ cacheDir: dir })
+  assert.deepEqual(meta({ id: 'session-live', createdAt: 1000, cwd: '/tmp/x' }), {
+    blank: false,
+    lastPromptAt: 1790609083301,
+  })
+  assert.deepEqual(meta({ id: 'session-blank', createdAt: 2000, cwd: '/tmp/x' }), { blank: true })
+  assert.deepEqual(meta({ id: 'session-weird', createdAt: 3000, cwd: '/tmp/x' }), {})
+  // 读不到就不给记录：调用方据此按"什么都不知道"处理。
+  assert.equal(meta({ id: 'session-missing', createdAt: 1 }), undefined)
+  // 没有缓存目录 = 永远"什么都不知道"（工具层在没挂投影缓存的宿主上走这条）。
+  assert.equal(createSessionMetaResolver({})({ id: 'session-live', createdAt: 1000, cwd: '/tmp/x' }), undefined)
+  // `createBlankResolver` 与它是同一条读法：这里顺带钉住"两个读取器不许各认一套格式"。
+  assert.equal(createBlankResolver({ cacheDir: dir })({ id: 'session-blank', createdAt: 2000, cwd: '/tmp/x' }), true)
 })
 
 test('hiddenReasonOf：header 的 origin、注册表的归档集、缓存里的 blank 拼成一条结论', () => {

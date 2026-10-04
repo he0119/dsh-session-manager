@@ -244,9 +244,10 @@ export interface SyncPullEntry {
   /** 贡献这条的机器。 */
   machine: string
   bytes: number
-  action: 'create' | 'skip'
+  /** `replace` = 本机原来那份被这条顶掉（旧的那份先备份）。 */
+  action: 'create' | 'replace' | 'skip'
   /** 机器可读的分类：界面按它挑文案（`reason` 是给模型看的细节）。 */
-  code: 'missing' | 'no-mapping' | 'missing-target'
+  code: 'missing' | 'remote-ahead' | 'remote-newer' | 'blank-local' | 'no-mapping' | 'missing-target'
   reason?: string
 }
 
@@ -257,7 +258,8 @@ export interface SyncPushEntry {
   cwd?: string
   bytes: number
   action: 'upload' | 'update' | 'skip'
-  code: 'missing' | 'local-ahead' | 'identical' | 'remote-ahead' | 'diverged'
+  /** `local-newer` = 两边各自写过、本机这份更新（`local-ahead` 是"远端确实是本机这份的前缀"）。 */
+  code: 'missing' | 'local-ahead' | 'local-newer' | 'identical' | 'remote-ahead' | 'diverged'
   /** 远端那份由哪台机器贡献（"远端领先 / 两边各自写过"要指名道姓）。 */
   machine?: string
   reason?: string
@@ -271,6 +273,8 @@ export interface SyncPlan {
   push: SyncPushEntry[]
   pullIds: string[]
   pushIds: string[]
+  /** 本机判为空白、这次不参与同步的会话 id（界面只拿它说一句"跳过 N 条"）。 */
+  blank: string[]
   bytesIn: number
   bytesOut: number
   localCount: number
@@ -285,6 +289,8 @@ export interface SyncResponse {
   plan: SyncPlan
   applied: boolean
   pulled: string[]
+  /** `pulled` 里"覆盖掉本机原来那份"的那些（旧的那份在备份里；界面据此多说一句）。 */
+  replaced: string[]
   pushed: Array<{ id: string; action: 'upload' | 'update' }>
   bytesIn: number
   bytesOut: number
@@ -524,8 +530,8 @@ export interface BackupSummary {
   createdAt: string
   sessions: number
   artifacts: number
-  /** 这份备份是迁移留下的还是删除留下的（老备份缺字段 = 迁移）。 */
-  kind?: 'migrate' | 'delete'
+  /** 这份备份是哪一类操作留下的：迁移 / 删除 / 同步时覆盖本机那份（老备份缺字段 = 迁移）。 */
+  kind?: 'migrate' | 'delete' | 'replace'
   from?: string
   to?: string
 }

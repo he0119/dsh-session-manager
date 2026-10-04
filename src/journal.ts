@@ -37,12 +37,17 @@ export interface BackupArtifactEntry {
  *
  * `migrate`：会话从 A 目录搬到 B 目录（备份里那份是"原状"，回滚 = 搬回去 + 还原字节）。
  * `delete`：会话被删掉（备份里那份是**唯一一份**，回滚 = 把它搬回原位）。
+ * `replace`：会话被**另一份内容**顶掉（同步时远端那份更新，见 src/sync.ts）：备份里那份是原状，
+ *   回滚 = 把顶进来那份连同它的目录一起撤掉、换回原状。
  *
- * 两者的差别不是文案：`delete` 的会话记录里 `targetDir` 指向备份目录内的那份副本，于是回滚的第一步
- * （"把目标搬回源"）恰好就是"把备份里的整个会话目录搬回去"；而字节还原那一步要因此容忍"备份里的
- * 文件已经不在了"（它刚被搬走）。老备份没有这个字段，按 `migrate` 处理。
+ * 三者的差别不是文案：`delete` 与 `replace` 的会话记录里 `targetDir` 指向备份目录内的那份副本，
+ * 于是回滚的第一步（"把目标搬回源"）恰好就是"把备份里的整个会话目录搬回去"，它同时**顺手清掉**
+ * 顶进来的那一份；而字节还原那一步要因此容忍"备份里的文件已经不在了"（它刚被搬走）。`replace`
+ * 与 `delete` 的唯一不同在注册表那一步：覆盖走的是导入那条编排，它会把会话重挂到目标工作区，
+ * 所以回滚要把注册表快照一起还原（`delete` 从头到尾没碰过注册表，还原它反而会抹掉之后的改动）。
+ * 老备份没有这个字段，按 `migrate` 处理。
  */
-export type BackupKind = 'migrate' | 'delete'
+export type BackupKind = 'migrate' | 'delete' | 'replace'
 
 /** 备份清单。 */
 export interface BackupManifest {
@@ -109,8 +114,8 @@ export function createBackup(options: CreateBackupOptions): {
       id: s.id,
       dirName: basename(s.sourceDir),
       sourceDir: s.sourceDir,
-      // 删除：备份里那份副本就是"回滚时搬回去的那一份"，所以目标目录记它。
-      targetDir: kind === 'delete' ? dest : (s.targetDir ?? s.sourceDir),
+      // 删除与覆盖：备份里那份副本就是"回滚时搬回去的那一份"，所以目标目录记它。
+      targetDir: kind === 'migrate' ? (s.targetDir ?? s.sourceDir) : dest,
       files: s.files.map((f) => f.name),
     })
   }
@@ -166,9 +171,10 @@ export interface RollbackResult {
  *   3. 会话产物搬回
  *   4. 还原注册表
  *
- * 「删除」备份（`kind === 'delete'`）复用同一条路，语义是"把备份里那一份搬回原位"：第 1 步就是
- * 整个会话目录的还原（见 `BackupKind`），第 2 步因此可能发现备份里那份已经不在了（刚被第 1 步搬走），
- * 第 4 步按删除的语义跳过。
+ * 「删除」与「覆盖」备份（`kind !== 'migrate'`）复用同一条路，语义是"把备份里那一份搬回原位"：第 1 步
+ * 就是整个会话目录的还原（见 `BackupKind`），它顺手把顶进来的那一份清掉；第 2 步因此可能发现备份里那份
+ * 已经不在了（刚被第 1 步搬走）。注册表那一步两者不同：删除从头到尾没碰过它，覆盖碰过（导入会把会话
+ * 重挂到目标工作区），所以只有删除跳过。
  */
 export function rollback(
   manifest: BackupManifest,
@@ -201,8 +207,8 @@ export function rollback(
       const from = join(backupDir, 'sessions', basename(dirname(s.sourceDir)), s.dirName, name)
       const to = join(s.sourceDir, name)
       if (!existsSync(from)) {
-        // 「删除」备份的恢复路径：第 1 步已经把备份里那整个会话目录搬回原位（它的 `targetDir` 就是
-        // 备份内那份副本），于是 `from` 随之不存在——但字节已经在 `to` 上了，这不是"备份坏了"。
+        // 「删除」/「覆盖」备份的恢复路径：第 1 步已经把备份里那整个会话目录搬回原位（它的 `targetDir`
+        // 就是备份内那份副本），于是 `from` 随之不存在——但字节已经在 `to` 上了，这不是"备份坏了"。
         // 只有两边都没有才是真的缺文件，照旧抛错。
         if (existsSync(to)) {
           actions.push(`bytes already in place: ${to}`)
