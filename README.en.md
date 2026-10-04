@@ -288,17 +288,20 @@ denominator is the number of items that leg will really do (skipped ones are not
 pushing each get their own pass.
 The rules and edges:
 
-- **When both sides hold the same id, contents and the last-activity time decide who is newer**: identical
-  contents (apart from the cwd) stay put; a local copy that really is a prefix of the remote one is
-  re-uploaded to refresh the remote; a remote copy that is ahead (yours is its prefix) or a both-wrote case
-  where the remote is later **backs your copy up and then replaces it** (the old one can always be restored
-  from the backup list on the Migrate tab); if either side has no last-activity time (an older remote index,
-  or a host without the projection cache) or both are equally new, neither copy is touched and the report
-  says whether it is "remote is ahead" or "both sides wrote". That last-activity time is folded by the host
-  out of the log itself, so copying and cwd rewriting do not change it. The judgement is a generation
-  fingerprint **independent of the cwd**: landing always rewrites the other machine's cwd (library directory
-  names are bound to the header `cwd`), and comparing raw bytes would call a pulled copy "both sides wrote" —
-  pushing a continuation of it back would then never happen;
+- **When both sides hold the same id, contents and the last-activity time decide who is newer**:
+  identical contents (apart from the cwd) stay put; a local copy that really is a prefix of the
+  remote one is re-uploaded to refresh the remote; a remote copy that is ahead (yours is its
+  prefix) or a both-wrote case where the remote is later **backs your copy up and then replaces
+  it** (the old one can always be restored from the backup list on the Migrate tab); if either
+  side has no last-activity time (an older remote index, or a host without the projection cache)
+  or both are equally new, neither copy is touched and the report says whether it is "remote is
+  ahead" or "both sides wrote". That last-activity time is the **later** of two clocks the host
+  folds out of the log (the last prompt, and the last message — the agent's own writes count, so
+  "you kept working after pushing" still has an answer), and neither copying nor cwd rewriting
+  changes it. The judgement is a generation fingerprint **independent of the cwd**: landing always
+  rewrites the other machine's cwd (library directory names are bound to the header `cwd`), and
+  comparing raw bytes would call a pulled copy "both sides wrote" — pushing a continuation of it
+  back would then never happen;
 - **A strictly-ahead local copy is re-uploaded**: the versions both sides share match apart from the cwd, so
   the remote copy really is a prefix of yours and refreshing it loses nothing; when more than one machine
   contributed the same id, the pulling side takes the **ahead** copy rather than the one whose slot name

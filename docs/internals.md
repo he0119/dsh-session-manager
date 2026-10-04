@@ -41,7 +41,7 @@
 - [WebDAV 同步是运输层，只增不覆盖](../.agents/notes/implemented/feature/2026-10-01-webdav-sync-is-a-transport.md)：
   远端只放包与索引（一机一格），落地复用导入那条编排；密码只放引用，值进宿主机凭据库。
 - [两边都有同一个 id 时择新，空白会话不搬](../.agents/notes/implemented/feature/2026-10-04-sync-picks-the-newer-copy.md)：
-  按内容与宿主的最后活动时间择新，远端那份赢时先备份（`kind: replace`）再换；空白会话不上传，并从
+  按内容与宿主的最后活动时间（提问与消息两枚钟里晚的那枚）择新，远端那份赢时先备份（`kind: replace`）再换；空白会话不上传，并从
   自己那格的索引里撤下。
 - [远端第一层是插件自己的命名空间](../.agents/notes/implemented/architecture/2026-10-02-remote-namespace-is-the-plugins.md)：
   `url` 之下固定一层 `dsh-session-manager/`，机器格直接放在里面（逐层 MKCOL 自建），于是 `url` 可以是

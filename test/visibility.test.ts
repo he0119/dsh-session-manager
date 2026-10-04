@@ -110,7 +110,11 @@ test('readProjectionCache / createSessionMetaResolver：空白与最后活动时
   writeCache(dir, 'session-live', {
     record: {
       identity: { createdAt: 1000, cwd: '/tmp/x' },
-      rows: { sessionListMetadata: { ver: 1, seq: 9, val: { blank: false, lastPromptAt: 1790609083301 } } },
+      rows: {
+        sessionListMetadata: { ver: 1, seq: 9, val: { blank: false, lastPromptAt: 1790609083301 } },
+        // 两枚钟分别在两行里：粗的那枚在列表元数据、细的那枚在时间上下文（`lastMessageTime`）。
+        timeContext: { ver: 1, seq: 11, val: { lastMessageTime: 1790609200000, lastInjectionTime: 1790609083301 } },
+      },
     },
   })
   // 空白那条没有活动时间（`lastPromptAt: null`）——只有数字才算数，别把 null 当成 0。
@@ -124,20 +128,37 @@ test('readProjectionCache / createSessionMetaResolver：空白与最后活动时
   writeCache(dir, 'session-weird', {
     record: {
       identity: { createdAt: 3000, cwd: '/tmp/x' },
-      rows: { sessionListMetadata: { val: { lastPromptAt: '昨天' } } },
+      rows: {
+        sessionListMetadata: { val: { lastPromptAt: '昨天' } },
+        timeContext: { val: { lastMessageTime: Number.NaN } },
+      },
+    },
+  })
+  // 只有细的那枚钟（宿主没写列表元数据）：粗的那枚缺席，细的照收。
+  writeCache(dir, 'session-fine-only', {
+    record: {
+      identity: { createdAt: 4000, cwd: '/tmp/x' },
+      rows: { timeContext: { val: { lastMessageTime: 1790609300000 } } },
     },
   })
   assert.deepEqual(readProjectionCache(dir, { id: 'session-live', createdAt: 1000, cwd: '/tmp/x' }), {
     blank: false,
     lastPromptAt: 1790609083301,
+    lastMessageAt: 1790609200000,
   })
   const meta = createSessionMetaResolver({ cacheDir: dir })
   assert.deepEqual(meta({ id: 'session-live', createdAt: 1000, cwd: '/tmp/x' }), {
     blank: false,
     lastPromptAt: 1790609083301,
+    lastMessageAt: 1790609200000,
   })
   assert.deepEqual(meta({ id: 'session-blank', createdAt: 2000, cwd: '/tmp/x' }), { blank: true })
   assert.deepEqual(meta({ id: 'session-weird', createdAt: 3000, cwd: '/tmp/x' }), {})
+  assert.deepEqual(
+    meta({ id: 'session-fine-only', createdAt: 4000, cwd: '/tmp/x' }),
+    { lastMessageAt: 1790609300000 },
+    '只有细的那枚钟时照收（同步那边取的就是两枚里晚的那枚）',
+  )
   // 读不到就不给记录：调用方据此按"什么都不知道"处理。
   assert.equal(meta({ id: 'session-missing', createdAt: 1 }), undefined)
   // 没有缓存目录 = 永远"什么都不知道"（工具层在没挂投影缓存的宿主上走这条）。

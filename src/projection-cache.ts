@@ -2,11 +2,12 @@
 //
 // 宿主把每条会话折叠出来的投影写进 `<storages>/session_projcache/sessions/<encodeSegment(id)>.json`，
 // 它自己列会话时也读这份缓存。本插件本来只借它取标题（session-title.ts），现在还要借它取
-// `sessionListMetadata` 那一行里的两件事：`blank`（宿主"这条会话还没开始过一轮"的判据，决定侧边栏
-// 要不要把它藏起来，见 visibility.ts）与 `lastPromptAt`（宿主记的最后一次活动时间；跨机器比"谁更新"
-// 用它，见 src/sync.ts）。
+// 两行里的四件事：`sessionListMetadata` 的 `blank`（宿主"这条会话还没开始过一轮"的判据，决定侧边栏
+// 要不要把它藏起来，见 visibility.ts）与 `lastPromptAt`（最后一次提问），以及 `timeContext` 的
+// `lastMessageTime`（最后一条消息，含 agent 自己写进去的那些）。后两枚都是"这条会话最后一次动"的钟，
+// 跨机器比"谁更新"时取晚的那枚（见 src/sync.ts）。
 //
-// 为什么把"读文件"独立成一层：标题与空白是两个字段，但**文件格式、身份校验、坏数据兜底**是同一套。
+// 为什么把"读文件"独立成一层：标题与这几枚判据是不同字段，但**文件格式、身份校验、坏数据兜底**是同一套。
 // 分成两份实现就会出现"标题这条路认得新格式、空白那条路不认得"，而两者本该同生共死。
 //
 // 身份校验（`createdAt` + `cwd` 必须与磁盘上这条会话对得上）是刻意的：id 相同但属于另一条生命周期的
@@ -34,12 +35,18 @@ export interface ProjectionCacheRecord {
   /** 宿主判定的"空白会话"（`sessionListMetadata.blank`）；字段不是布尔就没有。 */
   blank?: boolean
   /**
-   * 宿主记的最后一次活动时间（`sessionListMetadata.lastPromptAt`，毫秒时间戳）；不是有限数就没有。
+   * 最后一次**提问**的时间（`sessionListMetadata.lastPromptAt`，毫秒时间戳）；不是有限数就没有。
    *
-   * 它由宿主从日志事件里折出来，因此**跟着内容走**——文件复制、cwd 改写都不影响它。跨机器比"这条
-   * 会话谁更新"用的就是它（见 src/sync.ts 的「谁更新」那一节）。
+   * 它由宿主从日志事件里折出来，因此**跟着内容走**——文件复制、cwd 改写都不影响它。
    */
   lastPromptAt?: number
+  /**
+   * 最后一条**消息**的时间（`timeContext.lastMessageTime`，毫秒时间戳）；不是有限数就没有。
+   *
+   * 比 {@link lastPromptAt} 细：agent 自己写进去的那些也算"动过"。推上去之后本机又跑了几轮、两边
+   * 内容各自长出来时，两边的提问时间往往一样，靠这枚钟才分得出高下（见 src/sync.ts 的「谁更新」）。
+   */
+  lastMessageAt?: number
 }
 
 /**
@@ -71,6 +78,7 @@ export function readProjectionCache(
         rows?: {
           title?: { val?: unknown }
           sessionListMetadata?: { val?: { blank?: unknown; lastPromptAt?: unknown } }
+          timeContext?: { val?: { lastMessageTime?: unknown } }
         }
       }
     | undefined
@@ -89,5 +97,7 @@ export function readProjectionCache(
   if (typeof blankValue === 'boolean') out.blank = blankValue
   const lastPromptAt = record?.rows?.sessionListMetadata?.val?.lastPromptAt
   if (typeof lastPromptAt === 'number' && Number.isFinite(lastPromptAt)) out.lastPromptAt = lastPromptAt
+  const lastMessageAt = record?.rows?.timeContext?.val?.lastMessageTime
+  if (typeof lastMessageAt === 'number' && Number.isFinite(lastMessageAt)) out.lastMessageAt = lastMessageAt
   return out
 }

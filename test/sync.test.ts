@@ -282,7 +282,9 @@ function remoteOf(
     cwd?: string
     title?: string
     createdAt?: number
-    /** 索引里记的最后活动时间（跨机器比"谁更新"用）。 */
+    /** 索引里记的最后一枚钟（版本 3 写它；跨机器比"谁更新"用）。 */
+    lastActiveAt?: number
+    /** 版本 2 那枚钟（最后一次提问）——读的一侧仍然认。 */
     lastPromptAt?: number
     files: FileFingerprint[]
     repo?: string
@@ -426,10 +428,16 @@ test('sync：计划——两边各自写过时比最后活动时间；空白会�
   })
   // 本机这份：v1 与远端不同（各自写过），时间由这个表给。
   const divergedLocal = [['a', 0], ['zzz', 1]] as Array<[string, number]>
-  const meta = new Map<string, { blank?: boolean; lastPromptAt?: number }>([
+  const meta = new Map<string, { blank?: boolean; lastPromptAt?: number; lastMessageAt?: number }>([
     ['local-newer', { lastPromptAt: 5000 }],
     ['remote-newer', { lastPromptAt: 1000 }],
     ['tie', { lastPromptAt: 3000 }],
+    // 两枚钟各说各的：**取晚的那枚**。下面这几条正是"提问时间一样、本机后来又跑了几轮"那个局面
+    // （只比提问时间的话，这样的会话永远判不出来）。
+    ['fine-local', { lastPromptAt: 3000, lastMessageAt: 8000 }],
+    ['fine-remote', { lastPromptAt: 3000, lastMessageAt: 4000 }],
+    ['fine-tie', { lastPromptAt: 3000, lastMessageAt: 3000 }],
+    ['legacy-clock', { lastMessageAt: 5000 }],
     ['unknown-local', {}],
     ['blank-local', { blank: true }],
     ['blank-identical', { blank: true }],
@@ -441,6 +449,10 @@ test('sync：计划——两边各自写过时比最后活动时间；空白会�
       fakeSession('local-newer', divergedLocal),
       fakeSession('remote-newer', divergedLocal),
       fakeSession('tie', divergedLocal),
+      fakeSession('fine-local', divergedLocal),
+      fakeSession('fine-remote', divergedLocal),
+      fakeSession('fine-tie', divergedLocal),
+      fakeSession('legacy-clock', divergedLocal),
       fakeSession('unknown-local', divergedLocal),
       fakeSession('unknown-remote', divergedLocal),
       fakeSession('blank-local', divergedLocal),
@@ -451,7 +463,15 @@ test('sync：计划——两边各自写过时比最后活动时间；空白会�
     remote: remoteOf([
       { machine: 'robot-b', id: 'local-newer', cwd: '/home/b/proj', lastPromptAt: 1000, files: [fp(0, 'a'), fp(1, 'b')] },
       { machine: 'robot-b', id: 'remote-newer', cwd: '/home/b/proj', lastPromptAt: 9000, files: [fp(0, 'a'), fp(1, 'b')] },
-      { machine: 'robot-b', id: 'tie', cwd: '/home/b/proj', lastPromptAt: 3000, files: [fp(0, 'a'), fp(1, 'b')] },
+      { machine: 'robot-b', id: 'tie', cwd: '/home/b/proj', lastActiveAt: 3000, files: [fp(0, 'a'), fp(1, 'b')] },
+      // 远端那枚钟就只有 3000：本机细的那枚（8000）更晚 → 本机更新
+      { machine: 'robot-b', id: 'fine-local', cwd: '/home/b/proj', lastActiveAt: 3000, files: [fp(0, 'a'), fp(1, 'b')] },
+      // 本机细的那枚 4000 仍早于远端 9000 → 远端更新
+      { machine: 'robot-b', id: 'fine-remote', cwd: '/home/b/proj', lastActiveAt: 9000, files: [fp(0, 'a'), fp(1, 'b')] },
+      // 两枚都撞上远端那枚 → 判不出高下（不去猜）
+      { machine: 'robot-b', id: 'fine-tie', cwd: '/home/b/proj', lastActiveAt: 3000, files: [fp(0, 'a'), fp(1, 'b')] },
+      // 版本 2 的格子只有 lastPromptAt：拿它当活动时间，本机 5000 更晚
+      { machine: 'robot-b', id: 'legacy-clock', cwd: '/home/b/proj', lastPromptAt: 1000, files: [fp(0, 'a'), fp(1, 'b')] },
       { machine: 'robot-b', id: 'unknown-local', cwd: '/home/b/proj', lastPromptAt: 1000, files: [fp(0, 'a'), fp(1, 'b')] },
       // 老索引：没有 lastPromptAt 这一项
       { machine: 'robot-b', id: 'unknown-remote', cwd: '/home/b/proj', files: [fp(0, 'a'), fp(1, 'b')] },
@@ -472,8 +492,13 @@ test('sync：计划——两边各自写过时比最后活动时间；空白会�
   // 远端更晚 → 覆盖本机那份（代码与"远端领先"分开，界面上的整句不同）
   assert.equal(plan.pull.find((entry) => entry.id === 'remote-newer')?.action, 'replace')
   assert.equal(plan.pull.find((entry) => entry.id === 'remote-newer')?.code, 'remote-newer')
+  // 两枚钟取晚的那枚：细的那枚分得出高下时照分（不管提问时间一不一样）
+  assert.equal(byId.get('fine-local')?.code, 'local-newer', '本机细的那枚更晚 → 本机更新')
+  assert.equal(plan.pull.find((entry) => entry.id === 'fine-remote')?.code, 'remote-newer', '远端更晚 → 覆盖本机')
+  // 版本 2 的格子（只有提问时间）照旧能分高下：丢掉这枚等于让已经推上去的那些格子白瞎
+  assert.equal(byId.get('legacy-clock')?.code, 'local-newer', '认版本 2 那枚钟')
   // 一样新 / 有一边读不到 → 两条都不动
-  for (const id of ['tie', 'unknown-local', 'unknown-remote']) {
+  for (const id of ['tie', 'fine-tie', 'unknown-local', 'unknown-remote']) {
     assert.equal(byId.get(id)?.action, 'skip', id)
     assert.equal(byId.get(id)?.code, 'diverged', id)
     assert.match(byId.get(id)?.reason ?? '', /判不出谁更新|两边各自写过/, id)
@@ -485,8 +510,8 @@ test('sync：计划——两边各自写过时比最后活动时间；空白会�
   assert.equal(byId.get('blank-identical'), undefined)
   assert.equal(byId.get('blank-behind'), undefined)
   assert.deepEqual(plan.blank, ['blank-identical', 'blank-behind', 'blank-only'])
-  assert.deepEqual(plan.pushIds.sort(), ['local-newer'])
-  assert.deepEqual(plan.pullIds.sort(), ['blank-local', 'remote-newer'])
+  assert.deepEqual(plan.pushIds.sort(), ['fine-local', 'legacy-clock', 'local-newer'])
+  assert.deepEqual(plan.pullIds.sort(), ['blank-local', 'fine-remote', 'remote-newer'])
 })
 
 test('sync：索引解析宽容——坏 JSON / 缺 id / 没有代次都不炸整次同步', () => {
@@ -680,8 +705,9 @@ test('sync：端到端——空白会话不上传，也从自己那格索引里�
     assert.deepEqual([...before.entries.keys()].sort(), ['blank', 'real'])
 
     // 第二次：宿主说 blank 那条是空白、real 最后活动在这一刻 → 空白不上传，还要从自己那格撤下来。
-    const meta = (query: { id: string }): { blank?: boolean; lastPromptAt?: number } =>
-      query.id === 'blank' ? { blank: true } : { lastPromptAt: 1750000000000 }
+    // 两枚钟都给上，且**细的那枚更晚**：索引里该记下晚的那枚（只记提问时间会漏掉本机后来自己写的那些）。
+    const meta = (query: { id: string }): { blank?: boolean; lastPromptAt?: number; lastMessageAt?: number } =>
+      query.id === 'blank' ? { blank: true } : { lastPromptAt: 1700000000000, lastMessageAt: 1750000000000 }
     const plan = await syncMachine(a, dav, config, { apply: false, sessionMeta: meta })
     assert.deepEqual(plan.plan.blank, ['blank'])
     assert.deepEqual(plan.plan.pushIds, [], 'real 完全一致、blank 是空白 → 一条都不推')
@@ -690,7 +716,12 @@ test('sync：端到端——空白会话不上传，也从自己那格索引里�
     const after = await readRemoteLibrary(dav, settings(a, { machineId: 'robot-a' }))
     assert.deepEqual([...after.entries.keys()], ['real'], '别的机器不再看得到那条空白会话')
     assert.deepEqual(after.indexes.get('robot-a')?.entries.map((entry) => entry.id), ['real'])
-    assert.equal(after.entries.get('real')?.lastPromptAt, 1750000000000, '活动时间记进索引（别的机器靠它判谁更新）')
+    assert.equal(
+      after.entries.get('real')?.lastActiveAt,
+      1750000000000,
+      '活动时间记进索引，取的是两枚钟里晚的那枚（别的机器靠它判谁更新）',
+    )
+    assert.equal(after.entries.get('real')?.lastPromptAt, undefined, '旧的提问时间那枚不再写进索引')
     assert.ok(
       existsSync(join(fixture.root, SYNC_NAMESPACE_DIR, 'robot-a', 'blank.dshsess')),
       '远端那份包不主动删（只是不再被索引点名）',
@@ -698,6 +729,18 @@ test('sync：端到端——空白会话不上传，也从自己那格索引里�
     // 那条会话后来开始了（宿主不再判它空白）→ 下一次推送照旧把它带上
     const later = await syncMachine(a, dav, config, { apply: true })
     assert.deepEqual(later.pushed, [{ id: 'blank', action: 'upload' }])
+
+    // 真正"推上去"那一刻（不是上面"本来就一致、顺手补钟"那条路）也要把晚的那枚钟写进索引：
+    // 别的机器拿到的活动时间就从这里来，写错等于让择新永远比不出高下。
+    writeSession(a, 'fresh', 3000)
+    const pushed = await syncMachine(a, dav, config, {
+      apply: true,
+      sessionMeta: () => ({ lastPromptAt: 1700000000000, lastMessageAt: 1760000000000 }),
+    })
+    assert.deepEqual(pushed.pushed, [{ id: 'fresh', action: 'upload' }])
+    const afterPush = await readRemoteLibrary(dav, settings(a, { machineId: 'robot-a' }))
+    assert.equal(afterPush.entries.get('fresh')?.lastActiveAt, 1760000000000, '推上去时记的是两枚钟里晚的那枚')
+    assert.equal(afterPush.entries.get('fresh')?.lastPromptAt, undefined, '不写旧的那枚字段')
   } finally {
     await fixture.close()
     rmSync(SANDBOX, { recursive: true, force: true })
