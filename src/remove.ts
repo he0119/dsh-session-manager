@@ -13,10 +13,10 @@
 //
 // 与迁移共用同一套预演/确认口径：`plan` 只读、`apply` 才写盘，且计划里 `ok` 不为 true 就拒绝执行。
 //
-// **子代理跟着父会话走**：点名一条会话，它的**全部后代**（沿 header 的 `parentSession` 找下去）一起删，
+// **子智能体跟着父会话走**：点名一条会话，它的**全部后代**（沿 header 的 `parentSession` 找下去）一起删，
 // 因为子会话在外壳侧边栏里只挂在父会话的 `subagentCatalog` 下——父的日志一没了，子会话就再没有别的
 // 入口，留在盘上只会变成"本插件看得见、侧边栏看不见"的隐形残留。反向（只删子、留着父）不拦，只在
-// 预演里点明父会话下面会留一个点不开的条目：孤儿要收拾，而"这条子代理我就是要删掉"也是正当需求。
+// 预演里点明父会话下面会留一个点不开的条目：孤儿要收拾，而"这条子智能体我就是要删掉"也是正当需求。
 import { existsSync, readdirSync, rmSync, rmdirSync, statSync } from 'node:fs'
 import { dirname } from 'node:path'
 
@@ -65,7 +65,7 @@ export interface RemoveEntry {
   bytes: number
   /** 宿主内存里活着（这些会被预演挡下）。 */
   live: boolean
-  /** 日志 header 里的 `origin`（子代理会话写 `subagent`；界面据此挂标签）。 */
+  /** 日志 header 里的 `origin`（子智能体会话写 `subagent`；界面据此挂标签）。 */
   origin?: string
   /**
    * 这条是**级联**带进来的：`via` 是用户点名、把它牵进来的那条祖先会话。
@@ -82,7 +82,7 @@ export interface RemovalPlan {
   entries: RemoveEntry[]
   files: number
   bytes: number
-  /** 级联带进来的条数（点名之外、跟着父会话一起删的子代理后代）。 */
+  /** 级联带进来的条数（点名之外、跟着父会话一起删的子智能体后代）。 */
   cascaded: number
   /** 备份会落在哪（执行时是真实目录；预演时是按当前时间算出来的那一个）。 */
   backupRoot: string
@@ -113,7 +113,7 @@ function indexById(sessions: readonly DiscoveredSession[]): Map<string, Discover
 /**
  * 算出"删这些会话会发生什么"，不写任何字节。
  *
- * 请求里的每条会话都会先把**整族**（它自己 + 全部子代理后代）展开进计划，见 `familyOf()`。
+ * 请求里的每条会话都会先把**整族**（它自己 + 全部子智能体后代）展开进计划，见 `familyOf()`。
  *
  * @param deps 路径与探测口。
  * @param request 要删的会话 id。
@@ -142,7 +142,7 @@ export function planRemoval(deps: RemoveDeps, request: RemoveRequest): RemovalPl
     else if (!roots.some((root) => root.id === id)) roots.push(session)
   }
 
-  // 单独点名一条子代理（父会话还在库里、又不会被这次操作带上）：拒掉，并告诉用户该点名谁。子代理
+  // 单独点名一条子智能体（父会话还在库里、又不会被这次操作带上）：拒掉，并告诉用户该点名谁。子智能体
   // 跟着父会话走，只删它会把父会话日志里那条 catalog 留成"指着一条不存在的会话"（见 family.ts）。
   //
   // 判据是"父会话在不在**这次展开出来**的集合里"，而不是"有没有同时点名"：坏数据里的环（A 的父是 B、
@@ -161,7 +161,7 @@ export function planRemoval(deps: RemoveDeps, request: RemoveRequest): RemovalPl
     if (parentId === undefined) continue
     const parent = byId.get(parentId)
     const owner = parent?.title === undefined ? parentId : `${parent.title}（${parentId}）`
-    problems.push(`session ${id} 是子代理会话（它跟着父会话走）：请改点名它的父会话 ${owner}`)
+    problems.push(`session ${id} 是子智能体会话（它跟着父会话走）：请改点名它的父会话 ${owner}`)
   }
 
   const entries: RemoveEntry[] = []
@@ -171,7 +171,7 @@ export function planRemoval(deps: RemoveDeps, request: RemoveRequest): RemovalPl
     const via = named.has(id)
       ? undefined
       : { id: root.id, ...(root.title === undefined ? {} : { title: root.title }) }
-    const owner = via === undefined ? '' : `（子代理，跟着 ${via.title ?? via.id} 一起删）`
+    const owner = via === undefined ? '' : `（子智能体，跟着 ${via.title ?? via.id} 一起删）`
     const isLive = live.has(id)
     if (isLive) {
       // 只报问题、不进条目：活着的会话不该出现在"要删的东西"里，否则界面会把它列成一个待删项。
@@ -220,7 +220,7 @@ export function runRemoval(deps: RemoveDeps, request: RemoveRequest, options: { 
   if (!plan.ok) return { applied: false, ...empty, summary: `未执行：${plan.problems.join('；')}` }
   /** 整族一起删时把"多出来的那几条"说清楚，否则预演清单里会冒出用户没勾过的会话。 */
   const cascadeNote =
-    plan.cascaded === 0 ? '' : ` 其中 ${plan.cascaded} 条是子代理会话，跟着点名的会话一起删。`
+    plan.cascaded === 0 ? '' : ` 其中 ${plan.cascaded} 条是子智能体会话，跟着点名的会话一起删。`
   if (!options.apply) {
     return {
       applied: false,

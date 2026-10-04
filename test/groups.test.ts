@@ -118,7 +118,7 @@ test('组的稳定键：路径本身，没有 cwd 的那一组换成一个撞不
   assert.ok(!groupKey('').includes('/'))
 })
 
-// ---- 子代理缩进到父会话的下一级（`nestSessions`）----
+// ---- 子智能体缩进到父会话的下一级（`nestSessions`）----
 //
 // 这一层是**显示**关系：列表里的父子与删除/迁移的级联展开读的是同一条边（`parentSession` +
 // `origin === "subagent"`），所以缩进错了不会抛错、不会崩，只会让"删父会话会带上谁"与眼睛看到的对不上。
@@ -126,7 +126,7 @@ test('组的稳定键：路径本身，没有 cwd 的那一组换成一个撞不
 
 /**
  * 造一条带父指针的会话（缩进只用到 id / parentSession / origin / cwd / createdAt）。
- * 给了 `parentSession` 的默认是**子代理**（`origin: "subagent"`）；分叉用 `forkLink()`。
+ * 给了 `parentSession` 的默认是**子智能体**（`origin: "subagent"`）；分叉用 `forkLink()`。
  */
 function link(id: string, parentSession?: string, cwd = '/home/u/dev/alpha', options: { subagent?: boolean } = {}) {
   const asSubagent = parentSession !== undefined && options.subagent !== false
@@ -144,7 +144,7 @@ function forkLink(id: string, parentSession: string, cwd = '/home/u/dev/alpha') 
   return link(id, parentSession, cwd, { subagent: false })
 }
 
-test('缩进：子代理排在父会话后面、缩进一级，孙代再深一级', () => {
+test('缩进：子智能体排在父会话后面、缩进一级，孙代再深一级', () => {
   const rows = nestSessions([link('child', 'parent'), link('parent'), link('grand', 'child')], [link('parent'), link('child', 'parent'), link('grand', 'child')], new Set(['parent', 'child', 'grand']))
   assert.deepEqual(rows.map((row) => [row.session.id, row.depth]), [
     ['parent', 0],
@@ -184,7 +184,7 @@ test('缩进：父会话没在当前视图里（被筛掉 / 不在库里）时�
   assert.deepEqual(noCwd.map((row) => [row.session.id, row.depth, row.parentPath]), [['child', 1, undefined]])
 })
 
-test('缩进：分叉按普通行画不缩进，而它自己的子代理照旧缩进到它下面', () => {
+test('缩进：分叉按普通行画不缩进，而它自己的子智能体照旧缩进到它下面', () => {
   const rows = nestSessions(
     [forkLink('fork', 'parent'), link('parent'), link('sub', 'fork')],
     [link('parent'), forkLink('fork', 'parent'), link('sub', 'fork')],
@@ -194,7 +194,7 @@ test('缩进：分叉按普通行画不缩进，而它自己的子代理照旧�
     ['fork', 0],
     ['sub', 1],
     ['parent', 0],
-  ], '分叉是顶层行（顺序仍按输入），它的子代理跟着它缩进一级')
+  ], '分叉是顶层行（顺序仍按输入），它的子智能体跟着它缩进一级')
 
   // 分叉排在父后面（真实库里分叉通常比父新）也不能被收进父的子树里
   const after = nestSessions(
@@ -234,7 +234,7 @@ test('缩进：级数封顶（更深的链条按最后一级算，别把标题�
   ])
 })
 
-test('能不能单独勾：只有"子代理 + 父会话在库里"才不能（判据与宿主那几条路同源）', () => {
+test('能不能单独勾：只有"子智能体 + 父会话在库里"才不能（判据与宿主那几条路同源）', () => {
   const parent = link('p', undefined)
   const child = link('c', 'p')
   const grand = link('g', 'c')
@@ -242,10 +242,10 @@ test('能不能单独勾：只有"子代理 + 父会话在库里"才不能（判
   const fork = forkLink('f', 'p')
   const library = new Map([parent, child, grand, orphan, fork].map((session) => [session.id, session]))
 
-  assert.equal(lockedParentOf(child, library)?.id, 'p', '子代理要跟着父会话，不能单独勾')
+  assert.equal(lockedParentOf(child, library)?.id, 'p', '子智能体要跟着父会话，不能单独勾')
   assert.equal(lockedParentOf(grand, library)?.id, 'c', '隔一层也一样（父是它那一级的父）')
   assert.equal(lockedParentOf(parent, library), undefined, '普通会话照旧能单独勾')
   assert.equal(lockedParentOf(orphan, library), undefined, '父会话不在库里的孤儿没有可跟随的会话')
-  assert.equal(lockedParentOf(fork, library), undefined, '分叉不是子代理，照旧能单独勾')
+  assert.equal(lockedParentOf(fork, library), undefined, '分叉不是子智能体，照旧能单独勾')
   assert.equal(lockedParentOf(child, new Map()), undefined, '库是空的（父不在里面）时也不能把它锁死')
 })

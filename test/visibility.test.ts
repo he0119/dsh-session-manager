@@ -1,14 +1,14 @@
 // 侧边栏可见性：哪三类会话外壳不显示，以及"宿主说它空白吗"从哪读。
 //
 // 这条判据在真实库里错过一次：迁移面板的「未分组」报 4 条，而外壳侧边栏那一组只显示 1 条。差额是三
-// 条不同的隐藏理由（子代理 597.6KB 那条、两条只有 seed 事件的空白会话，其中一条还已归档），而面板与
+// 条不同的隐藏理由（子智能体 597.6KB 那条、两条只有 seed 事件的空白会话，其中一条还已归档），而面板与
 // 侧边栏当时各算各的。这里把判据与它的三个输入逐个钉死：
-//   - `hiddenReason()` 的**顺序**（宿主的顺序：先子代理、再空白、最后归档）；
+//   - `hiddenReason()` 的**顺序**（宿主的顺序：先子智能体、再空白、最后归档）；
 //   - 投影缓存里读到什么（`sessionListMetadata.blank`），读不到/身份对不上时按"会显示"处理；
 //   - `hiddenReasonOf()` 把 header / 注册表 / 缓存三处拼起来的那一步。
 //
 // 外加「未分组」那一条判据（`isUngrouped()`）：它是"谁都没认领 **且** 会显示"的合取，也就是宿主造
-// 「未分组」那一组时用的条件。以前插件在三个地方各答各的（只看"有没有认领"），于是子代理/空白/已归档
+// 「未分组」那一组时用的条件。以前插件在三个地方各答各的（只看"有没有认领"），于是子智能体/空白/已归档
 // 那些侧边栏根本不放进那一组的会话也被标成了「未分组」。
 import assert from 'node:assert/strict'
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
@@ -52,11 +52,11 @@ test('hiddenReason：三条理由按宿主的顺序判，都不成立才是"会�
 })
 
 test('isUngrouped：「谁都没认领」与「侧边栏会显示」两件事同时成立才算', () => {
-  // 不成立的两半各自都要判：认领了就不算，看不见（子代理/空白/已归档）也不算。
+  // 不成立的两半各自都要判：认领了就不算，看不见（子智能体/空白/已归档）也不算。
   assert.equal(isUngrouped({}), true, '没在册且看得见 = 侧边栏「未分组」那一组里的')
   assert.equal(isUngrouped({ owned: false }), true)
   assert.equal(isUngrouped({ owned: true }), false, '被某个工作区认领了就不是未分组')
-  assert.equal(isUngrouped({ origin: 'subagent' }), false, '子代理嵌在父会话下面，侧边栏不把它放进那一组')
+  assert.equal(isUngrouped({ origin: 'subagent' }), false, '子智能体嵌在父会话下面，侧边栏不把它放进那一组')
   assert.equal(isUngrouped({ blank: true }), false, '空白会话默认不显示（只有当前那条临时 New Session 例外，那件事插件看不到）')
   assert.equal(isUngrouped({ archived: true }), false, '已归档在默认归档过滤下不显示')
   assert.equal(isUngrouped({ origin: 'subagent', owned: true }), false)
@@ -188,7 +188,7 @@ test('hiddenReasonOf：header 的 origin、注册表的归档集、缓存里的 
   assert.equal(hiddenReasonOf(subject('session-archived'), { archived: new Set(['session-archived']) }), 'archived')
   assert.equal(hiddenReasonOf(subject('session-archived'), { archived: ['session-archived'] }), 'archived')
   assert.equal(hiddenReasonOf(subject('session-archived'), { archived: ['session-other'] }), undefined)
-  // 子代理优先于归档（宿主先判 origin）
+  // 子智能体优先于归档（宿主先判 origin）
   assert.equal(
     hiddenReasonOf(subject('session-archived', 'subagent'), { archived: ['session-archived'] }),
     'subagent',

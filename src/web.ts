@@ -154,12 +154,12 @@ interface SessionSummary {
   archived: boolean
   /** 宿主判它"一轮都没开始过"（见 visibility.ts）；缓存缺席时按 `false` 处理，与宿主的冷会话口径一致。 */
   blank: boolean
-  /** 日志 header 里的 `origin`（只有子代理会话会写）。 */
+  /** 日志 header 里的 `origin`（只有子智能体会话会写）。 */
   origin?: string
   /**
-   * 日志 header 里的 `parentSession`：这条子代理会话挂在哪条会话下面。
+   * 日志 header 里的 `parentSession`：这条子智能体会话挂在哪条会话下面。
    *
-   * 界面据此把子代理缩进到父会话的下一级（见 client/groups.ts 的 `nestSessions()`）。判据与删除/迁移的
+   * 界面据此把子智能体缩进到父会话的下一级（见 client/groups.ts 的 `nestSessions()`）。判据与删除/迁移的
    * 级联展开是同一个字段——列表里看到的父子关系与"删/搬会带上谁"因此不会各说各话。
    */
   parentSession?: string
@@ -257,9 +257,9 @@ function loadRegistry(
 export const scanLibrary = scanAll
 
 /**
- * 这次点名的会话里有没有"单独的子代理"（父会话还在库里、又不会被一起带上），有就给出拒绝文案。
+ * 这次点名的会话里有没有"单独的子智能体"（父会话还在库里、又不会被一起带上），有就给出拒绝文案。
  *
- * 子代理跟着父会话走（见 family.ts）：单独归档 / 导出它，要么在父会话的 `subagent/catalog` 里留下
+ * 子智能体跟着父会话走（见 family.ts）：单独归档 / 导出它，要么在父会话的 `subagent/catalog` 里留下
  * 一条指着不存在会话的条目，要么打出一个父会话不在里面的包。所以这几条路都直接拒，并指名该点谁。
  * 删除那条路在自己的编排里做同一件事（文案在 remove.ts，多一条父会话标题）。
  */
@@ -286,13 +286,13 @@ function loneSubagentError(
               files: parent.files.map((file) => ({ path: file.path, version: file.version })),
             }) ?? parent.title)
       const owner = title === undefined || title.trim() === '' ? item.parentId : `${title.trim()}（${item.parentId}）`
-      return `session ${item.id} 是子代理会话（它跟着父会话走）：请改点名它的父会话 ${owner}`
+      return `session ${item.id} 是子智能体会话（它跟着父会话走）：请改点名它的父会话 ${owner}`
     })
     .join('；')
 }
 
 /**
- * 点名的那批 id → 实际要动手的那批：点名的在前，随后是各自跟来的子代理（`familyOf()`）。
+ * 点名的那批 id → 实际要动手的那批：点名的在前，随后是各自跟来的子智能体（`familyOf()`）。
  *
  * 库里找不到的 id 原样留着（调用方照旧逐条报"不在库里"，不静默少做一件事）。
  */
@@ -312,7 +312,7 @@ function withSubagents(all: readonly DiscoveredSession[], ids: readonly string[]
  *
  * `ungrouped` = 这条会话在外壳侧边栏里落在「未分组」那一组里（判据与理由见 visibility.ts 的
  * `isUngrouped()`）。行上的标签、会话页那枚筛选芯片、迁移页那个来源都读它——**不再**发"有没有工作区
- * 认领"这个中间事实：以前那三处各自拿它去推「未分组」，于是子代理/空白/已归档这些侧边栏根本不放进
+ * 认领"这个中间事实：以前那三处各自拿它去推「未分组」，于是子智能体/空白/已归档这些侧边栏根本不放进
  * 那一组的会话也被标成了「未分组」。
  *
  * "有没有主"那一半读的是 `accounted`（`accounting.ts` 算好的**认领**，不是注册表里的登记原样）：
@@ -482,7 +482,7 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
       sendJson(res, 404, { error: `这些会话不在库里：${missing.join(', ')}` })
       return
     }
-    // 子代理不单独打包：它跟着父会话进包，否则包里那条 catalog 会指向一个包内不存在的会话。
+    // 子智能体不单独打包：它跟着父会话进包，否则包里那条 catalog 会指向一个包内不存在的会话。
     const lone = loneSubagentError(all, named, resolveTitle)
     if (lone !== undefined) {
       sendJson(res, 400, { error: lone })
@@ -862,7 +862,7 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
       return
     }
     const archived = fields['archived'] !== false
-    // 子代理不单独动：勾父会话时它跟着一起归档 / 取消归档（族是一个单位，见 family.ts）。
+    // 子智能体不单独动：勾父会话时它跟着一起归档 / 取消归档（族是一个单位，见 family.ts）。
     const all = scanLibrary(paths.sessionsRoot, decodeAll)
     const lone = loneSubagentError(all, ids, resolveTitle)
     if (lone !== undefined) {

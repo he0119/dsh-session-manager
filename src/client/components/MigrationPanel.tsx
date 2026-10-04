@@ -248,7 +248,7 @@ export function MigrationPanel({ t = fallback, state, reload, directory }: Panel
   /**
    * 筛选：这一页**只给搜索框**，不给类别芯片。
    *
-   * 列表里那些本来就是"侧边栏看得见的候选"（`migrationMatching` 已经排掉了隐藏会话），子代理 / 空白 /
+   * 列表里那些本来就是"侧边栏看得见的候选"（`migrationMatching` 已经排掉了隐藏会话），子智能体 / 空白 /
    * 已归档三类在这一页永远是 0——摆出来只会让人以为筛选坏了。搜索按标题或 id 找那几条要搬的。
    */
   const filter = useSessionFilter(matching)
@@ -724,7 +724,7 @@ export function MigrationPanel({ t = fallback, state, reload, directory }: Panel
                   bytes: formatBytes(preview.bytes),
                 })}
               </p>
-              {/* 级联带进来的子代理要说明白：勾的是一条父会话，清单里却多出几条没勾过的。 */}
+              {/* 级联带进来的子智能体要说明白：勾的是一条父会话，清单里却多出几条没勾过的。 */}
               {preview.cascaded > 0 && <p className="dsm-hint">{t('migrateFamily', { count: preview.cascaded })}</p>}
               <p className="dsm-hint">
                 {preview.unowned

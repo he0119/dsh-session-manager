@@ -1,7 +1,7 @@
-// 迁移候选与"外壳侧边栏看得见什么"对齐：子代理、空白、已归档的会话一个都不进候选。
+// 迁移候选与"外壳侧边栏看得见什么"对齐：子智能体、空白、已归档的会话一个都不进候选。
 //
 // 这条口径来自一次真实的账对不上：迁移面板的「未分组」报 4 条，外壳侧边栏那一组只显示 1 条。四条里
-// 三条是侧边栏不显示的（一条子代理会话、两条只有 seed 事件的空白会话，其中一条还已归档），而面板
+// 三条是侧边栏不显示的（一条子智能体会话、两条只有 seed 事件的空白会话，其中一条还已归档），而面板
 // 照旧把它们算进候选与条数。现在候选由 `src/visibility.ts` 一条判据决定，界面与计划层读同一份结论。
 //
 // 这里用 `previewMigration()`（而不是 `buildRelocationPlan()`）跑：空白判据的默认读取器是**编排层**
@@ -34,8 +34,8 @@ interface Sandbox {
 
 /**
  * 沙箱：源目录 source 下住着四条会话，其中三条外壳侧边栏不显示。
- *   - `session-visible`：在册、非子代理、非空白 → 唯一该进候选的那条；
- *   - `session-subagent`：header 写着 `origin: "subagent"`（子代理会话嵌在父会话下面）；
+ *   - `session-visible`：在册、非子智能体、非空白 → 唯一该进候选的那条；
+ *   - `session-subagent`：header 写着 `origin: "subagent"`（子智能体会话嵌在父会话下面）；
  *   - `session-blank`：投影缓存里 `sessionListMetadata.blank = true`（一轮都没开始过）；
  *   - `session-archived`：在册，但 id 在注册表的归档集里。
  */
@@ -87,7 +87,7 @@ function makeSandbox(name: string): Sandbox {
   const blankAt = write('session-blank')
   write('session-archived')
 
-  // 投影缓存：空白那条写 blank: true；子代理那条也写一份（不是空白），证明"子代理"这条理由来自 header。
+  // 投影缓存：空白那条写 blank: true；子智能体那条也写一份（不是空白），证明"子智能体"这条理由来自 header。
   writeFileSync(
     join(cacheDir, 'session-blank.json'),
     JSON.stringify({
@@ -138,18 +138,18 @@ function deps(sandbox: Sandbox): MigrateDeps {
   }
 }
 
-test('目录来源：子代理 / 空白 / 已归档的会话都不进候选，只剩侧边栏看得见的那条', () => {
+test('目录来源：子智能体 / 空白 / 已归档的会话都不进候选，只剩侧边栏看得见的那条', () => {
   const sandbox = makeSandbox('hidden-dir-source')
   const preview = previewMigration(deps(sandbox), { from: sandbox.source, to: sandbox.target })
   assert.equal(preview.ok, true, preview.problems.join('; '))
   // 候选（用户点得到、侧边栏也看得见的那些）只有一条：这里是"界面给的勾选面"。
   assert.deepEqual(preview.sessions.filter((s) => s.via === undefined).map((s) => s.id), ['session-visible'])
-  // 但计划里还有一条：`session-subagent` 是 `session-visible` 的子代理，**跟着父会话一起搬**——
+  // 但计划里还有一条：`session-subagent` 是 `session-visible` 的子智能体，**跟着父会话一起搬**——
   // 它不是候选，是族的一部分（判据与顺序见 src/family.ts）。空白与已归档那两条没有父会话，一个都不跟。
   assert.deepEqual(preview.sessions.map((s) => s.id), ['session-visible', 'session-subagent'])
   assert.equal(preview.cascaded, 1)
   assert.deepEqual(preview.sessions[1]?.via, { id: 'session-visible' })
-  assert.equal(preview.sessions[1]?.registered, false, '子代理从来不在册，跟着搬也不改变成员资格')
+  assert.equal(preview.sessions[1]?.registered, false, '子智能体从来不在册，跟着搬也不改变成员资格')
   // 目标项目目录名由 cwd 推出，夹具里两个目录不撞 key
   assert.notEqual(projectKey(sandbox.source), projectKey(sandbox.target))
 })
@@ -157,7 +157,7 @@ test('目录来源：子代理 / 空白 / 已归档的会话都不进候选，�
 test('未分组来源：同一个库、同一条判据，空洞的只剩"看得见且没人认领"的', () => {
   const sandbox = makeSandbox('hidden-unowned-source')
   const preview = previewMigration(deps(sandbox), { unowned: true, to: sandbox.target })
-  // 没人认领的三条里，子代理与空白都被挡掉；什么都没剩下，于是计划如实报"没有可迁移的会话"。
+  // 没人认领的三条里，子智能体与空白都被挡掉；什么都没剩下，于是计划如实报"没有可迁移的会话"。
   assert.deepEqual(preview.sessions.map((s) => s.id), [])
   assert.deepEqual(preview.problems, ['no sessions selected for migration'])
 })
@@ -170,7 +170,7 @@ test('点名叫一条侧边栏不显示的会话：报的是"它被隐藏了"，
     sessionIds: ['session-subagent'],
   })
   assert.equal(preview.ok, false)
-  // 子代理那类给的是**下一步**而不是"我不搬它"：点名它自己不会把它搬走（那是向上的牵连），
+  // 子智能体那类给的是**下一步**而不是"我不搬它"：点名它自己不会把它搬走（那是向上的牵连），
   // 该点名的是它的父会话——所以这句话里带着父会话的 id。
   assert.deepEqual(preview.problems, [
     'session session-subagent is a subagent session (it follows its parent) — migrate its parent session-visible instead',
@@ -204,7 +204,7 @@ test('投影缓存缺席（没挂那个域的老宿主）：不凭空判空白�
   // 从候选里悄悄拿掉。
   rmSync(join(sandbox.base, 'storages', 'session_projcache'), { recursive: true, force: true })
   const preview = previewMigration(deps(sandbox), { from: sandbox.source, to: sandbox.target })
-  // 只剩"归档"与"子代理"两条理由还在起作用：空白那条被放回候选（它与 `session-subagent` 一起，
+  // 只剩"归档"与"子智能体"两条理由还在起作用：空白那条被放回候选（它与 `session-subagent` 一起，
   // 后者是跟着 `session-visible` 进来的族成员）。
   assert.deepEqual(preview.sessions.map((s) => s.id).sort(), ['session-blank', 'session-subagent', 'session-visible'])
   assert.deepEqual(

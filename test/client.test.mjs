@@ -787,7 +787,7 @@ test('客户端产物：组头只摆名字，身份与本机路径在悬浮提�
 
 // ---- 「会话」页（逐条归档 / 删除）----
 //
-// 这一页的存在理由就是"侧边栏里点不到的那些会话"（子代理 / 空白 / 已归档），所以它的验收点有两个：
+// 这一页的存在理由就是"侧边栏里点不到的那些会话"（子智能体 / 空白 / 已归档），所以它的验收点有两个：
 // 三类隐藏理由都摆在行上，以及归档入口遇不到宿主能力时如实禁用（而不是留一个点了报错的按钮）。
 //
 // 断言走 `recorded`（假 createElement 记下的**全部**元素）而不是走树：分页组件的根是 Fragment，
@@ -801,8 +801,8 @@ test('客户端产物：「会话」页把侧边栏看不见的那三类标出�
     archiveAvailable: true,
     sessions: [
       { id: 's-1', cwd: '/home/u/dev/alpha', createdAt: 5, dir: '/home/u/dev/alpha', bytes: 2048, files: [], ungrouped: false },
-      // 子代理会话在 /state 里带**三个**字段：origin 是 header 里的事实，hidden 是宿主先判的理由，
-      // ungrouped 是"侧边栏会不会把它放进「未分组」"——子代理嵌在父会话下面，答案是否。
+      // 子智能体会话在 /state 里带**三个**字段：origin 是 header 里的事实，hidden 是宿主先判的理由，
+      // ungrouped 是"侧边栏会不会把它放进「未分组」"——子智能体嵌在父会话下面，答案是否。
       { id: 's-2', cwd: '/home/u/dev/alpha', createdAt: 4, dir: '/home/u/dev/alpha', bytes: 1024, files: [], origin: 'subagent', hidden: 'subagent', ungrouped: false },
       { id: 's-3', cwd: '/home/u/dev/alpha', createdAt: 3, dir: '/home/u/dev/alpha', bytes: 900, files: [], blank: true, hidden: 'blank', ungrouped: false },
       { id: 's-4', cwd: '/home/u/dev/beta', createdAt: 2, dir: '/home/u/dev/beta', bytes: 512, files: [], archived: true, hidden: 'archived', ungrouped: false },
@@ -851,12 +851,12 @@ test('客户端产物：「会话」页把侧边栏看不见的那三类标出�
     (child) => child !== null && typeof child === 'object',
   )
   assert.equal(cells.length, 5, '行里不再有归属那一列（勾选框 / 标记 / 标题 / 字节 / 时间）')
-  // 子代理**不是**「未分组」：它确实没在册，但侧边栏把它嵌在父会话下面，从来不放进那一组。
+  // 子智能体**不是**「未分组」：它确实没在册，但侧边栏把它嵌在父会话下面，从来不放进那一组。
   // 这条以前是反的（判据只看"有没有认领"），所以两行都钉住。
   assert.deepEqual(
     rowParts(manageRows.find((row) => strings(row).includes('s-2'))).tags,
     ['tagSubagent'],
-    '子代理只挂「子代理」——它不在侧边栏的「未分组」那一组里',
+    '子智能体只挂「子智能体」——它不在侧边栏的「未分组」那一组里',
   )
   assert.deepEqual(
     rowParts(manageRows.find((row) => strings(row).includes('s-5'))).tags,
@@ -872,7 +872,7 @@ test('客户端产物：「会话」页把侧边栏看不见的那三类标出�
   assert.ok(!text.includes('manageArchiveUnavailable'), '宿主有归档能力时不该显示"改不了归档"那句')
 })
 
-test('客户端产物：子代理缩进到父会话的下一级（同一组 / 父在别的组 / 父被筛掉 / 分叉不缩进）', { skip }, () => {
+test('客户端产物：子智能体缩进到父会话的下一级（同一组 / 父在别的组 / 父被筛掉 / 分叉不缩进）', { skip }, () => {
   // 列表里的父子关系与删除 / 迁移的级联展开是同一条边（`parentSession` + `origin === "subagent"`）。
   // 缩进错了不会抛错、不会崩，只会让"删父会话会带上谁"与眼睛看到的对不上，所以按行核顺序与缩进类名。
   const sessions = [
@@ -883,7 +883,7 @@ test('客户端产物：子代理缩进到父会话的下一级（同一组 / �
     { id: 'lone', cwd: '/home/u/dev/alpha', createdAt: 2, dir: '/home/u/dev/alpha', bytes: 400, files: [] },
     // 分叉（`sessions.fork()`）：有父指针、没有 origin，是自洽的普通会话——不缩进、也不挂标签
     { id: 'f1', cwd: '/home/u/dev/alpha', createdAt: 1, dir: '/home/u/dev/alpha', bytes: 400, files: [], parentSession: 'p1' },
-    // beta 组：这条子代理的父会话在 alpha（父被单独迁走过一次就会长成这样）
+    // beta 组：这条子智能体的父会话在 alpha（父被单独迁走过一次就会长成这样）
     { id: 'x1', cwd: '/home/u/dev/beta', createdAt: 1, dir: '/home/u/dev/beta', bytes: 500, files: [], origin: 'subagent', hidden: 'subagent', parentSession: 'p1' },
   ]
   const state = {
@@ -922,11 +922,11 @@ test('客户端产物：子代理缩进到父会话的下一级（同一组 / �
     { label: 'f1', tags: [], nest: '0' },
     { label: 'x1', tags: ['tagSubagent', 'tagParentElsewhere'], nest: '1' },
   ])
-  // 缩进只改画法：组头报的条数还是这一组有几条会话（子代理照样算）
+  // 缩进只改画法：组头报的条数还是这一组有几条会话（子智能体照样算）
   assert.ok(text.some((item) => String(item).includes('sessionsInDir:{"count":5}')), 'alpha 组 5 条（分叉也算一条）')
   assert.ok(text.some((item) => String(item).includes('sessionsInDir:{"count":1}')), 'beta 组 1 条')
 
-  // ② 只筛「子代理」：父会话被筛走，子代理按普通行画（不凭空多一级）；孙的父还在，于是只它缩进
+  // ② 只筛「子智能体」：父会话被筛走，子智能体按普通行画（不凭空多一级）；孙的父还在，于是只它缩进
   const second = render(mount({ state, panel: 'manage', arrays: [[], ['subagent']] }))
   assert.deepEqual(rowsOf(second.recorded), [
     { label: 'c1', tags: ['tagSubagent'], nest: '0' },
@@ -935,9 +935,9 @@ test('客户端产物：子代理缩进到父会话的下一级（同一组 / �
   ])
 })
 
-test('客户端产物：子代理行的勾选框禁用（跟着父会话走），全选也只勾能单独勾的那些', { skip }, () => {
+test('客户端产物：子智能体行的勾选框禁用（跟着父会话走），全选也只勾能单独勾的那些', { skip }, () => {
   // 能勾的集合必须与"单独操作不会被拒的集合"一致（宿主那几条路的判据见 family.ts 的 loneSubagents）：
-  // 否则用户只能靠"点下去被拒"发现自己点错了。分叉与孤儿都能单独勾——分叉不是子代理，孤儿没有可跟随的会话。
+  // 否则用户只能靠"点下去被拒"发现自己点错了。分叉与孤儿都能单独勾——分叉不是子智能体，孤儿没有可跟随的会话。
   const sessions = [
     { id: 'p1', title: '父会话', cwd: '/home/u/dev/alpha', createdAt: 5, dir: '/home/u/dev/alpha', bytes: 100, files: [] },
     { id: 'c1', cwd: '/home/u/dev/alpha', createdAt: 4, dir: '/home/u/dev/alpha', bytes: 200, files: [], origin: 'subagent', hidden: 'subagent', parentSession: 'p1' },
@@ -966,10 +966,10 @@ test('客户端产物：子代理行的勾选框禁用（跟着父会话走）�
     assert.ok(row !== undefined, `${label} 这一行要在`)
     return elementsOf(row).find((element) => element.type === 'input')?.props ?? {}
   }
-  assert.equal(inputOf('c1').disabled, true, '子代理不能单独勾')
+  assert.equal(inputOf('c1').disabled, true, '子智能体不能单独勾')
   assert.equal(inputOf('c1').title, 'lockedSubagentTip:{"name":"父会话"}', '提示里写明该勾哪一条')
   assert.notEqual(inputOf('父会话').disabled, true, '父会话能勾（它就是那个"上面那条"）')
-  assert.notEqual(inputOf('f1').disabled, true, '分叉不是子代理，照旧能单独勾')
+  assert.notEqual(inputOf('f1').disabled, true, '分叉不是子智能体，照旧能单独勾')
   assert.notEqual(inputOf('o1').disabled, true, '孤儿没有可跟随的会话，照旧能单独勾')
 
   // 筛到只剩"不能单独勾"的那些：一个能勾的都没有，「全选」要真的禁用（把孤儿摘掉，它能单独勾）
@@ -978,10 +978,10 @@ test('客户端产物：子代理行的勾选框禁用（跟着父会话走）�
   const selectAll = second.recorded.find(
     (element) => element.type === 'button' && strings(element).includes('selectAllSessions'),
   )
-  assert.equal(selectAll?.props?.['disabled'], true, '列出来的全是不能单独勾的子代理时，「全选」禁用')
+  assert.equal(selectAll?.props?.['disabled'], true, '列出来的全是不能单独勾的子智能体时，「全选」禁用')
 })
 
-test('客户端产物：导出页也把子代理缩进到父会话的下一级（两个分页各接一遍线）', { skip }, () => {
+test('客户端产物：导出页也把子智能体缩进到父会话的下一级（两个分页各接一遍线）', { skip }, () => {
   // 缩进这套接了两遍线（「会话」页在 ManagePanel、传输页在 TransferPanel），所以两处各钉一次。
   const state = {
     sessionsRoot: '/home/u/.dsh/sessions',
@@ -1071,8 +1071,8 @@ test('客户端产物：「会话」页的筛选条把不匹配的行筛掉，�
   const counts = recorded
     .filter((node) => String(node.props?.className) === 'dsm-filterCount')
     .map((node) => String(node.props.children))
-  // 「未分组」只有 1 条（s-live）：s-sub（子代理）与两条空白都不在侧边栏那一组里——这正是这次的改动
-  assert.deepEqual(counts, ['1', '2', '1', '1', '1'], '子代理 1 / 空白 2 / 已归档 1 / 未分组 1 / 活动中 1')
+  // 「未分组」只有 1 条（s-live）：s-sub（子智能体）与两条空白都不在侧边栏那一组里——这正是这次的改动
+  assert.deepEqual(counts, ['1', '2', '1', '1', '1'], '子智能体 1 / 空白 2 / 已归档 1 / 未分组 1 / 活动中 1')
   assert.equal(chip('filterAll')?.props?.['aria-pressed'], false, '筛着的时候「全部」不是选中态')
   assert.equal(chip('tagBlank')?.props?.['aria-pressed'], true, '种进去的那一类要显示成选中')
   assert.equal(chip('tagSubagent')?.props?.['aria-pressed'], false, '没勾的那几类不是选中态')
@@ -1197,7 +1197,7 @@ test('客户端产物：导出页也接了同一套筛选条，筛空的组整�
       .map((node) => String(node.props.children))
       .join(','),
     '1,1,0,1,0',
-    '子代理 1 / 空白 1 / 已归档 0 / 未分组 1（b-1）/ 活动中 0',
+    '子智能体 1 / 空白 1 / 已归档 0 / 未分组 1（b-1）/ 活动中 0',
   )
   assert.ok(text.includes('shownCount:{"shown":1,"total":4}'), '筛过之后报 显示 1 / 4 条')
 
@@ -1244,7 +1244,7 @@ test('客户端产物：迁移弹窗——计划逐条列出会话，跟着父�
     unowned: false,
     sourceProjectDirs: ['/home/u/.dsh/sessions/alpha'],
     sessions: [
-      // 点名的父会话 + 跟着走的子代理：`via` 指回点名的那个祖先
+      // 点名的父会话 + 跟着走的子智能体：`via` 指回点名的那个祖先
       { id: 's-1', createdAt: 3, registered: true, alreadyAtTarget: false, sourceDir: '/a/s-1', targetDir: '/b/s-1', files: 1, bytes: 100 },
       { id: 's-9', createdAt: 2, registered: false, alreadyAtTarget: false, sourceDir: '/a/s-9', targetDir: '/b/s-9', files: 1, bytes: 100, via: { id: 's-1' } },
     ].slice(0, cascaded === 0 ? 1 : 2),
@@ -1284,7 +1284,7 @@ test('客户端产物：迁移弹窗——计划逐条列出会话，跟着父�
   assert.ok(withFamily.text.includes('migrateTitle'), '迁移页本体渲染出来了')
   assert.ok(
     withFamily.text.some((item) => String(item) === 'migrateFamily:{"count":1}'),
-    '有一条子代理跟着走时，弹窗里要说明它是跟着父会话进来的',
+    '有一条子智能体跟着走时，弹窗里要说明它是跟着父会话进来的',
   )
   // 弹窗本体：标题、逐条清单（含"随父迁"那枚标签）、底部那对按钮
   const dialogs = withFamily.mounted.recorded.filter((node) => node.props?.role === 'dialog')
@@ -1311,7 +1311,7 @@ test('客户端产物：迁移弹窗——计划逐条列出会话，跟着父�
     '底部是「取消 / 确认迁移」，确认那个是唯一的落地入口',
   )
 
-  // 没有子代理跟随时那句话不该出现（否则每次迁移都多一行噪音）
+  // 没有子智能体跟随时那句话不该出现（否则每次迁移都多一行噪音）
   const plain = withPlan(0)
   assert.ok(plain.text.some((item) => String(item).startsWith('migrateSummary')), '弹窗正文照旧渲染')
   assert.equal(plain.text.some((item) => String(item).startsWith('migrateFamily')), false)
@@ -1495,7 +1495,7 @@ test('客户端产物：一个组都没有时不摆折叠工具栏', { skip }, (
     ],
     workspaces: [],
   }
-  // 筛「子代理」（一条都没有）→ 组一个都不剩，收无可收
+  // 筛「子智能体」（一条都没有）→ 组一个都不剩，收无可收
   const { registrations, recorded } = mount({ state, panel: 'transfer', arrays: [[], ['subagent'], []] })
   strings(registrations[0].component(registrations[0].registration.inject()))
   assert.equal(recorded.filter((node) => String(node.props?.className) === 'dsm-groupTools').length, 0)
@@ -1598,7 +1598,7 @@ test('客户端产物：「说明」页把分类词条、每页做什么与边�
   ]) {
     assert.ok(text.includes(key), `常见疑问缺少「${key}」`)
   }
-  // 四张卡片：会碰什么盘那节撤了，独有那三条（备份与回滚、子代理跟着父会话走、包里有什么）并入常见疑问
+  // 四张卡片：会碰什么盘那节撤了，独有那三条（备份与回滚、子智能体跟着父会话走、包里有什么）并入常见疑问
   assert.ok(!text.includes('helpDiskTitle'), '说明页不该再有单独的一张"会碰什么盘"')
   // 文案本身是纯文本（不能摆 Markdown 星号）由上面那条字典检查盯着：这里渲染的是键名，看不出值
   // 说明页不该长成一个"什么都往里塞"的垃圾桶：正文段落本身就是词条，没有额外的大段散文
@@ -2110,7 +2110,7 @@ test('客户端产物：会拉取那张表分得清「拉一条新的」与「�
 
 test('客户端产物：同步三张表挂会话列表那套类型标签（本机没有那条就不挂）', { skip }, () => {
   /*
-   * 计划行只带 id、标题与体积，类型（空白 / 子代理 / 已归档 / 活着的）得从 `/state` 那份会话清单取。
+   * 计划行只带 id、标题与体积，类型（空白 / 子智能体 / 已归档 / 活着的）得从 `/state` 那份会话清单取。
    * 判据与会话列表**同一套**（`sessionTags()` → `sessionFilter.hasAttribute()`），标签键与说明键也
    * 是同一套——两处各算一份的话，同一条会话在两个页面上会被挂上不同的标签。
    *
@@ -2202,7 +2202,7 @@ test('客户端产物：同步三张表挂会话列表那套类型标签（本�
   const text = strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
 
   // 与会话列表同一套键与同一套说明（`ATTRIBUTE_TAGS`），文案本身由字典给。
-  assert.ok(text.includes('tagSubagent'), '子代理那条挂「子代理」')
+  assert.ok(text.includes('tagSubagent'), '子智能体那条挂「子智能体」')
   assert.ok(text.includes('tagArchived'), '已归档那条挂「已归档」')
   assert.ok(text.includes('tagLive'), '活着的会话也标出来（覆盖它得先关掉，理由在那一刻才讲清）')
   assert.ok(

@@ -39,7 +39,7 @@ test('五类判据：各自只看自己那个字段，缺省一律为假', () =>
   // 缺省＝不在那一组里；只有宿主说在才算。
   assert.equal(matchesFilter(s('a'), 'unowned'), false)
   assert.equal(matchesFilter(s('a', { ungrouped: true }), 'unowned'), true)
-  // 子代理即使没在册也不是「未分组」——侧边栏把它嵌在父会话下面，从来不放进那一组。
+  // 子智能体即使没在册也不是「未分组」——侧边栏把它嵌在父会话下面，从来不放进那一组。
   // 这条以前是反的（只看"有没有工作区认领"），所以钉在这里。
   assert.equal(matchesFilter(s('a', { origin: 'subagent', ungrouped: false }), 'unowned'), false)
   assert.equal(matchesFilter(s('a', { origin: 'subagent', ungrouped: false }), 'subagent'), true)
@@ -94,7 +94,7 @@ test('每一类各有多少条：对整个库数，且一条会话可以同时�
     s('owned', { archived: true }),
     s('stray', { ungrouped: true, archived: true }),
   ]
-  // 「未分组」只有 2 条（`plain` 与 `stray`）：`sub`（子代理）与 `both`（空白+已归档）都不在侧边栏那一组里
+  // 「未分组」只有 2 条（`plain` 与 `stray`）：`sub`（子智能体）与 `both`（空白+已归档）都不在侧边栏那一组里
   assert.deepEqual(filterCounts(list), { subagent: 1, blank: 1, archived: 3, unowned: 2, live: 1 })
   assert.deepEqual(filterCounts([]), { subagent: 0, blank: 0, archived: 0, unowned: 0, live: 0 })
 })

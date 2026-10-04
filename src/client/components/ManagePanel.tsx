@@ -6,8 +6,8 @@
  * （[sessionList.tsx](./sessionList.tsx)），所以行、标签、条数、筛选条不会各说各话。
  *
  * 三个刻意的设计：
- *   - **全库都在这里**，包括外壳侧边栏不显示的子代理 / 空白 / 已归档会话：这一页恰恰是用来收拾它们的
- *     （侧边栏里根本点不到），所以它们以标签的形式标出来，而不是被藏掉；筛选条（子代理 / 空白 /
+ *   - **全库都在这里**，包括外壳侧边栏不显示的子智能体 / 空白 / 已归档会话：这一页恰恰是用来收拾它们的
+ *     （侧边栏里根本点不到），所以它们以标签的形式标出来，而不是被藏掉；筛选条（子智能体 / 空白 /
  *     已归档 / 未分组 / 活动中，多选＝任一命中，外加标题搜索）是同一件事的"只看这几类"，判据在
  *     [sessionFilter.ts](./sessionFilter.ts)；
  *   - **列表与「传输」页同形**：按目录分组、组头可折叠、组头那一下就是整组勾选（"把这个旧项目的会话
@@ -96,7 +96,7 @@ export function ManagePanel({ t = fallback, state, reload }: PanelShare): React.
   const picked = React.useMemo(() => selected.filter((id) => known.has(id)), [selected, known])
 
   /**
-   * 这一行能不能单独勾：子代理跟着父会话走（父会话还在库里时就只能跟着它）。
+   * 这一行能不能单独勾：子智能体跟着父会话走（父会话还在库里时就只能跟着它）。
    *
    * 判据在 `groups.ts` 的 `lockedParentOf()` 里，与宿主那几条路（remove.ts、web.ts 的归档与导出）
    * 同源——能勾的集合就是"单独操作不会被拒的集合"。
@@ -249,7 +249,7 @@ export function ManagePanel({ t = fallback, state, reload }: PanelShare): React.
             type="button"
             className="dsm-button"
             // 筛过之后再点「全选」，要的是"这几类都选上"，不是"把看不见的也选上"；不能单独勾的那些
-            // 也不进来：子代理跟着父会话走，勾父会话就等于勾了它。
+            // 也不进来：子智能体跟着父会话走，勾父会话就等于勾了它。
             onClick={() => setSelected(listed.filter(selectable).map((session) => session.id))}
             disabled={listed.filter(selectable).length === 0}
           >

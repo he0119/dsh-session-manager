@@ -226,7 +226,7 @@ test('GET /state：列出会话与工作区，带上「未分组」的结论', a
   assert.equal(body['pickerKind'], null)
 })
 
-test('GET /state：子代理 / 空白 / 已归档即使没在册也不是「未分组」（侧边栏从不把它们放进那一组）', async () => {
+test('GET /state：子智能体 / 空白 / 已归档即使没在册也不是「未分组」（侧边栏从不把它们放进那一组）', async () => {
   const sandbox = makeSandbox('web-state-ungrouped')
   writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000)
   writeSession(sandbox.sessionsRoot, 'session-child', CWD_A, 1001, { origin: 'subagent', parentSession: 'session-a' })
@@ -251,9 +251,9 @@ test('GET /state：子代理 / 空白 / 已归档即使没在册也不是「未�
     ['session-stray'],
   )
   assert.equal(byId.get('session-a')!['ungrouped'], false, '在册的不算')
-  assert.equal(byId.get('session-child')!['ungrouped'], false, '子代理嵌在父会话下面，不在那一组里')
+  assert.equal(byId.get('session-child')!['ungrouped'], false, '子智能体嵌在父会话下面，不在那一组里')
   assert.equal(byId.get('session-child')!['hidden'], 'subagent')
-  // 界面靠这个字段把子代理缩进到父会话的下一级（判据与删除 / 迁移的级联展开是同一个 header 字段）
+  // 界面靠这个字段把子智能体缩进到父会话的下一级（判据与删除 / 迁移的级联展开是同一个 header 字段）
   assert.equal(byId.get('session-child')!['parentSession'], 'session-a')
   assert.equal('parentSession' in byId.get('session-a')!, false, '普通会话没有这个字段（不是空串）')
   assert.equal(byId.get('session-blank')!['ungrouped'], false, '空白默认不显示')
@@ -398,7 +398,7 @@ test('POST /export：会话不在库里就 404，空选择就 400', async () => 
   assert.equal(badJson.captured.status, 400)
 })
 
-test('POST /export：单独导出子代理被拒；点名父会话时子代理跟着进包，条数报在响应头里', async () => {
+test('POST /export：单独导出子智能体被拒；点名父会话时子智能体跟着进包，条数报在响应头里', async () => {
   const sandbox = makeSandbox('web-export-subagent')
   writeSession(sandbox.sessionsRoot, 'session-parent', CWD_A, 1000, { title: '父会话' })
   writeSession(sandbox.sessionsRoot, 'session-child', CWD_A, 2000, { origin: 'subagent', parentSession: 'session-parent' })
@@ -624,7 +624,7 @@ test('POST /migrate：带 sessionIds 时只搬点名的会话（界面「只选�
   assert.deepEqual(readRegistry(sandbox.registryPath).tables.workspaces['ws-a']?.sessionIds, ['session-a'])
 })
 
-test('POST /migrate：勾中的父会话把子代理一起带走，条数报在 cascaded 里（界面据此说明）', async () => {
+test('POST /migrate：勾中的父会话把子智能体一起带走，条数报在 cascaded 里（界面据此说明）', async () => {
   const sandbox = makeSandbox('web-migrate-family')
   writeSession(sandbox.sessionsRoot, 'session-parent', CWD_A, 1000, { title: '父会话' })
   writeSession(sandbox.sessionsRoot, 'session-child', CWD_A, 1001, { origin: 'subagent', parentSession: 'session-parent' })
@@ -645,10 +645,10 @@ test('POST /migrate：勾中的父会话把子代理一起带走，条数报在 
   const preview = body['preview'] as Record<string, unknown>
   const sessions = preview['sessions'] as Array<Record<string, unknown>>
   assert.deepEqual(sessions.map((s) => s['id']), ['session-parent', 'session-child'])
-  // 界面读的就是这个字段：`cascaded > 0` 才多说一句"其中 N 条是子代理会话"
+  // 界面读的就是这个字段：`cascaded > 0` 才多说一句"其中 N 条是子智能体会话"
   assert.equal(preview['cascaded'], 1)
   // `via` 带着点名那条的标题（有标题时界面用它认人，没有就退到 id）
-  assert.deepEqual(sessions[1]!['via'], { id: 'session-parent', title: '父会话' }, '子代理要带着"是谁把它牵进来的"')
+  assert.deepEqual(sessions[1]!['via'], { id: 'session-parent', title: '父会话' }, '子智能体要带着"是谁把它牵进来的"')
   assert.equal(sessions[1]!['registered'], false)
   // 级联不改变成员资格：只有点名的父会话进目标工作区
   assert.deepEqual((preview['registryChange'] as Record<string, unknown>)['added'], ['session-parent'])
@@ -815,7 +815,7 @@ test('POST /rollback：只认本插件备份根下的目录', async () => {
 test('GET /state：会话行带上"侧边栏为什么不显示"，以及归档能力位', async () => {
   const sandbox = makeSandbox('web-state-visibility')
   writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000)
-  // 子代理会话：header 里带 origin，侧边栏把它嵌在父会话下面
+  // 子智能体会话：header 里带 origin，侧边栏把它嵌在父会话下面
   writeSession(sandbox.sessionsRoot, 'session-sub', CWD_A, 2000, { origin: 'subagent' })
   // 空白会话：宿主投影缓存说它一轮都没开始过
   writeSession(sandbox.sessionsRoot, 'session-blank', CWD_B, 3000)
@@ -836,7 +836,7 @@ test('GET /state：会话行带上"侧边栏为什么不显示"，以及归档�
   assert.equal(rows.get('session-a')!['hidden'], 'archived')
   assert.equal(rows.get('session-a')!['archived'], true)
   assert.equal(rows.get('session-a')!['blank'], false)
-  // 子代理：理由来自 header，先于归档判
+  // 子智能体：理由来自 header，先于归档判
   assert.equal(rows.get('session-sub')!['hidden'], 'subagent')
   assert.equal(rows.get('session-sub')!['origin'], 'subagent')
   // 空白：理由来自宿主投影缓存
@@ -894,10 +894,10 @@ test('POST /delete：预演不写盘、落地先备份再删，二者共用同�
   assert.equal(existsSync(applyBody['backupDir'] as string), true)
 })
 
-test('POST /delete：删父会话时把子代理一起带上，预演里带着出处字段', async () => {
+test('POST /delete：删父会话时把子智能体一起带上，预演里带着出处字段', async () => {
   const sandbox = makeSandbox('web-delete-family')
   writeSession(sandbox.sessionsRoot, 'session-parent', CWD_A, 1000, { title: '父会话' })
-  writeSession(sandbox.sessionsRoot, 'session-child', CWD_A, 2000, { title: '子代理', origin: 'subagent', parentSession: 'session-parent' })
+  writeSession(sandbox.sessionsRoot, 'session-child', CWD_A, 2000, { title: '子智能体', origin: 'subagent', parentSession: 'session-parent' })
 
   const handlers = createApiHandlers(deps(sandbox))
   const { res, captured } = fakeRes()
@@ -914,7 +914,7 @@ test('POST /delete：删父会话时把子代理一起带上，预演里带着�
   assert.equal(entries[0]!['via'], undefined)
   assert.deepEqual(entries[1]!['via'], { id: 'session-parent', title: '父会话' })
   assert.equal(entries[1]!['origin'], 'subagent')
-  assert.match(String(json(captured)['summary']), /其中 1 条是子代理会话/)
+  assert.match(String(json(captured)['summary']), /其中 1 条是子智能体会话/)
 })
 
 test('POST /delete：状态不允许（会话不在库里）用 409 并把完整计划带回来', async () => {
@@ -985,7 +985,7 @@ test('POST /archive：逐条调用宿主服务，部分失败不影响其余，�
   assert.deepEqual(calls[calls.length - 1], { op: 'unarchive', id: 'session-a' })
 })
 
-test('POST /archive：单独归档一条子代理被拒，点名父会话时子代理跟着一起归档', async () => {
+test('POST /archive：单独归档一条子智能体被拒，点名父会话时子智能体跟着一起归档', async () => {
   const sandbox = makeSandbox('web-archive-subagent')
   writeSession(sandbox.sessionsRoot, 'session-parent', CWD_A, 1000, { title: '父会话' })
   writeSession(sandbox.sessionsRoot, 'session-child', CWD_A, 2000, { origin: 'subagent', parentSession: 'session-parent' })
@@ -1008,16 +1008,16 @@ test('POST /archive：单独归档一条子代理被拒，点名父会话时子�
     return captured
   }
 
-  // 子代理跟着父会话走：单独点它一律拒，并指名该点谁（宿主的归档服务一次都不该被调到）
+  // 子智能体跟着父会话走：单独点它一律拒，并指名该点谁（宿主的归档服务一次都不该被调到）
   const lone = await post({ sessionIds: ['session-child'], archived: true })
   assert.equal(lone.status, 400)
   assert.match(
     String(json(lone)['error']),
-    /session-child 是子代理会话（它跟着父会话走）：请改点名它的父会话 父会话（session-parent）/,
+    /session-child 是子智能体会话（它跟着父会话走）：请改点名它的父会话 父会话（session-parent）/,
   )
   assert.deepEqual(calls, [], '被拒的请求一条都不该动')
 
-  // 点名父会话：子代理跟着一起归档（族是一个单位）
+  // 点名父会话：子智能体跟着一起归档（族是一个单位）
   const family = await post({ sessionIds: ['session-parent'], archived: true })
   assert.equal(family.status, 200)
   assert.deepEqual(calls, [
