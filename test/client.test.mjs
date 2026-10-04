@@ -2057,6 +2057,123 @@ test('客户端产物：会拉取那张表分得清「拉一条新的」与「�
   assert.ok(legacyText.includes('syncPullHead:{"count":2}'), '其余照旧画出来')
 })
 
+test('客户端产物：同步三张表挂会话列表那套类型标签（本机没有那条就不挂）', { skip }, () => {
+  /*
+   * 计划行只带 id、标题与体积，类型（空白 / 子代理 / 已归档 / 活着的）得从 `/state` 那份会话清单取。
+   * 判据与会话列表**同一套**（`sessionTags()` → `sessionFilter.hasAttribute()`），标签键与说明键也
+   * 是同一套——两处各算一份的话，同一条会话在两个页面上会被挂上不同的标签。
+   *
+   * 「会拉取」里新建的那些本机还没有，挂不出类型（那是"还没落到本机"，不是"它什么类型都不是"）。
+   */
+  const state = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    sync: { url: 'https://dav.example.com/dsh', machineId: 'robot-a', mappings: 0 },
+    sessions: [
+      {
+        id: 'session-forked',
+        title: '分叉那条',
+        cwd: '/home/u/dev/x',
+        createdAt: 1,
+        dir: '/home/u/.dsh/sessions/x/session-forked',
+        bytes: 300,
+        files: [],
+        origin: 'subagent',
+        parentSession: 'session-a',
+      },
+      {
+        id: 'session-replace',
+        title: '本机这条',
+        cwd: '/home/u/dev/x',
+        createdAt: 2,
+        dir: '/home/u/.dsh/sessions/x/session-replace',
+        bytes: 200,
+        files: [],
+        archived: true,
+        live: true,
+        // 宿主说它"会显示、但谁都没认领"。计划表**不**挂这枚标签（组头已经写着它属于哪个目录）。
+        ungrouped: true,
+      },
+    ],
+    workspaces: [{ id: 'w1', path: '/home/u/dev/x', title: '测试项目', sessionIds: [] }],
+  }
+  const response = {
+    mode: 'plan',
+    remote: { url: 'https://dav.example.com/dsh', machineId: 'robot-a' },
+    plan: {
+      ok: true,
+      problems: [],
+      pull: [
+        {
+          id: 'session-replace',
+          machine: 'robot-b',
+          bytes: 200,
+          action: 'replace',
+          code: 'remote-newer',
+          fromCwd: '/home/b/dev/x',
+          toCwd: '/home/u/dev/x',
+        },
+        {
+          id: 'session-new',
+          machine: 'robot-b',
+          bytes: 100,
+          action: 'create',
+          code: 'missing',
+          fromCwd: '/home/b/dev/x',
+          toCwd: '/home/u/dev/x',
+        },
+      ],
+      push: [
+        { id: 'session-forked', bytes: 300, action: 'update', code: 'local-newer', machine: 'robot-b', cwd: '/home/u/dev/x' },
+      ],
+      blank: [],
+      pullIds: ['session-replace', 'session-new'],
+      pushIds: ['session-forked'],
+      bytesIn: 300,
+      bytesOut: 300,
+      localCount: 2,
+      remoteCount: 2,
+      machines: ['robot-b'],
+    },
+    applied: false,
+    pulled: [],
+    replaced: [],
+    pushed: [],
+    bytesIn: 0,
+    bytesOut: 0,
+    registryWritten: false,
+    indexWritten: false,
+    problems: [],
+    takesEffect: 'immediate',
+  }
+  const mounted = mount({ state, panel: 'sync', nulls: [null, response, 'plan'] })
+  const text = strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
+
+  // 与会话列表同一套键与同一套说明（`ATTRIBUTE_TAGS`），文案本身由字典给。
+  assert.ok(text.includes('tagSubagent'), '子代理那条挂「子代理」')
+  assert.ok(text.includes('tagArchived'), '已归档那条挂「已归档」')
+  assert.ok(text.includes('tagLive'), '活着的会话也标出来（覆盖它得先关掉，理由在那一刻才讲清）')
+  assert.ok(
+    mounted.recorded.some((node) => node.props?.children === 'tagLive' && node.props?.title === 'tagLiveTip'),
+    '标签的说明挂在 title 上（与会话列表同一套）',
+  )
+  // 一条会话能挂几枚挂几枚（已归档 + 活着的两条都真）：本机那两条一共三枚标签，**新建那条一枚都没有**。
+  const typeTags = ['tagSubagent', 'tagBlank', 'tagArchived', 'tagLive']
+  assert.deepEqual(
+    text.filter((item) => typeTags.includes(item)).sort(),
+    ['tagArchived', 'tagLive', 'tagSubagent'],
+    '只有本机已有的那两条挂得上类型：「会拉取」里新建的那条本机还没有',
+  )
+  // 「未分组」不在计划表里挂：组头已经写着这条属于哪个目录。
+  assert.equal(text.includes('ungroupedSource'), false, '计划表不重复挂「未分组」')
+  // 类型标签与名字同占一格（会话列表那套 `.dsm-rowLabel` 排布）。
+  assert.ok(
+    mounted.recorded.some((node) => String(node.props?.className) === 'dsm-rowLabel'),
+    '名字与标签同占一格',
+  )
+})
+
 test('客户端产物：同步预演三张表按项目分组，路径只在组头上说一次', { skip }, () => {
   // 为什么分组：一次整库同步的计划里同一个目录会连着出现十几条，逐行印一遍同样的路径只是把人绕进去，
   // 还从会话名那一列扣宽度。分组键的规则在 src/client/logic/syncGroups.ts（test/syncGroups.test.ts 逐条钉

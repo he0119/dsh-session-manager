@@ -34,6 +34,7 @@ import * as React from 'react'
 import {
   applySync,
   fetchSyncPlan,
+  type SessionSummary,
   type SyncProgressEvent,
   type SyncPullEntry,
   type SyncPushEntry,
@@ -45,7 +46,7 @@ import { WorkspaceIcon } from './icons.tsx'
 import { translateWith, zh, type Translate } from '../logic/locales.ts'
 import { projectLabel, sessionLabel, type SessionLabel } from '../logic/planRows.ts'
 import { ProgressBar } from './ProgressBar.tsx'
-import { formatBytes } from './sessionList.tsx'
+import { formatBytes, sessionTags } from './sessionList.tsx'
 import { SyncConfigForm } from './SyncConfigForm.tsx'
 import { groupSyncRows, syncProjectOf, syncPullTip, type SyncGroup, type SyncSide } from '../logic/syncGroups.ts'
 import type { PanelShare } from '../types.ts'
@@ -216,16 +217,55 @@ function PlanGroupHead({
 }
 
 /**
- * 会话名那一格：显示标题、没有标题才退到 id（`sessionLabel()`），id 与整句说明在悬浮提示里。
+ * 这一行的**会话类型**标签：与会话列表**同一套**判据（`sessionList.sessionTags()` →
+ * `sessionFilter.hasAttribute()`），所以同一条会话在「会话」页与这里挂的标签一模一样——两处各算一套
+ * 的话，用户看到的就是两个不同的"什么是空白 / 子代理"。
+ *
+ * 计划行本身只带 id、标题与体积，类型得从 `/state` 那份会话清单里按 id 取；本机还没有这条会话时
+ * （「会拉取」里新建的那些）取不到，就不挂标签——那是"它还没落到本机"，不是"它什么类型都不是"。
+ *
+ * 不挂「未分组」：计划表按项目目录分组，组头已经写着这条属于哪个目录（同会话页的理由：归属那一格
+ * 已经写着它，不重复挂）。
+ *
+ * @param session `/state` 里那条会话；本机没有就是 `undefined`。
+ * @returns 要挂的标签（字典键 + 说明键），顺序与会话列表一致。
+ */
+function typeTagsOf(session: SessionSummary | undefined): Array<{ key: string; tip: string }> {
+  return session === undefined ? [] : sessionTags(session, { ungrouped: false })
+}
+
+/**
+ * 会话名那一格：显示标题、没有标题才退到 id（`sessionLabel()`），后面跟着会话类型标签，id 与整句说明
+ * 在悬浮提示里。
  *
  * 拉取行的提示还会补上"这条的 cwd 从哪改写到哪"（`syncPullTip()`）——那句话原来占着 cwd 一列，
  * 现在落地的目录已经在组头上，只有真的改写过的行才需要再说一句从哪儿来。
+ *
+ * 名字与标签同占一格用的是会话列表那套 `.dsm-rowLabel`（标签 `flex: none`、名字自己负责省略），
+ * 三张表因此在窄列里也有同一种排布。
  */
-function SessionCell({ label, tip }: { label: SessionLabel; tip: string }): React.ReactElement {
+function SessionCell({
+  label,
+  tip,
+  tags,
+  t,
+}: {
+  label: SessionLabel
+  tip: string
+  tags: Array<{ key: string; tip: string }>
+  t: Translate
+}): React.ReactElement {
   return (
     <td>
-      <span className={label.kind === 'title' ? 'dsm-rowTitle' : 'dsm-rowId'} title={tip}>
-        {label.text}
+      <span className="dsm-rowLabel">
+        <span className={label.kind === 'title' ? 'dsm-rowTitle' : 'dsm-rowId'} title={tip}>
+          {label.text}
+        </span>
+        {tags.map((tag) => (
+          <span key={tag.key} className="dsm-tag dsm-tagIdle" title={t(tag.tip)}>
+            {t(tag.key)}
+          </span>
+        ))}
       </span>
     </td>
   )
@@ -400,6 +440,11 @@ export function SyncPanel({ t = fallback, state, reload }: PanelShare): React.Re
    * 成什么名字，这里就是什么名字）；首帧还没读到状态时标题缺席，组头退回路径本身。
    */
   const workspaces = state?.workspaces ?? []
+  /**
+   * `/state` 那份会话清单按 id 索引：计划行只带 id，会话类型（空白 / 子代理 / 已归档 / 活着的）要从
+   * 这里取（见 `typeTagsOf()`）——判据与会话列表同一套，本页不自己算。
+   */
+  const sessionsById = new Map((state?.sessions ?? []).map((session) => [session.id, session]))
   const pullGroups = groupSyncRows(syncPulls, (entry) => syncProjectOf(entry, 'pull'), workspaces)
   const pushGroups = groupSyncRows(syncPushes, (entry) => syncProjectOf(entry, 'push'), workspaces)
   const keptGroups = groupSyncRows(syncKept, (row) => syncProjectOf(row.entry, row.side), workspaces)
@@ -548,7 +593,12 @@ export function SyncPanel({ t = fallback, state, reload }: PanelShare): React.Re
                                 {t(replace ? 'syncTagReplace' : 'syncTagPull')}
                               </span>
                             </td>
-                            <SessionCell label={label} tip={syncPullTip(entry, label.tip, t)} />
+                            <SessionCell
+                              label={label}
+                              tip={syncPullTip(entry, label.tip, t)}
+                              tags={typeTagsOf(sessionsById.get(entry.id))}
+                              t={t}
+                            />
                             <td className="dsm-meta">{formatBytes(entry.bytes)}</td>
                           </tr>
                         )
@@ -583,7 +633,7 @@ export function SyncPanel({ t = fallback, state, reload }: PanelShare): React.Re
                                 {tag.label}
                               </span>
                             </td>
-                            <SessionCell label={label} tip={label.tip} />
+                            <SessionCell label={label} tip={label.tip} tags={typeTagsOf(sessionsById.get(entry.id))} t={t} />
                             <td className="dsm-meta">{formatBytes(entry.bytes)}</td>
                           </tr>
                         )
@@ -621,7 +671,7 @@ export function SyncPanel({ t = fallback, state, reload }: PanelShare): React.Re
                                 {syncTag(entry, t)}
                               </span>
                             </td>
-                            <SessionCell label={label} tip={label.tip} />
+                            <SessionCell label={label} tip={label.tip} tags={typeTagsOf(sessionsById.get(entry.id))} t={t} />
                             <td className="dsm-cwd">{entry.machine ?? ''}</td>
                           </tr>
                         )

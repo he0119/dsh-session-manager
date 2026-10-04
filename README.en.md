@@ -279,7 +279,9 @@ nothing), reporting "pull N / push M" in three tables (will pull / will push / o
 **grouped by project directory**: the group header carries the name of its group (the workspace title, or the
 project name when no workspace registers it), a small host tag when the identity is known, and the count, with
 the project identity and the local path in that name's tooltip, while a
-row keeps only the action, the session name and its size — and the third column of the "left alone" table names
+row keeps only the action, the session name and its size (the name carries the **same type tags as the session
+list**: subagent / blank / archived / live, for the sessions this machine already has), and the third column of
+the "left alone" table names
 the machine holding the other copy. **Sync now** in that dialog actually pulls and pushes. While it runs, the
 dialog body becomes a progress bar with "Pushing 12 / 84" and the title of the session in flight — the
 denominator is the number of items that leg will really do (skipped ones are not counted), and pulling and
