@@ -110,7 +110,7 @@ test('未分组来源覆盖的会话：宿主说它在那一组 + 有 cwd，两�
 
 test('未分组来源不自己推判据：看起来"没在册、也没被隐藏"但宿主没标 ungrouped 的行不收', () => {
   // 这条夹具是刻意不真实的（真实 /state 会给这种行 ungrouped: true）。它钉的是**界面不许自己再推
-  // 一遍**：以前的判据是"没有 workspaceId 就算未分组"，于是子代理/空白/已归档这些侧边栏根本不放进
+  // 一遍**：以前的判据是"没有 workspaceId 就算未分组"，于是子智能体/空白/已归档这些侧边栏根本不放进
   // 那一组的会话也被算进来了。现在只有宿主说在那一组里才算。
   const list = [{ id: 'looks-unowned', cwd: '/a' }]
   assert.deepEqual(unownedSessions(list), [])
@@ -221,7 +221,7 @@ test('哨兵值不像一个路径：目录值永远是绝对路径或空串，�
   assert.equal(UNOWNED_SOURCE.includes('\\'), false)
 })
 
-// ---- 侧边栏看不见的会话不进候选（子代理 / 空白 / 已归档）----
+// ---- 侧边栏看不见的会话不进候选（子智能体 / 空白 / 已归档）----
 //
 // 判据在宿主侧算一次（`src/visibility.ts`），界面只读 `/state` 上的 `hidden` 字段。这里钉住的是
 // "界面照这个字段筛"这一步：漏筛任何一处，界面报的条数就会大于宿主真正会搬的条数。
@@ -234,7 +234,7 @@ const h = (id: string, cwd: string | undefined, ungrouped?: boolean, hidden?: st
   hidden,
 })
 
-test('未分组来源：只收宿主说在那一组里的那些（子代理 / 空白 / 已归档都不在那一组里）', () => {
+test('未分组来源：只收宿主说在那一组里的那些（子智能体 / 空白 / 已归档都不在那一组里）', () => {
   const list = [
     h('orphan-visible', '/a', true),
     h('orphan-subagent', '/a', false, 'subagent'),

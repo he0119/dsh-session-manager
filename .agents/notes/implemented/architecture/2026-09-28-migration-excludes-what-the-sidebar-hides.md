@@ -5,7 +5,7 @@ Status: implemented
 ## Problem
 
 同一台机器上，迁移页的「未分组」报 4 条、外壳侧边栏那一组只显示 1 条——差的 3 条是三种不同的隐藏
-理由（一条子代理会话、两条只有 seed 事件的空白会话，其中一条还已归档），而迁移当时把它们都算进了
+理由（一条子智能体会话、两条只有 seed 事件的空白会话，其中一条还已归档），而迁移当时把它们都算进了
 候选与条数。
 
 这类账对不上不能靠「把判据在界面上再抄一遍」解决。
@@ -18,7 +18,7 @@ Status: implemented
 
 三处输入各自的来源：
 
-- **子代理**：`header.origin === "subagent"`——发现阶段本来就在解首帧，不额外读盘；
+- **子智能体**：`header.origin === "subagent"`——发现阶段本来就在解首帧，不额外读盘；
 - **已归档**：注册表 `global.archivedSessionIds`；
 - **空白**：只有宿主自己知道（它记在投影缓存的 `sessionListMetadata.blank` 里，初始 `true`、第一个
   `turn/start` 之后翻掉），所以读 `<registryPath 同级的 storages>/session_projcache/sessions/<id>.json`。

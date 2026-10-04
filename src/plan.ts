@@ -144,7 +144,7 @@ export function buildRelocationPlan(options: BuildPlanOptions): RelocationPlan {
   const ownedOf = (sessions: readonly DiscoveredSession[]): Set<string> =>
     new Set(accountedOwners(registry, sessions).keys())
 
-  // 侧边栏看不见的那三类（子代理 / 空白 / 已归档）不进候选：迁移列表的范围必须与"用户在外壳里
+  // 侧边栏看不见的那三类（子智能体 / 空白 / 已归档）不进候选：迁移列表的范围必须与"用户在外壳里
   // 看得见的那批"对齐，否则面板报的条数与侧边栏不一致，而这个来源里也没有任何东西能解释差额
   // （判据与理由都在 visibility.ts）。要搬一条已归档的会话，先去「会话」页取消归档。
   const archived = new Set<string>(registry?.global?.archivedSessionIds ?? [])
@@ -165,7 +165,7 @@ export function buildRelocationPlan(options: BuildPlanOptions): RelocationPlan {
 
   const scanOptions = resolveTitle === undefined ? {} : { resolveTitle }
   // 源目录扫出来的那一份（含侧边栏看不见的：它们不进候选，但选中一条父会话时要把它们当中
-  // "属于这条父会话的子代理"找出来）。
+  // "属于这条父会话的子智能体"找出来）。
   let sourceScanned: DiscoveredSession[] = []
   let discovered: DiscoveredSession[] = []
   if (unowned) {
@@ -190,7 +190,7 @@ export function buildRelocationPlan(options: BuildPlanOptions): RelocationPlan {
 
   if (sessionIds) {
     const known = new Set(discovered.map((s) => s.id))
-    // 点名点到一条隐藏的会话时，子代理那类要说清"该点名的是谁"——查的是源目录那一份。
+    // 点名点到一条隐藏的会话时，子智能体那类要说清"该点名的是谁"——查的是源目录那一份。
     const sourceById = new Map(sourceScanned.map((session) => [session.id, session]))
     for (const id of sessionIds) {
       // 点名的会话不在这次来源的候选里：直接报 problem，不静默少搬（未分组来源下，
@@ -198,7 +198,7 @@ export function buildRelocationPlan(options: BuildPlanOptions): RelocationPlan {
       if (known.has(id)) continue
       const reason = hiddenInSource.get(id)
       if (reason !== undefined) {
-        // 子代理是"跟着父会话走"的那一类（见 family.ts）：点名它自己不会把它搬走（那是向上的
+        // 子智能体是"跟着父会话走"的那一类（见 family.ts）：点名它自己不会把它搬走（那是向上的
         // 牵连），该点名的是它的父会话——所以这句话要给出下一步，而不只是"我不搬它"。
         const parent = sourceById.get(id)?.header.parentSession
         problems.push(
@@ -222,7 +222,7 @@ export function buildRelocationPlan(options: BuildPlanOptions): RelocationPlan {
     }
   }
 
-  // **子代理跟着父会话走**：选中的每条会话都把它的全部后代一起带走（判据与顺序见 family.ts）。
+  // **子智能体跟着父会话走**：选中的每条会话都把它的全部后代一起带走（判据与顺序见 family.ts）。
   //
   // 找后代要扫全库：子会话的日志落在它自己 cwd 的项目目录里，而那个 cwd 未必还是父会话现在的 cwd
   // （父会话被单独迁走过一次，孩子就留在旧目录里了）——只扫源项目目录会漏掉那些，正是要修的那种
@@ -311,7 +311,7 @@ export function buildRelocationPlan(options: BuildPlanOptions): RelocationPlan {
   if (sessions.length > 0 && regCheck.ok) {
     try {
       // **成员资格不因为跟着走而改变**：点名的那些照旧全部重挂（未分组的会被"收编"，与以前一致），
-      // 而级联带进来的后代只有在**本来就在册**时才一起改挂——子代理通常从来没在册过（宿主自己也不把
+      // 而级联带进来的后代只有在**本来就在册**时才一起改挂——子智能体通常从来没在册过（宿主自己也不把
       // 它算进工作区成员），给它们凭空补一条登记只会让注册表里多出宿主不认的成员。
       // 排序：宿主注册表里的顺序是"新→旧"，而级联展开会打断这个顺序（父后面跟着它的孩子），
       // 所以这里按每条会话自己的 createdAt 排回来；只点名时与原来的顺序完全一致。
@@ -359,7 +359,7 @@ export function describePlan(plan: RelocationPlan): string {
   const files = plan.sessions.reduce((n, s) => n + s.files.length, 0)
   lines.push(`  日志文件 ${files} 个；目标项目目录 ${plan.targetProjectDir}`)
   if (plan.cascaded > 0) {
-    lines.push(`  其中 ${plan.cascaded} 条是子代理会话（跟着点名的父会话一起搬，成员资格不变）`)
+    lines.push(`  其中 ${plan.cascaded} 条是子智能体会话（跟着点名的父会话一起搬，成员资格不变）`)
   }
   if (plan.artifacts) {
     lines.push(`  会话产物：待搬 ${plan.artifacts.moves.length} 项、跳过 ${plan.artifacts.skipped.length} 项`)

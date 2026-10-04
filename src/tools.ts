@@ -351,7 +351,7 @@ export function liveSessionIds(ctx: unknown): ReadonlySet<string> {
 export interface PlanToolResult {
   ok: boolean
   sessions: number
-  /** 其中跟着点名会话一起走的子代理会话条数（见 plan.ts 的 `cascaded`）。 */
+  /** 其中跟着点名会话一起走的子智能体会话条数（见 plan.ts 的 `cascaded`）。 */
   cascaded: number
   files: number
   targetProjectDir: string
@@ -363,7 +363,7 @@ export interface PlanToolResult {
 /** 迁移类工具的返回值。 */
 export interface MigrateToolResult {
   applied: boolean
-  /** 跟着点名会话一起走的子代理会话条数（见 plan.ts 的 `cascaded`）。 */
+  /** 跟着点名会话一起走的子智能体会话条数（见 plan.ts 的 `cascaded`）。 */
   cascaded: number
   rewritten: number
   moved: number

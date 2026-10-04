@@ -85,7 +85,7 @@ function makeSandbox(name: string): Sandbox {
   const projectDirName = projectKey(fromDir)
   mkdirSync(join(root, projectDirName, 'session-a'), { recursive: true })
   mkdirSync(join(root, projectDirName, 'session-b'), { recursive: true })
-  // session-a 的子代理：不在册、侧边栏看不见，但**跟着父会话走**——工具层的 `cascaded` 就用它核。
+  // session-a 的子智能体：不在册、侧边栏看不见，但**跟着父会话走**——工具层的 `cascaded` 就用它核。
   mkdirSync(join(root, projectDirName, 'session-child'), { recursive: true })
   mkdirSync(join(root, projectKey(toDir)), { recursive: true })
 
@@ -273,7 +273,7 @@ test('工具端到端：plan(只读) → migrate(dry-run) → migrate(apply) →
   // ---- plan：只读 ----
   const plan = (await run(m.get('plan_session_migration')!, { from: sb.fromDir, to: sb.toDir })) as PlanToolResult
   assert.equal(plan.ok, true, plan.problems.join('; '))
-  // 两条候选 + 跟着 session-a 走的那条子代理
+  // 两条候选 + 跟着 session-a 走的那条子智能体
   assert.equal(plan.sessions, 3)
   assert.equal(plan.cascaded, 1)
   assert.equal(plan.files, 3)

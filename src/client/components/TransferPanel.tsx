@@ -94,7 +94,7 @@ export function TransferPanel({ t = fallback, state, reload }: PanelShare): Reac
     const filtered = groupSessions(sessions, workspaces)
       .map((group) => ({ group, sessions: group.sessions.filter(filter.matches) }))
       .filter((item) => item.sessions.length > 0)
-    // 子代理缩进到父会话的下一级；缩进在**筛完之后**才算（父被筛掉时子按普通行画），理由与三条边界
+    // 子智能体缩进到父会话的下一级；缩进在**筛完之后**才算（父被筛掉时子按普通行画），理由与三条边界
     // 见 groups.ts 的 nestSessions。
     const visible = new Set(filtered.flatMap((item) => item.sessions.map((session) => session.id)))
     return filtered.map((item) => ({ group: item.group, rows: nestSessions(item.sessions, sessions, visible) }))
@@ -117,7 +117,7 @@ export function TransferPanel({ t = fallback, state, reload }: PanelShare): Reac
   }, [sessions])
 
   /**
-   * 这一行能不能单独勾：子代理跟着父会话走（父会话还在库里时就只能跟着它）。判据与「会话」页共用
+   * 这一行能不能单独勾：子智能体跟着父会话走（父会话还在库里时就只能跟着它）。判据与「会话」页共用
    * `groups.ts` 的 `lockedParentOf()`，与宿主那条导出路的拒绝判据同源。
    */
   const lockOf = React.useMemo(() => {
@@ -172,7 +172,7 @@ export function TransferPanel({ t = fallback, state, reload }: PanelShare): Reac
       const result = await exportSessions(selected)
       download(result)
       const chosen = sessions.filter((session) => selected.includes(session.id))
-      // 包里的条数与字节以宿主回报的为准：勾一条父会话时，它的子代理跟着进包，比勾选数多。
+      // 包里的条数与字节以宿主回报的为准：勾一条父会话时，它的子智能体跟着进包，比勾选数多。
       setNotice(
         t('exported', {
           count: result.count ?? chosen.length,
@@ -299,7 +299,7 @@ export function TransferPanel({ t = fallback, state, reload }: PanelShare): Reac
             className="dsm-button"
             // 筛过之后"全选/清空"针对的是**眼下列出来的**那些：勾选面看到什么就选什么，
             // 已经勾上的不会因为切筛选而丢（头部一直报着"已选几条"）。
-            // 不能单独勾的那些不进来：子代理跟着父会话走，勾父会话就等于勾了它。
+            // 不能单独勾的那些不进来：子智能体跟着父会话走，勾父会话就等于勾了它。
             onClick={() => setSelected(allSelected ? [] : listed.filter(selectable).map((session) => session.id))}
             disabled={listed.filter(selectable).length === 0}
           >

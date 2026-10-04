@@ -1,4 +1,4 @@
-// 「子代理跟着父会话走」：展开判据（src/family.ts）与它在迁移这条路上的落地。
+// 「子智能体跟着父会话走」：展开判据（src/family.ts）与它在迁移这条路上的落地。
 //
 // 为什么迁移也要按族走：子会话在外壳侧边栏里没有自己的位置（那一行只从父会话日志里的
 // `subagent/catalog` 长出来）。父会话搬去别的目录、子会话留在原地，族就被拆成两半——侧边栏里看着
@@ -6,7 +6,7 @@
 // 候选里没有它（侧边栏看不见），点名点到它又会被拒（那是向上的牵连）。
 //
 // 所以：候选仍然只有侧边栏看得见的那批（见 test/hidden.test.ts），但**选中一条候选就带上它的全部
-// 后代**——多级、跨项目目录都带上，各自改写 cwd、各自搬目录、进同一份备份。成员资格不变：子代理本来
+// 后代**——多级、跨项目目录都带上，各自改写 cwd、各自搬目录、进同一份备份。成员资格不变：子智能体本来
 // 不在册，搬完还是不在册。
 import assert from 'node:assert/strict'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
@@ -32,8 +32,8 @@ const decodeAll: DecodeAll = (buf: Uint8Array): string => Buffer.from(decompress
 /**
  * 只带 `familyOf()` 要用的那几个字段：id、header.parentSession、header.origin。
  *
- * 给了 `parentSession` 的默认写成**子代理**（`origin: "subagent"`，真实库里这两条一起写）；要造
- * 「有父指针但不是子代理」的分叉用 `fork()`。
+ * 给了 `parentSession` 的默认写成**子智能体**（`origin: "subagent"`，真实库里这两条一起写）；要造
+ * 「有父指针但不是子智能体」的分叉用 `fork()`。
  */
 const session = (id: string, parentSession?: string, options: { subagent?: boolean } = {}): DiscoveredSession => {
   const asSubagent = parentSession !== undefined && options.subagent !== false
@@ -65,7 +65,7 @@ const fork = (id: string, parentSession: string): DiscoveredSession => session(i
 
 const idsOf = (members: ReturnType<typeof familyOf>): string[] => members.map((member) => member.session.id)
 
-test('展开：点名的一条在前，随后是全部子代理后代（多级），同一条只出现一次', () => {
+test('展开：点名的一条在前，随后是全部子智能体后代（多级），同一条只出现一次', () => {
   const library = [
     session('P'),
     session('c1', 'P'),
@@ -94,22 +94,22 @@ test('展开：点名两条时各自成族、共享的后代不重复；父与�
   assert.equal(named.find((member) => member.session.id === 'shared')?.root.id, 'shared')
 })
 
-test('展开：分叉不跟着父走（父被删 / 被迁都不带它），但分叉自己的子代理照旧跟着它', () => {
+test('展开：分叉不跟着父走（父被删 / 被迁都不带它），但分叉自己的子智能体照旧跟着它', () => {
   const library = [session('P'), session('c1', 'P'), fork('f1', 'P'), session('g1', 'f1'), fork('f2', 'c1')]
   const family = familyOf(library, [library[0]!])
-  assert.deepEqual(idsOf(family), ['P', 'c1'], 'f1 是分叉（独立会话），f2 挂在子代理 c1 下面但也是分叉——都不进来')
+  assert.deepEqual(idsOf(family), ['P', 'c1'], 'f1 是分叉（独立会话），f2 挂在子智能体 c1 下面但也是分叉——都不进来')
 
   const fromFork = familyOf(library, [library[2]!])
-  assert.deepEqual(idsOf(fromFork), ['f1', 'g1'], '点名分叉时，挂在它下面的子代理跟着它走')
+  assert.deepEqual(idsOf(fromFork), ['f1', 'g1'], '点名分叉时，挂在它下面的子智能体跟着它走')
 })
 
-test('单独点名的子代理：父会话还在库里、又没被点名时才挑出来', () => {
+test('单独点名的子智能体：父会话还在库里、又没被点名时才挑出来', () => {
   const library = [session('P'), session('c1', 'P'), session('g1', 'c1'), fork('f1', 'P'), session('orphan', 'gone')]
   assert.deepEqual(loneSubagents(library, new Set(['c1'])), [{ id: 'c1', parentId: 'P' }])
   assert.deepEqual(loneSubagents(library, new Set(['g1'])), [{ id: 'g1', parentId: 'c1' }], '隔一层也一样')
   assert.deepEqual(loneSubagents(library, new Set(['c1', 'P'])), [], '父会话也在这次点名里，就不是"单独"')
   assert.deepEqual(loneSubagents(library, new Set(['orphan'])), [], '父会话不在库里的孤儿没有可跟随的会话')
-  assert.deepEqual(loneSubagents(library, new Set(['f1'])), [], '分叉不是子代理，这条规则管不到它')
+  assert.deepEqual(loneSubagents(library, new Set(['f1'])), [], '分叉不是子智能体，这条规则管不到它')
   assert.deepEqual(loneSubagents(library, new Set(['P'])), [], '普通会话本来就该被单独点名')
 })
 
@@ -257,7 +257,7 @@ test('迁移：点名父会话 → 全部后代一起进计划（多级、跨项
     assert.equal(s.to, sb.dirTarget)
     assert.equal(s.targetDir, join(sb.root, projectKey(sb.dirTarget), s.id))
   }
-  // 成员资格不变：只有点名的父会话进目标工作区，三条子代理本来不在册、搬完也不在册
+  // 成员资格不变：只有点名的父会话进目标工作区，三条子智能体本来不在册、搬完也不在册
   assert.deepEqual(plan.sessions.map((s: SessionMove) => s.registered), [true, false, false, false])
   assert.equal(plan.registryChange?.createdTarget, true)
   assert.deepEqual(plan.registryChange?.added, ['session-parent'])
@@ -269,10 +269,10 @@ test('迁移：点名父会话 → 全部后代一起进计划（多级、跨项
   assert.equal(plan.sessions.some((s: SessionMove) => s.id === 'session-stray'), false)
 })
 
-test('迁移：「连同未分组的会话」关掉时不挡跟着走的子代理，但仍挡未在册的候选', () => {
+test('迁移：「连同未分组的会话」关掉时不挡跟着走的子智能体，但仍挡未在册的候选', () => {
   const sb = makeSandbox('family-migrate-include-unowned')
 
-  // 子代理本来就没在册——它跟着父走，不该被"未分组"那个开关拦下
+  // 子智能体本来就没在册——它跟着父走，不该被"未分组"那个开关拦下
   const following = buildRelocationPlan(opts(sb, { includeUnowned: false }))
   assert.equal(following.ok, true, following.problems.join('; '))
   assert.equal(following.cascaded, 3)

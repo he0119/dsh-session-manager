@@ -143,12 +143,12 @@ export interface SessionRowProps {
   owner?: string
   /** 「未分组」那枚标签在这一页有没有信息量（见 sessionTags）。 */
   ungroupedTag?: boolean
-  /** 缩进级数：这条会话是子代理、挂在上面那张父行下面时 > 0（见 groups.nestSessions）。 */
+  /** 缩进级数：这条会话是子智能体、挂在上面那张父行下面时 > 0（见 groups.nestSessions）。 */
   depth?: number
   /** 名字后面跟一枚小标签（父会话在别的目录组里时用它说明父在哪儿）；文案由调用方翻好。 */
   note?: { text: string; tip: string }
   /**
-   * 这一行不能单独勾：子代理跟着父会话走（要动它得勾上面那条父会话，见 family.ts）。
+   * 这一行不能单独勾：子智能体跟着父会话走（要动它得勾上面那条父会话，见 family.ts）。
    *
    * 勾选框**禁用**而不是"允许勾但拒绝执行"：能勾的集合就该是"单独操作不会被拒的集合"，
    * 否则用户只能靠试错发现自己点错了。提示里写明该勾哪一条。

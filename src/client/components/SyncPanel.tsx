@@ -220,7 +220,7 @@ function PlanGroupHead({
 /**
  * 这一行的**会话类型**标签：与会话列表**同一套**判据（`sessionList.sessionTags()` →
  * `sessionFilter.hasAttribute()`），所以同一条会话在「会话」页与这里挂的标签一模一样——两处各算一套
- * 的话，用户看到的就是两个不同的"什么是空白 / 子代理"。
+ * 的话，用户看到的就是两个不同的"什么是空白 / 子智能体"。
  *
  * 计划行本身只带 id、标题与体积，类型得从 `/state` 那份会话清单里按 id 取；本机还没有这条会话时
  * （「会拉取」里新建的那些）取不到，就不挂标签——那是"它还没落到本机"，不是"它什么类型都不是"。
@@ -442,7 +442,7 @@ export function SyncPanel({ t = fallback, state, reload }: PanelShare): React.Re
    */
   const workspaces = state?.workspaces ?? []
   /**
-   * `/state` 那份会话清单按 id 索引：计划行只带 id，会话类型（空白 / 子代理 / 已归档 / 活着的）要从
+   * `/state` 那份会话清单按 id 索引：计划行只带 id，会话类型（空白 / 子智能体 / 已归档 / 活着的）要从
    * 这里取（见 `typeTagsOf()`）——判据与会话列表同一套，本页不自己算。
    */
   const sessionsById = new Map((state?.sessions ?? []).map((session) => [session.id, session]))

@@ -29,7 +29,7 @@ export interface SessionSummary {
   /**
    * 外壳侧边栏会把它放进「未分组」那一组（宿主按 `src/visibility.ts` 的 `isUngrouped()` 算好发过来）。
    *
-   * 界面不再自己从"有没有工作区认领"推：那样推出来的「未分组」把子代理、空白、已归档也算进去，
+   * 界面不再自己从"有没有工作区认领"推：那样推出来的「未分组」把子智能体、空白、已归档也算进去，
    * 而侧边栏从来不把它们放进那一组（它默认压根不显示它们）。
    */
   ungrouped?: boolean
@@ -46,9 +46,9 @@ export interface SessionSummary {
   archived?: boolean
   /** 宿主判它"一轮都没开始过"（见 `src/visibility.ts`）。 */
   blank?: boolean
-  /** 日志 header 里的 `origin`（只有子代理会话会写）。 */
+  /** 日志 header 里的 `origin`（只有子智能体会话会写）。 */
   origin?: string
-  /** 日志 header 里的 `parentSession`：这条子代理挂在哪条会话下面（列表据此缩进一级）。 */
+  /** 日志 header 里的 `parentSession`：这条子智能体挂在哪条会话下面（列表据此缩进一级）。 */
   parentSession?: string
   /** 宿主内存里活着（删除会拒它）。 */
   live?: boolean
@@ -162,7 +162,7 @@ function numberHeader(response: Response, name: string): number | undefined {
 export interface ExportResult {
   blob: Blob
   filename: string
-  /** 包里实际有几条会话（宿主回报）：勾一条父会话时它的子代理跟着进包，比勾选数多。 */
+  /** 包里实际有几条会话（宿主回报）：勾一条父会话时它的子智能体跟着进包，比勾选数多。 */
   count?: number
   /** 包里日志的总字节数（宿主回报）；缺席时界面按勾中的那些算。 */
   bytes?: number
@@ -184,7 +184,7 @@ export async function exportSessions(sessionIds: readonly string[]): Promise<Exp
   }
   const disposition = response.headers.get('content-disposition') ?? ''
   const matched = /filename="([^"]+)"/.exec(disposition)
-  // 包里到底几条 / 多少字节：界面那句"已导出 N 条"说的是包里的东西，而包里可能多了跟来的子代理。
+  // 包里到底几条 / 多少字节：界面那句"已导出 N 条"说的是包里的东西，而包里可能多了跟来的子智能体。
   const count = numberHeader(response, 'x-dsh-session-count')
   const bytes = numberHeader(response, 'x-dsh-session-bytes')
   // 文件名以宿主的 Content-Disposition 为准；这条兜底只在没有响应头时用，后缀与它保持一致。
@@ -468,7 +468,7 @@ export interface MigrationPreview {
   /** 本次会搬动的会话各自所在的源项目目录（去重、排序）；未分组来源下不止一个。 */
   sourceProjectDirs: string[]
   sessions: PreviewSession[]
-  /** 级联带进来的条数：点名的会话的子代理后代。 */
+  /** 级联带进来的条数：点名的会话的子智能体后代。 */
   cascaded: number
   files: number
   bytes: number
@@ -612,7 +612,7 @@ export interface DeleteEntry {
   bytes: number
   /** 宿主内存里活着（这种会被预演挡下，正常不会出现在条目里）。 */
   live: boolean
-  /** 日志 header 里的 `origin`（子代理会话写 `subagent`）。 */
+  /** 日志 header 里的 `origin`（子智能体会话写 `subagent`）。 */
   origin?: string
   /** 级联带进来的：点名的那个祖先会话（点名的那几条自己没有这一项，见宿主 `RemoveEntry.via`）。 */
   via?: { id: string; title?: string }

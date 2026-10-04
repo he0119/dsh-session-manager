@@ -89,7 +89,7 @@ function writeSession(
 }
 
 /**
- * 写一条子代理会话：header 里带 `parentSession` 与 `origin`（宿主建子会话时两边一起写，
+ * 写一条子智能体会话：header 里带 `parentSession` 与 `origin`（宿主建子会话时两边一起写，
  * 见 test/session-log.test.ts）。
  */
 function writeSubagent(sandbox: Sandbox, id: string, parent: string, createdAt: number, options: { title?: string; cwd?: string } = {}): string {
@@ -226,7 +226,7 @@ test('删两条同目录的会话：项目目录要等两条都删完才空，�
   assert.deepEqual(manifest.sessions.map((s) => s.id).sort(), ['session-one', 'session-two'])
 })
 
-// ---- 子代理跟着父会话走 ----
+// ---- 子智能体跟着父会话走 ----
 //
 // 子会话在外壳侧边栏里只挂在父会话的 `subagentCatalog` 下（父日志里的 catalog 事件），父日志一没，
 // 它就再没有别的入口。所以"删父"必须把整族带走，否则盘上会留下"本插件看得见、侧边栏看不见"的残留。
@@ -235,8 +235,8 @@ test('级联：点名父会话 → 全部后代一起进计划（多级、跨项
   const sandbox = makeSandbox('remove-family')
   const otherCwd = join(sandbox.base, 'dir-b')
   writeSession(sandbox, 'session-parent', 1000, { title: '父会话' })
-  writeSubagent(sandbox, 'session-child', 'session-parent', 2000, { title: '子代理甲' })
-  // 隔一层：孙代理的父是子代理，不是被点名的那条——族的边界是"全部后代"，不是"直接子"
+  writeSubagent(sandbox, 'session-child', 'session-parent', 2000, { title: '子智能体甲' })
+  // 隔一层：孙代理的父是子智能体，不是被点名的那条——族的边界是"全部后代"，不是"直接子"
   writeSubagent(sandbox, 'session-grand', 'session-child', 3000, { title: '孙代理' })
   // 另一个项目目录里的后代：父子关系不靠目录，靠 header 里的 parentSession
   writeSubagent(sandbox, 'session-far', 'session-parent', 4000, { cwd: otherCwd })
@@ -261,7 +261,7 @@ test('级联：点名父会话 → 全部后代一起进计划（多级、跨项
   // 预演摘要要把多出来的条数说出来，否则用户只会看到"我只勾了一条、它要删四条"
   const run = runRemoval(deps(sandbox), { sessionIds: ['session-parent'] }, { apply: false })
   assert.match(run.summary, /将删除 4 个会话/)
-  assert.match(run.summary, /其中 3 条是子代理会话/)
+  assert.match(run.summary, /其中 3 条是子智能体会话/)
 })
 
 test('级联：多级同族一起删时，执行把整族装进同一份备份、目录一并清掉', () => {
@@ -275,28 +275,28 @@ test('级联：多级同族一起删时，执行把整族装进同一份备份�
   assert.equal(run.verified, true, run.problems.join('; '))
   assert.equal(run.dirsRemoved, 3)
   for (const dir of [parentDir, childDir, grandDir]) assert.equal(existsSync(dir), false, `${dir} 该没了`)
-  assert.match(run.summary, /其中 2 条是子代理会话/)
+  assert.match(run.summary, /其中 2 条是子智能体会话/)
   const { manifest } = readManifest(run.backupDir!)
   assert.deepEqual(manifest.sessions.map((s) => s.id).sort(), ['session-child', 'session-grand', 'session-parent'])
 })
 
-test('只删一条子代理：父会话还在库里 → 拒绝，并告诉用户该点名谁', () => {
+test('只删一条子智能体：父会话还在库里 → 拒绝，并告诉用户该点名谁', () => {
   const sandbox = makeSandbox('remove-child-only')
   writeSession(sandbox, 'session-parent', 1000, { title: '父会话' })
-  writeSubagent(sandbox, 'session-child', 'session-parent', 2000, { title: '子代理' })
+  writeSubagent(sandbox, 'session-child', 'session-parent', 2000, { title: '子智能体' })
 
   const plan = planRemoval(deps(sandbox), { sessionIds: ['session-child'] })
-  assert.equal(plan.ok, false, '子代理不能被单独操作')
+  assert.equal(plan.ok, false, '子智能体不能被单独操作')
   assert.equal(plan.entries.length, 0, '拒绝的计划里不该有要删的条目')
-  assert.match(plan.problems.join('; '), /session-child 是子代理会话（它跟着父会话走）：请改点名它的父会话 父会话（session-parent）/)
+  assert.match(plan.problems.join('; '), /session-child 是子智能体会话（它跟着父会话走）：请改点名它的父会话 父会话（session-parent）/)
 
-  // 点了父会话就不一样了：子代理跟着它一起走
+  // 点了父会话就不一样了：子智能体跟着它一起走
   const withParent = planRemoval(deps(sandbox), { sessionIds: ['session-parent'] })
   assert.equal(withParent.ok, true, withParent.problems.join('; '))
   assert.deepEqual(withParent.entries.map((entry) => entry.id), ['session-parent', 'session-child'])
 })
 
-test('嵌套的单独子代理：拒掉外层之后，里层的父也一起退出计划，于是同样被拒', () => {
+test('嵌套的单独子智能体：拒掉外层之后，里层的父也一起退出计划，于是同样被拒', () => {
   const sandbox = makeSandbox('remove-lone-nested')
   writeSession(sandbox, 'session-p', 1000)
   writeSubagent(sandbox, 'session-r', 'session-p', 2000)
@@ -308,8 +308,8 @@ test('嵌套的单独子代理：拒掉外层之后，里层的父也一起退�
   assert.equal(plan.ok, false)
   assert.deepEqual(plan.entries, [], '被拒的那些不该出现在"要删的东西"里')
   assert.equal(plan.problems.length, 2, plan.problems.join('; '))
-  assert.match(plan.problems.join('; '), /session-r 是子代理会话/)
-  assert.match(plan.problems.join('; '), /session-x 是子代理会话/)
+  assert.match(plan.problems.join('; '), /session-r 是子智能体会话/)
+  assert.match(plan.problems.join('; '), /session-x 是子智能体会话/)
 })
 
 test('孤儿（父会话已经不在库里）：没有可跟随的会话，允许单独收拾', () => {
@@ -354,7 +354,7 @@ test('活着的后代挡住整族：计划不 ok、执行一条都不删，问�
   // 活着的后代不进条目（界面不该把它列成待删项），但它的存在挡住整个计划
   assert.deepEqual(plan.entries.map((entry) => entry.id), ['session-parent'])
   assert.match(plan.problems.join('\n'), /session session-child 还在宿主内存里活着/)
-  assert.match(plan.problems.join('\n'), /子代理，跟着 父会话 一起删/)
+  assert.match(plan.problems.join('\n'), /子智能体，跟着 父会话 一起删/)
 
   const run = runRemoval(withLive, { sessionIds: ['session-parent'] }, { apply: true })
   assert.equal(run.applied, false)

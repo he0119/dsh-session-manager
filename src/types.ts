@@ -69,7 +69,7 @@ export interface SessionMove {
   files: SessionLogFile[]
   /**
    * 这条会话**被某个工作区认领**吗（判据见 accounting.ts：登记过 **且** header 的 cwd 归一之后就是那条
-   * 记录的 `path`）。它是"本来就在册"的判据——级联带进来的子代理只有在这一项为真时才跟着改挂。
+   * 记录的 `path`）。它是"本来就在册"的判据——级联带进来的子智能体只有在这一项为真时才跟着改挂。
    */
   registered: boolean
   /**
@@ -130,7 +130,7 @@ export interface RelocationPlan {
    */
   unowned: boolean
   sessions: SessionMove[]
-  /** 级联带进来的条数：点名的会话的子代理后代（见 `SessionMove.via`）。 */
+  /** 级联带进来的条数：点名的会话的子智能体后代（见 `SessionMove.via`）。 */
   cascaded: number
   artifacts: { moves: ArtifactMove[]; problems: string[]; skipped: ArtifactSkip[] } | null
   registryChange: RegistryChange | null

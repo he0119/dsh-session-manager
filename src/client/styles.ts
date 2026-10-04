@@ -58,7 +58,7 @@ export const CSS = `
 .dsm-hint { color: var(--dsw-alias-label-secondary, #646a73); }
 /*
  * 说明页：词条（dt 词 / dd 解释）与问答共用一个两列网格。词比解释重一档，解释用次要灰；
- * 词条列不折行（"子代理""未分组"最多四个字），解释列吃掉剩下的宽度。
+ * 词条列不折行（"子智能体""未分组"最多四个字），解释列吃掉剩下的宽度。
  */
 .dsm-defs {
   display: grid;
@@ -225,7 +225,7 @@ export const CSS = `
   box-shadow: inset 2px 0 0 0 color-mix(in srgb, var(--dsw-alias-label-primary, #1f2329) 14%, transparent);
 }
 /*
- * 子代理行：缩进到父会话的下一级（列表里的父子关系与删除 / 迁移的级联展开是同一棵树，见
+ * 子智能体行：缩进到父会话的下一级（列表里的父子关系与删除 / 迁移的级联展开是同一棵树，见
  * groups.ts 的 nestSessions）。
  *
  * 手段与上面组头那一档同一套：**再缩进一格 + 一条导引线**。线画在父行内容左缘那一格（组内行是

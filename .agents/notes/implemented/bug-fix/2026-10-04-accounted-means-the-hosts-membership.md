@@ -47,6 +47,6 @@ Status: implemented
   [列整库的两个分页按目录分组](../architecture/2026-09-27-group-by-directory-not-workspace.md)）。
 - `/state` 的 `workspaces[].sessionIds` 变成认领的那份，与宿主发给渲染层的取值同源；界面拿它当成员表
   看时不会再多出 `cwd` 已经对不上的登记。
-- 迁移的 `registered` 只决定级联带进来的子代理改不改挂，不改变候选口径。
+- 迁移的 `registered` 只决定级联带进来的子智能体改不改挂，不改变候选口径。
 - `test/accounting.test.ts` 钉住四种边界（解析不出来 / 归一后不是同一个字符串 / 没有 `cwd` / 库里没有
   这条会话），并按真实形状跑一次"目录改名"。

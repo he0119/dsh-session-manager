@@ -65,13 +65,13 @@
 
 ## 什么算一族
 
-- [族的那条边只有子代理，分叉不算](../.agents/notes/implemented/architecture/2026-09-30-only-subagent-edges-are-family.md)：
+- [族的那条边只有子智能体，分叉不算](../.agents/notes/implemented/architecture/2026-09-30-only-subagent-edges-are-family.md)：
   判据是 `parentSession` 加 `origin === "subagent"`。
-- [点名父会话时子代理跟着走](../.agents/notes/implemented/architecture/2026-09-28-naming-a-parent-takes-the-family-along.md)：
+- [点名父会话时子智能体跟着走](../.agents/notes/implemented/architecture/2026-09-28-naming-a-parent-takes-the-family-along.md)：
   迁移、删除、归档、导出四条路按族展开。
-- [子代理不能被单独操作](../.agents/notes/implemented/architecture/2026-09-30-subagents-cannot-be-operated-alone.md)：
+- [子智能体不能被单独操作](../.agents/notes/implemented/architecture/2026-09-30-subagents-cannot-be-operated-alone.md)：
   单独点名一律拒并指名父会话，孤儿除外。
-- [子代理缩进到父会话的下一级](../.agents/notes/implemented/architecture/2026-09-30-subagents-indent-under-their-parent.md)：
+- [子智能体缩进到父会话的下一级](../.agents/notes/implemented/architecture/2026-09-30-subagents-indent-under-their-parent.md)：
   缩进只改画法，四条边界各有确定的画法。
 
 ## 列表、筛选与分组

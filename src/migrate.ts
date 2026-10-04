@@ -90,7 +90,7 @@ export interface MigrationPreview {
   /** 本次真正会搬动的会话各自所在的源项目目录（去重、排序）——未分组来源下不止一个。 */
   sourceProjectDirs: string[]
   sessions: PreviewSession[]
-  /** 级联带进来的条数：点名的会话的子代理后代（见 `PreviewSession.via`）。 */
+  /** 级联带进来的条数：点名的会话的子智能体后代（见 `PreviewSession.via`）。 */
   cascaded: number
   files: number
   bytes: number
