@@ -4,7 +4,7 @@
 // 这里补的是**界面也会用到的**那些边界：备份目录的越界拒绝、备份清单的列举、dry-run 的零写入。
 import assert from 'node:assert/strict'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { basename, dirname, join } from 'node:path'
+import { basename, dirname, join, sep } from 'node:path'
 import test from 'node:test'
 
 import { decompress } from 'fzstd'
@@ -103,6 +103,29 @@ test('预演：把源项目目录的会话与注册表变更算出来，一个�
   const dirName = basename(sessionDir(sb.deps.sessionsRoot, FROM, sb.sessionId))
   assert.equal(existsSync(sessionDir(sb.deps.sessionsRoot, FROM, sb.sessionId)), true, '会话应当还在源项目目录')
   assert.equal(existsSync(join(sb.deps.sessionsRoot, preview.targetProjectDir, dirName)), false, '预演不该建目标会话目录')
+  rmSync(sb.base, { recursive: true, force: true })
+})
+
+test('预演：目标的另一种拼写先归一（同一个目录不会凭写法多出一条工作区记录）', () => {
+  const sb = makeSandbox('migrate-canonical-to')
+  // 结尾分隔符是"另一种拼写"里最朴素的一种；Windows 上还有 git 给的正斜杠（见 canonical-path.test.ts）
+  const preview = previewMigration(sb.deps, { from: FROM, to: `${TO}${sep}` })
+
+  assert.equal(preview.ok, true, `另一种拼写应当照常可用：${preview.problems.join('; ')}`)
+  assert.equal(preview.to, TO, '落地用的是归一之后的那个字符串')
+  assert.equal(preview.registryChange?.targetPath, TO, '注册表里那条记录的 path 也是它')
+  rmSync(sb.base, { recursive: true, force: true })
+})
+
+test('预演：同一个目录的两种拼写不算一次迁移', () => {
+  const sb = makeSandbox('migrate-same-directory')
+  const preview = previewMigration(sb.deps, { from: FROM, to: `${FROM}${sep}` })
+
+  assert.equal(preview.ok, false)
+  assert.ok(
+    preview.problems.some((problem) => /identical/.test(problem)),
+    `应当报"源与目标同一个目录"：${preview.problems.join('; ')}`,
+  )
   rmSync(sb.base, { recursive: true, force: true })
 })
 

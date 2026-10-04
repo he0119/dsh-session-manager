@@ -22,6 +22,7 @@ import { mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSy
 import { join } from 'node:path'
 import { gunzipSync, gzipSync } from 'node:zlib'
 
+import { canonicalDir } from './canonical-path.ts'
 import { encodeSegment, sessionDir } from './paths.ts'
 import { reHome, writeRegistryAtomic } from './registry.ts'
 import { foldTitleInFrames } from './session-title.ts'
@@ -360,7 +361,12 @@ function bundleTitle(bundle: SessionBundle, session: BundleSession, decodeAll: D
  *      落 `_no-cwd` 项目目录，也就不参与注册表重挂）。
  */
 export function planImport(bundle: SessionBundle, options: ImportOptions): ImportPlan {
-  const { root, targetCwd, registry, title, decodeAll, now, newId } = options
+  const { root, registry, title, decodeAll, now, newId } = options
+  /*
+   * 落地目录换成宿主存的那个拼写：改写进 header 的 `cwd` 与注册表里那条记录的 `path` 都是它，两者
+   * 不一致时宿主认不出这条工作区（见 canonical-path.ts）。没有 cwd 的会话用不到它，空串照旧。
+   */
+  const targetCwd = canonicalDir(options.targetCwd)
   const existingDirs = scanExistingSessionDirs(root)
   const entries: ImportEntry[] = []
   const problems: string[] = []
