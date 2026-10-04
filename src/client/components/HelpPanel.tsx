@@ -16,8 +16,8 @@
 
 import * as React from 'react'
 
-import { translateWith, zh } from './locales.ts'
-import type { PanelShare } from './types.ts'
+import { translateWith, zh } from '../logic/locales.ts'
+import type { PanelShare } from '../types.ts'
 
 /** 没有注入面时的兜底翻译。 */
 const fallback = translateWith(zh as unknown as Record<string, string>)

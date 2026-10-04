@@ -9,7 +9,7 @@
 
 import type { StateResponse } from './api.ts'
 import type { DirectoryApi } from './directory.ts'
-import type { Translate } from './locales.ts'
+import type { Translate } from './logic/locales.ts'
 
 /** 分页入参。 */
 export interface PanelShare {

@@ -6,7 +6,7 @@
 // "你的会话要被丢进无 cwd 项目目录"。根因是那一格只判断 `toCwd === undefined`——跳过的行按设计也没有
 // `toCwd`（见 `src/transfer.ts` 的 ImportEntry），于是两支不同的情况被合并成了一句错话。
 //
-// 判定抽成了 `src/client/planRows.ts`（纯函数），所以三支分支能在这里逐个钉死。
+// 判定抽成了 `src/client/logic/planRows.ts`（纯函数），所以三支分支能在这里逐个钉死。
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
@@ -24,7 +24,7 @@ import {
   repoName,
   sessionLabel,
   unownedSessions,
-} from '../src/client/planRows.ts'
+} from '../src/client/logic/planRows.ts'
 
 // 同 groups.test.ts：不 import `src/client/api.ts`（它会把 src/client 拉进没有 DOM 的 Host 工程）。
 

@@ -30,12 +30,12 @@ import {
   deleteSessions,
   type DeleteResponse,
   type SessionSummary,
-} from './api.ts'
+} from '../api.ts'
 import { ConfirmDialog } from './ConfirmDialog.tsx'
-import { translateWith, zh } from './locales.ts'
-import { groupKey, groupSessions, lockedParentOf, nestSessions } from './groups.ts'
-import { deleteFamilyNote, parentDirNote } from './planRows.ts'
-import { FILTER_KEYS } from './sessionFilter.ts'
+import { translateWith, zh } from '../logic/locales.ts'
+import { groupKey, groupSessions, lockedParentOf, nestSessions } from '../logic/groups.ts'
+import { deleteFamilyNote, parentDirNote } from '../logic/planRows.ts'
+import { FILTER_KEYS } from '../logic/sessionFilter.ts'
 import {
   SessionFilterBar,
   SessionGroupHead,
@@ -47,7 +47,7 @@ import {
   useGroupCollapse,
   useSessionFilter,
 } from './sessionList.tsx'
-import type { PanelShare } from './types.ts'
+import type { PanelShare } from '../types.ts'
 
 /** 没有注入面时的兜底翻译。 */
 const fallback = translateWith(zh as unknown as Record<string, string>)

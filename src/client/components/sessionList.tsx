@@ -18,7 +18,7 @@
 import * as React from 'react'
 
 import { ChevronIcon, SessionIcon, WorkspaceIcon } from './icons.tsx'
-import { projectLabel, sessionLabel } from './planRows.ts'
+import { projectLabel, sessionLabel } from '../logic/planRows.ts'
 import {
   attributeKeys,
   filterCounts,
@@ -26,8 +26,8 @@ import {
   type AttributeKey,
   type FilterKey,
   type SessionFacts,
-} from './sessionFilter.ts'
-import type { Translate } from './locales.ts'
+} from '../logic/sessionFilter.ts'
+import type { Translate } from '../logic/locales.ts'
 
 /** 一行会话要显示的字段（三个分页传进来的 `SessionSummary` 都满足它）。 */
 export interface RowSession extends SessionFacts {

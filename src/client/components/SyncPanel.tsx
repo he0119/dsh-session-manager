@@ -38,17 +38,17 @@ import {
   type SyncPullEntry,
   type SyncPushEntry,
   type SyncResponse,
-} from './api.ts'
+} from '../api.ts'
 import { ConfirmDialog } from './ConfirmDialog.tsx'
-import { groupKey } from './groups.ts'
+import { groupKey } from '../logic/groups.ts'
 import { WorkspaceIcon } from './icons.tsx'
-import { translateWith, zh, type Translate } from './locales.ts'
-import { projectLabel, sessionLabel, type SessionLabel } from './planRows.ts'
+import { translateWith, zh, type Translate } from '../logic/locales.ts'
+import { projectLabel, sessionLabel, type SessionLabel } from '../logic/planRows.ts'
 import { ProgressBar } from './ProgressBar.tsx'
 import { formatBytes } from './sessionList.tsx'
 import { SyncConfigForm } from './SyncConfigForm.tsx'
-import { groupSyncRows, syncProjectOf, syncPullTip, type SyncGroup, type SyncSide } from './syncGroups.ts'
-import type { PanelShare } from './types.ts'
+import { groupSyncRows, syncProjectOf, syncPullTip, type SyncGroup, type SyncSide } from '../logic/syncGroups.ts'
+import type { PanelShare } from '../types.ts'
 
 /** 没有注入面时的兜底翻译。 */
 const fallback = translateWith(zh as unknown as Record<string, string>)

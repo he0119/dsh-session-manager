@@ -44,12 +44,12 @@
  * @module dsh-session-manager/client
  */
 
-import { ManagerPanel } from './ManagerPanel.tsx'
+import { ManagerPanel } from './components/ManagerPanel.tsx'
 import { type CredentialsApi, setCredentialsApi } from './credentials.ts'
 import { type DirectoryListing, getDirectoryApi, setDirectoryApi } from './directory.ts'
-import { NS, en, zh, type Translate } from './locales.ts'
+import { NS, en, zh, type Translate } from './logic/locales.ts'
 import { installStyles } from './styles.ts'
-import { SYNC_SECTION, setSyncConfigApi, type SyncConfigApi } from './syncForm.ts'
+import { SYNC_SECTION, setSyncConfigApi, type SyncConfigApi } from './logic/syncForm.ts'
 
 /** 插件名（客户端模块系统里的 factory id，等于包名）。 */
 export const name = '@he0119/dsh-session-manager'
