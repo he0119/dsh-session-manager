@@ -9,7 +9,10 @@
  *
  * 词条**复用行上那几枚标签的文案**（`t('tagSubagent')` / `t('tagSubagentTip')` …）：同一件事在
  * 悬浮提示与这一页里必须是同一句话，各写一份就会漂。这一页只补标签没说到的部分（"可见"这一类、
- * 三个分页的分工、碰哪些文件、常见疑问）。
+ * 每页做什么、数据从哪来、常见疑问）。
+ *
+ * 页面上只有四张卡片：原先单独一张"会碰什么盘"与「常见疑问」逐条重复（回滚与恢复、删完侧边栏为什么
+ * 还在、活动中的会话删不掉），独有那几条（备份时机、子代理跟着父会话走、包里有什么）并进常见疑问。
  *
  * @module dsh-session-manager/client/HelpPanel
  */
@@ -43,24 +46,14 @@ const TAB_LINES = [
   ['tabSync', 'helpTabSync'],
 ] as const
 
-/** 会碰什么盘：一次写全备份、回滚 / 恢复、子代理跟着父会话走、侧边栏重扫、内存里的会话、包内容。 */
-const DISK_LINES = [
-  'helpDiskBackup',
-  'helpDiskRollback',
-  'helpDiskRestore',
-  'helpDiskFamily',
-  'helpDiskSidebar',
-  'helpDiskLive',
-  'helpDiskExport',
-  'helpDiskSync',
-] as const
-
-/** 常见疑问：问答同上一条同一个形状（dt 问、dd 答）。 */
+/** 常见疑问：问答同上一条同一个形状（dt 问、dd 答）。会碰什么盘的独有内容收在这里。 */
 const FAQ = [
   ['faqUnownedQ', 'faqUnownedA'],
   ['faqDeletedQ', 'faqDeletedA'],
   ['faqRestartQ', 'faqRestartA'],
-  ['faqRestoreQ', 'faqRestoreA'],
+  ['faqBackupQ', 'faqBackupA'],
+  ['faqFamilyQ', 'faqFamilyA'],
+  ['faqExportQ', 'faqExportA'],
   ['faqForkQ', 'faqForkA'],
   ['faqPasswordQ', 'faqPasswordA'],
 ] as const
@@ -110,14 +103,6 @@ export function HelpPanel({ t = fallback, state }: PanelShare): React.ReactEleme
             </React.Fragment>
           ))}
         </dl>
-      </HelpSection>
-
-      <HelpSection title={t('helpDiskTitle')}>
-        <ul className="dsm-bullets">
-          {DISK_LINES.map((line) => (
-            <li key={line}>{t(line)}</li>
-          ))}
-        </ul>
       </HelpSection>
 
       <HelpSection title={t('helpWhereTitle')}>

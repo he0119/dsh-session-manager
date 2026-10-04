@@ -72,9 +72,6 @@ export const CSS = `
 .dsm-defs dd { margin: 0; color: var(--dsw-alias-label-secondary, #646a73); }
 /* 问答的"问"是一整句话，不能按 nowrap 排——它会顶穿词条列。 */
 .dsm-defsFaq dt { white-space: normal; }
-/* 说明页里那段"会碰什么盘"是并列的几条，用项目符号而不是词条。 */
-.dsm-bullets { margin: 0; padding-left: 18px; color: var(--dsw-alias-label-secondary, #646a73); font-size: 13px; line-height: 1.6; }
-.dsm-bullets li + li { margin-top: 4px; }
 /* 路径这类机器可读的字串：等宽 + 次要灰，避免与正文混成一句。 */
 .dsm-path { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; word-break: break-all; }
 .dsm-button {

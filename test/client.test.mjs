@@ -411,6 +411,13 @@ test('客户端产物：apply 把「会话管理」注册到设置里的一页�
   assert.deepEqual(Object.keys(zh).sort(), Object.keys(en).sort(), '两份字典的键集必须一致')
   assert.ok(Object.keys(zh).length > 20, '字典不该是空壳')
 
+  // 界面文案是纯文本渲染（`dd` / 提示里写什么就显示什么），所以字典里不能有 Markdown 记号：
+  // 说明页原来那两条 `**…**` 就是原样露在页面上的（用户截图报的）。
+  for (const [language, dictionary] of [['zh', zh], ['en', en]]) {
+    const marked = Object.keys(dictionary).filter((key) => String(dictionary[key]).includes('**'))
+    assert.deepEqual(marked, [], `${language} 字典里摆着 Markdown 星号（会原样显示）`)
+  }
+
   /*
    * 拉取 / 推送两张表的动作标签：那一列是 88px（单元格左右各 8px padding → 标签可用 70px），标签自己
    * 还有左右各 6px padding 与 1px 边框。真机（dev GUI）在这一列上量到：zh「分叉·重推」75px、en
@@ -1547,10 +1554,11 @@ test('客户端产物：「会话」页也按目录分组、也能折叠，勾�
 // ---- 「说明」页（词条与边界条件）----
 //
 // 这一页的存在理由是"把动作页上的散文搬走"，所以它的验收点有两个：词条**复用了行上那几枚标签的文案**
-// （同一件事在两处各写一份就会漂），以及边界条件确实讲全了（分类、三个分页、碰什么盘、数据从哪来、
-// 常见疑问）。动作页那边由上面那条"每段最多两行"的预算盯着。
+// （同一件事在两处各写一份就会漂），以及边界条件确实讲全了（分类、每页做什么、数据从哪来、常见疑问）。
+// 四张卡片：原先"会碰什么盘"那节的独有内容并进常见疑问，与既有问答重复的那三条不再各写一份。
+// 动作页那边由上面那条"每段最多两行"的预算盯着。
 
-test('客户端产物：「说明」页把分类词条、四个分页与边界条件摆出来', { skip }, () => {
+test('客户端产物：「说明」页把分类词条、每页做什么与边界条件摆出来', { skip }, () => {
   const state = {
     sessionsRoot: '/home/u/.dsh/sessions',
     registryPath: '/home/u/.dsh/registry.json',
@@ -1562,7 +1570,7 @@ test('客户端产物：「说明」页把分类词条、四个分页与边界�
   const { registrations, recorded } = mount({ state, panel: 'help' })
   const text = strings(registrations[0].component(registrations[0].registration.inject()))
 
-  for (const key of ['helpCategoriesTitle', 'helpTabsTitle', 'helpDiskTitle', 'helpWhereTitle', 'helpFaqTitle']) {
+  for (const key of ['helpCategoriesTitle', 'helpTabsTitle', 'helpWhereTitle', 'helpFaqTitle']) {
     assert.ok(text.includes(key), `缺少小节「${key}」`)
   }
   // 词条与解释成对，且词条就是行上那几枚标签的键
@@ -1570,20 +1578,30 @@ test('客户端产物：「说明」页把分类词条、四个分页与边界�
   for (const key of ['catVisible', 'tagSubagent', 'tagBlank', 'tagArchived', 'tagLive', 'ungroupedSource']) {
     assert.ok(terms.includes(key), `分类词典缺少「${key}」`)
   }
-  assert.equal(terms.length, 18, '词条数＝分类 6 + 分页 4 + 数据 2 + 疑问 6')
-  assert.equal(recorded.filter((node) => node.type === 'dd').length, 18, '每条词条都有解释')
+  assert.equal(terms.length, 20, '词条数＝分类 6 + 分页 4 + 数据 2 + 疑问 8')
+  assert.equal(recorded.filter((node) => node.type === 'dd').length, 20, '每条词条都有解释')
   assert.ok(terms.includes('tabSync'), '分页那一节要写到「同步」这一页')
   // 「数据从哪来」两条路径来自 /state，不是写死在文案里
   assert.ok(
     text.includes('/home/u/.dsh/sessions') && text.includes('/home/u/.dsh/registry.json'),
     '两条路径来自 /state',
   )
-  for (const key of ['faqUnownedQ', 'faqDeletedQ', 'faqRestartQ', 'faqRestoreQ', 'faqForkQ', 'faqPasswordQ']) {
+  for (const key of [
+    'faqUnownedQ',
+    'faqDeletedQ',
+    'faqRestartQ',
+    'faqBackupQ',
+    'faqFamilyQ',
+    'faqExportQ',
+    'faqForkQ',
+    'faqPasswordQ',
+  ]) {
     assert.ok(text.includes(key), `常见疑问缺少「${key}」`)
   }
-  // 同步那条边界也在这一页上（动作页只留用得到的句子）：同步只往库里加、不覆盖
-  assert.ok(text.includes('helpDiskSync'), '会碰什么盘那节要写上同步')
-  // 说明页不该长成一个"什么都往里塞"的垃圾桶：正文段落本身就是词条/项目符号，没有额外的大段散文
+  // 四张卡片：会碰什么盘那节撤了，独有那三条（备份与回滚、子代理跟着父会话走、包里有什么）并入常见疑问
+  assert.ok(!text.includes('helpDiskTitle'), '说明页不该再有单独的一张"会碰什么盘"')
+  // 文案本身是纯文本（不能摆 Markdown 星号）由上面那条字典检查盯着：这里渲染的是键名，看不出值
+  // 说明页不该长成一个"什么都往里塞"的垃圾桶：正文段落本身就是词条，没有额外的大段散文
   assert.ok(text.includes('helpHint'), '页首要有一句话说明这一页讲什么')
 })
 
