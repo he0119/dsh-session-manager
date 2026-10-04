@@ -244,7 +244,11 @@ export function MigrationPanel({ t = fallback, state, reload, directory }: Panel
   // **+「未分组」**（库里有这类会话时才出现，排在最后：它不是目录，别混进目录堆里）。
   // "只迁其中几条"的第一步是先看见这些会话在哪个目录下，所以每个候选都报**库里的条数**——
   // 注册表的登记条数会骗人：同一个目录下可能还有没登记在册的会话（那些默认也会被一起搬走）。
-  const sourceOptions = React.useMemo(() => migrationSourceRows(sessions, workspaces, t), [sessions, workspaces, t])
+  const repos = state?.repos
+  const sourceOptions = React.useMemo(
+    () => migrationSourceRows(sessions, workspaces, t, repos),
+    [sessions, workspaces, t, repos],
+  )
 
   /**
    * 下拉框里实际列出来的行 = 上面的候选 **+ 当前值本身**。
@@ -259,8 +263,8 @@ export function MigrationPanel({ t = fallback, state, reload, directory }: Panel
     if (from === '' || from === UNOWNED_SOURCE || sourceOptions.some((option) => option.path === from)) {
       return sourceOptions
     }
-    return [...sourceOptions, { path: from }]
-  }, [sourceOptions, from])
+    return [...sourceOptions, { path: from, ...(repos?.[from] === undefined ? {} : { repo: repos[from] }) }]
+  }, [sourceOptions, from, repos])
 
   /** 目标候选：已登记工作区（同一路径只留一条），外加当前值本身。 */
   const targetRows = React.useMemo<PathRow[]>(() => {
@@ -269,11 +273,17 @@ export function MigrationPanel({ t = fallback, state, reload, directory }: Panel
     for (const workspace of workspaces) {
       if (seen.has(workspace.path)) continue
       seen.add(workspace.path)
-      rows.push({ path: workspace.path, title: workspace.title })
+      rows.push({
+        path: workspace.path,
+        title: workspace.title,
+        ...(repos?.[workspace.path] === undefined ? {} : { repo: repos[workspace.path] }),
+      })
     }
-    if (to !== '' && !seen.has(to)) rows.push({ path: to })
+    if (to !== '' && !seen.has(to)) {
+      rows.push({ path: to, ...(repos?.[to] === undefined ? {} : { repo: repos[to] }) })
+    }
     return rows
-  }, [workspaces, to])
+  }, [workspaces, to, repos])
 
   const chosen = React.useMemo(
     () => (pickMode === 'all' ? matching.map((s) => s.id) : matching.filter((s) => picked.includes(s.id)).map((s) => s.id)),

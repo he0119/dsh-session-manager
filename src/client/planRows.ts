@@ -130,8 +130,109 @@ export function unownedSessions<T extends SourceSubject>(sessions: readonly T[])
   )
 }
 
+// ---- 一个目录在界面上怎么称呼：项目身份、标题与本机路径 ----
+
+/**
+ * 一个目录的三种称呼来源：本机路径（必有）、注册表里的工作区标题、仓库的项目身份。
+ *
+ * 项目身份是仓库的 git remote，宿主已经规范成 `host/owner/repo`（见宿主 `src/repo.ts`）：同一个项目在
+ * 两台机器上可以落在完全不同的目录里，本机路径是**机器特有**的那一个，而身份是仓库自己的名字。组头上
+ * 只看得见**名字**，身份与本机路径一起进悬浮提示（两个都是机器字符串，摆在那一行里又长又会被截断）；
+ * 下拉框里两个都摆在文本里（`<select>` 没有悬浮提示，而同一个仓库在本机的两个克隆只能靠路径区分）。
+ */
+export interface ProjectSubject {
+  /** 本机目录的绝对路径；空串 = 没有 cwd 的那一组。 */
+  readonly path: string
+  /** 注册表里的工作区标题（未登记目录没有）。 */
+  readonly title?: string
+  /** 项目身份（`host/owner/repo`）；认不出来时没有。 */
+  readonly repo?: string
+}
+
+/**
+ * 身份里的项目名：最后一段（`github.com/he0119/dsh-session-manager` → `dsh-session-manager`）。
+ *
+ * 末尾的 `.git` 会去掉：规范形式里它已经被剪掉，而"认不出来就原样退回"的那些形状（裸路径等）可能还带
+ * 着它，直接当名字显示会多一个后缀。
+ */
+export function repoName(repo: string): string {
+  const parts = repo.replace(/\.git$/, '').split('/')
+  return parts[parts.length - 1] || repo
+}
+
+/**
+ * 身份里的主机名：第一段（`github.com/he0119/dsh-session-manager` → `github.com`）。
+ *
+ * "认不出来就原样退回"的那些形状（裸路径等）没有主机段，那时整条原样当标签——这种身份本来就少见，
+ * 标签太长由 CSS 的 nowrap 兜住。
+ */
+export function repoHost(repo: string): string {
+  const cut = repo.indexOf('/')
+  return cut <= 0 ? repo : repo.slice(0, cut)
+}
+
+/**
+ * 一个组头要说的事：主名字（唯一可见的那串字）、一枚主机标签（有身份时），以及它们的悬浮提示。
+ */
+export interface ProjectLabel {
+  /** 主名字：工作区标题 → 项目名（没有标题时）→ 本机路径（都没有时）。 */
+  readonly name: string
+  /**
+   * 悬浮提示：**项目身份（有的话）与本机路径各一行**。
+   *
+   * 组头上只看得见名字——身份与本机路径都是机器字符串，摆在那一行里既长又会被截断（截断的身份比没有
+   * 还难认），而"这是哪个仓库、它在本机哪个目录"是"想知道才看"的信息。悬浮提示把两件都给出：身份在
+   * 上（跨机器认得出来的那个名字），本机路径在下（同一个仓库在本机的两个克隆靠它区分）。
+   */
+  readonly tip: string
+  /**
+   * 项目身份的主机名（`github.com`）：组头在名字后面挂一枚小标签。
+   *
+   * 只挂主机名，不挂整条身份——整条又长又会被截断（那正是它从这一行里撤下来的原因），而"这枚标签说的
+   * 是哪个远端"由标签自己的悬浮提示给全。它同时是个**看得见的记号**：哪些目录是认得出身份的仓库，扫
+   * 一眼就知道，不必逐个悬浮。
+   */
+  readonly host?: string
+}
+
+/**
+ * 一个目录组头怎么称呼。
+ *
+ * 名字取**人认得的那一个**：注册表里的工作区标题优先（那是用户自己起的名字），没有标题才退到项目名
+ * （身份最后一段——未登记目录原来拿整条本机路径当名字，机器特有的绝对路径对认项目没有帮助）。
+ *
+ * @param subject 路径、标题与身份。
+ * @param t 翻译（没有 cwd 的那一组用 `noCwdGroup`）。
+ * @returns 名字与悬浮提示。
+ */
+export function projectLabel(subject: ProjectSubject, t: Translate): ProjectLabel {
+  const { path, title, repo } = subject
+  const name = title ?? (path === '' ? t('noCwdGroup') : repo === undefined ? path : repoName(repo))
+  const lines = [repo, path].filter((line): line is string => line !== undefined && line !== '')
+  return {
+    name,
+    tip: lines.length === 0 ? name : lines.join('\n'),
+    ...(repo === undefined ? {} : { host: repoHost(repo) }),
+  }
+}
+
+/**
+ * 目录下拉框里那一行（不带条数）：项目身份优先「身份 — 路径」，没有身份就照旧「标题 — 路径」。
+ *
+ * 下拉框与组头不同：`<option>` 没有悬浮提示，所以路径不能退到提示里——同一个仓库在本机的两个克隆
+ * 否则就无从区分。身份那一栏取代的是**标题**（标题只是路径的标签，路径与身份都在这一行里）。
+ *
+ * @param subject 路径、标题与身份。
+ * @returns 一行的文案。
+ */
+export function pathLabel(subject: ProjectSubject): string {
+  const { path, title, repo } = subject
+  if (repo !== undefined) return `${repo} — ${path}`
+  return title === undefined ? path : `${title} — ${path}`
+}
+
 /** 迁移页一个目录下拉框里的一行。`count` 只有"宿主库里真有会话的目录"才有。 */
-export interface PathRow {
+export interface PathRow extends ProjectSubject {
   /** 值（也是 React 的 key）：目录路径，或者 UNOWNED_SOURCE。 */
   path: string
   /** 已登记工作区才有标题（注册表里的名字）。 */
@@ -139,16 +240,16 @@ export interface PathRow {
   /** 库里这个来源下的会话条数。 */
   count?: number
   /**
-   * 整行的文案（有则不再拼"标题 — 路径"）。
+   * 整行的文案（有则不再拼"身份/标题 — 路径"）。
    *
    * 「未分组」不是路径，拼上哨兵值等于把内部约定漏给用户看，所以那一行自带文案。
    */
   label?: string
 }
 
-/** 一行候选的文案：工作区标题（有则带）+ 路径 + 库里的条数（有则带）。 */
+/** 一行候选的文案：身份（或标题）+ 路径 + 库里的条数（有则带）。 */
 export function optionLabel(row: PathRow, t: Translate): string {
-  const head = row.label ?? (row.title === undefined ? row.path : `${row.title} — ${row.path}`)
+  const head = row.label ?? pathLabel(row)
   return row.count === undefined ? head : `${head} — ${t('sessionsInDir', { count: row.count })}`
 }
 
@@ -163,11 +264,13 @@ export function optionLabel(row: PathRow, t: Translate): string {
  * @param sessions 会话库里的全部会话。
  * @param workspaces 已登记的工作区。
  * @param t 翻译（只用来拼"N 条会话"）。
+ * @param repos 目录 → 项目身份（宿主 `/state` 的 `repos`）；缺省按"没有身份"处理。
  */
 export function migrationSourceRows(
   sessions: readonly SourceSubject[],
   workspaces: ReadonlyArray<{ readonly path: string; readonly title?: string }>,
   t: Translate,
+  repos: Readonly<Record<string, string>> = {},
 ): PathRow[] {
   const counts = new Map<string, number>()
   for (const session of sessions) {
@@ -180,12 +283,17 @@ export function migrationSourceRows(
   for (const workspace of workspaces) {
     if (seen.has(workspace.path)) continue
     seen.add(workspace.path)
-    options.push({ path: workspace.path, title: workspace.title, count: counts.get(workspace.path) ?? 0 })
+    options.push({
+      path: workspace.path,
+      title: workspace.title,
+      count: counts.get(workspace.path) ?? 0,
+      ...(repos[workspace.path] === undefined ? {} : { repo: repos[workspace.path] }),
+    })
   }
   for (const [path, count] of [...counts.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
     if (seen.has(path)) continue
     seen.add(path)
-    options.push({ path, count })
+    options.push({ path, count, ...(repos[path] === undefined ? {} : { repo: repos[path] }) })
   }
   const unowned = unownedSessions(sessions).length
   if (unowned > 0) options.push({ path: UNOWNED_SOURCE, label: t('ungroupedSource'), count: unowned })

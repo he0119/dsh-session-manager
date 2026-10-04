@@ -18,6 +18,10 @@ import {
   migrationMatching,
   migrationSourceRows,
   optionLabel,
+  pathLabel,
+  projectLabel,
+  repoHost,
+  repoName,
   sessionLabel,
   unownedSessions,
 } from '../src/client/planRows.ts'
@@ -133,6 +137,76 @@ test('源候选：没有落在「未分组」里的会话时，那一行不出�
 test('候选文案：未分组那一行用自己的文案，不把哨兵值漏出来', () => {
   assert.equal(optionLabel({ path: UNOWNED_SOURCE, label: '未分组', count: 3 }, t), '未分组 — sessionsInDir:{"count":3}')
   assert.equal(optionLabel({ path: '/a', count: 2 }, t), '/a — sessionsInDir:{"count":2}')
+})
+
+// ---- 一个目录怎么称呼：项目身份（git remote）与本机路径 ----
+//
+// 本机绝对路径是**机器特有**的：同一个项目在两台机器上可以落在完全不同的目录里，而 `host/owner/repo`
+// 是仓库自己的名字。所以组头显示身份、把路径退到悬浮提示里；下拉框里两个都留（`<option>` 没有悬浮
+// 提示，而同一个仓库在本机的两个克隆只能靠路径区分）。
+
+test('组头：只摆名字 + 一枚主机标签，项目身份与本机路径一起进悬浮提示', () => {
+  // 已登记的工作区：名字是用户起的标题（身份不顶掉人的名字），身份与路径各占提示里的一行
+  assert.deepEqual(projectLabel({ path: '/home/u/dev/x', title: '测试项目', repo: 'github.com/he0119/x' }, t), {
+    name: '测试项目',
+    tip: 'github.com/he0119/x\n/home/u/dev/x',
+    host: 'github.com',
+  })
+  // 未登记：名字取身份最后一段（原来这里是整条本机路径）
+  assert.deepEqual(projectLabel({ path: '/opt/work/x', repo: 'git.hehome.xyz/he0910/x' }, t), {
+    name: 'x',
+    tip: 'git.hehome.xyz/he0910/x\n/opt/work/x',
+    host: 'git.hehome.xyz',
+  })
+})
+
+test('主机名：取身份第一段（认不出来而原样退回的形状整条当标签）', () => {
+  assert.equal(repoHost('github.com/he0119/dsh-session-manager'), 'github.com')
+  assert.equal(repoHost('git.hehome.xyz/hehome/smart-home-deploy'), 'git.hehome.xyz')
+  // 裸路径那种"认不出来就原样退回"的身份没有主机段，整条当标签（少见，nowrap 兜住）
+  assert.equal(repoHost('/srv/git/thing'), '/srv/git/thing')
+  assert.equal(repoHost('thing'), 'thing')
+})
+
+test('组头：没有身份时名字照旧（标题，未登记就只剩路径），提示里给本机路径', () => {
+  assert.deepEqual(projectLabel({ path: '/home/u/dev/x', title: '测试项目' }, t), {
+    name: '测试项目',
+    tip: '/home/u/dev/x',
+  })
+  assert.deepEqual(projectLabel({ path: '/home/u/dev/x' }, t), { name: '/home/u/dev/x', tip: '/home/u/dev/x' })
+})
+
+test('组头：没有 cwd 的那一组照旧用自己的文案，身份与路径都不参与', () => {
+  assert.deepEqual(projectLabel({ path: '' }, t), { name: 'noCwdGroup', tip: 'noCwdGroup' })
+})
+
+test('项目名：取身份最后一段，末尾的 .git 不算（"认不出来就原样退回"的形状可能还带着它）', () => {
+  assert.equal(repoName('github.com/he0119/dsh-session-manager'), 'dsh-session-manager')
+  assert.equal(repoName('gitlab.example.com/Team/Repo'), 'Repo')
+  assert.equal(repoName('/srv/git/thing.git'), 'thing')
+  assert.equal(repoName('C:/repos/thing'), 'thing')
+})
+
+test('下拉框：身份取代标题那一栏，本机路径留着（那里没有悬浮提示可退）', () => {
+  assert.equal(pathLabel({ path: '/home/u/dev/x', title: '测试项目', repo: 'github.com/he0119/x' }), 'github.com/he0119/x — /home/u/dev/x')
+  assert.equal(pathLabel({ path: '/home/u/dev/x', title: '测试项目' }), '测试项目 — /home/u/dev/x')
+  assert.equal(pathLabel({ path: '/home/u/dev/x' }), '/home/u/dev/x')
+  assert.equal(
+    optionLabel({ path: '/home/u/dev/x', title: '测试项目', repo: 'github.com/he0119/x', count: 2 }, t),
+    'github.com/he0119/x — /home/u/dev/x — sessionsInDir:{"count":2}',
+  )
+})
+
+test('源候选把身份带在行上（界面文案只读行，不再自己查表）', () => {
+  const rows = migrationSourceRows(
+    [s('owned', '/b', false)],
+    [{ path: '/b', title: '工作区乙' }],
+    t,
+    { '/b': 'github.com/he0119/b' },
+  )
+  assert.deepEqual(rows, [{ path: '/b', title: '工作区乙', count: 1, repo: 'github.com/he0119/b' }])
+  // 没有身份的目录：行上就没有这个字段（界面据此退回路径）
+  assert.deepEqual(migrationSourceRows([s('other', '/c', false)], [], t), [{ path: '/c', count: 1 }])
 })
 
 test('源匹配：目录按 cwd 匹配，未分组给的就是跨目录的那一批，空值不匹配任何会话', () => {

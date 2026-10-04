@@ -80,6 +80,14 @@ export interface StateResponse {
    * 缺字段（旧宿主）同样按"没配置"处理。
    */
   sync?: SyncInfo | null
+  /**
+   * 目录 → 项目身份（仓库的 git remote，规范成 `host/owner/repo`，见宿主 `src/repo.ts`）。
+   *
+   * 界面把它显示在原来印本机路径的地方：路径是机器特有的，同一个项目在两台机器上可以落在完全不同的
+   * 目录里，而 `host/owner/repo` 是仓库自己的名字。认不出来的目录不在表里（不是仓库、没有 remote、
+   * 目录已经不在），界面退回显示路径；缺字段（旧宿主）按空表处理。
+   */
+  repos?: Record<string, string>
   registryPath: string
   problems: string[]
   sessions: SessionSummary[]

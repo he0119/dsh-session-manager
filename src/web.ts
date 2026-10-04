@@ -119,6 +119,13 @@ export interface ApiDeps {
    * 准备工作），不该被列一次会话就触发。
    */
   syncInfo?: () => SyncInfo | undefined
+  /**
+   * 认一批目录的项目身份（git remote，见 repo.ts）——界面据此把"本机路径"那一格换成`host/owner/repo`。
+   *
+   * 要跑 git，所以由入口注入（`src/index.ts` 造一份带缓存的实现，一个插件实例只问每个目录一次）。
+   * 缺省不认：没有这个入口的宿主（测试、没装 git 的机器）界面照旧显示路径。
+   */
+  repos?: (dirs: readonly string[]) => Promise<ReadonlyMap<string, string>>
 }
 
 /** 界面要展示的一条会话。 */
@@ -393,6 +400,13 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
   const state = async (_req: IncomingMessage, res: ServerResponse): Promise<void> => {
     const { registry, problems } = loadRegistry(paths.registryPath)
     const sessions = scanLibrary(paths.sessionsRoot, decodeAll, { resolveTitle })
+    const workspaces = summarizeWorkspaces(registry)
+    // 项目身份只认"界面上真会出现的那些目录"：每条会话的 cwd + 注册表登记的工作区路径。别的一律不问
+    // ——`git rev-parse` 是每个目录一次进程，列表页的热路径上多问一个都是白花。
+    const directories = new Set<string>()
+    for (const session of sessions) if (session.cwd !== undefined && session.cwd !== '') directories.add(session.cwd)
+    for (const workspace of workspaces) if (workspace.path !== '') directories.add(workspace.path)
+    const repos = deps.repos === undefined ? new Map<string, string>() : await deps.repos([...directories])
     sendJson(res, 200, {
       sessionsRoot: paths.sessionsRoot,
       registryPath: paths.registryPath,
@@ -403,12 +417,15 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
       archiveAvailable: deps.registryOps?.() !== undefined,
       // 同步卡片：没有配置就是 null（界面据此说明"没配置 sync.url"，而不是画一个点了没反应的按钮）。
       sync: deps.syncInfo?.() ?? null,
+      // 目录 → 项目身份（`host/owner/repo`）：界面把它显示在原来印本机路径的地方。认不出来的目录不在
+      // 表里，界面退回显示路径。
+      repos: Object.fromEntries(repos),
       sessions: summarizeSessions(sessions, registry, {
         archived: new Set(registry?.global.archivedSessionIds ?? []),
         resolveBlank,
         live: liveSessionIds(),
       }),
-      workspaces: summarizeWorkspaces(registry),
+      workspaces,
     })
   }
 

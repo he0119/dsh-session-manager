@@ -587,8 +587,14 @@ test('客户端产物：导出列表按目录分组，组头就是"整组勾选"
   const text = strings(component(registration.inject()))
 
   assert.ok(text.includes('工作区甲'), '已登记的工作区拿标题当组名')
-  assert.ok(text.includes('/home/u/dev/alpha'), '组名旁边还要给出路径')
-  assert.ok(text.includes('/home/u/dev/beta'), '没登记的目录也要成组（按路径）')
+  // 组头只摆名字：路径（以及认出来的项目身份）都在名字那一格的悬浮提示里，判定见下面那个用例。
+  assert.ok(
+    recorded.some(
+      (element) => String(element.props?.className) === 'dsm-groupTitle' && element.props?.title === '/home/u/dev/alpha',
+    ),
+    '已登记的工作区：路径在名字那一格的悬浮提示里（组头上不再印它）',
+  )
+  assert.ok(text.includes('/home/u/dev/beta'), '没登记的目录也要成组（没有标题、也没有身份，名字就是路径）')
   assert.ok(text.includes('unregisteredDir'), '没登记的目录要标出来，别让人以为它不在册')
   assert.ok(text.includes('noCwdGroup'), '没有 cwd 的会话自成一组建在最后')
   assert.ok(text.some((item) => String(item).startsWith('sessionsInDir:')), '组头要给出这一组有几条')
@@ -660,6 +666,85 @@ test('客户端产物：导出列表按目录分组，组头就是"整组勾选"
 
 })
 
+test('客户端产物：组头只摆名字，身份与本机路径在悬浮提示里；下拉框里两个都留', { skip }, () => {
+  // 组头上只留**人认得的那一个名字**：项目身份（host/owner/repo）与本机路径都是机器字符串，摆在那一行
+  // 里又长又会被截断（截断的身份比没有还难认），而"这是哪个仓库、在本机哪个目录"是想知道才看的信息。
+  // 规则在 planRows.projectLabel() / pathLabel()（test/planRows.test.ts 逐条钉着），这里管的是"四处
+  // 界面是不是都接上了这条线"：两个动作页的组头、迁移页的来源下拉框、传输页的目标下拉框。下拉框与组头
+  // 的差别是刻意的——<option> 没有悬浮提示，路径不能从那儿消失。
+  const state = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    pickerKind: 'browse',
+    repos: {
+      '/home/u/dev/alpha': 'github.com/he0119/alpha',
+      '/home/u/dev/beta': 'github.com/he0119/beta',
+    },
+    sessions: [
+      { id: 's-1', cwd: '/home/u/dev/alpha', createdAt: 2, dir: '/home/u/dev/alpha', bytes: 2048, files: [], ungrouped: false },
+      { id: 's-2', cwd: '/home/u/dev/beta', createdAt: 1, dir: '/home/u/dev/beta', bytes: 1024, files: [], ungrouped: true },
+    ],
+    workspaces: [{ id: 'w1', path: '/home/u/dev/alpha', title: '工作区甲', sessionIds: ['s-1'] }],
+  }
+  const mounted = mount({ state, panel: 'transfer' })
+  const tree = mounted.registrations[0].component(mounted.registrations[0].registration.inject())
+  const text = strings(tree)
+
+  /** 一条组头里那串可见的字（组头里只该有这一格文字）。 */
+  const namesOf = (head) =>
+    elementsOf(head)
+      .filter((element) => String(element.props?.className) === 'dsm-groupTitle')
+      .map((element) => ({ text: element.props?.children, tip: element.props?.title }))
+  const heads = mounted.recorded.filter((element) => String(element.props?.className) === 'dsm-groupHead')
+  assert.equal(heads.length, 2, '两个目录两条组头')
+
+  /** 一条组头里那枚主机标签（有项目身份的目录才有）。 */
+  const hostsOf = (head) =>
+    elementsOf(head)
+      .filter((element) => String(element.props?.className) === 'dsm-tag dsm-tagIdle' && element.props?.children === 'github.com')
+      .map((element) => element.props?.title)
+  assert.deepEqual(hostsOf(heads[0]), ['github.com/he0119/alpha'], '有身份的组头挂一枚主机标签，标签的悬浮提示给全整条身份')
+  assert.deepEqual(hostsOf(heads[1]), ['github.com/he0119/beta'])
+
+  // 已登记的那一组：名字是用户起的标题（身份不该把人的名字顶掉），身份与路径都在它的悬浮提示里
+  assert.deepEqual(namesOf(heads[0]), [
+    { text: '工作区甲', tip: 'github.com/he0119/alpha\n/home/u/dev/alpha' },
+  ])
+
+  // 没登记的那一组：名字取身份最后一段（原来这里是整条本机路径），"未登记"照样标
+  assert.deepEqual(namesOf(heads[1]), [
+    { text: 'beta', tip: 'github.com/he0119/beta\n/home/u/dev/beta' },
+  ])
+  assert.equal(text.includes('unregisteredDir'), true, '没登记的目录照样要标出来')
+  // 两个机器字符串都不在可见文字里：身份与路径各自只出现在悬浮提示上
+  assert.equal(text.includes('github.com/he0119/beta'), false, '身份不再当可见文字印一遍')
+  assert.equal(text.includes('/home/u/dev/beta'), false, '本机路径也不再当可见文字印一遍')
+  assert.ok(
+    mounted.recorded.some((element) => element.props?.title === 'github.com/he0119/beta\n/home/u/dev/beta'),
+    '身份与路径都没丢：它们落在名字那一格的悬浮提示上',
+  )
+
+  // 传输页的目标工作区下拉框：身份取代标题那一栏，路径留着（那里没有悬浮提示可退）
+  const target = mounted.recorded.find((element) => element.type === 'option' && element.props?.value === '/home/u/dev/alpha')
+  assert.equal(target?.props?.children, 'github.com/he0119/alpha — /home/u/dev/alpha')
+
+  // 迁移页的来源下拉框：同一套写法 + 库里的条数
+  const migrated = mount({ state, panel: 'migrate' })
+  strings(migrated.registrations[0].component(migrated.registrations[0].registration.inject()))
+  const options = migrated.recorded.filter((element) => element.type === 'option')
+  const optionFor = (path) => options.find((element) => element.props?.value === path)
+  assert.equal(
+    optionFor('/home/u/dev/alpha')?.props?.children,
+    'github.com/he0119/alpha — /home/u/dev/alpha — sessionsInDir:{"count":1}',
+    '有身份时那一行是"身份 — 路径 — 条数"（标题不再重复，路径与身份都在）',
+  )
+  assert.equal(
+    optionFor('/home/u/dev/beta')?.props?.children,
+    'github.com/he0119/beta — /home/u/dev/beta — sessionsInDir:{"count":1}',
+  )
+})
+
 // ---- 「会话」页（逐条归档 / 删除）----
 //
 // 这一页的存在理由就是"侧边栏里点不到的那些会话"（子代理 / 空白 / 已归档），所以它的验收点有两个：
@@ -705,13 +790,17 @@ test('客户端产物：「会话」页把侧边栏看不见的那三类标出�
   tagged('tagBlank', 'tagBlankTip')
   tagged('tagArchived', 'tagArchivedTip')
   tagged('tagLive', 'tagLiveTip')
-  // 归属进了组头：按目录分组（组头写工作区标题与路径），行上不再重复那一列
+  // 归属进了组头：按目录分组（组头写工作区标题，目录路径在那一格的悬浮提示里），行上不再重复那一列
   const heads = recorded.filter((node) => String(node.props?.className) === 'dsm-groupHead')
   assert.equal(heads.length, 2, 'alpha 与 beta 各一组')
   assert.ok(strings(heads[0]).includes('工作区甲'), '登记过的那一组写工作区标题')
   assert.ok(
-    heads.some((node) => strings(node).includes('/home/u/dev/alpha')),
-    '组头把目录写在路径那一格',
+    recorded.some(
+      (node) =>
+        String(node.props?.className) === 'dsm-groupTitle' &&
+        String(node.props?.title).includes('/home/u/dev/alpha'),
+    ),
+    '组头那一格的悬浮提示里给出目录（这个夹具没有项目身份，提示就是路径）',
   )
   const manageRows = recorded.filter(
     (node) => node.type === 'label' && String(node.props?.className).includes('dsm-rowManage'),
@@ -1873,6 +1962,8 @@ test('客户端产物：同步预演三张表按项目分组，路径只在组�
       { id: 'w2', path: '/home/u/dev/beta', title: '测试项目', sessionIds: [] },
       { id: 'w1', path: '/home/u/dev/alpha', title: '会话管理', sessionIds: [] },
     ],
+    // 只给 beta 一个身份：alpha 那一组照旧显示本机路径，两边的画法在同一个用例里对照着看。
+    repos: { '/home/u/dev/beta': 'github.com/he0119/beta' },
   }
   const response = {
     mode: 'plan',
@@ -1929,14 +2020,34 @@ test('客户端产物：同步预演三张表按项目分组，路径只在组�
   )
   const headText = heads.map((head) => strings(head))
   const headOf = (index) => headText[index] ?? []
+  // 组头只摆名字（与列表那边同一份称呼规则）：这一组有身份，身份与本机路径都在名字那一格的悬浮提示里。
   assert.deepEqual(
-    headOf(0).filter((item) => item === '测试项目' || item === '/home/u/dev/beta'),
-    ['测试项目', '/home/u/dev/beta'],
-    '已登记的工作区：组头是标题 + 路径',
+    headOf(0).filter((item) => item === '测试项目' || item === 'github.com/he0119/beta'),
+    ['测试项目'],
+    '有项目身份的工作区：组头只有标题，身份不进可见文字',
+  )
+  assert.ok(
+    mounted.recorded.some(
+      (node) => String(node.props?.className) === 'dsm-groupTitle' && node.props?.title === 'github.com/he0119/beta\n/home/u/dev/beta',
+    ),
+    '身份与本机路径都在那一格的悬浮提示里（同一个仓库的两个克隆靠路径区分）',
+  )
+  assert.ok(
+    mounted.recorded.some(
+      (node) => String(node.props?.className) === 'dsm-tag dsm-tagIdle' && node.props?.title === 'github.com/he0119/beta',
+    ),
+    '弹窗里也挂同一枚主机标签（标签自己的提示给全整条身份）',
   )
   assert.deepEqual(
     headOf(1).filter((item) => item === '会话管理' || item === '/home/u/dev/alpha'),
-    ['会话管理', '/home/u/dev/alpha'],
+    ['会话管理'],
+    '没有身份的目录也只剩标题——路径同样退到悬浮提示里',
+  )
+  assert.ok(
+    mounted.recorded.some(
+      (node) => String(node.props?.className) === 'dsm-groupTitle' && node.props?.title === '/home/u/dev/alpha',
+    ),
+    '没有身份时悬浮提示给的就是本机路径',
   )
   assert.ok(headOf(2).includes('noCwdGroup'), '没有 cwd 的那一组照旧自成一组建在最后')
   assert.ok(

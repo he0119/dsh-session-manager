@@ -13,6 +13,7 @@ import { readFileSync } from 'node:fs'
 import type { Context } from '@deepseek-ai/cordis'
 
 import { Config, type PluginConfigInput } from './config.ts'
+import { createRepoLookup } from './repo.ts'
 import {
   archiveOps,
   decodeAll,
@@ -63,6 +64,9 @@ export function apply(ctx: Context, config: PluginConfigInput = {}): () => void 
 
   const logger = (ctx as { logger?: { info?: (message: string) => void } }).logger
   const info = (message: string): void => logger?.info?.(message)
+  // 项目身份（git remote）只在这里造一份：它有进程内缓存（一个目录只问一次 git），而 /state 是页面的
+  // 热路径——每次请求都新建一份等于把缓存扔掉。见 src/repo.ts 的 createRepoLookup()。
+  const repos = createRepoLookup()
 
   info(
     `dsh-session-manager 已就绪：sessions=${paths.sessionsRoot} registry=${paths.registryPath} backups=${paths.backupRoot}`,
@@ -94,6 +98,8 @@ export function apply(ctx: Context, config: PluginConfigInput = {}): () => void 
       // WebDAV 同步：运行时按需造（每次请求重新解析密码引用），/state 只看非敏感的那几个字段。
       sync: () => syncRuntime(ctx, config),
       syncInfo: () => describeSyncConfig(config),
+      // 界面把"本机路径"那一格换成项目身份（git remote）时读它；找不到身份就退回路径。
+      repos,
     })
     info(`dsh-session-manager 界面端点已挂：${API_PREFIX}`)
     return dispose

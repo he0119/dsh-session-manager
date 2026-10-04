@@ -176,6 +176,16 @@ test('标签不许折行：它是小块，不是一句话', () => {
   assert.match(body, /white-space:\s*nowrap/, '窄列里标签会竖成两行（「跳/过」），必须 nowrap')
 })
 
+test('组头里的标签与名字一样高：行高压到 18px（12px 的字 + 2px 边框 = 名字那一行 20px）', () => {
+  // 为什么钉它：标签默认行高 20px，加上下各 1px 边框就是 22px，于是挂了标签的组头比没挂的高 2px
+  // （真实 dev GUI 里量到 39 vs 38px），同一列组头的下沿参差。列表与弹窗两处选择器不同、值同一个。
+  for (const selector of ['.dsm-groupPick > .dsm-tag', '.dsm-planGroupHead .dsm-tag']) {
+    const body = ruleBody(selector)
+    assert.notEqual(body, null, `找不到 ${selector} 规则`)
+    assert.match(body, /line-height:\s*18px/, `${selector} 的行高要与名字那一行（20px）对得上`)
+  }
+})
+
 test('预演表的动作列：同步那张表自己量列宽，标签再长也不许顶到下一列', () => {
   // 真实事故（用户截图报的）：同步预演的动作列沿用了导入预演那 60px（单元格左右各 8px padding，
   // 内容只有 44px），而它装的是「本机有、远端没有」这种动词短语——浏览器里实测 110px，en 那句
@@ -197,6 +207,17 @@ test('预演表的动作列：同步那张表自己量列宽，标签再长也�
   assert.notEqual(keptRule, null, '「这次不动」那张表的状态列要单独声明列宽')
   const keptWidth = Number(/width:\s*([\d.]+)px/.exec(keptRule ?? '')?.[1])
   assert.ok(keptWidth >= 111, `状态列声明了 ${keptWidth}px，装不下最长的那颗标签（要 ≥111px）`)
+})
+
+test('组头只摆名字：右端那两串数字靠自己的 margin-left 贴住右缘', () => {
+  // 组头原来靠一段 `flex: 1 1 0` 的等宽路径（曾经是 .dsm-groupPath）把计数块挤到右缘；那一格撤掉之后
+  // （身份与本机路径进了名字的悬浮提示），让位改由计数块自己承担。少了 margin-left: auto，数字会紧贴
+  // 名字，而"这组几条 / 选中几条"在每个组头里离右缘多远就取决于名字有多长——同一个列表里数字对不齐。
+  // 这里没有渲染器，读的是声明本身。
+  const counts = ruleBody('.dsm-groupCounts')
+  assert.notEqual(counts, null, '找不到 .dsm-groupCounts 规则')
+  assert.match(counts, /margin-left:\s*auto/, '计数块自己贴右缘（组头里已经没有可让位的元素了）')
+  assert.match(counts, /flex:\s*none/, '计数块不压缩：窄屏下先被压扁的该是名字，不是数字')
 })
 
 test('计划表的项目组头：一条横幅，横排的是内层那一行', () => {

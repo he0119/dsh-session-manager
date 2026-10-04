@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 
-import { canonicalRepo, createGitRunner, repoLocation, type GitRunner } from '../src/repo.ts'
+import { canonicalRepo, createGitRunner, createRepoLookup, repoLocation, type GitRunner } from '../src/repo.ts'
 
 test('项目身份：同一个仓库的各种写法归一到同一个身份', () => {
   const same = [
@@ -140,4 +140,28 @@ test('项目身份：真去跑 git（起一个临时仓库）', () => {
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
+})
+
+test('界面用的项目身份：一个目录一次进程里只问一次 git，认不出来的不记', async () => {
+  let calls = 0
+  const run: GitRunner = async (args, cwd) => {
+    calls += 1
+    if (cwd === '/work/a') {
+      if (args[0] === 'rev-parse') return '/work/a\n'
+      if (args[0] === 'remote') return 'origin\n'
+      if (args[0] === 'config') return 'git@github.com:he0119/a.git\n'
+    }
+    // 不是仓库的目录：`git rev-parse` 失败（真实的 git 就是这么失败的）
+    throw new Error(`git ${args.join(' ')} 退出码 128`)
+  }
+  const lookup = createRepoLookup({ run })
+  // 空串（没有 cwd 的那一组）不是目录，压根不该去问 git
+  const first = await lookup(['/work/a', '/work/plain', '/work/a', ''])
+  assert.deepEqual([...first], [['/work/a', 'github.com/he0119/a']], '只记认出来的那些')
+  assert.equal(calls, 4, '一个目录一次：/work/a 三条命令 + /work/plain 一条（空串不问）')
+
+  // 第二次：一个 git 都不问（缓存，认不出来的那些也缓存着）——/state 是页面的热路径
+  const second = await lookup(['/work/a', '/work/plain'])
+  assert.deepEqual([...second], [['/work/a', 'github.com/he0119/a']])
+  assert.equal(calls, 4, '缓存命中就一条命令都不发')
 })

@@ -9,6 +9,10 @@
  * 身份只认 remote，不认目录名与仓库名：同一个仓库在两台机器上叫不同名字的目录也照样对得上；反过来，
  * 两台机器上同名的目录若是两个仓库，也不会被认成同一个项目。
  *
+ * 除了同步落地，界面也用这份身份显示"这是哪个项目"（`createRepoLookup()`，`/state` 里那一栏
+ * `repos`）：本机绝对路径是机器特有的，同一个项目在两台机器上可以落在完全不同的目录里，而
+ * `host/owner/repo` 是仓库自己的名字。
+ *
  * 这一层零 DSH 依赖，跑 git 的入口是注入的（[GitRunner]），所以判定逻辑能单测，不必真去克隆。
  *
  * @module dsh-session-manager/repo
@@ -153,4 +157,42 @@ export function createGitRunner(options: { timeoutMs?: number } = {}): GitRunner
         else reject(new Error(`git ${args.join(' ')} 退出码 ${String(code)}：${err.trim().slice(0, 200)}`))
       })
     })
+}
+
+/** 一批目录的项目身份：目录路径 → `host/owner/repo`；认不出来的目录不在表里。 */
+export type RepoMap = ReadonlyMap<string, string>
+
+/**
+ * 认一批目录的项目身份（界面要按目录显示"这是哪个项目"）。
+ *
+ * **进程内缓存**：同一个目录只问一次 git——身份是仓库自己的名字，一个插件实例的生命周期里几乎不变，
+ * 而 `/state` 是页面的热路径（每帧都拉一次），每次都为二十来个目录起 git 进程会把列个会话拖慢。
+ * 代价是**改了 remote 要重启 DSH 才会刷新显示**（同步落地那条路不复用这份缓存，它每次现读，
+ * 所以"落到哪儿"永远是对的，只有这一行字会旧）。
+ *
+ * 目录不存在、不是仓库、没有 remote、没装 git——一律记成"没有身份"并缓存下来，不会每次重问。
+ *
+ * @param options.run 跑 git 的入口（可注入，便于测试）。
+ * @returns 认身份的函数。
+ */
+export function createRepoLookup(options: { run?: GitRunner } = {}): (dirs: readonly string[]) => Promise<RepoMap> {
+  const run = options.run ?? createGitRunner()
+  const cache = new Map<string, Promise<string | undefined>>()
+  return async (dirs: readonly string[]): Promise<RepoMap> => {
+    const wanted = [...new Set(dirs.filter((dir) => dir !== ''))]
+    const found = await Promise.all(
+      wanted.map(async (dir): Promise<[string, string] | undefined> => {
+        let pending = cache.get(dir)
+        if (pending === undefined) {
+          pending = repoLocation(dir, run).then((location) => location?.repo)
+          cache.set(dir, pending)
+        }
+        const repo = await pending
+        return repo === undefined ? undefined : [dir, repo]
+      }),
+    )
+    const out = new Map<string, string>()
+    for (const entry of found) if (entry !== undefined) out.set(entry[0], entry[1])
+    return out
+  }
 }

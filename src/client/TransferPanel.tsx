@@ -32,7 +32,7 @@ import { download, exportSessions, importBundle, type ImportResponse } from './a
 import type { ImportEntry, SessionSummary } from './api.ts'
 import { ConfirmDialog } from './ConfirmDialog.tsx'
 import { groupKey, groupSessions, lockedParentOf, nestSessions } from './groups.ts'
-import { describeCwd, parentDirNote, sessionLabel } from './planRows.ts'
+import { describeCwd, parentDirNote, pathLabel, sessionLabel } from './planRows.ts'
 import { FILTER_KEYS } from './sessionFilter.ts'
 import {
   SessionFilterBar,
@@ -330,16 +330,14 @@ export function TransferPanel({ t = fallback, state, reload }: PanelShare): Reac
             groups.map(({ group, rows }) => {
               const key = groupKey(group.path)
               const picked = rows.filter((row) => selected.includes(row.session.id)).length
-              // 组头的名字：登记过就用工作区标题（人认得的名字），没登记就只剩路径可显示。
-              const name = group.title ?? (group.path === '' ? t('noCwdGroup') : group.path)
               const collapsed = collapse.isCollapsed(key)
               return (
                 // key 与折叠状态同一个身份（`groupKey`），免得两处各写一遍哨兵。
                 <div key={key} className="dsm-group">
                   <SessionGroupHead
-                    name={name}
-                    title={group.title}
                     path={group.path}
+                    title={group.title}
+                    repo={state?.repos?.[group.path]}
                     count={rows.length}
                     picked={picked}
                     collapsed={collapsed}
@@ -390,7 +388,7 @@ export function TransferPanel({ t = fallback, state, reload }: PanelShare): Reac
             <option value="">{t('pickWorkspace')}</option>
             {workspaces.map((workspace) => (
               <option key={workspace.id} value={workspace.path}>
-                {workspace.title} — {workspace.path}
+                {pathLabel({ path: workspace.path, title: workspace.title, repo: state?.repos?.[workspace.path] })}
               </option>
             ))}
           </select>
