@@ -2,7 +2,7 @@
  * 「同步」弹窗里那三张计划表按**项目目录**分组。
  *
  * 为什么分组：一次整库同步的计划可能有几十条，而其中绝大多数行属于同一个目录。原来每条各占一行、
- * 每行都印一遍同样的路径，读起来是一列重复的字符串——真正要看的"这条会话是谁、会落/推到哪个项目"
+ * 每行都印一遍同样的路径，读起来是一列重复的字符串——真正要看的"这条会话是谁、会落到 / 推送到哪个项目"
  * 反而被挤成窄窄一格。分组之后路径在组头上说一次，行里只剩动作、会话名与大小。
  *
  * 分组键的两个方向都取**本机那个目录**（拉取取落地后的 `toCwd`，推取本机的 `cwd`）：用户是从
@@ -19,7 +19,7 @@
 import { orderProjectPaths, workspaceTitles, type GroupableWorkspace } from './groups.ts'
 import type { Translate } from './locales.ts'
 
-/** 一条计划行来自哪张表：拉（远端 → 本机）还是推（本机 → 远端），决定"项目"取哪个字段。 */
+/** 一条计划行来自哪张表：拉取（远端 → 本机）还是推送（本机 → 远端），决定"项目"取哪个字段。 */
 export type SyncSide = 'pull' | 'push'
 
 /**
@@ -43,9 +43,9 @@ export interface SyncProjectSubject {
  * @returns 项目路径；`''` 是"没有 cwd"的哨兵（与 `groups.groupKey` 同一套约定）。
  */
 export function syncProjectOf(entry: SyncProjectSubject, side: SyncSide): string {
-  // 推：本机的 cwd 就是项目，缺 cwd 的会话没有项目可归（落 `_no-cwd` 那一组）。
+  // 推送：本机的 cwd 就是项目，缺 cwd 的会话没有项目可归（落 `_no-cwd` 那一组）。
   if (side === 'push') return entry.cwd ?? ''
-  // 拉：先看落地后的本机路径（映射配好了才有）；没有映射时退到远端那一段——那一行说的正是
+  // 拉取：先看落地后的本机路径（映射配好了才有）；没有映射时退到远端那一段——那一行说的正是
   // "这个远端项目还没有本机目录"，把它的路径摆在组头上就是用户要补的那条。
   return entry.toCwd ?? entry.fromCwd ?? ''
 }

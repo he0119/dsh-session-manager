@@ -113,8 +113,8 @@
 - [写盘动作是一个按钮开一个确认弹窗](../.agents/notes/implemented/architecture/2026-10-03-one-click-confirm-dialog.md)：
   计划与"做不做"这个决定同框；只有会写盘的动作问，归档与导出不问。
 - [同步的预演与落地都走 SSE 报进度](../.agents/notes/implemented/architecture/2026-10-03-sync-progress-streams-over-sse.md)：
-  预演与落地回同一个事件流形状；算计划的四段各有各的分母（没有分母的那段不画条），写盘分拉与推两段，
-  跳过的那些不进分母，也没有中途取消。
+  预演与落地回同一个事件流形状；算计划的四段各有各的分母（没有分母的那段不画条），写盘分拉取与推送
+  两段，跳过的那些不进分母，也没有中途取消。
 
 ## Host 半侧的约束
 

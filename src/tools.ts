@@ -173,27 +173,27 @@ export interface SyncToolResult {
 }
 
 /**
- * 计划里"没动"的条目（推与拉两侧的 skip）压成一行行说明。
+ * 计划里"没动"的条目（推送与拉取两侧的 skip）压成一行行说明。
  *
- * `identical`（"远端已经有这一份"）不进来：整库同步时它是最多也最没信息量的一类，几百行"这条不用推"
+ * `identical`（"远端已经有这一份"）不进来：整库同步时它是最多也最没信息量的一类，几百行"这条不用推送"
  * 会把真正要看的那几条淹掉。
  */
 function planNotes(plan: SyncPlan): string[] {
   const notes: string[] = []
   for (const entry of plan.pull) {
-    if (entry.action === 'skip') notes.push(`不拉 ${entry.id}：${entry.reason ?? ''}`)
+    if (entry.action === 'skip') notes.push(`不拉取 ${entry.id}：${entry.reason ?? ''}`)
   }
   for (const entry of plan.push) {
-    if (entry.action === 'skip' && entry.code !== 'identical') notes.push(`不推 ${entry.id}：${entry.reason ?? ''}`)
+    if (entry.action === 'skip' && entry.code !== 'identical') notes.push(`不推送 ${entry.id}：${entry.reason ?? ''}`)
   }
   return notes
 }
 
 /** 一次同步的一句话结论。 */
 function describeSync(plan: SyncPlan, pulled: readonly string[], pushed: readonly string[], applied: boolean): string {
-  const head = `${applied ? '已同步' : '预演'}：拉 ${plan.pullIds.length} 条、推 ${plan.pushIds.length} 条（本机 ${plan.localCount} 条，远端 ${plan.remoteCount} 条，来自 ${plan.machines.join('、') || '还没有机器'}）`
+  const head = `${applied ? '已同步' : '预演'}：拉取 ${plan.pullIds.length} 条、推送 ${plan.pushIds.length} 条（本机 ${plan.localCount} 条，远端 ${plan.remoteCount} 条，来自 ${plan.machines.join('、') || '还没有机器'}）`
   if (!applied) return head
-  return `${head}。实际落地：拉 ${pulled.length} 条、推 ${pushed.length} 条`
+  return `${head}。实际落地：拉取 ${pulled.length} 条、推送 ${pushed.length} 条`
 }
 
 /**

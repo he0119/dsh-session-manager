@@ -467,7 +467,7 @@ test('sync_sessions：预演只读、apply 才落地；远端那条按映射改�
     assert.ok(existsSync(landed), 'apply 之后应当落在映射到的目标项目目录里')
     const header = JSON.parse(decodeAll(readFileSync(landed)).split('\n')[0] ?? '{}') as { cwd?: string }
     assert.equal(header.cwd, sb.toDir, 'header 的 cwd 要改写成这台机器的路径')
-    // 推上去的那几条也真的在远端：索引与包都写了自己那一格
+    // 推送的那几条也真的在远端：索引与包都写了自己那一格
     assert.ok(existsSync(join(fixture.root, remoteIndexPath('robot-a'))))
     assert.ok(existsSync(join(fixture.root, remoteBundlePath('robot-a', 'session-a'))))
   } finally {

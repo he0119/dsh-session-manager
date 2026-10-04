@@ -1,5 +1,5 @@
 /**
- * 「同步」分页：按 WebDAV 配置在多台机器之间拉与推（点「同步」先在弹窗里看只读计划，确认才落盘）。
+ * 「同步」分页：按 WebDAV 配置在多台机器之间拉取与推送（点「同步」先在弹窗里看只读计划，确认才落盘）。
  *
  * 为什么单独一页，而不是挂在「传输」底下：两者正交——「传输」是一次性的带走/带回来（选包、选目标、
  * 导出下载），同步是一条**常设**通道：远端地址、机器名、映射表与那个确认弹窗都只属于它。挤在一页时
@@ -17,7 +17,7 @@
  * [api.ts](./api.ts) 的 `applySync` 与 [ProgressBar.tsx](./ProgressBar.tsx)）。同步是这个插件里唯一
  * "按条走网络"的动作，一次整库同步可能是几十秒，而在此之前界面只有一句"同步中…"。
  *
- * 弹窗里那三张计划表（会拉 / 会推 / 没动）按**项目目录**分组：一次整库同步的计划里，同一个目录会连着
+ * 弹窗里那三张计划表（会拉取 / 会推送 / 没动）按**项目目录**分组：一次整库同步的计划里，同一个目录会连着
  * 出现十几条，逐行印一遍同样的路径只是把人绕进去。分组键怎么取、组怎么排见
  * [syncGroups.ts](./syncGroups.ts)——那是纯函数，规则在 `test/syncGroups.test.ts` 里逐条钉着。
  *
@@ -70,7 +70,7 @@ interface SyncKeptRow {
   readonly entry: SyncPullEntry | SyncPushEntry
 }
 
-/** 拉/推两种计划行的公共字段（只为 `syncWhy()` / `syncTag()` 取字段用）。 */
+/** 拉取 / 推送两种计划行的公共字段（只为 `syncWhy()` / `syncTag()` 取字段用）。 */
 interface SyncRow {
   code: SyncPullEntry['code'] | SyncPushEntry['code']
   action: string
@@ -106,7 +106,7 @@ function syncWhy(entry: SyncRow, t: Translate): string {
 /**
  * 「没动」那一类的短标签：状态进标签，整句（`syncWhy()`）挂在它的 `title` 上。
  *
- * 与拉/推两张表同一口径：窄列里放不下整句，而**状态与会话名必须是两种东西**——挤成一行同色同号的
+ * 与拉取 / 推送两张表同一口径：窄列里放不下整句，而**状态与会话名必须是两种东西**——挤成一行同色同号的
  * 文字时，一列"某某：两边各自写过（robot-b）"读起来分不出哪个是状态、哪个是会话。认不出来的码退回
  * 整句（宁可挤，也不要显示成一个生词）。
  */
@@ -289,9 +289,9 @@ export function SyncPanel({ t = fallback, state, reload }: PanelShare): React.Re
   }
 
   /**
-   * 弹窗里按「确认同步」：真拉真推。
+   * 弹窗里按「确认同步」：真的拉取与推送。
    *
-   * 逐条失败（某一条拉不下来）照旧把成功的那部分报出来，失败的那些**在页面横幅上逐条留着**——弹窗
+   * 逐条失败（某一条拉取失败）照旧把成功的那部分报出来，失败的那些**在页面横幅上逐条留着**——弹窗
    * 关掉之后它们还得看得见；不然用户只知道"同步过了"，不知道有一条没成。
    */
   const doSyncApply = (): void => {
@@ -313,13 +313,13 @@ export function SyncPanel({ t = fallback, state, reload }: PanelShare): React.Re
               bytesIn: formatBytes(result.bytesIn),
               bytesOut: formatBytes(result.bytesOut),
             }) +
-              // 拉下来的会话进没进宿主内存里的那份注册表：这句只在真拉了东西时才有意义。
+              // 拉取来的会话进没进宿主内存里的那份注册表：这句只在真的有东西落盘时才有意义。
               (result.pulled.length === 0
                 ? ''
                 : ` ${result.takesEffect === 'immediate' ? t('effectImmediate') : t('effectRestart')}`),
           )
         }
-        // 拉下来的落到本机库里了：列表与工作区归属都要重读（推的那一侧不改本机任何东西）。
+        // 拉取的落到本机库里了：列表与工作区归属都要重读（推的那一侧不改本机任何东西）。
         if (result.pulled.length > 0) void reload()
       },
       (cause) => {
@@ -444,7 +444,7 @@ export function SyncPanel({ t = fallback, state, reload }: PanelShare): React.Re
           onConfirm={doSyncApply}
           onCancel={() => setDialog(null)}
         >
-        {/* 落地：前面三个阶段（算计划）与后面两段（拉 / 推）报的是同一套事件，画法也一样。 */}
+        {/* 落地：前面三个阶段（算计划）与后面两段（拉取 / 推送）报的是同一套事件，画法也一样。 */}
         {busy === 'apply' &&
           (progress === null ? (
             <p className="dsm-hint">{t('syncPreparing')}</p>
@@ -545,7 +545,7 @@ export function SyncPanel({ t = fallback, state, reload }: PanelShare): React.Re
             {syncKept.length > 0 && (
               <>
                 <p className="dsm-hint">{t('syncKeptHead', { count: syncKept.length })}</p>
-                {/* 与拉/推两张表同一种画法：状态列放标签、会话单独一列——挤成一行同色的说明时，
+                {/* 与拉取 / 推送两张表同一种画法：状态列放标签、会话单独一列——挤成一行同色的说明时，
                     状态与会话名分不出来（用户截图报的）。整句仍在标签的 title 上。
                     第三列是**远端是哪台机器**：分组之后路径已经在组头上（缺映射那类给的就是远端
                     路径），这一列再不重复它——剩下的信息只有"另一份是谁的"。 */}

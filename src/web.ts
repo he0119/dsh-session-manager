@@ -676,10 +676,10 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
   }
 
   /**
-   * WebDAV 同步：`?mode=apply` 才真跑（拉 + 推），`?mode=test` 只探一次连通性，缺省只预演（读远端，
+   * WebDAV 同步：`?mode=apply` 才真跑（拉取 + 推送），`?mode=test` 只探一次连通性，缺省只预演（读远端，
    * 什么都不写）。
    *
-   * 拉下来的会话走的是**导入那条编排**（`runSync()` 内部调 `planImport/applyImport`），所以这里与
+   * 拉取来的会话走的是**导入那条编排**（`runSync()` 内部调 `planImport/applyImport`），所以这里与
    * 导入端点同一套边界：包必须自校验通过、同 id 只跳过、`_no-cwd` 直接落项目目录。
    */
   const syncSessions = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
@@ -731,7 +731,7 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
     /*
      * 预演与落地都走事件流：`{type:'progress'}` 每做一条一次、`{type:'result'}` 收尾、`{type:'error'}`
      * 兜底。预演也要进度——它得先扫本机（每条会话读头、折标题）、再读远端索引、最后逐条比对内容，
-     * 冷启动时这几秒里界面原来只有一句"预演中…"；落地那边同样受益，按下确认后到第一条拉下来之间
+     * 冷启动时这几秒里界面原来只有一句"预演中…"；落地那边同样受益，按下确认后到第一条拉取完成之间
      * 算的还是这三个阶段。
      *
      * 流一旦开始，HTTP 状态就已经发出去了（200），所以这一段的错误只能靠事件说——客户端按
