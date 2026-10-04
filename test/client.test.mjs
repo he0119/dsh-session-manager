@@ -1748,7 +1748,7 @@ test('客户端产物：同步预演三张表的状态列只放短标签，整�
     problems: [],
     sync: { url: 'https://dav.example.com/dsh', machineId: 'robot-a', mappings: 0 },
     sessions: [],
-    workspaces: [],
+    workspaces: [{ id: 'w1', path: '/home/u/dev/x', title: '测试项目', sessionIds: [] }],
   }
   const response = {
     mode: 'plan',
@@ -1757,7 +1757,15 @@ test('客户端产物：同步预演三张表的状态列只放短标签，整�
       ok: true,
       problems: [],
       pull: [
-        { id: 'session-a', machine: 'robot-b', bytes: 100, action: 'create', code: 'missing', fromCwd: '/home/b/dev/x' },
+        {
+          id: 'session-a',
+          machine: 'robot-b',
+          bytes: 100,
+          action: 'create',
+          code: 'missing',
+          fromCwd: '/home/b/dev/x',
+          toCwd: '/home/u/dev/x',
+        },
       ],
       push: [
         { id: 'session-b', bytes: 200, action: 'upload', code: 'missing', cwd: '/home/u/dev/x' },
@@ -1796,12 +1804,18 @@ test('客户端产物：同步预演三张表的状态列只放短标签，整�
   )
   assert.ok(
     tables.some((node) => String(node.props?.className).includes('dsm-keptTable')),
-    '「这次不动」也是一张表（状态一列、会话一列、说明一列），不是一整行说明',
+    '「这次不动」也是一张表（状态一列、会话一列、远端机器一列），不是一整行说明',
   )
   const keptHeaders = mounted.recorded
-    .filter((node) => node.type === 'th' && node.props?.children === 'colNote')
+    .filter((node) => node.type === 'th' && node.props?.children === 'colMachine')
     .length
-  assert.equal(keptHeaders, 1, '那张表的第三列表头是「说明」')
+  assert.equal(keptHeaders, 1, '那张表的第三列表头是「远端机器」')
+  // 分组之后路径只在组头说一次：三张表里都不该再有 cwd 列（这一页上也没有别的表会用到它）。
+  assert.equal(
+    mounted.recorded.filter((node) => node.type === 'th' && node.props?.className === 'dsm-colCwd').length,
+    0,
+    '同步预演的表里不再有 cwd 列——路径去组头了',
+  )
 
   // 动作列：看得见的是动词，整句在 title 里。
   const tagOf = (visible, title) =>
@@ -1841,6 +1855,132 @@ test('客户端产物：同步预演三张表的状态列只放短标签，整�
     primaryOf(waitingRecorded).props.disabled,
     true,
     '计划没到手时确认按钮禁用——这一条靠 ConfirmDialog 的 planning，同步页不给 disabled',
+  )
+})
+
+test('客户端产物：同步预演三张表按项目分组，路径只在组头上说一次', { skip }, () => {
+  // 为什么分组：一次整库同步的计划里同一个目录会连着出现十几条，逐行印一遍同样的路径只是把人绕进去，
+  // 还从会话名那一列扣宽度。分组键的规则在 src/client/syncGroups.ts（test/syncGroups.test.ts 逐条钉
+  // 着），这里只管"组画出来没有、路径是不是只出现在组头、行里还剩下什么"。
+  const state = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    sync: { url: 'https://dav.example.com/dsh', machineId: 'robot-a', mappings: 1 },
+    sessions: [],
+    // 注册表顺序刻意是 beta 在前：组的次序跟着它走（与列表那边同一套），不是按路径排序。
+    workspaces: [
+      { id: 'w2', path: '/home/u/dev/beta', title: '测试项目', sessionIds: [] },
+      { id: 'w1', path: '/home/u/dev/alpha', title: '会话管理', sessionIds: [] },
+    ],
+  }
+  const response = {
+    mode: 'plan',
+    remote: { url: 'https://dav.example.com/dsh', machineId: 'robot-a' },
+    plan: {
+      ok: true,
+      problems: [],
+      pull: [
+        { id: 'session-5', machine: 'robot-b', bytes: 100, action: 'create', code: 'missing', fromCwd: '/home/b/dev/x', toCwd: '/home/u/dev/beta' },
+        { id: 'session-6', machine: 'robot-b', bytes: 100, action: 'create', code: 'missing', fromCwd: '/home/b/dev/alpha', toCwd: '/home/u/dev/alpha' },
+        // 远端那条会话本来就没有 cwd：它落 _no-cwd，归"没有 cwd"那一组。
+        { id: 'session-7', machine: 'robot-b', bytes: 100, action: 'create', code: 'missing' },
+        // 没动的那两类：缺映射（本机没有那个项目，组头给远端路径）、目标目录不存在（本机路径）。
+        { id: 'session-8', machine: 'robot-map', bytes: 100, action: 'skip', code: 'no-mapping', fromCwd: '/home/b/dev/zzz' },
+        { id: 'session-9', machine: 'robot-b', bytes: 100, action: 'skip', code: 'missing-target', fromCwd: '/home/b/dev/w', toCwd: '/home/u/dev/gone' },
+      ],
+      push: [
+        { id: 'session-1', bytes: 200, action: 'upload', code: 'missing', cwd: '/home/u/dev/alpha' },
+        { id: 'session-2', bytes: 200, action: 'upload', code: 'missing', cwd: '/home/u/dev/beta' },
+        // 本机这条也没有 cwd：同样归"没有 cwd"那一组（推的那一侧）。
+        { id: 'session-3', bytes: 200, action: 'upload', code: 'missing' },
+        { id: 'session-4', bytes: 200, action: 'upload', code: 'missing', cwd: '/home/u/dev/alpha' },
+        { id: 'session-10', bytes: 200, action: 'skip', code: 'remote-ahead', machine: 'robot-c', cwd: '/home/u/dev/alpha' },
+      ],
+      pullIds: ['session-5', 'session-6', 'session-7'],
+      pushIds: ['session-1', 'session-2', 'session-3', 'session-4'],
+      bytesIn: 300,
+      bytesOut: 800,
+      localCount: 4,
+      remoteCount: 3,
+      machines: ['robot-b', 'robot-c'],
+    },
+    applied: false,
+    pulled: [],
+    pushed: [],
+    bytesIn: 0,
+    bytesOut: 0,
+    registryWritten: false,
+    indexWritten: false,
+    problems: [],
+    takesEffect: 'immediate',
+  }
+  const mounted = mount({ state, panel: 'sync', nulls: [null, response, 'plan'] })
+  const tree = mounted.registrations[0].component(mounted.registrations[0].registration.inject())
+  const text = strings(tree)
+
+  // 每个项目一条组头（横跨整行的 th），三张表各自成组：拉 3 组（beta / alpha / 没有 cwd）、
+  // 推 3 组、没动 3 组（alpha / 远端 zzz / 本机 gone）。
+  const heads = mounted.recorded.filter((node) => String(node.props?.className) === 'dsm-planGroupHead')
+  assert.equal(heads.length, 9, '三张表各自按项目分组，一共 9 条组头')
+  assert.ok(
+    heads.every((head) => head.type === 'th' && head.props?.scope === 'colgroup' && Number(head.props?.colSpan) >= 2),
+    '组头是一行跨列的 th（不是普通 <td>，读屏要能听出它领着一个列组）',
+  )
+  const headText = heads.map((head) => strings(head))
+  const headOf = (index) => headText[index] ?? []
+  assert.deepEqual(
+    headOf(0).filter((item) => item === '测试项目' || item === '/home/u/dev/beta'),
+    ['测试项目', '/home/u/dev/beta'],
+    '已登记的工作区：组头是标题 + 路径',
+  )
+  assert.deepEqual(
+    headOf(1).filter((item) => item === '会话管理' || item === '/home/u/dev/alpha'),
+    ['会话管理', '/home/u/dev/alpha'],
+  )
+  assert.ok(headOf(2).includes('noCwdGroup'), '没有 cwd 的那一组照旧自成一组建在最后')
+  assert.ok(
+    text.includes('sessionsInDir:{"count":2}'),
+    '组头报这一组几条（alpha 在推表里两条），与列表那边的说法同一句',
+  )
+
+  // 组内保持计划给的顺序（不重排）：推表里 alpha 那一组是 session-1、session-4。
+  const rowIds = mounted.recorded
+    .filter((node) => String(node.props?.className) === 'dsm-rowId')
+    .map((node) => node.props?.children)
+  assert.deepEqual(
+    rowIds,
+    ['session-5', 'session-6', 'session-7', 'session-2', 'session-1', 'session-4', 'session-3', 'session-10', 'session-8', 'session-9'],
+    '拉表按落地目录分组、推表按本机目录分组、没动按各自那一边分组；组内顺序就是计划给的顺序',
+  )
+
+  // 路径只在组头：拉取行的来源路径不许再当可见文字，它退到那一行的悬浮提示里（只有真的改写过才补）。
+  assert.equal(text.includes('/home/b/dev/x'), false, '来源路径不再逐行印一遍')
+  const tips = mounted.recorded
+    .filter((node) => String(node.props?.className) === 'dsm-rowId')
+    .map((node) => String(node.props?.title))
+  assert.equal(
+    tips[0],
+    'session-5\ncwdRewritten:{"from":"/home/b/dev/x","to":"/home/u/dev/beta"}',
+    '改写过的拉取行在悬浮提示里说清从哪到哪',
+  )
+  assert.equal(tips[2], 'session-7', '本来就没有 cwd 的会话没有可改写的来源，提示就只是会话名与 id')
+  assert.equal(tips[5], 'session-4', '推送行不补改写（它本来就落在这个项目里）')
+
+  // 缺映射那一组：组头给的是**远端**那条路径（本机根本没有那个项目），行里只剩状态、会话名与机器名。
+  assert.deepEqual(
+    headOf(7).filter((item) => item === '/home/b/dev/zzz'),
+    ['/home/b/dev/zzz'],
+    '缺映射的组头是远端路径——那正是要补的那条映射',
+  )
+  assert.ok(
+    mounted.recorded.some((node) => node.props?.children === 'robot-map' && String(node.props?.className) === 'dsm-cwd'),
+    '「没动」的第三列放远端机器——缺映射那一行以前在这儿印的是那条路径',
+  )
+  assert.equal(
+    text.filter((item) => item === '/home/b/dev/zzz').length,
+    1,
+    '那条远端路径只在组头上出现一次（行里不再重复它）',
   )
 })
 

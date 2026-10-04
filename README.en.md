@@ -263,10 +263,13 @@ WebDAV has no locking, so each machine writes only its own slot and reads every 
 anything else.
 
 On the **Sync** tab, **Sync** first computes a read-only plan in a dialog (it reads the remote and writes
-nothing), reporting "pull N / push M" and listing every session, where it would land and what was left alone
-and why; **Sync now** in that dialog actually pulls and pushes. While it runs, the dialog body becomes a
-progress bar with "Pushing 12 / 84" and the title of the session in flight — the denominator is the number of
-items that leg will really do (skipped ones are not counted), and pulling and pushing each get their own pass.
+nothing), reporting "pull N / push M" in three tables (will pull / will push / on both sides, left alone), each
+**grouped by project directory**: the group header carries the workspace name, the path and the count, while a
+row keeps only the action, the session name and its size — and the third column of the "left alone" table names
+the machine holding the other copy. **Sync now** in that dialog actually pulls and pushes. While it runs, the
+dialog body becomes a progress bar with "Pushing 12 / 84" and the title of the session in flight — the
+denominator is the number of items that leg will really do (skipped ones are not counted), and pulling and
+pushing each get their own pass.
 The rules and edges:
 
 - **Add-only**: a session id that already exists locally is never pulled, and a remote copy that is newer

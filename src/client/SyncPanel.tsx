@@ -17,6 +17,10 @@
  * [api.ts](./api.ts) 的 `applySync` 与 [ProgressBar.tsx](./ProgressBar.tsx)）。同步是这个插件里唯一
  * "按条走网络"的动作，一次整库同步可能是几十秒，而在此之前界面只有一句"同步中…"。
  *
+ * 弹窗里那三张计划表（会拉 / 会推 / 没动）按**项目目录**分组：一次整库同步的计划里，同一个目录会连着
+ * 出现十几条，逐行印一遍同样的路径只是把人绕进去。分组键怎么取、组怎么排见
+ * [syncGroups.ts](./syncGroups.ts)——那是纯函数，规则在 `test/syncGroups.test.ts` 里逐条钉着。
+ *
  * 样式只在 [styles.ts](./styles.ts) 里定义，颜色只用 `--dsw-alias-*` 主题 token；控件以手写的原生
  * 元素为主，确认弹窗外壳走官方控件库的 `Modal`（[ConfirmDialog.tsx](./ConfirmDialog.tsx) 里说了
  * 为什么）。渲染路径上不许做会抛的事——抛出去整个 Slot 条目会变成崩溃占位（控制台里是
@@ -36,10 +40,14 @@ import {
   type SyncResponse,
 } from './api.ts'
 import { ConfirmDialog } from './ConfirmDialog.tsx'
+import { groupKey } from './groups.ts'
+import { WorkspaceIcon } from './icons.tsx'
+import { translateWith, zh, type Translate } from './locales.ts'
+import { sessionLabel, type SessionLabel } from './planRows.ts'
 import { ProgressBar } from './ProgressBar.tsx'
 import { formatBytes } from './sessionList.tsx'
 import { SyncConfigForm } from './SyncConfigForm.tsx'
-import { translateWith, zh, type Translate } from './locales.ts'
+import { groupSyncRows, syncProjectOf, syncPullTip, type SyncGroup, type SyncSide } from './syncGroups.ts'
 import type { PanelShare } from './types.ts'
 
 /** 没有注入面时的兜底翻译。 */
@@ -50,12 +58,19 @@ function reasonOf(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause)
 }
 
-/** 同步计划里一条的显示名：标题优先，没有标题才退到 id（与行上那套口径一致）。 */
-function syncName(entry: { id: string; title?: string }): string {
-  return entry.title ?? entry.id
+/**
+ * 计划行 + 它来自哪张表。
+ *
+ * 「这次不动」那张表把两个方向的跳过项并在一起，而"属于哪个项目"要看方向（见 `syncProjectOf()`），
+ * 所以方向必须跟着行一起走，不能到了渲染那一步再猜——推送行的 `cwd` 与拉取行的 `fromCwd` 都可能是
+ * 同一段路径，靠字段碰运气认方向迟早认错。
+ */
+interface SyncKeptRow {
+  readonly side: SyncSide
+  readonly entry: SyncPullEntry | SyncPushEntry
 }
 
-/** 拉/推两种计划行的公共字段（只为 `syncWhy()` 取字段用）。 */
+/** 拉/推两种计划行的公共字段（只为 `syncWhy()` / `syncTag()` 取字段用）。 */
 interface SyncRow {
   code: SyncPullEntry['code'] | SyncPushEntry['code']
   action: string
@@ -111,18 +126,62 @@ function syncTag(entry: SyncRow, t: Translate): string {
 }
 
 /**
- * 「没动」那一行右边那一格：要用户动手的那两类给**路径**（缺的那条映射、不存在的那个目录），
- * 其余给"是哪台机器持有的另一份"。
+ * 计划表里的项目组头：一条横跨整行的横幅（`<th colSpan>` 占满那一行）。
+ *
+ * 为什么在表里插一行、而不是一个项目一张表：会话名与大小必须仍然对着 `<thead>` 那两列，而一张表只有
+ * 一个表头——一张表一个项目的话，"动作 / 会话 / 大小"这套表头要么每个项目重复一遍，要么只剩第一张
+ * 有，列宽也会各算各的。
+ *
+ * 组头的画法与列表那边的组头同一档（字色 12% 兑出来的横幅、工作区图形、标题 + 等宽路径 + 条数），
+ * 但没有折叠与勾选：弹窗里这份清单只是读一遍，不在这儿挑东西。路径只在有工作区标题时才单列一格，
+ * 没有标题时路径自己就是标题（与列表那边同一个写法，免得同一段路径印两遍）。
  */
-function syncWhere(entry: SyncRow): string {
-  switch (entry.code) {
-    case 'no-mapping':
-      return entry.fromCwd ?? ''
-    case 'missing-target':
-      return entry.toCwd ?? ''
-    default:
-      return entry.machine ?? ''
-  }
+function PlanGroupHead({
+  group,
+  columns,
+  t,
+}: {
+  group: SyncGroup<unknown>
+  columns: number
+  t: Translate
+}): React.ReactElement {
+  const name = group.title ?? (group.path === '' ? t('noCwdGroup') : group.path)
+  return (
+    <tr className="dsm-planGroup">
+      <th className="dsm-planGroupHead" colSpan={columns} scope="colgroup">
+        <span className="dsm-planGroupInner">
+          <WorkspaceIcon />
+          <span className="dsm-groupTitle" title={name}>
+            {name}
+          </span>
+          {group.title !== undefined && (
+            <span className="dsm-groupPath" title={group.path}>
+              {group.path}
+            </span>
+          )}
+          <span className="dsm-groupCounts">
+            <span className="dsm-hint">{t('sessionsInDir', { count: group.rows.length })}</span>
+          </span>
+        </span>
+      </th>
+    </tr>
+  )
+}
+
+/**
+ * 会话名那一格：显示标题、没有标题才退到 id（`sessionLabel()`），id 与整句说明在悬浮提示里。
+ *
+ * 拉取行的提示还会补上"这条的 cwd 从哪改写到哪"（`syncPullTip()`）——那句话原来占着 cwd 一列，
+ * 现在落地的目录已经在组头上，只有真的改写过的行才需要再说一句从哪儿来。
+ */
+function SessionCell({ label, tip }: { label: SessionLabel; tip: string }): React.ReactElement {
+  return (
+    <td>
+      <span className={label.kind === 'title' ? 'dsm-rowTitle' : 'dsm-rowId'} title={tip}>
+        {label.text}
+      </span>
+    </td>
+  )
 }
 
 /**
@@ -271,13 +330,27 @@ export function SyncPanel({ t = fallback, state, reload }: PanelShare): React.Re
   const syncPulls = syncPlan?.pull.filter((entry) => entry.action === 'create') ?? []
   const syncPushes = syncPlan?.push.filter((entry) => entry.action !== 'skip') ?? []
   // 只留"有信息量"的没动项：`identical` 是"远端已经有这一份"，整库同步时它是最多也最没用的一类。
-  const syncKept = syncPlan === null
-    ? []
-    : [
-        ...syncPlan.pull.filter((entry) => entry.action === 'skip'),
-        ...syncPlan.push.filter((entry) => entry.action === 'skip' && entry.code !== 'identical'),
-      ]
+  const syncKept: SyncKeptRow[] =
+    syncPlan === null
+      ? []
+      : [
+          ...syncPlan.pull
+            .filter((entry) => entry.action === 'skip')
+            .map((entry): SyncKeptRow => ({ side: 'pull', entry })),
+          ...syncPlan.push
+            .filter((entry) => entry.action === 'skip' && entry.code !== 'identical')
+            .map((entry): SyncKeptRow => ({ side: 'push', entry })),
+        ]
   const syncClean = syncPlan !== null && syncPulls.length === 0 && syncPushes.length === 0 && syncKept.length === 0
+  /**
+   * 三张表各自按**项目目录**分组（见 [syncGroups.ts](./syncGroups.ts)）：拉取行按落地后的本机目录、
+   * 推送行按本机目录、「没动」按它自己那一边的目录。工作区标题从 `/state` 来（同一个路径在别处显示
+   * 成什么名字，这里就是什么名字）；首帧还没读到状态时标题缺席，组头退回路径本身。
+   */
+  const workspaces = state?.workspaces ?? []
+  const pullGroups = groupSyncRows(syncPulls, (entry) => syncProjectOf(entry, 'pull'), workspaces)
+  const pushGroups = groupSyncRows(syncPushes, (entry) => syncProjectOf(entry, 'push'), workspaces)
+  const keptGroups = groupSyncRows(syncKept, (row) => syncProjectOf(row.entry, row.side), workspaces)
   /**
    * 上次同步的计划里见过的远端 cwd：交给映射表当候选。
    *
@@ -399,32 +472,30 @@ export function SyncPanel({ t = fallback, state, reload }: PanelShare): React.Re
                     <tr>
                       <th className="dsm-colAction">{t('colAction')}</th>
                       <th className="dsm-colSession">{t('colSession')}</th>
-                      <th className="dsm-colCwd">{t('colCwd')}</th>
                       <th className="dsm-colBytes">{t('colBytes')}</th>
                     </tr>
                   </thead>
-                  <tbody>
-                    {syncPulls.map((entry) => (
-                      <tr key={entry.id}>
-                        <td>
-                          <span className="dsm-tag dsm-tagCreate" title={t('syncCodeMissingPull')}>
-                            {t('syncTagPull')}
-                          </span>
-                        </td>
-                        <td>
-                          <span className="dsm-rowTitle" title={entry.id}>
-                            {syncName(entry)}
-                          </span>
-                        </td>
-                        <td className="dsm-cwd">
-                          {entry.toCwd === undefined
-                            ? t('cwdKeep')
-                            : t('cwdRewritten', { from: entry.fromCwd ?? '', to: entry.toCwd })}
-                        </td>
-                        <td className="dsm-meta">{formatBytes(entry.bytes)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
+                  {pullGroups.map((group) => (
+                    // 每个项目一个 <tbody>：组头是它自己的表头行（colSpan 占满），列对齐由上面那一个
+                    // <thead> 统一给。
+                    <tbody key={groupKey(group.path)}>
+                      <PlanGroupHead group={group} columns={3} t={t} />
+                      {group.rows.map((entry) => {
+                        const label = sessionLabel(entry)
+                        return (
+                          <tr key={entry.id}>
+                            <td>
+                              <span className="dsm-tag dsm-tagCreate" title={t('syncCodeMissingPull')}>
+                                {t('syncTagPull')}
+                              </span>
+                            </td>
+                            <SessionCell label={label} tip={syncPullTip(entry, label.tip, t)} />
+                            <td className="dsm-meta">{formatBytes(entry.bytes)}</td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  ))}
                 </table>
               </>
             )}
@@ -437,31 +508,31 @@ export function SyncPanel({ t = fallback, state, reload }: PanelShare): React.Re
                     <tr>
                       <th className="dsm-colAction">{t('colAction')}</th>
                       <th className="dsm-colSession">{t('colSession')}</th>
-                      <th className="dsm-colCwd">{t('colCwd')}</th>
                       <th className="dsm-colBytes">{t('colBytes')}</th>
                     </tr>
                   </thead>
-                  <tbody>
-                    {syncPushes.map((entry) => (
-                      <tr key={entry.id}>
-                        <td>
-                          <span
-                            className={`dsm-tag ${entry.code === 'local-ahead' ? 'dsm-tagSkip' : 'dsm-tagCreate'}`}
-                            title={entry.code === 'local-ahead' ? t('syncCodeLocalAhead') : t('syncCodeMissingPush')}
-                          >
-                            {entry.code === 'local-ahead' ? t('syncTagRepush') : t('syncTagPush')}
-                          </span>
-                        </td>
-                        <td>
-                          <span className="dsm-rowTitle" title={entry.id}>
-                            {syncName(entry)}
-                          </span>
-                        </td>
-                        <td className="dsm-cwd">{entry.cwd ?? t('noCwd')}</td>
-                        <td className="dsm-meta">{formatBytes(entry.bytes)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
+                  {pushGroups.map((group) => (
+                    <tbody key={groupKey(group.path)}>
+                      <PlanGroupHead group={group} columns={3} t={t} />
+                      {group.rows.map((entry) => {
+                        const label = sessionLabel(entry)
+                        return (
+                          <tr key={entry.id}>
+                            <td>
+                              <span
+                                className={`dsm-tag ${entry.code === 'local-ahead' ? 'dsm-tagSkip' : 'dsm-tagCreate'}`}
+                                title={entry.code === 'local-ahead' ? t('syncCodeLocalAhead') : t('syncCodeMissingPush')}
+                              >
+                                {entry.code === 'local-ahead' ? t('syncTagRepush') : t('syncTagPush')}
+                              </span>
+                            </td>
+                            <SessionCell label={label} tip={label.tip} />
+                            <td className="dsm-meta">{formatBytes(entry.bytes)}</td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  ))}
                 </table>
               </>
             )}
@@ -470,32 +541,36 @@ export function SyncPanel({ t = fallback, state, reload }: PanelShare): React.Re
               <>
                 <p className="dsm-hint">{t('syncKeptHead', { count: syncKept.length })}</p>
                 {/* 与拉/推两张表同一种画法：状态列放标签、会话单独一列——挤成一行同色的说明时，
-                    状态与会话名分不出来（用户截图报的）。整句仍在标签的 title 上。 */}
+                    状态与会话名分不出来（用户截图报的）。整句仍在标签的 title 上。
+                    第三列是**远端是哪台机器**：分组之后路径已经在组头上（缺映射那类给的就是远端
+                    路径），这一列再不重复它——剩下的信息只有"另一份是谁的"。 */}
                 <table className="dsm-table dsm-planTable dsm-syncPlanTable dsm-keptTable">
                   <thead>
                     <tr>
                       <th className="dsm-colAction">{t('colAction')}</th>
                       <th className="dsm-colSession">{t('colSession')}</th>
-                      <th className="dsm-colCwd">{t('colNote')}</th>
+                      <th className="dsm-colMachine">{t('colMachine')}</th>
                     </tr>
                   </thead>
-                  <tbody>
-                    {syncKept.map((entry) => (
-                      <tr key={entry.id}>
-                        <td>
-                          <span className="dsm-tag dsm-tagSkip" title={syncWhy(entry, t)}>
-                            {syncTag(entry, t)}
-                          </span>
-                        </td>
-                        <td>
-                          <span className="dsm-rowTitle" title={entry.id}>
-                            {syncName(entry)}
-                          </span>
-                        </td>
-                        <td className="dsm-cwd">{syncWhere(entry)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
+                  {keptGroups.map((group) => (
+                    <tbody key={groupKey(group.path)}>
+                      <PlanGroupHead group={group} columns={3} t={t} />
+                      {group.rows.map(({ entry }) => {
+                        const label = sessionLabel(entry)
+                        return (
+                          <tr key={entry.id}>
+                            <td>
+                              <span className="dsm-tag dsm-tagSkip" title={syncWhy(entry, t)}>
+                                {syncTag(entry, t)}
+                              </span>
+                            </td>
+                            <SessionCell label={label} tip={label.tip} />
+                            <td className="dsm-cwd">{entry.machine ?? ''}</td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  ))}
                 </table>
               </>
             )}

@@ -48,6 +48,8 @@
   字段刻意不做成活的。
 - [跨机器的项目身份是 git remote](../.agents/notes/implemented/feature/2026-10-01-project-identity-is-the-git-remote.md)：
   索引记身份与仓库内相对路径，落 `本机仓库根 + 相对路径`；显式映射优先，认不出来就跳过并点名仓库。
+- [同步预演按项目分组](../.agents/notes/implemented/feature/2026-10-04-sync-plan-groups-by-project.md)：
+  三张表各自按项目目录分组，路径在组头说一次，行里只剩动作、会话名与大小。
 - `src/dav.ts` 是那四种方法与 Basic 鉴权（含宽容的多状态响应解析），`src/sync.ts` 是索引、计划与落地，
   `src/tools.ts` 的 `sync_sessions` 与 `src/web.ts` 的 `GET|POST /sync` 调同一份 `runSync()`。
 
