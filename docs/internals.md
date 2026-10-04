@@ -80,6 +80,8 @@
   分组键是 `cwd`，工作区标题只是路径的标签。
 - [「未分组」就是外壳那一组](../.agents/notes/implemented/bug-fix/2026-09-28-ungrouped-means-the-sidebar-group.md)：
   一个名字一个定义，三处读同一个结论。
+- [「认领」是宿主那份成员表](../.agents/notes/implemented/bug-fix/2026-10-04-accounted-means-the-hosts-membership.md)：
+  注册表里的**登记**不算数，cwd 归一到记录 `path` 才算——判据只在 `src/accounting.ts` 写一遍。
 - [迁移页把「未分组」当独立来源](../.agents/notes/implemented/architecture/2026-09-27-unowned-is-a-migration-source.md)：
   候选、请求、计划、被关掉的开关，四种口径钉在一起。
 - [迁移排除侧边栏不显示的会话](../.agents/notes/implemented/architecture/2026-09-28-migration-excludes-what-the-sidebar-hides.md)：

@@ -94,9 +94,13 @@ export function hiddenReasonOf(subject: VisibilitySubject, options: VisibilityOp
   return hiddenReason(visibilityFacts(subject, options))
 }
 
-/** 判「未分组」要多知道的一件事：这条会话有没有被某个工作区认领。 */
+/** 判「未分组」要多知道的一件事：这条会话有没有被某个工作区**认领**。 */
 export interface UngroupedFacts extends VisibilityFacts {
-  /** 它的 id 是否在某个工作区记录的 `sessionIds` 里。 */
+  /**
+   * 它是否被某个工作区认领（判据在 accounting.ts：**登记过**且 header 的 cwd 归一之后就是那条记录的
+   * `path`）。这里刻意不收"在不在注册表里"那种原始事实——宿主还要按目录过滤一遍，两边不一致时侧边栏
+   * 那一组里会有会话，而插件说它们有主。
+   */
   owned?: boolean
 }
 
@@ -108,6 +112,10 @@ export interface UngroupedFacts extends VisibilityFacts {
  * 所以「未分组」是**两件事同时成立**：谁都没认领它，**而且**默认视图下侧边栏会显示它。子代理会话
  * 嵌在父会话下面、空白（除当前那条临时 New Session）与已归档默认都不显示，它们因此都不是「未分组」
  * 的成员——哪怕它们同样没在册。
+ *
+ * 那张表里的 id 是**过滤过的**：宿主把记录里的登记再按"header 的 cwd 归一之后等于记录的 path"筛一遍
+ * （目录改名 / 删掉后登记还在的那些因此不算成员，见 accounting.ts）。所以 `owned` 要的是被认领，
+ * 不是登记。
  *
  * 这条判据是「未分组」在本插件里的**唯一**定义：行上那枚标签、会话页那枚筛选芯片、迁移页那个来源
  * 都读它（来源还要额外要求有 `cwd`：那个来源要改写 header，没有 cwd 的会话它搬不动，见 planRows.ts）。

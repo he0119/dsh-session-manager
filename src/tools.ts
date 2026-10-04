@@ -420,7 +420,7 @@ export function registerTools(ctx: Context, config: PluginConfigInput = {}): Arr
           },
           includeUnowned: {
             type: 'boolean',
-            description: 'Optional: also migrate sessions not registered in any workspace (default true).',
+            description: 'Optional: also migrate sessions no workspace accounts for (the sidebar Ungrouped group; default true).',
           },
         },
         output: {
@@ -492,7 +492,7 @@ export function registerTools(ctx: Context, config: PluginConfigInput = {}): Arr
           },
           includeUnowned: {
             type: 'boolean',
-            description: 'Optional: also migrate unregistered sessions (default true).',
+            description: 'Optional: also migrate sessions no workspace accounts for (default true).',
           },
           apply: { type: 'boolean', description: 'Optional: true performs the migration (default false = dry-run).' },
           includeArtifacts: {

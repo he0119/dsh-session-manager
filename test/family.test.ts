@@ -280,7 +280,7 @@ test('迁移：「连同未分组的会话」关掉时不挡跟着走的子代�
   // 而一个真正没在册的**候选**（用户点得到的那条）照旧拦：开关管的是候选，不是族
   const stray = buildRelocationPlan(opts(sb, { sessionIds: ['session-stray'], includeUnowned: false }))
   assert.equal(stray.ok, false)
-  assert.deepEqual(stray.problems, ['session session-stray is not registered in any workspace (use includeUnowned)'])
+  assert.deepEqual(stray.problems, ['session session-stray is not accounted by any workspace (use includeUnowned)'])
   assert.equal(stray.sessions.length, 1, '没在册的那条不进计划，但级联展开照旧发生（它名下没有后代）')
   assert.equal(stray.cascaded, 0)
 })

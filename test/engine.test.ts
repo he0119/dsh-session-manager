@@ -191,7 +191,7 @@ test('未登记会话：默认连带迁移，includeUnowned=false 时报问题',
 
   const strict = buildRelocationPlan(opts(sb, { includeUnowned: false }))
   assert.equal(strict.ok, false)
-  assert.match(strict.problems.join(';'), /not registered in any workspace/)
+  assert.match(strict.problems.join(';'), /not accounted by any workspace/)
 
   rmSync(sb.base, { recursive: true, force: true })
 })

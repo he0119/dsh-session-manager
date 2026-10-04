@@ -5,6 +5,7 @@
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
+import { accountedOwners } from './accounting.ts'
 import { planArtifactMoves } from './artifacts.ts'
 import { canonicalDir } from './canonical-path.ts'
 import { projectDirOf, scanAll, scanProjectDir, type DiscoveredSession } from './discovery.ts'
@@ -131,10 +132,17 @@ export function buildRelocationPlan(options: BuildPlanOptions): RelocationPlan {
     problems.push(`projectKey collision: ${from} and ${to} both encode to ${projectKey(from)}`)
   }
 
-  const owned = new Set<string>()
-  for (const rec of Object.values(registry?.tables?.workspaces ?? {})) {
-    for (const sid of rec.sessionIds) owned.add(sid)
-  }
+  /*
+   * 「在册」与「被认领」是两件事（判据与理由见 accounting.ts）：注册表里登记过、但它的目录已经改名或
+   * 删掉的会话，宿主那边**不算**任何工作区的成员——外壳侧边栏把它放进「未分组」。下面每一处"这条有没有
+   * 主"的判断都读被认领的那一份，否则插件会把一条外壳说没人认领的会话当成"已在册"（迁移页那个来源
+   * 因此永远是 0 条，而侧边栏那一组里明明摆着会话）。
+   *
+   * 这一份先按**源**扫出来的那批算（未分组来源那一支马上要用），级联带进来的后代在下面按全库重算一次。
+   */
+  let owned = new Set<string>()
+  const ownedOf = (sessions: readonly DiscoveredSession[]): Set<string> =>
+    new Set(accountedOwners(registry, sessions).keys())
 
   // 侧边栏看不见的那三类（子代理 / 空白 / 已归档）不进候选：迁移列表的范围必须与"用户在外壳里
   // 看得见的那批"对齐，否则面板报的条数与侧边栏不一致，而这个来源里也没有任何东西能解释差额
@@ -167,11 +175,13 @@ export function buildRelocationPlan(options: BuildPlanOptions): RelocationPlan {
     // 所以它们根本搬不进来——那是这个来源自己的**能力**限制，不是「未分组」的定义（侧边栏那一组里有它们）。
     // 界面上那个来源的条数与这里必须一致，于是界面读的是宿主发来的同一个结论（planRows.unownedSessions）。
     sourceScanned = scanAll(root, decodeAll, scanOptions)
+    owned = ownedOf(sourceScanned)
     discovered = splitHidden(
       sourceScanned.filter((s) => !owned.has(s.id) && typeof s.cwd === 'string' && s.cwd !== ''),
     )
   } else if (existsSync(sourceProjectDir)) {
     sourceScanned = scanProjectDir(sourceProjectDir, decodeAll, scanOptions)
+    owned = ownedOf(sourceScanned)
     discovered = splitHidden(sourceScanned)
     for (const s of discovered) {
       if (s.cwd !== from) problems.push(`session ${s.id}: header cwd ${s.cwd} != ${from}`)
@@ -208,7 +218,7 @@ export function buildRelocationPlan(options: BuildPlanOptions): RelocationPlan {
   if (sessionIds) selected = discovered.filter((s) => sessionIds.includes(s.id))
   if (!unowned && !includeUnowned) {
     for (const s of selected) {
-      if (!owned.has(s.id)) problems.push(`session ${s.id} is not registered in any workspace (use includeUnowned)`)
+      if (!owned.has(s.id)) problems.push(`session ${s.id} is not accounted by any workspace (use includeUnowned)`)
     }
   }
 
@@ -223,6 +233,9 @@ export function buildRelocationPlan(options: BuildPlanOptions): RelocationPlan {
   const merged = new Map<string, DiscoveredSession>()
   for (const session of library) merged.set(session.id, session)
   for (const session of sourceScanned) merged.set(session.id, session)
+  // 级联带进来的后代可能住在别的项目目录里（上一段的理由）：认领要按这份合并后的全量重算，否则一条
+  // 在别处有主的后代会被判成"从来没在册"，迁移时就不给它改挂（见下面 `registered`）。
+  owned = ownedOf([...merged.values()])
   const family = familyOf([...merged.values()], selected)
   const selectedIds = new Set(selected.map((s) => s.id))
 
