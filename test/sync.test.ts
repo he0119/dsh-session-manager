@@ -495,7 +495,7 @@ test('sync：计划——两边各自写过时比最后活动时间；空白会�
   // 两枚钟取晚的那枚：细的那枚分得出高下时照分（不管提问时间一不一样）
   assert.equal(byId.get('fine-local')?.code, 'local-newer', '本机细的那枚更晚 → 本机更新')
   assert.equal(plan.pull.find((entry) => entry.id === 'fine-remote')?.code, 'remote-newer', '远端更晚 → 覆盖本机')
-  // 版本 2 的格子（只有提问时间）照旧能分高下：丢掉这枚等于让已经推上去的那些格子白瞎
+  // 版本 2 的格子（只有提问时间）照旧能分高下：丢掉这枚等于让已经推送过的那些格子白瞎
   assert.equal(byId.get('legacy-clock')?.code, 'local-newer', '认版本 2 那枚钟')
   // 一样新 / 有一边读不到 → 两条都不动
   for (const id of ['tie', 'fine-tie', 'unknown-local', 'unknown-remote']) {
@@ -699,7 +699,7 @@ test('sync：端到端——空白会话不上传，也从自己那格索引里�
   try {
     writeSession(a, 'real', 1000)
     writeSession(a, 'blank', 2000)
-    // 第一次：宿主没给投影缓存（＝什么都不知道）→ 两条都推上去，这就是老版本留下的局面。
+    // 第一次：宿主没给投影缓存（＝什么都不知道）→ 两条都推送，这就是老版本留下的局面。
     await syncMachine(a, dav, config, { apply: true })
     const before = await readRemoteLibrary(dav, settings(a, { machineId: 'robot-a' }))
     assert.deepEqual([...before.entries.keys()].sort(), ['blank', 'real'])
@@ -730,7 +730,7 @@ test('sync：端到端——空白会话不上传，也从自己那格索引里�
     const later = await syncMachine(a, dav, config, { apply: true })
     assert.deepEqual(later.pushed, [{ id: 'blank', action: 'upload' }])
 
-    // 真正"推上去"那一刻（不是上面"本来就一致、顺手补钟"那条路）也要把晚的那枚钟写进索引：
+    // 真正"推送"那一刻（不是上面"本来就一致、顺手补钟"那条路）也要把晚的那枚钟写进索引：
     // 别的机器拿到的活动时间就从这里来，写错等于让择新永远比不出高下。
     writeSession(a, 'fresh', 3000)
     const pushed = await syncMachine(a, dav, config, {
@@ -739,7 +739,7 @@ test('sync：端到端——空白会话不上传，也从自己那格索引里�
     })
     assert.deepEqual(pushed.pushed, [{ id: 'fresh', action: 'upload' }])
     const afterPush = await readRemoteLibrary(dav, settings(a, { machineId: 'robot-a' }))
-    assert.equal(afterPush.entries.get('fresh')?.lastActiveAt, 1760000000000, '推上去时记的是两枚钟里晚的那枚')
+    assert.equal(afterPush.entries.get('fresh')?.lastActiveAt, 1760000000000, '推送时记的是两枚钟里晚的那枚')
     assert.equal(afterPush.entries.get('fresh')?.lastPromptAt, undefined, '不写旧的那枚字段')
   } finally {
     await fixture.close()
@@ -809,7 +809,7 @@ test('sync：端到端——各自写过时以更新的那份为准，两台机�
     addGeneration(a, 's1', 5, '{"type":"event","seq":5,"who":"a"}')
     addGeneration(b, 's1', 5, '{"type":"event","seq":5,"who":"b"}')
 
-    // b 先把本机领先那份推上去（对它自己来说，a 那格停在 v4）
+    // b 先把本机领先那份推送（对它自己来说，a 那格停在 v4）
     const bPush = await syncMachine(b, dav, bConfig, { apply: true, sessionMeta: bMeta })
     assert.deepEqual(bPush.pushed, [{ id: 's1', action: 'update' }])
 
