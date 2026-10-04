@@ -494,7 +494,7 @@ export const CSS = `
 .dsm-planTable { table-layout: fixed; }
 .dsm-planTable th, .dsm-planTable td { box-sizing: border-box; }
 .dsm-planTable .dsm-colAction { width: 60px; }
-/* 同步计划那两张表（拉 / 推）的动作列装的是「重推刷新」这种动词短语，比导入计划的两个字长一档，
+/* 同步计划那两张表（拉取 / 推送）的动作列装的是「重推刷新」这种动词短语，比导入计划的两个字长一档，
    所以这两张表自己量一个列宽：实测 12px 字号下最宽的一个是 en 'Re-push' 63px、zh「重推刷新」62px，
    加单元格左右各 8px padding 是 79px，再留约 9px 余量。列宽仍然是**设计**（fixed 布局），只是这
    张表的设计跟着它自己的内容走；会话那一列照旧吃掉剩下的宽度（列宽从 60 → 88px，那一列少 28px）。
@@ -525,7 +525,7 @@ export const CSS = `
 .dsm-planTable .dsm-colMachine { width: 26%; }
 .dsm-planTable .dsm-colBytes { width: 68px; }
 /*
- * 计划表里的项目组头：一条横跨整行的横幅，一个项目底下挂着它那几行（会拉 / 会推 / 没动三张表同一套）。
+ * 计划表里的项目组头：一条横跨整行的横幅，一个项目底下挂着它那几行（会拉取 / 会推送 / 没动三张表同一套）。
  *
  * 底色与列表那边的 .dsm-groupHead 同一档（字色 12% 兑在卡片底色上）、路径同样是等宽次要色——同一个
  * 目录在列表与弹窗里长得一样，才不必重新认一遍。区别是没有折叠与勾选：弹窗里这份清单只是读一遍。

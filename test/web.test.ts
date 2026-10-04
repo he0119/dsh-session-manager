@@ -1163,7 +1163,7 @@ test('GET /sync?mode=test：只读探一次，把结论与"这次有没有凭据
   }
 })
 
-test('POST /sync?mode=apply：预演不落地，apply 走事件流拉下远端那条并登记进本机工作区', async () => {
+test('POST /sync?mode=apply：预演不落地，apply 走事件流拉取远端那条并登记进本机工作区', async () => {
   const sandbox = makeSandbox('web-sync')
   writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000)
   const fixture = await startDavFixture({ root: join(sandbox.base, 'dav') })
@@ -1236,7 +1236,7 @@ test('POST /sync?mode=apply：预演不落地，apply 走事件流拉下远端�
     assert.deepEqual(
       stream.map((event) => event['type']),
       ['progress', 'progress', 'progress', 'progress', 'result'],
-      '先报算计划的三段（扫本机、读远端索引），再报拉与推各一条，最后收尾',
+      '先报算计划的三段（扫本机、读远端索引），再报拉取与推送各一条，最后收尾',
     )
     assert.deepEqual(
       stream.filter((event) => event['type'] === 'progress').map((event) => event['progress']),
@@ -1246,7 +1246,7 @@ test('POST /sync?mode=apply：预演不落地，apply 走事件流拉下远端�
         { phase: 'pull', total: 1, done: 0, id: 'session-remote', label: '远端那条' },
         { phase: 'push', total: 1, done: 0, id: 'session-a', label: 'session-a' },
       ],
-      '算计划的三段在前（按下确认后到第一条拉下来之间那段空档就靠它），每条开始处理前一条事件：先拉后推，done 从 0 数起，label 标题优先',
+      '算计划的三段在前（按下确认后到第一条拉取完成之间那段空档就靠它），每条开始处理前一条事件：先拉取后推送，done 从 0 数起，label 标题优先',
     )
     const outcome = stream.find((event) => event['type'] === 'result')?.['result'] as Record<string, unknown>
     assert.equal(outcome['mode'], 'apply')

@@ -1889,7 +1889,7 @@ test('客户端产物：同步预演三张表的状态列只放短标签，整�
   assert.equal(
     tables.filter((node) => String(node.props?.className).includes('dsm-syncPlanTable')).length,
     3,
-    '拉表、推表与「这次不动」那张表都要带变体类，否则列宽还是导入预演那 60px',
+    '拉取与推送那两张表、还有「这次不动」那张表都要带变体类，否则列宽还是导入预演那 60px',
   )
   assert.ok(
     tables.some((node) => String(node.props?.className).includes('dsm-keptTable')),
@@ -1909,8 +1909,8 @@ test('客户端产物：同步预演三张表的状态列只放短标签，整�
   // 动作列：看得见的是动词，整句在 title 里。
   const tagOf = (visible, title) =>
     mounted.recorded.find((node) => node.props?.children === visible && node.props?.title === title)
-  assert.ok(tagOf('syncTagPull', 'syncCodeMissingPull'), '拉表那颗标签是「拉下来」，整句在 title 上')
-  assert.ok(tagOf('syncTagPush', 'syncCodeMissingPush'), '推表新推的那颗是「推上去」')
+  assert.ok(tagOf('syncTagPull', 'syncCodeMissingPull'), '拉取那张表的标签是「拉取」，整句在 title 上')
+  assert.ok(tagOf('syncTagPush', 'syncCodeMissingPush'), '推表新推的那颗是「推送」')
   assert.ok(tagOf('syncTagRepush', 'syncCodeLocalAhead'), '本机领先的那颗是「重推刷新」')
   assert.ok(
     mounted.recorded.some(
@@ -2010,8 +2010,8 @@ test('客户端产物：同步预演三张表按项目分组，路径只在组�
   const tree = mounted.registrations[0].component(mounted.registrations[0].registration.inject())
   const text = strings(tree)
 
-  // 每个项目一条组头（横跨整行的 th），三张表各自成组：拉 3 组（beta / alpha / 没有 cwd）、
-  // 推 3 组、没动 3 组（alpha / 远端 zzz / 本机 gone）。
+  // 每个项目一条组头（横跨整行的 th），三张表各自成组：拉取 3 组（beta / alpha / 没有 cwd）、
+  // 推送 3 组、没动 3 组（alpha / 远端 zzz / 本机 gone）。
   const heads = mounted.recorded.filter((node) => String(node.props?.className) === 'dsm-planGroupHead')
   assert.equal(heads.length, 9, '三张表各自按项目分组，一共 9 条组头')
   assert.ok(
@@ -2052,17 +2052,17 @@ test('客户端产物：同步预演三张表按项目分组，路径只在组�
   assert.ok(headOf(2).includes('noCwdGroup'), '没有 cwd 的那一组照旧自成一组建在最后')
   assert.ok(
     text.includes('sessionsInDir:{"count":2}'),
-    '组头报这一组几条（alpha 在推表里两条），与列表那边的说法同一句',
+    '组头报这一组几条（alpha 在推送那张表里两条），与列表那边的说法同一句',
   )
 
-  // 组内保持计划给的顺序（不重排）：推表里 alpha 那一组是 session-1、session-4。
+  // 组内保持计划给的顺序（不重排）：推送那张表里 alpha 那一组是 session-1、session-4。
   const rowIds = mounted.recorded
     .filter((node) => String(node.props?.className) === 'dsm-rowId')
     .map((node) => node.props?.children)
   assert.deepEqual(
     rowIds,
     ['session-5', 'session-6', 'session-7', 'session-2', 'session-1', 'session-4', 'session-3', 'session-10', 'session-8', 'session-9'],
-    '拉表按落地目录分组、推表按本机目录分组、没动按各自那一边分组；组内顺序就是计划给的顺序',
+    '拉取那张表按落地目录分组、推送那张表按本机目录分组、没动按各自那一边分组；组内顺序就是计划给的顺序',
   )
 
   // 路径只在组头：拉取行的来源路径不许再当可见文字，它退到那一行的悬浮提示里（只有真的改写过才补）。
@@ -2397,7 +2397,7 @@ test('客户端产物：落地时弹窗正文换成进度条（第几条 / 共�
   assert.equal(primaryOf(recorded).props.disabled, true, '落地时确认按钮禁用（不能按第二下）')
   assert.equal(cancelOf(recorded).props.disabled, true, '取消也禁用：中途撒手会在宿主侧留下半截状态')
 
-  // 拉那一段用另一句：两段分母不同，文案得跟着 phase 走。
+  // 拉取那一段用另一句：两段分母不同，文案得跟着 phase 走。
   const pulling = mount({
     state,
     panel: 'sync',

@@ -235,7 +235,7 @@ export function download(result: ExportResult): void {
 
 // ---- WebDAV 同步 ----
 
-/** 一次同步里"会拉下来"的一条。 */
+/** 一次同步里"会拉取"的一条。 */
 export interface SyncPullEntry {
   id: string
   title?: string
@@ -250,7 +250,7 @@ export interface SyncPullEntry {
   reason?: string
 }
 
-/** 一次同步里"会推上去"的一条。 */
+/** 一次同步里"会推送"的一条。 */
 export interface SyncPushEntry {
   id: string
   title?: string
@@ -375,7 +375,7 @@ async function readSyncResponse(
 }
 
 /**
- * 真的跑一次同步（拉 + 推），边跑边报进度。
+ * 真的跑一次同步（拉取 + 推送），边跑边报进度。
  *
  * @param onProgress 每收到一条进度事件调一次（算计划的四段与写盘的两段走同一个回调）。
  * @returns 落地结果；单条失败在 `problems` 里，不是抛错。

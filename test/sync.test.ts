@@ -328,7 +328,7 @@ test('sync：relation 区分一致 / 本机领先 / 远端领先 / 分叉', () =
   assert.equal(relation([v0, v1], [v0, fp(2, 'd')]), 'diverged')
 })
 
-test('sync：计划——远端独有要拉，没有映射 / 目标不存在都跳过并说明', () => {
+test('sync：计划——远端独有要拉取，没有映射 / 目标不存在都跳过并说明', () => {
   const dirs = new Set(['/opt/work/proj'])
   const plan = planSync({
     local: [],
@@ -357,7 +357,7 @@ test('sync：计划——远端独有要拉，没有映射 / 目标不存在都�
   assert.equal(plan.bytesIn, 20, 's1 与 s3 各 10 字节')
 })
 
-test('sync：计划——本机独有要推，本机领先重推，远端领先与分叉都不动', () => {
+test('sync：计划——本机独有要推送，本机领先重新推送，远端领先与分叉都不动', () => {
   // 计划阶段只为"两边都有"的会话算指纹，所以这里的假哈希把 sha 编进文件路径里：
   // `path` 是 `sha@version`，`fakeHash` 再把它拆回来。
   const fakeHash = (path: string, version: number): FileFingerprint => ({
@@ -386,13 +386,13 @@ test('sync：计划——本机独有要推，本机领先重推，远端领先�
   const byId = new Map(plan.push.map((entry) => [entry.id, entry]))
   assert.equal(byId.get('only-local')?.action, 'upload')
   assert.equal(byId.get('only-local')?.title, '本机独有')
-  assert.equal(byId.get('behind')?.action, 'update', '本机严格领先 → 重推刷新')
+  assert.equal(byId.get('behind')?.action, 'update', '本机严格领先 → 重新推送刷新')
   assert.equal(byId.get('same')?.action, 'skip')
   assert.equal(byId.get('ahead')?.action, 'skip')
   assert.match(byId.get('ahead')?.reason ?? '', /robot-b 那份更新/)
   assert.equal(byId.get('fork')?.action, 'skip')
   assert.match(byId.get('fork')?.reason ?? '', /两边各自写过/)
-  assert.deepEqual(plan.pullIds, [], '两边都有的会话一条都不拉')
+  assert.deepEqual(plan.pullIds, [], '两边都有的会话一条都不拉取')
 })
 
 test('sync：索引解析宽容——坏 JSON / 缺 id / 没有代次都不炸整次同步', () => {
@@ -421,7 +421,7 @@ test('sync：索引解析宽容——坏 JSON / 缺 id / 没有代次都不炸�
 
 // ── 落地（真服务） ────────────────────────────────────────────────────────
 
-test('sync：端到端——A 推、B 拉，cwd 改写成 B 的路径且注册表跟着登记', async () => {
+test('sync：端到端——A 推送、B 拉取，cwd 改写成 B 的路径且注册表跟着登记', async () => {
   rmSync(SANDBOX, { recursive: true, force: true })
   mkdirSync(SANDBOX, { recursive: true })
   const fixture = await startDavFixture({ root: join(SANDBOX, 'dav') })
@@ -439,7 +439,7 @@ test('sync：端到端——A 推、B 拉，cwd 改写成 B 的路径且注册�
     })
     assert.deepEqual(pushed.pushed.map((entry) => entry.id).sort(), ['s1', 's2', 's3'])
     assert.equal(pushed.indexWritten, true)
-    assert.equal(pushed.registryWritten, false, '推的那一侧不碰注册表')
+    assert.equal(pushed.registryWritten, false, '推送的那一侧不碰注册表')
 
     // 远端索引里带着标题与代次指纹
     const remote = await readRemoteLibrary(dav, settings(a, { machineId: 'robot-a' }))
@@ -459,7 +459,7 @@ test('sync：端到端——A 推、B 拉，cwd 改写成 B 的路径且注册�
     const pulled = await syncMachine(b, dav, bConfig, { apply: true })
     assert.deepEqual(pulled.pulled.sort(), ['s1', 's2'])
     assert.equal(pulled.registryWritten, true)
-    assert.equal(pulled.indexWritten, true, '拉完也要写自己那一格（把所有自己的会话列出来）')
+    assert.equal(pulled.indexWritten, true, '拉取完也要写自己那一格（把所有自己的会话列出来）')
 
     // 落地位置与 cwd：按 B 的路径重新算项目目录
     for (const id of ['s1', 's2']) {
@@ -468,7 +468,7 @@ test('sync：端到端——A 推、B 拉，cwd 改写成 B 的路径且注册�
     }
     assert.equal(existsSync(join(b.sessionsRoot, projectKey(a.cwd))), false, 'A 的项目目录不该在 B 上出现')
 
-    // 注册表：B 上新建了指向本机路径的工作区，拉下来的会话登记在里面
+    // 注册表：B 上新建了指向本机路径的工作区，拉取来的会话登记在里面
     const registry = readRegistry(b.registryPath)
     const record = Object.values(registry.tables.workspaces).find((item) => item.path === b.cwd)
     assert.ok(record, 'B 上应当登记了目标工作区')
@@ -488,7 +488,7 @@ test('sync：端到端——A 推、B 拉，cwd 改写成 B 的路径且注册�
   }
 })
 
-test('sync：端到端——两边各推各的互不覆盖；本机领先时重推刷新', async () => {
+test('sync：端到端——两边各推送各的互不覆盖；本机领先时重新推送刷新', async () => {
   rmSync(SANDBOX, { recursive: true, force: true })
   mkdirSync(SANDBOX, { recursive: true })
   const fixture = await startDavFixture({ root: join(SANDBOX, 'dav') })
@@ -517,7 +517,7 @@ test('sync：端到端——两边各推各的互不覆盖；本机领先时重�
       ['b1'],
     )
 
-    // A 上 a1 多出一代（本机严格领先）→ 下一次同步重推，而不是跳过
+    // A 上 a1 多出一代（本机严格领先）→ 下一次同步重新推送，而不是跳过
     addGeneration(a, 'a1', 5)
     const grown = await syncMachine(a, dav, aConfig, { apply: false })
     assert.deepEqual(grown.plan.pushIds, ['a1'])
@@ -527,9 +527,9 @@ test('sync：端到端——两边各推各的互不覆盖；本机领先时重�
     const applied = await syncMachine(a, dav, aConfig, { apply: true })
     assert.deepEqual(applied.pushed, [{ id: 'a1', action: 'update' }])
     const refreshed = await readRemoteLibrary(dav, settings(a, { machineId: 'robot-a' }))
-    assert.equal(refreshed.entries.get('a1')?.files.length, 2, '重推后远端记录到两代')
+    assert.equal(refreshed.entries.get('a1')?.files.length, 2, '重新推送后远端记录到两代')
 
-    // B 那边已经有 a1 了（同 id）→ 第二次同步不拉它，也不覆盖本机
+    // B 那边已经有 a1 了（同 id）→ 第二次同步不拉取它，也不覆盖本机
     const bAgain = await syncMachine(b, dav, bConfig, { apply: false })
     assert.deepEqual(bAgain.plan.pullIds, [])
   } finally {
@@ -559,7 +559,7 @@ test('sync：端到端——坏包只记问题，不挡住同一批里其它会�
     })
     assert.deepEqual(outcome.pulled, ['good'])
     assert.equal(outcome.problems.length, 1)
-    assert.match(outcome.problems[0] ?? '', /拉 bad 失败/)
+    assert.match(outcome.problems[0] ?? '', /拉取 bad 失败/)
     assert.ok(existsSync(join(sessionDir(b.sessionsRoot, b.cwd, 'good'), 'session.v4.jsonl.zstd')))
   } finally {
     await fixture.close()
@@ -583,7 +583,7 @@ test('sync：端到端——远端索引点名的包不在时只记问题', asyn
       apply: true,
     })
     assert.deepEqual(outcome.pulled, [])
-    assert.match(outcome.problems.join('\n'), /拉 gone 失败/)
+    assert.match(outcome.problems.join('\n'), /拉取 gone 失败/)
   } finally {
     await fixture.close()
     rmSync(SANDBOX, { recursive: true, force: true })
@@ -746,7 +746,7 @@ test('sync：端到端——两个不同路径的克隆靠 git remote 认成同�
     writeSession(a, 's1', 1000, { cwd: aSub })
     await syncMachine(a, dav, { ...config, machineId: 'robot-a' }, { apply: true, git: gitA })
     const remote = await readRemoteLibrary(dav, { ...config, machineId: 'robot-b' })
-    assert.equal(remote.entries.get('s1')?.repo, 'github.com/he0119/demo-proj', '推上去的索引带着项目身份')
+    assert.equal(remote.entries.get('s1')?.repo, 'github.com/he0119/demo-proj', '推送的索引带着项目身份')
     assert.equal(remote.entries.get('s1')?.repoPath, 'packages/web', '以及仓库内相对路径')
 
     const probing: SyncProgress[] = []
@@ -793,7 +793,7 @@ test('sync：项目身份——索引里不写 remote 原文（凭据不进远�
   }
 })
 
-test('sync：拉下来之后继续写，还推得回去（判据不看 cwd，只看内容）', async () => {
+test('sync：拉取之后继续写，还能推送回远端（判据不看 cwd，只看内容）', async () => {
   rmSync(SANDBOX, { recursive: true, force: true })
   mkdirSync(SANDBOX, { recursive: true })
   const fixture = await startDavFixture({ root: join(SANDBOX, 'dav') })
@@ -823,7 +823,7 @@ test('sync：拉下来之后继续写，还推得回去（判据不看 cwd，只
       '两边的字节确实不同（cwd 被改写过），判据得绕开它',
     )
 
-    // 再预演一次：拉下来的这份就是远端那份，判"内容一致"，而不是"两边各自写过"
+    // 再预演一次：拉取的这份就是远端那份，判"内容一致"，而不是"两边各自写过"
     const again = await syncMachine(b, dav, settings(b, { machineId: 'robot-b', mapping: {} }), { apply: false, git: gitNone })
     assert.equal(again.plan.push.length, 1)
     assert.equal(again.plan.push[0]?.code, 'identical')
@@ -1052,7 +1052,7 @@ test('sync：测试连接打真服务——空远端、已有机器格、凭据�
 // 是界面在那几十秒里唯一能看的东西，所以这里钉住它的形状与顺序——**发在开始处理一条之前**（`done`
 // 是已经做完的条数），跳过的那些不进分母（否则进度条永远走不满）。
 
-test('sync：每开始处理一条报一次进度，拉与推各自一段', async () => {
+test('sync：每开始处理一条报一次进度，拉取与推送各自一段', async () => {
   rmSync(SANDBOX, { recursive: true, force: true })
   mkdirSync(SANDBOX, { recursive: true })
   const fixture = await startDavFixture({ root: join(SANDBOX, 'dav') })
@@ -1094,7 +1094,7 @@ test('sync：每开始处理一条报一次进度，拉与推各自一段', asyn
     assert.deepEqual(
       planPhases(pushing),
       ['scan 0/3', 'scan 1/3', 'scan 2/3', 'remote 0/0'],
-      '落地前先算计划：本机三条会话各报一次、远端索引前后各一条——按下确认后到第一条推上去之间不空等',
+      '落地前先算计划：本机三条会话各报一次、远端索引前后各一条——按下确认后到第一条推送之间不空等',
     )
 
     const pulling: SyncProgress[] = []

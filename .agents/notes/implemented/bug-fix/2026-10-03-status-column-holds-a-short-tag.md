@@ -6,7 +6,7 @@ Status: implemented
 
 同步预演的三段清单里，窄列装的都是整句，两处都出过可见的问题：
 
-- 两张计划表（会拉下来 / 会推上去）沿用导入预演那张表的动作列：`.dsm-planTable .dsm-colAction`
+- 两张计划表（会拉取 / 会推送）沿用导入预演那张表的动作列：`.dsm-planTable .dsm-colAction`
   声明 60px，`table-layout: fixed` 下内容区只有 60 − 16（单元格左右各 8px padding）= 44px。导入预演
   放的是两个字的标签（「新建」「跳过」），同步预演放的是整句：「本机有、远端没有」实测 110px
   （en `here, not on the remote` 158px）、「本机更新，重推刷新」122px（en `local is ahead,
@@ -20,7 +20,7 @@ Status: implemented
 
 三段清单一个口径：**状态进标签、会话单独一列、整句挂 title**。
 
-- 可见文字换成短标签：拉/推两张表是动作（`syncTagPull` / `syncTagPush` / `syncTagRepush`），
+- 可见文字换成短标签：拉取 / 推送两张表是动作（`syncTagPull` / `syncTagPush` / `syncTagRepush`），
   「这次不动」那张是状态（`syncTagDiverged` / `syncTagRemoteAhead` / `syncTagNoMapping` /
   `syncTagMissingTarget`）。
 - 整句（`syncCode*`）挂在标签的 `title` 上。

@@ -16,9 +16,9 @@
 // 为什么一机一格：WebDAV 没有锁，多台机器共写一份 `index.json` 就是"后写的盖掉先写的"。每台机器
 // 只写自己那一格、读别人的全部，就不需要锁。
 //
-// 冲突口径与 `transfer.ts` 一致：**只增不覆盖**。库里已有同 id 的会话就不拉；远端那份比自己新的
+// 冲突口径与 `transfer.ts` 一致：**只增不覆盖**。库里已有同 id 的会话就不拉取；远端那份比自己新的
 // 也照样不动，只在报告里说清楚（见 `relation()` 的四种关系）。反过来，如果本机严格领先于远端，
-// 就把包重推一次——此时两边共有的代次逐条一致，远端那份确实是本地这份的前缀，覆盖不会丢数据。
+// 就把包重新推送一次——此时两边共有的代次逐条一致，远端那份确实是本地这份的前缀，覆盖不会丢数据。
 import { createHash } from 'node:crypto'
 import { readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
@@ -75,7 +75,7 @@ export interface RemoteSessionEntry {
   repoPath?: string
   createdAt: number
   files: FileFingerprint[]
-  /** 贡献这条记录的机器 id（拉包时要知道去哪个格子取）。 */
+  /** 贡献这条记录的机器 id（拉取时要知道去哪个格子取）。 */
   machine: string
 }
 
@@ -187,8 +187,8 @@ function contentBytes(bytes: Buffer, compression: string | null, decodeAll: Deco
  * 与"这台机器上的 cwd"无关的内容指纹。
  *
  * 落地会把别人的 cwd 改写成这台机器的路径（库目录名与 header 的 `cwd` 绑死，不改写就落不下来），
- * 于是同一份会话在两台机器上的**字节不同**。判据要是按字节比，拉下来的那份会被判成"两边各自写过"：
- * 报告里的理由是错的（其实是同一份），更要紧的是它在那台机器上**继续写之后也推不回去**——新代次永远
+ * 于是同一份会话在两台机器上的**字节不同**。判据要是按字节比，拉取来的那份会被判成"两边各自写过"：
+ * 报告里的理由是错的（其实是同一份），更要紧的是它在那台机器上**继续写之后也无法再推送回远端**——新代次永远
  * 留在本机。所以索引里存的是把 cwd 归一化之后的哈希：cwd 是"这份会话在这台机器上落在哪儿"，不是
  * "这是哪份会话"。
  *
@@ -304,9 +304,9 @@ export interface SyncPlan {
   problems: string[]
   pull: SyncPullEntry[]
   push: SyncPushEntry[]
-  /** 会被拉下来的会话 id。 */
+  /** 会被拉取来的会话 id。 */
   pullIds: string[]
-  /** 会被推上去的会话 id（`upload` 与 `update` 都在里面）。 */
+  /** 会被推送的会话 id（`upload` 与 `update` 都在里面）。 */
   pushIds: string[]
   bytesIn: number
   bytesOut: number
@@ -355,13 +355,13 @@ function defaultIsDirectory(path: string): boolean {
 }
 
 /**
- * 算一次同步的计划：哪几条拉下来、哪几条推上去、哪些不动和为什么。
+ * 算一次同步的计划：哪几条拉取、哪几条推送、哪些不动和为什么。
  *
  * 判定顺序：
- *   1. 远端有、本机没有 → 拉（`cwd` 要能映射到本机一个真实存在的目录；没有 `cwd` 的会话不需要映射）；
- *   2. 本机有 → 远端没有就推；两边都有就**一律不拉**（只增不覆盖）：
+ *   1. 远端有、本机没有 → 拉取（`cwd` 要能映射到本机一个真实存在的目录；没有 `cwd` 的会话不需要映射）；
+ *   2. 本机有 → 远端没有就推送；两边都有就**一律不拉取**（只增不覆盖）：
  *      - 内容一致 → 不动；
- *      - 本机严格领先（共有的代次逐条一致）→ 重推一次，把远端刷新到最新；
+ *      - 本机严格领先（共有的代次逐条一致）→ 重新推送一次，把远端刷新到最新；
  *      - 远端领先 / 两边各自写过 → 不动，理由里写清是哪一种。
  *
  * @param input 本机库、远端索引、映射表与两个可注入的判据。
@@ -379,7 +379,7 @@ export function planSync(input: SyncPlanInput): SyncPlan {
   let bytesIn = 0
   let bytesOut = 0
 
-  // 远端独有的：拉。cwd 要能落到本机一个真实存在的目录，否则这条跳过（报告里说清为什么）。
+  // 远端独有的：拉取。cwd 要能落到本机一个真实存在的目录，否则这条跳过（报告里说清为什么）。
   for (const [id, entry] of input.remote.entries) {
     if (local.has(id)) continue
     const bytes = entry.files.reduce((sum, file) => sum + file.bytes, 0)
@@ -423,7 +423,7 @@ export function planSync(input: SyncPlanInput): SyncPlan {
     bytesIn += bytes
   }
 
-  // 本机这侧的：远端没有就推，两边都有就（按关系）决定推还是不推、以及为什么不动。
+  // 本机这侧的：远端没有就推送，两边都有就（按关系）决定推送还是不推送、以及为什么不动。
   for (const session of input.local) {
     const remote = input.remote.entries.get(session.id)
     const bytes = session.files.reduce((sum, file) => sum + file.bytes, 0)
@@ -443,7 +443,7 @@ export function planSync(input: SyncPlanInput): SyncPlan {
     const theirs = remote.files
     const kind = relation(mine, theirs)
     if (kind === 'local-ahead') {
-      // 共有的代次逐条一致，远端确实是本机这份的前缀：重推不会盖掉它缺的那些代次。
+      // 共有的代次逐条一致，远端确实是本机这份的前缀：重新推送不会盖掉它缺的那些代次。
       push.push({
         ...common,
         action: 'update',
@@ -666,7 +666,7 @@ export async function readRemoteLibrary(dav: DavPort, settings: SyncSettings): P
     try {
       text = (await dav.get(`${SYNC_NAMESPACE_DIR}/${dirName}/${SYNC_INDEX_FILE}`)).toString('utf8')
     } catch (error) {
-      // 404 = 这台机器还没推过东西（或推了一半）：不算问题，它这次不贡献任何会话。
+      // 404 = 这台机器还没推送过内容（或推送了一半）：不算问题，它这次不贡献任何会话。
       if ((error as { status?: number } | null)?.status === 404) continue
       problems.push(`读远端 ${dirName}/${SYNC_INDEX_FILE} 失败：${error instanceof Error ? error.message : String(error)}`)
       continue
@@ -684,7 +684,7 @@ export async function readRemoteLibrary(dav: DavPort, settings: SyncSettings): P
       /*
        * 同一个 id 有多台贡献时：**领先**的那份赢（代次是另一个的超集、且共有代次内容一致）。
        *
-       * "格子名排序取第一个"在只增不覆盖下本来够用——但一台机器把拉下来的会话继续写下去之后，它的格子
+       * "格子名排序取第一个"在只增不覆盖下本来够用——但一台机器把拉取来的会话继续写下去之后，它的格子
        * 里是更长的那份，而格子名恰好排在前面时，别处拉到的会是旧的那份（缺最新代次，还看不出少）。
        * 内容一致或两边各自写过时仍然按格子名排序取第一个（`machines` 已排序，结果确定）。
        */
@@ -704,7 +704,7 @@ export async function readRemoteLibrary(dav: DavPort, settings: SyncSettings): P
  * 六段（`phase`）各有各的分母，合起来算一个百分比只会骗人：算计划要先扫本机、再读远端索引、再逐个
  * 目录认本机仓库的身份（真机量到这一段比前两段加起来还长：13 个目录跑一轮 `git rev-parse` 约
  * 0.2 秒）、最后逐条比对内容，然后落地再分拉与推两段（先拉的 3 条与后推的 84 条同样不是一个分母）。
- * **预演与落地报的是同一套事件**：落地那边也要先算一遍计划，用户按下确认后到第一条拉下来之间那段
+ * **预演与落地报的是同一套事件**：落地那边也要先算一遍计划，用户按下确认后到第一条拉取完成之间那段
  * 空档，靠的就是前面这四个阶段。
  */
 export interface SyncProgress {
@@ -734,9 +734,9 @@ export interface SyncOutcome {
   plan: SyncPlan
   /** 这次是不是真的写盘了（`apply` 为 false 时全是只读）。 */
   applied: boolean
-  /** 拉下来并落盘的会话 id。 */
+  /** 拉取并落盘的会话 id。 */
   pulled: string[]
-  /** 推上去的会话。 */
+  /** 推送的会话。 */
   pushed: Array<{ id: string; action: 'upload' | 'update' }>
   /** 实际写进库的字节数。 */
   bytesIn: number
@@ -767,12 +767,12 @@ function readRegistryLoose(path: string): { registry?: WorkspaceRegistryState; p
     const registry = readRegistry(path)
     const check = validateRegistry(registry)
     if (!check.ok) {
-      return { problem: `注册表没通过校验（本次拉下来的会话会落成未分组）：${check.problems.join('；')}` }
+      return { problem: `注册表没通过校验（本次拉取来的会话会落成未分组）：${check.problems.join('；')}` }
     }
     return { registry }
   } catch (error) {
     return {
-      problem: `读不到注册表 ${path}（本次拉下来的会话会落成未分组）：${error instanceof Error ? error.message : String(error)}`,
+      problem: `读不到注册表 ${path}（本次拉取来的会话会落成未分组）：${error instanceof Error ? error.message : String(error)}`,
     }
   }
 }
@@ -827,7 +827,7 @@ export async function runSync(
   /*
    * 项目身份（git remote）：本机的哪些目录是同一个项目。
    *
-   * 只在真用得上时问 git——远端有带身份的条目，或者本机这次要推东西——否则整库同步会被一串
+   * 只在真用得上时问 git——远端有带身份的条目，或者本机这次要推送内容——否则整库同步会被一串
    * `git rev-parse` 拖慢，而它一条都用不到。同一个目录只问一次（`locate` 缓存），因为一次同步里
    * 会话数远多于项目数。
    */
@@ -852,7 +852,7 @@ export async function runSync(
       if (found !== undefined && !repos.has(found.repo)) repos.set(found.repo, found.root)
     }
   }
-  // 指纹走"与 cwd 无关"的那份：落地会改写 cwd，按字节比会把拉下来的那份判成"两边各自写过"。
+  // 指纹走"与 cwd 无关"的那份：落地会改写 cwd，按字节比会把拉取来的那份判成"两边各自写过"。
   const contentHash = (path: string, version: number, compression: string | null): FileFingerprint =>
     contentFingerprint(path, version, compression, deps.decodeAll)
   //
@@ -896,11 +896,11 @@ export async function runSync(
   let bytesOut = 0
   let registryWritten = false
 
-  // ── 拉：取包 → 自校验 → 走导入那条编排 ────────────────────────────────────
+  // ── 拉取：取包 → 自校验 → 走导入那条编排 ────────────────────────────────────
   const loose = readRegistryLoose(deps.registryPath)
   if (loose.problem !== undefined) problems.push(loose.problem)
   let registry = loose.registry
-  // 只把"真会拉"的那些算进进度分母：跳过的（库里有同 id、没配映射…）不计，否则进度条永远走不满。
+  // 只把"真会拉取"的那些算进进度分母：跳过的（库里有同 id、没配映射…）不计，否则进度条永远走不满。
   const pullJobs = plan.pull.filter((entry) => entry.action === 'create')
   for (let index = 0; index < pullJobs.length; index += 1) {
     const entry = pullJobs[index] as SyncPullEntry
@@ -929,11 +929,11 @@ export async function runSync(
       pulled.push(...outcome.written)
       bytesIn += outcome.bytes
     } catch (error) {
-      problems.push(`拉 ${entry.id} 失败：${error instanceof Error ? error.message : String(error)}`)
+      problems.push(`拉取 ${entry.id} 失败：${error instanceof Error ? error.message : String(error)}`)
     }
   }
 
-  // ── 推：整包 PUT，然后重写自己那一格的索引 ────────────────────────────────
+  // ── 推送：整包 PUT，然后重写自己那一格的索引 ────────────────────────────────
   const own = remote.indexes.get(machineDirName(deps.settings.machineId))
   const ownEntries = new Map<string, RemoteIndex['entries'][number]>()
   for (const entry of own?.entries ?? []) {
@@ -983,7 +983,7 @@ export async function runSync(
       pushed.push({ id: entry.id, action: entry.action === 'update' ? 'update' : 'upload' })
       bytesOut += bundle.length
     } catch (error) {
-      problems.push(`推 ${entry.id} 失败：${error instanceof Error ? error.message : String(error)}`)
+      problems.push(`推送 ${entry.id} 失败：${error instanceof Error ? error.message : String(error)}`)
     }
   }
 

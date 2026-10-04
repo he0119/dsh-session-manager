@@ -79,7 +79,7 @@ test('项目身份：多个 remote 时优先 origin，没有 origin 就按名字
   assert.equal((await repoLocation('/work/proj', noOrigin))?.repo, 'example.com/o/r')
 })
 
-test('项目身份：子目录记下相对路径（拉回来才能落回同构的位置）', async () => {
+test('项目身份：子目录记下相对路径（拉取回来才能落回同构的位置）', async () => {
   const run: GitRunner = async (args) => {
     if (args[0] === 'rev-parse') return '/work/proj\n'
     if (args[0] === 'remote') return 'origin\n'
