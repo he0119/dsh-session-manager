@@ -3,8 +3,7 @@ import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { dirname } from 'node:path'
-import { join } from 'node:path'
+import { dirname, join, sep } from 'node:path'
 import test from 'node:test'
 
 import { decompress } from 'fzstd'
@@ -1028,6 +1027,94 @@ test('sync：项目身份——显式映射优先；本机认不出这个项目�
   assert.equal(legacy.pull[0]?.action, 'skip')
   assert.equal(legacy.pull[0]?.code, 'no-mapping')
   assert.doesNotMatch(legacy.pull[0]?.reason ?? '', /也没在本机找到仓库/)
+})
+
+test('sync：落地目录先归一，计划里报的就是落地用的那个字符串', () => {
+  // 两条来路都会给出"另一种拼写"：仓库根来自 git（Windows 上是 `C:/…`），映射值来自用户手输。
+  // 这里用一份假的归一表，验的是"计划阶段就归一"这件事，与平台无关。
+  const canonical = (path: string): string => path.replaceAll('/', '\\')
+  const remote = remoteOf([
+    {
+      machine: 'robot-a',
+      id: 's1',
+      cwd: '/home/alice/dev/proj',
+      createdAt: 1,
+      files: [fp(1, 'aa')],
+      repo: 'github.com/o/r',
+      repoPath: '.',
+    },
+    { machine: 'robot-a', id: 's2', cwd: '/home/alice/other', createdAt: 1, files: [fp(1, 'bb')] },
+  ])
+  const plan = planSync({
+    local: [],
+    remote,
+    mapping: new Map([['/home/alice/other', 'C:/Users/me/other']]),
+    repos: new Map([['github.com/o/r', 'C:/Users/me/proj']]),
+    isDirectory: () => true,
+    canonicalize: canonical,
+  })
+  const byId = new Map(plan.pull.map((entry) => [entry.id, entry]))
+  assert.equal(byId.get('s1')?.toCwd, 'C:\\Users\\me\\proj', '仓库根（repoPath 是 .）也要归一')
+  assert.equal(byId.get('s2')?.toCwd, 'C:\\Users\\me\\other', '显式映射同样归一')
+})
+
+test('sync：覆盖本机那份时，本机这条的 cwd 也归一（拼写给正，不新建一条记录）', () => {
+  const canonical = (path: string): string => path.replaceAll('/', '\\')
+  // 假哈希（与上面那条计划测试同一口径）：`path` 是 `sha@version`
+  const fakeHash = (path: string, version: number): FileFingerprint => ({
+    version,
+    bytes: 1,
+    sha256: path.split('@')[0] ?? '',
+  })
+  const remote = remoteOf([
+    { machine: 'robot-a', id: 's1', cwd: '/home/alice/dev/proj', createdAt: 1, files: [fp(4, 'aa'), fp(5, 'bb')] },
+  ])
+  // 本机这条的 cwd 是另一种拼写（git 在 Windows 上给的就是正斜杠），内容比远端少一代 → 远端领先 → 覆盖本机
+  const at = fakeSession('s1', [['aa', 4]])
+  const local: DiscoveredSession = { ...at, cwd: 'C:/Users/me/proj', header: { ...at.header, cwd: 'C:/Users/me/proj' } }
+  const plan = planSync({
+    local: [local],
+    remote,
+    mapping: new Map(),
+    repos: new Map(),
+    isDirectory: () => true,
+    hashFile: fakeHash,
+    canonicalize: canonical,
+  })
+  assert.equal(plan.pull[0]?.action, 'replace')
+  assert.equal(plan.pull[0]?.toCwd, 'C:\\Users\\me\\proj', '落地目录取本机这条自己的 cwd，归一之后再落')
+})
+
+test('sync：端到端——落地目录先归一，同一个目录不会多出一条工作区记录', async () => {
+  rmSync(SANDBOX, { recursive: true, force: true })
+  mkdirSync(SANDBOX, { recursive: true })
+  const fixture = await startDavFixture({ root: join(SANDBOX, 'dav') })
+  const dav = createDavClient({ baseUrl: fixture.url })
+  const a = makeMachine('robot-a')
+  const b = makeMachine('robot-b')
+  const url = 'git@github.com:he0119/demo-proj.git'
+  const gitA = fakeGit({ [a.cwd]: { root: a.cwd, url } })
+  // B 这边的 git 报的是**另一种拼写**。Windows 真机上它就是 `C:/…`（见 canonical-path.test.ts 那条
+  // 正斜杠断言），这里用两个平台都算另一种写法的结尾 `.` 段，验的是同一段归一代码。
+  const spelled = `${b.cwd}${sep}.`
+  const gitB = fakeGit({ [b.cwd]: { root: spelled, url } })
+  const config: SyncSettings = { url: '', machineId: 'robot-a', mapping: {} }
+  try {
+    registerWorkspace(b, b.cwd)
+    writeSession(a, 's1', 1000)
+    await syncMachine(a, dav, { ...config, machineId: 'robot-a' }, { apply: true, git: gitA })
+    const outcome = await syncMachine(b, dav, { ...config, machineId: 'robot-b' }, { apply: true, git: gitB })
+    assert.deepEqual(outcome.pulled, ['s1'])
+
+    const records = Object.entries(readRegistry(b.registryPath).tables.workspaces)
+    assert.equal(records.length, 1, '复用已有的那条工作区，而不是凭另一种拼写新建一条')
+    assert.equal(records[0]?.[1].path, b.cwd, '注册表里的 path 是宿主会存的那个字符串')
+    assert.deepEqual(records[0]?.[1].sessionIds, ['s1'], '会话登记在那条已有的记录上')
+    assert.equal(readHeader(b, b.cwd, 's1').cwd, b.cwd, '落地那条会话的 header 也是同一个字符串')
+  } finally {
+    await fixture.close()
+    rmSync(SANDBOX, { recursive: true, force: true })
+  }
 })
 
 test('sync：端到端——两个不同路径的克隆靠 git remote 认成同一个项目', async () => {

@@ -13,6 +13,11 @@
 // （见 paths.ts）。两台机器的同一个项目路径不同，字节级的库互不相认。所以这里只放大包，落地一律
 // 走 `transfer.ts` 的 `planImport/applyImport`——由它把 `cwd` 改写成**这台机器**的路径。
 //
+// 落地目录要先归一成**宿主存的那个拼写**（`canonicalize`，见 canonical-path.ts）：仓库根来自
+// `git rev-parse --show-toplevel`（Windows 上是 `C:/…`），映射值来自用户手输，而宿主把工作区路径
+// 与会话 cwd 都存成 `fs.realpath` 归一之后的样子、并按字符串相等比成员资格。不归一的话同一个目录
+// 会多出一条谁也不认的工作区记录（那条记录登记的那些会话全被滤掉，界面上是个空工作区）。
+//
 // 为什么一机一格：WebDAV 没有锁，多台机器共写一份 `index.json` 就是"后写的盖掉先写的"。每台机器
 // 只写自己那一格、读别人的全部，就不需要锁。
 //
@@ -39,6 +44,7 @@ import { createHash } from 'node:crypto'
 import { readFileSync, rmSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
+import { canonicalDir, type DirCanonicalizer } from './canonical-path.ts'
 import type { DavPort } from './dav.ts'
 import { scanAll, type DiscoveredSession } from './discovery.ts'
 import { createBackup } from './journal.ts'
@@ -435,6 +441,14 @@ export interface SyncPlanInput {
    * （与删除拒掉活会话同一件事）。缺席 = 判断不了，按"都不活着"处理。
    */
   isLive?: (id: string) => boolean
+  /**
+   * 把落地目录换成宿主存的那个拼写（缺省 `canonicalDir`，见 canonical-path.ts）。
+   *
+   * 计划里报的 `toCwd` 与落地用的必须是同一个字符串，所以归一发生在**计划**这一层：预演看到的目标、
+   * 改写进 header 的 cwd、注册表里那条记录的 `path` 因此是同一份值。可注入是为了让计划这条纯计算的
+   * 测试不必真建目录。
+   */
+  canonicalize?: DirCanonicalizer
 }
 
 /**
@@ -485,6 +499,7 @@ function timeText(value: number | undefined): string {
 export function planSync(input: SyncPlanInput): SyncPlan {
   const hashFile = input.hashFile ?? fileFingerprint
   const isDirectory = input.isDirectory ?? defaultIsDirectory
+  const canonicalize = input.canonicalize ?? canonicalDir
   const problems: string[] = []
   const local = new Map(input.local.map((session) => [session.id, session]))
   const pull: SyncPullEntry[] = []
@@ -515,10 +530,10 @@ export function planSync(input: SyncPlanInput): SyncPlan {
     }
     // 落地顺序：显式映射（用户配了就算数）→ 仓库身份 + 仓库内相对路径（配置不必每台机器一份）→ 跳过。
     const viaRepo = entry.repo === undefined ? undefined : input.repos?.get(entry.repo)
-    const target =
+    const picked =
       input.mapping.get(entry.cwd) ??
       (viaRepo === undefined ? undefined : joinRepoPath(viaRepo, entry.repoPath))
-    if (target === undefined) {
+    if (picked === undefined) {
       pull.push({
         ...base,
         action: 'skip',
@@ -529,6 +544,9 @@ export function planSync(input: SyncPlanInput): SyncPlan {
       })
       continue
     }
+    // 归一之后再谈"落到哪儿"：仓库根来自 git（Windows 上是 `C:/…`），映射值来自用户手输，两者都可能是
+    // 宿主不认的另一种拼写（见 canonical-path.ts）。
+    const target = canonicalize(picked)
     if (!isDirectory(target)) {
       problems.push(`同步映射把 ${entry.cwd} 指到了 ${target}，但那不是一个存在的目录`)
       pull.push({ ...base, toCwd: target, action: 'skip', code: 'missing-target', reason: `目标目录不存在：${target}` })
@@ -627,16 +645,18 @@ export function planSync(input: SyncPlanInput): SyncPlan {
       /*
        * 落地目录：**本机这条自己的 cwd 优先**。这条会话在本机已经有家（还有工作区登记），不该因为
        * 远端记着另一条路径就把它搬走；本机这条没有 cwd 时才按"显式映射 → 仓库身份"认，与新建拉取
-       * 同一条路。
+       * 同一条路。两种来路都要归一：本机这条的 cwd 也可能是宿主不认的另一种拼写（分隔符、大小写、
+       * 结尾分隔符）。
        */
-      let target = session.cwd
+      let target = session.cwd === undefined ? undefined : canonicalize(session.cwd)
       if (target === undefined) {
         const viaRepo = remote.repo === undefined ? undefined : input.repos?.get(remote.repo)
-        target =
+        const picked =
           remote.cwd === undefined
             ? undefined
             : input.mapping.get(remote.cwd) ??
               (viaRepo === undefined ? undefined : joinRepoPath(viaRepo, remote.repoPath))
+        target = picked === undefined ? undefined : canonicalize(picked)
         if (target === undefined && remote.cwd !== undefined) {
           push.push({
             ...common,

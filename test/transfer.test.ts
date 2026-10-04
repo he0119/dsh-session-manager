@@ -1,7 +1,7 @@
 // 会话包传输：容器的字节往返、包校验的拒绝面、导入预演与落地、冲突与无 cwd 的分支。
 import assert from 'node:assert/strict'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, sep } from 'node:path'
 import test from 'node:test'
 
 import { decompress } from 'fzstd'
@@ -224,6 +224,31 @@ test('导入：明文 v0 日志（无 zstd 外壳）走文本改写，同样只�
   assert.deepEqual(nextLines.slice(1), original.split('\n').slice(1))
   // 导入写出的文件名就是包里那个名字，不由本机重新推算（否则明文 v0 会被改名成 .zstd）
   assert.equal(existsSync(sessionDir(targetRoot, TO_CWD, 'session-v0')), true)
+})
+
+test('导入：目标目录的另一种拼写先归一（header 的 cwd 与注册表那条记录是同一个字符串）', () => {
+  const root = makeRoot('transfer-canonical')
+  const source = writeSession(root, { id: 'session-a', cwd: FROM_CWD })
+  const bundle = readBundle(buildBundle([source]))
+
+  const targetRoot = makeRoot('transfer-canonical-target')
+  const to = join(targetRoot, 'proj')
+  mkdirSync(to, { recursive: true })
+  // 另一种拼写：Windows 上 `git rev-parse --show-toplevel` 给的正斜杠也是这一类（见
+  // canonical-path.test.ts），这里用两个平台都算另一种写法的结尾 `.` 段验同一段代码。
+  const spelled = `${to}${sep}`
+  const registry = emptyRegistry()
+  const plan = planImport(bundle, { root: targetRoot, targetCwd: spelled, registry, now: '2026-09-27T00:00:00.000Z', newId: 'ws-target' })
+
+  assert.equal(plan.ok, true, plan.problems.join('; '))
+  assert.equal(plan.entries[0]?.toCwd, to, '落地用的是归一之后的那个字符串')
+  assert.equal(plan.nextRegistry?.tables.workspaces['ws-target']?.path, to, '注册表那条记录的 path 也是它')
+
+  const registryPath = join(targetRoot, '..', 'workspace.json')
+  applyImport(bundle, plan, { root: targetRoot, targetCwd: spelled, registry, registryPath, decodeAll })
+  const written = join(sessionDir(targetRoot, to, 'session-a'), 'session.v4.jsonl.zstd')
+  const header = JSON.parse(decodeAll(readFileSync(written)).split('\n')[0]!) as { cwd: string }
+  assert.equal(header.cwd, to, '改写进 header 的同样是它')
 })
 
 test('导出/导入：一个包装多条会话（含无 cwd 的那条）时各自走各自的分支', () => {

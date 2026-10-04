@@ -6,6 +6,7 @@ import { existsSync, readFileSync, statSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
 import { planArtifactMoves } from './artifacts.ts'
+import { canonicalDir } from './canonical-path.ts'
 import { projectDirOf, scanAll, scanProjectDir, type DiscoveredSession } from './discovery.ts'
 import { familyOf } from './family.ts'
 import { projectKey } from './project-key.ts'
@@ -66,7 +67,6 @@ export function buildRelocationPlan(options: BuildPlanOptions): RelocationPlan {
   const {
     root,
     registry,
-    to,
     decodeAll,
     sessionIds = null,
     unowned = false,
@@ -80,7 +80,7 @@ export function buildRelocationPlan(options: BuildPlanOptions): RelocationPlan {
   const problems: string[] = []
 
   if (typeof root !== 'string' || !root) problems.push('root is required (path to the sessions root)')
-  if (typeof to !== 'string' || !to) problems.push('to is required (target workspace directory)')
+  if (typeof options.to !== 'string' || !options.to) problems.push('to is required (target workspace directory)')
   if (unowned) {
     if (from !== '') problems.push('source is ambiguous: pass either from (a directory) or unowned, not both')
   } else if (from === '') {
@@ -91,7 +91,7 @@ export function buildRelocationPlan(options: BuildPlanOptions): RelocationPlan {
       ok: false,
       problems,
       from: unowned ? '' : from,
-      to,
+      to: options.to,
       root,
       sourceProjectDir: '',
       targetProjectDir: '',
@@ -104,7 +104,15 @@ export function buildRelocationPlan(options: BuildPlanOptions): RelocationPlan {
     }
   }
 
-  if (!unowned && from === to) problems.push('from and to are identical — nothing to migrate')
+  /*
+   * 目标目录换成宿主存的那个拼写（见 canonical-path.ts）：`path` 进注册表、`cwd` 进 header，两者都要是
+   * 宿主会存的那个字符串——手输的结尾分隔符、`..` 段、正斜杠、大小写不一致都算另一种拼写。
+   * **源那一侧不归一**：它是注册表的现状，下面那条"会话 header 的 cwd 必须等于源"的检查要按它的原样比。
+   */
+  const to = canonicalDir(options.to)
+  const sameDirectory = from !== '' && canonicalDir(from) === to
+
+  if (!unowned && sameDirectory) problems.push('from and to are identical — nothing to migrate')
 
   const regCheck = validateRegistry(registry)
   if (!regCheck.ok) problems.push(...regCheck.problems.map((p) => `registry: ${p}`))
@@ -117,8 +125,9 @@ export function buildRelocationPlan(options: BuildPlanOptions): RelocationPlan {
   const targetProjectDir = projectDirOf(root, to)
   if (!unowned && !existsSync(sourceProjectDir)) problems.push(`source project directory does not exist: ${sourceProjectDir}`)
 
-  // 有损目录名的碰撞：源与目标项目目录若同名，会话日志会混在一起
-  if (!unowned && projectKey(from) === projectKey(to)) {
+  // 有损目录名的碰撞：源与目标项目目录若同名，会话日志会混在一起。同一个目录的**两种拼写**不是碰撞
+  // （上面那条 'identical' 已经在说它了）：那时 projectKey 相同，但两个 cwd 指的是同一处。
+  if (!unowned && !sameDirectory && projectKey(from) === projectKey(to)) {
     problems.push(`projectKey collision: ${from} and ${to} both encode to ${projectKey(from)}`)
   }
 
@@ -239,7 +248,8 @@ export function buildRelocationPlan(options: BuildPlanOptions): RelocationPlan {
     // 只是没登记在册）不需要搬任何东西——它的"目标目录"就是自己现在的位置，所以"目标已存在"
     // 在这里不是冲突。这一支在单目录来源下够不到（`from === to` 被上面挡了），
     // 未分组来源下它是**收编**这件事的常态：只补一条注册表记录。
-    const alreadyAtTarget = sessionFrom === to
+    // 同一个目录的另一种拼写同样算"已经在目标上"：那一支要做的只是把 header 的拼写改对。
+    const alreadyAtTarget = sessionFrom === to || canonicalDir(sessionFrom) === to
     if (existsSync(targetDir) && !alreadyAtTarget) problems.push(`target session directory already exists: ${targetDir}`)
     if (targetDirs.has(targetDir)) problems.push(`duplicate target directory: ${targetDir}`)
     targetDirs.add(targetDir)

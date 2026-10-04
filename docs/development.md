@@ -131,6 +131,7 @@ tsconfig.client.json Web Client 自己的类型工程（DOM + JSX；Host 那份�
 | 源文件 | 职责 | DSH 依赖 |
 |---|---|---|
 | `src/project-key.ts` | 逐字符复刻宿主 `projectKey()` + 有损碰撞检测 | 无 |
+| `src/canonical-path.ts` | 落地目录的规范拼写（`canonicalDir()`：宿主存工作区 `path` 与会话 `cwd` 用的同一个 realpath），落地那条路上唯一的归一入口 | 无 |
 | `src/types.ts` | 贯穿各层的共享类型（计划、产物、注册表视图等） | 无 |
 | `src/paths.ts` | `encodeSegment()`、代次文件名、会话目录/日志路径 | 无 |
 | `src/zstd-frame.ts` | raw 帧编码、首帧边界定位、多帧感知守卫 | 无 |
@@ -159,9 +160,9 @@ tsconfig.client.json Web Client 自己的类型工程（DOM + JSX；Host 那份�
 | `src/client/*.ts` | 根下：`index.ts` 是入口（注册 `settings.section`、装样式、把页面与接缝接起来）、`api.ts` 是界面端点调用（state / export / import / sync / migrate / backups / rollback / delete / archive，`/sync` 那两条按 SSE 分帧读流）、`credentials.ts` 是宿主机凭据服务（`remote.credentials`）的持有处、`directory.ts` 是宿主目录选择服务的持有处（可选依赖，`native` / `browse` 两种能力，界面按宿主报来的 `pickerKind` 选一种）、`types.ts` 是端点响应的类型面、`styles.ts` 是样式表正文与注入（`installStyles`） | 无 |
 | `src/index.ts` | 插件入口 `apply(ctx, config)` | `dsh-tools` |
 
-核心层（`project-key` / `paths` / `zstd-frame` / `session-log` / `discovery` / `projection-cache` /
-`session-title` / `visibility` / `registry` / `plan` / `journal` / `execute` / `artifacts` / `transfer` /
-`dav` / `sync` / `migrate` / `remove`）**不依赖 DSH**，
+核心层（`project-key` / `canonical-path` / `paths` / `zstd-frame` / `session-log` / `discovery` /
+`projection-cache` / `session-title` / `visibility` / `registry` / `plan` / `journal` / `execute` /
+`artifacts` / `transfer` / `dav` / `sync` / `migrate` / `remove`）**不依赖 DSH**，
 所以插件外壳与测试共用同一段代码。只有 `src/tools.ts` 与 `src/index.ts` 依赖
 `@deepseek-ai/dsh-tools`，`src/web.ts` 连它也不依赖（只认一个 `{ register }` 形状）。`src/config.ts` 依赖
 `@deepseek-ai/schemastery`（schema 与 volatile 语义来自它），但不依赖插件外壳。

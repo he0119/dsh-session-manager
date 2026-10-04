@@ -14,6 +14,10 @@
   宿主启动时校验的四条，本插件在写前与写后各验一次。
 - [有损的 projectKey 会撞名，动手前先查](../.agents/notes/implemented/architecture/2026-09-27-lossy-project-key-collision.md)：
   `C:\x\y` 与 `C:\x-y` 编码结果相同，宿主的 `realpath` 检查抓不到。
+- [落地目录要写成宿主存的那个拼写](../.agents/notes/implemented/bug-fix/2026-10-04-landing-directory-is-the-hosts-spelling.md)：
+  宿主按 `fs.realpath` 归一后的字符串比工作区 `path` 与会话 `cwd`，另一种拼写（git 给的正斜杠、手输的
+  结尾分隔符）会变成一条成员表恒为空的工作区；归一在计划那一层，`planSync` / `planImport` /
+  `buildRelocationPlan` 三个入口共用 `canonicalDir()`。
 - [只重写第一个 frame](../.agents/notes/implemented/architecture/2026-09-27-only-the-first-frame-is-rewritten.md)
   与[写侧不依赖压缩器](../.agents/notes/implemented/architecture/2026-09-27-write-side-has-no-compressor.md)：
   改写只动首帧，而首帧由本包手写一个 raw block 帧；只读的内容指纹另走一条只解首帧前缀的浅路，产出
