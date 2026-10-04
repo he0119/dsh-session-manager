@@ -48,6 +48,9 @@
   字段刻意不做成活的。
 - [跨机器的项目身份是 git remote](../.agents/notes/implemented/feature/2026-10-01-project-identity-is-the-git-remote.md)：
   索引记身份与仓库内相对路径，落 `本机仓库根 + 相对路径`；显式映射优先，认不出来就跳过并点名仓库。
+- [工作区组头只摆名字与一枚主机标签，项目身份与本机路径进悬浮提示](../.agents/notes/implemented/feature/2026-10-04-workspace-shows-project-identity.md)：
+  列表与同步弹窗的组头、两个目录下拉框四处共用 `planRows` 的称呼规则（组头只摆名字 + 一枚主机名标签，
+  下拉框里身份与路径都在文本里），身份由 `/state` 的 `repos` 报来（注入的入口带进程内缓存）。
 - [同步预演按项目分组](../.agents/notes/implemented/feature/2026-10-04-sync-plan-groups-by-project.md)：
   三张表各自按项目目录分组，路径在组头说一次，行里只剩动作、会话名与大小。
 - `src/dav.ts` 是那四种方法与 Basic 鉴权（含宽容的多状态响应解析），`src/sync.ts` 是索引、计划与落地，

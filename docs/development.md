@@ -145,14 +145,14 @@ tsconfig.client.json Web Client 自己的类型工程（DOM + JSX；Host 那份�
 | `src/artifacts.ts` | 会话产物提取（证据分层）、规划（求交/剪枝）、搬迁 | 无 |
 | `src/transfer.ts` | `.dshsess` 容器（导出/解析/校验）、导入预演与落地 | 无 |
 | `src/config.ts` | 插件配置的 schema：`sync` 那一节带 `volatile`（活字段，改完不用重启），三个路径字段不带；`syncSection()` 把"活引用"与"普通对象"两种来路收成一份值 | `@deepseek-ai/schemastery` |
-| `src/repo.ts` | 跨机器的项目身份：git remote 规范化（`host/owner/repo`，去掉 `.git` 与凭据、端口进身份）与"这条目录属于哪个仓库"（仓库根 + 仓库内相对路径）；跑 git 的入口可注入 | 无 |
+| `src/repo.ts` | 跨机器的项目身份：git remote 规范化（`host/owner/repo`，去掉 `.git` 与凭据、端口进身份）与"这条目录属于哪个仓库"（仓库根 + 仓库内相对路径）；跑 git 的入口可注入。`createRepoLookup()` 是界面读身份那条路（进程内缓存：一个目录只问一次 git，`/state` 是热路径） | 无 |
 | `src/dav.ts` | WebDAV 客户端：PROPFIND / GET / PUT / MKCOL + Basic 鉴权 + 多状态响应解析 | 无 |
 | `src/sync.ts` | WebDAV 同步编排：远端索引、映射、计划（四种关系）、拉与推（复用 transfer 的导入落地） | 无 |
 | `src/migrate.ts` | 迁移编排：预演 / 执行 / 回滚 / 备份清单（工具与界面两个入口共用） | 无 |
 | `src/remove.ts` | 删除编排：预演（活着的拒删、单独点名子代理拒掉；点名一条就按 `family.ts` 把它的**全部子代理**一起展开）→ 先备份 → 删目录 → 复核；不碰注册表 | 无 |
 | `src/tools.ts` | 5 个工具注册（+ schema、平台解码器实例、可选服务探测、同步配置与运行时） | `dsh-tools` |
-| `src/web.ts` | 界面端点（state / export / import / sync / migrate / backups / rollback / delete / archive），只要求 `{ register }` 形状；`/sync`（预演与落地）回 SSE（按条报进度，见 [决策](../.agents/notes/implemented/architecture/2026-10-03-sync-progress-streams-over-sse.md)），其余端点都是一次性 JSON | 无 |
-| `src/client/*` | 浏览器半侧：「会话管理」页（会话 / 迁移 / 传输 / 同步 / 说明五个分页）、字典、样式、端点调用 → `lib/client.js`；`sessionList.tsx` 是前三个分页共用的列表骨架（行、组头、列表框、筛选条），`sessionFilter.ts` 是它背后的筛选与搜索判据（纯函数），`groups.ts` 是列表的组织规则（按目录分组、组内把子代理缩进到父会话下一级，都是纯函数），`syncGroups.ts` 是同步预演那三张表按项目目录分组的规则（纯函数），`HelpPanel.tsx` 是那个不碰数据的说明页，`SyncPanel.tsx` 是「同步」分页（同步按钮、三张按项目分组的计划表、按 phase 说话的进度块），`ConfirmDialog.tsx` 是四个动作页共用的确认弹窗外壳（官方 `Modal` + 标题/正文/底部按钮，计划由调用方取），`ProgressBar.tsx` 是那条 6px 进度条（同步的预演与落地共用，分母为 0 的那一段不画），`syncStream.ts` 是同步事件流的分帧与解释（纯字符串处理、与 DOM 无关，所以能被 Host 侧的测试图直接引），`syncForm.ts` 是同步设置的读写面（宿主设置接缝 `configForms`）与映射草稿的解析（纯函数），`credentials.ts` 是宿主机凭据服务（`remote.credentials`）的持有处，`SyncConfigForm.tsx` 是那张表单 | 无 |
+| `src/web.ts` | 界面端点（state / export / import / sync / migrate / backups / rollback / delete / archive），只要求 `{ register }` 形状；`GET /state` 另报一栏 `repos`（目录 → 项目身份，注入的入口认，见 `src/repo.ts`）；`/sync`（预演与落地）回 SSE（按条报进度，见 [决策](../.agents/notes/implemented/architecture/2026-10-03-sync-progress-streams-over-sse.md)），其余端点都是一次性 JSON | 无 |
+| `src/client/*` | 浏览器半侧：「会话管理」页（会话 / 迁移 / 传输 / 同步 / 说明五个分页）、字典、样式、端点调用 → `lib/client.js`；`sessionList.tsx` 是前三个分页共用的列表骨架（行、组头、列表框、筛选条），`sessionFilter.ts` 是它背后的筛选与搜索判据（纯函数），`groups.ts` 是列表的组织规则（按目录分组、组内把子代理缩进到父会话下一级，都是纯函数），`syncGroups.ts` 是同步预演那三张表按项目目录分组的规则（纯函数），`planRows.ts` 是"一行 / 一格怎么写"（cwd 那一格、会话名，以及一个目录怎么称呼——`projectLabel()` / `pathLabel()` / `repoHost()`：组头只摆名字 + 一枚主机名标签、项目身份与本机路径进悬浮提示，下拉框里两者都摆进文本），`HelpPanel.tsx` 是那个不碰数据的说明页，`SyncPanel.tsx` 是「同步」分页（同步按钮、三张按项目分组的计划表、按 phase 说话的进度块），`ConfirmDialog.tsx` 是四个动作页共用的确认弹窗外壳（官方 `Modal` + 标题/正文/底部按钮，计划由调用方取），`ProgressBar.tsx` 是那条 6px 进度条（同步的预演与落地共用，分母为 0 的那一段不画），`syncStream.ts` 是同步事件流的分帧与解释（纯字符串处理、与 DOM 无关，所以能被 Host 侧的测试图直接引），`syncForm.ts` 是同步设置的读写面（宿主设置接缝 `configForms`）与映射草稿的解析（纯函数），`credentials.ts` 是宿主机凭据服务（`remote.credentials`）的持有处，`SyncConfigForm.tsx` 是那张表单 | 无 |
 | `src/index.ts` | 插件入口 `apply(ctx, config)` | `dsh-tools` |
 
 核心层（`project-key` / `paths` / `zstd-frame` / `session-log` / `discovery` / `projection-cache` /

@@ -229,7 +229,8 @@ export const zh = {
   helpCategoriesNote:
     '三种"不显示"的理由由宿主先判（子代理 → 空白 → 已归档），本插件跟它一致；同一条会话可能同时占好几条，行上就挂多枚标签。',
   helpTabsTitle: '三个分页各管什么',
-  helpTabManage: '对着整个会话库逐条归档或删除，包括侧边栏点不到的那些。',
+  helpTabManage:
+    '对着整个会话库逐条归档或删除，包括侧边栏点不到的那些。列表按目录分组，组头只写这一组的名字（工作区标题，没登记过的目录取项目身份最后一段）并挂一枚主机名小标签（有 git remote 时），项目身份与本机路径都在名字那一格的悬浮提示里（同一个仓库的两个克隆靠路径区分）。',
   helpTabMigrate: '把一个来源（某个目录，或横跨多目录的「未分组」）的会话搬到另一个目录：改写日志 header 的 cwd（只动首帧，其余字节不变）、把会话目录移进目标项目目录、并重新登记工作区注册表。勾中的会话会把它的子代理会话一起带走（见下面「子代理跟着父会话走」）。',
   helpTabTransfer: '把勾选的会话打成 .dshsess 包带走，或把包里的会话导进某个工作区。',
   helpTabSync: '按 WebDAV 配置在几台机器之间同步：点「同步」先算一份只读计划（报出会拉几条、会推几条，逐条说清落地目录与为什么没动），确认才真拉真推。远端地址、机器名与路径映射就在这一页改，改完不用重启。同一个仓库在两台机器上的路径不同也不必配映射：远端记着仓库身份（git remote），本机认得出就落「本机克隆路径 + 仓库内相对路径」。',
@@ -568,7 +569,8 @@ export const en: Record<keyof typeof zh, string> = {
   helpCategoriesNote:
     'The host decides the three hidden reasons first (subagent → blank → archived) and this plugin follows the same order; one session can carry several of them, so a row can show several tags.',
   helpTabsTitle: 'What the three tabs do',
-  helpTabManage: 'Archive or delete sessions in the whole library, row by row, including the ones the sidebar cannot reach.',
+  helpTabManage:
+    'Archive or delete sessions in the whole library, row by row, including the ones the sidebar cannot reach. The list is grouped by directory and a group header carries only the name of its group (the workspace title, or the last segment of the project identity for a directory no workspace registers) plus a small host tag when a git remote is known; the project identity and the local path both live in that name\u2019s tooltip (the path is what tells two clones of one repository apart).',
   helpTabMigrate: 'Move one source (a directory, or the cross-directory Ungrouped) to another directory: rewrite each log header cwd (first frame only, the rest stays byte-identical), move the session directories, and re-home the workspace registry. A ticked session takes its subagent sessions along (see Subagents follow their parent session below).',
   helpTabTransfer: 'Pack the ticked sessions into a .dshsess bundle, or import a bundle into a workspace.',
   helpTabSync: 'Sync between machines through the WebDAV configuration: Sync first computes a read-only plan (how many to pull, how many to push, where each one lands and why it stays put), and only Confirm does the transfer. The remote URL, machine id and path mapping are edited on this page, and take effect without a restart. Two machines keeping the same repository at different paths need no mapping at all: the remote records the project identity (the git remote), and this machine lands it at “your clone + the path inside the repository”.',

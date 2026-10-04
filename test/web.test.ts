@@ -1047,6 +1047,32 @@ test('GET /state：带上同步配置的非敏感字段；没配时是 null', as
   })
 })
 
+test('GET /state：目录带项目身份，只问界面上真会出现的那些目录', async () => {
+  const sandbox = makeSandbox('web-state-repos')
+  writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000)
+  writeSession(sandbox.sessionsRoot, 'session-b', CWD_B, 2000)
+  const asked: string[][] = []
+  const handlers = createApiHandlers(
+    deps(sandbox, {
+      repos: async (dirs) => {
+        asked.push([...dirs])
+        return new Map([[CWD_A, 'github.com/he0119/demo']])
+      },
+    }),
+  )
+  const { res, captured } = fakeRes()
+  await handlers['GET /state']!(fakeReq('GET', `${API_PREFIX}/state`), res)
+  assert.deepEqual(json(captured)['repos'], { [CWD_A]: 'github.com/he0119/demo' })
+  // 问的是"会话的 cwd + 注册表里的工作区路径"（这里 CWD_A 两处都有，只问一次），不是库里的每个目录
+  assert.equal(asked.length, 1)
+  assert.deepEqual(asked[0]!.slice().sort(), [CWD_A, CWD_B].sort())
+
+  // 没注入这个入口（旧宿主、没装 git 的机器）：空表，界面退回显示路径
+  const plain = fakeRes()
+  await createApiHandlers(deps(sandbox))['GET /state']!(fakeReq('GET', `${API_PREFIX}/state`), plain.res)
+  assert.deepEqual(json(plain.captured)['repos'], {})
+})
+
 test('GET|POST /sync：这个宿主没配置同步时 409，且没有一个字节被写', async () => {
   const sandbox = makeSandbox('web-sync-off')
   writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000)

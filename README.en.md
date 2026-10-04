@@ -69,8 +69,14 @@ one-line bump at that point.
 
 - The list is **grouped by directory** with foldable headers (**Collapse all / Expand all** sit above the
   list), and clicking a header toggles that whole group — so
-  "archive every session of this old project" is one click. A header carries the workspace title and path,
-  so rows no longer repeat the owner; that width goes to the title instead, and a session sitting in the
+  "archive every session of this old project" is one click. A header carries **only the name of its
+  group**: the workspace title, or for a directory no workspace registers **the project name** (the last
+  segment of its project identity — `dsh-session-manager` — when it has a git remote, and the local path
+  when it does not), so rows no longer repeat the owner; **the project identity and the local path both
+  live in that name's tooltip** (two lines: identity first, path below — the path is what tells two
+  clones of one repository apart), a directory whose identity is known also carries a small **host tag**
+  (`github.com`, `git.hehome.xyz`) after the name, so a glance shows which directories are repositories the
+  identity knows about, and that tag's own tooltip gives the full identity, and a session sitting in the
   shell sidebar's Ungrouped group carries a small "Ungrouped" tag (the header is the directory, the tag says
   where the shell puts the row). **Subagent sessions are indented one level under their parent** (they
   follow it; when the parent lives in another directory group the row stays in its own group, indented, and
@@ -112,7 +118,10 @@ one-line bump at that point.
   workspaces **plus any directory the library actually holds sessions for** (annotated with that count)
   **plus Ungrouped**, so no path has to be typed from memory. A path outside the candidates goes in through
   **Browse…** or **Type a path**: on the desktop **Browse…** opens the OS directory dialog, in the browser it
-  expands an in-page directory browser, and on a host with no picker the button is simply not shown;
+  expands an in-page directory browser, and on a host with no picker the button is simply not shown. A
+  directory with a git remote reads as **project identity + local path**
+  (`github.com/he0119/dsh-session-manager — /home/uy_sun/dev/dsh-session-manager`): a dropdown has no
+  tooltips, so the path cannot disappear from here — it is what tells two clones of one repository apart;
 - **the source can also be Ungrouped**: the sessions with a `cwd` that the shell sidebar parks in its
   Ungrouped group, possibly spread over several directories — adopt them all into the target workspace in
   one go. It is the only source that spans directories, because "those two
@@ -165,8 +174,11 @@ directories back — deleting never touched the registry.
   is the other way round (see below);
 - **Export**: tick sessions → the browser downloads one `.dshsess` bundle. The bundle carries the raw
   bytes of **every generation** of those logs (each with a sha256), not files the session created. The
-  list is **grouped by directory** (group name = workspace title; a directory no workspace registers shows
-  its path and is marked), and **clicking a group header toggles that whole group** — so "take every
+  list is **grouped by directory** (group name = workspace title; a directory no workspace registers is named
+  after the last segment of its project identity — its git remote when it has one, its path otherwise — and is
+  marked either way; the identity and the local path both live in that name's tooltip, and a directory whose
+  identity is known carries a small host tag),
+  and **clicking a group header toggles that whole group** — so "take every
   session of this workspace away" is one click. The chevron at the head of a row **folds** the
   group away (the header and its "N sessions / M selected" stay), and the "Grouped by directory" row above
   the list carries **Collapse all / Expand all**: folding is a display matter, so "Select whole library"
@@ -264,7 +276,9 @@ anything else.
 
 On the **Sync** tab, **Sync** first computes a read-only plan in a dialog (it reads the remote and writes
 nothing), reporting "pull N / push M" in three tables (will pull / will push / on both sides, left alone), each
-**grouped by project directory**: the group header carries the workspace name, the path and the count, while a
+**grouped by project directory**: the group header carries the name of its group (the workspace title, or the
+project name when no workspace registers it), a small host tag when the identity is known, and the count, with
+the project identity and the local path in that name's tooltip, while a
 row keeps only the action, the session name and its size — and the third column of the "left alone" table names
 the machine holding the other copy. **Sync now** in that dialog actually pulls and pushes. While it runs, the
 dialog body becomes a progress bar with "Pushing 12 / 84" and the title of the session in flight — the

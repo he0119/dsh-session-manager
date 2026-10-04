@@ -43,7 +43,7 @@ import { ConfirmDialog } from './ConfirmDialog.tsx'
 import { groupKey } from './groups.ts'
 import { WorkspaceIcon } from './icons.tsx'
 import { translateWith, zh, type Translate } from './locales.ts'
-import { sessionLabel, type SessionLabel } from './planRows.ts'
+import { projectLabel, sessionLabel, type SessionLabel } from './planRows.ts'
 import { ProgressBar } from './ProgressBar.tsx'
 import { formatBytes } from './sessionList.tsx'
 import { SyncConfigForm } from './SyncConfigForm.tsx'
@@ -132,31 +132,36 @@ function syncTag(entry: SyncRow, t: Translate): string {
  * 一个表头——一张表一个项目的话，"动作 / 会话 / 大小"这套表头要么每个项目重复一遍，要么只剩第一张
  * 有，列宽也会各算各的。
  *
- * 组头的画法与列表那边的组头同一档（字色 12% 兑出来的横幅、工作区图形、标题 + 等宽路径 + 条数），
- * 但没有折叠与勾选：弹窗里这份清单只是读一遍，不在这儿挑东西。路径只在有工作区标题时才单列一格，
- * 没有标题时路径自己就是标题（与列表那边同一个写法，免得同一段路径印两遍）。
+ * 组头的画法与列表那边的组头同一档（字色 12% 兑出来的横幅、工作区图形、名字 + 条数），但没有折叠与
+ * 勾选：弹窗里这份清单只是读一遍，不在这儿挑东西。称呼规则也共用一份（`planRows.projectLabel()`）：
+ * 那一行只摆名字（工作区标题，没登记就是项目名），项目身份与本机路径一起进悬浮提示——它们都是机器
+ * 字符串，摆在行里又长又会被截断，而"这是哪个仓库、在哪儿"是想知道才看的信息。
  */
 function PlanGroupHead({
   group,
   columns,
+  repo,
   t,
 }: {
   group: SyncGroup<unknown>
   columns: number
+  /** 这一组的项目身份（宿主 `/state` 的 `repos`）；认不出来时没有。 */
+  repo?: string
   t: Translate
 }): React.ReactElement {
-  const name = group.title ?? (group.path === '' ? t('noCwdGroup') : group.path)
+  const label = projectLabel({ path: group.path, title: group.title, repo }, t)
   return (
     <tr className="dsm-planGroup">
       <th className="dsm-planGroupHead" colSpan={columns} scope="colgroup">
         <span className="dsm-planGroupInner">
           <WorkspaceIcon />
-          <span className="dsm-groupTitle" title={name}>
-            {name}
+          <span className="dsm-groupTitle" title={label.tip}>
+            {label.name}
           </span>
-          {group.title !== undefined && (
-            <span className="dsm-groupPath" title={group.path}>
-              {group.path}
+          {/* 与列表那边同一枚标签：有项目身份的目录挂主机名，悬浮提示里给全整条身份。 */}
+          {label.host !== undefined && (
+            <span className="dsm-tag dsm-tagIdle" title={repo}>
+              {label.host}
             </span>
           )}
           <span className="dsm-groupCounts">
@@ -479,7 +484,7 @@ export function SyncPanel({ t = fallback, state, reload }: PanelShare): React.Re
                     // 每个项目一个 <tbody>：组头是它自己的表头行（colSpan 占满），列对齐由上面那一个
                     // <thead> 统一给。
                     <tbody key={groupKey(group.path)}>
-                      <PlanGroupHead group={group} columns={3} t={t} />
+                      <PlanGroupHead group={group} columns={3} repo={state?.repos?.[group.path]} t={t} />
                       {group.rows.map((entry) => {
                         const label = sessionLabel(entry)
                         return (
@@ -513,7 +518,7 @@ export function SyncPanel({ t = fallback, state, reload }: PanelShare): React.Re
                   </thead>
                   {pushGroups.map((group) => (
                     <tbody key={groupKey(group.path)}>
-                      <PlanGroupHead group={group} columns={3} t={t} />
+                      <PlanGroupHead group={group} columns={3} repo={state?.repos?.[group.path]} t={t} />
                       {group.rows.map((entry) => {
                         const label = sessionLabel(entry)
                         return (
@@ -554,7 +559,7 @@ export function SyncPanel({ t = fallback, state, reload }: PanelShare): React.Re
                   </thead>
                   {keptGroups.map((group) => (
                     <tbody key={groupKey(group.path)}>
-                      <PlanGroupHead group={group} columns={3} t={t} />
+                      <PlanGroupHead group={group} columns={3} repo={state?.repos?.[group.path]} t={t} />
                       {group.rows.map(({ entry }) => {
                         const label = sessionLabel(entry)
                         return (

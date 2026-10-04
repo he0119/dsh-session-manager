@@ -275,15 +275,13 @@ export function ManagePanel({ t = fallback, state, reload }: PanelShare): React.
           ) : (
             groups.map(({ group, rows }) => {
               const key = groupKey(group.path)
-              // 组头的名字：登记过就用工作区标题（人认得的名字），没登记就只剩路径可显示。
-              const name = group.title ?? (group.path === '' ? t('noCwdGroup') : group.path)
               const collapsed = collapse.isCollapsed(key)
               return (
                 <div key={key} className="dsm-group">
                   <SessionGroupHead
-                    name={name}
-                    title={group.title}
                     path={group.path}
+                    title={group.title}
+                    repo={state?.repos?.[group.path]}
                     count={rows.length}
                     picked={rows.filter((row) => picked.includes(row.session.id)).length}
                     collapsed={collapsed}

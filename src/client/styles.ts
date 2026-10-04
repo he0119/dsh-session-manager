@@ -132,8 +132,8 @@ export const CSS = `
   align-items: center;
   gap: 8px;
   /*
-   * 一条组头永远只占一行：nowrap + 让路径（flex-basis: 0，见下面 .dsm-groupPath）先让位。
-   * 反面教材是本次改之前的写法：wrap + 路径用内容宽度参与折行计算，于是路径一长，右手的两个
+   * 一条组头永远只占一行：nowrap + 名字截断（见下面的 .dsm-groupTitle）+ 计数块 flex: none。
+   * 反面教材是本次改之前的写法：wrap + 机器字符串用内容宽度参与折行计算，于是它一长，右手的两个
    * 计数就被挤到第二行——组头长成两行、数字跑到左边，看着像坏了（532px 宽的列表里真实发生过）。
    * 换行是**最后**的手段，截断才是。
    */
@@ -148,9 +148,10 @@ export const CSS = `
   border-bottom: 1px solid var(--dsw-alias-border-l2, rgba(0, 0, 0, 0.12));
 }
 /*
- * 组头里"点一下就是整组勾选／取消"的那一块：勾选框、标记、名字、路径、右侧那两串数字。
+ * 组头里"点一下就是整组勾选／取消"的那一块：勾选框、图形标记、名字、可选的那枚标签，以及右端的计数。
  *
- * 它独占组头除折叠按钮以外的全部宽度（点击面因此仍是整行），路径的让位规则也在这个 flex 行里生效。
+ * 它独占组头除折叠按钮以外的全部宽度（点击面因此仍是整行）；右端那两串数字靠自己的 margin-left: auto
+ * 贴住右缘，名字与它之间那段空白就是这个 flex 行里剩下的地方。
  */
 .dsm-groupPick {
   flex: 1 1 auto;
@@ -187,29 +188,13 @@ export const CSS = `
  */
 .dsm-groupTools { display: flex; align-items: center; gap: 6px; }
 /*
- * 组头里的名字：它就是这一行的主角，不折行；实在挤不下时截断（截断了还有悬浮提示补全）。
+ * 组头里的名字：它就是这一行**唯一**的字（项目身份与本机路径都在它的悬浮提示里，见
+ * planRows.projectLabel()），不折行；实在挤不下时截断。
  */
 .dsm-groupTitle {
   font-size: 14px;
   font-weight: 600;
   flex: 0 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-/*
- * 组头里的路径：等宽 + 次要色。它是机器字符串，人写的会话标题是句子——字体不同，两者就不会被
- * 当成同一类东西（尤其那个目录名与会话标题重名的时候）。
- *
- * flex: 1 1 0（基准宽度 0）是这一行不折行的关键：它不参与折行/撑宽的计算，多出来的地方
- * 由它独占（界面宽时它显示全，窄时它先截断）。右边那两串数字因此永远待在原地。
- */
-.dsm-groupPath {
-  flex: 1 1 0;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 12px;
-  color: var(--dsw-alias-label-secondary, #646a73);
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -224,8 +209,13 @@ export const CSS = `
   gap: 8px;
   white-space: nowrap;
 }
-/* 组头上的标签（"未登记目录"）也是不可压的：它的字不能折行，压窄了就会溢出自己的框。 */
-.dsm-groupPick > .dsm-tag { flex: none; }
+/*
+ * 组头上的标签（"未登记目录"与主机名）也是不可压的：它的字不能折行，压窄了就会溢出自己的框。
+ *
+ * 行高压到 18px：12px 的字 + 上下各 1px 边框正好等于 14px 名字那一行的高度（20px），于是挂了标签的
+ * 组头不会比没挂的高出来（改之前 22px，量到 39 vs 38px——同一列组头高度不齐）。
+ */
+.dsm-groupPick > .dsm-tag { flex: none; line-height: 18px; }
 /*
  * 组内的会话行：整行缩进一格（勾选框也跟着走，读起来就是"挂在组头下面"），左缘那条 2px 的导引线
  * 逐行相接，成一条竖线。它压在整个列表的左边界上，正是"这一组"的范围。
@@ -527,6 +517,8 @@ export const CSS = `
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* 弹窗里那份清单的组头挂着同一枚主机标签，行高与列表那边同一条规格（见 .dsm-groupPick > .dsm-tag）。 */
+.dsm-planGroupHead .dsm-tag { line-height: 18px; }
 .dsm-planTable .dsm-colCwd { width: 26%; }
 /* 「这次不动」那张表的第三列（远端机器）：宽度沿用原来那一列的 26%。分组之后这一列不再放路径
    （路径去组头了），只放机器名——机器名比路径短，多出来的宽度归中间的会话列。 */

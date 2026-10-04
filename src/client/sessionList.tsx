@@ -18,7 +18,7 @@
 import * as React from 'react'
 
 import { ChevronIcon, SessionIcon, WorkspaceIcon } from './icons.tsx'
-import { sessionLabel } from './planRows.ts'
+import { projectLabel, sessionLabel } from './planRows.ts'
 import {
   attributeKeys,
   filterCounts,
@@ -281,11 +281,16 @@ export function GroupCheckbox({
 }
 
 export interface SessionGroupHeadProps {
-  /** 组名：登记过就是工作区标题，没登记就只剩路径。 */
-  name: string
-  /** 已登记工作区才有标题；没有标题时组名就是路径，不必再重复一行。 */
-  title?: string
+  /** 这一组的目录路径（分组键本身）。 */
   path: string
+  /** 已登记工作区才有标题（注册表里的名字）。 */
+  title?: string
+  /**
+   * 这个目录的项目身份（仓库的 git remote，`host/owner/repo`）；认不出来时没有。
+   *
+   * 有身份时**那一格显示的就不是本机路径**——路径退到它的悬浮提示里（见 `planRows.projectLabel()`）。
+   */
+  repo?: string
   /** 这一组**列出来的**有几条（筛过之后就是筛剩下的）。 */
   count: number
   picked: number
@@ -311,9 +316,9 @@ export interface SessionGroupHeadProps {
  * 也会两头打架。于是整组勾选那一块单独包成 label（点组头其余任意一处仍等于勾上／取消整组）。
  */
 export function SessionGroupHead({
-  name,
-  title,
   path,
+  title,
+  repo,
   count,
   picked,
   collapsed,
@@ -321,14 +326,17 @@ export function SessionGroupHead({
   onToggleCollapse,
   t,
 }: SessionGroupHeadProps): React.ReactElement {
+  // 称呼规则集中在 `planRows.projectLabel()`：组头上只摆名字，项目身份与本机路径一起进它的悬浮提示
+  // （见那个函数的说明）。列表、同步弹窗与两个下拉框读的是同一份口径。
+  const label = projectLabel({ path, title, repo }, t)
   return (
     <div className="dsm-groupHead">
       <button
         type="button"
         className="dsm-groupToggle"
         aria-expanded={!collapsed}
-        aria-label={t('toggleGroupLabel', { name })}
-        title={t('toggleGroupLabel', { name })}
+        aria-label={t('toggleGroupLabel', { name: label.name })}
+        title={t('toggleGroupLabel', { name: label.name })}
         onClick={onToggleCollapse}
       >
         <ChevronIcon />
@@ -337,16 +345,18 @@ export function SessionGroupHead({
         <GroupCheckbox
           checked={count > 0 && picked === count}
           indeterminate={picked > 0 && picked < count}
-          label={t('selectGroup', { name })}
+          label={t('selectGroup', { name: label.name })}
           onToggle={onToggle}
         />
         <WorkspaceIcon />
-        <span className="dsm-groupTitle" title={name}>
-          {name}
+        <span className="dsm-groupTitle" title={label.tip}>
+          {label.name}
         </span>
-        {title !== undefined && (
-          <span className="dsm-groupPath" title={path}>
-            {path}
+        {/* 有项目身份的目录挂一枚主机名标签：整条身份太长（会被截断），而"这是认得出身份的仓库"值得
+            扫一眼就看见——标签的悬浮提示里给全整条身份。 */}
+        {label.host !== undefined && (
+          <span className="dsm-tag dsm-tagIdle" title={repo}>
+            {label.host}
           </span>
         )}
         {title === undefined && path !== '' && <span className="dsm-tag dsm-tagIdle">{t('unregisteredDir')}</span>}
