@@ -41,7 +41,7 @@ import {
   type ImportOptions,
 } from './transfer.ts'
 import type { DecodeAll, WorkspaceRegistryState } from './types.ts'
-import { createBlankResolver, hiddenReason, isUngrouped, type HiddenReason } from './visibility.ts'
+import { createBlankResolver, createSessionMetaResolver, hiddenReason, isUngrouped, type HiddenReason, type SessionMeta } from './visibility.ts'
 
 /** 本插件占用的路由前缀。 */
 export const API_PREFIX = '/dsh-session-manager/api'
@@ -97,6 +97,13 @@ export interface ApiDeps {
    * 空白会话标出来，迁移页据此把它们排除在候选之外。
    */
   resolveBlank?: (query: { id: string; createdAt: number; cwd?: string }) => boolean | undefined
+  /**
+   * 读同一条缓存记录里的空白与最后活动时间（见 visibility.ts 的 `SessionMeta`）。
+   *
+   * 与 `resolveBlank` 分开是因为问的不是同一件事：那一条问"侧边栏显示不显示"，这一条问"同步时这条
+   * 要不要搬运、两边各自写过时谁更新"。缺省同样按 `paths.registryPath` 反推投影缓存目录。
+   */
+  sessionMeta?: (query: { id: string; createdAt: number; cwd?: string }) => SessionMeta | undefined
   /**
    * 宿主内存里活着的会话 id（`ctx.sessions.list()`，见 src/index.ts）。
    *
@@ -393,6 +400,9 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
   // 空白判据与标题同源：都读宿主自己那份投影缓存（见 visibility.ts）。界面与迁移计划因此共用一条口径。
   const resolveBlank =
     deps.resolveBlank ?? createBlankResolver({ cacheDir: projectionCacheDir(paths.registryPath) })
+  // 同步要的那两件事（空白、最后活动时间）同源同文件，但问的不是同一个问题（见 ApiDeps.sessionMeta）。
+  const sessionMeta =
+    deps.sessionMeta ?? createSessionMetaResolver({ cacheDir: projectionCacheDir(paths.registryPath) })
   // 宿主内存里活着的会话：删除会拒掉它们。端口缺席时按空集（判断不了）——预演的输出里没有
   // 任何一处声称"这些一定没在跑"，界面上那句说明也是这么写的。
   const liveSessionIds = (): ReadonlySet<string> => deps.liveSessionIds?.() ?? new Set<string>()
@@ -713,8 +723,12 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
       settings: runtime.settings,
       sessionsRoot: paths.sessionsRoot,
       registryPath: paths.registryPath,
+      backupRoot: paths.backupRoot,
       decodeAll,
       resolveTitle,
+      sessionMeta,
+      // 覆盖本机那份之前要问一句"这条还在跑吗"（与删除同一条理由：宿主手里有它的写句柄）。
+      liveSessionIds,
       ...(deps.pluginVersion === undefined ? {} : { pluginVersion: deps.pluginVersion }),
       ...(deps.now === undefined ? {} : { now: deps.now }),
     }

@@ -89,8 +89,13 @@ function writeSession(machine: Machine, id: string, createdAt: number, options: 
   writeFileSync(join(dir, 'session.v4.jsonl.zstd'), Buffer.concat(lines.map((line) => encodeRawFrame(`${line}\n`))))
 }
 
-/** 给一条已有会话再加一代日志（宿主续写会话就是这个形状：同一个目录里多一个 `session.vN`）。 */
-function addGeneration(machine: Machine, id: string, version: number): void {
+/**
+ * 给一条已有会话再加一代日志（宿主续写会话就是这个形状：同一个目录里多一个 `session.vN`）。
+ *
+ * `event` 缺席就是"只有 header"那一代；给了就多一帧——两边各自续写、内容不同，靠它造出**真正分叉**
+ * 的两份（只有 cwd 不同的两份会被内容指纹认成同一份，那是刻意的）。
+ */
+function addGeneration(machine: Machine, id: string, version: number, event?: string): void {
   const dir = sessionDir(machine.sessionsRoot, machine.cwd, id)
   const header: SessionHeader = {
     type: 'session',
@@ -101,10 +106,9 @@ function addGeneration(machine: Machine, id: string, version: number): void {
     isSeeded: false,
     delegationDepth: 0,
   }
-  writeFileSync(
-    join(dir, `session.v${version}.jsonl.zstd`),
-    Buffer.concat([JSON.stringify(header), '\n'].map((line) => encodeRawFrame(line))),
-  )
+  const frames = [encodeRawFrame(JSON.stringify(header)), encodeRawFrame('\n')]
+  if (event !== undefined) frames.push(encodeRawFrame(`${event}\n`))
+  writeFileSync(join(dir, `session.v${version}.jsonl.zstd`), Buffer.concat(frames))
 }
 
 /** 这台机器的同步设置。 */
@@ -122,6 +126,12 @@ async function syncMachine(
     titles?: Record<string, string>
     git?: GitRunner
     onProgress?: (event: SyncProgress) => void
+    /** 读宿主投影缓存那两件事（空白与最后活动时间）；缺省什么都不知道（与没挂投影缓存的宿主一样）。 */
+    sessionMeta?: (query: { id: string; createdAt: number; cwd?: string }) => { blank?: boolean; lastPromptAt?: number } | undefined
+    /** 宿主内存里活着的会话。 */
+    liveSessionIds?: () => ReadonlySet<string>
+    /** 备份根目录（缺省 `machine.base/backups`）；指向坏位置可以验"备份不成功就一条都不动"。 */
+    backupRoot?: string
   },
 ): Promise<Awaited<ReturnType<typeof runSync>>> {
   return runSync(
@@ -130,9 +140,12 @@ async function syncMachine(
       settings: config,
       sessionsRoot: machine.sessionsRoot,
       registryPath: machine.registryPath,
+      backupRoot: options.backupRoot ?? join(machine.base, 'backups'),
       decodeAll,
       ...(options.titles === undefined ? {} : { resolveTitle: ({ id }: { id: string }) => options.titles?.[id] }),
       ...(options.git === undefined ? {} : { git: options.git }),
+      ...(options.sessionMeta === undefined ? {} : { sessionMeta: options.sessionMeta }),
+      ...(options.liveSessionIds === undefined ? {} : { liveSessionIds: options.liveSessionIds }),
       pluginVersion: '0.0.1-test',
       now: () => new Date('2026-10-01T00:00:00.000Z'),
     },
@@ -269,6 +282,8 @@ function remoteOf(
     cwd?: string
     title?: string
     createdAt?: number
+    /** 索引里记的最后活动时间（跨机器比"谁更新"用）。 */
+    lastPromptAt?: number
     files: FileFingerprint[]
     repo?: string
     repoPath?: string
@@ -357,7 +372,7 @@ test('sync：计划——远端独有要拉取，没有映射 / 目标不存在�
   assert.equal(plan.bytesIn, 20, 's1 与 s3 各 10 字节')
 })
 
-test('sync：计划——本机独有要推送，本机领先重新推送，远端领先与分叉都不动', () => {
+test('sync：计划——本机独有要推送，本机领先重推，远端领先覆盖本机，判不出高下的分叉不动', () => {
   // 计划阶段只为"两边都有"的会话算指纹，所以这里的假哈希把 sha 编进文件路径里：
   // `path` 是 `sha@version`，`fakeHash` 再把它拆回来。
   const fakeHash = (path: string, version: number): FileFingerprint => ({
@@ -388,11 +403,90 @@ test('sync：计划——本机独有要推送，本机领先重新推送，远�
   assert.equal(byId.get('only-local')?.title, '本机独有')
   assert.equal(byId.get('behind')?.action, 'update', '本机严格领先 → 重新推送刷新')
   assert.equal(byId.get('same')?.action, 'skip')
-  assert.equal(byId.get('ahead')?.action, 'skip')
-  assert.match(byId.get('ahead')?.reason ?? '', /robot-b 那份更新/)
+  // 远端领先是**结构性**的（本机这份确实是它的前缀，不必比时间）：不留在推送表里，改走覆盖本机那条路。
+  assert.equal(byId.get('ahead'), undefined, '远端领先不再只是"不动"一行')
+  const replaced = plan.pull.find((entry) => entry.id === 'ahead')
+  assert.equal(replaced?.action, 'replace')
+  assert.equal(replaced?.code, 'remote-ahead')
+  assert.equal(replaced?.fromCwd, '/home/b/proj')
+  assert.equal(replaced?.toCwd, '/opt/work/proj', '覆盖时留在本机这条自己的目录里，不跟远端那条路径走')
+  // 分叉且一边都没有活动时间（老索引 / 没挂投影缓存）→ 退回旧口径：两条都不动。
   assert.equal(byId.get('fork')?.action, 'skip')
   assert.match(byId.get('fork')?.reason ?? '', /两边各自写过/)
-  assert.deepEqual(plan.pullIds, [], '两边都有的会话一条都不拉取')
+  assert.match(byId.get('fork')?.reason ?? '', /判不出谁更新/)
+  assert.deepEqual(plan.pullIds, ['ahead'], '会拉取的两类：新建（这里没有）与覆盖本机')
+  assert.deepEqual(plan.blank, [], '没有投影缓存时谁都不算空白（宁可不判）')
+})
+
+test('sync：计划——两边各自写过时比最后活动时间；空白会话不上传', () => {
+  const fakeHash = (path: string, version: number): FileFingerprint => ({
+    version,
+    bytes: 1,
+    sha256: path.split('@')[0] ?? '',
+  })
+  // 本机这份：v1 与远端不同（各自写过），时间由这个表给。
+  const divergedLocal = [['a', 0], ['zzz', 1]] as Array<[string, number]>
+  const meta = new Map<string, { blank?: boolean; lastPromptAt?: number }>([
+    ['local-newer', { lastPromptAt: 5000 }],
+    ['remote-newer', { lastPromptAt: 1000 }],
+    ['tie', { lastPromptAt: 3000 }],
+    ['unknown-local', {}],
+    ['blank-local', { blank: true }],
+    ['blank-identical', { blank: true }],
+    ['blank-behind', { blank: true }],
+    ['blank-only', { blank: true }],
+  ])
+  const plan = planSync({
+    local: [
+      fakeSession('local-newer', divergedLocal),
+      fakeSession('remote-newer', divergedLocal),
+      fakeSession('tie', divergedLocal),
+      fakeSession('unknown-local', divergedLocal),
+      fakeSession('unknown-remote', divergedLocal),
+      fakeSession('blank-local', divergedLocal),
+      fakeSession('blank-identical', [['a', 0]]),
+      fakeSession('blank-behind', divergedLocal),
+      fakeSession('blank-only', [['a', 0], ['b', 1]]),
+    ],
+    remote: remoteOf([
+      { machine: 'robot-b', id: 'local-newer', cwd: '/home/b/proj', lastPromptAt: 1000, files: [fp(0, 'a'), fp(1, 'b')] },
+      { machine: 'robot-b', id: 'remote-newer', cwd: '/home/b/proj', lastPromptAt: 9000, files: [fp(0, 'a'), fp(1, 'b')] },
+      { machine: 'robot-b', id: 'tie', cwd: '/home/b/proj', lastPromptAt: 3000, files: [fp(0, 'a'), fp(1, 'b')] },
+      { machine: 'robot-b', id: 'unknown-local', cwd: '/home/b/proj', lastPromptAt: 1000, files: [fp(0, 'a'), fp(1, 'b')] },
+      // 老索引：没有 lastPromptAt 这一项
+      { machine: 'robot-b', id: 'unknown-remote', cwd: '/home/b/proj', files: [fp(0, 'a'), fp(1, 'b')] },
+      { machine: 'robot-b', id: 'blank-local', cwd: '/home/b/proj', lastPromptAt: 1000, files: [fp(0, 'a'), fp(1, 'b')] },
+      { machine: 'robot-b', id: 'blank-identical', cwd: '/home/b/proj', lastPromptAt: 1000, files: [fp(0, 'a')] },
+      { machine: 'robot-b', id: 'blank-behind', cwd: '/home/b/proj', lastPromptAt: 1000, files: [fp(0, 'a')] },
+    ]),
+    mapping: new Map(),
+    hashFile: fakeHash,
+    sessionMeta: (session) => meta.get(session.id),
+  })
+  const byId = new Map(plan.push.map((entry) => [entry.id, entry]))
+
+  // 本机更晚 → 重新推送自己这一格
+  assert.equal(byId.get('local-newer')?.action, 'update')
+  assert.equal(byId.get('local-newer')?.code, 'local-newer')
+  assert.equal(byId.get('local-newer')?.machine, 'robot-b')
+  // 远端更晚 → 覆盖本机那份（代码与"远端领先"分开，界面上的整句不同）
+  assert.equal(plan.pull.find((entry) => entry.id === 'remote-newer')?.action, 'replace')
+  assert.equal(plan.pull.find((entry) => entry.id === 'remote-newer')?.code, 'remote-newer')
+  // 一样新 / 有一边读不到 → 两条都不动
+  for (const id of ['tie', 'unknown-local', 'unknown-remote']) {
+    assert.equal(byId.get(id)?.action, 'skip', id)
+    assert.equal(byId.get(id)?.code, 'diverged', id)
+    assert.match(byId.get(id)?.reason ?? '', /判不出谁更新|两边各自写过/, id)
+  }
+  // 空白：本机没内容，远端有 → 以远端为准（走覆盖那条路，不推送）
+  assert.equal(plan.pull.find((entry) => entry.id === 'blank-local')?.action, 'replace')
+  assert.equal(plan.pull.find((entry) => entry.id === 'blank-local')?.code, 'blank-local')
+  // 空白且两边内容一样 / 本机领先 → 不上传，只进 blank（"远端已经有这一份"那种行也不给）
+  assert.equal(byId.get('blank-identical'), undefined)
+  assert.equal(byId.get('blank-behind'), undefined)
+  assert.deepEqual(plan.blank, ['blank-identical', 'blank-behind', 'blank-only'])
+  assert.deepEqual(plan.pushIds.sort(), ['local-newer'])
+  assert.deepEqual(plan.pullIds.sort(), ['blank-local', 'remote-newer'])
 })
 
 test('sync：索引解析宽容——坏 JSON / 缺 id / 没有代次都不炸整次同步', () => {
@@ -488,7 +582,7 @@ test('sync：端到端——A 推送、B 拉取，cwd 改写成 B 的路径且�
   }
 })
 
-test('sync：端到端——两边各推送各的互不覆盖；本机领先时重新推送刷新', async () => {
+test('sync：端到端——两边各推送各的；远端领先时本机那份先备份再换成它', async () => {
   rmSync(SANDBOX, { recursive: true, force: true })
   mkdirSync(SANDBOX, { recursive: true })
   const fixture = await startDavFixture({ root: join(SANDBOX, 'dav') })
@@ -529,9 +623,178 @@ test('sync：端到端——两边各推送各的互不覆盖；本机领先时�
     const refreshed = await readRemoteLibrary(dav, settings(a, { machineId: 'robot-a' }))
     assert.equal(refreshed.entries.get('a1')?.files.length, 2, '重新推送后远端记录到两代')
 
-    // B 那边已经有 a1 了（同 id）→ 第二次同步不拉取它，也不覆盖本机
+    /*
+     * B 那边已经有 a1（当初拉来的只有一代），而远端现在是两代 → **远端领先**：以远端为准，
+     * 但本机原来那份要先备份（备份是旧那份唯一的副本，落在 b.base/backups 下、kind=replace）。
+     */
     const bAgain = await syncMachine(b, dav, bConfig, { apply: false })
-    assert.deepEqual(bAgain.plan.pullIds, [])
+    const replaceEntry = bAgain.plan.pull.find((entry) => entry.id === 'a1')
+    assert.deepEqual(bAgain.plan.pullIds, ['a1'])
+    assert.equal(replaceEntry?.action, 'replace')
+    assert.equal(replaceEntry?.code, 'remote-ahead')
+    assert.equal(replaceEntry?.machine, 'robot-a')
+
+    const bApplied = await syncMachine(b, dav, bConfig, { apply: true })
+    assert.deepEqual(bApplied.pulled, ['a1'])
+    assert.deepEqual(bApplied.replaced, ['a1'], '覆盖掉的单独报出来，界面据此多说一句')
+    // 本机这份成了两代、而且与 A 那份逐代同名（内容指纹与 cwd 无关）
+    const localAfter = scanAll(b.sessionsRoot, decodeAll).find((session) => session.id === 'a1')
+    assert.deepEqual(localAfter?.files.map((file) => file.version), [4, 5])
+
+    const backupDir = join(b.base, 'backups', '2026-10-01T00-00-00-000Z')
+    const manifest = JSON.parse(readFileSync(join(backupDir, 'manifest.json'), 'utf8')) as {
+      kind?: string
+      sessions: Array<{ id: string; files: string[] }>
+    }
+    assert.equal(manifest.kind, 'replace', '这份备份是"覆盖前的那一份"，与删除/迁移分开记账')
+    assert.deepEqual(manifest.sessions.map((session) => session.id), ['a1'])
+    assert.deepEqual(manifest.sessions[0]?.files, ['session.v4.jsonl.zstd'], '备份里是换掉之前的那一代')
+    assert.ok(
+      existsSync(join(backupDir, 'sessions', projectKey(b.cwd), 'a1', 'session.v4.jsonl.zstd')),
+      '旧那份整目录都备份下来了（可回滚/恢复）',
+    )
+
+    // 换过之后两边代次一样多 → 再同步一次就没得做了（收敛，不会来回换）
+    const settled = await syncMachine(b, dav, bConfig, { apply: false })
+    assert.deepEqual(settled.plan.pullIds, [])
+    assert.deepEqual(settled.plan.pushIds, [])
+  } finally {
+    await fixture.close()
+    rmSync(SANDBOX, { recursive: true, force: true })
+  }
+})
+
+test('sync：端到端——空白会话不上传，也从自己那格索引里撤下来', async () => {
+  rmSync(SANDBOX, { recursive: true, force: true })
+  mkdirSync(SANDBOX, { recursive: true })
+  const fixture = await startDavFixture({ root: join(SANDBOX, 'dav') })
+  const dav = createDavClient({ baseUrl: fixture.url })
+  const a = makeMachine('robot-a')
+  const config = settings(a, { machineId: 'robot-a' })
+  try {
+    writeSession(a, 'real', 1000)
+    writeSession(a, 'blank', 2000)
+    // 第一次：宿主没给投影缓存（＝什么都不知道）→ 两条都推上去，这就是老版本留下的局面。
+    await syncMachine(a, dav, config, { apply: true })
+    const before = await readRemoteLibrary(dav, settings(a, { machineId: 'robot-a' }))
+    assert.deepEqual([...before.entries.keys()].sort(), ['blank', 'real'])
+
+    // 第二次：宿主说 blank 那条是空白、real 最后活动在这一刻 → 空白不上传，还要从自己那格撤下来。
+    const meta = (query: { id: string }): { blank?: boolean; lastPromptAt?: number } =>
+      query.id === 'blank' ? { blank: true } : { lastPromptAt: 1750000000000 }
+    const plan = await syncMachine(a, dav, config, { apply: false, sessionMeta: meta })
+    assert.deepEqual(plan.plan.blank, ['blank'])
+    assert.deepEqual(plan.plan.pushIds, [], 'real 完全一致、blank 是空白 → 一条都不推')
+    const applied = await syncMachine(a, dav, config, { apply: true, sessionMeta: meta })
+    assert.deepEqual(applied.pushed, [])
+    const after = await readRemoteLibrary(dav, settings(a, { machineId: 'robot-a' }))
+    assert.deepEqual([...after.entries.keys()], ['real'], '别的机器不再看得到那条空白会话')
+    assert.deepEqual(after.indexes.get('robot-a')?.entries.map((entry) => entry.id), ['real'])
+    assert.equal(after.entries.get('real')?.lastPromptAt, 1750000000000, '活动时间记进索引（别的机器靠它判谁更新）')
+    assert.ok(
+      existsSync(join(fixture.root, SYNC_NAMESPACE_DIR, 'robot-a', 'blank.dshsess')),
+      '远端那份包不主动删（只是不再被索引点名）',
+    )
+    // 那条会话后来开始了（宿主不再判它空白）→ 下一次推送照旧把它带上
+    const later = await syncMachine(a, dav, config, { apply: true })
+    assert.deepEqual(later.pushed, [{ id: 'blank', action: 'upload' }])
+  } finally {
+    await fixture.close()
+    rmSync(SANDBOX, { recursive: true, force: true })
+  }
+})
+
+test('sync：端到端——要覆盖本机那份之前先问"还在跑吗"；备份失败就一条都不动', async () => {
+  rmSync(SANDBOX, { recursive: true, force: true })
+  mkdirSync(SANDBOX, { recursive: true })
+  const fixture = await startDavFixture({ root: join(SANDBOX, 'dav') })
+  const dav = createDavClient({ baseUrl: fixture.url })
+  const a = makeMachine('robot-a')
+  const b = makeMachine('robot-b')
+  const aConfig = settings(a, { machineId: 'robot-a', mapping: { [b.cwd]: a.cwd } })
+  const bConfig = settings(b, { machineId: 'robot-b', mapping: { [a.cwd]: b.cwd } })
+  try {
+    writeSession(a, 's1', 1000)
+    await syncMachine(a, dav, aConfig, { apply: true })
+    await syncMachine(b, dav, bConfig, { apply: true })
+    addGeneration(a, 's1', 5)
+    await syncMachine(a, dav, aConfig, { apply: true })
+
+    // 这条还活在宿主内存里（运行中或已打开）→ 不覆盖它，只在推送表里留一行说明
+    const live = await syncMachine(b, dav, bConfig, {
+      apply: false,
+      liveSessionIds: () => new Set(['s1']),
+    })
+    assert.deepEqual(live.plan.pullIds, [])
+    const row = live.plan.push.find((entry) => entry.id === 's1')
+    assert.equal(row?.action, 'skip')
+    assert.equal(row?.code, 'remote-ahead')
+    assert.match(row?.reason ?? '', /还在宿主内存里/)
+
+    // 备份根指向"父路径是个文件"的位置 → 备份必失败 → 一条都不动（本机那份照旧只有一代）
+    const blocked = join(b.base, 'not-a-dir')
+    writeFileSync(blocked, 'x')
+    const failed = await syncMachine(b, dav, bConfig, { apply: true, backupRoot: join(blocked, 'backups') })
+    assert.deepEqual(failed.pulled, [])
+    assert.deepEqual(failed.replaced, [])
+    assert.match(failed.problems.join('\n'), /备份失败/)
+    const untouched = scanAll(b.sessionsRoot, decodeAll).find((session) => session.id === 's1')
+    assert.deepEqual(untouched?.files.map((file) => file.version), [4], '本机那份一个字节都没动')
+  } finally {
+    await fixture.close()
+    rmSync(SANDBOX, { recursive: true, force: true })
+  }
+})
+
+test('sync：端到端——各自写过时以更新的那份为准，两台机器最后收敛到同一份', async () => {
+  rmSync(SANDBOX, { recursive: true, force: true })
+  mkdirSync(SANDBOX, { recursive: true })
+  const fixture = await startDavFixture({ root: join(SANDBOX, 'dav') })
+  const dav = createDavClient({ baseUrl: fixture.url })
+  const a = makeMachine('robot-a')
+  const b = makeMachine('robot-b')
+  const aConfig = settings(a, { machineId: 'robot-a', mapping: { [b.cwd]: a.cwd } })
+  const bConfig = settings(b, { machineId: 'robot-b', mapping: { [a.cwd]: b.cwd } })
+  // 两台"最后活动时间"：a 那份更晚（宿主折出来的值，跨机器只能靠索引里记的那个比）
+  const aMeta = (): { lastPromptAt: number } => ({ lastPromptAt: 2000 })
+  const bMeta = (): { lastPromptAt: number } => ({ lastPromptAt: 1000 })
+  try {
+    writeSession(a, 's1', 1000)
+    await syncMachine(a, dav, aConfig, { apply: true })
+    await syncMachine(b, dav, bConfig, { apply: true })
+    // 两台各自续写一代：同名的 v5、内容不同 → 真正分叉（只有 cwd 不同会被内容指纹认成同一份）
+    addGeneration(a, 's1', 5, '{"type":"event","seq":5,"who":"a"}')
+    addGeneration(b, 's1', 5, '{"type":"event","seq":5,"who":"b"}')
+
+    // b 先把本机领先那份推上去（对它自己来说，a 那格停在 v4）
+    const bPush = await syncMachine(b, dav, bConfig, { apply: true, sessionMeta: bMeta })
+    assert.deepEqual(bPush.pushed, [{ id: 's1', action: 'update' }])
+
+    // a：远端那份（b 的 v5b）与本机（v5a）各自写过，而本机更晚 → 重推自己这一格
+    const aPlan = await syncMachine(a, dav, aConfig, { apply: false, sessionMeta: aMeta })
+    assert.equal(aPlan.plan.push.find((entry) => entry.id === 's1')?.code, 'local-newer')
+    assert.deepEqual(aPlan.plan.pullIds, [])
+    await syncMachine(a, dav, aConfig, { apply: true, sessionMeta: aMeta })
+
+    // b 再同步：两台各贡献一份、没有领先关系 → 活动时间更晚的那份赢 → 换成本机那份，旧的那份进备份
+    const bAdopt = await syncMachine(b, dav, bConfig, { apply: true, sessionMeta: bMeta })
+    assert.deepEqual(bAdopt.replaced, ['s1'])
+    const library = await readRemoteLibrary(dav, settings(a, { machineId: 'robot-a' }))
+    assert.equal(library.entries.get('s1')?.machine, 'robot-a', '联集取活动时间更晚的那份')
+    assert.deepEqual(
+      library.indexes.get('robot-b')?.entries.map((entry) => entry.id),
+      [],
+      'b 那格的旧记录撤掉了（它描述的是已经被顶掉的那份）',
+    )
+    // 收敛：b 本机那份的 v5 与 a 的 v5 内容指纹相同（判据与 cwd 无关；字节数会随 cwd 长短变，不比它）
+    const fingerprintOf = (machine: Machine): FileFingerprint =>
+      contentFingerprint(join(sessionDir(machine.sessionsRoot, machine.cwd, 's1'), 'session.v5.jsonl.zstd'), 5, 'zstd', decodeAll)
+    assert.equal(fingerprintOf(b).sha256, fingerprintOf(a).sha256, 'b 换过来的就是 a 那份内容')
+    assert.equal(fingerprintOf(b).version, 5)
+    // 再同步一次：两边都没得做（不会来回换）
+    const settled = await syncMachine(b, dav, bConfig, { apply: false, sessionMeta: bMeta })
+    assert.deepEqual(settled.plan.pullIds, [])
+    assert.deepEqual(settled.plan.pushIds, [])
   } finally {
     await fixture.close()
     rmSync(SANDBOX, { recursive: true, force: true })
@@ -858,12 +1121,27 @@ test('sync：同一个 id 有多台贡献时，联集取领先的那份（不是
   const fixture = await startDavFixture({ root: join(SANDBOX, 'dav') })
   const dav = createDavClient({ baseUrl: fixture.url })
   try {
-    const shortIndex = { unit: 'dsh-session-manager/sync', version: 1, machineId: 'robot-a', entries: [{ id: 's1', cwd: '/x', createdAt: 1, files: [shared] }] }
+    // s2 是两边**各自写过**（v5 的哈希不同，也没有领先关系）：这时格子名说了不算，活动时间更晚的赢。
+    // 刻意让格子名排在前面的 robot-a 是旧的那份——按格子名取第一个的老口径会取到它。
+    const forkA = fp(5, 'aaaa')
+    const forkB = fp(5, 'bbbb')
+    const shortIndex = {
+      unit: 'dsh-session-manager/sync',
+      version: 2,
+      machineId: 'robot-a',
+      entries: [
+        { id: 's1', cwd: '/x', createdAt: 1, files: [shared], lastPromptAt: 100 },
+        { id: 's2', cwd: '/x', createdAt: 1, files: [shared, forkA], lastPromptAt: 100 },
+      ],
+    }
     const longIndex = {
       unit: 'dsh-session-manager/sync',
-      version: 1,
+      version: 2,
       machineId: 'robot-b',
-      entries: [{ id: 's1', cwd: '/x', createdAt: 1, files: [shared, longer] }],
+      entries: [
+        { id: 's1', cwd: '/x', createdAt: 1, files: [shared, longer], lastPromptAt: 100 },
+        { id: 's2', cwd: '/x', createdAt: 1, files: [shared, forkB], lastPromptAt: 900 },
+      ],
     }
     for (const [machine, payload] of [
       ['robot-a', shortIndex],
@@ -878,6 +1156,25 @@ test('sync：同一个 id 有多台贡献时，联集取领先的那份（不是
     const library = await readRemoteLibrary(dav, settings(makeMachine('robot-c'), { machineId: 'robot-c' }))
     assert.equal(library.entries.get('s1')?.machine, 'robot-b', '领先的那份（v5 在这台机器上）')
     assert.equal(library.entries.get('s1')?.files.length, 2)
+    assert.equal(library.entries.get('s2')?.machine, 'robot-b', '各自写过时按活动时间取更晚的那份')
+    assert.equal(library.entries.get('s2')?.files[1]?.sha256, 'bbbb')
+    // 老索引（没有活动时间）里各自写过的两份仍然按格子名排序取第一个：结果要确定
+    writeFileSync(
+      join(fixture.root, `${SYNC_NAMESPACE_DIR}/robot-a/${SYNC_INDEX_FILE}`),
+      JSON.stringify({
+        ...shortIndex,
+        entries: [{ id: 's2', cwd: '/x', createdAt: 1, files: [shared, forkA] }],
+      }),
+    )
+    writeFileSync(
+      join(fixture.root, `${SYNC_NAMESPACE_DIR}/robot-b/${SYNC_INDEX_FILE}`),
+      JSON.stringify({
+        ...longIndex,
+        entries: [{ id: 's2', cwd: '/x', createdAt: 1, files: [shared, forkB] }],
+      }),
+    )
+    const legacy = await readRemoteLibrary(dav, settings(makeMachine('robot-d'), { machineId: 'robot-d' }))
+    assert.equal(legacy.entries.get('s2')?.machine, 'robot-a', '读不到时间就退回旧口径（结果是确定的）')
   } finally {
     await fixture.close()
     rmSync(SANDBOX, { recursive: true, force: true })

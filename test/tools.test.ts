@@ -13,6 +13,7 @@ import { Context } from '@deepseek-ai/cordis'
 import { decompress } from 'fzstd'
 
 import { createDavClient } from '../src/dav.ts'
+import { projectionCacheDir } from '../src/paths.ts'
 import { projectKey } from '../src/project-key.ts'
 import { readRegistry } from '../src/registry.ts'
 import { remoteBundlePath, remoteIndexPath } from '../src/sync.ts'
@@ -413,6 +414,53 @@ test('sync_sessions：没配 sync.url 时如实说"没配置"（不发任何请�
   assert.equal(result.applied, false)
   assert.match(result.problems.join('\n'), /没有配置 WebDAV 同步/)
   rmSync(sb.base, { recursive: true, force: true })
+})
+
+test('sync_sessions：空白会话不上传（工具侧也读宿主投影缓存），并在 notes 里报一句', async () => {
+  // 工具与界面两条路各建一份编排，但"宿主说这条空不空白"必须是同一个来源（注册表旁边的投影缓存）。
+  // 这条钉住工具侧真的接上了那个来源：接错了的表现是空白会话被推上去。
+  const sb = makeSandbox('tools-sync-blank')
+  const fixture = await startDavFixture({ root: join(sb.base, 'dav') })
+  try {
+    const logPath = join(sb.root, sb.projectDirName, 'session-a', 'session.v4.jsonl.zstd')
+    const header = JSON.parse(decodeAll(readFileSync(logPath)).split('\n')[0] ?? '{}') as {
+      id: string
+      createdAt: number
+      cwd: string
+    }
+    const cacheDir = projectionCacheDir(sb.registryPath)
+    mkdirSync(cacheDir, { recursive: true })
+    writeFileSync(
+      join(cacheDir, 'session-a.json'),
+      JSON.stringify({
+        version: 7,
+        record: {
+          identity: { formatVersion: 4, createdAt: header.createdAt, cwd: header.cwd },
+          rows: { sessionListMetadata: { ver: 1, seq: 1, val: { blank: true, lastPromptAt: null } } },
+        },
+      }),
+    )
+    const config: PluginConfig = {
+      sessionsRoot: sb.root,
+      registryPath: sb.registryPath,
+      backupRoot: sb.backupRoot,
+      sync: { url: fixture.url, machineId: 'robot-a', mapping: {} },
+    }
+    const { defs } = await makeHost(config)
+    const applied = (await run(byName(defs).get('sync_sessions')!, { apply: true })) as SyncToolResult
+    assert.equal(applied.ok, true)
+    assert.deepEqual(applied.pushed.sort(), ['session-b', 'session-child'], '空白那条不上传')
+    assert.deepEqual(applied.notes, ['跳过 1 条空白会话（建出来但一轮都没开始过）：session-a'])
+    // 自己那格索引里也不该有它（别的机器因此看不到这条空白会话）。
+    const index = JSON.parse(readFileSync(join(fixture.root, remoteIndexPath('robot-a')), 'utf8')) as {
+      entries: Array<{ id: string }>
+    }
+    assert.deepEqual(index.entries.map((entry) => entry.id).sort(), ['session-b', 'session-child'])
+    assert.equal(existsSync(join(fixture.root, remoteBundlePath('robot-a', 'session-a'))), false)
+  } finally {
+    await fixture.close()
+    rmSync(sb.base, { recursive: true, force: true })
+  }
 })
 
 test('sync_sessions：预演只读、apply 才落地；远端那条按映射改写成目标路径', async () => {

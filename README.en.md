@@ -286,17 +286,25 @@ denominator is the number of items that leg will really do (skipped ones are not
 pushing each get their own pass.
 The rules and edges:
 
-- **Add-only**: a session id that already exists locally is never pulled, and a remote copy that is newer
-  than yours is left alone too — the report says whether it is "remote is ahead" or "both sides wrote". The
-  judgement is a generation fingerprint **independent of the cwd**: landing always rewrites the other
-  machine's cwd (library directory names are bound to the header `cwd`), and comparing raw bytes would call
-  a pulled copy "both sides wrote" — pushing a continuation of it back would then never happen;
+- **When both sides hold the same id, contents and the last-activity time decide who is newer**: identical
+  contents (apart from the cwd) stay put; a local copy that really is a prefix of the remote one is
+  re-uploaded to refresh the remote; a remote copy that is ahead (yours is its prefix) or a both-wrote case
+  where the remote is later **backs your copy up and then replaces it** (the old one can always be restored
+  from the backup list on the Migrate tab); if either side has no last-activity time (an older remote index,
+  or a host without the projection cache) or both are equally new, neither copy is touched and the report
+  says whether it is "remote is ahead" or "both sides wrote". That last-activity time is folded by the host
+  out of the log itself, so copying and cwd rewriting do not change it. The judgement is a generation
+  fingerprint **independent of the cwd**: landing always rewrites the other machine's cwd (library directory
+  names are bound to the header `cwd`), and comparing raw bytes would call a pulled copy "both sides wrote" —
+  pushing a continuation of it back would then never happen;
 - **A strictly-ahead local copy is re-uploaded**: the versions both sides share match apart from the cwd, so
   the remote copy really is a prefix of yours and refreshing it loses nothing; when more than one machine
   contributed the same id, the pulling side takes the **ahead** copy rather than the one whose slot name
   sorts first;
-- **Two machines that each continued the same session never merge**: to keep chatting on both, agree that a
-  session is continued on one machine only;
+- **Blank sessions take no part**: one that was created but never started is not pushed (the dialog reports
+  "skipping N blank sessions"), and the next push drops it from this machine's own index too — so other
+  machines stop seeing it; when the local copy is blank and the remote one has content, the remote wins
+  (there is nothing in an empty copy worth protecting);
 - A session you delete disappears from your own index on the next push (the remote bundle is not deleted),
   and copies other machines already took are unaffected;
 - A session without a `cwd` gets no invented path (it lands under `_no-cwd`, same as import); a `cwd` with no
@@ -314,7 +322,7 @@ Sync also goes through a plan: the `sync_sessions` tool previews by default and 
 | `migrate_sessions` | needs `apply:true` | Dry-run by default; performs a byte-level backup and self-verifies after |
 | `rollback_session_migration` | yes | Byte-exact rollback from a backup directory |
 | `verify_workspace_sessions` | no | Check that a project directory agrees with its headers |
-| `sync_sessions` | needs `apply:true` | Sync with the WebDAV remote (pull what other machines pushed, push what only this machine has); dry-run by default |
+| `sync_sessions` | needs `apply:true` | Sync with the WebDAV remote (pull what other machines pushed, push what only this machine has; when both sides hold the same id, contents and the last-activity time pick the newer copy); dry-run by default |
 
 ## Things to know
 
@@ -329,8 +337,9 @@ Sync also goes through a plan: the `sync_sessions` tool previews by default and 
   ask for them).
 - **Paths**: neither session `cwd` values nor registry paths carry a trailing slash; `projectKey` folds `/`,
   `\` and `:` into `-`, so a few paths collide in that encoding — the plan layer blocks those up front.
-- **Sync only adds**: a remote copy that is ahead of yours is never pulled, and two machines that each
-  continued the same session never merge (see the Sync section).
+- **Sync picks the newer copy**: when the remote one is newer (or both sides wrote and it is later), your
+  copy is **backed up first and then replaced**; if either side has no last-activity time, neither is touched
+  (see the edges in the Sync section).
 - **Plugin config**: the optional `sessionsRoot` / `registryPath` / `backupRoot` fields override the default
   paths above; a `sync` block configures WebDAV sync (`url` / `machineId` / `username` / `passwordRef` /
   `mapping` / `timeoutMs`). A password is only ever a **reference** (an environment-variable name), never
@@ -341,7 +350,8 @@ Sync also goes through a plan: the `sync_sessions` tool previews by default and 
 
 - [.agents/notes/](.agents/notes/AGENTS.md) — the reasoning behind each decision and what was rejected
   (Chinese): the silent data loss of multi-frame zstd, the startup invariants, the lossy-encoding
-  collision, the `.dshsess` container trade-offs, the effect mode, why sync only adds, and the UI decisions
+  collision, the `.dshsess` container trade-offs, the effect mode, how sync decides which copy is newer and
+  why blank sessions are not moved, and the UI decisions
 - [docs/internals.md](docs/internals.md) — a decision map indexing the notes above by topic
 - [docs/development.md](docs/development.md) — local workflow: deps, build, tests, a dev instance
 - [docs/releasing.md](docs/releasing.md) — release process

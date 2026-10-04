@@ -1947,6 +1947,116 @@ test('客户端产物：同步预演三张表的状态列只放短标签，整�
   )
 })
 
+test('客户端产物：会拉取那张表分得清「拉一条新的」与「覆盖本机那份」；空白会话只在正文里报一句', { skip }, () => {
+  /*
+   * 两条新口径都要在界面上看得出来：
+   *   - 「会拉取」里现在混着两种事：从无到有拉一条（本机没有它）与**覆盖本机那份**（本机有，但它更
+   *     新）。两者都往本机落内容，但后者会把本机已有的东西换掉，所以标签得分开，整句挂在 title 上；
+   *   - 空白会话没有内容可同步，逐条列出来只是把三张表撑长：只在正文里报一句条数。
+   * 顺带钉住"旧宿主回的响应里没有 blank 这个字段"也不许把渲染弄崩。
+   */
+  const state = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    sync: { url: 'https://dav.example.com/dsh', machineId: 'robot-a', mappings: 0 },
+    sessions: [],
+    workspaces: [{ id: 'w1', path: '/home/u/dev/x', title: '测试项目', sessionIds: [] }],
+  }
+  const response = {
+    mode: 'plan',
+    remote: { url: 'https://dav.example.com/dsh', machineId: 'robot-a' },
+    plan: {
+      ok: true,
+      problems: [],
+      pull: [
+        {
+          id: 'session-new',
+          machine: 'robot-b',
+          bytes: 100,
+          action: 'create',
+          code: 'missing',
+          fromCwd: '/home/b/dev/x',
+          toCwd: '/home/u/dev/x',
+        },
+        {
+          id: 'session-replace',
+          machine: 'robot-b',
+          bytes: 200,
+          action: 'replace',
+          code: 'remote-newer',
+          fromCwd: '/home/b/dev/x',
+          toCwd: '/home/u/dev/x',
+        },
+      ],
+      push: [
+        { id: 'session-forked', bytes: 300, action: 'update', code: 'local-newer', machine: 'robot-b', cwd: '/home/u/dev/x' },
+      ],
+      blank: ['session-blank-1', 'session-blank-2'],
+      pullIds: ['session-new', 'session-replace'],
+      pushIds: ['session-forked'],
+      bytesIn: 300,
+      bytesOut: 300,
+      localCount: 5,
+      remoteCount: 3,
+      machines: ['robot-b'],
+    },
+    applied: false,
+    pulled: [],
+    pushed: [],
+    bytesIn: 0,
+    bytesOut: 0,
+    registryWritten: false,
+    indexWritten: false,
+    problems: [],
+    takesEffect: 'immediate',
+  }
+  const mounted = mount({ state, panel: 'sync', nulls: [null, response, 'plan'] })
+  const text = strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
+  const tagOf = (visible, title) =>
+    mounted.recorded.find((node) => node.props?.children === visible && node.props?.title === title)
+
+  assert.ok(tagOf('syncTagPull', 'syncCodeMissingPull'), '从无到有那条照旧是「拉取」')
+  // 覆盖本机那份：标签说的是动作，title 说清"谁更新、会拿谁换掉本机这份"。
+  assert.ok(tagOf('syncTagReplace', 'syncCodeReplaceNewer'), '覆盖那条挂「覆盖本机」+ 它自己那句整句')
+  assert.ok(tagOf('syncTagLocalNewer', 'syncCodeLocalNewer'), '分叉里本机更晚那条是「分叉·重推」')
+  assert.equal(
+    mounted.recorded.some(
+      (node) => node.props?.children === 'syncTagReplace' && node.props?.title === 'syncCodeReplaceAhead',
+    ),
+    false,
+    '两条覆盖行的整句按各自的码走（这里这条说的是"两边各自写过"）',
+  )
+  assert.ok(text.includes('session-replace'), '覆盖那条也在「会拉取」那张表里（它同样是往本机落内容）')
+  assert.ok(text.includes('syncPullHead:{"count":2}'), '那张表的条数把覆盖那条算进去')
+  assert.ok(text.includes('syncPushHead:{"count":1}'), '覆盖不是推送：推表只有分叉重推那一条')
+
+  // 空白会话：只在正文里报一句，id 一个都不许冒出来（那三张表里也不许有它们）。
+  const blankLine = mounted.recorded.find(
+    (node) => node.type === 'p' && node.props?.children === 'syncSkippedBlank:{"count":2}',
+  )
+  assert.ok(blankLine !== undefined, '正文里那句"跳过 N 条空白会话"在')
+  assert.equal(
+    text.some((item) => String(item).includes('session-blank')),
+    false,
+    '空白会话逐条列出来只会把表撑长',
+  )
+
+  // 旧宿主（响应里没有 blank 这个字段）也要能画：缺字段按"一条都没有"处理，不是当场崩。
+  const legacy = mount({
+    state,
+    panel: 'sync',
+    nulls: [null, { ...response, plan: { ...response.plan, blank: undefined } }, 'plan'],
+  })
+  const legacyText = strings(legacy.registrations[0].component(legacy.registrations[0].registration.inject()))
+  assert.equal(
+    legacyText.some((item) => String(item).startsWith('syncSkippedBlank')),
+    false,
+    '没有 blank 字段就不画那一句',
+  )
+  assert.ok(legacyText.includes('syncPullHead:{"count":2}'), '其余照旧画出来')
+})
+
 test('客户端产物：同步预演三张表按项目分组，路径只在组头上说一次', { skip }, () => {
   // 为什么分组：一次整库同步的计划里同一个目录会连着出现十几条，逐行印一遍同样的路径只是把人绕进去，
   // 还从会话名那一列扣宽度。分组键的规则在 src/client/logic/syncGroups.ts（test/syncGroups.test.ts 逐条钉
@@ -2353,6 +2463,86 @@ test('客户端产物：回滚弹窗先摆动作清单再确认（清单就是�
     strings(cancelOf(item.recorded)).concat(strings(primaryOf(item.recorded))),
     ['cancel', 'rollbackConfirm'],
     '底部是「取消 / 确认回滚」',
+  )
+})
+
+test('客户端产物：备份清单认三种来源——迁移/删除/覆盖前，后两种点「恢复」', { skip }, () => {
+  // 同步把本机那份换掉之前也要备份（`kind: 'replace'`）。它与删除留下的那份**行为一样**（搬回目录、
+  // 注册表照旧），但与迁移那份不同（迁移要连注册表一起还原）。清单里那颗标签与那个动作按钮都要跟着走，
+  // 不然用户面对一份"同步覆盖前"的备份会以为按下去会把工作区登记也一起改回去。
+  const backupOf = (kind, stamp) => ({
+    dir: `/home/u/.dsh/dsh-session-manager-backups/${stamp}`,
+    createdAt: `${stamp.slice(0, 10)}T08:00:00.000Z`,
+    sessions: 1,
+    artifacts: 0,
+    kind,
+  })
+  const backups = [
+    { ...backupOf('migrate', '2026-10-03T08-00-00'), from: '/home/u/dev/alpha', to: '/home/u/dev/beta' },
+    backupOf('delete', '2026-10-04T08-00-00'),
+    backupOf('replace', '2026-10-05T08-00-00'),
+  ]
+  const state = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    sessions: [],
+    workspaces: [],
+  }
+  const mounted = mount({ state, panel: 'migrate', arrays: [[], backups] })
+  const text = strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
+  assert.ok(text.includes('backupKindMigrate'), '迁移那份的标签照旧')
+  assert.ok(text.includes('backupKindDelete'), '删除那份的标签照旧')
+  assert.ok(text.includes('backupKindReplace'), '同步覆盖前那份要有自己的标签')
+  const buttonLabels = mounted.recorded
+    .filter((node) => node.type === 'button')
+    .map((node) => node.props?.children)
+  assert.equal(
+    buttonLabels.filter((label) => label === 'restoreAction').length,
+    2,
+    '删除与覆盖前那两份都点「恢复」（只搬目录）',
+  )
+  assert.equal(
+    buttonLabels.filter((label) => label === 'rollbackAction').length,
+    1,
+    '只有迁移那份点「回滚」（连注册表一起还原）',
+  )
+
+  // 弹窗里的措辞也跟着来源走：覆盖前那份开的是「恢复」那一套文案。
+  const replacing = mount({
+    state,
+    panel: 'migrate',
+    arrays: [[], backups],
+    nulls: [
+      null, null, null, null, null, null, null, null, null, null,
+      {
+        backup: backups[2],
+        plan: {
+          mode: 'plan',
+          dryRun: true,
+          actions: ['把 s-1 搬回 /home/u/dev/x'],
+          restoredFiles: 0,
+          restoredArtifacts: 0,
+          registryRestored: false,
+          backupDir: backups[2].dir,
+          createdAt: backups[2].createdAt,
+          sessions: 1,
+          artifacts: 0,
+          takesEffect: 'immediate',
+        },
+        error: null,
+      },
+    ],
+  })
+  // 先把树走一遍（`recorded` 只有走过才填上），再找那个弹窗。
+  strings(replacing.registrations[0].component(replacing.registrations[0].registration.inject()))
+  const dialogs = replacing.recorded.filter((node) => node.props?.role === 'dialog')
+  assert.equal(dialogs.length, 1)
+  assert.equal(dialogs[0].props['aria-label'], 'restoreDialogTitle', '覆盖前那份开的是「恢复」弹窗')
+  assert.deepEqual(
+    strings(cancelOf(replacing.recorded)).concat(strings(primaryOf(replacing.recorded))),
+    ['cancel', 'restoreConfirm'],
+    '底部是「取消 / 确认恢复」',
   )
 })
 

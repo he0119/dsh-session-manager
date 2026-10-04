@@ -16,22 +16,35 @@
 // 为什么一机一格：WebDAV 没有锁，多台机器共写一份 `index.json` 就是"后写的盖掉先写的"。每台机器
 // 只写自己那一格、读别人的全部，就不需要锁。
 //
-// 冲突口径与 `transfer.ts` 一致：**只增不覆盖**。库里已有同 id 的会话就不拉取；远端那份比自己新的
-// 也照样不动，只在报告里说清楚（见 `relation()` 的四种关系）。反过来，如果本机严格领先于远端，
-// 就把包重新推送一次——此时两边共有的代次逐条一致，远端那份确实是本地这份的前缀，覆盖不会丢数据。
+// 冲突口径：**空白不搬运，两边都有按"谁更新"择新**。
+//
+//   - 空白会话（宿主投影缓存判 `blank`，与迁移页同一条口径：建出来但一轮都没开始过）本机不会上传，
+//     也会从这台机器自己的那份索引里撤下来——它没有内容可同步，别的机器也就不必再看到它；反过来，
+//     本机这条是空白而远端那条有内容时，以远端为准（空的没什么可保的）。
+//   - 同一 id 两边都有：内容一致不动；本机严格领先（远端确实是本机这份的前缀）重新推送刷新；
+//     **远端领先**（代次是超集）或**两边各自写过**时，比一个"谁更新"——本机那份的最后活动时间取宿主
+//     投影缓存的 `lastPromptAt`，远端那份取索引里记的同一个值。远端更新就把本机那份**先备份再换掉**
+//     （走导入那条编排，理由见下面 pull 的说明）；本机更新就把自己这一格刷成最新。两边的时间有一个
+//     读不到（老索引没这个字段、宿主没挂投影缓存）就退回旧口径：不动，只在报告里说清。
+//
+// 为什么"谁更新"用的是宿主折出来的活动时间而不是文件修改时间：文件的 mtime 经不起复制（下载、
+// 解包、备份还原都会把它抹平），而 `lastPromptAt` 与日志内容同生共死，落地改写 cwd 时也不受影响。
+// 判据仍然**不**拿时间反推"谁是祖先"：代次那边的四种关系是结构性的，时间只在结构判不出来时分高下。
 import { createHash } from 'node:crypto'
-import { readFileSync, statSync } from 'node:fs'
+import { readFileSync, rmSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
 import type { DavPort } from './dav.ts'
 import { scanAll, type DiscoveredSession } from './discovery.ts'
+import { createBackup } from './journal.ts'
 import { encodeSegment } from './paths.ts'
 import { createGitRunner, repoLocation, type GitRunner, type RepoLocation } from './repo.ts'
 import { readRegistry, validateRegistry } from './registry.ts'
 import { relocateHeaderCwdShallow, relocateHeaderCwdText } from './session-log.ts'
 import type { TitleQuery } from './session-title.ts'
-import { applyImport, buildBundle, planImport, readBundle, type ExportSource, type ImportOptions } from './transfer.ts'
+import { applyImport, buildBundle, planImport, readBundle, type ExportSource, type ImportOptions, type SessionBundle } from './transfer.ts'
 import type { DecodeAll, WorkspaceRegistryState } from './types.ts'
+import type { SessionMeta } from './visibility.ts'
 
 /** 远端本插件独占的那层目录（相对资源根），机器格就放在它下面：`url` 可以填服务器/账号根。 */
 export const SYNC_NAMESPACE_DIR = 'dsh-session-manager'
@@ -41,8 +54,13 @@ export const SYNC_INDEX_FILE = 'index.json'
 export const SYNC_BUNDLE_EXT = '.dshsess'
 /** 索引里的自描述标识（别的工具写进来的 index.json 不该被当成自己人）。 */
 export const SYNC_INDEX_UNIT = 'dsh-session-manager/sync'
-/** 当前索引格式版本。 */
-export const SYNC_INDEX_VERSION = 1
+/**
+ * 当前索引格式版本。
+ *
+ * 2 起每条记录多一个可选的 `lastPromptAt`（跨机器比"谁更新"用的活动时间）。读的一侧两种都收：
+ * 缺这个字段的老索引照旧能用，只是那几条判不出谁更新（退回"不动"）。
+ */
+export const SYNC_INDEX_VERSION = 2
 
 /** 解析后的同步设置（配置里的原始形态见 tools.ts 的 `SyncConfig`）。 */
 export interface SyncSettings {
@@ -75,6 +93,12 @@ export interface RemoteSessionEntry {
   repoPath?: string
   createdAt: number
   files: FileFingerprint[]
+  /**
+   * 这台机器上这条会话的最后活动时间（毫秒时间戳，宿主投影缓存里的 `lastPromptAt`）。
+   *
+   * 跨机器比"谁更新"用的就是它；读不到（老索引、宿主没挂投影缓存）就没有这一项，那几条判不出高下。
+   */
+  lastPromptAt?: number
   /** 贡献这条记录的机器 id（拉取时要知道去哪个格子取）。 */
   machine: string
 }
@@ -264,6 +288,27 @@ function versionsText(files: readonly FileFingerprint[]): string {
   return first === last ? `v${first}` : `v${first}–v${last}`
 }
 
+/** 两边各自写过时，谁更新的结论。 */
+export type NewerSide = 'local' | 'remote' | 'unknown'
+
+/**
+ * 比"谁更新"：本机那份的活动时间与远端索引里记的那个。
+ *
+ * 两边都拿得到才下结论，缺一个就是 `unknown`——**不下手**好过按半个事实覆盖掉一份；两边一样新也
+ * 归 `unknown`（同一次活动各写各的，随手挑一个赢家会凭空丢掉另一份）。这几种都退回旧口径：报告里
+ * 说清是"远端更新"还是"两边各自写过"，但一个字节都不动。
+ *
+ * @param mine 本机那份的最后活动时间（宿主投影缓存；缺席 = 不知道）。
+ * @param theirs 远端索引里记的最后活动时间（老索引没有这一项）。
+ * @returns 谁更新，或判不出来。
+ */
+export function newerSide(mine: number | undefined, theirs: number | undefined): NewerSide {
+  if (mine === undefined || theirs === undefined) return 'unknown'
+  if (mine > theirs) return 'local'
+  if (theirs > mine) return 'remote'
+  return 'unknown'
+}
+
 /** 拉取方向的一条。 */
 export interface SyncPullEntry {
   id: string
@@ -276,9 +321,13 @@ export interface SyncPullEntry {
   machine: string
   /** 包里这些日志的字节数（用于报告）。 */
   bytes: number
-  action: 'create' | 'skip'
+  /**
+   * `create` = 本机本来没有这条；`replace` = 本机那份被这一份顶掉（旧的那份先备份）；
+   * `skip` = 不拉（缺映射、目标不存在）。
+   */
+  action: 'create' | 'replace' | 'skip'
   /** 机器可读的分类（界面按它挑文案与过滤，不去解析 `reason`）。 */
-  code: 'missing' | 'no-mapping' | 'missing-target'
+  code: 'missing' | 'remote-ahead' | 'remote-newer' | 'blank-local' | 'no-mapping' | 'missing-target'
   reason?: string
 }
 
@@ -291,7 +340,7 @@ export interface SyncPushEntry {
   bytes: number
   action: 'upload' | 'update' | 'skip'
   /** 机器可读的分类（界面按它挑文案与过滤，不去解析 `reason`）。 */
-  code: 'missing' | 'local-ahead' | 'identical' | 'remote-ahead' | 'diverged'
+  code: 'missing' | 'local-ahead' | 'local-newer' | 'identical' | 'remote-ahead' | 'diverged'
   /** 远端那一份由哪台机器贡献（"远端领先 / 两边各自写过"要指名道姓）。 */
   machine?: string
   reason?: string
@@ -308,6 +357,8 @@ export interface SyncPlan {
   pullIds: string[]
   /** 会被推送的会话 id（`upload` 与 `update` 都在里面）。 */
   pushIds: string[]
+  /** 本机判为空白、这次不参与同步的会话 id（按发现顺序；它们不在上面两张表里）。 */
+  blank: string[]
   bytesIn: number
   bytesOut: number
   localCount: number
@@ -333,6 +384,20 @@ export interface SyncPlanInput {
   hashFile?: (path: string, version: number, compression: string | null) => FileFingerprint
   /** 目标目录是不是真的存在（映射对不上真实目录就不落地）。 */
   isDirectory?: (path: string) => boolean
+  /**
+   * 读这条本机会话的空白与最后活动时间（宿主投影缓存；见 visibility.ts 的 `SessionMeta`）。
+   *
+   * 缺席 = 两件事都不知道：空白按"非空白"处理（宁可不判，也不把用户看得见的会话悄悄踢出同步），
+   * 活动时间按"比不出来"处理（退回"不动"）。这与迁移页那边 `resolveBlank` 缺席时的口径一致。
+   */
+  sessionMeta?: (session: DiscoveredSession) => SessionMeta | undefined
+  /**
+   * 这条会话是不是还在宿主内存里（在跑 / 已打开）。
+   *
+   * 只有"覆盖本机那份"这一步要问它：宿主手里有内存副本与写句柄，日志被换掉之后它还会接着往里写
+   * （与删除拒掉活会话同一件事）。缺席 = 判断不了，按"都不活着"处理。
+   */
+  isLive?: (id: string) => boolean
 }
 
 /**
@@ -354,17 +419,30 @@ function defaultIsDirectory(path: string): boolean {
   }
 }
 
+/** 活动时间的可读形式（报告里用；读不到就说读不到，别显示成 1970）。 */
+function timeText(value: number | undefined): string {
+  return value === undefined ? '没记活动时间' : new Date(value).toISOString()
+}
+
 /**
  * 算一次同步的计划：哪几条拉取、哪几条推送、哪些不动和为什么。
  *
  * 判定顺序：
  *   1. 远端有、本机没有 → 拉取（`cwd` 要能映射到本机一个真实存在的目录；没有 `cwd` 的会话不需要映射）；
- *   2. 本机有 → 远端没有就推送；两边都有就**一律不拉取**（只增不覆盖）：
+ *   2. 本机有 → 远端没有就推送；两边都有按关系定：
  *      - 内容一致 → 不动；
  *      - 本机严格领先（共有的代次逐条一致）→ 重新推送一次，把远端刷新到最新；
- *      - 远端领先 / 两边各自写过 → 不动，理由里写清是哪一种。
+ *      - 远端领先（本机这份确实是它的前缀）、或两边各自写过而**远端更新的**→ 覆盖本机那份（先备份）；
+ *      - 两边各自写过而**本机更新的**→ 重新推送一次，把自己这一格刷成最新；
+ *      - 判不出谁更新 → 不动，理由里写清是"远端更新"还是"两边各自写过"、以及为什么比不出来；
+ *   3. 本机这条是空白会话（宿主投影缓存判 `blank`）→ **不上传**，也不算"远端已经有这一份"；它没有
+ *      内容可传，所以只进 `plan.blank`（界面拿它说一句"跳过 N 条空白会话"）。唯一的例外是远端那条
+ *      有内容：空的没什么可保的，那时以远端为准（走上面"覆盖本机那份"那条路）。
  *
- * @param input 本机库、远端索引、映射表与两个可注入的判据。
+ * 判据是代次指纹（**与 cwd 无关**，见 `contentFingerprint`）加一个"谁更新"的活动时间。两个都不知道
+ * 的组合一律不动：宁可少做，也不按半个事实覆盖掉一份。
+ *
+ * @param input 本机库、远端索引、映射表与几个可注入的判据。
  * @returns 计划；`problems` 非空时 `ok` 为 false。
  */
 export function planSync(input: SyncPlanInput): SyncPlan {
@@ -376,6 +454,7 @@ export function planSync(input: SyncPlanInput): SyncPlan {
   const push: SyncPushEntry[] = []
   const pullIds: string[] = []
   const pushIds: string[] = []
+  const blank: string[] = []
   let bytesIn = 0
   let bytesOut = 0
 
@@ -423,9 +502,11 @@ export function planSync(input: SyncPlanInput): SyncPlan {
     bytesIn += bytes
   }
 
-  // 本机这侧的：远端没有就推送，两边都有就（按关系）决定推送还是不推送、以及为什么不动。
+  // 本机这侧的：远端没有就推送，两边都有就（按关系 + 谁更新）决定推送、覆盖本机那份、还是不动。
   for (const session of input.local) {
     const remote = input.remote.entries.get(session.id)
+    const meta = input.sessionMeta?.(session)
+    const isBlank = meta?.blank === true
     const bytes = session.files.reduce((sum, file) => sum + file.bytes, 0)
     const common = {
       id: session.id,
@@ -434,6 +515,11 @@ export function planSync(input: SyncPlanInput): SyncPlan {
       bytes,
     }
     if (remote === undefined) {
+      if (isBlank) {
+        // 空白会话没有内容可传：不推、也不进自己那份索引（见 runSync 里的索引重写）。
+        blank.push(session.id)
+        continue
+      }
       push.push({ ...common, action: 'upload', code: 'missing' })
       pushIds.push(session.id)
       bytesOut += bytes
@@ -442,7 +528,18 @@ export function planSync(input: SyncPlanInput): SyncPlan {
     const mine = fingerprints(session, hashFile)
     const theirs = remote.files
     const kind = relation(mine, theirs)
+    if (kind === 'identical') {
+      // 空白会话不摆成"远端已经有这一份"：它没内容，这一行只会让人以为它参与了同步。
+      if (isBlank) blank.push(session.id)
+      else push.push({ ...common, action: 'skip', code: 'identical', machine: remote.machine, reason: '远端已经有这一份' })
+      continue
+    }
     if (kind === 'local-ahead') {
+      if (isBlank) {
+        // 空白会话永远不上传：远端那份是它的后缀也一样，没有内容值得刷新。
+        blank.push(session.id)
+        continue
+      }
       // 共有的代次逐条一致，远端确实是本机这份的前缀：重新推送不会盖掉它缺的那些代次。
       push.push({
         ...common,
@@ -454,19 +551,104 @@ export function planSync(input: SyncPlanInput): SyncPlan {
       bytesOut += bytes
       continue
     }
-    if (kind === 'identical') {
-      push.push({ ...common, action: 'skip', code: 'identical', machine: remote.machine, reason: '远端已经有这一份' })
+    /*
+     * 到这里只剩「远端领先」与「两边各自写过」：两者都可能要**覆盖本机那份**。
+     *
+     * 远端领先是结构性的（本机这份确实是它的前缀），不需要时间就知道它更新；两边各自写过才要时间
+     * 分高下，而空白那份不用比分——它没有内容可保。
+     */
+    const side = kind === 'remote-ahead' || isBlank ? 'remote' : newerSide(meta?.lastPromptAt, remote.lastPromptAt)
+    if (side === 'local') {
+      push.push({
+        ...common,
+        action: 'update',
+        code: 'local-newer',
+        machine: remote.machine,
+        reason:
+          `同一个 id 两边各自写过（本机 ${versionsText(mine)}，${remote.machine} ${versionsText(theirs)}），` +
+          `本机这份更新（${timeText(meta?.lastPromptAt)} 对 ${timeText(remote.lastPromptAt)}）——重新推送把自己这一格刷成最新`,
+      })
+      pushIds.push(session.id)
+      bytesOut += bytes
       continue
     }
+    if (side === 'remote') {
+      if (input.isLive?.(session.id) === true) {
+        // 覆盖要动本机那份文件，而宿主手里还有它的内存副本与写句柄（与删除拒掉活会话同一件事）。
+        push.push({
+          ...common,
+          action: 'skip',
+          code: kind,
+          machine: remote.machine,
+          reason: `${remote.machine} 那份更新，但本机这条还在宿主内存里（运行中或已打开）——先关掉它再同步`,
+        })
+        continue
+      }
+      /*
+       * 落地目录：**本机这条自己的 cwd 优先**。这条会话在本机已经有家（还有工作区登记），不该因为
+       * 远端记着另一条路径就把它搬走；本机这条没有 cwd 时才按"显式映射 → 仓库身份"认，与新建拉取
+       * 同一条路。
+       */
+      let target = session.cwd
+      if (target === undefined) {
+        const viaRepo = remote.repo === undefined ? undefined : input.repos?.get(remote.repo)
+        target =
+          remote.cwd === undefined
+            ? undefined
+            : input.mapping.get(remote.cwd) ??
+              (viaRepo === undefined ? undefined : joinRepoPath(viaRepo, remote.repoPath))
+        if (target === undefined && remote.cwd !== undefined) {
+          push.push({
+            ...common,
+            action: 'skip',
+            code: kind,
+            machine: remote.machine,
+            reason: `本机这条没有 cwd，远端记的是 ${remote.cwd}，本机又没有它的同步映射——先补映射再同步`,
+          })
+          continue
+        }
+        if (target !== undefined && !isDirectory(target)) {
+          problems.push(`同步映射把 ${remote.cwd ?? ''} 指到了 ${target}，但那不是一个存在的目录`)
+          push.push({
+            ...common,
+            action: 'skip',
+            code: kind,
+            machine: remote.machine,
+            reason: `目标目录不存在：${target}`,
+          })
+          continue
+        }
+      }
+      pull.push({
+        id: session.id,
+        ...(session.title === undefined ? {} : { title: session.title }),
+        ...(remote.cwd === undefined ? {} : { fromCwd: remote.cwd }),
+        ...(target === undefined ? {} : { toCwd: target }),
+        machine: remote.machine,
+        bytes,
+        action: 'replace',
+        code: kind === 'remote-ahead' ? 'remote-ahead' : isBlank ? 'blank-local' : 'remote-newer',
+        reason:
+          kind === 'remote-ahead'
+            ? `${remote.machine} 那份更新（本机 ${versionsText(mine)}，它到 ${versionsText(theirs)}）——先备份本机这份再换成它`
+            : isBlank
+              ? `本机这条是空白会话，${remote.machine} 那份有内容——先备份再换成它`
+              : `同一个 id 两边各自写过（本机 ${versionsText(mine)}，${remote.machine} ${versionsText(theirs)}），` +
+                `${remote.machine} 那份更新（${timeText(remote.lastPromptAt)} 对本机 ${timeText(meta?.lastPromptAt)}）——先备份本机这份再换成它`,
+      })
+      pullIds.push(session.id)
+      bytesIn += bytes
+      continue
+    }
+    // 分叉、且有一边读不到活动时间（老索引 / 宿主没挂投影缓存）：退回旧口径，两条都不动，理由是"比不出来"。
     push.push({
       ...common,
       action: 'skip',
-      code: kind,
+      code: 'diverged',
       machine: remote.machine,
       reason:
-        kind === 'remote-ahead'
-          ? `${remote.machine} 那份更新（本机 ${versionsText(mine)}，它到 ${versionsText(theirs)}）——同 id 不覆盖，本机不动`
-          : `同一个 id 两边各自写过（本机 ${versionsText(mine)}，${remote.machine} ${versionsText(theirs)}）——两条都不动`,
+        `同一个 id 两边各自写过（本机 ${versionsText(mine)}，${remote.machine} ${versionsText(theirs)}），` +
+        `又判不出谁更新（本机 ${timeText(meta?.lastPromptAt)}、远端 ${timeText(remote.lastPromptAt)}）——两条都不动`,
     })
   }
 
@@ -477,6 +659,7 @@ export function planSync(input: SyncPlanInput): SyncPlan {
     push,
     pullIds,
     pushIds,
+    blank,
     bytesIn,
     bytesOut,
     localCount: input.local.length,
@@ -532,6 +715,9 @@ export function parseIndex(text: string, machine: string, problems: string[]): R
       ...(typeof entry.repo === 'string' && entry.repo !== '' ? { repo: entry.repo } : {}),
       ...(typeof entry.repoPath === 'string' && entry.repoPath !== '' ? { repoPath: entry.repoPath } : {}),
       createdAt: typeof entry.createdAt === 'number' ? entry.createdAt : 0,
+      ...(typeof entry.lastPromptAt === 'number' && Number.isFinite(entry.lastPromptAt)
+        ? { lastPromptAt: entry.lastPromptAt }
+        : {}),
       files,
     })
   }
@@ -639,9 +825,14 @@ export async function testSyncConnection(dav: DavPort): Promise<SyncTestResult> 
 /**
  * 读远端：列机器格、逐格读索引、按 id 取并集。
  *
- * 同一个 id 有多台机器贡献时取**领先**的那份（代次超集且共有代次一致），没有领先关系就按目录名排序取
- * 第一个（排序保证结果确定）。某个格子读不到只记问题，
- * 不阻塞其它格子。
+ * 同一个 id 有多台机器贡献时按两步取一份：
+ *   1. **领先**的那份赢（代次是另一个的超集、且共有代次内容一致）；
+ *   2. 没有领先关系（两边各自写过）时，**活动时间更晚**的那份赢；两边的时间有一边读不到（老索引），
+ *      才按目录名排序取第一个（排序保证结果确定）。
+ *
+ * 第 2 步不只是"取一份"：一台机器把自己更新那份推上来之后（它只写自己那一格），别的机器读到的就是
+ * 更新的那一份——不去看时间的话，两台各自续写过的机器谁的格子名排前面谁赢，更新那份反而可能读不到。
+ * 某个格子读不到只记问题，不阻塞其它格子。
  * @param dav 远端。
  * @param settings 同步设置（只需要机器格所在的资源根）。
  * @returns 并集、各机器索引与问题清单。
@@ -684,11 +875,17 @@ export async function readRemoteLibrary(dav: DavPort, settings: SyncSettings): P
       /*
        * 同一个 id 有多台贡献时：**领先**的那份赢（代次是另一个的超集、且共有代次内容一致）。
        *
-       * "格子名排序取第一个"在只增不覆盖下本来够用——但一台机器把拉取来的会话继续写下去之后，它的格子
-       * 里是更长的那份，而格子名恰好排在前面时，别处拉到的会是旧的那份（缺最新代次，还看不出少）。
-       * 内容一致或两边各自写过时仍然按格子名排序取第一个（`machines` 已排序，结果确定）。
+       * "格子名排序取第一个"本来够用——但一台机器把拉取来的会话继续写下去之后，它的格子里是更长的那份，
+       * 而格子名恰好排在前面时，别处拉到的会是旧的那份（缺最新代次，还看不出少）。两边各自写过时更糟：
+       * 谁的格子名排前面谁赢，而"谁更新"跟格子名没有任何关系，所以这里再比一道活动时间（与 `planSync`
+       * 里那条判据同一个值）；两边的时间有一边读不到，才退回按格子名排序取第一个（`machines` 已排序，
+       * 结果确定）。
        */
-      if (relation(full.files, existing.files) === 'local-ahead') entries.set(entry.id, full)
+      const relationNow = relation(full.files, existing.files)
+      const leading =
+        relationNow === 'local-ahead' ||
+        (relationNow === 'diverged' && newerSide(full.lastPromptAt, existing.lastPromptAt) === 'local')
+      if (leading) entries.set(entry.id, full)
     }
   }
   return { machines, entries, indexes, problems }
@@ -736,6 +933,13 @@ export interface SyncOutcome {
   applied: boolean
   /** 拉取并落盘的会话 id。 */
   pulled: string[]
+  /**
+   * 其中**覆盖掉本机原来那份**的会话 id（它们是 `pulled` 的子集）。
+   *
+   * 单独列出来是因为这一类的代价不同：本机那份内容被换掉了，旧的那份只在备份里（`kind: 'replace'`，
+   * 界面与工具都据此多说一句）。
+   */
+  replaced: string[]
   /** 推送的会话。 */
   pushed: Array<{ id: string; action: 'upload' | 'update' }>
   /** 实际写进库的字节数。 */
@@ -753,8 +957,24 @@ export interface SyncDeps {
   settings: SyncSettings
   sessionsRoot: string
   registryPath: string
+  /** 备份根目录：远端那份更新、要覆盖本机那份时，旧的那份先按迁移/删除那套备份进来。 */
+  backupRoot: string
   decodeAll: DecodeAll
   resolveTitle?: (query: TitleQuery) => string | undefined
+  /**
+   * 读宿主投影缓存里这条会话的空白与最后活动时间（见 visibility.ts 的 `SessionMeta`）。
+   *
+   * 缺席 = 两件事都不知道（空白不判、时间比不出来）：工具层在没有投影缓存时会走这一条，界面那侧
+   * 一律注入（`createSessionMetaResolver`）。
+   */
+  sessionMeta?: (query: { id: string; createdAt: number; cwd?: string }) => SessionMeta | undefined
+  /**
+   * 宿主内存里活着的会话 id（`ctx.sessions.list()`，见 src/index.ts）。
+   *
+   * 只有"覆盖本机那份"这一步问它：宿主手里有内存副本与写句柄，日志被换掉之后它还会接着写
+   * （与删除拒掉活会话同一件事）。缺席 = 判断不了。
+   */
+  liveSessionIds?: () => ReadonlySet<string>
   pluginVersion?: string
   now?: () => Date
   /** 跑 git 的入口（读项目身份用）；缺省是真去跑 git。测试里注入一个假的，不必真建仓库。 */
@@ -870,7 +1090,33 @@ export async function runSync(
     compared += 1
     return fingerprint
   }
-  const plan = planSync({ local, remote, mapping: normalized.mapping, repos, hashFile: planHash })
+  /*
+   * 投影缓存那两件事（空白、最后活动时间）按会话读一次就够：算计划要它、写回索引时还要它。宿主没给
+   * 这个口子（工具层在没挂投影缓存的宿主上就是这样）时什么都不读，两件事都按"不知道"处理。
+   */
+  const metaCache = new Map<string, SessionMeta | undefined>()
+  const metaOf = (session: Pick<DiscoveredSession, 'id' | 'createdAt' | 'cwd'>): SessionMeta | undefined => {
+    const cached = metaCache.get(session.id)
+    if (cached !== undefined || metaCache.has(session.id)) return cached
+    const value = deps.sessionMeta?.({
+      id: session.id,
+      createdAt: session.createdAt,
+      ...(session.cwd === undefined ? {} : { cwd: session.cwd }),
+    })
+    metaCache.set(session.id, value)
+    return value
+  }
+  // 活会话这件事只读一次：覆盖本机那一步会逐条问它，而宿主那份列表在一次同步里不会变。
+  const live = deps.liveSessionIds?.()
+  const plan = planSync({
+    local,
+    remote,
+    mapping: normalized.mapping,
+    repos,
+    hashFile: planHash,
+    ...(deps.sessionMeta === undefined ? {} : { sessionMeta: metaOf }),
+    ...(live === undefined ? {} : { isLive: (id: string): boolean => live.has(id) }),
+  })
   plan.problems.unshift(...normalized.problems)
   plan.problems.push(...remote.problems)
   plan.ok = plan.problems.length === 0
@@ -880,6 +1126,7 @@ export async function runSync(
       plan,
       applied: false,
       pulled: [],
+      replaced: [],
       pushed: [],
       bytesIn: 0,
       bytesOut: 0,
@@ -891,6 +1138,7 @@ export async function runSync(
 
   const byId = new Map(local.map((session) => [session.id, session]))
   const pulled: string[] = []
+  const replaced: string[] = []
   const pushed: Array<{ id: string; action: 'upload' | 'update' }> = []
   let bytesIn = 0
   let bytesOut = 0
@@ -900,13 +1148,19 @@ export async function runSync(
   const loose = readRegistryLoose(deps.registryPath)
   if (loose.problem !== undefined) problems.push(loose.problem)
   let registry = loose.registry
-  // 只把"真会拉取"的那些算进进度分母：跳过的（库里有同 id、没配映射…）不计，否则进度条永远走不满。
+  /*
+   * 只把"真会拉取"的那些算进进度分母：跳过的（库里有同 id、没配映射…）不计，否则进度条永远走不满。
+   * 「覆盖本机」也是拉取（那份内容从远端来），所以和"新建"共用一个分母：方向一样，只是它多一步
+   * 先备份再顶掉本机那份。
+   */
   const pullJobs = plan.pull.filter((entry) => entry.action === 'create')
+  const replaceJobs = plan.pull.filter((entry) => entry.action === 'replace')
+  const pullTotal = pullJobs.length + replaceJobs.length
   for (let index = 0; index < pullJobs.length; index += 1) {
     const entry = pullJobs[index] as SyncPullEntry
     options.onProgress?.({
       phase: 'pull',
-      total: pullJobs.length,
+      total: pullTotal,
       done: index,
       id: entry.id,
       label: entry.title ?? entry.id,
@@ -933,13 +1187,114 @@ export async function runSync(
     }
   }
 
+  /*
+   * ── 覆盖本机的那几条：先取包、再备份、最后顶掉本机那份 ────────────────────────
+   *
+   * 三步的顺序是安全边界，不是风格：包取不到 / 坏了就一个字节都不动本机那份；备份不成功同样一条都不
+   * 动（备份是旧那份**唯一**的副本，`kind: 'replace'` 见 journal.ts）。只有前两步都过了才落到"撤掉
+   * 旧目录、按导入落地"。
+   *
+   * 为什么要先撤掉整个目录、而不是逐文件覆盖：同一目录里留着旧代次就是坏数据（宿主把目录里的代次
+   * 一起读进来），而新旧两份的代次名可能重合、也可能不重合，逐文件覆盖两种都处理不对。
+   */
+  if (replaceJobs.length > 0) {
+    const fetched = new Map<string, SessionBundle>()
+    for (const entry of replaceJobs) {
+      try {
+        fetched.set(entry.id, readBundle(await deps.dav.get(remoteBundlePath(entry.machine, entry.id))))
+      } catch (error) {
+        problems.push(
+          `覆盖 ${entry.id} 失败（远端那包取不到或坏了，本机那份没动）：${error instanceof Error ? error.message : String(error)}`,
+        )
+      }
+    }
+    const ready = replaceJobs.filter((entry) => fetched.has(entry.id))
+    let backedUp = false
+    if (ready.length > 0) {
+      try {
+        createBackup({
+          backupRoot: deps.backupRoot,
+          registryPath: deps.registryPath,
+          sessions: ready.flatMap((entry) => {
+            const session = byId.get(entry.id)
+            return session === undefined ? [] : [{ id: entry.id, sourceDir: session.dir, files: session.files }]
+          }),
+          kind: 'replace',
+          ...(deps.now === undefined ? {} : { now: deps.now() }),
+        })
+        backedUp = true
+      } catch (error) {
+        problems.push(
+          `覆盖本机那份之前备份失败，这批 ${ready.length} 条一条都没动：${error instanceof Error ? error.message : String(error)}`,
+        )
+      }
+    }
+    for (let index = 0; backedUp && index < ready.length; index += 1) {
+      const entry = ready[index] as SyncPullEntry
+      const session = byId.get(entry.id)
+      const bundle = fetched.get(entry.id)
+      if (session === undefined || bundle === undefined) continue
+      options.onProgress?.({
+        phase: 'pull',
+        total: pullTotal,
+        done: pullJobs.length + index,
+        id: entry.id,
+        label: entry.title ?? session.title ?? entry.id,
+      })
+      try {
+        rmSync(session.dir, { recursive: true, force: true })
+        const importOptions: ImportOptions & { decodeAll: DecodeAll } = {
+          root: deps.sessionsRoot,
+          targetCwd: entry.toCwd ?? '',
+          ...(registry === undefined ? {} : { registry }),
+          registryPath: deps.registryPath,
+          decodeAll: deps.decodeAll,
+        }
+        const importPlan = planImport(bundle, importOptions)
+        if (importPlan.nextRegistry !== null) registry = importPlan.nextRegistry
+        const outcome = applyImport(bundle, importPlan, importOptions)
+        if (outcome.registryWritten) registryWritten = true
+        pulled.push(...outcome.written)
+        if (outcome.written.includes(entry.id)) replaced.push(entry.id)
+        bytesIn += outcome.bytes
+      } catch (error) {
+        problems.push(`覆盖 ${entry.id} 失败：${error instanceof Error ? error.message : String(error)}`)
+      }
+    }
+  }
+
   // ── 推送：整包 PUT，然后重写自己那一格的索引 ────────────────────────────────
-  const own = remote.indexes.get(machineDirName(deps.settings.machineId))
+  const ownDirName = machineDirName(deps.settings.machineId)
+  const own = remote.indexes.get(ownDirName)
   const ownEntries = new Map<string, RemoteIndex['entries'][number]>()
   for (const entry of own?.entries ?? []) {
     // 索引只描述"我这台机器现在还拿得出的会话"：本机删掉的下一次推送就从索引里消失
     // （远端那份包不主动删；别的机器自己那份记录照旧）。
     if (byId.has(entry.id)) ownEntries.set(entry.id, entry)
+  }
+  /*
+   * 两类要主动从自己这格撤下来：
+   *   - **空白会话**：没有内容可贡献，留着它只会让别的机器把它拉走；
+   *   - **刚换成远端那份的**：本机这份现在是别人那份内容，自己这格的旧记录（以及那个包）描述的是
+   *     已经不在的那份，留着会让"同一个 id 有多台贡献"那条判据去比两份不同的指纹。
+   * 例外是从**自己这格**换回来的那条：那格的记录描述的正是刚落地这份内容（判据与 cwd 无关），留着是
+   * 对的——撤掉反而会让远端整个少一条会话。
+   */
+  for (const id of plan.blank) ownEntries.delete(id)
+  for (const entry of replaceJobs) if (entry.machine !== ownDirName) ownEntries.delete(entry.id)
+  /*
+   * 老索引（版本 1）里的条目没有活动时间。本机这条恰好与远端**完全一致**时（两侧指纹都算过、就是
+   * 同一份内容），顺手把本机投影缓存里的活动时间补上去：不然这些从此不再变化的会话永远缺时间，两边
+   * 各自写过时那次比较就只能退回"判不出来"。只补这一种——其余条目的指纹可能已经不描述本机现状，
+   * 给它们改时间就成了撒谎。
+   */
+  for (const entry of plan.push) {
+    if (entry.action !== 'skip' || entry.code !== 'identical') continue
+    const current = ownEntries.get(entry.id)
+    const session = byId.get(entry.id)
+    if (current === undefined || current.lastPromptAt !== undefined || session === undefined) continue
+    const meta = metaOf(session)
+    if (meta?.lastPromptAt !== undefined) ownEntries.set(entry.id, { ...current, lastPromptAt: meta.lastPromptAt })
   }
   const pushJobs = plan.push.filter((entry) => entry.action === 'upload' || entry.action === 'update')
   for (let index = 0; index < pushJobs.length; index += 1) {
@@ -971,12 +1326,15 @@ export async function runSync(
       await deps.dav.put(remoteBundlePath(deps.settings.machineId, entry.id), bundle)
       // 身份是"这条会话属于哪个项目"的机器无关说法：别的机器凭它 + 仓库内相对路径落地，不必配映射。
       const found = session.cwd === undefined ? undefined : await locate(session.cwd)
+      // 活动时间跟着记录一起上去：别的机器靠它判"两边各自写过时谁更新"（见 planSync 与 readRemoteLibrary）。
+      const meta = metaOf(session)
       ownEntries.set(entry.id, {
         id: session.id,
         ...(session.cwd === undefined ? {} : { cwd: session.cwd }),
         ...(session.title === undefined ? {} : { title: session.title }),
         ...(found === undefined ? {} : { repo: found.repo, repoPath: found.repoPath }),
         createdAt: session.createdAt,
+        ...(meta?.lastPromptAt === undefined ? {} : { lastPromptAt: meta.lastPromptAt }),
         files: fingerprints(session, contentHash),
       })
       // 到这里只剩 upload / update 两种（上面筛过），写成三元的形状让类型也跟着收窄。
@@ -1014,6 +1372,7 @@ export async function runSync(
     plan,
     applied: true,
     pulled,
+    replaced,
     pushed,
     bytesIn,
     bytesOut,
