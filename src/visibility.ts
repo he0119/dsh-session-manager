@@ -138,12 +138,14 @@ export function createBlankResolver(options: { cacheDir?: string }): (query: Pro
 export interface SessionMeta {
   /** 宿主判定的"空白会话"；`undefined` = 宿主没说（见 visibility.ts 开头那段保守口径）。 */
   blank?: boolean
-  /** 宿主记的最后一次活动时间（毫秒）；`undefined` = 读不到。 */
+  /** 最后一次**提问**的时间（毫秒）；`undefined` = 读不到。 */
   lastPromptAt?: number
+  /** 最后一条**消息**的时间（毫秒，比提问那枚细）；`undefined` = 读不到。 */
+  lastMessageAt?: number
 }
 
 /**
- * 造一个"这条会话的空白与最后活动时间"读取器（读投影缓存）。
+ * 造一个"这条会话的空白与两枚活动时间"读取器（读投影缓存）。
  *
  * 与 `hiddenReason` 那条判据**不**合并：可见性问的是"外壳侧边栏显示不显示"，这里问的是"这条会话
  * 有没有内容、最后一次动是什么时候"（同步用）。合成一个函数只会让两边都多背一半用不上的字段。
@@ -162,6 +164,7 @@ export function createSessionMetaResolver(options: {
     return {
       ...(record.blank === undefined ? {} : { blank: record.blank }),
       ...(record.lastPromptAt === undefined ? {} : { lastPromptAt: record.lastPromptAt }),
+      ...(record.lastMessageAt === undefined ? {} : { lastMessageAt: record.lastMessageAt }),
     }
   }
 }

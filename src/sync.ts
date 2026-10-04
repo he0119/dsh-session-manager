@@ -23,12 +23,17 @@
 //     本机这条是空白而远端那条有内容时，以远端为准（空的没什么可保的）。
 //   - 同一 id 两边都有：内容一致不动；本机严格领先（远端确实是本机这份的前缀）重新推送刷新；
 //     **远端领先**（代次是超集）或**两边各自写过**时，比一个"谁更新"——本机那份的最后活动时间取宿主
-//     投影缓存的 `lastPromptAt`，远端那份取索引里记的同一个值。远端更新就把本机那份**先备份再换掉**
-//     （走导入那条编排，理由见下面 pull 的说明）；本机更新就把自己这一格刷成最新。两边的时间有一个
-//     读不到（老索引没这个字段、宿主没挂投影缓存）就退回旧口径：不动，只在报告里说清。
+//     投影缓存里的两枚钟（`lastPromptAt` 最后一次提问、`timeContext.lastMessageTime` 最后一条消息，
+//     取晚的那枚），远端那份取索引里记的同一个值。远端更新就把本机那份**先备份再换掉**（走导入那条
+//     编排，理由见下面 pull 的说明）；本机更新就把自己这一格刷成最新。两边的时间有一个读不到（老索引
+//     没这个字段、宿主没挂投影缓存）就退回旧口径：不动，只在报告里说清。
+//
+// 为什么要那枚细的钟：只比"最后一次提问"时，"推上去之后本机又跑了几轮、两边的日志各自长出来"这种
+// 情况两边的提问时间往往一模一样，于是最该分高下的场合反而判不出来（本机这份被日志重写切过之后尤其
+// 如此）。`lastMessageTime` 把 agent 自己写进去的也算进去，正好补这一段。
 //
 // 为什么"谁更新"用的是宿主折出来的活动时间而不是文件修改时间：文件的 mtime 经不起复制（下载、
-// 解包、备份还原都会把它抹平），而 `lastPromptAt` 与日志内容同生共死，落地改写 cwd 时也不受影响。
+// 解包、备份还原都会把它抹平），而这两枚钟与日志内容同生共死，落地改写 cwd 时也不受影响。
 // 判据仍然**不**拿时间反推"谁是祖先"：代次那边的四种关系是结构性的，时间只在结构判不出来时分高下。
 import { createHash } from 'node:crypto'
 import { readFileSync, rmSync, statSync } from 'node:fs'
@@ -57,10 +62,11 @@ export const SYNC_INDEX_UNIT = 'dsh-session-manager/sync'
 /**
  * 当前索引格式版本。
  *
- * 2 起每条记录多一个可选的 `lastPromptAt`（跨机器比"谁更新"用的活动时间）。读的一侧两种都收：
- * 缺这个字段的老索引照旧能用，只是那几条判不出谁更新（退回"不动"）。
+ * 2 起每条记录多一个可选的 `lastPromptAt`（最后一次提问），3 起写的是 `lastActiveAt`（最后一枚钟，
+ * 见 `activeAt()`）。读的一侧收全三种情形：版本 1 的老索引照旧能用，只有 `lastPromptAt` 的版本 2
+ * 拿它当活动时间，版本 3 用 `lastActiveAt`。缺这一项的那些条目判不出谁更新，退回"不动"。
  */
-export const SYNC_INDEX_VERSION = 2
+export const SYNC_INDEX_VERSION = 3
 
 /** 解析后的同步设置（配置里的原始形态见 tools.ts 的 `SyncConfig`）。 */
 export interface SyncSettings {
@@ -94,9 +100,14 @@ export interface RemoteSessionEntry {
   createdAt: number
   files: FileFingerprint[]
   /**
-   * 这台机器上这条会话的最后活动时间（毫秒时间戳，宿主投影缓存里的 `lastPromptAt`）。
+   * 这台机器上这条会话的最后活动时间（毫秒时间戳，宿主两枚钟里晚的那枚，见 `activeAt()`）。
    *
    * 跨机器比"谁更新"用的就是它；读不到（老索引、宿主没挂投影缓存）就没有这一项，那几条判不出高下。
+   */
+  lastActiveAt?: number
+  /**
+   * 版本 2 写的那枚钟（最后一次提问）。新记录不再写它，但**读**的时候仍然认：已经推上去的那些格子
+   * 里记着它，丢掉就等于让那些条目退回"判不出谁更新"。
    */
   lastPromptAt?: number
   /** 贡献这条记录的机器 id（拉取时要知道去哪个格子取）。 */
@@ -298,10 +309,36 @@ export type NewerSide = 'local' | 'remote' | 'unknown'
  * 归 `unknown`（同一次活动各写各的，随手挑一个赢家会凭空丢掉另一份）。这几种都退回旧口径：报告里
  * 说清是"远端更新"还是"两边各自写过"，但一个字节都不动。
  *
- * @param mine 本机那份的最后活动时间（宿主投影缓存；缺席 = 不知道）。
- * @param theirs 远端索引里记的最后活动时间（老索引没有这一项）。
+ * @param mine 本机那份的最后活动时间（`activeAt()` 折出来的；缺席 = 不知道）。
+ * @param theirs 远端索引里记的那一枚（老索引没有这一项）。
  * @returns 谁更新，或判不出来。
  */
+/**
+ * 这条本机会话"最后一次动"在什么时候。
+ *
+ * 宿主给了两枚钟，取**晚的**那枚：`lastPromptAt` 是最后一次提问（列表那一行记的，粗），
+ * `lastMessageTime` 是最后一条消息——agent 自己写进去的也算（细）。只取前者的话，"推上去之后本机
+ * 又跑了几轮、两边的日志各自长出来"这种最该分高下的场合，两边的提问时间往往一模一样，于是判不出来。
+ *
+ * @param meta 投影缓存里读到的这条会话（缺席 = 宿主没挂缓存）。
+ * @returns 毫秒时间戳；两枚钟都读不到就是 `undefined`（那几条退回"不动"）。
+ */
+function activeAt(meta: SessionMeta | undefined): number | undefined {
+  const values = [meta?.lastPromptAt, meta?.lastMessageAt].filter(
+    (value): value is number => typeof value === 'number' && Number.isFinite(value),
+  )
+  return values.length === 0 ? undefined : Math.max(...values)
+}
+
+/**
+ * 远端索引条目里那枚钟：新记录写 `lastActiveAt`，版本 2 那份记在 `lastPromptAt` 里。
+ *
+ * @param entry 远端那条记录；本机这条在远端没有对应格子时是 `undefined`（那时没有钟可读）。
+ */
+function remoteActiveAt(entry: { lastActiveAt?: number; lastPromptAt?: number } | undefined): number | undefined {
+  return entry?.lastActiveAt ?? entry?.lastPromptAt
+}
+
 export function newerSide(mine: number | undefined, theirs: number | undefined): NewerSide {
   if (mine === undefined || theirs === undefined) return 'unknown'
   if (mine > theirs) return 'local'
@@ -507,6 +544,9 @@ export function planSync(input: SyncPlanInput): SyncPlan {
     const remote = input.remote.entries.get(session.id)
     const meta = input.sessionMeta?.(session)
     const isBlank = meta?.blank === true
+    /** 本机这条"最后一次动"什么时候（两枚钟里晚的那枚）。远端那枚按同一把尺子取自索引。 */
+    const mineActiveAt = activeAt(meta)
+    const theirActiveAt = remoteActiveAt(remote)
     const bytes = session.files.reduce((sum, file) => sum + file.bytes, 0)
     const common = {
       id: session.id,
@@ -557,7 +597,7 @@ export function planSync(input: SyncPlanInput): SyncPlan {
      * 远端领先是结构性的（本机这份确实是它的前缀），不需要时间就知道它更新；两边各自写过才要时间
      * 分高下，而空白那份不用比分——它没有内容可保。
      */
-    const side = kind === 'remote-ahead' || isBlank ? 'remote' : newerSide(meta?.lastPromptAt, remote.lastPromptAt)
+    const side = kind === 'remote-ahead' || isBlank ? 'remote' : newerSide(mineActiveAt, theirActiveAt)
     if (side === 'local') {
       push.push({
         ...common,
@@ -566,7 +606,7 @@ export function planSync(input: SyncPlanInput): SyncPlan {
         machine: remote.machine,
         reason:
           `同一个 id 两边各自写过（本机 ${versionsText(mine)}，${remote.machine} ${versionsText(theirs)}），` +
-          `本机这份更新（${timeText(meta?.lastPromptAt)} 对 ${timeText(remote.lastPromptAt)}）——重新推送把自己这一格刷成最新`,
+          `本机这份更新（${timeText(mineActiveAt)} 对 ${timeText(theirActiveAt)}）——重新推送把自己这一格刷成最新`,
       })
       pushIds.push(session.id)
       bytesOut += bytes
@@ -634,7 +674,7 @@ export function planSync(input: SyncPlanInput): SyncPlan {
             : isBlank
               ? `本机这条是空白会话，${remote.machine} 那份有内容——先备份再换成它`
               : `同一个 id 两边各自写过（本机 ${versionsText(mine)}，${remote.machine} ${versionsText(theirs)}），` +
-                `${remote.machine} 那份更新（${timeText(remote.lastPromptAt)} 对本机 ${timeText(meta?.lastPromptAt)}）——先备份本机这份再换成它`,
+                `${remote.machine} 那份更新（${timeText(theirActiveAt)} 对本机 ${timeText(mineActiveAt)}）——先备份本机这份再换成它`,
       })
       pullIds.push(session.id)
       bytesIn += bytes
@@ -648,7 +688,7 @@ export function planSync(input: SyncPlanInput): SyncPlan {
       machine: remote.machine,
       reason:
         `同一个 id 两边各自写过（本机 ${versionsText(mine)}，${remote.machine} ${versionsText(theirs)}），` +
-        `又判不出谁更新（本机 ${timeText(meta?.lastPromptAt)}、远端 ${timeText(remote.lastPromptAt)}）——两条都不动`,
+        `又判不出谁更新（本机 ${timeText(mineActiveAt)}、远端 ${timeText(theirActiveAt)}）——两条都不动`,
     })
   }
 
@@ -715,6 +755,9 @@ export function parseIndex(text: string, machine: string, problems: string[]): R
       ...(typeof entry.repo === 'string' && entry.repo !== '' ? { repo: entry.repo } : {}),
       ...(typeof entry.repoPath === 'string' && entry.repoPath !== '' ? { repoPath: entry.repoPath } : {}),
       createdAt: typeof entry.createdAt === 'number' ? entry.createdAt : 0,
+      ...(typeof entry.lastActiveAt === 'number' && Number.isFinite(entry.lastActiveAt)
+        ? { lastActiveAt: entry.lastActiveAt }
+        : {}),
       ...(typeof entry.lastPromptAt === 'number' && Number.isFinite(entry.lastPromptAt)
         ? { lastPromptAt: entry.lastPromptAt }
         : {}),
@@ -884,7 +927,7 @@ export async function readRemoteLibrary(dav: DavPort, settings: SyncSettings): P
       const relationNow = relation(full.files, existing.files)
       const leading =
         relationNow === 'local-ahead' ||
-        (relationNow === 'diverged' && newerSide(full.lastPromptAt, existing.lastPromptAt) === 'local')
+        (relationNow === 'diverged' && newerSide(remoteActiveAt(full), remoteActiveAt(existing)) === 'local')
       if (leading) entries.set(entry.id, full)
     }
   }
@@ -1283,18 +1326,24 @@ export async function runSync(
   for (const id of plan.blank) ownEntries.delete(id)
   for (const entry of replaceJobs) if (entry.machine !== ownDirName) ownEntries.delete(entry.id)
   /*
-   * 老索引（版本 1）里的条目没有活动时间。本机这条恰好与远端**完全一致**时（两侧指纹都算过、就是
-   * 同一份内容），顺手把本机投影缓存里的活动时间补上去：不然这些从此不再变化的会话永远缺时间，两边
-   * 各自写过时那次比较就只能退回"判不出来"。只补这一种——其余条目的指纹可能已经不描述本机现状，
-   * 给它们改时间就成了撒谎。
+   * 老索引里的条目没有活动时间（版本 1 一个都没有，版本 2 记的是粗的那枚提问时间）。本机这条恰好与
+   * 远端**完全一致**时（两侧指纹都算过、就是同一份内容），顺手把本机投影缓存里的活动时间补上去：
+   * 不然这些从此不再变化的会话永远缺时间，两边各自写过时那次比较就只能退回"判不出来"。只补这一种
+   * ——其余条目的指纹可能已经不描述本机现状，给它们改时间就成了撒谎。
+   *
+   * 版本 2 那种只记了提问时间的条目也在这里升级：算出来的活动时间不会比它早，写上去之后下次比较用的
+   * 就是细的那枚（`activeAt()` 取的是两枚钟里晚的）。
    */
   for (const entry of plan.push) {
     if (entry.action !== 'skip' || entry.code !== 'identical') continue
     const current = ownEntries.get(entry.id)
     const session = byId.get(entry.id)
-    if (current === undefined || current.lastPromptAt !== undefined || session === undefined) continue
-    const meta = metaOf(session)
-    if (meta?.lastPromptAt !== undefined) ownEntries.set(entry.id, { ...current, lastPromptAt: meta.lastPromptAt })
+    if (current === undefined || session === undefined) continue
+    const active = activeAt(metaOf(session))
+    if (active === undefined || current.lastActiveAt === active) continue
+    // 旧的提问时间那枚钟不再保留：两条说的是同一件事，留两条只会让"哪条是真的"变成一个要猜的问题。
+    const { lastPromptAt: _dropped, ...rest } = current
+    ownEntries.set(entry.id, { ...rest, lastActiveAt: active })
   }
   const pushJobs = plan.push.filter((entry) => entry.action === 'upload' || entry.action === 'update')
   for (let index = 0; index < pushJobs.length; index += 1) {
@@ -1328,13 +1377,14 @@ export async function runSync(
       const found = session.cwd === undefined ? undefined : await locate(session.cwd)
       // 活动时间跟着记录一起上去：别的机器靠它判"两边各自写过时谁更新"（见 planSync 与 readRemoteLibrary）。
       const meta = metaOf(session)
+      const active = activeAt(meta)
       ownEntries.set(entry.id, {
         id: session.id,
         ...(session.cwd === undefined ? {} : { cwd: session.cwd }),
         ...(session.title === undefined ? {} : { title: session.title }),
         ...(found === undefined ? {} : { repo: found.repo, repoPath: found.repoPath }),
         createdAt: session.createdAt,
-        ...(meta?.lastPromptAt === undefined ? {} : { lastPromptAt: meta.lastPromptAt }),
+        ...(active === undefined ? {} : { lastActiveAt: active }),
         files: fingerprints(session, contentHash),
       })
       // 到这里只剩 upload / update 两种（上面筛过），写成三元的形状让类型也跟着收窄。
