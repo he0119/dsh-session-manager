@@ -199,6 +199,24 @@ test('预演表的动作列：同步那张表自己量列宽，标签再长也�
   assert.ok(keptWidth >= 111, `状态列声明了 ${keptWidth}px，装不下最长的那颗标签（要 ≥111px）`)
 })
 
+test('计划表的项目组头：一条横幅，横排的是内层那一行', () => {
+  // 同步预演按项目分组之后，组头是表里跨列的一行（`.dsm-planTable .dsm-planGroupHead`）。
+  // 它得自己声明两件事，否则会被 `.dsm-table th` 压回去：
+  //   - 字色：那一条把 th 一律写成次要色，而组头的名字是这一段的标题（与列表那边的组头同色）；
+  //   - 底色：浅色主题里 bg-layer 那几档是同一个白，层次只能靠"字色兑出来的一层"（同 .dsm-groupHead）。
+  const head = ruleBody('.dsm-planTable .dsm-planGroupHead')
+  assert.notEqual(head, null, '找不到计划表组头的规则')
+  assert.match(head ?? '', /color:\s*var\(--dsw-alias-label-primary/, '组头标题走主文字色')
+  assert.match(head ?? '', /color-mix\(/, '底色用字色兑出来的一层——bg-layer 那几档在浅色主题里是同一个白')
+  assert.match(head ?? '', /border-bottom:\s*1px solid var\(--dsw-alias-border-l2/, '下边框把组头与它那几行分开')
+  // 横排的是**内层**：给 th 自己换 display 会让浏览器补一个匿名单元格，fixed 布局的列宽跟着走形。
+  const inner = ruleBody('.dsm-planTable .dsm-planGroupInner')
+  assert.notEqual(inner, null, '找不到组头内层那一行的规则')
+  assert.match(inner ?? '', /display:\s*flex/, '图形、标题、路径、条数要横着排')
+  // 第三列（远端机器）沿用原来那一列 26% 的宽度：分组之后它只放机器名，多出来的归会话列。
+  assert.notEqual(ruleBody('.dsm-planTable .dsm-colMachine'), null, '「这次不动」的机器列要声明列宽')
+})
+
 test('state 色不许裸当文字色：它是指示色，浅色主题下淡到读不出来', () => {
   // 真实事故（浏览器里量的，明暗两套都量了）：`.dsm-tagSkip` 拿 `state-idle-primary` 当字色，
   // 浅色主题 #d4d4d4 在白底上 1.48:1、深色 #545557 在 #232324 上 2.1:1；`.dsm-warn` 拿

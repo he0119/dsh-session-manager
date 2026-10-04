@@ -77,12 +77,7 @@ export function groupSessions<S extends GroupableSession>(
   sessions: readonly S[],
   workspaces: readonly GroupableWorkspace[],
 ): SessionGroup<S>[] {
-  // 同一个路径在注册表里出现多次（同一目录被登记成两个工作区）时取先出现的那个标题，
-  // 与迁移页的下拉候选同一个口径。
-  const titles = new Map<string, string>()
-  for (const workspace of workspaces) {
-    if (!titles.has(workspace.path)) titles.set(workspace.path, workspace.title)
-  }
+  const titles = workspaceTitles(workspaces)
 
   const byPath = new Map<string, S[]>()
   for (const session of sessions) {
@@ -93,28 +88,52 @@ export function groupSessions<S extends GroupableSession>(
     else group.push(session)
   }
 
-  const groups: SessionGroup<S>[] = []
+  return orderProjectPaths(byPath.keys(), workspaces).map((path) => {
+    const title = titles.get(path)
+    return {
+      path,
+      ...(title === undefined ? {} : { title }),
+      sessions: newestFirst(byPath.get(path) ?? []),
+    }
+  })
+}
+
+/**
+ * 路径 → 工作区标题。同一个路径在注册表里出现多次（同一目录被登记成两个工作区）时取先出现的那个标题，
+ * 与迁移页的下拉候选同一个口径。
+ */
+export function workspaceTitles(workspaces: readonly GroupableWorkspace[]): Map<string, string> {
+  const titles = new Map<string, string>()
+  for (const workspace of workspaces) {
+    if (!titles.has(workspace.path)) titles.set(workspace.path, workspace.title)
+  }
+  return titles
+}
+
+/**
+ * 组的顺序：**已登记的工作区**（按注册表顺序，也就是界面上别处的工作区顺序）→ 其余目录（按路径排序，
+ * 纯为稳定）→ 没有 cwd 的那一组（空串，放在最后——它不是一个真的目录）。
+ *
+ * 抽出来是因为它不只服务会话列表：「同步」弹窗那三张计划表按**项目**分组（见
+ * [syncGroups.ts](./syncGroups.ts)），两组清单读起来必须是同一个次序，否则同一个目录在两处排的位置
+ * 不一样，用户会以为这是两件不同的事。
+ *
+ * @param paths - 眼下真有行的那些路径（没有行的已登记工作区不会成为一个空组）。
+ * @param workspaces - `/state` 给出的工作区。
+ * @returns 排好序的路径，正好是 `paths` 里那些（不增不减）。
+ */
+export function orderProjectPaths(paths: Iterable<string>, workspaces: readonly GroupableWorkspace[]): string[] {
+  const known = new Set(paths)
+  const ordered: string[] = []
   const taken = new Set<string>()
   for (const workspace of workspaces) {
-    if (taken.has(workspace.path) || !byPath.has(workspace.path)) continue
+    if (taken.has(workspace.path) || !known.has(workspace.path)) continue
     taken.add(workspace.path)
-    const title = titles.get(workspace.path)
-    groups.push({
-      path: workspace.path,
-      ...(title === undefined ? {} : { title }),
-      sessions: newestFirst(byPath.get(workspace.path) ?? []),
-    })
+    ordered.push(workspace.path)
   }
-
-  const rest = [...byPath.keys()].filter((key) => key !== '' && !taken.has(key)).sort()
-  for (const path of rest) {
-    groups.push({ path, sessions: newestFirst(byPath.get(path) ?? []) })
-  }
-
-  const orphans = byPath.get('')
-  if (orphans !== undefined) groups.push({ path: '', sessions: newestFirst(orphans) })
-
-  return groups
+  for (const path of [...known].filter((key) => key !== '' && !taken.has(key)).sort()) ordered.push(path)
+  if (known.has('')) ordered.push('')
+  return ordered
 }
 
 /**

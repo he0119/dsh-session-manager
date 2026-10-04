@@ -528,7 +528,29 @@ export const CSS = `
   text-overflow: ellipsis;
 }
 .dsm-planTable .dsm-colCwd { width: 26%; }
+/* 「这次不动」那张表的第三列（远端机器）：宽度沿用原来那一列的 26%。分组之后这一列不再放路径
+   （路径去组头了），只放机器名——机器名比路径短，多出来的宽度归中间的会话列。 */
+.dsm-planTable .dsm-colMachine { width: 26%; }
 .dsm-planTable .dsm-colBytes { width: 68px; }
+/*
+ * 计划表里的项目组头：一条横跨整行的横幅，一个项目底下挂着它那几行（会拉 / 会推 / 没动三张表同一套）。
+ *
+ * 底色与列表那边的 .dsm-groupHead 同一档（字色 12% 兑在卡片底色上）、路径同样是等宽次要色——同一个
+ * 目录在列表与弹窗里长得一样，才不必重新认一遍。区别是没有折叠与勾选：弹窗里这份清单只是读一遍。
+ *
+ * 选择器带 .dsm-planTable 不只为了就近分组：.dsm-table th（一个 class + 一个元素）比单个 class
+ * 更具体，光写 .dsm-planGroupHead 的话内边距与字色都会被它压回去。
+ */
+.dsm-planTable .dsm-planGroupHead {
+  padding: 6px 8px;
+  color: var(--dsw-alias-label-primary, #1f2329);
+  background: var(--dsw-alias-bg-layer-1, transparent);
+  background: color-mix(in srgb, var(--dsw-alias-label-primary, #1f2329) 12%, var(--dsw-alias-bg-layer-1, #fff));
+  border-bottom: 1px solid var(--dsw-alias-border-l2, rgba(0, 0, 0, 0.12));
+}
+/* 组头里的那一行内容：图形 + 标题 + 路径 + 条数。横着排的是**里面这一层**，不是 th 自己换 display
+   （表格单元格改成 flex 会让浏览器补一个匿名单元格，列宽就不再由 fixed 布局说了算）。 */
+.dsm-planTable .dsm-planGroupInner { display: flex; align-items: center; gap: 8px; }
 /* cwd 那一格里的路径要能断行（fixed 布局下列宽不会再变），否则长路径顶出格子。 */
 .dsm-cwd { color: var(--dsw-alias-label-secondary, #646a73); overflow-wrap: anywhere; }
 /* 标签是个小块：挤在窄列里也不能折成两行（导入计划表的动作列里曾经折成「跳/过」）。 */

@@ -55,7 +55,6 @@ export const zh = {
   exporting: '打包中…',
   exported: '已导出 {count} 条会话（{bytes}）。',
   noSessions: '这个会话库里还没有会话。',
-  noCwd: '（无 cwd）',
 
   importTitle: '导入',
   importHint: '选一个 .dshsess 包和目标工作区，点「导入」：弹窗里逐条列出会写什么，确认才落盘。',
@@ -71,7 +70,7 @@ export const zh = {
   colSession: '会话',
   colCwd: 'cwd',
   colBytes: '大小',
-  colNote: '说明',
+  colMachine: '远端机器',
   actionCreate: '创建',
   actionSkip: '跳过',
   cwdRewritten: '{from} → {to}',
@@ -394,7 +393,6 @@ export const en: Record<keyof typeof zh, string> = {
   exporting: 'Packing…',
   exported: 'Exported {count} sessions ({bytes}).',
   noSessions: 'This library has no sessions yet.',
-  noCwd: '(no cwd)',
 
   importTitle: 'Import',
   importHint: 'Pick a .dshsess bundle and a target workspace, then hit Import: the dialog lists every write before you confirm.',
@@ -410,7 +408,7 @@ export const en: Record<keyof typeof zh, string> = {
   colSession: 'Session',
   colCwd: 'cwd',
   colBytes: 'Size',
-  colNote: 'Note',
+  colMachine: 'Remote machine',
   actionCreate: 'create',
   actionSkip: 'skip',
   cwdRewritten: '{from} → {to}',
