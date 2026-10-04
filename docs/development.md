@@ -131,7 +131,8 @@ tsconfig.client.json Web Client 自己的类型工程（DOM + JSX；Host 那份�
 | 源文件 | 职责 | DSH 依赖 |
 |---|---|---|
 | `src/project-key.ts` | 逐字符复刻宿主 `projectKey()` + 有损碰撞检测 | 无 |
-| `src/canonical-path.ts` | 落地目录的规范拼写（`canonicalDir()`：宿主存工作区 `path` 与会话 `cwd` 用的同一个 realpath），落地那条路上唯一的归一入口 | 无 |
+| `src/canonical-path.ts` | 落地目录的规范拼写（`canonicalDir()`：宿主存工作区 `path` 与会话 `cwd` 用的同一个 realpath），落地那条路上唯一的归一入口；`canonicalDirIfExists()` 是它的"解析不出来就是结论"版本（宿主建成员索引用的那一支） | 无 |
+| `src/accounting.ts` | 「这条会话被哪个工作区**认领**」的唯一一份判据（宿主 `Workspace.sessionIds` 的口径：登记过 **且** header 的 cwd 归一到那条记录的 `path`）；`/state` 与迁移计划都读它 | 无 |
 | `src/types.ts` | 贯穿各层的共享类型（计划、产物、注册表视图等） | 无 |
 | `src/paths.ts` | `encodeSegment()`、代次文件名、会话目录/日志路径 | 无 |
 | `src/zstd-frame.ts` | raw 帧编码、首帧边界定位、多帧感知守卫 | 无 |
@@ -140,7 +141,7 @@ tsconfig.client.json Web Client 自己的类型工程（DOM + JSX；Host 那份�
 | `src/discovery.ts` | 项目目录扫描 + 只解首帧读 header（发现阶段快），可注入标题读取器 | 无 |
 | `src/projection-cache.ts` | 读宿主投影缓存的单条记录（标题、`blank` 等列表元数据） | 无 |
 | `src/session-title.ts` | 会话标题：宿主投影缓存优先，缺席时有界地解日志开头 | 无 |
-| `src/visibility.ts` | 侧边栏可见性与「未分组」判据：子代理 / 空白 / 已归档三条理由（候选与界面共用一份）、`isUngrouped()`＝没认领 **且** 会显示 | 无 |
+| `src/visibility.ts` | 侧边栏可见性与「未分组」判据：子代理 / 空白 / 已归档三条理由（候选与界面共用一份）、`isUngrouped()`＝没认领（`accounting.ts`）**且** 会显示 | 无 |
 | `src/family.ts` | **族**的展开（点名一条会话 → 它自己 + 全部子代理后代）与「单独点名的子代理」判据（`loneSubagents()`），删除 / 迁移 / 归档 / 导出共用 | 无 |
 | `src/plan.ts` | 只读计划：目标推导、阻塞问题、注册表变更（候选只取侧边栏看得见的，选中后再向下展开整族） | 无 |
 | `src/journal.ts` | 字节级备份清单与回滚（迁移与删除两种来源） | 无 |

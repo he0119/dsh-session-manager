@@ -18,6 +18,9 @@ Status: implemented
 「未分组」只有一个定义，算在 `src/visibility.ts` 的 `isUngrouped()` 里：**谁都没认领**
 （`!accounted`）**而且**侧边栏默认视图**会显示它**。`/state` 把它作为 `ungrouped` 发给界面。
 
+"认领"是宿主 `Workspace.sessionIds` 的口径（登记 **且** `cwd` 归一到记录的 `path`），判据在
+`src/accounting.ts`，见 [「认领」是宿主那份成员表](./2026-10-04-accounted-means-the-hosts-membership.md)。
+
 多出来的那半句定义（「侧边栏会显示它」）就是 `hiddenReasonOf()`，所以两件事现在是同一个模块里共用
 `visibilityFacts()` 的两个函数。
 

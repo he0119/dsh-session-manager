@@ -10,7 +10,7 @@
 //
 // 这一层只做一件事：把要落地的目录换成宿主会存的那个字符串。目录不存在或读不动时**原样返回**——
 // 那几种情况本来就该由调用方按原来的拼写报"目标目录不存在"，而不是在这里变成一个空串。
-import { realpathSync } from 'node:fs'
+import { realpathSync, statSync } from 'node:fs'
 
 /**
  * 把目录归一成宿主认得的拼写。
@@ -35,5 +35,33 @@ export function canonicalDir(path: string): string {
     return realpathSync.native(path)
   } catch {
     return path
+  }
+}
+
+/**
+ * 目录的规范拼写，而且它**必须解析得出来**；解析不出来（不存在、解析到的东西不是目录、没权限）
+ * 返回 `undefined`。
+ *
+ * 与 `canonicalDir()` 的差别只在失败那一支：那一支要给调用方留原拼写去报"目标目录不存在"（或按原样
+ * 落进注册表），这一支把"解析不出来"本身当成结论。宿主的 workspace 注册表建会话成员索引时用的就是
+ * 这一支（`@deepseek-ai/dsh-workspace` 的 `indexHeader()`：`realpath` 之后还要 `stat().isDirectory()`），
+ * 于是"登记过、但目录已经改名或删掉"的会话在宿主眼里**没人认领**——它落进外壳侧边栏的「未分组」
+ * （判据的用法见 src/accounting.ts）。
+ *
+ * @param path 候选目录（可以是另一种拼写，也可以根本不存在）。
+ * @returns 规范拼写；空串与解析不出来的都返回 `undefined`。
+ */
+export function canonicalDirIfExists(path: string): string | undefined {
+  if (path === '') return undefined
+  let real: string
+  try {
+    real = realpathSync.native(path)
+  } catch {
+    return undefined
+  }
+  try {
+    return statSync(real).isDirectory() ? real : undefined
+  } catch {
+    return undefined
   }
 }

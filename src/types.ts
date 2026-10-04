@@ -67,6 +67,10 @@ export interface SessionMove {
   sourceDir: string
   targetDir: string
   files: SessionLogFile[]
+  /**
+   * 这条会话**被某个工作区认领**吗（判据见 accounting.ts：登记过 **且** header 的 cwd 归一之后就是那条
+   * 记录的 `path`）。它是"本来就在册"的判据——级联带进来的子代理只有在这一项为真时才跟着改挂。
+   */
   registered: boolean
   /**
    * 这条是**级联**带进来的：`via` 是用户点名、把它牵进来的那条祖先会话。
@@ -108,8 +112,8 @@ export interface RelocationPlan {
   ok: boolean
   problems: string[]
   /**
-   * 源工作区目录；**未分组来源**（`unowned`）时是空串——那时源由"注册表没认领"决定，
-   * 可以横跨多个项目目录，每条会话各自的源在 `sessions[].from` 里。
+   * 源工作区目录；**未分组来源**（`unowned`）时是空串——那时源由"谁都没认领"决定（判据见
+   * accounting.ts），可以横跨多个项目目录，每条会话各自的源在 `sessions[].from` 里。
    */
   from: string
   to: string

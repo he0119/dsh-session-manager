@@ -260,6 +260,48 @@ test('GET /state：子代理 / 空白 / 已归档即使没在册也不是「未�
   assert.equal(byId.get('session-archived')!['ungrouped'], false, '已归档在默认归档过滤下不显示')
 })
 
+test('GET /state：登记过、但目录已经改名的会话算「未分组」，工作区的成员表里也没有它', async () => {
+  const sandbox = makeSandbox('web-state-stale-record')
+  // 目录不在了（真实库里的样子：改名 / 搬走之后那条登记还留在注册表里）。这条会话的 cwd **逐字就是**
+  // 那条记录的 path，但宿主建成员索引要先把它 realpath 出来——解析不出来就不算成员（见 accounting.ts）。
+  const gone = join(sandbox.base, 'gone-dir')
+  writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000)
+  writeSession(sandbox.sessionsRoot, 'session-stale', gone, 1001)
+  writeRegistryAtomic(sandbox.registryPath, {
+    ...sandbox.registry,
+    global: { ...sandbox.registry.global, workspaceIds: ['ws-gone', 'ws-a'] },
+    tables: {
+      workspaces: {
+        'ws-gone': {
+          ...sandbox.registry.tables.workspaces['ws-a']!,
+          path: gone,
+          title: 'gone',
+          sessionIds: ['session-stale'],
+        },
+        'ws-a': { ...sandbox.registry.tables.workspaces['ws-a']!, sessionIds: ['session-a'] },
+      },
+    },
+  })
+
+  const handlers = createApiHandlers(deps(sandbox))
+  const { res, captured } = fakeRes()
+  await handlers['GET /state']!(fakeReq('GET', `${API_PREFIX}/state`), res)
+  const body = json(captured)
+  const sessions = body['sessions'] as Array<Record<string, unknown>>
+  const byId = new Map(sessions.map((s) => [String(s['id']), s]))
+  assert.equal(byId.get('session-stale')!['ungrouped'], true, '登记还在，但目录没了：外壳那边就是「未分组」')
+  assert.equal(byId.get('session-a')!['ungrouped'], false, 'cwd 解析得出来且等于记录的 path 的才是真成员')
+  // 工作区那一栏报的是**认领**的那份（宿主发给渲染层的也是这份）：登记里 cwd 已经对不上的不算成员
+  const workspaces = body['workspaces'] as Array<Record<string, unknown>>
+  assert.deepEqual(
+    workspaces.map((w) => [w['id'], w['sessionIds']]),
+    [
+      ['ws-gone', []],
+      ['ws-a', ['session-a']],
+    ],
+  )
+})
+
 test('GET /state：标题优先读宿主投影缓存，缓存对不上身份才回落日志', async () => {
   const sandbox = makeSandbox('web-state-title')
   // 日志里是首条 fallback 标题，缓存里是用户改过的名字：缓存赢（它就是"最新一条"）。

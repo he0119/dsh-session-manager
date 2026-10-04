@@ -361,9 +361,12 @@ test('未分组来源：参数说不清、点名点错、要搬产物时都如�
   assert.ok(artifacts.problems.some((p) => p.includes('artifacts')), artifacts.problems.join('; '))
 })
 
-test('未分组来源：库里一条这样的会话都没有时，计划结果是"没得搬"而不是崩溃', () => {
-  const sb = makeSandbox('unowned-empty')
-  // 把三条候选从注册表视角变成"已在册"：全部登记进 ws-a
+test('未分组来源：登记过、但 cwd 与那条记录的 path 对不上的照旧算未分组（宿主也这么滤）', () => {
+  const sb = makeSandbox('unowned-stale-record')
+  // 把三条候选都登记进 ws-a（它的 path 是 dirA），而它们各自的 cwd 是 dirB / dirC / 目标目录：
+  // 宿主建成员索引时按 header 的 cwd 归一后与记录的 path 逐字比，对不上的**不算成员**——外壳侧边栏
+  // 因此把这三条放进「未分组」（目录改名、搬走之后真实库里的样子）。只有 session-orphan-a 的 cwd
+  // 就是 dirA，它是 ws-a 的真成员，不该进这个来源。
   const registry = structuredClone(sb.registry) as WorkspaceRegistryState
   registry.tables.workspaces['ws-a']!.sessionIds = [
     'session-owned',
@@ -372,6 +375,35 @@ test('未分组来源：库里一条这样的会话都没有时，计划结果�
     'session-orphan-c',
     'session-orphan-at',
   ]
+  const plan = buildRelocationPlan({ root: sb.root, registry, to: sb.dirTarget, decodeAll, unowned: true })
+  assert.equal(plan.ok, true, plan.problems.join('; '))
+  assert.deepEqual(plan.sessions.map((s) => s.id).sort(), [
+    'session-orphan-at',
+    'session-orphan-b',
+    'session-orphan-c',
+  ])
+  assert.equal(plan.sessions.every((s) => s.registered === false), true, '它们在外壳那边就是没人认领的')
+})
+
+test('未分组来源：库里一条这样的会话都没有时，计划结果是"没得搬"而不是崩溃', () => {
+  const sb = makeSandbox('unowned-empty')
+  // 每条会话都由**它自己那个目录**的工作区认领（登记 + cwd 归一到同一个 path 才是认领，见 accounting.ts）：
+  // 于是这个来源一条候选都不剩。
+  const registry = structuredClone(sb.registry) as WorkspaceRegistryState
+  registry.tables.workspaces['ws-a']!.sessionIds = ['session-owned', 'session-orphan-a']
+  const claim = (id: string, path: string, sessionId: string): void => {
+    registry.tables.workspaces[id] = {
+      path,
+      title: id,
+      sessionIds: [sessionId],
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    }
+    registry.global.workspaceIds.push(id)
+  }
+  claim('ws-b', sb.dirB, 'session-orphan-b')
+  claim('ws-c', sb.dirC, 'session-orphan-c')
+  claim('ws-target', sb.dirTarget, 'session-orphan-at')
   const plan = buildRelocationPlan({ root: sb.root, registry, to: sb.dirTarget, decodeAll, unowned: true })
   assert.equal(plan.ok, false)
   assert.deepEqual(plan.problems, ['no sessions selected for migration'])

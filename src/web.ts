@@ -14,6 +14,7 @@ import { statSync } from 'node:fs'
 import { join } from 'node:path'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 
+import { accountedOwners } from './accounting.ts'
 import { scanAll, type DiscoveredSession } from './discovery.ts'
 import {
   assertBackupDir,
@@ -143,7 +144,7 @@ interface SessionSummary {
   cwd?: string
   createdAt: number
   dir: string
-  /** 外壳侧边栏会把它放进「未分组」那一组（判据见 visibility.ts 的 `isUngrouped()`）。 */
+  /** 外壳侧边栏会把它放进「未分组」那一组（判据见 visibility.ts 的 `isUngrouped()` 与 accounting.ts 的「认领」）。 */
   ungrouped: boolean
   bytes: number
   files: Array<{ name: string; bytes: number }>
@@ -171,6 +172,7 @@ interface WorkspaceSummary {
   id: string
   path: string
   title: string
+  /** 宿主报给界面的那一份成员（**认领**的那些，见 accounting.ts），不是注册表里的登记原样。 */
   sessionIds: string[]
 }
 
@@ -313,23 +315,23 @@ function withSubagents(all: readonly DiscoveredSession[], ids: readonly string[]
  * 认领"这个中间事实：以前那三处各自拿它去推「未分组」，于是子代理/空白/已归档这些侧边栏根本不放进
  * 那一组的会话也被标成了「未分组」。
  *
+ * "有没有主"那一半读的是 `accounted`（`accounting.ts` 算好的**认领**，不是注册表里的登记原样）：
+ * 目录改名 / 删掉之后登记还在、会话却已经不算任何工作区的成员，外壳那边正是这么算的。
+ *
  * `hidden` 是外壳侧边栏"会不会显示这条会话"的判据结果（见 visibility.ts）：三份列表各自要看的东西
  * 不同——导出照单全收、迁移只收侧边栏看得见的、管理页要把看不见的原因标出来——所以这里一次算清，
  * 三处都读同一个字段，避免"面板说 4 条、侧边栏显示 1 条"这种对不上的账。
  */
 function summarizeSessions(
   sessions: readonly DiscoveredSession[],
-  registry: WorkspaceRegistryState | null,
   options: {
+    /** 会话 id → 认领它的工作区 id（`accountedOwners()`）。 */
+    accounted: ReadonlyMap<string, string>
     archived: ReadonlySet<string>
     resolveBlank?: (query: { id: string; createdAt: number; cwd?: string }) => boolean | undefined
     live: ReadonlySet<string>
   },
 ): SessionSummary[] {
-  const owner = new Map<string, string>()
-  for (const [workspaceId, record] of Object.entries(registry?.tables.workspaces ?? {})) {
-    for (const id of record.sessionIds) owner.set(id, workspaceId)
-  }
   return sessions.map((session) => {
     const blank = options.resolveBlank?.({ id: session.id, createdAt: session.createdAt, cwd: session.cwd }) === true
     const archived = options.archived.has(session.id)
@@ -341,7 +343,7 @@ function summarizeSessions(
       cwd: session.cwd,
       createdAt: session.createdAt,
       dir: session.dir,
-      ungrouped: isUngrouped({ ...facts, owned: owner.has(session.id) }),
+      ungrouped: isUngrouped({ ...facts, owned: options.accounted.has(session.id) }),
       bytes: session.files.reduce((sum, file) => sum + file.bytes, 0),
       files: session.files.map((file) => ({ name: file.name, bytes: file.bytes })),
       archived,
@@ -356,11 +358,25 @@ function summarizeSessions(
   })
 }
 
-function summarizeWorkspaces(registry: WorkspaceRegistryState | null): WorkspaceSummary[] {
+/**
+ * 界面要的工作区：`sessionIds` 报**认领**的那些（登记里 cwd 已经对不上的不算成员），与宿主发给渲染层
+ * 的那一份同源（见 accounting.ts）——工作区那一行的条数与外壳那一组里的会话因此不会各说各话。
+ */
+function summarizeWorkspaces(
+  registry: WorkspaceRegistryState | null,
+  accounted: ReadonlyMap<string, string>,
+): WorkspaceSummary[] {
   return (registry?.global.workspaceIds ?? []).flatMap((id) => {
     const record = registry?.tables.workspaces[id]
     if (!record) return []
-    return [{ id, path: record.path, title: record.title, sessionIds: record.sessionIds }]
+    return [
+      {
+        id,
+        path: record.path,
+        title: record.title,
+        sessionIds: record.sessionIds.filter((sessionId) => accounted.get(sessionId) === id),
+      },
+    ]
   })
 }
 
@@ -410,7 +426,10 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
   const state = async (_req: IncomingMessage, res: ServerResponse): Promise<void> => {
     const { registry, problems } = loadRegistry(paths.registryPath)
     const sessions = scanLibrary(paths.sessionsRoot, decodeAll, { resolveTitle })
-    const workspaces = summarizeWorkspaces(registry)
+    // 「认领」算一次，会话列表那栏与工作区那栏读同一份：宿主发给渲染层的也是同一个取值
+    // （`Workspace.sessionIds` 的过滤，见 accounting.ts），两处各算一遍迟早会分叉。
+    const accounted = accountedOwners(registry, sessions)
+    const workspaces = summarizeWorkspaces(registry, accounted)
     // 项目身份只认"界面上真会出现的那些目录"：每条会话的 cwd + 注册表登记的工作区路径。别的一律不问
     // ——`git rev-parse` 是每个目录一次进程，列表页的热路径上多问一个都是白花。
     const directories = new Set<string>()
@@ -430,7 +449,8 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
       // 目录 → 项目身份（`host/owner/repo`）：界面把它显示在原来印本机路径的地方。认不出来的目录不在
       // 表里，界面退回显示路径。
       repos: Object.fromEntries(repos),
-      sessions: summarizeSessions(sessions, registry, {
+      sessions: summarizeSessions(sessions, {
+        accounted,
         archived: new Set(registry?.global.archivedSessionIds ?? []),
         resolveBlank,
         live: liveSessionIds(),
