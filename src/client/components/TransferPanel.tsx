@@ -46,11 +46,8 @@ import {
   useGroupCollapse,
   useSessionFilter,
 } from './sessionList.tsx'
-import { translateWith, zh, type Translate } from '../logic/locales.ts'
+import type { Translate } from '../logic/locales.ts'
 import type { PanelShare } from '../types.ts'
-
-/** 没有注入面时的兜底翻译。 */
-const fallback = translateWith(zh as unknown as Record<string, string>)
 
 /**
  * cwd 那一格：三支分支在 [planRows.ts](./planRows.ts) 里判，这里只挑文案。
@@ -59,13 +56,13 @@ const fallback = translateWith(zh as unknown as Record<string, string>)
  */
 function cwdText(entry: ImportEntry, t: Translate): string {
   const plan = describeCwd(entry)
-  if (plan.kind === 'skip') return t('cwdSkipped')
-  if (plan.kind === 'keepNoCwd') return t('cwdKeep')
-  return t('cwdRewritten', { from: plan.from, to: plan.to })
+  if (plan.kind === 'skip') return t('cwd.skipped')
+  if (plan.kind === 'keepNoCwd') return t('cwd.keep')
+  return t('cwd.rewritten', { from: plan.from, to: plan.to })
 }
 
 /** 传输页。 */
-export function TransferPanel({ t = fallback, state, reload }: PanelShare): React.ReactElement {
+export function TransferPanel({ t, state, reload }: PanelShare): React.ReactElement {
   const [selected, setSelected] = React.useState<readonly string[]>([])
   const [file, setFile] = React.useState<File | null>(null)
   const [payload, setPayload] = React.useState<ArrayBuffer | null>(null)
@@ -124,7 +121,7 @@ export function TransferPanel({ t = fallback, state, reload }: PanelShare): Reac
     const byId = new Map(sessions.map((session) => [session.id, session]))
     return (session: SessionSummary): { tip: string } | undefined => {
       const parent = lockedParentOf(session, byId)
-      return parent === undefined ? undefined : { tip: t('lockedSubagentTip', { name: parent.title ?? parent.id }) }
+      return parent === undefined ? undefined : { tip: t('list.lockedSubagentTip', { name: parent.title ?? parent.id }) }
     }
   }, [sessions, t])
   const selectable = (session: SessionSummary): boolean => lockOf(session) === undefined
@@ -157,7 +154,7 @@ export function TransferPanel({ t = fallback, state, reload }: PanelShare): Reac
     try {
       await action()
     } catch (cause) {
-      setError(t('failed', { reason: cause instanceof Error ? cause.message : String(cause) }))
+      setError(t('error.failed', { reason: cause instanceof Error ? cause.message : String(cause) }))
     } finally {
       setBusy(null)
     }
@@ -165,7 +162,7 @@ export function TransferPanel({ t = fallback, state, reload }: PanelShare): Reac
 
   const doExport = (): void => {
     if (selected.length === 0) {
-      setError(t('needSelection'))
+      setError(t('transfer.import.needSelection'))
       return
     }
     void run('export', async () => {
@@ -174,7 +171,7 @@ export function TransferPanel({ t = fallback, state, reload }: PanelShare): Reac
       const chosen = sessions.filter((session) => selected.includes(session.id))
       // 包里的条数与字节以宿主回报的为准：勾一条父会话时，它的子智能体跟着进包，比勾选数多。
       setNotice(
-        t('exported', {
+        t('transfer.export.done', {
           count: result.count ?? chosen.length,
           bytes: formatBytes(result.bytes ?? totalBytes(chosen)),
         }),
@@ -195,24 +192,24 @@ export function TransferPanel({ t = fallback, state, reload }: PanelShare): Reac
     void picked
       .arrayBuffer()
       .then((buffer) => setPayload(buffer))
-      .catch((cause: unknown) => setError(t('failed', { reason: cause instanceof Error ? cause.message : String(cause) })))
+      .catch((cause: unknown) => setError(t('error.failed', { reason: cause instanceof Error ? cause.message : String(cause) })))
   }
 
   /**
    * 点「导入」：开弹窗，同时把只读的导入计划取回来（`mode=plan` 不写盘）。
    *
-   * 包与目标工作区都得先有：缺哪个就在页面横幅上说出缺的那个（`needFile` / `needWorkspace`），而不是
+   * 包与目标工作区都得先有：缺哪个就在页面横幅上说出缺的那个（`transfer.import.needFile` / `transfer.import.needWorkspace`），而不是
    * 先弹一个空框再抱怨——那一步的错与"计划有什么问题"不是一件事。
    *
    * 计划回来时弹窗可能已经被取消掉了：`current === null` 时原地作废（同「会话」页的删除弹窗）。
    */
   const openImport = (): void => {
     if (file === null || payload === null) {
-      setError(t('needFile'))
+      setError(t('transfer.import.needFile'))
       return
     }
     if (target === '') {
-      setError(t('needWorkspace'))
+      setError(t('transfer.import.needWorkspace'))
       return
     }
     setError(null)
@@ -242,7 +239,7 @@ export function TransferPanel({ t = fallback, state, reload }: PanelShare): Reac
         setBusy(null)
         if (result.written !== undefined && result.written.length > 0) {
           setPending(null)
-          setNotice(t('applied', { count: result.written.length, bytes: formatBytes(result.bytes) }))
+          setNotice(t('transfer.import.done', { count: result.written.length, bytes: formatBytes(result.bytes) }))
           void reload()
           return
         }
@@ -251,7 +248,7 @@ export function TransferPanel({ t = fallback, state, reload }: PanelShare): Reac
       (cause) => {
         setBusy(null)
         setPending(null)
-        setError(t('failed', { reason: cause instanceof Error ? cause.message : String(cause) }))
+        setError(t('error.failed', { reason: cause instanceof Error ? cause.message : String(cause) }))
       },
     )
   }
@@ -267,7 +264,7 @@ export function TransferPanel({ t = fallback, state, reload }: PanelShare): Reac
           <span>{error}</span>
           <span className="dsm-spacer" />
           <button type="button" className="dsm-button" onClick={() => setError(null)}>
-            {t('dismiss')}
+            {t('error.dismiss')}
           </button>
         </p>
       )}
@@ -276,7 +273,7 @@ export function TransferPanel({ t = fallback, state, reload }: PanelShare): Reac
           <span>{notice}</span>
           <span className="dsm-spacer" />
           <button type="button" className="dsm-button" onClick={() => setNotice(null)}>
-            {t('dismiss')}
+            {t('error.dismiss')}
           </button>
         </p>
       )}
@@ -288,10 +285,10 @@ export function TransferPanel({ t = fallback, state, reload }: PanelShare): Reac
 
       <div className="dsm-card">
         <div className="dsm-cardHead">
-          <span className="dsm-cardTitle">{t('exportTitle')}</span>
-          <span className="dsm-hint">{t('selectedCount', { count: selected.length })}</span>
+          <span className="dsm-cardTitle">{t('transfer.export.title')}</span>
+          <span className="dsm-hint">{t('list.selected', { count: selected.length })}</span>
           {filter.active && (
-            <span className="dsm-hint">{t('shownCount', { shown: listed.length, total: sessions.length })}</span>
+            <span className="dsm-hint">{t('list.shown', { shown: listed.length, total: sessions.length })}</span>
           )}
           <span className="dsm-spacer" />
           <button
@@ -303,7 +300,7 @@ export function TransferPanel({ t = fallback, state, reload }: PanelShare): Reac
             onClick={() => setSelected(allSelected ? [] : listed.filter(selectable).map((session) => session.id))}
             disabled={listed.filter(selectable).length === 0}
           >
-            {allSelected ? t('clearAll') : t('selectAll')}
+            {allSelected ? t('list.clear') : t('transfer.export.selectAll')}
           </button>
           <button
             type="button"
@@ -311,10 +308,10 @@ export function TransferPanel({ t = fallback, state, reload }: PanelShare): Reac
             onClick={doExport}
             disabled={busy !== null || selected.length === 0}
           >
-            {busy === 'export' ? t('exporting') : t('exportAction')}
+            {busy === 'export' ? t('transfer.export.running') : t('transfer.export.action')}
           </button>
         </div>
-        <p className="dsm-hint">{t('exportHint')}</p>
+        <p className="dsm-hint">{t('transfer.export.hint')}</p>
 
         {sessions.length > 0 && <SessionFilterBar keys={FILTER_KEYS} filter={filter} t={t} />}
         {/* 一个组都没有（筛空了或库里是空的）时不摆这对按钮：没有可收起的东西。 */}
@@ -322,10 +319,10 @@ export function TransferPanel({ t = fallback, state, reload }: PanelShare): Reac
 
         <SessionListBox fixed>
           {sessions.length === 0 ? (
-            <SessionListEmpty text={t('noSessions')} />
+            <SessionListEmpty text={t('list.empty')} />
           ) : groups.length === 0 ? (
             // 高度固定，空态画在框里（见 styles.ts 的 .dsm-listFixed）
-            <SessionListEmpty text={t('noMatch')} />
+            <SessionListEmpty text={t('list.noMatch')} />
           ) : (
             groups.map(({ group, rows }) => {
               const key = groupKey(group.path)
@@ -368,9 +365,9 @@ export function TransferPanel({ t = fallback, state, reload }: PanelShare): Reac
 
       <div className="dsm-card">
         <div className="dsm-cardHead">
-          <span className="dsm-cardTitle">{t('importTitle')}</span>
+          <span className="dsm-cardTitle">{t('transfer.import.title')}</span>
         </div>
-        <p className="dsm-hint">{t('importHint')}</p>
+        <p className="dsm-hint">{t('transfer.import.hint')}</p>
 
         <div className="dsm-controls">
           {/* 后缀必须与宿主导出的文件名一致（`src/web.ts` 的 `fileName()`）。这里曾经写成
@@ -385,7 +382,7 @@ export function TransferPanel({ t = fallback, state, reload }: PanelShare): Reac
               setPending(null)
             }}
           >
-            <option value="">{t('pickWorkspace')}</option>
+            <option value="">{t('transfer.import.pickWorkspace')}</option>
             {workspaces.map((workspace) => (
               <option key={workspace.id} value={workspace.path}>
                 {pathLabel({ path: workspace.path, title: workspace.title, repo: state?.repos?.[workspace.path] })}
@@ -398,7 +395,7 @@ export function TransferPanel({ t = fallback, state, reload }: PanelShare): Reac
             onClick={openImport}
             disabled={busy !== null || file === null}
           >
-            {t('importAction')}
+            {t('transfer.import.action')}
           </button>
         </div>
 
@@ -410,9 +407,9 @@ export function TransferPanel({ t = fallback, state, reload }: PanelShare): Reac
         {pending !== null && (
           <ConfirmDialog
             t={t}
-            title={t('importDialogTitle')}
-            confirmLabel={t('apply')}
-            busyLabel={t('applying')}
+            title={t('transfer.import.dialogTitle')}
+            confirmLabel={t('transfer.import.apply')}
+            busyLabel={t('transfer.import.applying')}
             busy={busy === 'apply'}
             planning={plan === null && pending.error === null}
             error={pending.error}
@@ -423,7 +420,7 @@ export function TransferPanel({ t = fallback, state, reload }: PanelShare): Reac
             {plan !== null && (
               <>
                 <p className={plan.ok ? 'dsm-ok' : 'dsm-warn'}>
-                  {t('planSummary', { create: createCount, skip: skipCount, bytes: formatBytes(plan.bytes) })}
+                  {t('transfer.import.planSummary', { create: createCount, skip: skipCount, bytes: formatBytes(plan.bytes) })}
                   {plan.error !== undefined ? ` · ${plan.error}` : ''}
                 </p>
                 {plan.note !== undefined && <p className="dsm-hint">{plan.note}</p>}
@@ -435,10 +432,10 @@ export function TransferPanel({ t = fallback, state, reload }: PanelShare): Reac
                 <table className="dsm-table dsm-planTable">
                   <thead>
                     <tr>
-                      <th className="dsm-colAction">{t('colAction')}</th>
-                      <th className="dsm-colSession">{t('colSession')}</th>
-                      <th className="dsm-colCwd">{t('colCwd')}</th>
-                      <th className="dsm-colBytes">{t('colBytes')}</th>
+                      <th className="dsm-colAction">{t('table.action')}</th>
+                      <th className="dsm-colSession">{t('table.session')}</th>
+                      <th className="dsm-colCwd">{t('table.cwd')}</th>
+                      <th className="dsm-colBytes">{t('table.bytes')}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -448,7 +445,7 @@ export function TransferPanel({ t = fallback, state, reload }: PanelShare): Reac
                         <tr key={entry.id}>
                           <td>
                             <span className={`dsm-tag ${entry.action === 'create' ? 'dsm-tagCreate' : 'dsm-tagSkip'}`}>
-                              {entry.action === 'create' ? t('actionCreate') : t('actionSkip')}
+                              {entry.action === 'create' ? t('table.create') : t('table.skip')}
                             </span>
                           </td>
                           <td>

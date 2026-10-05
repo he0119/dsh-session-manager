@@ -36,7 +36,7 @@ import {
   formatStamp,
   useSessionFilter,
 } from './sessionList.tsx'
-import { translateWith, zh, type Translate } from '../logic/locales.ts'
+import type { Translate } from '../logic/locales.ts'
 import { DirectoryPicker } from './DirectoryPicker.tsx'
 import { normalizePickedPath } from '../directory.ts'
 import {
@@ -48,9 +48,6 @@ import {
   type PathRow,
 } from '../logic/planRows.ts'
 import type { PanelShare } from '../types.ts'
-
-/** 没有注入面时的兜底翻译。 */
-const fallback = translateWith(zh as unknown as Record<string, string>)
 
 /** 异常 → 一句话（弹窗正文与横幅共用）。 */
 function reasonOf(cause: unknown): string {
@@ -68,10 +65,10 @@ function isRestore(backup: Pick<BackupSummary, 'kind'>): boolean {
 }
 
 /** 这份备份是哪一类操作留下的（三种各一枚标签）。 */
-function backupKindLabel(backup: Pick<BackupSummary, 'kind'>): 'backupKindMigrate' | 'backupKindDelete' | 'backupKindReplace' {
-  if (backup.kind === 'delete') return 'backupKindDelete'
-  if (backup.kind === 'replace') return 'backupKindReplace'
-  return 'backupKindMigrate'
+function backupKindLabel(backup: Pick<BackupSummary, 'kind'>): 'backup.kind.migrate' | 'backup.kind.delete' | 'backup.kind.replace' {
+  if (backup.kind === 'delete') return 'backup.kind.delete'
+  if (backup.kind === 'replace') return 'backup.kind.replace'
+  return 'backup.kind.migrate'
 }
 
 /** 一次落地之后的结论：复核过没过、备份在哪、要不要重启（原样透出宿主报的三件事）。 */
@@ -154,11 +151,11 @@ function PathField({
         </select>
         {pickerKind !== null && (
           <button type="button" className="dsm-button" onClick={onBrowse}>
-            {t('browse')}
+            {t('migrate.path.browse')}
           </button>
         )}
         <button type="button" className="dsm-button" aria-expanded={manualOpen} onClick={onToggleManual}>
-          {manualOpen ? t('collapse') : t('typePath')}
+          {manualOpen ? t('migrate.path.collapse') : t('migrate.path.type')}
         </button>
       </div>
       {manualOpen && (
@@ -167,7 +164,7 @@ function PathField({
           type="text"
           aria-label={label}
           value={manualValue ?? value}
-          placeholder={t('pathPlaceholder')}
+          placeholder={t('migrate.path.placeholder')}
           onChange={(event) => onChange(event.target.value)}
         />
       )}
@@ -177,7 +174,7 @@ function PathField({
 }
 
 /** 迁移页。 */
-export function MigrationPanel({ t = fallback, state, reload, directory }: PanelShare): React.ReactElement {
+export function MigrationPanel({ t, state, reload, directory }: PanelShare): React.ReactElement {
   const sessions = state?.sessions ?? []
   const workspaces = state?.workspaces ?? []
   // 宿主有没有目录选择器、是哪一种；`null`（含旧宿主没这个字段）时不显示「浏览…」。
@@ -355,7 +352,7 @@ export function MigrationPanel({ t = fallback, state, reload, directory }: Panel
   const browse = async (which: 'from' | 'to'): Promise<void> => {
     const api = directory?.()
     if (pickerKind === null || api === undefined) {
-      setError(t('browseUnavailable'))
+      setError(t('migrate.path.unavailable'))
       return
     }
     if (pickerKind === 'browse') {
@@ -368,7 +365,7 @@ export function MigrationPanel({ t = fallback, state, reload, directory }: Panel
       if (picked === null || picked === '') return
       applyPath(which, picked)
     } catch (cause) {
-      setError(t('browseFailed', { reason: cause instanceof Error ? cause.message : String(cause) }))
+      setError(t('migrate.path.failed', { reason: cause instanceof Error ? cause.message : String(cause) }))
     }
   }
 
@@ -393,22 +390,22 @@ export function MigrationPanel({ t = fallback, state, reload, directory }: Panel
   /**
    * 点「迁移」：开弹窗，同时把只读的迁移计划取回来（`mode: 'plan'`，不落盘）。
    *
-   * 参数不齐时不开口：`needFrom` / `needTo` / `needMigrateSelection` 三句先摆在页面的错误横幅里——
+   * 参数不齐时不开口：`migrate.needFrom` / `migrate.needTo` / `migrate.needSelection` 三句先摆在页面的错误横幅里——
    * 那是"还没到能算计划的地步"，摆进弹窗只会让用户先看一个空框再看到一句抱怨。
    *
    * 计划回来时弹窗可能已经被取消掉了：`current === null` 时原地作废（同「会话」页的删除弹窗）。
    */
   const openMigrate = (): void => {
     if (from.trim() === '') {
-      setError(t('needFrom'))
+      setError(t('migrate.needFrom'))
       return
     }
     if (to.trim() === '') {
-      setError(t('needTo'))
+      setError(t('migrate.needTo'))
       return
     }
     if (pickMode === 'subset' && chosen.length === 0) {
-      setError(t('needMigrateSelection'))
+      setError(t('migrate.needSelection'))
       return
     }
     setError(null)
@@ -443,22 +440,22 @@ export function MigrationPanel({ t = fallback, state, reload, directory }: Panel
           takesEffect: response.takesEffect,
         })
         setNotice(
-          t('migrateDone', {
+          t('migrate.done', {
             sessions: response.preview.sessions.length,
             rewritten: response.rewritten,
             moved: response.moved,
             artifacts:
-              response.artifactsMoved > 0 ? t('migrateArtifactsPart', { count: response.artifactsMoved }) : '',
+              response.artifactsMoved > 0 ? t('migrate.doneArtifacts', { count: response.artifactsMoved }) : '',
           }) +
             ' ' +
-            (response.verified ? t('verifiedPass') : t('verifiedFail')),
+            (response.verified ? t('verify.pass') : t('verify.fail')),
         )
         void reload().then(() => loadBackups())
       },
       (cause) => {
         setBusy(null)
         setPending(null)
-        setError(t('failed', { reason: reasonOf(cause) }))
+        setError(t('error.failed', { reason: reasonOf(cause) }))
       },
     )
   }
@@ -500,7 +497,7 @@ export function MigrationPanel({ t = fallback, state, reload, directory }: Panel
         setRollbackBusy(null)
         setRollbackDialog(null)
         setNotice(
-          t(isRestore(backup) ? 'restoreDone' : 'rollbackDone', {
+          t(isRestore(backup) ? 'backup.restore.done' : 'backup.rollback.done', {
             sessions: response.sessions,
             files: response.restoredFiles,
           }),
@@ -523,7 +520,7 @@ export function MigrationPanel({ t = fallback, state, reload, directory }: Panel
           <span>{error}</span>
           <span className="dsm-spacer" />
           <button type="button" className="dsm-button" onClick={() => setError(null)}>
-            {t('dismiss')}
+            {t('error.dismiss')}
           </button>
         </p>
       )}
@@ -532,16 +529,16 @@ export function MigrationPanel({ t = fallback, state, reload, directory }: Panel
           <span>{notice}</span>
           <span className="dsm-spacer" />
           <button type="button" className="dsm-button" onClick={() => setNotice(null)}>
-            {t('dismiss')}
+            {t('error.dismiss')}
           </button>
         </p>
       )}
 
       <div className="dsm-card">
         <div className="dsm-cardHead">
-          <span className="dsm-cardTitle">{t('migrateTitle')}</span>
+          <span className="dsm-cardTitle">{t('migrate.title')}</span>
         </div>
-        <p className="dsm-hint">{t('migrateHint')}</p>
+        <p className="dsm-hint">{t('migrate.hint')}</p>
 
         {/*
           源/目标各自只有**一个值控件**：下拉框本身就是那个值（`value={from}`/`value={to}`），
@@ -551,8 +548,8 @@ export function MigrationPanel({ t = fallback, state, reload, directory }: Panel
         <div className="dsm-fields">
           <PathField
             t={t}
-            label={t('fromLabel')}
-            placeholder={t('pickSource')}
+            label={t('migrate.from.label')}
+            placeholder={t('migrate.from.pick')}
             rows={sourceRows}
             value={from}
             pickerKind={pickerKind}
@@ -565,12 +562,12 @@ export function MigrationPanel({ t = fallback, state, reload, directory }: Panel
             manualOpen={manual === 'from'}
             onToggleManual={() => setManual((current) => (current === 'from' ? null : 'from'))}
             browser={browserFor('from')}
-            {...(unownedSource ? { manualValue: t('ungroupedSource') } : {})}
+            {...(unownedSource ? { manualValue: t('list.ungrouped') } : {})}
           />
           <PathField
             t={t}
-            label={t('toLabel')}
-            placeholder={t('pickTarget')}
+            label={t('migrate.to.label')}
+            placeholder={t('migrate.to.pick')}
             rows={targetRows}
             value={to}
             pickerKind={pickerKind}
@@ -586,12 +583,12 @@ export function MigrationPanel({ t = fallback, state, reload, directory }: Panel
         </div>
 
         <label className="dsm-field">
-          <span className="dsm-fieldLabel">{t('titleLabel')}</span>
+          <span className="dsm-fieldLabel">{t('migrate.workspaceTitle.label')}</span>
           <input
             className="dsm-input"
             type="text"
             value={title}
-            placeholder={t('titlePlaceholder')}
+            placeholder={t('migrate.workspaceTitle.placeholder')}
             onChange={(event) => setTitle(event.target.value)}
           />
         </label>
@@ -602,35 +599,35 @@ export function MigrationPanel({ t = fallback, state, reload, directory }: Panel
           请求里照样按 true / false 发（见 request()），于是界面上看不见的东西也不会改变行为。
         */}
         {unownedSource ? (
-          <p className="dsm-hint">{t('unownedSourceHint')}</p>
+          <p className="dsm-hint">{t('migrate.from.unownedHint')}</p>
         ) : (
           <div className="dsm-options">
             <label className="dsm-check">
               <input type="checkbox" checked={includeUnowned} onChange={(event) => setIncludeUnowned(event.target.checked)} />
-              <span>{t('includeUnowned')}</span>
+              <span>{t('migrate.includeUnowned')}</span>
             </label>
             <label className="dsm-check">
               <input type="checkbox" checked={includeArtifacts} onChange={(event) => setIncludeArtifacts(event.target.checked)} />
-              <span>{t('includeArtifacts')}</span>
+              <span>{t('migrate.includeArtifacts')}</span>
             </label>
           </div>
         )}
 
         <div className="dsm-field">
-          <span className="dsm-fieldLabel">{t('pickScopeLabel')}</span>
+          <span className="dsm-fieldLabel">{t('migrate.scope.label')}</span>
           <div className="dsm-options">
             <label className="dsm-check">
               <input type="radio" name="dsm-pick" checked={pickMode === 'all'} onChange={() => setPickMode('all')} />
-              <span>{t('allSessions')}</span>
+              <span>{t('migrate.scope.all')}</span>
             </label>
             <label className="dsm-check">
               <input type="radio" name="dsm-pick" checked={pickMode === 'subset'} onChange={() => setPickMode('subset')} />
               <span>
-                {pickMode === 'subset' ? t('selectedCount', { count: chosen.length }) : t('pickSubsetLabel')}
+                {pickMode === 'subset' ? t('list.selected', { count: chosen.length }) : t('migrate.scope.subset')}
               </span>
             </label>
             <span className="dsm-hint">
-              {matching.length > 0 ? t('sourceSessions', { count: matching.length }) : t('sourceSessionsNone')}
+              {matching.length > 0 ? t('migrate.source.count', { count: matching.length }) : t('migrate.source.none')}
             </span>
           </div>
         </div>
@@ -639,21 +636,21 @@ export function MigrationPanel({ t = fallback, state, reload, directory }: Panel
           <>
             <SessionFilterBar keys={[]} filter={filter} t={t} />
             <div className="dsm-options">
-              <span className="dsm-hint">{pickMode === 'all' ? t('pickTickHint') : t('pickSubsetHint')}</span>
+              <span className="dsm-hint">{pickMode === 'all' ? t('migrate.scope.tickHint') : t('migrate.scope.subsetHint')}</span>
               {pickMode === 'subset' && (
                 <>
                   <span className="dsm-spacer" />
                   <button type="button" className="dsm-button" onClick={() => setPicked(matching.map((session) => session.id))}>
-                    {t('selectAllInSource')}
+                    {t('migrate.scope.selectAll')}
                   </button>
                   <button type="button" className="dsm-button" onClick={() => setPicked([])}>
-                    {t('clearPick')}
+                    {t('migrate.scope.clear')}
                   </button>
                 </>
               )}
             </div>
             <SessionListBox fixed>
-              {listed.length === 0 && <SessionListEmpty text={t('noMatch')} />}
+              {listed.length === 0 && <SessionListEmpty text={t('list.noMatch')} />}
               {listed.map((session) => (
                 <SessionRow
                   key={session.id}
@@ -683,7 +680,7 @@ export function MigrationPanel({ t = fallback, state, reload, directory }: Panel
             onClick={openMigrate}
             disabled={busy !== null}
           >
-            {t('migrateAction')}
+            {t('migrate.action')}
           </button>
         </div>
 
@@ -691,11 +688,11 @@ export function MigrationPanel({ t = fallback, state, reload, directory }: Panel
         {effect !== null && (
           <div className="dsm-effect">
             <p className={effect.verified ? 'dsm-ok' : 'dsm-warn'}>
-              {effect.verified ? t('verifiedPass') : t('verifiedFail')}
+              {effect.verified ? t('verify.pass') : t('verify.fail')}
               {effect.backupDir !== undefined ? ` · ${effect.backupDir}` : ''}
             </p>
             <p className={effect.takesEffect === 'immediate' ? 'dsm-hint' : 'dsm-warn'}>
-              {effect.takesEffect === 'immediate' ? t('effectImmediate') : t('effectRestart')}
+              {effect.takesEffect === 'immediate' ? t('effect.immediate') : t('effect.restart')}
             </p>
           </div>
         )}
@@ -705,9 +702,9 @@ export function MigrationPanel({ t = fallback, state, reload, directory }: Panel
       {pending !== null && (
         <ConfirmDialog
           t={t}
-          title={t('migrateDialogTitle')}
-          confirmLabel={t('migrateApply')}
-          busyLabel={t('migrating')}
+          title={t('migrate.dialogTitle')}
+          confirmLabel={t('migrate.apply')}
+          busyLabel={t('migrate.running')}
           busy={busy === 'apply'}
           planning={pending.response === null && pending.error === null}
           error={pending.error}
@@ -718,24 +715,24 @@ export function MigrationPanel({ t = fallback, state, reload, directory }: Panel
           {preview !== null && (
             <>
               <p className={preview.ok ? 'dsm-ok' : 'dsm-warn'}>
-                {t('migrateSummary', {
+                {t('migrate.summary', {
                   sessions: preview.sessions.length,
                   files: preview.files,
                   bytes: formatBytes(preview.bytes),
                 })}
               </p>
               {/* 级联带进来的子智能体要说明白：勾的是一条父会话，清单里却多出几条没勾过的。 */}
-              {preview.cascaded > 0 && <p className="dsm-hint">{t('migrateFamily', { count: preview.cascaded })}</p>}
+              {preview.cascaded > 0 && <p className="dsm-hint">{t('migrate.family', { count: preview.cascaded })}</p>}
               <p className="dsm-hint">
                 {preview.unowned
-                  ? t('migrateProjectDirsUnowned', { projectDirs: preview.sourceProjectDirs.length, to: preview.targetProjectDir })
-                  : t('migrateProjectDirs', { from: preview.sourceProjectDir, to: preview.targetProjectDir })}
+                  ? t('migrate.projectDirsUnowned', { projectDirs: preview.sourceProjectDirs.length, to: preview.targetProjectDir })
+                  : t('migrate.projectDirs', { from: preview.sourceProjectDir, to: preview.targetProjectDir })}
               </p>
 
               {preview.problems.length > 0 && (
                 <div className="dsm-problems">
                   <p className="dsm-warn">
-                    {t('problemsTitle')}（{preview.problems.length}）
+                    {t('problems.title')}（{preview.problems.length}）
                   </p>
                   <ul className="dsm-listPlain">
                     {preview.problems.map((problem) => (
@@ -747,20 +744,20 @@ export function MigrationPanel({ t = fallback, state, reload, directory }: Panel
 
               {planned && (
                 <div className="dsm-registry">
-                  <p className="dsm-fields-label">{t('registryChangeTitle')}</p>
+                  <p className="dsm-fields-label">{t('registry.change.title')}</p>
                   <ul className="dsm-listPlain">
                     {registry === null || registry.unchanged ? (
-                      <li>{t('registryUnchanged')}</li>
+                      <li>{t('registry.unchanged')}</li>
                     ) : (
                       <>
-                        <li>{registry.createdTarget ? t('registryCreateTarget') : t('registryReuseTarget')}</li>
-                        {registry.added.length > 0 && <li>{t('registryAdded', { count: registry.added.length })}</li>}
+                        <li>{registry.createdTarget ? t('registry.create') : t('registry.reuse')}</li>
+                        {registry.added.length > 0 && <li>{t('registry.added', { count: registry.added.length })}</li>}
                         {registry.adoptedFromUnowned.length > 0 && (
-                          <li>{t('registryAdopted', { count: registry.adoptedFromUnowned.length })}</li>
+                          <li>{t('registry.adopted', { count: registry.adoptedFromUnowned.length })}</li>
                         )}
-                        {registry.movedFrom.length > 0 && <li>{t('registryMoved', { count: registry.movedFrom.length })}</li>}
+                        {registry.movedFrom.length > 0 && <li>{t('registry.moved', { count: registry.movedFrom.length })}</li>}
                         {registry.removedSources.length > 0 && (
-                          <li>{t('registryRemoved', { count: registry.removedSources.length })}</li>
+                          <li>{t('registry.removed', { count: registry.removedSources.length })}</li>
                         )}
                       </>
                     )}
@@ -770,9 +767,9 @@ export function MigrationPanel({ t = fallback, state, reload, directory }: Panel
 
               {preview.artifacts !== null && (
                 <p className="dsm-hint">
-                  {t('artifactsPlanned', { count: preview.artifacts.moves })}
+                  {t('artifacts.planned', { count: preview.artifacts.moves })}
                   {preview.artifacts.skipped.length > 0
-                    ? ` · ${t('artifactsSkipped', { count: preview.artifacts.skipped.length })}`
+                    ? ` · ${t('artifacts.skipped', { count: preview.artifacts.skipped.length })}`
                     : ''}
                 </p>
               )}
@@ -800,23 +797,23 @@ export function MigrationPanel({ t = fallback, state, reload, directory }: Panel
 
       <div className="dsm-card">
         <div className="dsm-cardHead">
-          <span className="dsm-cardTitle">{t('backupTitle')}</span>
+          <span className="dsm-cardTitle">{t('backup.title')}</span>
           <span className="dsm-spacer" />
           <button type="button" className="dsm-button" onClick={() => void loadBackups()} disabled={rollbackBusy !== null}>
-            {t('refresh')}
+            {t('page.refresh')}
           </button>
         </div>
-        <p className="dsm-hint">{t('backupHint')}</p>
+        <p className="dsm-hint">{t('backup.hint')}</p>
         {backupRoot !== '' && (
           <p className="dsm-hint">
-            {t('backupRootLabel')}：{backupRoot}
+            {t('backup.rootLabel')}：{backupRoot}
           </p>
         )}
 
         {backupError !== null && <p className="dsm-banner dsm-error">{backupError}</p>}
 
         {backups.length === 0 ? (
-          <p className="dsm-empty">{t('noBackups')}</p>
+          <p className="dsm-empty">{t('backup.empty')}</p>
         ) : (
           <div className="dsm-list">
             {backups.map((backup) => (
@@ -829,7 +826,7 @@ export function MigrationPanel({ t = fallback, state, reload, directory }: Panel
                       {t(backupKindLabel(backup))}
                     </span>
                   </span>
-                  <span className="dsm-hint">{t('backupRow', { sessions: backup.sessions, artifacts: backup.artifacts })}</span>
+                  <span className="dsm-hint">{t('backup.row', { sessions: backup.sessions, artifacts: backup.artifacts })}</span>
                   {(backup.from !== undefined || backup.to !== undefined) && (
                     <span className="dsm-meta" title={backup.dir}>
                       {backup.from ?? '—'} → {backup.to ?? '—'}
@@ -842,7 +839,7 @@ export function MigrationPanel({ t = fallback, state, reload, directory }: Panel
                   onClick={() => openRollback(backup)}
                   disabled={rollbackBusy !== null}
                 >
-                  {t(isRestore(backup) ? 'restoreAction' : 'rollbackAction')}
+                  {t(isRestore(backup) ? 'backup.restore.action' : 'backup.rollback.action')}
                 </button>
               </div>
             ))}
@@ -854,9 +851,9 @@ export function MigrationPanel({ t = fallback, state, reload, directory }: Panel
       {rollbackDialog !== null && (
         <ConfirmDialog
           t={t}
-          title={t(isRestore(rollbackDialog.backup) ? 'restoreDialogTitle' : 'rollbackDialogTitle')}
-          confirmLabel={t(isRestore(rollbackDialog.backup) ? 'restoreConfirm' : 'rollbackConfirm')}
-          busyLabel={t(isRestore(rollbackDialog.backup) ? 'restoring' : 'rollingBack')}
+          title={t(isRestore(rollbackDialog.backup) ? 'backup.restore.dialogTitle' : 'backup.rollback.dialogTitle')}
+          confirmLabel={t(isRestore(rollbackDialog.backup) ? 'backup.restore.confirm' : 'backup.rollback.confirm')}
+          busyLabel={t(isRestore(rollbackDialog.backup) ? 'backup.restore.running' : 'backup.rollback.running')}
           busy={rollbackBusy === rollbackDialog.backup.dir}
           planning={rollbackDialog.plan === null && rollbackDialog.error === null}
           error={rollbackDialog.error}
@@ -867,7 +864,7 @@ export function MigrationPanel({ t = fallback, state, reload, directory }: Panel
           {rollbackDialog.plan !== null && (
             <>
               <p className="dsm-warn">
-                {t(isRestore(rollbackDialog.backup) ? 'restoreActions' : 'rollbackActions', {
+                {t(isRestore(rollbackDialog.backup) ? 'backup.restore.actions' : 'backup.rollback.actions', {
                   count: rollbackDialog.plan.actions.length,
                 })}
               </p>

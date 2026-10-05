@@ -32,7 +32,6 @@ import {
   type SessionSummary,
 } from '../api.ts'
 import { ConfirmDialog } from './ConfirmDialog.tsx'
-import { translateWith, zh } from '../logic/locales.ts'
 import { groupKey, groupSessions, lockedParentOf, nestSessions } from '../logic/groups.ts'
 import { deleteFamilyNote, parentDirNote } from '../logic/planRows.ts'
 import { FILTER_KEYS } from '../logic/sessionFilter.ts'
@@ -49,11 +48,8 @@ import {
 } from './sessionList.tsx'
 import type { PanelShare } from '../types.ts'
 
-/** 没有注入面时的兜底翻译。 */
-const fallback = translateWith(zh as unknown as Record<string, string>)
-
 /** 「会话」分页。 */
-export function ManagePanel({ t = fallback, state, reload }: PanelShare): React.ReactElement {
+export function ManagePanel({ t, state, reload }: PanelShare): React.ReactElement {
   const sessions = state?.sessions ?? []
   const archiveAvailable = state?.archiveAvailable === true
 
@@ -105,7 +101,7 @@ export function ManagePanel({ t = fallback, state, reload }: PanelShare): React.
     const byId = new Map(sessions.map((session) => [session.id, session]))
     return (session: SessionSummary): { tip: string } | undefined => {
       const parent = lockedParentOf(session, byId)
-      return parent === undefined ? undefined : { tip: t('lockedSubagentTip', { name: parent.title ?? parent.id }) }
+      return parent === undefined ? undefined : { tip: t('list.lockedSubagentTip', { name: parent.title ?? parent.id }) }
     }
   }, [sessions, t])
   const selectable = (session: SessionSummary): boolean => lockOf(session) === undefined
@@ -137,8 +133,8 @@ export function ManagePanel({ t = fallback, state, reload }: PanelShare): React.
       setFailed(response.failed)
       if (response.archived.length > 0) {
         setNotice(
-          t(archived ? 'manageArchived' : 'manageUnarchived', { count: response.archived.length }) +
-            ` ${t('manageArchiveImmediate')}`,
+          t(archived ? 'manage.archive.done' : 'manage.archive.undone', { count: response.archived.length }) +
+            ` ${t('manage.archive.immediate')}`,
         )
       }
       if (response.failed.length === 0) setSelected([])
@@ -213,7 +209,7 @@ export function ManagePanel({ t = fallback, state, reload }: PanelShare): React.
           <span>{error}</span>
           <span className="dsm-spacer" />
           <button type="button" className="dsm-button" onClick={() => setError(null)}>
-            {t('dismiss')}
+            {t('error.dismiss')}
           </button>
         </p>
       )}
@@ -222,13 +218,13 @@ export function ManagePanel({ t = fallback, state, reload }: PanelShare): React.
           <span>{notice}</span>
           <span className="dsm-spacer" />
           <button type="button" className="dsm-button" onClick={() => setNotice(null)}>
-            {t('dismiss')}
+            {t('error.dismiss')}
           </button>
         </p>
       )}
       {failed.length > 0 && (
         <p className="dsm-banner dsm-warn">
-          <span>{t('manageArchiveFailed', { count: failed.length })}</span>
+          <span>{t('manage.archive.failed', { count: failed.length })}</span>
         </p>
       )}
       {failed.map((item) => (
@@ -239,10 +235,10 @@ export function ManagePanel({ t = fallback, state, reload }: PanelShare): React.
 
       <div className="dsm-card">
         <div className="dsm-cardHead">
-          <span className="dsm-cardTitle">{t('manageTitle')}</span>
-          <span className="dsm-hint">{t('selectedCount', { count: picked.length })}</span>
+          <span className="dsm-cardTitle">{t('manage.title')}</span>
+          <span className="dsm-hint">{t('list.selected', { count: picked.length })}</span>
           {filter.active && (
-            <span className="dsm-hint">{t('shownCount', { shown: listed.length, total: sessions.length })}</span>
+            <span className="dsm-hint">{t('list.shown', { shown: listed.length, total: sessions.length })}</span>
           )}
           <span className="dsm-spacer" />
           <button
@@ -253,14 +249,14 @@ export function ManagePanel({ t = fallback, state, reload }: PanelShare): React.
             onClick={() => setSelected(listed.filter(selectable).map((session) => session.id))}
             disabled={listed.filter(selectable).length === 0}
           >
-            {t('selectAllSessions')}
+            {t('list.selectAll')}
           </button>
           <button type="button" className="dsm-button" onClick={() => setSelected([])} disabled={picked.length === 0}>
-            {t('clearAll')}
+            {t('list.clear')}
           </button>
         </div>
-        <p className="dsm-hint">{t('manageHint')}</p>
-        {!archiveAvailable && <p className="dsm-hint">{t('manageArchiveUnavailable')}</p>}
+        <p className="dsm-hint">{t('manage.hint')}</p>
+        {!archiveAvailable && <p className="dsm-hint">{t('manage.archive.unavailable')}</p>}
 
         {sessions.length > 0 && <SessionFilterBar keys={FILTER_KEYS} filter={filter} t={t} />}
         {groups.length > 0 && <SessionGroupTools collapse={collapse} t={t} />}
@@ -269,9 +265,9 @@ export function ManagePanel({ t = fallback, state, reload }: PanelShare): React.
             这一页的高度改回去，外层滚动条又能把整个卡片挪动 15px（见 styles.ts 的 .dsm-listFixed）。 */}
         <SessionListBox fixed>
           {sessions.length === 0 ? (
-            <SessionListEmpty text={t('noSessions')} />
+            <SessionListEmpty text={t('list.empty')} />
           ) : groups.length === 0 ? (
-            <SessionListEmpty text={t('noMatch')} />
+            <SessionListEmpty text={t('list.noMatch')} />
           ) : (
             groups.map(({ group, rows }) => {
               const key = groupKey(group.path)
@@ -316,7 +312,7 @@ export function ManagePanel({ t = fallback, state, reload }: PanelShare): React.
             onClick={() => void doArchive(true)}
             disabled={busy !== null || picked.length === 0 || !archiveAvailable}
           >
-            {busy === 'archive' ? t('manageArchiving') : t('manageArchive')}
+            {busy === 'archive' ? t('manage.archive.running') : t('manage.archive.action')}
           </button>
           <button
             type="button"
@@ -324,7 +320,7 @@ export function ManagePanel({ t = fallback, state, reload }: PanelShare): React.
             onClick={() => void doArchive(false)}
             disabled={busy !== null || picked.length === 0 || !archiveAvailable}
           >
-            {busy === 'unarchive' ? t('manageArchiving') : t('manageUnarchive')}
+            {busy === 'unarchive' ? t('manage.archive.running') : t('manage.archive.undo')}
           </button>
           <span className="dsm-spacer" />
           <button
@@ -333,19 +329,19 @@ export function ManagePanel({ t = fallback, state, reload }: PanelShare): React.
             onClick={openDelete}
             disabled={busy !== null || picked.length === 0}
           >
-            {t('manageDelete')}
+            {t('manage.delete.action')}
           </button>
         </div>
-        <p className="dsm-hint">{t('manageDeleteHint')}</p>
+        <p className="dsm-hint">{t('manage.delete.hint')}</p>
       </div>
 
       {/* 删除弹窗：清单与「确认」在同一块地方（见 ConfirmDialog.tsx 的说明）。 */}
       {pending !== null && (
         <ConfirmDialog
           t={t}
-          title={t('manageDeletePlanTitle')}
-          confirmLabel={t('manageDeleteApply')}
-          busyLabel={t('manageDeleting')}
+          title={t('manage.delete.dialogTitle')}
+          confirmLabel={t('manage.delete.apply')}
+          busyLabel={t('manage.delete.running')}
           busy={busy === 'apply'}
           planning={pending.plan === null && pending.error === null}
           error={pending.error}
@@ -366,7 +362,7 @@ export function ManagePanel({ t = fallback, state, reload }: PanelShare): React.
                 </div>
               )}
               <p className="dsm-hint">
-                {t('manageBackupTo', { dir: pending.plan.backupDir ?? pending.plan.preview.backupRoot })}
+                {t('manage.delete.backupTo', { dir: pending.plan.backupDir ?? pending.plan.preview.backupRoot })}
               </p>
               <SessionListBox>
                 {pending.plan.preview.entries.map((entry) => (

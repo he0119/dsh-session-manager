@@ -7,7 +7,7 @@
  * 就是每次都要扫过去的散文（实测三页正文 187 / 382 / 144 字，最长的一段 192 字）。于是按"用到的
  * 时刻"分开：动作页只留决定，词条与边界条件集中到这一页，两处不各写一份口径。
  *
- * 词条**复用行上那几枚标签的文案**（`t('tagSubagent')` / `t('tagSubagentTip')` …）：同一件事在
+ * 词条**复用行上那几枚标签的文案**（`t('tag.subagent')` / `t('tag.subagentTip')` …）：同一件事在
  * 悬浮提示与这一页里必须是同一句话，各写一份就会漂。这一页只补标签没说到的部分（"可见"这一类、
  * 每页做什么、数据从哪来、常见疑问）。
  *
@@ -19,43 +19,39 @@
 
 import * as React from 'react'
 
-import { translateWith, zh } from '../logic/locales.ts'
 import type { PanelShare } from '../types.ts'
-
-/** 没有注入面时的兜底翻译。 */
-const fallback = translateWith(zh as unknown as Record<string, string>)
 
 /**
  * 分类词典：词与解释都取自行上那几枚标签（`tagX` 是词、`tagXTip` 是解释），只有"可见"是新写的。
  * 顺序按宿主的判定顺序走（子智能体 → 空白 → 已归档）再补上跨类的两类（活动中、未分组）。
  */
 const CATEGORIES = [
-  ['catVisible', 'catVisibleTip'],
-  ['tagSubagent', 'tagSubagentTip'],
-  ['tagBlank', 'tagBlankTip'],
-  ['tagArchived', 'tagArchivedTip'],
-  ['tagLive', 'tagLiveTip'],
-  ['ungroupedSource', 'ungroupedTip'],
+  ['help.categories.visible', 'help.categories.visibleTip'],
+  ['tag.subagent', 'tag.subagentTip'],
+  ['tag.blank', 'tag.blankTip'],
+  ['tag.archived', 'tag.archivedTip'],
+  ['tag.live', 'tag.liveTip'],
+  ['list.ungrouped', 'list.ungroupedTip'],
 ] as const
 
 /** 四个分页各管什么：与页签同一个顺序（会话 → 迁移 → 传输 → 同步）。 */
 const TAB_LINES = [
-  ['tabManage', 'helpTabManage'],
-  ['tabMigrate', 'helpTabMigrate'],
-  ['tabTransfer', 'helpTabTransfer'],
-  ['tabSync', 'helpTabSync'],
+  ['page.tab.manage', 'help.tabs.manage'],
+  ['page.tab.migrate', 'help.tabs.migrate'],
+  ['page.tab.transfer', 'help.tabs.transfer'],
+  ['page.tab.sync', 'help.tabs.sync'],
 ] as const
 
 /** 常见疑问：问答同上一条同一个形状（dt 问、dd 答）。会碰什么盘的独有内容收在这里。 */
 const FAQ = [
-  ['faqUnownedQ', 'faqUnownedA'],
-  ['faqDeletedQ', 'faqDeletedA'],
-  ['faqRestartQ', 'faqRestartA'],
-  ['faqBackupQ', 'faqBackupA'],
-  ['faqFamilyQ', 'faqFamilyA'],
-  ['faqExportQ', 'faqExportA'],
-  ['faqForkQ', 'faqForkA'],
-  ['faqPasswordQ', 'faqPasswordA'],
+  ['help.faq.unownedQ', 'help.faq.unownedA'],
+  ['help.faq.deletedQ', 'help.faq.deletedA'],
+  ['help.faq.restartQ', 'help.faq.restartA'],
+  ['help.faq.backupQ', 'help.faq.backupA'],
+  ['help.faq.familyQ', 'help.faq.familyA'],
+  ['help.faq.exportQ', 'help.faq.exportA'],
+  ['help.faq.forkQ', 'help.faq.forkA'],
+  ['help.faq.passwordQ', 'help.faq.passwordA'],
 ] as const
 
 /** 一张卡片：标题 + 正文，动作页那些卡片同一个外壳。 */
@@ -77,12 +73,12 @@ function HelpSection({
 }
 
 /** 「说明」分页。 */
-export function HelpPanel({ t = fallback, state }: PanelShare): React.ReactElement {
+export function HelpPanel({ t, state }: PanelShare): React.ReactElement {
   return (
     <>
-      <p className="dsm-hint">{t('helpHint')}</p>
+      <p className="dsm-hint">{t('help.hint')}</p>
 
-      <HelpSection title={t('helpCategoriesTitle')}>
+      <HelpSection title={t('help.categories.title')}>
         <dl className="dsm-defs">
           {CATEGORIES.map(([term, tip]) => (
             <React.Fragment key={term}>
@@ -91,10 +87,10 @@ export function HelpPanel({ t = fallback, state }: PanelShare): React.ReactEleme
             </React.Fragment>
           ))}
         </dl>
-        <p className="dsm-hint">{t('helpCategoriesNote')}</p>
+        <p className="dsm-hint">{t('help.categories.note')}</p>
       </HelpSection>
 
-      <HelpSection title={t('helpTabsTitle')}>
+      <HelpSection title={t('help.tabs.title')}>
         <dl className="dsm-defs">
           {TAB_LINES.map(([tab, line]) => (
             <React.Fragment key={tab}>
@@ -105,24 +101,24 @@ export function HelpPanel({ t = fallback, state }: PanelShare): React.ReactEleme
         </dl>
       </HelpSection>
 
-      <HelpSection title={t('helpWhereTitle')}>
+      <HelpSection title={t('help.where.title')}>
         <dl className="dsm-defs">
-          <dt>{t('helpWhereLibrary')}</dt>
+          <dt>{t('help.where.library')}</dt>
           <dd>
             <span className="dsm-path">{state?.sessionsRoot ?? ''}</span>
             <br />
-            {t('helpWhereLibraryText')}
+            {t('help.where.libraryText')}
           </dd>
-          <dt>{t('helpWhereRegistry')}</dt>
+          <dt>{t('help.where.registry')}</dt>
           <dd>
             <span className="dsm-path">{state?.registryPath ?? ''}</span>
             <br />
-            {t('helpWhereRegistryText')}
+            {t('help.where.registryText')}
           </dd>
         </dl>
       </HelpSection>
 
-      <HelpSection title={t('helpFaqTitle')}>
+      <HelpSection title={t('help.faq.title')}>
         <dl className="dsm-defs dsm-defsFaq">
           {FAQ.map(([question, answer]) => (
             <React.Fragment key={question}>

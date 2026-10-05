@@ -76,10 +76,10 @@ export function DirectoryPicker({ t, api, startPath, onPick, onClose }: Director
   return (
     <div className="dsm-browser">
       <div className="dsm-browserHead">
-        <span className="dsm-fieldLabel">{t('browseTitle')}</span>
+        <span className="dsm-fieldLabel">{t('dirPicker.title')}</span>
         <span className="dsm-spacer" />
         <button type="button" className="dsm-button" onClick={() => void open('')} disabled={busy}>
-          {t('dirHome')}
+          {t('dirPicker.home')}
         </button>
         <button type="button" className="dsm-button" onClick={onClose}>
           {t('cancel')}
@@ -107,14 +107,14 @@ export function DirectoryPicker({ t, api, startPath, onPick, onClose }: Director
         {listing?.path ?? startPath}
       </p>
 
-      {error !== null && <p className="dsm-banner dsm-error">{t('failed', { reason: error })}</p>}
+      {error !== null && <p className="dsm-banner dsm-error">{t('error.failed', { reason: error })}</p>}
 
-      {busy && <p className="dsm-hint">{t('loading')}</p>}
+      {busy && <p className="dsm-hint">{t('page.loading')}</p>}
 
       {!busy && listing !== null && (
         <>
           {listing.entries.length === 0 ? (
-            <p className="dsm-empty">{t('dirEmpty')}</p>
+            <p className="dsm-empty">{t('dirPicker.empty')}</p>
           ) : (
             <div className="dsm-list dsm-dirList">
               {listing.entries.map((entry) => (
@@ -130,7 +130,7 @@ export function DirectoryPicker({ t, api, startPath, onPick, onClose }: Director
               ))}
             </div>
           )}
-          {listing.truncated && <p className="dsm-hint">{t('dirTruncated')}</p>}
+          {listing.truncated && <p className="dsm-hint">{t('dirPicker.truncated')}</p>}
         </>
       )}
 
@@ -141,9 +141,9 @@ export function DirectoryPicker({ t, api, startPath, onPick, onClose }: Director
           onClick={() => onPick(normalizePickedPath(listing?.path ?? ''))}
           disabled={busy || listing === null}
         >
-          {t('dirPick')}
+          {t('dirPicker.pick')}
         </button>
-        <span className="dsm-hint">{t('dirPickHint')}</span>
+        <span className="dsm-hint">{t('dirPicker.hint')}</span>
       </div>
     </div>
   )

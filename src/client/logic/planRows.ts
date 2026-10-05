@@ -20,7 +20,7 @@
  * @module dsh-session-manager/client/planRows
  */
 
-import type { Translate } from './locales.ts'
+import type { SessionManagerKey, Translate } from './locales.ts'
 
 /** 判断 cwd 这一格只用得上这三个字段。 */
 export interface CwdSubject {
@@ -202,12 +202,12 @@ export interface ProjectLabel {
  * （身份最后一段——未登记目录原来拿整条本机路径当名字，机器特有的绝对路径对认项目没有帮助）。
  *
  * @param subject 路径、标题与身份。
- * @param t 翻译（没有 cwd 的那一组用 `noCwdGroup`）。
+ * @param t 翻译（没有 cwd 的那一组用 `list.noCwdGroup`）。
  * @returns 名字与悬浮提示。
  */
 export function projectLabel(subject: ProjectSubject, t: Translate): ProjectLabel {
   const { path, title, repo } = subject
-  const name = title ?? (path === '' ? t('noCwdGroup') : repo === undefined ? path : repoName(repo))
+  const name = title ?? (path === '' ? t('list.noCwdGroup') : repo === undefined ? path : repoName(repo))
   const lines = [repo, path].filter((line): line is string => line !== undefined && line !== '')
   return {
     name,
@@ -250,7 +250,7 @@ export interface PathRow extends ProjectSubject {
 /** 一行候选的文案：身份（或标题）+ 路径 + 库里的条数（有则带）。 */
 export function optionLabel(row: PathRow, t: Translate): string {
   const head = row.label ?? pathLabel(row)
-  return row.count === undefined ? head : `${head} — ${t('sessionsInDir', { count: row.count })}`
+  return row.count === undefined ? head : `${head} — ${t('list.sessionsInDir', { count: row.count })}`
 }
 
 /**
@@ -296,7 +296,7 @@ export function migrationSourceRows(
     options.push({ path, count, ...(repos[path] === undefined ? {} : { repo: repos[path] }) })
   }
   const unowned = unownedSessions(sessions).length
-  if (unowned > 0) options.push({ path: UNOWNED_SOURCE, label: t('ungroupedSource'), count: unowned })
+  if (unowned > 0) options.push({ path: UNOWNED_SOURCE, label: t('list.ungrouped'), count: unowned })
   return options
 }
 
@@ -329,7 +329,7 @@ function referentName(referent: { readonly id: string; readonly title?: string }
 function familyNote(
   subject: FamilySubject,
   t: Translate,
-  keys: { readonly text: string; readonly tip: string },
+  keys: { readonly text: SessionManagerKey; readonly tip: SessionManagerKey },
 ): { text: string; tip: string } | undefined {
   if (subject.via === undefined) return undefined
   return { text: t(keys.text), tip: t(keys.tip, { name: referentName(subject.via) }) }
@@ -348,7 +348,7 @@ function familyNote(
  * @returns 标签文案与悬浮提示；点名的那几条自己没有 `via`，于是 `undefined`（不挂标签）。
  */
 export function deleteFamilyNote(subject: FamilySubject, t: Translate): { text: string; tip: string } | undefined {
-  return familyNote(subject, t, { text: 'manageDeleteVia', tip: 'manageDeleteViaTip' })
+  return familyNote(subject, t, { text: 'manage.delete.via', tip: 'manage.delete.viaTip' })
 }
 
 /**
@@ -358,7 +358,7 @@ export function deleteFamilyNote(subject: FamilySubject, t: Translate): { text: 
  * 错话，而这两张清单里的 `via` 是同一个字段（宿主两张计划各自的 `via`）。
  */
 export function migrateFamilyNote(subject: FamilySubject, t: Translate): { text: string; tip: string } | undefined {
-  return familyNote(subject, t, { text: 'migrateVia', tip: 'migrateViaTip' })
+  return familyNote(subject, t, { text: 'migrate.via', tip: 'migrate.viaTip' })
 }
 
 /**
@@ -378,7 +378,7 @@ export function parentDirNote(
 ): { text: string; tip: string } | undefined {
   const path = row.parentPath
   if (path === undefined || path === '') return undefined
-  return { text: t('tagParentElsewhere'), tip: t('tagParentElsewhereTip', { path }) }
+  return { text: t('manage.tag.parentElsewhere'), tip: t('manage.tag.parentElsewhereTip', { path }) }
 }
 
 /**

@@ -43,16 +43,13 @@ import {
 import { ConfirmDialog } from './ConfirmDialog.tsx'
 import { groupKey } from '../logic/groups.ts'
 import { WorkspaceIcon } from './icons.tsx'
-import { translateWith, zh, type Translate } from '../logic/locales.ts'
+import type { SessionManagerKey, Translate } from '../logic/locales.ts'
 import { projectLabel, sessionLabel, type SessionLabel } from '../logic/planRows.ts'
 import { ProgressBar } from './ProgressBar.tsx'
-import { formatBytes, sessionTags } from './sessionList.tsx'
+import { formatBytes, sessionTags, type TagCopy } from './sessionList.tsx'
 import { SyncConfigForm } from './SyncConfigForm.tsx'
 import { groupSyncRows, syncProjectOf, syncPullTip, type SyncGroup, type SyncSide } from '../logic/syncGroups.ts'
 import type { PanelShare } from '../types.ts'
-
-/** 没有注入面时的兜底翻译。 */
-const fallback = translateWith(zh as unknown as Record<string, string>)
 
 /** 异常 → 一句话（弹窗正文与横幅共用，同迁移页）。 */
 function reasonOf(cause: unknown): string {
@@ -88,19 +85,19 @@ interface SyncRow {
 function syncWhy(entry: SyncRow, t: Translate): string {
   switch (entry.code) {
     case 'missing':
-      return t(entry.action === 'create' ? 'syncCodeMissingPull' : 'syncCodeMissingPush')
+      return t(entry.action === 'create' ? 'sync.why.missingPull' : 'sync.why.missingPush')
     case 'local-ahead':
-      return t('syncCodeLocalAhead')
+      return t('sync.why.localAhead')
     case 'local-newer':
-      return t('syncCodeLocalNewer')
+      return t('sync.why.localNewer')
     case 'remote-ahead':
-      return t('syncCodeRemoteAhead', { machine: entry.machine ?? '' })
+      return t('sync.why.remoteAhead', { machine: entry.machine ?? '' })
     case 'diverged':
-      return t('syncCodeDiverged', { machine: entry.machine ?? '' })
+      return t('sync.why.diverged', { machine: entry.machine ?? '' })
     case 'no-mapping':
-      return t('syncCodeNoMapping', { from: entry.fromCwd ?? '' })
+      return t('sync.why.noMapping', { from: entry.fromCwd ?? '' })
     case 'missing-target':
-      return t('syncCodeMissingTarget', { to: entry.toCwd ?? '' })
+      return t('sync.why.missingTarget', { to: entry.toCwd ?? '' })
     default:
       return String(entry.code)
   }
@@ -116,15 +113,15 @@ function syncWhy(entry: SyncRow, t: Translate): string {
 function syncTag(entry: SyncRow, t: Translate): string {
   switch (entry.code) {
     case 'remote-ahead':
-      return t('syncTagRemoteAhead')
+      return t('sync.tag.remoteAhead')
     case 'diverged':
-      return t('syncTagDiverged')
+      return t('sync.tag.diverged')
     case 'local-newer':
-      return t('syncTagLocalNewer')
+      return t('sync.tag.localNewer')
     case 'no-mapping':
-      return t('syncTagNoMapping')
+      return t('sync.tag.noMapping')
     case 'missing-target':
-      return t('syncTagMissingTarget')
+      return t('sync.tag.missingTarget')
     default:
       return syncWhy(entry, t)
   }
@@ -137,16 +134,16 @@ function syncTag(entry: SyncRow, t: Translate): string {
  * （「覆盖本机」），title 说清"谁更新、会拿谁换掉本机这份"。码认不出来就退回标签本身（与 `syncWhy()`
  * 同一条兜底规则：宁可挤，也不显示成一个生词）。
  */
-function replaceCodeKey(code: SyncPullEntry['code']): string {
+function replaceCodeKey(code: SyncPullEntry['code']): SessionManagerKey {
   switch (code) {
     case 'remote-ahead':
-      return 'syncCodeReplaceAhead'
+      return 'sync.why.replaceAhead'
     case 'remote-newer':
-      return 'syncCodeReplaceNewer'
+      return 'sync.why.replaceNewer'
     case 'blank-local':
-      return 'syncCodeReplaceBlank'
+      return 'sync.why.replaceBlank'
     default:
-      return 'syncTagReplace'
+      return 'sync.tag.replace'
   }
 }
 
@@ -161,11 +158,11 @@ function replaceCodeKey(code: SyncPullEntry['code']): string {
 function pushTag(entry: SyncPushEntry, t: Translate): { label: string; title: string; repush: boolean } {
   switch (entry.code) {
     case 'local-ahead':
-      return { label: t('syncTagRepush'), title: t('syncCodeLocalAhead'), repush: true }
+      return { label: t('sync.tag.repush'), title: t('sync.why.localAhead'), repush: true }
     case 'local-newer':
-      return { label: t('syncTagLocalNewer'), title: t('syncCodeLocalNewer'), repush: true }
+      return { label: t('sync.tag.localNewer'), title: t('sync.why.localNewer'), repush: true }
     default:
-      return { label: t('syncTagPush'), title: t('syncCodeMissingPush'), repush: false }
+      return { label: t('sync.tag.push'), title: t('sync.why.missingPush'), repush: false }
   }
 }
 
@@ -209,7 +206,7 @@ function PlanGroupHead({
             </span>
           )}
           <span className="dsm-groupCounts">
-            <span className="dsm-hint">{t('sessionsInDir', { count: group.rows.length })}</span>
+            <span className="dsm-hint">{t('list.sessionsInDir', { count: group.rows.length })}</span>
           </span>
         </span>
       </th>
@@ -231,7 +228,7 @@ function PlanGroupHead({
  * @param session `/state` 里那条会话；本机没有就是 `undefined`。
  * @returns 要挂的标签（字典键 + 说明键），顺序与会话列表一致。
  */
-function typeTagsOf(session: SessionSummary | undefined): Array<{ key: string; tip: string }> {
+function typeTagsOf(session: SessionSummary | undefined): TagCopy[] {
   return session === undefined ? [] : sessionTags(session, { ungrouped: false })
 }
 
@@ -253,7 +250,7 @@ function SessionCell({
 }: {
   label: SessionLabel
   tip: string
-  tags: Array<{ key: string; tip: string }>
+  tags: TagCopy[]
   t: Translate
 }): React.ReactElement {
   return (
@@ -277,22 +274,22 @@ function SessionCell({
  *
  * `done` 是**已经做完**的条数、事件发在开始处理下一条之前，所以正在处理的是第 `done + 1` 条——与
  * 进度条的 `current` 同一个数，两处必须一起变。读远端索引是一次网络往返，没有"第几条"可讲，所以那
- * 一段是固定的一句（`syncPreparing`）。
+ * 一段是固定的一句（`sync.progress.preparing`）。
  */
 function progressTextOf(t: Translate, progress: SyncProgressEvent): string {
   switch (progress.phase) {
     case 'scan':
-      return t('syncScanning', { current: progress.done + 1, total: progress.total })
+      return t('sync.progress.scanning', { current: progress.done + 1, total: progress.total })
     case 'repo':
-      return t('syncMatchingRepos', { current: progress.done + 1, total: progress.total })
+      return t('sync.progress.matchingRepos', { current: progress.done + 1, total: progress.total })
     case 'compare':
-      return t('syncComparing', { current: progress.done + 1, total: progress.total })
+      return t('sync.progress.comparing', { current: progress.done + 1, total: progress.total })
     case 'remote':
-      return t('syncPreparing')
+      return t('sync.progress.preparing')
     case 'pull':
-      return t('syncPulling', { current: progress.done + 1, total: progress.total })
+      return t('sync.progress.pulling', { current: progress.done + 1, total: progress.total })
     case 'push':
-      return t('syncPushing', { current: progress.done + 1, total: progress.total })
+      return t('sync.progress.pushing', { current: progress.done + 1, total: progress.total })
   }
 }
 
@@ -318,13 +315,13 @@ function ProgressBlock({
       {progress.total > 0 && <ProgressBar current={progress.done + 1} total={progress.total} label={text} />}
       <p className="dsm-hint">{text}</p>
       {progress.label === undefined ? null : <p className="dsm-rowTitle">{progress.label}</p>}
-      {writing && <p className="dsm-hint">{t('syncProgressNote')}</p>}
+      {writing && <p className="dsm-hint">{t('sync.progress.note')}</p>}
     </>
   )
 }
 
 /** 同步页。 */
-export function SyncPanel({ t = fallback, state, reload }: PanelShare): React.ReactElement {
+export function SyncPanel({ t, state, reload }: PanelShare): React.ReactElement {
   /** 最近一次计划或结果：映射表的远端候选与弹窗正文都读它（关掉弹窗之后候选还得在）。 */
   const [sync, setSync] = React.useState<SyncResponse | null>(null)
   /** 同步弹窗开着吗（`plan` = 正在算计划、`apply` = 正在落地）。 */
@@ -366,7 +363,7 @@ export function SyncPanel({ t = fallback, state, reload }: PanelShare): React.Re
       (cause) => {
         setBusy(null)
         setDialog(null)
-        setError(t('failed', { reason: reasonOf(cause) }))
+        setError(t('error.failed', { reason: reasonOf(cause) }))
       },
     )
   }
@@ -390,18 +387,18 @@ export function SyncPanel({ t = fallback, state, reload }: PanelShare): React.Re
         setFailures(result.problems)
         if (result.pulled.length > 0 || result.pushed.length > 0) {
           setNotice(
-            t('syncApplied', {
+            t('sync.applied', {
               pulled: result.pulled.length,
               pushed: result.pushed.length,
               bytesIn: formatBytes(result.bytesIn),
               bytesOut: formatBytes(result.bytesOut),
             }) +
               // 覆盖本机原来那份是这次同步里唯一"本机内容被换掉"的部分，值得单独说一句（旧的进备份了）。
-              (result.replaced.length === 0 ? '' : ` ${t('syncAppliedReplaced', { count: result.replaced.length })}`) +
+              (result.replaced.length === 0 ? '' : ` ${t('sync.appliedReplaced', { count: result.replaced.length })}`) +
               // 拉取来的会话进没进宿主内存里的那份注册表：这句只在真的有东西落盘时才有意义。
               (result.pulled.length === 0
                 ? ''
-                : ` ${result.takesEffect === 'immediate' ? t('effectImmediate') : t('effectRestart')}`),
+                : ` ${result.takesEffect === 'immediate' ? t('effect.immediate') : t('effect.restart')}`),
           )
         }
         // 拉取的落到本机库里了：列表与工作区归属都要重读（推的那一侧不改本机任何东西）。
@@ -411,7 +408,7 @@ export function SyncPanel({ t = fallback, state, reload }: PanelShare): React.Re
         setBusy(null)
         setDialog(null)
         setProgress(null)
-        setError(t('failed', { reason: reasonOf(cause) }))
+        setError(t('error.failed', { reason: reasonOf(cause) }))
       },
     )
   }
@@ -472,7 +469,7 @@ export function SyncPanel({ t = fallback, state, reload }: PanelShare): React.Re
           <span>{error}</span>
           <span className="dsm-spacer" />
           <button type="button" className="dsm-button" onClick={() => setError(null)}>
-            {t('dismiss')}
+            {t('error.dismiss')}
           </button>
         </p>
       )}
@@ -481,7 +478,7 @@ export function SyncPanel({ t = fallback, state, reload }: PanelShare): React.Re
           <span>{notice}</span>
           <span className="dsm-spacer" />
           <button type="button" className="dsm-button" onClick={() => setNotice(null)}>
-            {t('dismiss')}
+            {t('error.dismiss')}
           </button>
         </p>
       )}
@@ -494,20 +491,20 @@ export function SyncPanel({ t = fallback, state, reload }: PanelShare): React.Re
 
       <div className="dsm-card">
         <div className="dsm-cardHead">
-          <span className="dsm-cardTitle">{t('syncTitle')}</span>
+          <span className="dsm-cardTitle">{t('sync.title')}</span>
           {syncInfo !== null && (
-            <span className="dsm-hint">{t('syncWhere', { url: syncInfo.url })}</span>
+            <span className="dsm-hint">{t('sync.where', { url: syncInfo.url })}</span>
           )}
           {syncInfo !== null && <span className="dsm-spacer" />}
           {syncInfo !== null && (
             <button type="button" className="dsm-button dsm-primary" onClick={openSync} disabled={busy !== null}>
-              {t('syncAction')}
+              {t('sync.action')}
             </button>
           )}
         </div>
         {/* 没配置同步时只留一句话：摆一个点了没反应的按钮比不摆更糟（与「宿主没有归档能力」同一条口径）。 */}
         <p className="dsm-hint">
-          {syncInfo === null ? t('syncOffHint') : t('syncHint', { mappings: syncInfo.mappings })}
+          {syncInfo === null ? t('sync.offHint') : t('sync.hint', { mappings: syncInfo.mappings })}
         </p>
         {/* 配置表单就在「同步」旁边：改完 URL 立刻能同步一次。宿主没有设置接缝时这一块自己说明。 */}
         <SyncConfigForm
@@ -525,9 +522,9 @@ export function SyncPanel({ t = fallback, state, reload }: PanelShare): React.Re
         <ConfirmDialog
           t={t}
           // 落地那一段标题也换掉：这时候已经不是"将要"了，正文里正跑着进度。
-          title={t(busy === 'apply' ? 'syncRunning' : 'syncDialogTitle')}
-          confirmLabel={t('syncApply')}
-          busyLabel={t('syncBusy')}
+          title={t(busy === 'apply' ? 'sync.running' : 'sync.dialogTitle')}
+          confirmLabel={t('sync.applyAction')}
+          busyLabel={t('sync.busy')}
           busy={busy === 'apply'}
           planning={planning}
           // 预演那几秒不是在空等：先扫本机、再读远端索引、最后逐条比对内容。算到哪一步摆哪一步的进度
@@ -540,39 +537,39 @@ export function SyncPanel({ t = fallback, state, reload }: PanelShare): React.Re
         {/* 落地：前面三个阶段（算计划）与后面两段（拉取 / 推送）报的是同一套事件，画法也一样。 */}
         {busy === 'apply' &&
           (progress === null ? (
-            <p className="dsm-hint">{t('syncPreparing')}</p>
+            <p className="dsm-hint">{t('sync.progress.preparing')}</p>
           ) : (
             <ProgressBlock t={t} progress={progress} />
           ))}
         {busy !== 'apply' && !planning && sync !== null && syncPlan !== null && (
           <div>
             <p className={syncPlan.ok && sync.problems.length === 0 ? 'dsm-ok' : 'dsm-warn'}>
-              {t('syncSummary', {
+              {t('sync.summary', {
                 pull: syncPlan.pullIds.length,
                 push: syncPlan.pushIds.length,
                 local: syncPlan.localCount,
                 remote: syncPlan.remoteCount,
               })}
-              {syncPlan.machines.length > 0 ? ` · ${t('syncMachines', { machines: syncPlan.machines.join('、') })}` : ''}
+              {syncPlan.machines.length > 0 ? ` · ${t('sync.machines', { machines: syncPlan.machines.join('、') })}` : ''}
             </p>
             {/* 空白会话不进那三张表：它们的去处只有这一句（没有内容可同步，也没有"为什么不动"可讲）。 */}
-            {syncBlank > 0 && <p className="dsm-hint">{t('syncSkippedBlank', { count: syncBlank })}</p>}
+            {syncBlank > 0 && <p className="dsm-hint">{t('sync.skippedBlank', { count: syncBlank })}</p>}
             {sync.problems.map((problem) => (
               <p key={problem} className="dsm-warn">
                 {problem}
               </p>
             ))}
-            {syncClean && <p className="dsm-ok">{t('syncNothing')}</p>}
+            {syncClean && <p className="dsm-ok">{t('sync.nothing')}</p>}
 
             {syncPulls.length > 0 && (
               <>
-                <p className="dsm-hint">{t('syncPullHead', { count: syncPulls.length })}</p>
+                <p className="dsm-hint">{t('sync.pullHead', { count: syncPulls.length })}</p>
                 <table className="dsm-table dsm-planTable dsm-syncPlanTable">
                   <thead>
                     <tr>
-                      <th className="dsm-colAction">{t('colAction')}</th>
-                      <th className="dsm-colSession">{t('colSession')}</th>
-                      <th className="dsm-colBytes">{t('colBytes')}</th>
+                      <th className="dsm-colAction">{t('table.action')}</th>
+                      <th className="dsm-colSession">{t('table.session')}</th>
+                      <th className="dsm-colBytes">{t('table.bytes')}</th>
                     </tr>
                   </thead>
                   {pullGroups.map((group) => (
@@ -589,9 +586,9 @@ export function SyncPanel({ t = fallback, state, reload }: PanelShare): React.Re
                             <td>
                               <span
                                 className={`dsm-tag ${replace ? 'dsm-tagSkip' : 'dsm-tagCreate'}`}
-                                title={t(replace ? replaceCodeKey(entry.code) : 'syncCodeMissingPull')}
+                                title={t(replace ? replaceCodeKey(entry.code) : 'sync.why.missingPull')}
                               >
-                                {t(replace ? 'syncTagReplace' : 'syncTagPull')}
+                                {t(replace ? 'sync.tag.replace' : 'sync.tag.pull')}
                               </span>
                             </td>
                             <SessionCell
@@ -612,13 +609,13 @@ export function SyncPanel({ t = fallback, state, reload }: PanelShare): React.Re
 
             {syncPushes.length > 0 && (
               <>
-                <p className="dsm-hint">{t('syncPushHead', { count: syncPushes.length })}</p>
+                <p className="dsm-hint">{t('sync.pushHead', { count: syncPushes.length })}</p>
                 <table className="dsm-table dsm-planTable dsm-syncPlanTable">
                   <thead>
                     <tr>
-                      <th className="dsm-colAction">{t('colAction')}</th>
-                      <th className="dsm-colSession">{t('colSession')}</th>
-                      <th className="dsm-colBytes">{t('colBytes')}</th>
+                      <th className="dsm-colAction">{t('table.action')}</th>
+                      <th className="dsm-colSession">{t('table.session')}</th>
+                      <th className="dsm-colBytes">{t('table.bytes')}</th>
                     </tr>
                   </thead>
                   {pushGroups.map((group) => (
@@ -647,7 +644,7 @@ export function SyncPanel({ t = fallback, state, reload }: PanelShare): React.Re
 
             {syncKept.length > 0 && (
               <>
-                <p className="dsm-hint">{t('syncKeptHead', { count: syncKept.length })}</p>
+                <p className="dsm-hint">{t('sync.keptHead', { count: syncKept.length })}</p>
                 {/* 与拉取 / 推送两张表同一种画法：状态列放标签、会话单独一列——挤成一行同色的说明时，
                     状态与会话名分不出来（用户截图报的）。整句仍在标签的 title 上。
                     第三列是**远端是哪台机器**：分组之后路径已经在组头上（缺映射那类给的就是远端
@@ -655,9 +652,9 @@ export function SyncPanel({ t = fallback, state, reload }: PanelShare): React.Re
                 <table className="dsm-table dsm-planTable dsm-syncPlanTable dsm-keptTable">
                   <thead>
                     <tr>
-                      <th className="dsm-colAction">{t('colAction')}</th>
-                      <th className="dsm-colSession">{t('colSession')}</th>
-                      <th className="dsm-colMachine">{t('colMachine')}</th>
+                      <th className="dsm-colAction">{t('table.action')}</th>
+                      <th className="dsm-colSession">{t('table.session')}</th>
+                      <th className="dsm-colMachine">{t('table.machine')}</th>
                     </tr>
                   </thead>
                   {keptGroups.map((group) => (

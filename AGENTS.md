@@ -86,8 +86,10 @@ pnpm typecheck && pnpm build && pnpm test && pnpm check:package
 - 浏览器半侧只 `require` **平台基线模块**：`react`、`react/jsx-runtime`、官方控件库
   `@deepseek-ai/dsh-client-ui-primitives`——这三个在 `tsdown.config.ts` 的 `CLIENT_EXTERNALS` 里保持
   外置，其余内联。控件改用官方控件库（peer 与 devDep 已接线，手写控件逐步替换）；要引非基线模块
-  必须在 `dsh.client.external` 里点名。基线模块的 API 变化由 `peerDependencies` 的版本范围拦在激活，
-  不会静默走形；`Slot` 条目渲染抛错只会留下一个空 `div`，所以渲染路径上别做会抛的事。
+  必须在 `dsh.client.external` 里点名。**只 import 类型不算**：`verbatimModuleSyntax` 下类型导入会被
+  完全擦除，产物里一个 `require` 都不会多（`test/client.test.mjs` 按产物文本核这一条）。基线模块的
+  API 变化由 `peerDependencies` 的版本范围拦在激活，不会静默走形；`Slot` 条目渲染抛错只会留下一个
+  空 `div`，所以渲染路径上别做会抛的事。
 - 颜色只用宿主 `Theme` 检查面列出的 `--dsw-alias-*`（`cordis_inspect_query` → client / Theme /
   listTokens），每条声明都带中性回落值；名单外的 token 要登记进 `test/styles.test.mjs` 的例外表
   并写明理由（现有两例：`label-primary-foreground`、`label-tertiary`）。
@@ -96,7 +98,11 @@ pnpm typecheck && pnpm build && pnpm test && pnpm check:package
   `test/styles.test.mjs` 与 `test/client.test.mjs` 两处钉住。
 - `src/client/styles.ts` 的 CSS 正文里**不许出现反引号**（模板字面量会被提前截断，报错落在很远处）；
   类名一律 `dsm-` 前缀。
-- 中英两份字典的键集必须一致（`test/client.test.mjs` 会核）。
+- 文案走官方客户端 locale 机制：字典在 `src/client/logic/locales.ts`，`zh` 是键集真源，`en` 由
+  `LocaleDictOf` 逐键核，命名空间合并进 `LocaleNamespaceMap`——少键 / 多键 / `t('…')` 写错键都是编译
+  错误。注册条目带 `locale: NS`，组件从**框架 props** 拿 `t`，不自己 `inject` 一个，也不留中文兜底；
+  键名点分（`page.title`），通用词（取消 / 关闭 / 保存）复用宿主 `common` 命名空间。运行期那一遍在
+  `test/client.test.mjs`：两份字典键集一致、页面问到的每个键都在字典里。
 
 ## 代码结构
 

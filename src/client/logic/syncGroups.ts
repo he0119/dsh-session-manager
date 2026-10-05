@@ -110,5 +110,5 @@ export function syncPullTip(entry: SyncProjectSubject, base: string, t: Translat
   const from = entry.fromCwd
   const to = entry.toCwd
   if (from === undefined || to === undefined || from === to) return base
-  return `${base}\n${t('cwdRewritten', { from, to })}`
+  return `${base}\n${t('cwd.rewritten', { from, to })}`
 }

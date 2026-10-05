@@ -125,7 +125,7 @@ test('源候选：已登记工作区在前、其余目录按路径排、未分�
   assert.deepEqual(rows, [
     { path: '/b', title: '工作区乙', count: 1 },
     { path: '/a', count: 3 },
-    { path: UNOWNED_SOURCE, label: 'ungroupedSource', count: 2 },
+    { path: UNOWNED_SOURCE, label: 'list.ungrouped', count: 2 },
   ])
 })
 
@@ -135,8 +135,8 @@ test('源候选：没有落在「未分组」里的会话时，那一行不出�
 })
 
 test('候选文案：未分组那一行用自己的文案，不把哨兵值漏出来', () => {
-  assert.equal(optionLabel({ path: UNOWNED_SOURCE, label: '未分组', count: 3 }, t), '未分组 — sessionsInDir:{"count":3}')
-  assert.equal(optionLabel({ path: '/a', count: 2 }, t), '/a — sessionsInDir:{"count":2}')
+  assert.equal(optionLabel({ path: UNOWNED_SOURCE, label: '未分组', count: 3 }, t), '未分组 — list.sessionsInDir:{"count":3}')
+  assert.equal(optionLabel({ path: '/a', count: 2 }, t), '/a — list.sessionsInDir:{"count":2}')
 })
 
 // ---- 一个目录怎么称呼：项目身份（git remote）与本机路径 ----
@@ -177,7 +177,7 @@ test('组头：没有身份时名字照旧（标题，未登记就只剩路径�
 })
 
 test('组头：没有 cwd 的那一组照旧用自己的文案，身份与路径都不参与', () => {
-  assert.deepEqual(projectLabel({ path: '' }, t), { name: 'noCwdGroup', tip: 'noCwdGroup' })
+  assert.deepEqual(projectLabel({ path: '' }, t), { name: 'list.noCwdGroup', tip: 'list.noCwdGroup' })
 })
 
 test('项目名：取身份最后一段，末尾的 .git 不算（"认不出来就原样退回"的形状可能还带着它）', () => {
@@ -193,7 +193,7 @@ test('下拉框：身份取代标题那一栏，本机路径留着（那里没�
   assert.equal(pathLabel({ path: '/home/u/dev/x' }), '/home/u/dev/x')
   assert.equal(
     optionLabel({ path: '/home/u/dev/x', title: '测试项目', repo: 'github.com/he0119/x', count: 2 }, t),
-    'github.com/he0119/x — /home/u/dev/x — sessionsInDir:{"count":2}',
+    'github.com/he0119/x — /home/u/dev/x — list.sessionsInDir:{"count":2}',
   )
 })
 
@@ -267,16 +267,16 @@ test('目录来源：候选与条数都只数看得见的那批', () => {
 
 test('级联带进来的行：说"随父会话删"，提示里点名是哪一条（有标题用标题）', () => {
   assert.deepEqual(deleteFamilyNote({ via: { id: 'session-p', title: '搬家那次' } }, t), {
-    text: 'manageDeleteVia',
-    tip: 'manageDeleteViaTip:{"name":"搬家那次"}',
+    text: 'manage.delete.via',
+    tip: 'manage.delete.viaTip:{"name":"搬家那次"}',
   })
   // 读不到标题就退回 id：提示里至少还有一个能对得上日志的名字
   assert.deepEqual(deleteFamilyNote({ via: { id: 'session-p' } }, t), {
-    text: 'manageDeleteVia',
-    tip: 'manageDeleteViaTip:{"name":"session-p"}',
+    text: 'manage.delete.via',
+    tip: 'manage.delete.viaTip:{"name":"session-p"}',
   })
   // 标题是空白串与没有标题同一条路（`sessionLabel` 也是这个口径）
-  assert.deepEqual(deleteFamilyNote({ via: { id: 'session-p', title: '  ' } }, t)?.tip, 'manageDeleteViaTip:{"name":"session-p"}')
+  assert.deepEqual(deleteFamilyNote({ via: { id: 'session-p', title: '  ' } }, t)?.tip, 'manage.delete.viaTip:{"name":"session-p"}')
 })
 
 test('没有出处时不挂标签（点名的那几条就是这样）', () => {
@@ -287,13 +287,13 @@ test('没有出处时不挂标签（点名的那几条就是这样）', () => {
 // 把它一起搬走，说「随父删」就是一句错话（界面上的动作与标签必须说同一件事）。
 test('迁移清单里：说"随父迁"，提示里点名是哪一条', () => {
   assert.deepEqual(migrateFamilyNote({ via: { id: 'session-p', title: '搬家那次' } }, t), {
-    text: 'migrateVia',
-    tip: 'migrateViaTip:{"name":"搬家那次"}',
+    text: 'migrate.via',
+    tip: 'migrate.viaTip:{"name":"搬家那次"}',
   })
   // 读不到标题同样退回 id（与删除那份同一个 `referentName`）
   assert.deepEqual(migrateFamilyNote({ via: { id: 'session-p' } }, t), {
-    text: 'migrateVia',
-    tip: 'migrateViaTip:{"name":"session-p"}',
+    text: 'migrate.via',
+    tip: 'migrate.viaTip:{"name":"session-p"}',
   })
 })
 

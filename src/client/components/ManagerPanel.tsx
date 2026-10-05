@@ -16,7 +16,7 @@ import * as React from 'react'
 
 import { fetchState, type StateResponse } from '../api.ts'
 import type { DirectoryApi } from '../directory.ts'
-import { translateWith, zh, type Translate } from '../logic/locales.ts'
+import type { Translate } from '../logic/locales.ts'
 import { HelpPanel } from './HelpPanel.tsx'
 import { ManagePanel } from './ManagePanel.tsx'
 import { MigrationPanel } from './MigrationPanel.tsx'
@@ -24,24 +24,22 @@ import { SyncPanel } from './SyncPanel.tsx'
 import { TransferPanel } from './TransferPanel.tsx'
 
 /**
- * 页面获得的注入面：`t` 与 `directory` 都由注册时的 `inject()` 给出。
+ * 页面获得的注入面：`t` 是**框架 props**（注册时带 `locale: NS` 换来的那一个），`directory` 由
+ * 注册时的 `inject()` 给出。
  *
- * 两个都可缺席（`t` 缺席时回落到中文、选择器缺席时界面上给提示），为的是注入面一旦变形状
- * 也只是少个能力，而不是整页白屏。
+ * `t` 必定在——带 `locale` 注册的条目拿到的就是它；目录选择器可以缺席（那个能力由别的客户端
+ * 插件提供），缺席时界面上给提示，而不是整页白屏。
  */
 export interface ManagerPanelProps {
-  t?: Translate
+  t: Translate
   directory?: () => DirectoryApi | undefined
 }
-
-/** 没有注入面时的兜底翻译。 */
-const fallback = translateWith(zh as unknown as Record<string, string>)
 
 /** 页内分页。 */
 type PanelKey = 'transfer' | 'sync' | 'migrate' | 'manage' | 'help'
 
 /** 会话管理页。 */
-export function ManagerPanel({ t = fallback, directory }: ManagerPanelProps): React.ReactElement {
+export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactElement {
   const [state, setState] = React.useState<StateResponse | null>(null)
   // 默认停在第一个页签（「会话」）：它是这一页的日常视图，另外两页是偶发动作。
   const [panel, setPanel] = React.useState<PanelKey>('manage')
@@ -54,7 +52,7 @@ export function ManagerPanel({ t = fallback, directory }: ManagerPanelProps): Re
     try {
       setState(await fetchState())
     } catch (cause) {
-      setError(t('failed', { reason: cause instanceof Error ? cause.message : String(cause) }))
+      setError(t('error.failed', { reason: cause instanceof Error ? cause.message : String(cause) }))
     } finally {
       setBusy(false)
     }
@@ -75,15 +73,15 @@ export function ManagerPanel({ t = fallback, directory }: ManagerPanelProps): Re
     <section className="dsm-root" data-plugin="dsh-session-manager">
       <header className="dsm-head">
         <div className="dsm-titleRow">
-          <h2 className="dsm-title">{t('title')}</h2>
+          <h2 className="dsm-title">{t('page.title')}</h2>
           <span className="dsm-spacer" />
           <button type="button" className="dsm-button" onClick={() => void load()} disabled={busy}>
-            {busy ? t('loading') : t('refresh')}
+            {busy ? t('page.loading') : t('page.refresh')}
           </button>
         </div>
         <p className="dsm-intro">
-          {t('library')}：{state?.sessionsRoot ?? ''} · {t('sessionsCount', { count: sessions })} ·{' '}
-          {t('workspacesCount', { count: workspaces })}
+          {t('page.library')}：{state?.sessionsRoot ?? ''} · {t('page.count.sessions', { count: sessions })} ·{' '}
+          {t('page.count.workspaces', { count: workspaces })}
         </p>
       </header>
 
@@ -92,7 +90,7 @@ export function ManagerPanel({ t = fallback, directory }: ManagerPanelProps): Re
           <span>{error}</span>
           <span className="dsm-spacer" />
           <button type="button" className="dsm-button" onClick={() => setError(null)}>
-            {t('dismiss')}
+            {t('error.dismiss')}
           </button>
         </p>
       )}
@@ -111,7 +109,7 @@ export function ManagerPanel({ t = fallback, directory }: ManagerPanelProps): Re
           aria-selected={panel === 'manage'}
           onClick={() => setPanel('manage')}
         >
-          {t('tabManage')}
+          {t('page.tab.manage')}
         </button>
         <button
           type="button"
@@ -120,7 +118,7 @@ export function ManagerPanel({ t = fallback, directory }: ManagerPanelProps): Re
           aria-selected={panel === 'migrate'}
           onClick={() => setPanel('migrate')}
         >
-          {t('tabMigrate')}
+          {t('page.tab.migrate')}
         </button>
         <button
           type="button"
@@ -129,7 +127,7 @@ export function ManagerPanel({ t = fallback, directory }: ManagerPanelProps): Re
           aria-selected={panel === 'transfer'}
           onClick={() => setPanel('transfer')}
         >
-          {t('tabTransfer')}
+          {t('page.tab.transfer')}
         </button>
         <button
           type="button"
@@ -138,7 +136,7 @@ export function ManagerPanel({ t = fallback, directory }: ManagerPanelProps): Re
           aria-selected={panel === 'sync'}
           onClick={() => setPanel('sync')}
         >
-          {t('tabSync')}
+          {t('page.tab.sync')}
         </button>
         <button
           type="button"
@@ -147,7 +145,7 @@ export function ManagerPanel({ t = fallback, directory }: ManagerPanelProps): Re
           aria-selected={panel === 'help'}
           onClick={() => setPanel('help')}
         >
-          {t('tabHelp')}
+          {t('page.tab.help')}
         </button>
       </div>
 

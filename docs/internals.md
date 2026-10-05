@@ -130,6 +130,10 @@
 - [插件列表那一行的标题来自包导出的 locale 元信息](../.agents/notes/implemented/bug-fix/2026-10-05-plugin-title-comes-from-exported-locale.md)：
   外壳读 `<包名>/locale/*.json` 的 `meta.title` / `meta.description`（`en.json` 是发现入口），读不到
   就回退成包名——`en.json`、`zh.json`、`exports` 里的 `./locale/*.json` 三样缺一即静默回退。
+- [客户端文案按官方 locale 机制接进类型系统](../.agents/notes/implemented/architecture/2026-10-05-client-copy-follows-the-official-locale-mechanism.md)：
+  页面文案走客户端 `locale` 服务（命名空间 + 点分键名 + 宿主 `common` 兜底），`t` 由框架按 `locale`
+  作为 props 送进组件；字典与键集只 import 类型，产物里字节不变。与上一条是两条链：`locale/*.json`
+  服务插件列表那一行，这份服务页面里的字。
 
 ## Host 半侧的约束
 
