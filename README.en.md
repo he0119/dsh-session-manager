@@ -11,7 +11,7 @@ In DSH, "which workspace a session belongs to" is not an editable field — it i
 in the session log header. The host exposes no move / reassign API, and it rejects a log whose project directory
 disagrees with its `cwd`. So moving directories by hand either drops sessions into Ungrouped or makes
 them fail to load with `corrupt session log`. This plugin does all three things together — **rewrite the
-header `cwd` + move the log directory + re-home the workspace registry** — showing you that plan before it
+header `cwd` + move the log directory + make the host accept the new grouping** — showing you that plan before it
 writes anything, and rolling back byte-for-byte afterwards. (Why it has to work that way:
 [.agents/notes/implemented/](.agents/notes/implemented), in Chinese.)
 
@@ -153,9 +153,11 @@ one-line bump at that point.
   directory, **how the registry changes** (create or reuse the target workspace, how many sessions are added,
   which workspaces lose them, whether an emptied workspace is removed), the artifact plan and its skip reasons;
 - **Confirm** then rewrites each log header `cwd` (first frame only, the rest byte-identical) → move the session
-  directories → re-home the registry → **independent verification** (the host's own corrupt criterion) → leave
-  a byte-level backup. Afterwards the page tells you whether the change took effect immediately or
-  **requires a DSH restart**.
+  directories → write the registry → **hand the work to the host** (reuse or create the target workspace, attach
+  the sessions, drop a source workspace once it is empty — see "Things to know" below) → **independent
+  verification** (the host's own corrupt criterion, plus a "session ids unchanged" check) → leave a byte-level
+  backup. Afterwards the page tells you whether the change took effect immediately or **requires a DSH
+  restart**.
 
 **Backups & rollback** — below the migrate tab, every backup this plugin wrote (time, **migration** or
 **delete**, session count, source → target), with the steps shown before you confirm. A migration backup
@@ -204,7 +206,7 @@ directories back — deleting never touched the registry.
 archived / active / Ungrouped, where Ungrouped is exactly the shell sidebar's Ungrouped group: nothing claims
 it and the sidebar shows it), what the three tabs do, which files the actions touch (backups, roll back vs
 restore, when the sidebar follows), where the data comes from (the library and the registry paths), and the
-common questions (which sessions count as Ungrouped, why a deleted session is still in the sidebar, why a
+common questions (which sessions count as Ungrouped, why a deleted session is still in the sidebar, when a
 migration asks for a restart). The action tabs
 (Sessions / Migrate / Transfer / Sync) keep only the decision at hand, so each explanation there stays within two
 lines.
@@ -314,8 +316,9 @@ The rules and edges:
   and copies other machines already took are unaffected;
 - A session without a `cwd` gets no invented path (it lands under `_no-cwd`, same as import); a `cwd` with no
   mapping is skipped and listed;
-- Pulled sessions need a host rescan to appear in the sidebar — restarting DSH is the surest way (the same
-  registry-on-disk semantics as migration).
+- Pulled sessions need a host rescan to appear in the sidebar: once the registry changes, the plugin hands the
+  work to the host (the same semantics as migration), and only asks for a restart when the host lacks those
+  actions.
 
 Sync also goes through a plan: the `sync_sessions` tool previews by default and only writes with `apply:true`.
 
@@ -331,10 +334,17 @@ Sync also goes through a plan: the `sync_sessions` tool previews by default and 
 
 ## Things to know
 
-- **An offline write only counts after a DSH restart**: the host holds an in-memory registry. If upstream
-  exposes `workspaceRegistry.reassignSessions()`, the plugin takes effect immediately and says so; otherwise
-  both the tools and the page tell you to restart — and until you do, do not add sessions under the old
-  workspace.
+- **The work is handed to the host, so a restart is normally unnecessary**: the `workspace.json` on disk is only
+  the third copy — the host's in-memory registry is authoritative (writes change it; it never re-reads the file),
+  and it also keeps a header index built at startup. So after changing the registry the plugin does not wait for
+  the host to notice: it asks the host to take one fresh look at the disk (rebuild the header cache and the
+  "where does this session live" index), then has the host reuse or create the target workspace, attach the
+  sessions, detach them from the sources and delete an emptied workspace. The host persists those itself and
+  notifies the UI, so the sidebar follows right away — without touching the process or killing a running turn.
+  Session ids are only ever attached and detached, never minted or renamed; an existing workspace is reused with
+  its own id. When the host lacks those actions (tools-only front end, older version), both the tools and the page
+  say so and ask for a **DSH restart** — and until then, do not change any workspace: creating, renaming or
+  archiving one would clobber this change with the in-memory copy.
 - **Look before it writes**: `plan` and the page's dialog (which shows that same `plan`) write nothing; every
   real write is preceded by a byte-level backup.
 - **Only the first frame is rewritten**: only the header frame is recompressed, the remaining frames stay

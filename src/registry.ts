@@ -167,18 +167,21 @@ export function reHome(
 
   // 目标工作区（复用或新建）
   let targetId: string | undefined
+  let targetTitle = ''
   let createdTarget = false
   for (const [id, rec] of Object.entries(workspaces)) {
     if (rec.path === toPath) {
       targetId = id
+      targetTitle = rec.title
       break
     }
   }
   if (targetId === undefined) {
     targetId = newId
+    targetTitle = title ?? defaultTitle(toPath)
     workspaces[targetId] = {
       path: toPath,
-      title: title ?? toPath.split(/[\\/]/).filter(Boolean).pop() ?? toPath,
+      title: targetTitle,
       sessionIds: [],
       createdAt: now,
       updatedAt: now,
@@ -222,6 +225,7 @@ export function reHome(
     change: {
       targetId,
       targetPath: toPath,
+      targetTitle,
       createdTarget,
       added,
       adoptedFromUnowned,
@@ -230,4 +234,92 @@ export function reHome(
       unchanged: added.length === 0 && movedFrom.length === 0,
     },
   }
+}
+
+/** 新建工作区时的缺省标题（与宿主 `create()` 的"取路径最后一段"一致）。 */
+function defaultTitle(path: string): string {
+  return path.split(/[\\/]/).filter(Boolean).pop() ?? path
+}
+
+/** 注册表复核结果。 */
+export interface RegistryVerification {
+  ok: boolean
+  problems: string[]
+}
+
+/** 一份注册表里出现过的全部会话 id。 */
+function sessionIdsOf(reg: WorkspaceRegistryState): Set<string> {
+  const out = new Set<string>()
+  for (const rec of Object.values(reg.tables.workspaces)) for (const sid of rec.sessionIds) out.add(sid)
+  return out
+}
+
+/**
+ * 复核一次注册表改动：**会话 id 不新增（除计划带来的）、不丢失；已存在的工作区 id 与路径不变**。
+ *
+ * 这三条是"活体落盘由宿主代劳"之后唯一还需要插件自己盯的东西：宿主分配 id 的地方只有"新建工作区"
+ * 一处，其余一律复用。复核失败不改变磁盘（文件已经写好），只把问题报出去。
+ */
+export function verifyRegistryChange(
+  before: WorkspaceRegistryState,
+  after: WorkspaceRegistryState,
+  change: RegistryChange,
+): RegistryVerification {
+  const problems: string[] = []
+  const valid = validateRegistry(after)
+  if (!valid.ok) problems.push(...valid.problems.map((p) => `落盘后的注册表不合法：${p}`))
+
+  // 工作区：已存在的（不在 removedSources 里、也不是目标）必须**同一个 id、同一条路径**还在
+  const removedIds = new Set(change.removedSources.map((s) => s.workspaceId))
+  const afterByPath = new Map(Object.entries(after.tables.workspaces).map(([id, rec]) => [rec.path, { id, rec }]))
+  for (const [id, rec] of Object.entries(before.tables.workspaces)) {
+    if (rec.path === change.targetPath) continue
+    if (removedIds.has(id)) {
+      if (after.tables.workspaces[id] !== undefined) problems.push(`工作区 ${id} 计划里要删，却还在`)
+      continue
+    }
+    const now = afterByPath.get(rec.path)
+    if (now === undefined) problems.push(`工作区 ${rec.path} 计划里要留，却没了`)
+    else if (now.id !== id) problems.push(`工作区 ${rec.path} 的 id 变了：${id} -> ${now.id}`)
+  }
+
+  // 目标：只多不少，且多出来的正是计划里那批
+  const target = afterByPath.get(change.targetPath)
+  if (target === undefined) problems.push(`目标工作区 ${change.targetPath} 不在落盘结果里`)
+  else {
+    const had = new Set(beforeByPath(before, change.targetPath)?.sessionIds ?? [])
+    const want = new Set([...had, ...change.added])
+    const got = new Set(target.rec.sessionIds)
+    for (const sid of want) if (!got.has(sid)) problems.push(`会话 ${sid} 没进目标工作区`)
+    for (const sid of got) if (!want.has(sid)) problems.push(`目标工作区里多了计划外的会话 ${sid}`)
+  }
+
+  // 工作区集合：只允许"少掉计划要删的、多出计划要建的目标"
+  const beforePaths = new Set(Object.values(before.tables.workspaces).map((r) => r.path))
+  const afterPaths = new Set(Object.values(after.tables.workspaces).map((r) => r.path))
+  for (const path of beforePaths) {
+    if (path === change.targetPath) continue
+    const removed = change.removedSources.some((s) => before.tables.workspaces[s.workspaceId]?.path === path)
+    if (!removed && !afterPaths.has(path)) problems.push(`工作区 ${path} 凭空消失了`)
+  }
+  for (const path of afterPaths) {
+    if (beforePaths.has(path) || path === change.targetPath) continue
+    problems.push(`冒出一个计划外的工作区 ${path}`)
+  }
+
+  // 会话：id 集合只许"按计划"变大，绝不许变小（改名 / 丢失都会在这里露出来）
+  const beforeSessions = sessionIdsOf(before)
+  const afterSessions = sessionIdsOf(after)
+  const allowedNew = new Set(change.added)
+  for (const sid of beforeSessions) if (!afterSessions.has(sid)) problems.push(`会话 ${sid} 在落盘结果里没了（id 不该变）`)
+  for (const sid of afterSessions) {
+    if (!beforeSessions.has(sid) && !allowedNew.has(sid)) problems.push(`落盘结果里多了计划外的会话 ${sid}`)
+  }
+
+  return { ok: problems.length === 0, problems }
+}
+
+/** 某条路径在注册表里的记录（缺省 = 还没有这条工作区）。 */
+function beforeByPath(reg: WorkspaceRegistryState, path: string): WorkspaceRecord | undefined {
+  return Object.values(reg.tables.workspaces).find((rec) => rec.path === path)
 }

@@ -3,8 +3,8 @@
 // 设计取向：
 //   * 读操作（plan / verify）永不写盘；
 //   * 写操作（migrate / rollback / sync）默认 dry-run，必须显式 apply:true；
-//   * 每个写操作的返回值都说明"何时生效"——因为绕过宿主直接改注册表可能需要重启 DSH，
-//     除非上游提供了 workspaceRegistry.reassignSessions（见 effectMode()）。
+//   * 每个写操作的返回值都说明"何时生效"——因为注册表改完还得让宿主认（见 take-effect.ts 与
+//     hostRegistryPort()：能把活儿交给宿主自己做就即时生效，否则如实说要重启）。
 import type { Context } from '@deepseek-ai/cordis'
 
 import { DEFAULT_PASSWORD_REF, syncSection, type PluginConfig, type PluginConfigInput, type SyncConfig } from './config.ts'
@@ -23,8 +23,9 @@ import {
 } from './migrate.ts'
 import { projectKey } from './project-key.ts'
 import { projectionCacheDir } from './paths.ts'
+import { describeEffect, describePlannedEffect, effectOf } from './take-effect.ts'
 import { runSync, type SyncPlan, type SyncSettings } from './sync.ts'
-import type { DecodeAll } from './types.ts'
+import type { DecodeAll, EffectMode, HostRegistryPort } from './types.ts'
 import { createSessionMetaResolver } from './visibility.ts'
 
 /**
@@ -62,8 +63,9 @@ export function resolvePaths(config: PluginConfigInput = {}): ResolvedPaths {
   }
 }
 
-/** 迁移何时生效。 */
-export type EffectMode = 'immediate' | 'restart-required'
+// 迁移与导入都会改注册表，改完都得让宿主认下这处改动；生效模式的类型与措辞在 types.ts / take-effect.ts
+// 一处定义，这里只做宿主侧的探测与转发（web.ts 仍从本模块取这个类型，避免调用面来回改）。
+export type { EffectMode }
 
 /** 一次同步要用的远端与设置。 */
 export interface SyncRuntime {
@@ -243,12 +245,113 @@ export function optionalService(ctx: unknown, name: string): unknown {
 }
 
 /**
- * 迁移何时生效：上游若提供 reassignSessions 就能进程内即时生效，
- * 否则直接落盘必须重启 DSH 才会被承认（宿主持有内存副本）。
+ * 迁移何时生效：这个宿主能不能当场把注册表改掉。
+ *
+ * 能（`hostRegistryPort()` 拿得到宿主那套动作）就报 `immediate`——插件把活儿交给宿主自己做；
+ * 不能就如实报 `restart-required`，由调用方告诉用户重启。
+ * @param ctx 宿主上下文。
+ * @returns 生效模式。
  */
 export function effectMode(ctx: unknown): EffectMode {
-  const registry = optionalService(ctx, 'workspaceRegistry') as { reassignSessions?: unknown } | undefined
-  return typeof registry?.reassignSessions === 'function' ? 'immediate' : 'restart-required'
+  return hostRegistryPort(ctx) === undefined ? 'restart-required' : 'immediate'
+}
+
+/** 宿主的"一个工作区"：只声明我们用得到的那几件。 */
+interface HostWorkspaceEntity {
+  id: string
+  sessionIds: readonly string[]
+  attachSession(sessionId: string): Promise<void>
+  insertSessionBefore(sessionId: string, beforeSessionId?: string): Promise<unknown>
+  detachSession(sessionId: string): Promise<void>
+}
+
+/**
+ * 宿主的 `workspaceRegistry`：只声明我们用得到的那几件。
+ *
+ * `replaceHeaderIndex` / `indexLiveSessions` 在宿主的类型面里标着 `private`——那只是它对外不给用的
+ * 说法，运行期就是普通原型方法。插件用它们做的正是宿主自己 `[Service.init]()` 在"表里已经有工作区"
+ * 时做的那两步：按磁盘重建 header 缓存，再把活着的会话补进索引。
+ */
+interface HostWorkspaceService {
+  create(path: string, title?: string): Promise<{ id: string }>
+  get(id: string): unknown
+  delete(id: string): Promise<boolean>
+  replaceHeaderIndex(headers: readonly unknown[]): Promise<void>
+  indexLiveSessions(): Promise<void>
+}
+
+/** 宿主的 `sessionPersistence`：只要"现在磁盘上有哪些会话、各自的 header 是什么"。 */
+interface HostSessionPersistence {
+  list(): Promise<Array<{ header: unknown }>>
+}
+
+/**
+ * 探测宿主那套"改注册表"的动作，收成一个端口交给核心层。
+ *
+ * 为什么不自己写文件：宿主内存里那份注册表才是权威（单单元契约：写入才改它，绝不从磁盘重读），
+ * 文件改完它不认——侧边栏还是旧归属，之后任何一次工作区改动还会把这次写盘盖掉。宿主那套动作
+ * （复用/新建工作区、挂会话、摘会话、删工作区）自己会落盘、也会通知界面，交给它做最省事也最稳。
+ *
+ * 认形状不认实现：少一件就当"这个宿主没有这套动作"，绝不半套上场。
+ *
+ * @param ctx 宿主上下文。
+ * @returns 端口；这个宿主没有这套动作时 undefined。
+ */
+export function hostRegistryPort(ctx: unknown): HostRegistryPort | undefined {
+  const registry = optionalService(ctx, 'workspaceRegistry') as Partial<HostWorkspaceService> | undefined
+  const persistence = optionalService(ctx, 'sessionPersistence') as Partial<HostSessionPersistence> | undefined
+  if (registry === undefined || persistence === undefined) return undefined
+  if (
+    typeof registry.create !== 'function' ||
+    typeof registry.get !== 'function' ||
+    typeof registry.delete !== 'function' ||
+    typeof registry.replaceHeaderIndex !== 'function' ||
+    typeof registry.indexLiveSessions !== 'function' ||
+    typeof persistence.list !== 'function'
+  ) {
+    return undefined
+  }
+
+  const entityOf = (workspaceId: string): HostWorkspaceEntity | undefined => {
+    const found = registry.get?.call(registry, workspaceId) as Partial<HostWorkspaceEntity> | undefined
+    if (found === undefined || found === null) return undefined
+    if (typeof found.attachSession !== 'function' || typeof found.detachSession !== 'function') return undefined
+    if (typeof found.insertSessionBefore !== 'function') return undefined
+    return found as HostWorkspaceEntity
+  }
+
+  const need = (workspaceId: string): HostWorkspaceEntity => {
+    const entity = entityOf(workspaceId)
+    if (entity === undefined) throw new Error(`宿主里没有工作区 ${workspaceId}`)
+    return entity
+  }
+
+  return {
+    // 跟宿主启动时做的两步一致：先按磁盘重建 header 缓存，再把活着的会话补进索引。
+    refreshIndex: async () => {
+      const sessions = await persistence.list!.call(persistence)
+      await registry.replaceHeaderIndex!.call(registry, sessions.map((s) => s.header))
+      await registry.indexLiveSessions!.call(registry)
+    },
+    ensureWorkspace: async (path, title) => {
+      const workspace = (await registry.create!.call(registry, path, title)) as { id: string }
+      return workspace.id
+    },
+    // 挂靠是**前插**，而计划是**追加**：挂完再挪到末尾，顺序才跟预演里看到的一致。
+    attachSession: async (workspaceId, sessionId) => {
+      const entity = need(workspaceId)
+      await entity.attachSession(sessionId)
+      await entity.insertSessionBefore(sessionId)
+    },
+    // 工作区已经不在了也当成功：摘除本来就幂等，真正的一致性由落盘后的复核盯着。
+    detachSession: async (workspaceId, sessionId) => {
+      await entityOf(workspaceId)?.detachSession(sessionId)
+    },
+    members: async (workspaceId) => [...(entityOf(workspaceId)?.sessionIds ?? [])],
+    removeWorkspace: async (workspaceId) => {
+      await registry.delete!.call(registry, workspaceId)
+    },
+  }
 }
 
 /**
@@ -282,13 +385,6 @@ export function directoryPickerKind(ctx: unknown): PickerKind {
     return null
   }
 }
-
-const EFFECT_NOTE: Record<EffectMode, string> = {
-  immediate: '注册表变更由 workspaceRegistry 直接承接，无需重启。',
-  'restart-required':
-    '注册表已落盘，但宿主进程内持有内存副本，需重启 DSH 后才会生效；重启前请勿在旧工作区继续新增会话。',
-}
-
 /**
  * 宿主的归档能力（`ctx.workspaceRegistry` 的 `archiveSession` / `unarchiveSession`）。
  *
@@ -389,6 +485,8 @@ export function registerTools(ctx: Context, config: PluginConfigInput = {}): Arr
     registryPath: paths.registryPath,
     backupRoot: paths.backupRoot,
     decodeAll,
+    // 每次调用重新探测（加载条目会随 profile 的热应用来去），探测不到就是"只能重启"。
+    hostRegistry: () => hostRegistryPort(ctx),
   }
   const disposers: Array<() => void> = []
 
@@ -476,8 +574,10 @@ export function registerTools(ctx: Context, config: PluginConfigInput = {}): Arr
           're-home the workspace registry. Defaults to dry-run; apply:true performs it after taking a byte-level ' +
           'backup. Refuses on any blocking problem. Subagent sessions always follow their parent (naming one is ' +
           'refused; naming a parent takes its whole family along; their registry membership does not change). ' +
-          'Offline registry writes take effect after a DSH restart unless ' +
-          'the host exposes workspaceRegistry.reassignSessions.',
+          'The registry file is written on disk and then handed back to the host by restarting the load entry ' +
+          'that provides it (the workspace layer only; the process is not restarted), so the change takes effect ' +
+          'immediately. When that entry cannot be found on this host, the result says a DSH restart is required ' +
+          'instead.',
         parameters: {
           from: { type: 'string', required: true, description: 'Source workspace directory (absolute path).' },
           to: {
@@ -523,7 +623,7 @@ export function registerTools(ctx: Context, config: PluginConfigInput = {}): Arr
           ],
         },
         async execute(args): Promise<MigrateToolResult> {
-          const run = runMigration(
+          const run = await runMigration(
             deps,
             {
               from: args.from,
@@ -535,9 +635,9 @@ export function registerTools(ctx: Context, config: PluginConfigInput = {}): Arr
             { apply: args.apply === true },
           )
           const summary = run.applied
-            ? `${run.summary}\n${EFFECT_NOTE[mode()]}`
+            ? run.summary
             : run.preview.ok
-              ? `${run.summary}\n\n（dry-run，未写任何字节；传 apply:true 执行）`
+              ? `${run.summary}\n\n（dry-run，未写任何字节；传 apply:true 执行）\n${describePlannedEffect(mode())}`
               : run.summary
           return {
             applied: run.applied,
@@ -547,7 +647,8 @@ export function registerTools(ctx: Context, config: PluginConfigInput = {}): Arr
             artifactsMoved: run.artifactsMoved,
             verified: run.verified,
             ...(run.backupDir === undefined ? {} : { backupDir: run.backupDir }),
-            takesEffect: mode(),
+            // 真的改过注册表就认执行结果（run.effect），没改过才退到探测。
+            takesEffect: effectOf(run.effect, mode()),
             summary,
             problems: run.applied ? run.problems : run.preview.problems,
           }
@@ -577,6 +678,7 @@ export function registerTools(ctx: Context, config: PluginConfigInput = {}): Arr
               restoredArtifacts: { type: 'integer', required: true },
               sessions: { type: 'integer', required: true },
               registryRestored: { type: 'boolean', required: true },
+              takesEffect: { type: 'string', required: true },
               summary: { type: 'string', required: true },
             },
           },
@@ -585,15 +687,19 @@ export function registerTools(ctx: Context, config: PluginConfigInput = {}): Arr
           ],
         },
         async execute(args) {
-          const r = rollbackMigration({ backupRoot: paths.backupRoot }, { backupDir: args.backupDir })
+          // 回滚不走宿主那套动作：它要的是"备份里那条记录原样回来"（含被迁移删掉的工作区），
+          // 而宿主的新建工作区只会分配新 id —— 宁可整份写回 + 如实报"需要重启"。
+          const r = await rollbackMigration({ backupRoot: paths.backupRoot }, { backupDir: args.backupDir })
           return {
             restoredFiles: r.restoredFiles,
             restoredArtifacts: r.restoredArtifacts,
             sessions: r.sessions,
             registryRestored: r.registryRestored,
+            takesEffect: effectOf(r.effect, mode()),
             summary:
               `已回滚 ${r.sessions} 个会话、还原 ${r.restoredFiles} 个文件` +
-              `${r.restoredArtifacts > 0 ? `、搬回 ${r.restoredArtifacts} 项产物` : ''}并恢复注册表。`,
+              `${r.restoredArtifacts > 0 ? `、搬回 ${r.restoredArtifacts} 项产物` : ''}并恢复注册表。` +
+              (r.effect === undefined ? '' : `\n${describeEffect(r.effect)}`),
           }
         },
       }),
@@ -734,6 +840,8 @@ export function registerTools(ctx: Context, config: PluginConfigInput = {}): Arr
               sessionMeta: createSessionMetaResolver({ cacheDir: projectionCacheDir(paths.registryPath) }),
               // 覆盖本机那份之前要问一句"这条还在跑吗"（与删除同一条理由：宿主手里有它的写句柄）。
               liveSessionIds: () => liveSessionIds(ctx),
+              // 拉取会把会话重挂到目标工作区（写注册表），所以整批落地之后同样要把宿主重新接管一遍。
+              hostRegistry: () => hostRegistryPort(ctx),
             },
             { apply: args.apply === true },
           )
@@ -749,7 +857,7 @@ export function registerTools(ctx: Context, config: PluginConfigInput = {}): Arr
             bytesOut: outcome.applied ? outcome.bytesOut : outcome.plan.bytesOut,
             machines: outcome.plan.machines,
             // 只有真的往库里落了会话才谈得上"要不要重启"；纯推送不改本机任何东西。
-            takesEffect: outcome.applied && outcome.pulled.length > 0 ? mode() : 'immediate',
+            takesEffect: outcome.applied && outcome.pulled.length > 0 ? effectOf(outcome.effect, mode()) : 'immediate',
             summary: describeSync(outcome.plan, outcome.pulled, outcome.replaced, pushedIds, outcome.applied),
             problems: [...outcome.plan.problems, ...outcome.problems],
           }

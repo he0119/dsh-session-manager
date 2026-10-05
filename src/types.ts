@@ -137,10 +137,65 @@ export interface RelocationPlan {
   nextRegistry: WorkspaceRegistryState | null
 }
 
+/** 注册表改动何时被宿主承认。 */
+export type EffectMode = 'immediate' | 'restart-required'
+
+/**
+ * 宿主注册表动作的端口：插件把"改这份账"的活儿交给宿主自己做（见 .agents/notes 里就地刷新那篇）。
+ *
+ * 每一件都对应宿主本来就有的动作（官方界面移动会话走的就是它们）：它先落盘、再改内存、再通知界面，
+ * 所以侧边栏不刷新就自己跟上。会话 id 只被"挂靠 / 摘掉"、从不新建；已存在的工作区 id 不变
+ * （`ensureWorkspace()` 对同一条路径是幂等的）。
+ *
+ * 由宿主那半侧（`workspaceRehomePort()`）探测并交出，核心层只认这个形状——本类型不 import 任何宿主包。
+ */
+export interface HostRegistryPort {
+  /**
+   * 让宿主按磁盘重看一眼（刷新 header 缓存 + 重建活会话索引，跟它启动时做的两步一样）。
+   *
+   * **必须在改归属之前**：`attachSession()` 会拿缓存里的 header 校验 `cwd`，缓存还是旧的就会被它
+   * 一口回绝（`its cwd resolves to '<旧路径>'`）。
+   */
+  refreshIndex(): Promise<void>
+  /** 复用或新建目标工作区；返回它的 id（同一条路径重复调用返回同一个工作区）。 */
+  ensureWorkspace(path: string, title?: string): Promise<string>
+  /** 把会话挂到该工作区**末尾**（按调用顺序追加，与计划里的顺序一致）。 */
+  attachSession(workspaceId: string, sessionId: string): Promise<void>
+  /** 把会话从该工作区摘除。 */
+  detachSession(workspaceId: string, sessionId: string): Promise<void>
+  /** 该工作区当前的会话 id（顺序即显示顺序）。 */
+  members(workspaceId: string): Promise<readonly string[]>
+  /** 删除工作区记录（源侧成员搬空之后才该调）。 */
+  removeWorkspace(workspaceId: string): Promise<void>
+}
+
+/**
+ * 这一次改动有没有被**活着的宿主**接住。
+ *
+ * 几种情形要分得开：宿主自己改完了（`applied`）、改到一半失败了（文件已经写好，只能重启）、
+ * 这个宿主没有那套动作（只有工具的前端 / 老版本）、这次走的是整份写回文件那条路（`file-only`）。
+ * 措辞由 `describeEffect()` 一处给出，
+ * 工具层与界面层因此不会各说各话。
+ */
+export interface EffectOutcome {
+  /**
+   * `applied` 宿主自己改完了；`failed` 改到一半失败；`unavailable` 这个宿主没有那套动作；
+   * `file-only` 是**整份写回文件**那条路（回滚为了原样保住工作区 id 才走它）——文件对了，
+   * 宿主手里那份还是旧的，得重启。
+   */
+  kind: 'applied' | 'failed' | 'unavailable' | 'file-only'
+  /** 宿主实际用的目标工作区 id（新建时由宿主分配，与计划里的预测值可能不同）。 */
+  targetId?: string
+  /** `failed` 时的原因（原样带给用户，别吞）。 */
+  error?: string
+}
+
 /** `reHome()` 实际发生的动作。 */
 export interface RegistryChange {
   targetId: string
   targetPath: string
+  /** 新建目标工作区时该用的标题（与 `reHome()` 写进记录的那个一致）。 */
+  targetTitle: string
   createdTarget: boolean
   added: string[]
   adoptedFromUnowned: string[]

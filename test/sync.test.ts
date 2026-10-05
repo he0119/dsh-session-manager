@@ -30,6 +30,7 @@ import {
   type FileFingerprint,
   type RemoteLibrary,
   type RemoteSessionEntry,
+  type SyncDeps,
   type SyncProgress,
   type SyncSettings,
 } from '../src/sync.ts'
@@ -129,6 +130,8 @@ async function syncMachine(
     sessionMeta?: (query: { id: string; createdAt: number; cwd?: string }) => { blank?: boolean; lastPromptAt?: number } | undefined
     /** 宿主内存里活着的会话。 */
     liveSessionIds?: () => ReadonlySet<string>
+    /** 宿主那套"改注册表"的动作（见 src/take-effect.ts）；缺省 = 这个宿主没有这个能力。 */
+    hostRegistry?: SyncDeps['hostRegistry']
     /** 备份根目录（缺省 `machine.base/backups`）；指向坏位置可以验"备份不成功就一条都不动"。 */
     backupRoot?: string
   },
@@ -145,6 +148,7 @@ async function syncMachine(
       ...(options.git === undefined ? {} : { git: options.git }),
       ...(options.sessionMeta === undefined ? {} : { sessionMeta: options.sessionMeta }),
       ...(options.liveSessionIds === undefined ? {} : { liveSessionIds: options.liveSessionIds }),
+      ...(options.hostRegistry === undefined ? {} : { hostRegistry: options.hostRegistry }),
       pluginVersion: '0.0.1-test',
       now: () => new Date('2026-10-01T00:00:00.000Z'),
     },
@@ -574,10 +578,44 @@ test('sync：端到端——A 推送、B 拉取，cwd 改写成 B 的路径且�
       /没有 .*elsewhere → 本机的同步映射/,
     )
 
-    const pulled = await syncMachine(b, dav, bConfig, { apply: true })
+    // 拉取会改注册表（把会话挂到目标工作区），落盘之后把活儿交给宿主：整批只"重看磁盘"一次，
+    // 而且必须在注册表写好之后——所以台账记的是"那一刻文件里的成员"。
+    const reloads: string[] = []
+    const hostWorkspaces = new Map<string, { id: string; path: string; sessionIds: string[] }>()
+    let minted = 0
+    const hostEntity = (id: string): { sessionIds: string[] } | undefined => hostWorkspaces.get(id)
+    const hostPort: NonNullable<SyncDeps['hostRegistry']> = () => ({
+      refreshIndex: async () => {
+        const written = readRegistry(b.registryPath)
+        const record = Object.values(written.tables.workspaces).find((item) => item.path === b.cwd)
+        reloads.push([...(record?.sessionIds ?? [])].sort().join(','))
+      },
+      ensureWorkspace: async (path: string) => {
+        for (const rec of hostWorkspaces.values()) if (rec.path === path) return rec.id
+        minted += 1
+        const id = `ws-host-${minted}`
+        hostWorkspaces.set(id, { id, path, sessionIds: [] })
+        return id
+      },
+      attachSession: async (workspaceId: string, sessionId: string) => {
+        const rec = hostEntity(workspaceId)
+        if (rec !== undefined && !rec.sessionIds.includes(sessionId)) rec.sessionIds.push(sessionId)
+      },
+      detachSession: async (workspaceId: string, sessionId: string) => {
+        const rec = hostEntity(workspaceId)
+        if (rec !== undefined) rec.sessionIds = rec.sessionIds.filter((s) => s !== sessionId)
+      },
+      members: async (workspaceId: string) => [...(hostEntity(workspaceId)?.sessionIds ?? [])],
+      removeWorkspace: async (workspaceId: string) => {
+        hostWorkspaces.delete(workspaceId)
+      },
+    })
+    const pulled = await syncMachine(b, dav, bConfig, { apply: true, hostRegistry: hostPort })
     assert.deepEqual(pulled.pulled.sort(), ['s1', 's2'])
     assert.equal(pulled.registryWritten, true)
     assert.equal(pulled.indexWritten, true, '拉取完也要写自己那一格（把所有自己的会话列出来）')
+    assert.equal(pulled.effect?.kind, 'applied')
+    assert.deepEqual(reloads, ['s1,s2'], '两条一起落地也只重看一次磁盘，且发生在注册表落盘之后')
 
     // 落地位置与 cwd：按 B 的路径重新算项目目录
     for (const id of ['s1', 's2']) {
@@ -597,9 +635,16 @@ test('sync：端到端——A 推送、B 拉取，cwd 改写成 B 的路径且�
     const again = await syncMachine(b, dav, bConfig, { apply: true })
     assert.deepEqual(again.pulled, [])
     assert.deepEqual(again.pushed, [])
+    assert.equal(again.effect, undefined, '这次没写注册表，就没有要交给宿主的东西')
     const aPlan = await syncMachine(a, dav, settings(a, { machineId: 'robot-a' }), { apply: false })
     assert.deepEqual(aPlan.plan.pullIds, [])
     assert.deepEqual(aPlan.plan.pushIds, [])
+
+    // 宿主没有那套动作（只有工具的前端 / 老版本）时如实回报"只能重启"，而不是假装已经接管。
+    const c = makeMachine('robot-c')
+    const noPort = await syncMachine(c, dav, settings(c, { machineId: 'robot-c', mapping: { [a.cwd]: c.cwd } }), { apply: true })
+    assert.deepEqual(noPort.pulled.sort(), ['s1', 's2'])
+    assert.equal(noPort.effect?.kind, 'unavailable')
   } finally {
     await fixture.close()
     rmSync(SANDBOX, { recursive: true, force: true })

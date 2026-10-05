@@ -23,6 +23,7 @@ import {
   effectMode,
   liveSessionIds,
   registerTools,
+  hostRegistryPort,
   type MigrateToolResult,
   type PlanToolResult,
   type SyncToolResult,
@@ -142,12 +143,27 @@ async function startSibling(host: Context, service: string, value: unknown): Pro
  * 这里因此提供真实服务（各由兄弟条目提供）、开一个声明了 inject 的 fiber，并 `await` 它激活完成。
  *
  * @param config - 插件路径配置。
- * @param options.registry - 是否提供 workspaceRegistry，以及它是否有 reassignSessions。
+ * @param options.registry - 假宿主的工作区注册表：`absent` = 没有这个服务；`plain` = 齐全；
+ *   `no-refresh` = 缺"按磁盘重看一眼"那两件（认形状失败）；传一份注册表则连内容一起模拟（复用目标
+ *   工作区返回同一个 id、源空了能被删掉）。
+ * @param options.persistence - 假宿主的会话持久化：`absent` = 没有这个服务，`ready` = 有。
+ * @param options.wrongTargetId - 故意让"复用目标工作区"返回一个错的 id（验插件当场停下报需要重启）。
+ * @param options.attachFails - 让挂靠抛错（验失败路径不把一次成功的迁移说成失败）。
+ * @param options.onCall - 每次调用宿主动作记一笔（台账：验调用顺序与"改在落盘之后"）。
+ * @param options.mutateOnRefresh - "按磁盘重看一眼"时顺手改一下注册表文件（验落盘后的 id 复核会报出来）。
  * @param options.picker - 是否提供 directoryPicker，以及它报的是哪种能力（`broken` = 形状不认）。
  */
 async function makeHost(
   config: PluginConfig,
-  options: { registry?: 'absent' | 'plain' | 'capable'; picker?: 'absent' | 'browse' | 'native' | 'broken' } = {},
+  options: {
+    registry?: 'absent' | 'plain' | 'no-refresh' | WorkspaceRegistryState
+    persistence?: 'absent' | 'ready'
+    wrongTargetId?: string
+    attachFails?: boolean
+    onCall?: (call: string) => void
+    mutateOnRefresh?: (registryPath: string) => void
+    picker?: 'absent' | 'browse' | 'native' | 'broken'
+  } = {},
 ): Promise<{ ctx: Context; defs: CapturedTool[] }> {
   const defs: CapturedTool[] = []
   const host = new Context()
@@ -157,9 +173,76 @@ async function makeHost(
       return () => {}
     },
   })
-  const mode = options.registry ?? 'absent'
-  if (mode !== 'absent') {
-    await startSibling(host, 'workspaceRegistry', mode === 'capable' ? { reassignSessions: (): void => {} } : {})
+
+  const registryOption = options.registry ?? 'absent'
+  if (registryOption !== 'absent') {
+    // 假宿主尽量像真的：工作区按路径复用（同一条路径返回同一个 id）、挂/摘真的改成员表、
+    // 源空了能被删掉。它**不写文件**——文件那一步仍然由插件自己走，这正是要测的接缝。
+    const workspaces = new Map<string, { id: string; path: string; sessionIds: string[] }>()
+    const state = typeof registryOption === 'object' ? registryOption : undefined
+    for (const [id, rec] of Object.entries(state?.tables.workspaces ?? {})) {
+      workspaces.set(id, { id, path: rec.path, sessionIds: [...rec.sessionIds] })
+    }
+    let minted = 0
+    const entityOf = (id: string): Record<string, unknown> | undefined => {
+      const rec = workspaces.get(id)
+      if (rec === undefined) return undefined
+      return {
+        id: rec.id,
+        get sessionIds() {
+          return [...rec.sessionIds]
+        },
+        attachSession: async (sessionId: string) => {
+          if (options.attachFails === true) throw new Error('夹具：挂靠失败')
+          options.onCall?.(`attach:${sessionId}`)
+          if (!rec.sessionIds.includes(sessionId)) rec.sessionIds.push(sessionId)
+        },
+        insertSessionBefore: async (sessionId: string) => {
+          options.onCall?.(`move-end:${sessionId}`)
+          rec.sessionIds = [...rec.sessionIds.filter((s) => s !== sessionId), sessionId]
+        },
+        detachSession: async (sessionId: string) => {
+          options.onCall?.(`detach:${sessionId}`)
+          rec.sessionIds = rec.sessionIds.filter((s) => s !== sessionId)
+        },
+      }
+    }
+    const registry: Record<string, unknown> = {
+      create: async (path: string): Promise<{ id: string }> => {
+        for (const rec of workspaces.values()) {
+          if (rec.path === path) {
+            options.onCall?.(`reuse:${path}`)
+            if (options.wrongTargetId !== undefined) return { id: options.wrongTargetId }
+            return { id: rec.id }
+          }
+        }
+        minted += 1
+        const id = `ws-new-${minted}`
+        workspaces.set(id, { id, path, sessionIds: [] })
+        options.onCall?.(`create:${path}`)
+        return { id }
+      },
+      get: (id: string) => entityOf(id),
+      delete: async (id: string) => {
+        options.onCall?.(`remove:${id}`)
+        return workspaces.delete(id)
+      },
+      replaceHeaderIndex: async (headers: readonly unknown[]) => {
+        options.onCall?.(`refresh:${headers.length}`)
+        if (config.registryPath !== undefined) options.mutateOnRefresh?.(config.registryPath)
+      },
+      indexLiveSessions: async () => {
+        options.onCall?.('index-live')
+      },
+    }
+    if (registryOption === 'no-refresh') {
+      delete registry['replaceHeaderIndex']
+      delete registry['indexLiveSessions']
+    }
+    await startSibling(host, 'workspaceRegistry', registry)
+  }
+  if ((options.persistence ?? 'absent') !== 'absent') {
+    await startSibling(host, 'sessionPersistence', { list: async () => [{ header: { id: 'session-a', cwd: 'x' } }] })
   }
   const picker = options.picker ?? 'absent'
   if (picker === 'browse' || picker === 'native') {
@@ -244,25 +327,170 @@ test('目录选择器：宿主报哪种能力就照哪种走，没有/形状不�
   rmSync(sb.base, { recursive: true, force: true })
 })
 
-test('生效模式：上游无 reassign 时如实报 restart-required，有则报 immediate', async () => {
+test('生效模式：拿得到宿主那套动作就报 immediate，其余一律如实报 restart-required', async () => {
   const sb = makeSandbox('mode')
   const config = { sessionsRoot: sb.root, registryPath: sb.registryPath, backupRoot: sb.backupRoot }
 
   // 在真实 fiber 上读：服务没声明进 inject，属性写法会抛「without inject」，必须走 ctx.get。
-  const absent = await makeHost(config)
-  assert.equal(effectMode(absent.ctx), 'restart-required')
-
-  const plain = await makeHost(config, { registry: 'plain' })
-  assert.equal(effectMode(plain.ctx), 'restart-required', '提供了服务但没有 reassignSessions')
-
-  const capable = await makeHost(config, { registry: 'capable' })
-  assert.equal(effectMode(capable.ctx), 'immediate')
-
   // 连 ctx 形状都不对时也必须给个答案，而不是抛。
+  assert.equal(effectMode((await makeHost(config)).ctx), 'restart-required', '什么服务都没有：只能重启')
   assert.equal(effectMode({}), 'restart-required')
   assert.equal(effectMode(undefined), 'restart-required')
+  assert.equal(effectMode((await makeHost(config, { registry: 'plain' })).ctx), 'restart-required', '没有会话持久化：刷不了索引')
+  assert.equal(
+    effectMode((await makeHost(config, { registry: 'plain', persistence: 'ready' })).ctx),
+    'immediate',
+    '齐全：能当场把账改掉',
+  )
+  // 形状不认（少了"按磁盘重看一眼"那两件）时退回"需要重启"，绝不猜。
+  assert.equal(
+    effectMode((await makeHost(config, { registry: 'no-refresh', persistence: 'ready' })).ctx),
+    'restart-required',
+  )
+
+  // 端口本身：把活儿转给宿主那几件动作，形状不认就给 undefined。
+  const fakeCtx = (registry: unknown, persistence: unknown = {}): unknown => ({
+    get: (name: string) =>
+      name === 'workspaceRegistry' ? registry : name === 'sessionPersistence' ? persistence : undefined,
+  })
+  const ready = {
+    create: async () => ({ id: 'ws-1' }),
+    get: () => undefined,
+    delete: async () => true,
+    replaceHeaderIndex: async () => {},
+    indexLiveSessions: async () => {},
+  }
+  assert.ok(hostRegistryPort(fakeCtx(ready, { list: async () => [] })))
+  assert.equal(hostRegistryPort(fakeCtx(undefined, { list: async () => [] })), undefined, '没有注册表服务')
+  assert.equal(hostRegistryPort(fakeCtx(ready, undefined)), undefined, '没有会话持久化：刷不了索引')
+  assert.equal(hostRegistryPort(fakeCtx({ ...ready, replaceHeaderIndex: undefined }, { list: async () => [] })), undefined)
+  assert.equal(hostRegistryPort(fakeCtx({ ...ready, indexLiveSessions: undefined }, { list: async () => [] })), undefined)
+  assert.equal(hostRegistryPort(fakeCtx({ ...ready, create: undefined }, { list: async () => [] })), undefined)
+  assert.equal(hostRegistryPort(fakeCtx(ready, {})), undefined, '持久化没有 list()')
 
   rmSync(sb.base, { recursive: true, force: true })
+})
+
+test('改完注册表交给宿主自己做：顺序、id 复核、失败退路', async () => {
+  const configOf = (sb: Sandbox): PluginConfig => ({
+    sessionsRoot: sb.root,
+    registryPath: sb.registryPath,
+    backupRoot: sb.backupRoot,
+  })
+
+  // ---- 成功：宿主那几件动作按"先重看磁盘、再改归属、源空了才删"的顺序被叫到 ----
+  const ok = makeSandbox('effect-ok')
+  const calls: string[] = []
+  const atRefresh: string[] = []
+  const { defs } = await makeHost(configOf(ok), {
+    registry: ok.registry,
+    persistence: 'ready',
+    onCall: (call) => {
+      calls.push(call)
+      // 台账记的是**那一刻文件里的归属**：刷新若不是发生在落盘之后，这里就读不到 session-b。
+      if (call.startsWith('refresh:')) {
+        atRefresh.push(readRegistry(ok.registryPath).tables.workspaces['ws-temp']?.sessionIds.join(',') ?? '还没落盘')
+      }
+    },
+  })
+  // 只读的预演不许碰宿主：它一个字节都没写，只说"执行时会怎样"。
+  const planned = (await run(byName(defs).get('migrate_sessions')!, { from: ok.fromDir, to: ok.toDir })) as MigrateToolResult
+  assert.equal(planned.applied, false)
+  assert.equal(planned.takesEffect, 'immediate', '预演按探测说"执行时会当场生效"')
+  assert.match(planned.summary, /执行时由宿主自己改/)
+  assert.equal(calls.length, 0, '预演不打扰宿主')
+  assert.deepEqual(readRegistry(ok.registryPath), ok.registry, '预演不得改注册表')
+
+  const applied = (await run(byName(defs).get('migrate_sessions')!, {
+    from: ok.fromDir,
+    to: ok.toDir,
+    apply: true,
+  })) as MigrateToolResult
+  assert.equal(applied.applied, true)
+  assert.equal(applied.verified, true, applied.problems.join('; '))
+  assert.equal(applied.takesEffect, 'immediate')
+  assert.match(applied.summary, /无需重启 DSH/)
+  assert.deepEqual(atRefresh, ['session-b,session-a'], '刷新必须在注册表落盘之后发生')
+  // 复用已有工作区（同一个 id）→ 按计划顺序挂到末尾 → 源侧摘空 → 删掉空工作区
+  assert.deepEqual(calls, [
+    'refresh:1',
+    'index-live',
+    `reuse:${ok.toDir}`,
+    'attach:session-b',
+    'move-end:session-b',
+    'attach:session-a',
+    'move-end:session-a',
+    'detach:session-a',
+    'detach:session-b',
+    'remove:ws-dl',
+  ])
+  assert.deepEqual(readRegistry(ok.registryPath).tables.workspaces['ws-temp']?.sessionIds, ['session-b', 'session-a'])
+
+  // ---- 目标工作区 id 对不上：当场停下，如实报"需要重启"，绝不悄悄换个 id ----
+  const wrong = makeSandbox('effect-wrong-id')
+  const wrongHost = await makeHost(configOf(wrong), {
+    registry: wrong.registry,
+    persistence: 'ready',
+    wrongTargetId: 'ws-someone-else',
+  })
+  const wrongRun = (await run(byName(wrongHost.defs).get('migrate_sessions')!, {
+    from: wrong.fromDir,
+    to: wrong.toDir,
+    apply: true,
+  })) as MigrateToolResult
+  assert.equal(wrongRun.applied, true, 'id 对不上不改"迁移成不成功"')
+  assert.equal(wrongRun.takesEffect, 'restart-required')
+  assert.match(wrongRun.summary, /目标工作区 id 与计划不符/)
+
+  // ---- 挂靠失败：迁移仍然算成功（文件已经写好），如实报"仍需重启" ----
+  const bad = makeSandbox('effect-fail')
+  const failing = await makeHost(configOf(bad), { registry: bad.registry, persistence: 'ready', attachFails: true })
+  const degraded = (await run(byName(failing.defs).get('migrate_sessions')!, {
+    from: bad.fromDir,
+    to: bad.toDir,
+    apply: true,
+  })) as MigrateToolResult
+  assert.equal(degraded.applied, true, '宿主没接住不该把一次成功的迁移说成失败')
+  assert.equal(degraded.takesEffect, 'restart-required')
+  assert.match(degraded.summary, /宿主没接住这次改动（夹具：挂靠失败）/)
+  assert.match(degraded.summary, /重启 DSH/)
+  assert.ok(degraded.backupDir && existsSync(degraded.backupDir), '失败也不该顺手回滚')
+  assert.deepEqual(readRegistry(bad.registryPath).tables.workspaces['ws-temp']?.sessionIds, ['session-b', 'session-a'])
+
+  // ---- 会话 id 被动过：落盘后的复核必须报出来（迁移本身仍算做过） ----
+  const tampered = makeSandbox('effect-id-tamper')
+  const tampering = await makeHost(configOf(tampered), {
+    registry: tampered.registry,
+    persistence: 'ready',
+    mutateOnRefresh: (registryPath) => {
+      const text = readFileSync(registryPath, 'utf8').replaceAll('session-a', 'session-a-renamed')
+      writeFileSync(registryPath, text)
+    },
+  })
+  const caught = (await run(byName(tampering.defs).get('migrate_sessions')!, {
+    from: tampered.fromDir,
+    to: tampered.toDir,
+    apply: true,
+  })) as MigrateToolResult
+  assert.equal(caught.applied, true)
+  assert.equal(caught.verified, false, 'id 被改过就必须复核失败')
+  assert.match(caught.problems.join('; '), /session-a 在落盘结果里没了（id 不该变）/)
+  assert.match(caught.problems.join('; '), /多了计划外的会话 session-a-renamed/)
+
+  // ---- 回滚：为了原样保住工作区 id，走整份写回文件，如实报"需要重启" ----
+  const rb = (await run(byName(defs).get('rollback_session_migration')!, { backupDir: applied.backupDir })) as {
+    takesEffect: string
+    summary: string
+  }
+  // 探测说有那套动作，回滚却仍然报"需要重启"——这正是"整份写回文件"那条路的痕迹。
+  assert.equal(rb.takesEffect, 'restart-required')
+  assert.match(rb.summary, /工作区 id 原样保留/)
+  assert.deepEqual(calls.filter((c) => c.startsWith('reuse:')).length, 1, '回滚不该再叫宿主改一次')
+
+  rmSync(ok.base, { recursive: true, force: true })
+  rmSync(wrong.base, { recursive: true, force: true })
+  rmSync(bad.base, { recursive: true, force: true })
+  rmSync(tampered.base, { recursive: true, force: true })
 })
 
 test('工具端到端：plan(只读) → migrate(dry-run) → migrate(apply) → verify → rollback', async () => {
