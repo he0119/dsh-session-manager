@@ -119,6 +119,7 @@ src/            手写源码（每个文件一个职责，核心层零 DSH 依�
 src/client/     浏览器半侧 → lib/client.js：入口 index.ts、纯逻辑 logic/、渲染 components/，
                 根下是端点调用、宿主服务接缝与样式
 lib/            构建产物（tsdown 输出，已 gitignore）
+locale/         插件展示元信息：meta.title / meta.description，en.json 是宿主的发现入口
 test/           测试（run-all.mjs 是进程内 runner）
 docs/           本目录
 AGENTS.md       给 AI 助手与贡献者的协作约定（提交信息口径、验证清单、界面硬约束）

@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Session Manager",
+    "description": "Export and import session packages, move sessions and workspaces to a new directory, and sync sessions between machines — all from the settings page."
+  }
+}

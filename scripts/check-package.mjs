@@ -5,7 +5,8 @@
  *
  * 1. 运行期文件一个都不少（`lib/index.js`、`lib/client.js`、`lib/types/`、`cordis.patch.yml`…）；
  * 2. `main` / `types` / `bin` / `exports` / `dsh.bundle.patch` 指向的每个路径**都在包里**——
- *    入口指着空气是「装进宿主才报错」的那类事故，本地测试全绿也照样发生；
+ *    入口指着空气是「装进宿主才报错」的那类事故，本地测试全绿也照样发生；通配条目
+ *    （`./locale/*.json`）按形状核，至少要匹配到一个真实文件；
  * 3. `test/`、`src/`、`docs/` 这些不该外泄的目录没有被带进包。
  *
  * 外加一条跨文件不变式：`cordis.patch.yml` 里 insert 的 `name:` 必须等于本包名。
@@ -97,6 +98,10 @@ const REQUIRED = [
   'README.en.md',
   'LICENSE',
   'icon.svg',
+  // 宿主的插件展示元信息从这两个文件读（`readPluginMeta()`），而 `en.json` 是唯一的发现入口：
+  // 少了它，中文标题也一起消失，标题静默回退成包名。
+  'locale/en.json',
+  'locale/zh.json',
 ]
 for (const path of REQUIRED) {
   assert.ok(shipped.has(path), `包里缺少运行期文件：${path}（跑过 build 了吗？）`)
@@ -113,11 +118,31 @@ function collectPaths(value, out = []) {
   }
   return out
 }
+/**
+ * `./locale/*.json` 这类条目按形状匹配，不当字面路径看。
+ *
+ * 星号**不是**「这一条免检」：通配入口一条真实文件都匹配不到时，宿主的 locale 解析会静默回退成
+ * 包名——正是这条自检要挡的那种"本地全绿、装进去才发现"。
+ */
+function matchesWildcard(pattern, path) {
+  const source = pattern
+    .split('*')
+    .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .join('[^/]*')
+  return new RegExp(`^${source}$`).test(path)
+}
 const entryPaths = new Set([
   ...collectPaths({ main: pkg.main, types: pkg.types, exports: pkg.exports, bin: pkg.bin }),
   ...collectPaths(pkg.dsh ?? {}),
 ])
 for (const path of entryPaths) {
+  if (path.includes('*')) {
+    assert.ok(
+      [...shipped].some((file) => matchesWildcard(path, file)),
+      `package.json 的通配入口匹配不到包里任何文件：${path}`,
+    )
+    continue
+  }
   assert.ok(shipped.has(path), `package.json 指向了包外路径：${path}`)
 }
 
