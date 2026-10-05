@@ -11,11 +11,14 @@
  * 是同一件事——分开两页会让"我改了 URL，去看计划"多一次跳转。接缝本身是命名空间寻址的（同一份
  * 控制器，谁取都是那一份），所以放在本页不改变读写语义。
  *
- * 字段那一层刻意只留**结构**：不 import 宿主客户端包的类型，`ctx` 的成员只在运行期成立，由
- * `test/client.test.mjs` 的注册面断言兜住。这是本包客户端半侧的统一口径。
+ * 字段那一层刻意只留**结构**：`ctx` 的成员只在运行期成立，由 `test/client.test.mjs` 的注册面
+ * 断言兜住。本包客户端半侧唯一按官方类型写的是字典与 `t` 的键集（见 [locales.ts](./locales.ts)），
+ * 那是为了"键写错就在编译期报出来"。
  *
  * @module dsh-session-manager/client/syncForm
  */
+
+import type { SessionManagerKey } from './locales.ts'
 
 /** 本插件在 profile 里的 entry id：设置接缝按它寻址（`cordis.patch.yml` 里那个 insert 的 id）。 */
 export const SYNC_SECTION = 'session-manager'
@@ -321,7 +324,7 @@ export interface SyncTestOutcome {
 
 /** 一句界面文案：字典键 + 占位符（`t(key, params)`）。 */
 export interface SyncTestSentence {
-  key: string
+  key: SessionManagerKey
   params?: Record<string, string | number>
 }
 
@@ -339,25 +342,25 @@ export function testVerdict(outcome: SyncTestOutcome, passwordRef: string): Sync
   const detail = outcome.detail ?? ''
   switch (outcome.code) {
     case 'ok':
-      if (!outcome.namespaceExists) return { key: 'syncTestOkFirst' }
-      if (outcome.machines.length === 0) return { key: 'syncTestOkEmpty' }
-      return { key: 'syncTestOk', params: { machines: outcome.machines.join(', ') } }
+      if (!outcome.namespaceExists) return { key: 'sync.test.okFirst' }
+      if (outcome.machines.length === 0) return { key: 'sync.test.okEmpty' }
+      return { key: 'sync.test.ok', params: { machines: outcome.machines.join(', ') } }
     case 'unauthenticated':
-      if (outcome.username === null) return { key: 'syncTestNoUser', params: { status: outcome.status } }
-      if (!outcome.hasPassword) return { key: 'syncTestNoPassword', params: { ref: passwordRef } }
-      return { key: 'syncTestUnauthorized', params: { status: outcome.status } }
+      if (outcome.username === null) return { key: 'sync.test.noUser', params: { status: outcome.status } }
+      if (!outcome.hasPassword) return { key: 'sync.test.noPassword', params: { ref: passwordRef } }
+      return { key: 'sync.test.unauthorized', params: { status: outcome.status } }
     case 'forbidden':
-      return { key: 'syncTestForbidden', params: { status: outcome.status } }
+      return { key: 'sync.test.forbidden', params: { status: outcome.status } }
     case 'notFound':
-      return { key: 'syncTestNotFound', params: { status: outcome.status } }
+      return { key: 'sync.test.notFound', params: { status: outcome.status } }
     case 'unsupported':
-      return { key: 'syncTestUnsupported', params: { status: outcome.status } }
+      return { key: 'sync.test.unsupported', params: { status: outcome.status } }
     case 'unreachable':
-      return { key: 'syncTestUnreachable', params: { detail } }
+      return { key: 'sync.test.unreachable', params: { detail } }
     case 'serverError':
-      return { key: 'syncTestServerError', params: { status: outcome.status, detail } }
+      return { key: 'sync.test.serverError', params: { status: outcome.status, detail } }
     default:
       // 认不出来的码也照实说：带上状态码与原始原因，好过悄悄显示成"成功"。
-      return { key: 'syncTestOther', params: { status: outcome.status, detail } }
+      return { key: 'sync.test.other', params: { status: outcome.status, detail } }
   }
 }

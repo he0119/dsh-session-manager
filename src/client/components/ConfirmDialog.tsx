@@ -87,7 +87,7 @@ export function ConfirmDialog({
       open
       onClose={onCancel}
       title={title}
-      closeLabel={t('closeDialog')}
+      closeLabel={t('close')}
       className="dsm-dialog"
       contentClassName="dsm-dialogContent"
       footer={
@@ -108,7 +108,7 @@ export function ConfirmDialog({
     >
       {/* 正文自己再包一层：官方 `.body` 是纵向 flex 但不给块间距，而这里摆的是段落 + 清单 + 表格。 */}
       <div className="dsm-dialogBody">
-        {planning && (planningDetail ?? <p className="dsm-hint">{t('previewing')}</p>)}
+        {planning && (planningDetail ?? <p className="dsm-hint">{t('dialog.previewing')}</p>)}
         {error !== null && <p className="dsm-error">{error}</p>}
         {children}
       </div>

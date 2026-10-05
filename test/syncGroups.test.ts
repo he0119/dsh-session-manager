@@ -112,7 +112,7 @@ test('分组键的哨兵：没有 cwd 那一组的 React key 撞不上任何真�
 
 test('拉取行的悬浮提示：只有真的改写了才补"从哪到哪"', () => {
   const t = (key: string, params?: Record<string, unknown>): string =>
-    key === 'cwdRewritten' ? `${String(params?.from)} → ${String(params?.to)}` : key
+    key === 'cwd.rewritten' ? `${String(params?.from)} → ${String(params?.to)}` : key
   assert.equal(
     syncPullTip({ fromCwd: '/home/b/dev/x', toCwd: '/home/u/dev/alpha' }, '标题\nid', t),
     '标题\nid\n/home/b/dev/x → /home/u/dev/alpha',

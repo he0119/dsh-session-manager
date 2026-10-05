@@ -27,7 +27,7 @@ import {
   type FilterKey,
   type SessionFacts,
 } from '../logic/sessionFilter.ts'
-import type { Translate } from '../logic/locales.ts'
+import type { SessionManagerKey, Translate } from '../logic/locales.ts'
 
 /** 一行会话要显示的字段（三个分页传进来的 `SessionSummary` 都满足它）。 */
 export interface RowSession extends SessionFacts {
@@ -98,12 +98,20 @@ export function totalBytes(sessions: readonly { bytes: number }[]): number {
   return sessions.reduce((sum, session) => sum + session.bytes, 0)
 }
 
+/**
+ * 一枚行内标签的两句字典键：`key` 是标签本身、`tip` 是"这条会话为什么是这样"的说明。
+ *
+ * 两处都收窄成字典键集而不是 `string`：芯片、行标签、筛选框三处共用同一批键，写成 `string` 时
+ * 打错一个键不会报错，只会在界面上露出键名。
+ */
+export type TagCopy = { key: SessionManagerKey; tip: SessionManagerKey }
+
 /** 行上的属性标签 → 字典键（文案与"这条会话为什么是这样"的说明）。 */
-export const ATTRIBUTE_TAGS: Record<AttributeKey, { key: string; tip: string }> = {
-  subagent: { key: 'tagSubagent', tip: 'tagSubagentTip' },
-  blank: { key: 'tagBlank', tip: 'tagBlankTip' },
-  archived: { key: 'tagArchived', tip: 'tagArchivedTip' },
-  live: { key: 'tagLive', tip: 'tagLiveTip' },
+export const ATTRIBUTE_TAGS: Record<AttributeKey, TagCopy> = {
+  subagent: { key: 'tag.subagent', tip: 'tag.subagentTip' },
+  blank: { key: 'tag.blank', tip: 'tag.blankTip' },
+  archived: { key: 'tag.archived', tip: 'tag.archivedTip' },
+  live: { key: 'tag.live', tip: 'tag.liveTip' },
 }
 
 /**
@@ -113,7 +121,7 @@ export const ATTRIBUTE_TAGS: Record<AttributeKey, { key: string; tip: string }> 
  * （"谁都没认领它，而且默认视图下它会显示"），所以三处都叫「未分组」，判据也共用
  * `session.ungrouped`（原先列表里叫「未登记在册」，同一件事两个名字）。
  */
-export const UNGROUPED_TAG = { key: 'ungroupedSource', tip: 'ungroupedTip' }
+export const UNGROUPED_TAG: TagCopy = { key: 'list.ungrouped', tip: 'list.ungroupedTip' }
 
 /**
  * 这一行该挂哪几枚标签。
@@ -128,7 +136,7 @@ export const UNGROUPED_TAG = { key: 'ungroupedSource', tip: 'ungroupedTip' }
 export function sessionTags(
   session: SessionFacts,
   options: { ungrouped: boolean },
-): Array<{ key: string; tip: string }> {
+): TagCopy[] {
   const tags = attributeKeys(session).map((key) => ATTRIBUTE_TAGS[key])
   if (options.ungrouped && session.ungrouped === true) tags.push(UNGROUPED_TAG)
   return tags
@@ -335,8 +343,8 @@ export function SessionGroupHead({
         type="button"
         className="dsm-groupToggle"
         aria-expanded={!collapsed}
-        aria-label={t('toggleGroupLabel', { name: label.name })}
-        title={t('toggleGroupLabel', { name: label.name })}
+        aria-label={t('list.toggleGroup', { name: label.name })}
+        title={t('list.toggleGroup', { name: label.name })}
         onClick={onToggleCollapse}
       >
         <ChevronIcon />
@@ -345,7 +353,7 @@ export function SessionGroupHead({
         <GroupCheckbox
           checked={count > 0 && picked === count}
           indeterminate={picked > 0 && picked < count}
-          label={t('selectGroup', { name: label.name })}
+          label={t('list.selectGroup', { name: label.name })}
           onToggle={onToggle}
         />
         <WorkspaceIcon />
@@ -359,10 +367,10 @@ export function SessionGroupHead({
             {label.host}
           </span>
         )}
-        {title === undefined && path !== '' && <span className="dsm-tag dsm-tagIdle">{t('unregisteredDir')}</span>}
+        {title === undefined && path !== '' && <span className="dsm-tag dsm-tagIdle">{t('list.unregisteredDir')}</span>}
         <span className="dsm-groupCounts">
-          <span className="dsm-hint">{t('sessionsInDir', { count })}</span>
-          <span className="dsm-hint">{t('selectedCount', { count: picked })}</span>
+          <span className="dsm-hint">{t('list.sessionsInDir', { count })}</span>
+          <span className="dsm-hint">{t('list.selected', { count: picked })}</span>
         </span>
       </label>
     </div>
@@ -410,12 +418,12 @@ export function useGroupCollapse(keys: readonly string[]): GroupCollapse {
 export function SessionGroupTools({ collapse, t }: { collapse: GroupCollapse; t: Translate }): React.ReactElement {
   return (
     <div className="dsm-groupTools">
-      <span className="dsm-hint">{t('groupedByDir')}</span>
+      <span className="dsm-hint">{t('list.groupedByDir')}</span>
       <button type="button" className="dsm-button" disabled={collapse.allCollapsed} onClick={collapse.collapseAll}>
-        {t('collapseAll')}
+        {t('list.collapseAll')}
       </button>
       <button type="button" className="dsm-button" disabled={!collapse.anyCollapsed} onClick={collapse.expandAll}>
-        {t('expandAll')}
+        {t('list.expandAll')}
       </button>
     </div>
   )
@@ -484,7 +492,7 @@ export function useSessionFilter(sessions: readonly SessionFacts[]): SessionFilt
 }
 
 /** 芯片上的文案：四类属性与行上标签同一份，「未分组」与外壳那一组同名。 */
-const CHIP_LABELS: Record<FilterKey, { key: string; tip: string }> = {
+const CHIP_LABELS: Record<FilterKey, TagCopy> = {
   subagent: ATTRIBUTE_TAGS.subagent,
   blank: ATTRIBUTE_TAGS.blank,
   archived: ATTRIBUTE_TAGS.archived,
@@ -516,14 +524,14 @@ export function SessionFilterBar({ keys, filter, t }: SessionFilterBarProps): Re
     <>
       {chips && (
         <div className="dsm-filters">
-          <span className="dsm-hint">{t('filterLabel')}</span>
+          <span className="dsm-hint">{t('list.filter.label')}</span>
           <button
             type="button"
             className="dsm-filter"
             aria-pressed={filter.filters.length === 0}
             onClick={filter.clear}
           >
-            {t('filterAll')}
+            {t('list.filter.all')}
           </button>
           {keys.map((key) => (
             <button
@@ -541,16 +549,16 @@ export function SessionFilterBar({ keys, filter, t }: SessionFilterBarProps): Re
         </div>
       )}
       <div className="dsm-filterSearch">
-        {!chips && <span className="dsm-hint">{t('filterLabel')}</span>}
+        {!chips && <span className="dsm-hint">{t('list.filter.label')}</span>}
         <input
           className="dsm-search"
           type="search"
           value={filter.query}
-          placeholder={t('searchPlaceholder')}
-          aria-label={t('searchPlaceholder')}
+          placeholder={t('list.filter.search')}
+          aria-label={t('list.filter.search')}
           onChange={(event) => filter.setQuery(event.target.value)}
         />
-        {chips && <span className="dsm-hint">{t('filterHint')}</span>}
+        {chips && <span className="dsm-hint">{t('list.filter.hint')}</span>}
       </div>
     </>
   )

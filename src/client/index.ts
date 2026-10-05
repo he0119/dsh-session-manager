@@ -22,10 +22,13 @@
  *   - 运行时只 `require` 平台基线模块（`react` / `react/jsx-runtime` /
  *     `@deepseek-ai/dsh-client-ui-primitives`）：控件改用官方控件库（手写的在逐个替换），不引非
  *     基线模块，颜色只用主题 token。基线模块没送到时整个 Slot 条目会变成崩溃占位，所以渲染路径上
- *     不做会抛的事。
+ *     不做会抛的事。字典与命名空间那两处**只 import 类型**，产物里一个 require 都不会多。
  *
- * 类型面也是结构化的（不 import 宿主客户端包的类型）：本包不在类型层与那些包绑死，
- * 代价是 `ctx` 的成员只在运行期成立，由 `test/client.test.mjs` 的注册面断言兜住。
+ * 文案与 `t` 走官方的 locale 机制：字典在 [locales.ts](./logic/locales.ts) 里注册进 `locale`
+ * 服务，注册 Slot 时带 `locale: NS`，页面的 `t` 由**框架 props** 送来（`PropsLocale`，见官方
+ * 「新增设置卡片」那一页的示例）——本页不再自己 inject 一个 `t`，也不留中文兜底：那一层的服务
+ * 不在时框架给的是崩溃占位，而不是"悄悄换一种语言"。`ctx` 的其余成员仍是结构化的最小面，由
+ * `test/client.test.mjs` 的注册面断言兜住。
  *
  * 另有一处**服务借用**：目录字段的「浏览…」走宿主自己的 `uiWorkspace`，而不是本插件
  * 自己糊一套文件系统访问。它是可选依赖，收在 [directory.ts](./directory.ts) 里；宿主给的
@@ -43,6 +46,9 @@
  *
  * @module dsh-session-manager/client
  */
+
+import type { BuiltInLocaleId } from '@deepseek-ai/dsh-client-locale/client'
+import type { LocaleDictOf } from '@deepseek-ai/dsh-client-ui-slots'
 
 import { ManagerPanel } from './components/ManagerPanel.tsx'
 import { type CredentialsApi, setCredentialsApi } from './credentials.ts'
@@ -92,10 +98,18 @@ interface ConfigFormsService {
   get(namespace: string): SyncConfigApi | undefined
 }
 
-/** `locale` 服务的最小面。 */
+/**
+ * `locale` 服务的最小面。
+ *
+ * 两个方法都按**本命名空间**收窄：`register` 的字典要 `LocaleDictOf<NS>`（少键 / 多键是编译
+ * 错误），`bind` 回来的翻译函数键域也是这一份加宿主的 `common`。
+ */
 interface LocaleService {
-  register(namespace: string, dictionaries: Record<string, Record<string, string>>): () => void
-  bind(namespace: string): Translate
+  register(
+    namespace: typeof NS,
+    dictionaries: Record<BuiltInLocaleId, LocaleDictOf<typeof NS>>,
+  ): () => void
+  bind(namespace: typeof NS): Translate
 }
 
 /**
@@ -186,10 +200,11 @@ export function apply(ctx: ClientContext): void {
         id: SECTION_ID,
         order: SECTION_ORDER,
         // thunk：外壳投影导航行时会调用它，切语言后重新投影即可，不必重新注册。
-        label: () => ctx.locale.bind(NS)('title'),
+        label: () => ctx.locale.bind(NS)('page.title'),
         locale: NS,
-        // 同理给一个**取选择器的函数**：投影时它可能还没到位，点击那一刻才作数。
-        inject: () => ({ t: ctx.locale.bind(NS), directory: () => getDirectoryApi() }),
+        // 只给一个**取选择器的函数**：投影时它可能还没到位，点击那一刻才作数。
+        // `t` 不在这里——它由框架按 `locale` 送进组件 props（`PropsLocale`）。
+        inject: () => ({ directory: () => getDirectoryApi() }),
       },
       ManagerPanel,
     ),

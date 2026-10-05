@@ -29,6 +29,15 @@ const code = ready ? readFileSync(bundlePath, 'utf8') : ''
 const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
 
 /**
+ * 本页不自己写、直接用宿主 `common` 命名空间的那三个词。
+ *
+ * 与 `src/client/logic/locales.ts` 的 `REUSED_COMMON` 是同一份名单；那边用
+ * `satisfies readonly CommonKey[]` 在**编译期**核这几个词真的是宿主 common 的键（这正是那份类型
+ * 声明存在的意义），这里只核另一边：本字典里**没有**它们，查找链才会落到宿主那一份。
+ */
+const REUSED_COMMON = ['cancel', 'close', 'save']
+
+/**
  * 假的 react：钩子给出初始值，同时把创建出来的元素记下来，供"页签还在吗"这类断言用。
  *
  * `firstNull` 是给"要验证**有数据**时那棵树"用的：页面骨架（ManagerPanel）就是用它自己的
@@ -306,6 +315,22 @@ function mount({ translate, state, panel, arrays, strings, nulls, configForms, c
   const injectedServices = []
   const bound = []
   const t = (key, params) => (params ? `${key}:${JSON.stringify(params)}` : key)
+  // 页面渲染时问到的每一个键（`t()` 的入参）都记下来，并当场核一遍它在本字典里：字面量键已经有
+  // 编译期那道（`LocaleNamespaceMap` + `LocaleDictOf`），这条管的是**动态拼出来的**那些（键表、
+  // 码 → 键的映射）——漏在字典外的话，界面上露出来的就是键名本身。
+  //
+  // 三个例外是刻意让它落到宿主 `common` 命名空间的词（`cancel` / `close` / `save`）：它们在
+  // 字典里**必须缺席**，由宿主那条查找链兜住（见下面那条断言）。
+  const asked = new Set()
+  const seat = (key, params) => {
+    asked.add(key)
+    const dictionary = dictionaries[0]?.dicts.zh ?? {}
+    assert.ok(
+      Object.hasOwn(dictionary, key) || REUSED_COMMON.includes(key),
+      `页面问到的键不在字典里：${key}`,
+    )
+    return (translate ?? t)(key, params)
+  }
 
   mod.apply({
     effect(callback, label) {
@@ -356,17 +381,28 @@ function mount({ translate, state, panel, arrays, strings, nulls, configForms, c
         return callback()
       },
       register(registration, component) {
-        registrations.push({ registration, component })
+        // 框架在渲染时把 `t` seat 叠在注册面之上（条目声明了 `locale` 就有它）。本文件照同一个
+        // 合成顺序把它补上，于是"页面拿到的 `t` 来自框架、不是插件自己 inject 的"在用例里也成立；
+        // 插件自己 inject 的那一份留在 `injected` 上，供下面那条断言核它**没有** `t`。
+        const injected = registration.inject
+        registrations.push({
+          registration: { ...registration, inject: () => ({ ...(injected?.() ?? {}), t: seat }) },
+          component,
+          injected,
+        })
         return () => {}
       },
     },
   })
 
-  return { mod, nodes, recorded, registrations, dictionaries, effects, injectedSlots, injectedServices, bound, t }
+  return {
+    mod, nodes, recorded, registrations, dictionaries, effects, injectedSlots, injectedServices,
+    bound, t, seat, asked,
+  }
 }
 
 test('客户端产物：apply 把「会话管理」注册到设置里的一页，并带上字典与注入面', { skip }, async () => {
-  const { nodes, registrations, dictionaries, effects, injectedSlots, injectedServices, bound, t } = mount()
+  const { nodes, registrations, dictionaries, effects, injectedSlots, injectedServices, bound, seat } = mount()
 
   // Slot 用 inject 等声明到位，而不是直接 register——声明可能晚于本插件 apply。
   assert.deepEqual(injectedSlots, ['settings.section'])
@@ -382,8 +418,11 @@ test('客户端产物：apply 把「会话管理」注册到设置里的一页�
   // bind 是惰性的（label 与 inject 都是 thunk），上面调用 label() 之后它才被绑过
   assert.deepEqual(bound, ['dsh-session-manager'])
 
-  // 注入面里的 t 就是绑到本命名空间的翻译函数
-  assert.equal(registration.inject().t, t)
+  // 翻译函数是**框架 props**，不是插件自己 inject 的：注册选项声明 `locale: NS`，框架据此把 `t`
+  // 送进组件（本文件在 register 那里照同一条合成顺序补上）。插件自己 inject 的注入面里因此只剩
+  // 目录选择器那一项——多 inject 一个 `t` 会把框架那一个盖掉，那正是这条断言要拦的事。
+  assert.deepEqual(Object.keys(registrations[0].injected() ?? {}), ['directory'])
+  assert.equal(registration.inject().t, seat)
 
   // 目录选择器与凭据服务：都作为**可选**依赖收（由别的客户端插件提供，不写进顶层 inject），
   // 服务不在时整页照装——只是对应那一块要自己说明。凭据那两个名字都声明：命名空间服务挂在
@@ -410,6 +449,11 @@ test('客户端产物：apply 把「会话管理」注册到设置里的一页�
   const { zh, en } = dictionaries[0].dicts
   assert.deepEqual(Object.keys(zh).sort(), Object.keys(en).sort(), '两份字典的键集必须一致')
   assert.ok(Object.keys(zh).length > 20, '字典不该是空壳')
+  // 取消 / 关闭 / 保存走宿主 `common` 命名空间（查找链在本命名空间缺席时落到它）：这两处必须
+  // 一边缺席、一边存在——本字典里留一份就不会用宿主那份，两种语言各写一遍正是要避免的事。
+  for (const key of REUSED_COMMON) {
+    assert.ok(!Object.hasOwn(zh, key) && !Object.hasOwn(en, key), `${key} 该由宿主 common 提供`)
+  }
 
   // 界面文案是纯文本渲染（`dd` / 提示里写什么就显示什么），所以字典里不能有 Markdown 记号：
   // 说明页原来那两条 `**…**` 就是原样露在页面上的（用户截图报的）。
@@ -431,13 +475,13 @@ test('客户端产物：apply 把「会话管理」注册到设置里的一页�
    * 表是 122px 的列，装的是「两边各自写过」这种更长的短语，不在这条里。
    */
   const SYNC_ACTION_LABELS = [
-    'syncTagPull',
-    'syncTagPush',
-    'syncTagRepush',
-    'syncTagLocalNewer',
-    'syncTagReplace',
-    'syncTagNoMapping',
-    'syncTagMissingTarget',
+    'sync.tag.pull',
+    'sync.tag.push',
+    'sync.tag.repush',
+    'sync.tag.localNewer',
+    'sync.tag.replace',
+    'sync.tag.noMapping',
+    'sync.tag.missingTarget',
   ]
   const labelWidth = (text) =>
     [...text].reduce((sum, ch) => sum + (ch.charCodeAt(0) > 0x7f ? 12 : 6.5), 14)
@@ -462,14 +506,14 @@ test('客户端产物：apply 把「会话管理」注册到设置里的一页�
     en: 175,
   }
   const actionKeys = [
-    'exportHint',
-    'importHint',
-    'migrateHint',
-    'unownedSourceHint',
-    'manageHint',
-    'manageDeleteHint',
-    'backupHint',
-    'filterHint',
+    'transfer.export.hint',
+    'transfer.import.hint',
+    'migrate.hint',
+    'migrate.from.unownedHint',
+    'manage.hint',
+    'manage.delete.hint',
+    'backup.hint',
+    'list.filter.hint',
   ]
   for (const [language, cap] of Object.entries(PAGE_PROSE)) {
     const dictionary = language === 'zh' ? zh : en
@@ -504,15 +548,15 @@ test('客户端产物：页面骨架带着四个动作页（会话 / 迁移 / �
   // 用注入面给的 t（键回显）渲染，于是文案就等于字典键，断言不依赖任何一种语言。
   const element = component(inject())
   const text = strings(element)
-  assert.ok(text.includes('tabTransfer'), '页内要有「传输」这一页')
-  assert.ok(text.includes('tabMigrate'), '页内要有「迁移」这一页')
-  assert.ok(text.includes('tabManage'), '页内要有「会话」这一页（逐条归档 / 删除）')
-  assert.ok(text.includes('tabSync'), '页内要有「同步」这一页（WebDAV）')
+  assert.ok(text.includes('page.tab.transfer'), '页内要有「传输」这一页')
+  assert.ok(text.includes('page.tab.migrate'), '页内要有「迁移」这一页')
+  assert.ok(text.includes('page.tab.manage'), '页内要有「会话」这一页（逐条归档 / 删除）')
+  assert.ok(text.includes('page.tab.sync'), '页内要有「同步」这一页（WebDAV）')
   // 页签顺序：日常的「会话」在最前；「同步」紧挨「传输」（它落地走的是导入那条编排）；说明垫底
   const tabs = recorded.filter((node) => String(node.props?.className) === 'dsm-tab')
   assert.deepEqual(
     tabs.map((node) => strings(node)[0]),
-    ['tabManage', 'tabMigrate', 'tabTransfer', 'tabSync', 'tabHelp'],
+    ['page.tab.manage', 'page.tab.migrate', 'page.tab.transfer', 'page.tab.sync', 'page.tab.help'],
     '顺序是 会话 → 迁移 → 传输 → 同步 → 说明（动作页按日常程度排，参考页垫底）',
   )
   assert.deepEqual(
@@ -520,7 +564,7 @@ test('客户端产物：页面骨架带着四个动作页（会话 / 迁移 / �
     [true, false, false, false, false],
     '默认停在第一个页签',
   )
-  assert.ok(text.includes('title'), '页面标题走同一份字典')
+  assert.ok(text.includes('page.title'), '页面标题走同一份字典')
 })
 
 test('客户端产物：页头是页面级标题（h2 + 说明行），不是卡片式的小标题', { skip }, () => {
@@ -533,19 +577,19 @@ test('客户端产物：页头是页面级标题（h2 + 说明行），不是卡
 
   const heading = tree.find((node) => node.props?.className === 'dsm-title')
   assert.equal(heading?.type, 'h2', '页面标题必须是 h2（内建页就是 h2）')
-  assert.ok(strings(heading).includes('title'), '标题文案走字典')
+  assert.ok(strings(heading).includes('page.title'), '标题文案走字典')
   assert.equal(tree.some((node) => node.props?.className === 'dsm-sub'), false, '旧的 .dsm-sub 不该再出现')
 
   const intro = tree.find((node) => node.props?.className === 'dsm-intro')
   assert.equal(intro?.type, 'p', '说明行是 p')
   assert.ok(
-    strings(intro).some((text) => text.includes('library')),
+    strings(intro).some((text) => text.includes('page.library')),
     '说明行里带着会话库信息（路径与条数）',
   )
   // 标题行里只有标题、弹簧与刷新按钮：说明不在这一行里，否则又变成"挤在一行"。
   const row = tree.find((node) => node.props?.className === 'dsm-titleRow')
   assert.equal(row?.type, 'div', '标题行是一个 div')
-  assert.ok(!strings(row).some((text) => text.includes('library')), '说明行不在标题行里')
+  assert.ok(!strings(row).some((text) => text.includes('page.library')), '说明行不在标题行里')
 })
 
 test('客户端产物：页面组件在初始状态下能渲染成元素（不抛）', { skip }, () => {
@@ -582,8 +626,8 @@ test('客户端产物：迁移页把「未分组」列成独立来源（注册�
   const { inject } = registrations[0].registration
   const text = strings(component(inject()))
 
-  assert.ok(text.includes('tabMigrate'), '页签还在（seeded 的那一页就是它）')
-  assert.ok(text.includes('migrateTitle') && text.includes('sourceSessionsNone'), '迁移页本体渲染出来了')
+  assert.ok(text.includes('page.tab.migrate'), '页签还在（seeded 的那一页就是它）')
+  assert.ok(text.includes('migrate.title') && text.includes('migrate.source.none'), '迁移页本体渲染出来了')
 
   const options = recorded.filter((element) => element.type === 'option')
   const paths = options.map((element) => String(element.props?.value))
@@ -593,7 +637,7 @@ test('客户端产物：迁移页把「未分组」列成独立来源（注册�
   assert.ok(unowned, '源下拉框里必须有「未分组」这一行')
   // 条数 = 库里"侧边栏会放进「未分组」、且有 cwd"的会话数（s-2 与 s-3），不是某个目录的条数
   assert.ok(
-    text.some((item) => String(item).includes('ungroupedSource') && String(item).includes('sessionsInDir:{"count":2}')),
+    text.some((item) => String(item).includes('list.ungrouped') && String(item).includes('list.sessionsInDir:{"count":2}')),
     '未分组那一行要报出跨目录的条数',
   )
   // 哨兵值只该出现在 option 的 value 上，不该当文案露出来
@@ -635,9 +679,9 @@ test('客户端产物：导出列表按目录分组，组头就是"整组勾选"
     '已登记的工作区：路径在名字那一格的悬浮提示里（组头上不再印它）',
   )
   assert.ok(text.includes('/home/u/dev/beta'), '没登记的目录也要成组（没有标题、也没有身份，名字就是路径）')
-  assert.ok(text.includes('unregisteredDir'), '没登记的目录要标出来，别让人以为它不在册')
-  assert.ok(text.includes('noCwdGroup'), '没有 cwd 的会话自成一组建在最后')
-  assert.ok(text.some((item) => String(item).startsWith('sessionsInDir:')), '组头要给出这一组有几条')
+  assert.ok(text.includes('list.unregisteredDir'), '没登记的目录要标出来，别让人以为它不在册')
+  assert.ok(text.includes('list.noCwdGroup'), '没有 cwd 的会话自成一组建在最后')
+  assert.ok(text.some((item) => String(item).startsWith('list.sessionsInDir:')), '组头要给出这一组有几条')
 
   // 三组会话 = 三条组头；一条会话一行，行里不再重复 cwd（它已经在组头上）。
   const heads = recorded.filter((element) => element.props?.className === 'dsm-groupHead')
@@ -645,7 +689,7 @@ test('客户端产物：导出列表按目录分组，组头就是"整组勾选"
   // 整组勾选的入口是组头上那个框：它的无障碍名字必须说清是哪一组（"整组勾选／取消：工作区甲"），
   // 否则读屏用户在一堆同名框里分不出点的是谁。文案在 props 里，所以只能从树上取，不在 strings()。
   const groupBoxes = recorded.filter(
-    (element) => element.type === 'input' && String(element.props?.['aria-label'] ?? '').startsWith('selectGroup:'),
+    (element) => element.type === 'input' && String(element.props?.['aria-label'] ?? '').startsWith('list.selectGroup:'),
   )
   assert.equal(groupBoxes.length, 3, '每条组头一个"整组勾选"的框')
   assert.ok(
@@ -700,9 +744,9 @@ test('客户端产物：导出列表按目录分组，组头就是"整组勾选"
   assert.deepEqual(tagsByLabel.get('s-1'), [], '登记在册的会话不挂标签')
   // s-1 与 s-2 在同一个目录、同一组里：在册与不在册混在一组是常态（真实库里就是这样），
   // 标签得精确到行，不能按组一刀切。
-  assert.deepEqual(tagsByLabel.get('s-2'), ['ungroupedSource'], '同目录里在「未分组」那一组的那条要单独标出来')
-  assert.deepEqual(tagsByLabel.get('s-3'), ['ungroupedSource'], '另一个目录里的同样标出来')
-  assert.deepEqual(tagsByLabel.get('s-4'), ['ungroupedSource'], '没有 cwd 的也在那一组里（标签与迁移来源的 cwd 要求无关）')
+  assert.deepEqual(tagsByLabel.get('s-2'), ['list.ungrouped'], '同目录里在「未分组」那一组的那条要单独标出来')
+  assert.deepEqual(tagsByLabel.get('s-3'), ['list.ungrouped'], '另一个目录里的同样标出来')
+  assert.deepEqual(tagsByLabel.get('s-4'), ['list.ungrouped'], '没有 cwd 的也在那一组里（标签与迁移来源的 cwd 要求无关）')
 
 })
 
@@ -756,7 +800,7 @@ test('客户端产物：组头只摆名字，身份与本机路径在悬浮提�
   assert.deepEqual(namesOf(heads[1]), [
     { text: 'beta', tip: 'github.com/he0119/beta\n/home/u/dev/beta' },
   ])
-  assert.equal(text.includes('unregisteredDir'), true, '没登记的目录照样要标出来')
+  assert.equal(text.includes('list.unregisteredDir'), true, '没登记的目录照样要标出来')
   // 两个机器字符串都不在可见文字里：身份与路径各自只出现在悬浮提示上
   assert.equal(text.includes('github.com/he0119/beta'), false, '身份不再当可见文字印一遍')
   assert.equal(text.includes('/home/u/dev/beta'), false, '本机路径也不再当可见文字印一遍')
@@ -776,12 +820,12 @@ test('客户端产物：组头只摆名字，身份与本机路径在悬浮提�
   const optionFor = (path) => options.find((element) => element.props?.value === path)
   assert.equal(
     optionFor('/home/u/dev/alpha')?.props?.children,
-    'github.com/he0119/alpha — /home/u/dev/alpha — sessionsInDir:{"count":1}',
+    'github.com/he0119/alpha — /home/u/dev/alpha — list.sessionsInDir:{"count":1}',
     '有身份时那一行是"身份 — 路径 — 条数"（标题不再重复，路径与身份都在）',
   )
   assert.equal(
     optionFor('/home/u/dev/beta')?.props?.children,
-    'github.com/he0119/beta — /home/u/dev/beta — sessionsInDir:{"count":1}',
+    'github.com/he0119/beta — /home/u/dev/beta — list.sessionsInDir:{"count":1}',
   )
 })
 
@@ -817,8 +861,8 @@ test('客户端产物：「会话」页把侧边栏看不见的那三类标出�
   const { inject } = registrations[0].registration
   const text = strings(component(inject()))
 
-  assert.ok(text.includes('tabManage'), '页签停在「会话」这一页')
-  assert.ok(text.includes('manageTitle') && text.includes('manageHint'), '页面本体渲染出来了')
+  assert.ok(text.includes('page.tab.manage'), '页签停在「会话」这一页')
+  assert.ok(text.includes('manage.title') && text.includes('manage.hint'), '页面本体渲染出来了')
   // 三类隐藏理由各挂各的标签：**标签文字**是子节点，**为什么不显示**在悬浮提示里，两处都核
   const tagged = (key, tip) => {
     const node = recorded.find((element) => element.type === 'span' && strings(element).includes(key))
@@ -826,10 +870,10 @@ test('客户端产物：「会话」页把侧边栏看不见的那三类标出�
     assert.equal(node.props?.title, tip, `「${key}」要说清它为什么不显示`)
     assert.equal(node.props?.className, 'dsm-tag dsm-tagIdle', '标签走统一的那套中性样式')
   }
-  tagged('tagSubagent', 'tagSubagentTip')
-  tagged('tagBlank', 'tagBlankTip')
-  tagged('tagArchived', 'tagArchivedTip')
-  tagged('tagLive', 'tagLiveTip')
+  tagged('tag.subagent', 'tag.subagentTip')
+  tagged('tag.blank', 'tag.blankTip')
+  tagged('tag.archived', 'tag.archivedTip')
+  tagged('tag.live', 'tag.liveTip')
   // 归属进了组头：按目录分组（组头写工作区标题，目录路径在那一格的悬浮提示里），行上不再重复那一列
   const heads = recorded.filter((node) => String(node.props?.className) === 'dsm-groupHead')
   assert.equal(heads.length, 2, 'alpha 与 beta 各一组')
@@ -855,21 +899,21 @@ test('客户端产物：「会话」页把侧边栏看不见的那三类标出�
   // 这条以前是反的（判据只看"有没有认领"），所以两行都钉住。
   assert.deepEqual(
     rowParts(manageRows.find((row) => strings(row).includes('s-2'))).tags,
-    ['tagSubagent'],
+    ['tag.subagent'],
     '子智能体只挂「子智能体」——它不在侧边栏的「未分组」那一组里',
   )
   assert.deepEqual(
     rowParts(manageRows.find((row) => strings(row).includes('s-5'))).tags,
-    ['tagLive', 'ungroupedSource'],
+    ['tag.live', 'list.ungrouped'],
     '真正落在侧边栏「未分组」里的那条才挂「未分组」',
   )
   // 归档与删除两组入口都在，且宿主给出归档能力时不显示那句"改不了"
-  assert.ok(text.includes('manageArchive') && text.includes('manageUnarchive'), '归档 / 取消归档入口在')
+  assert.ok(text.includes('manage.archive.action') && text.includes('manage.archive.undo'), '归档 / 取消归档入口在')
   const actionButton = (key) =>
     recorded.find((element) => element.type === 'button' && strings(element).includes(key))
-  assert.equal(actionButton('manageArchive')?.props?.['disabled'], false, '宿主有归档能力时按钮可用')
-  assert.ok(actionButton('manageDelete') !== undefined && text.includes('manageDeleteHint'), '删除入口与说明在')
-  assert.ok(!text.includes('manageArchiveUnavailable'), '宿主有归档能力时不该显示"改不了归档"那句')
+  assert.equal(actionButton('manage.archive.action')?.props?.['disabled'], false, '宿主有归档能力时按钮可用')
+  assert.ok(actionButton('manage.delete.action') !== undefined && text.includes('manage.delete.hint'), '删除入口与说明在')
+  assert.ok(!text.includes('manage.archive.unavailable'), '宿主有归档能力时不该显示"改不了归档"那句')
 })
 
 test('客户端产物：子智能体缩进到父会话的下一级（同一组 / 父在别的组 / 父被筛掉 / 分叉不缩进）', { skip }, () => {
@@ -915,23 +959,23 @@ test('客户端产物：子智能体缩进到父会话的下一级（同一组 /
   const first = render(mount({ state, panel: 'manage' }))
   const text = first.text
   assert.deepEqual(rowsOf(first.recorded), [
-    { label: 'p1', tags: ['tagArchived'], nest: '0' },
-    { label: 'c1', tags: ['tagSubagent'], nest: '1' },
-    { label: 'c2', tags: ['tagSubagent'], nest: '2' },
+    { label: 'p1', tags: ['tag.archived'], nest: '0' },
+    { label: 'c1', tags: ['tag.subagent'], nest: '1' },
+    { label: 'c2', tags: ['tag.subagent'], nest: '2' },
     { label: 'lone', tags: [], nest: '0' },
     { label: 'f1', tags: [], nest: '0' },
-    { label: 'x1', tags: ['tagSubagent', 'tagParentElsewhere'], nest: '1' },
+    { label: 'x1', tags: ['tag.subagent', 'manage.tag.parentElsewhere'], nest: '1' },
   ])
   // 缩进只改画法：组头报的条数还是这一组有几条会话（子智能体照样算）
-  assert.ok(text.some((item) => String(item).includes('sessionsInDir:{"count":5}')), 'alpha 组 5 条（分叉也算一条）')
-  assert.ok(text.some((item) => String(item).includes('sessionsInDir:{"count":1}')), 'beta 组 1 条')
+  assert.ok(text.some((item) => String(item).includes('list.sessionsInDir:{"count":5}')), 'alpha 组 5 条（分叉也算一条）')
+  assert.ok(text.some((item) => String(item).includes('list.sessionsInDir:{"count":1}')), 'beta 组 1 条')
 
   // ② 只筛「子智能体」：父会话被筛走，子智能体按普通行画（不凭空多一级）；孙的父还在，于是只它缩进
   const second = render(mount({ state, panel: 'manage', arrays: [[], ['subagent']] }))
   assert.deepEqual(rowsOf(second.recorded), [
-    { label: 'c1', tags: ['tagSubagent'], nest: '0' },
-    { label: 'c2', tags: ['tagSubagent'], nest: '1' },
-    { label: 'x1', tags: ['tagSubagent'], nest: '0' },
+    { label: 'c1', tags: ['tag.subagent'], nest: '0' },
+    { label: 'c2', tags: ['tag.subagent'], nest: '1' },
+    { label: 'x1', tags: ['tag.subagent'], nest: '0' },
   ])
 })
 
@@ -967,7 +1011,7 @@ test('客户端产物：子智能体行的勾选框禁用（跟着父会话走�
     return elementsOf(row).find((element) => element.type === 'input')?.props ?? {}
   }
   assert.equal(inputOf('c1').disabled, true, '子智能体不能单独勾')
-  assert.equal(inputOf('c1').title, 'lockedSubagentTip:{"name":"父会话"}', '提示里写明该勾哪一条')
+  assert.equal(inputOf('c1').title, 'list.lockedSubagentTip:{"name":"父会话"}', '提示里写明该勾哪一条')
   assert.notEqual(inputOf('父会话').disabled, true, '父会话能勾（它就是那个"上面那条"）')
   assert.notEqual(inputOf('f1').disabled, true, '分叉不是子智能体，照旧能单独勾')
   assert.notEqual(inputOf('o1').disabled, true, '孤儿没有可跟随的会话，照旧能单独勾')
@@ -976,7 +1020,7 @@ test('客户端产物：子智能体行的勾选框禁用（跟着父会话走�
   const lockedOnly = { ...state, sessions: sessions.filter((session) => session.id !== 'o1') }
   const second = render(mount({ state: lockedOnly, panel: 'manage', arrays: [[], ['subagent']] }))
   const selectAll = second.recorded.find(
-    (element) => element.type === 'button' && strings(element).includes('selectAllSessions'),
+    (element) => element.type === 'button' && strings(element).includes('list.selectAll'),
   )
   assert.equal(selectAll?.props?.['disabled'], true, '列出来的全是不能单独勾的子智能体时，「全选」禁用')
 })
@@ -1022,14 +1066,14 @@ test('客户端产物：「会话」页在宿主没有归档能力时禁用入�
   const { component } = registrations[0]
   const { inject } = registrations[0].registration
   const text = strings(component(inject()))
-  assert.ok(text.includes('manageArchiveUnavailable'), '要说清为什么归档按钮不可用')
+  assert.ok(text.includes('manage.archive.unavailable'), '要说清为什么归档按钮不可用')
 
   const button = (key) =>
     recorded.find((element) => element.type === 'button' && strings(element).includes(key))
-  assert.equal(button('manageArchive')?.props?.['disabled'], true, '没有归档能力时归档按钮要真的禁用')
-  assert.equal(button('manageUnarchive')?.props?.['disabled'], true, '取消归档同理')
+  assert.equal(button('manage.archive.action')?.props?.['disabled'], true, '没有归档能力时归档按钮要真的禁用')
+  assert.equal(button('manage.archive.undo')?.props?.['disabled'], true, '取消归档同理')
   // 删除不依赖宿主的归档服务，所以入口照旧在（空选择下它也禁用，但那是另一条理由，界面上另有说明）
-  assert.ok(button('manageDelete') !== undefined, '删除入口照旧在')
+  assert.ok(button('manage.delete.action') !== undefined, '删除入口照旧在')
 })
 
 test('客户端产物：「会话」页的筛选条把不匹配的行筛掉，选中态挂在 aria-pressed 上', { skip }, () => {
@@ -1060,12 +1104,12 @@ test('客户端产物：「会话」页的筛选条把不匹配的行筛掉，�
   assert.equal(chips.length, 6, '「全部」+ 五类')
   const chip = (label) => chips.find((node) => strings(node).includes(label))
   assert.deepEqual(chips.map((node) => strings(node).join('')), [
-    'filterAll',
-    'tagSubagent',
-    'tagBlank',
-    'tagArchived',
-    'ungroupedSource',
-    'tagLive',
+    'list.filter.all',
+    'tag.subagent',
+    'tag.blank',
+    'tag.archived',
+    'list.ungrouped',
+    'tag.live',
   ])
   // 每类各有多少条（对整个库数）：数字是 React 直接渲染的数字节点，strings() 只收字符串，所以单看这里
   const counts = recorded
@@ -1073,12 +1117,12 @@ test('客户端产物：「会话」页的筛选条把不匹配的行筛掉，�
     .map((node) => String(node.props.children))
   // 「未分组」只有 1 条（s-live）：s-sub（子智能体）与两条空白都不在侧边栏那一组里——这正是这次的改动
   assert.deepEqual(counts, ['1', '2', '1', '1', '1'], '子智能体 1 / 空白 2 / 已归档 1 / 未分组 1 / 活动中 1')
-  assert.equal(chip('filterAll')?.props?.['aria-pressed'], false, '筛着的时候「全部」不是选中态')
-  assert.equal(chip('tagBlank')?.props?.['aria-pressed'], true, '种进去的那一类要显示成选中')
-  assert.equal(chip('tagSubagent')?.props?.['aria-pressed'], false, '没勾的那几类不是选中态')
+  assert.equal(chip('list.filter.all')?.props?.['aria-pressed'], false, '筛着的时候「全部」不是选中态')
+  assert.equal(chip('tag.blank')?.props?.['aria-pressed'], true, '种进去的那一类要显示成选中')
+  assert.equal(chip('tag.subagent')?.props?.['aria-pressed'], false, '没勾的那几类不是选中态')
   // 每一类的说明走悬浮提示（与行上的标签同一份文案）
-  assert.equal(chip('tagBlank')?.props?.title, 'tagBlankTip')
-  assert.equal(chip('ungroupedSource')?.props?.title, 'ungroupedTip')
+  assert.equal(chip('tag.blank')?.props?.title, 'tag.blankTip')
+  assert.equal(chip('list.ungrouped')?.props?.title, 'list.ungroupedTip')
 
   // 列表：只剩空白那两条（筛选＝任一命中），其余三类不在树上
   const rows = recorded.filter(
@@ -1090,23 +1134,23 @@ test('客户端产物：「会话」页的筛选条把不匹配的行筛掉，�
   // "空白 + 已归档"那条要挂两枚标签：只挂宿主先判的那一枚，筛选就没法自证了。
   // 它**不**挂「未分组」：侧边栏默认视图里压根不显示它，更不会把它放进「未分组」那一组。
   const both = rows.find((row) => strings(row).includes('s-both'))
-  assert.deepEqual(rowParts(both).tags, ['tagBlank', 'tagArchived'], '既是空白又已归档的那条挂两枚，且都不是「未分组」')
+  assert.deepEqual(rowParts(both).tags, ['tag.blank', 'tag.archived'], '既是空白又已归档的那条挂两枚，且都不是「未分组」')
   // 筛过之后头部报"显示了其中几条"，别让人以为库里的会话变少了
-  assert.ok(text.includes('shownCount:{"shown":2,"total":5}'), '筛过之后报出 显示 N / M 条')
+  assert.ok(text.includes('list.shown:{"shown":2,"total":5}'), '筛过之后报出 显示 N / M 条')
 
   // 说明句「多选＝任一命中」必须**自己一行**（筛选条后面那个 <p>），不能挤在胶囊那一行里。
   // 挤回去不会报错、不会崩，只会让它重新跟着容器右边缘跑：外层滚动条一进一出就让这条边的位置变
   // （实测旧写法 9px；装了经典滚动条的环境是 15px），胶囊行余量也只剩三十来px、窄一点就整行换行。
   // 位置这种东西没法在这里量，所以按结构核：它在不在 .dsm-filters 里面。
   const filterRow = recorded.find((node) => String(node.props?.className) === 'dsm-filters')
-  assert.equal(strings(filterRow).includes('filterHint'), false, '说明句不在胶囊那一行里')
+  assert.equal(strings(filterRow).includes('list.filter.hint'), false, '说明句不在胶囊那一行里')
   const searchRow = recorded.find((node) => String(node.props?.className) === 'dsm-filterSearch')
-  assert.ok(strings(searchRow).includes('filterHint'), '说明句与胶囊不在同一行（都在固定的左边界上）')
+  assert.ok(strings(searchRow).includes('list.filter.hint'), '说明句与胶囊不在同一行（都在固定的左边界上）')
   // 搜索框本身：值的来源是筛选状态，占位符与无障碍名字走字典（它们是 props，strings() 看不见）
   const search = recorded.find((node) => String(node.props?.className) === 'dsm-search')
   assert.equal(search?.props?.type, 'search', '搜索框是原生 input[type=search]（自带清空按钮）')
-  assert.equal(search?.props?.placeholder, 'searchPlaceholder', '占位符说明它搜什么')
-  assert.equal(search?.props?.['aria-label'], 'searchPlaceholder', '搜索框要有无障碍名字')
+  assert.equal(search?.props?.placeholder, 'list.filter.search', '占位符说明它搜什么')
+  assert.equal(search?.props?.['aria-label'], 'list.filter.search', '搜索框要有无障碍名字')
   assert.ok(
     (Array.isArray(searchRow.props.children) ? searchRow.props.children : [searchRow.props.children]).includes(search),
     '搜索框在搜索那一行里',
@@ -1136,7 +1180,7 @@ test('客户端产物：「会话」页一条都没筛出来时，那个固定�
   assert.equal(lists.length, 1, '列表框还在（高度固定的那个框）')
   const empties = recorded.filter((node) => String(node.props?.className) === 'dsm-empty')
   assert.equal(empties.length, 1, '空态的说明只有一条')
-  assert.ok(strings(empties[0]).includes('noMatch'), '空态说的是"没有符合筛选条件的会话"')
+  assert.ok(strings(empties[0]).includes('list.noMatch'), '空态说的是"没有符合筛选条件的会话"')
   // 空态必须是框的子节点，不能是它的兄弟（换成兄弟就等于把框撤了）
   assert.ok(
     String(lists[0].props.className).includes('dsm-listFixed'),
@@ -1160,7 +1204,7 @@ test('客户端产物：「会话」页一条都没筛出来时，那个固定�
     '空态画在列表框里面',
   )
   assert.ok(!text.includes('s-owned') && !text.includes('s-blank'), '没有匹配的行被列出来')
-  assert.ok(text.includes('shownCount:{"shown":0,"total":2}'), '头部照样报 显示 0 / 2 条')
+  assert.ok(text.includes('list.shown:{"shown":0,"total":2}'), '头部照样报 显示 0 / 2 条')
 })
 
 test('客户端产物：导出页也接了同一套筛选条，筛空的组整组不画、组头条数跟着筛', { skip }, () => {
@@ -1184,12 +1228,12 @@ test('客户端产物：导出页也接了同一套筛选条，筛空的组整�
   // 这一页列的是**整个库**（隐藏会话也在），所以五类芯片都有意义，计数对整个库数
   const chips = recorded.filter((node) => String(node.props?.className) === 'dsm-filter')
   assert.deepEqual(chips.map((node) => strings(node).join('')), [
-    'filterAll',
-    'tagSubagent',
-    'tagBlank',
-    'tagArchived',
-    'ungroupedSource',
-    'tagLive',
+    'list.filter.all',
+    'tag.subagent',
+    'tag.blank',
+    'tag.archived',
+    'list.ungrouped',
+    'tag.live',
   ])
   assert.equal(
     recorded
@@ -1199,13 +1243,13 @@ test('客户端产物：导出页也接了同一套筛选条，筛空的组整�
     '1,1,0,1,0',
     '子智能体 1 / 空白 1 / 已归档 0 / 未分组 1（b-1）/ 活动中 0',
   )
-  assert.ok(text.includes('shownCount:{"shown":1,"total":4}'), '筛过之后报 显示 1 / 4 条')
+  assert.ok(text.includes('list.shown:{"shown":1,"total":4}'), '筛过之后报 显示 1 / 4 条')
 
   // 筛空的那一组整组不画（组头底下没有行，看着像坏了），留下那组报的是筛剩下的条数
   const heads = recorded.filter((node) => String(node.props?.className) === 'dsm-groupHead')
   assert.equal(heads.length, 1, '筛空的组不画组头')
   assert.ok(strings(heads[0]).includes('工作区甲'), '留下的是 alpha 那组')
-  assert.ok(text.includes('sessionsInDir:{"count":1}'), '组头报的是筛剩下的条数')
+  assert.ok(text.includes('list.sessionsInDir:{"count":1}'), '组头报的是筛剩下的条数')
 
   // 行出自共用组件（sessionList.tsx 的 SessionRow），标签也走共用判据
   const rowEls = recorded.filter((node) => typeof node.type === 'function' && node.type.name === 'SessionRow')
@@ -1216,7 +1260,7 @@ test('客户端产物：导出页也接了同一套筛选条，筛空的组整�
   )
   assert.equal(labels.length, 1)
   // a-2 是空白：它不挂「未分组」（侧边栏默认视图里根本没显示它）
-  assert.deepEqual(rowParts(labels[0]).tags, ['tagBlank'], '这一页也挂属性标签，且「未分组」只给侧边栏那一组')
+  assert.deepEqual(rowParts(labels[0]).tags, ['tag.blank'], '这一页也挂属性标签，且「未分组」只给侧边栏那一组')
 })
 
 test('客户端产物：迁移弹窗——计划逐条列出会话，跟着父会话进来的那些挂「随父迁」', { skip }, () => {
@@ -1281,21 +1325,21 @@ test('客户端产物：迁移弹窗——计划逐条列出会话，跟着父�
   }
 
   const withFamily = withPlan(1)
-  assert.ok(withFamily.text.includes('migrateTitle'), '迁移页本体渲染出来了')
+  assert.ok(withFamily.text.includes('migrate.title'), '迁移页本体渲染出来了')
   assert.ok(
-    withFamily.text.some((item) => String(item) === 'migrateFamily:{"count":1}'),
+    withFamily.text.some((item) => String(item) === 'migrate.family:{"count":1}'),
     '有一条子智能体跟着走时，弹窗里要说明它是跟着父会话进来的',
   )
   // 弹窗本体：标题、逐条清单（含"随父迁"那枚标签）、底部那对按钮
   const dialogs = withFamily.mounted.recorded.filter((node) => node.props?.role === 'dialog')
   assert.equal(dialogs.length, 1, '迁移页上只有一个弹窗')
-  assert.equal(dialogs[0].props['aria-label'], 'migrateDialogTitle', '标题说的是那个动作')
+  assert.equal(dialogs[0].props['aria-label'], 'migrate.dialogTitle', '标题说的是那个动作')
   const rows = withFamily.mounted.recorded.filter(
     (node) => typeof node.type === 'string' && String(node.props?.className).includes('dsm-rowPlan'),
   )
   assert.deepEqual(rows.map((row) => rowParts(row).label), ['s-1', 's-9'], '清单里逐条列出会搬走的会话')
   assert.deepEqual(rowParts(rows[0]).tags, [], '点名的那些没有出处标签')
-  assert.deepEqual(rowParts(rows[1]).tags, ['migrateVia'], '级联进来的挂「随父迁」（不是「随父删」）')
+  assert.deepEqual(rowParts(rows[1]).tags, ['migrate.via'], '级联进来的挂「随父迁」（不是「随父删」）')
   assert.equal(
     (String(rows[1].props.className).match(/dsm-rowNest(\d)/) ?? [])[1],
     '1',
@@ -1307,14 +1351,14 @@ test('客户端产物：迁移弹窗——计划逐条列出会话，跟着父�
     elementsOf(footer)
       .filter((node) => node.type === 'button')
       .map((button) => strings(button)[0]),
-    ['cancel', 'migrateApply'],
+    ['cancel', 'migrate.apply'],
     '底部是「取消 / 确认迁移」，确认那个是唯一的落地入口',
   )
 
   // 没有子智能体跟随时那句话不该出现（否则每次迁移都多一行噪音）
   const plain = withPlan(0)
-  assert.ok(plain.text.some((item) => String(item).startsWith('migrateSummary')), '弹窗正文照旧渲染')
-  assert.equal(plain.text.some((item) => String(item).startsWith('migrateFamily')), false)
+  assert.ok(plain.text.some((item) => String(item).startsWith('migrate.summary')), '弹窗正文照旧渲染')
+  assert.equal(plain.text.some((item) => String(item).startsWith('migrate.family')), false)
 })
 
 test('客户端产物：迁移页只给搜索框、不给类别芯片（那页的列表本来就是候选）', { skip }, () => {
@@ -1361,7 +1405,7 @@ test('客户端产物：「会话」页的搜索框按标题或 id 筛，筛空�
   // 会话页第一个空串状态就是搜索词（勾选集是第一个空数组，useSessionFilter 紧跟着它）
   const hit = mount({ state, panel: 'manage', strings: ['迁移'] })
   const hitText = strings(hit.registrations[0].component(hit.registrations[0].registration.inject()))
-  assert.ok(hitText.includes('shownCount:{"shown":1,"total":2}'), '按标题搜到了那一条')
+  assert.ok(hitText.includes('list.shown:{"shown":1,"total":2}'), '按标题搜到了那一条')
   assert.deepEqual(
     hit.recorded
       .filter((node) => typeof node.type === 'function' && node.type.name === 'SessionRow')
@@ -1372,14 +1416,14 @@ test('客户端产物：「会话」页的搜索框按标题或 id 筛，筛空�
   // 搜不到时：空态照样画在那个高度固定的框里，头部报 显示 0 / 2（框还在，整页高度就不变）
   const miss = mount({ state, panel: 'manage', strings: ['zzz-没有这条'] })
   const missText = strings(miss.registrations[0].component(miss.registrations[0].registration.inject()))
-  assert.ok(missText.includes('shownCount:{"shown":0,"total":2}'), '搜不到也照样报条数')
+  assert.ok(missText.includes('list.shown:{"shown":0,"total":2}'), '搜不到也照样报条数')
   const lists = miss.recorded.filter((node) =>
     String(node.props?.className ?? '').split(/\s+/).includes('dsm-list'),
   )
   assert.equal(lists.length, 1, '列表框还在')
   assert.ok(
     miss.recorded.some(
-      (node) => String(node.props?.className) === 'dsm-empty' && strings(node).includes('noMatch'),
+      (node) => String(node.props?.className) === 'dsm-empty' && strings(node).includes('list.noMatch'),
     ),
     '空态画在框里',
   )
@@ -1409,9 +1453,9 @@ test('客户端产物：组头的折叠只影响画不画行，不影响"列出�
   assert.deepEqual(oneRows.map((node) => node.props.session.id), ['b-1'], '收起的那一组不画行')
   const heads = one.recorded.filter((node) => String(node.props?.className) === 'dsm-groupHead')
   assert.equal(heads.length, 2, '组头一个都不少（收起来的是行，不是整个组）')
-  assert.ok(oneText.includes('sessionsInDir:{"count":1}'), '收起的组头照样报"这组几条"')
+  assert.ok(oneText.includes('list.sessionsInDir:{"count":1}'), '收起的组头照样报"这组几条"')
   assert.ok(
-    oneText.includes('shownCount:{"shown":2,"total":3}'),
+    oneText.includes('list.shown:{"shown":2,"total":3}'),
     '头部照样按列出来的算（2 条），折叠不改"算不算"',
   )
 
@@ -1429,7 +1473,7 @@ test('客户端产物：组头的折叠只影响画不画行，不影响"列出�
     '收起的那组 false，另一组 true',
   )
   assert.ok(
-    toggles.every((node) => node.props.type === 'button' && String(node.props['aria-label']).includes('toggleGroupLabel')),
+    toggles.every((node) => node.props.type === 'button' && String(node.props['aria-label']).includes('list.toggleGroup')),
     '是可聚焦的按钮，且带无障碍名字',
   )
   // 按钮不能塞进"点一下整组勾选"那个 label 里：labelable 元素只能是被标注的那一个
@@ -1481,8 +1525,8 @@ test('客户端产物：组头的折叠只影响画不画行，不影响"列出�
     all.recorded.filter((node) => typeof node.type === 'function' && node.type.name === 'SessionRow').length,
     0,
   )
-  assert.ok(allText.includes('shownCount:{"shown":2,"total":3}'), '全收着也照样报"显示 2 / 3 条"')
-  assert.ok(allText.includes('sessionsInDir:{"count":1}'), '组头的条数不因为收起而变')
+  assert.ok(allText.includes('list.shown:{"shown":2,"total":3}'), '全收着也照样报"显示 2 / 3 条"')
+  assert.ok(allText.includes('list.sessionsInDir:{"count":1}'), '组头的条数不因为收起而变')
 })
 
 test('客户端产物：一个组都没有时不摆折叠工具栏', { skip }, () => {
@@ -1500,7 +1544,7 @@ test('客户端产物：一个组都没有时不摆折叠工具栏', { skip }, (
   strings(registrations[0].component(registrations[0].registration.inject()))
   assert.equal(recorded.filter((node) => String(node.props?.className) === 'dsm-groupTools').length, 0)
   assert.ok(
-    recorded.some((node) => String(node.props?.className) === 'dsm-empty' && strings(node).includes('noMatch')),
+    recorded.some((node) => String(node.props?.className) === 'dsm-empty' && strings(node).includes('list.noMatch')),
     '筛空时框里是那句空态',
   )
 })
@@ -1532,8 +1576,8 @@ test('客户端产物：「会话」页也按目录分组、也能折叠，勾�
   assert.deepEqual(rowIds, ['b-1'], '收起的那一组不画行，另一组照画')
   const heads = recorded.filter((node) => String(node.props?.className) === 'dsm-groupHead')
   assert.equal(heads.length, 2, '组头一个都不少')
-  assert.ok(text.includes('sessionsInDir:{"count":1}'), '收起的组头照样报"这组几条"')
-  assert.ok(text.includes('shownCount:{"shown":2,"total":4}'), '折叠不改"列出来了哪些"（仍是 2 条）')
+  assert.ok(text.includes('list.sessionsInDir:{"count":1}'), '收起的组头照样报"这组几条"')
+  assert.ok(text.includes('list.shown:{"shown":2,"total":4}'), '折叠不改"列出来了哪些"（仍是 2 条）')
   assert.ok(text.includes('工作区甲'), '组头写工作区标题')
   // 组头那一下就是整组勾选（勾选集是空的，于是两个组头的选框都没勾上）
   const boxes = heads.map((node) => elementsOf(node).find((child) => child.type === 'input'))
@@ -1570,31 +1614,31 @@ test('客户端产物：「说明」页把分类词条、每页做什么与边�
   const { registrations, recorded } = mount({ state, panel: 'help' })
   const text = strings(registrations[0].component(registrations[0].registration.inject()))
 
-  for (const key of ['helpCategoriesTitle', 'helpTabsTitle', 'helpWhereTitle', 'helpFaqTitle']) {
+  for (const key of ['help.categories.title', 'help.tabs.title', 'help.where.title', 'help.faq.title']) {
     assert.ok(text.includes(key), `缺少小节「${key}」`)
   }
   // 词条与解释成对，且词条就是行上那几枚标签的键
   const terms = recorded.filter((node) => node.type === 'dt').flatMap((node) => strings(node))
-  for (const key of ['catVisible', 'tagSubagent', 'tagBlank', 'tagArchived', 'tagLive', 'ungroupedSource']) {
+  for (const key of ['help.categories.visible', 'tag.subagent', 'tag.blank', 'tag.archived', 'tag.live', 'list.ungrouped']) {
     assert.ok(terms.includes(key), `分类词典缺少「${key}」`)
   }
   assert.equal(terms.length, 20, '词条数＝分类 6 + 分页 4 + 数据 2 + 疑问 8')
   assert.equal(recorded.filter((node) => node.type === 'dd').length, 20, '每条词条都有解释')
-  assert.ok(terms.includes('tabSync'), '分页那一节要写到「同步」这一页')
+  assert.ok(terms.includes('page.tab.sync'), '分页那一节要写到「同步」这一页')
   // 「数据从哪来」两条路径来自 /state，不是写死在文案里
   assert.ok(
     text.includes('/home/u/.dsh/sessions') && text.includes('/home/u/.dsh/registry.json'),
     '两条路径来自 /state',
   )
   for (const key of [
-    'faqUnownedQ',
-    'faqDeletedQ',
-    'faqRestartQ',
-    'faqBackupQ',
-    'faqFamilyQ',
-    'faqExportQ',
-    'faqForkQ',
-    'faqPasswordQ',
+    'help.faq.unownedQ',
+    'help.faq.deletedQ',
+    'help.faq.restartQ',
+    'help.faq.backupQ',
+    'help.faq.familyQ',
+    'help.faq.exportQ',
+    'help.faq.forkQ',
+    'help.faq.passwordQ',
   ]) {
     assert.ok(text.includes(key), `常见疑问缺少「${key}」`)
   }
@@ -1602,7 +1646,7 @@ test('客户端产物：「说明」页把分类词条、每页做什么与边�
   assert.ok(!text.includes('helpDiskTitle'), '说明页不该再有单独的一张"会碰什么盘"')
   // 文案本身是纯文本（不能摆 Markdown 星号）由上面那条字典检查盯着：这里渲染的是键名，看不出值
   // 说明页不该长成一个"什么都往里塞"的垃圾桶：正文段落本身就是词条，没有额外的大段散文
-  assert.ok(text.includes('helpHint'), '页首要有一句话说明这一页讲什么')
+  assert.ok(text.includes('help.hint'), '页首要有一句话说明这一页讲什么')
 })
 
 test('客户端产物：同步页的同步块——没配置只说明，配置了才摆按钮', { skip }, () => {
@@ -1621,8 +1665,8 @@ test('客户端产物：同步页的同步块——没配置只说明，配置�
 
   // 没配置：一句话说明怎么配，一个按钮都不摆（点了没反应的按钮比不摆更糟）
   const off = mount({ state: base, panel: 'sync' })
-  assert.ok(text(off).includes('syncOffHint'), '没配置时要说明怎么配')
-  assert.ok(!buttonTexts(off).includes('syncAction'), '没配置时不该出现同步按钮')
+  assert.ok(text(off).includes('sync.offHint'), '没配置时要说明怎么配')
+  assert.ok(!buttonTexts(off).includes('sync.action'), '没配置时不该出现同步按钮')
 
   // 配置了：远端与这台机器报出来，预演与确认两个按钮都在
   const on = mount({
@@ -1630,12 +1674,12 @@ test('客户端产物：同步页的同步块——没配置只说明，配置�
     panel: 'sync',
   })
   const onText = text(on)
-  assert.ok(onText.includes('syncWhere:{"url":"https://dav.example.com/dsh"}'), '卡片标题只报远端')
-  assert.ok(onText.includes('syncHint:{"mappings":2}'), '要报出映射条数')
+  assert.ok(onText.includes('sync.where:{"url":"https://dav.example.com/dsh"}'), '卡片标题只报远端')
+  assert.ok(onText.includes('sync.hint:{"mappings":2}'), '要报出映射条数')
   // 机器名不再重复印在标题上：它挪到了机器名那一栏的**灰字**里（宿主解析出来的缺省值，没配就是
   // 主机名），与「超时」那一栏的 30000 同一个口径——留空不等于没有值。那一栏归表单那条用例钉。
   // 一个动作一个按钮：弹窗里的「确认同步」只有开了弹窗才在树上，卡片头上只有「同步」这一个入口。
-  assert.deepEqual(buttonTexts(on).filter((label) => label.startsWith('sync')), ['syncAction'])
+  assert.deepEqual(buttonTexts(on).filter((label) => label.startsWith('sync')), ['sync.action'])
 })
 
 test('客户端产物：同步设置表单按 entry id 向设置接缝取控制器，宿主没提供时说实话', { skip }, () => {
@@ -1688,7 +1732,7 @@ test('客户端产物：同步设置表单按 entry id 向设置接缝取控制�
   })
   const text = strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
   assert.deepEqual(asked, ['session-manager'], '按 profile 里那个 insert 的 id 取控制器')
-  assert.ok(text.includes('syncFieldMapping'), '映射字段在场')
+  assert.ok(text.includes('sync.field.mapping'), '映射字段在场')
   assert.ok(
     mounted.recorded.some((node) => node.type === 'input' && node.props?.value === 'https://dav.example.com/dsh'),
     'URL 是从接缝里读出来的，不是页面自己存的',
@@ -1708,19 +1752,19 @@ test('客户端产物：同步设置表单按 entry id 向设置接缝取控制�
   )
   assert.equal(mappingInputs.length, 2, '映射表按「远端 cwd → 本机目录」两个输入框画')
   assert.ok(!mounted.recorded.some((node) => node.type === 'textarea'), '映射表不再是一段文本')
-  assert.ok(text.includes('syncMapAdd'), '有「添加一行」')
+  assert.ok(text.includes('sync.map.add'), '有「添加一行」')
 
   // 密码：官方控件库那个**只写**控件（`SettingsSecretField`），不是本页手写的 dsm-input。
   // 假钩子不跑 useEffect，所以这里量的是首帧：`describe` 的答案还没回来之前按"未配置"画，
   // 并且输入框从空白开始——没有任何读路径会把值送回来（`describe` 只回 {configured, writable}）。
   const secret = mounted.recorded.find((node) => node.props?.id === 'dsm-dav-password')?.props
   assert.ok(secret !== undefined, '宿主给了凭据服务就摆出密码控件')
-  assert.equal(secret.label, 'syncFieldPasswordValue')
+  assert.equal(secret.label, 'sync.field.password')
   assert.equal(secret.text, '', '只写控件从空白开始：值不会从宿主那边回来')
-  assert.equal(secret.stateLabel, 'syncPasswordUnset', '首帧按未配置画，describe 回来之后再改')
+  assert.equal(secret.stateLabel, 'sync.password.unset', '首帧按未配置画，describe 回来之后再改')
   assert.equal(secret.configured, false)
   assert.equal(secret.disabled, false)
-  assert.ok(!text.includes('syncPasswordUnavailable'), '有凭据服务时不摆那句"只能走环境变量"')
+  assert.ok(!text.includes('sync.password.unavailable'), '有凭据服务时不摆那句"只能走环境变量"')
 
   // 引用名（`sync.passwordRef`）不在这张表单上：它是插件配置的事，卡片只问"密码是什么"。
   // 摆出来就等于给配置里那一项开第二个编辑口，而这两个口很容易悄悄分叉。
@@ -1733,8 +1777,8 @@ test('客户端产物：同步设置表单按 entry id 向设置接缝取控制�
   // 宿主没提供设置接缝（例如只装了设置外壳）：这一块要自己说明，而不是画一张点了没用的表单
   const bare = mount({ state, panel: 'sync' })
   const bareText = strings(bare.registrations[0].component(bare.registrations[0].registration.inject()))
-  assert.ok(bareText.includes('syncFormUnavailable'), '没接缝时说清只能在配置里改')
-  assert.ok(!bareText.includes('syncMapAdd'), '没接缝时不画表单')
+  assert.ok(bareText.includes('sync.form.unavailable'), '没接缝时说清只能在配置里改')
+  assert.ok(!bareText.includes('sync.map.add'), '没接缝时不画表单')
 
   // 有接缝、没有凭据服务（宿主没装凭据提供方）：表单照画，只是密码那一块说清只能走环境变量，
   // 不摆一个按下去必然被拒的输入框。
@@ -1744,9 +1788,9 @@ test('客户端产物：同步设置表单按 entry id 向设置接缝取控制�
     configForms: { get: () => controller },
   })
   const noCredentialsText = strings(noCredentials.registrations[0].component(noCredentials.registrations[0].registration.inject()))
-  assert.ok(noCredentialsText.includes('syncPasswordUnavailable'), '没凭据服务时说清密码只能走环境变量')
+  assert.ok(noCredentialsText.includes('sync.password.unavailable'), '没凭据服务时说清密码只能走环境变量')
   assert.ok(!noCredentials.recorded.some((node) => node.props?.id === 'dsm-dav-password'), '也不摆那个控件')
-  assert.ok(noCredentialsText.includes('syncMapAdd'), '其余字段照旧能改')
+  assert.ok(noCredentialsText.includes('sync.map.add'), '其余字段照旧能改')
 })
 
 test('客户端产物：同步设置里的「测试连接」——按钮、只读提示与三种结论', { skip }, async () => {
@@ -1786,13 +1830,13 @@ test('客户端产物：同步设置里的「测试连接」——按钮、只�
   const outcomeOf = (outcome) => render({ nulls: [null, null, null, null, null, null, null, outcome] })
 
   const fresh = render()
-  assert.ok(fresh.text.some((item) => item === 'syncTest'), '有「测试连接」按钮')
-  assert.ok(fresh.text.some((item) => item === 'syncTestHint'), '旁边说明这次探测是只读的')
-  assert.equal(fresh.text.includes('syncTestDirty'), false, '没有草稿时不摆"先保存"那句')
-  const testButton = fresh.mounted.recorded.find((node) => node.type === 'button' && node.props?.children === 'syncTest')
+  assert.ok(fresh.text.some((item) => item === 'sync.test.action'), '有「测试连接」按钮')
+  assert.ok(fresh.text.some((item) => item === 'sync.test.hint'), '旁边说明这次探测是只读的')
+  assert.equal(fresh.text.includes('sync.test.dirty'), false, '没有草稿时不摆"先保存"那句')
+  const testButton = fresh.mounted.recorded.find((node) => node.type === 'button' && node.props?.children === 'sync.test.action')
   assert.ok(testButton !== undefined, '按钮是个真的 button')
   assert.equal(testButton.props.disabled, false, '配了 url、又没有草稿：可以直接测')
-  assert.equal(fresh.text.some((item) => String(item).startsWith('syncTestOk')), false, '没测之前不摆结论')
+  assert.equal(fresh.text.some((item) => String(item).startsWith('sync.test.ok')), false, '没测之前不摆结论')
 
   // 401 且库里没有密码：这是最常见的那一次失败，说清"引用名里没有值"（而不是笼统的"认证失败"）。
   const denied = outcomeOf({
@@ -1807,7 +1851,7 @@ test('客户端产物：同步设置里的「测试连接」——按钮、只�
     username: 'webdav',
     hasPassword: false,
   })
-  const deniedLine = 'syncTestNoPassword:{"ref":"DSH_DAV_PASSWORD"}'
+  const deniedLine = 'sync.test.noPassword:{"ref":"DSH_DAV_PASSWORD"}'
   assert.ok(denied.text.some((item) => item === deniedLine), '没密码的 401 要说清是引用名里没有值')
   assert.ok(
     denied.mounted.recorded.some((node) => node.props?.className === 'dsm-warn' && node.props?.children === deniedLine),
@@ -1825,7 +1869,7 @@ test('客户端产物：同步设置里的「测试连接」——按钮、只�
     username: 'webdav',
     hasPassword: true,
   })
-  const okLine = 'syncTestOk:{"machines":"robot-a, robot-b"}'
+  const okLine = 'sync.test.ok:{"machines":"robot-a, robot-b"}'
   assert.ok(reachable.text.some((item) => item === okLine), '连得上时把远端已有的机器格列出来')
   assert.ok(
     reachable.mounted.recorded.some((node) => node.props?.className === 'dsm-ok' && node.props?.children === okLine),
@@ -1836,10 +1880,10 @@ test('客户端产物：同步设置里的「测试连接」——按钮、只�
   // 钩子（它的初值是 `undefined`，只有 `null` 与 `''` 能被种），但"刚敲了密码还没保存"同样是脏的
   // ——密码框正好是这条渲染路径上第一个 `useState('')`，用它把表单弄脏。
   const edited = render({ strings: ['s3cret'] })
-  assert.ok(edited.text.some((item) => item === 'syncTestDirty'), '有草稿时那句改成"先保存"')
-  assert.equal(edited.text.includes('syncTestHint'), false, '脏的时候不再说"只读探测"')
+  assert.ok(edited.text.some((item) => item === 'sync.test.dirty'), '有草稿时那句改成"先保存"')
+  assert.equal(edited.text.includes('sync.test.hint'), false, '脏的时候不再说"只读探测"')
   const editedButton = edited.mounted.recorded.find(
-    (node) => node.type === 'button' && node.props?.children === 'syncTest',
+    (node) => node.type === 'button' && node.props?.children === 'sync.test.action',
   )
   assert.equal(editedButton.props.disabled, true, '测的是已保存的配置：有草稿就先别测')
 
@@ -1852,7 +1896,7 @@ test('客户端产物：同步设置里的「测试连接」——按钮、只�
     },
   })
   const clickable = clicked.mounted.recorded.find(
-    (node) => node.type === 'button' && node.props?.children === 'syncTest',
+    (node) => node.type === 'button' && node.props?.children === 'sync.test.action',
   )
   clickable.props.onClick()
   await Promise.resolve()
@@ -1871,7 +1915,7 @@ test('客户端产物：同步设置里的「测试连接」——按钮、只�
     hasPassword: false,
   })
   assert.ok(
-    unreachable.text.some((item) => item === 'syncTestUnreachable:{"detail":"fetch failed"}'),
+    unreachable.text.some((item) => item === 'sync.test.unreachable:{"detail":"fetch failed"}'),
     '连不上时把原始原因原样带出来',
   )
 })
@@ -1947,7 +1991,7 @@ test('客户端产物：同步预演三张表的状态列只放短标签，整�
     '「这次不动」也是一张表（状态一列、会话一列、远端机器一列），不是一整行说明',
   )
   const keptHeaders = mounted.recorded
-    .filter((node) => node.type === 'th' && node.props?.children === 'colMachine')
+    .filter((node) => node.type === 'th' && node.props?.children === 'table.machine')
     .length
   assert.equal(keptHeaders, 1, '那张表的第三列表头是「远端机器」')
   // 分组之后路径只在组头说一次：三张表里都不该再有 cwd 列（这一页上也没有别的表会用到它）。
@@ -1960,22 +2004,22 @@ test('客户端产物：同步预演三张表的状态列只放短标签，整�
   // 动作列：看得见的是动词，整句在 title 里。
   const tagOf = (visible, title) =>
     mounted.recorded.find((node) => node.props?.children === visible && node.props?.title === title)
-  assert.ok(tagOf('syncTagPull', 'syncCodeMissingPull'), '拉取那张表的标签是「拉取」，整句在 title 上')
-  assert.ok(tagOf('syncTagPush', 'syncCodeMissingPush'), '推表新推的那颗是「推送」')
-  assert.ok(tagOf('syncTagRepush', 'syncCodeLocalAhead'), '本机领先的那颗是「重推刷新」')
+  assert.ok(tagOf('sync.tag.pull', 'sync.why.missingPull'), '拉取那张表的标签是「拉取」，整句在 title 上')
+  assert.ok(tagOf('sync.tag.push', 'sync.why.missingPush'), '推表新推的那颗是「推送」')
+  assert.ok(tagOf('sync.tag.repush', 'sync.why.localAhead'), '本机领先的那颗是「重推刷新」')
   assert.ok(
     mounted.recorded.some(
-      (node) => node.props?.children === 'syncTagDiverged' && String(node.props?.title).startsWith('syncCodeDiverged'),
+      (node) => node.props?.children === 'sync.tag.diverged' && String(node.props?.title).startsWith('sync.why.diverged'),
     ),
     '「这次不动」那颗是「两边各自写过」，整句（带机器名）在 title 上',
   )
 
   // 整句不许再当可见文字（它会把邻居那一列压掉；挤在同一句里还会让状态与会话名分不出来）。
-  assert.equal(text.includes('syncCodeMissingPush'), false, '动作列不再放整句')
-  assert.equal(text.includes('syncCodeMissingPull'), false)
-  assert.equal(text.includes('syncCodeDiverged'), false, '「这次不动」也不再整句可见')
+  assert.equal(text.includes('sync.why.missingPush'), false, '动作列不再放整句')
+  assert.equal(text.includes('sync.why.missingPull'), false)
+  assert.equal(text.includes('sync.why.diverged'), false, '「这次不动」也不再整句可见')
   assert.equal(
-    text.some((item) => String(item).includes('syncCodeDiverged') && String(item).includes('session-d')),
+    text.some((item) => String(item).includes('sync.why.diverged') && String(item).includes('session-d')),
     false,
     '状态与会话名不许挤在同一个文本节点里——那正是分不出两者的原因',
   )
@@ -1985,9 +2029,9 @@ test('客户端产物：同步预演三张表的状态列只放短标签，整�
   const waiting = mount({ state, panel: 'sync', nulls: [null, response, 'plan', 'plan'] })
   const waitingRecorded = waiting.recorded
   const waitingText = strings(waiting.registrations[0].component(waiting.registrations[0].registration.inject()))
-  assert.ok(waitingText.includes('previewing'), '计划在路上时正文是"预演中…"')
+  assert.ok(waitingText.includes('dialog.previewing'), '计划在路上时正文是"预演中…"')
   assert.equal(
-    waitingText.some((item) => String(item).startsWith('syncSummary')),
+    waitingText.some((item) => String(item).startsWith('sync.summary')),
     false,
     '计划路上的那一段不摆旧计划（上次那份的表会被当成这次的）',
   )
@@ -2067,24 +2111,24 @@ test('客户端产物：会拉取那张表分得清「拉一条新的」与「�
   const tagOf = (visible, title) =>
     mounted.recorded.find((node) => node.props?.children === visible && node.props?.title === title)
 
-  assert.ok(tagOf('syncTagPull', 'syncCodeMissingPull'), '从无到有那条照旧是「拉取」')
+  assert.ok(tagOf('sync.tag.pull', 'sync.why.missingPull'), '从无到有那条照旧是「拉取」')
   // 覆盖本机那份：标签说的是动作，title 说清"谁更新、会拿谁换掉本机这份"。
-  assert.ok(tagOf('syncTagReplace', 'syncCodeReplaceNewer'), '覆盖那条挂「覆盖本机」+ 它自己那句整句')
-  assert.ok(tagOf('syncTagLocalNewer', 'syncCodeLocalNewer'), '分叉里本机更晚那条是「分叉重推」')
+  assert.ok(tagOf('sync.tag.replace', 'sync.why.replaceNewer'), '覆盖那条挂「覆盖本机」+ 它自己那句整句')
+  assert.ok(tagOf('sync.tag.localNewer', 'sync.why.localNewer'), '分叉里本机更晚那条是「分叉重推」')
   assert.equal(
     mounted.recorded.some(
-      (node) => node.props?.children === 'syncTagReplace' && node.props?.title === 'syncCodeReplaceAhead',
+      (node) => node.props?.children === 'sync.tag.replace' && node.props?.title === 'sync.why.replaceAhead',
     ),
     false,
     '两条覆盖行的整句按各自的码走（这里这条说的是"两边各自写过"）',
   )
   assert.ok(text.includes('session-replace'), '覆盖那条也在「会拉取」那张表里（它同样是往本机落内容）')
-  assert.ok(text.includes('syncPullHead:{"count":2}'), '那张表的条数把覆盖那条算进去')
-  assert.ok(text.includes('syncPushHead:{"count":1}'), '覆盖不是推送：推表只有分叉重推那一条')
+  assert.ok(text.includes('sync.pullHead:{"count":2}'), '那张表的条数把覆盖那条算进去')
+  assert.ok(text.includes('sync.pushHead:{"count":1}'), '覆盖不是推送：推表只有分叉重推那一条')
 
   // 空白会话：只在正文里报一句，id 一个都不许冒出来（那三张表里也不许有它们）。
   const blankLine = mounted.recorded.find(
-    (node) => node.type === 'p' && node.props?.children === 'syncSkippedBlank:{"count":2}',
+    (node) => node.type === 'p' && node.props?.children === 'sync.skippedBlank:{"count":2}',
   )
   assert.ok(blankLine !== undefined, '正文里那句"跳过 N 条空白会话"在')
   assert.equal(
@@ -2101,11 +2145,11 @@ test('客户端产物：会拉取那张表分得清「拉一条新的」与「�
   })
   const legacyText = strings(legacy.registrations[0].component(legacy.registrations[0].registration.inject()))
   assert.equal(
-    legacyText.some((item) => String(item).startsWith('syncSkippedBlank')),
+    legacyText.some((item) => String(item).startsWith('sync.skippedBlank')),
     false,
     '没有 blank 字段就不画那一句',
   )
-  assert.ok(legacyText.includes('syncPullHead:{"count":2}'), '其余照旧画出来')
+  assert.ok(legacyText.includes('sync.pullHead:{"count":2}'), '其余照旧画出来')
 })
 
 test('客户端产物：同步三张表挂会话列表那套类型标签（本机没有那条就不挂）', { skip }, () => {
@@ -2202,22 +2246,22 @@ test('客户端产物：同步三张表挂会话列表那套类型标签（本�
   const text = strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
 
   // 与会话列表同一套键与同一套说明（`ATTRIBUTE_TAGS`），文案本身由字典给。
-  assert.ok(text.includes('tagSubagent'), '子智能体那条挂「子智能体」')
-  assert.ok(text.includes('tagArchived'), '已归档那条挂「已归档」')
-  assert.ok(text.includes('tagLive'), '活着的会话也标出来（覆盖它得先关掉，理由在那一刻才讲清）')
+  assert.ok(text.includes('tag.subagent'), '子智能体那条挂「子智能体」')
+  assert.ok(text.includes('tag.archived'), '已归档那条挂「已归档」')
+  assert.ok(text.includes('tag.live'), '活着的会话也标出来（覆盖它得先关掉，理由在那一刻才讲清）')
   assert.ok(
-    mounted.recorded.some((node) => node.props?.children === 'tagLive' && node.props?.title === 'tagLiveTip'),
+    mounted.recorded.some((node) => node.props?.children === 'tag.live' && node.props?.title === 'tag.liveTip'),
     '标签的说明挂在 title 上（与会话列表同一套）',
   )
   // 一条会话能挂几枚挂几枚（已归档 + 活着的两条都真）：本机那两条一共三枚标签，**新建那条一枚都没有**。
-  const typeTags = ['tagSubagent', 'tagBlank', 'tagArchived', 'tagLive']
+  const typeTags = ['tag.subagent', 'tag.blank', 'tag.archived', 'tag.live']
   assert.deepEqual(
     text.filter((item) => typeTags.includes(item)).sort(),
-    ['tagArchived', 'tagLive', 'tagSubagent'],
+    ['tag.archived', 'tag.live', 'tag.subagent'],
     '只有本机已有的那两条挂得上类型：「会拉取」里新建的那条本机还没有',
   )
   // 「未分组」不在计划表里挂：组头已经写着这条属于哪个目录。
-  assert.equal(text.includes('ungroupedSource'), false, '计划表不重复挂「未分组」')
+  assert.equal(text.includes('list.ungrouped'), false, '计划表不重复挂「未分组」')
   // 类型标签与名字同占一格（会话列表那套 `.dsm-rowLabel` 排布）。
   assert.ok(
     mounted.recorded.some((node) => String(node.props?.className) === 'dsm-rowLabel'),
@@ -2327,9 +2371,9 @@ test('客户端产物：同步预演三张表按项目分组，路径只在组�
     ),
     '没有身份时悬浮提示给的就是本机路径',
   )
-  assert.ok(headOf(2).includes('noCwdGroup'), '没有 cwd 的那一组照旧自成一组建在最后')
+  assert.ok(headOf(2).includes('list.noCwdGroup'), '没有 cwd 的那一组照旧自成一组建在最后')
   assert.ok(
-    text.includes('sessionsInDir:{"count":2}'),
+    text.includes('list.sessionsInDir:{"count":2}'),
     '组头报这一组几条（alpha 在推送那张表里两条），与列表那边的说法同一句',
   )
 
@@ -2350,7 +2394,7 @@ test('客户端产物：同步预演三张表按项目分组，路径只在组�
     .map((node) => String(node.props?.title))
   assert.equal(
     tips[0],
-    'session-5\ncwdRewritten:{"from":"/home/b/dev/x","to":"/home/u/dev/beta"}',
+    'session-5\ncwd.rewritten:{"from":"/home/b/dev/x","to":"/home/u/dev/beta"}',
     '改写过的拉取行在悬浮提示里说清从哪到哪',
   )
   assert.equal(tips[2], 'session-7', '本来就没有 cwd 的会话没有可改写的来源，提示就只是会话名与 id')
@@ -2395,10 +2439,10 @@ test('客户端产物：同步独占「同步」分页，传输页不再有那�
       return mounted.registrations[0].component(mounted.registrations[0].registration.inject())
     })(),
   )
-  assert.ok(syncText.includes('syncTitle'), '「同步」分页上要有同步卡片')
-  assert.ok(syncText.includes('syncAction'), '且带着同步按钮（配置在，按钮就在）')
-  assert.ok(!transferText.includes('syncTitle'), '传输页上不该再有同步卡片')
-  assert.ok(!transferText.includes('syncAction'), '传输页上不该再有同步按钮')
+  assert.ok(syncText.includes('sync.title'), '「同步」分页上要有同步卡片')
+  assert.ok(syncText.includes('sync.action'), '且带着同步按钮（配置在，按钮就在）')
+  assert.ok(!transferText.includes('sync.title'), '传输页上不该再有同步卡片')
+  assert.ok(!transferText.includes('sync.action'), '传输页上不该再有同步按钮')
 })
 
 // ---- 确认弹窗：一个动作一个入口 ----
@@ -2440,14 +2484,14 @@ test('客户端产物：会写盘的四个动作各自只有一个入口，预�
   const migrate = panelText('migrate')
   const sync = panelText('sync')
 
-  // 页面上只剩"那个动作"本身；`previewing`（"预演中…"）只该出现在开着的弹窗里，页面上一律没有。
+  // 页面上只剩"那个动作"本身；`dialog.previewing`（"预演中…"）只该出现在开着的弹窗里，页面上一律没有。
   for (const text of [manage, transfer, migrate, sync]) {
-    assert.equal(text.includes('previewing'), false, '关着弹窗时页面上不该有"预演中…"')
+    assert.equal(text.includes('dialog.previewing'), false, '关着弹窗时页面上不该有"预演中…"')
   }
-  assert.ok(manage.includes('manageDelete'), '「会话」页的写入口是「删除所选」')
-  assert.ok(transfer.includes('importAction'), '传输页的写入口是「导入」（导出不问）')
-  assert.ok(migrate.includes('migrateAction'), '迁移页的写入口是「迁移」')
-  assert.ok(sync.includes('syncAction'), '同步页的写入口是「同步」')
+  assert.ok(manage.includes('manage.delete.action'), '「会话」页的写入口是「删除所选」')
+  assert.ok(transfer.includes('transfer.import.action'), '传输页的写入口是「导入」（导出不问）')
+  assert.ok(migrate.includes('migrate.action'), '迁移页的写入口是「迁移」')
+  assert.ok(sync.includes('sync.action'), '同步页的写入口是「同步」')
 })
 
 test('客户端产物：删除弹窗摆出清单与备份位置，计划不 ok 时确认按钮禁用', { skip }, () => {
@@ -2496,17 +2540,17 @@ test('客户端产物：删除弹窗摆出清单与备份位置，计划不 ok �
   const good = render(true)
   const dialogs = good.recorded.filter((node) => node.props?.role === 'dialog')
   assert.equal(dialogs.length, 1, '点删除之后页面上只有一个弹窗')
-  assert.equal(dialogs[0].props['aria-label'], 'manageDeletePlanTitle', '标题说的是那个动作')
+  assert.equal(dialogs[0].props['aria-label'], 'manage.delete.dialogTitle', '标题说的是那个动作')
   assert.ok(good.text.some((item) => String(item) === '将删除 2 条会话'), '弹窗里摆的是宿主给的那份摘要')
   const rows = good.recorded.filter(
     (node) => typeof node.type === 'string' && String(node.props?.className).includes('dsm-rowPlan'),
   )
   assert.deepEqual(rows.map((row) => rowParts(row).label), ['s-1', 's-9'], '清单逐条列出会被删的会话')
-  assert.deepEqual(rowParts(rows[1]).tags, ['manageDeleteVia'], '级联进来的挂「随父删」')
+  assert.deepEqual(rowParts(rows[1]).tags, ['manage.delete.via'], '级联进来的挂「随父删」')
   assert.equal(primaryOf(good.recorded).props.disabled, false, '计划 ok 时确认可用')
   assert.ok(strings(cancelOf(good.recorded)).includes('cancel'), '旁边是「取消」')
   assert.ok(
-    good.text.some((item) => String(item).startsWith('manageBackupTo') && String(item).includes('dsh-session-manager-backups')),
+    good.text.some((item) => String(item).startsWith('manage.delete.backupTo') && String(item).includes('dsh-session-manager-backups')),
     '备份落在哪要写在弹窗里（要恢复时知道去哪找）',
   )
 
@@ -2524,7 +2568,7 @@ test('客户端产物：删除弹窗摆出清单与备份位置，计划不 ok �
   })
   const waitingRecorded = waiting.recorded
   const waitingText = strings(waiting.registrations[0].component(waiting.registrations[0].registration.inject()))
-  assert.ok(waitingText.includes('previewing'), '计划在路上时正文是"预演中…"')
+  assert.ok(waitingText.includes('dialog.previewing'), '计划在路上时正文是"预演中…"')
   assert.equal(primaryOf(waitingRecorded).props.disabled, true, '计划没到手时确认按钮禁用')
 })
 
@@ -2565,8 +2609,8 @@ test('客户端产物：导入弹窗里摆的是那张预演表，全是跳过�
     (node) => node.type === 'table' && String(node.props?.className).includes('dsm-planTable'),
   )
   assert.ok(table !== undefined, '弹窗里是那张导入计划表（列宽规则也挂在它身上）')
-  assert.ok(create.text.some((item) => String(item).startsWith('planSummary')), '表头那句话照旧在')
-  assert.equal(primaryOf(create.recorded).props.children, 'apply', '确认按钮走「确认导入」那一条')
+  assert.ok(create.text.some((item) => String(item).startsWith('transfer.import.planSummary')), '表头那句话照旧在')
+  assert.equal(primaryOf(create.recorded).props.children, 'transfer.import.apply', '确认按钮走「确认导入」那一条')
   assert.equal(primaryOf(create.recorded).props.disabled, false, '有会创建的条目时确认可用')
 
   const skip = render('skip')
@@ -2624,12 +2668,12 @@ test('客户端产物：回滚弹窗先摆动作清单再确认（清单就是�
   const text = strings(item.registrations[0].component(item.registrations[0].registration.inject()))
   const dialogs = item.recorded.filter((node) => node.props?.role === 'dialog')
   assert.equal(dialogs.length, 1, '点「回滚」只开一个弹窗（不再有"看回滚动作"那一步）')
-  assert.equal(dialogs[0].props['aria-label'], 'rollbackDialogTitle', '标题说的是那个动作')
-  assert.ok(text.some((item) => String(item).startsWith('rollbackActions')), '那句"以下是回滚会做的 N 个动作"照旧在')
+  assert.equal(dialogs[0].props['aria-label'], 'backup.rollback.dialogTitle', '标题说的是那个动作')
+  assert.ok(text.some((item) => String(item).startsWith('backup.rollback.actions')), '那句"以下是回滚会做的 N 个动作"照旧在')
   assert.ok(text.some((item) => String(item) === '把 s-1 搬回 /home/u/dev/alpha'), '动作清单逐条摆出来')
   assert.deepEqual(
     strings(cancelOf(item.recorded)).concat(strings(primaryOf(item.recorded))),
-    ['cancel', 'rollbackConfirm'],
+    ['cancel', 'backup.rollback.confirm'],
     '底部是「取消 / 确认回滚」',
   )
 })
@@ -2659,19 +2703,19 @@ test('客户端产物：备份清单认三种来源——迁移/删除/覆盖前
   }
   const mounted = mount({ state, panel: 'migrate', arrays: [[], backups] })
   const text = strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
-  assert.ok(text.includes('backupKindMigrate'), '迁移那份的标签照旧')
-  assert.ok(text.includes('backupKindDelete'), '删除那份的标签照旧')
-  assert.ok(text.includes('backupKindReplace'), '同步覆盖前那份要有自己的标签')
+  assert.ok(text.includes('backup.kind.migrate'), '迁移那份的标签照旧')
+  assert.ok(text.includes('backup.kind.delete'), '删除那份的标签照旧')
+  assert.ok(text.includes('backup.kind.replace'), '同步覆盖前那份要有自己的标签')
   const buttonLabels = mounted.recorded
     .filter((node) => node.type === 'button')
     .map((node) => node.props?.children)
   assert.equal(
-    buttonLabels.filter((label) => label === 'restoreAction').length,
+    buttonLabels.filter((label) => label === 'backup.restore.action').length,
     2,
     '删除与覆盖前那两份都点「恢复」（只搬目录）',
   )
   assert.equal(
-    buttonLabels.filter((label) => label === 'rollbackAction').length,
+    buttonLabels.filter((label) => label === 'backup.rollback.action').length,
     1,
     '只有迁移那份点「回滚」（连注册表一起还原）',
   )
@@ -2706,10 +2750,10 @@ test('客户端产物：备份清单认三种来源——迁移/删除/覆盖前
   strings(replacing.registrations[0].component(replacing.registrations[0].registration.inject()))
   const dialogs = replacing.recorded.filter((node) => node.props?.role === 'dialog')
   assert.equal(dialogs.length, 1)
-  assert.equal(dialogs[0].props['aria-label'], 'restoreDialogTitle', '覆盖前那份开的是「恢复」弹窗')
+  assert.equal(dialogs[0].props['aria-label'], 'backup.restore.dialogTitle', '覆盖前那份开的是「恢复」弹窗')
   assert.deepEqual(
     strings(cancelOf(replacing.recorded)).concat(strings(primaryOf(replacing.recorded))),
-    ['cancel', 'restoreConfirm'],
+    ['cancel', 'backup.restore.confirm'],
     '底部是「取消 / 确认恢复」',
   )
 })
@@ -2744,14 +2788,14 @@ test('客户端产物：落地时弹窗正文换成进度条（第几条 / 共�
   assert.ok(bar !== undefined, '进度条本体在弹窗正文里')
   assert.equal(bar.props['aria-valuenow'], 13, '正在处理第 13 条（done 是**已经做完**的条数）')
   assert.equal(bar.props['aria-valuemax'], 84, '分母是这一段要做的总条数')
-  assert.equal(bar.props['aria-label'], 'syncPushing:{"current":13,"total":84}', '可读名就是那句计数')
+  assert.equal(bar.props['aria-label'], 'sync.progress.pushing:{"current":13,"total":84}', '可读名就是那句计数')
   const fill = recorded.find((node) => String(node.props?.className) === 'dsm-progressFill')
   assert.equal(fill.props.style.width, `${(13 / 84) * 100}%`, '填充宽度按 13/84 算，不是写死的')
-  assert.ok(text.includes('syncPushing:{"current":13,"total":84}'), '正文里写清正在推送第几条')
+  assert.ok(text.includes('sync.progress.pushing:{"current":13,"total":84}'), '正文里写清正在推送第几条')
   assert.ok(text.includes('会话九'), '当前那一条的标题也在（一条几 MB 的包会在这停一会儿）')
-  assert.ok(text.includes('syncProgressNote'), '并说明为什么这里没有「取消」')
+  assert.ok(text.includes('sync.progress.note'), '并说明为什么这里没有「取消」')
   assert.equal(recorded.some((node) => node.type === 'table'), false, '落地时不再画计划表（那张表说的是"将要"）')
-  assert.equal(primaryOf(recorded).props.children, 'syncBusy', '确认按钮变成"同步中…"')
+  assert.equal(primaryOf(recorded).props.children, 'sync.busy', '确认按钮变成"同步中…"')
   assert.equal(primaryOf(recorded).props.disabled, true, '落地时确认按钮禁用（不能按第二下）')
   assert.equal(cancelOf(recorded).props.disabled, true, '取消也禁用：中途撒手会在宿主侧留下半截状态')
 
@@ -2762,12 +2806,12 @@ test('客户端产物：落地时弹窗正文换成进度条（第几条 / 共�
     nulls: [null, null, 'apply', 'apply', null, null, progressOf('pull', 0, 3, 'session-a')],
   })
   const pullingText = strings(pulling.registrations[0].component(pulling.registrations[0].registration.inject()))
-  assert.ok(pullingText.includes('syncPulling:{"current":1,"total":3}'), '拉那一段说「正在拉取」')
+  assert.ok(pullingText.includes('sync.progress.pulling:{"current":1,"total":3}'), '拉那一段说「正在拉取」')
 
   // 还没收到第一条事件（宿主刚起来，什么都没开始报）。
   const preparing = mount({ state, panel: 'sync', nulls: [null, null, 'apply', 'apply'] })
   const preparingText = strings(preparing.registrations[0].component(preparing.registrations[0].registration.inject()))
-  assert.ok(preparingText.includes('syncPreparing'), '那一段说"正在读取远端索引…"')
+  assert.ok(preparingText.includes('sync.progress.preparing'), '那一段说"正在读取远端索引…"')
   assert.equal(
     preparing.recorded.some((node) => String(node.props?.className) === 'dsm-progress'),
     false,
@@ -2792,24 +2836,24 @@ test('客户端产物：落地时弹窗正文换成进度条（第几条 / 共�
   const scanning = phaseOf({ phase: 'scan', done: 42, total: 85 })
   assert.equal(scanning.bar.props['aria-valuenow'], 43, '扫到第 43 条（done 是已经扫完的条数）')
   assert.equal(scanning.bar.props['aria-valuemax'], 85, '分母是这次要尝试的条目数')
-  assert.ok(scanning.text.includes('syncScanning:{"current":43,"total":85}'), '预演时说"正在扫描本机会话"')
-  assert.equal(scanning.text.includes('previewing'), false, '有具体进度就不摆那句静态的「预演中…」')
+  assert.ok(scanning.text.includes('sync.progress.scanning:{"current":43,"total":85}'), '预演时说"正在扫描本机会话"')
+  assert.equal(scanning.text.includes('dialog.previewing'), false, '有具体进度就不摆那句静态的「预演中…」')
   assert.equal(scanning.mounted.recorded.some((node) => node.type === 'table'), false, '计划还没回来，不画表')
-  assert.equal(scanning.text.includes('syncProgressNote'), false, '预演阶段还没有东西可覆盖，不摆那句"只增不覆盖"')
+  assert.equal(scanning.text.includes('sync.progress.note'), false, '预演阶段还没有东西可覆盖，不摆那句"只增不覆盖"')
 
   // 读远端索引是一次往返，没有"第几条"可讲（宿主给的分母是 0）：固定一句话，**不摆条**——画一条
   // 1/1 的会让人以为已经做完了，而它其实还在等。
   const remote = phaseOf({ phase: 'remote', done: 0, total: 0 })
-  assert.ok(remote.text.includes('syncPreparing'), '读远端索引那一段就说"正在读取远端索引…"')
+  assert.ok(remote.text.includes('sync.progress.preparing'), '读远端索引那一段就说"正在读取远端索引…"')
   assert.equal(remote.bar, undefined, '分母是 0 的那一段不画进度条')
 
   // 认本机仓库身份：每个候选目录一个 git 进程，真机上这一段比前两段加起来还长。
   const matching = phaseOf({ phase: 'repo', done: 4, total: 13 })
-  assert.ok(matching.text.includes('syncMatchingRepos:{"current":5,"total":13}'), '认仓库时说的是"正在核对本机仓库"')
+  assert.ok(matching.text.includes('sync.progress.matchingRepos:{"current":5,"total":13}'), '认仓库时说的是"正在核对本机仓库"')
 
   // 比对内容：分母是两边都有那些会话的文件数。
   const comparing = phaseOf({ phase: 'compare', done: 7, total: 12 })
-  assert.ok(comparing.text.includes('syncComparing:{"current":8,"total":12}'), '比对时说的是"正在比对内容"')
+  assert.ok(comparing.text.includes('sync.progress.comparing:{"current":8,"total":12}'), '比对时说的是"正在比对内容"')
 })
 
 test('客户端产物：确认同步打的是落地端点，读的是一条事件流而不是等一次性 JSON', { skip }, async () => {
@@ -2985,7 +3029,7 @@ test('客户端产物：同步预演读的也是一条事件流（不是等一�
   })
 
   strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
-  const open = mounted.recorded.find((node) => node.type === 'button' && node.props?.children === 'syncAction')
+  const open = mounted.recorded.find((node) => node.type === 'button' && node.props?.children === 'sync.action')
   assert.ok(open !== undefined, '卡片头上那个「同步」就是预演的入口')
   open.props.onClick()
   for (let tries = 0; tries < 50 && index < chunks.length; tries += 1) {

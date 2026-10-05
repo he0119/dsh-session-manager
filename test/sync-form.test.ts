@@ -192,34 +192,34 @@ test('同步设置：测试连接的结论翻成哪一句（判定在宿主侧�
   }
   const cases: Array<[string, SyncTestOutcome, SyncTestSentence]> = [
     // 连得上：三种情形分开说——还没有这一层 / 有但还没机器推过 / 已经有机器格
-    ['还没建命名空间', { ...base }, { key: 'syncTestOkFirst' }],
-    ['命名空间在、但空', { ...base, namespaceExists: true }, { key: 'syncTestOkEmpty' }],
+    ['还没建命名空间', { ...base }, { key: 'sync.test.okFirst' }],
+    ['命名空间在、但空', { ...base, namespaceExists: true }, { key: 'sync.test.okEmpty' }],
     [
       '已有机器格',
       { ...base, namespaceExists: true, machines: ['robot-a', 'robot-b'], entries: 2 },
-      { key: 'syncTestOk', params: { machines: 'robot-a, robot-b' } },
+      { key: 'sync.test.ok', params: { machines: 'robot-a, robot-b' } },
     ],
     // 401 三句：没填用户名 / 引用名里没有值 / 服务器不认这套——处置完全不同，不能混
-    ['没填用户名', { ...base, code: 'unauthenticated', status: 401, username: null }, { key: 'syncTestNoUser', params: { status: 401 } }],
+    ['没填用户名', { ...base, code: 'unauthenticated', status: 401, username: null }, { key: 'sync.test.noUser', params: { status: 401 } }],
     [
       '引用名里没有值',
       { ...base, code: 'unauthenticated', status: 401, hasPassword: false },
-      { key: 'syncTestNoPassword', params: { ref: 'DSH_DAV_PASSWORD' } },
+      { key: 'sync.test.noPassword', params: { ref: 'DSH_DAV_PASSWORD' } },
     ],
-    ['凭据不对', { ...base, code: 'unauthenticated', status: 401 }, { key: 'syncTestUnauthorized', params: { status: 401 } }],
-    ['没权限', { ...base, code: 'forbidden', status: 403 }, { key: 'syncTestForbidden', params: { status: 403 } }],
-    ['地址不对', { ...base, code: 'notFound', status: 404 }, { key: 'syncTestNotFound', params: { status: 404 } }],
-    ['不是 WebDAV', { ...base, code: 'unsupported', status: 405 }, { key: 'syncTestUnsupported', params: { status: 405 } }],
-    ['连不上', { ...base, code: 'unreachable', status: 0, detail: 'fetch failed' }, { key: 'syncTestUnreachable', params: { detail: 'fetch failed' } }],
+    ['凭据不对', { ...base, code: 'unauthenticated', status: 401 }, { key: 'sync.test.unauthorized', params: { status: 401 } }],
+    ['没权限', { ...base, code: 'forbidden', status: 403 }, { key: 'sync.test.forbidden', params: { status: 403 } }],
+    ['地址不对', { ...base, code: 'notFound', status: 404 }, { key: 'sync.test.notFound', params: { status: 404 } }],
+    ['不是 WebDAV', { ...base, code: 'unsupported', status: 405 }, { key: 'sync.test.unsupported', params: { status: 405 } }],
+    ['连不上', { ...base, code: 'unreachable', status: 0, detail: 'fetch failed' }, { key: 'sync.test.unreachable', params: { detail: 'fetch failed' } }],
     [
       '服务器出错',
       { ...base, code: 'serverError', status: 503, detail: 'x' },
-      { key: 'syncTestServerError', params: { status: 503, detail: 'x' } },
+      { key: 'sync.test.serverError', params: { status: 503, detail: 'x' } },
     ],
     [
       '认不出来的码也照实说',
       { ...base, code: 'wat', status: 418, detail: 'teapot' },
-      { key: 'syncTestOther', params: { status: 418, detail: 'teapot' } },
+      { key: 'sync.test.other', params: { status: 418, detail: 'teapot' } },
     ],
   ]
   for (const [name, outcome, expected] of cases) {
@@ -230,5 +230,5 @@ test('同步设置：测试连接的结论翻成哪一句（判定在宿主侧�
     assert.ok(sentence.key in en, `${name}：英文缺 ${sentence.key}`)
   }
   // 认不出来的码不许悄悄说成"连得上"
-  assert.notEqual(testVerdict({ ...base, code: 'wat', status: 418, detail: 'teapot' }, 'REF').key, 'syncTestOk')
+  assert.notEqual(testVerdict({ ...base, code: 'wat', status: 418, detail: 'teapot' }, 'REF').key, 'sync.test.ok')
 })

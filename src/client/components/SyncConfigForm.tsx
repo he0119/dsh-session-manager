@@ -49,11 +49,11 @@ import type { Translate } from '../logic/locales.ts'
 function problemText(problem: MappingProblem, t: Translate): string {
   switch (problem.code) {
     case 'mapNoFrom':
-      return t('syncMapNoFrom', { line: problem.line })
+      return t('sync.map.noFrom', { line: problem.line })
     case 'mapNoTo':
-      return t('syncMapNoTo', { line: problem.line })
+      return t('sync.map.noTo', { line: problem.line })
     case 'mapDuplicate':
-      return t('syncMapDuplicate', { line: problem.line, from: problem.from })
+      return t('sync.map.duplicate', { line: problem.line, from: problem.from })
   }
 }
 
@@ -166,10 +166,10 @@ export function SyncConfigForm({
   }, [credentials, passwordRef, credentialGen])
 
   if (api === undefined || snapshot === undefined) {
-    return <p className="dsm-hint">{t('syncFormUnavailable')}</p>
+    return <p className="dsm-hint">{t('sync.form.unavailable')}</p>
   }
-  if (snapshot.status === 'loading') return <p className="dsm-hint">{t('syncFormLoading')}</p>
-  if (snapshot.status !== 'ready') return <p className="dsm-hint">{t('syncFormUnavailable')}</p>
+  if (snapshot.status === 'loading') return <p className="dsm-hint">{t('sync.form.loading')}</p>
+  if (snapshot.status !== 'ready') return <p className="dsm-hint">{t('sync.form.unavailable')}</p>
 
   const view = draft ?? draftFrom(section)
   const problems = draftProblems(view)
@@ -285,51 +285,51 @@ export function SyncConfigForm({
   return (
     <div className="dsm-syncForm">
       <Field
-        label={t('syncFieldUrl')}
-        hint={t('syncFieldUrlHint')}
+        label={t('sync.field.url')}
+        hint={t('sync.field.urlHint')}
         value={view.url}
         onChange={(url) => edit({ url })}
         placeholder="https://dav.example.com/dsh"
       />
       <div className="dsm-syncRow">
         <Field
-          label={t('syncFieldMachine')}
-          hint={t('syncFieldMachineHint')}
+          label={t('sync.field.machine')}
+          hint={t('sync.field.machineHint')}
           value={view.machineId}
           onChange={(machineId) => edit({ machineId })}
           // 留空时宿主用主机名顶上：把那个名字写成灰字，用户才知道"空着会叫什么"。
           placeholder={machineDefault ?? ''}
         />
         <Field
-          label={t('syncFieldTimeout')}
-          hint={t('syncFieldTimeoutHint')}
+          label={t('sync.field.timeout')}
+          hint={t('sync.field.timeoutHint')}
           value={view.timeoutMs}
           onChange={(timeoutMs) => edit({ timeoutMs })}
           placeholder="30000"
         />
       </div>
       <Field
-        label={t('syncFieldUser')}
-        hint={t('syncFieldUserHint')}
+        label={t('sync.field.user')}
+        hint={t('sync.field.userHint')}
         value={view.username}
         onChange={(username) => edit({ username })}
       />
-      {credentials === undefined && <p className="dsm-hint">{t('syncPasswordUnavailable')}</p>}
+      {credentials === undefined && <p className="dsm-hint">{t('sync.password.unavailable')}</p>}
       {credentials !== undefined && (
         <SettingsSecretField
           id="dsm-dav-password"
-          label={t('syncFieldPasswordValue')}
-          hint={credential.writable ? t('syncFieldPasswordValueHint') : t('syncPasswordShadowed')}
+          label={t('sync.field.password')}
+          hint={credential.writable ? t('sync.field.passwordHint') : t('sync.password.shadowed')}
           text={password}
           disabled={!snapshot.writable || !credential.writable}
           configured={credential.configured}
-          stateLabel={credential.configured ? t('syncPasswordSet') : t('syncPasswordUnset')}
+          stateLabel={credential.configured ? t('sync.password.set') : t('sync.password.unset')}
           onEdit={editPassword}
         />
       )}
       <div className="dsm-field">
-        <span className="dsm-fieldLabel">{t('syncFieldMapping')}</span>
-        {view.mapping.length === 0 && <span className="dsm-hint">{t('syncFieldMappingEmpty')}</span>}
+        <span className="dsm-fieldLabel">{t('sync.field.mapping')}</span>
+        {view.mapping.length === 0 && <span className="dsm-hint">{t('sync.field.mappingEmpty')}</span>}
         {view.mapping.length > 0 && (
           <div className="dsm-mapRows">
             {view.mapping.map((row, index) => (
@@ -338,7 +338,7 @@ export function SyncConfigForm({
                   className="dsm-input"
                   type="text"
                   list={remoteCwds.length > 0 ? 'dsm-mapRemoteCwds' : undefined}
-                  aria-label={t('syncMapRemoteLabel', { line: index + 1 })}
+                  aria-label={t('sync.map.remoteLabel', { line: index + 1 })}
                   placeholder="/home/alice/dev/proj"
                   value={row.from}
                   onChange={(event) => editMapping(index, { from: event.target.value })}
@@ -349,13 +349,13 @@ export function SyncConfigForm({
                 <input
                   className="dsm-input"
                   type="text"
-                  aria-label={t('syncMapLocalLabel', { line: index + 1 })}
+                  aria-label={t('sync.map.localLabel', { line: index + 1 })}
                   placeholder="/opt/work/proj"
                   value={row.to}
                   onChange={(event) => editMapping(index, { to: event.target.value })}
                 />
                 <button type="button" className="dsm-button" onClick={() => removeMapping(index)}>
-                  {t('syncMapRemove')}
+                  {t('sync.map.remove')}
                 </button>
               </div>
             ))}
@@ -370,28 +370,28 @@ export function SyncConfigForm({
         )}
         <div className="dsm-controls">
           <button type="button" className="dsm-button" onClick={addMapping}>
-            {t('syncMapAdd')}
+            {t('sync.map.add')}
           </button>
-          <span className="dsm-hint">{t('syncFieldMappingHint')}</span>
+          <span className="dsm-hint">{t('sync.field.mappingHint')}</span>
         </div>
       </div>
 
       <div className="dsm-controls">
         <button type="button" className="dsm-button dsm-primary" onClick={save} disabled={!canSave}>
-          {saving ? t('saving') : t('save')}
+          {saving ? t('sync.form.saving') : t('save')}
         </button>
         <button type="button" className="dsm-button" onClick={discard} disabled={!dirty}>
-          {t('discard')}
+          {t('sync.form.discard')}
         </button>
-        {!snapshot.writable && <span className="dsm-warn">{t('syncFormReadOnly')}</span>}
+        {!snapshot.writable && <span className="dsm-warn">{t('sync.form.readOnly')}</span>}
         {problems.map((problem) => (
           <span key={problem.code} className="dsm-warn">
-            {problem.code === 'mapping' ? problemText(problem.problem, t) : t('syncTimeoutInvalid')}
+            {problem.code === 'mapping' ? problemText(problem.problem, t) : t('sync.field.timeoutInvalid')}
           </span>
         ))}
-        {failed && <span className="dsm-warn">{t('saveFailed')}</span>}
+        {failed && <span className="dsm-warn">{t('sync.form.saveFailed')}</span>}
         {credentialError !== undefined && <span className="dsm-warn">{credentialError}</span>}
-        {snapshot.writable && dirty && problems.length === 0 && !failed && <span className="dsm-hint">{t('unsaved')}</span>}
+        {snapshot.writable && dirty && problems.length === 0 && !failed && <span className="dsm-hint">{t('sync.form.unsaved')}</span>}
       </div>
 
       {/*
@@ -400,9 +400,9 @@ export function SyncConfigForm({
        */}
       <div className="dsm-controls">
         <button type="button" className="dsm-button" onClick={testConnection} disabled={!canTest}>
-          {testing ? t('syncTestRunning') : t('syncTest')}
+          {testing ? t('sync.test.running') : t('sync.test.action')}
         </button>
-        <span className="dsm-hint">{dirty ? t('syncTestDirty') : t('syncTestHint')}</span>
+        <span className="dsm-hint">{dirty ? t('sync.test.dirty') : t('sync.test.hint')}</span>
       </div>
       {testError !== undefined && <p className="dsm-warn">{testError}</p>}
       {verdict !== undefined && (
