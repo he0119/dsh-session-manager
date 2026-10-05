@@ -51,10 +51,11 @@ import { createBackup } from './journal.ts'
 import { encodeSegment } from './paths.ts'
 import { createGitRunner, repoLocation, type GitRunner, type RepoLocation } from './repo.ts'
 import { readRegistry, validateRegistry } from './registry.ts'
+import { takeEffectOnHostAll, type EffectDeps } from './take-effect.ts'
 import { relocateHeaderCwdShallow, relocateHeaderCwdText } from './session-log.ts'
 import type { TitleQuery } from './session-title.ts'
 import { applyImport, buildBundle, planImport, readBundle, type ExportSource, type ImportOptions, type SessionBundle } from './transfer.ts'
-import type { DecodeAll, WorkspaceRegistryState } from './types.ts'
+import type { DecodeAll, EffectOutcome, RegistryChange, WorkspaceRegistryState } from './types.ts'
 import type { SessionMeta } from './visibility.ts'
 
 /** 远端本插件独占的那层目录（相对资源根），机器格就放在它下面：`url` 可以填服务器/账号根。 */
@@ -1011,11 +1012,16 @@ export interface SyncOutcome {
   bytesOut: number
   registryWritten: boolean
   indexWritten: boolean
+  /**
+   * 拉取改的那几笔注册表有没有被宿主接住（见 take-effect.ts）：`undefined` = 这次没写注册表
+   * （预演或纯推送）。
+   */
+  effect?: EffectOutcome
   problems: string[]
 }
 
 /** `runSync()` 的依赖。 */
-export interface SyncDeps {
+export interface SyncDeps extends EffectDeps {
   dav: DavPort
   settings: SyncSettings
   sessionsRoot: string
@@ -1206,6 +1212,8 @@ export async function runSync(
   let bytesIn = 0
   let bytesOut = 0
   let registryWritten = false
+  /** 拉取改的那几笔注册表（按执行顺序），整批落地之后一起交给宿主。 */
+  const registryChanges: RegistryChange[] = []
 
   // ── 拉取：取包 → 自校验 → 走导入那条编排 ────────────────────────────────────
   const loose = readRegistryLoose(deps.registryPath)
@@ -1241,6 +1249,7 @@ export async function runSync(
       }
       const importPlan = planImport(bundle, importOptions)
       if (importPlan.nextRegistry !== null) registry = importPlan.nextRegistry
+      if (importPlan.registryChange !== null) registryChanges.push(importPlan.registryChange)
       const outcome = applyImport(bundle, importPlan, importOptions)
       if (outcome.registryWritten) registryWritten = true
       pulled.push(...outcome.written)
@@ -1315,6 +1324,7 @@ export async function runSync(
         }
         const importPlan = planImport(bundle, importOptions)
         if (importPlan.nextRegistry !== null) registry = importPlan.nextRegistry
+        if (importPlan.registryChange !== null) registryChanges.push(importPlan.registryChange)
         const outcome = applyImport(bundle, importPlan, importOptions)
         if (outcome.registryWritten) registryWritten = true
         pulled.push(...outcome.written)
@@ -1325,6 +1335,10 @@ export async function runSync(
       }
     }
   }
+
+  // ── 让宿主认下这批改动：拉取会把会话挂到目标工作区（改注册表），与迁移是同一条语义。
+  //    整批落地之后按顺序收口一次，而不是每条会话各来一遍。
+  const effect = registryWritten ? await takeEffectOnHostAll(registryChanges, deps) : undefined
 
   // ── 推送：整包 PUT，然后重写自己那一格的索引 ────────────────────────────────
   const ownDirName = machineDirName(deps.settings.machineId)
@@ -1448,6 +1462,7 @@ export async function runSync(
     bytesOut,
     registryWritten,
     indexWritten,
+    ...(effect === undefined ? {} : { effect }),
     problems,
   }
 }

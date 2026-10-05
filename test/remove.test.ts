@@ -145,7 +145,7 @@ test('执行：先备份（整份会话目录）再删，复核通过；空掉�
   assert.equal(existsSync(join(backed.targetDir, 'session.lock')), true)
 })
 
-test('恢复：从备份把整个会话目录搬回原位（含 session.lock），注册表不动', () => {
+test('恢复：从备份把整个会话目录搬回原位（含 session.lock），注册表不动', async () => {
   const sandbox = makeSandbox('remove-restore')
   const dir = writeSession(sandbox, 'session-doomed', 1000)
   const before = readFileSync(join(dir, 'session.v4.jsonl.zstd'))
@@ -160,12 +160,12 @@ test('恢复：从备份把整个会话目录搬回原位（含 session.lock）�
   const mutated = readFileSync(sandbox.registryPath, 'utf8')
 
   // 先看动作清单（dry-run 不写盘）
-  const dry = rollbackMigration({ backupRoot: sandbox.backupRoot }, { backupDir: run.backupDir!, dryRun: true })
+  const dry = await rollbackMigration({ backupRoot: sandbox.backupRoot }, { backupDir: run.backupDir!, dryRun: true })
   assert.equal(dry.registryRestored, false)
   assert.equal(dry.actions.some((action) => action.startsWith('registry untouched')), true)
   assert.equal(existsSync(dir), false, 'dry-run 不许写盘')
 
-  const outcome = rollbackMigration({ backupRoot: sandbox.backupRoot }, { backupDir: run.backupDir! })
+  const outcome = await rollbackMigration({ backupRoot: sandbox.backupRoot }, { backupDir: run.backupDir! })
   assert.equal(outcome.dryRun, false)
   assert.equal(outcome.restoredFiles, 1)
   assert.equal(outcome.registryRestored, false)

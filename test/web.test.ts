@@ -14,7 +14,7 @@ import { readRegistry, validateRegistry, writeRegistryAtomic } from '../src/regi
 import { createDavClient } from '../src/dav.ts'
 import { SYNC_NAMESPACE_DIR } from '../src/sync.ts'
 import type { DecodeAll, SessionHeader, WorkspaceRegistryState } from '../src/types.ts'
-import { API_PREFIX, createApiHandlers, registerWebRoutes, type WebRouteLike } from '../src/web.ts'
+import { API_PREFIX, createApiHandlers, registerWebRoutes, type ApiDeps, type WebRouteLike } from '../src/web.ts'
 import { encodeRawFrame } from '../src/zstd-frame.ts'
 import { putRemoteSession, startDavFixture } from './dav-fixture.ts'
 
@@ -687,11 +687,58 @@ test('POST /migrate：unowned 来源不带 from 也能预演（界面那个跨�
   assert.match(String((json(denied.captured) as Record<string, unknown>)['error']), /unowned/)
 })
 
-test('POST /migrate：mode=apply 真搬并回可回滚的备份；注入 effectMode 时如实回报', async () => {
+/**
+ * 一个"像真宿主"的假宿主：工作区按路径复用、挂/摘真的改成员表。
+ *
+ * 它**不写文件**——文件那一步仍由插件自己走（这正是要测的接缝）。`onRefresh` 拿来做台账：
+ * 记下的必须是"那一刻文件里的归属"，才说明刷新发生在落盘之后。
+ */
+function fakeHostPort(options: { onRefresh?: (registryPath: string) => void; attachFails?: boolean } = {}): ApiDeps['hostRegistry'] {
+  const workspaces = new Map<string, { id: string; path: string; sessionIds: string[] }>()
+  let minted = 0
+  return () => ({
+    refreshIndex: async () => {},
+    ensureWorkspace: async (path: string) => {
+      for (const rec of workspaces.values()) if (rec.path === path) return rec.id
+      minted += 1
+      const id = `ws-host-${minted}`
+      workspaces.set(id, { id, path, sessionIds: [] })
+      return id
+    },
+    attachSession: async (workspaceId: string, sessionId: string) => {
+      if (options.attachFails === true) throw new Error('夹具：挂靠失败')
+      const rec = workspaces.get(workspaceId)
+      if (rec !== undefined && !rec.sessionIds.includes(sessionId)) rec.sessionIds.push(sessionId)
+    },
+    detachSession: async (workspaceId: string, sessionId: string) => {
+      const rec = workspaces.get(workspaceId)
+      if (rec !== undefined) rec.sessionIds = rec.sessionIds.filter((s) => s !== sessionId)
+    },
+    members: async (workspaceId: string) => [...(workspaces.get(workspaceId)?.sessionIds ?? [])],
+    removeWorkspace: async (workspaceId: string) => {
+      workspaces.delete(workspaceId)
+    },
+  })
+}
+
+test('POST /migrate：mode=apply 真搬并回可回滚的备份；有那套动作时由宿主自己改', async () => {
   const sandbox = makeSandbox('web-migrate-apply')
   writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000)
 
-  const handlers = createApiHandlers({ ...deps(sandbox), effectMode: () => 'immediate' })
+  // 台账：刷新必须在注册表落盘之后才发生，所以这里顺手记下那一刻文件里的归属。
+  const calls: string[] = []
+  const host = fakeHostPort()
+  const base = host!()!
+  // 包一层，只为了在"重看磁盘"那一刻记一笔。
+  const port: NonNullable<ApiDeps['hostRegistry']> = () => ({
+    ...base,
+    refreshIndex: async (): Promise<void> => {
+      const registry = readRegistry(sandbox.registryPath)
+      const target = Object.values(registry.tables.workspaces).find((record) => record.path === CWD_B)
+      calls.push(target?.sessionIds.join(',') ?? '没有 CWD_B 的工作区记录')
+    },
+  })
+  const handlers = createApiHandlers({ ...deps(sandbox), hostRegistry: port })
   const { res, captured } = fakeRes()
   await handlers['POST /migrate']!(
     fakeReq('POST', `${API_PREFIX}/migrate`, Buffer.from(JSON.stringify({ mode: 'apply', from: CWD_A, to: CWD_B }))),
@@ -706,6 +753,8 @@ test('POST /migrate：mode=apply 真搬并回可回滚的备份；注入 effectM
   assert.equal(body['moved'], 1)
   assert.equal(body['takesEffect'], 'immediate')
   assert.equal(typeof body['backupDir'], 'string')
+  assert.deepEqual(calls, ['session-a'], '刷新要真的发生，且发生在注册表落盘之后')
+  assert.match(String(body['summary']), /无需重启 DSH/)
 
   // 真的搬了：目标项目目录里有、源项目目录里没有、header.cwd 已改写
   const moved = sessionDir(sandbox.sessionsRoot, CWD_B, 'session-a')
@@ -727,6 +776,38 @@ test('POST /migrate：mode=apply 真搬并回可回滚的备份；注入 effectM
   assert.equal(listed[0]?.['sessions'], 1)
   assert.equal(listed[0]?.['from'], CWD_A)
   assert.equal(listed[0]?.['to'], CWD_B)
+})
+
+test('POST /migrate：宿主没接住时如实报"需要重启"，而不是照探测说无需重启', async () => {
+  const sandbox = makeSandbox('web-migrate-effect-fail')
+  writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000)
+
+  let calls = 0
+  const host = fakeHostPort()
+  const base = host!()!
+  const handlers = createApiHandlers({
+    ...deps(sandbox),
+    // 探测说有那套动作（否则 `takesEffect` 本来就该是 restart-required），但真跑起来会失败。
+    hostRegistry: () => ({
+      ...base,
+      refreshIndex: async (): Promise<void> => {
+        calls += 1
+        throw new Error('夹具：宿主没接住')
+      },
+    }),
+  })
+  const { res, captured } = fakeRes()
+  await handlers['POST /migrate']!(
+    fakeReq('POST', `${API_PREFIX}/migrate`, Buffer.from(JSON.stringify({ mode: 'apply', from: CWD_A, to: CWD_B }))),
+    res,
+  )
+  assert.equal(captured.status, 200)
+  const body = json(captured)
+  assert.equal(calls, 1, '要真的试过才谈得上"失败"')
+  assert.equal(body['applied'], true, '宿主没接住不该把迁移说成失败')
+  assert.equal(body['verified'], true)
+  assert.equal(body['takesEffect'], 'restart-required', '界面能说的"无需重启"必须来自真实结果')
+  assert.match(String(body['summary']), /宿主没接住这次改动（夹具：宿主没接住）/)
 })
 
 test('POST /rollback：先 dryRun 看动作，再真回滚到原状', async () => {

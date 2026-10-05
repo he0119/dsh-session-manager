@@ -19,11 +19,11 @@ import {
   decodeAll,
   describeSyncConfig,
   directoryPickerKind,
-  effectMode,
   liveSessionIds,
   registerTools,
   resolvePaths,
   syncRuntime,
+  hostRegistryPort,
 } from './tools.ts'
 import { API_PREFIX, registerWebRoutes, type WebServerLike } from './web.ts'
 
@@ -85,8 +85,9 @@ export function apply(ctx: Context, config: PluginConfigInput = {}): () => void 
       paths,
       decodeAll,
       pluginVersion: pluginVersion(),
-      // "迁移何时生效"要读宿主服务（workspaceRegistry），那件事只在这里做得了。
-      effectMode: () => effectMode(ctx),
+      // "迁移何时生效"要读宿主服务（workspaceRegistry、sessionPersistence），那件事只在这里做得了。
+      // 交出的是**探测**而不是结论：执行过的那些由编排层按实际结果报（见 src/take-effect.ts）。
+      hostRegistry: () => hostRegistryPort(ctx),
       // 同理：目录选择器是"桌面对话框"还是"页面内浏览"，只有宿主自己知道。
       pickerKind: () => directoryPickerKind(ctx),
       // 归档与取消归档是宿主的能力（`workspaceRegistry`，Web profile 才有）：这里把两个方法收成

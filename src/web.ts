@@ -28,6 +28,7 @@ import {
 import { familyOf, loneSubagents } from './family.ts'
 import { projectionCacheDir } from './paths.ts'
 import { readRegistry, validateRegistry } from './registry.ts'
+import { describeEffect, effectOf, takeEffectOnHost } from './take-effect.ts'
 import { runRemoval, type RemoveDeps, type RemovalRun } from './remove.ts'
 import { createTitleResolver, type TitleQuery } from './session-title.ts'
 import { runSync, testSyncConnection, type SyncOutcome, type SyncProgress } from './sync.ts'
@@ -41,7 +42,7 @@ import {
   type ImportPlan,
   type ImportOptions,
 } from './transfer.ts'
-import type { DecodeAll, WorkspaceRegistryState } from './types.ts'
+import type { DecodeAll, HostRegistryPort, WorkspaceRegistryState } from './types.ts'
 import { createBlankResolver, createSessionMetaResolver, hiddenReason, isUngrouped, type HiddenReason, type SessionMeta } from './visibility.ts'
 
 /** 本插件占用的路由前缀。 */
@@ -71,12 +72,15 @@ export interface ApiDeps {
   /** 插件版本，写进包的来源信息。 */
   pluginVersion?: string
   /**
-   * 注册表改动何时被宿主承认（`immediate` 还是 `restart-required`）。
+   * 宿主注册表动作的探测（`immediate` 还是 `restart-required` 由它推出来）。
    *
-   * 由入口注入而不是在这里探测：`effectMode()` 要读宿主服务，那件事属于 DSH 边界（`src/index.ts`），
+   * 由入口注入而不是在这里探测：那要读宿主服务，属于 DSH 边界（`src/index.ts`），
    * 本模块只认 `{ register() }` 形状，不该知道 Cordis 的存在。
+   *
+   * 生效模式**不单独注入**：界面能说的"无需重启"必须与执行路径真能做到的事一致，所以两者
+   * 同源——拿不到这个端口就是"需要重启"。
    */
-  effectMode?: () => EffectMode
+  hostRegistry?: () => HostRegistryPort | undefined
   /**
    * 宿主目录选择器的能力种类（`browse` / `native` / `null`）。
    *
@@ -422,6 +426,9 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
   // 宿主内存里活着的会话：删除会拒掉它们。端口缺席时按空集（判断不了）——预演的输出里没有
   // 任何一处声称"这些一定没在跑"，界面上那句说明也是这么写的。
   const liveSessionIds = (): ReadonlySet<string> => deps.liveSessionIds?.() ?? new Set<string>()
+  // 宿主注册表动作的探测：迁移 / 导入 / 同步拉取共用这一个；探测本身在宿主那一侧，
+  // 界面这一层只转手（见 ApiDeps.hostRegistry）。
+  const hostRegistry = (): HostRegistryPort | undefined => deps.hostRegistry?.()
 
   const state = async (_req: IncomingMessage, res: ServerResponse): Promise<void> => {
     const { registry, problems } = loadRegistry(paths.registryPath)
@@ -573,14 +580,20 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
 
     try {
       const outcome = applyImport(bundle, plan, { ...options, decodeAll })
+      // 导入会改注册表（把会话挂进目标工作区），与迁移是同一条语义：改完就把活儿交给宿主自己做，
+      // 而不是把"重启 DSH 最稳妥"留给用户。注册表这次没动时（没有要挂的 / 读不到注册表）没有这一步。
+      const effect = outcome.registryWritten ? await takeEffectOnHost(plan.registryChange, { hostRegistry }) : undefined
       sendJson(res, 200, {
         ...payload,
         ok: true,
         written: outcome.written,
         writtenBytes: outcome.bytes,
         registryWritten: outcome.registryWritten,
-        // 宿主进程内持有注册表内存副本，落盘后重启才会被承认——与迁移那条路径同一套语义。
-        note: '会话与注册表已落盘；宿主要重新扫描才会在侧边栏看到，重启 DSH 最稳妥。',
+        takesEffect: effectOf(effect, takesEffect()),
+        note:
+          effect === undefined
+            ? '会话已落盘（这次没有改注册表）：宿主重新扫描后就会出现在侧边栏，不需要重启。'
+            : describeEffect(effect),
       })
     } catch (error) {
       sendJson(res, 500, {
@@ -598,9 +611,11 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
     decodeAll,
     // 迁移页挑会话时同样按标题认人（与传输页同一套口径）。
     resolveTitle,
+    // 每次调用重新探测（只有工具的前端 / 老版本宿主可能没有这套动作）。
+    hostRegistry,
   }
-  // 没注入就按"需要重启"说：宁可保守，也不谎称已经生效。
-  const takesEffect = (): EffectMode => deps.effectMode?.() ?? 'restart-required'
+  // 没注入就按"需要重启"说：宁可保守，也不谎称已经生效。执行过的那些走执行结果（见 effectOf）。
+  const takesEffect = (): EffectMode => (hostRegistry() === undefined ? 'restart-required' : 'immediate')
 
   const backups = async (_req: IncomingMessage, res: ServerResponse): Promise<void> => {
     sendJson(res, 200, { backupRoot: paths.backupRoot, backups: listBackups(migrateDeps) })
@@ -651,7 +666,7 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
       ...(typeof fields['title'] === 'string' && fields['title'].trim() !== '' ? { title: fields['title'].trim() } : {}),
     }
     const apply = fields['mode'] === 'apply'
-    const run = runMigration(migrateDeps, request, { apply })
+    const run = await runMigration(migrateDeps, request, { apply })
     const payload = {
       mode: apply ? 'apply' : 'plan',
       ok: run.preview.ok && (!apply || run.verified),
@@ -664,7 +679,8 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
       ...(run.backupDir === undefined ? {} : { backupDir: run.backupDir }),
       problems: run.problems,
       summary: run.summary,
-      takesEffect: takesEffect(),
+      // 真的改过注册表就认执行结果，没改过才退到探测（见 take-effect.ts 的 effectOf）。
+      takesEffect: effectOf(run.effect, takesEffect()),
     }
 
     if (!run.preview.ok) {
@@ -698,11 +714,15 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
       return
     }
     const dryRun = fields['dryRun'] === true
-    const outcome = rollbackMigration(
+    const outcome = await rollbackMigration(
       { backupRoot: paths.backupRoot },
       { backupDir: String(backupDir), dryRun },
     )
-    sendJson(res, 200, { mode: dryRun ? 'plan' : 'apply', ...outcome, takesEffect: takesEffect() })
+    sendJson(res, 200, {
+      mode: dryRun ? 'plan' : 'apply',
+      ...outcome,
+      takesEffect: effectOf(outcome.effect, takesEffect()),
+    })
   }
 
   /**
@@ -749,6 +769,8 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
       sessionMeta,
       // 覆盖本机那份之前要问一句"这条还在跑吗"（与删除同一条理由：宿主手里有它的写句柄）。
       liveSessionIds,
+      // 拉取会把会话挂到目标工作区（改注册表）：整批落地之后由编排层收口交给宿主一次。
+      hostRegistry,
       ...(deps.pluginVersion === undefined ? {} : { pluginVersion: deps.pluginVersion }),
       ...(deps.now === undefined ? {} : { now: deps.now }),
     }
@@ -759,7 +781,7 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
       ...outcome,
       problems: [...outcome.plan.problems, ...outcome.problems],
       // 只有真的往库里落了会话才谈得上"要不要重启"；纯推送不改本机任何东西。
-      takesEffect: apply && outcome.pulled.length > 0 ? takesEffect() : 'immediate',
+      takesEffect: apply && outcome.pulled.length > 0 ? effectOf(outcome.effect, takesEffect()) : 'immediate',
     })
 
     /*

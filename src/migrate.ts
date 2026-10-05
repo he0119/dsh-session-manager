@@ -13,13 +13,14 @@ import { applyPlan, verifyAppliedPlan } from './execute.ts'
 import { readManifest, rollback, type BackupKind, type BackupManifest, type RollbackResult } from './journal.ts'
 import { projectionCacheDir } from './paths.ts'
 import { buildRelocationPlan, describePlan } from './plan.ts'
-import { readRegistry, validateRegistry } from './registry.ts'
+import { takeEffectOnHost, describeEffect, type EffectDeps } from './take-effect.ts'
+import { readRegistry, validateRegistry, verifyRegistryChange } from './registry.ts'
 import type { TitleQuery } from './session-title.ts'
-import type { DecodeAll, RelocationPlan, RegistryChange, WorkspaceRegistryState } from './types.ts'
+import type { DecodeAll, EffectOutcome, RelocationPlan, RegistryChange, WorkspaceRegistryState } from './types.ts'
 import { createBlankResolver } from './visibility.ts'
 
 /** 迁移用到的路径与解码器（与 `ResolvedPaths` 同形，但本模块不认识 tools.ts）。 */
-export interface MigrateDeps {
+export interface MigrateDeps extends EffectDeps {
   sessionsRoot: string
   registryPath: string
   backupRoot: string
@@ -116,6 +117,12 @@ export interface MigrationRun {
   backupDir?: string
   /** 复核发现的问题（空数组 = 通过）。 */
   problems: string[]
+  /**
+   * 这次改动有没有被**活着的宿主**接住（见 `take-effect.ts`），只在真的执行过时才有。
+   *
+   * 缺席 = 没执行（dry-run / 计划不 ok）：那时"何时生效"只能由探测回答，见 `describePlannedEffect()`。
+   */
+  effect?: EffectOutcome
   summary: string
 }
 
@@ -125,6 +132,12 @@ export interface RollbackOutcome extends RollbackResult {
   createdAt: string
   sessions: number
   artifacts: number
+  /**
+   * 同 `MigrationRun.effect`：只在真的回滚过、且注册表确实还原了时才有。
+   *
+   * 永远是 `file-only`——回滚为了**原样保住工作区 id** 走的是整份写回文件那条路，不走宿主那套动作。
+   */
+  effect?: EffectOutcome
 }
 
 /** 备份清单里的一条（界面的"备份与回滚"列表用）。 */
@@ -224,8 +237,14 @@ export function previewMigration(deps: MigrateDeps, request: MigrateRequest): Mi
  *
  * `apply: false` 时只返回预演，一个字节都不写——工具层与界面层的"预演"都走这里，
  * 因此不存在"预览一套、实做另一套"。
+ *
+ * 真的改过注册表之后还会把活儿交给宿主自己做（见 `takeEffectOnHost()`）；那是异步的，所以这里也是。
  */
-export function runMigration(deps: MigrateDeps, request: MigrateRequest, options: { apply: boolean }): MigrationRun {
+export async function runMigration(
+  deps: MigrateDeps,
+  request: MigrateRequest,
+  options: { apply: boolean },
+): Promise<MigrationRun> {
   const plan = buildPlan(deps, request)
   const preview = previewOf(plan)
   if (!plan.ok) {
@@ -259,19 +278,41 @@ export function runMigration(deps: MigrateDeps, request: MigrateRequest, options
     backupRoot: deps.backupRoot,
   })
   const verified = verifyAppliedPlan(plan, { decodeAll: deps.decodeAll })
+  // 复核失败也照样让宿主认：磁盘就是磁盘，宿主该看到的是真实状态，藏起来只会更晚暴露。
+  const effect = await takeEffectOnHost(plan.registryChange, deps)
+  // 注册表复核：会话 id 只按计划变大、绝不缩水，已存在的工作区 id 与路径不变（见 verifyRegistryChange）。
+  const registryCheck = verifyRegistryChangeOnDisk(deps, result.backupDir, plan.registryChange)
+  const problems = [...verified.problems, ...registryCheck]
   return {
     applied: true,
     preview,
     rewritten: result.rewritten,
     moved: result.moved,
     artifactsMoved: result.artifactsMoved,
-    verified: verified.ok,
+    verified: verified.ok && registryCheck.length === 0,
     backupDir: result.backupDir,
-    problems: verified.problems,
+    problems,
+    effect,
     summary:
       `已迁移 ${plan.sessions.length} 个会话（改写 ${result.rewritten} 个日志、移动 ${result.moved} 个目录` +
       `${result.artifactsMoved > 0 ? `、搬迁 ${result.artifactsMoved} 项产物` : ''}）。\n` +
-      `复核：${verified.ok ? '通过' : '失败'}。备份：${result.backupDir}`,
+      `复核：${verified.ok && registryCheck.length === 0 ? '通过' : '失败'}。备份：${result.backupDir}\n` +
+      describeEffect(effect),
+  }
+}
+
+/**
+ * 注册表复核：拿备份里那份（改动前）与现在磁盘上那份比，核"会话 id 不变、工作区 id 不变"。
+ * @returns 一串问题（空 = 通过）；复核不了（读不到）时也如实报一句。
+ */
+function verifyRegistryChangeOnDisk(deps: MigrateDeps, backupDir: string, change: RegistryChange | null): string[] {
+  if (change === null) return []
+  try {
+    const before = readRegistry(join(backupDir, 'registry.json'))
+    const after = readRegistry(deps.registryPath)
+    return verifyRegistryChange(before, after, change).problems
+  } catch (error) {
+    return [`注册表复核没能跑完：${error instanceof Error ? error.message : String(error)}`]
   }
 }
 
@@ -302,20 +343,27 @@ export function readBackup(deps: Pick<MigrateDeps, 'backupRoot'>, backupDir: unk
 /**
  * 回滚一次迁移。
  *
- * `dryRun: true` 只回一份动作清单（界面据此让用户先看清再确认），不写任何字节。
+ * `dryRun: true` 只回一份动作清单（界面据此让用户先看清再确认），不写任何字节——那时也没有要生效的东西。
+ *
+ * 回滚**不走宿主那套动作**：它要的正是"备份里那条记录原样回来"，其中包括被迁移删掉的那个工作区——
+ * 而宿主的"新建工作区"只会分配新 id。所以这里整份写回文件：id 一个都不变，代价是要重启 DSH。
  */
-export function rollbackMigration(
+export async function rollbackMigration(
   deps: Pick<MigrateDeps, 'backupRoot'>,
   request: { backupDir: string; dryRun?: boolean },
-): RollbackOutcome {
+): Promise<RollbackOutcome> {
   const { dir, manifest } = readBackup(deps, request.backupDir)
   const result = rollback(manifest, { backupDir: dir, dryRun: request.dryRun === true })
+  // 只有注册表真的被还原过才谈得上"要生效"（删除那类备份从头到尾没碰过它）。
+  const effect: EffectOutcome | undefined =
+    !result.dryRun && result.registryRestored ? { kind: 'file-only' } : undefined
   return {
     ...result,
     backupDir: dir,
     createdAt: manifest.createdAt,
     sessions: manifest.sessions.length,
     artifacts: (manifest.artifacts ?? []).length,
+    ...(effect === undefined ? {} : { effect }),
   }
 }
 

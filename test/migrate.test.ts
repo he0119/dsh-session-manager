@@ -129,9 +129,9 @@ test('预演：同一个目录的两种拼写不算一次迁移', () => {
   rmSync(sb.base, { recursive: true, force: true })
 })
 
-test('dry-run：runMigration(apply:false) 与预演同形，且不写盘', () => {
+test('dry-run：runMigration(apply:false) 与预演同形，且不写盘', async () => {
   const sb = makeSandbox('migrate-dryrun')
-  const run = runMigration(sb.deps, { from: FROM, to: TO }, { apply: false })
+  const run = await runMigration(sb.deps, { from: FROM, to: TO }, { apply: false })
 
   assert.equal(run.applied, false)
   assert.equal(run.backupDir, undefined, 'dry-run 不该有备份目录')
@@ -140,9 +140,9 @@ test('dry-run：runMigration(apply:false) 与预演同形，且不写盘', () =>
   rmSync(sb.base, { recursive: true, force: true })
 })
 
-test('执行：改写 header.cwd、搬目录、登记目标工作区，并留下可回滚的备份', () => {
+test('执行：改写 header.cwd、搬目录、登记目标工作区，并留下可回滚的备份', async () => {
   const sb = makeSandbox('migrate-apply')
-  const run = runMigration(sb.deps, { from: FROM, to: TO, title: 'to' }, { apply: true })
+  const run = await runMigration(sb.deps, { from: FROM, to: TO, title: 'to' }, { apply: true })
 
   assert.equal(run.applied, true)
   assert.equal(run.verified, true, `复核应当通过：${run.problems.join('; ')}`)
@@ -174,9 +174,9 @@ test('执行：改写 header.cwd、搬目录、登记目标工作区，并留下
   rmSync(sb.base, { recursive: true, force: true })
 })
 
-test('子集：只搬点名的会话，源工作区没被搬空就留在注册表里', () => {
+test('子集：只搬点名的会话，源工作区没被搬空就留在注册表里', async () => {
   const sb = makeSandbox('migrate-subset', ['session-keep', 'session-go'])
-  const run = runMigration(sb.deps, { from: FROM, to: TO, sessionIds: ['session-go'] }, { apply: true })
+  const run = await runMigration(sb.deps, { from: FROM, to: TO, sessionIds: ['session-go'] }, { apply: true })
 
   assert.equal(run.applied, true)
   assert.equal(run.verified, true, `复核应当通过：${run.problems.join('; ')}`)
@@ -206,21 +206,21 @@ test('子集：点名的会话不在源项目目录里 → 预演就报问题，
   rmSync(sb.base, { recursive: true, force: true })
 })
 
-test('回滚：dryRun 只回动作清单，真跑则目录与字节都回到原位', () => {
+test('回滚：dryRun 只回动作清单，真跑则目录与字节都回到原位', async () => {
   const sb = makeSandbox('migrate-rollback')
-  const run = runMigration(sb.deps, { from: FROM, to: TO, title: 'to' }, { apply: true })
+  const run = await runMigration(sb.deps, { from: FROM, to: TO, title: 'to' }, { apply: true })
   const backupDir = run.backupDir!
   const afterMigrate = sessionDir(sb.deps.sessionsRoot, TO, sb.sessionId)
   assert.equal(existsSync(afterMigrate), true)
 
   // dry-run：给动作但不写
-  const plan = rollbackMigration(sb.deps, { backupDir, dryRun: true })
+  const plan = await rollbackMigration(sb.deps, { backupDir, dryRun: true })
   assert.equal(plan.dryRun, true)
   assert.ok(plan.actions.length > 0, '应当列出将要做的动作')
   assert.equal(existsSync(afterMigrate), true, 'dry-run 不该动目录')
 
   // 真回滚：目录回源项目目录、header.cwd 复原、注册表还原
-  const done = rollbackMigration(sb.deps, { backupDir })
+  const done = await rollbackMigration(sb.deps, { backupDir })
   assert.equal(done.dryRun, false)
   assert.equal(done.restoredFiles, 1)
   assert.equal(done.registryRestored, true)
@@ -235,7 +235,7 @@ test('回滚：dryRun 只回动作清单，真跑则目录与字节都回到原�
   rmSync(sb.base, { recursive: true, force: true })
 })
 
-test('覆盖前那份备份：目录像删除那样搬回，注册表像迁移那样一起还原', () => {
+test('覆盖前那份备份：目录像删除那样搬回，注册表像迁移那样一起还原', async () => {
   // 同步"覆盖本机那份"走的是同一条备份路（`kind: 'replace'`），但语义与删除那份**不一样**：
   // 覆盖会把会话搬到一个新目录（远端那份的 cwd 可能不同）并 reHome 它在注册表里的登记，所以回滚必须
   // 连注册表一起还原——只搬目录会让登记停在被覆盖之后的那份路径上。
@@ -265,7 +265,7 @@ test('覆盖前那份备份：目录像删除那样搬回，注册表像迁移�
   const listed = listBackups(sb.deps).find((item) => item.dir === backup.dir)
   assert.equal(listed?.kind, 'replace', '清单里如实报"覆盖前"那一类')
 
-  const done = rollbackMigration(sb.deps, { backupDir: backup.dir })
+  const done = await rollbackMigration(sb.deps, { backupDir: backup.dir })
   assert.equal(done.registryRestored, true, '覆盖那条要连注册表一起还原')
   assert.equal(existsSync(dir), true, '被换掉的那份要搬回原位')
   assert.deepEqual(readRegistry(sb.deps.registryPath).tables.workspaces['ws-from']?.sessionIds, [sb.sessionId])
@@ -273,9 +273,9 @@ test('覆盖前那份备份：目录像删除那样搬回，注册表像迁移�
   rmSync(sb.base, { recursive: true, force: true })
 })
 
-test('备份目录越界：只认本插件备份根下的目录，其余一律拒', () => {
+test('备份目录越界：只认本插件备份根下的目录，其余一律拒', async () => {
   const sb = makeSandbox('migrate-guard')
-  const run = runMigration(sb.deps, { from: FROM, to: TO, title: 'to' }, { apply: true })
+  const run = await runMigration(sb.deps, { from: FROM, to: TO, title: 'to' }, { apply: true })
   const good = run.backupDir!
 
   assert.equal(assertBackupDir(sb.deps, good), good)
@@ -290,9 +290,9 @@ test('备份目录越界：只认本插件备份根下的目录，其余一律�
   rmSync(sb.base, { recursive: true, force: true })
 })
 
-test('列举备份：坏目录跳过而不是让整张列表打不开', () => {
+test('列举备份：坏目录跳过而不是让整张列表打不开', async () => {
   const sb = makeSandbox('migrate-list')
-  runMigration(sb.deps, { from: FROM, to: TO, title: 'to' }, { apply: true })
+  await runMigration(sb.deps, { from: FROM, to: TO, title: 'to' }, { apply: true })
   mkdirSync(join(sb.deps.backupRoot, 'garbage'), { recursive: true })
   writeFileSync(join(sb.deps.backupRoot, 'garbage', 'manifest.json'), '{not json')
 
