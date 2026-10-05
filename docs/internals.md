@@ -22,8 +22,10 @@
   与[写侧不依赖压缩器](../.agents/notes/implemented/architecture/2026-09-27-write-side-has-no-compressor.md)：
   改写只动首帧，而首帧由本包手写一个 raw block 帧；只读的内容指纹另走一条只解首帧前缀的浅路，产出
   与严格路逐字节相同。
-- [生效模式如实探测，不假装即时生效](../.agents/notes/implemented/architecture/2026-09-27-effect-mode-tells-the-truth.md)：
-  上游有没有进程内重挂入口，决定了这次改动要不要重启 DSH。
+- [生效模式如实探测，不假装即时生效](../.agents/notes/implemented/architecture/2026-09-27-effect-mode-tells-the-truth.md)
+  与[写完注册表就地重挂工作区那一层](../.agents/notes/implemented/architecture/2026-10-05-reload-the-workspace-entry.md)：
+  `src/reload.ts` 拿到宿主那一行的端口（`workspaceReloadPort()`）就把工作区那一层重挂一遍，拿不到就
+  如实说这次改动需要重启 DSH。
 
 ## 文件格式与搬运
 

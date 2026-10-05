@@ -13,13 +13,14 @@ import { applyPlan, verifyAppliedPlan } from './execute.ts'
 import { readManifest, rollback, type BackupKind, type BackupManifest, type RollbackResult } from './journal.ts'
 import { projectionCacheDir } from './paths.ts'
 import { buildRelocationPlan, describePlan } from './plan.ts'
+import { reloadWorkspace, describeReload, type ReloadDeps } from './reload.ts'
 import { readRegistry, validateRegistry } from './registry.ts'
 import type { TitleQuery } from './session-title.ts'
-import type { DecodeAll, RelocationPlan, RegistryChange, WorkspaceRegistryState } from './types.ts'
+import type { DecodeAll, RelocationPlan, RegistryChange, ReloadOutcome, WorkspaceRegistryState } from './types.ts'
 import { createBlankResolver } from './visibility.ts'
 
 /** 迁移用到的路径与解码器（与 `ResolvedPaths` 同形，但本模块不认识 tools.ts）。 */
-export interface MigrateDeps {
+export interface MigrateDeps extends ReloadDeps {
   sessionsRoot: string
   registryPath: string
   backupRoot: string
@@ -116,6 +117,12 @@ export interface MigrationRun {
   backupDir?: string
   /** 复核发现的问题（空数组 = 通过）。 */
   problems: string[]
+  /**
+   * 这次写盘有没有被宿主重新接管（只在真的执行过时才有）。
+   *
+   * 缺席 = 没执行（dry-run / 计划不 ok）：那时"何时生效"只能由探测回答，见 `describePlannedEffect()`。
+   */
+  reload?: ReloadOutcome
   summary: string
 }
 
@@ -125,6 +132,8 @@ export interface RollbackOutcome extends RollbackResult {
   createdAt: string
   sessions: number
   artifacts: number
+  /** 同 `MigrationRun.reload`：只在真的回滚过、且注册表确实还原了时才有。 */
+  reload?: ReloadOutcome
 }
 
 /** 备份清单里的一条（界面的"备份与回滚"列表用）。 */
@@ -224,8 +233,14 @@ export function previewMigration(deps: MigrateDeps, request: MigrateRequest): Mi
  *
  * `apply: false` 时只返回预演，一个字节都不写——工具层与界面层的"预演"都走这里，
  * 因此不存在"预览一套、实做另一套"。
+ *
+ * 真的写盘之后还会把宿主那一层重新接管一遍（见 `reloadWorkspace()`）；它是**异步**的，所以这里也是。
  */
-export function runMigration(deps: MigrateDeps, request: MigrateRequest, options: { apply: boolean }): MigrationRun {
+export async function runMigration(
+  deps: MigrateDeps,
+  request: MigrateRequest,
+  options: { apply: boolean },
+): Promise<MigrationRun> {
   const plan = buildPlan(deps, request)
   const preview = previewOf(plan)
   if (!plan.ok) {
@@ -259,6 +274,8 @@ export function runMigration(deps: MigrateDeps, request: MigrateRequest, options
     backupRoot: deps.backupRoot,
   })
   const verified = verifyAppliedPlan(plan, { decodeAll: deps.decodeAll })
+  // 复核失败也照样重挂：磁盘就是磁盘，宿主该看到的是真实状态，藏起来只会更晚暴露。
+  const reload = await reloadWorkspace(deps)
   return {
     applied: true,
     preview,
@@ -268,10 +285,12 @@ export function runMigration(deps: MigrateDeps, request: MigrateRequest, options
     verified: verified.ok,
     backupDir: result.backupDir,
     problems: verified.problems,
+    reload,
     summary:
       `已迁移 ${plan.sessions.length} 个会话（改写 ${result.rewritten} 个日志、移动 ${result.moved} 个目录` +
       `${result.artifactsMoved > 0 ? `、搬迁 ${result.artifactsMoved} 项产物` : ''}）。\n` +
-      `复核：${verified.ok ? '通过' : '失败'}。备份：${result.backupDir}`,
+      `复核：${verified.ok ? '通过' : '失败'}。备份：${result.backupDir}\n` +
+      describeReload(reload),
   }
 }
 
@@ -302,20 +321,24 @@ export function readBackup(deps: Pick<MigrateDeps, 'backupRoot'>, backupDir: unk
 /**
  * 回滚一次迁移。
  *
- * `dryRun: true` 只回一份动作清单（界面据此让用户先看清再确认），不写任何字节。
+ * `dryRun: true` 只回一份动作清单（界面据此让用户先看清再确认），不写任何字节——那时也不重挂：
+ * 一个字节都没动，没有要交给宿主的东西。
  */
-export function rollbackMigration(
-  deps: Pick<MigrateDeps, 'backupRoot'>,
+export async function rollbackMigration(
+  deps: Pick<MigrateDeps, 'backupRoot'> & ReloadDeps,
   request: { backupDir: string; dryRun?: boolean },
-): RollbackOutcome {
+): Promise<RollbackOutcome> {
   const { dir, manifest } = readBackup(deps, request.backupDir)
   const result = rollback(manifest, { backupDir: dir, dryRun: request.dryRun === true })
+  // 只有注册表真的被还原过才谈得上"让宿主重新接管"（删除那类备份从头到尾没碰过它）。
+  const reload = !result.dryRun && result.registryRestored ? await reloadWorkspace(deps) : undefined
   return {
     ...result,
     backupDir: dir,
     createdAt: manifest.createdAt,
     sessions: manifest.sessions.length,
     artifacts: (manifest.artifacts ?? []).length,
+    ...(reload === undefined ? {} : { reload }),
   }
 }
 

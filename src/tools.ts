@@ -3,8 +3,8 @@
 // 设计取向：
 //   * 读操作（plan / verify）永不写盘；
 //   * 写操作（migrate / rollback / sync）默认 dry-run，必须显式 apply:true；
-//   * 每个写操作的返回值都说明"何时生效"——因为绕过宿主直接改注册表可能需要重启 DSH，
-//     除非上游提供了 workspaceRegistry.reassignSessions（见 effectMode()）。
+//   * 每个写操作的返回值都说明"何时生效"——因为绕过宿主直接改注册表之后，得让宿主重新接管
+//     （见 reload.ts 与 workspaceReloadPort()：能就地重挂工作区那一层就即时生效，否则如实说要重启）。
 import type { Context } from '@deepseek-ai/cordis'
 
 import { DEFAULT_PASSWORD_REF, syncSection, type PluginConfig, type PluginConfigInput, type SyncConfig } from './config.ts'
@@ -23,8 +23,9 @@ import {
 } from './migrate.ts'
 import { projectKey } from './project-key.ts'
 import { projectionCacheDir } from './paths.ts'
+import { describePlannedEffect, describeReload, effectOf } from './reload.ts'
 import { runSync, type SyncPlan, type SyncSettings } from './sync.ts'
-import type { DecodeAll } from './types.ts'
+import type { DecodeAll, EffectMode, WorkspaceReloadPort } from './types.ts'
 import { createSessionMetaResolver } from './visibility.ts'
 
 /**
@@ -62,8 +63,9 @@ export function resolvePaths(config: PluginConfigInput = {}): ResolvedPaths {
   }
 }
 
-/** 迁移何时生效。 */
-export type EffectMode = 'immediate' | 'restart-required'
+// 迁移与导入都会改注册表，改完都得把宿主重新接管一遍；生效模式的类型与措辞在 types.ts / reload.ts
+// 一处定义，这里只做宿主侧的探测与转发（web.ts 仍从本模块取这个类型，避免调用面来回改）。
+export type { EffectMode }
 
 /** 一次同步要用的远端与设置。 */
 export interface SyncRuntime {
@@ -243,12 +245,77 @@ export function optionalService(ctx: unknown, name: string): unknown {
 }
 
 /**
- * 迁移何时生效：上游若提供 reassignSessions 就能进程内即时生效，
- * 否则直接落盘必须重启 DSH 才会被承认（宿主持有内存副本）。
+ * 迁移何时生效：注册表落盘之后，宿主那一层能不能被就地重挂一遍。
+ *
+ * 能（`workspaceReloadPort()` 拿得到入口）就报 `immediate`——插件自己会把宿主重新接管一次；
+ * 不能就如实报 `restart-required`，由调用方告诉用户重启。
+ * @param ctx 宿主上下文。
+ * @returns 生效模式。
  */
 export function effectMode(ctx: unknown): EffectMode {
-  const registry = optionalService(ctx, 'workspaceRegistry') as { reassignSessions?: unknown } | undefined
-  return typeof registry?.reassignSessions === 'function' ? 'immediate' : 'restart-required'
+  return workspaceReloadPort(ctx) === undefined ? 'restart-required' : 'immediate'
+}
+
+/**
+ * 提供工作区注册表的那个加载条目（宿主 profile 里的一行）。
+ *
+ * 名字是**模块名**而不是条目 id：条目 id（`include:workspace`）取决于 profile 的嵌套形状，
+ * 模块名是这一行自己声明的。换名字就当成"探测不到"，退回"需要重启"。
+ */
+const WORKSPACE_ENTRY = '@deepseek-ai/dsh-workspace'
+
+/**
+ * 探测"定点重挂工作区那一层"的进程内入口。
+ *
+ * 为什么必须是重挂而不是直接改服务：`WorkspaceRegistry` 在进程内持有注册表的内存副本与一份**启动时
+ * 建的 header 索引**，两者都不会因为文件变了而重读；改文件只是让下次启动看到新状态。重挂那个加载条目
+ * （`fiber.restart()` = dispose + 重新 init）会让它重读 `workspace.json` 并重扫日志重建索引——这正是
+ * 一次整机重启对这一层做的事，但不动进程、不杀正在跑的回合。
+ *
+ * 认形状不认实现：`loader.entries()` 是 cordis 公开的加载条目枚举，`fiber.restart()` 也是公开方法
+ * （官方插件管理器热应用配置时走的同一条路）。任何一处不认识就返回 undefined，绝不猜。
+ *
+ * @param ctx 宿主上下文。
+ * @returns 端口（`run()` 真的去重挂）；这个宿主没有这个能力时 undefined。
+ */
+export function workspaceReloadPort(ctx: unknown): WorkspaceReloadPort | undefined {
+  // 没有注册表服务就没得重挂：那是宿主的能力，够不着就别假装够得着。
+  if (optionalService(ctx, 'workspaceRegistry') === undefined) return undefined
+  const loader = optionalService(ctx, 'loader') as { entries?: unknown } | undefined
+  const entries = loader?.entries
+  if (typeof entries !== 'function') return undefined
+
+  let rows: unknown
+  try {
+    rows = (entries as () => unknown).call(loader)
+  } catch {
+    // 树还在装配 / 形状不认：按"没有入口"处理，这个探测不该把一次迁移整个打挂。
+    return undefined
+  }
+  if (rows === null || typeof rows !== 'object' || typeof (rows as Iterable<unknown>)[Symbol.iterator] !== 'function') {
+    return undefined
+  }
+
+  for (const row of rows as Iterable<unknown>) {
+    const entry = row as {
+      id?: unknown
+      options?: { name?: unknown; disabled?: unknown } | undefined
+      fiber?: { restart?: unknown } | undefined
+    } | null
+    if (entry?.options?.name !== WORKSPACE_ENTRY) continue
+    // 停用的一行重挂起来没有意义（它本来就不在跑）。
+    if (entry.options.disabled === true) continue
+    const restart = entry.fiber?.restart
+    if (typeof restart !== 'function') continue
+    const fiber = entry.fiber as { restart: () => Promise<void> }
+    return {
+      entryId: typeof entry.id === 'string' ? entry.id : WORKSPACE_ENTRY,
+      run: async () => {
+        await fiber.restart()
+      },
+    }
+  }
+  return undefined
 }
 
 /**
@@ -282,13 +349,6 @@ export function directoryPickerKind(ctx: unknown): PickerKind {
     return null
   }
 }
-
-const EFFECT_NOTE: Record<EffectMode, string> = {
-  immediate: '注册表变更由 workspaceRegistry 直接承接，无需重启。',
-  'restart-required':
-    '注册表已落盘，但宿主进程内持有内存副本，需重启 DSH 后才会生效；重启前请勿在旧工作区继续新增会话。',
-}
-
 /**
  * 宿主的归档能力（`ctx.workspaceRegistry` 的 `archiveSession` / `unarchiveSession`）。
  *
@@ -389,6 +449,8 @@ export function registerTools(ctx: Context, config: PluginConfigInput = {}): Arr
     registryPath: paths.registryPath,
     backupRoot: paths.backupRoot,
     decodeAll,
+    // 每次调用重新探测（加载条目会随 profile 的热应用来去），探测不到就是"只能重启"。
+    workspaceReload: () => workspaceReloadPort(ctx),
   }
   const disposers: Array<() => void> = []
 
@@ -476,8 +538,10 @@ export function registerTools(ctx: Context, config: PluginConfigInput = {}): Arr
           're-home the workspace registry. Defaults to dry-run; apply:true performs it after taking a byte-level ' +
           'backup. Refuses on any blocking problem. Subagent sessions always follow their parent (naming one is ' +
           'refused; naming a parent takes its whole family along; their registry membership does not change). ' +
-          'Offline registry writes take effect after a DSH restart unless ' +
-          'the host exposes workspaceRegistry.reassignSessions.',
+          'The registry file is written on disk and then handed back to the host by restarting the load entry ' +
+          'that provides it (the workspace layer only; the process is not restarted), so the change takes effect ' +
+          'immediately. When that entry cannot be found on this host, the result says a DSH restart is required ' +
+          'instead.',
         parameters: {
           from: { type: 'string', required: true, description: 'Source workspace directory (absolute path).' },
           to: {
@@ -523,7 +587,7 @@ export function registerTools(ctx: Context, config: PluginConfigInput = {}): Arr
           ],
         },
         async execute(args): Promise<MigrateToolResult> {
-          const run = runMigration(
+          const run = await runMigration(
             deps,
             {
               from: args.from,
@@ -535,9 +599,9 @@ export function registerTools(ctx: Context, config: PluginConfigInput = {}): Arr
             { apply: args.apply === true },
           )
           const summary = run.applied
-            ? `${run.summary}\n${EFFECT_NOTE[mode()]}`
+            ? run.summary
             : run.preview.ok
-              ? `${run.summary}\n\n（dry-run，未写任何字节；传 apply:true 执行）`
+              ? `${run.summary}\n\n（dry-run，未写任何字节；传 apply:true 执行）\n${describePlannedEffect(mode())}`
               : run.summary
           return {
             applied: run.applied,
@@ -547,7 +611,8 @@ export function registerTools(ctx: Context, config: PluginConfigInput = {}): Arr
             artifactsMoved: run.artifactsMoved,
             verified: run.verified,
             ...(run.backupDir === undefined ? {} : { backupDir: run.backupDir }),
-            takesEffect: mode(),
+            // 真的执行过就认执行结果（run.reload），没执行才退到探测。
+            takesEffect: effectOf(run.reload, mode()),
             summary,
             problems: run.applied ? run.problems : run.preview.problems,
           }
@@ -577,6 +642,7 @@ export function registerTools(ctx: Context, config: PluginConfigInput = {}): Arr
               restoredArtifacts: { type: 'integer', required: true },
               sessions: { type: 'integer', required: true },
               registryRestored: { type: 'boolean', required: true },
+              takesEffect: { type: 'string', required: true },
               summary: { type: 'string', required: true },
             },
           },
@@ -585,15 +651,20 @@ export function registerTools(ctx: Context, config: PluginConfigInput = {}): Arr
           ],
         },
         async execute(args) {
-          const r = rollbackMigration({ backupRoot: paths.backupRoot }, { backupDir: args.backupDir })
+          const r = await rollbackMigration(
+            { backupRoot: paths.backupRoot, workspaceReload: () => workspaceReloadPort(ctx) },
+            { backupDir: args.backupDir },
+          )
           return {
             restoredFiles: r.restoredFiles,
             restoredArtifacts: r.restoredArtifacts,
             sessions: r.sessions,
             registryRestored: r.registryRestored,
+            takesEffect: effectOf(r.reload, mode()),
             summary:
               `已回滚 ${r.sessions} 个会话、还原 ${r.restoredFiles} 个文件` +
-              `${r.restoredArtifacts > 0 ? `、搬回 ${r.restoredArtifacts} 项产物` : ''}并恢复注册表。`,
+              `${r.restoredArtifacts > 0 ? `、搬回 ${r.restoredArtifacts} 项产物` : ''}并恢复注册表。` +
+              (r.reload === undefined ? '' : `\n${describeReload(r.reload)}`),
           }
         },
       }),
@@ -734,6 +805,8 @@ export function registerTools(ctx: Context, config: PluginConfigInput = {}): Arr
               sessionMeta: createSessionMetaResolver({ cacheDir: projectionCacheDir(paths.registryPath) }),
               // 覆盖本机那份之前要问一句"这条还在跑吗"（与删除同一条理由：宿主手里有它的写句柄）。
               liveSessionIds: () => liveSessionIds(ctx),
+              // 拉取会把会话重挂到目标工作区（写注册表），所以整批落地之后同样要把宿主重新接管一遍。
+              workspaceReload: () => workspaceReloadPort(ctx),
             },
             { apply: args.apply === true },
           )
@@ -749,7 +822,7 @@ export function registerTools(ctx: Context, config: PluginConfigInput = {}): Arr
             bytesOut: outcome.applied ? outcome.bytesOut : outcome.plan.bytesOut,
             machines: outcome.plan.machines,
             // 只有真的往库里落了会话才谈得上"要不要重启"；纯推送不改本机任何东西。
-            takesEffect: outcome.applied && outcome.pulled.length > 0 ? mode() : 'immediate',
+            takesEffect: outcome.applied && outcome.pulled.length > 0 ? effectOf(outcome.reload, mode()) : 'immediate',
             summary: describeSync(outcome.plan, outcome.pulled, outcome.replaced, pushedIds, outcome.applied),
             problems: [...outcome.plan.problems, ...outcome.problems],
           }

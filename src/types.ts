@@ -137,6 +137,36 @@ export interface RelocationPlan {
   nextRegistry: WorkspaceRegistryState | null
 }
 
+/** 注册表改动何时被宿主承认。 */
+export type EffectMode = 'immediate' | 'restart-required'
+
+/**
+ * "让宿主重新接管注册表"的进程内入口：把提供 `workspaceRegistry` 的那个加载条目 dispose 掉再
+ * 重新 init 一遍（见 .agents/notes 里定点重挂那篇）。
+ *
+ * 由宿主那一层（`workspaceReloadPort()`）探测并交出，核心层只认这个形状——本类型不 import 任何宿主包。
+ */
+export interface WorkspaceReloadPort {
+  /** 重挂的加载条目 id（诊断用，例如 `include:workspace`）。 */
+  entryId: string
+  /** dispose + 重新 init；resolve 时新实例已就位。 */
+  run(): Promise<void>
+}
+
+/**
+ * 刚落盘的注册表有没有被宿主重新接管。
+ *
+ * 三种情形要分得开：重挂成功、重挂失败（文件写好了但宿主没接住）、这个宿主没有进程内入口
+ * （只能重启）。措辞由 `describeReload()` 一处给出，工具层与界面层因此不会各说各话。
+ */
+export interface ReloadOutcome {
+  kind: 'applied' | 'failed' | 'unavailable'
+  /** `applied` / `failed` 时的加载条目 id。 */
+  entryId?: string
+  /** `failed` 时的原因（原样带给用户，别吞）。 */
+  error?: string
+}
+
 /** `reHome()` 实际发生的动作。 */
 export interface RegistryChange {
   targetId: string

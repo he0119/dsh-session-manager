@@ -687,11 +687,21 @@ test('POST /migrate：unowned 来源不带 from 也能预演（界面那个跨�
   assert.match(String((json(denied.captured) as Record<string, unknown>)['error']), /unowned/)
 })
 
-test('POST /migrate：mode=apply 真搬并回可回滚的备份；注入 effectMode 时如实回报', async () => {
+test('POST /migrate：mode=apply 真搬并回可回滚的备份；有重挂入口时由它说了算', async () => {
   const sandbox = makeSandbox('web-migrate-apply')
   writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000)
 
-  const handlers = createApiHandlers({ ...deps(sandbox), effectMode: () => 'immediate' })
+  // 台账：重挂必须在注册表落盘之后才发生，所以这里顺手记下那一刻文件里的归属。
+  const calls: string[] = []
+  const reload = {
+    entryId: 'include:workspace',
+    run: async (): Promise<void> => {
+      const registry = readRegistry(sandbox.registryPath)
+      const target = Object.values(registry.tables.workspaces).find((record) => record.path === CWD_B)
+      calls.push(target?.sessionIds.join(',') ?? '没有 CWD_B 的工作区记录')
+    },
+  }
+  const handlers = createApiHandlers({ ...deps(sandbox), workspaceReload: () => reload })
   const { res, captured } = fakeRes()
   await handlers['POST /migrate']!(
     fakeReq('POST', `${API_PREFIX}/migrate`, Buffer.from(JSON.stringify({ mode: 'apply', from: CWD_A, to: CWD_B }))),
@@ -706,6 +716,8 @@ test('POST /migrate：mode=apply 真搬并回可回滚的备份；注入 effectM
   assert.equal(body['moved'], 1)
   assert.equal(body['takesEffect'], 'immediate')
   assert.equal(typeof body['backupDir'], 'string')
+  assert.deepEqual(calls, ['session-a'], '重挂要真的发生，且发生在注册表落盘之后')
+  assert.match(String(body['summary']), /无需重启 DSH/)
 
   // 真的搬了：目标项目目录里有、源项目目录里没有、header.cwd 已改写
   const moved = sessionDir(sandbox.sessionsRoot, CWD_B, 'session-a')
@@ -727,6 +739,36 @@ test('POST /migrate：mode=apply 真搬并回可回滚的备份；注入 effectM
   assert.equal(listed[0]?.['sessions'], 1)
   assert.equal(listed[0]?.['from'], CWD_A)
   assert.equal(listed[0]?.['to'], CWD_B)
+})
+
+test('POST /migrate：重挂失败时如实报"需要重启"，而不是照探测说无需重启', async () => {
+  const sandbox = makeSandbox('web-migrate-reload-fail')
+  writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000)
+
+  let calls = 0
+  const handlers = createApiHandlers({
+    ...deps(sandbox),
+    // 探测说有入口（否则 `takesEffect` 本来就该是 restart-required），但真跑起来会失败。
+    workspaceReload: () => ({
+      entryId: 'include:workspace',
+      run: async (): Promise<void> => {
+        calls += 1
+        throw new Error('夹具：重挂失败')
+      },
+    }),
+  })
+  const { res, captured } = fakeRes()
+  await handlers['POST /migrate']!(
+    fakeReq('POST', `${API_PREFIX}/migrate`, Buffer.from(JSON.stringify({ mode: 'apply', from: CWD_A, to: CWD_B }))),
+    res,
+  )
+  assert.equal(captured.status, 200)
+  const body = json(captured)
+  assert.equal(calls, 1, '要真的试过重挂才谈得上"失败"')
+  assert.equal(body['applied'], true, '重挂失败不该把迁移说成失败')
+  assert.equal(body['verified'], true)
+  assert.equal(body['takesEffect'], 'restart-required', '界面能说的"无需重启"必须来自真实结果')
+  assert.match(String(body['summary']), /重新接管失败（夹具：重挂失败）/)
 })
 
 test('POST /rollback：先 dryRun 看动作，再真回滚到原状', async () => {

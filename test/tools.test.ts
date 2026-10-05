@@ -23,6 +23,7 @@ import {
   effectMode,
   liveSessionIds,
   registerTools,
+  workspaceReloadPort,
   type MigrateToolResult,
   type PlanToolResult,
   type SyncToolResult,
@@ -142,12 +143,22 @@ async function startSibling(host: Context, service: string, value: unknown): Pro
  * 这里因此提供真实服务（各由兄弟条目提供）、开一个声明了 inject 的 fiber，并 `await` 它激活完成。
  *
  * @param config - 插件路径配置。
- * @param options.registry - 是否提供 workspaceRegistry，以及它是否有 reassignSessions。
+ * @param options.registry - 是否提供 workspaceRegistry（没有它就没有可重挂的那一层）。
+ * @param options.loader - 加载器那一行的形状：`ready` = 认得出工作区条目且能重挂；
+ *   `no-entry` / `no-restart` = 形状不认；`absent` = 宿主没有 loader 服务。
+ * @param options.onRestart - `ready` 时每次重挂调一次（台账：验"真的重挂过、且在注册表落盘之后"）。
+ * @param options.restartFails - `ready` 时让重挂抛错（验失败路径不把一次成功的迁移说成失败）。
  * @param options.picker - 是否提供 directoryPicker，以及它报的是哪种能力（`broken` = 形状不认）。
  */
 async function makeHost(
   config: PluginConfig,
-  options: { registry?: 'absent' | 'plain' | 'capable'; picker?: 'absent' | 'browse' | 'native' | 'broken' } = {},
+  options: {
+    registry?: 'absent' | 'plain'
+    loader?: 'absent' | 'no-entry' | 'no-restart' | 'ready'
+    onRestart?: () => void
+    restartFails?: boolean
+    picker?: 'absent' | 'browse' | 'native' | 'broken'
+  } = {},
 ): Promise<{ ctx: Context; defs: CapturedTool[] }> {
   const defs: CapturedTool[] = []
   const host = new Context()
@@ -157,9 +168,29 @@ async function makeHost(
       return () => {}
     },
   })
-  const mode = options.registry ?? 'absent'
-  if (mode !== 'absent') {
-    await startSibling(host, 'workspaceRegistry', mode === 'capable' ? { reassignSessions: (): void => {} } : {})
+  if ((options.registry ?? 'absent') !== 'absent') {
+    await startSibling(host, 'workspaceRegistry', {})
+  }
+  const loader = options.loader ?? 'absent'
+  if (loader !== 'absent') {
+    // 真实 profile 里这一行由 dsh-base 的 patch 挂上，这里只摆出探测读得到的形状。
+    const row = {
+      id: 'include:workspace',
+      options: { name: '@deepseek-ai/dsh-workspace' },
+      fiber: {
+        restart: async (): Promise<void> => {
+          options.onRestart?.()
+          if (options.restartFails === true) throw new Error('夹具：重挂失败')
+        },
+      },
+    }
+    const rows =
+      loader === 'no-entry'
+        ? [{ id: 'include:other', options: { name: '@deepseek-ai/dsh-other' }, fiber: {} }]
+        : loader === 'no-restart'
+          ? [{ id: 'include:workspace', options: { name: '@deepseek-ai/dsh-workspace' }, fiber: {} }]
+          : [row]
+    await startSibling(host, 'loader', { entries: () => rows })
   }
   const picker = options.picker ?? 'absent'
   if (picker === 'browse' || picker === 'native') {
@@ -244,25 +275,124 @@ test('目录选择器：宿主报哪种能力就照哪种走，没有/形状不�
   rmSync(sb.base, { recursive: true, force: true })
 })
 
-test('生效模式：上游无 reassign 时如实报 restart-required，有则报 immediate', async () => {
+test('生效模式：认得出"定点重挂工作区那一层"就报 immediate，其余一律如实报 restart-required', async () => {
   const sb = makeSandbox('mode')
   const config = { sessionsRoot: sb.root, registryPath: sb.registryPath, backupRoot: sb.backupRoot }
 
   // 在真实 fiber 上读：服务没声明进 inject，属性写法会抛「without inject」，必须走 ctx.get。
-  const absent = await makeHost(config)
-  assert.equal(effectMode(absent.ctx), 'restart-required')
-
-  const plain = await makeHost(config, { registry: 'plain' })
-  assert.equal(effectMode(plain.ctx), 'restart-required', '提供了服务但没有 reassignSessions')
-
-  const capable = await makeHost(config, { registry: 'capable' })
-  assert.equal(effectMode(capable.ctx), 'immediate')
-
   // 连 ctx 形状都不对时也必须给个答案，而不是抛。
+  assert.equal(effectMode((await makeHost(config)).ctx), 'restart-required', '没有注册表服务：没有可重挂的那一层')
   assert.equal(effectMode({}), 'restart-required')
   assert.equal(effectMode(undefined), 'restart-required')
+  assert.equal(
+    effectMode((await makeHost(config, { registry: 'plain' })).ctx),
+    'restart-required',
+    '有注册表服务但没有 loader：够不着重挂入口',
+  )
+  // 形状不认（条目名不对 / 没有 fiber.restart）时退回"需要重启"，绝不猜。
+  for (const loader of ['no-entry', 'no-restart'] as const) {
+    assert.equal(effectMode((await makeHost(config, { registry: 'plain', loader })).ctx), 'restart-required', loader)
+  }
+  assert.equal(effectMode((await makeHost(config, { registry: 'plain', loader: 'ready' })).ctx), 'immediate')
+
+  // 端口本身：交出去就要真的转给那一行（拿台账当证据），形状不认时给 undefined。
+  const entry = (restart: () => Promise<void>): Record<string, unknown> => ({
+    id: 'include:workspace',
+    options: { name: '@deepseek-ai/dsh-workspace' },
+    fiber: { restart },
+  })
+  const fakeCtx = (rows: unknown, registry: unknown = {}): unknown => ({
+    get: (name: string) => (name === 'workspaceRegistry' ? registry : { entries: () => rows }),
+  })
+  let calls = 0
+  const port = workspaceReloadPort(fakeCtx([entry(async () => { calls += 1 })]))
+  assert.ok(port)
+  assert.equal(port.entryId, 'include:workspace')
+  await port.run()
+  assert.equal(calls, 1, '端口要真的调 fiber.restart()')
+  assert.equal(workspaceReloadPort(fakeCtx([])), undefined, '树里没有那一行')
+  assert.equal(
+    workspaceReloadPort({ get: (name: string) => (name === 'workspaceRegistry' ? undefined : { entries: () => [entry(async () => {})] }) }),
+    undefined,
+    '没有注册表服务：没有可重挂的那一层',
+  )
+  assert.equal(workspaceReloadPort(fakeCtx([{ ...entry(async () => {}), options: { name: '@deepseek-ai/dsh-other' } }])), undefined)
+  assert.equal(workspaceReloadPort(fakeCtx([{ ...entry(async () => {}), options: { name: '@deepseek-ai/dsh-workspace', disabled: true } }])), undefined, '停用的一行重挂没有意义')
+  assert.equal(workspaceReloadPort(fakeCtx(42)), undefined, 'entries() 不是可遍历的')
+  assert.equal(
+    workspaceReloadPort({ get: (name: string) => (name === 'workspaceRegistry' ? {} : { entries: (): never => { throw new Error('树还在装配') } }) }),
+    undefined,
+    'entries() 抛错时按"没有入口"处理',
+  )
 
   rmSync(sb.base, { recursive: true, force: true })
+})
+
+test('定点重挂：apply 之后由它说了算；重挂失败也不把迁移说成失败', async () => {
+  const configOf = (sb: Sandbox): PluginConfig => ({
+    sessionsRoot: sb.root,
+    registryPath: sb.registryPath,
+    backupRoot: sb.backupRoot,
+  })
+
+  // ---- 成功：重挂在注册表落盘之后发生，回报"无需重启" ----
+  const ok = makeSandbox('reload-ok')
+  const seen: string[] = []
+  const { defs } = await makeHost(configOf(ok), {
+    registry: 'plain',
+    loader: 'ready',
+    onRestart: () => {
+      // 台账记的是**那一刻文件里的归属**：如果不是 ['session-b','session-a']，说明重挂跑在落盘之前。
+      const registry = readRegistry(ok.registryPath)
+      seen.push(registry.tables.workspaces['ws-temp']?.sessionIds.join(',') ?? '还没落盘')
+    },
+  })
+  // 只读的预演不许碰重挂：它一个字节都没写，只说"执行时会怎样"。
+  const planned = (await run(byName(defs).get('migrate_sessions')!, { from: ok.fromDir, to: ok.toDir })) as MigrateToolResult
+  assert.equal(planned.applied, false)
+  assert.equal(planned.takesEffect, 'immediate', '预演按探测说"执行时会即时生效"')
+  assert.match(planned.summary, /执行时宿主会就地重挂/)
+  assert.equal(seen.length, 0, '预演不重挂')
+  assert.deepEqual(readRegistry(ok.registryPath), ok.registry, '预演不得改注册表')
+
+  const applied = (await run(byName(defs).get('migrate_sessions')!, {
+    from: ok.fromDir,
+    to: ok.toDir,
+    apply: true,
+  })) as MigrateToolResult
+  assert.equal(applied.applied, true)
+  assert.equal(applied.verified, true, applied.problems.join('; '))
+  assert.equal(applied.takesEffect, 'immediate')
+  assert.deepEqual(seen, ['session-b,session-a'], '重挂必须在注册表落盘之后发生')
+  assert.match(applied.summary, /无需重启 DSH/)
+
+  // ---- 失败：迁移仍然算成功（文件已经写好），如实报"仍需重启" ----
+  const bad = makeSandbox('reload-fail')
+  const failing = await makeHost(configOf(bad), { registry: 'plain', loader: 'ready', restartFails: true })
+  const degraded = (await run(byName(failing.defs).get('migrate_sessions')!, {
+    from: bad.fromDir,
+    to: bad.toDir,
+    apply: true,
+  })) as MigrateToolResult
+  assert.equal(degraded.applied, true, '重挂失败不该把一次成功的迁移说成失败')
+  assert.equal(degraded.verified, true)
+  assert.equal(degraded.takesEffect, 'restart-required')
+  assert.match(degraded.summary, /重新接管失败（夹具：重挂失败）/)
+  assert.match(degraded.summary, /重启 DSH/)
+  assert.ok(degraded.backupDir && existsSync(degraded.backupDir), '重挂失败也不该顺手回滚')
+  assert.deepEqual(readRegistry(bad.registryPath).tables.workspaces['ws-temp']?.sessionIds, ['session-b', 'session-a'])
+
+  // ---- 回滚走同一条路 ----
+  const rb = (await run(byName(defs).get('rollback_session_migration')!, { backupDir: applied.backupDir })) as {
+    takesEffect: string
+    summary: string
+  }
+  assert.equal(rb.takesEffect, 'immediate')
+  assert.match(rb.summary, /无需重启 DSH/)
+  assert.equal(seen.length, 2, '回滚把注册表还原之后也要再重挂一次')
+
+  rmSync(ok.base, { recursive: true, force: true })
+  rmSync(bad.base, { recursive: true, force: true })
 })
 
 test('工具端到端：plan(只读) → migrate(dry-run) → migrate(apply) → verify → rollback', async () => {

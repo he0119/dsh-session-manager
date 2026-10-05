@@ -51,10 +51,11 @@ import { createBackup } from './journal.ts'
 import { encodeSegment } from './paths.ts'
 import { createGitRunner, repoLocation, type GitRunner, type RepoLocation } from './repo.ts'
 import { readRegistry, validateRegistry } from './registry.ts'
+import { reloadWorkspace, type ReloadDeps } from './reload.ts'
 import { relocateHeaderCwdShallow, relocateHeaderCwdText } from './session-log.ts'
 import type { TitleQuery } from './session-title.ts'
 import { applyImport, buildBundle, planImport, readBundle, type ExportSource, type ImportOptions, type SessionBundle } from './transfer.ts'
-import type { DecodeAll, WorkspaceRegistryState } from './types.ts'
+import type { DecodeAll, ReloadOutcome, WorkspaceRegistryState } from './types.ts'
 import type { SessionMeta } from './visibility.ts'
 
 /** 远端本插件独占的那层目录（相对资源根），机器格就放在它下面：`url` 可以填服务器/账号根。 */
@@ -1011,11 +1012,17 @@ export interface SyncOutcome {
   bytesOut: number
   registryWritten: boolean
   indexWritten: boolean
+  /**
+   * 拉取是否已经让宿主重新接管了注册表（见 reload.ts）：`undefined` = 这次没写注册表（预演或纯推送）。
+   *
+   * 与迁移同一套语义——宿主进程内有内存副本，写盘只是让**下次启动**看到新状态。
+   */
+  reload?: ReloadOutcome
   problems: string[]
 }
 
 /** `runSync()` 的依赖。 */
-export interface SyncDeps {
+export interface SyncDeps extends ReloadDeps {
   dav: DavPort
   settings: SyncSettings
   sessionsRoot: string
@@ -1326,6 +1333,10 @@ export async function runSync(
     }
   }
 
+  // ── 让宿主重新接管：拉取会把会话重挂到目标工作区（写注册表），与迁移是同一条语义。
+  //    整批落地之后收口一次，不是每条会话重挂一次——重挂会把依赖工作区的那些条目一起重起。
+  const reload = registryWritten ? await reloadWorkspace(deps) : undefined
+
   // ── 推送：整包 PUT，然后重写自己那一格的索引 ────────────────────────────────
   const ownDirName = machineDirName(deps.settings.machineId)
   const own = remote.indexes.get(ownDirName)
@@ -1448,6 +1459,7 @@ export async function runSync(
     bytesOut,
     registryWritten,
     indexWritten,
+    ...(reload === undefined ? {} : { reload }),
     problems,
   }
 }

@@ -152,10 +152,11 @@ tsconfig.client.json Web Client 自己的类型工程（DOM + JSX；Host 那份�
 | `src/config.ts` | 插件配置的 schema：`sync` 那一节带 `volatile`（活字段，改完不用重启），三个路径字段不带；`syncSection()` 把"活引用"与"普通对象"两种来路收成一份值 | `@deepseek-ai/schemastery` |
 | `src/repo.ts` | 跨机器的项目身份：git remote 规范化（`host/owner/repo`，去掉 `.git` 与凭据、端口进身份）与"这条目录属于哪个仓库"（仓库根 + 仓库内相对路径）；跑 git 的入口可注入。`createRepoLookup()` 是界面读身份那条路（进程内缓存：一个目录只问一次 git，`/state` 是热路径） | 无 |
 | `src/dav.ts` | WebDAV 客户端：PROPFIND / GET / PUT / MKCOL + Basic 鉴权 + 多状态响应解析 | 无 |
-| `src/sync.ts` | WebDAV 同步编排：远端索引、映射、计划（四种关系 + 空白与「谁更新」）、拉取 / 覆盖本机那份 / 推送（都复用 transfer 的导入落地） | 无 |
-| `src/migrate.ts` | 迁移编排：预演 / 执行 / 回滚 / 备份清单（工具与界面两个入口共用） | 无 |
+| `src/sync.ts` | WebDAV 同步编排：远端索引、映射、计划（四种关系 + 空白与「谁更新」）、拉取 / 覆盖本机那份 / 推送（都复用 transfer 的导入落地）；整批拉取写回注册表之后收口调一次 `src/reload.ts` | 无 |
+| `src/migrate.ts` | 迁移编排：预演 / 执行 / 回滚 / 备份清单（工具与界面两个入口共用）；写盘之后交 `src/reload.ts` 让宿主重新接管 | 无 |
+| `src/reload.ts` | 「写完注册表之后让宿主重新接管」的共用一步：三处写注册表（迁移、回滚、导入 / 同步拉取）都调它；探测端口、执行重挂、以及"要不要重启"的措辞只写在这里，**执行时机**留给各自编排层（批量落地时收口一次） | 无 |
 | `src/remove.ts` | 删除编排：预演（活着的拒删、单独点名子智能体拒掉；点名一条就按 `family.ts` 把它的**全部子智能体**一起展开）→ 先备份 → 删目录 → 复核；不碰注册表 | 无 |
-| `src/tools.ts` | 5 个工具注册（+ schema、平台解码器实例、可选服务探测、同步配置与运行时） | `dsh-tools` |
+| `src/tools.ts` | 5 个工具注册（+ schema、平台解码器实例、可选服务探测（含 `workspaceReloadPort()`：从 `loader.entries()` 里认出提供注册表的那一行）、同步配置与运行时） | `dsh-tools` |
 | `src/web.ts` | 界面端点（state / export / import / sync / migrate / backups / rollback / delete / archive），只要求 `{ register }` 形状；`GET /state` 另报一栏 `repos`（目录 → 项目身份，注入的入口认，见 `src/repo.ts`）；`/sync`（预演与落地）回 SSE（按条报进度，见 [决策](../.agents/notes/implemented/architecture/2026-10-03-sync-progress-streams-over-sse.md)），其余端点都是一次性 JSON | 无 |
 | `src/client/logic/*` | **零 DOM 的纯逻辑**，Host 侧的 `test/*.ts` 能直接引（`exclude` 只挡自动包含，import 一样会把它拉进来）：`groups.ts` 是列表的组织规则（按目录分组、组内把子智能体缩进到父会话下一级）、`sessionFilter.ts` 是背后的筛选与搜索判据、`planRows.ts` 是"一行 / 一格怎么写"（cwd 那一格、会话名，以及一个目录怎么称呼——`projectLabel()` / `pathLabel()` / `repoHost()`：组头只摆名字 + 一枚主机名标签、项目身份与本机路径进悬浮提示，下拉框里两者都摆进文本）、`syncGroups.ts` 是同步预演那三张表按项目目录分组的规则、`syncForm.ts` 是同步设置的读写面（宿主设置接缝 `configForms`）与映射草稿的解析、`syncStream.ts` 是同步事件流的分帧与解释（纯字符串处理、与 DOM 无关）、`locales.ts` 是中英两份字典 | 无 |
 | `src/client/components/*` | 渲染路径（`.tsx`）：`ManagerPanel.tsx` 是「会话管理」页的骨架（页内「会话 / 迁移 / 传输 / 同步 / 说明」五个分页）、`ManagePanel.tsx` / `MigrationPanel.tsx` / `TransferPanel.tsx` / `SyncPanel.tsx` 是那四个动作页（`SyncPanel.tsx` 是「同步」分页：同步按钮、三张按项目分组的计划表（会话名后面复用 `sessionList.tsx` 的类型标签）、按 phase 说话的进度块）、`sessionList.tsx` 是前三个分页共用的列表骨架（行、组头、列表框、筛选条）、`ConfirmDialog.tsx` 是四个动作页共用的确认弹窗外壳（官方 `Modal` + 标题/正文/底部按钮，计划由调用方取）、`ProgressBar.tsx` 是那条 6px 进度条（同步的预演与落地共用，分母为 0 的那一段不画）、`SyncConfigForm.tsx` 是同步设置那张表单、`DirectoryPicker.tsx` 是页面内的目录浏览框、`HelpPanel.tsx` 是那个不碰数据的说明页、`icons.tsx` 是内联的两个轮廓图标 | 无 |

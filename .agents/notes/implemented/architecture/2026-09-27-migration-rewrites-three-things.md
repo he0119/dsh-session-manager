@@ -44,3 +44,5 @@ DSH 里「会话属于哪个工作区」不是一个可改字段，而是由会�
   [删除先备份、不碰注册表](2026-09-28-delete-backs-up-and-spares-the-registry.md) 与
   `test/engine.test.ts` 的 `plan → apply → verify → rollback` 逐字节还原。
 - 三件事的次序与失败处理落在 `src/execute.ts` 的固定步骤里，回滚按同一个计划逆着走。
+- 注册表那一件写完之后还得让宿主**重新读**它，否则内存副本与启动时建的索引仍是旧的：见
+  [写完注册表就地重挂工作区那一层](2026-10-05-reload-the-workspace-entry.md)。

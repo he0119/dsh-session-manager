@@ -153,7 +153,8 @@ one-line bump at that point.
   directory, **how the registry changes** (create or reuse the target workspace, how many sessions are added,
   which workspaces lose them, whether an emptied workspace is removed), the artifact plan and its skip reasons;
 - **Confirm** then rewrites each log header `cwd` (first frame only, the rest byte-identical) → move the session
-  directories → re-home the registry → **independent verification** (the host's own corrupt criterion) → leave
+  directories → re-home the registry → **hand the registry back to the host** (re-mount the workspace entry in
+  place, see "Things to know" below) → **independent verification** (the host's own corrupt criterion) → leave
   a byte-level backup. Afterwards the page tells you whether the change took effect immediately or
   **requires a DSH restart**.
 
@@ -204,7 +205,7 @@ directories back — deleting never touched the registry.
 archived / active / Ungrouped, where Ungrouped is exactly the shell sidebar's Ungrouped group: nothing claims
 it and the sidebar shows it), what the three tabs do, which files the actions touch (backups, roll back vs
 restore, when the sidebar follows), where the data comes from (the library and the registry paths), and the
-common questions (which sessions count as Ungrouped, why a deleted session is still in the sidebar, why a
+common questions (which sessions count as Ungrouped, why a deleted session is still in the sidebar, when a
 migration asks for a restart). The action tabs
 (Sessions / Migrate / Transfer / Sync) keep only the decision at hand, so each explanation there stays within two
 lines.
@@ -314,8 +315,9 @@ The rules and edges:
   and copies other machines already took are unaffected;
 - A session without a `cwd` gets no invented path (it lands under `_no-cwd`, same as import); a `cwd` with no
   mapping is skipped and listed;
-- Pulled sessions need a host rescan to appear in the sidebar — restarting DSH is the surest way (the same
-  registry-on-disk semantics as migration).
+- Pulled sessions need a host rescan to appear in the sidebar: after writing the registry the plugin re-mounts
+  the workspace entry in place (the same semantics as migration), and only asks for a restart when the host has
+  no such entry.
 
 Sync also goes through a plan: the `sync_sessions` tool previews by default and only writes with `apply:true`.
 
@@ -331,10 +333,14 @@ Sync also goes through a plan: the `sync_sessions` tool previews by default and 
 
 ## Things to know
 
-- **An offline write only counts after a DSH restart**: the host holds an in-memory registry. If upstream
-  exposes `workspaceRegistry.reassignSessions()`, the plugin takes effect immediately and says so; otherwise
-  both the tools and the page tell you to restart — and until you do, do not add sessions under the old
-  workspace.
+- **After writing the registry the plugin re-mounts the entry, so a restart is normally unnecessary**: the host
+  keeps both an in-memory registry and a header index built at startup, so a file write alone is not enough. Once
+  `workspace.json` is written, the plugin restarts the load entry that provides it (`@deepseek-ai/dsh-workspace`)
+  — `fiber.restart()`, i.e. dispose and init again, exactly what a full DSH restart does to *this* layer, without
+  touching the process or killing a running turn. The sidebar therefore follows right away. When that entry is
+  not there (renamed module, older host, tools-only front end), both the tools and the page say so and ask for a
+  **DSH restart** — and until then, do not change any workspace: creating, renaming or archiving one would
+  clobber this change with the in-memory copy.
 - **Look before it writes**: `plan` and the page's dialog (which shows that same `plan`) write nothing; every
   real write is preceded by a byte-level backup.
 - **Only the first frame is rewritten**: only the header frame is recompressed, the remaining frames stay
