@@ -5,6 +5,7 @@
 //   1) 插件入口的自描述字段与 cordis.patch.yml / inject 一致
 //   2) 能注册出 5 个工具，且 parameters / output.render 形状符合宿主契约
 //   3) apply 返回单个卸载函数（Cordis 契约），卸载后路由与工具都摘掉
+//   4) apply 那次写盘只有一件：把旧默认备份根搬进插件目录（其余动作都是只读）
 //
 // **为什么这里用真实 Cordis，而不是一个纯对象假装 ctx**：Cordis 的 Context 是 Proxy，服务属性
 // 只有在当前 fiber 的 `inject` 里声明过才可读，否则**同步抛** `cannot get property "X" without
@@ -17,9 +18,10 @@
 // 设 DSM_SMOKE_WORKSPACE=<一个真实工作区目录> 时，额外让 plan 在该目录上跑一次
 // **只读**计划，并断言它确实没写任何字节——这是"产物在真实数据上可用"的证据。
 import assert from 'node:assert/strict'
-import { existsSync, mkdirSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import test from 'node:test'
+import test, { after } from 'node:test'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import { Context } from '@deepseek-ai/cordis'
@@ -29,6 +31,18 @@ const entry = join(here, '..', 'lib', 'index.js')
 const ready = existsSync(entry)
 const skip = ready ? false : 'lib/index.js 不存在，先跑 pnpm run build'
 const realDataSkip = skip || (process.env.DSM_SMOKE_WORKSPACE ? false : 'set DSM_SMOKE_WORKSPACE to a real workspace dir')
+
+// 这份冒烟会真的 `apply()` 一次插件，而 apply 现在要动磁盘（把旧默认备份根搬进插件目录，见
+// src/tools.ts 的 adoptLegacyBackupRoot()）。DSH_HOME 因此必须指向一座临时目录：跑测试不该拿运行者
+// 真实的 ~/.dsh 当场地，那里有他的备份与会话库。
+const smokeHome = mkdtempSync(join(tmpdir(), 'dsm-smoke-home-'))
+const homeBefore = process.env.DSH_HOME
+process.env.DSH_HOME = smokeHome
+after(() => {
+  if (homeBefore === undefined) delete process.env.DSH_HOME
+  else process.env.DSH_HOME = homeBefore
+  rmSync(smokeHome, { recursive: true, force: true })
+})
 
 const EXPECTED = [
   'migrate_sessions',
@@ -179,6 +193,21 @@ test('产物冒烟：webServer 晚到也能补挂端点（子 fiber 等它）', 
 
   await plugin.dispose()
   assert.equal(plugin.removed.length, 9, '卸载仍然摘干净')
+})
+
+test('产物冒烟：apply 把旧默认备份根整体搬进插件目录', { skip }, async () => {
+  const legacy = join(smokeHome, 'dsh-session-manager-backups')
+  const stamp = '2026-10-03T08-00-00-000Z'
+  const manifest = '{"kind":"delete","sessions":[]}\n'
+  mkdirSync(join(legacy, stamp), { recursive: true })
+  writeFileSync(join(legacy, stamp, 'manifest.json'), manifest)
+
+  const { dispose } = await loadPlugin({ withWebServer: false })
+  await dispose()
+
+  const moved = join(smokeHome, 'dsh-session-manager', 'backups', stamp, 'manifest.json')
+  assert.equal(existsSync(legacy), false, '旧默认根整个让出来，不留空壳')
+  assert.equal(readFileSync(moved, 'utf8'), manifest, '清单字节不变——它记着回滚要还原的那些路径')
 })
 
 test('产物冒烟：plan 在真实工作区上只读可用', { skip: realDataSkip }, async () => {
