@@ -55,6 +55,9 @@ export const zh = {
   'page.tab.manage': '会话',
   'page.count.sessions': '{count} 个会话',
   'page.count.workspaces': '{count} 个工作区',
+  // 右下角那枚版本徽标的悬浮提示。徽标本体（`v0.3.1 · 3c9f1ab`）是标识符，不进字典。
+  'page.version.tip': '插件版本 {version}',
+  'page.version.tipBuild': '插件版本 {version}，本地构建（git {commit}）',
 
   // ---- 传输（导出 / 导入会话包） ----
   'transfer.export.title': '导出',
@@ -411,6 +414,8 @@ export const en: LocaleDictOf<typeof NS> = {
   'page.tab.manage': 'Sessions',
   'page.count.sessions': '{count} sessions',
   'page.count.workspaces': '{count} workspaces',
+  'page.version.tip': 'Plugin version {version}',
+  'page.version.tipBuild': 'Plugin version {version}, local build (git {commit})',
 
   'transfer.export.title': 'Export',
   'transfer.export.hint': 'Tick the sessions to take away and download one .dshsess bundle; the list is grouped by directory and a header toggles its whole group. What goes in is explained in Help.',

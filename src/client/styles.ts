@@ -57,6 +57,18 @@ export const CSS = `
 .dsm-cardTitle { font-weight: 600; }
 .dsm-hint { color: var(--dsw-alias-label-secondary, #646a73); }
 /*
+ * 页脚那枚版本徽标：这一页的右下角。字号比正文小一档（与内建设置页那些注脚同级），颜色取页内
+ * 最静的那一档（label-tertiary，与页头那行说明同一个 token），靠右对齐——它是"这一页是哪个
+ * 构建"的自述，不该跟内容抢注意力。
+ */
+.dsm-version {
+  margin: 0;
+  text-align: right;
+  color: var(--dsw-alias-label-tertiary, var(--dsw-alias-label-secondary, #646a73));
+  font-size: 12px;
+  line-height: 18px;
+}
+/*
  * 说明页：词条（dt 词 / dd 解释）与问答共用一个两列网格。词比解释重一档，解释用次要灰；
  * 词条列不折行（"子智能体""未分组"最多四个字），解释列吃掉剩下的宽度。
  */

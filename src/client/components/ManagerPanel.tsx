@@ -15,8 +15,10 @@
 import * as React from 'react'
 
 import { fetchState, type StateResponse } from '../api.ts'
+import { PLUGIN_COMMIT, PLUGIN_DIRTY, PLUGIN_VERSION } from '../build.ts'
 import type { DirectoryApi } from '../directory.ts'
 import type { Translate } from '../logic/locales.ts'
+import { versionCommit, versionLabel, versionTag } from '../logic/version.ts'
 import { HelpPanel } from './HelpPanel.tsx'
 import { ManagePanel } from './ManagePanel.tsx'
 import { MigrationPanel } from './MigrationPanel.tsx'
@@ -68,6 +70,16 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
 
   const sessions = state?.sessions.length ?? 0
   const workspaces = state?.workspaces.length ?? 0
+  // 这一页是哪个构建：构建期写死的版本号，加上直接从 git build 时的短 commit（脏工作区挂 -dirty）。
+  const version = versionLabel(PLUGIN_VERSION, PLUGIN_COMMIT, PLUGIN_DIRTY)
+  // 提示里版本号与 commit 各占一处，所以这里传的是不带 commit 的那个版本号。
+  const versionTip =
+    PLUGIN_COMMIT === ''
+      ? t('page.version.tip', { version: versionTag(PLUGIN_VERSION) })
+      : t('page.version.tipBuild', {
+          version: versionTag(PLUGIN_VERSION),
+          commit: versionCommit(PLUGIN_COMMIT, PLUGIN_DIRTY),
+        })
 
   return (
     <section className="dsm-root" data-plugin="dsh-session-manager">
@@ -154,6 +166,15 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
       {panel === 'transfer' && <TransferPanel t={t} state={state} reload={load} />}
       {panel === 'sync' && <SyncPanel t={t} state={state} reload={load} />}
       {panel === 'help' && <HelpPanel t={t} state={state} reload={load} />}
+
+      {/*
+        版本徽标：这一页的右下角。放在页内分页**之后**而不是页头——它答的是"这一页是哪个构建"，
+        与"你要做什么"无关；悬浮提示把"发布版还是直接 build 的"说全（判据见 build.ts 与
+        scripts/build-identity.ts）。一句话里的数字来自构建期常量，渲染路径上没有任何 IO。
+      */}
+      <p className="dsm-version" title={versionTip}>
+        {version}
+      </p>
     </section>
   )
 }
