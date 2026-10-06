@@ -732,6 +732,12 @@ test('sync_sessions：预演只读、apply 才落地；远端那条按映射改�
       false,
       '预演不落地：库里不该多出这条',
     )
+    // 预演也要回答"执行后要不要重启"（与界面那条路同一个口径）：调用方得能在落地**之前**提醒用户。
+    assert.equal(preview.takesEffect, 'restart-required', '预演按探测说，而不是"这次什么都没干"')
+    assert.ok(
+      preview.summary.endsWith('执行后需要重启 DSH 才会生效；重启前请勿再改任何工作区。'),
+      `预演正文里也要有这句：${preview.summary}`,
+    )
 
     const applied = (await run(sync, { apply: true })) as SyncToolResult
     assert.equal(applied.applied, true)

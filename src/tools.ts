@@ -917,9 +917,24 @@ export function registerTools(ctx: Context, config: PluginConfigInput = {}): Arr
             bytesIn: outcome.applied ? outcome.bytesIn : outcome.plan.bytesIn,
             bytesOut: outcome.applied ? outcome.bytesOut : outcome.plan.bytesOut,
             machines: outcome.plan.machines,
-            // 只有真的往库里落了会话才谈得上"要不要重启"；纯推送不改本机任何东西。
-            takesEffect: outcome.applied && outcome.pulled.length > 0 ? effectOf(outcome.effect, mode()) : 'immediate',
-            summary: describeSync(outcome.plan, outcome.pulled, outcome.replaced, pushedIds, outcome.applied),
+            /*
+             * 这次同步要不要重启才被承认：落地按真实结果说，预演按探测说（与界面那条路同一个口径，
+             * 见 src/web.ts 里的 `syncEffect()`）。两种模式都只在"真有会话要落到本机"时才谈得上生效：
+             * 纯推送不改本机任何东西，`restart-required` 在那时会是一句假警告。
+             */
+            takesEffect: outcome.applied
+              ? outcome.pulled.length === 0
+                ? 'immediate'
+                : effectOf(outcome.effect, mode())
+              : outcome.plan.pullIds.length === 0
+                ? 'immediate'
+                : mode(),
+            summary:
+              describeSync(outcome.plan, outcome.pulled, outcome.replaced, pushedIds, outcome.applied) +
+              // 预演也要把"执行后会怎样"说出来，否则调用方要到落地之后才知道要重启（与迁移工具同一条）。
+              (outcome.applied || outcome.plan.pullIds.length === 0
+                ? ''
+                : `\n${describePlannedEffect(mode())}`),
             problems: [...outcome.plan.problems, ...outcome.problems],
           }
         },

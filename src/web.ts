@@ -774,14 +774,28 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
       ...(deps.pluginVersion === undefined ? {} : { pluginVersion: deps.pluginVersion }),
       ...(deps.now === undefined ? {} : { now: deps.now }),
     }
+    /**
+     * 这次同步要不要重启才被承认。
+     *
+     * 落地那次按**真实结果**说（见 take-effect.ts 的 `effectOf()`）；预演那次按探测说——"要不要重启"
+     * 得在按下确认**之前**就摆出来，事后才说等于没提醒（与迁移预演同一套口径）。
+     *
+     * 两种模式都只在"真有会话要落到本机"时才谈得上生效：纯推送不改本机任何东西，此时
+     * `restart-required` 是一句假警告。
+     */
+    const syncEffect = (outcome: SyncOutcome): EffectMode => {
+      if (outcome.applied) {
+        return outcome.pulled.length === 0 ? 'immediate' : effectOf(outcome.effect, takesEffect())
+      }
+      return outcome.plan.pullIds.length === 0 ? 'immediate' : takesEffect()
+    }
     /** 预演与落地回同一份形状的结果，界面两条路都用同一套解析。 */
     const payloadOf = (outcome: SyncOutcome): Record<string, unknown> => ({
       mode: apply ? 'apply' : 'plan',
       remote: { url: runtime.settings.url, machineId: runtime.settings.machineId },
       ...outcome,
       problems: [...outcome.plan.problems, ...outcome.problems],
-      // 只有真的往库里落了会话才谈得上"要不要重启"；纯推送不改本机任何东西。
-      takesEffect: apply && outcome.pulled.length > 0 ? effectOf(outcome.effect, takesEffect()) : 'immediate',
+      takesEffect: syncEffect(outcome),
     })
 
     /*

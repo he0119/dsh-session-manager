@@ -318,7 +318,8 @@ The rules and edges:
   mapping is skipped and listed;
 - Pulled sessions need a host rescan to appear in the sidebar: once the registry changes, the plugin hands the
   work to the host (the same semantics as migration), and only asks for a restart when the host lacks those
-  actions.
+  actions — the confirm dialog says so **before** you apply, and a single warning line stays on the page
+  afterwards (when the host takes the change itself, neither appears).
 
 Sync also goes through a plan: the `sync_sessions` tool previews by default and only writes with `apply:true`.
 
