@@ -163,6 +163,10 @@ npx @deepseek-ai/dsh@next plugin --profile desktop add /path/to/dsh-session-mana
 
 宿主没有 `webServer` 服务时（例如只用工具的前端）这一页不出现，工具照常可用。
 
+页面右下角写着这一页是**哪个构建**：发布版只有版本号（`v0.3.1`）；从仓库直接 build 出来的产物多一个
+短 commit（`v0.3.1 · 0b8c452`），构建时工作区有未提交改动再挂 `-dirty`。悬浮提示把这句话说全（是发布
+版还是本地构建）。
+
 ### 同步（WebDAV）
 
 多台机器上的同一个项目往往装在不同目录（`/home/alice/dev/proj` 与 `/opt/work/proj`），所以**不能**直接

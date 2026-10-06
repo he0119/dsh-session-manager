@@ -19,6 +19,9 @@ import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 import vm from 'node:vm'
 
+import { readBuildIdentity } from '../scripts/build-identity.ts'
+import { versionLabel } from '../src/client/logic/version.ts'
+
 const here = dirname(fileURLToPath(import.meta.url))
 const root = join(here, '..')
 const bundlePath = join(root, 'lib', 'client.js')
@@ -590,6 +593,45 @@ test('客户端产物：页头是页面级标题（h2 + 说明行），不是卡
   const row = tree.find((node) => node.props?.className === 'dsm-titleRow')
   assert.equal(row?.type, 'div', '标题行是一个 div')
   assert.ok(!strings(row).some((text) => text.includes('page.library')), '说明行不在标题行里')
+})
+
+test('客户端产物：右下角那枚版本徽标说得出这是哪个构建', { skip }, () => {
+  // 徽标是「这一页是哪个构建」的自述：版本号永远在，直接从 git build 的产物再多一个短 commit
+  // （发布构建只有版本号——标签与版本号本来就是同一件事）。三个常量由 `tsdown.config.ts` 的
+  // `define` 在编译期写进产物，判据在 scripts/build-identity.ts；没注入的话源码里那三个标识符是
+  // ReferenceError，页面当场崩成占位——所以这一条同时是"注入链真的通了"的证据。
+  const identity = readBuildIdentity(root)
+  const { registrations } = mount()
+  const { component, registration } = registrations[0]
+  const tree = elements(component(registration.inject()))
+
+  const badge = tree.find((node) => node.props?.className === 'dsm-version')
+  assert.equal(badge?.type, 'p', '徽标是一行说明文字')
+  // 「右下角」在结构上就是"页面的最后一个元素"：挪到页内分页之前就不再是页脚了。
+  assert.equal(tree.at(-1), badge, '徽标是这一页的最后一个元素（页脚）')
+
+  const label = String(badge?.props?.children ?? '')
+  assert.ok(label.startsWith(`v${pkg.version}`), `徽标要报出版本号：${label}`)
+  if (identity.dirty) {
+    // 工作区脏时产物可能比源码新（刚 build 完又改了两行）也可能比源码旧（改完还没 build），
+    // 这时只核形状；干净的检出上必须逐字对上这个构建。
+    assert.match(label, /^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?: · [0-9a-f]{7,}(?:-dirty)?)?$/)
+  } else {
+    assert.equal(
+      label,
+      versionLabel(identity.version, identity.commit ?? '', identity.dirty),
+      '徽标与当前检出的构建对不上——先 pnpm run build 再跑测试',
+    )
+  }
+
+  // 悬浮提示说清是发布版还是直接 build 的（`v0.3.1` / 本地构建 git 3c9f1ab）：两个键都在字典里，
+  // 由上面那条"页面问到的键不在字典里"的断言兜住；这里核的是**问的是哪一个**。
+  const tip = String(badge?.props?.title ?? '')
+  const buildKey = 'page.version.tipBuild'
+  assert.ok(
+    tip.startsWith(identity.commit === undefined ? 'page.version.tip' : buildKey),
+    `悬浮提示要按有没有 commit 选键：${tip}`,
+  )
 })
 
 test('客户端产物：页面组件在初始状态下能渲染成元素（不抛）', { skip }, () => {

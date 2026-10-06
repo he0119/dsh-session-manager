@@ -214,6 +214,11 @@ lines.
 A host without the `webServer` service (tools-only front ends) still loads the plugin — the page simply
 does not appear.
 
+The bottom-right corner of the page says **which build this is**: a release shows just the version
+(`v0.3.1`); a build made straight from the repository adds a short commit (`v0.3.1 · 0b8c452`), plus a
+`-dirty` suffix when the working tree had uncommitted changes at build time. Hover for the full sentence
+(release or local build).
+
 ### Sync (WebDAV)
 
 The same project usually lives in different directories on different machines (`/home/alice/dev/proj` vs

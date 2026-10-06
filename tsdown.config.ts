@@ -6,14 +6,24 @@
  * 注意 Host 的 `deps.neverBundle: true`：Cordis、DSH 与普通 npm 依赖都由安装环境解析，
  * 不进产物。这与官方 Host 包的口径一致。客户端反过来——它跑在浏览器里，除了平台模块表提供的
  * 那几个基线模块，其余都得内联进产物。
+ *
+ * 另外一处只有这里能做的事：把**这个构建是谁**（版本号、直接 build 时的短 commit）在编译期写死进
+ * 客户端产物（下面 `define` 的三个标识符），于是页面右下角的徽标不必问宿主、也不必在运行期跑 git。
+ * 判据与降级都在 [build-identity.ts](./scripts/build-identity.ts) 里。
  */
 import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 
 import { defineConfig, type UserConfig } from 'tsdown'
+
+import { readBuildIdentity } from './scripts/build-identity.ts'
 
 const { name: PACKAGE } = JSON.parse(
   readFileSync(new URL('./package.json', import.meta.url), 'utf8'),
 ) as { name: string }
+
+/** 这一层构建的自述：发布构建只有版本号，直接 build 另有短 commit（工作区脏再挂 `-dirty`）。 */
+const identity = readBuildIdentity(fileURLToPath(new URL('.', import.meta.url)))
 
 /**
  * 浏览器模块表里由宿主提供、产物里保持 `require(...)` 的模块：平台基线。
@@ -99,6 +109,13 @@ const client: UserConfig = {
   dts: false,
   sourcemap: true,
   fixedExtension: false,
+  // 构建期常量：源码里这三个标识符不存在（`src/client/build.ts` 里只有 declare），只有产物里有。
+  // 只写在客户端那一份配置上——Host 半侧不显示版本，定义了也没人问。
+  define: {
+    __DSM_VERSION__: JSON.stringify(identity.version),
+    __DSM_COMMIT__: JSON.stringify(identity.commit ?? ''),
+    __DSM_DIRTY__: identity.dirty ? 'true' : 'false',
+  },
   // Host 端的 lib/index.js 也在同一个目录里，默认的 clean 会把它一起删掉。
   clean: false,
   deps: {

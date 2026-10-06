@@ -140,6 +140,10 @@
   页面文案走客户端 `locale` 服务（命名空间 + 点分键名 + 宿主 `common` 兜底），`t` 由框架按 `locale`
   作为 props 送进组件；字典与键集只 import 类型，产物里字节不变。与上一条是两条链：`locale/*.json`
   服务插件列表那一行，这份服务页面里的字。
+- [右下角那枚徽标报的是哪个构建](../.agents/notes/implemented/feature/2026-10-06-version-badge-reports-the-build.md)：
+  版本号与短 commit 由 `tsdown.config.ts` 的 `define` 在**编译期**写进客户端产物（判据在
+  `scripts/build-identity.ts`：HEAD 上有标签 = 发布构建只报版本号，直接从 git build 的多一个短 commit，
+  构建时工作区脏再挂 `-dirty`），页面渲染时只读常量，运行期不碰 git。
 
 ## Host 半侧的约束
 
