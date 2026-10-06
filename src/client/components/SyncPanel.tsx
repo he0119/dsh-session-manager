@@ -394,11 +394,7 @@ export function SyncPanel({ t, state, reload }: PanelShare): React.ReactElement 
               bytesOut: formatBytes(result.bytesOut),
             }) +
               // 覆盖本机原来那份是这次同步里唯一"本机内容被换掉"的部分，值得单独说一句（旧的进备份了）。
-              (result.replaced.length === 0 ? '' : ` ${t('sync.appliedReplaced', { count: result.replaced.length })}`) +
-              // 拉取来的会话进没进宿主内存里的那份注册表：这句只在真的有东西落盘时才有意义。
-              (result.pulled.length === 0
-                ? ''
-                : ` ${result.takesEffect === 'immediate' ? t('effect.immediate') : t('effect.restart')}`),
+              (result.replaced.length === 0 ? '' : ` ${t('sync.appliedReplaced', { count: result.replaced.length })}`),
           )
         }
         // 拉取的落到本机库里了：列表与工作区归属都要重读（推的那一侧不改本机任何东西）。
@@ -461,6 +457,15 @@ export function SyncPanel({ t, state, reload }: PanelShare): React.ReactElement 
   ]
   /** 计划还在算：正文暂时不画（`sync` 里可能还留着上一次的那份结果，摆出来会被当成这次的）。 */
   const planning = dialog === 'plan' && busy === 'plan'
+  /**
+   * 落地之后要不要重启才被宿主承认。
+   *
+   * **只在需要重启时说话**，而且单独一条横幅、不塞进上面那条绿色成功横幅——两件事共用一个颜色底时，
+   * 读的人分不出哪句是坏消息。判据取自最近一次结果：`mode === 'apply'` 说明它是落地回来的，不是预演
+   * （与迁移页同一口径，见 [MigrationPanel.tsx](./MigrationPanel.tsx)）。
+   */
+  const restartWarn =
+    sync !== null && sync.mode === 'apply' && sync.pulled.length > 0 && sync.takesEffect === 'restart-required'
 
   return (
     <>
@@ -481,6 +486,12 @@ export function SyncPanel({ t, state, reload }: PanelShare): React.ReactElement 
             {t('error.dismiss')}
           </button>
         </p>
+      )}
+
+      {restartWarn && (
+        // 不定 dismiss：它不是这次操作的错，而是"这次落地还没被宿主承认"这个事实，下一次同步开始
+        // （`sync` 换成新的计划）时它自己就没了。
+        <p className="dsm-banner dsm-warn">{t('effect.restart')}</p>
       )}
 
       {failures.map((problem) => (
@@ -552,6 +563,11 @@ export function SyncPanel({ t, state, reload }: PanelShare): React.ReactElement 
               })}
               {syncPlan.machines.length > 0 ? ` · ${t('sync.machines', { machines: syncPlan.machines.join('、') })}` : ''}
             </p>
+            {/* 事前提醒：这次落地之后要不要重启，得在按「确认同步」**之前**说出来（见 `effect.plannedRestart`）。
+                纯推送不改本机任何东西，所以只在真有会话要落到本机、且宿主那头需要重启时才摆这一句。 */}
+            {syncPulls.length > 0 && sync.takesEffect === 'restart-required' && (
+              <p className="dsm-warn">{t('effect.plannedRestart')}</p>
+            )}
             {/* 空白会话不进那三张表：它们的去处只有这一句（没有内容可同步，也没有"为什么不动"可讲）。 */}
             {syncBlank > 0 && <p className="dsm-hint">{t('sync.skippedBlank', { count: syncBlank })}</p>}
             {sync.problems.map((problem) => (

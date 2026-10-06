@@ -297,7 +297,12 @@ export interface SyncResponse {
   registryWritten: boolean
   indexWritten: boolean
   problems: string[]
-  /** 这次落地要不要重启 DSH 才被承认（与迁移/导入同一套口径）。 */
+  /**
+   * 这次同步要不要重启 DSH 才被承认（与迁移/导入同一套口径）。
+   *
+   * 落地那次说的是**实际结果**；预演那次说的是"执行时会不会需要"（按宿主端口的探测）——界面靠它在
+   * 按下「确认同步」之前就把这句话摆出来。两种模式都只在真有会话要落到本机时才谈得上生效。
+   */
   takesEffect: 'immediate' | 'restart-required'
   error?: string
 }

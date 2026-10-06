@@ -463,6 +463,12 @@ export function MigrationPanel({ t, state, reload, directory }: PanelShare): Rea
   const preview = pending?.response?.preview ?? null
   const planned = preview !== null && preview.ok
   const registry = preview?.registryChange ?? null
+  /**
+   * 这次改动会不会**需要重启**才被宿主承认：预演那次按宿主端口的探测说（见 src/web.ts 的迁移端点），
+   * 摆在弹窗里当事前提醒。注册表本来就不用改（`unchanged`）时没有"生效"可谈，不摆这一句。
+   */
+  const plannedRestart =
+    planned && registry !== null && !registry.unchanged && pending?.response?.takesEffect === 'restart-required'
 
   /**
    * 点备份行上的「回滚」/「恢复」：开弹窗，同时把只读的动作清单取回来（`dryRun: true` 不写盘）。
@@ -691,9 +697,9 @@ export function MigrationPanel({ t, state, reload, directory }: PanelShare): Rea
               {effect.verified ? t('verify.pass') : t('verify.fail')}
               {effect.backupDir !== undefined ? ` · ${effect.backupDir}` : ''}
             </p>
-            <p className={effect.takesEffect === 'immediate' ? 'dsm-hint' : 'dsm-warn'}>
-              {effect.takesEffect === 'immediate' ? t('effect.immediate') : t('effect.restart')}
-            </p>
+            {/* **只在需要重启时说话**（与同步页同一口径）：宿主自己接住时这里再说一句"无需重启"只是噪音，
+                而两句话都用同一个颜色时反而分不出哪句是坏消息。 */}
+            {effect.takesEffect === 'restart-required' && <p className="dsm-warn">{t('effect.restart')}</p>}
           </div>
         )}
       </div>
@@ -764,6 +770,10 @@ export function MigrationPanel({ t, state, reload, directory }: PanelShare): Rea
                   </ul>
                 </div>
               )}
+
+              {/* 事前提醒：这次改动要不要重启才被宿主承认，得在按「确认迁移」**之前**说出来
+                  （判据与"注册表本来就不用改"那一条见上面的 `plannedRestart`）。 */}
+              {plannedRestart && <p className="dsm-warn">{t('effect.plannedRestart')}</p>}
 
               {preview.artifacts !== null && (
                 <p className="dsm-hint">

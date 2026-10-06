@@ -1361,6 +1361,146 @@ test('客户端产物：迁移弹窗——计划逐条列出会话，跟着父�
   assert.equal(plain.text.some((item) => String(item).startsWith('migrate.family')), false)
 })
 
+test('客户端产物：迁移的「要不要重启」——确认前先说一句，落地后只在需要重启时留一句', { skip }, () => {
+  // 与同步页同一口径（见下面那条同步用例）：「需要重启」是坏消息，既不跟"复核通过"那条绿色结论共用
+  // 一块底，也不在没事的时候说一句"无需重启"；而且要在按「确认迁移」**之前**说出来，事后才说等于没提醒
+  // （预演那次的口径由宿主给，见 src/web.ts 与 test/web.test.ts）。
+  const state = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    pickerKind: 'browse',
+    sessions: [
+      { id: 's-1', cwd: '/home/u/dev/alpha', createdAt: 3, dir: '/home/u/dev/alpha', bytes: 2048, files: [], ungrouped: false },
+    ],
+    workspaces: [{ id: 'w1', path: '/home/u/dev/alpha', title: '工作区甲', sessionIds: ['s-1'] }],
+  }
+  /** 一份真的会改注册表的计划：新建目标工作区、把 s-1 从 w1 搬过去、w1 空掉之后删掉。 */
+  const change = {
+    targetId: 'w2',
+    targetPath: '/home/u/dev/beta',
+    targetTitle: '工作区乙',
+    createdTarget: true,
+    added: ['s-1'],
+    adoptedFromUnowned: [],
+    movedFrom: [{ workspaceId: 'w1', path: '/home/u/dev/alpha', sessionIds: ['s-1'] }],
+    removedSources: [{ workspaceId: 'w1', path: '/home/u/dev/alpha' }],
+    unchanged: false,
+  }
+  const previewOf = (registryChange) => ({
+    ok: true,
+    problems: [],
+    from: '/home/u/dev/alpha',
+    to: '/home/u/dev/beta',
+    sourceProjectDir: 'alpha',
+    targetProjectDir: 'beta',
+    unowned: false,
+    sourceProjectDirs: ['/home/u/.dsh/sessions/alpha'],
+    sessions: [
+      {
+        id: 's-1',
+        createdAt: 3,
+        registered: true,
+        alreadyAtTarget: false,
+        sourceDir: '/a/s-1',
+        targetDir: '/b/s-1',
+        files: 1,
+        bytes: 100,
+      },
+    ],
+    cascaded: 0,
+    files: 1,
+    bytes: 100,
+    artifacts: null,
+    registryChange,
+    summary: 'plan summary',
+  })
+  /** `pending` 是第四个 null 状态（picking / manual 在它前面），顺序种错就表现为弹窗没渲染出来。 */
+  const dialog = (registryChange, takesEffect) => {
+    const mounted = mount({
+      state,
+      panel: 'migrate',
+      strings: ['/home/u/dev/alpha', '/home/u/dev/beta'],
+      nulls: [
+        null,
+        null,
+        null,
+        {
+          response: {
+            mode: 'plan',
+            ok: true,
+            preview: previewOf(registryChange),
+            applied: false,
+            rewritten: 0,
+            moved: 0,
+            artifactsMoved: 0,
+            verified: false,
+            problems: [],
+            summary: 'plan summary',
+            takesEffect,
+          },
+          error: null,
+        },
+      ],
+    })
+    const tree = mounted.registrations[0].component(mounted.registrations[0].registration.inject())
+    return { mounted, text: strings(tree) }
+  }
+
+  const warned = dialog(change, 'restart-required')
+  assert.ok(warned.text.includes('effect.plannedRestart'), '真要改注册表、宿主又接不住时，确认之前就先说')
+  assert.ok(
+    warned.mounted.recorded.some(
+      (node) => node.props?.children === 'effect.plannedRestart' && node.props?.className === 'dsm-warn',
+    ),
+    '这句是警告色',
+  )
+  assert.equal(
+    dialog(change, 'immediate').text.includes('effect.plannedRestart'),
+    false,
+    '宿主自己接得住时不提前警告（只在坏消息时说话）',
+  )
+  assert.equal(
+    dialog({ ...change, unchanged: true }, 'restart-required').text.includes('effect.plannedRestart'),
+    false,
+    '注册表本来就不用改时没有"生效"可谈，不摆这一句',
+  )
+
+  // 落地之后的结论块：需要重启时多一句警告；不需要时那句"无需重启"已经删掉（它和"复核通过"挤在同一个
+  // 块里、又是同一种颜色，读不出哪句是坏消息）。
+  const effectBlock = (takesEffect) => {
+    const mounted = mount({
+      state,
+      panel: 'migrate',
+      // null 顺序：骨架的 error / picking / manual / pending / busy / 错误 / notice / **effect**。
+      nulls: [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        { verified: true, backupDir: '/home/u/.dsh/dsh-session-manager/backups/2026-10-06T00-00-00', takesEffect },
+      ],
+    })
+    const tree = mounted.registrations[0].component(mounted.registrations[0].registration.inject())
+    return { mounted, text: strings(tree) }
+  }
+  const restarting = effectBlock('restart-required')
+  assert.ok(
+    restarting.mounted.recorded.some(
+      (node) => node.props?.children === 'effect.restart' && node.props?.className === 'dsm-warn',
+    ),
+    '需要重启时留一句警告（复核那条绿色结论还在，但不再替它说话）',
+  )
+  assert.ok(restarting.text.includes('verify.pass'), '复核结论照旧')
+  assert.ok(restarting.text.includes('effect.restart'), '警告的文案在页面上')
+  const applied = effectBlock('immediate')
+  assert.equal(applied.text.includes('effect.restart'), false, '不需要重启时一句都不摆')
+  assert.ok(applied.text.includes('verify.pass'), '复核结论照旧')
+})
+
 test('客户端产物：迁移页只给搜索框、不给类别芯片（那页的列表本来就是候选）', { skip }, () => {
   const state = {
     sessionsRoot: '/home/u/.dsh/sessions',
@@ -2755,6 +2895,113 @@ test('客户端产物：备份清单认三种来源——迁移/删除/覆盖前
     strings(cancelOf(replacing.recorded)).concat(strings(primaryOf(replacing.recorded))),
     ['cancel', 'backup.restore.confirm'],
     '底部是「取消 / 确认恢复」',
+  )
+})
+
+// ---- 「要不要重启」怎么摆 ----
+//
+// 这一句曾经跟「已拉取 N 条…」拼成同一个字符串、画在**绿色**成功横幅里，于是"需要重启"与"不需要重启"
+// 共用一块绿底，读的人分不出哪句是坏消息；文案本身也长到要分两行。现在的口径是：
+//   - **只在坏消息时说话**：宿主自己接住时一个字都不说；
+//   - 结论单独一条 warn 横幅，不跟绿色横幅同层；
+//   - 真要重启时，预演弹窗里就提前说（判据由宿主随响应给，见 test/web.test.ts 与 src/web.ts）。
+
+test('客户端产物：需要重启的结论单独一条 warn 横幅，预演弹窗里提前说，不需要重启时一句都不摆', { skip }, () => {
+  const state = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    sync: { url: 'https://dav.example.com/dsh', machineId: 'robot-a', mappings: 0 },
+    sessions: [],
+    workspaces: [],
+  }
+  const entry = {
+    id: 'session-a',
+    machine: 'robot-b',
+    bytes: 100,
+    action: 'create',
+    code: 'missing',
+    fromCwd: '/home/b/dev/x',
+    toCwd: '/home/u/dev/x',
+  }
+  const base = {
+    remote: { url: 'https://dav.example.com/dsh', machineId: 'robot-a' },
+    plan: {
+      ok: true,
+      problems: [],
+      pull: [entry],
+      push: [],
+      pullIds: ['session-a'],
+      pushIds: [],
+      bytesIn: 100,
+      bytesOut: 0,
+      localCount: 0,
+      remoteCount: 1,
+      machines: ['robot-b'],
+    },
+    applied: false,
+    pulled: [],
+    pushed: [],
+    bytesIn: 0,
+    bytesOut: 0,
+    registryWritten: false,
+    indexWritten: false,
+    problems: [],
+  }
+  /** 预演：库里什么都没有，`takesEffect` 说的是"执行时会不会需要重启"（宿主端口的探测）。 */
+  const planned = (takesEffect) => ({ ...base, mode: 'plan', takesEffect })
+  /** 落地：真的拉进来一条，`takesEffect` 说的是"刚才那次实际怎样"。 */
+  const landed = (takesEffect) => ({
+    ...base,
+    mode: 'apply',
+    applied: true,
+    pulled: ['session-a'],
+    plan: { ...base.plan, pull: [], pullIds: [] },
+    registryWritten: true,
+    takesEffect,
+  })
+  const render = (sync, dialog = null) => {
+    const mounted = mount({ state, panel: 'sync', nulls: [null, sync, dialog] })
+    return {
+      mounted,
+      text: strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject())),
+    }
+  }
+  /** 画出某句文案的那个元素：要核"它长什么颜色"就得拿到元素本身，光看文字分不出横幅与段落。 */
+  const nodeOf = (mounted, text) => mounted.recorded.find((node) => node.props?.children === text)
+
+  // ① 预演：宿主那头需要重启时，正文里在「确认同步」之前先摆一句（弹窗开着 = 种成 'plan'）。
+  const warned = render(planned('restart-required'), 'plan')
+  assert.ok(warned.text.includes('effect.plannedRestart'), '预演里就要说"落地后需重启"')
+  assert.equal(
+    String(nodeOf(warned.mounted, 'effect.plannedRestart').props.className),
+    'dsm-warn',
+    '事前提示是警告色，不能跟"一切正常"共用一种颜色',
+  )
+
+  // 宿主自己接得住时不摆这一句——旧版在这里写"无需重启"，等于每次都说一句话。
+  const calm = render(planned('immediate'), 'plan')
+  assert.equal(calm.text.includes('effect.plannedRestart'), false, '不需要重启时不提前警告')
+
+  // ② 落地：需要重启时结论单独一条 warn 横幅。
+  const warnedLanded = render(landed('restart-required'))
+  const banner = warnedLanded.mounted.recorded.find(
+    (node) => String(node.props?.className) === 'dsm-banner dsm-warn',
+  )
+  assert.ok(banner !== undefined, '需要重启时有一条独立横幅')
+  assert.deepEqual(banner.props.children, 'effect.restart', '横幅里就是那句短话')
+  assert.equal(
+    String(banner.props.className).includes('dsm-ok'),
+    false,
+    '它不许跟「已拉取 N 条…」那条绿色横幅同层：同一块绿底上分不出哪句是坏消息',
+  )
+
+  // 宿主自己接住时没有横幅：这一次改动已经生效，没有坏消息可说。
+  const calmLanded = render(landed('immediate'))
+  assert.equal(
+    calmLanded.mounted.recorded.some((node) => node.props?.children === 'effect.restart'),
+    false,
+    '不需要重启时不摆结论（旧版那句"无需重启"只是噪音）',
   )
 })
 

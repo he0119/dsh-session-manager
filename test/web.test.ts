@@ -1346,6 +1346,9 @@ test('POST /sync?mode=apply：预演不落地，apply 走事件流拉取远端�
       false,
       '预演一个字节都不落地',
     )
+    // 预演也要回答"这次落地之后要不要重启"：判据是宿主端口的探测（这个宿主没有那套动作），而不是
+    // "这次什么都没干"。界面的确认弹窗就靠它在按下确认之前先把这句话说出来。
+    assert.equal(plan['takesEffect'], 'restart-required', '预演就把"落地后要重启"说清楚')
 
     const applied = fakeRes()
     await handlers['GET|POST /sync']!(fakeReq('POST', `${API_PREFIX}/sync?mode=apply`), applied.res)
@@ -1385,6 +1388,17 @@ test('POST /sync?mode=apply：预演不落地，apply 走事件流拉取远端�
     const registry = readRegistry(sandbox.registryPath)
     assert.deepEqual([...(registry.tables.workspaces['ws-a']?.sessionIds ?? [])].sort(), ['session-a', 'session-remote'])
     assert.equal(validateRegistry(registry).ok, true, '同步完的注册表仍然满足启动不变式')
+
+    // 落地完再预演一次：本机已经有这条、内容一致，没有会话要落到本机，此时不该再说"需要重启"——
+    // 纯推送（或没事可做）不改本机任何东西，那时候说重启是一句假警告。
+    const after = fakeRes()
+    await handlers['GET|POST /sync']!(fakeReq('GET', `${API_PREFIX}/sync`), after.res)
+    const afterResult = events(after.captured).find((event) => event['type'] === 'result')?.['result'] as Record<
+      string,
+      unknown
+    >
+    assert.deepEqual((afterResult['plan'] as Record<string, unknown>)['pullIds'], [], '这条已经在本机了')
+    assert.equal(afterResult['takesEffect'], 'immediate', '没有会话要落地就不谈"生效"')
   } finally {
     await fixture.close()
     rmSync(sandbox.base, { recursive: true, force: true })

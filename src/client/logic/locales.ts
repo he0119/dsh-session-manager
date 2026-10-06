@@ -169,8 +169,11 @@ export const zh = {
   'migrate.doneArtifacts': '、搬迁 {count} 项产物',
   'verify.pass': '复核通过',
   'verify.fail': '复核未通过',
-  'effect.immediate': '宿主已经自己改完这份注册表（会话只在工作区之间换归属，id 没变），无需重启。',
-  'effect.restart': '注册表已写入磁盘，但宿主手里那份还是旧的，需重启 DSH 才会生效；重启前请勿再改任何工作区（新建 / 改名 / 归档都会覆盖掉这处改动）。',
+  // 生效方式只留短句：「为什么会这样」的长解释在说明页的 FAQ（`help.faq.restart*`），这里不复述。
+  // `effect.restart` 是落地**之后**的结论（带处置），`effect.plannedRestart` 是确认弹窗里的**事前**
+  // 提示（只是告知，处置留给结论那一句）。
+  'effect.restart': '需重启 DSH 才生效；重启前请勿再改工作区。',
+  'effect.plannedRestart': '落地后需重启 DSH 才生效。',
   'problems.title': '问题',
 
   // ---- 备份与回滚 ----
@@ -522,9 +525,8 @@ export const en: LocaleDictOf<typeof NS> = {
   'migrate.doneArtifacts': ', {count} artifacts moved',
   'verify.pass': 'verification passed',
   'verify.fail': 'verification FAILED',
-  'effect.immediate': 'The host has applied the registry change itself (sessions only changed which workspace owns them, ids unchanged); no restart needed.',
-  'effect.restart':
-    'The registry is on disk, but the host still holds the old copy: restart DSH for it to take effect. Until then, do not change any workspace (creating, renaming or archiving one would clobber this change).',
+  'effect.restart': 'Restart DSH for this to take effect; until then, do not change any workspace.',
+  'effect.plannedRestart': 'A DSH restart will be needed before this takes effect.',
   'problems.title': 'Problems',
 
   'backup.title': 'Backups & rollback',
