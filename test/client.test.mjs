@@ -2518,7 +2518,7 @@ test('客户端产物：删除弹窗摆出清单与备份位置，计划不 ok �
       ],
       files: 0,
       bytes: 3072,
-      backupRoot: '/home/u/.dsh/dsh-session-manager-backups',
+      backupRoot: '/home/u/.dsh/dsh-session-manager/backups',
     },
     applied: false,
     dirsRemoved: 0,
@@ -2550,7 +2550,7 @@ test('客户端产物：删除弹窗摆出清单与备份位置，计划不 ok �
   assert.equal(primaryOf(good.recorded).props.disabled, false, '计划 ok 时确认可用')
   assert.ok(strings(cancelOf(good.recorded)).includes('cancel'), '旁边是「取消」')
   assert.ok(
-    good.text.some((item) => String(item).startsWith('manage.delete.backupTo') && String(item).includes('dsh-session-manager-backups')),
+    good.text.some((item) => String(item).startsWith('manage.delete.backupTo') && String(item).includes('dsh-session-manager/backups')),
     '备份落在哪要写在弹窗里（要恢复时知道去哪找）',
   )
 
@@ -2623,7 +2623,7 @@ test('客户端产物：导入弹窗里摆的是那张预演表，全是跳过�
 
 test('客户端产物：回滚弹窗先摆动作清单再确认（清单就是那次真实写入的形状）', { skip }, () => {
   const backup = {
-    dir: '/home/u/.dsh/dsh-session-manager-backups/2026-10-03T08-00-00',
+    dir: '/home/u/.dsh/dsh-session-manager/backups/2026-10-03T08-00-00',
     createdAt: '2026-10-03T08:00:00.000Z',
     sessions: 2,
     artifacts: 0,
@@ -2683,7 +2683,7 @@ test('客户端产物：备份清单认三种来源——迁移/删除/覆盖前
   // 注册表照旧），但与迁移那份不同（迁移要连注册表一起还原）。清单里那颗标签与那个动作按钮都要跟着走，
   // 不然用户面对一份"同步覆盖前"的备份会以为按下去会把工作区登记也一起改回去。
   const backupOf = (kind, stamp) => ({
-    dir: `/home/u/.dsh/dsh-session-manager-backups/${stamp}`,
+    dir: `/home/u/.dsh/dsh-session-manager/backups/${stamp}`,
     createdAt: `${stamp.slice(0, 10)}T08:00:00.000Z`,
     sessions: 1,
     artifacts: 0,

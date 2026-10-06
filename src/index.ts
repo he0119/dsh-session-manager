@@ -15,6 +15,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { Config, type PluginConfigInput } from './config.ts'
 import { createRepoLookup } from './repo.ts'
 import {
+  adoptLegacyBackupRoot,
   archiveOps,
   decodeAll,
   describeSyncConfig,
@@ -59,11 +60,23 @@ function pluginVersion(): string | undefined {
  * @returns 卸载函数：宿主热卸载时逐个注销已注册的工具与路由。
  */
 export function apply(ctx: Context, config: PluginConfigInput = {}): () => void {
+  const logger = (ctx as { logger?: { info?: (message: string) => void } }).logger
+  const info = (message: string): void => logger?.info?.(message)
+
+  // 旧默认备份根搬进插件目录，一次就够（见 src/tools.ts 的 adoptLegacyBackupRoot()）。放在
+  // resolvePaths() 之前：此后工具与界面拿到的 backupRoot 已经是新位置，旧备份照旧列得出、滚得回。
+  const adopted = adoptLegacyBackupRoot(config)
+  if (adopted !== undefined) {
+    info(
+      adopted.ok
+        ? `dsh-session-manager：备份根已搬到 ${adopted.to}（原 ${adopted.from}）`
+        : `dsh-session-manager：备份根未能搬到 ${adopted.to}，仍留在 ${adopted.from}：${adopted.error ?? ''}`,
+    )
+  }
+
   const paths = resolvePaths(config)
   const disposers = registerTools(ctx, config)
 
-  const logger = (ctx as { logger?: { info?: (message: string) => void } }).logger
-  const info = (message: string): void => logger?.info?.(message)
   // 项目身份（git remote）只在这里造一份：它有进程内缓存（一个目录只问一次 git），而 /state 是页面的
   // 热路径——每次请求都新建一份等于把缓存扔掉。见 src/repo.ts 的 createRepoLookup()。
   const repos = createRepoLookup()

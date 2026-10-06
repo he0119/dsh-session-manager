@@ -104,6 +104,9 @@
 
 - [删除先备份，且不碰注册表](../.agents/notes/implemented/architecture/2026-09-28-delete-backs-up-and-spares-the-registry.md)：
   整目录进备份、`registry untouched`；归档走的是相反的一条路——只能走宿主能力。
+- [备份根落在插件自己的目录下](../.agents/notes/implemented/architecture/2026-10-06-backup-root-lives-under-the-plugin-directory.md)：
+  默认根是 `<DSH_HOME>/dsh-session-manager/backups`，`~/.dsh` 根下不再多一层平铺的插件名；插件启动时
+  把旧默认根整体搬过去（`src/tools.ts` 的 `adoptLegacyBackupRoot()`），老备份照旧列得出、滚得回。
 
 ## 浏览器半侧
 
