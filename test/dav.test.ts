@@ -84,11 +84,39 @@ test('dav：get 一个不存在的文件抛出带状态码的 DavError', async (
   })
 })
 
-test('dav：ensure 幂等（已有集合的 405 不算错）', async () => {
+test('dav：ensure 同一个客户端里只发一次 MKCOL', async () => {
   await withFixture('ensure', async (fixture, client) => {
     await client.ensure('machines/robot-a')
     await client.ensure('machines/robot-a')
-    assert.ok(fixture.requests.filter((line) => line === 'MKCOL /dav/machines/robot-a').length >= 2)
+    assert.equal(fixture.requests.filter((line) => line === 'MKCOL /dav/machines/robot-a').length, 1)
+  })
+})
+
+test('dav：ensure 撞上远端已有的集合时容忍 405，记下之后不再重复问', async () => {
+  await withFixture('ensure-405', async (fixture, client) => {
+    // 集合在远端先有了（别的机器建的、或上一次同步建的）：MKCOL 会回 405。
+    mkdirSync(join(fixture.root, 'machines', 'robot-a'), { recursive: true })
+    await client.ensure('machines/robot-a')
+    await client.ensure('machines/robot-a')
+    assert.equal(fixture.requests.filter((line) => line === 'MKCOL /dav/machines/robot-a').length, 1)
+    // 换一个客户端（每次同步都新建）就要重新问一遍：这一轮的缓存不跨实例，远端可能被别的机器改过。
+    const fresh = createDavClient({ baseUrl: fixture.url })
+    await fresh.ensure('machines/robot-a')
+    assert.equal(fixture.requests.filter((line) => line === 'MKCOL /dav/machines/robot-a').length, 2)
+  })
+})
+
+test('dav：同一目录里连续 put 只把父集合建一轮（一次推送不再逐文件重发 MKCOL）', async () => {
+  await withFixture('put-ensured-once', async (fixture, client) => {
+    for (const name of ['a', 'b', 'c']) await client.put(`machines/robot-a/${name}.dshsess`, Buffer.from(name))
+    // 三个包：两次 MKCOL（命名空间 + 机器格）与三次 PUT，没有多出来的建目录请求。
+    assert.deepEqual(fixture.requests, [
+      'MKCOL /dav/machines',
+      'MKCOL /dav/machines/robot-a',
+      'PUT /dav/machines/robot-a/a.dshsess',
+      'PUT /dav/machines/robot-a/b.dshsess',
+      'PUT /dav/machines/robot-a/c.dshsess',
+    ])
   })
 })
 

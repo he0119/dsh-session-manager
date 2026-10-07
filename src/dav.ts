@@ -67,9 +67,9 @@ export interface DavPort {
   list(collection: string): Promise<DavEntry[]>
   /** 读一个文件；不存在抛 `DavError`（status 404）。 */
   get(path: string): Promise<Buffer>
-  /** 写一个文件；父集合不存在会先建出来。 */
+  /** 写一个文件；父集合不存在会先建出来，这一实例里已经建过的层级不再问第二遍。 */
   put(path: string, bytes: Buffer): Promise<void>
-  /** 保证一个集合存在（逐层 MKCOL，已存在不算错）。 */
+  /** 保证一个集合存在（逐层 MKCOL，已存在不算错；同一个客户端里每层只 MKCOL 一次）。 */
   ensure(collection: string): Promise<void>
   /** 只读探一次：资源根在不在、认证过不过、这个集合在不在（不改远端任何东西）。 */
   probe(collection: string): Promise<DavProbe>
@@ -220,13 +220,26 @@ export function createDavClient(options: DavOptions): DavPort {
     return response
   }
 
+  /**
+   * 这一次客户端实例里已经确认存在的集合（相对资源根的前缀）。
+   *
+   * 为什么要记：`put()` 每次写文件都要把父集合逐层"确保"一遍，于是一次推送里 N 个包就是 2N 次
+   * MKCOL，其中除头两次外全是"已存在"的 405——远端日志里每个文件都顶着两行建目录。
+   * 只记成功过的状态：201 / 200 / 204 是这次建的，405 是服务器说已经有了；失败的照旧抛，不入账。
+   */
+  const ensured = new Set<string>()
+
   async function ensure(collection: string): Promise<void> {
     const segments = joinPath(collection).split('/').filter((part) => part !== '')
     for (let index = 1; index <= segments.length; index++) {
       const target = segments.slice(0, index).join('/')
+      if (ensured.has(target)) continue
       const response = await request('MKCOL', target)
       // 201 = 建好了；405 = 已经有了。其余（401 / 403 / 507……）如实抛。
-      if (response.status === 405) continue
+      if (response.status === 405) {
+        ensured.add(target)
+        continue
+      }
       if (response.status !== 201 && response.status !== 200 && response.status !== 204) {
         throw new DavError(
           `MKCOL ${urlOf(target)} 返回 ${response.status} ${response.statusText}`,
@@ -235,6 +248,7 @@ export function createDavClient(options: DavOptions): DavPort {
           target,
         )
       }
+      ensured.add(target)
     }
   }
 
