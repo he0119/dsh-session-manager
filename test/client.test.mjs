@@ -2183,6 +2183,30 @@ test('客户端产物：同步预演三张表的状态列只放短标签，整�
     '同步预演的表里不再有 cwd 列——路径去组头了',
   )
 
+  // 三段的段头是 `h3.dsm-planHead`（标题 + 条数药丸），不再是与正文同档的一行 `.dsm-hint`——"三段之间
+  // 看不出分界"就是从那儿来的（用户报的）。结构差别得在产物里钉住，不然改样式时很容易又退回 `p`。
+  const heads = mounted.recorded.filter((node) => node.type === 'h3' && node.props?.className === 'dsm-planHead')
+  assert.equal(heads.length, 3, '会拉取 / 会推送 / 两边都有、这次不动 各一个段头')
+  assert.deepEqual(
+    heads.map((node) => strings(node)[0]),
+    ['sync.pullHead', 'sync.pushHead', 'sync.keptHead'],
+    '段头只放标题，条数由药丸说',
+  )
+  assert.deepEqual(
+    heads.map((node) => strings(node).at(-1)),
+    ['list.sessionsInDir:{"count":1}', 'list.sessionsInDir:{"count":2}', 'list.sessionsInDir:{"count":1}'],
+    '药丸里的条数与会话列表同一句（list.sessionsInDir），数是这一段真正会做的条数',
+  )
+  assert.equal(
+    mounted.recorded.some(
+      (node) =>
+        node.type === 'p' &&
+        ['sync.pullHead', 'sync.pushHead', 'sync.keptHead'].includes(String(node.props?.children)),
+    ),
+    false,
+    '段头不再是 .dsm-hint 那一行（那正是"和正文分不出"的写法）',
+  )
+
   // 动作列：看得见的是动词，整句在 title 里。
   const tagOf = (visible, title) =>
     mounted.recorded.find((node) => node.props?.children === visible && node.props?.title === title)
@@ -2305,8 +2329,16 @@ test('客户端产物：会拉取那张表分得清「拉一条新的」与「�
     '两条覆盖行的整句按各自的码走（这里这条说的是"两边各自写过"）',
   )
   assert.ok(text.includes('session-replace'), '覆盖那条也在「会拉取」那张表里（它同样是往本机落内容）')
-  assert.ok(text.includes('sync.pullHead:{"count":2}'), '那张表的条数把覆盖那条算进去')
-  assert.ok(text.includes('sync.pushHead:{"count":1}'), '覆盖不是推送：推表只有分叉重推那一条')
+  assert.ok(text.includes('sync.pullHead'), '「会拉取」那个段头在')
+  assert.ok(
+    text.includes('list.sessionsInDir:{"count":2}'),
+    '段头药丸里那张表的条数把覆盖那条算进去',
+  )
+  assert.ok(text.includes('sync.pushHead'), '「会推送」那个段头在')
+  assert.ok(
+    text.includes('list.sessionsInDir:{"count":1}'),
+    '覆盖不是推送：段头药丸里推表只有分叉重推那一条',
+  )
 
   // 空白会话：只在正文里报一句，id 一个都不许冒出来（那三张表里也不许有它们）。
   const blankLine = mounted.recorded.find(
@@ -2331,7 +2363,7 @@ test('客户端产物：会拉取那张表分得清「拉一条新的」与「�
     false,
     '没有 blank 字段就不画那一句',
   )
-  assert.ok(legacyText.includes('sync.pullHead:{"count":2}'), '其余照旧画出来')
+  assert.ok(legacyText.includes('sync.pullHead'), '其余照旧画出来')
 })
 
 test('客户端产物：同步三张表挂会话列表那套类型标签（本机没有那条就不挂）', { skip }, () => {

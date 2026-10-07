@@ -552,6 +552,29 @@ export const CSS = `
 /* 组头里的那一行内容：图形 + 标题 + 路径 + 条数。横着排的是**里面这一层**，不是 th 自己换 display
    （表格单元格改成 flex 会让浏览器补一个匿名单元格，列宽就不再由 fixed 布局说了算）。 */
 .dsm-planTable .dsm-planGroupInner { display: flex; align-items: center; gap: 8px; }
+/*
+ * 计划弹窗里那三段的段头（会拉取 / 会推送 / 两边都有、这次不动）。
+ *
+ * 原来是与正文同一档的 .dsm-hint（13px/400 次要色）：紧挨着"跳过 N 条空白会话…"那种说明句，三张表
+ * 之间看不出分界。段头改成 13px/600 的主文字色（h3 默认的 1.17em / bold / 1em 外边距在这里被覆盖），
+ * 条数退进一颗 12px 的中性药丸——标题、正文、标签各有各的形状。
+ *
+ * 外边距只给上面 16px：这几段落在弹窗正文那个普通块流里（不是 flex 子项），相邻外边距照常折叠，量到的
+ * 就是"离上一段 16px、离下面那张表 0px"。标题因此紧贴它自己那张表、与上一段分开——"这条标题说的是下面
+ * 那张表"靠的就是这个差（真实 dev GUI 里量到 16px / 0px，深浅两套主题同值）。
+ */
+.dsm-planHead {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 16px 0 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary, #1f2329);
+}
+/* 药丸里装的是条数，不跟着段头一起加粗；行高与会话列表、组头里的标签同一条（18px + 上下各 1px 边框
+   = 段头那一行的 20px，于是药丸不会把这一行顶高：实测两处都是 20px）。 */
+.dsm-planHead .dsm-tag { font-weight: 400; line-height: 18px; }
 /* cwd 那一格里的路径要能断行（fixed 布局下列宽不会再变），否则长路径顶出格子。 */
 .dsm-cwd { color: var(--dsw-alias-label-secondary, #646a73); overflow-wrap: anywhere; }
 /* 标签是个小块：挤在窄列里也不能折成两行（导入计划表的动作列里曾经折成「跳/过」）。 */

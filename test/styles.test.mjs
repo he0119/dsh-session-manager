@@ -238,6 +238,27 @@ test('计划表的项目组头：一条横幅，横排的是内层那一行', ()
   assert.notEqual(ruleBody('.dsm-planTable .dsm-colMachine'), null, '「这次不动」的机器列要声明列宽')
 })
 
+test('计划弹窗的三段段头：13px/600 的主文字色 + 一颗 12px 的中性药丸，不再与正文同一档', () => {
+  // 真实缺陷（用户报的"和其他内容区分并不明显"）：三个段头原来是 `.dsm-hint`（13px/400 次要色，
+  // dev GUI 里量到 rgb(97, 102, 107)），与紧挨着的"跳过 N 条空白会话…"一字不差——三张表之间因此
+  // 没有可见的分界。修法是把那一行变成段头（`h3` + `.dsm-planHead`），所以这里钉住"它不再是正文
+  // 那一档"：字号仍是 13px，靠 600 的字重与 label-primary 分开。
+  const head = ruleBody('.dsm-planHead')
+  assert.notEqual(head, null, '找不到 .dsm-planHead 规则')
+  assert.match(head ?? '', /font-weight:\s*600/, '段头要比正文重一档（正文是 400）')
+  assert.match(head ?? '', /color:\s*var\(--dsw-alias-label-primary/, '段头走主文字色（正文说明句是次要色）')
+  assert.match(head ?? '', /font-size:\s*13px/, '字号仍是正文那一档：段头靠字重与颜色分开，不靠变大')
+  assert.match(head ?? '', /display:\s*flex/, '标题与条数药丸横着排')
+  // 外边距只给上面 16px：这几段在普通块流里（不是 flex 子项），相邻外边距照常折叠，量到的是"离上一段
+  // 16px、离下面那张表 0px"。标题贴住它自己那张表、与上一段分开，靠的就是这个差；两边一样大时标题
+  // 看起来像上一段的尾巴。
+  assert.match(head ?? '', /margin:\s*16px\s+0\s+0/, '段头贴住下面那张表，与上一段拉开')
+  const pill = ruleBody('.dsm-planHead .dsm-tag')
+  assert.notEqual(pill, null, '段头里的条数药丸要单独声明')
+  assert.match(pill ?? '', /font-weight:\s*400/, '药丸里的条数是数据，不跟着段头一起加粗')
+  assert.match(pill ?? '', /line-height:\s*18px/, '药丸行高与组头、列表里的标签同一条，不把段头顶高')
+})
+
 test('state 色不许裸当文字色：它是指示色，浅色主题下淡到读不出来', () => {
   // 真实事故（浏览器里量的，明暗两套都量了）：`.dsm-tagSkip` 拿 `state-idle-primary` 当字色，
   // 浅色主题 #d4d4d4 在白底上 1.48:1、深色 #545557 在 #232324 上 2.1:1；`.dsm-warn` 拿

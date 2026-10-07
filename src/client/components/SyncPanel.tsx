@@ -167,6 +167,23 @@ function pushTag(entry: SyncPushEntry, t: Translate): { label: string; title: st
 }
 
 /**
+ * 三段清单的段头：标题在左、条数进一颗中性药丸。
+ *
+ * 原来这里是一行 `.dsm-hint`（13px/400 的次要色），与正文里"跳过 N 条空白会话…"那种说明句一模一样，
+ * 于是三张表之间没有可见的分界（用户报的"和其他内容区分并不明显"）。段头用 `h3`：读屏可以按标题在
+ * 三段之间跳，视觉上标题是 13px/600 的主文字色、条数退回 12px 的中性药丸——标题、正文、标签三种
+ * 东西各有各的形状，扫一眼就分得出来。条数那句与会话列表、组头共用（`list.sessionsInDir`）。
+ */
+function PlanSectionHead({ title, count, t }: { title: string; count: number; t: Translate }): React.ReactElement {
+  return (
+    <h3 className="dsm-planHead">
+      {title}
+      <span className="dsm-tag dsm-tagIdle">{t('list.sessionsInDir', { count })}</span>
+    </h3>
+  )
+}
+
+/**
  * 计划表里的项目组头：一条横跨整行的横幅（`<th colSpan>` 占满那一行）。
  *
  * 为什么在表里插一行、而不是一个项目一张表：会话名与大小必须仍然对着 `<thead>` 那两列，而一张表只有
@@ -579,7 +596,7 @@ export function SyncPanel({ t, state, reload }: PanelShare): React.ReactElement 
 
             {syncPulls.length > 0 && (
               <>
-                <p className="dsm-hint">{t('sync.pullHead', { count: syncPulls.length })}</p>
+                <PlanSectionHead title={t('sync.pullHead')} count={syncPulls.length} t={t} />
                 <table className="dsm-table dsm-planTable dsm-syncPlanTable">
                   <thead>
                     <tr>
@@ -625,7 +642,7 @@ export function SyncPanel({ t, state, reload }: PanelShare): React.ReactElement 
 
             {syncPushes.length > 0 && (
               <>
-                <p className="dsm-hint">{t('sync.pushHead', { count: syncPushes.length })}</p>
+                <PlanSectionHead title={t('sync.pushHead')} count={syncPushes.length} t={t} />
                 <table className="dsm-table dsm-planTable dsm-syncPlanTable">
                   <thead>
                     <tr>
@@ -660,7 +677,7 @@ export function SyncPanel({ t, state, reload }: PanelShare): React.ReactElement 
 
             {syncKept.length > 0 && (
               <>
-                <p className="dsm-hint">{t('sync.keptHead', { count: syncKept.length })}</p>
+                <PlanSectionHead title={t('sync.keptHead')} count={syncKept.length} t={t} />
                 {/* 与拉取 / 推送两张表同一种画法：状态列放标签、会话单独一列——挤成一行同色的说明时，
                     状态与会话名分不出来（用户截图报的）。整句仍在标签的 title 上。
                     第三列是**远端是哪台机器**：分组之后路径已经在组头上（缺映射那类给的就是远端
