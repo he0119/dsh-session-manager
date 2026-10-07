@@ -11,6 +11,11 @@
  * 会写盘的那个（导入）才需要先看清再确认——这条分界与「会话」页里归档（即时）和删除（弹窗）的分界
  * 是同一条。
  *
+ * 两张卡的形状不同（一张是列表、一张是字段），但**主动作的位置是同一条规矩**：卡片级的主动作（导出所选、
+ * 导入）一律在卡片底部的动作行里，卡片头部只放不动数据的工具（全选 / 清空、刷新、收起 / 展开）。
+ * 判据见 [决策](../../../.agents/notes/implemented/architecture/2026-10-07-card-actions-live-in-a-footer-row.md)：
+ * 动作跟着它的输入走——字段与清单在上、动作在下，与确认弹窗、与内建设置页的表单同一个阅读顺序。
+ *
  * WebDAV 同步**不在这里**：它是一条常设通道（远端地址、机器名、映射表与确认弹窗），与本页的正交，
  * 见 [SyncPanel.tsx](./SyncPanel.tsx)。两件事挤在一页时，同步那块只能排在导出列表与导入计划表之后。
  *
@@ -302,14 +307,6 @@ export function TransferPanel({ t, state, reload }: PanelShare): React.ReactElem
           >
             {allSelected ? t('list.clear') : t('transfer.export.selectAll')}
           </button>
-          <button
-            type="button"
-            className="dsm-button dsm-primary"
-            onClick={doExport}
-            disabled={busy !== null || selected.length === 0}
-          >
-            {busy === 'export' ? t('transfer.export.running') : t('transfer.export.action')}
-          </button>
         </div>
         <p className="dsm-hint">{t('transfer.export.hint')}</p>
 
@@ -364,6 +361,13 @@ export function TransferPanel({ t, state, reload }: PanelShare): React.ReactElem
             })
           )}
         </SessionListBox>
+
+        {/* 卡片级的主动作放底部动作行（见文件头那条规矩）：头部只留"全选 / 清空"这枚选行工具。 */}
+        <div className="dsm-controls">
+          <button type="button" className="dsm-button dsm-primary" onClick={doExport} disabled={busy !== null || selected.length === 0}>
+            {busy === 'export' ? t('transfer.export.running') : t('transfer.export.action')}
+          </button>
+        </div>
       </div>
 
       <div className="dsm-card">

@@ -614,6 +614,55 @@ test('客户端产物：备份是独立分页，迁移页上不再有那张清�
   )
 })
 
+/**
+ * 树里每一枚 `dsm-primary` 按钮所在的容器（`cardHead` / `controls` / `root`）。
+ *
+ * 一次下探里记下来，不分成"先收卡头再收按钮"两趟：函数组件每被调用一次都新建一批元素，两趟比对
+ * 身份是对不上的（`strings()` 那条注释里同一个坑）。
+ */
+function primaryPlacements(node, inside = 'root', out = []) {
+  if (Array.isArray(node)) {
+    for (const item of node) primaryPlacements(item, inside, out)
+    return out
+  }
+  if (node === null || typeof node !== 'object') return out
+  if (typeof node.type === 'function') return primaryPlacements(node.type(node.props), inside, out)
+  const className = String(node.props?.className ?? '')
+  const classes = className.split(/\s+/)
+  const nested = classes.includes('dsm-cardHead') ? 'cardHead' : classes.includes('dsm-controls') ? 'controls' : inside
+  if (node.type === 'button' && classes.includes('dsm-primary')) out.push(nested)
+  return primaryPlacements(node.props?.children, nested, out)
+}
+
+test('客户端产物：卡片级的主动作长在卡片底部的动作行里，不长在卡头', { skip }, () => {
+  // 同一页上几张卡片的形状不同（列表 / 字段），主动作的位置是同一条规矩：头部只放不动数据的工具
+  // （刷新、全选 / 清空、收起 / 展开），会写盘的那枚在卡片底部的动作行里。判据见
+  // .agents/notes/implemented/architecture/2026-10-07-card-actions-live-in-a-footer-row.md。
+  const state = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    archiveAvailable: true,
+    sync: { url: 'https://dav.example.com/dsh', machineId: 'robot-a', mappings: 1 },
+    sessions: [{ id: 's-1', cwd: '/home/u/dev/alpha', createdAt: 1, dir: '/home/u/dev/alpha', bytes: 1, files: [] }],
+    workspaces: [{ id: 'w1', path: '/home/u/dev/alpha', title: '工作区甲', sessionIds: ['s-1'] }],
+  }
+  // 「会话」页那一行放的是归档 / 取消归档 / 删除，三枚都没有 `dsm-primary`（删除是破坏性动作、靠
+  // spacer 顶到右端）；另外三页各有一到两枚主动作：迁移页的「迁移」、传输页的「导出所选 + 导入」、
+  // 同步页的「同步」（那张设置表单自己的「保存」只在宿主有设置接缝时才画，归表单那条用例钉）。
+  const expected = {
+    manage: [],
+    migrate: ['controls'],
+    transfer: ['controls', 'controls'],
+    sync: ['controls'],
+  }
+  for (const [panel, places] of Object.entries(expected)) {
+    const mounted = mount({ state, panel })
+    const tree = mounted.registrations[0].component(mounted.registrations[0].registration.inject())
+    assert.deepEqual(primaryPlacements(tree), places, `${panel} 页的主动作位置`)
+  }
+})
+
 test('客户端产物：页头是页面级标题（h2 + 说明行），不是卡片式的小标题', { skip }, () => {
   // 真实事故（用户报的）：这一页标题曾是 14px 的 `span`，跟内建设置页（`h2` 18px + 13px 说明行）
   // 摆在一起就是两种规格。结构层面的差别得在产物里钉住，不然改样式时很容易又退回 span。

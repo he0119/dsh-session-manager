@@ -126,6 +126,8 @@
 - [页头照内建设置页的规格](../.agents/notes/implemented/architecture/2026-09-28-page-header-matches-the-builtin-settings.md)
   与 [版面不跟着滚动条动](../.agents/notes/implemented/architecture/2026-09-28-layout-does-not-move-with-the-scrollbar.md)：
   页头没有官方原语可用，规格只能去真实设置页里量。
+- [卡片级的主动作放卡片底部的动作行](../.agents/notes/implemented/architecture/2026-10-07-card-actions-live-in-a-footer-row.md)：
+  动作跟着它的输入走；卡头只留不动数据的工具（刷新、全选 / 清空、收起 / 展开），清单行上的动作不挪位。
 - [备份清单是独立分页](../.agents/notes/implemented/architecture/2026-10-07-backups-are-their-own-page.md)：
   迁移 / 删除 / 同步覆盖三种来路共用一张清单，页签排在动作页之后、「说明」之前。
 - [页面分两份加载，清单没到之前先说实话](../.agents/notes/implemented/architecture/2026-10-07-page-loads-in-two-phases.md)：

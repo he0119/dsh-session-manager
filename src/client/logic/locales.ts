@@ -285,6 +285,7 @@ export const zh = {
 
   // ---- WebDAV 同步 ----
   'sync.title': 'WebDAV 同步',
+  'sync.form.title': '同步设置',
   'sync.where': '远端 {url}',
   'sync.hint':
     '按插件配置里的映射同步：把别处推送来的会话拉取到本机，把本机独有的推送到远端。远端放的是一个个 .dshsess 包，拉取时会按映射改写成这台机器的路径。同一个 id 两边都有时按内容与最后活动时间判谁更新，远端更新会先备份再换掉本机那份。映射 {mappings} 条。',
@@ -640,6 +641,7 @@ export const en: LocaleDictOf<typeof NS> = {
 
   // ---- WebDAV sync ----
   'sync.title': 'WebDAV sync',
+  'sync.form.title': 'Sync settings',
   'sync.where': 'Remote {url}',
   'sync.hint':
     'Syncs through the mapping in the plugin configuration: pulls what other machines pushed, pushes what only this machine has. The remote holds one .dshsess bundle per session, and a pull rewrites the cwd to this machine’s mapped directory. When both sides hold the same session, contents and the last-activity time decide who is newer, and a newer remote backs up the local copy before replacing it. {mappings} mapping(s).',
