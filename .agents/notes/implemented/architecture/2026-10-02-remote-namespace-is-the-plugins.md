@@ -22,7 +22,8 @@ Status: implemented
 ```
 
 - 命名空间与机器格都不必先建：`put()` 逐层 MKCOL，所以 `url` 可以直接是服务器根、账号根或任意一层
-  上级集合。
+  上级集合（每个客户端实例里每层只发一轮，见
+  [远端建目录在同一次同步里只发一轮](../simplification/2026-10-07-mkcol-once-per-client.md)）。
 - 这一层是**常量**，不进配置：`url` 的语义因此收窄成"WebDAV 上的哪一处"，"这是本插件的数据"由代码
   保证。
 - 索引名、包后缀与机器格的名字都没变（`SYNC_INDEX_FILE`、`.dshsess`、`SYNC_INDEX_UNIT`），变的只是
