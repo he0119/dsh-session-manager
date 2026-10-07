@@ -6,8 +6,14 @@
  * 同步那块只能排在导出列表与导入计划表之后，越用越长；而这一页的第一件事（看一眼远端配没配对、
  * 改一下映射）与「传输」的第一件事（勾哪些会话）也没有先后关系。
  *
- * 分页顺序是「会话 → 迁移 → 传输 → 同步 → 说明」：同步排在传输之后，是因为它落地走的是导入那条
- * 编排（见 README 的「同步」一节），紧挨着读更顺。
+ * 分页顺序是「会话 → 迁移 → 传输 → 同步 → 备份 → 说明」：同步排在传输之后，是因为它落地走的是导入
+ * 那条编排（见 README 的「同步」一节），紧挨着读更顺。
+ *
+ * 这一页拆成两张卡：上面那张是"这条通道现在通到哪、要不要走一趟"（一句话 + 主动作），下面是设置表单。
+ * 拆开是为了让主动作有个自己的动作行（见
+ * [决策](../../../.agents/notes/implemented/architecture/2026-10-07-card-actions-live-in-a-footer-row.md)）：
+ * 表单十几行，按钮放卡头就成了"页面第一件事"、放卡尾又得翻过整张表，而它读的是**已保存**的配置，
+ * 与那张表单没有阅读顺序上的先后。
  *
  * 这一层只做三件事：调宿主端点、记本地草稿、把结果摆出来。所有判定都在宿主侧
  * （`src/web.ts` + `src/sync.ts`）：计划返回的就是将要发生的事，页面不自己推算。会话库数据由页面
@@ -530,12 +536,6 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
           {syncInfo !== null && (
             <span className="dsm-hint">{t('sync.where', { url: syncInfo.url })}</span>
           )}
-          {syncInfo !== null && <span className="dsm-spacer" />}
-          {syncInfo !== null && (
-            <button type="button" className="dsm-button dsm-primary" onClick={openSync} disabled={busy !== null}>
-              {t('sync.action')}
-            </button>
-          )}
         </div>
         {/* 没配置同步时只留一句话：摆一个点了没反应的按钮比不摆更糟（与「宿主没有归档能力」同一条口径）。 */}
         <p className="dsm-hint">
@@ -545,7 +545,24 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
               ? t('sync.offHint')
               : t('sync.hint', { mappings: syncInfo.mappings })}
         </p>
-        {/* 配置表单就在「同步」旁边：改完 URL 立刻能同步一次。宿主没有设置接缝时这一块自己说明。 */}
+        {/* 主动作在卡片底部的动作行里（见 TransferPanel.tsx 的说明）。这一页没有把「同步」放进头部：
+            下面那张设置卡有十来行字段，按钮在头部就成了"页面第一件事"、在末尾又得翻过整张表单，
+            而它读的是**已保存**的配置——与那张表单没有阅读顺序上的先后。 */}
+        {syncInfo !== null && (
+          <div className="dsm-controls">
+            <button type="button" className="dsm-button dsm-primary" onClick={openSync} disabled={busy !== null}>
+              {t('sync.action')}
+            </button>
+          </div>
+        )}
+      </div>
+
+      <div className="dsm-card">
+        <div className="dsm-cardHead">
+          <span className="dsm-cardTitle">{t('sync.form.title')}</span>
+        </div>
+        {/* 配置改的是这条通道怎么走，与上面那次同步正交：改完 URL 立刻能同步一次。宿主没有设置接缝时
+            这一块自己说明。 */}
         <SyncConfigForm
           t={t}
           onSaved={() => void reload()}

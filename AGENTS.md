@@ -96,6 +96,10 @@ pnpm typecheck && pnpm build && pnpm test && pnpm check:package
 - 页头与页内分页**没有官方原语可用**（官方设置页自己手写 `h2` / `p` / 本地 CSS），照内建设置页的规格
   写：`h2` 18px/600 独占一行，隔 12px 一行 13px 说明（`label-tertiary`），整体列布局；规格由
   `test/styles.test.mjs` 与 `test/client.test.mjs` 两处钉住。
+- **卡片级的主动作一律放卡片底部的动作行**（`.dsm-controls`），卡片头部只放不动数据的工具（刷新、
+  全选 / 清空、收起 / 展开）；破坏性动作用 `dsm-spacer` 顶到同一行右端，清单行上的动作留在行上。依据
+  见 [决策](.agents/notes/implemented/architecture/2026-10-07-card-actions-live-in-a-footer-row.md)，
+  结构由 `test/client.test.mjs` 的 `primaryPlacements()` 钉住。
 - `src/client/styles.ts` 的 CSS 正文里**不许出现反引号**（模板字面量会被提前截断，报错落在很远处）；
   类名一律 `dsm-` 前缀。
 - 文案走官方客户端 locale 机制：字典在 `src/client/logic/locales.ts`，`zh` 是键集真源，`en` 由
