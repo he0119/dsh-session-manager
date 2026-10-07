@@ -180,6 +180,8 @@ export const zh = {
   'problems.title': '问题',
 
   // ---- 备份与回滚 ----
+  // 页签键跟着它自己那一节走（同 `page.tab.help`）：这一页是独立分页，不再挂在「迁移」底下。
+  'page.tab.backup': '备份',
   'backup.title': '备份与回滚',
   'backup.hint': '每次迁移、每次导入落地、每次删除都会先留一份字节级备份；「回滚」与「恢复」把它还原回去。',
   'backup.rootLabel': '备份根目录',
@@ -218,7 +220,7 @@ export const zh = {
   'manage.delete.dialogTitle': '将要删除',
   'manage.delete.apply': '确认删除',
   'manage.delete.running': '删除中…',
-  'manage.delete.backupTo': '备份落在：{dir}（要恢复就去「迁移」页的「备份与回滚」）',
+  'manage.delete.backupTo': '备份落在：{dir}（要恢复就去「备份」页）',
   'manage.delete.hint':
     '删除会先把整个会话目录备份到本插件的备份根，再删掉它；还活在宿主内存里的会话删不掉。',
   'manage.delete.via': '随父删',
@@ -257,6 +259,7 @@ export const zh = {
   'help.tabs.migrate': '把会话从一个目录搬到另一个目录：改掉会话记录里的工作目录、把日志目录挪过去、并更新工作区注册表。勾中的会话会带上它的子智能体。',
   'help.tabs.transfer': '把会话导出成 .dshsess 包，或把包里的会话导入某个工作区。',
   'help.tabs.sync': '在几台机器之间同步会话（WebDAV）：先给一份只读计划，确认才真的拉取与推送。远端地址、机器名与路径映射在这一页改，改完不用重启。',
+  'help.tabs.backup': '几个会写盘的操作共同的后悔面：每次迁移、每次删除、每次同步覆盖本机那份之前都会先留一份字节级备份。「回滚」把迁移搬走的那份搬回来（连工作区注册表一起还原），「恢复」只把备份里那份搬回去，注册表不动。',
   'help.where.title': '数据从哪来',
   'help.where.library': '会话库',
   'help.where.libraryText': '每个目录就是一条会话；标题、大小和是否显示都从这里的日志读出来。',
@@ -270,7 +273,7 @@ export const zh = {
   'help.faq.restartQ': '迁移完了，什么时候需要重启 DSH？',
   'help.faq.restartA': '正常不用：改完注册表之后插件把活儿交给宿主自己做——先让它按磁盘重看一眼，再复用 / 新建目标工作区、把会话挂过去、把源侧摘空、删掉空掉的工作区；这些动作宿主自己会落盘、也会通知界面，侧边栏立刻按新归属显示，会话 id 一个都没变。只有宿主上没有那套动作时——比如只有工具没有界面的前端、老版本——才会提示重启；那时别改任何工作区，新建 / 改名 / 归档都会把这次改动覆盖掉。',
   'help.faq.backupQ': '备份放在哪？「回滚」和「恢复」差在哪？',
-  'help.faq.backupA': '迁移、导入和删除之前都会先备份，清单在「迁移 → 备份与回滚」里。「回滚」把会话目录、日志和工作区注册表一起还原；「恢复」只把删掉的会话目录搬回来——删除本来就没碰过注册表。',
+  'help.faq.backupA': '迁移、导入和删除之前都会先备份，清单在「备份」页里。「回滚」把会话目录、日志和工作区注册表一起还原；「恢复」只把删掉的会话目录搬回来——删除本来就没碰过注册表。',
   'help.faq.familyQ': '删掉或迁走一条会话，它的子智能体怎么办？',
   'help.faq.familyA': '子智能体跟着父会话走：删父会话、迁父会话都会带上它，确认弹窗里逐条列出，一次备份就装下整族。也可以只删子智能体，但父会话下面那一行从此点不开。',
   'help.faq.exportQ': '导出包里有什么？',
@@ -297,12 +300,12 @@ export const zh = {
   'sync.progress.comparing': '正在比对内容 {current} / {total}',
   'sync.progress.pulling': '正在拉取 {current} / {total}',
   'sync.progress.pushing': '正在推送 {current} / {total}',
-  'sync.progress.note': '中断了再点一次「同步」会接着补齐，所以这里没有「取消」；要覆盖本机那份之前会先备份（在「迁移」页的备份清单里恢复）。',
+  'sync.progress.note': '中断了再点一次「同步」会接着补齐，所以这里没有「取消」；要覆盖本机那份之前会先备份（在「备份」页恢复）。',
   'sync.applyAction': '确认同步',
   'sync.summary': '会拉取 {pull} 条、会推送 {push} 条（本机 {local} 条，远端 {remote} 条）',
   'sync.machines': '远端机器：{machines}',
   'sync.applied': '已拉取 {pulled} 条、已推送 {pushed} 条（落地 {bytesIn}，上传 {bytesOut}）。',
-  'sync.appliedReplaced': '其中 {count} 条覆盖了本机原来那份（旧的那份已进备份，可在「迁移」页的备份清单里恢复）。',
+  'sync.appliedReplaced': '其中 {count} 条覆盖了本机原来那份（旧的那份已进备份，可在「备份」页恢复）。',
   'sync.nothing': '两边一样，没有要同步的。',
   // 三段清单的段头：只留标题，条数由段头里那颗药丸说（复用 `list.sessionsInDir`，与组头同一句）。
   'sync.pullHead': '会拉取',
@@ -535,6 +538,7 @@ export const en: LocaleDictOf<typeof NS> = {
   'effect.plannedRestart': 'A DSH restart will be needed before this takes effect.',
   'problems.title': 'Problems',
 
+  'page.tab.backup': 'Backups',
   'backup.title': 'Backups & rollback',
   'backup.hint': 'Every migration, every import that lands and every delete leaves a byte-level backup first; Roll back and Restore put it back.',
   'backup.rootLabel': 'Backup root',
@@ -572,7 +576,7 @@ export const en: LocaleDictOf<typeof NS> = {
   'manage.delete.dialogTitle': 'About to delete',
   'manage.delete.apply': 'Delete now',
   'manage.delete.running': 'Deleting…',
-  'manage.delete.backupTo': 'Backup lands in: {dir} (restore it from Backups & rollback on the Migrate tab)',
+  'manage.delete.backupTo': 'Backup lands in: {dir} (restore it from the Backups tab)',
   'manage.delete.hint':
     'Deleting backs the whole session directory up into this plugin’s backup root first, then removes it; a session still living in host memory cannot be deleted.',
   'manage.delete.via': 'with parent',
@@ -610,6 +614,7 @@ export const en: LocaleDictOf<typeof NS> = {
   'help.tabs.migrate': 'Move sessions from one directory to another: rewrite the working directory recorded in the session, move the log directory, and update the workspace registry. Ticked sessions take their subagents along.',
   'help.tabs.transfer': 'Export sessions into a .dshsess bundle, or import a bundle’s sessions into a workspace.',
   'help.tabs.sync': 'Sync sessions between machines over WebDAV: it first shows a read-only plan and only pulls and pushes once you confirm. The remote address, machine names and path mappings are edited on this page, with no restart.',
+  'help.tabs.backup': 'The undo surface shared by the operations that write: every migration, every delete and every overwrite of this machine’s copy leaves a byte-level backup first. Roll back brings back what a migration moved (the workspace registry included); Restore only moves the backed-up copy back and leaves the registry alone.',
   'help.where.title': 'Where the data comes from',
   'help.where.library': 'Session library',
   'help.where.libraryText': 'Each directory is one session; titles, sizes and visibility are read from the logs here.',
@@ -623,7 +628,7 @@ export const en: LocaleDictOf<typeof NS> = {
   'help.faq.restartQ': 'When does a migration ask me to restart DSH?',
   'help.faq.restartA': 'Normally never: once the registry changes, the plugin hands the work to the host — one fresh look at the disk, then reuse or create the target workspace, attach the sessions, detach them from the sources and delete an emptied workspace. The host persists those itself and notifies the UI, so the sidebar shows the new grouping right away with every session id unchanged. It only asks for a restart when the host lacks those actions — a tools-only front end, or an older version; until then, do not change any workspace: creating, renaming or archiving one would clobber this change.',
   'help.faq.backupQ': 'Where do backups go, and how do Roll back and Restore differ?',
-  'help.faq.backupA': 'Every migration, import and delete backs up first; the list is under Migrate → Backups & rollback. Roll back restores the session directories, the logs and the workspace registry together; Restore only moves the deleted session directories back — deleting never touched the registry.',
+  'help.faq.backupA': 'Every migration, import and delete backs up first; the list is on the Backups tab. Roll back restores the session directories, the logs and the workspace registry together; Restore only moves the deleted session directories back — deleting never touched the registry.',
   'help.faq.familyQ': 'What happens to a session’s subagents when I delete or migrate it?',
   'help.faq.familyA': 'Subagents follow their parent: deleting or migrating a parent takes them along, listed row by row in the confirm dialog, and one backup holds the whole family. Deleting a subagent alone is allowed, but that line under its parent will never open again.',
   'help.faq.exportQ': 'What is inside an export bundle?',
@@ -650,12 +655,12 @@ export const en: LocaleDictOf<typeof NS> = {
   'sync.progress.comparing': 'Comparing contents {current} / {total}',
   'sync.progress.pulling': 'Pulling {current} / {total}',
   'sync.progress.pushing': 'Pushing {current} / {total}',
-  'sync.progress.note': 'If it stops, sync again and it carries on where it left off — that is why there is no Cancel here. A copy about to be overwritten is backed up first (restore it from the backup list on the Migration page).',
+  'sync.progress.note': 'If it stops, sync again and it carries on where it left off — that is why there is no Cancel here. A copy about to be overwritten is backed up first (restore it from the Backups tab).',
   'sync.applyAction': 'Sync now',
   'sync.summary': 'Pull {pull}, push {push} (local {local}, remote {remote})',
   'sync.machines': 'Remote machines: {machines}',
   'sync.applied': 'Pulled {pulled}, pushed {pushed} ({bytesIn} written, {bytesOut} uploaded).',
-  'sync.appliedReplaced': '{count} of them replaced this machine’s copy (the old one is backed up; restore it from the Migration page).',
+  'sync.appliedReplaced': '{count} of them replaced this machine’s copy (the old one is backed up; restore it from the Backups tab).',
   'sync.nothing': 'Both sides are in sync.',
   // Section heads for the three lists: the title only; the count is the pill beside it
   // (reusing `list.sessionsInDir`, the same line the project group heads use).
