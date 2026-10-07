@@ -111,6 +111,6 @@ Status: implemented
   它们可以复用同一套地基（`onProgress` 回调 + SSE 端点 + `ProgressBar`），但各自的循环不在这条路径上。
 - 实测（真实 dev GUI，两种主题都量过）：轨道 6px / 圆角 3px，浅色 `rgba(0, 0, 0, 0.1)`、深色
   `rgba(255, 255, 255, 0.12)`（都来自 `border-l2`）；填充浅色 `rgb(15, 17, 21)`、深色
-  `rgb(249, 250, 251)`（`brand-primary`）；计数行 13px/20px，颜色是 `label-secondary`。
+  `rgb(249, 250, 251)`（`brand-primary`）；计数行 12px/18px（次要文字那一档），颜色是 `label-secondary`。
 - 验收用了一个本地假 WebDAV（`test/dav-fixture.ts` 加一层"每条 PUT 慢 250ms"的代理）与真实的
   `~/.dsh/sessions`（**只推送不拉取**，84 条会话写到临时目录里），验完删干净、配置改回原值。
