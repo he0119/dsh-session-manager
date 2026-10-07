@@ -94,9 +94,9 @@ pnpm typecheck && pnpm build && pnpm test && pnpm check:package
   listTokens），每条声明都带中性回落值；名单外的 token 要登记进 `test/styles.test.mjs` 的例外表
   并写明理由（现有两例：`label-primary-foreground`、`label-tertiary`）。
 - 页头与页内分页**没有官方原语可用**（官方设置页自己手写 `h2` / `p` / 本地 CSS），照内建设置页的规格
-  写：`h2` 18px/600 独占一行，隔 12px 一行 13px 说明（`label-tertiary`），整体列布局；页头里**不放
-  动作**——页面级的那枚「刷新」挂在页签那一行的右端（`.dsm-tabsRow`，下划线随整行铺满）。规格由
-  `test/styles.test.mjs` 与 `test/client.test.mjs` 两处钉住，依据见
+  写：`h2` 16px/500 独占一行（行高 24px），隔 12px 一行 14px 说明（`label-tertiary`），整体列布局；
+  页头里**不放动作**——页面级的那枚「刷新」挂在页签那一行的右端（`.dsm-tabsRow`，下划线随整行铺满）。
+  规格由 `test/styles.test.mjs` 与 `test/client.test.mjs` 两处钉住，依据见
   [决策](.agents/notes/implemented/architecture/2026-09-28-page-header-matches-the-builtin-settings.md)。
 - **卡片级的主动作一律放卡片底部的动作行**（`.dsm-controls`），卡片头部只放不动数据的工具（刷新、
   全选 / 清空、收起 / 展开）；破坏性动作用 `dsm-spacer` 顶到同一行右端，清单行上的动作留在行上。依据
