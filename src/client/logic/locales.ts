@@ -304,9 +304,10 @@ export const zh = {
   'sync.applied': '已拉取 {pulled} 条、已推送 {pushed} 条（落地 {bytesIn}，上传 {bytesOut}）。',
   'sync.appliedReplaced': '其中 {count} 条覆盖了本机原来那份（旧的那份已进备份，可在「迁移」页的备份清单里恢复）。',
   'sync.nothing': '两边一样，没有要同步的。',
-  'sync.pullHead': '会拉取（{count} 条）',
-  'sync.pushHead': '会推送（{count} 条）',
-  'sync.keptHead': '两边都有、这次不动（{count} 条）',
+  // 三段清单的段头：只留标题，条数由段头里那颗药丸说（复用 `list.sessionsInDir`，与组头同一句）。
+  'sync.pullHead': '会拉取',
+  'sync.pushHead': '会推送',
+  'sync.keptHead': '两边都有、这次不动',
   'sync.why.missingPull': '远端有、本机没有',
   'sync.why.missingPush': '本机有、远端没有',
   'sync.why.localAhead': '本机更新，重新推送会刷新远端',
@@ -656,9 +657,11 @@ export const en: LocaleDictOf<typeof NS> = {
   'sync.applied': 'Pulled {pulled}, pushed {pushed} ({bytesIn} written, {bytesOut} uploaded).',
   'sync.appliedReplaced': '{count} of them replaced this machine’s copy (the old one is backed up; restore it from the Migration page).',
   'sync.nothing': 'Both sides are in sync.',
-  'sync.pullHead': 'To pull ({count})',
-  'sync.pushHead': 'To push ({count})',
-  'sync.keptHead': 'On both sides, left alone ({count})',
+  // Section heads for the three lists: the title only; the count is the pill beside it
+  // (reusing `list.sessionsInDir`, the same line the project group heads use).
+  'sync.pullHead': 'To pull',
+  'sync.pushHead': 'To push',
+  'sync.keptHead': 'On both sides, left alone',
   'sync.why.missingPull': 'on the remote, not here',
   'sync.why.missingPush': 'here, not on the remote',
   'sync.why.localAhead': 'local is ahead, re-pushing refreshes the remote',

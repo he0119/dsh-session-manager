@@ -130,6 +130,8 @@
   词条进「说明」页，并钉了一条两行的上限。
 - [预演表的状态列只放短标签，整句挂 title](../.agents/notes/implemented/bug-fix/2026-10-03-status-column-holds-a-short-tag.md)：
   窄列装不下整句时改文案与列宽，不是让标签顶到邻居身上；三段清单同形，状态与会话名分成两列。
+- [同步预演的三段清单要有段头](../.agents/notes/implemented/bug-fix/2026-10-07-sync-plan-sections-need-headings.md)：
+  三行条数原来是与正文同一档的 `.dsm-hint`，改成 `h3` 段头 + 条数药丸；段头贴住它自己那张表。
 - [写盘动作是一个按钮开一个确认弹窗](../.agents/notes/implemented/architecture/2026-10-03-one-click-confirm-dialog.md)：
   计划与"做不做"这个决定同框；只有会写盘的动作问，归档与导出不问。
 - [同步的预演与落地都走 SSE 报进度](../.agents/notes/implemented/architecture/2026-10-03-sync-progress-streams-over-sse.md)：
