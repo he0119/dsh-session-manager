@@ -37,7 +37,6 @@ export const CSS = `
   line-height: 20px;
 }
 .dsm-head { display: flex; flex-direction: column; gap: 12px; }
-.dsm-titleRow { display: flex; align-items: baseline; gap: 12px; }
 .dsm-title { margin: 0; font-size: 18px; font-weight: 600; line-height: 1.2; }
 .dsm-intro {
   margin: 0;
@@ -607,11 +606,22 @@ export const CSS = `
   gap: 8px;
 }
 /* 页内分页：贴着卡片区的下划线式页签，和设置外壳自己的 tab 视觉区分开 */
+.dsm-tabsRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  /* 面板窄到装不下「一排页签 + 刷新」时（英文页签实测 421px）让它换行，而不是把刷新挤出可视区。 */
+  flex-wrap: wrap;
+  row-gap: 4px;
+  border-bottom: 1px solid var(--dsw-alias-border-l1, rgba(0, 0, 0, 0.1));
+}
+/* 页面级的动作（「刷新」）推到这一行的右端：页签整排只占左边一段，右边量下来空着 142px。
+   用 margin-left:auto 而不是一枚 spacer——换行之后它仍然贴着右端。 */
+.dsm-tabsRow > .dsm-button { flex: none; margin-left: auto; }
 .dsm-tabs {
   display: flex;
   align-items: center;
   gap: 4px;
-  border-bottom: 1px solid var(--dsw-alias-border-l1, rgba(0, 0, 0, 0.1));
 }
 .dsm-tab {
   appearance: none;

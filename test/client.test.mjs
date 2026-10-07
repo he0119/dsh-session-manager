@@ -682,10 +682,34 @@ test('客户端产物：页头是页面级标题（h2 + 说明行），不是卡
     strings(intro).some((text) => text.includes('page.library')),
     '说明行里带着会话库信息（路径与条数）',
   )
-  // 标题行里只有标题、弹簧与刷新按钮：说明不在这一行里，否则又变成"挤在一行"。
-  const row = tree.find((node) => node.props?.className === 'dsm-titleRow')
-  assert.equal(row?.type, 'div', '标题行是一个 div')
-  assert.ok(!strings(row).some((text) => text.includes('page.library')), '说明行不在标题行里')
+  // 页头**只有**标题与说明行两行：页头里一枚按钮都没有，「刷新」在页签那一行的右端（见下一条）。
+  // 反例有两代：标题与「刷新」同排（标题那一行被按钮从 24px 撑到 30px，按钮还与设置外壳自己那枚
+  // 「打开配置文件」在同一个右列里上下叠着）；说明行与「刷新」同排（说明行实测宽 497px，加上按钮
+  // 与间距要 580px，而内容列只有 564px，它会被挤成两行）。
+  const head = tree.find((node) => node.props?.className === 'dsm-head')
+  assert.equal(head?.type, 'header', '页头是 header')
+  const headKids = Array.isArray(head?.props?.children) ? head.props.children : [head?.props?.children]
+  assert.ok(headKids.includes(heading), '标题是页头的直接子节点——没有别的控件与它同排')
+  assert.ok(headKids.includes(intro), '说明行也是页头的直接子节点')
+  assert.equal(tree.some((node) => node.props?.className === 'dsm-titleRow'), false, '标题行那一层不该再出现')
+  assert.deepEqual(
+    elementsOf(head).filter((node) => node.type === 'button'),
+    [],
+    '页头里不该有按钮',
+  )
+
+  // 「刷新」在页签那一行的右端：整页的状态（`/meta` + `/state`）不属于任何一个分页，只能挂在页面
+  // 这一级；页签整排只占左边一段，右边量下来空着 142px。
+  const tabsRow = tree.find((node) => node.props?.className === 'dsm-tabsRow')
+  assert.equal(tabsRow?.type, 'div', '页签与「刷新」同排在一个 div 里')
+  assert.ok(
+    strings(tabsRow).some((text) => text.includes('page.refresh')),
+    '「刷新」挂在这一行的右端',
+  )
+  assert.ok(
+    elementsOf(tabsRow).some((node) => node.props?.className === 'dsm-tabs' && node.props?.role === 'tablist'),
+    '页签那一层还在这一行里（下划线式页签没有变成工具栏）',
+  )
 })
 
 test('客户端产物：清单还没到时页头先说库在哪与「读取中…」，不说 0 条', { skip }, () => {

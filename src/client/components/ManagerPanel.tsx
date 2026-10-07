@@ -121,13 +121,7 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
   return (
     <section className="dsm-root" data-plugin="dsh-session-manager">
       <header className="dsm-head">
-        <div className="dsm-titleRow">
-          <h2 className="dsm-title">{t('page.title')}</h2>
-          <span className="dsm-spacer" />
-          <button type="button" className="dsm-button" onClick={() => void load()} disabled={busy}>
-            {busy ? t('page.loading') : t('page.refresh')}
-          </button>
-        </div>
+        <h2 className="dsm-title">{t('page.title')}</h2>
         <p className="dsm-intro">
           {t('page.library')}：{libraryLine}
         </p>
@@ -149,61 +143,78 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
         排在动作页之后、最后的「说明」之前——「说明」是一次性读的参考，不该挤在动作页上（详见
         HelpPanel.tsx 的取舍）。同步紧挨着传输，是因为它落地走的是导入那条编排（见 SyncPanel.tsx
         的说明）。顺序与页签、页面本体两处都跟着走对齐，默认页就是第一个（见上面 useState 的初值）。
+
+        「刷新」挂在这一行的右端，不在页头里（见下面 dsm-tabsRow 的说明）。
       */}
-      <div className="dsm-tabs" role="tablist">
-        <button
-          type="button"
-          role="tab"
-          className="dsm-tab"
-          aria-selected={panel === 'manage'}
-          onClick={() => setPanel('manage')}
-        >
-          {t('page.tab.manage')}
-        </button>
-        <button
-          type="button"
-          role="tab"
-          className="dsm-tab"
-          aria-selected={panel === 'migrate'}
-          onClick={() => setPanel('migrate')}
-        >
-          {t('page.tab.migrate')}
-        </button>
-        <button
-          type="button"
-          role="tab"
-          className="dsm-tab"
-          aria-selected={panel === 'transfer'}
-          onClick={() => setPanel('transfer')}
-        >
-          {t('page.tab.transfer')}
-        </button>
-        <button
-          type="button"
-          role="tab"
-          className="dsm-tab"
-          aria-selected={panel === 'sync'}
-          onClick={() => setPanel('sync')}
-        >
-          {t('page.tab.sync')}
-        </button>
-        <button
-          type="button"
-          role="tab"
-          className="dsm-tab"
-          aria-selected={panel === 'backup'}
-          onClick={() => setPanel('backup')}
-        >
-          {t('page.tab.backup')}
-        </button>
-        <button
-          type="button"
-          role="tab"
-          className="dsm-tab"
-          aria-selected={panel === 'help'}
-          onClick={() => setPanel('help')}
-        >
-          {t('page.tab.help')}
+      <div className="dsm-tabsRow">
+        <div className="dsm-tabs" role="tablist">
+          <button
+            type="button"
+            role="tab"
+            className="dsm-tab"
+            aria-selected={panel === 'manage'}
+            onClick={() => setPanel('manage')}
+          >
+            {t('page.tab.manage')}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            className="dsm-tab"
+            aria-selected={panel === 'migrate'}
+            onClick={() => setPanel('migrate')}
+          >
+            {t('page.tab.migrate')}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            className="dsm-tab"
+            aria-selected={panel === 'transfer'}
+            onClick={() => setPanel('transfer')}
+          >
+            {t('page.tab.transfer')}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            className="dsm-tab"
+            aria-selected={panel === 'sync'}
+            onClick={() => setPanel('sync')}
+          >
+            {t('page.tab.sync')}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            className="dsm-tab"
+            aria-selected={panel === 'backup'}
+            onClick={() => setPanel('backup')}
+          >
+            {t('page.tab.backup')}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            className="dsm-tab"
+            aria-selected={panel === 'help'}
+            onClick={() => setPanel('help')}
+          >
+            {t('page.tab.help')}
+          </button>
+        </div>
+        {/*
+          「刷新」在这一行的右端，不在页头里：它重读的是**整页**的状态（`/meta` + `/state`：库在哪、
+          多少个会话、多少个工作区、同步配没配），所以它不属于任何一个分页，只能留在页面这一级；
+          而页头只有标题与说明行两行（规格与内建设置页对齐，见
+          [决策](../../../.agents/notes/implemented/architecture/2026-09-28-page-header-matches-the-builtin-settings.md)），
+          摆进去就会把标题那一行撑高、并与设置外壳自己那枚「打开配置文件」在同一个右列里上下叠着。
+          排到说明行右端也不行：那一行（`会话库：… · 457 个会话 · 13 个工作区`）实测宽 497px，加上
+          按钮与间距要 580px，而内容列只有 564px——它会被挤成两行。这一行右端量下来还有 142px 空着
+          （右端对齐由 `.dsm-tabsRow > .dsm-button` 的 `margin-left:auto` 做，换行后也贴着右端）。
+        */}
+        <button type="button" className="dsm-button" onClick={() => void load()} disabled={busy}>
+          {busy ? t('page.loading') : t('page.refresh')}
         </button>
       </div>
 
