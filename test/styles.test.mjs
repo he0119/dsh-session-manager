@@ -317,6 +317,20 @@ test('正文与次要文字是内建那两档：正文 14px/20px、说明句 12p
   assert.match(hint, /line-height:\s*18px/, '行高 18px，与内建卡片描述同值')
 })
 
+test('说明页 FAQ 的答案不被挤成零宽：那一栏是单列网格', () => {
+  // 真实缺陷（英文界面里一眼能看出来）：`.dsm-defs` 的列是 minmax(0, auto) minmax(0, 1fr)，FAQ 的
+  // 问题是一整句话，max-content 把第一列吃满（量到 522px），答案那一列拿到 0px——每个答案一行只放得
+  // 下一个字符，整列垂到卡片右缘外面（真实 dev GUI 里量到 dd 宽 0px、高 1122px；声明成单列之后宽
+  // 534px、高 88px）。FAQ 是"问题一行、答案一行"，本来就没有第二列可用。
+  const faq = ruleBody('.dsm-defsFaq')
+  assert.notEqual(faq, null, '找不到 .dsm-defsFaq 规则')
+  assert.match(
+    faq,
+    /grid-template-columns:\s*minmax\(0,\s*1fr\)/,
+    'FAQ 那一栏要声明成单列，否则答案列会被问题句的 max-content 挤成 0 宽',
+  )
+})
+
 test('组内行的缩进由组头那几个尺寸推出来：组头的勾选框恒在行勾选框左边 16px', () => {
   // 为什么钉它：折叠开关从组头右端挪到**最前**之后，组头的内容整体右移了一个开关的宽度，组内那些行
   // 的缩进必须跟着加同样多。少加了会怎样：组头的勾选框跑到组内行的**右边**去，"这些行挂在这个组头
