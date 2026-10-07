@@ -318,7 +318,10 @@ export function TransferPanel({ t, state, reload }: PanelShare): React.ReactElem
         {groups.length > 0 && <SessionGroupTools collapse={collapse} t={t} />}
 
         <SessionListBox fixed>
-          {sessions.length === 0 ? (
+          {state === null ? (
+            // 清单还在读：说"读取中…"而不是"这个会话库里还没有会话"（见 ManagerPanel 的两份数据说明）。
+            <SessionListEmpty text={t('page.loading')} />
+          ) : sessions.length === 0 ? (
             <SessionListEmpty text={t('list.empty')} />
           ) : groups.length === 0 ? (
             // 高度固定，空态画在框里（见 styles.ts 的 .dsm-listFixed）

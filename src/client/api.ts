@@ -62,9 +62,15 @@ export interface WorkspaceSummary {
   sessionIds: string[]
 }
 
-/** `GET /state` 的响应。 */
-export interface StateResponse {
+/**
+ * `GET /meta` 的响应：会话库位置与宿主的能力位。
+ *
+ * 它不扫库，所以总是先于 `/state` 回来；`/state` 的响应是它的**超集**（同样这几个字段，另加清单）。
+ * 界面据此在"清单还在读"的那段时间里也能把库在哪、能不能归档先说清楚。
+ */
+export interface MetaResponse {
   sessionsRoot: string
+  registryPath: string
   /**
    * 宿主目录选择器的能力种类：`native` = 系统对话框、`browse` = 页面内浏览、`null` = 没有。
    * 目录字段据此决定「浏览…」开哪一种；缺字段（旧宿主）按 `null` 处理。
@@ -80,6 +86,10 @@ export interface StateResponse {
    * 缺字段（旧宿主）同样按"没配置"处理。
    */
   sync?: SyncInfo | null
+}
+
+/** `GET /state` 的响应：`/meta` 那几项 + 这次扫库扫出来的清单。 */
+export interface StateResponse extends MetaResponse {
   /**
    * 目录 → 项目身份（仓库的 git remote，规范成 `host/owner/repo`，见宿主 `src/repo.ts`）。
    *
@@ -88,7 +98,6 @@ export interface StateResponse {
    * 目录已经不在），界面退回显示路径；缺字段（旧宿主）按空表处理。
    */
   repos?: Record<string, string>
-  registryPath: string
   problems: string[]
   sessions: SessionSummary[]
   workspaces: WorkspaceSummary[]
@@ -143,6 +152,16 @@ async function asJson<T>(response: Response): Promise<T> {
   const body = parsed as { error?: string }
   if (!response.ok) throw new Error(body.error ?? `HTTP ${response.status}`)
   return parsed as T
+}
+
+/**
+ * 读会话库位置与宿主能力位（不扫库，先于 `/state` 到）。
+ *
+ * 拿不到时**不该**把整页变成错误：这几项只是"先说清楚"，清单那条路（`fetchState`）照样能把它带回来
+ * ——页头因此退回"读取中…"，而不是白屏（见 ManagerPanel 的 load）。
+ */
+export async function fetchMeta(): Promise<MetaResponse> {
+  return asJson<MetaResponse>(await fetch(`${API_PREFIX}/meta`, { headers: { accept: 'application/json' } }))
 }
 
 /** 读会话库与工作区清单。 */

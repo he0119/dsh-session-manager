@@ -51,8 +51,12 @@ const REUSED_COMMON = ['cancel', 'close', 'save']
  * `nulls` 是那条规矩的延伸：要往**更后面**的某个 null 状态里种数据（比如迁移页的预演结果，
  * 见下面的用例），就按顺序把前几个 null 状态写成 null、要种的那个写成值。顺序同样是调用方与
  * 组件之间的约定，种错了表现为"期望的元素没渲染出来"（当场红），不会静默过。
+ *
+ * `meta` 是页面骨架里那份 `/meta` 状态（初始化值是 `undefined`——它在页面上的语义是"还没到"，
+ * 与 null 不能混，所以单开一个种子而不是挤进 `nulls`）。它是渲染顺序里**第一个** `useState(undefined)`
+ * 的状态（骨架的钩子先于任何分页跑；设置表单里那几个 undefined 状态都在后面）。
  */
-function fakeReact(recorded = [], firstNull = undefined, panel = undefined, arrays = [], strings = [], nulls = []) {
+function fakeReact(recorded = [], firstNull = undefined, panel = undefined, arrays = [], strings = [], nulls = [], meta = undefined) {
   let seededPanel = false
   const nullSeeds = firstNull === undefined ? [] : [firstNull]
   nullSeeds.push(...nulls)
@@ -62,6 +66,7 @@ function fakeReact(recorded = [], firstNull = undefined, panel = undefined, arra
   // 空串状态同样按顺序种（见 mount 的 strings 参数）：迁移页第一个空串是「源目录」，传输页第一个是
   // 导入目标、第二个才是搜索词，会话页第一个就是搜索词——各用例里写清自己种的是哪一个。
   const stringSeeds = [...strings]
+  const undefinedSeeds = meta === undefined ? [] : [meta]
   const record = (type, props) => {
     const element = { type, props: props ?? {} }
     recorded.push(element)
@@ -78,6 +83,10 @@ function fakeReact(recorded = [], firstNull = undefined, panel = undefined, arra
     useState: (value) => {
       if (value === null && nullSeeds.length > 0) {
         return [nullSeeds.shift(), () => {}]
+      }
+      // `/meta` 那一份（见上面的 meta 说明）。排在 null 之后、数组与空串之前，与骨架里的调用顺序一致。
+      if (value === undefined && undefinedSeeds.length > 0) {
+        return [undefinedSeeds.shift(), () => {}]
       }
       // 页内分页的状态：假钩子不会点页签，于是除默认那一页之外的 JSX 在冒烟里一次都跑不到。
       // 只替换**第一个** `useState('manage')`（骨架里那个，默认页就是它），其余字符串状态照旧。
@@ -201,7 +210,7 @@ function fakeDocument(nodes) {
 }
 
 /** 按模块加载器的契约执行产物，返回工厂与其 id。 */
-function loadBundle({ firstNull, panel, arrays, strings, nulls, fetch } = {}) {
+function loadBundle({ firstNull, panel, arrays, strings, nulls, meta, fetch } = {}) {
   let entry = null
   const nodes = []
   const sandbox = {
@@ -220,7 +229,7 @@ function loadBundle({ firstNull, panel, arrays, strings, nulls, fetch } = {}) {
   vm.runInNewContext(code, sandbox, { filename: 'lib/client.js' })
   assert.ok(entry !== null, '产物必须以 window.__ModuleLoader__.load({ id, factory }) 报名')
   const recorded = []
-  const react = fakeReact(recorded, firstNull, panel, arrays, strings, nulls)
+  const react = fakeReact(recorded, firstNull, panel, arrays, strings, nulls, meta)
   const mod = entry.factory((specifier) => {
     if (specifier === 'react') return react
     if (specifier === 'react/jsx-runtime') {
@@ -309,8 +318,8 @@ test('客户端产物：导出面符合客户端插件契约', { skip }, () => {
 })
 
 /** 跑一次 apply，收下所有注册面（后面几个用例共用）。 */
-function mount({ translate, state, panel, arrays, strings, nulls, configForms, credentials, fetch } = {}) {
-  const { mod, nodes, recorded } = loadBundle({ firstNull: state, panel, arrays, strings, nulls, fetch })
+function mount({ translate, state, meta, panel, arrays, strings, nulls, configForms, credentials, fetch } = {}) {
+  const { mod, nodes, recorded } = loadBundle({ firstNull: state, panel, arrays, strings, nulls, meta, fetch })
   const registrations = []
   const dictionaries = []
   const effects = []
@@ -593,6 +602,75 @@ test('客户端产物：页头是页面级标题（h2 + 说明行），不是卡
   const row = tree.find((node) => node.props?.className === 'dsm-titleRow')
   assert.equal(row?.type, 'div', '标题行是一个 div')
   assert.ok(!strings(row).some((text) => text.includes('page.library')), '说明行不在标题行里')
+})
+
+test('客户端产物：清单还没到时页头先说库在哪与「读取中…」，不说 0 条', { skip }, () => {
+  /**
+   * 渲染一整页（`strings` 会走进函数组件，包括分页那个 Fragment），并返回页头说明行的文字。
+   *
+   * 走 `strings` 而不是 `elements`：分页本体包在 Fragment 里，`elements` 不下穿 Fragment。
+   */
+  const introOf = (mounted) => {
+    strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
+    return strings(mounted.recorded.find((node) => node.props?.className === 'dsm-intro'))
+  }
+
+  // 只给 `/meta`：它就是"先回来的那一份"（不扫库），`/state` 还在扫，state 保持 null。
+  const meta = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    archiveAvailable: true,
+  }
+  const withMeta = mount({ meta })
+  const line = introOf(withMeta)
+  assert.ok(line.includes('page.library'), '说明行还是"会话库：…"这一句')
+  assert.ok(
+    line.some((text) => text.includes('/home/u/.dsh/sessions')),
+    '库的位置来自 /meta，不必等扫完整库',
+  )
+  assert.ok(line.some((text) => text.includes('page.loading')), '条数那一段说"读取中…"')
+  assert.ok(
+    !line.some((text) => text.includes('page.count.sessions')),
+    '"还不知道"不能画成"0 个会话"：条数是结论，不是默认值',
+  )
+  // 列表那一格同理：清单没到说"读取中…"，不说"这个会话库里还没有会话"（默认页就是「会话」）
+  const empties = withMeta.recorded.filter((node) => String(node.props?.className) === 'dsm-empty')
+  assert.deepEqual(strings(empties[0]), ['page.loading'], '空列表那一格说"读取中…"')
+
+  // 两份都还没到（首帧）：整行只有一句"读取中…"，不是"会话库： · 0 个会话 · 0 个工作区"
+  const bare = introOf(mount())
+  assert.ok(bare.includes('page.loading'), '位置也还不知道时，整行说"读取中…"')
+  assert.ok(!bare.some((text) => text.includes('page.count')), '首帧一个数字都不报')
+})
+
+test('客户端产物：能力位按 /meta 或 /state 说的来，两份都没到时不先报结论', { skip }, () => {
+  const read = (mounted) => strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
+  const base = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    sessions: [],
+    workspaces: [],
+  }
+
+  // `/meta` 说这个宿主有归档能力：清单还在读，但"这个宿主没有 workspaceRegistry"绝不能先出现
+  const withArchive = read(mount({ meta: { ...base, archiveAvailable: true } }))
+  assert.ok(!withArchive.includes('manage.archive.unavailable'), '宿主有这个能力（/meta 说的），不能先报"没有"')
+
+  // 两份都还没到：那一刻的真相是"还不知道"，一句结论都不下
+  const bare = read(mount())
+  assert.ok(!bare.includes('manage.archive.unavailable'), '能力位还不知道时不说结论')
+  assert.ok(!bare.includes('list.empty'), '清单没到不能说"这个会话库里还没有会话"')
+  const bareSync = read(mount({ panel: 'sync' }))
+  assert.ok(!bareSync.includes('sync.offHint'), '同步配置没读到不能说"这台机器没配同步"')
+  assert.ok(bareSync.includes('page.loading'), '那一刻说的是"读取中…"')
+
+  // 读到了、宿主确实没有 / 确实没配：照旧把话说出来（不是一律不说）
+  assert.ok(
+    read(mount({ state: { ...base, archiveAvailable: false } })).includes('manage.archive.unavailable'),
+    '读到了确实没有归档能力，就要说明并禁用那两个按钮',
+  )
+  assert.ok(read(mount({ panel: 'sync', state: base })).includes('sync.offHint'), '读到了确实没配同步，就要说明')
 })
 
 test('客户端产物：右下角那枚版本徽标说得出这是哪个构建', { skip }, () => {

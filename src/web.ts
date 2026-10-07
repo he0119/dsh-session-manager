@@ -179,6 +179,20 @@ interface SessionSummary {
   live: boolean
 }
 
+/**
+ * 界面**先**要的那几项：会话库在哪、宿主有哪些能力位。
+ *
+ * 不碰会话库就能答出来（`paths` 是配置解析的结果，能力位是宿主服务的探测），所以它跟着 `GET /meta`
+ * 单独先回一份；`GET /state` 的响应是它的**超集**（同样这几个字段 + 扫库扫出来的清单）。
+ */
+interface MetaFacts {
+  sessionsRoot: string
+  registryPath: string
+  pickerKind: PickerKind | null
+  archiveAvailable: boolean
+  sync: SyncInfo | null
+}
+
 /** 界面要展示的一个工作区。 */
 interface WorkspaceSummary {
   id: string
@@ -440,6 +454,28 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
   // 同理：把宿主的两个冷读服务转手给编排层（迁移 / 导入 / 同步拉取三个落地口共用，见 ApiDeps.hostCheckpoints）。
   const hostCheckpoints = (): CheckpointWarmPort | undefined => deps.hostCheckpoints?.()
 
+  /**
+   * 先答「库在哪、这个宿主能不能归档」这一份，不等扫库。
+   *
+   * 为什么单开一条而不是等 `/state`：那一份要扫完整库（每条会话都要读 header、还要折标题），
+   * 界面在它回来之前只能空着页头；而这两件事从 `paths` 与宿主服务上直接就有，没有理由跟着清单一起等。
+   * 判据只有一处——`/state` 摊开的就是这一份。
+   */
+  const metaFacts = (): MetaFacts => ({
+    sessionsRoot: paths.sessionsRoot,
+    registryPath: paths.registryPath,
+    // 目录字段能不能「浏览…」由宿主的能力位决定，界面不试错（见 ApiDeps.pickerKind）。
+    pickerKind: deps.pickerKind?.() ?? null,
+    // 归档按钮能不能点：这个宿主的 workspaceRegistry 在不在（只有 Web profile 才有它）。
+    archiveAvailable: deps.registryOps?.() !== undefined,
+    // 同步卡片：没有配置就是 null（界面据此说明"没配置 sync.url"，而不是画一个点了没反应的按钮）。
+    sync: deps.syncInfo?.() ?? null,
+  })
+
+  const meta = async (_req: IncomingMessage, res: ServerResponse): Promise<void> => {
+    sendJson(res, 200, metaFacts())
+  }
+
   const state = async (_req: IncomingMessage, res: ServerResponse): Promise<void> => {
     const { registry, problems } = loadRegistry(paths.registryPath)
     const sessions = scanLibrary(paths.sessionsRoot, decodeAll, { resolveTitle })
@@ -454,15 +490,9 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
     for (const workspace of workspaces) if (workspace.path !== '') directories.add(workspace.path)
     const repos = deps.repos === undefined ? new Map<string, string>() : await deps.repos([...directories])
     sendJson(res, 200, {
-      sessionsRoot: paths.sessionsRoot,
-      registryPath: paths.registryPath,
+      // 位置与能力位与 `/meta` 同一份取值，不在这里重算（见 metaFacts）。
+      ...metaFacts(),
       problems,
-      // 目录字段能不能「浏览…」由宿主的能力位决定，界面不试错（见 ApiDeps.pickerKind）。
-      pickerKind: deps.pickerKind?.() ?? null,
-      // 归档按钮能不能点：这个宿主的 workspaceRegistry 在不在（只有 Web profile 才有它）。
-      archiveAvailable: deps.registryOps?.() !== undefined,
-      // 同步卡片：没有配置就是 null（界面据此说明"没配置 sync.url"，而不是画一个点了没反应的按钮）。
-      sync: deps.syncInfo?.() ?? null,
       // 目录 → 项目身份（`host/owner/repo`）：界面把它显示在原来印本机路径的地方。认不出来的目录不在
       // 表里，界面退回显示路径。
       repos: Object.fromEntries(repos),
@@ -959,6 +989,7 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
   }
 
   return {
+    'GET /meta': meta,
     'GET /state': state,
     'POST /export': exportSessions,
     'POST /import': importSessions,

@@ -49,9 +49,12 @@ import {
 import type { PanelShare } from '../types.ts'
 
 /** 「会话」分页。 */
-export function ManagePanel({ t, state, reload }: PanelShare): React.ReactElement {
+export function ManagePanel({ t, state, meta, reload }: PanelShare): React.ReactElement {
   const sessions = state?.sessions ?? []
-  const archiveAvailable = state?.archiveAvailable === true
+  // 归档能力位与清单无关（`/meta` 先给），所以它用 `state ?? meta`：清单还在读时也不会先把
+  // "这个宿主没有 workspaceRegistry"画上去。
+  const facts = state ?? meta
+  const archiveAvailable = facts?.archiveAvailable === true
 
   const [selected, setSelected] = React.useState<readonly string[]>([])
   /** 筛选条：一枚芯片都不勾、关键词为空 = 全都列出来（见 sessionFilter.matchesFilters）。 */
@@ -256,7 +259,8 @@ export function ManagePanel({ t, state, reload }: PanelShare): React.ReactElemen
           </button>
         </div>
         <p className="dsm-hint">{t('manage.hint')}</p>
-        {!archiveAvailable && <p className="dsm-hint">{t('manage.archive.unavailable')}</p>}
+        {/* 能力位还没到（首帧，`/meta` 与 `/state` 都没回来）时先不说结论：那一刻的真相是"还不知道"。 */}
+        {facts !== undefined && !archiveAvailable && <p className="dsm-hint">{t('manage.archive.unavailable')}</p>}
 
         {sessions.length > 0 && <SessionFilterBar keys={FILTER_KEYS} filter={filter} t={t} />}
         {groups.length > 0 && <SessionGroupTools collapse={collapse} t={t} />}
@@ -264,7 +268,10 @@ export function ManagePanel({ t, state, reload }: PanelShare): React.ReactElemen
         {/* 高度固定：连"一条都没筛出来"（以及库里一条都没有）也画在这个框里，否则那些状态会把
             这一页的高度改回去，外层滚动条又能把整个卡片挪动 15px（见 styles.ts 的 .dsm-listFixed）。 */}
         <SessionListBox fixed>
-          {sessions.length === 0 ? (
+          {state === null ? (
+            // 清单还在读：这一格说"读取中…"而不是"这个会话库里还没有会话"——后者是个结论。
+            <SessionListEmpty text={t('page.loading')} />
+          ) : sessions.length === 0 ? (
             <SessionListEmpty text={t('list.empty')} />
           ) : groups.length === 0 ? (
             <SessionListEmpty text={t('list.noMatch')} />

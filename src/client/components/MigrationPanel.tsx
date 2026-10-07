@@ -174,11 +174,12 @@ function PathField({
 }
 
 /** 迁移页。 */
-export function MigrationPanel({ t, state, reload, directory }: PanelShare): React.ReactElement {
+export function MigrationPanel({ t, state, meta, reload, directory }: PanelShare): React.ReactElement {
   const sessions = state?.sessions ?? []
   const workspaces = state?.workspaces ?? []
-  // 宿主有没有目录选择器、是哪一种；`null`（含旧宿主没这个字段）时不显示「浏览…」。
-  const pickerKind = state?.pickerKind ?? null
+  // 宿主有没有目录选择器、是哪一种；`null`（含旧宿主没这个字段）时不显示「浏览…」。这一项来自
+  // `/meta`（与清单无关、先到），所以清单还在读时那两个字段的「浏览…」也不至于晚一步出现。
+  const pickerKind = (state ?? meta)?.pickerKind ?? null
 
   const [from, setFrom] = React.useState('')
   const [to, setTo] = React.useState('')

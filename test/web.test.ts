@@ -194,6 +194,101 @@ function deps(
   }
 }
 
+/**
+ * `/meta` 那五项：界面在清单回来之前要画的就是它们。
+ *
+ * 单独列出来是为了"两份取值必须一致"那条断言（见下面两个用例）：一组键、一处来源，漂了就红。
+ */
+const META_KEYS = ['sessionsRoot', 'registryPath', 'pickerKind', 'archiveAvailable', 'sync'] as const
+
+test('GET /meta：位置与能力位先答出来，一条会话都不读', async () => {
+  const sandbox = makeSandbox('web-meta')
+  // 库里真放一条会话：`/meta` 若顺手扫库，下面那两条"贵"的入口就会被调到（当场红）。
+  writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000, { title: '不该被 /meta 读到' })
+  /** 扫库与问项目身份这两条路的入口被调用了几次。 */
+  let touched = 0
+  const handlers = createApiHandlers(
+    deps(sandbox, {
+      pickerKind: () => 'browse',
+      registryOps: () => ({ archive: async () => {}, unarchive: async () => {} }),
+      syncInfo: () => ({ url: 'https://dav.example/dsh', machineId: 'laptop', mappings: 2 }),
+      // 这两条是"贵"的那两条路：`/meta` 碰它们就说明它并不便宜，所以让它当场红。
+      resolveTitle: () => {
+        touched += 1
+        throw new Error('/meta 不该读标题')
+      },
+      repos: async () => {
+        touched += 1
+        throw new Error('/meta 不该问项目身份')
+      },
+    }),
+  )
+  const { res, captured } = fakeRes()
+  await handlers['GET /meta']!(fakeReq('GET', `${API_PREFIX}/meta`), res)
+
+  assert.equal(captured.status, 200)
+  assert.deepEqual(json(captured), {
+    sessionsRoot: sandbox.sessionsRoot,
+    registryPath: sandbox.registryPath,
+    pickerKind: 'browse',
+    archiveAvailable: true,
+    sync: { url: 'https://dav.example/dsh', machineId: 'laptop', mappings: 2 },
+  })
+  assert.equal(touched, 0, '/meta 不该读标题、也不该问项目身份')
+
+  // 库那个目录**不存在**（机器上还没建、或被删了）时照样答得出位置：这一份不依赖库能读。
+  const gone = join(sandbox.base, 'gone')
+  const bare = fakeRes()
+  await createApiHandlers(
+    deps(sandbox, { paths: { sessionsRoot: gone, registryPath: sandbox.registryPath, backupRoot: join(sandbox.base, 'backups') } }),
+  )['GET /meta']!(fakeReq('GET', `${API_PREFIX}/meta`), bare.res)
+  assert.equal(bare.captured.status, 200)
+  assert.equal(json(bare.captured)['sessionsRoot'], gone)
+})
+
+test('/state 与 /meta：同一批字段是同一份取值（界面按"超集"读它）', async () => {
+  const sandbox = makeSandbox('web-meta-same')
+  writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000)
+  /** 两种宿主各核一遍：能力位为真与为假都要逐字相同（只核一边就抓不到"自己算一遍"那种漂）。 */
+  const configurations: Array<{ name: string; archiveAvailable: boolean; deps: Parameters<typeof deps>[1] }> = [
+    {
+      name: '有归档服务与 native 选择器',
+      archiveAvailable: true,
+      deps: {
+        pickerKind: () => 'native',
+        registryOps: () => ({ archive: async () => {}, unarchive: async () => {} }),
+        syncInfo: () => ({ url: 'https://dav.example/dsh', machineId: 'desktop', mappings: 0 }),
+      },
+    },
+    {
+      // 档案端口**在**、但它说这个宿主没有那个服务（`src/index.ts` 的探测就是这样答"没有"的）：
+      // 按"端口在不在"判就把 false 算成 true 了，这一组专门拦那种写法。
+      name: '端口在、服务不在；没配同步',
+      archiveAvailable: false,
+      deps: { pickerKind: () => null, registryOps: () => undefined, syncInfo: () => undefined },
+    },
+  ]
+  for (const configuration of configurations) {
+    const handlers = createApiHandlers(deps(sandbox, configuration.deps))
+    const call = async (suffix: string): Promise<Record<string, unknown>> => {
+      const { res, captured } = fakeRes()
+      await handlers[`GET ${suffix}`]!(fakeReq('GET', `${API_PREFIX}${suffix}`), res)
+      return json(captured)
+    }
+    const meta = await call('/meta')
+    const state = await call('/state')
+    assert.equal(meta['archiveAvailable'], configuration.archiveAvailable, configuration.name)
+    assert.deepEqual(
+      Object.fromEntries(META_KEYS.map((key) => [key, state[key]])),
+      meta,
+      `/state 是 /meta 的超集：这五项必须逐字相同（${configuration.name}）`,
+    )
+    // 反过来：清单只在那一份里
+    assert.deepEqual(meta['sessions'], undefined)
+    assert.equal((state['sessions'] as unknown[]).length, 1)
+  }
+})
+
 test('GET /state：列出会话与工作区，带上「未分组」的结论', async () => {
   const sandbox = makeSandbox('web-state')
   writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000, { title: '帮我安装到 web-dev 中' })
@@ -568,7 +663,7 @@ test('POST /import：包坏了、目标目录不合法、库已存在同 id，�
   assert.match(String(json(conflictApply.captured)['error']), /没有可导入的会话/)
 })
 
-test('registerWebRoutes：注册九条精确路由，方法不对回 405', async () => {
+test('registerWebRoutes：注册十条精确路由，方法不对回 405', async () => {
   const sandbox = makeSandbox('web-routes')
   const routes: WebRouteLike[] = []
   const dispose = registerWebRoutes(
@@ -578,6 +673,7 @@ test('registerWebRoutes：注册九条精确路由，方法不对回 405', async
   assert.deepEqual(
     routes.map((route) => `${route.kind} ${route.path}`),
     [
+      `exact ${API_PREFIX}/meta`,
       `exact ${API_PREFIX}/state`,
       `exact ${API_PREFIX}/export`,
       `exact ${API_PREFIX}/import`,

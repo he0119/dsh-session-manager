@@ -11,7 +11,7 @@
  *
  * **两个调用面互斥**：宿主的 `directoryPicker` 是能力位服务，`native` 只有 `pick()`、
  * `browse` 只有 `list()`（见 [tools.ts](../../src/tools.ts) 的 `directoryPickerKind`）。
- * 种类由宿主报给界面（`/state` 的 `pickerKind`），界面据此决定「浏览…」开哪一种。
+ * 种类由宿主报给界面（`/meta` 的 `pickerKind`，`/state` 里也有同一份），界面据此决定「浏览…」开哪一种。
  *
  * @module dsh-session-manager/client/directory
  */
