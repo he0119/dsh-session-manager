@@ -435,8 +435,24 @@ export const CSS = `
   max-width: 100%;
 }
 .dsm-file { padding: 3px; }
-/* 目录下拉：撑满一行（旁边留给「浏览…」按钮），长路径由浏览器自己省略，别把布局顶宽。 */
+/* 目录字段的值：撑满一行（旁边留给「手输路径」），长值单行省略（完整值在它的悬浮提示里），别把
+   布局顶宽。这枚控件是**按钮**（点开候选面板，见 CandidatePanel.tsx），所以还要把浏览器给按钮的
+   默认外观收回来：文字靠左、内容两端对齐、光标是手型。 */
 .dsm-selectPath { flex: 1 1 22rem; min-width: 0; }
+.dsm-pathValue {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  text-align: left;
+  cursor: pointer;
+}
+.dsm-pathValueText {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 /* 页面内目录浏览框：一个缩进的浅底小面板，和所在字段同宽。 */
 .dsm-browser {
   display: flex;
@@ -505,6 +521,22 @@ export const CSS = `
 }
 .dsm-dirEntry:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary, #3370ff); outline-offset: -1px; }
 .dsm-dirHidden { color: var(--dsw-alias-label-secondary, #646a73); }
+/*
+ * 候选面板的列表：与目录浏览框同一个 .dsm-dirList 皮，只是**一行一个**、一行两行字。
+ * 一行一个是因为候选的文案比一个目录名长得多（"身份/标题 — 本机路径 — N 条会话"），两列并排会被
+ * 截成谁也认不出来；两行字则是把名字留在第一行、路径与条数退到第二行小字里（见 planRows.candidateRow）。
+ */
+.dsm-candidateList { grid-template-columns: minmax(0, 1fr); }
+.dsm-candidate {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  /* 覆盖 .dsm-dirEntry 的单行省略：两行各自省略。 */
+  white-space: normal;
+}
+.dsm-candidateName { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dsm-candidateMeta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dsm-table { width: 100%; border-collapse: collapse; }
 .dsm-table th, .dsm-table td {
   text-align: left;
@@ -717,6 +749,9 @@ export const CSS = `
   width: 180px;
 }
 .dsm-search::placeholder { color: var(--dsw-alias-label-secondary, #646a73); }
+/* 候选面板里的筛选框：它是面板的主控件，撑满一行（180px 那个宽度是给列表工具栏那一行用的）。改宽属于
+   改 .dsm-search 自己，所以挨着它写——上面的候选面板那一段只管那个列表长什么样。 */
+.dsm-candidateFilter { width: 100%; }
 .dsm-filter {
   appearance: none;
   border: 1px solid var(--dsw-alias-border-l2, rgba(0, 0, 0, 0.18));

@@ -23,7 +23,7 @@ still works.
 
 | Entry point | Good for |
 |---|---|
-| The **Session management** page in Settings | Everyday use: archive or delete single sessions on the **Sessions** tab; pick a source (a directory or Ungrouped) from a dropdown to migrate; tick sessions to export / import; run a WebDAV sync on the **Sync** tab; roll back or restore on the **Backups** tab |
+| The **Session management** page in Settings | Everyday use: archive or delete single sessions on the **Sessions** tab; pick a source (a directory or Ungrouped) from the candidate panel to migrate; tick sessions to export / import; run a WebDAV sync on the **Sync** tab; roll back or restore on the **Backups** tab |
 | 5 model tools | Just say "move this workspace's sessions to `~/dev/xxx`" and let the model preview first, apply second |
 
 Both share one migration implementation, so the count the dialog reports is the count you get.
@@ -114,14 +114,20 @@ one-line bump at that point.
 
 **Migrate** — move one directory's sessions to another directory
 
-- source and target are each a **single dropdown that holds the value**; candidates are registered
-  workspaces **plus any directory the library actually holds sessions for** (annotated with that count)
-  **plus Ungrouped**, so no path has to be typed from memory. A path outside the candidates goes in through
-  **Browse…** or **Type a path**: on the desktop **Browse…** opens the OS directory dialog, in the browser it
-  expands an in-page directory browser, and on a host with no picker the button is simply not shown. A
-  directory with a git remote reads as **project identity + local path**
-  (`github.com/he0119/dsh-session-manager — /home/uy_sun/dev/dsh-session-manager`): a dropdown has no
-  tooltips, so the path cannot disappear from here — it is what tells two clones of one repository apart;
+- source and target are each **one value control whose text is the path in use**; clicking it opens the
+  **candidate panel**, whose candidates are registered workspaces **plus any directory the library
+  actually holds sessions for** (annotated with that count) **plus Ungrouped**, so no path has to be
+  typed from memory. Each row carries two lines (the name on top, the local path and session count
+  below, the whole string in its tooltip) and the **filter box** above them narrows the list by path,
+  workspace title or project identity — it only filters the candidates and never touches the value.
+  **Clicking a row selects it** (and collapses the panel); the other two routes sit in the panel head and
+  in the field: **Browse the file system…** opens the OS directory dialog on the desktop and expands the
+  in-page directory browser in the browser (on a host with no picker that button is simply not shown),
+  and **Type a path** covers anything outside the candidates. A directory with a git remote reads as
+  **project identity + local path**
+  (`github.com/he0119/dsh-session-manager — /home/uy_sun/dev/dsh-session-manager`): that control has a
+  single line, so the path cannot disappear from here — it is what tells two clones of one repository
+  apart;
 - **the source can also be Ungrouped**: the sessions with a `cwd` that the shell sidebar parks in its
   Ungrouped group, possibly spread over several directories — adopt them all into the target workspace in
   one go. It is the only source that spans directories, because "those two

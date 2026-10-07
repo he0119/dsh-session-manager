@@ -116,14 +116,19 @@ export const zh = {
   'migrate.from.unownedHint':
     '「未分组」＝侧边栏那一组里的会话（可能横跨多个目录），一次全部收进目标工作区；没有工作目录的搬不了，下面两个开关也不适用。',
   'migrate.to.pick': '选择目标目录…',
-  'migrate.path.browse': '浏览…',
   'migrate.path.type': '手输路径',
   'migrate.path.collapse': '收起',
   'migrate.path.placeholder': '目录的绝对路径',
+  // 候选面板里的筛选框：只收窄列表里列出来的候选，不改值（值仍由那个字段持有）。
+  'migrate.path.filter': '筛选候选目录',
+  'migrate.path.noMatch': '没有匹配的候选目录；「浏览文件系统…」和「手输路径」不受筛选影响。',
   'migrate.path.unavailable': '这个宿主没有可用的目录选择器，请从列表里挑一个，或手输路径。',
   'migrate.path.failed': '目录选择器没能返回路径：{reason}',
   // 页面内浏览框（宿主给的是 `browse` 能力时用它）：数据来自宿主的 `list()`，不猜路径。
   'dirPicker.title': '选择目录',
+  // 候选面板与目录浏览框互切的那两枚按钮（同一个人从"候选"切到"文件系统"，再从那边切回来）。
+  'dirPicker.filesystem': '浏览文件系统…',
+  'dirPicker.candidates': '候选列表',
   'dirPicker.home': '宿主 home',
   'dirPicker.pick': '用这个目录',
   'dirPicker.hint': '列出来的都是目录：点名字进去，确认当前这一层就点左边。',
@@ -477,15 +482,20 @@ export const en: LocaleDictOf<typeof NS> = {
   'migrate.from.unownedHint':
     'Ungrouped = the sidebar’s Ungrouped group, adopted in one go (it can span directories); sessions with no working directory cannot move, and the switches below do not apply.',
   'migrate.to.pick': 'Choose a target directory…',
-  'migrate.path.browse': 'Browse…',
   'migrate.path.type': 'Type a path',
   'migrate.path.collapse': 'Hide',
   'migrate.path.placeholder': 'Absolute path of the directory',
+  // The candidate panel’s filter: it only narrows what the list shows, never the value.
+  'migrate.path.filter': 'Filter the candidate directories',
+  'migrate.path.noMatch': 'No candidate matches; “Browse the file system…” and “Type a path” are not filtered.',
   'migrate.path.unavailable': 'This host has no usable directory picker — choose from the list, or type a path.',
   'migrate.path.failed': 'The directory picker returned no path: {reason}',
   // The in-page browser (used when the host serves the `browse` capability): its data comes from
   // the host’s own `list()`, so no path is ever guessed here.
   'dirPicker.title': 'Choose a directory',
+  // The pair that switches the candidate panel and the directory browser into each other.
+  'dirPicker.filesystem': 'Browse the file system…',
+  'dirPicker.candidates': 'Candidate list',
   'dirPicker.home': 'Host home',
   'dirPicker.pick': 'Use this directory',
   'dirPicker.hint': 'Everything listed is a directory: click a name to go in, or confirm this level on the left.',

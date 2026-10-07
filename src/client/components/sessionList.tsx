@@ -335,7 +335,7 @@ export function SessionGroupHead({
   t,
 }: SessionGroupHeadProps): React.ReactElement {
   // 称呼规则集中在 `planRows.projectLabel()`：组头上只摆名字，项目身份与本机路径一起进它的悬浮提示
-  // （见那个函数的说明）。列表、同步弹窗与两个下拉框读的是同一份口径。
+  // （见那个函数的说明）。列表、同步弹窗与目录字段读的是同一份口径。
   const label = projectLabel({ path, title, repo }, t)
   return (
     <div className="dsm-groupHead">

@@ -836,7 +836,7 @@ test('客户端产物：页面组件在初始状态下能渲染成元素（不�
 
 test('客户端产物：迁移页把「未分组」列成独立来源（注册表没认领的那批可以一次收编）', { skip }, () => {
   // 迁移页平时在产物冒烟里跑不到（页签状态停在「传输」），所以这里把页签 seed 成 'migrate'。
-  // 这一页值得跑一遍：它的来源下拉框现在有两条路（目录 / 未分组），而"未分组"是个**跨目录**的来源
+  // 这一页值得跑一遍：它的来源现在有两条路（目录候选 / 未分组），而"未分组"是个**跨目录**的来源
   // ——判据在 planRows.ts（有单测），这里只证明它真的被摆到了界面上、条数用的是库里的口径。
   const state = {
     sessionsRoot: '/home/u/.dsh/sessions',
@@ -850,7 +850,12 @@ test('客户端产物：迁移页把「未分组」列成独立来源（注册�
     ],
     workspaces: [{ id: 'w1', path: '/home/u/dev/alpha', title: '工作区甲', sessionIds: ['s-1'] }],
   }
-  const { registrations, recorded } = mount({ state, panel: 'migrate' })
+  const { registrations, recorded } = mount({
+    state,
+    panel: 'migrate',
+    // null 顺序：骨架的 error / picking（种成"源字段的候选面板开着"——候选就住在面板里）。
+    nulls: [null, { which: 'from', mode: 'candidates' }],
+  })
   const { component } = registrations[0]
   const { inject } = registrations[0].registration
   const text = strings(component(inject()))
@@ -858,18 +863,21 @@ test('客户端产物：迁移页把「未分组」列成独立来源（注册�
   assert.ok(text.includes('page.tab.migrate'), '页签还在（seeded 的那一页就是它）')
   assert.ok(text.includes('migrate.title') && text.includes('migrate.source.none'), '迁移页本体渲染出来了')
 
-  const options = recorded.filter((element) => element.type === 'option')
-  const paths = options.map((element) => String(element.props?.value))
-  assert.ok(paths.includes('/home/u/dev/alpha'), '已登记工作区的目录仍是候选')
-  assert.ok(paths.includes('/home/u/dev/beta'), '没登记的目录（库里有会话）也是候选')
-  const unowned = options.find((element) => element.props?.value === '@unowned')
-  assert.ok(unowned, '源下拉框里必须有「未分组」这一行')
-  // 条数 = 库里"侧边栏会放进「未分组」、且有 cwd"的会话数（s-2 与 s-3），不是某个目录的条数
-  assert.ok(
-    text.some((item) => String(item).includes('list.ungrouped') && String(item).includes('list.sessionsInDir:{"count":2}')),
+  const rows = candidateRows(recorded)
+  const second = (row) => String(strings(row)[1] ?? '')
+  assert.ok(rows.some((row) => second(row).includes('/home/u/dev/alpha')), '已登记工作区的目录仍是候选')
+  assert.ok(rows.some((row) => second(row).includes('/home/u/dev/beta')), '没登记的目录（库里有会话）也是候选')
+  // 冒烟里的翻译函数把键原样吐回来，所以那一行的名字是 list.ungrouped（真值是「未分组」）
+  const unowned = rows.find((row) => String(strings(row)[0]) === 'list.ungrouped')
+  assert.ok(unowned, '候选里必须有「未分组」这一行')
+  // 条数 = 库里"侧边栏会放进「未分组」、且有 cwd"的会话数（s-2 与 s-3），不是某个目录的条数。
+  // 第二行只有条数：哨兵值不是路径，不上那一行。
+  assert.deepEqual(
+    strings(unowned),
+    ['list.ungrouped', 'list.sessionsInDir:{"count":2}'],
     '未分组那一行要报出跨目录的条数',
   )
-  // 哨兵值只该出现在 option 的 value 上，不该当文案露出来
+  // 哨兵值只是行内部的值，不该当文案露出来（名字是「未分组」，第二行只有条数）
   assert.equal(
     text.some((item) => String(item).includes('@unowned')),
     false,
@@ -979,12 +987,13 @@ test('客户端产物：导出列表按目录分组，组头就是"整组勾选"
 
 })
 
-test('客户端产物：组头只摆名字，身份与本机路径在悬浮提示里；下拉框里两个都留', { skip }, () => {
+test('客户端产物：组头只摆名字，身份与本机路径在悬浮提示里；候选行与下拉框各留各的', { skip }, () => {
   // 组头上只留**人认得的那一个名字**：项目身份（host/owner/repo）与本机路径都是机器字符串，摆在那一行
   // 里又长又会被截断（截断的身份比没有还难认），而"这是哪个仓库、在本机哪个目录"是想知道才看的信息。
-  // 规则在 planRows.projectLabel() / pathLabel()（test/planRows.test.ts 逐条钉着），这里管的是"四处
-  // 界面是不是都接上了这条线"：两个动作页的组头、迁移页的来源下拉框、传输页的目标下拉框。下拉框与组头
-  // 的差别是刻意的——<option> 没有悬浮提示，路径不能从那儿消失。
+  // 规则在 planRows.projectLabel() / pathLabel() / candidateRow()（test/planRows.test.ts 逐条钉着），
+  // 这里管的是"四处界面是不是都接上了这条线"：两个动作页的组头、迁移页的候选面板、传输页的目标下拉框。
+  // 面板与组头可以只摆名字（第二行与悬浮提示接得住），<option> 不行——它没有悬浮提示，路径不能从那儿
+  // 消失。
   const state = {
     sessionsRoot: '/home/u/.dsh/sessions',
     registryPath: '/home/u/.dsh/registry.json',
@@ -1042,20 +1051,22 @@ test('客户端产物：组头只摆名字，身份与本机路径在悬浮提�
   const target = mounted.recorded.find((element) => element.type === 'option' && element.props?.value === '/home/u/dev/alpha')
   assert.equal(target?.props?.children, 'github.com/he0119/alpha — /home/u/dev/alpha')
 
-  // 迁移页的来源下拉框：同一套写法 + 库里的条数
-  const migrated = mount({ state, panel: 'migrate' })
+  // 迁移页的候选面板：名字仍取 `projectLabel`（有标题就是标题），身份与本机路径退到第二行与悬浮提示里
+  const migrated = mount({ state, panel: 'migrate', nulls: [null, { which: 'from', mode: 'candidates' }] })
   strings(migrated.registrations[0].component(migrated.registrations[0].registration.inject()))
-  const options = migrated.recorded.filter((element) => element.type === 'option')
-  const optionFor = (path) => options.find((element) => element.props?.value === path)
-  assert.equal(
-    optionFor('/home/u/dev/alpha')?.props?.children,
-    'github.com/he0119/alpha — /home/u/dev/alpha — list.sessionsInDir:{"count":1}',
-    '有身份时那一行是"身份 — 路径 — 条数"（标题不再重复，路径与身份都在）',
+  const rows = candidateRows(migrated.recorded)
+  const rowFor = (path) => rows.find((row) => String(strings(row)[1] ?? '').includes(path))
+  assert.deepEqual(
+    strings(rowFor('/home/u/dev/alpha')),
+    ['工作区甲', '/home/u/dev/alpha · list.sessionsInDir:{"count":1}'],
+    '有身份时名字仍取人起的标题，身份与本机路径在第二行与悬浮提示里',
   )
   assert.equal(
-    optionFor('/home/u/dev/beta')?.props?.children,
-    'github.com/he0119/beta — /home/u/dev/beta — list.sessionsInDir:{"count":1}',
+    rowFor('/home/u/dev/alpha')?.props?.title,
+    'github.com/he0119/alpha\n/home/u/dev/alpha\nlist.sessionsInDir:{"count":1}',
+    '整串（身份 + 路径 + 条数）在悬浮提示里',
   )
+  assert.deepEqual(strings(rowFor('/home/u/dev/beta')), ['beta', '/home/u/dev/beta · list.sessionsInDir:{"count":1}'])
 })
 
 // ---- 「会话」页（逐条归档 / 删除）----
@@ -1757,6 +1768,147 @@ test('客户端产物：迁移页只给搜索框、不给类别芯片（那页�
   assert.deepEqual(rowEls.map((node) => node.props.session.id), ['a-1'])
   assert.equal(rowEls[0].props.variant, 'pick')
   assert.equal(rowEls[0].props.ungroupedTag, true, '目录来源下，没在册的那条要挂「未分组」')
+})
+
+// ---- 目录字段的候选面板 ----
+//
+// 候选是"你有多少个工作区就有多少条"，几十条时原生下拉框只能一行行滚着找。字段因此只剩两件东西：
+// **一枚值控件**（显示当前值，点开面板）与「手输路径」——候选、筛选、选中都在面板里（点一行就是选中），
+// 与页面内那个目录浏览框是同一份面板、同一套皮，两边的头各有一枚按钮互相切。这里钉四件事：值控件
+// 显示的确实是当前值、点开的是候选面板；面板里的筛选只收窄它自己那份列表；没命中时给一句说法而值
+// 不动；宿主没有目录选择器时不摆那枚切过去的按钮。
+
+/** 候选面板里列出来的行：每一行都是一枚 `dsm-dirEntry dsm-candidate` 按钮。 */
+function candidateRows(recorded) {
+  return recorded.filter((node) => node.type === 'button' && String(node.props?.className ?? '') === 'dsm-dirEntry dsm-candidate')
+}
+
+/** 某个目录字段的值控件（候选面板的开关）。 */
+function valueControl(recorded) {
+  return recorded.find((node) => String(node.props?.className ?? '') === 'dsm-select dsm-selectPath dsm-pathValue')
+}
+
+/** 两个工作区、两条会话：源候选与目标候选都是这两条，够看清"筛的是哪一份列表"。 */
+const MIGRATE_FIELD_STATE = {
+  sessionsRoot: '/home/u/.dsh/sessions',
+  registryPath: '/home/u/.dsh/registry.json',
+  problems: [],
+  pickerKind: 'browse',
+  sessions: [
+    { id: 'a-1', cwd: '/home/u/dev/alpha', createdAt: 3, dir: '/home/u/dev/alpha', bytes: 100, files: [] },
+    { id: 'b-1', cwd: '/home/u/dev/beta', createdAt: 1, dir: '/home/u/dev/beta', bytes: 300, files: [] },
+  ],
+  workspaces: [
+    { id: 'w1', path: '/home/u/dev/alpha', title: '工作区甲', sessionIds: ['a-1'] },
+    { id: 'w2', path: '/home/u/dev/beta', title: '工作区乙', sessionIds: ['b-1'] },
+  ],
+}
+
+test('客户端产物：目录字段的值控件显示当前值，点开的是候选面板（没有原生下拉框了）', { skip }, () => {
+  // null 状态按渲染顺序种：骨架的 error / **picking**（这里种成"源字段的候选面板开着"）。
+  const mounted = mount({
+    state: MIGRATE_FIELD_STATE,
+    panel: 'migrate',
+    strings: ['/home/u/dev/alpha'],
+    nulls: [null, { which: 'from', mode: 'candidates' }],
+  })
+  const { component, registration } = mounted.registrations[0]
+  strings(component(registration.inject()))
+
+  assert.equal(mounted.recorded.filter((node) => node.type === 'select').length, 0, '目录字段里再没有原生下拉框')
+
+  const value = valueControl(mounted.recorded)
+  assert.ok(value, '值控件是一枚按钮')
+  assert.equal(value.props['aria-expanded'], true, '面板开着时它是 expanded')
+  assert.equal(value.props.title, '/home/u/dev/alpha', '完整值在悬浮提示里（框里放不下会截断）')
+  assert.equal(
+    value.props['aria-label'],
+    'migrate.from.label：工作区甲 — /home/u/dev/alpha',
+    '无障碍名字里既有字段也有当前值（屏幕阅读器与语音控制都要）',
+  )
+  assert.deepEqual(strings(value), ['工作区甲 — /home/u/dev/alpha'], '框里显示的是当前值，且认得出的名字在前')
+
+  assert.ok(
+    mounted.recorded.some((node) => String(node.props?.className ?? '').includes('dsm-candidatePicker')),
+    '候选面板开在这个字段下面',
+  )
+  const rows = candidateRows(mounted.recorded)
+  assert.deepEqual(rows.map((row) => strings(row)[0]), ['工作区甲', '工作区乙'], '一行一个候选，名字在第一行')
+  assert.equal(strings(rows[0])[1], '/home/u/dev/alpha · list.sessionsInDir:{"count":1}', '路径与条数在第二行')
+  assert.equal(rows[0].props['aria-current'], 'true', '当前值那一行认得出来')
+  assert.equal(rows[1].props['aria-current'], undefined, '别的行没有这个记号')
+
+  const filter = mounted.recorded.find((node) => node.props?.['aria-label'] === 'migrate.path.filter')
+  assert.equal(filter.props.className, 'dsm-search dsm-candidateFilter', '筛选框在面板里、撑满一行')
+  assert.ok(
+    mounted.recorded.some((node) => node.props?.children === 'dirPicker.filesystem'),
+    '宿主那条路在面板头里（这台宿主有目录选择器）',
+  )
+})
+
+test('客户端产物：候选面板的筛选只收窄自己那份列表，没命中时给一句说法', { skip }, () => {
+  // 空串状态按渲染顺序种：from → to → title → 会话搜索词 → **面板里的筛选词**。
+  const openPanel = (query) =>
+    mount({
+      state: MIGRATE_FIELD_STATE,
+      panel: 'migrate',
+      strings: ['/home/u/dev/alpha', '', '', '', query],
+      nulls: [null, { which: 'from', mode: 'candidates' }],
+    })
+  const render = (mounted) => strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
+
+  const hit = openPanel('beta')
+  const hitText = render(hit)
+  assert.deepEqual(candidateRows(hit.recorded).map((row) => strings(row)[0]), ['工作区乙'], '命中一条就只列那一条')
+  assert.equal(hitText.includes('migrate.path.noMatch'), false, '有命中就不说"没有匹配"')
+
+  const miss = openPanel('zzz-没有这个')
+  const missText = render(miss)
+  assert.deepEqual(candidateRows(miss.recorded), [], '一条都不列')
+  assert.ok(missText.includes('migrate.path.noMatch'), '给一句说法，别让人以为筛选坏了')
+  assert.deepEqual(strings(valueControl(miss.recorded)), ['工作区甲 — /home/u/dev/alpha'], '值不受筛选影响')
+})
+
+test('客户端产物：面板头那枚「浏览文件系统…」把同一处切成宿主的目录浏览框', { skip }, () => {
+  const mounted = mount({
+    state: MIGRATE_FIELD_STATE,
+    panel: 'migrate',
+    strings: ['/home/u/dev/alpha'],
+    nulls: [null, { which: 'from', mode: 'filesystem' }],
+  })
+  const { component, registration } = mounted.registrations[0]
+  const text = strings(component(registration.inject()))
+
+  assert.ok(text.includes('dirPicker.title'), '切成宿主的目录浏览框')
+  assert.ok(text.includes('dirPicker.candidates'), '那头有切回候选的按钮')
+  assert.equal(
+    mounted.recorded.some((node) => String(node.props?.className ?? '').includes('dsm-candidatePicker')),
+    false,
+    '候选面板不同时开着（同一处只有一份列表）',
+  )
+  assert.equal(valueControl(mounted.recorded).props['aria-expanded'], false, '候选面板没开：值控件是收起的')
+})
+
+test('客户端产物：宿主没有目录选择器时，候选面板里不摆「浏览文件系统…」', { skip }, () => {
+  const { pickerKind, ...withoutPicker } = MIGRATE_FIELD_STATE
+  assert.equal(pickerKind, 'browse', '夹具本来是"有选择器"那一档')
+  const mounted = mount({
+    state: withoutPicker,
+    panel: 'migrate',
+    strings: ['/home/u/dev/alpha'],
+    nulls: [null, { which: 'from', mode: 'candidates' }],
+  })
+  strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
+
+  assert.ok(
+    mounted.recorded.some((node) => String(node.props?.className ?? '').includes('dsm-candidatePicker')),
+    '候选面板照旧开着',
+  )
+  assert.equal(
+    mounted.recorded.some((node) => node.props?.children === 'dirPicker.filesystem'),
+    false,
+    '不摆一个点了必然报错的按钮',
+  )
 })
 
 test('客户端产物：「会话」页的搜索框按标题或 id 筛，筛空时空态还是画在同一个框里', { skip }, () => {
