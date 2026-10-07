@@ -12,12 +12,13 @@ import test from 'node:test'
 
 import {
   UNOWNED_SOURCE,
+  candidateRow,
   deleteFamilyNote,
   describeCwd,
+  filterPathRows,
   migrateFamilyNote,
   migrationMatching,
   migrationSourceRows,
-  optionLabel,
   pathLabel,
   projectLabel,
   repoHost,
@@ -134,16 +135,73 @@ test('源候选：没有落在「未分组」里的会话时，那一行不出�
   assert.equal(rows.some((row) => row.path === UNOWNED_SOURCE), false)
 })
 
-test('候选文案：未分组那一行用自己的文案，不把哨兵值漏出来', () => {
-  assert.equal(optionLabel({ path: UNOWNED_SOURCE, label: '未分组', count: 3 }, t), '未分组 — list.sessionsInDir:{"count":3}')
-  assert.equal(optionLabel({ path: '/a', count: 2 }, t), '/a — list.sessionsInDir:{"count":2}')
+test('候选面板里一行：名字在第一行，路径与条数在第二行，整串留给悬浮提示', () => {
+  assert.deepEqual(
+    candidateRow({ path: '/home/u/dev/x', title: '测试项目', repo: 'github.com/he0119/x', count: 2 }, t),
+    {
+      name: '测试项目',
+      meta: '/home/u/dev/x · list.sessionsInDir:{"count":2}',
+      tip: 'github.com/he0119/x\n/home/u/dev/x\nlist.sessionsInDir:{"count":2}',
+    },
+  )
+  // 名字退到项目名（与组头同一个 `projectLabel`），条数照旧在第二行
+  assert.deepEqual(candidateRow({ path: '/home/u/dev/x', repo: 'github.com/he0119/x', count: 1 }, t), {
+    name: 'x',
+    meta: '/home/u/dev/x · list.sessionsInDir:{"count":1}',
+    tip: 'github.com/he0119/x\n/home/u/dev/x\nlist.sessionsInDir:{"count":1}',
+  })
+  // 什么都没有的裸目录：两行都是路径
+  assert.deepEqual(candidateRow({ path: '/a' }, t), { name: '/a', meta: '/a', tip: '/a' })
+})
+
+test('候选面板：「未分组」那行用自带的文案与条数，哨兵值不上第二行', () => {
+  assert.deepEqual(candidateRow({ path: UNOWNED_SOURCE, label: '未分组', count: 3 }, t), {
+    name: '未分组',
+    meta: 'list.sessionsInDir:{"count":3}',
+    tip: '未分组\nlist.sessionsInDir:{"count":3}',
+  })
+})
+
+// ---- 候选筛选（`filterPathRows`）----
+//
+// 工作区一多，候选就是几十条，列表里只能一行行找。候选面板自带一个筛选框把这个列表收窄，判据是
+// **行自己的事实**（路径 / 标题 / 项目身份 / 行自带的文案），不是"渲染出来的那一整串"——那一串里
+// 拼了「— 3 条会话」这样的装饰，拿它当关键词库会让「3」命中一堆行。这里钉死这两条。
+
+test('候选筛选：路径、标题、项目身份都能命中，大小写不敏感', () => {
+  const rows = [
+    { path: '/home/u/dev/dsh-aperture', title: '光圈', repo: 'github.com/he0119/dsh-aperture' },
+    { path: '/home/u/dev/dsh-session-manager' },
+    { path: UNOWNED_SOURCE, label: '未分组', count: 2 },
+  ]
+  assert.deepEqual(filterPathRows(rows, 'aperture').map((row) => row.path), ['/home/u/dev/dsh-aperture'])
+  // 标题不在路径里也要命中：用户记的是自己给工作区起的名字
+  assert.deepEqual(filterPathRows(rows, '光圈').map((row) => row.path), ['/home/u/dev/dsh-aperture'])
+  assert.deepEqual(filterPathRows(rows, 'SESSION-MANAGER').map((row) => row.path), ['/home/u/dev/dsh-session-manager'])
+  // 「未分组」那一行是个哨兵值、不是路径，它靠自带的文案命中
+  assert.deepEqual(filterPathRows(rows, '未分组').map((row) => row.path), [UNOWNED_SOURCE])
+})
+
+test('候选筛选：空白关键词原样返回（顺序不变、给的是新数组），没命中的就是空', () => {
+  const rows = [{ path: '/b' }, { path: '/a', title: '甲' }]
+  const all = filterPathRows(rows, '   ')
+  assert.deepEqual(all, rows, '空关键词不筛')
+  assert.notEqual(all, rows, '返回一份新数组：调用方把它当列表内容，不该拿到候选列表本身')
+  assert.deepEqual(filterPathRows(rows, 'zzz-没有这个'), [])
+})
+
+test('候选筛选：不拿拼出来的那一串当关键词库（条数只是装饰，不参与匹配）', () => {
+  const rows = [{ path: '/a', count: 3 }]
+  assert.deepEqual(filterPathRows(rows, '3'), [], '「3 条会话」里的 3 不该把 /a 捞出来')
+  assert.deepEqual(filterPathRows(rows, 'sessionsInDir'), [], '文案键名同理')
 })
 
 // ---- 一个目录怎么称呼：项目身份（git remote）与本机路径 ----
 //
 // 本机绝对路径是**机器特有**的：同一个项目在两台机器上可以落在完全不同的目录里，而 `host/owner/repo`
-// 是仓库自己的名字。所以组头显示身份、把路径退到悬浮提示里；下拉框里两个都留（`<option>` 没有悬浮
-// 提示，而同一个仓库在本机的两个克隆只能靠路径区分）。
+// 是仓库自己的名字。所以组头显示身份、把路径退到悬浮提示里；只有一行可用的那两处（目录字段的值控件、
+// 导入页那个下拉框）里两个都留——那里没有第二行与悬浮提示可退，同一个仓库在本机的两个克隆只能靠路径
+// 区分。
 
 test('组头：只摆名字 + 一枚主机标签，项目身份与本机路径一起进悬浮提示', () => {
   // 已登记的工作区：名字是用户起的标题（身份不顶掉人的名字），身份与路径各占提示里的一行
@@ -187,14 +245,10 @@ test('项目名：取身份最后一段，末尾的 .git 不算（"认不出来�
   assert.equal(repoName('C:/repos/thing'), 'thing')
 })
 
-test('下拉框：身份取代标题那一栏，本机路径留着（那里没有悬浮提示可退）', () => {
+test('一行路径的称呼：身份取代标题那一栏，本机路径留着（值控件与导入那个下拉框都读它）', () => {
   assert.equal(pathLabel({ path: '/home/u/dev/x', title: '测试项目', repo: 'github.com/he0119/x' }), 'github.com/he0119/x — /home/u/dev/x')
   assert.equal(pathLabel({ path: '/home/u/dev/x', title: '测试项目' }), '测试项目 — /home/u/dev/x')
   assert.equal(pathLabel({ path: '/home/u/dev/x' }), '/home/u/dev/x')
-  assert.equal(
-    optionLabel({ path: '/home/u/dev/x', title: '测试项目', repo: 'github.com/he0119/x', count: 2 }, t),
-    'github.com/he0119/x — /home/u/dev/x — list.sessionsInDir:{"count":2}',
-  )
 })
 
 test('源候选把身份带在行上（界面文案只读行，不再自己查表）', () => {

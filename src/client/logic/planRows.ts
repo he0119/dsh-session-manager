@@ -87,9 +87,9 @@ export function sessionLabel(subject: LabelSubject): SessionLabel {
 // ---- 迁移页的来源：目录候选与「未分组」 ----
 
 /**
- * 迁移页源下拉框里那个「未分组」用的**哨兵值**。
+ * 迁移页源字段里那个「未分组」用的**哨兵值**。
  *
- * 源是一个值控件（下拉框自己就是那个值，见 MigrationPanel 的说明），所以「未分组」也得是一个值；
+ * 源是一个值控件（控件的文本就是那个值，见 MigrationPanel 的说明），所以「未分组」也得是一个值；
  * 但它不是一个路径。用哨兵而不是"再加一个单选框"是为了不让同一个字段有两个控件——这个值永远
  * 不会下线：发请求时被翻译成 `unowned: true` 且 `from` 传空串（见 MigrationPanel 的 request()）。
  * 合法的目录值要么是绝对路径（`/…` 或 `C:\…`），要么是空串，撞不上它。
@@ -138,7 +138,8 @@ export function unownedSessions<T extends SourceSubject>(sessions: readonly T[])
  * 项目身份是仓库的 git remote，宿主已经规范成 `host/owner/repo`（见宿主 `src/repo.ts`）：同一个项目在
  * 两台机器上可以落在完全不同的目录里，本机路径是**机器特有**的那一个，而身份是仓库自己的名字。组头上
  * 只看得见**名字**，身份与本机路径一起进悬浮提示（两个都是机器字符串，摆在那一行里又长又会被截断）；
- * 下拉框里两个都摆在文本里（`<select>` 没有悬浮提示，而同一个仓库在本机的两个克隆只能靠路径区分）。
+ * 只有一行可用的那两处（目录字段的值控件、导入页那个下拉框）里两个都摆在文本里——那里没有第二行可
+ * 退，而同一个仓库在本机的两个克隆只能靠路径区分（见 `pathLabel()` 与 `candidateRow()`）。
  */
 export interface ProjectSubject {
   /** 本机目录的绝对路径；空串 = 没有 cwd 的那一组。 */
@@ -217,10 +218,12 @@ export function projectLabel(subject: ProjectSubject, t: Translate): ProjectLabe
 }
 
 /**
- * 目录下拉框里那一行（不带条数）：项目身份优先「身份 — 路径」，没有身份就照旧「标题 — 路径」。
+ * 一行路径的称呼（不带条数）：项目身份优先「身份 — 路径」，没有身份就照旧「标题 — 路径」。
  *
- * 下拉框与组头不同：`<option>` 没有悬浮提示，所以路径不能退到提示里——同一个仓库在本机的两个克隆
- * 否则就无从区分。身份那一栏取代的是**标题**（标题只是路径的标签，路径与身份都在这一行里）。
+ * 机器字符串的两种摆法与候选面板不同：面板里一行是两行文字（名字在上、路径在下，见 `candidateRow()`），
+ * 而**值控件**（目录字段那枚按钮）与「导入」那个下拉框都只有一行可用——那里没有第二行可以退，路径就
+ * 不能从这一行里消失：同一个仓库在本机的两个克隆只能靠它区分。身份那一栏取代的是**标题**（标题只是
+ * 路径的标签，路径与身份都在这一行里）。
  *
  * @param subject 路径、标题与身份。
  * @returns 一行的文案。
@@ -231,7 +234,7 @@ export function pathLabel(subject: ProjectSubject): string {
   return title === undefined ? path : `${title} — ${path}`
 }
 
-/** 迁移页一个目录下拉框里的一行。`count` 只有"宿主库里真有会话的目录"才有。 */
+/** 迁移页一个目录字段里的一行候选。`count` 只有"宿主库里真有会话的目录"才有。 */
 export interface PathRow extends ProjectSubject {
   /** 值（也是 React 的 key）：目录路径，或者 UNOWNED_SOURCE。 */
   path: string
@@ -240,17 +243,75 @@ export interface PathRow extends ProjectSubject {
   /** 库里这个来源下的会话条数。 */
   count?: number
   /**
-   * 整行的文案（有则不再拼"身份/标题 — 路径"）。
+   * 这一行自带的名字（有则不再按"标题 / 项目名 / 路径"推，见 `candidateRow()`）。
    *
    * 「未分组」不是路径，拼上哨兵值等于把内部约定漏给用户看，所以那一行自带文案。
    */
   label?: string
 }
 
-/** 一行候选的文案：身份（或标题）+ 路径 + 库里的条数（有则带）。 */
-export function optionLabel(row: PathRow, t: Translate): string {
-  const head = row.label ?? pathLabel(row)
-  return row.count === undefined ? head : `${head} — ${t('list.sessionsInDir', { count: row.count })}`
+/** 候选面板里一行怎么摆：名字一行、路径与条数一行，外加整行的悬浮提示。 */
+export interface CandidateRow {
+  /** 主名字：工作区标题 →「未分组」那行自带的文案 → 项目名 → 本机路径（同 `projectLabel()`）。 */
+  readonly name: string
+  /** 第二行：本机路径与条数（有哪个写哪个，都没有时缺省）。 */
+  readonly meta?: string
+  /** 悬浮提示：项目身份（有的话）与本机路径各一行，再加条数。 */
+  readonly tip: string
+}
+
+/**
+ * 候选列表里一行摆成什么。
+ *
+ * 与 `<option>` 的写法不同：那里只有一行可用，名字、路径与条数只能挤成一整串（挤不下就截断，所以
+ * 路径必须留在里面——`<option>` 没有悬浮提示）。候选面板里一行是一枚按钮、两行文字，于是**名字在
+ * 第一行**（用户认的是它：工作区标题，没有标题才退到项目名），路径与条数退到第二行的小字里，完整
+ * 的一串留给悬浮提示。
+ *
+ * 「未分组」那一行的 `path` 是哨兵值、不是路径：它只出现在名字与条数里，绝不摆上第二行。
+ *
+ * @param row 一行候选（`migrationSourceRows()` / 调用方补过当前值的那个列表）。
+ * @param t 翻译（只用来拼"N 条会话"）。
+ * @returns 两行文字与悬浮提示。
+ */
+export function candidateRow(row: PathRow, t: Translate): CandidateRow {
+  const label = projectLabel(row, t)
+  const count = row.count === undefined ? undefined : t('list.sessionsInDir', { count: row.count })
+  const meta = [row.path === UNOWNED_SOURCE ? undefined : row.path, count].filter(
+    (part): part is string => part !== undefined && part !== '',
+  )
+  return {
+    name: row.label ?? label.name,
+    ...(meta.length === 0 ? {} : { meta: meta.join(' · ') }),
+    tip: [row.label ?? label.tip, count].filter((line): line is string => line !== undefined).join('\n'),
+  }
+}
+
+/**
+ * 候选目录面板里那个筛选框的判据：关键词命中的那几行，顺序照旧。
+ *
+ * 候选会长到几十条（工作区一多就是），列表里只能一行行找——面板自己带一个筛选框把这个列表收窄
+ * （见 [目录字段是一个值控件，三条改值的路](../../../.agents/notes/implemented/architecture/2026-09-27-directory-field-is-one-value-control.md)）。
+ *
+ * 关键词对**行自己的事实**匹配：路径、工作区标题、项目身份，外加那个自带文案的「未分组」行。
+ * 不对"渲染出来的那一整串"匹配——那一串里拼了「— 3 条会话」这样的装饰，拿它当关键词库会让「3」
+ * 命中一堆行。大小写不敏感的子串，不做模糊：筛完的顺序仍旧是候选本来的顺序（已登记工作区在前、
+ * 库里有会话的目录按路径排在后），筛一下就让行换位置，用户会以为候选变了。
+ *
+ * 空白关键词 = 原样返回一份新数组（调用方把它当列表内容，不该拿到内部引用）。
+ *
+ * @param rows 候选行（`migrationSourceRows()` / 调用方补过当前值的那个列表）。
+ * @param query 筛选框里的原文（两头空白不算）。
+ * @returns 命中的那几行，顺序与输入一致。
+ */
+export function filterPathRows(rows: readonly PathRow[], query: string): PathRow[] {
+  const needle = query.trim().toLowerCase()
+  if (needle === '') return [...rows]
+  return rows.filter((row) =>
+    [row.path, row.title ?? '', row.repo ?? '', row.label ?? ''].some((fact) =>
+      fact.toLowerCase().includes(needle),
+    ),
+  )
 }
 
 /**

@@ -32,10 +32,24 @@ export interface DirectoryPickerProps {
   onPick: (path: string) => void
   /** 关掉这个框（不改变值）。 */
   onClose: () => void
+  /**
+   * 切回候选面板（见 [CandidatePanel.tsx](./CandidatePanel.tsx)）。
+   *
+   * 从"候选"切过来的调用方才给：那时两枚按钮是"两条路互相切"；单独用这个浏览框时（它自己的默认
+   * 用法）没有可切回去的地方，就不摆这枚按钮。
+   */
+  onCandidates?: () => void
 }
 
 /** 页面内目录浏览框。 */
-export function DirectoryPicker({ t, api, startPath, onPick, onClose }: DirectoryPickerProps): React.ReactElement {
+export function DirectoryPicker({
+  t,
+  api,
+  startPath,
+  onPick,
+  onClose,
+  onCandidates,
+}: DirectoryPickerProps): React.ReactElement {
   const [listing, setListing] = React.useState<DirectoryListing | null>(null)
   const [busy, setBusy] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
@@ -78,6 +92,11 @@ export function DirectoryPicker({ t, api, startPath, onPick, onClose }: Director
       <div className="dsm-browserHead">
         <span className="dsm-fieldLabel">{t('dirPicker.title')}</span>
         <span className="dsm-spacer" />
+        {onCandidates !== undefined && (
+          <button type="button" className="dsm-button" onClick={onCandidates}>
+            {t('dirPicker.candidates')}
+          </button>
+        )}
         <button type="button" className="dsm-button" onClick={() => void open('')} disabled={busy}>
           {t('dirPicker.home')}
         </button>
