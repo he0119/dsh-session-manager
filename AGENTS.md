@@ -96,8 +96,11 @@ pnpm typecheck && pnpm build && pnpm test && pnpm check:package
 - 页头与页内分页**没有官方原语可用**（官方设置页自己手写 `h2` / `p` / 本地 CSS），照内建设置页的规格
   写：`h2` 16px/500 独占一行（行高 24px），隔 12px 一行 14px 说明（`label-tertiary`），整体列布局；
   页头里**不放动作**——页面级的那枚「刷新」挂在页签那一行的右端（`.dsm-tabsRow`，下划线随整行铺满）。
+  字号的其余几档同样去内建页里量：正文 **14px / 行高 20px**（`.dsm-root`，内建卡片标题就是它），比
+  正文淡一档的字 **12px / 行高 18px**（`.dsm-hint`，内建卡片描述就是它）；行高不跟着字号按比例放大。
   规格由 `test/styles.test.mjs` 与 `test/client.test.mjs` 两处钉住，依据见
-  [决策](.agents/notes/implemented/architecture/2026-09-28-page-header-matches-the-builtin-settings.md)。
+  [页头那篇](.agents/notes/implemented/architecture/2026-09-28-page-header-matches-the-builtin-settings.md)
+  与 [字号那篇](.agents/notes/implemented/architecture/2026-10-07-body-type-matches-the-builtin-settings.md)。
 - **卡片级的主动作一律放卡片底部的动作行**（`.dsm-controls`），卡片头部只放不动数据的工具（刷新、
   全选 / 清空、收起 / 展开）；破坏性动作用 `dsm-spacer` 顶到同一行右端，清单行上的动作留在行上。依据
   见 [决策](.agents/notes/implemented/architecture/2026-10-07-card-actions-live-in-a-footer-row.md)，

@@ -28,12 +28,17 @@ export const STYLE_OWNER = 'dsh-session-manager/client.css'
 
 /** 样式表正文。 */
 export const CSS = `
+/*
+ * 正文与次要文字的字号照内建设置页量出来的两档（不是按美观定的）：正文那一档是 **14px / 行高 20px**
+ * （内建卡片的标题就是它），次要那一档是 **12px / 行高 18px**（内建卡片的描述就是它）。所以正文字号
+ * 走这一层继承，凡是"比正文淡一档"的字都显式写成 12px/18px，而不是只换个颜色。
+ */
 .dsm-root {
   display: flex;
   flex-direction: column;
   gap: 16px;
   color: var(--dsw-alias-label-primary, #1f2329);
-  font-size: 13px;
+  font-size: 14px;
   line-height: 20px;
 }
 .dsm-head { display: flex; flex-direction: column; gap: 12px; }
@@ -56,7 +61,15 @@ export const CSS = `
 }
 .dsm-cardHead { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .dsm-cardTitle { font-weight: 600; }
-.dsm-hint { color: var(--dsw-alias-label-secondary, #646a73); }
+/*
+ * 次要文字：内建卡片的描述那一档（12px / 18px），比正文小一号。只换颜色不换字号是不够的——同一段
+ * 说明与正文一样大时，"这是补充"这件事只能靠颜色说，而颜色在换主题、换屏幕时会漂。
+ */
+.dsm-hint {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-secondary, #646a73);
+}
 /*
  * 页脚那枚版本徽标：这一页的右下角。字号比正文小一档（与内建设置页那些注脚同级），颜色取页内
  * 最静的那一档（label-tertiary，与页头那行说明同一个 token），靠右对齐——它是"这一页是哪个
@@ -78,8 +91,8 @@ export const CSS = `
   grid-template-columns: minmax(0, auto) minmax(0, 1fr);
   gap: 6px 12px;
   margin: 0;
-  font-size: 13px;
-  line-height: 1.6;
+  font-size: 14px;
+  line-height: 22px;
 }
 .dsm-defs dt { color: var(--dsw-alias-label-primary, #1f2329); font-weight: 600; white-space: nowrap; }
 .dsm-defs dd { margin: 0; color: var(--dsw-alias-label-secondary, #646a73); }
@@ -569,7 +582,7 @@ export const CSS = `
   align-items: baseline;
   gap: 8px;
   margin: 16px 0 0;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--dsw-alias-label-primary, #1f2329);
 }
@@ -683,7 +696,8 @@ export const CSS = `
  */
 .dsm-filters { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .dsm-filterSearch { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-/* 搜索框：与 .dsm-select / .dsm-file 同一套皮（边框、底色、圆角都走 token）。 */
+/* 搜索框：与 .dsm-select / .dsm-file 同一套皮（边框、底色、圆角都走 token）。字号 13px 是内建输入框
+   那一档（内建那几页的输入框就是 13px / 行高 18px），比正文小一号。 */
 .dsm-search {
   appearance: none;
   border: 1px solid var(--dsw-alias-border-l2, rgba(0, 0, 0, 0.18));
@@ -747,10 +761,10 @@ export const CSS = `
  * 不写这一条时弹窗里的行 16px、行高更大，页面里的行 13px）。弹窗里摆的就是页面上的那几个组件，
  * 两处必须同规格。
  */
-.dsm-dialogBody { display: flex; flex-direction: column; gap: 8px; font-size: 13px; line-height: 20px; }
+.dsm-dialogBody { display: flex; flex-direction: column; gap: 8px; font-size: 14px; line-height: 20px; }
 /* 底部那对按钮同上：footer 在我们那层 body 之外，字号也会继承文档根的 16px（量到 16px / 34px 高，
    页面上的同一个类名是 13px / 30px 高）。同一个 .dsm-button 在弹窗里与页面里得是一个规格。 */
-.dsm-dialog .dsm-button { font-size: 13px; }
+.dsm-dialog .dsm-button { font-size: 14px; }
 /*
  * 进度条：同步这种"按条走网络"的长动作（整库可能上百条）用它回答"做到第几条了"。
  *

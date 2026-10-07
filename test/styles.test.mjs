@@ -238,16 +238,16 @@ test('计划表的项目组头：一条横幅，横排的是内层那一行', ()
   assert.notEqual(ruleBody('.dsm-planTable .dsm-colMachine'), null, '「这次不动」的机器列要声明列宽')
 })
 
-test('计划弹窗的三段段头：13px/600 的主文字色 + 一颗 12px 的中性药丸，不再与正文同一档', () => {
+test('计划弹窗的三段段头：14px/600 的主文字色 + 一颗 12px 的中性药丸，与说明句差一档', () => {
   // 真实缺陷（用户报的"和其他内容区分并不明显"）：三个段头原来是 `.dsm-hint`（13px/400 次要色，
   // dev GUI 里量到 rgb(97, 102, 107)），与紧挨着的"跳过 N 条空白会话…"一字不差——三张表之间因此
-  // 没有可见的分界。修法是把那一行变成段头（`h3` + `.dsm-planHead`），所以这里钉住"它不再是正文
-  // 那一档"：字号仍是 13px，靠 600 的字重与 label-primary 分开。
+  // 没有可见的分界。修法是把那一行变成段头（`h3` + `.dsm-planHead`）：字号走正文那一档（14px）、
+  // 字重 600、颜色 label-primary，而同一张表上下的说明句是 12px 的次要色。
   const head = ruleBody('.dsm-planHead')
   assert.notEqual(head, null, '找不到 .dsm-planHead 规则')
   assert.match(head ?? '', /font-weight:\s*600/, '段头要比正文重一档（正文是 400）')
   assert.match(head ?? '', /color:\s*var\(--dsw-alias-label-primary/, '段头走主文字色（正文说明句是次要色）')
-  assert.match(head ?? '', /font-size:\s*13px/, '字号仍是正文那一档：段头靠字重与颜色分开，不靠变大')
+  assert.match(head ?? '', /font-size:\s*14px/, '字号走正文那一档（14px）：说明句已经降到 12px，段头靠字重与颜色再分一层')
   assert.match(head ?? '', /display:\s*flex/, '标题与条数药丸横着排')
   // 外边距只给上面 16px：这几段在普通块流里（不是 flex 子项），相邻外边距照常折叠，量到的是"离上一段
   // 16px、离下面那张表 0px"。标题贴住它自己那张表、与上一段分开，靠的就是这个差；两边一样大时标题
@@ -299,6 +299,22 @@ test('页头照内建设置页的规格：16px/500 的 h2 标题 + 隔 12px 一�
   assert.notEqual(intro, null, '找不到 .dsm-intro 规则')
   assert.match(intro, /font-size:\s*14px/, '说明行 14px（内建页的说明行就是这一档）')
   assert.match(intro, /--dsw-alias-label-tertiary/, '说明行用 label-tertiary，与内建页的说明行同色')
+})
+
+test('正文与次要文字是内建那两档：正文 14px/20px、说明句 12px/18px', () => {
+  // 为什么钉它：内建那几页把字分两档——卡片的标题 strong 是 14px/500/行高 20px，卡片的描述是
+  // 12px/400/行高 18px（真实 dev GUI 里量下来同值）。本页原来是正文 13px、说明句跟着正文一起 13px，
+  // 于是"这是补充"只能靠颜色说，层次比内建扁一档。正文行高留在 20px（内建卡片标题就是 14px/20px），
+  // 每一行的行盒高度不变，行高、缩进那些量着调的几何值才不用跟着重算。
+  const root = ruleBody('.dsm-root')
+  assert.notEqual(root, null, '找不到 .dsm-root 规则')
+  assert.match(root, /font-size:\s*14px/, '正文这一档是内建的 14px（卡片标题就是它）')
+  assert.match(root, /line-height:\s*20px/, '行高 20px：内建卡片标题是 14px/20px，不动行高才不会把每一行撑高')
+
+  const hint = ruleBody('.dsm-hint')
+  assert.notEqual(hint, null, '找不到 .dsm-hint 规则')
+  assert.match(hint, /font-size:\s*12px/, '次要文字那一档是内建的 12px（卡片描述就是它）')
+  assert.match(hint, /line-height:\s*18px/, '行高 18px，与内建卡片描述同值')
 })
 
 test('组内行的缩进由组头那几个尺寸推出来：组头的勾选框恒在行勾选框左边 16px', () => {

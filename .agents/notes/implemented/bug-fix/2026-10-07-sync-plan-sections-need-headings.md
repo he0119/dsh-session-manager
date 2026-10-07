@@ -5,7 +5,7 @@ Status: implemented
 ## Problem
 
 同步预演弹窗把计划摆成三段清单（会拉取 / 会推送 / 两边都有、这次不动），每段一行条数 + 一张表。那行条数
-是与正文同一档的 `<p class="dsm-hint">`：13px / 400 / `label-secondary`。
+是与正文同一档的 `<p class="dsm-hint">`：次要色 / 400，与段头只差颜色。
 
 于是三段之间没有可见的分界：真实 dev GUI 里量到那一行是 `rgb(97, 102, 107)`，与紧挨在它上面的
 "跳过 5 条空白会话（建出来但一个回合都没聊过）…"**逐字节相同**——同一段正文里两句同样的话，一张表从哪
@@ -17,8 +17,8 @@ Status: implemented
 
 - **结构**：段头是标题而不是段落。读屏可以按标题在三段之间跳；`Modal` 的标题是 `h2`，三段的层级正好
   接在它下面。
-- **视觉**：标题 13px / 600 / `label-primary`（字号仍是正文那一档，靠字重与颜色分开）；条数 12px / 400 /
-  `label-secondary` 的药丸。标题、正文、标签因此各有各的形状。
+- **视觉**：标题 14px / 600 / `label-primary`（字号走正文那一档，说明句已经降到 12px，于是还差
+  一档）；条数 12px / 400 / `label-secondary` 的药丸。标题、正文、标签因此各有各的形状。
 - **条数那句话复用 `list.sessionsInDir`**（`{count} 条会话` / `{count} sessions`）——组头右端那句就是它。
   三个段头键因此**不再带 `{count}`**，只留标题本身。
 - **间距只给上面 16px**：这几段落在一个普通块流里（不是 flex 子项），相邻外边距照常折叠，量到的就是
@@ -49,7 +49,7 @@ Status: implemented
 ## Consequences
 
 - 真实 dev GUI（profiles/web-dev，WebDAV 计划 2 拉 / 4 推 / 800 不动）量到，两套主题各一遍：
-  - 浅色：段头 `rgb(15, 17, 21)`、600 / 13px，会话卡片底 `#fff` 上 18.9:1；药丸 `rgb(97, 102, 107)`
+  - 浅色：段头 `rgb(15, 17, 21)`、600 / 14px，会话卡片底 `#fff` 上 18.9:1；药丸 `rgb(97, 102, 107)`
     5.8:1、边框 `rgba(0, 0, 0, 0.1)`；
   - 深色：段头 `rgb(249, 250, 251)`、13.34:1（底 `rgb(44, 44, 46)`）；药丸 `rgb(207, 211, 214)`
     9.25:1、边框 `rgba(255, 255, 255, 0.12)`；
@@ -59,6 +59,6 @@ Status: implemented
   `border-l2`），两侧的回落值照旧。
 - 验证：`test/client.test.mjs` 钉住三段各一个 `h3.dsm-planHead`、标题键、药丸里的条数（1 / 2 / 1 那份
   夹具）以及"这三个键不再由 `<p class="dsm-hint">` 渲染"；`test/styles.test.mjs` 钉住那些声明
-  （600 / `label-primary` / 13px / flex / `margin: 16px 0 0`，药丸 400 / 18px）。四处篡改各自红在对应
+  （600 / `label-primary` / 14px / flex / `margin: 16px 0 0`，药丸 400 / 18px）。四处篡改各自红在对应
   断言上：段头退回 `.dsm-hint` 的 `p`、条数不放进药丸、`font-weight` 退回 400、药丸行高退回 20px。
 - `test/client.test.mjs` 测的是**构建产物**：篡改源码之后要先 `pnpm build` 再跑，否则红不了。

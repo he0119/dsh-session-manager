@@ -19,7 +19,9 @@ Status: implemented
 照内建设置页的规格写：`h2` 16px/500 的标题独占一行（行高 24px），下面隔 12px 跟一行 14px/22px 的
 说明行，整体是 `display:flex; flex-direction:column; gap:12px`。说明行的颜色是
 `--dsw-alias-label-tertiary`（浅色主题 **#81858c**，量的就是那一页 `p` 说明行的计算色）。页头整块
-因此是 **58px** 高（78 → 136），与相邻区块逐像素对齐。
+因此是 **58px** 高（78 → 136），与相邻区块逐像素对齐。正文与次要文字那两档（14px/20px 与
+12px/18px）也在同一批对尺里，见
+[正文与次要文字照内建设置页的两档](2026-10-07-body-type-matches-the-builtin-settings.md)。
 
 ## 页头里不放动作
 
