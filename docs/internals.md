@@ -126,6 +126,9 @@
 - [页头照内建设置页的规格](../.agents/notes/implemented/architecture/2026-09-28-page-header-matches-the-builtin-settings.md)
   与 [版面不跟着滚动条动](../.agents/notes/implemented/architecture/2026-09-28-layout-does-not-move-with-the-scrollbar.md)：
   页头没有官方原语可用，规格只能去真实设置页里量。
+- [页面分两份加载，清单没到之前先说实话](../.agents/notes/implemented/architecture/2026-10-07-page-loads-in-two-phases.md)：
+  `GET /meta` 先给「库在哪、这个宿主有哪些能力位」（不扫库），`GET /state` 是它的超集；清单到位前
+  那几处说「读取中…」，不把"0 个会话""这个宿主没有这个能力"当成结论画上去。
 - [目录字段是一个值控件，三条改值的路](../.agents/notes/implemented/architecture/2026-09-27-directory-field-is-one-value-control.md)
   与 [「浏览…」按宿主的能力走](../.agents/notes/implemented/bug-fix/2026-09-27-browse-follows-the-picker-capability.md)：
   任意绝对路径要一个值控件，而目录选择器是一只互斥的能力位服务。

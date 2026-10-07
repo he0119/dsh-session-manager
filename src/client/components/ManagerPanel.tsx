@@ -6,6 +6,10 @@
  * 重新认一遍上下文。页面本体分别是 [TransferPanel.tsx](./TransferPanel.tsx)、
  * [MigrationPanel.tsx](./MigrationPanel.tsx) 与 [ManagePanel.tsx](./ManagePanel.tsx)。
  *
+ * 数据分两份到：`/meta`（库在哪、宿主有哪些能力位，不扫库）与 `/state`（扫完整库的清单）。页头读
+ * `state ?? meta`，所以"位置与能力位"不必等那遍扫描；清单没到的分页说「读取中…」，而不是先把
+ * "还没有会话""这个宿主没有这个能力"这类**结论**画上去再改。
+ *
  * 分页切换会**卸载**另一个分页：本地草稿（勾选、弹窗里那份计划）随之清掉。这是有意的——一份计划
  * 不该在切走再切回来之后还留着，让人以为它还是刚刚算出来的那份。
  *
@@ -14,7 +18,7 @@
 
 import * as React from 'react'
 
-import { fetchState, type StateResponse } from '../api.ts'
+import { fetchMeta, fetchState, type MetaResponse, type StateResponse } from '../api.ts'
 import { PLUGIN_COMMIT, PLUGIN_DIRTY, PLUGIN_VERSION } from '../build.ts'
 import type { DirectoryApi } from '../directory.ts'
 import type { Translate } from '../logic/locales.ts'
@@ -43,6 +47,13 @@ type PanelKey = 'transfer' | 'sync' | 'migrate' | 'manage' | 'help'
 /** 会话管理页。 */
 export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactElement {
   const [state, setState] = React.useState<StateResponse | null>(null)
+  /**
+   * 会话库位置与能力位那一份（`/meta`）。
+   *
+   * 用 `undefined` 而不是 `null` 表示"还没到"：`null` 在本页是"读到了，宿主就是没给"（比如没配同步），
+   * 两者不能混。它比 `state` 先到，页头因此不必等清单。
+   */
+  const [meta, setMeta] = React.useState<MetaResponse | undefined>(undefined)
   // 默认停在第一个页签（「会话」）：它是这一页的日常视图，另外两页是偶发动作。
   const [panel, setPanel] = React.useState<PanelKey>('manage')
   const [busy, setBusy] = React.useState(false)
@@ -52,9 +63,22 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
     setBusy(true)
     setError(null)
     try {
-      setState(await fetchState())
-    } catch (cause) {
-      setError(t('error.failed', { reason: cause instanceof Error ? cause.message : String(cause) }))
+      // 两份同时发、各自落地：`/meta` 不扫库，通常立刻回来，页头先把位置与能力位画上；`/state` 要扫完
+      // 整库（每条会话读 header + 折标题），回来再填清单与条数。用 allSettled 是为了让先到的那份**先画**，
+      // 而不是等另一份一起。
+      const [metaResult, stateResult] = await Promise.allSettled([fetchMeta(), fetchState()])
+      if (metaResult.status === 'fulfilled') setMeta(metaResult.value)
+      // `/meta` 拿不到不算这一页的错：那几项只是"先说清楚"，清单那条路照样把它们带回来（页头退回
+      // "读取中…"）。所以这里不报错，也不清掉上一次拿到的位置。
+      if (stateResult.status === 'fulfilled') {
+        setState(stateResult.value)
+      } else {
+        setError(
+          t('error.failed', {
+            reason: stateResult.reason instanceof Error ? stateResult.reason.message : String(stateResult.reason),
+          }),
+        )
+      }
     } finally {
       setBusy(false)
     }
@@ -70,6 +94,17 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
 
   const sessions = state?.sessions.length ?? 0
   const workspaces = state?.workspaces.length ?? 0
+  /**
+   * 页头那行读的那些事实：`/state` 到了以它为准（它是超集），没到就用先回来的 `/meta`。
+   *
+   * 清单没到时条数说"读取中…"而不是 0——`0 个会话` 是**结论**，而那一刻的真相是"还不知道"。
+   */
+  const facts = state ?? meta
+  const counts =
+    state === null
+      ? t('page.loading')
+      : `${t('page.count.sessions', { count: sessions })} · ${t('page.count.workspaces', { count: workspaces })}`
+  const libraryLine = facts === undefined ? t('page.loading') : `${facts.sessionsRoot} · ${counts}`
   // 这一页是哪个构建：构建期写死的版本号，加上直接从 git build 时的短 commit（脏工作区挂 -dirty）。
   const version = versionLabel(PLUGIN_VERSION, PLUGIN_COMMIT, PLUGIN_DIRTY)
   // 提示里版本号与 commit 各占一处，所以这里传的是不带 commit 的那个版本号。
@@ -92,8 +127,7 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
           </button>
         </div>
         <p className="dsm-intro">
-          {t('page.library')}：{state?.sessionsRoot ?? ''} · {t('page.count.sessions', { count: sessions })} ·{' '}
-          {t('page.count.workspaces', { count: workspaces })}
+          {t('page.library')}：{libraryLine}
         </p>
       </header>
 
@@ -161,11 +195,11 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
         </button>
       </div>
 
-      {panel === 'manage' && <ManagePanel t={t} state={state} reload={load} />}
-      {panel === 'migrate' && <MigrationPanel t={t} state={state} reload={load} directory={directory} />}
-      {panel === 'transfer' && <TransferPanel t={t} state={state} reload={load} />}
-      {panel === 'sync' && <SyncPanel t={t} state={state} reload={load} />}
-      {panel === 'help' && <HelpPanel t={t} state={state} reload={load} />}
+      {panel === 'manage' && <ManagePanel t={t} state={state} meta={meta} reload={load} />}
+      {panel === 'migrate' && <MigrationPanel t={t} state={state} meta={meta} reload={load} directory={directory} />}
+      {panel === 'transfer' && <TransferPanel t={t} state={state} meta={meta} reload={load} />}
+      {panel === 'sync' && <SyncPanel t={t} state={state} meta={meta} reload={load} />}
+      {panel === 'help' && <HelpPanel t={t} state={state} meta={meta} reload={load} />}
 
       {/*
         版本徽标：这一页的右下角。放在页内分页**之后**而不是页头——它答的是"这一页是哪个构建"，

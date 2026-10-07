@@ -73,7 +73,9 @@ function HelpSection({
 }
 
 /** 「说明」分页。 */
-export function HelpPanel({ t, state }: PanelShare): React.ReactElement {
+export function HelpPanel({ t, state, meta }: PanelShare): React.ReactElement {
+  // 两条路径来自 `/meta` 或 `/state`（同一份取值，见 ManagerPanel）：这一页只印它们，不自己推。
+  const facts = state ?? meta
   return (
     <>
       <p className="dsm-hint">{t('help.hint')}</p>
@@ -105,13 +107,13 @@ export function HelpPanel({ t, state }: PanelShare): React.ReactElement {
         <dl className="dsm-defs">
           <dt>{t('help.where.library')}</dt>
           <dd>
-            <span className="dsm-path">{state?.sessionsRoot ?? ''}</span>
+            <span className="dsm-path">{facts?.sessionsRoot ?? t('page.loading')}</span>
             <br />
             {t('help.where.libraryText')}
           </dd>
           <dt>{t('help.where.registry')}</dt>
           <dd>
-            <span className="dsm-path">{state?.registryPath ?? ''}</span>
+            <span className="dsm-path">{facts?.registryPath ?? t('page.loading')}</span>
             <br />
             {t('help.where.registryText')}
           </dd>

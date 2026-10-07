@@ -338,7 +338,7 @@ function ProgressBlock({
 }
 
 /** 同步页。 */
-export function SyncPanel({ t, state, reload }: PanelShare): React.ReactElement {
+export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactElement {
   /** 最近一次计划或结果：映射表的远端候选与弹窗正文都读它（关掉弹窗之后候选还得在）。 */
   const [sync, setSync] = React.useState<SyncResponse | null>(null)
   /** 同步弹窗开着吗（`plan` = 正在算计划、`apply` = 正在落地）。 */
@@ -356,8 +356,15 @@ export function SyncPanel({ t, state, reload }: PanelShare): React.ReactElement 
    */
   const [progress, setProgress] = React.useState<SyncProgressEvent | null>(null)
 
-  /** 同步配置（宿主插件配置里的 `sync` 块）；`null` 或字段缺席都按"没配置"处理，只画一句说明。 */
-  const syncInfo = state?.sync ?? null
+  /**
+   * 同步配置（宿主插件配置里的 `sync` 块）；`null` 或字段缺席都按"没配置"处理，只画一句说明。
+   *
+   * 这一项不依赖清单（`/meta` 先到），所以按 `state ?? meta` 取；两份都还没到时**不能**按"没配置"
+   * 画——那时该说的是"读取中…"，否则页面会先断言一句假的"这台机器没配同步"再改口。
+   */
+  const facts = state ?? meta
+  const syncInfo = facts?.sync ?? null
+  const syncKnown = facts !== undefined
 
   /**
    * 点「同步」：开弹窗并算一份只读计划（`GET /sync` 只读远端，什么都不写）。
@@ -532,7 +539,11 @@ export function SyncPanel({ t, state, reload }: PanelShare): React.ReactElement 
         </div>
         {/* 没配置同步时只留一句话：摆一个点了没反应的按钮比不摆更糟（与「宿主没有归档能力」同一条口径）。 */}
         <p className="dsm-hint">
-          {syncInfo === null ? t('sync.offHint') : t('sync.hint', { mappings: syncInfo.mappings })}
+          {!syncKnown
+            ? t('page.loading')
+            : syncInfo === null
+              ? t('sync.offHint')
+              : t('sync.hint', { mappings: syncInfo.mappings })}
         </p>
         {/* 配置表单就在「同步」旁边：改完 URL 立刻能同步一次。宿主没有设置接缝时这一块自己说明。 */}
         <SyncConfigForm

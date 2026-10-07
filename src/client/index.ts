@@ -117,7 +117,7 @@ interface LocaleService {
  *
  * 两个方法对应宿主能力位的两只（`native` / `browse`），**互斥**——在 `browse` 宿主上
  * `pickDirectory()` 会被宿主以 `directory-picker/unavailable` 拒绝，反之 `listDirectory()`
- * 也会。界面用宿主报来的 `pickerKind`（`/state`）选其中一个，不试错。
+ * 也会。界面用宿主报来的 `pickerKind`（`/meta` 先到，`/state` 里同一份）选其中一个，不试错。
  */
 interface UiWorkspaceService {
   /** 宿主系统对话框（`native` 宿主）：绝对路径，用户取消 `null`。 */
