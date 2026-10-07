@@ -170,7 +170,7 @@ export interface HostRegistryPort {
 }
 
 /**
- * 这一次改动有没有被**活着的宿主**接住。
+ * 本次改动有没有被**活着的宿主**接住。
  *
  * 几种情形要分得开：宿主自己改完了（`applied`）、改到一半失败了（文件已经写好，只能重启）、
  * 这个宿主没有那套动作（只有工具的前端 / 老版本）、这次走的是整份写回文件那条路（`file-only`）。
@@ -188,6 +188,36 @@ export interface EffectOutcome {
   targetId?: string
   /** `failed` 时的原因（原样带给用户，别吞）。 */
   error?: string
+}
+
+/**
+ * 宿主"补齐列表元数据"的两个服务收成的端口（见 checkpoint-warm.ts）。
+ *
+ * 宿主的会话列表**不读日志**：没活过的会话，标题 / 空白 / 最后活动时间都从它自己持久化的投影检查点里
+ * 取，取不到就显示"未命名"。本插件只能借宿主自己的冷读补那一条记录——`sessionQuery.readSession()` 加
+ * `sessionProjectionCache.coldSnapshot()`——自己写那份文件是错的（见 checkpoint-warm.ts 的开头）。
+ *
+ * 由宿主那半侧（`hostCheckpointPort()`）探测并交出，核心层只认这个形状——本类型不 import 任何宿主包。
+ */
+export interface CheckpointWarmPort {
+  /**
+   * 让宿主对**一条已存会话**冷读一遍日志、把折叠结果写成检查点（不建活会话、不动日志）。
+   *
+   * 失败时抛错：调用方逐条兜住——落地已经成功，这里补的是宿主那份派生数据。
+   */
+  warm(sessionId: string): Promise<void>
+}
+
+/** 一次落地之后"请宿主补检查点"的结果（见 checkpoint-warm.ts 的 `warmCheckpoints()`）。 */
+export interface WarmOutcome {
+  /** 真的补上的条数。 */
+  warmed: number
+  /** 试过但没补上的条数（逐条兜住，不影响落地结论）。 */
+  failed: number
+  /** 这个宿主没有那套动作（老版本 / 只装了工具的前端 / 没挂投影缓存）时为 true。 */
+  unavailable: boolean
+  /** 前几条失败原因（给人看的，最多三条；`failed` 才是全部条数）。 */
+  problems: string[]
 }
 
 /** `reHome()` 实际发生的动作。 */

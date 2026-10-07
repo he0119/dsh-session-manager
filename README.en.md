@@ -351,6 +351,13 @@ Sync also goes through a plan: the `sync_sessions` tool previews by default and 
   its own id. When the host lacks those actions (tools-only front end, older version), both the tools and the page
   say so and ask for a **DSH restart** — and until then, do not change any workspace: creating, renaming or
   archiving one would clobber this change with the in-memory copy.
+- **Landing also folds the list metadata**: the title, the blank verdict and the last-activity time shown in the
+  sidebar do not come from the log — they come from the host's own projection checkpoint, which the host only
+  writes for **live** sessions. So after an import, a sync pull or a migration (which rewrites `cwd`), the
+  plugin asks the host itself (read the log, then cold-fold the projections) to fill those in, and the sidebar
+  shows names without opening each row once. It costs one extra full-log read per landed session; the ones that
+  cannot be read are skipped per session and counted, and on a host without those services they keep waiting for
+  a first open.
 - **Look before it writes**: `plan` and the page's dialog (which shows that same `plan`) write nothing; every
   real write is preceded by a byte-level backup.
 - **Only the first frame is rewritten**: only the header frame is recompressed, the remaining frames stay

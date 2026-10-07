@@ -132,6 +132,8 @@ async function syncMachine(
     liveSessionIds?: () => ReadonlySet<string>
     /** 宿主那套"改注册表"的动作（见 src/take-effect.ts）；缺省 = 这个宿主没有这个能力。 */
     hostRegistry?: SyncDeps['hostRegistry']
+    /** 宿主那套"补投影检查点"的服务（见 src/checkpoint-warm.ts）；缺省 = 这个宿主补不了。 */
+    hostCheckpoints?: SyncDeps['hostCheckpoints']
     /** 备份根目录（缺省 `machine.base/backups`）；指向坏位置可以验"备份不成功就一条都不动"。 */
     backupRoot?: string
   },
@@ -149,6 +151,7 @@ async function syncMachine(
       ...(options.sessionMeta === undefined ? {} : { sessionMeta: options.sessionMeta }),
       ...(options.liveSessionIds === undefined ? {} : { liveSessionIds: options.liveSessionIds }),
       ...(options.hostRegistry === undefined ? {} : { hostRegistry: options.hostRegistry }),
+      ...(options.hostCheckpoints === undefined ? {} : { hostCheckpoints: options.hostCheckpoints }),
       pluginVersion: '0.0.1-test',
       now: () => new Date('2026-10-01T00:00:00.000Z'),
     },
@@ -610,12 +613,24 @@ test('sync：端到端——A 推送、B 拉取，cwd 改写成 B 的路径且�
         hostWorkspaces.delete(workspaceId)
       },
     })
-    const pulled = await syncMachine(b, dav, bConfig, { apply: true, hostRegistry: hostPort })
+    // 同一次收口里还要请宿主把拉来的这两条折进投影检查点：它们从没在本机活过，侧边栏本来会显示"未命名"。
+    const warmed: string[] = []
+    const pulled = await syncMachine(b, dav, bConfig, {
+      apply: true,
+      hostRegistry: hostPort,
+      hostCheckpoints: () => ({
+        warm: async (sessionId: string) => {
+          warmed.push(sessionId)
+        },
+      }),
+    })
     assert.deepEqual(pulled.pulled.sort(), ['s1', 's2'])
     assert.equal(pulled.registryWritten, true)
     assert.equal(pulled.indexWritten, true, '拉取完也要写自己那一格（把所有自己的会话列出来）')
     assert.equal(pulled.effect?.kind, 'applied')
     assert.deepEqual(reloads, ['s1,s2'], '两条一起落地也只重看一次磁盘，且发生在注册表落盘之后')
+    assert.deepEqual([...warmed].sort(), ['s1', 's2'], '落地的两条各补一次')
+    assert.equal(pulled.warm?.warmed, 2)
 
     // 落地位置与 cwd：按 B 的路径重新算项目目录
     for (const id of ['s1', 's2']) {
@@ -636,6 +651,7 @@ test('sync：端到端——A 推送、B 拉取，cwd 改写成 B 的路径且�
     assert.deepEqual(again.pulled, [])
     assert.deepEqual(again.pushed, [])
     assert.equal(again.effect, undefined, '这次没写注册表，就没有要交给宿主的东西')
+    assert.equal(again.warm, undefined, '没落到本机任何一条：这一步根本没跑，不摆空结论')
     const aPlan = await syncMachine(a, dav, settings(a, { machineId: 'robot-a' }), { apply: false })
     assert.deepEqual(aPlan.plan.pullIds, [])
     assert.deepEqual(aPlan.plan.pushIds, [])

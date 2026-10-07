@@ -27,6 +27,7 @@ import {
 } from './migrate.ts'
 import { familyOf, loneSubagents } from './family.ts'
 import { projectionCacheDir } from './paths.ts'
+import { describeWarm, warmCheckpoints } from './checkpoint-warm.ts'
 import { readRegistry, validateRegistry } from './registry.ts'
 import { describeEffect, effectOf, takeEffectOnHost } from './take-effect.ts'
 import { runRemoval, type RemoveDeps, type RemovalRun } from './remove.ts'
@@ -42,7 +43,7 @@ import {
   type ImportPlan,
   type ImportOptions,
 } from './transfer.ts'
-import type { DecodeAll, HostRegistryPort, WorkspaceRegistryState } from './types.ts'
+import type { CheckpointWarmPort, DecodeAll, HostRegistryPort, WorkspaceRegistryState } from './types.ts'
 import { createBlankResolver, createSessionMetaResolver, hiddenReason, isUngrouped, type HiddenReason, type SessionMeta } from './visibility.ts'
 
 /** 本插件占用的路由前缀。 */
@@ -81,6 +82,13 @@ export interface ApiDeps {
    * 同源——拿不到这个端口就是"需要重启"。
    */
   hostRegistry?: () => HostRegistryPort | undefined
+  /**
+   * 宿主"补齐列表元数据"的端口（`sessionQuery` + `sessionProjectionCache`，见 checkpoint-warm.ts）。
+   *
+   * 同 `hostRegistry`：要读宿主服务，所以由入口探测后注入；缺席 = 这个宿主补不了，落地照旧成功，
+   * 只是那些会话在侧边栏要等第一次点开才有标题。
+   */
+  hostCheckpoints?: () => CheckpointWarmPort | undefined
   /**
    * 宿主目录选择器的能力种类（`browse` / `native` / `null`）。
    *
@@ -429,6 +437,8 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
   // 宿主注册表动作的探测：迁移 / 导入 / 同步拉取共用这一个；探测本身在宿主那一侧，
   // 界面这一层只转手（见 ApiDeps.hostRegistry）。
   const hostRegistry = (): HostRegistryPort | undefined => deps.hostRegistry?.()
+  // 同理：把宿主的两个冷读服务转手给编排层（迁移 / 导入 / 同步拉取三个落地口共用，见 ApiDeps.hostCheckpoints）。
+  const hostCheckpoints = (): CheckpointWarmPort | undefined => deps.hostCheckpoints?.()
 
   const state = async (_req: IncomingMessage, res: ServerResponse): Promise<void> => {
     const { registry, problems } = loadRegistry(paths.registryPath)
@@ -583,6 +593,12 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
       // 导入会改注册表（把会话挂进目标工作区），与迁移是同一条语义：改完就把活儿交给宿主自己做，
       // 而不是把"重启 DSH 最稳妥"留给用户。注册表这次没动时（没有要挂的 / 读不到注册表）没有这一步。
       const effect = outcome.registryWritten ? await takeEffectOnHost(plan.registryChange, { hostRegistry }) : undefined
+      /*
+       * 导进来的会话从没在本机活过，宿主的投影检查点里没有它们：侧边栏会显示"未命名"、时间退回
+       * createdAt，直到被点开一次。这里请宿主自己冷读一遍补上（逐条兜住失败，不影响落地结论，
+       * 见 checkpoint-warm.ts）。
+       */
+      const warm = await warmCheckpoints(outcome.written, { hostCheckpoints })
       sendJson(res, 200, {
         ...payload,
         ok: true,
@@ -590,10 +606,15 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
         writtenBytes: outcome.bytes,
         registryWritten: outcome.registryWritten,
         takesEffect: effectOf(effect, takesEffect()),
-        note:
+        ...(outcome.written.length === 0 ? {} : { warm }),
+        note: [
           effect === undefined
             ? '会话已落盘（这次没有改注册表）：宿主重新扫描后就会出现在侧边栏，不需要重启。'
             : describeEffect(effect),
+          describeWarm(warm),
+        ]
+          .filter((line): line is string => line !== undefined)
+          .join('\n'),
       })
     } catch (error) {
       sendJson(res, 500, {
@@ -613,6 +634,8 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
     resolveTitle,
     // 每次调用重新探测（只有工具的前端 / 老版本宿主可能没有这套动作）。
     hostRegistry,
+    // 迁移改写了 cwd，旧检查点因此对不上：收口时请宿主重折一遍（见 checkpoint-warm.ts）。
+    hostCheckpoints,
   }
   // 没注入就按"需要重启"说：宁可保守，也不谎称已经生效。执行过的那些走执行结果（见 effectOf）。
   const takesEffect = (): EffectMode => (hostRegistry() === undefined ? 'restart-required' : 'immediate')
@@ -679,6 +702,7 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
       ...(run.backupDir === undefined ? {} : { backupDir: run.backupDir }),
       problems: run.problems,
       summary: run.summary,
+      ...(run.warm === undefined ? {} : { warm: run.warm }),
       // 真的改过注册表就认执行结果，没改过才退到探测（见 take-effect.ts 的 effectOf）。
       takesEffect: effectOf(run.effect, takesEffect()),
     }
@@ -771,6 +795,8 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
       liveSessionIds,
       // 拉取会把会话挂到目标工作区（改注册表）：整批落地之后由编排层收口交给宿主一次。
       hostRegistry,
+      // 拉取来的会话在本机没有投影检查点：同一次收口里请宿主把列表元数据折出来（见 checkpoint-warm.ts）。
+      hostCheckpoints,
       ...(deps.pluginVersion === undefined ? {} : { pluginVersion: deps.pluginVersion }),
       ...(deps.now === undefined ? {} : { now: deps.now }),
     }

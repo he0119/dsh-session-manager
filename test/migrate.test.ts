@@ -301,3 +301,43 @@ test('列举备份：坏目录跳过而不是让整张列表打不开', async ()
   assert.equal(listBackups({ ...sb.deps, backupRoot: join(sb.base, 'nope') }).length, 0, '备份根不存在时回空列表')
   rmSync(sb.base, { recursive: true, force: true })
 })
+
+test('执行后请宿主补检查点：搬动的会话各补一次，补不上也不影响迁移结论', async () => {
+  const sb = makeSandbox('migrate-warm', ['session-warm-1', 'session-warm-2'])
+  const warmed: string[] = []
+  const run = await runMigration(
+    {
+      ...sb.deps,
+      // 一条成功、一条失败：计数要分开，失败的只进结论、不进 problems（迁移本身没错）。
+      hostCheckpoints: () => ({
+        warm: async (sessionId: string) => {
+          warmed.push(sessionId)
+          if (sessionId === 'session-warm-2') throw new Error('日志读不动')
+        },
+      }),
+    },
+    { from: FROM, to: TO, title: 'to' },
+    { apply: true },
+  )
+
+  assert.deepEqual([...warmed].sort(), ['session-warm-1', 'session-warm-2'])
+  assert.equal(run.warm?.warmed, 1)
+  assert.equal(run.warm?.failed, 1)
+  assert.equal(run.verified, true, `复核应当照旧通过：${run.problems.join('; ')}`)
+  assert.deepEqual(run.problems, [], '补齐列表元数据失败不该出现在迁移的问题清单里')
+  assert.match(run.summary, /已请宿主折好这 1 条会话的列表元数据/)
+  assert.match(run.summary, /1 条没补上/)
+
+  rmSync(sb.base, { recursive: true, force: true })
+})
+
+test('宿主没有补检查点那套服务时：如实说"要等第一次点开"，迁移照旧算成功', async () => {
+  const sb = makeSandbox('migrate-warm-unavailable')
+  const run = await runMigration(sb.deps, { from: FROM, to: TO, title: 'to' }, { apply: true })
+
+  assert.equal(run.applied, true)
+  assert.equal(run.verified, true)
+  assert.equal(run.warm?.unavailable, true)
+  assert.match(run.summary, /第一次点开才有标题/)
+  rmSync(sb.base, { recursive: true, force: true })
+})
