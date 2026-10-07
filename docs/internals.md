@@ -140,6 +140,8 @@
   任意绝对路径要一个值控件，而目录选择器是一只互斥的能力位服务。
 - [动作页只留当下要做的决定](../.agents/notes/implemented/architecture/2026-09-28-help-page-owns-the-glossary.md)：
   词条进「说明」页，并钉了一条两行的上限。
+- [说明页 FAQ 的答案不被挤成零宽](../.agents/notes/implemented/bug-fix/2026-10-07-faq-answers-collapse-to-zero-width.md)：
+  FAQ 是"问题一行、答案一行"，那一栏自己声明单列，不能沿用词条表那套两列网格。
 - [预演表的状态列只放短标签，整句挂 title](../.agents/notes/implemented/bug-fix/2026-10-03-status-column-holds-a-short-tag.md)：
   窄列装不下整句时改文案与列宽，不是让标签顶到邻居身上；三段清单同形，状态与会话名分成两列。
 - [同步预演的三段清单要有段头](../.agents/notes/implemented/bug-fix/2026-10-07-sync-plan-sections-need-headings.md)：

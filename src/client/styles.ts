@@ -98,6 +98,12 @@ export const CSS = `
 .dsm-defs dd { margin: 0; color: var(--dsw-alias-label-secondary, #646a73); }
 /* 问答的"问"是一整句话，不能按 nowrap 排——它会顶穿词条列。 */
 .dsm-defsFaq dt { white-space: normal; }
+/*
+ * FAQ 是"问题一行、答案一行"，本来就没有第二列：.dsm-defs 那条 minmax(0, auto) 会把问题的
+ * max-content 吃满整行，答案那一列因此拿到 0px——每个答案一行只放得下一个字符，整列垂到卡片右缘
+ * 外面（真实 dev GUI 里量到 dd 宽 0px、高 1122px；声明成单列之后宽 534px、高 88px）。
+ */
+.dsm-defsFaq { grid-template-columns: minmax(0, 1fr); }
 /* 路径这类机器可读的字串：等宽 + 次要灰，避免与正文混成一句。 */
 .dsm-path { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; word-break: break-all; }
 .dsm-button {
