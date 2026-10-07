@@ -4,27 +4,19 @@
  * Host 半侧的编排在 `src/migrate.ts`，端点在同名路由下；这一层只做三件事：收参数、把**计划**摆清楚、
  * 按用户的确认落地。所有判定都在宿主侧——页面不自己推算会不会成功，也不自己拼路径。
  *
- * 两个刻意的设计：
- *   - **计划与确认同框**：点「迁移」开确认弹窗（见 [ConfirmDialog.tsx](./ConfirmDialog.tsx)），里面
- *     就是 `mode: 'plan'` 的响应（同样的形状、同样的数字），落地按钮在同一个弹窗里；"看到的就是将要
- *     发生的"因此不依赖用户记住上一屏，取消则是关掉弹窗、页面回到按之前的样子；
- *   - 回滚给一份**动作清单**再确认：回滚会搬目录、按字节还原日志、恢复注册表，等于一次真实写入，
- *     所以开弹窗时先 `dryRun` 把动作列出来，用户点确认才动手。
+ * 一个刻意的设计：**计划与确认同框**——点「迁移」开确认弹窗（见 [ConfirmDialog.tsx](./ConfirmDialog.tsx)），
+ * 里面就是 `mode: 'plan'` 的响应（同样的形状、同样的数字），落地按钮在同一个弹窗里；"看到的就是将要
+ * 发生的"因此不依赖用户记住上一屏，取消则是关掉弹窗、页面回到之前的样子。
+ *
+ * 这一页只做迁移这一件事：迁移留下的那份备份（以及删除、同步覆盖留下的）在「备份」分页里，见
+ * [BackupPanel.tsx](./BackupPanel.tsx)。
  *
  * @module dsh-session-manager/client/MigrationPanel
  */
 
 import * as React from 'react'
 
-import {
-  fetchBackups,
-  migrate,
-  rollbackBackup,
-  type BackupSummary,
-  type MigrationRequest,
-  type MigrationResponse,
-  type RollbackResponse,
-} from '../api.ts'
+import { migrate, type MigrationRequest, type MigrationResponse } from '../api.ts'
 import { ConfirmDialog } from './ConfirmDialog.tsx'
 import {
   SessionFilterBar,
@@ -33,7 +25,6 @@ import {
   SessionRow,
   SessionStaticRow,
   formatBytes,
-  formatStamp,
   useSessionFilter,
 } from './sessionList.tsx'
 import type { Translate } from '../logic/locales.ts'
@@ -52,23 +43,6 @@ import type { PanelShare } from '../types.ts'
 /** 异常 → 一句话（弹窗正文与横幅共用）。 */
 function reasonOf(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause)
-}
-
-/**
- * 这份备份点下去是「恢复」还是「回滚」。
- *
- * 判据是"原来那份还在不在原地"：删除与同步时覆盖本机那份（`delete` / `replace`）都是**备份里那份
- * 搬回去**，属恢复；迁移是"搬走那份搬回来"，属回滚。老备份没有 kind 字段，按迁移处理。
- */
-function isRestore(backup: Pick<BackupSummary, 'kind'>): boolean {
-  return backup.kind !== undefined && backup.kind !== 'migrate'
-}
-
-/** 这份备份是哪一类操作留下的（三种各一枚标签）。 */
-function backupKindLabel(backup: Pick<BackupSummary, 'kind'>): 'backup.kind.migrate' | 'backup.kind.delete' | 'backup.kind.replace' {
-  if (backup.kind === 'delete') return 'backup.kind.delete'
-  if (backup.kind === 'replace') return 'backup.kind.replace'
-  return 'backup.kind.migrate'
 }
 
 /** 一次落地之后的结论：复核过没过、备份在哪、要不要重启（原样透出宿主报的三件事）。 */
@@ -207,36 +181,6 @@ export function MigrationPanel({ t, state, meta, reload, directory }: PanelShare
   const [notice, setNotice] = React.useState<string | null>(null)
   /** 上一次落地之后的结论（复核 / 备份 / 生效方式）：弹窗关了之后它还得在页面上留着。 */
   const [effect, setEffect] = React.useState<MigrationEffect | null>(null)
-
-  const [backups, setBackups] = React.useState<BackupSummary[]>([])
-  const [backupRoot, setBackupRoot] = React.useState('')
-  const [backupError, setBackupError] = React.useState<string | null>(null)
-  /** 正在算回滚动作 / 正在回滚的那份备份目录（按钮据此禁用）。 */
-  const [rollbackBusy, setRollbackBusy] = React.useState<string | null>(null)
-  /** 回滚 / 恢复弹窗：动作清单与确认按钮在同一块地方（同 ConfirmDialog.tsx 的说明）。 */
-  const [rollbackDialog, setRollbackDialog] = React.useState<{
-    backup: BackupSummary
-    plan: RollbackResponse | null
-    error: string | null
-  } | null>(null)
-
-  const loadBackups = React.useCallback(async (): Promise<void> => {
-    try {
-      const response = await fetchBackups()
-      setBackups(response.backups)
-      setBackupRoot(response.backupRoot)
-      setBackupError(null)
-    } catch (cause) {
-      setBackupError(cause instanceof Error ? cause.message : String(cause))
-    }
-  }, [])
-
-  const loaded = React.useRef(false)
-  React.useEffect(() => {
-    if (loaded.current) return
-    loaded.current = true
-    void loadBackups()
-  }, [loadBackups])
 
   // 库里能按 cwd 匹配到的会话——只是给用户一个勾选面；真正迁移哪些由宿主按源项目目录算。
   // 「未分组」来源不是按 cwd 匹配，而是"注册表没认领、且有 cwd"的那一批（可以横跨多个目录），
@@ -451,7 +395,7 @@ export function MigrationPanel({ t, state, meta, reload, directory }: PanelShare
             ' ' +
             (response.verified ? t('verify.pass') : t('verify.fail')),
         )
-        void reload().then(() => loadBackups())
+        void reload()
       },
       (cause) => {
         setBusy(null)
@@ -470,55 +414,6 @@ export function MigrationPanel({ t, state, meta, reload, directory }: PanelShare
    */
   const plannedRestart =
     planned && registry !== null && !registry.unchanged && pending?.response?.takesEffect === 'restart-required'
-
-  /**
-   * 点备份行上的「回滚」/「恢复」：开弹窗，同时把只读的动作清单取回来（`dryRun: true` 不写盘）。
-   *
-   * 动作清单是回滚这件事唯一能让用户预先看到的东西（会话目录搬回哪、日志从哪还原、注册表动不动），
-   * 所以它必须与确认按钮同框——这正是原来"看回滚动作 → 再点一下回滚"两步之间的那段距离。
-   */
-  const openRollback = (backup: BackupSummary): void => {
-    setBackupError(null)
-    setRollbackDialog({ backup, plan: null, error: null })
-    setRollbackBusy(backup.dir)
-    void rollbackBackup(backup.dir, true).then(
-      (response) =>
-        setRollbackDialog((current) =>
-          current === null || current.backup.dir !== backup.dir ? current : { ...current, plan: response },
-        ),
-      (cause) =>
-        setRollbackDialog((current) =>
-          current === null || current.backup.dir !== backup.dir
-            ? current
-            : { ...current, plan: null, error: reasonOf(cause) },
-        ),
-    ).finally(() => setRollbackBusy(null))
-  }
-
-  /** 弹窗里按「确认回滚 / 确认恢复」：写盘并还原。 */
-  const applyRollback = (backup: BackupSummary): void => {
-    setRollbackBusy(backup.dir)
-    setBackupError(null)
-    void rollbackBackup(backup.dir, false).then(
-      (response) => {
-        setRollbackBusy(null)
-        setRollbackDialog(null)
-        setNotice(
-          t(isRestore(backup) ? 'backup.restore.done' : 'backup.rollback.done', {
-            sessions: response.sessions,
-            files: response.restoredFiles,
-          }),
-        )
-        setEffect(null)
-        void reload().then(() => loadBackups())
-      },
-      (cause) => {
-        setRollbackBusy(null)
-        setRollbackDialog(null)
-        setBackupError(reasonOf(cause))
-      },
-    )
-  }
 
   return (
     <>
@@ -801,89 +696,6 @@ export function MigrationPanel({ t, state, meta, reload, directory }: PanelShare
                   ))}
                 </SessionListBox>
               )}
-            </>
-          )}
-        </ConfirmDialog>
-      )}
-
-      <div className="dsm-card">
-        <div className="dsm-cardHead">
-          <span className="dsm-cardTitle">{t('backup.title')}</span>
-          <span className="dsm-spacer" />
-          <button type="button" className="dsm-button" onClick={() => void loadBackups()} disabled={rollbackBusy !== null}>
-            {t('page.refresh')}
-          </button>
-        </div>
-        <p className="dsm-hint">{t('backup.hint')}</p>
-        {backupRoot !== '' && (
-          <p className="dsm-hint">
-            {t('backup.rootLabel')}：{backupRoot}
-          </p>
-        )}
-
-        {backupError !== null && <p className="dsm-banner dsm-error">{backupError}</p>}
-
-        {backups.length === 0 ? (
-          <p className="dsm-empty">{t('backup.empty')}</p>
-        ) : (
-          <div className="dsm-list">
-            {backups.map((backup) => (
-              <div key={backup.dir} className="dsm-backupRow">
-                <div className="dsm-backupMain">
-                  <span className="dsm-rowId">
-                    {formatStamp(backup.createdAt)}
-                    {/* 这份备份是迁移留下的还是删除留下的：删除的那份点「恢复」，迁移的那份点「回滚」。 */}
-                    <span className="dsm-tag dsm-tagIdle">
-                      {t(backupKindLabel(backup))}
-                    </span>
-                  </span>
-                  <span className="dsm-hint">{t('backup.row', { sessions: backup.sessions, artifacts: backup.artifacts })}</span>
-                  {(backup.from !== undefined || backup.to !== undefined) && (
-                    <span className="dsm-meta" title={backup.dir}>
-                      {backup.from ?? '—'} → {backup.to ?? '—'}
-                    </span>
-                  )}
-                </div>
-                <button
-                  type="button"
-                  className="dsm-button"
-                  onClick={() => openRollback(backup)}
-                  disabled={rollbackBusy !== null}
-                >
-                  {t(isRestore(backup) ? 'backup.restore.action' : 'backup.rollback.action')}
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* 回滚 / 恢复弹窗：动作清单与「确认」同框（见 ConfirmDialog.tsx 的说明）。 */}
-      {rollbackDialog !== null && (
-        <ConfirmDialog
-          t={t}
-          title={t(isRestore(rollbackDialog.backup) ? 'backup.restore.dialogTitle' : 'backup.rollback.dialogTitle')}
-          confirmLabel={t(isRestore(rollbackDialog.backup) ? 'backup.restore.confirm' : 'backup.rollback.confirm')}
-          busyLabel={t(isRestore(rollbackDialog.backup) ? 'backup.restore.running' : 'backup.rollback.running')}
-          busy={rollbackBusy === rollbackDialog.backup.dir}
-          planning={rollbackDialog.plan === null && rollbackDialog.error === null}
-          error={rollbackDialog.error}
-          disabled={rollbackDialog.plan === null}
-          onConfirm={() => applyRollback(rollbackDialog.backup)}
-          onCancel={() => setRollbackDialog(null)}
-        >
-          {rollbackDialog.plan !== null && (
-            <>
-              <p className="dsm-warn">
-                {t(isRestore(rollbackDialog.backup) ? 'backup.restore.actions' : 'backup.rollback.actions', {
-                  count: rollbackDialog.plan.actions.length,
-                })}
-              </p>
-              <ul className="dsm-listPlain">
-                {rollbackDialog.plan.actions.map((action) => (
-                  <li key={action}>{action}</li>
-                ))}
-              </ul>
             </>
           )}
         </ConfirmDialog>

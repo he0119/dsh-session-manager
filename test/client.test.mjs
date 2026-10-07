@@ -553,7 +553,7 @@ test('客户端产物：导航行的文案跟着语言走（同一个 thunk 每�
   assert.equal(label(), 'Session management')
 })
 
-test('客户端产物：页面骨架带着四个动作页（会话 / 迁移 / 传输 / 同步）与说明页', { skip }, () => {
+test('客户端产物：页面骨架带着五个动作页（会话 / 迁移 / 传输 / 同步 / 备份）与说明页', { skip }, () => {
   const { registrations, recorded } = mount()
   const { component } = registrations[0]
   const { inject } = registrations[0].registration
@@ -564,19 +564,54 @@ test('客户端产物：页面骨架带着四个动作页（会话 / 迁移 / �
   assert.ok(text.includes('page.tab.migrate'), '页内要有「迁移」这一页')
   assert.ok(text.includes('page.tab.manage'), '页内要有「会话」这一页（逐条归档 / 删除）')
   assert.ok(text.includes('page.tab.sync'), '页内要有「同步」这一页（WebDAV）')
-  // 页签顺序：日常的「会话」在最前；「同步」紧挨「传输」（它落地走的是导入那条编排）；说明垫底
+  assert.ok(text.includes('page.tab.backup'), '页内要有「备份」这一页（三种写操作共同的后悔面）')
+  // 页签顺序：日常的「会话」在最前；「同步」紧挨「传输」（它落地走的是导入那条编排）；「备份」是
+  // 三个写操作共同的后悔面、不属于任何一个动作页，所以排在动作页之后；说明垫底
   const tabs = recorded.filter((node) => String(node.props?.className) === 'dsm-tab')
   assert.deepEqual(
     tabs.map((node) => strings(node)[0]),
-    ['page.tab.manage', 'page.tab.migrate', 'page.tab.transfer', 'page.tab.sync', 'page.tab.help'],
-    '顺序是 会话 → 迁移 → 传输 → 同步 → 说明（动作页按日常程度排，参考页垫底）',
+    ['page.tab.manage', 'page.tab.migrate', 'page.tab.transfer', 'page.tab.sync', 'page.tab.backup', 'page.tab.help'],
+    '顺序是 会话 → 迁移 → 传输 → 同步 → 备份 → 说明（动作页按日常程度排，参考页垫底）',
   )
   assert.deepEqual(
     tabs.map((node) => node.props['aria-selected']),
-    [true, false, false, false, false],
+    [true, false, false, false, false, false],
     '默认停在第一个页签',
   )
   assert.ok(text.includes('page.title'), '页面标题走同一份字典')
+})
+
+test('客户端产物：备份是独立分页，迁移页上不再有那张清单', { skip }, () => {
+  // 这张清单里躺的不只是迁移留下的备份：删除与同步覆盖本机那份也各留一份（`kind` 三种）。它原先挂在
+  // 「迁移」卡片下面时，界面得在三处替它引路（删除成功的横幅、同步的结果与进度说明、说明页的 FAQ）。
+  const state = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    sessions: [],
+    workspaces: [],
+  }
+  const pageText = (panel) => {
+    const mounted = mount({ state, panel })
+    return strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
+  }
+  const migrate = pageText('migrate')
+  const backup = pageText('backup')
+  for (const key of ['backup.title', 'backup.hint', 'backup.empty']) {
+    assert.ok(!migrate.includes(key), `迁移页上不该再有备份清单的那部分（${key}）`)
+    assert.ok(backup.includes(key), `「备份」分页上要有清单的那部分（${key}）`)
+  }
+  // 「会话」页与「同步」页的成功文案都指向「备份」页，不再指向「迁移」页的某张卡：那句话只在弹窗
+  // 或流式进度里出现，渲染路径上取不到，所以按字典的值核（键一定在，值里不该再出现"迁移页"）。
+  const { zh } = mount().dictionaries[0].dicts
+  for (const key of ['manage.delete.backupTo', 'sync.progress.note', 'sync.appliedReplaced', 'help.faq.backupA']) {
+    assert.ok(zh[key].includes('「备份」页'), `${key} 要把人指到「备份」页`)
+    assert.ok(!zh[key].includes('迁移」页'), `${key} 不该再指「迁移」页`)
+  }
+  assert.ok(
+    zh['sync.progress.note'].includes('「备份」页'),
+    '同步的进度说明里那句"去哪恢复"要指到「备份」页',
+  )
 })
 
 test('客户端产物：页头是页面级标题（h2 + 说明行），不是卡片式的小标题', { skip }, () => {
@@ -1882,9 +1917,10 @@ test('客户端产物：「说明」页把分类词条、每页做什么与边�
   for (const key of ['help.categories.visible', 'tag.subagent', 'tag.blank', 'tag.archived', 'tag.live', 'list.ungrouped']) {
     assert.ok(terms.includes(key), `分类词典缺少「${key}」`)
   }
-  assert.equal(terms.length, 20, '词条数＝分类 6 + 分页 4 + 数据 2 + 疑问 8')
-  assert.equal(recorded.filter((node) => node.type === 'dd').length, 20, '每条词条都有解释')
+  assert.equal(terms.length, 21, '词条数＝分类 6 + 分页 5 + 数据 2 + 疑问 8')
+  assert.equal(recorded.filter((node) => node.type === 'dd').length, 21, '每条词条都有解释')
   assert.ok(terms.includes('page.tab.sync'), '分页那一节要写到「同步」这一页')
+  assert.ok(terms.includes('page.tab.backup'), '分页那一节也要写到「备份」这一页')
   // 「数据从哪来」两条路径来自 /state，不是写死在文案里
   assert.ok(
     text.includes('/home/u/.dsh/sessions') && text.includes('/home/u/.dsh/registry.json'),
@@ -2930,14 +2966,13 @@ test('客户端产物：回滚弹窗先摆动作清单再确认（清单就是�
     sessions: [],
     workspaces: [],
   }
-  // null 顺序：骨架的 error / 迁移页的 picking / manual / pending / busy / error / notice / effect /
-  // backupError / rollbackBusy / **rollbackDialog**（备份清单由第二个数组种）。
+  // null 顺序：骨架的 error / 备份页的 error / notice / busy / **dialog**（备份清单由第一个数组种）。
   const item = mount({
     state,
-    panel: 'migrate',
-    arrays: [[], [backup]],
+    panel: 'backup',
+    arrays: [[backup]],
     nulls: [
-      null, null, null, null, null, null, null, null, null, null,
+      null, null, null, null,
       {
         backup,
         plan: {
@@ -2993,7 +3028,7 @@ test('客户端产物：备份清单认三种来源——迁移/删除/覆盖前
     sessions: [],
     workspaces: [],
   }
-  const mounted = mount({ state, panel: 'migrate', arrays: [[], backups] })
+  const mounted = mount({ state, panel: 'backup', arrays: [backups] })
   const text = strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
   assert.ok(text.includes('backup.kind.migrate'), '迁移那份的标签照旧')
   assert.ok(text.includes('backup.kind.delete'), '删除那份的标签照旧')
@@ -3015,10 +3050,10 @@ test('客户端产物：备份清单认三种来源——迁移/删除/覆盖前
   // 弹窗里的措辞也跟着来源走：覆盖前那份开的是「恢复」那一套文案。
   const replacing = mount({
     state,
-    panel: 'migrate',
-    arrays: [[], backups],
+    panel: 'backup',
+    arrays: [backups],
     nulls: [
-      null, null, null, null, null, null, null, null, null, null,
+      null, null, null, null,
       {
         backup: backups[2],
         plan: {

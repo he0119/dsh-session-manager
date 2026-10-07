@@ -23,7 +23,7 @@ still works.
 
 | Entry point | Good for |
 |---|---|
-| The **Session management** page in Settings | Everyday use: archive or delete single sessions on the **Sessions** tab; pick a source (a directory or Ungrouped) from a dropdown to migrate; tick sessions to export / import; run a WebDAV sync on the **Sync** tab |
+| The **Session management** page in Settings | Everyday use: archive or delete single sessions on the **Sessions** tab; pick a source (a directory or Ungrouped) from a dropdown to migrate; tick sessions to export / import; run a WebDAV sync on the **Sync** tab; roll back or restore on the **Backups** tab |
 | 5 model tools | Just say "move this workspace's sessions to `~/dev/xxx`" and let the model preview first, apply second |
 
 Both share one migration implementation, so the count the dialog reports is the count you get.
@@ -98,8 +98,8 @@ one-line bump at that point.
 - **Delete**: tick rows → **Delete selected** opens a dialog listing every session that would go, the
   file count and where the backup lands → confirm there. Deleting **backs the session directory up into this plugin's backup root
   first**, then removes it; the sidebar drops those rows once the host rescans. A session still live in
-  host memory is refused — close it in the host first. Changed your mind? Restore it from
-  **Backups & rollback**;
+  host memory is refused — close it in the host first. Changed your mind? Restore it from the **Backups**
+  tab;
 - **Subagents follow their parent session**: ticking a parent takes its subagent sessions (and any
   deeper descendants) with it — the dialog lists them row by row, marked as going with the parent, and
   one backup holds the whole family (once the parent's log is gone a subagent has no way back into the
@@ -159,13 +159,6 @@ one-line bump at that point.
   backup. Afterwards the page tells you whether the change took effect immediately or **requires a DSH
   restart**.
 
-**Backups & rollback** — below the migrate tab, every backup this plugin wrote (time, **migration** or
-**delete**, session count, source → target), with the steps shown before you confirm. A migration backup
-offers **Roll back**, which first lists the steps in a dialog and only then restores the session
-directories, the log bytes and the workspace registry together (and removes the emptied target project directory, symmetric with the migration cleaning up an
-emptied source project directory). A delete backup offers **Restore**: it only moves the session
-directories back — deleting never touched the registry.
-
 **Transfer** — take sessions away, bring them back
 
 - Rows show a session's **title**, with the full title and the id on hover: a uuid tells a human nothing,
@@ -202,14 +195,22 @@ directories back — deleting never touched the registry.
   touches nothing locally. Import **never overwrites**: a session whose id already exists is skipped and reported; a session with no `cwd` lands in
   the `_no-cwd` project directory and is not registered.
 
+**Backups** — the undo surface shared by the operations that write: every backup this plugin wrote (time,
+**migration** / **delete** / **before overwrite**, session count, source → target), with the steps shown
+before you confirm. A migration backup offers **Roll back**: it restores the session directories, the log
+bytes and the workspace registry together (and removes the emptied target project directory, symmetric with
+the migration cleaning up an emptied source project directory). A backup from a delete or from a sync
+overwriting this machine’s copy offers **Restore**: it only moves the backed-up copy back — those two never
+touched the registry.
+
 **Help** — the vocabulary and the costs in one place: the category dictionary (visible / subagent / blank /
 archived / active / Ungrouped, where Ungrouped is exactly the shell sidebar's Ungrouped group: nothing claims
-it and the sidebar shows it), what the three tabs do, which files the actions touch (backups, roll back vs
+it and the sidebar shows it), what the five tabs do, which files the actions touch (backups, roll back vs
 restore, when the sidebar follows), where the data comes from (the library and the registry paths), and the
 common questions (which sessions count as Ungrouped, why a deleted session is still in the sidebar, when a
 migration asks for a restart). The action tabs
-(Sessions / Migrate / Transfer / Sync) keep only the decision at hand, so each explanation there stays within two
-lines.
+(Sessions / Migrate / Transfer / Sync / Backups) keep only the decision at hand, so each explanation there stays
+within two lines.
 
 A host without the `webServer` service (tools-only front ends) still loads the plugin — the page simply
 does not appear.

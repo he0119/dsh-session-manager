@@ -34,12 +34,13 @@ const CATEGORIES = [
   ['list.ungrouped', 'list.ungroupedTip'],
 ] as const
 
-/** 四个分页各管什么：与页签同一个顺序（会话 → 迁移 → 传输 → 同步）。 */
+/** 五个分页各管什么：与页签同一个顺序（会话 → 迁移 → 传输 → 同步 → 备份）。 */
 const TAB_LINES = [
   ['page.tab.manage', 'help.tabs.manage'],
   ['page.tab.migrate', 'help.tabs.migrate'],
   ['page.tab.transfer', 'help.tabs.transfer'],
   ['page.tab.sync', 'help.tabs.sync'],
+  ['page.tab.backup', 'help.tabs.backup'],
 ] as const
 
 /** 常见疑问：问答同上一条同一个形状（dt 问、dd 答）。会碰什么盘的独有内容收在这里。 */
