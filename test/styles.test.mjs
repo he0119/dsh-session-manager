@@ -279,10 +279,11 @@ test('state 色不许裸当文字色：它是指示色，浅色主题下淡到�
   assert.deepEqual(offenders, [], 'state 色要当文字色，得先用 color-mix 和 label-primary 兑过')
 })
 
-test('页头照内建设置页的规格：18px/600 的 h2 标题 + 下面一档灰的说明行', () => {
+test('页头照内建设置页的规格：16px/500 的 h2 标题 + 隔 12px 一行 14px 的说明行', () => {
   // 为什么钉它：这一页的页头是**手写**的（官方设置页也是手写 h2 + p，没有现成原语可复用），
   // 规格只能照量出来的数字抄。抄错的后果就是真实事故里那种"看着不对但没人说得清哪不对"——
-  // 用户就是这么发现标题格式与本页不一致的：内建页是 h2/18px、说明行 12px 之后、列布局。
+  // 抄错参照页也会：18px/600 那一档量的是「插件」**整页**的标题，而本页是设置外壳里的一个区块，
+  // 相邻的「模型」「内置插件」「Agent 预设」三个区块的标题都是 16px/500、说明行 14px/22px。
   const head = ruleBody('.dsm-head')
   assert.notEqual(head, null, '找不到 .dsm-head 规则')
   assert.match(head, /flex-direction:\s*column/, '标题与说明要上下排（内建页就是列布局），不该挤成一行')
@@ -290,11 +291,13 @@ test('页头照内建设置页的规格：18px/600 的 h2 标题 + 下面一档�
 
   const title = ruleBody('.dsm-title')
   assert.notEqual(title, null, '找不到 .dsm-title 规则')
-  assert.match(title, /font-size:\s*18px/, '页面标题是 18px（与「内置插件」那一页同规格）')
-  assert.match(title, /font-weight:\s*600/)
+  assert.match(title, /font-size:\s*16px/, '区块标题是 16px（与「模型」「内置插件」那几页同规格）')
+  assert.match(title, /font-weight:\s*500/)
+  assert.match(title, /line-height:\s*24px/, '标题行高 24px——量出来的就是它，不是按字号算的比例')
 
   const intro = ruleBody('.dsm-intro')
   assert.notEqual(intro, null, '找不到 .dsm-intro 规则')
+  assert.match(intro, /font-size:\s*14px/, '说明行 14px（内建页的说明行就是这一档）')
   assert.match(intro, /--dsw-alias-label-tertiary/, '说明行用 label-tertiary，与内建页的说明行同色')
 })
 

@@ -10,10 +10,10 @@
  *
  * 排版分两层，都是**照着设置外壳自己的页量出来的**（不是估的）：
  *
- * - **页头**照内建设置页（如「内置插件」）的节奏：`h2` 18px/600 的标题独占一行，下面 12px 跟一行
- *   13px 的说明（用 `label-tertiary`——内建页那一行的计算色就是它解析出来的 `#81858c`），再往下
- *   才是内容。上游那套页头是 `@deepseek-ai/dsh-client-ui-settings-general` 的原语渲染的（类名
- *   是 `pbvGtq_` 这种打包哈希），本插件刻意不 require 它，所以规格只能这样抄过来。
+ * - **页头**照内建设置页（「模型」「内置插件」「Agent 预设」都是这一档）的节奏：`h2` 16px/500 的标题
+ *   独占一行（行高 24px），下面 12px 跟一行 14px 的说明（用 `label-tertiary`——内建页那一行的计算色
+ *   就是它解析出来的 `#81858c`），再往下才是内容。上游那套页头是设置外壳的功能插件包自己手写的
+ *   （类名是 `zGbnIq_` 这种打包哈希），本插件刻意不 require 它，所以规格只能这样量过来。
  * - **卡片**照「插件」页那一类管理列表：一个区块一张卡片（发丝描边 + 大圆角）、行高紧凑、
  *   次要文字用 `label-secondary`。
  *
@@ -37,9 +37,11 @@ export const CSS = `
   line-height: 20px;
 }
 .dsm-head { display: flex; flex-direction: column; gap: 12px; }
-.dsm-title { margin: 0; font-size: 18px; font-weight: 600; line-height: 1.2; }
+.dsm-title { margin: 0; font-size: 16px; font-weight: 500; line-height: 24px; }
 .dsm-intro {
   margin: 0;
+  font-size: 14px;
+  line-height: 22px;
   color: var(--dsw-alias-label-tertiary, var(--dsw-alias-label-secondary, #646a73));
 }
 .dsm-spacer { flex: 1 1 auto; }
