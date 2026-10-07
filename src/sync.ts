@@ -45,6 +45,7 @@ import { readFileSync, rmSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { canonicalDir, type DirCanonicalizer } from './canonical-path.ts'
+import { warmCheckpoints, type WarmDeps } from './checkpoint-warm.ts'
 import type { DavPort } from './dav.ts'
 import { scanAll, type DiscoveredSession } from './discovery.ts'
 import { createBackup } from './journal.ts'
@@ -55,7 +56,7 @@ import { takeEffectOnHostAll, type EffectDeps } from './take-effect.ts'
 import { relocateHeaderCwdShallow, relocateHeaderCwdText } from './session-log.ts'
 import type { TitleQuery } from './session-title.ts'
 import { applyImport, buildBundle, planImport, readBundle, type ExportSource, type ImportOptions, type SessionBundle } from './transfer.ts'
-import type { DecodeAll, EffectOutcome, RegistryChange, WorkspaceRegistryState } from './types.ts'
+import type { DecodeAll, EffectOutcome, RegistryChange, WarmOutcome, WorkspaceRegistryState } from './types.ts'
 import type { SessionMeta } from './visibility.ts'
 
 /** 远端本插件独占的那层目录（相对资源根），机器格就放在它下面：`url` 可以填服务器/账号根。 */
@@ -1017,11 +1018,16 @@ export interface SyncOutcome {
    * （预演或纯推送）。
    */
   effect?: EffectOutcome
+  /**
+   * 拉取来的会话在本机没有宿主的投影检查点（它们从没在本机活过）：这一步是"请宿主重新折一遍"的结果，
+   * 缺席 = 这次没有落到本机的会话（见 checkpoint-warm.ts）。
+   */
+  warm?: WarmOutcome
   problems: string[]
 }
 
 /** `runSync()` 的依赖。 */
-export interface SyncDeps extends EffectDeps {
+export interface SyncDeps extends EffectDeps, WarmDeps {
   dav: DavPort
   settings: SyncSettings
   sessionsRoot: string
@@ -1339,6 +1345,15 @@ export async function runSync(
   // ── 让宿主认下这批改动：拉取会把会话挂到目标工作区（改注册表），与迁移是同一条语义。
   //    整批落地之后按顺序收口一次，而不是每条会话各来一遍。
   const effect = registryWritten ? await takeEffectOnHostAll(registryChanges, deps) : undefined
+  /*
+   * ── 接着请宿主把这批会话的列表元数据折出来（同一个收口点）─────────────────────
+   *
+   * 侧边栏那一行的名字不来自日志：宿主对"从没在本机活过"的会话只读它自己持久化的投影检查点，读不到就
+   * 显示"未命名"；而检查点只在活的会话（创建 / `turn/end` / 释放）时被写。拉取来的会话恰好两样都不占，
+   * 于是标题、空白判据、最后活动时间一起缺——最后这一样还会让下一次同步的"谁更新"判不出来。详见
+   * checkpoint-warm.ts：这一步只是把宿主自己的冷读走一遍，失败逐条兜住，不影响上面的落地结论。
+   */
+  const warm = await warmCheckpoints(pulled, deps)
 
   // ── 推送：整包 PUT，然后重写自己那一格的索引 ────────────────────────────────
   const ownDirName = machineDirName(deps.settings.machineId)
@@ -1463,6 +1478,8 @@ export async function runSync(
     registryWritten,
     indexWritten,
     ...(effect === undefined ? {} : { effect }),
+    // 没落到本机任何一条时（纯推送 / 什么都没做）这一步根本没跑，就别摆一个空结论。
+    ...(pulled.length === 0 ? {} : { warm }),
     problems,
   }
 }

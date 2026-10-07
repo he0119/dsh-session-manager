@@ -23,9 +23,10 @@ import {
 } from './migrate.ts'
 import { projectKey } from './project-key.ts'
 import { projectionCacheDir } from './paths.ts'
+import { describeWarm } from './checkpoint-warm.ts'
 import { describeEffect, describePlannedEffect, effectOf } from './take-effect.ts'
 import { runSync, type SyncPlan, type SyncSettings } from './sync.ts'
-import type { DecodeAll, EffectMode, HostRegistryPort } from './types.ts'
+import type { CheckpointWarmPort, DecodeAll, EffectMode, HostRegistryPort } from './types.ts'
 import { createSessionMetaResolver } from './visibility.ts'
 
 /**
@@ -415,6 +416,47 @@ export function hostRegistryPort(ctx: unknown): HostRegistryPort | undefined {
   }
 }
 
+/** 宿主的 `sessionQuery`：只要"读一条已存会话的完整日志（不建活会话）"这一件。 */
+interface HostSessionQuery {
+  readSession(sessionId: string): Promise<{
+    session: unknown
+    inheritedEventCount: unknown
+    events: readonly unknown[]
+  }>
+}
+
+/** 宿主的 `sessionProjectionCache`：只要"冷读一条并写回检查点"这一件。 */
+interface HostProjectionCache {
+  coldSnapshot(meta: unknown, inheritedEventCount: unknown, events: readonly unknown[]): unknown
+}
+
+/**
+ * 探测宿主那套"补齐列表元数据"的服务，收成一个端口交给核心层（见 checkpoint-warm.ts）。
+ *
+ * 为什么不自己写那份检查点文件：它是折叠的**种子**——`identity`（formatVersion/createdAt/cwd/isSeeded/
+ * inheritedEventCount）与每行的 `ver`、`seq` 都归宿主，`ver` 对不上会被它静默丢弃、`seq` 写错会让它跳过
+ * 真事件。宿主自己的两个服务正好做这件事：`readSession()` 读完校验，`coldSnapshot()` 折叠并写回。
+ *
+ * 认形状不认实现：少一件就当"这个宿主没有这套动作"，绝不半套上场。
+ *
+ * @param ctx 宿主上下文。
+ * @returns 端口；这个宿主没有这套动作时 undefined。
+ */
+export function hostCheckpointPort(ctx: unknown): CheckpointWarmPort | undefined {
+  const query = optionalService(ctx, 'sessionQuery') as Partial<HostSessionQuery> | undefined
+  const cache = optionalService(ctx, 'sessionProjectionCache') as Partial<HostProjectionCache> | undefined
+  if (query === undefined || cache === undefined) return undefined
+  if (typeof query.readSession !== 'function' || typeof cache.coldSnapshot !== 'function') return undefined
+
+  return {
+    warm: async (sessionId) => {
+      // 宿主自己那两步：整份日志读完校验（不建活会话）→ 折叠所有投影单元并写回检查点（它自己 fail-soft）。
+      const loaded = await query.readSession!.call(query, sessionId)
+      cache.coldSnapshot!.call(cache, loaded.session, loaded.inheritedEventCount, loaded.events)
+    },
+  }
+}
+
 /**
  * 宿主目录选择器的能力种类。
  *
@@ -548,6 +590,8 @@ export function registerTools(ctx: Context, config: PluginConfigInput = {}): Arr
     decodeAll,
     // 每次调用重新探测（加载条目会随 profile 的热应用来去），探测不到就是"只能重启"。
     hostRegistry: () => hostRegistryPort(ctx),
+    // 迁移改写了 cwd，旧检查点因此对不上：收口时请宿主重折一遍（见 checkpoint-warm.ts）。
+    hostCheckpoints: () => hostCheckpointPort(ctx),
   }
   const disposers: Array<() => void> = []
 
@@ -903,6 +947,8 @@ export function registerTools(ctx: Context, config: PluginConfigInput = {}): Arr
               liveSessionIds: () => liveSessionIds(ctx),
               // 拉取会把会话重挂到目标工作区（写注册表），所以整批落地之后同样要把宿主重新接管一遍。
               hostRegistry: () => hostRegistryPort(ctx),
+              // 同一处收口：拉取来的会话在本机没有投影检查点，请宿主把列表元数据折出来（见 checkpoint-warm.ts）。
+              hostCheckpoints: () => hostCheckpointPort(ctx),
             },
             { apply: args.apply === true },
           )
@@ -929,12 +975,14 @@ export function registerTools(ctx: Context, config: PluginConfigInput = {}): Arr
               : outcome.plan.pullIds.length === 0
                 ? 'immediate'
                 : mode(),
-            summary:
-              describeSync(outcome.plan, outcome.pulled, outcome.replaced, pushedIds, outcome.applied) +
+            summary: [
+              describeSync(outcome.plan, outcome.pulled, outcome.replaced, pushedIds, outcome.applied),
+              describeWarm(outcome.warm),
               // 预演也要把"执行后会怎样"说出来，否则调用方要到落地之后才知道要重启（与迁移工具同一条）。
-              (outcome.applied || outcome.plan.pullIds.length === 0
-                ? ''
-                : `\n${describePlannedEffect(mode())}`),
+              outcome.applied || outcome.plan.pullIds.length === 0 ? undefined : describePlannedEffect(mode()),
+            ]
+              .filter((line): line is string => line !== undefined)
+              .join('\n'),
             problems: [...outcome.plan.problems, ...outcome.problems],
           }
         },

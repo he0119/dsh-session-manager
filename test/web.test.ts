@@ -478,6 +478,51 @@ test('POST /import：预演不写盘，落地后会话与注册表一起落盘',
   assert.deepEqual(registry.tables.workspaces[Object.keys(registry.tables.workspaces)[0]!]!.sessionIds, ['session-a'])
 })
 
+test('POST /import：落地之后请宿主把列表元数据折出来，补不上也不影响落地', async () => {
+  const source = makeSandbox('web-import-warm-source')
+  writeSession(source.sessionsRoot, 'session-a', CWD_A, 1000, { title: '被导出的会话' })
+  const exportHandlers = createApiHandlers(deps(source))
+  const exported = fakeRes()
+  await exportHandlers['POST /export']!(
+    fakeReq('POST', `${API_PREFIX}/export`, Buffer.from(JSON.stringify({ sessionIds: ['session-a'] }))),
+    exported.res,
+  )
+  const bundleBytes = exported.captured.body
+
+  const target = makeSandbox('web-import-warm')
+  rmSync(target.sessionsRoot, { recursive: true, force: true })
+  mkdirSync(target.sessionsRoot, { recursive: true })
+  writeRegistryAtomic(target.registryPath, {
+    unit: { name: 'workspace', version: 2 },
+    global: { initialized: true, workspaceIds: [], archivedSessionIds: [], pinnedSessionIds: [] },
+    tables: { workspaces: {} },
+  })
+
+  // 宿主那两条服务"能调但读不动"：这一步只补派生数据，落地必须照旧算成功。
+  const warmed: string[] = []
+  const handlers = createApiHandlers(
+    deps(target, {
+      hostCheckpoints: () => ({
+        warm: async (sessionId: string): Promise<void> => {
+          warmed.push(sessionId)
+          throw new Error('日志读不动')
+        },
+      }),
+    }),
+  )
+  const applied = fakeRes()
+  await handlers['POST /import']!(
+    fakeReq('POST', `${API_PREFIX}/import?targetCwd=${encodeURIComponent(CWD_B)}&mode=apply`, bundleBytes),
+    applied.res,
+  )
+  assert.equal(applied.captured.status, 200, '补不上列表元数据不该把落地说成失败')
+  const body = json(applied.captured)
+  assert.deepEqual(body['written'], ['session-a'])
+  assert.deepEqual(warmed, ['session-a'], '刚落地的会话要各补一次')
+  assert.equal((body['warm'] as Record<string, unknown>)['failed'], 1)
+  assert.match(String(body['note']), /没补上/)
+})
+
 test('POST /import：包坏了、目标目录不合法、库已存在同 id，各自给出可读的拒绝', async () => {
   const sandbox = makeSandbox('web-import-errors')
   writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000)

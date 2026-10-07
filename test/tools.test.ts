@@ -23,6 +23,7 @@ import {
   effectMode,
   liveSessionIds,
   registerTools,
+  hostCheckpointPort,
   hostRegistryPort,
   type MigrateToolResult,
   type PlanToolResult,
@@ -756,4 +757,38 @@ test('sync_sessions：预演只读、apply 才落地；远端那条按映射改�
     await fixture.close()
     rmSync(sb.base, { recursive: true, force: true })
   }
+})
+
+test('补齐列表元数据的端口：认形状，按宿主自己的两步走（读日志 → 写回检查点）', async () => {
+  const calls: string[] = []
+  const loaded = { session: { id: 's-1', version: 4 }, inheritedEventCount: 7, events: [{ type: 'session' }] }
+  const fakeCtx = (query: unknown, cache: unknown): unknown => ({
+    get: (name: string) => (name === 'sessionQuery' ? query : name === 'sessionProjectionCache' ? cache : undefined),
+  })
+  const readyQuery = {
+    readSession: async (id: string): Promise<typeof loaded> => {
+      calls.push(`read:${id}`)
+      return loaded
+    },
+  }
+  const readyCache = {
+    coldSnapshot: (meta: unknown, inheritedEventCount: unknown, events: readonly unknown[]): void => {
+      calls.push('coldSnapshot')
+      // 转手的三件必须原样是宿主 readSession() 交给我们的那三件：换一个名字、少一件都会写错检查点。
+      assert.equal(meta, loaded.session)
+      assert.equal(inheritedEventCount, loaded.inheritedEventCount)
+      assert.equal(events, loaded.events)
+    },
+  }
+
+  assert.equal(hostCheckpointPort(fakeCtx(undefined, readyCache)), undefined, '没有 sessionQuery：补不了')
+  assert.equal(hostCheckpointPort(fakeCtx(readyQuery, undefined)), undefined, '没有投影缓存：补不了')
+  assert.equal(hostCheckpointPort(fakeCtx({}, readyCache)), undefined, 'readSession 形状不认')
+  assert.equal(hostCheckpointPort(fakeCtx(readyQuery, {})), undefined, 'coldSnapshot 形状不认')
+  assert.equal(hostCheckpointPort({}), undefined, '连 ctx 形状都不对时也必须给个答案，而不是抛')
+
+  const port = hostCheckpointPort(fakeCtx(readyQuery, readyCache))
+  assert.ok(port, '两件都齐：端口拿得到')
+  await port.warm('s-1')
+  assert.deepEqual(calls, ['read:s-1', 'coldSnapshot'], '顺序不能反：没有事件就没有可折的东西')
 })

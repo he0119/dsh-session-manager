@@ -10,17 +10,30 @@ import { existsSync, readdirSync, statSync } from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
 
 import { applyPlan, verifyAppliedPlan } from './execute.ts'
+import { describeWarm, warmCheckpoints, type WarmDeps } from './checkpoint-warm.ts'
 import { readManifest, rollback, type BackupKind, type BackupManifest, type RollbackResult } from './journal.ts'
 import { projectionCacheDir } from './paths.ts'
 import { buildRelocationPlan, describePlan } from './plan.ts'
 import { takeEffectOnHost, describeEffect, type EffectDeps } from './take-effect.ts'
 import { readRegistry, validateRegistry, verifyRegistryChange } from './registry.ts'
 import type { TitleQuery } from './session-title.ts'
-import type { DecodeAll, EffectOutcome, RelocationPlan, RegistryChange, WorkspaceRegistryState } from './types.ts'
+import type {
+  DecodeAll,
+  EffectOutcome,
+  RelocationPlan,
+  RegistryChange,
+  WarmOutcome,
+  WorkspaceRegistryState,
+} from './types.ts'
 import { createBlankResolver } from './visibility.ts'
 
-/** 迁移用到的路径与解码器（与 `ResolvedPaths` 同形，但本模块不认识 tools.ts）。 */
-export interface MigrateDeps extends EffectDeps {
+/**
+ * 迁移用到的路径与解码器（与 `ResolvedPaths` 同形，但本模块不认识 tools.ts）。
+ *
+ * 同时要 `EffectDeps`（改完注册表交给宿主自己做）与 `WarmDeps`（迁移改写了 cwd，旧检查点的身份就对不上
+ * 了，得请宿主重新折一遍）。
+ */
+export interface MigrateDeps extends EffectDeps, WarmDeps {
   sessionsRoot: string
   registryPath: string
   backupRoot: string
@@ -123,6 +136,12 @@ export interface MigrationRun {
    * 缺席 = 没执行（dry-run / 计划不 ok）：那时"何时生效"只能由探测回答，见 `describePlannedEffect()`。
    */
   effect?: EffectOutcome
+  /**
+   * 迁移改写了这些会话的 `cwd`，旧检查点（身份里带 cwd）因此对不上：这一步是"请宿主重新折一遍"的结果。
+   *
+   * 只在真的执行过、且这次真有会话搬动时才有（见 checkpoint-warm.ts）。
+   */
+  warm?: WarmOutcome
   summary: string
 }
 
@@ -280,6 +299,14 @@ export async function runMigration(
   const verified = verifyAppliedPlan(plan, { decodeAll: deps.decodeAll })
   // 复核失败也照样让宿主认：磁盘就是磁盘，宿主该看到的是真实状态，藏起来只会更晚暴露。
   const effect = await takeEffectOnHost(plan.registryChange, deps)
+  /*
+   * 搬动改写了 header 的 cwd，而宿主的投影检查点把 cwd 记在身份里 —— 不重折一遍，侧边栏这些会话就是
+   * "未命名"，要点开一次才补上。这一步只补宿主那份派生数据：失败逐条兜住，不影响上面的结论。
+   */
+  const warm = await warmCheckpoints(
+    plan.sessions.map((session) => session.id),
+    deps,
+  )
   // 注册表复核：会话 id 只按计划变大、绝不缩水，已存在的工作区 id 与路径不变（见 verifyRegistryChange）。
   const registryCheck = verifyRegistryChangeOnDisk(deps, result.backupDir, plan.registryChange)
   const problems = [...verified.problems, ...registryCheck]
@@ -293,11 +320,16 @@ export async function runMigration(
     backupDir: result.backupDir,
     problems,
     effect,
-    summary:
+    warm,
+    summary: [
       `已迁移 ${plan.sessions.length} 个会话（改写 ${result.rewritten} 个日志、移动 ${result.moved} 个目录` +
-      `${result.artifactsMoved > 0 ? `、搬迁 ${result.artifactsMoved} 项产物` : ''}）。\n` +
-      `复核：${verified.ok && registryCheck.length === 0 ? '通过' : '失败'}。备份：${result.backupDir}\n` +
+        `${result.artifactsMoved > 0 ? `、搬迁 ${result.artifactsMoved} 项产物` : ''}）。`,
+      `复核：${verified.ok && registryCheck.length === 0 ? '通过' : '失败'}。备份：${result.backupDir}`,
       describeEffect(effect),
+      describeWarm(warm),
+    ]
+      .filter((line): line is string => line !== undefined)
+      .join('\n'),
   }
 }
 
