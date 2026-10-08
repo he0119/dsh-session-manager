@@ -277,6 +277,14 @@ export function MigrationPanel({ t, state, meta, reload, directory }: PanelShare
   const registry = preview?.registryChange ?? null
   /** 顺带摘掉的悬空登记条数（宿主本来就不认它们，见宿主 `RegistryChange.droppedStale`）。 */
   const staleDropped = (registry?.droppedStale ?? []).reduce((n, entry) => n + entry.sessionIds.length, 0)
+  /*
+   * 下面这两项是**后加进响应的字段**，一律按"没有就说没有"兜住：界面产物与宿主进程是两份代码，
+   * 开发档（profile 把本包软链到检出目录）里更是随手重建一次产物就对不上了——那台宿主还是上次启动时
+   * 加载的那份，它的预演响应里没有这两个字段。渲染路径上一次 undefined 的解引用就会把整页打成空白
+   * （DSH 只把崩掉的 Slot 摘掉，设置页剩下的内容就全没了），所以缺字段只该表现为"少说一句"。
+   */
+  const liveSkipped = preview?.liveSkipped ?? []
+  const strandedCount = (preview?.strandedSources ?? []).reduce((n, source) => n + source.members.length, 0)
   /**
    * 这次改动会不会**需要重启**才被宿主承认：预演那次按宿主端口的探测说（见 src/web.ts 的迁移端点），
    * 摆在弹窗里当事前提醒。注册表本来就不用改（`unchanged`）时没有"生效"可谈，不摆这一句。
@@ -527,18 +535,12 @@ export function MigrationPanel({ t, state, meta, reload, directory }: PanelShare
               {/* 级联带进来的子智能体要说明白：勾的是一条父会话，清单里却多出几条没勾过的。 */}
               {preview.cascaded > 0 && <p className="dsm-hint">{t('migrate.family', { count: preview.cascaded })}</p>}
               {/* 少搬的那批同样要说明白：它们不在下面那张清单里，不提这一句就是"勾了 22 条、搬走 9 条"。 */}
-              {preview.liveSkipped.length > 0 && (
-                <p className="dsm-hint">{t('migrate.liveSkipped', { count: preview.liveSkipped.length })}</p>
+              {liveSkipped.length > 0 && (
+                <p className="dsm-hint">{t('migrate.liveSkipped', { count: liveSkipped.length })}</p>
               )}
               {/* 侧边栏不显示的那几条第 ③ 种：这次也不搬，源工作区因此留在注册表里——不提的话用户看到的
                   就是"整个来源都迁完了，怎么还留着一块一条都不显示的工作区"。 */}
-              {preview.strandedSources.length > 0 && (
-                <p className="dsm-hint">
-                  {t('migrate.stranded', {
-                    count: preview.strandedSources.reduce((n, source) => n + source.members.length, 0),
-                  })}
-                </p>
-              )}
+              {strandedCount > 0 && <p className="dsm-hint">{t('migrate.stranded', { count: strandedCount })}</p>}
               <p className="dsm-hint">
                 {preview.unowned
                   ? t('migrate.projectDirsUnowned', { projectDirs: preview.sourceProjectDirs.length, to: preview.targetProjectDir })

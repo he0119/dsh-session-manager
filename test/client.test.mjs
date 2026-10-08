@@ -1818,6 +1818,31 @@ test('客户端产物：迁移弹窗——计划逐条列出会话，跟着父�
     false,
     '这两类是两回事，别互相冒充（这一份里没有活会话）',
   )
+
+  // 宿主半侧比界面旧一版：响应里没有后加的那两个字段（开发档把本包软链到检出目录，随手重建一次产物
+  // 就对不上——那台宿主是上次启动时加载的）。缺字段只该表现为"少说一句"：渲染路径上抛一次，DSH 会把
+  // 整个 Slot 摘掉，设置页就只剩一片空白——那正是"点了迁移界面全白"的现场。
+  const olderPreview = previewOf(0)
+  delete olderPreview.liveSkipped
+  delete olderPreview.strandedSources
+  const legacyMount = mount({
+    state,
+    panel: 'migrate',
+    strings: ['/home/u/dev/alpha', '/home/u/dev/beta'],
+    nulls: [
+      null,
+      null,
+      null,
+      { response: { ...outcomeOf(0), preview: olderPreview }, error: null },
+    ],
+  })
+  const legacyText = strings(legacyMount.registrations[0].component(legacyMount.registrations[0].registration.inject()))
+  assert.ok(
+    legacyText.some((item) => String(item).startsWith('migrate.summary')),
+    '宿主半侧旧一版时弹窗照旧渲染出来（渲染路径上抛一次，整页就白了）',
+  )
+  assert.equal(legacyText.some((item) => String(item).startsWith('migrate.liveSkipped')), false)
+  assert.equal(legacyText.some((item) => String(item).startsWith('migrate.stranded')), false)
 })
 
 test('客户端产物：迁移的「要不要重启」——确认前先说一句，落地后只在需要重启时留一句', { skip }, () => {

@@ -69,3 +69,7 @@ Status: implemented
   挑了子集时不误报）、`test/registry.test.ts`（`reHome()` 与复核的放行/抓错）、`test/web.test.ts`、
   `test/tools.test.ts`、`test/client.test.mjs` 各钉住一条。篡改验证四处：计划层不传 `staleSessionIds`、
   报告层永远空 `strandedSources`、宿主侧不摘悬空登记、复核不放行——各自都让对应用例变红。
+- 界面读 `liveSkipped` / `strandedSources` 一律按"没有就说没有"兜住：界面产物与宿主进程是两份代码
+  （开发档把本包软链到检出目录，重建一次产物就对不上——宿主还是上次启动时那份），而渲染路径上一次
+  undefined 的解引用会把整个 Slot 摘掉、设置页只剩空白。`test/client.test.mjs` 用"响应里删掉这两个
+  字段"钉住这一条。
