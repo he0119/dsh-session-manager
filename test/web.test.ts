@@ -1,6 +1,7 @@
 // 界面用的宿主端点：列会话、导出、导入（预演与落地），以及各条拒绝面。
 import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
+import { createServer, request } from 'node:http'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { join } from 'node:path'
@@ -177,8 +178,30 @@ function events(res: Captured): Array<Record<string, unknown>> {
     .map((line) => JSON.parse(line.slice('data:'.length).trim()) as Record<string, unknown>)
 }
 
-function json(res: Captured): Record<string, unknown> {
+function rawJson(res: Captured): Record<string, unknown> {
   return JSON.parse(res.body.toString('utf8')) as Record<string, unknown>
+}
+
+/**
+ * 这次响应正文里"业务那一份"。
+ *
+ * 长动作（`/state`、`/migrate`、`/delete`、`/rollback`、`/import`、`/archive`）回的是事件流：结果在
+ * 收尾那条 `{type:'result'}` 里；流开始之前就被挡下的那些错（参数不对、能力不具备）仍然是一次性
+ * JSON。两种形状在这里分流一次，下面每个用例照旧只读"业务那一份"。
+ */
+function payload(res: Captured): Record<string, unknown> {
+  const contentType = res.headers['content-type'] ?? ''
+  if (!contentType.includes('text/event-stream')) return rawJson(res)
+  const event = events(res).find((item) => item['type'] === 'result')
+  assert.ok(event !== undefined, '事件流必须以一条 result 收尾')
+  return event['result'] as Record<string, unknown>
+}
+
+/** 这次响应报的进度事件（按顺序），用来核"每段报没报、分母对不对"。 */
+function progressOf(res: Captured): Array<Record<string, unknown>> {
+  return events(res)
+    .filter((item) => item['type'] === 'progress')
+    .map((item) => item['progress'] as Record<string, unknown>)
 }
 
 function deps(
@@ -227,7 +250,7 @@ test('GET /meta：位置与能力位先答出来，一条会话都不读', async
   await handlers['GET /meta']!(fakeReq('GET', `${API_PREFIX}/meta`), res)
 
   assert.equal(captured.status, 200)
-  assert.deepEqual(json(captured), {
+  assert.deepEqual(payload(captured), {
     sessionsRoot: sandbox.sessionsRoot,
     registryPath: sandbox.registryPath,
     pickerKind: 'browse',
@@ -243,7 +266,7 @@ test('GET /meta：位置与能力位先答出来，一条会话都不读', async
     deps(sandbox, { paths: { sessionsRoot: gone, registryPath: sandbox.registryPath, backupRoot: join(sandbox.base, 'backups') } }),
   )['GET /meta']!(fakeReq('GET', `${API_PREFIX}/meta`), bare.res)
   assert.equal(bare.captured.status, 200)
-  assert.equal(json(bare.captured)['sessionsRoot'], gone)
+  assert.equal(payload(bare.captured)['sessionsRoot'], gone)
 })
 
 test('/state 与 /meta：同一批字段是同一份取值（界面按"超集"读它）', async () => {
@@ -273,7 +296,7 @@ test('/state 与 /meta：同一批字段是同一份取值（界面按"超集"�
     const call = async (suffix: string): Promise<Record<string, unknown>> => {
       const { res, captured } = fakeRes()
       await handlers[`GET ${suffix}`]!(fakeReq('GET', `${API_PREFIX}${suffix}`), res)
-      return json(captured)
+      return payload(captured)
     }
     const meta = await call('/meta')
     const state = await call('/state')
@@ -299,7 +322,7 @@ test('GET /state：列出会话与工作区，带上「未分组」的结论', a
   await handlers['GET /state']!(fakeReq('GET', `${API_PREFIX}/state`), res)
 
   assert.equal(captured.status, 200)
-  const body = json(captured)
+  const body = payload(captured)
   const sessions = body['sessions'] as Array<Record<string, unknown>>
   assert.deepEqual(sessions.map((s) => s['id']).sort(), ['session-a', 'session-b'])
   // 新→旧
@@ -337,7 +360,7 @@ test('GET /state：子智能体 / 空白 / 已归档即使没在册也不是「�
   const handlers = createApiHandlers(deps(sandbox))
   const { res, captured } = fakeRes()
   await handlers['GET /state']!(fakeReq('GET', `${API_PREFIX}/state`), res)
-  const sessions = (json(captured)['sessions'] ?? []) as Array<Record<string, unknown>>
+  const sessions = (payload(captured)['sessions'] ?? []) as Array<Record<string, unknown>>
   const byId = new Map(sessions.map((s) => [String(s['id']), s]))
 
   // 只有"谁都没认领 **且** 侧边栏会显示"的那条算「未分组」；它同时说明另外四条为什么不算。
@@ -381,7 +404,7 @@ test('GET /state：登记过、但目录已经改名的会话算「未分组」�
   const handlers = createApiHandlers(deps(sandbox))
   const { res, captured } = fakeRes()
   await handlers['GET /state']!(fakeReq('GET', `${API_PREFIX}/state`), res)
-  const body = json(captured)
+  const body = payload(captured)
   const sessions = body['sessions'] as Array<Record<string, unknown>>
   const byId = new Map(sessions.map((s) => [String(s['id']), s]))
   assert.equal(byId.get('session-stale')!['ungrouped'], true, '登记还在，但目录没了：外壳那边就是「未分组」')
@@ -412,7 +435,7 @@ test('GET /state：标题优先读宿主投影缓存，缓存对不上身份才�
   const { res, captured } = fakeRes()
   await handlers['GET /state']!(fakeReq('GET', `${API_PREFIX}/state`), res)
 
-  const byId = new Map((json(captured)['sessions'] as Array<Record<string, unknown>>).map((s) => [s['id'], s]))
+  const byId = new Map((payload(captured)['sessions'] as Array<Record<string, unknown>>).map((s) => [s['id'], s]))
   assert.equal(byId.get('session-a')!['title'], '缓存里的新标题')
   assert.equal(byId.get('session-b')!['title'], '日志里的标题')
   assert.equal(byId.get('session-c')!['title'], '只在日志里的标题')
@@ -434,7 +457,7 @@ test('GET /state：读标题失败（注入的读取器抛错）不影响列出�
   await handlers['GET /state']!(fakeReq('GET', `${API_PREFIX}/state`), res)
 
   assert.equal(captured.status, 200)
-  const sessions = json(captured)['sessions'] as Array<Record<string, unknown>>
+  const sessions = payload(captured)['sessions'] as Array<Record<string, unknown>>
   assert.deepEqual(sessions.map((s) => s['id']), ['session-a'])
   assert.equal(sessions[0]!['title'], undefined)
 })
@@ -445,12 +468,12 @@ test('GET /state：宿主的选择器能力种类如实透给界面（native/bro
   const browse = createApiHandlers({ ...deps(sandbox), pickerKind: () => 'browse' })
   const browseRes = fakeRes()
   await browse['GET /state']!(fakeReq('GET', `${API_PREFIX}/state`), browseRes.res)
-  assert.equal(json(browseRes.captured)['pickerKind'], 'browse')
+  assert.equal(payload(browseRes.captured)['pickerKind'], 'browse')
 
   const native = createApiHandlers({ ...deps(sandbox), pickerKind: () => 'native' })
   const nativeRes = fakeRes()
   await native['GET /state']!(fakeReq('GET', `${API_PREFIX}/state`), nativeRes.res)
-  assert.equal(json(nativeRes.captured)['pickerKind'], 'native')
+  assert.equal(payload(nativeRes.captured)['pickerKind'], 'native')
 })
 
 test('POST /export：回一个可解析的包，文件名与内容都对', async () => {
@@ -509,7 +532,7 @@ test('POST /export：单独导出子智能体被拒；点名父会话时子智�
 
   const refused = await post(['session-child'])
   assert.equal(refused.status, 400)
-  assert.match(String(json(refused)['error']), /请改点名它的父会话 父会话（session-parent）/)
+  assert.match(String(payload(refused)['error']), /请改点名它的父会话 父会话（session-parent）/)
 
   const packed = await post(['session-parent'])
   assert.equal(packed.status, 200)
@@ -549,7 +572,7 @@ test('POST /import：预演不写盘，落地后会话与注册表一起落盘',
   const planned = fakeRes()
   await handlers['POST /import']!(fakeReq('POST', targetUrl, bundleBytes), planned.res)
   assert.equal(planned.captured.status, 200)
-  const planBody = json(planned.captured)
+  const planBody = payload(planned.captured)
   assert.equal(planBody['ok'], true)
   assert.deepEqual(planBody['created'], ['session-a'])
   // 预演表里显示的是标题（id 退到悬浮提示）：它从包里的日志事件折出来，清单格式没为此改过。
@@ -559,7 +582,7 @@ test('POST /import：预演不写盘，落地后会话与注册表一起落盘',
   const applied = fakeRes()
   await handlers['POST /import']!(fakeReq('POST', `${targetUrl}&mode=apply`, bundleBytes), applied.res)
   assert.equal(applied.captured.status, 200)
-  const applyBody = json(applied.captured)
+  const applyBody = payload(applied.captured)
   assert.deepEqual(applyBody['written'], ['session-a'])
   assert.equal(applyBody['registryWritten'], true)
   assert.match(String(applyBody['note']), /重启/)
@@ -611,7 +634,7 @@ test('POST /import：落地之后请宿主把列表元数据折出来，补不�
     applied.res,
   )
   assert.equal(applied.captured.status, 200, '补不上列表元数据不该把落地说成失败')
-  const body = json(applied.captured)
+  const body = payload(applied.captured)
   assert.deepEqual(body['written'], ['session-a'])
   assert.deepEqual(warmed, ['session-a'], '刚落地的会话要各补一次')
   assert.equal((body['warm'] as Record<string, unknown>)['failed'], 1)
@@ -637,7 +660,7 @@ test('POST /import：包坏了、目标目录不合法、库已存在同 id，�
   const garbage = fakeRes()
   await handlers['POST /import']!(fakeReq('POST', url, Buffer.from('这不是包')), garbage.res)
   assert.equal(garbage.captured.status, 400)
-  assert.match(String(json(garbage.captured)['error']), /gzip/i)
+  assert.match(String(payload(garbage.captured)['error']), /gzip/i)
 
   const noTarget = fakeRes()
   await handlers['POST /import']!(fakeReq('POST', `${API_PREFIX}/import`, bundleBytes), noTarget.res)
@@ -649,18 +672,25 @@ test('POST /import：包坏了、目标目录不合法、库已存在同 id，�
     badTarget.res,
   )
   assert.equal(badTarget.captured.status, 400)
-  assert.match(String(json(badTarget.captured)['error']), /不存在/)
+  assert.match(String(payload(badTarget.captured)['error']), /不存在/)
 
-  // 库里已有同 id：预演 ok=false、落地 409，都不覆盖
+  // 库里已有同 id：预演 ok=false、落地也是"结果"（`ok:false` + 原话），一个字节都不覆盖。
+  // 落地那份现在从事件流的 `result` 里回（流已经开始了，不能再改 HTTP 状态）。
   const conflict = fakeRes()
   await handlers['POST /import']!(fakeReq('POST', url, bundleBytes), conflict.res)
   assert.equal(conflict.captured.status, 200)
-  assert.equal(json(conflict.captured)['ok'], false)
+  assert.equal(payload(conflict.captured)['ok'], false)
 
   const conflictApply = fakeRes()
   await handlers['POST /import']!(fakeReq('POST', `${url}&mode=apply`, bundleBytes), conflictApply.res)
-  assert.equal(conflictApply.captured.status, 409)
-  assert.match(String(json(conflictApply.captured)['error']), /没有可导入的会话/)
+  assert.equal(conflictApply.captured.status, 200)
+  assert.equal(
+    conflictApply.captured.headers['content-type'],
+    'text/event-stream; charset=utf-8',
+    '落地开始干活之后回的是事件流：状态码早就发出去了，结论只能从 result 里读',
+  )
+  assert.equal(payload(conflictApply.captured)['ok'], false)
+  assert.match(String(payload(conflictApply.captured)['error']), /没有可导入的会话/)
 })
 
 test('registerWebRoutes：注册十条精确路由，方法不对回 405', async () => {
@@ -700,7 +730,7 @@ test('registerWebRoutes：注册十条精确路由，方法不对回 405', async
   const rejected = fakeRes()
   await syncRoute.handler(fakeReq('DELETE', `${API_PREFIX}/sync`), rejected.res)
   assert.equal(rejected.captured.status, 405)
-  assert.match(String(json(rejected.captured)['error']), /只接受 GET \/ POST/)
+  assert.match(String(payload(rejected.captured)['error']), /只接受 GET \/ POST/)
   dispose()
 })
 
@@ -717,7 +747,7 @@ test('POST /migrate：mode 缺省只预演，预演结果里带上源/目标项�
     res,
   )
   assert.equal(captured.status, 200)
-  const body = json(captured)
+  const body = payload(captured)
   assert.equal(body['mode'], 'plan')
   assert.equal(body['ok'], true)
   assert.equal(body['applied'], false)
@@ -752,7 +782,7 @@ test('POST /migrate：带 sessionIds 时只搬点名的会话（界面「只选�
   )
 
   assert.equal(captured.status, 200)
-  const body = json(captured)
+  const body = payload(captured)
   assert.equal(body['applied'], true)
   assert.deepEqual(
     ((body['preview'] as Record<string, unknown>)['sessions'] as { id: string }[]).map((s) => s.id),
@@ -782,7 +812,7 @@ test('POST /migrate：勾中的父会话把子智能体一起带走，条数报�
   )
 
   assert.equal(captured.status, 200)
-  const body = json(captured)
+  const body = payload(captured)
   const preview = body['preview'] as Record<string, unknown>
   const sessions = preview['sessions'] as Array<Record<string, unknown>>
   assert.deepEqual(sessions.map((s) => s['id']), ['session-parent', 'session-child'])
@@ -808,7 +838,7 @@ test('POST /migrate：unowned 来源不带 from 也能预演（界面那个跨�
     res,
   )
   assert.equal(captured.status, 200)
-  const body = json(captured)
+  const body = payload(captured)
   const preview = body['preview'] as Record<string, unknown>
   assert.equal(preview['unowned'], true)
   assert.equal(preview['from'], '')
@@ -825,7 +855,7 @@ test('POST /migrate：unowned 来源不带 from 也能预演（界面那个跨�
     denied.res,
   )
   assert.equal(denied.captured.status, 400)
-  assert.match(String((json(denied.captured) as Record<string, unknown>)['error']), /unowned/)
+  assert.match(String((payload(denied.captured) as Record<string, unknown>)['error']), /unowned/)
 })
 
 /**
@@ -886,7 +916,7 @@ test('POST /migrate：mode=apply 真搬并回可回滚的备份；有那套动�
     res,
   )
   assert.equal(captured.status, 200)
-  const body = json(captured)
+  const body = payload(captured)
   assert.equal(body['mode'], 'apply')
   assert.equal(body['applied'], true)
   assert.equal(body['verified'], true, `复核应当通过：${JSON.stringify(body['problems'])}`)
@@ -912,7 +942,7 @@ test('POST /migrate：mode=apply 真搬并回可回滚的备份；有那套动�
   const backups = fakeRes()
   await handlers['GET /backups']!(fakeReq('GET', `${API_PREFIX}/backups`), backups.res)
   assert.equal(backups.captured.status, 200)
-  const listed = json(backups.captured)['backups'] as Array<Record<string, unknown>>
+  const listed = payload(backups.captured)['backups'] as Array<Record<string, unknown>>
   assert.equal(listed.length, 1)
   assert.equal(listed[0]?.['sessions'], 1)
   assert.equal(listed[0]?.['from'], CWD_A)
@@ -943,7 +973,7 @@ test('POST /migrate：宿主没接住时如实报"需要重启"，而不是照�
     res,
   )
   assert.equal(captured.status, 200)
-  const body = json(captured)
+  const body = payload(captured)
   assert.equal(calls, 1, '要真的试过才谈得上"失败"')
   assert.equal(body['applied'], true, '宿主没接住不该把迁移说成失败')
   assert.equal(body['verified'], true)
@@ -961,7 +991,7 @@ test('POST /rollback：先 dryRun 看动作，再真回滚到原状', async () =
     fakeReq('POST', `${API_PREFIX}/migrate`, Buffer.from(JSON.stringify({ mode: 'apply', from: CWD_A, to: CWD_B }))),
     migrateRes.res,
   )
-  const backupDir = json(migrateRes.captured)['backupDir'] as string
+  const backupDir = payload(migrateRes.captured)['backupDir'] as string
   assert.ok(backupDir)
 
   // dry-run：给动作清单，但不写
@@ -971,8 +1001,8 @@ test('POST /rollback：先 dryRun 看动作，再真回滚到原状', async () =
     dry.res,
   )
   assert.equal(dry.captured.status, 200)
-  assert.equal(json(dry.captured)['dryRun'], true)
-  assert.ok((json(dry.captured)['actions'] as unknown[]).length > 0)
+  assert.equal(payload(dry.captured)['dryRun'], true)
+  assert.ok((payload(dry.captured)['actions'] as unknown[]).length > 0)
   assert.equal(existsSync(sessionDir(sandbox.sessionsRoot, CWD_B, 'session-a')), true, 'dry-run 不该动目录')
 
   // 真回滚
@@ -982,8 +1012,8 @@ test('POST /rollback：先 dryRun 看动作，再真回滚到原状', async () =
     done.res,
   )
   assert.equal(done.captured.status, 200)
-  assert.equal(json(done.captured)['dryRun'], false)
-  assert.equal(json(done.captured)['restoredFiles'], 1)
+  assert.equal(payload(done.captured)['dryRun'], false)
+  assert.equal(payload(done.captured)['restoredFiles'], 1)
   assert.equal(existsSync(sessionDir(sandbox.sessionsRoot, CWD_B, 'session-a')), false)
   const back = sessionDir(sandbox.sessionsRoot, CWD_A, 'session-a')
   assert.equal(existsSync(back), true)
@@ -1003,16 +1033,24 @@ test('POST /migrate：参数与状态问题各自给出可读的拒绝（400 / 4
   }
 
   assert.equal((await post('{not json')).status, 400)
-  assert.match(String(json(await post(JSON.stringify({ to: CWD_B })))['error']), /缺少源工作区目录/)
+  assert.match(String(payload(await post(JSON.stringify({ to: CWD_B })))['error']), /缺少源工作区目录/)
   assert.match(
-    String(json(await post(JSON.stringify({ from: CWD_A, to: join(sandbox.base, 'nope') })))['error']),
+    String(payload(await post(JSON.stringify({ from: CWD_A, to: join(sandbox.base, 'nope') })))['error']),
     /目标工作区目录不存在/,
   )
-  // 状态问题：源项目目录不存在 → 409（参数没问题，是库的状态说了不行）
+  // 状态问题：源项目目录不存在 → 计划本身 ok=false（参数没问题，是库的状态说了不行）。
+  //
+  // 这一条**不再用 409**：干活那一段是事件流，状态码在第一条事件之前就发出去了。结论因此落在
+  // `result` 的正文里（`ok` 与 `preview.problems` 与原来那份一字不差），界面读的就是它。
   const missingProjectDir = await post(JSON.stringify({ from: join(sandbox.base, 'ghost'), to: CWD_B }))
-  assert.equal(missingProjectDir.status, 409)
-  assert.equal(json(missingProjectDir)['ok'], false)
-  assert.ok((json(missingProjectDir)['preview'] as Record<string, unknown>)['problems'])
+  assert.equal(missingProjectDir.status, 200)
+  assert.equal(
+    missingProjectDir.headers['content-type'],
+    'text/event-stream; charset=utf-8',
+    '流一旦开始，HTTP 状态就固定了；"计划有问题"是结果，不是传输层的错',
+  )
+  assert.equal(payload(missingProjectDir)['ok'], false)
+  assert.ok((payload(missingProjectDir)['preview'] as Record<string, unknown>)['problems'])
 })
 
 test('POST /rollback：只认本插件备份根下的目录', async () => {
@@ -1025,11 +1063,11 @@ test('POST /rollback：只认本插件备份根下的目录', async () => {
     return captured
   }
 
-  assert.match(String(json(await post({}))['error']), /缺少备份目录/)
-  assert.match(String(json(await post({ backupDir: sandbox.base }))['error']), /不在本插件的备份根下/)
+  assert.match(String(payload(await post({}))['error']), /缺少备份目录/)
+  assert.match(String(payload(await post({ backupDir: sandbox.base }))['error']), /不在本插件的备份根下/)
   const empty = join(sandbox.base, 'backups', 'empty')
   mkdirSync(empty, { recursive: true })
-  assert.match(String(json(await post({ backupDir: empty }))['error']), /没有 manifest\.json/)
+  assert.match(String(payload(await post({ backupDir: empty }))['error']), /没有 manifest\.json/)
 })
 
 // ---- 会话管理：可见性字段 / 删除 / 归档 ----
@@ -1052,7 +1090,7 @@ test('GET /state：会话行带上"侧边栏为什么不显示"，以及归档�
   const { res, captured } = fakeRes()
   await handlers['GET /state']!(fakeReq('GET', `${API_PREFIX}/state`), res)
 
-  const body = json(captured)
+  const body = payload(captured)
   const rows = new Map((body['sessions'] as Array<Record<string, unknown>>).map((row) => [row['id'], row]))
   // 已归档（缓存里 blank: false，所以理由只能是归档）
   assert.equal(rows.get('session-a')!['hidden'], 'archived')
@@ -1078,7 +1116,7 @@ test('GET /state：注入归档端口后 archiveAvailable 为 true', async () =>
   )
   const { res, captured } = fakeRes()
   await handlers['GET /state']!(fakeReq('GET', `${API_PREFIX}/state`), res)
-  assert.equal(json(captured)['archiveAvailable'], true)
+  assert.equal(payload(captured)['archiveAvailable'], true)
 })
 
 test('POST /delete：预演不写盘、落地先备份再删，二者共用同一份计划', async () => {
@@ -1095,7 +1133,7 @@ test('POST /delete：预演不写盘、落地先备份再删，二者共用同�
 
   const planned = await post({ sessionIds: ['session-a'], mode: 'plan' })
   assert.equal(planned.status, 200)
-  const planBody = json(planned)
+  const planBody = payload(planned)
   assert.equal(planBody['mode'], 'plan')
   assert.equal(planBody['applied'], false)
   const preview = planBody['preview'] as Record<string, unknown>
@@ -1106,7 +1144,7 @@ test('POST /delete：预演不写盘、落地先备份再删，二者共用同�
 
   const applied = await post({ sessionIds: ['session-a'], mode: 'apply' })
   assert.equal(applied.status, 200)
-  const applyBody = json(applied)
+  const applyBody = payload(applied)
   assert.equal(applyBody['applied'], true)
   assert.equal(applyBody['verified'], true)
   assert.match(String(applyBody['summary']), /已删除 1 个会话/)
@@ -1128,7 +1166,7 @@ test('POST /delete：删父会话时把子智能体一起带上，预演里带�
     res,
   )
   assert.equal(captured.status, 200)
-  const preview = json(captured)['preview'] as Record<string, unknown>
+  const preview = payload(captured)['preview'] as Record<string, unknown>
   // 界面读的就是这几个字段（见 src/client/api.ts 的 DeleteEntry）：条数、级联计数与"跟着谁来的"
   assert.equal(preview['cascaded'], 1)
   const entries = preview['entries'] as Array<Record<string, unknown>>
@@ -1136,10 +1174,10 @@ test('POST /delete：删父会话时把子智能体一起带上，预演里带�
   assert.equal(entries[0]!['via'], undefined)
   assert.deepEqual(entries[1]!['via'], { id: 'session-parent', title: '父会话' })
   assert.equal(entries[1]!['origin'], 'subagent')
-  assert.match(String(json(captured)['summary']), /其中 1 条是子智能体会话/)
+  assert.match(String(payload(captured)['summary']), /其中 1 条是子智能体会话/)
 })
 
-test('POST /delete：状态不允许（会话不在库里）用 409 并把完整计划带回来', async () => {
+test('POST /delete：状态不允许（会话不在库里）时把完整计划带回来', async () => {
   const sandbox = makeSandbox('web-delete-guard')
   const handlers = createApiHandlers(deps(sandbox))
 
@@ -1148,8 +1186,9 @@ test('POST /delete：状态不允许（会话不在库里）用 409 并把完整
     fakeReq('POST', `${API_PREFIX}/delete`, Buffer.from(JSON.stringify({ sessionIds: ['session-ghost'], mode: 'apply' }))),
     res,
   )
-  assert.equal(captured.status, 409)
-  const body = json(captured)
+  // 与 /migrate 同一套：落地那条路是事件流，状态码发在结果之前，所以"计划不 ok"落在正文里。
+  assert.equal(captured.status, 200)
+  const body = payload(captured)
   assert.equal(body['ok'], false)
   assert.equal((body['preview'] as Record<string, unknown>)['ok'], false)
   assert.match(String((body['problems'] as string[]).join('\n')), /不在库里/)
@@ -1191,19 +1230,25 @@ test('POST /archive：逐条调用宿主服务，部分失败不影响其余，�
     { op: 'archive', id: 'session-a' },
     { op: 'archive', id: 'session-busy' },
   ])
-  // 一条被宿主拒了：整体报 409，但成功的那条与失败的原因都在正文里
-  assert.equal(done.status, 409)
-  const body = json(done)
+  // 一条被宿主拒了：整体 `ok:false`，但成功的那条与失败的原因都在正文里（逐条报进度的那条流
+  // 以 `result` 收尾，部分失败同样是"结果"而不是传输层的错）。
+  assert.equal(done.status, 200)
+  const body = payload(done)
   assert.equal(body['ok'], false)
   assert.deepEqual(body['archived'], ['session-a'])
   assert.deepEqual(body['failed'], [
     { id: 'session-busy', error: 'cannot archive session: the session is active (turn)' },
   ])
   assert.equal(body['takesEffect'], 'immediate')
+  // 逐条报进度：分母是这次点名的条数，`done` 是"已经做完的条数"。
+  assert.deepEqual(progressOf(done), [
+    { phase: 'archive', total: 2, done: 0, id: 'session-a' },
+    { phase: 'archive', total: 2, done: 1, id: 'session-busy' },
+  ])
 
   const undone = await post({ sessionIds: ['session-a'], archived: false })
   assert.equal(undone.status, 200)
-  assert.equal(json(undone)['ok'], true)
+  assert.equal(payload(undone)['ok'], true)
   assert.deepEqual(calls[calls.length - 1], { op: 'unarchive', id: 'session-a' })
 })
 
@@ -1234,7 +1279,7 @@ test('POST /archive：单独归档一条子智能体被拒，点名父会话时�
   const lone = await post({ sessionIds: ['session-child'], archived: true })
   assert.equal(lone.status, 400)
   assert.match(
-    String(json(lone)['error']),
+    String(payload(lone)['error']),
     /session-child 是子智能体会话（它跟着父会话走）：请改点名它的父会话 父会话（session-parent）/,
   )
   assert.deepEqual(calls, [], '被拒的请求一条都不该动')
@@ -1246,7 +1291,7 @@ test('POST /archive：单独归档一条子智能体被拒，点名父会话时�
     { op: 'archive', id: 'session-parent' },
     { op: 'archive', id: 'session-child' },
   ])
-  assert.deepEqual(json(family)['archived'], ['session-parent', 'session-child'])
+  assert.deepEqual(payload(family)['archived'], ['session-parent', 'session-child'])
 })
 
 test('POST /archive：宿主没有 workspaceRegistry 时如实拒绝（不绕过去写注册表文件）', async () => {
@@ -1258,7 +1303,7 @@ test('POST /archive：宿主没有 workspaceRegistry 时如实拒绝（不绕过
     res,
   )
   assert.equal(captured.status, 409)
-  assert.match(String(json(captured)['error']), /workspaceRegistry/)
+  assert.match(String(payload(captured)['error']), /workspaceRegistry/)
 })
 
 test('POST /rollback：删除备份走恢复（注册表不动），迁移备份照旧还原注册表', async () => {
@@ -1271,12 +1316,12 @@ test('POST /rollback：删除备份走恢复（注册表不动），迁移备份
     fakeReq('POST', `${API_PREFIX}/delete`, Buffer.from(JSON.stringify({ sessionIds: ['session-a'], mode: 'apply' }))),
     created.res,
   )
-  const backupDir = json(created.captured)['backupDir'] as string
+  const backupDir = payload(created.captured)['backupDir'] as string
 
   // 备份列表要能看出这份是"删除"留下的（界面据此把按钮写成「恢复」）
   const listed = fakeRes()
   await handlers['GET /backups']!(fakeReq('GET', `${API_PREFIX}/backups`), listed.res)
-  const backups = json(listed.captured)['backups'] as Array<Record<string, unknown>>
+  const backups = payload(listed.captured)['backups'] as Array<Record<string, unknown>>
   assert.equal(backups.find((backup) => backup['dir'] === backupDir)!['kind'], 'delete')
 
   const rolled = fakeRes()
@@ -1285,7 +1330,7 @@ test('POST /rollback：删除备份走恢复（注册表不动），迁移备份
     rolled.res,
   )
   assert.equal(rolled.captured.status, 200)
-  const outcome = json(rolled.captured)
+  const outcome = payload(rolled.captured)
   assert.equal(outcome['registryRestored'], false)
   assert.equal(existsSync(sessionDir(sandbox.sessionsRoot, CWD_A, 'session-a')), true)
 })
@@ -1296,7 +1341,7 @@ test('GET /state：带上同步配置的非敏感字段；没配时是 null', as
   const sandbox = makeSandbox('web-sync-state')
   const plain = fakeRes()
   await createApiHandlers(deps(sandbox))['GET /state']!(fakeReq('GET', `${API_PREFIX}/state`), plain.res)
-  assert.equal(json(plain.captured)['sync'], null, '没配置同步就是 null（界面据此不画那个区块）')
+  assert.equal(payload(plain.captured)['sync'], null, '没配置同步就是 null（界面据此不画那个区块）')
 
   const configured = fakeRes()
   await createApiHandlers(
@@ -1304,7 +1349,7 @@ test('GET /state：带上同步配置的非敏感字段；没配时是 null', as
       syncInfo: () => ({ url: 'https://dav.example.com/dsh', machineId: 'robot-a', mappings: 2 }),
     }),
   )['GET /state']!(fakeReq('GET', `${API_PREFIX}/state`), configured.res)
-  assert.deepEqual(json(configured.captured)['sync'], {
+  assert.deepEqual(payload(configured.captured)['sync'], {
     url: 'https://dav.example.com/dsh',
     machineId: 'robot-a',
     mappings: 2,
@@ -1326,7 +1371,7 @@ test('GET /state：目录带项目身份，只问界面上真会出现的那些�
   )
   const { res, captured } = fakeRes()
   await handlers['GET /state']!(fakeReq('GET', `${API_PREFIX}/state`), res)
-  assert.deepEqual(json(captured)['repos'], { [CWD_A]: 'github.com/he0119/demo' })
+  assert.deepEqual(payload(captured)['repos'], { [CWD_A]: 'github.com/he0119/demo' })
   // 问的是"会话的 cwd + 注册表里的工作区路径"（这里 CWD_A 两处都有，只问一次），不是库里的每个目录
   assert.equal(asked.length, 1)
   assert.deepEqual(asked[0]!.slice().sort(), [CWD_A, CWD_B].sort())
@@ -1334,7 +1379,7 @@ test('GET /state：目录带项目身份，只问界面上真会出现的那些�
   // 没注入这个入口（旧宿主、没装 git 的机器）：空表，界面退回显示路径
   const plain = fakeRes()
   await createApiHandlers(deps(sandbox))['GET /state']!(fakeReq('GET', `${API_PREFIX}/state`), plain.res)
-  assert.deepEqual(json(plain.captured)['repos'], {})
+  assert.deepEqual(payload(plain.captured)['repos'], {})
 })
 
 test('GET|POST /sync：这个宿主没配置同步时 409，且没有一个字节被写', async () => {
@@ -1345,13 +1390,13 @@ test('GET|POST /sync：这个宿主没配置同步时 409，且没有一个字�
     const { res, captured } = fakeRes()
     await handlers['GET|POST /sync']!(fakeReq(method, `${API_PREFIX}/sync`), res)
     assert.equal(captured.status, 409)
-    assert.match(String(json(captured)['error']), /没有配置 WebDAV 同步/)
+    assert.match(String(payload(captured)['error']), /没有配置 WebDAV 同步/)
   }
   // 「测试连接」走同一个 409：没有 url 就没有可探的远端（这句比"PROPFIND 失败"有用得多）。
   const probe = fakeRes()
   await handlers['GET|POST /sync']!(fakeReq('GET', `${API_PREFIX}/sync?mode=test`), probe.res)
   assert.equal(probe.captured.status, 409)
-  assert.match(String(json(probe.captured)['error']), /没有配置 WebDAV 同步/)
+  assert.match(String(payload(probe.captured)['error']), /没有配置 WebDAV 同步/)
   assert.deepEqual(readRegistry(sandbox.registryPath).tables.workspaces['ws-a']?.sessionIds, ['session-a'])
 })
 
@@ -1383,7 +1428,7 @@ test('GET /sync?mode=test：只读探一次，把结论与"这次有没有凭据
       'GET|POST /sync'
     ]!(fakeReq('GET', `${API_PREFIX}/sync?mode=test`), wrong.res)
     assert.equal(wrong.captured.status, 200)
-    const denied = json(wrong.captured)
+    const denied = payload(wrong.captured)
     assert.equal(denied['mode'], 'test')
     assert.equal(denied['code'], 'unauthenticated')
     assert.equal(denied['status'], 401)
@@ -1402,7 +1447,7 @@ test('GET /sync?mode=test：只读探一次，把结论与"这次有没有凭据
       fakeReq('GET', `${API_PREFIX}/sync?mode=test`),
       ok.res,
     )
-    const first = json(ok.captured)
+    const first = payload(ok.captured)
     assert.equal(first['code'], 'ok')
     assert.equal(first['namespaceExists'], false)
     assert.equal(first['hasPassword'], true)
@@ -1415,7 +1460,7 @@ test('GET /sync?mode=test：只读探一次，把结论与"这次有没有凭据
       fakeReq('GET', `${API_PREFIX}/sync?mode=test`),
       listed.res,
     )
-    assert.deepEqual(json(listed.captured)['machines'], ['robot-a'])
+    assert.deepEqual(payload(listed.captured)['machines'], ['robot-a'])
     // 只读：这一轮里除了那两次 PROPFIND 与前面建目录的 MKCOL，没有 PUT / GET / DELETE。
     assert.deepEqual(
       fixture.requests.filter((line) => !line.startsWith('PROPFIND') && !line.startsWith('MKCOL')),
@@ -1543,5 +1588,311 @@ test('POST /sync?mode=apply：预演不落地，apply 走事件流拉取远端�
   } finally {
     await fixture.close()
     rmSync(sandbox.base, { recursive: true, force: true })
+  }
+})
+
+// ---- 长动作的进度（事件流） ----
+//
+// 这一组钉的不是"某个动作能跑完"（上面那些用例已经钉了结论），而是"**干活的每一段都报了**"：
+// 分母是什么、`done` 从 0 数起、顺序与真实步骤一致。界面那条进度条读的就是这些事件，少报一段的表现
+// 就是进度条停在原地或者走不满——只有这里能当场发现。
+
+test('GET /state：整库扫描逐条报进度，收尾仍是那一份清单', async () => {
+  const sandbox = makeSandbox('web-state-progress')
+  writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000, { title: '会话甲' })
+  writeSession(sandbox.sessionsRoot, 'session-b', CWD_A, 2000, { title: '会话乙' })
+  const handlers = createApiHandlers(deps(sandbox))
+
+  const { res, captured } = fakeRes()
+  await handlers['GET /state']!(fakeReq('GET', `${API_PREFIX}/state`), res)
+  assert.equal(captured.status, 200)
+  assert.equal(
+    captured.headers['content-type'],
+    'text/event-stream; charset=utf-8',
+    '整库要逐条读 header、折标题，这一段走事件流（页头那句「读取中…」原来什么都不知道）',
+  )
+  assert.deepEqual(
+    progressOf(captured),
+    [
+      { phase: 'scan', total: 2, done: 0 },
+      { phase: 'scan', total: 2, done: 1 },
+    ],
+    '每开始扫一条报一次：done 是**已经扫完**的条数，界面按 done + 1 说"正在扫第几条"',
+  )
+  const body = payload(captured)
+  assert.equal((body['sessions'] as unknown[]).length, 2, '收尾那条 result 里仍是原来那份清单')
+  assert.equal(body['sessionsRoot'], sandbox.sessionsRoot)
+})
+
+test('POST /migrate：落地时把 备份 / 改写 / 搬目录 / 注册表 / 复核 / 补齐 逐段报出来', async () => {
+  const sandbox = makeSandbox('web-migrate-progress')
+  writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000, { title: '会话甲' })
+  writeSession(sandbox.sessionsRoot, 'session-b', CWD_A, 2000)
+  const warmed: string[] = []
+  const handlers = createApiHandlers(
+    deps(sandbox, {
+      hostCheckpoints: () => ({
+        warm: async (id: string): Promise<void> => {
+          warmed.push(id)
+        },
+      }),
+      // 宿主没有那套注册表动作时这一步要回"重启最稳妥"，与进度无关，这里只是把探测固定住。
+      hostRegistry: () => undefined,
+    }),
+  )
+
+  const { res, captured } = fakeRes()
+  await handlers['POST /migrate']!(
+    fakeReq('POST', `${API_PREFIX}/migrate`, Buffer.from(JSON.stringify({ from: CWD_A, to: CWD_B, mode: 'apply' }))),
+    res,
+  )
+  assert.equal(captured.status, 200)
+  assert.deepEqual(
+    progressOf(captured).map((item) => [item['phase'], item['total'], item['done']]),
+    [
+      ['scan', 2, 0],
+      ['scan', 2, 1],
+      // 备份是"整份会话目录按字节复制"：分母是会话数
+      ['backup', 2, 0],
+      ['backup', 2, 1],
+      // 改写是逐文件的活：这条会话只有一代日志，所以分母与上面同数（有几代日志时分母就更大）
+      ['rewrite', 2, 0],
+      ['rewrite', 2, 1],
+      ['move', 2, 0],
+      ['move', 2, 1],
+      // 注册表是一次落盘，没有"第几条"：分母 0，界面只说在做什么、不画条
+      ['registry', 0, 0],
+      ['verify', 2, 0],
+      ['verify', 2, 1],
+      // 落地之后请宿主把列表元数据折出来（不然侧边栏是"未命名"）
+      ['warm', 2, 0],
+      ['warm', 2, 1],
+    ],
+    '段名与真实步骤一一对应、顺序一致；每段开始处理下一条之前先报一条',
+  )
+  // 会话按"最新在前"排（与侧边栏同一口径）：session-b 是后建的，所以它排在前面。
+  assert.deepEqual(warmed, ['session-b', 'session-a'], '补齐那一段真的是逐条走宿主')
+  assert.equal(payload(captured)['verified'], true, '收尾仍是原来那份结论')
+  // 报进度不许碰数据：本条会话的名字只出现在 id / label 上，备份目录里那份快照才是字节真相。
+  const labels = progressOf(captured)
+    .filter((item) => item['phase'] === 'backup')
+    .map((item) => item['label'])
+  assert.deepEqual(labels, ['session-b', '会话甲'], 'label 优先用标题，没有标题的那条退回 id')
+})
+
+test('POST /delete：先备整个会话目录再删，逐条报进度（预演只报扫描那一段）', async () => {
+  const sandbox = makeSandbox('web-delete-progress')
+  writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000, { title: '会话甲' })
+  writeSession(sandbox.sessionsRoot, 'session-b', CWD_A, 2000)
+  const handlers = createApiHandlers(deps(sandbox))
+  const body = (mode: string): Buffer =>
+    Buffer.from(JSON.stringify({ sessionIds: ['session-a', 'session-b'], mode }))
+
+  // 预演：只有"重算计划"那一段要花时间（扫整个库）
+  const planned = fakeRes()
+  await handlers['POST /delete']!(fakeReq('POST', `${API_PREFIX}/delete`, body('plan')), planned.res)
+  assert.deepEqual(
+    progressOf(planned.captured).map((item) => item['phase']),
+    ['scan', 'scan'],
+    '预演不写盘：不该出现 backup / remove / verify 那几段',
+  )
+
+  const applied = fakeRes()
+  await handlers['POST /delete']!(fakeReq('POST', `${API_PREFIX}/delete`, body('apply')), applied.res)
+  assert.deepEqual(
+    progressOf(applied.captured).map((item) => [item['phase'], item['total'], item['done']]),
+    [
+      ['scan', 2, 0],
+      ['scan', 2, 1],
+      ['backup', 2, 0],
+      ['backup', 2, 1],
+      ['remove', 2, 0],
+      ['remove', 2, 1],
+      ['verify', 2, 0],
+      ['verify', 2, 1],
+    ],
+    '备份在前、删除在后、最后逐条复核"真的不在了、备份里真的在"',
+  )
+  assert.equal(payload(applied.captured)['verified'], true)
+})
+
+test('POST /rollback：预演与落地都逐条报"正在还原"，迁移备份还多一段注册表', async () => {
+  const sandbox = makeSandbox('web-rollback-progress')
+  writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000, { title: '会话甲' })
+  writeSession(sandbox.sessionsRoot, 'session-b', CWD_A, 2000)
+  const handlers = createApiHandlers(deps(sandbox))
+  const migrate = (mode: string): Buffer => Buffer.from(JSON.stringify({ from: CWD_A, to: CWD_B, mode }))
+
+  await handlers['POST /migrate']!(fakeReq('POST', `${API_PREFIX}/migrate`, migrate('apply')), fakeRes().res)
+  const { res: listRes, captured: listed } = fakeRes()
+  await handlers['GET /backups']!(fakeReq('GET', `${API_PREFIX}/backups`), listRes)
+  const backupDir = (payload(listed)['backups'] as Array<Record<string, unknown>>)[0]!['dir'] as string
+
+  const call = async (dryRun: boolean): Promise<Captured> => {
+    const { res, captured } = fakeRes()
+    await handlers['POST /rollback']!(
+      fakeReq('POST', `${API_PREFIX}/rollback`, Buffer.from(JSON.stringify({ backupDir, dryRun }))),
+      res,
+    )
+    return captured
+  }
+
+  const dry = await call(true)
+  assert.deepEqual(
+    progressOf(dry).map((item) => [item['phase'], item['total'], item['done'], item['label']]),
+    [
+      ['restore', 2, 0, 'session-b'],
+      ['restore', 2, 1, 'session-a'],
+      ['registry', 0, 0, undefined],
+    ],
+    '预演也要逐条走一遍清单（不写盘而已）：分母是会话数，注册表那一段没有分母',
+  )
+  assert.equal(payload(dry)['dryRun'], true)
+
+  const done = await call(false)
+  assert.deepEqual(
+    progressOf(done).map((item) => item['phase']),
+    ['restore', 'restore', 'registry'],
+    '落地报的是同一套段名（界面一条进度块跑完预演与落地两条路）',
+  )
+  assert.equal(payload(done)['registryRestored'], true)
+  assert.deepEqual(
+    progressOf(done).filter((item) => item['phase'] === 'restore').map((item) => item['label']),
+    ['session-b', 'session-a'],
+    '还原按会话报，label 用 id（备份清单里没有标题这一项）',
+  )
+})
+
+test('POST /import：预演按包里的条数读、落地只按"会创建"的那些写', async () => {
+  const source = makeSandbox('web-import-progress-src')
+  writeSession(source.sessionsRoot, 'session-a', CWD_A, 1000, { title: '会话甲' })
+  writeSession(source.sessionsRoot, 'session-b', CWD_A, 2000)
+  const sourceHandlers = createApiHandlers(deps(source))
+  const exported = fakeRes()
+  await sourceHandlers['POST /export']!(
+    fakeReq('POST', `${API_PREFIX}/export`, Buffer.from(JSON.stringify({ sessionIds: ['session-a', 'session-b'] }))),
+    exported.res,
+  )
+  assert.equal(
+    exported.captured.headers['content-type'],
+    'application/octet-stream',
+    '导出**不**吃事件流：它的响应体就是产物本身（见 web.ts 里那条说明）',
+  )
+  const bundle = exported.captured.body
+
+  // 落地到一个只有其中一条的库：那一条会被跳过（分母只算"会创建"的那些，进度条才走得满）
+  const target = makeSandbox('web-import-progress-dst')
+  writeSession(target.sessionsRoot, 'session-a', CWD_A, 1000)
+  const handlers = createApiHandlers(
+    deps(target, { hostCheckpoints: () => ({ warm: async (): Promise<void> => {} }) }),
+  )
+  const url = `${API_PREFIX}/import?targetCwd=${encodeURIComponent(CWD_A)}`
+
+  const planned = fakeRes()
+  await handlers['POST /import']!(fakeReq('POST', url, bundle), planned.res)
+  assert.deepEqual(
+    progressOf(planned.captured).map((item) => [item['phase'], item['total'], item['done']]),
+    [
+      // 库那一遍扫描没有"第几条"可讲（目录项的条数与包里的条数不是一回事）
+      ['scan', 0, 0],
+      ['read', 2, 0],
+      ['read', 2, 1],
+    ],
+    '预演逐条读包里的日志折标题，分母是包里的条数',
+  )
+  assert.equal(payload(planned.captured)['ok'], true)
+
+  const applied = fakeRes()
+  await handlers['POST /import']!(fakeReq('POST', `${url}&mode=apply`, bundle), applied.res)
+  assert.deepEqual(
+    progressOf(applied.captured).map((item) => [item['phase'], item['total'], item['done']]),
+    [
+      ['scan', 0, 0],
+      ['read', 2, 0],
+      ['read', 2, 1],
+      // session-a 已在库里 → 一条都不写；分母是 1（会创建的那些），所以恰好走满
+      ['write', 1, 0],
+      ['registry', 0, 0],
+      ['warm', 1, 0],
+    ],
+    '落地沿用同一份计划（不再读一遍包），只按会创建的那些逐条写盘',
+  )
+  const body = payload(applied.captured)
+  assert.deepEqual(body['written'], ['session-b'])
+  assert.equal(existsSync(sessionDir(target.sessionsRoot, CWD_A, 'session-b')), true)
+})
+
+test('事件流：每写完一条就把 socket 推给内核（同步循环里也攒不到最后）', async () => {
+  const sandbox = makeSandbox('web-sse-flush')
+  writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000, { title: '会话甲' })
+  writeSession(sandbox.sessionsRoot, 'session-b', CWD_A, 2000, { title: '会话乙' })
+  writeSession(sandbox.sessionsRoot, 'session-c', CWD_A, 3000, { title: '会话丙' })
+  const handlers = createApiHandlers(deps(sandbox))
+
+  /*
+   * 这一条钉的是"进度条到底会不会动"的那一半，测试里其它断言都钉不住它：
+   *
+   * `res.write()` 每次都会把 socket cork 住（`writableCorked` 1、事件就躺在 `writableLength` 里），
+   * Node 要等下一次事件循环才推给内核。而报进度的这些循环是**同步**的（读日志、改首帧、搬目录中间
+   * 一次 await 都没有），所以不主动 `uncork()` 的话，整段干完之前一个字节都发不出去——跨进程实测
+   * （本机、五条事件）：不 uncork 全在 1537ms 到达，uncork 之后是 33/330/630/930/1230ms。
+   *
+   * 这里量的是 `uncork()` 之后 socket 里还剩多少字节：每条事件都推干净了（0），事件条数也对得上。
+   */
+  const afterFlush: number[] = []
+  const server = createServer((req, res) => {
+    const real = res.socket
+    if (real === null) throw new Error('这个夹具需要一个真实 socket')
+    const socket = new Proxy(real, {
+      get(target, prop, receiver) {
+        if (prop === 'uncork') {
+          return () => {
+            target.uncork()
+            // 推完之后 socket 里不该再留着这条事件的字节。
+            afterFlush.push(target.writableLength)
+          }
+        }
+        const value = Reflect.get(target, prop, receiver) as unknown
+        return typeof value === 'function' ? (value as (...args: unknown[]) => unknown).bind(target) : value
+      },
+    })
+    /*
+     * 只把 `sendEvent()` 用到的那几样转发给真正的响应：`Object.create(res)` 那种代理不行——
+     * `end()` 内部的 `this.finished = true` 会写在代理自己身上，真响应永远结束不了（用例当场挂住）。
+     */
+    const shim = {
+      get writableEnded(): boolean {
+        return res.writableEnded
+      },
+      write: (chunk: string | Buffer): boolean => res.write(chunk),
+      end: (chunk?: string | Buffer): void => {
+        res.end(chunk)
+      },
+      writeHead: (status: number, headers?: Record<string, string>): unknown => res.writeHead(status, headers),
+      socket,
+    } as unknown as ServerResponse
+    void handlers['GET /state']!(req, shim)
+  })
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const port = (server.address() as { port: number }).port
+  try {
+    const body = await new Promise<string>((resolve, reject) => {
+      const client = request({ port, path: `${API_PREFIX}/state` }, (upstream) => {
+        let text = ''
+        upstream.setEncoding('utf8')
+        upstream.on('data', (chunk: string) => {
+          text += chunk
+        })
+        upstream.on('end', () => resolve(text))
+      })
+      client.on('error', reject)
+      client.end()
+    })
+    const eventCount = (body.match(/^data:/gm) ?? []).length
+    assert.equal(eventCount, 4, '3 条会话 → 3 条 scan 进度 + 1 条收尾')
+    assert.equal(afterFlush.length, eventCount, '每写完一条事件必须推一次：攒着就是整段结束才发')
+    assert.deepEqual([...new Set(afterFlush)], [0], '推完之后 socket 里不留缓冲——字节已经在路上了')
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()))
   }
 })

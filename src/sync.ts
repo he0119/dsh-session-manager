@@ -56,7 +56,15 @@ import { takeEffectOnHostAll, type EffectDeps } from './take-effect.ts'
 import { relocateHeaderCwdShallow, relocateHeaderCwdText } from './session-log.ts'
 import type { TitleQuery } from './session-title.ts'
 import { applyImport, buildBundle, planImport, readBundle, type ExportSource, type ImportOptions, type SessionBundle } from './transfer.ts'
-import type { DecodeAll, EffectOutcome, RegistryChange, WarmOutcome, WorkspaceRegistryState } from './types.ts'
+import type {
+  DecodeAll,
+  EffectOutcome,
+  ProgressEvent,
+  ProgressReporter,
+  RegistryChange,
+  WarmOutcome,
+  WorkspaceRegistryState,
+} from './types.ts'
 import type { SessionMeta } from './visibility.ts'
 
 /** 远端本插件独占的那层目录（相对资源根），机器格就放在它下面：`url` 可以填服务器/账号根。 */
@@ -969,27 +977,16 @@ export async function readRemoteLibrary(dav: DavPort, settings: SyncSettings): P
  * **预演与落地报的是同一套事件**：落地那边也要先算一遍计划，用户按下确认后到第一条拉取完成之间那段
  * 空档，靠的就是前面这四个阶段。
  */
-export interface SyncProgress {
-  /**
-   * 这一段是什么：
-   *   - `scan` / `remote` / `repo` / `compare`：算计划的四段（预演与落地都有）；
-   *   - `pull` / `push`：真写盘的两段（只有落地有）。
-   */
-  phase: 'scan' | 'remote' | 'repo' | 'compare' | 'pull' | 'push'
-  /**
-   * 这一段一共多少条（计划里定下、真会做的那些；跳过的没算进来）。
-   *
-   * `0` 表示这一段**没有条数可讲**（例如读一次远端索引）：界面只摆那句话，不摆进度条——画一条
-   * 1/1 的会让人以为"已经做完了"，而它其实还在等。
-   */
-  total: number
-  /** 这一段已经做完几条。 */
-  done: number
-  /** 正在开始处理的那条会话 id（`scan` / `remote` / `compare` 没有"某一条"，缺席）。 */
-  id?: string
-  /** 界面上怎么称呼它（标题优先，读不到退回 id）——与清单里同一套口径。 */
-  label?: string
-}
+/**
+ * 同步报的那几段（形状与共用词汇完全同源，见 `types.ts` 的 `ProgressEvent`）。
+ *
+ * `done` 是**已经做完**的条数——事件发在开始处理下一条之前，所以正在处理的是第 `done + 1` 条。
+ *
+ * 六段各有各的分母：`scan` / `remote` / `repo` / `compare` 是算计划的四段（预演就有），
+ * `pull` / `push` 是真写盘的两段。`id` 与 `label` 只有写盘那两段有（"正在处理某一条"），算计划那四段
+ * 只报做到哪儿。
+ */
+export type SyncProgress = ProgressEvent
 
 /** 落地的结果。 */
 export interface SyncOutcome {
@@ -1104,7 +1101,8 @@ function repoCandidates(deps: SyncDeps, local: readonly DiscoveredSession[]): st
  */
 export async function runSync(
   deps: SyncDeps,
-  options: { apply: boolean; onProgress?: (event: SyncProgress) => void },
+  options: { apply: boolean; onProgress?: ProgressReporter },
+
 ): Promise<SyncOutcome> {
   const problems: string[] = []
   const report = options.onProgress

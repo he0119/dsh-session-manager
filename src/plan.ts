@@ -13,7 +13,7 @@ import { familyOf } from './family.ts'
 import { projectKey } from './project-key.ts'
 import { reHome, validateRegistry } from './registry.ts'
 import type { TitleQuery } from './session-title.ts'
-import type { DecodeAll, RelocationPlan, SessionMove, WorkspaceRegistryState } from './types.ts'
+import type { DecodeAll, ProgressReporter, RelocationPlan, SessionMove, WorkspaceRegistryState } from './types.ts'
 import { hiddenReasonOf, type HiddenReason } from './visibility.ts'
 
 /** `buildRelocationPlan()` 的选项。 */
@@ -57,6 +57,14 @@ export interface BuildPlanOptions {
    * `hiddenOf()` 的说明：这一层的候选必须与外壳侧边栏显示的那些对齐。
    */
   resolveBlank?: (query: { id: string; createdAt: number; cwd?: string }) => boolean | undefined
+  /**
+   * 发现阶段的进度（可选）。
+   *
+   * 只报**源那一遍**扫描：目录来源下它是"扫这个项目目录"，未分组来源下它是"扫整个库"——两者都是
+   * 用户等的第一步，分母也只有一个。后面为展开子智能体族而扫的第二遍（不带标题）不报：它没有第二个
+   * 分母可分，硬报会让界面上的条跳回 0（那正是 `ProgressEvent` 一句"各有各的分母"的意思）。
+   */
+  onProgress?: ProgressReporter
 }
 
 /**
@@ -76,6 +84,7 @@ export function buildRelocationPlan(options: BuildPlanOptions): RelocationPlan {
     includeArtifacts = false,
     resolveTitle,
     resolveBlank,
+    onProgress,
   } = options
   const from = (options.from ?? '').trim()
   const problems: string[] = []
@@ -163,7 +172,12 @@ export function buildRelocationPlan(options: BuildPlanOptions): RelocationPlan {
       return false
     })
 
-  const scanOptions = resolveTitle === undefined ? {} : { resolveTitle }
+  const scanOptions = {
+    ...(resolveTitle === undefined ? {} : { resolveTitle }),
+    ...(onProgress === undefined
+      ? {}
+      : { onProgress: (done: number, total: number) => onProgress({ phase: 'scan', done, total }) }),
+  }
   // 源目录扫出来的那一份（含侧边栏看不见的：它们不进候选，但选中一条父会话时要把它们当中
   // "属于这条父会话的子智能体"找出来）。
   let sourceScanned: DiscoveredSession[] = []
@@ -296,11 +310,16 @@ export function buildRelocationPlan(options: BuildPlanOptions): RelocationPlan {
   if (includeArtifacts && unowned && sessions.length > 0) {
     problems.push('unowned source cannot relocate session artifacts (it spans several source directories)')
   } else if (includeArtifacts && sessions.length > 0) {
-    const texts = sessions.map((s) => ({
-      id: s.id,
-      // 多代次（v3 + v4）按代次顺序拼接，与宿主读取口径一致
-      text: s.files.map((f) => decodeAll(readFileSync(f.path))).join(''),
-    }))
+    const texts: Array<{ id: string; text: string }> = []
+    for (const [index, s] of sessions.entries()) {
+      // 产物定位要**全量解码**每份日志（多帧全解），比发现阶段贵得多：这一段同样值得一条进度。
+      onProgress?.({ phase: 'read', total: sessions.length, done: index, id: s.id, label: s.title ?? s.id })
+      texts.push({
+        id: s.id,
+        // 多代次（v3 + v4）按代次顺序拼接，与宿主读取口径一致
+        text: s.files.map((f) => decodeAll(readFileSync(f.path))).join(''),
+      })
+    }
     artifacts = planArtifactMoves({ sessions: texts, fromDir: from, toDir: to })
     for (const p of artifacts.problems) problems.push(p)
   }

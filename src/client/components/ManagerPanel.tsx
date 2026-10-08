@@ -19,7 +19,7 @@
 
 import * as React from 'react'
 
-import { fetchMeta, fetchState, type MetaResponse, type StateResponse } from '../api.ts'
+import { fetchMeta, fetchState, type MetaResponse, type ProgressEvent, type StateResponse } from '../api.ts'
 import { PLUGIN_COMMIT, PLUGIN_DIRTY, PLUGIN_VERSION } from '../build.ts'
 import type { DirectoryApi } from '../directory.ts'
 import type { Translate } from '../logic/locales.ts'
@@ -28,6 +28,7 @@ import { BackupPanel } from './BackupPanel.tsx'
 import { HelpPanel } from './HelpPanel.tsx'
 import { ManagePanel } from './ManagePanel.tsx'
 import { MigrationPanel } from './MigrationPanel.tsx'
+import { ProgressBlock } from './ProgressBlock.tsx'
 import { SyncPanel } from './SyncPanel.tsx'
 import { TransferPanel } from './TransferPanel.tsx'
 
@@ -56,6 +57,14 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
    * 两者不能混。它比 `state` 先到，页头因此不必等清单。
    */
   const [meta, setMeta] = React.useState<MetaResponse | undefined>(undefined)
+  /**
+   * 这次读库扫到哪儿了（`/state` 是事件流，见 api.ts 的 `fetchState()`）。
+   *
+   * `undefined` = 还没收到第一条事件（与 `meta` 同一个语义："还没到"），那时页头照旧只说「读取中…」、
+   * 不画条——还不知道分母。初值取 `undefined` 而不是 `null` 还有一个理由：`null` 在本页是"读到了、
+   * 宿主就是没给"（见上面 `meta` 的说明），两者不能混。
+   */
+  const [loadProgress, setLoadProgress] = React.useState<ProgressEvent | undefined>(undefined)
   // 默认停在第一个页签（「会话」）：它是这一页的日常视图，另外两页是偶发动作。
   const [panel, setPanel] = React.useState<PanelKey>('manage')
   const [busy, setBusy] = React.useState(false)
@@ -64,11 +73,13 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
   const load = React.useCallback(async (): Promise<void> => {
     setBusy(true)
     setError(null)
+    setLoadProgress(undefined)
     try {
       // 两份同时发、各自落地：`/meta` 不扫库，通常立刻回来，页头先把位置与能力位画上；`/state` 要扫完
       // 整库（每条会话读 header + 折标题），回来再填清单与条数。用 allSettled 是为了让先到的那份**先画**，
       // 而不是等另一份一起。
-      const [metaResult, stateResult] = await Promise.allSettled([fetchMeta(), fetchState()])
+      // `/state` 要扫完整库（每条会话读 header、折标题）：这段进度就是"扫到第几条"。
+      const [metaResult, stateResult] = await Promise.allSettled([fetchMeta(), fetchState(setLoadProgress)])
       if (metaResult.status === 'fulfilled') setMeta(metaResult.value)
       // `/meta` 拿不到不算这一页的错：那几项只是"先说清楚"，清单那条路照样把它们带回来（页头退回
       // "读取中…"）。所以这里不报错，也不清掉上一次拿到的位置。
@@ -83,6 +94,7 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
       }
     } finally {
       setBusy(false)
+      setLoadProgress(undefined)
     }
   }, [t])
 
@@ -126,6 +138,12 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
           {t('page.library')}：{libraryLine}
         </p>
       </header>
+
+      {/*
+        读库的进度：整库要逐条读 header、折标题（更大或更慢的库上是几秒），这一段原来只有页头那句
+        「读取中…」。摆在页头下面、页签上面——它是这一页自己的事，不属于任何一个分页。
+      */}
+      {loadProgress !== undefined && <ProgressBlock t={t} progress={loadProgress} />}
 
       {error !== null && (
         <p className="dsm-banner dsm-error">

@@ -20,8 +20,9 @@
  * 骨架（[ManagerPanel.tsx](./ManagerPanel.tsx)）拉好传进来，切分页不各拉一份。
  *
  * 落地那一次是**流式**的：宿主按条推事件，正文换成进度条与"正在推送 12 / 84"（见
- * [api.ts](./api.ts) 的 `applySync` 与 [ProgressBar.tsx](./ProgressBar.tsx)）。同步是这个插件里唯一
- * "按条走网络"的动作，一次整库同步可能是几十秒，而在此之前界面只有一句"同步中…"。
+ * [api.ts](./api.ts) 的 `applySync` 与 [ProgressBlock.tsx](./ProgressBlock.tsx)）。同步是这一页里
+ * "按条走网络"的那个动作，一次整库同步可能是几十秒；同一套进度块现在也被迁移 / 删除 / 回滚 / 导入 /
+ * 归档 / 扫库复用（见 [ProgressBlock.tsx](./ProgressBlock.tsx)）。
  *
  * 弹窗里那三张计划表（会拉取 / 会推送 / 没动）按**项目目录**分组：一次整库同步的计划里，同一个目录会连着
  * 出现十几条，逐行印一遍同样的路径只是把人绕进去。分组键怎么取、组怎么排见
@@ -40,8 +41,8 @@ import * as React from 'react'
 import {
   applySync,
   fetchSyncPlan,
+  type ProgressEvent,
   type SessionSummary,
-  type SyncProgressEvent,
   type SyncPullEntry,
   type SyncPushEntry,
   type SyncResponse,
@@ -51,7 +52,7 @@ import { groupKey } from '../logic/groups.ts'
 import { WorkspaceIcon } from './icons.tsx'
 import type { SessionManagerKey, Translate } from '../logic/locales.ts'
 import { projectLabel, sessionLabel, type SessionLabel } from '../logic/planRows.ts'
-import { ProgressBar } from './ProgressBar.tsx'
+import { ProgressBlock } from './ProgressBlock.tsx'
 import { formatBytes, sessionTags, type TagCopy } from './sessionList.tsx'
 import { SyncConfigForm } from './SyncConfigForm.tsx'
 import { groupSyncRows, syncProjectOf, syncPullTip, type SyncGroup, type SyncSide } from '../logic/syncGroups.ts'
@@ -292,57 +293,6 @@ function SessionCell({
   )
 }
 
-/**
- * 进度那行字。
- *
- * `done` 是**已经做完**的条数、事件发在开始处理下一条之前，所以正在处理的是第 `done + 1` 条——与
- * 进度条的 `current` 同一个数，两处必须一起变。读远端索引是一次网络往返，没有"第几条"可讲，所以那
- * 一段是固定的一句（`sync.progress.preparing`）。
- */
-function progressTextOf(t: Translate, progress: SyncProgressEvent): string {
-  switch (progress.phase) {
-    case 'scan':
-      return t('sync.progress.scanning', { current: progress.done + 1, total: progress.total })
-    case 'repo':
-      return t('sync.progress.matchingRepos', { current: progress.done + 1, total: progress.total })
-    case 'compare':
-      return t('sync.progress.comparing', { current: progress.done + 1, total: progress.total })
-    case 'remote':
-      return t('sync.progress.preparing')
-    case 'pull':
-      return t('sync.progress.pulling', { current: progress.done + 1, total: progress.total })
-    case 'push':
-      return t('sync.progress.pushing', { current: progress.done + 1, total: progress.total })
-  }
-}
-
-/**
- * 进度条 + 那行字（+ 正在处理的那一条）。
- *
- * 算计划那四段（扫本机 / 读远端 / 认仓库 / 比对内容）没有"某一条"可讲，`label` 缺席时不摆那一行——
- * 预演与落地共用这一段，落地那边前四个阶段也是这个形状。
- */
-function ProgressBlock({
-  t,
-  progress,
-}: {
-  t: Translate
-  progress: SyncProgressEvent
-}): React.ReactElement {
-  const text = progressTextOf(t, progress)
-  // "中断了再点一次接着补齐"那句话只在真写盘的两段有意义：预演阶段还没有东西可写。
-  const writing = progress.phase === 'pull' || progress.phase === 'push'
-  return (
-    <>
-      {/* 分母是 0 的那一段（读一次远端索引）没有"第几条"：只摆那句话，不摆条。 */}
-      {progress.total > 0 && <ProgressBar current={progress.done + 1} total={progress.total} label={text} />}
-      <p className="dsm-hint">{text}</p>
-      {progress.label === undefined ? null : <p className="dsm-rowTitle">{progress.label}</p>}
-      {writing && <p className="dsm-hint">{t('sync.progress.note')}</p>}
-    </>
-  )
-}
-
 /** 同步页。 */
 export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactElement {
   /** 最近一次计划或结果：映射表的远端候选与弹窗正文都读它（关掉弹窗之后候选还得在）。 */
@@ -360,7 +310,7 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
    * `null` 有两种时候——还没开始、以及刚开始那一段（宿主在算计划：读远端索引、扫本机库、比指纹，
    * 没有逐条可报）。后者界面显示"正在读取远端索引…"，所以这里不需要第三个状态位。
    */
-  const [progress, setProgress] = React.useState<SyncProgressEvent | null>(null)
+  const [progress, setProgress] = React.useState<ProgressEvent | null>(null)
 
   /**
    * 同步配置（宿主插件配置里的 `sync` 块）；`null` 或字段缺席都按"没配置"处理，只画一句说明。
@@ -438,6 +388,15 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
       },
     )
   }
+
+  /**
+   * 进度块下面补的那句话：只有真写盘的两段（拉取 / 推送）才有意义——预演阶段还没有东西可覆盖。
+   *
+   * 各页的那句话不同（迁移说的是"中断会留下中间状态、可在备份页回退"，导入说的是"只增不覆盖"），
+   * 所以它由调用方给，而不是塞进共用的 [ProgressBlock.tsx](./ProgressBlock.tsx)。
+   */
+  const syncNote = (event: ProgressEvent): string | undefined =>
+    event.phase === 'pull' || event.phase === 'push' ? t('sync.progress.note') : undefined
 
   const syncPlan = sync?.plan ?? null
   // 覆盖本机那份也摆在「会拉取」这张表里（它同样是往本机落内容），只是行上挂一颗不同的标签。
@@ -585,7 +544,7 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
           planning={planning}
           // 预演那几秒不是在空等：先扫本机、再读远端索引、最后逐条比对内容。算到哪一步摆哪一步的进度
           // （还没有事件时退回 ConfirmDialog 那句「预演中…」）。
-          planningDetail={progress === null ? undefined : <ProgressBlock t={t} progress={progress} />}
+          planningDetail={progress === null ? undefined : <ProgressBlock t={t} progress={progress} note={syncNote(progress)} />}
           error={null}
           onConfirm={doSyncApply}
           onCancel={() => setDialog(null)}
@@ -593,9 +552,9 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
         {/* 落地：前面三个阶段（算计划）与后面两段（拉取 / 推送）报的是同一套事件，画法也一样。 */}
         {busy === 'apply' &&
           (progress === null ? (
-            <p className="dsm-hint">{t('sync.progress.preparing')}</p>
+            <p className="dsm-hint">{t('progress.waiting')}</p>
           ) : (
-            <ProgressBlock t={t} progress={progress} />
+            <ProgressBlock t={t} progress={progress} note={syncNote(progress)} />
           ))}
         {busy !== 'apply' && !planning && sync !== null && syncPlan !== null && (
           <div>
