@@ -3,7 +3,7 @@
  *
  * 与另外两页的分工：传输页是"把会话带走"、迁移页是"把会话挪个目录并登记"，这一页是"这条会话我
  * 不要了 / 先收起来"。三页共用同一份 `/state`（页面骨架只拉一次）与同一套列表骨架
- * （[sessionList.tsx](./sessionList.tsx)），所以行、标签、条数、筛选条不会各说各话。
+ * （[sessionList.tsx](./sessionList.tsx)），所以行、标签、条数、筛选条、选行那一对按钮都不会各说各话。
  *
  * 三个刻意的设计：
  *   - **全库都在这里**，包括外壳侧边栏不显示的子智能体 / 空白 / 已归档会话：这一页恰恰是用来收拾它们的
@@ -25,14 +25,9 @@
 
 import * as React from 'react'
 
-import {
-  archiveSessions,
-  deleteSessions,
-  type DeleteResponse,
-  type SessionSummary,
-} from '../api.ts'
+import { archiveSessions, deleteSessions, type DeleteResponse } from '../api.ts'
 import { ConfirmDialog } from './ConfirmDialog.tsx'
-import { groupKey, groupSessions, lockedParentOf, nestSessions } from '../logic/groups.ts'
+import { groupKey, groupSessions, nestSessions } from '../logic/groups.ts'
 import { deleteFamilyNote, parentDirNote } from '../logic/planRows.ts'
 import { FILTER_KEYS } from '../logic/sessionFilter.ts'
 import {
@@ -41,10 +36,12 @@ import {
   SessionGroupTools,
   SessionListBox,
   SessionListEmpty,
+  SessionPickTools,
   SessionRow,
   SessionStaticRow,
   useGroupCollapse,
   useSessionFilter,
+  useSessionPicking,
 } from './sessionList.tsx'
 import type { PanelShare } from '../types.ts'
 
@@ -56,7 +53,15 @@ export function ManagePanel({ t, state, meta, reload }: PanelShare): React.React
   const facts = state ?? meta
   const archiveAvailable = facts?.archiveAvailable === true
 
-  const [selected, setSelected] = React.useState<readonly string[]>([])
+  /**
+   * 勾选：行勾选、整组勾选、全选、清空，以及"这一行为什么不能单独勾"。
+   *
+   * 整份逻辑在 [sessionList.tsx](./sessionList.tsx) 里，与「传输」页共用一份（那一页原先自己写了一遍
+   * 逐字同形的 `toggle` / `toggleGroup` / `lockOf`）。判据见那里的 `useSessionPicking()`：
+   * 能勾的集合就是"单独操作不会被拒的集合"（子智能体跟着父会话走）。
+   */
+  const picking = useSessionPicking(sessions, t)
+  const picked = picking.picked
   /** 筛选条：一枚芯片都不勾、关键词为空 = 全都列出来（见 sessionFilter.matchesFilters）。 */
   const filter = useSessionFilter(sessions)
   const [busy, setBusy] = React.useState<'archive' | 'unarchive' | 'apply' | null>(null)
@@ -89,41 +94,8 @@ export function ManagePanel({ t, state, meta, reload }: PanelShare): React.React
   const collapse = useGroupCollapse(groups.map((item) => groupKey(item.group.path)))
   /** 当前列出来的那些（筛过之后，按组摊平）。缩进只改画法，不改"列出来了哪些"。 */
   const listed = React.useMemo(() => groups.flatMap((item) => item.rows.map((row) => row.session)), [groups])
-
-  // 已被删掉/已不在列表里的 id 不该继续留在选择集里（弹窗里删完再刷新时会遇到）。
-  const known = React.useMemo(() => new Set(sessions.map((session) => session.id)), [sessions])
-  const picked = React.useMemo(() => selected.filter((id) => known.has(id)), [selected, known])
-
-  /**
-   * 这一行能不能单独勾：子智能体跟着父会话走（父会话还在库里时就只能跟着它）。
-   *
-   * 判据在 `groups.ts` 的 `lockedParentOf()` 里，与宿主那几条路（remove.ts、web.ts 的归档与导出）
-   * 同源——能勾的集合就是"单独操作不会被拒的集合"。
-   */
-  const lockOf = React.useMemo(() => {
-    const byId = new Map(sessions.map((session) => [session.id, session]))
-    return (session: SessionSummary): { tip: string } | undefined => {
-      const parent = lockedParentOf(session, byId)
-      return parent === undefined ? undefined : { tip: t('list.lockedSubagentTip', { name: parent.title ?? parent.id }) }
-    }
-  }, [sessions, t])
-  const selectable = (session: SessionSummary): boolean => lockOf(session) === undefined
-
-  const toggle = (session: SessionSummary): void => {
-    if (!selectable(session)) return
-    const id = session.id
-    setSelected((current) => (current.includes(id) ? current.filter((item) => item !== id) : [...current, id]))
-  }
-
-  /** 组头那一下：整组勾上，或整组取消（与「传输」页同一套）。不能单独勾的那些不参与。 */
-  const toggleGroup = (sessions: readonly SessionSummary[]): void => {
-    const ids = sessions.filter(selectable).map((session) => session.id)
-    if (ids.length === 0) return
-    const whole = ids.every((id) => selected.includes(id))
-    setSelected((current) =>
-      whole ? current.filter((id) => !ids.includes(id)) : [...new Set([...current, ...ids])],
-    )
-  }
+  /** 眼下列出来的那些里能单独勾的（「全选」的作用面与禁用判据）。 */
+  const pickable = picking.selectableOf(listed)
 
   const doArchive = async (archived: boolean): Promise<void> => {
     setBusy(archived ? 'archive' : 'unarchive')
@@ -140,7 +112,7 @@ export function ManagePanel({ t, state, meta, reload }: PanelShare): React.React
             ` ${t('manage.archive.immediate')}`,
         )
       }
-      if (response.failed.length === 0) setSelected([])
+      if (response.failed.length === 0) picking.clear()
       await reload()
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
@@ -190,7 +162,7 @@ export function ManagePanel({ t, state, meta, reload }: PanelShare): React.React
         setBusy(null)
         if (response.applied) {
           setNotice(response.summary)
-          setSelected([])
+          picking.clear()
           setPending(null)
           void reload()
           return
@@ -244,19 +216,17 @@ export function ManagePanel({ t, state, meta, reload }: PanelShare): React.React
             <span className="dsm-hint">{t('list.shown', { shown: listed.length, total: sessions.length })}</span>
           )}
           <span className="dsm-spacer" />
-          <button
-            type="button"
-            className="dsm-button"
-            // 筛过之后再点「全选」，要的是"这几类都选上"，不是"把看不见的也选上"；不能单独勾的那些
-            // 也不进来：子智能体跟着父会话走，勾父会话就等于勾了它。
-            onClick={() => setSelected(listed.filter(selectable).map((session) => session.id))}
-            disabled={listed.filter(selectable).length === 0}
-          >
-            {t('list.selectAll')}
-          </button>
-          <button type="button" className="dsm-button" onClick={() => setSelected([])} disabled={picked.length === 0}>
-            {t('list.clear')}
-          </button>
+          {/*
+            筛过之后「全选」要的是"这几类都选上"，不是"把看不见的也选上"；不能单独勾的那些也不进来：
+            子智能体跟着父会话走，勾父会话就等于勾了它。这一对与「传输」「迁移」两页是同一个组件。
+          */}
+          <SessionPickTools
+            selectableCount={pickable.length}
+            pickedCount={picked.length}
+            onSelectAll={() => picking.selectAll(listed)}
+            onClear={picking.clear}
+            t={t}
+          />
         </div>
         <p className="dsm-hint">{t('manage.hint')}</p>
         {/* 能力位还没到（首帧，`/meta` 与 `/state` 都没回来）时先不说结论：那一刻的真相是"还不知道"。 */}
@@ -288,7 +258,7 @@ export function ManagePanel({ t, state, meta, reload }: PanelShare): React.React
                     count={rows.length}
                     picked={rows.filter((row) => picked.includes(row.session.id)).length}
                     collapsed={collapsed}
-                    onToggle={() => toggleGroup(rows.map((row) => row.session))}
+                    onToggle={() => picking.toggleGroup(rows.map((row) => row.session))}
                     onToggleCollapse={() => collapse.toggle(key)}
                     t={t}
                   />
@@ -299,10 +269,10 @@ export function ManagePanel({ t, state, meta, reload }: PanelShare): React.React
                         session={row.session}
                         variant="manage"
                         checked={picked.includes(row.session.id)}
-                        onToggle={() => toggle(row.session)}
+                        onToggle={() => picking.toggle(row.session)}
                         depth={row.depth}
                         note={parentDirNote(row, t)}
-                        locked={lockOf(row.session)}
+                        locked={picking.lockOf(row.session)}
                         t={t}
                       />
                     ))}

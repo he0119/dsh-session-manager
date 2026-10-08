@@ -132,6 +132,9 @@
   正文与次要文字是内建那两档（14px/20px 与 12px/18px），行高不跟着字号放大。
 - [卡片级的主动作放卡片底部的动作行](../.agents/notes/implemented/architecture/2026-10-07-card-actions-live-in-a-footer-row.md)：
   动作跟着它的输入走；卡头只留不动数据的工具（刷新、全选 / 清空、收起 / 展开），清单行上的动作不挪位。
+- [选行工具全站只有一对](../.agents/notes/implemented/bug-fix/2026-10-08-one-pair-of-pick-tools.md)：
+  三张带勾选的清单共用一对常驻的「全选 / 清空」（同一套作用面与禁用判据），位置是清单之上那一行的
+  右端；清单就是整张卡时在卡头，清单是卡片里的一段时在它上方那一行。
 - [备份清单是独立分页](../.agents/notes/implemented/architecture/2026-10-07-backups-are-their-own-page.md)：
   迁移 / 删除 / 同步覆盖三种来路共用一张清单，页签排在动作页之后、「说明」之前。
 - [页面分两份加载，清单没到之前先说实话](../.agents/notes/implemented/architecture/2026-10-07-page-loads-in-two-phases.md)：

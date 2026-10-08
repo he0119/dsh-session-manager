@@ -35,9 +35,9 @@
 import * as React from 'react'
 
 import { download, exportSessions, importBundle, type ImportResponse } from '../api.ts'
-import type { ImportEntry, SessionSummary } from '../api.ts'
+import type { ImportEntry } from '../api.ts'
 import { ConfirmDialog } from './ConfirmDialog.tsx'
-import { groupKey, groupSessions, lockedParentOf, nestSessions } from '../logic/groups.ts'
+import { groupKey, groupSessions, nestSessions } from '../logic/groups.ts'
 import { describeCwd, directoryTargetRows, parentDirNote, sessionLabel } from '../logic/planRows.ts'
 import { FILTER_KEYS } from '../logic/sessionFilter.ts'
 import {
@@ -46,11 +46,13 @@ import {
   SessionGroupTools,
   SessionListBox,
   SessionListEmpty,
+  SessionPickTools,
   SessionRow,
   formatBytes,
   totalBytes,
   useGroupCollapse,
   useSessionFilter,
+  useSessionPicking,
 } from './sessionList.tsx'
 import { DirectoryField, useDirectoryFields } from './DirectoryField.tsx'
 import type { Translate } from '../logic/locales.ts'
@@ -70,7 +72,6 @@ function cwdText(entry: ImportEntry, t: Translate): string {
 
 /** 传输页。 */
 export function TransferPanel({ t, state, meta, reload, directory }: PanelShare): React.ReactElement {
-  const [selected, setSelected] = React.useState<readonly string[]>([])
   const [file, setFile] = React.useState<File | null>(null)
   const [payload, setPayload] = React.useState<ArrayBuffer | null>(null)
   const [target, setTarget] = React.useState('')
@@ -100,6 +101,15 @@ export function TransferPanel({ t, state, meta, reload, directory }: PanelShare)
     () => directoryTargetRows(workspaces, state?.repos, target),
     [workspaces, state?.repos, target],
   )
+  /**
+   * 勾选：与「会话」页共用一份逻辑（`useSessionPicking()`，判据在 sessionList.tsx）——能勾的集合就是
+   * "单独操作不会被拒的集合"（子智能体跟着父会话走，与宿主那条导出路的拒绝判据同源）。
+   *
+   * 它排在这一页第一个**空数组状态**的位置上（老代码里 `selected` 就在这儿）：勾选集与筛选条的先后
+   * 是冒烟用例种状态时的约定（见 test/client.test.mjs 的 arrays 参数）。
+   */
+  const picking = useSessionPicking(sessions, t)
+  const picked = picking.picked
   /** 筛选条：类别芯片 + 标题搜索。这一页列的是**整个库**（隐藏会话也在），所以五类芯片都有意义。 */
   const filter = useSessionFilter(sessions)
   // 列表按**目录**分组（不是按注册表里的工作区）：同一个目录下常有没登记在册的会话，而用户说的
@@ -121,51 +131,13 @@ export function TransferPanel({ t, state, meta, reload, directory }: PanelShare)
   /**
    * 折叠：只是把组内的行收起来，**不改"列出来了哪些"**。
    *
-   * 收起来的是"画不画"，不是"算不算"：头部照样报「显示 N / M 条」，「全选整库」照样选这些组里的会话
+   * 收起来的是"画不画"，不是"算不算"：头部照样报「显示 N / M 条」，「全选」照样选这些组里的会话
    * （组头上"这组几条 / 勾了几条"一直在，收起一个目录之后这两串数字正是最该看见的）。反过来做——让
    * 折叠把行从全选里摘出去——就会变成"点一下箭头悄悄改了要导出的东西"，那才是真难查。
    */
   const collapse = useGroupCollapse(groups.map((item) => groupKey(item.group.path)))
-  const allSelected = listed.length > 0 && listed.every((session) => selected.includes(session.id))
-
-  // 库变了（例如刚导入完）：把已经不在库里的选择摘掉，别让「已选 3」里混着不存在的会话。
-  React.useEffect(() => {
-    setSelected((current) => current.filter((id) => sessions.some((session) => session.id === id)))
-  }, [sessions])
-
-  /**
-   * 这一行能不能单独勾：子智能体跟着父会话走（父会话还在库里时就只能跟着它）。判据与「会话」页共用
-   * `groups.ts` 的 `lockedParentOf()`，与宿主那条导出路的拒绝判据同源。
-   */
-  const lockOf = React.useMemo(() => {
-    const byId = new Map(sessions.map((session) => [session.id, session]))
-    return (session: SessionSummary): { tip: string } | undefined => {
-      const parent = lockedParentOf(session, byId)
-      return parent === undefined ? undefined : { tip: t('list.lockedSubagentTip', { name: parent.title ?? parent.id }) }
-    }
-  }, [sessions, t])
-  const selectable = (session: SessionSummary): boolean => lockOf(session) === undefined
-
-  const toggle = (session: SessionSummary): void => {
-    if (!selectable(session)) return
-    const id = session.id
-    setSelected((current) => (current.includes(id) ? current.filter((x) => x !== id) : [...current, id]))
-  }
-
-  /**
-   * 点组头：整组勾上，或整组取消。
-   *
-   * 只勾了一部分时点一下是"补齐"，这是列表的通行手感（Gmail/GitHub 都这样）；想去掉整组，
-   * 再看一眼它变成"全部勾上"之后再点一下即可。一条会话都没勾的组同理是"勾上"。
-   */
-  const toggleGroup = (group: readonly SessionSummary[]): void => {
-    const ids = group.filter(selectable).map((session) => session.id)
-    if (ids.length === 0) return
-    const whole = ids.every((id) => selected.includes(id))
-    setSelected((current) =>
-      whole ? current.filter((id) => !ids.includes(id)) : [...new Set([...current, ...ids])],
-    )
-  }
+  /** 眼下列出来的那些里能单独勾的（「全选」的作用面与禁用判据）。 */
+  const pickable = picking.selectableOf(listed)
 
   const run = async (kind: 'export', action: () => Promise<void>): Promise<void> => {
     setBusy(kind)
@@ -181,14 +153,14 @@ export function TransferPanel({ t, state, meta, reload, directory }: PanelShare)
   }
 
   const doExport = (): void => {
-    if (selected.length === 0) {
+    if (picked.length === 0) {
       setError(t('transfer.import.needSelection'))
       return
     }
     void run('export', async () => {
-      const result = await exportSessions(selected)
+      const result = await exportSessions(picked)
       download(result)
-      const chosen = sessions.filter((session) => selected.includes(session.id))
+      const chosen = sessions.filter((session) => picked.includes(session.id))
       // 包里的条数与字节以宿主回报的为准：勾一条父会话时，它的子智能体跟着进包，比勾选数多。
       setNotice(
         t('transfer.export.done', {
@@ -200,16 +172,17 @@ export function TransferPanel({ t, state, meta, reload, directory }: PanelShare)
   }
 
   const pickFile = (event: React.ChangeEvent<HTMLInputElement>): void => {
-    const picked = event.target.files?.[0] ?? null
-    setFile(picked)
+    // 变量名避开 `picked`（那个是勾选集）：两个都叫 picked 时读代码的人得回头认作用域。
+    const chosen = event.target.files?.[0] ?? null
+    setFile(chosen)
     setPending(null)
     setError(null)
     setNotice(null)
-    if (picked === null) {
+    if (chosen === null) {
       setPayload(null)
       return
     }
-    void picked
+    void chosen
       .arrayBuffer()
       .then((buffer) => setPayload(buffer))
       .catch((cause: unknown) => setError(t('error.failed', { reason: cause instanceof Error ? cause.message : String(cause) })))
@@ -306,22 +279,23 @@ export function TransferPanel({ t, state, meta, reload, directory }: PanelShare)
       <div className="dsm-card">
         <div className="dsm-cardHead">
           <span className="dsm-cardTitle">{t('transfer.export.title')}</span>
-          <span className="dsm-hint">{t('list.selected', { count: selected.length })}</span>
+          <span className="dsm-hint">{t('list.selected', { count: picked.length })}</span>
           {filter.active && (
             <span className="dsm-hint">{t('list.shown', { shown: listed.length, total: sessions.length })}</span>
           )}
           <span className="dsm-spacer" />
-          <button
-            type="button"
-            className="dsm-button"
-            // 筛过之后"全选/清空"针对的是**眼下列出来的**那些：勾选面看到什么就选什么，
-            // 已经勾上的不会因为切筛选而丢（头部一直报着"已选几条"）。
-            // 不能单独勾的那些不进来：子智能体跟着父会话走，勾父会话就等于勾了它。
-            onClick={() => setSelected(allSelected ? [] : listed.filter(selectable).map((session) => session.id))}
-            disabled={listed.filter(selectable).length === 0}
-          >
-            {allSelected ? t('list.clear') : t('transfer.export.selectAll')}
-          </button>
+          {/*
+            "全选"针对的是**眼下列出来的**那些：勾选面看到什么就选什么，已经勾上的不会因为切筛选而丢
+            （头部一直报着"已选几条"）；不能单独勾的那些不进来（子智能体跟着父会话走）。「清空」与它
+            并排常驻——一枚会变脸的按钮在"勾了一部分"时只剩「全选」可读，那时清不掉。
+          */}
+          <SessionPickTools
+            selectableCount={pickable.length}
+            pickedCount={picked.length}
+            onSelectAll={() => picking.selectAll(listed)}
+            onClear={picking.clear}
+            t={t}
+          />
         </div>
         <p className="dsm-hint">{t('transfer.export.hint')}</p>
 
@@ -341,7 +315,7 @@ export function TransferPanel({ t, state, meta, reload, directory }: PanelShare)
           ) : (
             groups.map(({ group, rows }) => {
               const key = groupKey(group.path)
-              const picked = rows.filter((row) => selected.includes(row.session.id)).length
+              const groupPicked = rows.filter((row) => picked.includes(row.session.id)).length
               const collapsed = collapse.isCollapsed(key)
               return (
                 // key 与折叠状态同一个身份（`groupKey`），免得两处各写一遍哨兵。
@@ -351,9 +325,9 @@ export function TransferPanel({ t, state, meta, reload, directory }: PanelShare)
                     title={group.title}
                     repo={state?.repos?.[group.path]}
                     count={rows.length}
-                    picked={picked}
+                    picked={groupPicked}
                     collapsed={collapsed}
-                    onToggle={() => toggleGroup(rows.map((row) => row.session))}
+                    onToggle={() => picking.toggleGroup(rows.map((row) => row.session))}
                     onToggleCollapse={() => collapse.toggle(key)}
                     t={t}
                   />
@@ -363,11 +337,11 @@ export function TransferPanel({ t, state, meta, reload, directory }: PanelShare)
                         key={row.session.id}
                         session={row.session}
                         variant="export"
-                        checked={selected.includes(row.session.id)}
-                        onToggle={() => toggle(row.session)}
+                        checked={picked.includes(row.session.id)}
+                        onToggle={() => picking.toggle(row.session)}
                         depth={row.depth}
                         note={parentDirNote(row, t)}
-                        locked={lockOf(row.session)}
+                        locked={picking.lockOf(row.session)}
                         t={t}
                       />
                     ))}
@@ -379,7 +353,7 @@ export function TransferPanel({ t, state, meta, reload, directory }: PanelShare)
 
         {/* 卡片级的主动作放底部动作行（见文件头那条规矩）：头部只留"全选 / 清空"这枚选行工具。 */}
         <div className="dsm-controls">
-          <button type="button" className="dsm-button dsm-primary" onClick={doExport} disabled={busy !== null || selected.length === 0}>
+          <button type="button" className="dsm-button dsm-primary" onClick={doExport} disabled={busy !== null || picked.length === 0}>
             {busy === 'export' ? t('transfer.export.running') : t('transfer.export.action')}
           </button>
         </div>

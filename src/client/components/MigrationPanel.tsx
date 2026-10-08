@@ -22,10 +22,12 @@ import {
   SessionFilterBar,
   SessionListBox,
   SessionListEmpty,
+  SessionPickTools,
   SessionRow,
   SessionStaticRow,
   formatBytes,
   useSessionFilter,
+  useSessionPicking,
 } from './sessionList.tsx'
 import type { Translate } from '../logic/locales.ts'
 import { DirectoryField, useDirectoryFields } from './DirectoryField.tsx'
@@ -68,7 +70,6 @@ export function MigrationPanel({ t, state, meta, reload, directory }: PanelShare
   const [includeArtifacts, setIncludeArtifacts] = React.useState(false)
   const [includeUnowned, setIncludeUnowned] = React.useState(true)
   const [pickMode, setPickMode] = React.useState<PickMode>('all')
-  const [picked, setPicked] = React.useState<readonly string[]>([])
 
   /**
    * 两个字段的展开状态（哪个字段开着候选面板／宿主的目录浏览框、「手输路径」展开了哪一个）。
@@ -98,6 +99,19 @@ export function MigrationPanel({ t, state, meta, reload, directory }: PanelShare
   // 「未分组」来源不是按 cwd 匹配，而是"注册表没认领、且有 cwd"的那一批（可以横跨多个目录），
   // 判据与宿主侧完全同一条（见 planRows.unownedSessions）。
   const matching = React.useMemo(() => migrationMatching(sessions, from), [sessions, from])
+
+  /**
+   * 勾选：与「会话」「传输」两页同一个 hook、同一对按钮（见 sessionList.tsx）。
+   *
+   * 这一页**不锁任何一行**（`lockable = false`）：候选本来就把侧边栏看不见的会话排掉了
+   * （`migrationMatching` 只留 `hidden === undefined` 的），而宿主那条迁移路也不拒单独的子智能体——
+   * 摆一个永远点不动的灰框等于撒谎。
+   *
+   * 勾选集挂在这一份候选上（不是整个库）：换了源目录，上一份候选里的勾选跟着作废，与"点一行就是
+   * 选这个来源"同一件事。
+   */
+  const picking = useSessionPicking(matching, t, false)
+  const picked = picking.picked
 
   /**
    * 筛选：这一页**只给搜索框**，不给类别芯片。
@@ -146,7 +160,7 @@ export function MigrationPanel({ t, state, meta, reload, directory }: PanelShare
   const targetRows = React.useMemo(() => directoryTargetRows(workspaces, repos, to), [workspaces, to, repos])
 
   const chosen = React.useMemo(
-    () => (pickMode === 'all' ? matching.map((s) => s.id) : matching.filter((s) => picked.includes(s.id)).map((s) => s.id)),
+    () => (pickMode === 'all' ? matching.map((s) => s.id) : [...picked]),
     [pickMode, matching, picked],
   )
 
@@ -295,7 +309,7 @@ export function MigrationPanel({ t, state, meta, reload, directory }: PanelShare
             value={from}
             onChange={(value) => {
               setFrom(value)
-              setPicked([])
+              picking.clear()
               setEffect(null)
             }}
             pickerKind={pickerKind}
@@ -356,14 +370,23 @@ export function MigrationPanel({ t, state, meta, reload, directory }: PanelShare
           <span className="dsm-fieldLabel">{t('migrate.scope.label')}</span>
           <div className="dsm-options">
             <label className="dsm-check">
-              <input type="radio" name="dsm-pick" checked={pickMode === 'all'} onChange={() => setPickMode('all')} />
+              <input
+                type="radio"
+                name="dsm-pick"
+                checked={pickMode === 'all'}
+                // 切回「全部」＝整来源一起搬、不按勾选走，所以把勾选清掉：留着几条已经被忽略的勾，
+                // 下一次切回子集时会以为什么都没丢（那是"界面在替请求说话"）。
+                onChange={() => {
+                  setPickMode('all')
+                  picking.clear()
+                }}
+              />
               <span>{t('migrate.scope.all')}</span>
             </label>
             <label className="dsm-check">
               <input type="radio" name="dsm-pick" checked={pickMode === 'subset'} onChange={() => setPickMode('subset')} />
-              <span>
-                {pickMode === 'subset' ? t('list.selected', { count: chosen.length }) : t('migrate.scope.subset')}
-              </span>
+              {/* 条数不在这一格：它与另外两页一样，由下面的「已选 N」报（那一条在三页里是同一处）。 */}
+              <span>{t('migrate.scope.subset')}</span>
             </label>
             <span className="dsm-hint">
               {matching.length > 0 ? t('migrate.source.count', { count: matching.length }) : t('migrate.source.none')}
@@ -374,19 +397,32 @@ export function MigrationPanel({ t, state, meta, reload, directory }: PanelShare
         {matching.length > 0 && (
           <>
             <SessionFilterBar keys={[]} filter={filter} t={t} />
+            {/*
+              勾选提示单独一行，选行那一对在下一行的右端（与「会话」「传输」两页同一个组件）。两者挤在
+              同一行时（中文 37 字 + 「已选 N」+ 两枚按钮）会换行——实测这一列只有 534px，工具被顶到
+              第二行，行高从 30px 变成 62px。
+
+              这一对**只要清单在就在**：原先它只在「只选其中几条」下出现，清单摆着却没有全选 / 清空，
+              与另外两页是两套语法。
+
+              「全选」在这里连带切到子集：勾选只在子集下进请求（`request()` 的 `sessionIds`），不切的话
+              屏幕上满勾、实际整来源一起搬，那是界面在撒谎。作用面是**眼下列出来的**那些（筛过之后就是
+              "这几类都选上"）。
+            */}
+            <p className="dsm-hint">{pickMode === 'all' ? t('migrate.scope.tickHint') : t('migrate.scope.subsetHint')}</p>
             <div className="dsm-options">
-              <span className="dsm-hint">{pickMode === 'all' ? t('migrate.scope.tickHint') : t('migrate.scope.subsetHint')}</span>
-              {pickMode === 'subset' && (
-                <>
-                  <span className="dsm-spacer" />
-                  <button type="button" className="dsm-button" onClick={() => setPicked(matching.map((session) => session.id))}>
-                    {t('migrate.scope.selectAll')}
-                  </button>
-                  <button type="button" className="dsm-button" onClick={() => setPicked([])}>
-                    {t('migrate.scope.clear')}
-                  </button>
-                </>
-              )}
+              <span className="dsm-hint">{t('list.selected', { count: picked.length })}</span>
+              <span className="dsm-spacer" />
+              <SessionPickTools
+                selectableCount={listed.length}
+                pickedCount={picked.length}
+                onSelectAll={() => {
+                  setPickMode('subset')
+                  picking.selectAll(listed)
+                }}
+                onClear={picking.clear}
+                t={t}
+              />
             </div>
             <SessionListBox fixed>
               {listed.length === 0 && <SessionListEmpty text={t('list.noMatch')} />}
@@ -395,13 +431,11 @@ export function MigrationPanel({ t, state, meta, reload, directory }: PanelShare
                   key={session.id}
                   session={session}
                   variant="pick"
-                  checked={pickMode === 'subset' && picked.includes(session.id)}
+                  checked={picked.includes(session.id)}
                   onToggle={() => {
                     // 在「全部」下勾某一条 = 我指的就是这一条：顺势切到子集，不要求用户先改单选框
                     if (pickMode === 'all') setPickMode('subset')
-                    setPicked((current) =>
-                      current.includes(session.id) ? current.filter((id) => id !== session.id) : [...current, session.id],
-                    )
+                    picking.toggle(session)
                   }}
                   // 切到「未分组」来源时每一行都不在册，标了等于没标，于是不挂这枚标签。
                   ungroupedTag={!unownedSource}

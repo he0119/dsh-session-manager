@@ -105,6 +105,12 @@ pnpm typecheck && pnpm build && pnpm test && pnpm check:package
   全选 / 清空、收起 / 展开）；破坏性动作用 `dsm-spacer` 顶到同一行右端，清单行上的动作留在行上。依据
   见 [决策](.agents/notes/implemented/architecture/2026-10-07-card-actions-live-in-a-footer-row.md)，
   结构由 `test/client.test.mjs` 的 `primaryPlacements()` 钉住。
+- **带勾选的清单只有一对选行工具**（「全选」`list.selectAll` / 「清空」`list.clear`，作用面是眼下列出来
+  的那些、清空清整个勾选集，两枚各带禁用态），逻辑在 `sessionList.tsx` 的 `useSessionPicking()` 与
+  `SessionPickTools` 一处，位置是清单之上那一行的右端（清单就是整张卡时在卡头，清单是卡片里的一段时在
+  它上方那一行）。依据见
+  [决策](.agents/notes/implemented/bug-fix/2026-10-08-one-pair-of-pick-tools.md)，结构由
+  `test/client.test.mjs` 的 `pickPlacements()` 钉住。
 - `src/client/styles.ts` 的 CSS 正文里**不许出现反引号**（模板字面量会被提前截断，报错落在很远处）；
   类名一律 `dsm-` 前缀。
 - 文案走官方客户端 locale 机制：字典在 `src/client/logic/locales.ts`，`zh` 是键集真源，`en` 由

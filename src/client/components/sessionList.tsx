@@ -8,7 +8,11 @@
  * 就会漏两处——所以共用的边界划在**一行的解剖结构**与**列表的框**上。
  *
  * 留在各分页里的，是各页自己的东西：传输页的组头（按目录分组，见 `groups.ts`）、会话页的归属那一格
- * 与删除计划、迁移页的「全部 / 子集」单选框与备份回滚。
+ * 与删除计划、迁移页的「全部 / 子集」单选框。
+ *
+ * 勾选那一套也在这里：`useSessionPicking()`（行勾选 / 整组勾选 / 全选 / 清空 / 锁定的判据）与
+ * `SessionPickTools`（那对常驻的「全选 / 清空」）三页共用一份，位置与作用面见
+ * [决策](../../../.agents/notes/implemented/bug-fix/2026-10-08-one-pair-of-pick-tools.md)。
  *
  * 样式只在 [styles.ts](./styles.ts) 里定义，颜色只用 `--dsw-alias-*` 主题 token。
  *
@@ -18,6 +22,7 @@
 import * as React from 'react'
 
 import { ChevronIcon, SessionIcon, WorkspaceIcon } from './icons.tsx'
+import { lockedParentOf, type NestableSession } from '../logic/groups.ts'
 import { projectLabel, sessionLabel } from '../logic/planRows.ts'
 import {
   attributeKeys,
@@ -288,6 +293,95 @@ export function GroupCheckbox({
   )
 }
 
+/**
+ * 一行能勾选的会话：除了筛选判据要的那几个字段，还得有族关系（判"能不能单独勾"）与标题（提示里点名
+ * 父会话）。`/state` 的 `SessionSummary` 满足它。
+ */
+export interface PickableSession extends NestableSession {
+  readonly title?: string
+}
+
+/**
+ * 一个清单的勾选状态：行勾选、整组勾选、全选、清空，以及"这一行为什么不能单独勾"。
+ *
+ * 「会话」页与「传输」页原先各写一份（两处的 `toggle` / `toggleGroup` / `lockOf` 逐字同形，只有变量名
+ * 不同），差别只剩"勾完之后拿去干什么"。收在一处之后三件事一起成立：
+ *
+ *   - 判据只有一条（禁用的集合就是宿主会拒的集合，见 [groups.lockedParentOf](../logic/groups.ts)）；
+ *   - 眼下的勾选永远只算**库还在**的会话（见下面的 `picked`：删完 / 换源之后再读，条数不会先报一个
+ *     已经不存在的数）；
+ *   - 选行那一对按钮（下面的 `SessionPickTools`）拿到的数字同源，三个分页的禁用态因此一致。
+ *
+ * @param library 整个库（**不筛**）：父会话在不在库里只与库有关，与当前筛选 / 折叠无关。
+ * @param t 注入面给的翻译函数（锁定提示里点名父会话）。
+ * @param lockable 这个清单有没有"不能单独勾"的行。缺省有（子智能体跟着父会话走）；迁移页传 `false`——
+ *   它的候选本来就把侧边栏看不见的会话排掉了（见 `planRows.migrationMatching`），而宿主那条迁移路也不
+ *   拒单独的子智能体，摆一个永远点不动的灰框才是撒谎。
+ */
+export interface SessionPicking<S extends PickableSession> {
+  /** 眼下真正勾上的那些 id（已经摘掉不在库里的）。 */
+  readonly picked: readonly string[]
+  /** 这一行为什么不能单独勾；能勾时 `undefined`。 */
+  readonly lockOf: (session: S) => { tip: string } | undefined
+  /** 这些行里能单独勾的那些（「全选」的作用面与禁用判据都读它）。 */
+  readonly selectableOf: (sessions: readonly S[]) => S[]
+  readonly toggle: (session: S) => void
+  /** 组头那一下：整组勾上，或整组取消（只勾了一部分时是"补齐"）。 */
+  readonly toggleGroup: (sessions: readonly S[]) => void
+  /** 勾上**眼下列出来的**这些能勾的行（筛过之后就是"这几类都选上"，不是"把看不见的也选上"）。 */
+  readonly selectAll: (listed: readonly S[]) => void
+  /** 清空整个勾选集（眼下的勾选可能包含被筛掉的行，所以不是"清掉列出来的那些"）。 */
+  readonly clear: () => void
+}
+
+export function useSessionPicking<S extends PickableSession>(
+  library: readonly S[],
+  t: Translate,
+  lockable = true,
+): SessionPicking<S> {
+  const [selected, setSelected] = React.useState<readonly string[]>([])
+  /**
+   * 库里还在的那些 id。
+   *
+   * 派生出 `picked` 而不是去改状态：写入成功后 `reload()` 会把清单换成新的那一份，这一帧里"已选 N"
+   * 因此不会先报上一个已经不存在的会话（原来传输页为此单摆了一个 effect 去清选择集，两页的写法不同）。
+   */
+  const known = React.useMemo(() => new Set(library.map((session) => session.id)), [library])
+  const picked = React.useMemo(() => selected.filter((id) => known.has(id)), [selected, known])
+
+  const lockOf = React.useMemo(() => {
+    if (!lockable) return () => undefined
+    const byId = new Map(library.map((session) => [session.id, session]))
+    return (session: S): { tip: string } | undefined => {
+      const parent = lockedParentOf(session, byId)
+      return parent === undefined
+        ? undefined
+        : { tip: t('list.lockedSubagentTip', { name: parent.title ?? parent.id }) }
+    }
+  }, [library, t, lockable])
+
+  const selectableOf = (sessions: readonly S[]): S[] => sessions.filter((session) => lockOf(session) === undefined)
+
+  const toggle = (session: S): void => {
+    if (lockOf(session) !== undefined) return
+    const id = session.id
+    setSelected((current) => (current.includes(id) ? current.filter((item) => item !== id) : [...current, id]))
+  }
+
+  const toggleGroup = (sessions: readonly S[]): void => {
+    const ids = selectableOf(sessions).map((session) => session.id)
+    if (ids.length === 0) return
+    const whole = ids.every((id) => picked.includes(id))
+    setSelected(whole ? picked.filter((id) => !ids.includes(id)) : [...new Set([...picked, ...ids])])
+  }
+
+  const selectAll = (listed: readonly S[]): void => setSelected(selectableOf(listed).map((session) => session.id))
+
+  const clear = (): void => setSelected([])
+
+  return { picked, lockOf, selectableOf, toggle, toggleGroup, selectAll, clear }
+}
+
 export interface SessionGroupHeadProps {
   /** 这一组的目录路径（分组键本身）。 */
   path: string
@@ -412,6 +506,48 @@ export function useGroupCollapse(keys: readonly string[]): GroupCollapse {
     collapseAll,
     expandAll,
   }
+}
+
+/**
+ * 清单的选行工具：一枚「全选」、一枚「清空」——三个分页共用同一对、同一套禁用判据。
+ *
+ * 为什么是**常驻的两枚**，而不是一枚会变脸的（全勾上了才显示「清空」）：勾了一部分时那枚按钮只剩
+ * 「全选」一个词可读，而那一刻用户最想点的偏偏是「清空」——它在界面上不存在，只能一行行点回去。
+ * 两枚各自带禁用态（没有能勾的行 / 一条都没勾）就够了，不必靠换标签省一个位置。
+ *
+ * 全选的作用面是**眼下列出来的那些**（筛过之后就是"这几类都选上"）；清空清的是整个勾选集。两者都由
+ * 调用方把数字算好送进来（数字来自上面的 `useSessionPicking`）。
+ *
+ * 摆在哪儿：清单之上那一行的右端——清单就是整张卡的内容时是卡头（会话页、传输页），清单是卡片里的
+ * 一段时是清单上方那一行（迁移页的范围勾选）。见
+ * [决策](../../../.agents/notes/implemented/bug-fix/2026-10-08-one-pair-of-pick-tools.md)。
+ *
+ * @param selectableCount 眼下列出来的行里能勾的有几条（0 时「全选」禁用）。
+ * @param pickedCount 眼下勾了几条（0 时「清空」禁用）。
+ */
+export function SessionPickTools({
+  selectableCount,
+  pickedCount,
+  onSelectAll,
+  onClear,
+  t,
+}: {
+  selectableCount: number
+  pickedCount: number
+  onSelectAll: () => void
+  onClear: () => void
+  t: Translate
+}): React.ReactElement {
+  return (
+    <>
+      <button type="button" className="dsm-button" onClick={onSelectAll} disabled={selectableCount === 0}>
+        {t('list.selectAll')}
+      </button>
+      <button type="button" className="dsm-button" onClick={onClear} disabled={pickedCount === 0}>
+        {t('list.clear')}
+      </button>
+    </>
+  )
 }
 
 /** 分组列表的工具栏：一句话说明分组方式，加一对"全部收起 / 全部展开"。 */
