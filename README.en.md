@@ -88,7 +88,8 @@ one-line bump at that point.
   count in the library. Tick several to see several kinds (multiple = either), **All** clears them. The
   line below is a **title / id search box** (both are searched: "name it by id" and "the one where I asked
   about that" are both everyday needs). The header then reports "showing N / M", and **Select all picks
-  what is listed right now** (filter to blank, select all, delete them), while ticking survives switching
+  what is listed right now** (filter to blank, select all, delete them), with **Clear** sitting next to it
+  (it empties the whole tick set, so a partial tick can be cleared too), while ticking survives switching
   filters;
 - **Archive / Unarchive**: tick rows and put them away or bring them back in one click. It goes through
   the host's own archiving capability and takes effect **immediately** — the sidebar follows right away,
@@ -140,9 +141,12 @@ one-line bump at that point.
 - **move the whole source, or only some of it**: the sessions of the source are listed
   (titles too, ids on hover; under a directory source the Ungrouped rows carry an "Ungrouped" tag), with a
   **title / id search box** above them to narrow the list, and ticking any row switches to "only the ticked
-  ones"; one source per run. This page gets no category chips: its candidates already exclude everything
-  the sidebar cannot show, so those categories would always read 0 here — showing them would only look
-  like a broken filter;
+  ones"; one source per run. The row above that list carries the same pair as the **Sessions** and
+  **Transfer** tabs: **Select all** picks only what is listed right now (and switches to "only the ticked
+  ones" with it), while the **Clear** next to it empties the whole tick set. Switching back to **All**
+  clears the ticks — "All" moves the whole source and does not go by ticks. This page gets no category
+  chips: its candidates already exclude everything the sidebar cannot show, so those categories would
+  always read 0 here — showing them would only look like a broken filter;
 - **candidates line up with the host sidebar**: subagent sessions (nested under their parent), blank
   sessions (never started a turn) and archived sessions are never candidates — a session the sidebar
   cannot show should not be swept along by accident. Naming one of them explicitly makes the plan say
@@ -183,7 +187,7 @@ one-line bump at that point.
   and **clicking a group header toggles that whole group** — so "take every
   session of this workspace away" is one click. The chevron at the head of a row **folds** the
   group away (the header and its "N sessions / M selected" stay), and the "Grouped by directory" row above
-  the list carries **Collapse all / Expand all**: folding is a display matter, so "Select whole library"
+  the list carries **Collapse all / Expand all**: folding is a display matter, so "Select all"
   still counts what is listed — clicking an arrow never quietly drops sessions from the export. The two levels never read alike: a group header is a tinted
   band with a folder glyph, while session rows are indented under it and carry a chat-bubble glyph (a session
   title is a sentence the user wrote, so it easily looks like a directory name). Subagent sessions sit one
@@ -193,9 +197,10 @@ one-line bump at that point.
 - **Filter**: the same set as the **Sessions** tab — a row of small chips (subagent / blank / archived /
   ungrouped / active, each with the count in the library, multiple = either, **All** clears them) plus a
   **title / id search box**; used together the two are ANDed (search foo, show blank only = blank sessions
-  among foo). The header then reports "showing N / M", and **Select whole library picks what is listed
-  right now**; a group whose rows were all filtered out is not drawn at all (a header with nothing under
-  it looks broken), and a group header reports the filtered count;
+  among foo). The header then reports "showing N / M", and **Select all picks what is listed right now**,
+  with the **Clear** next to it emptying the whole tick set; a group whose rows were all filtered out is
+  not drawn at all (a header with nothing under it looks broken), and a group header reports the filtered
+  count;
 - **Import**: pick a bundle and a landing directory — that field is the **same control with the same
   candidates** as the migration target (the value control opens the candidate panel, and you can also type
   a path or browse the file system) → **Import** opens a dialog listing, per session, what will

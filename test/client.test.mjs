@@ -1272,6 +1272,169 @@ test('客户端产物：子智能体行的勾选框禁用（跟着父会话走�
   assert.equal(selectAll?.props?.['disabled'], true, '列出来的全是不能单独勾的子智能体时，「全选」禁用')
 })
 
+/**
+ * 树里每一枚"选行工具按钮"所在的容器（`cardHead` / `options` / `controls` / `root`）与禁用态。
+ *
+ * 与 `primaryPlacements()` 同一个走法（一次下探里记下来，不分成两趟）：函数组件每被调用一次都新建
+ * 一批元素，两趟比对身份是对不上的。
+ */
+function pickPlacements(node, inside = 'root', out = []) {
+  if (Array.isArray(node)) {
+    for (const item of node) pickPlacements(item, inside, out)
+    return out
+  }
+  if (node === null || typeof node !== 'object') return out
+  if (typeof node.type === 'function') return pickPlacements(node.type(node.props), inside, out)
+  const classes = String(node.props?.className ?? '').split(/\s+/)
+  const nested = classes.includes('dsm-cardHead')
+    ? 'cardHead'
+    : classes.includes('dsm-options')
+      ? 'options'
+      : classes.includes('dsm-controls')
+        ? 'controls'
+        : inside
+  if (node.type === 'button') {
+    const text = strings(node)[0]
+    if (text === 'list.selectAll' || text === 'list.clear') {
+      out.push({ text, where: nested, disabled: node.props?.['disabled'] === true })
+    }
+  }
+  return pickPlacements(node.props?.children, nested, out)
+}
+
+test('客户端产物：三个分页的选行工具是同一对「全选 / 清空」，禁用判据与位置一致', { skip }, () => {
+  // 现象（用户报的）：会话页有一对常驻的「全选」「清空」，传输页只有一枚**会变脸**的按钮——全勾上了
+  // 它才显示「清空」，勾了一部分时"清空"在界面上根本不存在；迁移页那一对只在「只选其中几条」下出现
+  // （清单摆着却没有工具），而且它的「全选」无视搜索框（作用面是 matching 而不是列出来的那些）。
+  // 统一之后的判据见 .agents/notes/implemented/bug-fix/2026-10-08-one-pair-of-pick-tools.md。
+  const state = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    archiveAvailable: true,
+    sessions: [
+      { id: 's-alpha', title: '甲', cwd: '/home/u/dev/alpha', createdAt: 2, dir: '/home/u/dev/alpha', bytes: 100, files: [], ungrouped: false },
+      { id: 's-beta', title: '乙', cwd: '/home/u/dev/beta', createdAt: 1, dir: '/home/u/dev/beta', bytes: 200, files: [], ungrouped: true },
+    ],
+    workspaces: [{ id: 'w1', path: '/home/u/dev/alpha', title: '工作区甲', sessionIds: ['s-alpha'] }],
+  }
+  /**
+   * 渲染一页（一次 `mount` 只够走**一遍**：假钩子的状态种子喂给第一次下探，再走一遍就退回初始值了，
+   * 所以"位置"与"文字"各 mount 一次）。
+   */
+  const render = (panel, extra = {}) => {
+    const mounted = mount({ state, panel, ...extra })
+    const { component, registration } = mounted.registrations[0]
+    return { mounted, tree: component(registration.inject()) }
+  }
+  const placesOf = (panel, extra = {}) => pickPlacements(render(panel, extra).tree)
+  const textOf = (panel, extra = {}) => strings(render(panel, extra).tree)
+
+  const where = { manage: 'cardHead', transfer: 'cardHead', migrate: 'options' }
+  // 迁移页的清单靠"源目录"种出来（strings 的第一个空串状态）
+  const fromSource = { strings: ['/home/u/dev/alpha'] }
+
+  // ① 三个分页都是**常驻的两枚**，顺序固定（全选在前）：一条都没勾时只有「清空」禁用；位置都是"清单
+  // 之上那一行的右端"——会话页 / 传输页的清单就是整张卡，所以是卡头；迁移页的勾选是卡片里的一段，
+  // 所以是清单上方那一行（与筛选框同一处）。
+  const fresh = {
+    manage: placesOf('manage'),
+    transfer: placesOf('transfer'),
+    migrate: placesOf('migrate', fromSource),
+  }
+  for (const [panel, places] of Object.entries(fresh)) {
+    assert.deepEqual(
+      places,
+      [
+        { text: 'list.selectAll', where: where[panel], disabled: false },
+        { text: 'list.clear', where: where[panel], disabled: true },
+      ],
+      `${panel}：一对常驻的「全选 / 清空」，只有「清空」在没勾东西时禁用`,
+    )
+  }
+
+  // ② 勾了几条（种进第一个空数组状态）：两枚都能点。传输页那枚"变脸"的按钮正是在这里失效的——
+  // 勾了一部分时它只剩「全选」可读，用户找不到「清空」。
+  const some = {
+    manage: placesOf('manage', { arrays: [['s-alpha']] }),
+    transfer: placesOf('transfer', { arrays: [['s-alpha']] }),
+    migrate: placesOf('migrate', { ...fromSource, arrays: [['s-alpha']] }),
+  }
+  for (const [panel, places] of Object.entries(some)) {
+    assert.deepEqual(
+      places.map((entry) => entry.disabled),
+      [false, false],
+      `${panel}：勾了一部分时「全选」与「清空」同时可点`,
+    )
+  }
+
+  // ③ 「全选」的作用面是**眼下列出来的那些**（不是整份候选）：把筛选条件种成筛不到任何一行，
+  // 「全选」就必须禁用——否则它会悄悄选上屏幕上看不见的会话。迁移页这条同时证明工具**不随清单空掉
+  // 而消失**（清空照旧可点）。
+  const filtered = {
+    // 会话页 / 传输页的筛选条：第一个空数组状态是勾选集，第二个是筛选条
+    transfer: placesOf('transfer', { arrays: [['s-alpha'], ['blank']] }),
+    // 迁移页只有搜索框（空串状态的第四个），两个会话都不是空白，所以搜不到任何一行
+    migrate: placesOf('migrate', { strings: ['/home/u/dev/alpha', '', '', 'zzz'], arrays: [['s-alpha']] }),
+  }
+  for (const [panel, places] of Object.entries(filtered)) {
+    assert.deepEqual(
+      places,
+      [
+        { text: 'list.selectAll', where: where[panel], disabled: true },
+        { text: 'list.clear', where: where[panel], disabled: false },
+      ],
+      `${panel}：筛空之后「全选」禁用（作用面是列出来的那些），工具不消失（「清空」照旧可点）`,
+    )
+  }
+
+  // ④ 一枚变脸的按钮、三份各写一遍的文案都不该再回来：三页问到的都是同一对键，另外那三枚键从两份
+  // 字典里一起删掉（留着就等于"同一件事有两个词"）。
+  const { zh, en } = render('manage').mounted.dictionaries[0].dicts
+  for (const key of ['transfer.export.selectAll', 'migrate.scope.selectAll', 'migrate.scope.clear']) {
+    assert.ok(!Object.hasOwn(zh, key) && !Object.hasOwn(en, key), `${key} 该删掉：同一对按钮只留 list.*`)
+  }
+  for (const panel of ['manage', 'transfer']) {
+    const text = textOf(panel)
+    assert.ok(text.includes('list.selectAll') && text.includes('list.clear'), `${panel} 用共用的那对键`)
+  }
+  // 迁移页那一份要种出清单来，才走得到那对按钮；同一次下探里也核那个单选框的标签
+  const migrateText = textOf('migrate', fromSource)
+  assert.ok(migrateText.includes('list.selectAll') && migrateText.includes('list.clear'), 'migrate 用共用的那对键')
+  // 「只选其中几条」的单选框不再把条数塞进标签里（条数由「已选 N」报，三页同一处）
+  assert.deepEqual(
+    migrateText.filter((text) => String(text).startsWith('migrate.scope.subset')),
+    ['migrate.scope.subset'],
+    '「只选其中几条」的标签是它自己，不带条数',
+  )
+  // 「全部」模式下那行提示要说清"整来源一起搬、勾选不算数"，以及怎么切到子集（多了一条「全选」的路）
+  for (const [language, dictionary] of [['zh', zh], ['en', en]]) {
+    assert.ok(
+      String(dictionary['migrate.scope.tickHint']).includes('全选') ||
+        String(dictionary['migrate.scope.tickHint']).includes('Select all'),
+      `${language}：提示里要写出「全选」也能切到子集`,
+    )
+  }
+
+  // ⑤ 迁移页的行勾选与模式**解耦**：勾选面只反映勾了什么（`checked` 读的是勾选集），模式只决定请求
+  // 怎么发（「全部」不发 sessionIds）。种一条勾选、模式停在默认的「全部」：那一行的复选框必须是勾上
+  // 的——旧写法在「全部」下把所有行画成未勾，屏幕上与「已选 N」两处各说各话。
+  //
+  // 走 `strings()` 而不是 `elements()`：分页本体包在 Fragment 里，`elements()` 不下穿 Fragment
+  // （见它的注释），而行的记录照样会进 `recorded`。
+  const pickedView = mount({ state, panel: 'migrate', ...fromSource, arrays: [['s-alpha']] })
+  strings(pickedView.registrations[0].component(pickedView.registrations[0].registration.inject()))
+  const pickedRow = pickedView.recorded.find(
+    (node) => node.type === 'label' && String(node.props?.className).includes('dsm-rowPick'),
+  )
+  assert.ok(pickedRow !== undefined, '迁移页要画出行来')
+  assert.equal(
+    elementsOf(pickedRow).find((element) => element.type === 'input')?.props?.['checked'],
+    true,
+    '「全部」模式下也要把已勾的那一行画成勾上',
+  )
+})
+
 test('客户端产物：导出页也把子智能体缩进到父会话的下一级（两个分页各接一遍线）', { skip }, () => {
   // 缩进这套接了两遍线（「会话」页在 ManagePanel、传输页在 TransferPanel），所以两处各钉一次。
   const state = {
