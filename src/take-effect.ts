@@ -161,6 +161,13 @@ export async function applyOnHost(
     for (const sessionId of source.sessionIds) await port.detachSession(source.workspaceId, sessionId)
   }
 
+  // ④′ 计划顺带清掉的**悬空登记**也要在宿主那份里摘掉：它内存里那条记录还留着这些 id，
+  //     不摘的话下一次它自己落盘就把它们写回文件、那块工作区又删不掉了（`detachSession()` 本来就幂等，
+  //     摘一个宿主不认的 id 与摘一个真成员是同一个动作）。
+  for (const entry of change.droppedStale) {
+    for (const sessionId of entry.sessionIds) await port.detachSession(entry.workspaceId, sessionId)
+  }
+
   // ⑤ 计划里要删的源工作区：确认真的空了才删（拿实际成员数说话，不靠计划推断）。
   for (const source of change.removedSources) {
     if ((await port.members(source.workspaceId)).length === 0) await port.removeWorkspace(source.workspaceId)

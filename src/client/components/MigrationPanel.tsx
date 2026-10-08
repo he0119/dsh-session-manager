@@ -275,6 +275,8 @@ export function MigrationPanel({ t, state, meta, reload, directory }: PanelShare
   const preview = pending?.response?.preview ?? null
   const planned = preview !== null && preview.ok
   const registry = preview?.registryChange ?? null
+  /** 顺带摘掉的悬空登记条数（宿主本来就不认它们，见宿主 `RegistryChange.droppedStale`）。 */
+  const staleDropped = (registry?.droppedStale ?? []).reduce((n, entry) => n + entry.sessionIds.length, 0)
   /**
    * 这次改动会不会**需要重启**才被宿主承认：预演那次按宿主端口的探测说（见 src/web.ts 的迁移端点），
    * 摆在弹窗里当事前提醒。注册表本来就不用改（`unchanged`）时没有"生效"可谈，不摆这一句。
@@ -528,6 +530,15 @@ export function MigrationPanel({ t, state, meta, reload, directory }: PanelShare
               {preview.liveSkipped.length > 0 && (
                 <p className="dsm-hint">{t('migrate.liveSkipped', { count: preview.liveSkipped.length })}</p>
               )}
+              {/* 侧边栏不显示的那几条第 ③ 种：这次也不搬，源工作区因此留在注册表里——不提的话用户看到的
+                  就是"整个来源都迁完了，怎么还留着一块一条都不显示的工作区"。 */}
+              {preview.strandedSources.length > 0 && (
+                <p className="dsm-hint">
+                  {t('migrate.stranded', {
+                    count: preview.strandedSources.reduce((n, source) => n + source.members.length, 0),
+                  })}
+                </p>
+              )}
               <p className="dsm-hint">
                 {preview.unowned
                   ? t('migrate.projectDirsUnowned', { projectDirs: preview.sourceProjectDirs.length, to: preview.targetProjectDir })
@@ -564,6 +575,7 @@ export function MigrationPanel({ t, state, meta, reload, directory }: PanelShare
                         {registry.removedSources.length > 0 && (
                           <li>{t('registry.removed', { count: registry.removedSources.length })}</li>
                         )}
+                        {staleDropped > 0 && <li>{t('registry.stale', { count: staleDropped })}</li>}
                       </>
                     )}
                   </ul>

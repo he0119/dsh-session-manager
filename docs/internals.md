@@ -32,6 +32,10 @@
   因此按 `MigrateDeps.liveSessionIds()` 把它们摘出去，`liveSkipped` 一路报到工具返回值与界面，点名点到
   它们、或整个来源都活着时按 problem 拒绝。宿主没接住那一步时，这次算好的注册表整份写回文件
   （`restoreRegistry()`），"重启后一致"才成立。
+- [宿主不认的登记不算成员，搬完剩下的要说出来](../.agents/notes/implemented/bug-fix/2026-10-08-stale-registrations-do-not-hold-a-workspace.md)：
+  `reHome()` 判"源工作区被搬空了吗"按**认领**算（悬空登记不算数，并在同一次里顺手摘掉），只剩侧边栏
+  不显示的会话时那块工作区留着——`strandedSources` / `describeStranded()` 一处措辞，报给预演、结果、
+  界面与工具返回值。
 - [生效提示先说在事前，且只在需要重启时说话](../.agents/notes/implemented/architecture/2026-10-06-restart-notice-up-front-and-only-on-bad-news.md)：
   `/sync` 与 `sync_sessions` 的预演一律按探测回答"执行时会不会需要重启"（迁移那条路本来就是），界面在
   确认弹窗里先说、落地后只在需要重启时留一条 warn 横幅；长解释只在说明页的 FAQ。

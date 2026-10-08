@@ -122,6 +122,15 @@ export interface ReHomeOptions {
   newId?: string
   /** 原注册表变空时是否删除该工作区，默认 true。 */
   removeEmptySources?: boolean
+  /**
+   * **登记了、宿主却不认**的会话 id（盘上已经没有这条会话，或 header 的 cwd 归一之后对不上记录的
+   * `path`；判据见 accounting.ts）。
+   *
+   * 为什么要有这一项：宿主自己就是按"认领"算成员的（`Workspace.sessionIds` 会把这些过滤掉），侧边栏
+   * 因此早就当它们不存在；而本模块判"源被搬空了吗"若只看登记数组，这些悬空登记会把那条工作区记录
+   * 永远钉住——真实会话全搬走之后，侧边栏留下一个画出来却一条都不显示的"残留工作区"。
+   */
+  staleSessionIds?: ReadonlySet<string>
 }
 
 /**
@@ -131,6 +140,8 @@ export interface ReHomeOptions {
  *   - 目标目录已有工作区则复用；否则新建记录并**前插**到 durable 顺序
  *     （与宿主 WorkspaceRegistry.create() 的"新工作区前插"一致）。
  *   - 会话从原注册表移除；原注册表变空时默认删除该工作区记录与顺序项。
+ *   - "变空"按**宿主认的成员**算：`staleSessionIds` 里的悬空登记不算成员，并在这一次里从记录上摘掉
+ *     （见 `ReHomeOptions.staleSessionIds`）。
  *   - 若会话已在目标注册表中，视为幂等跳过，不重复追加。
  *
  * @throws 传入的注册表已违反启动不变式，或结果会违反时抛错。
@@ -146,7 +157,9 @@ export function reHome(
     now = new Date().toISOString(),
     newId = randomUUID(),
     removeEmptySources = true,
+    staleSessionIds,
   } = options
+  const stale = staleSessionIds ?? new Set<string>()
 
   if (typeof toPath !== 'string' || toPath.length === 0) throw new Error('reHome requires toPath')
   if (!Array.isArray(sessionIds) || sessionIds.length === 0) {
@@ -193,13 +206,17 @@ export function reHome(
   // 从原注册表摘除
   const movedFrom: RegistryChange['movedFrom'] = []
   const removedSources: RegistryChange['removedSources'] = []
+  const droppedStale: RegistryChange['droppedStale'] = []
   for (const [id, rec] of Object.entries(workspaces)) {
     if (id === targetId) continue
     const had = rec.sessionIds.filter((sid) => sessionIds.includes(sid))
     if (had.length === 0) continue
-    rec.sessionIds = rec.sessionIds.filter((sid) => !sessionIds.includes(sid))
+    // 同一块工作区里的悬空登记顺手摘掉：宿主本来就不认它们，留着只会让这块记录永远删不掉。
+    const staleHere = rec.sessionIds.filter((sid) => stale.has(sid) && !sessionIds.includes(sid))
+    rec.sessionIds = rec.sessionIds.filter((sid) => !sessionIds.includes(sid) && !stale.has(sid))
     rec.updatedAt = now
     movedFrom.push({ workspaceId: id, path: rec.path, sessionIds: had })
+    if (staleHere.length > 0) droppedStale.push({ workspaceId: id, path: rec.path, sessionIds: staleHere })
     if (removeEmptySources && rec.sessionIds.length === 0) {
       delete workspaces[id]
       next.global.workspaceIds = next.global.workspaceIds.filter((x) => x !== id)
@@ -231,6 +248,7 @@ export function reHome(
       adoptedFromUnowned,
       movedFrom,
       removedSources,
+      droppedStale,
       unchanged: added.length === 0 && movedFrom.length === 0,
     },
   }
@@ -307,11 +325,15 @@ export function verifyRegistryChange(
     problems.push(`冒出一个计划外的工作区 ${path}`)
   }
 
-  // 会话：id 集合只许"按计划"变大，绝不许变小（改名 / 丢失都会在这里露出来）
+  // 会话：id 集合只许"按计划"变大，绝不许变小（改名 / 丢失都会在这里露出来）——除了计划里点名要
+  // 摘掉的悬空登记：那些 id 在宿主那边本来就不算会话（盘上已经没有它），复核该放行的正是这一批。
   const beforeSessions = sessionIdsOf(before)
   const afterSessions = sessionIdsOf(after)
   const allowedNew = new Set(change.added)
-  for (const sid of beforeSessions) if (!afterSessions.has(sid)) problems.push(`会话 ${sid} 在落盘结果里没了（id 不该变）`)
+  const allowedGone = new Set(change.droppedStale.flatMap((entry) => entry.sessionIds))
+  for (const sid of beforeSessions) {
+    if (!afterSessions.has(sid) && !allowedGone.has(sid)) problems.push(`会话 ${sid} 在落盘结果里没了（id 不该变）`)
+  }
   for (const sid of afterSessions) {
     if (!beforeSessions.has(sid) && !allowedNew.has(sid)) problems.push(`落盘结果里多了计划外的会话 ${sid}`)
   }

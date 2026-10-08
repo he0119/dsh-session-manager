@@ -19,6 +19,9 @@ import type {
   ProgressReporter,
   RelocationPlan,
   SessionMove,
+  StrandedMember,
+  StrandedReason,
+  StrandedSource,
   WorkspaceRegistryState,
 } from './types.ts'
 import { hiddenReasonOf, type HiddenReason } from './visibility.ts'
@@ -127,6 +130,7 @@ export function buildRelocationPlan(options: BuildPlanOptions): RelocationPlan {
       unowned,
       sessions: [],
       liveSkipped: [],
+      strandedSources: [],
       cascaded: 0,
       artifacts: null,
       registryChange: null,
@@ -390,6 +394,19 @@ export function buildRelocationPlan(options: BuildPlanOptions): RelocationPlan {
     for (const p of artifacts.problems) problems.push(p)
   }
 
+  /*
+   * 登记了、宿主却不认的会话 id（盘上已经没有这条会话，或 header 的 cwd 归一之后对不上记录的 `path`）。
+   *
+   * 判"源工作区被搬空了吗"不能拿它们当筹码：宿主自己就是按"认领"算成员的（见 accounting.ts），
+   * 侧边栏早就把它们当不存在；只看登记数组的话，这些悬空登记会把那条工作区记录永远钉住。
+   * `owned` 在上面按**整库**重算过，所以这里读的是最终那一份。
+   */
+  const accountedIds = new Set(owned.keys())
+  const staleSessionIds = new Set<string>()
+  for (const record of Object.values(registry.tables.workspaces)) {
+    for (const sid of record.sessionIds) if (!accountedIds.has(sid)) staleSessionIds.add(sid)
+  }
+
   // 注册表变更（纯计算；把问题并入 problems 而不是抛出）
   let registryChange: RelocationPlan['registryChange'] = null
   let nextRegistry: WorkspaceRegistryState | null = null
@@ -404,11 +421,35 @@ export function buildRelocationPlan(options: BuildPlanOptions): RelocationPlan {
         .filter((session) => session.via === undefined || session.registered)
         .sort((a, b) => b.createdAt - a.createdAt)
         .map((session) => session.id)
-      const result = reHome(registry, { sessionIds: registryIds, toPath: to, title })
+      const result = reHome(registry, { sessionIds: registryIds, toPath: to, title, staleSessionIds })
       nextRegistry = result.registry
       registryChange = result.change
     } catch (error) {
       problems.push(`registry re-home failed: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+
+  // 搬完还剩人的源工作区：留下的都是**侧边栏不显示**的会话（宿主认的成员，判据见 visibility.ts），
+  // 这次搬不走、那块记录也就删不掉。理由必须跟着预演与结果一起报出去（见 describeStranded()）。
+  const strandedSources: StrandedSource[] = []
+  if (registryChange !== null && nextRegistry !== null) {
+    const removed = new Set(registryChange.removedSources.map((source) => source.workspaceId))
+    for (const moved of registryChange.movedFrom) {
+      if (removed.has(moved.workspaceId)) continue
+      const record = nextRegistry.tables.workspaces[moved.workspaceId]
+      if (record === undefined) continue
+      const members: StrandedMember[] = []
+      for (const sid of record.sessionIds) {
+        const session = merged.get(sid)
+        const reason = session === undefined ? undefined : hiddenOf(session)
+        // 没被点名、可见的那几条是"用户自己挑的子集"，不在这里报——这一段说的是"搬不走的"。
+        // 宿主持着的那些由 liveSkipped 单独报账。
+        if (reason === undefined) continue
+        members.push({ id: sid, ...(session?.title === undefined ? {} : { title: session.title }), reason })
+      }
+      if (members.length > 0) {
+        strandedSources.push({ workspaceId: moved.workspaceId, path: record.path, title: record.title, members })
+      }
     }
   }
 
@@ -423,6 +464,7 @@ export function buildRelocationPlan(options: BuildPlanOptions): RelocationPlan {
     unowned,
     sessions,
     liveSkipped: [...liveSkipped.values()],
+    strandedSources,
     cascaded: sessions.filter((s) => s.via !== undefined).length,
     artifacts,
     registryChange,
@@ -455,15 +497,18 @@ export function describePlan(plan: RelocationPlan): string {
     )
     lines.push('    它们留在原目录、归属不变；重启 DSH 之后再迁一次即可。')
   }
+  lines.push(...describeStranded(plan.strandedSources))
   if (plan.artifacts) {
     lines.push(`  会话产物：待搬 ${plan.artifacts.moves.length} 项、跳过 ${plan.artifacts.skipped.length} 项`)
   }
   if (plan.registryChange) {
     const c = plan.registryChange
+    const staleCount = c.droppedStale.reduce((n, entry) => n + entry.sessionIds.length, 0)
     lines.push(
       `  注册表：目标工作区 ${c.targetId}${c.createdTarget ? '（新建，前插）' : '（复用）'}；` +
         `新增归属 ${c.added.length}（其中未分组收编 ${c.adoptedFromUnowned.length}）；` +
-        `摘除自 ${c.movedFrom.length} 个工作区；删除空工作区 ${c.removedSources.length}`,
+        `摘除自 ${c.movedFrom.length} 个工作区；删除空工作区 ${c.removedSources.length}` +
+        `${staleCount > 0 ? `；顺带清掉 ${staleCount} 条宿主不认的悬空登记` : ''}`,
     )
   }
   if (plan.problems.length) {
@@ -471,4 +516,38 @@ export function describePlan(plan: RelocationPlan): string {
     for (const p of plan.problems) lines.push(`    - ${p}`)
   }
   return lines.join('\n')
+}
+
+/** `describeStranded()` 里三种理由的称呼与顺序（与 visibility.ts 的判据顺序一致）。 */
+const STRANDED_LABELS: ReadonlyArray<readonly [StrandedReason, string]> = [
+  ['subagent', '子智能体'],
+  ['blank', '空白'],
+  ['archived', '已归档'],
+]
+
+/**
+ * 源工作区"搬完还剩人"那两行的措辞。
+ *
+ * 为什么两行都得说：留下的那几条**不在**这次的清单里（它们侧边栏不显示，见 visibility.ts），
+ * 而不说清楚，用户看到的就是"全部迁完了，怎么还有一块空工作区"——预留一个"少搬了但没人提"的坑，
+ * 与 `liveSkipped` 那句是同一个口径。
+ *
+ * @param sources 见 `RelocationPlan.strandedSources`。
+ * @returns 摘要里要追加的行（空数组 = 每块源工作区都搬空了）。
+ */
+export function describeStranded(sources: readonly StrandedSource[]): string[] {
+  const members = sources.flatMap((source) => source.members)
+  if (members.length === 0) return []
+  const reasons = STRANDED_LABELS.map(([reason, label]) => ({
+    label,
+    count: members.filter((member) => member.reason === reason).length,
+  }))
+    .filter((item) => item.count > 0)
+    .map((item) => `${item.label} ${item.count}`)
+    .join('、')
+  return [
+    `  另有 ${members.length} 条会话侧边栏不显示（${reasons}），这次不搬：${members.map((member) => member.id).join('、')}`,
+    `    它们留在 ${sources.map((source) => source.path).join('、')}，那几块工作区因此不会被删——` +
+      '要清掉它们：已归档的先去「会话」页取消归档、空白的删掉、子智能体连着它的父会话一起迁，然后再迁一次。',
+  ]
 }

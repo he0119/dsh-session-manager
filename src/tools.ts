@@ -554,6 +554,11 @@ export interface PlanToolResult {
   cascaded: number
   /** 宿主持在内存里、这次不搬的会话条数（见 plan.ts 的 `liveSkipped`）。 */
   liveSkipped: number
+  /**
+   * 侧边栏不显示（已归档 / 空白 / 父会话不在这批里的子智能体）、这次也不搬的会话条数
+   * （见 plan.ts 的 `strandedSources`）：它们留在源工作区的登记里，那块工作区因此不会被删。
+   */
+  stranded: number
   files: number
   targetProjectDir: string
   summary: string
@@ -568,6 +573,8 @@ export interface MigrateToolResult {
   cascaded: number
   /** 宿主持在内存里、这次没搬的会话条数（见 plan.ts 的 `liveSkipped`）。 */
   liveSkipped: number
+  /** 侧边栏不显示、这次也没搬的会话条数（见 plan.ts 的 `strandedSources`）。 */
+  stranded: number
   rewritten: number
   moved: number
   artifactsMoved: number
@@ -612,7 +619,10 @@ export function registerTools(ctx: Context, config: PluginConfigInput = {}): Arr
           'change, and any ' +
           'blocking problem (missing target directory, projectKey collision, occupied target directory, invalid ' +
           'registry). Sessions the host still holds in memory (live) cannot move while it holds them: they are ' +
-          'left in place and counted in liveSkipped instead of being migrated. Subagent sessions always follow ' +
+          'left in place and counted in liveSkipped instead of being migrated. Sessions the sidebar hides ' +
+          '(archived, blank, or subagents whose parent is not part of this source) are not candidates either: they ' +
+          'stay behind, so their source workspace is not removed from the registry — the summary names them and ' +
+          'stranded counts them. Subagent sessions always follow ' +
           'their parent: naming a subagent is refused, and naming a ' +
           'parent takes its whole family along. Writes nothing. Call this before migrate_sessions.',
         parameters: {
@@ -643,6 +653,7 @@ export function registerTools(ctx: Context, config: PluginConfigInput = {}): Arr
               sessions: { type: 'integer', required: true },
               cascaded: { type: 'integer', required: true },
               liveSkipped: { type: 'integer', required: true },
+              stranded: { type: 'integer', required: true },
               files: { type: 'integer', required: true },
               targetProjectDir: { type: 'string', required: true },
               summary: { type: 'string', required: true },
@@ -666,6 +677,7 @@ export function registerTools(ctx: Context, config: PluginConfigInput = {}): Arr
             sessions: preview.sessions.length,
             cascaded: preview.cascaded,
             liveSkipped: preview.liveSkipped.length,
+            stranded: preview.strandedSources.reduce((n, source) => n + source.members.length, 0),
             files: preview.files,
             targetProjectDir: preview.targetProjectDir,
             summary: preview.summary,
@@ -692,7 +704,9 @@ export function registerTools(ctx: Context, config: PluginConfigInput = {}): Arr
           'performs it after taking a byte-level ' +
           'backup. Refuses on any blocking problem. Sessions the host still holds in memory (live) cannot move ' +
           'while it holds them: they are left in place and named in the result, and a migration can therefore ' +
-          'move a subset. Subagent sessions always follow their parent (naming one is ' +
+          'move a subset. Sessions the sidebar hides (archived, blank, or subagents whose parent is not part of ' +
+          'this source) are left behind too — their source workspace therefore stays in the registry, and both ' +
+          'the summary and stranded say so. Subagent sessions always follow their parent (naming one is ' +
           'refused; naming a parent takes its whole family along; their registry membership does not change).',
         parameters: {
           from: { type: 'string', required: true, description: 'Source workspace directory (absolute path).' },
@@ -725,6 +739,7 @@ export function registerTools(ctx: Context, config: PluginConfigInput = {}): Arr
               applied: { type: 'boolean', required: true },
               cascaded: { type: 'integer', required: true },
               liveSkipped: { type: 'integer', required: true },
+              stranded: { type: 'integer', required: true },
               rewritten: { type: 'integer', required: true },
               moved: { type: 'integer', required: true },
               artifactsMoved: { type: 'integer', required: true },
@@ -760,6 +775,7 @@ export function registerTools(ctx: Context, config: PluginConfigInput = {}): Arr
             applied: run.applied,
             cascaded: run.preview.cascaded,
             liveSkipped: run.preview.liveSkipped.length,
+            stranded: run.preview.strandedSources.reduce((n, source) => n + source.members.length, 0),
             rewritten: run.rewritten,
             moved: run.moved,
             artifactsMoved: run.artifactsMoved,
