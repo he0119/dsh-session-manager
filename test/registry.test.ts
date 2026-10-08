@@ -4,7 +4,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 
-import { readRegistry, reHome, validateRegistry } from '../src/registry.ts'
+import { missingMemberships, readRegistry, reHome, validateRegistry } from '../src/registry.ts'
 import type { WorkspaceRegistryState } from '../src/types.ts'
 
 /** 一份满足全部启动不变式的最小注册表。 */
@@ -146,6 +146,26 @@ test('reHome：结果永不违反不变式（含未知会话 id）', () => {
     now: NOW,
   })
   assert.equal(validateRegistry(registry).ok, true)
+})
+
+// 缺归属：宿主拿内存里那份整份落盘之后，别人那几条就是这么没的（见 registry.ts 的 missingMemberships）。
+test('缺归属：计划里有、盘上整份都没有的才算', () => {
+  const expected = makeRegistry()
+  const actual = structuredClone(expected)
+  actual.tables.workspaces['ws-downloads']!.sessionIds = ['session-a', 'session-extra']
+  actual.tables.workspaces['ws-temp']!.sessionIds = []
+  assert.deepEqual(missingMemberships(expected, actual), [
+    { path: 'C:\\Users\\me\\Downloads', title: 'Downloads', sessionId: 'session-b' },
+    { path: 'C:\\Users\\me\\Work\\temp', title: 'temp', sessionId: 'session-live' },
+  ])
+})
+
+test('缺归属：挪到别的工作区下不算缺（那是复核该报出来的问题，不该在这里悄悄改挂）', () => {
+  const expected = makeRegistry()
+  const actual = structuredClone(expected)
+  actual.tables.workspaces['ws-downloads']!.sessionIds = ['session-a']
+  actual.tables.workspaces['ws-temp']!.sessionIds = ['session-live', 'session-b']
+  assert.deepEqual(missingMemberships(expected, actual), [])
 })
 
 // 真实数据：只读校验本机真实注册表，必须满足启动不变式。

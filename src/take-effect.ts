@@ -16,11 +16,17 @@
 // 宿主的旧归属。所以失败之后要把这次算好的注册表**整份写回来**（`restoreRegistry()`），"重启后一致"
 // 才是真的：重启后宿主读的是磁盘，文件对了就对了。
 //
+// **它全盘接受、却顺手抹掉别人的归属时**，成败判据就不够用了：它那一步是拿内存里那份整份落盘的，
+// 内存里没有的归属会被一起抹掉（另一台宿主写过的、或上一次写回文件之后的），而它照样一路成功。
+// 所以接受之后还要拿计划与盘上那份比一次（`missingMemberships()`），少了就让宿主重新挂一遍
+// （`restoreMemberships()`）——它的挂靠会立刻落盘，磁盘与侧边栏因此一起回到这次的结果上，不用重启；
+// 它不认的那几条（盘上早就没有这条会话）不硬写回文件，只如实报出来。
+//
 // 会话 id 全程只被"挂靠 / 摘掉"，既不新建也不改名；已存在的工作区复用自己那条记录、id 不变。
 //
 // 本模块保持**零 DSH 依赖**：端口由宿主那半侧（`src/tools.ts` 的 `hostRegistryPort()`）探测后注入；
 // 写盘只借 `registry.ts` 的原子写，与迁移 / 导入 / 同步用的是同一份。
-import { writeRegistryAtomic } from './registry.ts'
+import { missingMemberships, readRegistry, writeRegistryAtomic } from './registry.ts'
 import type {
   EffectMode,
   EffectOutcome,
@@ -68,6 +74,55 @@ function restoreRegistry(deps: EffectDeps, options: TakeEffectOptions): boolean 
     // 写不回去也不能把已经落地的迁移说成失败：结论里那句"重启前先核对文件"会兜住。
     return false
   }
+}
+
+/**
+ * 宿主接受之后，把"计划里有、盘上整份没有了"的归属要回来。
+ *
+ * 宿主那一步是按内存里那份整份落盘的，所以它内存里没有的归属会被一起抹掉——它自己不会发现这件事
+ * （对它来说那份就是权威）。插件拿计划（`options.registry`）与盘上那份比一次，少了就让宿主重新挂
+ * 一遍：`attachSession()` 会立刻把它那份落盘，磁盘与侧边栏因此一起回到这次的结果上。
+ *
+ * 它不认的那几条（盘上早就没有这条会话的悬空登记、header 的 cwd 与记录对不上的）**不写回文件**：
+ * 写回去只会让它下次落盘再抹一次，而且那本来就不是"归属丢了"，是"宿主早就不认这条登记"。
+ * @param port 宿主注册表动作的端口。
+ * @param deps 编排依赖（要 `registryPath` 才复核得了）。
+ * @param expected 这次算出来的注册表终态；缺席就不复核（不能拿没给的东西当判据）。
+ * @returns 认下的与被回绝的会话 id；没得复核（没路径 / 没终态 / 读不到盘）时 undefined。
+ */
+async function restoreMemberships(
+  port: HostRegistryPort,
+  deps: EffectDeps,
+  expected: WorkspaceRegistryState | null | undefined,
+): Promise<{ restored: string[]; unrecognized: string[] } | undefined> {
+  if (deps.registryPath === undefined || expected === null || expected === undefined) return undefined
+  let missing
+  try {
+    missing = missingMemberships(expected, readRegistry(deps.registryPath))
+  } catch {
+    // 盘上那份读不出来时不猜：这是复核的事，由编排层照旧报出来，别在这里悄悄动手。
+    return undefined
+  }
+  if (missing.length === 0) return undefined
+  const restored: string[] = []
+  const unrecognized: string[] = []
+  try {
+    // 再让它按磁盘看一眼：它内存里没有的会话，header 缓存里往往也没有，不刷一遍会被它一口回绝。
+    await port.refreshIndex()
+  } catch {
+    // 连刷新都被回绝时不硬来：全部如实报成"没要回来"。
+    return { restored: [], unrecognized: missing.map((item) => item.sessionId) }
+  }
+  for (const item of missing) {
+    try {
+      const workspaceId = await port.ensureWorkspace(item.path, item.title)
+      await port.attachSession(workspaceId, item.sessionId)
+      restored.push(item.sessionId)
+    } catch {
+      unrecognized.push(item.sessionId)
+    }
+  }
+  return { restored, unrecognized }
 }
 
 /**
@@ -176,7 +231,24 @@ export async function takeEffectOnHostAll(
       registryRestored: restoreRegistry(deps, options),
     }
   }
-  return { kind: 'applied', ...(targetId === undefined ? {} : { targetId }) }
+  // 它全盘接受、却拿内存里那份把别人的归属一起抹掉时，上面这条路是察觉不到的（见 `restoreMemberships()`）。
+  let memberships: { restored: string[]; unrecognized: string[] } | undefined
+  try {
+    memberships = await restoreMemberships(port, deps, options.registry)
+  } catch {
+    // 要回来这一步本身出错不能反过来把已经落地的改动说成失败：这只是一次补偿。
+    memberships = undefined
+  }
+  return {
+    kind: 'applied',
+    ...(targetId === undefined ? {} : { targetId }),
+    ...(memberships === undefined || memberships.restored.length === 0
+      ? {}
+      : { membershipsRestored: memberships.restored }),
+    ...(memberships === undefined || memberships.unrecognized.length === 0
+      ? {}
+      : { membershipsUnrecognized: memberships.unrecognized }),
+  }
 }
 
 /**
@@ -186,8 +258,22 @@ export async function takeEffectOnHostAll(
  */
 export function describeEffect(outcome: EffectOutcome): string {
   switch (outcome.kind) {
-    case 'applied':
-      return '宿主已经自己改完这份注册表（会话只在工作区之间换归属，id 没变），侧边栏这就跟上了，无需重启 DSH。'
+    case 'applied': {
+      const restored = outcome.membershipsRestored?.length ?? 0
+      const unrecognized = outcome.membershipsUnrecognized?.length ?? 0
+      const lines = ['宿主已经自己改完这份注册表（会话只在工作区之间换归属，id 没变），侧边栏这就跟上了，无需重启 DSH。']
+      if (restored > 0) {
+        // 它那一步是拿内存里那份整份落盘的：内存里没有的归属会被一起抹掉，所以要回来（见 restoreMemberships()）。
+        lines.push(
+          `复核发现它顺手抹掉了 ${restored} 条别的归属（它内存里本来就没有这些会话），` +
+            '已让它重新认下——磁盘与侧边栏都回到这次的结果上。',
+        )
+      }
+      if (unrecognized > 0) {
+        lines.push(`另有 ${unrecognized} 条归属宿主不认（盘上已经没有这些会话），没有写回文件。`)
+      }
+      return lines.join('\n')
+    }
     case 'failed':
       // 宿主一旦动过手就会按内存整份落盘：写回来了才敢说"磁盘上就是这次的结果"（见 `restoreRegistry()`）。
       return outcome.registryRestored === true
