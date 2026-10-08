@@ -28,16 +28,13 @@ import {
   useSessionFilter,
 } from './sessionList.tsx'
 import type { Translate } from '../logic/locales.ts'
-import { CandidatePanel } from './CandidatePanel.tsx'
-import { ChevronIcon } from './icons.tsx'
-import { DirectoryPicker } from './DirectoryPicker.tsx'
-import { normalizePickedPath } from '../directory.ts'
+import { DirectoryField, useDirectoryFields } from './DirectoryField.tsx'
 import {
   UNOWNED_SOURCE,
+  directoryTargetRows,
   migrateFamilyNote,
   migrationMatching,
   migrationSourceRows,
-  pathLabel,
   type PathRow,
 } from '../logic/planRows.ts'
 import type { PanelShare } from '../types.ts'
@@ -57,113 +54,6 @@ interface MigrationEffect {
 /** 会话选择：全部，或从匹配到的会话里勾几条。 */
 type PickMode = 'all' | 'subset'
 
-/** 一个目录字段的入参。 */
-interface PathFieldProps {
-  t: Translate
-  label: string
-  /** 值控件空着时的提示（"选源目录…"）。 */
-  placeholder: string
-  rows: PathRow[]
-  value: string
-  onChange: (value: string) => void
-  /** 点值控件：开／收候选面板。 */
-  onChoose: () => void
-  /** 候选面板是不是开着（值控件上表达成 `aria-expanded`）。 */
-  chooserOpen: boolean
-  /** 「手输路径」是否展开。 */
-  manualOpen: boolean
-  onToggleManual: () => void
-  /** 展开中的面板（没展开就是 null）。 */
-  browser: React.ReactNode
-  /**
-   * 「手输路径」输入框里显示的东西（缺省 = 当前值）。
-   *
-   * 只给「未分组」用：那个值是个内部哨兵（见 planRows.UNOWNED_SOURCE），原样摆进输入框等于让用户
-   * 看见一个既不是路径也不是人话的东西；框里显示"未分组"，一敲字就变成真路径（onChange 照旧）。
-   */
-  manualValue?: string
-}
-
-/**
- * 一个目录字段：**一个值控件 + 两条改值的路**。
- *
- * 为什么不是"值控件只是替文本框挑一个候选"：目录是个任意绝对路径，候选列表永远不可能完整（目标目录
- * 甚至可能还没建）。所以值控件的文本**就是那个值**——它是枚按钮，点开的是候选面板（见
- * [CandidatePanel.tsx](./CandidatePanel.tsx)），路径显示不下时截断、完整值在悬浮提示里；「手输路径」
- * 是万能兜底，宿主没有选择器、或要在候选之外敲一个路径时它是唯一的路。
- *
- * 宿主那条（文件系统）不再占字段里的一枚按钮：它进了候选面板的头（`dirPicker.filesystem`），两个
- * 面板在那里互相切。字段里因此只有两件东西——值控件与「手输路径」。
- *
- * 两件控件是并列的兄弟节点而不是把值控件套进 `<label>`：一个 label 里塞两个可交互控件，点哪个都会
- * 把焦点给第一个。
- */
-function PathField({
-  t,
-  label,
-  placeholder,
-  rows,
-  value,
-  onChange,
-  onChoose,
-  chooserOpen,
-  manualOpen,
-  onToggleManual,
-  browser,
-  manualValue,
-}: PathFieldProps): React.ReactElement {
-  /**
-   * 值控件上显示什么。
-   *
-   * 值本身是路径，而路径不是人认得出的东西（`/home/u/dev/x` 与 `/home/u/dev/x-legacy` 在框里只差
-   * 几个字符），所以能对上候选时显示候选那一行的称呼（标题／项目名 + 路径，与列表里同一套写法，见
-   * `pathLabel()`）。「未分组」是哨兵值、不是路径，显示成人话。
-   */
-  const current = rows.find((row) => row.path === value)
-  const text =
-    value === ''
-      ? placeholder
-      : value === UNOWNED_SOURCE
-        ? t('list.ungrouped')
-        : current === undefined
-          ? value
-          : pathLabel(current)
-  return (
-    <div className="dsm-field">
-      <span className="dsm-fieldLabel">{label}</span>
-      <div className="dsm-controls">
-        <button
-          type="button"
-          className="dsm-select dsm-selectPath dsm-pathValue"
-          // 无障碍名字带上"现在是什么值"：按钮的可见文本会被 aria-label 顶掉，只报字段名的话
-          // 屏幕阅读器与语音控制都听不到当前值（下拉框是自己会报值的，这枚按钮不会）。
-          aria-label={`${label}：${text}`}
-          aria-expanded={chooserOpen}
-          title={value === '' ? undefined : value}
-          onClick={onChoose}
-        >
-          <span className="dsm-pathValueText">{text}</span>
-          <ChevronIcon />
-        </button>
-        <button type="button" className="dsm-button" aria-expanded={manualOpen} onClick={onToggleManual}>
-          {manualOpen ? t('migrate.path.collapse') : t('migrate.path.type')}
-        </button>
-      </div>
-      {manualOpen && (
-        <input
-          className="dsm-input"
-          type="text"
-          aria-label={label}
-          value={manualValue ?? value}
-          placeholder={t('migrate.path.placeholder')}
-          onChange={(event) => onChange(event.target.value)}
-        />
-      )}
-      {browser}
-    </div>
-  )
-}
-
 /** 迁移页。 */
 export function MigrationPanel({ t, state, meta, reload, directory }: PanelShare): React.ReactElement {
   const sessions = state?.sessions ?? []
@@ -181,16 +71,13 @@ export function MigrationPanel({ t, state, meta, reload, directory }: PanelShare
   const [picked, setPicked] = React.useState<readonly string[]>([])
 
   /**
-   * 展开中的面板挂在哪个字段上、开的是哪一份列表（同一时刻只有一个），以及「手输路径」展开了哪个
-   * 字段。
+   * 两个字段的展开状态（哪个字段开着候选面板／宿主的目录浏览框、「手输路径」展开了哪一个）。
    *
    * 面板有两份列表，`candidates`＝候选面板（值控件点开的那个）、`filesystem`＝宿主的目录浏览框；
-   * 两边的头各有一枚按钮互相切（见 `browserFor()`）。
+   * 两边的头各有一枚按钮互相切（见 [DirectoryField.tsx](./DirectoryField.tsx)）。状态由页面持有，
+   * 所以同一时刻只有一个面板开着。
    */
-  const [picking, setPicking] = React.useState<{ which: 'from' | 'to'; mode: 'candidates' | 'filesystem' } | null>(
-    null,
-  )
-  const [manual, setManual] = React.useState<'from' | 'to' | null>(null)
+  const fields = useDirectoryFields<'from' | 'to'>()
 
   /**
    * 迁移弹窗：`null` = 没开；开了先是一份空壳（计划还在算）。
@@ -251,24 +138,12 @@ export function MigrationPanel({ t, state, meta, reload, directory }: PanelShare
     return [...sourceOptions, { path: from, ...(repos?.[from] === undefined ? {} : { repo: repos[from] }) }]
   }, [sourceOptions, from, repos])
 
-  /** 目标候选：已登记工作区（同一路径只留一条），外加当前值本身。 */
-  const targetRows = React.useMemo<PathRow[]>(() => {
-    const rows: PathRow[] = []
-    const seen = new Set<string>()
-    for (const workspace of workspaces) {
-      if (seen.has(workspace.path)) continue
-      seen.add(workspace.path)
-      rows.push({
-        path: workspace.path,
-        title: workspace.title,
-        ...(repos?.[workspace.path] === undefined ? {} : { repo: repos[workspace.path] }),
-      })
-    }
-    if (to !== '' && !seen.has(to)) {
-      rows.push({ path: to, ...(repos?.[to] === undefined ? {} : { repo: repos[to] }) })
-    }
-    return rows
-  }, [workspaces, to, repos])
+  /**
+   * 目标候选：已登记工作区（同一路径只留一条），外加当前值本身。
+   *
+   * 与「传输」页导入的落地目录共用同一个构造（见 planRows.directoryTargetRows）：两处问的是同一件事。
+   */
+  const targetRows = React.useMemo(() => directoryTargetRows(workspaces, repos, to), [workspaces, to, repos])
 
   const chosen = React.useMemo(
     () => (pickMode === 'all' ? matching.map((s) => s.id) : matching.filter((s) => picked.includes(s.id)).map((s) => s.id)),
@@ -292,100 +167,6 @@ export function MigrationPanel({ t, state, meta, reload, directory }: PanelShare
     includeArtifacts: unownedSource ? false : includeArtifacts,
     ...(title.trim() === '' ? {} : { title: title.trim() }),
   })
-
-  /**
-   * 落一条路径到某个字段：去掉结尾斜杠后当成值（`cwd` 与注册表里的路径都不带结尾斜杠，
-   * 留着 `/a/b/` 会凭空多出一个迁不到任何会话的项目目录）。
-   */
-  const applyPath = (which: 'from' | 'to', raw: string): void => {
-    const path = normalizePickedPath(raw)
-    if (path === '') return
-    if (which === 'from') {
-      setFrom(path)
-      setPicked([])
-    } else {
-      setTo(path)
-    }
-    setEffect(null)
-    setPicking(null)
-    setManual(null)
-  }
-
-  /**
-   * 点值控件（或候选面板头里那枚「候选列表」）：开这一份面板；同一个字段再点一次就收起来。
-   *
-   * 收起靠"再点一次"而不是又一枚「关闭」按钮：值控件本来就摆在那儿，它自己就是那个开关（面板头里
-   * 另有一枚「关闭」，给键盘与不认识这个开关的人用）。
-   */
-  const toggleCandidates = (which: 'from' | 'to'): void => {
-    setPicking((current) =>
-      current?.which === which && current.mode === 'candidates' ? null : { which, mode: 'candidates' },
-    )
-  }
-
-  /**
-   * 面板里那枚「浏览文件系统…」：按**宿主报来的能力种类**决定走哪条，不试错。
-   *
-   * 宿主的目录选择器是能力位服务：`native` 只有 `pick()`（在宿主显示器上弹系统对话框），
-   * `browse` 只有 `list()`（页面自己画浏览器）。在 `browse` 宿主上硬调 `pick()` 会被宿主以
-   * `directory-picker/unavailable` 拒绝——那正是"按钮看着能用、点了必报错"的坑。
-   *
-   * 取消（`null`）什么都不做：取消就是取消，不该把已选的值清掉。
-   */
-  const browseFilesystem = async (which: 'from' | 'to'): Promise<void> => {
-    const api = directory?.()
-    if (pickerKind === null || api === undefined) {
-      setError(t('migrate.path.unavailable'))
-      return
-    }
-    if (pickerKind === 'browse') {
-      // 页面内浏览框：就在同一处把列表换成宿主的目录，面板不关。
-      setPicking({ which, mode: 'filesystem' })
-      return
-    }
-    try {
-      const picked = await api.pick()
-      if (picked === null || picked === '') return
-      applyPath(which, picked)
-    } catch (cause) {
-      setError(t('migrate.path.failed', { reason: cause instanceof Error ? cause.message : String(cause) }))
-    }
-  }
-
-  /** 某个字段展开中的面板；没展开时什么都不渲染（文件系统那一份还要选择器服务在）。 */
-  const browserFor = (which: 'from' | 'to'): React.ReactNode => {
-    if (picking?.which !== which) return null
-    const value = which === 'from' ? from : to
-    // 起点是这个字段当前的值；「未分组」那个哨兵不是路径，别拿它当起点去问宿主（那会变成
-    // 一次"列 '@unowned' 下面有什么"的无意义调用）。
-    const startPath = value === UNOWNED_SOURCE ? '' : value
-    if (picking.mode === 'filesystem') {
-      const api = directory?.()
-      if (api === undefined) return null
-      return (
-        <DirectoryPicker
-          t={t}
-          api={api}
-          startPath={startPath}
-          onPick={(path) => applyPath(which, path)}
-          onClose={() => setPicking(null)}
-          onCandidates={() => setPicking({ which, mode: 'candidates' })}
-        />
-      )
-    }
-    return (
-      <CandidatePanel
-        t={t}
-        label={which === 'from' ? t('migrate.from.label') : t('migrate.to.label')}
-        rows={which === 'from' ? sourceRows : targetRows}
-        value={value}
-        onPick={(path) => applyPath(which, path)}
-        onClose={() => setPicking(null)}
-        // 宿主没有目录选择器时不摆这枚按钮（见 CandidatePanel 的说明）。
-        {...(pickerKind === null ? {} : { onFilesystem: () => void browseFilesystem(which) })}
-      />
-    )
-  }
 
   /**
    * 点「迁移」：开弹窗，同时把只读的迁移计划取回来（`mode: 'plan'`，不落盘）。
@@ -499,12 +280,15 @@ export function MigrationPanel({ t, state, meta, reload, directory }: PanelShare
 
         {/*
           源/目标各自只有**一个值控件**：那是一枚按钮，文本本身就是那个值（不是"选一下、填进别处"），
-          点开的是候选面板——候选、筛选、选中都在面板里（见 CandidatePanel.tsx）；当前值若不在候选里
-          也补进行里（见 sourceRows/targetRows），于是值控件显示的就是列表里那一行。
+          点开的是候选面板——候选、筛选、选中都在面板里（与「传输」页的导入目标同一个组件，见
+          DirectoryField.tsx）；当前值若不在候选里也补进行里（见 sourceRows/targetRows），于是值控件
+          显示的就是列表里那一行。
         */}
         <div className="dsm-fields">
-          <PathField
+          <DirectoryField
             t={t}
+            controls={fields}
+            field="from"
             label={t('migrate.from.label')}
             placeholder={t('migrate.from.pick')}
             rows={sourceRows}
@@ -514,17 +298,15 @@ export function MigrationPanel({ t, state, meta, reload, directory }: PanelShare
               setPicked([])
               setEffect(null)
             }}
-            onChoose={() => toggleCandidates('from')}
-            // 只有候选面板开在这个字段上时才叫 expanded：切到宿主的浏览框之后，这枚按钮点下去
-            // 开回来的是候选面板（见 toggleCandidates）。
-            chooserOpen={picking !== null && picking.which === 'from' && picking.mode === 'candidates'}
-            manualOpen={manual === 'from'}
-            onToggleManual={() => setManual((current) => (current === 'from' ? null : 'from'))}
-            browser={browserFor('from')}
+            pickerKind={pickerKind}
+            directory={directory}
+            onError={setError}
             {...(unownedSource ? { manualValue: t('list.ungrouped') } : {})}
           />
-          <PathField
+          <DirectoryField
             t={t}
+            controls={fields}
+            field="to"
             label={t('migrate.to.label')}
             placeholder={t('migrate.to.pick')}
             rows={targetRows}
@@ -533,11 +315,9 @@ export function MigrationPanel({ t, state, meta, reload, directory }: PanelShare
               setTo(value)
               setEffect(null)
             }}
-            onChoose={() => toggleCandidates('to')}
-            chooserOpen={picking !== null && picking.which === 'to' && picking.mode === 'candidates'}
-            manualOpen={manual === 'to'}
-            onToggleManual={() => setManual((current) => (current === 'to' ? null : 'to'))}
-            browser={browserFor('to')}
+            pickerKind={pickerKind}
+            directory={directory}
+            onError={setError}
           />
         </div>
 

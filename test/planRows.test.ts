@@ -15,6 +15,7 @@ import {
   candidateRow,
   deleteFamilyNote,
   describeCwd,
+  directoryTargetRows,
   filterPathRows,
   migrateFamilyNote,
   migrationMatching,
@@ -245,7 +246,7 @@ test('项目名：取身份最后一段，末尾的 .git 不算（"认不出来�
   assert.equal(repoName('C:/repos/thing'), 'thing')
 })
 
-test('一行路径的称呼：身份取代标题那一栏，本机路径留着（值控件与导入那个下拉框都读它）', () => {
+test('一行路径的称呼：身份取代标题那一栏，本机路径留着（三处目录字段的值控件都读它）', () => {
   assert.equal(pathLabel({ path: '/home/u/dev/x', title: '测试项目', repo: 'github.com/he0119/x' }), 'github.com/he0119/x — /home/u/dev/x')
   assert.equal(pathLabel({ path: '/home/u/dev/x', title: '测试项目' }), '测试项目 — /home/u/dev/x')
   assert.equal(pathLabel({ path: '/home/u/dev/x' }), '/home/u/dev/x')
@@ -261,6 +262,31 @@ test('源候选把身份带在行上（界面文案只读行，不再自己查�
   assert.deepEqual(rows, [{ path: '/b', title: '工作区乙', count: 1, repo: 'github.com/he0119/b' }])
   // 没有身份的目录：行上就没有这个字段（界面据此退回路径）
   assert.deepEqual(migrationSourceRows([s('other', '/c', false)], [], t), [{ path: '/c', count: 1 }])
+})
+
+test('目标候选：已登记工作区（同一路径只留一条）+ 当前值本身，且不带条数', () => {
+  const workspaces = [
+    { path: '/a', title: '工作区甲' },
+    { path: '/a', title: '重复登记的同一条' },
+    { path: '/b', title: '工作区乙' },
+  ]
+  // 当前值不在注册表里（可能是「浏览文件系统…」选回来的）：补一行，界面要让"列出来的"与"值控件上的"对得上
+  assert.deepEqual(directoryTargetRows(workspaces, { '/a': 'github.com/he0119/a' }, '/tmp/new'), [
+    { path: '/a', title: '工作区甲', repo: 'github.com/he0119/a' },
+    { path: '/b', title: '工作区乙' },
+    { path: '/tmp/new' },
+  ])
+  // 当前值就是某一条候选时不再补（列表里那一行自己就带 aria-current）
+  assert.deepEqual(directoryTargetRows(workspaces, {}, '/b'), [
+    { path: '/a', title: '工作区甲' },
+    { path: '/b', title: '工作区乙' },
+  ])
+  // 还没选（空串）时不补行；没有工作区时就是空列表
+  assert.deepEqual(directoryTargetRows(workspaces, {}), [
+    { path: '/a', title: '工作区甲' },
+    { path: '/b', title: '工作区乙' },
+  ])
+  assert.deepEqual(directoryTargetRows([], {}, ''), [])
 })
 
 test('源匹配：目录按 cwd 匹配，未分组给的就是跨目录的那一批，空值不匹配任何会话', () => {

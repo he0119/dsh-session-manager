@@ -853,8 +853,8 @@ test('客户端产物：迁移页把「未分组」列成独立来源（注册�
   const { registrations, recorded } = mount({
     state,
     panel: 'migrate',
-    // null 顺序：骨架的 error / picking（种成"源字段的候选面板开着"——候选就住在面板里）。
-    nulls: [null, { which: 'from', mode: 'candidates' }],
+    // null 顺序：骨架的 error / 目录字段的面板（种成"源字段的候选面板开着"——候选就住在面板里）。
+    nulls: [null, { field: 'from', mode: 'candidates' }],
   })
   const { component } = registrations[0]
   const { inject } = registrations[0].registration
@@ -987,11 +987,11 @@ test('客户端产物：导出列表按目录分组，组头就是"整组勾选"
 
 })
 
-test('客户端产物：组头只摆名字，身份与本机路径在悬浮提示里；候选行与下拉框各留各的', { skip }, () => {
+test('客户端产物：组头只摆名字，身份与本机路径在悬浮提示里；候选行与值控件各留各的', { skip }, () => {
   // 组头上只留**人认得的那一个名字**：项目身份（host/owner/repo）与本机路径都是机器字符串，摆在那一行
   // 里又长又会被截断（截断的身份比没有还难认），而"这是哪个仓库、在本机哪个目录"是想知道才看的信息。
   // 规则在 planRows.projectLabel() / pathLabel() / candidateRow()（test/planRows.test.ts 逐条钉着），
-  // 这里管的是"四处界面是不是都接上了这条线"：两个动作页的组头、迁移页的候选面板、传输页的目标下拉框。
+  // 这里管的是"四处界面是不是都接上了这条线"：两个动作页的组头、迁移页的候选面板、两处的目录值控件。
   // 面板与组头可以只摆名字（第二行与悬浮提示接得住），<option> 不行——它没有悬浮提示，路径不能从那儿
   // 消失。
   const state = {
@@ -1047,12 +1047,19 @@ test('客户端产物：组头只摆名字，身份与本机路径在悬浮提�
     '身份与路径都没丢：它们落在名字那一格的悬浮提示上',
   )
 
-  // 传输页的目标工作区下拉框：身份取代标题那一栏，路径留着（那里没有悬浮提示可退）
-  const target = mounted.recorded.find((element) => element.type === 'option' && element.props?.value === '/home/u/dev/alpha')
-  assert.equal(target?.props?.children, 'github.com/he0119/alpha — /home/u/dev/alpha')
+  // 传输页的目标目录（与迁移页同一枚值控件）：身份取代标题那一栏，路径留着——这枚控件只有一行可用，
+  // 路径退不到别处去（它的悬浮提示给的是完整值）。
+  const transfer = mount({ state, panel: 'transfer', strings: ['/home/u/dev/alpha'] })
+  strings(transfer.registrations[0].component(transfer.registrations[0].registration.inject()))
+  const target = transfer.recorded.find((element) => String(element.props?.className ?? '').includes('dsm-pathValue'))
+  assert.deepEqual(
+    strings(target),
+    ['github.com/he0119/alpha — /home/u/dev/alpha'],
+    '导入卡片里那枚值控件里是「身份 — 路径」',
+  )
 
   // 迁移页的候选面板：名字仍取 `projectLabel`（有标题就是标题），身份与本机路径退到第二行与悬浮提示里
-  const migrated = mount({ state, panel: 'migrate', nulls: [null, { which: 'from', mode: 'candidates' }] })
+  const migrated = mount({ state, panel: 'migrate', nulls: [null, { field: 'from', mode: 'candidates' }] })
   strings(migrated.registrations[0].component(migrated.registrations[0].registration.inject()))
   const rows = candidateRows(migrated.recorded)
   const rowFor = (path) => rows.find((row) => String(strings(row)[1] ?? '').includes(path))
@@ -1506,7 +1513,7 @@ test('客户端产物：导出页也接了同一套筛选条，筛空的组整�
 test('客户端产物：迁移弹窗——计划逐条列出会话，跟着父会话进来的那些挂「随父迁」', { skip }, () => {
   // 弹窗是点了「迁移」之后才在树上的，冒烟里走不到（假钩子给不出点击），所以把 `pending` 种进去。
   // null 状态的顺序：页面骨架的 error（`state` 由 mount 的 `firstNull` 种）/ 迁移页的
-  // picking / manual / **pending**——所以 `nulls` 里先补三个 null，第四个才是那份计划。
+  // 目录字段的面板 / 手输路径 / **pending**——所以 `nulls` 里先补三个 null，第四个才是那份计划。
   // 种错位置表现为"弹窗没渲染出来"，当场红。
   const state = {
     sessionsRoot: '/home/u/.dsh/sessions',
@@ -1655,7 +1662,7 @@ test('客户端产物：迁移的「要不要重启」——确认前先说一�
     registryChange,
     summary: 'plan summary',
   })
-  /** `pending` 是第四个 null 状态（picking / manual 在它前面），顺序种错就表现为弹窗没渲染出来。 */
+  /** `pending` 是第四个 null 状态（目录字段的面板 / 手输路径在它前面），顺序种错就表现为弹窗没渲染出来。 */
   const dialog = (registryChange, takesEffect) => {
     const mounted = mount({
       state,
@@ -1712,7 +1719,7 @@ test('客户端产物：迁移的「要不要重启」——确认前先说一�
     const mounted = mount({
       state,
       panel: 'migrate',
-      // null 顺序：骨架的 error / picking / manual / pending / busy / 错误 / notice / **effect**。
+      // null 顺序：骨架的 error / 目录字段的面板 / 手输路径 / pending / busy / 错误 / notice / **effect**。
       nulls: [
         null,
         null,
@@ -1770,13 +1777,15 @@ test('客户端产物：迁移页只给搜索框、不给类别芯片（那页�
   assert.equal(rowEls[0].props.ungroupedTag, true, '目录来源下，没在册的那条要挂「未分组」')
 })
 
-// ---- 目录字段的候选面板 ----
+// ---- 目录字段的候选面板（迁移的源 / 目标、导入的落地目录共用一个组件） ----
 //
 // 候选是"你有多少个工作区就有多少条"，几十条时原生下拉框只能一行行滚着找。字段因此只剩两件东西：
 // **一枚值控件**（显示当前值，点开面板）与「手输路径」——候选、筛选、选中都在面板里（点一行就是选中），
-// 与页面内那个目录浏览框是同一份面板、同一套皮，两边的头各有一枚按钮互相切。这里钉四件事：值控件
-// 显示的确实是当前值、点开的是候选面板；面板里的筛选只收窄它自己那份列表；没命中时给一句说法而值
-// 不动；宿主没有目录选择器时不摆那枚切过去的按钮。
+// 与页面内那个目录浏览框是同一份面板、同一套皮，两边的头各有一枚按钮互相切。三处目录字段是同一个
+// 组件（见 DirectoryField.tsx），这里钉六件事：值控件显示的确实是当前值、点开的是候选面板；面板里的
+// 筛选只收窄它自己那份列表；没命中时给一句说法而值不动；宿主没有目录选择器时不摆那枚切过去的按钮；
+// **传输页的落地目录也是它**（没有原生下拉框了）、候选与迁移页的目标目录同一份；整页一个 `<select>`
+// 都没有。
 
 /** 候选面板里列出来的行：每一行都是一枚 `dsm-dirEntry dsm-candidate` 按钮。 */
 function candidateRows(recorded) {
@@ -1805,12 +1814,12 @@ const MIGRATE_FIELD_STATE = {
 }
 
 test('客户端产物：目录字段的值控件显示当前值，点开的是候选面板（没有原生下拉框了）', { skip }, () => {
-  // null 状态按渲染顺序种：骨架的 error / **picking**（这里种成"源字段的候选面板开着"）。
+  // null 状态按渲染顺序种：骨架的 error / **目录字段的面板**（这里种成"源字段的候选面板开着"）。
   const mounted = mount({
     state: MIGRATE_FIELD_STATE,
     panel: 'migrate',
     strings: ['/home/u/dev/alpha'],
-    nulls: [null, { which: 'from', mode: 'candidates' }],
+    nulls: [null, { field: 'from', mode: 'candidates' }],
   })
   const { component, registration } = mounted.registrations[0]
   strings(component(registration.inject()))
@@ -1838,7 +1847,7 @@ test('客户端产物：目录字段的值控件显示当前值，点开的是�
   assert.equal(rows[0].props['aria-current'], 'true', '当前值那一行认得出来')
   assert.equal(rows[1].props['aria-current'], undefined, '别的行没有这个记号')
 
-  const filter = mounted.recorded.find((node) => node.props?.['aria-label'] === 'migrate.path.filter')
+  const filter = mounted.recorded.find((node) => node.props?.['aria-label'] === 'pathField.filter')
   assert.equal(filter.props.className, 'dsm-search dsm-candidateFilter', '筛选框在面板里、撑满一行')
   assert.ok(
     mounted.recorded.some((node) => node.props?.children === 'dirPicker.filesystem'),
@@ -1853,19 +1862,19 @@ test('客户端产物：候选面板的筛选只收窄自己那份列表，没�
       state: MIGRATE_FIELD_STATE,
       panel: 'migrate',
       strings: ['/home/u/dev/alpha', '', '', '', query],
-      nulls: [null, { which: 'from', mode: 'candidates' }],
+      nulls: [null, { field: 'from', mode: 'candidates' }],
     })
   const render = (mounted) => strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
 
   const hit = openPanel('beta')
   const hitText = render(hit)
   assert.deepEqual(candidateRows(hit.recorded).map((row) => strings(row)[0]), ['工作区乙'], '命中一条就只列那一条')
-  assert.equal(hitText.includes('migrate.path.noMatch'), false, '有命中就不说"没有匹配"')
+  assert.equal(hitText.includes('pathField.noMatch'), false, '有命中就不说"没有匹配"')
 
   const miss = openPanel('zzz-没有这个')
   const missText = render(miss)
   assert.deepEqual(candidateRows(miss.recorded), [], '一条都不列')
-  assert.ok(missText.includes('migrate.path.noMatch'), '给一句说法，别让人以为筛选坏了')
+  assert.ok(missText.includes('pathField.noMatch'), '给一句说法，别让人以为筛选坏了')
   assert.deepEqual(strings(valueControl(miss.recorded)), ['工作区甲 — /home/u/dev/alpha'], '值不受筛选影响')
 })
 
@@ -1874,7 +1883,7 @@ test('客户端产物：面板头那枚「浏览文件系统…」把同一处�
     state: MIGRATE_FIELD_STATE,
     panel: 'migrate',
     strings: ['/home/u/dev/alpha'],
-    nulls: [null, { which: 'from', mode: 'filesystem' }],
+    nulls: [null, { field: 'from', mode: 'filesystem' }],
   })
   const { component, registration } = mounted.registrations[0]
   const text = strings(component(registration.inject()))
@@ -1896,7 +1905,7 @@ test('客户端产物：宿主没有目录选择器时，候选面板里不摆�
     state: withoutPicker,
     panel: 'migrate',
     strings: ['/home/u/dev/alpha'],
-    nulls: [null, { which: 'from', mode: 'candidates' }],
+    nulls: [null, { field: 'from', mode: 'candidates' }],
   })
   strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
 
@@ -1909,6 +1918,81 @@ test('客户端产物：宿主没有目录选择器时，候选面板里不摆�
     false,
     '不摆一个点了必然报错的按钮',
   )
+})
+
+test('客户端产物：传输页的落地目录换成了同一枚值控件，候选与迁移页的目标目录同一份', { skip }, () => {
+  // null 状态按渲染顺序种：骨架的 error / 传输页的 file / payload / pending / busy / error / notice /
+  // **目录字段的面板**（种成"落地目录的候选面板开着"——候选就住在面板里）。
+  const mounted = mount({
+    state: MIGRATE_FIELD_STATE,
+    panel: 'transfer',
+    strings: ['/home/u/dev/alpha'],
+    nulls: [null, null, null, null, null, null, null, { field: 'target', mode: 'candidates' }],
+  })
+  const { component, registration } = mounted.registrations[0]
+  const text = strings(component(registration.inject()))
+
+  // 目录字段不再有原生下拉框：值控件是那枚按钮（这条与迁移页那份是同一个组件的行为）。
+  assert.equal(mounted.recorded.filter((node) => node.type === 'select').length, 0, '不再有原生下拉框')
+  assert.equal(mounted.recorded.filter((node) => node.type === 'option').length, 0, '也就没有 <option> 了')
+  const value = valueControl(mounted.recorded)
+  assert.ok(value, '落地目录是那枚值控件')
+  assert.equal(value.props['aria-expanded'], true, '面板开着时它是 expanded')
+  assert.equal(
+    value.props['aria-label'],
+    'transfer.import.targetLabel：工作区甲 — /home/u/dev/alpha',
+    '无障碍名字里既有字段也有当前值',
+  )
+  assert.deepEqual(
+    candidateRows(mounted.recorded).map((row) => strings(row)),
+    [
+      ['工作区甲', '/home/u/dev/alpha'],
+      ['工作区乙', '/home/u/dev/beta'],
+    ],
+    '候选＝已登记的工作区（与迁移页目标目录同一份构造：不带条数、没有「未分组」）',
+  )
+  const filter = mounted.recorded.find((node) => node.props?.['aria-label'] === 'pathField.filter')
+  assert.equal(filter?.props?.className, 'dsm-search dsm-candidateFilter', '面板里还是那个筛选框')
+  assert.ok(text.includes('pathField.type'), '字段里还是那枚「手输路径」')
+  assert.ok(
+    mounted.recorded.some((node) => node.props?.children === 'dirPicker.filesystem'),
+    '宿主那条路也在面板头里（这台宿主报的是 browse 能力）',
+  )
+  // 包那一个字段也带标签了（原来它光秃秃地摆在动作行里）
+  assert.ok(text.includes('transfer.import.fileLabel'), '包那一个字段有标签')
+})
+
+test('客户端产物：传输页的落地目录也能手输（候选之外的路径）', { skip }, () => {
+  // null 顺序同上，最后一个是「手输路径」展开着的那个字段。
+  const mounted = mount({
+    state: MIGRATE_FIELD_STATE,
+    panel: 'transfer',
+    strings: ['/home/u/dev/alpha'],
+    nulls: [null, null, null, null, null, null, null, null, 'target'],
+  })
+  strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
+
+  const manual = mounted.recorded.find(
+    (node) => node.type === 'input' && node.props?.['aria-label'] === 'transfer.import.targetLabel',
+  )
+  assert.ok(manual, '「手输路径」展开时是一个输入框')
+  assert.equal(manual.props.value, '/home/u/dev/alpha', '框里就是当前值')
+  assert.equal(manual.props.placeholder, 'pathField.placeholder')
+  assert.equal(valueControl(mounted.recorded).props['aria-expanded'], false, '候选面板没开（同一时刻只有一个）')
+})
+
+test('客户端产物：整页一个原生下拉框都没有（目录一律走那枚值控件）', { skip }, () => {
+  // 六个分页各渲染一遍：目录字段在「迁移」与「同步」之外都用同一个组件，「同步」那张映射表里只有
+  // 文本框（远端路径靠 datalist 提示，那一侧在别的机器上、本机给不出候选）。
+  for (const panel of ['manage', 'migrate', 'transfer', 'sync', 'backup', 'help']) {
+    const mounted = mount({ state: MIGRATE_FIELD_STATE, panel })
+    strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
+    assert.deepEqual(
+      mounted.recorded.filter((node) => node.type === 'select').map((node) => node.props?.className),
+      [],
+      `${panel} 页里不该有原生下拉框`,
+    )
+  }
 })
 
 test('客户端产物：「会话」页的搜索框按标题或 id 筛，筛空时空态还是画在同一个框里', { skip }, () => {
@@ -3145,7 +3229,7 @@ test('客户端产物：导入弹窗里摆的是那张预演表，全是跳过�
     rehomed: [],
     bytes: 10,
   })
-  // null 顺序：骨架的 error / 传输页的 file / payload / **pending**（目标工作区由第二个空串种）。
+  // null 顺序：骨架的 error / 传输页的 file / payload / **pending**（第一个空串是导入目标，第二个是搜索词）。
   const mounted = (action) =>
     mount({
       state,

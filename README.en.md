@@ -23,7 +23,7 @@ still works.
 
 | Entry point | Good for |
 |---|---|
-| The **Session management** page in Settings | Everyday use: archive or delete single sessions on the **Sessions** tab; pick a source (a directory or Ungrouped) from the candidate panel to migrate; tick sessions to export / import; run a WebDAV sync on the **Sync** tab; roll back or restore on the **Backups** tab |
+| The **Session management** page in Settings | Everyday use: archive or delete single sessions on the **Sessions** tab; pick source and target directories from the candidate panel to migrate (the source may also be Ungrouped); tick sessions to export / import; run a WebDAV sync on the **Sync** tab; roll back or restore on the **Backups** tab |
 | 5 model tools | Just say "move this workspace's sessions to `~/dev/xxx`" and let the model preview first, apply second |
 
 Both share one migration implementation, so the count the dialog reports is the count you get.
@@ -115,9 +115,10 @@ one-line bump at that point.
 **Migrate** — move one directory's sessions to another directory
 
 - source and target are each **one value control whose text is the path in use**; clicking it opens the
-  **candidate panel**, whose candidates are registered workspaces **plus any directory the library
-  actually holds sessions for** (annotated with that count) **plus Ungrouped**, so no path has to be
-  typed from memory. Each row carries two lines (the name on top, the local path and session count
+  **candidate panel** (the import's landing directory on the **Transfer** tab is the very same control —
+  see **Import** below), whose candidates are registered workspaces **plus any directory the library
+  actually holds sessions for** (annotated with that count) **plus Ungrouped** (only the source has the
+  last two), so no path has to be typed from memory. Each row carries two lines (the name on top, the local path and session count
   below, the whole string in its tooltip) and the **filter box** above them narrows the list by path,
   workspace title or project identity — it only filters the candidates and never touches the value.
   **Clicking a row selects it** (and collapses the panel); the other two routes sit in the panel head and
@@ -195,7 +196,9 @@ one-line bump at that point.
   among foo). The header then reports "showing N / M", and **Select whole library picks what is listed
   right now**; a group whose rows were all filtered out is not drawn at all (a header with nothing under
   it looks broken), and a group header reports the filtered count;
-- **Import**: pick a bundle and a target workspace → **Import** opens a dialog listing, per session, what will
+- **Import**: pick a bundle and a landing directory — that field is the **same control with the same
+  candidates** as the migration target (the value control opens the candidate panel, and you can also type
+  a path or browse the file system) → **Import** opens a dialog listing, per session, what will
   be created, which `cwd` gets rewritten, what is skipped and how the registry changes → confirm there (with
   nothing to create the confirm button is greyed out). Export never asks: it only packs bytes for download and
   touches nothing locally. Import **never overwrites**: a session whose id already exists is skipped and reported; a session with no `cwd` lands in

@@ -80,9 +80,11 @@ export const zh = {
   'list.empty': '这个会话库里还没有会话。',
 
   'transfer.import.title': '导入',
-  'transfer.import.hint': '选一个 .dshsess 包和目标工作区，点「导入」：弹窗里逐条列出会写什么，确认才落盘。',
-  'transfer.import.pickFile': '选择 .dshsess 包',
-  'transfer.import.pickWorkspace': '选择目标工作区…',
+  'transfer.import.hint': '选一个 .dshsess 包和目标目录，点「导入」：弹窗里逐条列出会写什么，确认才落盘。',
+  'transfer.import.fileLabel': '要导入的包',
+  'transfer.import.targetLabel': '目标目录',
+  // 与迁移页的目标目录同一个字段（值控件 + 候选面板 + 手输路径），空着时值控件上显示这一句。
+  'transfer.import.targetPlaceholder': '选择目标目录…',
   'dialog.previewing': '预演中…',
   'transfer.import.action': '导入',
   'transfer.import.dialogTitle': '将要写入',
@@ -103,7 +105,7 @@ export const zh = {
   'transfer.import.done': '已写入 {count} 条会话（{bytes}）。',
   'transfer.import.needSelection': '请先勾选至少一个会话。',
   'transfer.import.needFile': '请先选择要导入的 .dshsess 包。',
-  'transfer.import.needWorkspace': '请先选择目标工作区。',
+  'transfer.import.needTarget': '请先选择目标目录。',
 
   // ---- 迁移 ----
   'migrate.title': '迁移会话',
@@ -116,14 +118,15 @@ export const zh = {
   'migrate.from.unownedHint':
     '「未分组」＝侧边栏那一组里的会话（可能横跨多个目录），一次全部收进目标工作区；没有工作目录的搬不了，下面两个开关也不适用。',
   'migrate.to.pick': '选择目标目录…',
-  'migrate.path.type': '手输路径',
-  'migrate.path.collapse': '收起',
-  'migrate.path.placeholder': '目录的绝对路径',
+  // 目录字段（迁移的源 / 目标、导入的落地目录三处共用同一个组件，见 DirectoryField.tsx）：
+  'pathField.type': '手输路径',
+  'pathField.collapse': '收起',
+  'pathField.placeholder': '目录的绝对路径',
   // 候选面板里的筛选框：只收窄列表里列出来的候选，不改值（值仍由那个字段持有）。
-  'migrate.path.filter': '筛选候选目录',
-  'migrate.path.noMatch': '没有匹配的候选目录；「浏览文件系统…」和「手输路径」不受筛选影响。',
-  'migrate.path.unavailable': '这个宿主没有可用的目录选择器，请从列表里挑一个，或手输路径。',
-  'migrate.path.failed': '目录选择器没能返回路径：{reason}',
+  'pathField.filter': '筛选候选目录',
+  'pathField.noMatch': '没有匹配的候选目录；「浏览文件系统…」和「手输路径」不受筛选影响。',
+  'pathField.unavailable': '这个宿主没有可用的目录选择器，请从列表里挑一个，或手输路径。',
+  'pathField.failed': '目录选择器没能返回路径：{reason}',
   // 页面内浏览框（宿主给的是 `browse` 能力时用它）：数据来自宿主的 `list()`，不猜路径。
   'dirPicker.title': '选择目录',
   // 候选面板与目录浏览框互切的那两枚按钮（同一个人从"候选"切到"文件系统"，再从那边切回来）。
@@ -447,9 +450,10 @@ export const en: LocaleDictOf<typeof NS> = {
   'list.empty': 'This library has no sessions yet.',
 
   'transfer.import.title': 'Import',
-  'transfer.import.hint': 'Pick a .dshsess bundle and a target workspace, then hit Import: the dialog lists every write before you confirm.',
-  'transfer.import.pickFile': 'Choose a .dshsess bundle',
-  'transfer.import.pickWorkspace': 'Choose a target workspace…',
+  'transfer.import.hint': 'Pick a .dshsess bundle and a target directory, then hit Import: the dialog lists every write before you confirm.',
+  'transfer.import.fileLabel': 'Bundle to import',
+  'transfer.import.targetLabel': 'Target directory',
+  'transfer.import.targetPlaceholder': 'Choose a target directory…',
   'dialog.previewing': 'Previewing…',
   'transfer.import.action': 'Import',
   'transfer.import.dialogTitle': 'About to write',
@@ -470,7 +474,7 @@ export const en: LocaleDictOf<typeof NS> = {
   'transfer.import.done': 'Wrote {count} sessions ({bytes}).',
   'transfer.import.needSelection': 'Tick at least one session first.',
   'transfer.import.needFile': 'Choose a .dshsess bundle first.',
-  'transfer.import.needWorkspace': 'Choose a target workspace first.',
+  'transfer.import.needTarget': 'Choose a target directory first.',
 
   'migrate.title': 'Migrate sessions',
   'migrate.hint':
@@ -482,14 +486,16 @@ export const en: LocaleDictOf<typeof NS> = {
   'migrate.from.unownedHint':
     'Ungrouped = the sidebar’s Ungrouped group, adopted in one go (it can span directories); sessions with no working directory cannot move, and the switches below do not apply.',
   'migrate.to.pick': 'Choose a target directory…',
-  'migrate.path.type': 'Type a path',
-  'migrate.path.collapse': 'Hide',
-  'migrate.path.placeholder': 'Absolute path of the directory',
+  // One shared directory field (migration’s source/target and the import’s landing directory — see
+  // DirectoryField.tsx):
+  'pathField.type': 'Type a path',
+  'pathField.collapse': 'Hide',
+  'pathField.placeholder': 'Absolute path of the directory',
   // The candidate panel’s filter: it only narrows what the list shows, never the value.
-  'migrate.path.filter': 'Filter the candidate directories',
-  'migrate.path.noMatch': 'No candidate matches; “Browse the file system…” and “Type a path” are not filtered.',
-  'migrate.path.unavailable': 'This host has no usable directory picker — choose from the list, or type a path.',
-  'migrate.path.failed': 'The directory picker returned no path: {reason}',
+  'pathField.filter': 'Filter the candidate directories',
+  'pathField.noMatch': 'No candidate matches; “Browse the file system…” and “Type a path” are not filtered.',
+  'pathField.unavailable': 'This host has no usable directory picker — choose from the list, or type a path.',
+  'pathField.failed': 'The directory picker returned no path: {reason}',
   // The in-page browser (used when the host serves the `browse` capability): its data comes from
   // the host’s own `list()`, so no path is ever guessed here.
   'dirPicker.title': 'Choose a directory',
