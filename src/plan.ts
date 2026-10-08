@@ -13,7 +13,7 @@ import { familyOf } from './family.ts'
 import { projectKey } from './project-key.ts'
 import { reHome, validateRegistry } from './registry.ts'
 import type { TitleQuery } from './session-title.ts'
-import type { DecodeAll, RelocationPlan, SessionMove, WorkspaceRegistryState } from './types.ts'
+import type { DecodeAll, LiveSkip, RelocationPlan, SessionMove, WorkspaceRegistryState } from './types.ts'
 import { hiddenReasonOf, type HiddenReason } from './visibility.ts'
 
 /** `buildRelocationPlan()` 的选项。 */
@@ -57,6 +57,17 @@ export interface BuildPlanOptions {
    * `hiddenOf()` 的说明：这一层的候选必须与外壳侧边栏显示的那些对齐。
    */
   resolveBlank?: (query: { id: string; createdAt: number; cwd?: string }) => boolean | undefined
+  /**
+   * 宿主持在内存里的会话 id（可选，见 `visibility.ts` 之外的这一条：`liveSessionIds()`）。
+   *
+   * 这一批**不能搬**，理由两条都是硬的：① 宿主改归属时会拿内存里那份 header 校验 `cwd`，而那条会话的
+   * 内存 header 还是旧路径（磁盘上早改好了也没用），挂靠一定被回绝；② 宿主手里还有它的写句柄，日志被
+   * 搬走之后它照样往旧路径写。所以它们被排除在候选之外、留在原目录、归属不变，只是**如实报出来**
+   * （`RelocationPlan.liveSkipped`）。
+   *
+   * 缺席 = 这次不判（只有工具的前端 / 老版本宿主）。
+   */
+  live?: ReadonlySet<string>
 }
 
 /**
@@ -76,6 +87,7 @@ export function buildRelocationPlan(options: BuildPlanOptions): RelocationPlan {
     includeArtifacts = false,
     resolveTitle,
     resolveBlank,
+    live = new Set<string>(),
   } = options
   const from = (options.from ?? '').trim()
   const problems: string[] = []
@@ -98,6 +110,7 @@ export function buildRelocationPlan(options: BuildPlanOptions): RelocationPlan {
       targetProjectDir: '',
       unowned,
       sessions: [],
+      liveSkipped: [],
       cascaded: 0,
       artifacts: null,
       registryChange: null,
@@ -163,6 +176,31 @@ export function buildRelocationPlan(options: BuildPlanOptions): RelocationPlan {
       return false
     })
 
+  /*
+   * 宿主持在内存里的那批（`live`）与侧边栏看不见的那三类一样，不进候选——但**理由不同**，处置也不同：
+   * 那三类是"用户在外壳里看不见、要搬先去会话页处理"，这一批是"宿主正攥着它，这次搬不动"，等它放手
+   * （重启 DSH）之后还能再迁一次。所以不能只把它们从候选里滤掉：`liveSkipped` 要一路报到预演、工具
+   * 返回值与界面上，否则用户看到的就是"勾了 22 条、搬走 9 条"而没有任何解释。
+   *
+   * 名单里的来源有两处：源候选（下面 `splitLive`）、以及级联扫全库时在别的项目目录里撞见的活着的后代
+   * （`noteLive`）——后者同样不能搬，不然族会被拆成两半还说不清为什么。
+   */
+  const liveSkipped = new Map<string, LiveSkip>()
+  const noteLive = (session: DiscoveredSession): void => {
+    liveSkipped.set(session.id, {
+      id: session.id,
+      ...(session.title === undefined ? {} : { title: session.title }),
+      createdAt: session.createdAt,
+      ...(session.cwd === undefined ? {} : { cwd: session.cwd }),
+    })
+  }
+  const splitLive = (all: DiscoveredSession[]): DiscoveredSession[] =>
+    all.filter((session) => {
+      if (!live.has(session.id)) return true
+      noteLive(session)
+      return false
+    })
+
   const scanOptions = resolveTitle === undefined ? {} : { resolveTitle }
   // 源目录扫出来的那一份（含侧边栏看不见的：它们不进候选，但选中一条父会话时要把它们当中
   // "属于这条父会话的子智能体"找出来）。
@@ -176,13 +214,13 @@ export function buildRelocationPlan(options: BuildPlanOptions): RelocationPlan {
     // 界面上那个来源的条数与这里必须一致，于是界面读的是宿主发来的同一个结论（planRows.unownedSessions）。
     sourceScanned = scanAll(root, decodeAll, scanOptions)
     owned = ownedOf(sourceScanned)
-    discovered = splitHidden(
-      sourceScanned.filter((s) => !owned.has(s.id) && typeof s.cwd === 'string' && s.cwd !== ''),
+    discovered = splitLive(
+      splitHidden(sourceScanned.filter((s) => !owned.has(s.id) && typeof s.cwd === 'string' && s.cwd !== '')),
     )
   } else if (existsSync(sourceProjectDir)) {
     sourceScanned = scanProjectDir(sourceProjectDir, decodeAll, scanOptions)
     owned = ownedOf(sourceScanned)
-    discovered = splitHidden(sourceScanned)
+    discovered = splitLive(splitHidden(sourceScanned))
     for (const s of discovered) {
       if (s.cwd !== from) problems.push(`session ${s.id}: header cwd ${s.cwd} != ${from}`)
     }
@@ -205,6 +243,14 @@ export function buildRelocationPlan(options: BuildPlanOptions): RelocationPlan {
           reason === 'subagent' && parent !== undefined
             ? `session ${id} is a subagent session (it follows its parent) — migrate its parent ${parent} instead`
             : `session ${id} is hidden from the host sidebar (${reason}) — migration does not take it`,
+        )
+        continue
+      }
+      // 点名的会话宿主持着：搬不动（理由见 `BuildPlanOptions.live`），所以给下一步而不是"找不到"。
+      if (liveSkipped.has(id)) {
+        problems.push(
+          `session ${id} is live in the host (it still holds an in-memory copy and a write handle) — ` +
+            'migration does not take it; restart DSH, then migrate it',
         )
         continue
       }
@@ -243,6 +289,12 @@ export function buildRelocationPlan(options: BuildPlanOptions): RelocationPlan {
   const targetDirs = new Set<string>()
   const sessions: SessionMove[] = []
   for (const { session: s, root: familyRoot } of family) {
+    // 级联带来的后代里活着的那些同样搬不动（见上面 `noteLive`）：跳过它、记下来、往下走。
+    // 其余的照搬——一条活着的后代不该把整个族拦下（它自己那次重启后再迁就是）。
+    if (live.has(s.id)) {
+      noteLive(s)
+      continue
+    }
     // 级联带进来的（用户没点名的那几条）要说清出处：预演里会因此多出没勾过的会话。
     const via = selectedIds.has(s.id)
       ? undefined
@@ -287,7 +339,14 @@ export function buildRelocationPlan(options: BuildPlanOptions): RelocationPlan {
     })
   }
 
-  if (sessions.length === 0 && problems.length === 0) problems.push('no sessions selected for migration')
+  if (sessions.length === 0 && problems.length === 0) {
+    // 一条都没剩、而且原因是"全被宿主持着"：说清这一点，别让用户拿"没选中会话"去查勾选。
+    problems.push(
+      liveSkipped.size > 0
+        ? `every session in this source is live in the host (${liveSkipped.size}) — restart DSH, then migrate them`
+        : 'no sessions selected for migration',
+    )
+  }
 
   // 可选的产物搬迁：需要**全量解码**会话日志（多帧全解），比发现阶段慢得多，
   // 因此只在显式要求时做。未分组来源横跨多个目录时不做：产物定位是"相对于源目录"的
@@ -337,6 +396,7 @@ export function buildRelocationPlan(options: BuildPlanOptions): RelocationPlan {
     targetProjectDir,
     unowned,
     sessions,
+    liveSkipped: [...liveSkipped.values()],
     cascaded: sessions.filter((s) => s.via !== undefined).length,
     artifacts,
     registryChange,
@@ -360,6 +420,14 @@ export function describePlan(plan: RelocationPlan): string {
   lines.push(`  日志文件 ${files} 个；目标项目目录 ${plan.targetProjectDir}`)
   if (plan.cascaded > 0) {
     lines.push(`  其中 ${plan.cascaded} 条是子智能体会话（跟着点名的父会话一起搬，成员资格不变）`)
+  }
+  if (plan.liveSkipped.length > 0) {
+    // 少搬就说少搬：逐条点名，用户才知道是哪几条、下一次该迁谁（只有重启 DSH 才能让宿主放手）。
+    lines.push(
+      `  另有 ${plan.liveSkipped.length} 条会话宿主持在内存里（还活着），这次不搬：` +
+        plan.liveSkipped.map((s) => s.id).join('、'),
+    )
+    lines.push('    它们留在原目录、归属不变；重启 DSH 之后再迁一次即可。')
   }
   if (plan.artifacts) {
     lines.push(`  会话产物：待搬 ${plan.artifacts.moves.length} 项、跳过 ${plan.artifacts.skipped.length} 项`)

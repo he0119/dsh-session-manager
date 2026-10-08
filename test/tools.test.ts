@@ -164,6 +164,8 @@ async function makeHost(
     onCall?: (call: string) => void
     mutateOnRefresh?: (registryPath: string) => void
     picker?: 'absent' | 'browse' | 'native' | 'broken'
+    /** 宿主内存里活着的会话 id（有 `sessions` 服务才问得出来；缺省 = 这个宿主没有那个服务）。 */
+    liveSessions?: string[]
   } = {},
 ): Promise<{ ctx: Context; defs: CapturedTool[] }> {
   const defs: CapturedTool[] = []
@@ -244,6 +246,10 @@ async function makeHost(
   }
   if ((options.persistence ?? 'absent') !== 'absent') {
     await startSibling(host, 'sessionPersistence', { list: async () => [{ header: { id: 'session-a', cwd: 'x' } }] })
+  }
+  if (options.liveSessions !== undefined) {
+    // 宿主内存里那份（`ctx.sessions.list()`）：迁移要按它把搬不动的那几条挑出来。
+    await startSibling(host, 'sessions', { list: () => options.liveSessions!.map((id) => ({ id })) })
   }
   const picker = options.picker ?? 'absent'
   if (picker === 'browse' || picker === 'native') {
@@ -488,10 +494,29 @@ test('改完注册表交给宿主自己做：顺序、id 复核、失败退路',
   assert.match(rb.summary, /工作区 id 原样保留/)
   assert.deepEqual(calls.filter((c) => c.startsWith('reuse:')).length, 1, '回滚不该再叫宿主改一次')
 
+  // ---- 宿主持在内存里的一条：搬不动，留在原处、留在源工作区里，并且必须报出来 ----
+  const held = makeSandbox('effect-live-hold')
+  const holding = await makeHost(configOf(held), {
+    registry: held.registry,
+    persistence: 'ready',
+    liveSessions: ['session-b'],
+  })
+  const heldRun = (await run(byName(holding.defs).get('migrate_sessions')!, {
+    from: held.fromDir,
+    to: held.toDir,
+    apply: true,
+  })) as MigrateToolResult
+  assert.equal(heldRun.applied, true)
+  assert.equal(heldRun.liveSkipped, 1, '工具层也要报出宿主持着几条：那是模型唯一看得见的一面')
+  assert.match(heldRun.summary, /另有 1 条会话宿主持在内存里（还活着），这次没搬：session-b/)
+  assert.deepEqual(readRegistry(held.registryPath).tables.workspaces['ws-dl']?.sessionIds, ['session-b'], '活会话仍归源工作区')
+  assert.deepEqual(readRegistry(held.registryPath).tables.workspaces['ws-temp']?.sessionIds, ['session-a'])
+
   rmSync(ok.base, { recursive: true, force: true })
   rmSync(wrong.base, { recursive: true, force: true })
   rmSync(bad.base, { recursive: true, force: true })
   rmSync(tampered.base, { recursive: true, force: true })
+  rmSync(held.base, { recursive: true, force: true })
 })
 
 test('工具端到端：plan(只读) → migrate(dry-run) → migrate(apply) → verify → rollback', async () => {

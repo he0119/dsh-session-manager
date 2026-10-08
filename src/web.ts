@@ -622,7 +622,15 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
       const outcome = applyImport(bundle, plan, { ...options, decodeAll })
       // 导入会改注册表（把会话挂进目标工作区），与迁移是同一条语义：改完就把活儿交给宿主自己做，
       // 而不是把"重启 DSH 最稳妥"留给用户。注册表这次没动时（没有要挂的 / 读不到注册表）没有这一步。
-      const effect = outcome.registryWritten ? await takeEffectOnHost(plan.registryChange, { hostRegistry }) : undefined
+      // 注册表终态一并交过去：宿主没接住时它会用内存副本盖掉这次写盘，那时得靠这份终态写回来
+      // （见 take-effect.ts 的 `restoreRegistry()`）。
+      const effect = outcome.registryWritten
+        ? await takeEffectOnHost(
+            plan.registryChange,
+            { hostRegistry, registryPath: paths.registryPath },
+            { registry: plan.nextRegistry },
+          )
+        : undefined
       /*
        * 导进来的会话从没在本机活过，宿主的投影检查点里没有它们：侧边栏会显示"未命名"、时间退回
        * createdAt，直到被点开一次。这里请宿主自己冷读一遍补上（逐条兜住失败，不影响落地结论，
@@ -666,6 +674,9 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
     hostRegistry,
     // 迁移改写了 cwd，旧检查点因此对不上：收口时请宿主重折一遍（见 checkpoint-warm.ts）。
     hostCheckpoints,
+    // 宿主持在内存里的那些搬不动（见 plan.ts 的 `BuildPlanOptions.live`）：界面同样要问，否则预演会
+    // 报一个"22 条全搬走"的计划，执行时宿主在第一条就回绝。
+    liveSessionIds,
   }
   // 没注入就按"需要重启"说：宁可保守，也不谎称已经生效。执行过的那些走执行结果（见 effectOf）。
   const takesEffect = (): EffectMode => (hostRegistry() === undefined ? 'restart-required' : 'immediate')

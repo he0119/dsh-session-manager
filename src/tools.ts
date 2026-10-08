@@ -552,6 +552,8 @@ export interface PlanToolResult {
   sessions: number
   /** 其中跟着点名会话一起走的子智能体会话条数（见 plan.ts 的 `cascaded`）。 */
   cascaded: number
+  /** 宿主持在内存里、这次不搬的会话条数（见 plan.ts 的 `liveSkipped`）。 */
+  liveSkipped: number
   files: number
   targetProjectDir: string
   summary: string
@@ -564,6 +566,8 @@ export interface MigrateToolResult {
   applied: boolean
   /** 跟着点名会话一起走的子智能体会话条数（见 plan.ts 的 `cascaded`）。 */
   cascaded: number
+  /** 宿主持在内存里、这次没搬的会话条数（见 plan.ts 的 `liveSkipped`）。 */
+  liveSkipped: number
   rewritten: number
   moved: number
   artifactsMoved: number
@@ -592,6 +596,8 @@ export function registerTools(ctx: Context, config: PluginConfigInput = {}): Arr
     hostRegistry: () => hostRegistryPort(ctx),
     // 迁移改写了 cwd，旧检查点因此对不上：收口时请宿主重折一遍（见 checkpoint-warm.ts）。
     hostCheckpoints: () => hostCheckpointPort(ctx),
+    // 宿主持在内存里的会话搬不动（见 plan.ts 的 `BuildPlanOptions.live`）：两个入口都要问同一件事。
+    liveSessionIds: () => liveSessionIds(ctx),
   }
   const disposers: Array<() => void> = []
 
@@ -605,7 +611,9 @@ export function registerTools(ctx: Context, config: PluginConfigInput = {}): Arr
           'sessions and log files would move, the target session project directory, the workspace-registry ' +
           'change, and any ' +
           'blocking problem (missing target directory, projectKey collision, occupied target directory, invalid ' +
-          'registry). Subagent sessions always follow their parent: naming a subagent is refused, and naming a ' +
+          'registry). Sessions the host still holds in memory (live) cannot move while it holds them: they are ' +
+          'left in place and counted in liveSkipped instead of being migrated. Subagent sessions always follow ' +
+          'their parent: naming a subagent is refused, and naming a ' +
           'parent takes its whole family along. Writes nothing. Call this before migrate_sessions.',
         parameters: {
           from: { type: 'string', required: true, description: 'Source workspace directory (absolute path).' },
@@ -634,6 +642,7 @@ export function registerTools(ctx: Context, config: PluginConfigInput = {}): Arr
               ok: { type: 'boolean', required: true },
               sessions: { type: 'integer', required: true },
               cascaded: { type: 'integer', required: true },
+              liveSkipped: { type: 'integer', required: true },
               files: { type: 'integer', required: true },
               targetProjectDir: { type: 'string', required: true },
               summary: { type: 'string', required: true },
@@ -656,6 +665,7 @@ export function registerTools(ctx: Context, config: PluginConfigInput = {}): Arr
             ok: preview.ok,
             sessions: preview.sessions.length,
             cascaded: preview.cascaded,
+            liveSkipped: preview.liveSkipped.length,
             files: preview.files,
             targetProjectDir: preview.targetProjectDir,
             summary: preview.summary,
@@ -676,13 +686,14 @@ export function registerTools(ctx: Context, config: PluginConfigInput = {}): Arr
           'Migrate DSH sessions between workspace directories: rewrite each session log header cwd (only the first ' +
           'zstd frame; the rest stays byte-identical), move the session directories into the target ' +
           'project directory, and ' +
-          're-home the workspace registry. Defaults to dry-run; apply:true performs it after taking a byte-level ' +
-          'backup. Refuses on any blocking problem. Subagent sessions always follow their parent (naming one is ' +
-          'refused; naming a parent takes its whole family along; their registry membership does not change). ' +
-          'The registry file is written on disk and then handed back to the host by restarting the load entry ' +
-          'that provides it (the workspace layer only; the process is not restarted), so the change takes effect ' +
-          'immediately. When that entry cannot be found on this host, the result says a DSH restart is required ' +
-          'instead.',
+          're-home the workspace registry (written atomically to disk, then handed to the live host so the ' +
+          'change takes effect without a restart; when the host cannot take it, the result says a DSH restart ' +
+          'is required and the registry file still holds this run\'s result). Defaults to dry-run; apply:true ' +
+          'performs it after taking a byte-level ' +
+          'backup. Refuses on any blocking problem. Sessions the host still holds in memory (live) cannot move ' +
+          'while it holds them: they are left in place and named in the result, and a migration can therefore ' +
+          'move a subset. Subagent sessions always follow their parent (naming one is ' +
+          'refused; naming a parent takes its whole family along; their registry membership does not change).',
         parameters: {
           from: { type: 'string', required: true, description: 'Source workspace directory (absolute path).' },
           to: {
@@ -713,6 +724,7 @@ export function registerTools(ctx: Context, config: PluginConfigInput = {}): Arr
             properties: {
               applied: { type: 'boolean', required: true },
               cascaded: { type: 'integer', required: true },
+              liveSkipped: { type: 'integer', required: true },
               rewritten: { type: 'integer', required: true },
               moved: { type: 'integer', required: true },
               artifactsMoved: { type: 'integer', required: true },
@@ -747,6 +759,7 @@ export function registerTools(ctx: Context, config: PluginConfigInput = {}): Arr
           return {
             applied: run.applied,
             cascaded: run.preview.cascaded,
+            liveSkipped: run.preview.liveSkipped.length,
             rewritten: run.rewritten,
             moved: run.moved,
             artifactsMoved: run.artifactsMoved,

@@ -151,6 +151,12 @@ one-line bump at that point.
   sessions (never started a turn) and archived sessions are never candidates — a session the sidebar
   cannot show should not be swept along by accident. Naming one of them explicitly makes the plan say
   it is hidden (for a subagent it also tells you to name its parent instead);
+- **a session the host still holds cannot move**: the copy in host memory (the rows tagged `active` in
+  this plugin's lists) still carries the old path, so attaching it is refused and its log cannot be moved
+  either. The plan therefore **leaves that batch out** and the dialog says one more line — "N more
+  sessions are live in the host, not moved this time" — while they stay in their directory with their
+  ownership unchanged. **Restart DSH and migrate again** to bring the rest over; naming one of them, or a
+  source where every session is live, is refused with that reason (not "no sessions selected");
 - **Subagents follow their parent session**: ticking a parent **moves its subagent sessions** (and any
   deeper descendants) with it (archiving and exporting work the same way: the subagents are archived, or
   packed into the bundle, together with the parent) — each log header's cwd is rewritten and each session directory moves into
@@ -365,7 +371,10 @@ Sync also goes through a plan: the `sync_sessions` tool previews by default and 
   Session ids are only ever attached and detached, never minted or renamed; an existing workspace is reused with
   its own id. When the host lacks those actions (tools-only front end, older version), both the tools and the page
   say so and ask for a **DSH restart** — and until then, do not change any workspace: creating, renaming or
-  archiving one would clobber this change with the in-memory copy.
+  archiving one would clobber this change with the in-memory copy. The same applies when the host **refuses
+  halfway**: the plugin writes the registry it just computed **back to the file** (the host had already
+  clobbered it once with its in-memory copy the moment it touched anything), so the restart shows this run's
+  result rather than the host's old ownership.
 - **Landing also folds the list metadata**: the title, the blank verdict and the last-activity time shown in the
   sidebar do not come from the log — they come from the host's own projection checkpoint, which the host only
   writes for **live** sessions. So after an import, a sync pull or a migration (which rewrites `cwd`), the

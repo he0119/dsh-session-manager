@@ -1688,7 +1688,7 @@ test('客户端产物：迁移弹窗——计划逐条列出会话，跟着父�
     ],
     workspaces: [{ id: 'w1', path: '/home/u/dev/alpha', title: '工作区甲', sessionIds: ['s-1'] }],
   }
-  const previewOf = (cascaded) => ({
+  const previewOf = (cascaded, live = 0) => ({
     ok: true,
     problems: [],
     from: '/home/u/dev/alpha',
@@ -1703,16 +1703,18 @@ test('客户端产物：迁移弹窗——计划逐条列出会话，跟着父�
       { id: 's-9', createdAt: 2, registered: false, alreadyAtTarget: false, sourceDir: '/a/s-9', targetDir: '/b/s-9', files: 1, bytes: 100, via: { id: 's-1' } },
     ].slice(0, cascaded === 0 ? 1 : 2),
     cascaded,
+    // 宿主持在内存里、这次不搬的那几条（宿主字段 `liveSkipped`）。
+    liveSkipped: Array.from({ length: live }, (_, index) => ({ id: `s-live-${index}`, createdAt: 1 })),
     files: 2,
     bytes: 200,
     artifacts: null,
     registryChange: null,
     summary: 'plan summary',
   })
-  const outcomeOf = (cascaded) => ({
+  const outcomeOf = (cascaded, live = 0) => ({
     mode: 'plan',
     ok: true,
-    preview: previewOf(cascaded),
+    preview: previewOf(cascaded, live),
     applied: false,
     rewritten: 0,
     moved: 0,
@@ -1723,12 +1725,12 @@ test('客户端产物：迁移弹窗——计划逐条列出会话，跟着父�
     takesEffect: 'restart-required',
   })
   /** 种一份计划进弹窗（`pending` 的位置见上面的注释）。 */
-  const withPlan = (cascaded) => {
+  const withPlan = (cascaded, live = 0) => {
     const mounted = mount({
       state,
       panel: 'migrate',
       strings: ['/home/u/dev/alpha', '/home/u/dev/beta'],
-      nulls: [null, null, null, { response: outcomeOf(cascaded), error: null }],
+      nulls: [null, null, null, { response: outcomeOf(cascaded, live), error: null }],
     })
     const tree = mounted.registrations[0].component(mounted.registrations[0].registration.inject())
     return { mounted, tree, text: strings(tree) }
@@ -1769,6 +1771,13 @@ test('客户端产物：迁移弹窗——计划逐条列出会话，跟着父�
   const plain = withPlan(0)
   assert.ok(plain.text.some((item) => String(item).startsWith('migrate.summary')), '弹窗正文照旧渲染')
   assert.equal(plain.text.some((item) => String(item).startsWith('migrate.family')), false)
+  // 宿主持在内存里那几条：不在下面的清单里，所以必须单独说明"这次没搬、重启后再迁一次"。
+  assert.equal(plain.text.some((item) => String(item).startsWith('migrate.liveSkipped')), false, '没有少搬时不多话')
+  const withLive = withPlan(0, 2)
+  assert.ok(
+    withLive.text.some((item) => String(item) === 'migrate.liveSkipped:{"count":2}'),
+    '少搬了 2 条要说出来，否则"勾了 N 条、搬走 M 条"没人解释',
+  )
 })
 
 test('客户端产物：迁移的「要不要重启」——确认前先说一句，落地后只在需要重启时留一句', { skip }, () => {
@@ -1819,6 +1828,7 @@ test('客户端产物：迁移的「要不要重启」——确认前先说一�
       },
     ],
     cascaded: 0,
+    liveSkipped: [],
     files: 1,
     bytes: 100,
     artifacts: null,

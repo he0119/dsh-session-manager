@@ -27,6 +27,11 @@
   `src/take-effect.ts` 拿到宿主那套动作（`hostRegistryPort()`：先按磁盘刷 header 缓存，再复用 / 新建
   工作区、挂会话、摘会话、删空工作区）就把改动交给它自己做，拿不到就如实说这次改动需要重启 DSH。被
   回退的那条路（重挂加载条目）留在[否决记录](../.agents/notes/rejected/architecture/2026-10-05-reload-the-workspace-entry.md)里。
+- [宿主持着的会话不搬，但要说出来](../.agents/notes/implemented/bug-fix/2026-10-08-live-sessions-cannot-move.md)：
+  `ctx.sessions.list()` 里那条（活的）会话内存 header 还是旧 `cwd`，挂靠必被回绝，日志也不能搬；计划层
+  因此按 `MigrateDeps.liveSessionIds()` 把它们摘出去，`liveSkipped` 一路报到工具返回值与界面，点名点到
+  它们、或整个来源都活着时按 problem 拒绝。宿主没接住那一步时，这次算好的注册表整份写回文件
+  （`restoreRegistry()`），"重启后一致"才成立。
 - [生效提示先说在事前，且只在需要重启时说话](../.agents/notes/implemented/architecture/2026-10-06-restart-notice-up-front-and-only-on-bad-news.md)：
   `/sync` 与 `sync_sessions` 的预演一律按探测回答"执行时会不会需要重启"（迁移那条路本来就是），界面在
   确认弹窗里先说、落地后只在需要重启时留一条 warn 横幅；长解释只在说明页的 FAQ。

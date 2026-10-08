@@ -20,6 +20,7 @@ import type { TitleQuery } from './session-title.ts'
 import type {
   DecodeAll,
   EffectOutcome,
+  LiveSkip,
   RelocationPlan,
   RegistryChange,
   WarmOutcome,
@@ -50,6 +51,14 @@ export interface MigrateDeps extends EffectDeps, WarmDeps {
    * 必须与外壳侧边栏显示的那批对齐，这是**编排层**的口径，不该因为入口是工具还是界面而不同。
    */
   resolveBlank?: (query: { id: string; createdAt: number; cwd?: string }) => boolean | undefined
+  /**
+   * 宿主持在内存里的会话 id（可选，见 plan.ts 的 `BuildPlanOptions.live`）。
+   *
+   * **两个入口都必须给**：预演与执行走的是同一个计划，“宿主手里那几条搬不动”这件事不能只有界面知道
+   * （工具层漏掉它就会让模型以为 22 条全搬走了）。缺席 = 这个宿主问不出来（只有工具的前端 / 老版本），
+   * 那时按"一条都不活着"处理——与以前的行为一致。
+   */
+  liveSessionIds?: () => ReadonlySet<string>
 }
 
 /** 一次迁移/预演的请求。 */
@@ -106,6 +115,12 @@ export interface MigrationPreview {
   sessions: PreviewSession[]
   /** 级联带进来的条数：点名的会话的子智能体后代（见 `PreviewSession.via`）。 */
   cascaded: number
+  /**
+   * 宿主持在内存里、这次**不搬**的会话（见 `types.ts` 的 `LiveSkip`）。
+   *
+   * 报出来是硬要求：它们不在 `sessions` 里，界面若不提这一条，用户看到的就是"勾了 22 条、搬走 9 条"。
+   */
+  liveSkipped: LiveSkip[]
   files: number
   bytes: number
   artifacts: {
@@ -217,6 +232,7 @@ function previewOf(plan: RelocationPlan): MigrationPreview {
     sourceProjectDirs: [...new Set(plan.sessions.map((session) => dirname(session.sourceDir)))].sort(),
     sessions,
     cascaded: plan.cascaded,
+    liveSkipped: plan.liveSkipped,
     files,
     bytes,
     artifacts: plan.artifacts
@@ -242,6 +258,7 @@ function buildPlan(deps: MigrateDeps, request: MigrateRequest): RelocationPlan {
     includeUnowned: request.includeUnowned !== false,
     includeArtifacts: request.includeArtifacts === true,
     resolveBlank,
+    live: deps.liveSessionIds?.() ?? new Set<string>(),
     ...(deps.resolveTitle === undefined ? {} : { resolveTitle: deps.resolveTitle }),
   })
 }
@@ -298,7 +315,8 @@ export async function runMigration(
   })
   const verified = verifyAppliedPlan(plan, { decodeAll: deps.decodeAll })
   // 复核失败也照样让宿主认：磁盘就是磁盘，宿主该看到的是真实状态，藏起来只会更晚暴露。
-  const effect = await takeEffectOnHost(plan.registryChange, deps)
+  // 注册表终态一并交过去：宿主没接住那一步时它会用内存副本盖掉这次写盘，那时得靠这份终态写回来。
+  const effect = await takeEffectOnHost(plan.registryChange, deps, { registry: plan.nextRegistry })
   /*
    * 搬动改写了 header 的 cwd，而宿主的投影检查点把 cwd 记在身份里 —— 不重折一遍，侧边栏这些会话就是
    * "未命名"，要点开一次才补上。这一步只补宿主那份派生数据：失败逐条兜住，不影响上面的结论。
@@ -324,11 +342,16 @@ export async function runMigration(
     summary: [
       `已迁移 ${plan.sessions.length} 个会话（改写 ${result.rewritten} 个日志、移动 ${result.moved} 个目录` +
         `${result.artifactsMoved > 0 ? `、搬迁 ${result.artifactsMoved} 项产物` : ''}）。`,
+      // 少搬了谁必须写在最前面那一段里：这一句是执行结果的全部交代，不能只出现在预演里。
+      plan.liveSkipped.length > 0
+        ? `另有 ${plan.liveSkipped.length} 条会话宿主持在内存里（还活着），这次没搬：` +
+          `${plan.liveSkipped.map((session) => session.id).join('、')}——重启 DSH 之后再迁一次。`
+        : '',
       `复核：${verified.ok && registryCheck.length === 0 ? '通过' : '失败'}。备份：${result.backupDir}`,
       describeEffect(effect),
       describeWarm(warm),
     ]
-      .filter((line): line is string => line !== undefined)
+      .filter((line): line is string => line !== undefined && line !== '')
       .join('\n'),
   }
 }

@@ -765,6 +765,60 @@ test('POST /migrate：带 sessionIds 时只搬点名的会话（界面「只选�
   assert.deepEqual(readRegistry(sandbox.registryPath).tables.workspaces['ws-a']?.sessionIds, ['session-a'])
 })
 
+test('POST /migrate：宿主持着的会话不搬，预演里报出 liveSkipped（源工作区不被摘空）', async () => {
+  const sandbox = makeSandbox('web-migrate-live')
+  writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000)
+  writeSession(sandbox.sessionsRoot, 'session-b', CWD_A, 2000)
+  // 两条都登记在 ws-a 名下：被宿主持着的那条要看得出来"留在源工作区里"。
+  writeRegistryAtomic(sandbox.registryPath, {
+    ...sandbox.registry,
+    tables: {
+      workspaces: {
+        'ws-a': { ...sandbox.registry.tables.workspaces['ws-a']!, sessionIds: ['session-a', 'session-b'] },
+      },
+    },
+  })
+
+  const handlers = createApiHandlers(deps(sandbox, { liveSessionIds: () => new Set(['session-b']) }))
+  const planned = fakeRes()
+  await handlers['POST /migrate']!(
+    fakeReq('POST', `${API_PREFIX}/migrate`, Buffer.from(JSON.stringify({ from: CWD_A, to: CWD_B }))),
+    planned.res,
+  )
+  assert.equal(planned.captured.status, 200)
+  const preview = json(planned.captured)['preview'] as Record<string, unknown>
+  assert.deepEqual((preview['sessions'] as { id: string }[]).map((s) => s.id), ['session-a'])
+  // 界面读的就是这个字段（`preview.liveSkipped.length > 0` 才多说一句"这次没搬"）。
+  assert.deepEqual((preview['liveSkipped'] as { id: string }[]).map((s) => s.id), ['session-b'])
+  assert.match(String(json(planned.captured)['summary']), /另有 1 条会话宿主持在内存里/)
+
+  const applied = fakeRes()
+  await handlers['POST /migrate']!(
+    fakeReq('POST', `${API_PREFIX}/migrate`, Buffer.from(JSON.stringify({ mode: 'apply', from: CWD_A, to: CWD_B }))),
+    applied.res,
+  )
+  assert.equal(applied.captured.status, 200)
+  assert.equal(json(applied.captured)['applied'], true)
+  // 活会话的日志一个字节都不许动，归属也留在源工作区（源工作区因此不会被删掉）
+  assert.equal(existsSync(sessionDir(sandbox.sessionsRoot, CWD_A, 'session-b')), true)
+  assert.deepEqual(readRegistry(sandbox.registryPath).tables.workspaces['ws-a']?.sessionIds, ['session-b'])
+  assert.equal(existsSync(sessionDir(sandbox.sessionsRoot, CWD_B, 'session-b')), false)
+
+  // 点名点到活会话：409 + 说清下一步（不是"找不到"）
+  const named = fakeRes()
+  await handlers['POST /migrate']!(
+    fakeReq(
+      'POST',
+      `${API_PREFIX}/migrate`,
+      Buffer.from(JSON.stringify({ from: CWD_A, to: CWD_B, sessionIds: ['session-b'] })),
+    ),
+    named.res,
+  )
+  assert.equal(named.captured.status, 409)
+  assert.match((json(named.captured)['problems'] as string[]).join('; '), /session-b is live in the host/)
+  assert.match((json(named.captured)['problems'] as string[]).join('; '), /restart DSH, then migrate it/)
+})
+
 test('POST /migrate：勾中的父会话把子智能体一起带走，条数报在 cascaded 里（界面据此说明）', async () => {
   const sandbox = makeSandbox('web-migrate-family')
   writeSession(sandbox.sessionsRoot, 'session-parent', CWD_A, 1000, { title: '父会话' })
