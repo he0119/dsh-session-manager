@@ -1700,7 +1700,7 @@ test('客户端产物：迁移弹窗——计划逐条列出会话，跟着父�
     ],
     workspaces: [{ id: 'w1', path: '/home/u/dev/alpha', title: '工作区甲', sessionIds: ['s-1'] }],
   }
-  const previewOf = (cascaded, live = 0) => ({
+  const previewOf = (cascaded, live = 0, stranded = 0) => ({
     ok: true,
     problems: [],
     from: '/home/u/dev/alpha',
@@ -1717,16 +1717,28 @@ test('客户端产物：迁移弹窗——计划逐条列出会话，跟着父�
     cascaded,
     // 宿主持在内存里、这次不搬的那几条（宿主字段 `liveSkipped`）。
     liveSkipped: Array.from({ length: live }, (_, index) => ({ id: `s-live-${index}`, createdAt: 1 })),
+    // 侧边栏不显示、这次也不搬的那几条（宿主字段 `strandedSources`）：它们让源工作区删不掉。
+    strandedSources:
+      stranded === 0
+        ? []
+        : [
+            {
+              workspaceId: 'w1',
+              path: '/home/u/dev/alpha',
+              title: '工作区甲',
+              members: Array.from({ length: stranded }, (_, index) => ({ id: `s-hidden-${index}`, reason: 'blank' })),
+            },
+          ],
     files: 2,
     bytes: 200,
     artifacts: null,
     registryChange: null,
     summary: 'plan summary',
   })
-  const outcomeOf = (cascaded, live = 0) => ({
+  const outcomeOf = (cascaded, live = 0, stranded = 0) => ({
     mode: 'plan',
     ok: true,
-    preview: previewOf(cascaded, live),
+    preview: previewOf(cascaded, live, stranded),
     applied: false,
     rewritten: 0,
     moved: 0,
@@ -1737,12 +1749,12 @@ test('客户端产物：迁移弹窗——计划逐条列出会话，跟着父�
     takesEffect: 'restart-required',
   })
   /** 种一份计划进弹窗（`pending` 的位置见上面的注释）。 */
-  const withPlan = (cascaded, live = 0) => {
+  const withPlan = (cascaded, live = 0, stranded = 0) => {
     const mounted = mount({
       state,
       panel: 'migrate',
       strings: ['/home/u/dev/alpha', '/home/u/dev/beta'],
-      nulls: [null, null, null, { response: outcomeOf(cascaded, live), error: null }],
+      nulls: [null, null, null, { response: outcomeOf(cascaded, live, stranded), error: null }],
     })
     const tree = mounted.registrations[0].component(mounted.registrations[0].registration.inject())
     return { mounted, tree, text: strings(tree) }
@@ -1790,6 +1802,22 @@ test('客户端产物：迁移弹窗——计划逐条列出会话，跟着父�
     withLive.text.some((item) => String(item) === 'migrate.liveSkipped:{"count":2}'),
     '少搬了 2 条要说出来，否则"勾了 N 条、搬走 M 条"没人解释',
   )
+  // 侧边栏不显示、这次也不搬的那几条：源工作区因此不会被删——不说的话用户看到的就是一块空工作区。
+  assert.equal(
+    plain.text.some((item) => String(item).startsWith('migrate.stranded')),
+    false,
+    '没有这类残留时不多话',
+  )
+  const withStranded = withPlan(0, 0, 2)
+  assert.ok(
+    withStranded.text.some((item) => String(item) === 'migrate.stranded:{"count":2}'),
+    '留下 2 条搬不走的要说出来，并说明源工作区因此不会被删',
+  )
+  assert.equal(
+    withStranded.text.some((item) => String(item).startsWith('migrate.liveSkipped')),
+    false,
+    '这两类是两回事，别互相冒充（这一份里没有活会话）',
+  )
 })
 
 test('客户端产物：迁移的「要不要重启」——确认前先说一句，落地后只在需要重启时留一句', { skip }, () => {
@@ -1816,6 +1844,8 @@ test('客户端产物：迁移的「要不要重启」——确认前先说一�
     adoptedFromUnowned: [],
     movedFrom: [{ workspaceId: 'w1', path: '/home/u/dev/alpha', sessionIds: ['s-1'] }],
     removedSources: [{ workspaceId: 'w1', path: '/home/u/dev/alpha' }],
+    // 顺带摘掉的悬空登记（宿主本来就不认它们，见宿主 `RegistryChange.droppedStale`）。
+    droppedStale: [],
     unchanged: false,
   }
   const previewOf = (registryChange) => ({
@@ -1841,6 +1871,7 @@ test('客户端产物：迁移的「要不要重启」——确认前先说一�
     ],
     cascaded: 0,
     liveSkipped: [],
+    strandedSources: [],
     files: 1,
     bytes: 100,
     artifacts: null,
@@ -1896,6 +1927,24 @@ test('客户端产物：迁移的「要不要重启」——确认前先说一�
     dialog({ ...change, unchanged: true }, 'restart-required').text.includes('effect.plannedRestart'),
     false,
     '注册表本来就不用改时没有"生效"可谈，不摆这一句',
+  )
+
+  // 顺带摘掉的悬空登记也要在"注册表变更"那张清单里报出来：它同样是一次改动，不能只在摘要那句里提。
+  assert.equal(dialog(change, 'immediate').text.includes('registry.stale'), false, '没摘任何登记时不多话')
+  const withStale = dialog(
+    {
+      ...change,
+      removedSources: [],
+      droppedStale: [
+        { workspaceId: 'w1', path: '/home/u/dev/alpha', sessionIds: ['s-ghost'] },
+        { workspaceId: 'w3', path: '/home/u/dev/gamma', sessionIds: ['s-gone'] },
+      ],
+    },
+    'immediate',
+  )
+  assert.ok(
+    withStale.text.some((item) => String(item) === 'registry.stale:{"count":2}'),
+    '摘掉 2 条悬空登记要在清单里说一句',
   )
 
   // 落地之后的结论块：需要重启时多一句警告；不需要时那句"无需重启"已经删掉（它和"复核通过"挤在同一个
@@ -3823,6 +3872,7 @@ test('客户端产物：迁移落地时弹窗正文换成进度块（计划表�
       sessions: [{ id: 's-1', createdAt: 5, registered: true, alreadyAtTarget: false, sourceDir: '/x', targetDir: '/y', files: 1, bytes: 10 }],
       cascaded: 0,
       liveSkipped: [],
+      strandedSources: [],
       files: 1,
       bytes: 10,
       artifacts: null,
@@ -4321,6 +4371,7 @@ test('客户端产物：迁移落地时宿主报的每条进度都进了界面�
     ],
     cascaded: 0,
     liveSkipped: [],
+    strandedSources: [],
     files: 1,
     bytes: 10,
     artifacts: null,

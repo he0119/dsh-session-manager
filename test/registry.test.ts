@@ -4,7 +4,13 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 
-import { missingMemberships, readRegistry, reHome, validateRegistry } from '../src/registry.ts'
+import {
+  missingMemberships,
+  readRegistry,
+  reHome,
+  validateRegistry,
+  verifyRegistryChange,
+} from '../src/registry.ts'
 import type { WorkspaceRegistryState } from '../src/types.ts'
 
 /** 一份满足全部启动不变式的最小注册表。 */
@@ -166,6 +172,69 @@ test('缺归属：挪到别的工作区下不算缺（那是复核该报出来�
   actual.tables.workspaces['ws-downloads']!.sessionIds = ['session-a']
   actual.tables.workspaces['ws-temp']!.sessionIds = ['session-live', 'session-b']
   assert.deepEqual(missingMemberships(expected, actual), [])
+})
+
+test('reHome：宿主不认的悬空登记不算成员，源工作区照样删得掉', () => {
+  const before = makeRegistry()
+  // session-ghost 只登记在册、盘上早就没有它了（插件删除会话时刻意不清理注册表）。
+  before.tables.workspaces['ws-downloads']!.sessionIds = ['session-a', 'session-b', 'session-ghost']
+  const { registry, change } = reHome(before, {
+    sessionIds: ['session-a', 'session-b'],
+    toPath: 'C:\\Users\\me\\Work\\temp',
+    now: NOW,
+    staleSessionIds: new Set(['session-ghost']),
+  })
+
+  assert.deepEqual(
+    change.removedSources.map((entry) => entry.workspaceId),
+    ['ws-downloads'],
+    '真实会话全搬走、只剩悬空登记时，这块工作区必须被删掉',
+  )
+  assert.deepEqual(change.droppedStale, [
+    { workspaceId: 'ws-downloads', path: 'C:\\Users\\me\\Downloads', sessionIds: ['session-ghost'] },
+  ])
+  assert.equal(registry.tables.workspaces['ws-downloads'], undefined)
+  assert.deepEqual(registry.global.workspaceIds, ['ws-temp'])
+  // 复核要放行这次点名摘掉的悬空登记（否则每次落地都会误报"会话 id 少了"）
+  assert.deepEqual(verifyRegistryChange(before, registry, change).problems, [])
+  assert.equal(validateRegistry(registry).ok, true)
+
+  // 篡改：同一份结果、但计划里不报这条摘除——复核必须把它抓出来，说明上面那条断言不是白过的。
+  const silent = { ...change, droppedStale: [] }
+  assert.match(verifyRegistryChange(before, registry, silent).problems.join(';'), /session-ghost 在落盘结果里没了/)
+})
+
+test('reHome：留下真成员的工作区还在，但它的悬空登记被顺手摘掉', () => {
+  const before = makeRegistry()
+  before.tables.workspaces['ws-downloads']!.sessionIds = ['session-a', 'session-b', 'session-ghost']
+  const { registry, change } = reHome(before, {
+    sessionIds: ['session-a'],
+    toPath: 'C:\\Users\\me\\Work\\temp',
+    now: NOW,
+    staleSessionIds: new Set(['session-ghost']),
+  })
+
+  assert.deepEqual(change.removedSources, [], '还剩 session-b，不许删这块工作区')
+  assert.deepEqual(registry.tables.workspaces['ws-downloads']?.sessionIds, ['session-b'], '悬空登记不该再挂在账上')
+  assert.deepEqual(change.droppedStale.map((entry) => entry.sessionIds), [['session-ghost']])
+  assert.deepEqual(verifyRegistryChange(before, registry, change).problems, [])
+})
+
+test('reHome：这次没碰的工作区不动它的悬空登记', () => {
+  const before = makeRegistry()
+  before.tables.workspaces['ws-temp']!.sessionIds = ['session-live', 'session-ghost']
+  const { registry, change } = reHome(before, {
+    sessionIds: ['session-a'],
+    // 目标是一块**新建**的工作区：ws-temp 这一次完全没被碰过，它的悬空登记不该被动。
+    toPath: 'C:\\Users\\me\\Work\\elsewhere',
+    newId: 'ws-new',
+    now: NOW,
+    staleSessionIds: new Set(['session-ghost']),
+  })
+
+  // 迁移只该动"这次真搬出过会话"的那些记录：别的记录里的悬空登记不是这次的事。
+  assert.deepEqual(registry.tables.workspaces['ws-temp']?.sessionIds, ['session-live', 'session-ghost'])
+  assert.deepEqual(change.droppedStale, [])
 })
 
 // 真实数据：只读校验本机真实注册表，必须满足启动不变式。

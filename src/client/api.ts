@@ -517,6 +517,18 @@ export interface MigrationPreview {
    * 它们不在 `sessions` 里：卡片必须提这一条，否则"勾了 22 条、搬走 9 条"没人解释。
    */
   liveSkipped: Array<{ id: string; title?: string; createdAt: number; cwd?: string }>
+  /**
+   * 源工作区搬完还剩人、因此**不会被删**的那几块（见宿主 `MigrationPreview.strandedSources`）。
+   *
+   * 留下的那几条侧边栏不显示（已归档 / 空白 / 子智能体），卡片必须提这一条：不提的话用户看到的就是
+   * "整个来源都迁完了，怎么侧边栏里还留着一块一条都不显示的工作区"。
+   */
+  strandedSources: Array<{
+    workspaceId: string
+    path: string
+    title: string
+    members: Array<{ id: string; title?: string; reason: 'subagent' | 'blank' | 'archived' }>
+  }>
   files: number
   bytes: number
   artifacts: {
@@ -532,6 +544,8 @@ export interface MigrationPreview {
     adoptedFromUnowned: string[]
     movedFrom: Array<{ workspaceId: string; path: string; sessionIds: string[] }>
     removedSources: Array<{ workspaceId: string; path: string }>
+    /** 顺带摘掉的悬空登记（宿主本来就不认它们，见宿主 `RegistryChange.droppedStale`）。 */
+    droppedStale: Array<{ workspaceId: string; path: string; sessionIds: string[] }>
     unchanged: boolean
   } | null
   summary: string
