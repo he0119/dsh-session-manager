@@ -165,6 +165,9 @@ export const zh = {
     '这条是子智能体：它属于你点名的「{name}」（可能隔了几层），所以跟着一起搬；搬完还是不算工作区成员。',
   'migrate.liveSkipped':
     '另有 {count} 条会话宿主持在内存里（还活着），这次不搬：它们留在原目录、归属不变。重启 DSH 之后再迁一次即可。',
+  'migrate.stranded':
+    '另有 {count} 条会话侧边栏不显示（已归档 / 空白 / 子智能体），这次不搬：它们留在源工作区里，那块工作区因此不会被删。' +
+    '要清掉它，先在「会话」页处理这几条（已归档的取消归档、空白的删掉、子智能体连着它的父会话一起迁），再迁一次。',
   'migrate.projectDirs': '项目目录：{from} → {to}',
   'migrate.projectDirsUnowned': '未分组横跨 {projectDirs} 个源项目目录 → {to}',
   'registry.change.title': '注册表变更',
@@ -174,6 +177,7 @@ export const zh = {
   'registry.adopted': '从不属于任何工作区的会话里收编 {count} 条',
   'registry.moved': '从 {count} 个工作区搬出',
   'registry.removed': '移除 {count} 个已空的工作区',
+  'registry.stale': '顺带清掉 {count} 条宿主已经不认的悬空登记（盘上已经没有这些会话）',
   'registry.unchanged': '注册表无需变更',
   'artifacts.planned': '计划搬迁 {count} 项产物',
   'artifacts.skipped': '跳过 {count} 项产物',
@@ -560,6 +564,11 @@ export const en: LocaleDictOf<typeof NS> = {
   'migrate.liveSkipped':
     '{count} more sessions are live in the host (it still holds them in memory), so they are not moved: they stay in ' +
     'their directory with their ownership unchanged. Restart DSH and migrate them again.',
+  'migrate.stranded':
+    '{count} more sessions are hidden from the sidebar (archived / blank / subagent), so they are not moved: they ' +
+    'stay registered in the source workspace, which therefore is not removed. To get rid of it, handle them on the ' +
+    'Sessions tab first (unarchive the archived ones, delete the blank ones, migrate a subagent together with its ' +
+    'parent), then migrate again.',
   'migrate.projectDirs': 'Project directory: {from} → {to}',
   'migrate.projectDirsUnowned': 'Ungrouped spans {projectDirs} source project directories → {to}',
   'registry.change.title': 'Registry change',
@@ -569,6 +578,7 @@ export const en: LocaleDictOf<typeof NS> = {
   'registry.adopted': '{count} adopted from unowned sessions',
   'registry.moved': 'moved out of {count} workspaces',
   'registry.removed': '{count} emptied workspaces removed',
+  'registry.stale': '{count} stale registrations the host no longer accounts for were dropped',
   'registry.unchanged': 'No registry change needed',
   'artifacts.planned': '{count} artifacts to move',
   'artifacts.skipped': '{count} artifacts skipped',

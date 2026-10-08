@@ -512,11 +512,36 @@ test('改完注册表交给宿主自己做：顺序、id 复核、失败退路',
   assert.deepEqual(readRegistry(held.registryPath).tables.workspaces['ws-dl']?.sessionIds, ['session-b'], '活会话仍归源工作区')
   assert.deepEqual(readRegistry(held.registryPath).tables.workspaces['ws-temp']?.sessionIds, ['session-a'])
 
+  // ---- 侧边栏不显示的会话（已归档）同样搬不走：源工作区留着，工具返回值里必须报出条数 ----
+  const hidden = makeSandbox('effect-hidden-stranded')
+  const hiddenRegistry: WorkspaceRegistryState = {
+    ...hidden.registry,
+    global: { ...hidden.registry.global, archivedSessionIds: ['session-b'] },
+  }
+  writeFileSync(hidden.registryPath, JSON.stringify(hiddenRegistry, null, 2) + '\n')
+  const hiding = await makeHost(configOf(hidden), { registry: hiddenRegistry, persistence: 'ready' })
+  const hiddenRun = (await run(byName(hiding.defs).get('migrate_sessions')!, {
+    from: hidden.fromDir,
+    to: hidden.toDir,
+    apply: true,
+  })) as MigrateToolResult
+  assert.equal(hiddenRun.applied, true)
+  assert.equal(hiddenRun.stranded, 1, '工具层也要报出"侧边栏不显示因而没搬"的条数：模型只有这一面')
+  assert.match(hiddenRun.summary, /另有 1 条会话侧边栏不显示（已归档 1），这次不搬：session-b/)
+  assert.match(hiddenRun.summary, /那几块工作区因此不会被删/)
+  assert.deepEqual(
+    readRegistry(hidden.registryPath).tables.workspaces['ws-dl']?.sessionIds,
+    ['session-b'],
+    '搬不走的那条仍归源工作区（源工作区因此不会被删）',
+  )
+  assert.deepEqual(readRegistry(hidden.registryPath).tables.workspaces['ws-temp']?.sessionIds, ['session-a'])
+
   rmSync(ok.base, { recursive: true, force: true })
   rmSync(wrong.base, { recursive: true, force: true })
   rmSync(bad.base, { recursive: true, force: true })
   rmSync(tampered.base, { recursive: true, force: true })
   rmSync(held.base, { recursive: true, force: true })
+  rmSync(hidden.base, { recursive: true, force: true })
 })
 
 test('工具端到端：plan(只读) → migrate(dry-run) → migrate(apply) → verify → rollback', async () => {

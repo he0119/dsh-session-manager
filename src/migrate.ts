@@ -13,7 +13,7 @@ import { applyPlan, verifyAppliedPlan } from './execute.ts'
 import { describeWarm, warmCheckpoints, type WarmDeps } from './checkpoint-warm.ts'
 import { readManifest, rollback, type BackupKind, type BackupManifest, type RollbackResult } from './journal.ts'
 import { projectionCacheDir } from './paths.ts'
-import { buildRelocationPlan, describePlan } from './plan.ts'
+import { buildRelocationPlan, describePlan, describeStranded } from './plan.ts'
 import { takeEffectOnHost, describeEffect, type EffectDeps } from './take-effect.ts'
 import { readRegistry, validateRegistry, verifyRegistryChange } from './registry.ts'
 import type { TitleQuery } from './session-title.ts'
@@ -24,6 +24,7 @@ import type {
   ProgressReporter,
   RelocationPlan,
   RegistryChange,
+  StrandedSource,
   WarmOutcome,
   WorkspaceRegistryState,
 } from './types.ts'
@@ -122,6 +123,13 @@ export interface MigrationPreview {
    * 报出来是硬要求：它们不在 `sessions` 里，界面若不提这一条，用户看到的就是"勾了 22 条、搬走 9 条"。
    */
   liveSkipped: LiveSkip[]
+  /**
+   * 源工作区搬完还剩人、因此**不会被删**的那几块（见宿主 `RelocationPlan.strandedSources`）。
+   *
+   * 它们不在 `sessions` 里，界面必须提这一条：否则用户看到的就是"整个来源都迁完了，怎么侧边栏里
+   * 还留着一块一条都不显示的工作区"。
+   */
+  strandedSources: StrandedSource[]
   files: number
   bytes: number
   artifacts: {
@@ -234,6 +242,7 @@ function previewOf(plan: RelocationPlan): MigrationPreview {
     sessions,
     cascaded: plan.cascaded,
     liveSkipped: plan.liveSkipped,
+    strandedSources: plan.strandedSources,
     files,
     bytes,
     artifacts: plan.artifacts
@@ -367,6 +376,8 @@ export async function runMigration(
         ? `另有 ${plan.liveSkipped.length} 条会话宿主持在内存里（还活着），这次没搬：` +
           `${plan.liveSkipped.map((session) => session.id).join('、')}——重启 DSH 之后再迁一次。`
         : '',
+      // 侧边栏不显示、这次搬不走的那几条同理：不说，用户就只会看到"还有一块空工作区"。
+      ...describeStranded(plan.strandedSources),
       `复核：${verified.ok && registryCheck.length === 0 ? '通过' : '失败'}。备份：${result.backupDir}`,
       describeEffect(effect),
       describeWarm(warm),

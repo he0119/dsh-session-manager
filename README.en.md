@@ -160,7 +160,14 @@ M" to report.
 - **candidates line up with the host sidebar**: subagent sessions (nested under their parent), blank
   sessions (never started a turn) and archived sessions are never candidates — a session the sidebar
   cannot show should not be swept along by accident. Naming one of them explicitly makes the plan say
-  it is hidden (for a subagent it also tells you to name its parent instead);
+  it is hidden (for a subagent it also tells you to name its parent instead); they therefore **cannot
+  move**, and since their ownership stays in the source workspace, that workspace is not removed — the
+  plan and the result name how many are left behind and why (the tools report `stranded`), so the next
+  step is to handle them on the Sessions tab (unarchive the archived ones, delete the blank ones, migrate
+  a subagent with its parent) and migrate again. **Registrations whose log is already gone** (deleting a
+  session deliberately leaves the registry alone, so such stale entries remain) are not members: the host
+  already ignores them, so they no longer count when deciding whether a source was emptied — this run
+  drops them from the registry as well;
 - **a session the host still holds cannot move**: the copy in host memory (the rows tagged `active` in
   this plugin's lists) still carries the old path, so attaching it is refused and its log cannot be moved
   either. The plan therefore **leaves that batch out** and the dialog says one more line — "N more
@@ -178,7 +185,9 @@ M" to report.
 - **Migrate opens the dialog**, which shows row by row the sessions that move (subagents that come along are
   indented one level and tagged "with parent"), the session / log / byte counts, source → target project
   directory, **how the registry changes** (create or reuse the target workspace, how many sessions are added,
-  which workspaces lose them, whether an emptied workspace is removed), the artifact plan and its skip reasons;
+  which workspaces lose them, whether an emptied workspace is removed, how many stale registrations were
+  dropped), the artifact plan and its skip reasons; whatever cannot move (live sessions, sessions the sidebar
+  hides) gets its own line — it stays in the source workspace, so that workspace is not removed;
 - **Confirm** then rewrites each log header `cwd` (first frame only, the rest byte-identical) → move the session
   directories → write the registry → **hand the work to the host** (reuse or create the target workspace, attach
   the sessions, drop a source workspace once it is empty — see "Things to know" below) → **independent

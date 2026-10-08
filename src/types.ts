@@ -122,6 +122,35 @@ export interface LiveSkip {
   cwd?: string
 }
 
+/**
+ * 侧边栏**不显示**一条会话的理由（与 visibility.ts 的 `HiddenReason` 同一套：那边是判据，这里是报账）。
+ */
+export type StrandedReason = 'subagent' | 'blank' | 'archived'
+
+/** 一块工作区里"搬完还剩人"的一条会话。 */
+export interface StrandedMember {
+  id: string
+  /** 界面认人用的标题（读到才有）。 */
+  title?: string
+  /** 它为什么没被这次迁移搬走（侧边栏不显示 → 不进候选，见 visibility.ts）。 */
+  reason: StrandedReason
+}
+
+/**
+ * 源工作区搬完**还剩人**、因此不会被删的那一块（见 `RelocationPlan.strandedSources`）。
+ *
+ * 为什么会剩下：候选只收侧边栏显示的那些（见 visibility.ts），已归档 / 空白 / 父会话不在这次来源里的
+ * 子智能体因此搬不走；它们的归属留在源工作区的登记里，那条记录就删不掉——侧边栏会画出一个一条都不
+ * 显示的工作区。少搬可以，不说清楚"那块工作区为什么还在"才是坏账。
+ */
+export interface StrandedSource {
+  workspaceId: string
+  path: string
+  title: string
+  /** 留下的登记（按注册表里的顺序）。 */
+  members: StrandedMember[]
+}
+
 /** 一次迁移的完整计划。 */
 export interface RelocationPlan {
   ok: boolean
@@ -154,6 +183,13 @@ export interface RelocationPlan {
    * （源工作区因此不会被摘空、更不会被删）。调用方必须把这份名单报出来——静默少搬就是坏账。
    */
   liveSkipped: LiveSkip[]
+  /**
+   * 源工作区搬完还剩人、因此不会被删的那几块（按注册表顺序；空数组 = 每块都搬空了）。
+   *
+   * 与 `liveSkipped` 并列的一条：那一份说的是"宿主持着、这次搬不动"，这一份说的是"侧边栏不显示、
+   * 这次也不搬"——两者都会让源工作区留在注册表里，因此都得报到界面与工具返回值上。
+   */
+  strandedSources: StrandedSource[]
   artifacts: { moves: ArtifactMove[]; problems: string[]; skipped: ArtifactSkip[] } | null
   registryChange: RegistryChange | null
   nextRegistry: WorkspaceRegistryState | null
@@ -321,5 +357,12 @@ export interface RegistryChange {
   adoptedFromUnowned: string[]
   movedFrom: Array<{ workspaceId: string; path: string; sessionIds: string[] }>
   removedSources: Array<{ workspaceId: string; path: string }>
+  /**
+   * 顺带摘掉的**宿主不认的**悬空登记（盘上已经没有这些会话，见 `ReHomeOptions.staleSessionIds`）。
+   *
+   * 与 `movedFrom` 并列：那不是"搬走"而是"清账"，落盘复核据此放行"这几条 id 从注册表里消失"
+   * （见 `verifyRegistryChange()`），宿主那一步也要把它们从自己的记录里摘掉。
+   */
+  droppedStale: Array<{ workspaceId: string; path: string; sessionIds: string[] }>
   unchanged: boolean
 }
