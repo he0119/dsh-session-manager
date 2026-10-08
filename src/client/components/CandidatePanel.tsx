@@ -1,8 +1,8 @@
 /**
  * 候选目录面板：目录字段那枚值控件点开的那一份列表。
  *
- * 为什么不是原生下拉框：候选＝已登记工作区 **+** 库里有会话的目录 **+「未分组」**，工作区一多就是
- * 几十条，原生下拉框只能一行行滚着找、也写不进筛选词。面板与页面内的目录浏览框
+ * 为什么不是原生下拉框：候选是"有多少个工作区就有多少条"（迁移页的来源还会加上库里有会话的目录与
+ * 「未分组」），原生下拉框只能一行行滚着找、也写不进筛选词。面板与页面内的目录浏览框
  * （[DirectoryPicker.tsx](./DirectoryPicker.tsx)）是同一套皮、同一个列表：一边是"从候选里挑"，
  * 一边是"去文件系统里找"，两件事在同一处收口，所以两边各有一枚按钮切过去（那枚按钮只在宿主提供
  * 了目录选择器时才出现，见 `onFilesystem`）。
@@ -75,13 +75,13 @@ export function CandidatePanel({
         className="dsm-search dsm-candidateFilter"
         type="search"
         value={query}
-        placeholder={t('migrate.path.filter')}
-        aria-label={t('migrate.path.filter')}
+        placeholder={t('pathField.filter')}
+        aria-label={t('pathField.filter')}
         onChange={(event) => setQuery(event.target.value)}
       />
 
       {listed.length === 0 ? (
-        <p className="dsm-empty">{t('migrate.path.noMatch')}</p>
+        <p className="dsm-empty">{t('pathField.noMatch')}</p>
       ) : (
         <div className="dsm-list dsm-dirList dsm-candidateList">
           {listed.map((row) => {

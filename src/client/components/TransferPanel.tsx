@@ -5,7 +5,8 @@
  * （`src/web.ts` + `src/transfer.ts`）：计划返回的就是将要发生的事，页面不自己推算
  *
  *   - 导出：按目录分组的列表里勾选（组头可整组勾）→ 宿主打包 → 浏览器下载；
- *   - 导入：选包 + 选目标工作区 → 点「导入」开确认弹窗（看清 create/skip 与 cwd 改写）→ 确认才落盘。
+ *   - 导入：选包 + 选目标目录（与「迁移」页共用那枚目录值控件，见 [DirectoryField.tsx](./DirectoryField.tsx)）
+ *     → 点「导入」开确认弹窗（看清 create/skip 与 cwd 改写）→ 确认才落盘。
  *
  * 导出那一个**不问**：它只把已有字节打成包给浏览器下载，不改本机任何东西，弹一次窗只是多一次点击。
  * 会写盘的那个（导入）才需要先看清再确认——这条分界与「会话」页里归档（即时）和删除（弹窗）的分界
@@ -37,7 +38,7 @@ import { download, exportSessions, importBundle, type ImportResponse } from '../
 import type { ImportEntry, SessionSummary } from '../api.ts'
 import { ConfirmDialog } from './ConfirmDialog.tsx'
 import { groupKey, groupSessions, lockedParentOf, nestSessions } from '../logic/groups.ts'
-import { describeCwd, parentDirNote, pathLabel, sessionLabel } from '../logic/planRows.ts'
+import { describeCwd, directoryTargetRows, parentDirNote, sessionLabel } from '../logic/planRows.ts'
 import { FILTER_KEYS } from '../logic/sessionFilter.ts'
 import {
   SessionFilterBar,
@@ -51,6 +52,7 @@ import {
   useGroupCollapse,
   useSessionFilter,
 } from './sessionList.tsx'
+import { DirectoryField, useDirectoryFields } from './DirectoryField.tsx'
 import type { Translate } from '../logic/locales.ts'
 import type { PanelShare } from '../types.ts'
 
@@ -67,7 +69,7 @@ function cwdText(entry: ImportEntry, t: Translate): string {
 }
 
 /** 传输页。 */
-export function TransferPanel({ t, state, reload }: PanelShare): React.ReactElement {
+export function TransferPanel({ t, state, meta, reload, directory }: PanelShare): React.ReactElement {
   const [selected, setSelected] = React.useState<readonly string[]>([])
   const [file, setFile] = React.useState<File | null>(null)
   const [payload, setPayload] = React.useState<ArrayBuffer | null>(null)
@@ -85,6 +87,19 @@ export function TransferPanel({ t, state, reload }: PanelShare): React.ReactElem
 
   const sessions = state?.sessions ?? []
   const workspaces = state?.workspaces ?? []
+  // 宿主有没有目录选择器、是哪一种；`null`（含旧宿主没这个字段）时候选面板里不摆「浏览文件系统…」。
+  // 这一项来自 `/meta`（与清单无关、先到），所以清单还在读时那枚按钮也不至于晚一步出现。
+  const pickerKind = (state ?? meta)?.pickerKind ?? null
+  /** 落地目录那一个字段的展开状态（页面上只有它一个目录字段）。 */
+  const fields = useDirectoryFields<'target'>()
+  /**
+   * 目标目录的候选：与「迁移」页的目标目录同一份构造（见 planRows.directoryTargetRows）——两处问的是
+   * 同一件事。
+   */
+  const targetRows = React.useMemo(
+    () => directoryTargetRows(workspaces, state?.repos, target),
+    [workspaces, state?.repos, target],
+  )
   /** 筛选条：类别芯片 + 标题搜索。这一页列的是**整个库**（隐藏会话也在），所以五类芯片都有意义。 */
   const filter = useSessionFilter(sessions)
   // 列表按**目录**分组（不是按注册表里的工作区）：同一个目录下常有没登记在册的会话，而用户说的
@@ -203,7 +218,7 @@ export function TransferPanel({ t, state, reload }: PanelShare): React.ReactElem
   /**
    * 点「导入」：开弹窗，同时把只读的导入计划取回来（`mode=plan` 不写盘）。
    *
-   * 包与目标工作区都得先有：缺哪个就在页面横幅上说出缺的那个（`transfer.import.needFile` / `transfer.import.needWorkspace`），而不是
+   * 包与目标目录都得先有：缺哪个就在页面横幅上说出缺的那个（`transfer.import.needFile` / `transfer.import.needTarget`），而不是
    * 先弹一个空框再抱怨——那一步的错与"计划有什么问题"不是一件事。
    *
    * 计划回来时弹窗可能已经被取消掉了：`current === null` 时原地作废（同「会话」页的删除弹窗）。
@@ -214,7 +229,7 @@ export function TransferPanel({ t, state, reload }: PanelShare): React.ReactElem
       return
     }
     if (target === '') {
-      setError(t('transfer.import.needWorkspace'))
+      setError(t('transfer.import.needTarget'))
       return
     }
     setError(null)
@@ -376,26 +391,35 @@ export function TransferPanel({ t, state, reload }: PanelShare): React.ReactElem
         </div>
         <p className="dsm-hint">{t('transfer.import.hint')}</p>
 
-        <div className="dsm-controls">
+        {/* 与「迁移」页同一套字段摆法：一件输入一个字段（带标签），目录那一个是共用的值控件，卡片级的
+            主动作落在底部的动作行里（见文件头那条规矩）。 */}
+        <label className="dsm-field">
+          <span className="dsm-fieldLabel">{t('transfer.import.fileLabel')}</span>
           {/* 后缀必须与宿主导出的文件名一致（`src/web.ts` 的 `fileName()`）。这里曾经写成
               `.dhsess`：刚导出的包在选择框的过滤器里被挡掉，用户以为导入坏了——一个错字把功能
               弄坏了，所以 test/client.test.mjs 里钉了一条。 */}
           <input className="dsm-file" type="file" accept=".dshsess" onChange={pickFile} />
-          <select
-            className="dsm-select"
-            value={target}
-            onChange={(event) => {
-              setTarget(event.target.value)
-              setPending(null)
-            }}
-          >
-            <option value="">{t('transfer.import.pickWorkspace')}</option>
-            {workspaces.map((workspace) => (
-              <option key={workspace.id} value={workspace.path}>
-                {pathLabel({ path: workspace.path, title: workspace.title, repo: state?.repos?.[workspace.path] })}
-              </option>
-            ))}
-          </select>
+        </label>
+
+        {/* 落地目录：与「迁移」页的目标目录是同一个组件、同一份候选（见 DirectoryField.tsx）。 */}
+        <DirectoryField
+          t={t}
+          controls={fields}
+          field="target"
+          label={t('transfer.import.targetLabel')}
+          placeholder={t('transfer.import.targetPlaceholder')}
+          rows={targetRows}
+          value={target}
+          onChange={(path) => {
+            setTarget(path)
+            setPending(null)
+          }}
+          pickerKind={pickerKind}
+          directory={directory}
+          onError={setError}
+        />
+
+        <div className="dsm-controls">
           <button
             type="button"
             className="dsm-button dsm-primary"

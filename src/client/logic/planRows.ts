@@ -138,8 +138,8 @@ export function unownedSessions<T extends SourceSubject>(sessions: readonly T[])
  * 项目身份是仓库的 git remote，宿主已经规范成 `host/owner/repo`（见宿主 `src/repo.ts`）：同一个项目在
  * 两台机器上可以落在完全不同的目录里，本机路径是**机器特有**的那一个，而身份是仓库自己的名字。组头上
  * 只看得见**名字**，身份与本机路径一起进悬浮提示（两个都是机器字符串，摆在那一行里又长又会被截断）；
- * 只有一行可用的那两处（目录字段的值控件、导入页那个下拉框）里两个都摆在文本里——那里没有第二行可
- * 退，而同一个仓库在本机的两个克隆只能靠路径区分（见 `pathLabel()` 与 `candidateRow()`）。
+ * 只有一行可用的那处（目录字段的值控件）里两个都摆在文本里——那里没有第二行可退，而同一个仓库在本机
+ * 的两个克隆只能靠路径区分（见 `pathLabel()` 与 `candidateRow()`）。
  */
 export interface ProjectSubject {
   /** 本机目录的绝对路径；空串 = 没有 cwd 的那一组。 */
@@ -221,7 +221,7 @@ export function projectLabel(subject: ProjectSubject, t: Translate): ProjectLabe
  * 一行路径的称呼（不带条数）：项目身份优先「身份 — 路径」，没有身份就照旧「标题 — 路径」。
  *
  * 机器字符串的两种摆法与候选面板不同：面板里一行是两行文字（名字在上、路径在下，见 `candidateRow()`），
- * 而**值控件**（目录字段那枚按钮）与「导入」那个下拉框都只有一行可用——那里没有第二行可以退，路径就
+ * 而**值控件**（目录字段那枚按钮，见 DirectoryField.tsx）只有一行可用——那里没有第二行可以退，路径就
  * 不能从这一行里消失：同一个仓库在本机的两个克隆只能靠它区分。身份那一栏取代的是**标题**（标题只是
  * 路径的标签，路径与身份都在这一行里）。
  *
@@ -263,10 +263,10 @@ export interface CandidateRow {
 /**
  * 候选列表里一行摆成什么。
  *
- * 与 `<option>` 的写法不同：那里只有一行可用，名字、路径与条数只能挤成一整串（挤不下就截断，所以
- * 路径必须留在里面——`<option>` 没有悬浮提示）。候选面板里一行是一枚按钮、两行文字，于是**名字在
- * 第一行**（用户认的是它：工作区标题，没有标题才退到项目名），路径与条数退到第二行的小字里，完整
- * 的一串留给悬浮提示。
+ * 与值控件（`pathLabel()`）的写法不同：那里只有一行可用，名字、路径与条数只能挤成一整串（挤不下就
+ * 截断，所以路径必须留在里面——那枚按钮没有第二行可退，它的悬浮提示给的是完整值）。候选面板里一行是
+ * 一枚按钮、两行文字，于是**名字在第一行**（用户认的是它：工作区标题，没有标题才退到项目名），路径与
+ * 条数退到第二行的小字里，完整的一串留给悬浮提示。
  *
  * 「未分组」那一行的 `path` 是哨兵值、不是路径：它只出现在名字与条数里，绝不摆上第二行。
  *
@@ -359,6 +359,44 @@ export function migrationSourceRows(
   const unowned = unownedSessions(sessions).length
   if (unowned > 0) options.push({ path: UNOWNED_SOURCE, label: t('list.ungrouped'), count: unowned })
   return options
+}
+
+/**
+ * 一个目录字段的**目标**候选：已登记工作区（注册表里同一目录登记了两回就只留一条）**外加当前值本身**。
+ *
+ * 「迁移」的目标目录与「导入」的落地目录问的是同一件事——"落到哪个已登记的目录"，所以两处共用这一份
+ * 候选：候选多一份少一份都会变成"换个分页就换个说法"。
+ *
+ * 与源候选有三处不同：**不带条数**（目标是"要落到哪儿"，不是"这批会话从哪儿来"，条数是来源那一侧的
+ * 事实）、没有「未分组」（那不是一个目录）、候选只来自注册表（库里真有会话的目录是**来源**的候选——
+ * 目标必须已经存在且已登记，用户要落到别处时走「手输路径」或「浏览文件系统…」）。
+ *
+ * @param workspaces 已登记的工作区。
+ * @param repos 目录 → 项目身份（宿主 `/state` 的 `repos`）；缺省按"没有身份"处理。
+ * @param current 当前值；缺省空串 = 还没选。
+ */
+export function directoryTargetRows(
+  workspaces: ReadonlyArray<{ readonly path: string; readonly title?: string }>,
+  repos: Readonly<Record<string, string>> = {},
+  current = '',
+): PathRow[] {
+  const rows: PathRow[] = []
+  const seen = new Set<string>()
+  for (const workspace of workspaces) {
+    if (seen.has(workspace.path)) continue
+    seen.add(workspace.path)
+    rows.push({
+      path: workspace.path,
+      title: workspace.title,
+      ...(repos[workspace.path] === undefined ? {} : { repo: repos[workspace.path] }),
+    })
+  }
+  // 当前值补一行（见 CandidatePanel 的说明）：值可能是「浏览文件系统…」选回来的、注册表没登记的目录，
+  // 没有这一行它既不在候选里、值控件也只剩一串光秃秃的路径。
+  if (current !== '' && !seen.has(current)) {
+    rows.push({ path: current, ...(repos[current] === undefined ? {} : { repo: repos[current] }) })
+  }
+  return rows
 }
 
 // ---- 计划清单：「这条是怎么进来的」 ----

@@ -220,7 +220,7 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
 
       {panel === 'manage' && <ManagePanel t={t} state={state} meta={meta} reload={load} />}
       {panel === 'migrate' && <MigrationPanel t={t} state={state} meta={meta} reload={load} directory={directory} />}
-      {panel === 'transfer' && <TransferPanel t={t} state={state} meta={meta} reload={load} />}
+      {panel === 'transfer' && <TransferPanel t={t} state={state} meta={meta} reload={load} directory={directory} />}
       {panel === 'sync' && <SyncPanel t={t} state={state} meta={meta} reload={load} />}
       {panel === 'backup' && <BackupPanel t={t} reload={load} />}
       {panel === 'help' && <HelpPanel t={t} state={state} meta={meta} reload={load} />}
