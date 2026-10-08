@@ -323,3 +323,40 @@ export function verifyRegistryChange(
 function beforeByPath(reg: WorkspaceRegistryState, path: string): WorkspaceRecord | undefined {
   return Object.values(reg.tables.workspaces).find((rec) => rec.path === path)
 }
+
+/** 计划里记着、落盘结果里整份都没有的一条归属（见 `missingMemberships()`）。 */
+export interface MissingMembership {
+  /** 这条会话在计划里属于哪个目录的工作区。 */
+  path: string
+  /** 那个工作区在计划里的标题（宿主连记录都没有时靠它新建）。 */
+  title: string
+  /** 会话 id。 */
+  sessionId: string
+}
+
+/**
+ * 计划里该有、落盘结果里**整份都没有**的归属。
+ *
+ * 宿主自己那一步是按内存里那份整份落盘的，于是它内存里没有的归属会被一起抹掉——这跟"计划里删掉了
+ * 一条"在文件上长得一模一样，所以判据只能是"计划里有、盘上没了"。
+ *
+ * 按目录（而不是工作区 id）比：新建的工作区由宿主分配 id，计划里那个只是预测值，拿 id 比会把一次
+ * 正常的新建全判成丢归属（见 `EffectOutcome.targetId`）。
+ *
+ * 只认"整份都没有"：会话被挪到**别的工作区**下不算这一条（那属于复核报出来的问题，不该由这里悄悄
+ * 改挂），盘上被宿主清掉的悬空登记也不在这里——它们本来就不该有归属。
+ */
+export function missingMemberships(
+  expected: WorkspaceRegistryState,
+  actual: WorkspaceRegistryState,
+): MissingMembership[] {
+  const owned = new Set<string>()
+  for (const record of Object.values(actual.tables.workspaces)) for (const id of record.sessionIds) owned.add(id)
+  const missing: MissingMembership[] = []
+  for (const record of Object.values(expected.tables.workspaces)) {
+    for (const sessionId of record.sessionIds) {
+      if (!owned.has(sessionId)) missing.push({ path: record.path, title: record.title, sessionId })
+    }
+  }
+  return missing
+}

@@ -22,7 +22,7 @@ import { scanAll } from '../src/discovery.ts'
 import { createBackup } from '../src/journal.ts'
 import { sessionDir } from '../src/paths.ts'
 import { writeRegistryAtomic, readRegistry } from '../src/registry.ts'
-import type { DecodeAll, SessionHeader, WorkspaceRegistryState } from '../src/types.ts'
+import type { DecodeAll, HostRegistryPort, SessionHeader, WorkspaceRegistryState } from '../src/types.ts'
 import { encodeRawFrame } from '../src/zstd-frame.ts'
 
 const decodeAll: DecodeAll = (buf: Uint8Array): string => Buffer.from(decompress(buf)).toString('utf8')
@@ -407,5 +407,141 @@ test('宿主没接住时把这次算好的注册表写回文件（它自己那�
   // 复核是拿"改动前的备份"与"现在磁盘上那份"比的：写回来了它就该通过——不写回来正是用户撞上的那次 500。
   assert.equal(run.verified, true, run.problems.join('; '))
   assert.deepEqual(run.problems, [])
+  rmSync(sb.base, { recursive: true, force: true })
+})
+
+/**
+ * 一个"像真宿主"的端口：它按**内存里那份**整份落盘（`dsh-storage-json` 的单单元契约），并且只认
+ * `known` 里的会话（盘上早就没有的那些它认不出来，`attachSession()` 会回绝——真实宿主拿 header 缓存
+ * 校验 cwd，同样回绝）。
+ */
+function memoryHost(options: {
+  registryPath: string
+  memory: WorkspaceRegistryState
+  known: ReadonlySet<string>
+}): { port: HostRegistryPort; attached: Array<{ workspaceId: string; sessionId: string }>; refreshes: () => number } {
+  const attached: Array<{ workspaceId: string; sessionId: string }> = []
+  let refreshes = 0
+  const persist = (): void => writeRegistryAtomic(options.registryPath, options.memory)
+  const stamp = '2026-01-01T00:00:00.000Z'
+  return {
+    attached,
+    refreshes: () => refreshes,
+    port: {
+      refreshIndex: async () => {
+        refreshes += 1
+      },
+      ensureWorkspace: async (path, title) => {
+        const found = Object.entries(options.memory.tables.workspaces).find(([, record]) => record.path === path)
+        if (found !== undefined) return found[0]
+        const id = `ws-host-${Object.keys(options.memory.tables.workspaces).length}`
+        options.memory.tables.workspaces[id] = {
+          path,
+          title: title ?? path,
+          sessionIds: [],
+          createdAt: stamp,
+          updatedAt: stamp,
+        }
+        options.memory.global.workspaceIds.push(id)
+        // 真实宿主：新建工作区那一步它按内存里那份整份落盘，插件写好的文件当场被盖。
+        persist()
+        return id
+      },
+      attachSession: async (workspaceId, sessionId) => {
+        if (!options.known.has(sessionId)) throw new Error(`夹具：宿主不认这条会话 ${sessionId}`)
+        const record = options.memory.tables.workspaces[workspaceId]
+        if (record === undefined) throw new Error(`夹具：没有这条工作区 ${workspaceId}`)
+        if (!record.sessionIds.includes(sessionId)) record.sessionIds.push(sessionId)
+        attached.push({ workspaceId, sessionId })
+        persist()
+      },
+      detachSession: async (workspaceId, sessionId) => {
+        const record = options.memory.tables.workspaces[workspaceId]
+        if (record !== undefined) record.sessionIds = record.sessionIds.filter((id) => id !== sessionId)
+        persist()
+      },
+      members: async (workspaceId) => [...(options.memory.tables.workspaces[workspaceId]?.sessionIds ?? [])],
+      removeWorkspace: async (workspaceId) => {
+        delete options.memory.tables.workspaces[workspaceId]
+        options.memory.global.workspaceIds = options.memory.global.workspaceIds.filter((id) => id !== workspaceId)
+        persist()
+      },
+    },
+  }
+}
+
+/** 往注册表里加一个别的目录的工作区，它有一条归属——宿主的旧内存里未必有这条。 */
+function addStranger(sb: Sandbox, workspaceId: string, path: string, sessionId: string): WorkspaceRegistryState {
+  mkdirSync(path, { recursive: true })
+  const registry = readRegistry(sb.deps.registryPath)
+  registry.global.workspaceIds.push(workspaceId)
+  registry.tables.workspaces[workspaceId] = {
+    path,
+    title: 'other',
+    sessionIds: [sessionId],
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  }
+  writeRegistryAtomic(sb.deps.registryPath, registry)
+  return registry
+}
+
+test('宿主全盘接受、却拿内存里那份抹掉了别人的归属：复核出来并让它重新挂一遍', async () => {
+  const sb = makeSandbox('migrate-effect-memory-clobber')
+  const otherDir = join(sb.base, 'other-dir')
+  const stranger = 'session-stranger-1'
+  const registry = addStranger(sb, 'ws-other', otherDir, stranger)
+  // 宿主那次启动读到的是更早的一份：这条归属在它内存里根本没有。
+  const memory = structuredClone(registry)
+  memory.tables.workspaces['ws-other']!.sessionIds = []
+  const host = memoryHost({ registryPath: sb.deps.registryPath, memory, known: new Set([sb.sessionId, stranger]) })
+  const deps: MigrateDeps = { ...sb.deps, hostRegistry: () => host.port }
+
+  const run = await runMigration(deps, { from: FROM, to: TO, title: 'to' }, { apply: true })
+
+  assert.equal(run.applied, true)
+  assert.equal(run.effect?.kind, 'applied')
+  assert.deepEqual(run.effect?.membershipsRestored, [stranger], '被抹掉的归属要让它重新认下')
+  assert.equal(run.effect?.membershipsUnrecognized, undefined)
+  // 走的是宿主那条路（不是插件自己写文件）：它被要求重新挂过这一条，且挂之前先按磁盘重看了一遍。
+  assert.deepEqual(
+    host.attached.filter((entry) => entry.sessionId === stranger),
+    [{ workspaceId: 'ws-other', sessionId: stranger }],
+  )
+  assert.ok(host.refreshes() >= 2, '要回来之前得让它按磁盘重看一遍，否则它拿旧缓存回绝')
+  // 磁盘上那条归属回来了，复核因此通过。
+  const after = readRegistry(sb.deps.registryPath)
+  assert.deepEqual(after.tables.workspaces['ws-other']?.sessionIds, [stranger])
+  assert.equal(run.verified, true, run.problems.join('; '))
+  assert.match(run.summary, /顺手抹掉了 1 条别的归属/)
+  rmSync(sb.base, { recursive: true, force: true })
+})
+
+test('宿主不认的悬空登记只报出来，不写回文件', async () => {
+  const sb = makeSandbox('migrate-effect-unknown-membership')
+  const otherDir = join(sb.base, 'other-dir')
+  const ghost = 'session-ghost-1'
+  const registry = addStranger(sb, 'ws-other', otherDir, ghost)
+  // 宿主不认这条（盘上早就没有这条会话）：内存里没有它，`attachSession()` 也回绝。
+  const memory = structuredClone(registry)
+  memory.tables.workspaces['ws-other']!.sessionIds = []
+  const host = memoryHost({ registryPath: sb.deps.registryPath, memory, known: new Set([sb.sessionId]) })
+  const deps: MigrateDeps = { ...sb.deps, hostRegistry: () => host.port }
+
+  const run = await runMigration(deps, { from: FROM, to: TO, title: 'to' }, { apply: true })
+
+  assert.equal(run.applied, true)
+  assert.equal(run.effect?.membershipsRestored, undefined, '要不回来的不能算要回来了')
+  assert.deepEqual(run.effect?.membershipsUnrecognized, [ghost])
+  assert.match(run.summary, /另有 1 条归属宿主不认/)
+  // 关键：不硬写回文件（写回去只会让它下次落盘再抹一次）。
+  const after = readRegistry(sb.deps.registryPath)
+  assert.deepEqual(after.tables.workspaces['ws-other']?.sessionIds, [])
+  // 复核照旧点名这一条没了（悬空登记的清理是另一条路的事）。
+  assert.equal(run.verified, false)
+  assert.ok(
+    run.problems.some((problem) => problem.includes(ghost)),
+    `复核应当点名这条：${run.problems.join('; ')}`,
+  )
   rmSync(sb.base, { recursive: true, force: true })
 })
