@@ -6,14 +6,19 @@
  *
  * 端点由 `src/web.ts` 注册，路径固定在本插件命名空间下（`/dsh-session-manager/api`）。
  *
+ * **长动作回的都是事件流**（`/state`、`/migrate`、`/delete`、`/rollback`、`/import`、`/archive`、
+ * `/sync`）：按下之后到结束之间的每一段都会推一条 `progress` 事件，界面据此画进度。参数不对、
+ * 宿主没这个能力这类**在流开始之前**就挡下的错，回的仍然是一次性 JSON + 状态码；`readEventStream()`
+ * 按 `content-type` 分流，所以调用方两种形状都认。
+ *
  * @module dsh-session-manager/client/api
  */
 
-import { SseFrames, interpretSyncEvent, type SyncProgressEvent } from './logic/syncStream.ts'
+import { SseFrames, interpretStreamEvent, type ProgressEvent } from './logic/eventStream.ts'
 
-// 事件流的分帧与解释在 syncStream.ts（那份文件与 DOM 无关，所以 Host 侧的测试图能直接引它）。类型
+// 事件流的分帧与解释在 eventStream.ts（那份文件与 DOM 无关，所以 Host 侧的测试图能直接引它）。类型
 // 从这里转出去，界面那一侧只认 api.ts 一个入口。
-export type { SyncProgressEvent }
+export type { ProgressEvent }
 
 /** 宿主端点前缀（与 `src/web.ts` 的 `API_PREFIX` 必须一致）。 */
 export const API_PREFIX = '/dsh-session-manager/api'
@@ -155,6 +160,74 @@ async function asJson<T>(response: Response): Promise<T> {
 }
 
 /**
+ * 一次性响应：流还没开始就被挡下（参数不对、没配同步、方法不对、内部错误）时宿主回的是普通 JSON，
+ * 带状态码。这里保持与其它端点同一套口径——把宿主给的原话抛出去。
+ */
+async function readOneShot<T>(response: Response): Promise<T> {
+  const text = await response.text()
+  let parsed: { error?: string } | null = null
+  try {
+    parsed = JSON.parse(text) as { error?: string }
+  } catch {
+    // 不是 JSON：下面统一把原文截一段报出去，比"解析失败"有用。
+  }
+  if (!response.ok) throw new Error(parsed?.error ?? `HTTP ${response.status}：${text.slice(0, 200) || '空响应'}`)
+  if (parsed === null) throw new Error(`HTTP ${response.status}：${text.slice(0, 200) || '空响应'}`)
+  return parsed as T
+}
+
+/**
+ * 按 `content-type` 把一个长动作的响应读出来：事件流就边读边报进度，一次性 JSON 就整份解析。
+ *
+ * @param response 宿主回的那份响应。
+ * @param onProgress 进度事件的回调（只有流走得到）。
+ * @param what 出错时的主语（「预演」「同步」「迁移」…）。
+ */
+async function readEventStream<T>(
+  response: Response,
+  onProgress: ((event: ProgressEvent) => void) | undefined,
+  what: string,
+): Promise<T> {
+  // 流开始之前的错（参数被拒、没配置同步、内部错误）仍然是一次性 JSON。
+  const contentType = response.headers.get('content-type') ?? ''
+  if (!contentType.includes('text/event-stream')) return await readOneShot<T>(response)
+
+  const reader = response.body?.getReader()
+  if (reader === undefined) throw new Error(`这次${what}没有可读的事件流（浏览器不支持流式响应）`)
+  // 分帧与解释都在 eventStream.ts（纯字符串处理，没有 DOM）；这里只负责把字节读出来喂进去。
+  const frames = new SseFrames()
+  const decoder = new TextDecoder()
+  // 收尾那条事件可能不带 `result`（`undefined` 也是合法负载），所以"收到没收到"单独记一个位，
+  // 而不是拿值的真假去判。
+  let result: T | undefined
+  let sawResult = false
+  let failure: string | null = null
+  const handle = (data: string): void => {
+    const event = interpretStreamEvent(data)
+    if (event === null) return
+    if (event.kind === 'progress') onProgress?.(event.progress)
+    else if (event.kind === 'result') {
+      result = event.result as T
+      sawResult = true
+    } else {
+      // 宿主只说了一句 `{type:'error'}` 时补上主语，别让界面上出现一个空字符串。
+      failure = event.message === '' ? `${what}失败` : event.message
+    }
+  }
+
+  for (;;) {
+    const { value, done } = await reader.read()
+    if (done) break
+    for (const data of frames.push(decoder.decode(value, { stream: true }))) handle(data)
+  }
+  for (const data of frames.flush()) handle(data)
+
+  if (failure !== null) throw new Error(failure)
+  if (!sawResult) throw new Error(`${what}没有回结果（连接提前断了？）`)
+  return result as T
+}
+
+/**
  * 读会话库位置与宿主能力位（不扫库，先于 `/state` 到）。
  *
  * 拿不到时**不该**把整页变成错误：这几项只是"先说清楚"，清单那条路（`fetchState`）照样能把它带回来
@@ -164,9 +237,17 @@ export async function fetchMeta(): Promise<MetaResponse> {
   return asJson<MetaResponse>(await fetch(`${API_PREFIX}/meta`, { headers: { accept: 'application/json' } }))
 }
 
-/** 读会话库与工作区清单。 */
-export async function fetchState(): Promise<StateResponse> {
-  return asJson<StateResponse>(await fetch(`${API_PREFIX}/state`, { headers: { accept: 'application/json' } }))
+/**
+ * 读会话库与工作区清单。
+ *
+ * 走事件流：这一份要扫完整库（每条会话读 header、折标题），冷启动或大库上是几秒的活，整页都在等它。
+ * 拿到之前界面上只有一句「读取中…」，现在跟着 `scan` 那一段一起报"扫到第几条"。
+ *
+ * @param onProgress 每收到一条进度事件调一次。
+ */
+export async function fetchState(onProgress?: (event: ProgressEvent) => void): Promise<StateResponse> {
+  const response = await fetch(`${API_PREFIX}/state`, { headers: { accept: 'text/event-stream' } })
+  return readEventStream<StateResponse>(response, onProgress, '读取会话库')
 }
 
 /** 导出的结果：字节 + 宿主给的文件名。 */
@@ -220,23 +301,19 @@ export async function importBundle(
   bytes: ArrayBuffer,
   targetCwd: string,
   mode: 'plan' | 'apply',
+  onProgress?: (event: ProgressEvent) => void,
 ): Promise<ImportResponse> {
   const url = `${API_PREFIX}/import?mode=${mode}&targetCwd=${encodeURIComponent(targetCwd)}`
   const response = await fetch(url, {
     method: 'POST',
-    headers: { 'content-type': 'application/octet-stream' },
+    headers: { 'content-type': 'application/octet-stream', accept: 'text/event-stream' },
     body: bytes,
   })
-  // 预演成功回 200，落地冲突回 409——两者都带完整的 JSON 正文，所以不按 ok 提前抛。
-  const text = await response.text()
-  let parsed: ImportResponse
-  try {
-    parsed = JSON.parse(text) as ImportResponse
-  } catch {
-    throw new Error(`HTTP ${response.status}：${text.slice(0, 200) || '空响应'}`)
-  }
-  if (!response.ok && parsed.error === undefined) throw new Error(`HTTP ${response.status}`)
-  return parsed
+  /*
+   * 包本身读不动、落地目录不在这类判定发生在**收到请求体之后、流开始之前**，回的是 400 + JSON；
+   * 一旦开始干活（预演逐条读包、落地逐条写盘）就是事件流，正文从 `result` 事件里拿。
+   */
+  return readEventStream<ImportResponse>(response, onProgress, '导入')
 }
 
 /** 触发浏览器下载。 */
@@ -331,77 +408,17 @@ export interface SyncResponse {
  *
  * 宿主对预演与落地回的都是 **SSE**：预演要先扫本机（每条会话读头、折标题）、再读远端索引、最后逐条
  * 比对内容，冷启动时那几秒里界面原来只有一句"预演中…"；落地的理由是上百条各一次网络往返。事件形状
- * 两条路完全一样，所以下面 `readSyncResponse()` 一份就够。
+ * 两条路完全一样，所以 `readEventStream()` 一份就够。
  *
  * @param onProgress 每收到一条进度事件调一次。
  * @returns 计划；问题在 `problems` 里，连接层的失败抛原话。
  */
-export async function fetchSyncPlan(onProgress?: (event: SyncProgressEvent) => void): Promise<SyncResponse> {
+export async function fetchSyncPlan(onProgress?: (event: ProgressEvent) => void): Promise<SyncResponse> {
   const response = await fetch(`${API_PREFIX}/sync`, {
     method: 'GET',
     headers: { accept: 'text/event-stream' },
   })
-  return readSyncResponse(response, onProgress, '预演')
-}
-
-/**
- * 一次性响应：流还没开始就被挡下（没配置同步、方法不对、内部错误）时宿主回的还是普通 JSON，
- * 带状态码。这里保持与其它端点同一套口径。
- */
-async function readOneShot(response: Response): Promise<SyncResponse> {
-  const text = await response.text()
-  let parsed: SyncResponse | null = null
-  try {
-    parsed = JSON.parse(text) as SyncResponse
-  } catch {
-    // 不是 JSON：下面统一把原文截一段报出去，比"解析失败"有用。
-  }
-  if (!response.ok) throw new Error(parsed?.error ?? `HTTP ${response.status}：${text.slice(0, 200) || '空响应'}`)
-  if (parsed === null) throw new Error(`HTTP ${response.status}：${text.slice(0, 200) || '空响应'}`)
-  return parsed
-}
-
-/**
- * 按 `content-type` 把一次同步的响应读出来：事件流就边读边报进度，一次性 JSON 就整份解析。
- *
- * @param response 宿主回的那份响应。
- * @param onProgress 进度事件的回调（只有流走得到）。
- * @param what 出错时的主语（「预演」/「同步」）。
- */
-async function readSyncResponse(
-  response: Response,
-  onProgress: ((event: SyncProgressEvent) => void) | undefined,
-  what: string,
-): Promise<SyncResponse> {
-  // 流开始之前的错（没配置同步、内部错误）仍然是一次性 JSON。
-  const contentType = response.headers.get('content-type') ?? ''
-  if (!contentType.includes('text/event-stream')) return await readOneShot(response)
-
-  const reader = response.body?.getReader()
-  if (reader === undefined) throw new Error(`这次${what}没有可读的事件流（浏览器不支持流式响应）`)
-  // 分帧与解释都在 syncStream.ts（纯字符串处理，没有 DOM）；这里只负责把字节读出来喂进去。
-  const frames = new SseFrames()
-  const decoder = new TextDecoder()
-  let result: SyncResponse | null = null
-  let failure: string | null = null
-  const handle = (data: string): void => {
-    const event = interpretSyncEvent(data)
-    if (event === null) return
-    if (event.kind === 'progress') onProgress?.(event.progress)
-    else if (event.kind === 'result') result = event.result as SyncResponse
-    else failure = event.message
-  }
-
-  for (;;) {
-    const { value, done } = await reader.read()
-    if (done) break
-    for (const data of frames.push(decoder.decode(value, { stream: true }))) handle(data)
-  }
-  for (const data of frames.flush()) handle(data)
-
-  if (failure !== null) throw new Error(failure)
-  if (result === null) throw new Error(`${what}没有回结果（连接提前断了？）`)
-  return result
+  return readEventStream<SyncResponse>(response, onProgress, '预演')
 }
 
 /**
@@ -410,12 +427,12 @@ async function readSyncResponse(
  * @param onProgress 每收到一条进度事件调一次（算计划的四段与写盘的两段走同一个回调）。
  * @returns 落地结果；单条失败在 `problems` 里，不是抛错。
  */
-export async function applySync(onProgress?: (event: SyncProgressEvent) => void): Promise<SyncResponse> {
+export async function applySync(onProgress?: (event: ProgressEvent) => void): Promise<SyncResponse> {
   const response = await fetch(`${API_PREFIX}/sync?mode=apply`, {
     method: 'POST',
     headers: { accept: 'text/event-stream' },
   })
-  return readSyncResponse(response, onProgress, '同步')
+  return readEventStream<SyncResponse>(response, onProgress, '同步')
 }
 
 /** `GET|POST /sync?mode=test` 的响应：一次只读探测的结论（判定码在宿主侧，句子在界面）。 */
@@ -584,25 +601,25 @@ export interface RollbackResponse {
 /**
  * 迁移或只预演。
  *
- * 预演与落地都可能回非 2xx（计划有问题 → 409；复核没过 → 500），而这两种情况**正文里带着
- * 完整结果**，所以这里不按 `ok` 提前抛，交给页面把 problems 摆出来。
+ * 回的是事件流：预演要扫源目录（未分组来源时是整个库），落地要备份、改写每份日志的首帧、搬目录、
+ * 复核、请宿主补检查点——实测 47 条会话 / 67.5 MB 要 45 秒（改写首帧是大头），那段时间原来只有一个
+ * 不动的按钮。
+ *
+ * 计划本身有问题（源目录不存在、目标被占用…）与复核没过**都还是结果**：它们带着完整的 `preview`，
+ * 页面要把清单与问题摆出来，所以都从 `result` 事件回，而不是当成流的错。
  */
-export async function migrate(request: MigrationRequest): Promise<MigrationResponse> {
+export async function migrate(
+  request: MigrationRequest,
+  onProgress?: (event: ProgressEvent) => void,
+): Promise<MigrationResponse> {
   const response = await fetch(`${API_PREFIX}/migrate`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', accept: 'text/event-stream' },
     body: JSON.stringify(request),
   })
-  const text = await response.text()
-  let parsed: MigrationResponse
-  try {
-    parsed = JSON.parse(text) as MigrationResponse
-  } catch {
-    throw new Error(`HTTP ${response.status}：${text.slice(0, 200) || '空响应'}`)
-  }
-  // 判据是"正文里有没有完整结果"，而不是状态码：带 preview 的 409/500 是**结果**（计划有问题 /
-  // 复核没过），页面必须把它摆出来；不带 preview 的 400 是参数被拒，当成异常抛给错误横幅。
-  if (parsed.preview === undefined) throw new Error(parsed.error ?? `HTTP ${response.status}`)
+  const parsed = await readEventStream<MigrationResponse>(response, onProgress, '迁移')
+  // 事件流那条路上正文一定带 preview（宿主把"计划有问题"也当结果回）；缺了说明对面不是本插件的宿主。
+  if (parsed.preview === undefined) throw new Error(parsed.error ?? '迁移没有回计划')
   return parsed
 }
 
@@ -612,14 +629,18 @@ export async function fetchBackups(): Promise<BackupsResponse> {
 }
 
 /** 回滚一份备份；`dryRun` 只回动作清单。 */
-export async function rollbackBackup(backupDir: string, dryRun: boolean): Promise<RollbackResponse> {
-  return asJson<RollbackResponse>(
-    await fetch(`${API_PREFIX}/rollback`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ backupDir, dryRun }),
-    }),
-  )
+export async function rollbackBackup(
+  backupDir: string,
+  dryRun: boolean,
+  onProgress?: (event: ProgressEvent) => void,
+): Promise<RollbackResponse> {
+  const response = await fetch(`${API_PREFIX}/rollback`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', accept: 'text/event-stream' },
+    body: JSON.stringify({ backupDir, dryRun }),
+  })
+  // 回滚要逐条会话搬目录、逐文件复写字节，整库回滚同样是几十秒的活，所以它也是事件流。
+  return readEventStream<RollbackResponse>(response, onProgress, '回滚')
 }
 
 // ---- 会话管理：删除 / 归档 ----
@@ -668,26 +689,23 @@ export interface DeleteResponse {
 /**
  * 删除会话（`mode: 'apply'` 才真删，且**先备份再删**）。
  *
- * 与 `migrate()` 同一套判据：正文里带 `preview` 的 409/500 是**结果**（计划不 ok / 复核没过），
- * 页面必须把它摆出来；不带 `preview` 的才是异常。
+ * 回的是事件流：预演要扫整库找这些会话与它们的后代，落地要先把整份会话目录按字节备份、再逐条删、
+ * 最后复核。计划本身不 ok（会话不在库里、宿主内存里活着…）与复核没过**都还是结果**——它们带着完整
+ * 的 `preview`，页面要把清单与问题摆出来。
  */
 export async function deleteSessions(
   sessionIds: readonly string[],
   mode: 'plan' | 'apply',
+  onProgress?: (event: ProgressEvent) => void,
 ): Promise<DeleteResponse> {
   const response = await fetch(`${API_PREFIX}/delete`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', accept: 'text/event-stream' },
     body: JSON.stringify({ sessionIds, mode }),
   })
-  const text = await response.text()
-  let parsed: DeleteResponse
-  try {
-    parsed = JSON.parse(text) as DeleteResponse
-  } catch {
-    throw new Error(`HTTP ${response.status}：${text.slice(0, 200) || '空响应'}`)
-  }
-  if (parsed.preview === undefined) throw new Error(parsed.error ?? `HTTP ${response.status}`)
+  const parsed = await readEventStream<DeleteResponse>(response, onProgress, '删除')
+  // 事件流那条路上正文一定带 plan（宿主把"计划有问题"也当结果回）；缺了说明对面不是本插件的宿主。
+  if (parsed.preview === undefined) throw new Error(parsed.error ?? '删除没有回计划')
   return parsed
 }
 
@@ -712,19 +730,15 @@ export interface ArchiveResponse {
 export async function archiveSessions(
   sessionIds: readonly string[],
   archived: boolean,
+  onProgress?: (event: ProgressEvent) => void,
 ): Promise<ArchiveResponse> {
   const response = await fetch(`${API_PREFIX}/archive`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', accept: 'text/event-stream' },
     body: JSON.stringify({ sessionIds, archived }),
   })
-  const text = await response.text()
-  let parsed: ArchiveResponse
-  try {
-    parsed = JSON.parse(text) as ArchiveResponse
-  } catch {
-    throw new Error(`HTTP ${response.status}：${text.slice(0, 200) || '空响应'}`)
-  }
-  if (!Array.isArray(parsed.failed)) throw new Error(parsed.error ?? `HTTP ${response.status}`)
+  // 逐条走宿主的注册表动作（每条一次落盘 + 广播），勾一整页时这一段是可感知的，所以它也报进度。
+  const parsed = await readEventStream<ArchiveResponse>(response, onProgress, '归档')
+  if (!Array.isArray(parsed.failed)) throw new Error(parsed.error ?? '归档没有回结果')
   return parsed
 }

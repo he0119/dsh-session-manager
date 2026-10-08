@@ -19,7 +19,7 @@
 // 落地结论：日志已经在盘上了，这一步只补宿主那份派生数据。
 //
 // @module dsh-session-manager/checkpoint-warm
-import type { CheckpointWarmPort, WarmOutcome } from './types.ts'
+import type { CheckpointWarmPort, ProgressReporter, WarmOutcome } from './types.ts'
 
 /** `warmCheckpoints()` 的依赖：宿主那半侧探测出来的端口（缺席 = 这个宿主没有那套动作）。 */
 export interface WarmDeps {
@@ -47,9 +47,15 @@ function reasonOf(error: unknown): string {
  *
  * @param ids 刚落地的会话 id（重复的会去掉）。
  * @param deps 宿主端口（缺席就什么都不做）。
+ * @param onProgress 逐条报一次（`phase: 'warm'`）。这一步**每条会话要把整份日志读一遍折一遍**
+ *   （见下面那句代价），落地几百条时它是最后一段长活，所以它值得一条进度；拿不到端口时一条都不报。
  * @returns 补上了几条、失败几条、这个宿主有没有那套动作。
  */
-export async function warmCheckpoints(ids: readonly string[], deps: WarmDeps): Promise<WarmOutcome> {
+export async function warmCheckpoints(
+  ids: readonly string[],
+  deps: WarmDeps,
+  onProgress?: ProgressReporter,
+): Promise<WarmOutcome> {
   const unique = [...new Set(ids.filter((id) => typeof id === 'string' && id !== ''))]
   // 一条都不用补时连端口都不探：纯推送、空计划这些路上不该多花一次宿主服务读取。
   if (unique.length === 0) return { warmed: 0, failed: 0, unavailable: false, problems: [] }
@@ -64,7 +70,8 @@ export async function warmCheckpoints(ids: readonly string[], deps: WarmDeps): P
 
   let warmed = 0
   const failures: string[] = []
-  for (const id of unique) {
+  for (const [index, id] of unique.entries()) {
+    onProgress?.({ phase: 'warm', total: unique.length, done: index, id, label: id })
     try {
       await port.warm(id)
       warmed += 1

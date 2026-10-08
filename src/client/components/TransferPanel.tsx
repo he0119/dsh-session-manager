@@ -34,9 +34,10 @@
 
 import * as React from 'react'
 
-import { download, exportSessions, importBundle, type ImportResponse } from '../api.ts'
+import { download, exportSessions, importBundle, type ImportResponse, type ProgressEvent } from '../api.ts'
 import type { ImportEntry } from '../api.ts'
 import { ConfirmDialog } from './ConfirmDialog.tsx'
+import { ProgressBlock } from './ProgressBlock.tsx'
 import { groupKey, groupSessions, nestSessions } from '../logic/groups.ts'
 import { describeCwd, directoryTargetRows, parentDirNote, sessionLabel } from '../logic/planRows.ts'
 import { FILTER_KEYS } from '../logic/sessionFilter.ts'
@@ -93,6 +94,18 @@ export function TransferPanel({ t, state, meta, reload, directory }: PanelShare)
   const pickerKind = (state ?? meta)?.pickerKind ?? null
   /** 落地目录那一个字段的展开状态（页面上只有它一个目录字段）。 */
   const fields = useDirectoryFields<'target'>()
+
+  /**
+   * 最近收到的那条进度事件（见 api.ts 的 `importBundle()`）。
+   *
+   * 只有**导入**有：包上传那一段宿主报不了（那是浏览器与网络的事），收到之后的预演（逐条读包里的日志
+   * 折标题）与落地（逐条写盘、改写首帧 cwd）是真花时间的两段。导出那一个**不在这里**：它的响应体
+   * 就是产物本身，改成事件流只能把整包字节塞进 JSON（见 src/web.ts 的 exportSessions）。
+   *
+   * 声明排在**最后**（不跟 `busy` 挤在一起）：冒烟用例按位置往 null 状态里种值（见 test/client.test.mjs
+   * 的 `nulls`），插在中间会让后面那些种子的位置整体错一格。
+   */
+  const [progress, setProgress] = React.useState<ProgressEvent | null>(null)
   /**
    * 目标目录的候选：与「迁移」页的目标目录同一份构造（见 planRows.directoryTargetRows）——两处问的是
    * 同一件事。
@@ -208,12 +221,18 @@ export function TransferPanel({ t, state, meta, reload, directory }: PanelShare)
     setError(null)
     setNotice(null)
     setPending({ plan: null, error: null })
-    void importBundle(payload, target, 'plan').then(
-      (plan) => setPending((current) => (current === null ? current : { ...current, plan })),
-      (cause) =>
+    setProgress(null)
+    void importBundle(payload, target, 'plan', setProgress).then(
+      (plan) => {
+        setProgress(null)
+        setPending((current) => (current === null ? current : { ...current, plan }))
+      },
+      (cause) => {
+        setProgress(null)
         setPending((current) =>
           current === null ? current : { plan: null, error: cause instanceof Error ? cause.message : String(cause) },
-        ),
+        )
+      },
     )
   }
 
@@ -227,9 +246,11 @@ export function TransferPanel({ t, state, meta, reload, directory }: PanelShare)
     if (payload === null || target === '') return
     setBusy('apply')
     setError(null)
-    void importBundle(payload, target, 'apply').then(
+    setProgress(null)
+    void importBundle(payload, target, 'apply', setProgress).then(
       (result) => {
         setBusy(null)
+        setProgress(null)
         if (result.written !== undefined && result.written.length > 0) {
           setPending(null)
           setNotice(t('transfer.import.done', { count: result.written.length, bytes: formatBytes(result.bytes) }))
@@ -240,6 +261,7 @@ export function TransferPanel({ t, state, meta, reload, directory }: PanelShare)
       },
       (cause) => {
         setBusy(null)
+        setProgress(null)
         setPending(null)
         setError(t('error.failed', { reason: cause instanceof Error ? cause.message : String(cause) }))
       },
@@ -412,17 +434,27 @@ export function TransferPanel({ t, state, meta, reload, directory }: PanelShare)
         {pending !== null && (
           <ConfirmDialog
             t={t}
-            title={t('transfer.import.dialogTitle')}
+            // 落地那一段标题也换掉：这时候已经不是"将要"了，正文里正跑着进度。
+            title={t(busy === 'apply' ? 'transfer.import.applying' : 'transfer.import.dialogTitle')}
             confirmLabel={t('transfer.import.apply')}
             busyLabel={t('transfer.import.applying')}
             busy={busy === 'apply'}
             planning={plan === null && pending.error === null}
+            // 预演那一段要逐条读包里的日志折标题（实测 250 条约 1.7 秒），把静态的「预演中…」换成进度。
+            planningDetail={progress === null ? undefined : <ProgressBlock t={t} progress={progress} />}
             error={pending.error}
             disabled={plan === null || !plan.ok || createCount === 0}
             onConfirm={applyImport}
             onCancel={() => setPending(null)}
           >
-            {plan !== null && (
+            {/* 落地：逐条写盘并改写首帧 cwd，正文换成进度（那张计划表说的是"将要"，这时候已经过期了）。 */}
+            {busy === 'apply' &&
+              (progress === null ? (
+                <p className="dsm-hint">{t('progress.waiting')}</p>
+              ) : (
+                <ProgressBlock t={t} progress={progress} note={t('transfer.import.progress.note')} />
+              ))}
+            {busy !== 'apply' && plan !== null && (
               <>
                 <p className={plan.ok ? 'dsm-ok' : 'dsm-warn'}>
                   {t('transfer.import.planSummary', { create: createCount, skip: skipCount, bytes: formatBytes(plan.bytes) })}

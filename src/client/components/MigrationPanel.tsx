@@ -16,8 +16,9 @@
 
 import * as React from 'react'
 
-import { migrate, type MigrationRequest, type MigrationResponse } from '../api.ts'
+import { migrate, type MigrationRequest, type MigrationResponse, type ProgressEvent } from '../api.ts'
 import { ConfirmDialog } from './ConfirmDialog.tsx'
+import { ProgressBlock } from './ProgressBlock.tsx'
 import {
   SessionFilterBar,
   SessionListBox,
@@ -94,6 +95,18 @@ export function MigrationPanel({ t, state, meta, reload, directory }: PanelShare
   const [notice, setNotice] = React.useState<string | null>(null)
   /** 上一次落地之后的结论（复核 / 备份 / 生效方式）：弹窗关了之后它还得在页面上留着。 */
   const [effect, setEffect] = React.useState<MigrationEffect | null>(null)
+
+  /**
+   * 最近收到的那条进度事件（宿主每做一段报一条，见 api.ts 的 `migrate()`）。
+   *
+   * `null` = 还没收到第一条：算计划那一段的头几百毫秒是这样（扫库的第一条事件马上就到），落地那条路上
+   * 则是按下确认之后的头一瞬。那时弹窗里摆的是那句静态的「预演中…」/按钮上的「迁移中…」，不画条——
+   * 还不知道分母，画一条只会让人以为已经开始了。
+   *
+   * 声明排在**最后**（不跟 `busy` 挤在一起）：冒烟用例按位置往 null 状态里种值（见 test/client.test.mjs
+   * 的 `nulls`），插在中间会让后面那些种子的位置整体错一格。
+   */
+  const [progress, setProgress] = React.useState<ProgressEvent | null>(null)
 
   // 库里能按 cwd 匹配到的会话——只是给用户一个勾选面；真正迁移哪些由宿主按源项目目录算。
   // 「未分组」来源不是按 cwd 匹配，而是"注册表没认领、且有 cwd"的那一批（可以横跨多个目录），
@@ -206,7 +219,8 @@ export function MigrationPanel({ t, state, meta, reload, directory }: PanelShare
     setError(null)
     setNotice(null)
     setPending({ response: null, error: null })
-    void migrate(request('plan')).then(
+    setProgress(null)
+    void migrate(request('plan'), setProgress).then(
       (response) => setPending((current) => (current === null ? current : { ...current, response })),
       (cause) => setPending((current) => (current === null ? current : { response: null, error: reasonOf(cause) })),
     )
@@ -221,9 +235,11 @@ export function MigrationPanel({ t, state, meta, reload, directory }: PanelShare
   const applyMigration = (): void => {
     setBusy('apply')
     setError(null)
-    void migrate(request('apply')).then(
+    setProgress(null)
+    void migrate(request('apply'), setProgress).then(
       (response) => {
         setBusy(null)
+        setProgress(null)
         if (!response.applied) {
           setPending((current) => (current === null ? current : { ...current, response }))
           return
@@ -249,6 +265,7 @@ export function MigrationPanel({ t, state, meta, reload, directory }: PanelShare
       },
       (cause) => {
         setBusy(null)
+        setProgress(null)
         setPending(null)
         setError(t('error.failed', { reason: reasonOf(cause) }))
       },
@@ -475,17 +492,28 @@ export function MigrationPanel({ t, state, meta, reload, directory }: PanelShare
       {pending !== null && (
         <ConfirmDialog
           t={t}
-          title={t('migrate.dialogTitle')}
+          // 落地那一段标题也换掉：这时候已经不是"将要"了，正文里正跑着进度。
+          title={t(busy === 'apply' ? 'migrate.running' : 'migrate.dialogTitle')}
           confirmLabel={t('migrate.apply')}
           busyLabel={t('migrate.running')}
           busy={busy === 'apply'}
           planning={pending.response === null && pending.error === null}
+          // 算计划那一段不是空等（要扫源目录、再扫全库认子智能体族），所以有事件就把那句静态的
+          // 「预演中…」换成进度。
+          planningDetail={progress === null ? undefined : <ProgressBlock t={t} progress={progress} />}
           error={pending.error}
           disabled={!planned}
           onConfirm={applyMigration}
           onCancel={() => setPending(null)}
         >
-          {preview !== null && (
+          {/* 落地：正文换成进度，那份计划表说的是"将要"，这时候已经过期了。 */}
+          {busy === 'apply' &&
+            (progress === null ? (
+              <p className="dsm-hint">{t('progress.waiting')}</p>
+            ) : (
+              <ProgressBlock t={t} progress={progress} note={t('migrate.progress.note')} />
+            ))}
+          {busy !== 'apply' && preview !== null && (
             <>
               <p className={preview.ok ? 'dsm-ok' : 'dsm-warn'}>
                 {t('migrate.summary', {

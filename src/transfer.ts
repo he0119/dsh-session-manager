@@ -27,7 +27,7 @@ import { encodeSegment, sessionDir } from './paths.ts'
 import { reHome, writeRegistryAtomic } from './registry.ts'
 import { foldTitleInFrames } from './session-title.ts'
 import { relocateHeaderCwd, relocateHeaderCwdText } from './session-log.ts'
-import type { DecodeAll, RegistryChange, SessionLogFile, WorkspaceRegistryState } from './types.ts'
+import type { DecodeAll, ProgressReporter, RegistryChange, SessionLogFile, WorkspaceRegistryState } from './types.ts'
 
 /** 容器 magic。换代时改这一串，而不是悄悄改变字段含义。 */
 export const BUNDLE_MAGIC = 'DSHSESS1\n'
@@ -91,17 +91,27 @@ function sha256(buf: Buffer): string {
  * 把若干会话打成 `.dshsess` 字节。
  * @param sources 会话源（每个源的所有代次文件都进包，保持与磁盘一致）。
  * @param options.now 清单时间戳，便于测试注入。
+ * @param options.onProgress 逐条会话报一次（`phase: 'pack'`）：每条要把它全部代次的字节读出来、
+ *   算一次 sha256，整库导出时这一步是真花时间的（实测 250 条 / 70.9 MB 约 1.4 秒）。
  * @throws 某个文件读不到时抛错（不产出半成品包）。
  */
 export function buildBundle(
   sources: readonly ExportSource[],
-  options: { now?: string; source?: BundleSourceInfo } = {},
+  options: { now?: string; source?: BundleSourceInfo; onProgress?: ProgressReporter } = {},
 ): Buffer {
   const parts: Buffer[] = []
   const sessions: BundleSession[] = []
   let offset = 0
 
-  for (const source of sources) {
+  for (const [index, source] of sources.entries()) {
+    options.onProgress?.({
+      phase: 'pack',
+      total: sources.length,
+      done: index,
+      id: source.id,
+      // 导出这条路刻意不读标题（见 web.ts 的 exportSessions）：id 就是它手里有的那个名字。
+      label: source.id,
+    })
     if (!source.files.length) throw new Error(`session ${source.id} has no log files to export`)
     const files: BundleFileEntry[] = []
     for (const file of source.files) {
@@ -329,6 +339,11 @@ export interface ImportOptions {
   decodeAll?: DecodeAll
   now?: string
   newId?: string
+  /**
+   * 预演进度：`scan`（扫一遍库里已有的会话目录，分母 0）→ `read`（逐条读包里的日志折标题，
+   * 分母是包里的条数——这一段是导入预演的大头，包里每条会话都要解一段字节）。
+   */
+  onProgress?: ProgressReporter
 }
 
 function hasCwd(session: BundleSession): boolean {
@@ -367,6 +382,9 @@ export function planImport(bundle: SessionBundle, options: ImportOptions): Impor
    * 不一致时宿主认不出这条工作区（见 canonical-path.ts）。没有 cwd 的会话用不到它，空串照旧。
    */
   const targetCwd = canonicalDir(options.targetCwd)
+  // 库那一遍扫描没有"第几条"可讲（它是整库的目录项，条数与包里的条数不是一回事）：报一段没有分母的，
+  // 界面只说"正在扫描会话库…"，与同步读远端索引那一段同一个口径。
+  options.onProgress?.({ phase: 'scan', total: 0, done: 0 })
   const existingDirs = scanExistingSessionDirs(root)
   const entries: ImportEntry[] = []
   const problems: string[] = []
@@ -374,7 +392,15 @@ export function planImport(bundle: SessionBundle, options: ImportOptions): Impor
   const rehomed: string[] = []
   let bytes = 0
 
-  for (const session of bundle.sessions) {
+  for (const [index, session] of bundle.sessions.entries()) {
+    options.onProgress?.({
+      phase: 'read',
+      total: bundle.sessions.length,
+      done: index,
+      id: session.id,
+      // 标题就是这一步要从日志里折出来的东西，所以它此刻还不知道：用 id 当名字。
+      label: session.id,
+    })
     const withCwd = hasCwd(session)
     const dir = sessionDir(root, withCwd ? targetCwd : undefined, session.id)
     const files = session.files.map((file) => ({ name: file.name, bytes: file.bytes }))
@@ -465,8 +491,16 @@ export function applyImport(
   const written: string[] = []
   let bytes = 0
 
-  for (const entry of plan.entries) {
-    if (entry.action !== 'create') continue
+  const creating = plan.entries.filter((entry) => entry.action === 'create')
+  for (const [index, entry] of creating.entries()) {
+    // 逐条会话报一次：分母是**会创建**的那些（跳过的那些一个字节都不写，算进分母进度条就走不满）。
+    options.onProgress?.({
+      phase: 'write',
+      total: creating.length,
+      done: index,
+      id: entry.id,
+      label: entry.title ?? entry.id,
+    })
     const session = byId.get(entry.id)
     if (!session) throw new Error(`internal error: plan entry ${entry.id} has no session in the bundle`)
 
@@ -484,6 +518,7 @@ export function applyImport(
 
   let registryWritten = false
   if (options.writeRegistry !== false && plan.nextRegistry !== null && options.registryPath !== undefined) {
+    options.onProgress?.({ phase: 'registry', total: 0, done: 0 })
     writeRegistryAtomic(options.registryPath, plan.nextRegistry)
     registryWritten = true
   }

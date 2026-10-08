@@ -220,6 +220,66 @@ export interface WarmOutcome {
   problems: string[]
 }
 
+/**
+ * 一次长动作里的**一段**做到哪儿了（宿主 → 界面，见 `src/web.ts` 的 SSE 端点）。
+ *
+ * `done` 是**已经做完**的条数——事件发在开始处理第 `done + 1` 条之前，与 `discovery.ts` 的
+ * `ScanOptions.onProgress` 同一个口径。`total: 0` 表示这一段没有分母（一次网络往返、一次注册表
+ * 落盘），界面只摆那段话、不画条：画一条 1/1 的会让人以为已经做完了。
+ *
+ * `phase` 是**跨动作共用的一份词汇**（扫库、备份、改写、写入、删、还原、打包、复核……），界面
+ * 因此只有一套渲染与一份文案；每个动作只报自己真会走的那几段。
+ */
+export interface ProgressEvent {
+  phase: ProgressPhase
+  /** 这一段一共多少条；0 = 这一段没有分母。 */
+  total: number
+  /** 这一段已经做完几条。 */
+  done: number
+  /** 正在处理的那条会话 id（不针对某一条的段没有）。 */
+  id?: string
+  /** 界面上怎么称呼它（标题优先，读不到退回 id）。 */
+  label?: string
+}
+
+/** 进度事件的段名（共用词汇，见 `ProgressEvent`）。 */
+export type ProgressPhase =
+  /** 扫会话库（`GET /state`、预演、删除预演、导入核对）。 */
+  | 'scan'
+  /** 读包：解压、逐文件校验 sha256、折标题。 */
+  | 'read'
+  /** 打包（导出）。 */
+  | 'pack'
+  /** 备份（先复制再动）。 */
+  | 'backup'
+  /** 改写信封里的 cwd。 */
+  | 'rewrite'
+  /** 把会话目录搬进目标项目目录。 */
+  | 'move'
+  /** 写入落盘的会话（导入、拉取落地）。 */
+  | 'write'
+  /** 删除会话目录。 */
+  | 'remove'
+  /** 从备份还原（回滚）。 */
+  | 'restore'
+  /** 归档 / 取消归档（逐条走宿主注册表动作）。 */
+  | 'archive'
+  /** 落盘注册表（没有分母）。 */
+  | 'registry'
+  /** 复核（读回刚落下的东西）。 */
+  | 'verify'
+  /** 请宿主补投影检查点（没有分母）。 */
+  | 'warm'
+  /** 以下五段只有同步用：读远端索引、认本机仓库、比对内容、拉取、推送。 */
+  | 'remote'
+  | 'repo'
+  | 'compare'
+  | 'pull'
+  | 'push'
+
+/** 上报一次进度（同步调用、不 await，所以实现里不许抛）。 */
+export type ProgressReporter = (event: ProgressEvent) => void
+
 /** `reHome()` 实际发生的动作。 */
 export interface RegistryChange {
   targetId: string

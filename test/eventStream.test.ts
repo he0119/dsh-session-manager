@@ -1,15 +1,15 @@
-// 同步事件流的分帧与解释（src/client/logic/syncStream.ts）。
+// 长动作事件流的分帧与解释（src/client/logic/eventStream.ts）。
 //
 // 这一层是"进度条能不能动"的全部要害：一次 `response.body` 读取的边界与事件边界毫无关系，一条事件
 // 被拆在两次读取之间是常态，中文标题还会让 UTF-8 的多字节跨块。解析写得糙一点，表现就是进度停在
-// 第 0 条、或者整次同步报一个莫名其妙的解析错误。
+// 第 0 条、或者整次动作报一个莫名其妙的解析错误。
 //
 // 分帧与解释放在一个与 DOM 无关的文件里，正是为了能这样直接测（Host 侧那份 tsconfig 没有 DOM，见
-// src/client/logic/syncStream.ts 顶上的说明）。
+// src/client/logic/eventStream.ts 顶上的说明）。
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { SseFrames, interpretSyncEvent } from '../src/client/logic/syncStream.ts'
+import { SseFrames, interpretStreamEvent } from '../src/client/logic/eventStream.ts'
 
 /** 一次喂完所有块，收集事件体（多块 = 模拟一次读取只拿到半条）。 */
 function collect(chunks: string[]): string[] {
@@ -48,35 +48,46 @@ test('SseFrames：流结束时最后一段没被空行收尾的也要吐出来',
   assert.deepEqual(collect(['\n\n', '']), [])
 })
 
-test('interpretSyncEvent：三种事件各解释成什么', () => {
-  assert.deepEqual(interpretSyncEvent('{"type":"progress","progress":{"phase":"push","total":84,"done":12,"id":"s-1","label":"一"}}'), {
+test('interpretStreamEvent：三种事件各解释成什么', () => {
+  assert.deepEqual(interpretStreamEvent('{"type":"progress","progress":{"phase":"push","total":84,"done":12,"id":"s-1","label":"一"}}'), {
     kind: 'progress',
     progress: { phase: 'push', total: 84, done: 12, id: 's-1', label: '一' },
   })
   // 算计划那三段没有 id / label（不是"正在处理某一条"），解释器照原样传过去，界面按 phase 说话。
-  assert.deepEqual(interpretSyncEvent('{"type":"progress","progress":{"phase":"scan","total":85,"done":42}}'), {
+  assert.deepEqual(interpretStreamEvent('{"type":"progress","progress":{"phase":"scan","total":85,"done":42}}'), {
     kind: 'progress',
     progress: { phase: 'scan', total: 85, done: 42 },
   })
-  assert.deepEqual(interpretSyncEvent('{"type":"progress","progress":{"phase":"compare","total":12,"done":7}}'), {
+  assert.deepEqual(interpretStreamEvent('{"type":"progress","progress":{"phase":"compare","total":12,"done":7}}'), {
     kind: 'progress',
     progress: { phase: 'compare', total: 12, done: 7 },
   })
-  const result = interpretSyncEvent('{"type":"result","result":{"mode":"apply","applied":true}}')
+  // 段名不收窄：迁移 / 删除 / 回滚 / 导入 / 扫库 / 归档那几段走的是同一个解释器，照原样传过去。
+  assert.deepEqual(interpretStreamEvent('{"type":"progress","progress":{"phase":"rewrite","total":253,"done":7,"id":"s-9"}}'), {
+    kind: 'progress',
+    progress: { phase: 'rewrite', total: 253, done: 7, id: 's-9' },
+  })
+  // 将来宿主多报一段（界面还不认识）：解释器照样把它当进度传过去，界面退到一句通用的话。
+  assert.deepEqual(interpretStreamEvent('{"type":"progress","progress":{"phase":"future-phase","total":3,"done":1}}'), {
+    kind: 'progress',
+    progress: { phase: 'future-phase', total: 3, done: 1 },
+  })
+  const result = interpretStreamEvent('{"type":"result","result":{"mode":"apply","applied":true}}')
   assert.equal(result?.kind, 'result')
   assert.deepEqual(result?.kind === 'result' ? result.result : null, { mode: 'apply', applied: true })
-  assert.deepEqual(interpretSyncEvent('{"type":"error","error":"写远端索引失败：磁盘满"}'), {
+  assert.deepEqual(interpretStreamEvent('{"type":"error","error":"写远端索引失败：磁盘满"}'), {
     kind: 'error',
     message: '写远端索引失败：磁盘满',
   })
-  // 只说 type 没带那句话时也要有一句人能读的，不能是 "undefined"。
-  assert.deepEqual(interpretSyncEvent('{"type":"error"}'), { kind: 'error', message: '同步失败' })
+  // 只说 type 没带那句话时留空串：读流那一侧按自己那个动作的主语补一句（"迁移失败" / "同步失败"），
+  // 界面上不会出现一个 "undefined"（见 api.ts 的 readEventStream）。
+  assert.deepEqual(interpretStreamEvent('{"type":"error"}'), { kind: 'error', message: '' })
 })
 
-test('interpretSyncEvent：认不出来的一律返回 null（不让它毁掉整次同步）', () => {
-  assert.equal(interpretSyncEvent('{"type":"progress"'), null, '半条 JSON：跳过它，后面的进度照旧')
-  assert.equal(interpretSyncEvent('null'), null)
-  assert.equal(interpretSyncEvent('"就一句话"'), null)
-  assert.equal(interpretSyncEvent('{"type":"progress"}'), null, 'type 对了但没有 progress 体')
-  assert.equal(interpretSyncEvent('{"type":"future-thing"}'), null, '将来宿主新加的类型')
+test('interpretStreamEvent：认不出来的一律返回 null（不让它毁掉整次动作）', () => {
+  assert.equal(interpretStreamEvent('{"type":"progress"'), null, '半条 JSON：跳过它，后面的进度照旧')
+  assert.equal(interpretStreamEvent('null'), null)
+  assert.equal(interpretStreamEvent('"就一句话"'), null)
+  assert.equal(interpretStreamEvent('{"type":"progress"}'), null, 'type 对了但没有 progress 体')
+  assert.equal(interpretStreamEvent('{"type":"future-thing"}'), null, '将来宿主新加的类型')
 })
