@@ -65,6 +65,16 @@ one-line bump at that point.
 
 ### Settings → Session management
 
+Every action that can take a while **reports progress**: the dialog body of migration, deletion, rollback and
+import (preview and apply), the action row of archiving, and the page header during the library scan all say
+"Rewriting logs 8 / 253" with a bar and the title of the session in flight. The denominator is **how many
+items that step will really do** (skipped ones are not counted, or the bar would never fill); steps without a
+denominator (reading the remote index, writing the workspace registry) only say what they are doing and
+draw no bar. While an apply runs, the dialog title switches from "About to
+migrate" to "Migrating…" and the cancel button is disabled — letting go halfway leaves the library in a
+half-done state. The one exception is **export**: its response body *is* the bundle, so there is no "item N of
+M" to report.
+
 **Sessions** — manage the whole library row by row
 
 - The list is **grouped by directory** with foldable headers (**Collapse all / Expand all** sit above the

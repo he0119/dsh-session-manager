@@ -43,7 +43,7 @@ import {
   type ImportPlan,
   type ImportOptions,
 } from './transfer.ts'
-import type { CheckpointWarmPort, DecodeAll, HostRegistryPort, WorkspaceRegistryState } from './types.ts'
+import type { CheckpointWarmPort, DecodeAll, HostRegistryPort, ProgressReporter, WorkspaceRegistryState } from './types.ts'
 import { createBlankResolver, createSessionMetaResolver, hiddenReason, isUngrouped, type HiddenReason, type SessionMeta } from './visibility.ts'
 
 /** 本插件占用的路由前缀。 */
@@ -257,10 +257,54 @@ function sendEventStream(res: ServerResponse): void {
   })
 }
 
-/** 写一条 SSE 事件（事件体是一行 JSON，形状为 `{ type, ... }`）。 */
+/**
+ * 写一条 SSE 事件（事件体是一行 JSON，形状为 `{ type, ... }`）。
+ *
+ * `uncork()` 那一句是**必须有**的，不是保险：`res.write()` 每次都会把 socket 重新 cork 住（实测
+ * `writableCorked` 从 0 变 1、`writableLength` 就是这条事件），Node 要等下一次事件循环才把它推给内核。
+ * 而报进度的这些循环是**同步**的——读日志、改首帧、搬目录中间一次 `await` 都没有——所以不主动
+ * uncork 的话，一整段干完之前一个字节都发不出去，所有事件在结束时一起到，进度条会从"正在准备…"
+ * 直接跳到做完（跨进程实测：不 uncork 五条事件全在 1537ms 到达，uncork 之后是 33/330/630/930/1230ms）。
+ * 同步那条路本来能走，是因为它每一步都在 await 网络往返，事件循环自然会转。
+ *
+ * `res.socket` 用可选链：万一响应被中间件包过一层（没有 socket），退化成原来的行为，而不是抛错。
+ * 多调用几次 uncork 是无害的（实测不抛错、不影响正文）。
+ */
 function sendEvent(res: ServerResponse, event: unknown): void {
   if (res.writableEnded) return
   res.write(`data: ${JSON.stringify(event)}\n\n`)
+  res.socket?.uncork()
+}
+
+/**
+ * 把一个长动作跑成事件流：`{type:'progress'}` 每做一条一次、`{type:'result'}` 收尾、`{type:'error'}`
+ * 兜底。
+ *
+ * 为什么是**共用一个**而不是每个端点各写一遍：这套形状原先只有 `/sync` 有（见
+ * [同步那篇决策](../../.agents/notes/implemented/architecture/2026-10-03-sync-progress-streams-over-sse.md)），
+ * 而"按下到结束之间没有任何反馈"是**所有**长动作共有的毛病——迁移落地实测 47 条 / 67.5 MB 要 45 秒
+ * （逐条改写首帧占 45 秒），导入落地 250 条 / 70.9 MB 要 19 秒，那些时间里界面只有一个不动的按钮。
+ * 地基抽在这里，各端点只负责"报哪几段"。
+ *
+ * 两段流之外的**判定**（参数不对、这个宿主没这个能力、备份目录越界）仍然在流开始**之前**回一次性
+ * JSON 带状态码——那时还没有任何一个字节发出去，用状态码说比用事件说清楚。流一旦开始，HTTP 状态
+ * 就已经是 200 了，之后的错只能靠 `{type:'error'}` 说（客户端按 `content-type` 分流）。
+ *
+ * @param res 响应对象（`webServer` 的路由 handler 拥有完整的响应生命周期，SSE 就是它举的例子）。
+ * @param run 真正干活的那一段；`report` 是同步调用、不 await 的上报口（实现里不许抛）。
+ */
+async function streamResult(
+  res: ServerResponse,
+  run: (report: ProgressReporter) => Promise<unknown> | unknown,
+): Promise<void> {
+  sendEventStream(res)
+  try {
+    const result = await run((progress) => sendEvent(res, { type: 'progress', progress }))
+    sendEvent(res, { type: 'result', result })
+  } catch (error) {
+    sendEvent(res, { type: 'error', error: error instanceof Error ? error.message : String(error) })
+  }
+  res.end()
 }
 
 /** 读注册表；文件缺失或坏掉都只记为问题，不拦住"列出会话"。 */
@@ -476,33 +520,43 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
     sendJson(res, 200, metaFacts())
   }
 
+  /**
+   * 整库清单。走事件流：这一份要**扫完整库**（每条会话读 header、还要折标题，实测 468 条 / 232 MB
+   * 约 0.2～0.45 秒，冷缓存与大库上就是几秒），而它是这一页打开时等的第一件事——那段时间原来只有
+   * 一句「读取中…」。`/meta` 仍然先回，且回的是同一次扫库之后要用的那几个能力位。
+   */
   const state = async (_req: IncomingMessage, res: ServerResponse): Promise<void> => {
-    const { registry, problems } = loadRegistry(paths.registryPath)
-    const sessions = scanLibrary(paths.sessionsRoot, decodeAll, { resolveTitle })
-    // 「认领」算一次，会话列表那栏与工作区那栏读同一份：宿主发给渲染层的也是同一个取值
-    // （`Workspace.sessionIds` 的过滤，见 accounting.ts），两处各算一遍迟早会分叉。
-    const accounted = accountedOwners(registry, sessions)
-    const workspaces = summarizeWorkspaces(registry, accounted)
-    // 项目身份只认"界面上真会出现的那些目录"：每条会话的 cwd + 注册表登记的工作区路径。别的一律不问
-    // ——`git rev-parse` 是每个目录一次进程，列表页的热路径上多问一个都是白花。
-    const directories = new Set<string>()
-    for (const session of sessions) if (session.cwd !== undefined && session.cwd !== '') directories.add(session.cwd)
-    for (const workspace of workspaces) if (workspace.path !== '') directories.add(workspace.path)
-    const repos = deps.repos === undefined ? new Map<string, string>() : await deps.repos([...directories])
-    sendJson(res, 200, {
-      // 位置与能力位与 `/meta` 同一份取值，不在这里重算（见 metaFacts）。
-      ...metaFacts(),
-      problems,
-      // 目录 → 项目身份（`host/owner/repo`）：界面把它显示在原来印本机路径的地方。认不出来的目录不在
-      // 表里，界面退回显示路径。
-      repos: Object.fromEntries(repos),
-      sessions: summarizeSessions(sessions, {
-        accounted,
-        archived: new Set(registry?.global.archivedSessionIds ?? []),
-        resolveBlank,
-        live: liveSessionIds(),
-      }),
-      workspaces,
+    await streamResult(res, async (report) => {
+      const { registry, problems } = loadRegistry(paths.registryPath)
+      const sessions = scanLibrary(paths.sessionsRoot, decodeAll, {
+        resolveTitle,
+        onProgress: (done, total) => report({ phase: 'scan', done, total }),
+      })
+      // 「认领」算一次，会话列表那栏与工作区那栏读同一份：宿主发给渲染层的也是同一个取值
+      // （`Workspace.sessionIds` 的过滤，见 accounting.ts），两处各算一遍迟早会分叉。
+      const accounted = accountedOwners(registry, sessions)
+      const workspaces = summarizeWorkspaces(registry, accounted)
+      // 项目身份只认"界面上真会出现的那些目录"：每条会话的 cwd + 注册表登记的工作区路径。别的一律不问
+      // ——`git rev-parse` 是每个目录一次进程，列表页的热路径上多问一个都是白花。
+      const directories = new Set<string>()
+      for (const session of sessions) if (session.cwd !== undefined && session.cwd !== '') directories.add(session.cwd)
+      for (const workspace of workspaces) if (workspace.path !== '') directories.add(workspace.path)
+      const repos = deps.repos === undefined ? new Map<string, string>() : await deps.repos([...directories])
+      return {
+        // 位置与能力位与 `/meta` 同一份取值，不在这里重算（见 metaFacts）。
+        ...metaFacts(),
+        problems,
+        // 目录 → 项目身份（`host/owner/repo`）：界面把它显示在原来印本机路径的地方。认不出来的目录不在
+        // 表里，界面退回显示路径。
+        repos: Object.fromEntries(repos),
+        sessions: summarizeSessions(sessions, {
+          accounted,
+          archived: new Set(registry?.global.archivedSessionIds ?? []),
+          resolveBlank,
+          live: liveSessionIds(),
+        }),
+        workspaces,
+      }
     })
   }
 
@@ -590,77 +644,72 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
       decodeAll,
     }
 
-    let plan: ImportPlan
-    try {
-      plan = planImport(bundle, options)
-    } catch (error) {
-      sendJson(res, 500, { error: error instanceof Error ? error.message : String(error) })
-      return
-    }
+    /*
+     * 计划与落地都走事件流：包本身的字节是**请求体**（上传那一段宿主报不了，那是浏览器与网络的事），
+     * 但收到之后还有两段长的——预演要逐条读包里的日志折标题（实测 250 条 / 70.9 MB 约 1.7 秒），落地
+     * 要逐条写盘并改写首帧 cwd（同一条包实测 18.9 秒）。这两段原来界面上只有一句「导入中…」。
+     */
+    await streamResult(res, async (report) => {
+      // 计划算不出来（包坏了、注册表重挂失败…）：抛出去就是 `error` 事件，界面照原话报——与原来
+      // 那次 500 的正文是同一条消息。
+      const plan: ImportPlan = planImport(bundle, { ...options, onProgress: report })
 
-    const payload = {
-      mode: apply ? 'apply' : 'plan',
-      bundle: { createdAt: bundle.createdAt, source: bundle.source, sessions: bundle.sessions.length },
-      problems: [...problems, ...plan.problems],
-      entries: plan.entries,
-      created: plan.created,
-      rehomed: plan.rehomed,
-      bytes: plan.bytes,
-      registryChange: plan.registryChange,
-    }
+      const payload = {
+        mode: apply ? 'apply' : 'plan',
+        bundle: { createdAt: bundle.createdAt, source: bundle.source, sessions: bundle.sessions.length },
+        problems: [...problems, ...plan.problems],
+        entries: plan.entries,
+        created: plan.created,
+        rehomed: plan.rehomed,
+        bytes: plan.bytes,
+        registryChange: plan.registryChange,
+      }
 
-    if (!apply) {
-      sendJson(res, 200, { ...payload, ok: plan.ok })
-      return
-    }
-    if (plan.created.length === 0) {
-      sendJson(res, 409, { ...payload, ok: false, error: '没有可导入的会话（都已在库里）' })
-      return
-    }
+      if (!apply) return { ...payload, ok: plan.ok }
+      if (plan.created.length === 0) return { ...payload, ok: false, error: '没有可导入的会话（都已在库里）' }
 
-    try {
-      const outcome = applyImport(bundle, plan, { ...options, decodeAll })
-      // 导入会改注册表（把会话挂进目标工作区），与迁移是同一条语义：改完就把活儿交给宿主自己做，
-      // 而不是把"重启 DSH 最稳妥"留给用户。注册表这次没动时（没有要挂的 / 读不到注册表）没有这一步。
-      // 注册表终态一并交过去：宿主没接住时它会用内存副本盖掉这次写盘，那时得靠这份终态写回来
-      // （见 take-effect.ts 的 `restoreRegistry()`）。
-      const effect = outcome.registryWritten
-        ? await takeEffectOnHost(
-            plan.registryChange,
-            { hostRegistry, registryPath: paths.registryPath },
-            { registry: plan.nextRegistry },
-          )
-        : undefined
-      /*
-       * 导进来的会话从没在本机活过，宿主的投影检查点里没有它们：侧边栏会显示"未命名"、时间退回
-       * createdAt，直到被点开一次。这里请宿主自己冷读一遍补上（逐条兜住失败，不影响落地结论，
-       * 见 checkpoint-warm.ts）。
-       */
-      const warm = await warmCheckpoints(outcome.written, { hostCheckpoints })
-      sendJson(res, 200, {
-        ...payload,
-        ok: true,
-        written: outcome.written,
-        writtenBytes: outcome.bytes,
-        registryWritten: outcome.registryWritten,
-        takesEffect: effectOf(effect, takesEffect()),
-        ...(outcome.written.length === 0 ? {} : { warm }),
-        note: [
-          effect === undefined
-            ? '会话已落盘（这次没有改注册表）：宿主重新扫描后就会出现在侧边栏，不需要重启。'
-            : describeEffect(effect),
-          describeWarm(warm),
-        ]
-          .filter((line): line is string => line !== undefined)
-          .join('\n'),
-      })
-    } catch (error) {
-      sendJson(res, 500, {
-        ...payload,
-        ok: false,
-        error: error instanceof Error ? error.message : String(error),
-      })
-    }
+      try {
+        const outcome = applyImport(bundle, plan, { ...options, decodeAll, onProgress: report })
+        // 导入会改注册表（把会话挂进目标工作区），与迁移是同一条语义：改完就把活儿交给宿主自己做，
+        // 而不是把"重启 DSH 最稳妥"留给用户。注册表这次没动时（没有要挂的 / 读不到注册表）没有这一步。
+        // 注册表终态一并交过去：宿主没接住时它会用内存副本盖掉这次写盘，那时得靠这份终态写回来
+        // （见 take-effect.ts 的 `restoreRegistry()`）。
+        const effect = outcome.registryWritten
+          ? await takeEffectOnHost(
+              plan.registryChange,
+              { hostRegistry, registryPath: paths.registryPath },
+              { registry: plan.nextRegistry },
+            )
+          : undefined
+        /*
+         * 导进来的会话从没在本机活过，宿主的投影检查点里没有它们：侧边栏会显示"未命名"、时间退回
+         * createdAt，直到被点开一次。这里请宿主自己冷读一遍补上（逐条兜住失败，不影响落地结论，
+         * 见 checkpoint-warm.ts）。
+         */
+        const warm = await warmCheckpoints(outcome.written, { hostCheckpoints }, report)
+        return {
+          ...payload,
+          ok: true,
+          written: outcome.written,
+          writtenBytes: outcome.bytes,
+          registryWritten: outcome.registryWritten,
+          takesEffect: effectOf(effect, takesEffect()),
+          ...(outcome.written.length === 0 ? {} : { warm }),
+          note: [
+            effect === undefined
+              ? '会话已落盘（这次没有改注册表）：宿主重新扫描后就会出现在侧边栏，不需要重启。'
+              : describeEffect(effect),
+            describeWarm(warm),
+          ]
+            .filter((line): line is string => line !== undefined)
+            .join('\n'),
+        }
+      } catch (error) {
+        // 写盘写到一半失败：正文里那份**计划**照样带回去（界面把冲突与原因摆在弹窗里），
+        // 与原来 500 那次的正文同一个形状。
+        return { ...payload, ok: false, error: error instanceof Error ? error.message : String(error) }
+      }
+    })
   }
 
   const migrateDeps: MigrateDeps = {
@@ -730,35 +779,32 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
       ...(typeof fields['title'] === 'string' && fields['title'].trim() !== '' ? { title: fields['title'].trim() } : {}),
     }
     const apply = fields['mode'] === 'apply'
-    const run = await runMigration(migrateDeps, request, { apply })
-    const payload = {
-      mode: apply ? 'apply' : 'plan',
-      ok: run.preview.ok && (!apply || run.verified),
-      preview: run.preview,
-      applied: run.applied,
-      rewritten: run.rewritten,
-      moved: run.moved,
-      artifactsMoved: run.artifactsMoved,
-      verified: run.verified,
-      ...(run.backupDir === undefined ? {} : { backupDir: run.backupDir }),
-      problems: run.problems,
-      summary: run.summary,
-      ...(run.warm === undefined ? {} : { warm: run.warm }),
-      // 真的改过注册表就认执行结果，没改过才退到探测（见 take-effect.ts 的 effectOf）。
-      takesEffect: effectOf(run.effect, takesEffect()),
-    }
-
-    if (!run.preview.ok) {
-      // 计划本身有问题（源项目目录不存在、目标被占用、cwd 不匹配……）：这是"当前状态不允许"，
-      // 用 409 而不是 400——参数可能完全正确，是库的状态说了不行。
-      sendJson(res, 409, payload)
-      return
-    }
-    if (apply && !run.verified) {
-      sendJson(res, 500, { ...payload, error: '迁移后的复核未通过，请查看 problems 并考虑回滚' })
-      return
-    }
-    sendJson(res, 200, payload)
+    /*
+     * 干活那一段走事件流：迁移落地要备份、改写、搬目录、复核、请宿主补检查点——实测 47 条会话 /
+     * 67.5 MB 要 45 秒（其中改写首帧占 45 秒）。计划不 ok 与复核没过**都还是结果**：它们带着
+     * 完整的 `preview`，界面要把清单与问题摆出来，所以一样从 `result` 事件回，而不是当成流的错。
+     */
+    await streamResult(res, async (report) => {
+      const run = await runMigration(migrateDeps, request, { apply, onProgress: report })
+      return {
+        mode: apply ? 'apply' : 'plan',
+        ok: run.preview.ok && (!apply || run.verified),
+        preview: run.preview,
+        applied: run.applied,
+        rewritten: run.rewritten,
+        moved: run.moved,
+        artifactsMoved: run.artifactsMoved,
+        verified: run.verified,
+        ...(run.backupDir === undefined ? {} : { backupDir: run.backupDir }),
+        problems: run.problems,
+        summary: run.summary,
+        ...(run.warm === undefined ? {} : { warm: run.warm }),
+        // 真的改过注册表就认执行结果，没改过才退到探测（见 take-effect.ts 的 effectOf）。
+        takesEffect: effectOf(run.effect, takesEffect()),
+        // 复核没过时那句话与原来 500 那次的正文一致（结果形状不变，只是换了种运法）。
+        ...(apply && !run.verified ? { error: '迁移后的复核未通过，请查看 problems 并考虑回滚' } : {}),
+      }
+    })
   }
 
   /** 回滚：`dryRun` 只回动作清单；只认本插件备份根下的目录（越界一律拒）。 */
@@ -779,14 +825,17 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
       return
     }
     const dryRun = fields['dryRun'] === true
-    const outcome = await rollbackMigration(
-      { backupRoot: paths.backupRoot },
-      { backupDir: String(backupDir), dryRun },
-    )
-    sendJson(res, 200, {
-      mode: dryRun ? 'plan' : 'apply',
-      ...outcome,
-      takesEffect: effectOf(outcome.effect, takesEffect()),
+    // 回滚 = 逐条会话把目录搬回去 + 逐文件字节还原，整库回滚同样是几十秒的活（同迁移），所以它也报进度。
+    await streamResult(res, async (report) => {
+      const outcome = await rollbackMigration(
+        { backupRoot: paths.backupRoot },
+        { backupDir: String(backupDir), dryRun, onProgress: report },
+      )
+      return {
+        mode: dryRun ? 'plan' : 'apply',
+        ...outcome,
+        takesEffect: effectOf(outcome.effect, takesEffect()),
+      }
     })
   }
 
@@ -916,31 +965,33 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
       return
     }
     const apply = fields['mode'] === 'apply'
-    const run: RemovalRun = runRemoval(removeDeps, { sessionIds: ids.map((id) => String(id)) }, { apply })
-    const payload = {
-      mode: apply ? 'apply' : 'plan',
-      ok: run.plan.ok && (!apply || run.verified),
-      /** 「将会删掉什么」的那份计划（预演与执行同源）。 */
-      preview: run.plan,
-      applied: run.applied,
-      dirsRemoved: run.dirsRemoved,
-      removedProjectDirs: run.removedProjectDirs,
-      verified: run.verified,
-      ...(run.backupDir === undefined ? {} : { backupDir: run.backupDir }),
-      problems: run.plan.ok ? run.problems : run.plan.problems,
-      summary: run.summary,
-    }
-    if (!run.plan.ok) {
-      // 计划本身有问题（会话不在库里、宿主内存里活着、目录已经不在……）：这是"当前状态不允许"，
-      // 用 409 而不是 400——参数可能完全正确，是库的状态说了不行（与 /migrate 同一套口径）。
-      sendJson(res, 409, payload)
-      return
-    }
-    if (apply && !run.verified) {
-      sendJson(res, 500, { ...payload, error: '删除后的复核未通过，请查看 problems 并从备份恢复' })
-      return
-    }
-    sendJson(res, 200, payload)
+    // 删除落地要**先按字节备份整份会话目录**再删，整库删除同样是几十秒的活（与迁移同量级），
+    // 所以它也走事件流：`scan`（重算计划）、`backup`、`remove`、`verify`。
+    await streamResult(res, (report) => {
+      const run: RemovalRun = runRemoval(
+        removeDeps,
+        { sessionIds: ids.map((id) => String(id)) },
+        { apply, onProgress: report },
+      )
+      return {
+        mode: apply ? 'apply' : 'plan',
+        ok: run.plan.ok && (!apply || run.verified),
+        /** 「将会删掉什么」的那份计划（预演与执行同源）。 */
+        preview: run.plan,
+        applied: run.applied,
+        dirsRemoved: run.dirsRemoved,
+        removedProjectDirs: run.removedProjectDirs,
+        verified: run.verified,
+        ...(run.backupDir === undefined ? {} : { backupDir: run.backupDir }),
+        problems: run.plan.ok ? run.problems : run.plan.problems,
+        summary: run.summary,
+        // 复核没过时那句话与原来 500 那次的正文一致（计划不 ok 时 `applied` 本来就是 false，
+        // 界面读的是 `preview`，与 409 那次一样）。
+        ...(apply && run.plan.ok && !run.verified
+          ? { error: '删除后的复核未通过，请查看 problems 并从备份恢复' }
+          : {}),
+      }
+    })
   }
 
   /**
@@ -982,20 +1033,24 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
     }
     const done: string[] = []
     const failed: Array<{ id: string; error: string }> = []
-    for (const id of targets) {
-      try {
-        if (archived) await ops.archive(id)
-        else await ops.unarchive(id)
-        done.push(id)
-      } catch (error) {
-        failed.push({ id, error: error instanceof Error ? error.message : String(error) })
+    // 逐条走宿主的注册表动作（每条一次落盘 + 广播），勾一整页会话时这一段是可感知的，所以它报进度。
+    await streamResult(res, async (report) => {
+      for (const [index, id] of targets.entries()) {
+        report({ phase: 'archive', total: targets.length, done: index, id })
+        try {
+          if (archived) await ops.archive(id)
+          else await ops.unarchive(id)
+          done.push(id)
+        } catch (error) {
+          failed.push({ id, error: error instanceof Error ? error.message : String(error) })
+        }
       }
-    }
-    sendJson(res, failed.length === 0 ? 200 : 409, {
-      ok: failed.length === 0,
-      archived: done,
-      failed,
-      takesEffect: 'immediate',
+      return {
+        ok: failed.length === 0,
+        archived: done,
+        failed,
+        takesEffect: 'immediate',
+      }
     })
   }
 

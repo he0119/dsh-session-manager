@@ -16,7 +16,7 @@ import { createBackup } from './journal.ts'
 import { projectKey } from './project-key.ts'
 import { validateRegistry, writeRegistryAtomic } from './registry.ts'
 import { relocateHeaderCwd } from './session-log.ts'
-import type { CompressFrame, DecodeAll, RelocationPlan } from './types.ts'
+import type { CompressFrame, DecodeAll, ProgressReporter, RelocationPlan } from './types.ts'
 import { encodeRawFrame } from './zstd-frame.ts'
 
 /** `applyPlan()` 的选项。 */
@@ -28,6 +28,14 @@ export interface ApplyOptions {
   compressFrame?: CompressFrame
   /** 注入时间，便于测试。 */
   now?: Date
+  /**
+   * 执行进度（见 `types.ts` 的 `ProgressEvent`）。
+   *
+   * 四段：`backup`（备份，`createBackup` 逐条报）、`rewrite`（逐**文件**改写首帧——这一段在真实库上
+   * 是最大头，一条会话几 MB 时一步就要几百毫秒）、`move`（逐条会话搬目录）、`registry`（落盘注册表，
+   * 没有分母）。改写的分母是**文件数**而不是会话数：那才是这一步真实的工作单位。
+   */
+  onProgress?: ProgressReporter
 }
 
 /** `applyPlan()` 的结果。 */
@@ -46,7 +54,7 @@ export interface ApplyResult {
  * @throws 计划的 `ok` 不为 true，或中途校验失败时抛错（不产出半成品状态）。
  */
 export function applyPlan(plan: RelocationPlan, options: ApplyOptions): ApplyResult {
-  const { registryPath, decodeAll, backupRoot, compressFrame = encodeRawFrame, now = new Date() } = options
+  const { registryPath, decodeAll, backupRoot, compressFrame = encodeRawFrame, now = new Date(), onProgress } = options
   if (!plan.ok) throw new Error(`refusing to apply a plan with problems: ${plan.problems.join('; ')}`)
   if (!plan.nextRegistry) throw new Error('plan has no computed registry change')
 
@@ -67,35 +75,39 @@ export function applyPlan(plan: RelocationPlan, options: ApplyOptions): ApplyRes
     ...(plan.unowned ? {} : { from: plan.from }),
     to: plan.to,
     now,
+    ...(onProgress === undefined ? {} : { onProgress }),
   })
   say(`backup -> ${backup.dir}`)
 
   // 2) 改写日志（原地）
   let rewritten = 0
-  for (const s of plan.sessions) {
-    for (const f of s.files) {
-      const buf = readFileSync(f.path)
-      const r = relocateHeaderCwd(buf, { from: s.from, to: s.to, decodeAll, compressFrame })
-      if (r.unchanged) {
-        say(`unchanged ${f.name} (${s.id})`)
-        continue
-      }
-      const tmp = `${f.path}.dsh-session-manager.tmp`
-      writeFileSync(tmp, r.buffer)
-      // 落盘前复验：临时文件必须能解出期望文本
-      const expectedHeader = decodeAll(r.buffer).split('\n')[0]
-      if (decodeAll(readFileSync(tmp)).split('\n')[0] !== expectedHeader) {
-        throw new Error(`temp verification failed for ${f.path}`)
-      }
-      renameSync(tmp, f.path)
-      rewritten++
-      say(`rewrote ${basename(f.path)} (${s.id}) events=${r.events} firstFrame=${r.firstFrameBytes}B`)
+  const rewrites = plan.sessions.flatMap((session) => session.files.map((file) => ({ session, file })))
+  for (const [index, item] of rewrites.entries()) {
+    const { session: s, file: f } = item
+    // 改写是"逐文件"的活：一条会话可能有几代日志，各是几 MB——分母用文件数，进度条才走得匀。
+    onProgress?.({ phase: 'rewrite', total: rewrites.length, done: index, id: s.id, label: s.title ?? s.id })
+    const buf = readFileSync(f.path)
+    const r = relocateHeaderCwd(buf, { from: s.from, to: s.to, decodeAll, compressFrame })
+    if (r.unchanged) {
+      say(`unchanged ${f.name} (${s.id})`)
+      continue
     }
+    const tmp = `${f.path}.dsh-session-manager.tmp`
+    writeFileSync(tmp, r.buffer)
+    // 落盘前复验：临时文件必须能解出期望文本
+    const expectedHeader = decodeAll(r.buffer).split('\n')[0]
+    if (decodeAll(readFileSync(tmp)).split('\n')[0] !== expectedHeader) {
+      throw new Error(`temp verification failed for ${f.path}`)
+    }
+    renameSync(tmp, f.path)
+    rewritten++
+    say(`rewrote ${basename(f.path)} (${s.id}) events=${r.events} firstFrame=${r.firstFrameBytes}B`)
   }
 
   // 3) 移动会话目录
   let moved = 0
-  for (const s of plan.sessions) {
+  for (const [index, s] of plan.sessions.entries()) {
+    onProgress?.({ phase: 'move', total: plan.sessions.length, done: index, id: s.id, label: s.title ?? s.id })
     if (dirname(s.sourceDir) === dirname(s.targetDir)) {
       say(`already in target project directory: ${basename(s.sourceDir)}`)
       continue
@@ -108,6 +120,7 @@ export function applyPlan(plan: RelocationPlan, options: ApplyOptions): ApplyRes
   }
 
   // 4) 注册表
+  onProgress?.({ phase: 'registry', total: 0, done: 0 })
   const check = validateRegistry(plan.nextRegistry)
   if (!check.ok) throw new Error(`refusing to write an invalid registry: ${check.problems.join('; ')}`)
   writeRegistryAtomic(registryPath, plan.nextRegistry)
@@ -148,15 +161,19 @@ export function applyPlan(plan: RelocationPlan, options: ApplyOptions): ApplyRes
 /**
  * 独立复核：迁移后每个会话都应满足"文件所在项目目录 == projectKey(header.cwd)、header.cwd == 目标"。
  * 这是宿主的 corrupt 判据的等价检查。
+ *
+ * @param options.onProgress 逐条会话报一次（`phase: 'verify'`）：复核要把刚落下的日志**整份解回来**
+ *   读 header，真实库上与改写同一量级，所以它同样值得一条进度。
  */
 export function verifyAppliedPlan(
   plan: RelocationPlan,
-  options: { decodeAll: DecodeAll },
+  options: { decodeAll: DecodeAll; onProgress?: ProgressReporter },
 ): { ok: boolean; problems: string[]; checked: number } {
-  const { decodeAll } = options
+  const { decodeAll, onProgress } = options
   const problems: string[] = []
   let checked = 0
-  for (const s of plan.sessions) {
+  for (const [index, s] of plan.sessions.entries()) {
+    onProgress?.({ phase: 'verify', total: plan.sessions.length, done: index, id: s.id, label: s.title ?? s.id })
     if (!existsSync(s.targetDir)) {
       problems.push(`session ${s.id}: target dir missing ${s.targetDir}`)
       continue

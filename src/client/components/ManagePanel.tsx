@@ -25,8 +25,9 @@
 
 import * as React from 'react'
 
-import { archiveSessions, deleteSessions, type DeleteResponse } from '../api.ts'
+import { archiveSessions, deleteSessions, type DeleteResponse, type ProgressEvent } from '../api.ts'
 import { ConfirmDialog } from './ConfirmDialog.tsx'
+import { ProgressBlock } from './ProgressBlock.tsx'
 import { groupKey, groupSessions, nestSessions } from '../logic/groups.ts'
 import { deleteFamilyNote, parentDirNote } from '../logic/planRows.ts'
 import { FILTER_KEYS } from '../logic/sessionFilter.ts'
@@ -75,6 +76,15 @@ export function ManagePanel({ t, state, meta, reload }: PanelShare): React.React
    */
   const [pending, setPending] = React.useState<{ plan: DeleteResponse | null; error: string | null } | null>(null)
   const [failed, setFailed] = React.useState<Array<{ id: string; error: string }>>([])
+  /**
+   * 最近收到的那条进度事件（归档与删除共用一份：两者不会同时进行，`busy` 就分得开）。
+   *
+   * 删除那两段是"扫整库"与"先备份再删"，归档那段是逐条走宿主的注册表动作——都是按下之后要等的活。
+   *
+   * 声明排在**最后**（不跟 `busy` 挤在一起）：冒烟用例按位置往 null 状态里种值（见 test/client.test.mjs
+   * 的 `nulls`），插在中间会让后面那些种子的位置整体错一格。
+   */
+  const [progress, setProgress] = React.useState<ProgressEvent | null>(null)
 
   /**
    * 按目录分组，组内留着筛选之后的那些（空掉的组整组不画：组头底下没有行，看着像坏了）。
@@ -102,8 +112,9 @@ export function ManagePanel({ t, state, meta, reload }: PanelShare): React.React
     setError(null)
     setNotice(null)
     setFailed([])
+    setProgress(null)
     try {
-      const response = await archiveSessions(picked, archived)
+      const response = await archiveSessions(picked, archived, setProgress)
       // 逐条失败照旧摆出来：一条因为"正在跑"被宿主拒了，不该把其余成功的说成失败。
       setFailed(response.failed)
       if (response.archived.length > 0) {
@@ -118,6 +129,7 @@ export function ManagePanel({ t, state, meta, reload }: PanelShare): React.React
       setError(cause instanceof Error ? cause.message : String(cause))
     } finally {
       setBusy(null)
+      setProgress(null)
     }
   }
 
@@ -136,12 +148,18 @@ export function ManagePanel({ t, state, meta, reload }: PanelShare): React.React
     setNotice(null)
     setFailed([])
     setPending({ plan: null, error: null })
-    void deleteSessions(picked, 'plan').then(
-      (response) => setPending((current) => (current === null ? current : { ...current, plan: response })),
-      (cause) =>
+    setProgress(null)
+    void deleteSessions(picked, 'plan', setProgress).then(
+      (response) => {
+        setProgress(null)
+        setPending((current) => (current === null ? current : { ...current, plan: response }))
+      },
+      (cause) => {
+        setProgress(null)
         setPending((current) =>
           current === null ? current : { plan: null, error: cause instanceof Error ? cause.message : String(cause) },
-        ),
+        )
+      },
     )
   }
 
@@ -157,9 +175,11 @@ export function ManagePanel({ t, state, meta, reload }: PanelShare): React.React
   const applyDelete = (): void => {
     setBusy('apply')
     setError(null)
-    void deleteSessions(picked, 'apply').then(
+    setProgress(null)
+    void deleteSessions(picked, 'apply', setProgress).then(
       (response) => {
         setBusy(null)
+        setProgress(null)
         if (response.applied) {
           setNotice(response.summary)
           picking.clear()
@@ -171,6 +191,7 @@ export function ManagePanel({ t, state, meta, reload }: PanelShare): React.React
       },
       (cause) => {
         setBusy(null)
+        setProgress(null)
         setPending(null)
         setError(cause instanceof Error ? cause.message : String(cause))
       },
@@ -309,6 +330,13 @@ export function ManagePanel({ t, state, meta, reload }: PanelShare): React.React
             {t('manage.delete.action')}
           </button>
         </div>
+        {/* 归档 / 取消归档的进度：逐条走宿主能力，勾一整页时这一段是可感知的。 */}
+        {(busy === 'archive' || busy === 'unarchive') &&
+          (progress === null ? (
+            <p className="dsm-hint">{t('progress.waiting')}</p>
+          ) : (
+            <ProgressBlock t={t} progress={progress} />
+          ))}
         <p className="dsm-hint">{t('manage.delete.hint')}</p>
       </div>
 
@@ -316,17 +344,27 @@ export function ManagePanel({ t, state, meta, reload }: PanelShare): React.React
       {pending !== null && (
         <ConfirmDialog
           t={t}
-          title={t('manage.delete.dialogTitle')}
+          // 落地那一段标题也换掉：这时候已经不是"将要"了，正文里正跑着进度。
+          title={t(busy === 'apply' ? 'manage.delete.running' : 'manage.delete.dialogTitle')}
           confirmLabel={t('manage.delete.apply')}
           busyLabel={t('manage.delete.running')}
           busy={busy === 'apply'}
           planning={pending.plan === null && pending.error === null}
+          // 预演要扫整库（找这些会话与它们的后代），那几秒里把静态的「预演中…」换成进度。
+          planningDetail={progress === null ? undefined : <ProgressBlock t={t} progress={progress} />}
           error={pending.error}
           disabled={pending.plan === null || !pending.plan.preview.ok}
           onConfirm={applyDelete}
           onCancel={() => setPending(null)}
         >
-          {pending.plan !== null && (
+          {/* 落地：先备份整份会话目录再删，正文换成进度（清单说的是"将要"，这时候已经过期了）。 */}
+          {busy === 'apply' &&
+            (progress === null ? (
+              <p className="dsm-hint">{t('progress.waiting')}</p>
+            ) : (
+              <ProgressBlock t={t} progress={progress} note={t('manage.delete.progress.note')} />
+            ))}
+          {busy !== 'apply' && pending.plan !== null && (
             <>
               <p className={pending.plan.preview.ok ? 'dsm-ok' : 'dsm-warn'}>{pending.plan.summary}</p>
               {pending.plan.problems.length > 0 && (

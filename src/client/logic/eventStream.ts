@@ -1,35 +1,40 @@
 /**
- * 同步的事件流：把宿主那段 SSE 文本翻译成"进度 / 结果 / 失败"三件事。
+ * 长动作的事件流：把宿主那段 SSE 文本翻译成"进度 / 结果 / 失败"三件事。
+ *
+ * 这份东西原先叫 `syncStream.ts`——那时只有同步走 SSE（见
+ * [那篇决策](../../../.agents/notes/implemented/architecture/2026-10-03-sync-progress-streams-over-sse.md)）。
+ * 现在**每个按下之后要等一会的动作**都走同一条流（迁移、删除、回滚、导入、归档、扫库），宿主那一侧
+ * 也共用了一个 `streamResult()`，所以这里跟着改成通用名字、段名不再收窄成同步那几个。
  *
  * 为什么单独一个文件：这里每一行都是**纯字符串处理**（分帧、解释），没有 fetch 也没有 DOM。客户端
  * 半侧有两份 tsconfig，Host 侧那份**没有 DOM**——那条边界正是为了让"浏览器 API 出现在 Host 代码里"
  * 在类型层面就不成立，所以任何能被 Host 侧测试图引入的客户端文件都必须与 DOM 无关。真正的读流
- * （fetch 与 `response.body`）留在 [api.ts](./api.ts) 里，这里只认文本。
+ * （fetch 与 `response.body`）留在 [api.ts](../api.ts) 里，这里只认文本。
  *
- * 宿主那一侧的生产者见 `src/web.ts` 的 `sendEvent`；事件形状的鼻祖是 `src/sync.ts` 的 `SyncProgress`。
+ * 宿主那一侧的生产者见 `src/web.ts` 的 `sendEventStream()` / `streamResult()`；事件形状的鼻祖是
+ * `src/sync.ts` 与 `src/types.ts` 的 `ProgressEvent`。
  *
- * @module dsh-session-manager/client/syncStream
+ * @module dsh-session-manager/client/eventStream
  */
 
 /**
- * 同步进行中的一条进度事件（宿主 `SyncProgress`）。
+ * 一次长动作里**一段**的进度（宿主 `ProgressEvent`，见 src/types.ts）。
  *
  * `done` 是**已经做完**的条数——事件发在开始处理下一条之前，所以正在处理的是第 `done + 1` 条。
  *
- * 六段各有各的分母：`scan` / `remote` / `repo` / `compare` 是算计划的四段（预演就有），
- * `pull` / `push` 是真写盘的两段。`id` 与 `label` 只有写盘那两段有（"正在处理某一条"），算计划那四段
- * 只报做到哪儿。
+ * 段名（`phase`）是跨动作共用的一份词汇：扫库、读日志、打包、备份、改写、搬目录、写入、删除、还原、
+ * 归档、落注册表、复核、补检查点，外加同步自己那五段（读远端、认仓库、比对、拉、推）。**每段各有各
+ * 的分母**：`total` 是那一段要做的条数，`0` 表示这一段没有分母（一次网络往返、一次注册表落盘），界面
+ * 只摆那句话、不画条。
+ *
+ * 这里不收窄成联合类型：将来宿主多报一段时，界面该按"这一段不认识"处理（退回一句通用的话），
+ * 而不是整次动作失败。
  */
-export interface SyncProgressEvent {
-  /** 这一段是什么（见上）。 */
-  phase: 'scan' | 'remote' | 'repo' | 'compare' | 'pull' | 'push'
-  /** 这一段一共多少条。 */
+export interface ProgressEvent {
+  phase: string
   total: number
-  /** 这一段已经做完几条。 */
   done: number
-  /** 正在处理的那条会话 id（算计划那四段没有）。 */
   id?: string
-  /** 界面上怎么称呼它（标题优先，读不到退回 id）。 */
   label?: string
 }
 
@@ -79,8 +84,8 @@ function eventData(block: string): string | null {
 }
 
 /** 一条事件体解释出来的东西。 */
-export type SyncStreamEvent =
-  | { kind: 'progress'; progress: SyncProgressEvent }
+export type StreamEvent =
+  | { kind: 'progress'; progress: ProgressEvent }
   | { kind: 'result'; result: unknown }
   | { kind: 'error'; message: string }
 
@@ -89,9 +94,9 @@ export type SyncStreamEvent =
  *
  * @param data 一条 SSE 事件的 `data:` 内容（见 `SseFrames`）。
  * @returns 认识的事件；不认识时 `null`——半条事件（解码边界上被切断）、心跳、以及将来宿主新加的
- *   类型都不该让整次同步失败。
+ *   类型都不该让整次动作失败。
  */
-export function interpretSyncEvent(data: string): SyncStreamEvent | null {
+export function interpretStreamEvent(data: string): StreamEvent | null {
   let event: unknown
   try {
     event = JSON.parse(data)
@@ -104,12 +109,14 @@ export function interpretSyncEvent(data: string): SyncStreamEvent | null {
     case 'progress': {
       const progress = record['progress']
       if (typeof progress !== 'object' || progress === null) return null
-      return { kind: 'progress', progress: progress as SyncProgressEvent }
+      return { kind: 'progress', progress: progress as ProgressEvent }
     }
     case 'result':
       return { kind: 'result', result: record['result'] }
     case 'error':
-      return { kind: 'error', message: String(record['error'] ?? '同步失败') }
+      // 没带那句话时留空串：调用方按自己那个动作补一句（"同步失败" / "迁移失败"），
+      // 而不是让界面上出现一个 "undefined"。
+      return { kind: 'error', message: record['error'] === undefined ? '' : String(record['error']) }
     default:
       return null
   }

@@ -56,8 +56,11 @@ const REUSED_COMMON = ['cancel', 'close', 'save']
  * 与 null 不能混，所以单开一个种子而不是挤进 `nulls`）。它是渲染顺序里**第一个** `useState(undefined)`
  * 的状态（骨架的钩子先于任何分页跑；设置表单里那几个 undefined 状态都在后面）。
  */
-function fakeReact(recorded = [], firstNull = undefined, panel = undefined, arrays = [], strings = [], nulls = [], meta = undefined) {
+function fakeReact(recorded = [], firstNull = undefined, panel = undefined, arrays = [], strings = [], nulls = [], meta = undefined, sets = []) {
   let seededPanel = false
+  // useState 的调用序号（同一次渲染里的先后）：`sets` 记下"第几个状态位被 set 成了什么"，
+  // 于是用例能核"这个位先收到进度、后来又清回 null"这种成对的事。
+  let slot = 0
   const nullSeeds = firstNull === undefined ? [] : [firstNull]
   nullSeeds.push(...nulls)
   // 「种」进空数组状态的那些值按顺序发：分页组件里第一个 useState([]) 是勾选集，第二个是筛选条
@@ -81,28 +84,36 @@ function fakeReact(recorded = [], firstNull = undefined, panel = undefined, arra
         ...(children.length === 0 ? {} : { children: children.length > 1 ? children : children[0] }),
       }),
     useState: (value) => {
+      // 假钩子**不改**状态（每次渲染都还是种子那个值），但把"谁被 set 成了什么"记下来：面板把
+      // `onProgress` 接没接到 api 上、落地之后有没有清掉进度，只有这一条路能看见（见下面「迁移落地
+      // 的进度真的进了界面状态」那条用例）。
+      const mine = slot
+      slot += 1
+      const set = (next) => {
+        sets.push({ slot: mine, value: next })
+      }
       if (value === null && nullSeeds.length > 0) {
-        return [nullSeeds.shift(), () => {}]
+        return [nullSeeds.shift(), set]
       }
       // `/meta` 那一份（见上面的 meta 说明）。排在 null 之后、数组与空串之前，与骨架里的调用顺序一致。
       if (value === undefined && undefinedSeeds.length > 0) {
-        return [undefinedSeeds.shift(), () => {}]
+        return [undefinedSeeds.shift(), set]
       }
       // 页内分页的状态：假钩子不会点页签，于是除默认那一页之外的 JSX 在冒烟里一次都跑不到。
       // 只替换**第一个** `useState('manage')`（骨架里那个，默认页就是它），其余字符串状态照旧。
       if (!seededPanel && value === 'manage' && panel !== undefined) {
         seededPanel = true
-        return [panel, () => {}]
+        return [panel, set]
       }
       // 勾选集 / 筛选条：分页组件自己的 `useState([])`。不给勾选集种子，"按钮禁没禁用"就只能撞上
       // "一条都没勾所以禁用"这条分支，断言等于没测到宿主能力那件事（见下面那个用例的注释）。
       if (arraySeeds.length > 0 && Array.isArray(value) && value.length === 0) {
-        return [arraySeeds.shift(), () => {}]
+        return [arraySeeds.shift(), set]
       }
       if (stringSeeds.length > 0 && value === '') {
-        return [stringSeeds.shift(), () => {}]
+        return [stringSeeds.shift(), set]
       }
-      return [value, () => {}]
+      return [value, set]
     },
     useEffect: () => {},
     useRef: (value) => ({ current: value }),
@@ -229,7 +240,8 @@ function loadBundle({ firstNull, panel, arrays, strings, nulls, meta, fetch } = 
   vm.runInNewContext(code, sandbox, { filename: 'lib/client.js' })
   assert.ok(entry !== null, '产物必须以 window.__ModuleLoader__.load({ id, factory }) 报名')
   const recorded = []
-  const react = fakeReact(recorded, firstNull, panel, arrays, strings, nulls, meta)
+  const sets = []
+  const react = fakeReact(recorded, firstNull, panel, arrays, strings, nulls, meta, sets)
   const mod = entry.factory((specifier) => {
     if (specifier === 'react') return react
     if (specifier === 'react/jsx-runtime') {
@@ -278,7 +290,7 @@ function loadBundle({ firstNull, panel, arrays, strings, nulls, meta, fetch } = 
     }
     throw new Error(`产物 require 了平台模块表里没有的模块：${specifier}`)
   })
-  return { entry, mod, nodes, recorded }
+  return { entry, mod, nodes, recorded, sets }
 }
 
 test('客户端产物：只 require 平台基线模块，id 与包名一致', { skip }, () => {
@@ -319,7 +331,7 @@ test('客户端产物：导出面符合客户端插件契约', { skip }, () => {
 
 /** 跑一次 apply，收下所有注册面（后面几个用例共用）。 */
 function mount({ translate, state, meta, panel, arrays, strings, nulls, configForms, credentials, fetch } = {}) {
-  const { mod, nodes, recorded } = loadBundle({ firstNull: state, panel, arrays, strings, nulls, meta, fetch })
+  const { mod, nodes, recorded, sets } = loadBundle({ firstNull: state, panel, arrays, strings, nulls, meta, fetch })
   const registrations = []
   const dictionaries = []
   const effects = []
@@ -408,7 +420,7 @@ function mount({ translate, state, meta, panel, arrays, strings, nulls, configFo
   })
 
   return {
-    mod, nodes, recorded, registrations, dictionaries, effects, injectedSlots, injectedServices,
+    mod, nodes, recorded, sets, registrations, dictionaries, effects, injectedSlots, injectedServices,
     bound, t, seat, asked,
   }
 }
@@ -3262,6 +3274,11 @@ test('客户端产物：同步独占「同步」分页，传输页不再有那�
 // 下面几条钉住三件事：① 每个会写盘的动作只有一个入口（页面上不再有独立的预演按钮）；② 弹窗里摆的
 // 是宿主那份计划（清单、问题、备份位置），主按钮在计划不 ok 时真的禁用；③ 级联进来的行有出处标签。
 
+/** 页面上开着的那几个弹窗（官方 `Modal` 渲染出来的 `role="dialog"` 元素，标题在 `aria-label` 上）。 */
+function dialogsOf(recorded) {
+  return recorded.filter((node) => node.props?.role === 'dialog')
+}
+
 /** 弹窗里的主按钮（footer 里带 `dsm-primary` 的那个）。 */
 function primaryOf(recorded) {
   return elementsOf(recorded.find((node) => String(node.props?.className) === 'dsm-fakeDialogFooter')).find(
@@ -3705,10 +3722,10 @@ test('客户端产物：落地时弹窗正文换成进度条（第几条 / 共�
   assert.ok(bar !== undefined, '进度条本体在弹窗正文里')
   assert.equal(bar.props['aria-valuenow'], 13, '正在处理第 13 条（done 是**已经做完**的条数）')
   assert.equal(bar.props['aria-valuemax'], 84, '分母是这一段要做的总条数')
-  assert.equal(bar.props['aria-label'], 'sync.progress.pushing:{"current":13,"total":84}', '可读名就是那句计数')
+  assert.equal(bar.props['aria-label'], 'progress.push:{"current":13,"total":84}', '可读名就是那句计数')
   const fill = recorded.find((node) => String(node.props?.className) === 'dsm-progressFill')
   assert.equal(fill.props.style.width, `${(13 / 84) * 100}%`, '填充宽度按 13/84 算，不是写死的')
-  assert.ok(text.includes('sync.progress.pushing:{"current":13,"total":84}'), '正文里写清正在推送第几条')
+  assert.ok(text.includes('progress.push:{"current":13,"total":84}'), '正文里写清正在推送第几条')
   assert.ok(text.includes('会话九'), '当前那一条的标题也在（一条几 MB 的包会在这停一会儿）')
   assert.ok(text.includes('sync.progress.note'), '并说明为什么这里没有「取消」')
   assert.equal(recorded.some((node) => node.type === 'table'), false, '落地时不再画计划表（那张表说的是"将要"）')
@@ -3723,12 +3740,12 @@ test('客户端产物：落地时弹窗正文换成进度条（第几条 / 共�
     nulls: [null, null, 'apply', 'apply', null, null, progressOf('pull', 0, 3, 'session-a')],
   })
   const pullingText = strings(pulling.registrations[0].component(pulling.registrations[0].registration.inject()))
-  assert.ok(pullingText.includes('sync.progress.pulling:{"current":1,"total":3}'), '拉那一段说「正在拉取」')
+  assert.ok(pullingText.includes('progress.pull:{"current":1,"total":3}'), '拉那一段说「正在拉取」')
 
   // 还没收到第一条事件（宿主刚起来，什么都没开始报）。
   const preparing = mount({ state, panel: 'sync', nulls: [null, null, 'apply', 'apply'] })
   const preparingText = strings(preparing.registrations[0].component(preparing.registrations[0].registration.inject()))
-  assert.ok(preparingText.includes('sync.progress.preparing'), '那一段说"正在读取远端索引…"')
+  assert.ok(preparingText.includes('progress.waiting'), '那一段说"正在读取远端索引…"')
   assert.equal(
     preparing.recorded.some((node) => String(node.props?.className) === 'dsm-progress'),
     false,
@@ -3753,7 +3770,7 @@ test('客户端产物：落地时弹窗正文换成进度条（第几条 / 共�
   const scanning = phaseOf({ phase: 'scan', done: 42, total: 85 })
   assert.equal(scanning.bar.props['aria-valuenow'], 43, '扫到第 43 条（done 是已经扫完的条数）')
   assert.equal(scanning.bar.props['aria-valuemax'], 85, '分母是这次要尝试的条目数')
-  assert.ok(scanning.text.includes('sync.progress.scanning:{"current":43,"total":85}'), '预演时说"正在扫描本机会话"')
+  assert.ok(scanning.text.includes('progress.scan:{"current":43,"total":85}'), '预演时说"正在扫描本机会话"')
   assert.equal(scanning.text.includes('dialog.previewing'), false, '有具体进度就不摆那句静态的「预演中…」')
   assert.equal(scanning.mounted.recorded.some((node) => node.type === 'table'), false, '计划还没回来，不画表')
   assert.equal(scanning.text.includes('sync.progress.note'), false, '预演阶段还没有东西可覆盖，不摆那句"只增不覆盖"')
@@ -3761,16 +3778,329 @@ test('客户端产物：落地时弹窗正文换成进度条（第几条 / 共�
   // 读远端索引是一次往返，没有"第几条"可讲（宿主给的分母是 0）：固定一句话，**不摆条**——画一条
   // 1/1 的会让人以为已经做完了，而它其实还在等。
   const remote = phaseOf({ phase: 'remote', done: 0, total: 0 })
-  assert.ok(remote.text.includes('sync.progress.preparing'), '读远端索引那一段就说"正在读取远端索引…"')
+  assert.ok(remote.text.includes('progress.remote'), '读远端索引那一段就说"正在读取远端索引…"')
   assert.equal(remote.bar, undefined, '分母是 0 的那一段不画进度条')
 
   // 认本机仓库身份：每个候选目录一个 git 进程，真机上这一段比前两段加起来还长。
   const matching = phaseOf({ phase: 'repo', done: 4, total: 13 })
-  assert.ok(matching.text.includes('sync.progress.matchingRepos:{"current":5,"total":13}'), '认仓库时说的是"正在核对本机仓库"')
+  assert.ok(matching.text.includes('progress.repo:{"current":5,"total":13}'), '认仓库时说的是"正在核对本机仓库"')
 
   // 比对内容：分母是两边都有那些会话的文件数。
   const comparing = phaseOf({ phase: 'compare', done: 7, total: 12 })
-  assert.ok(comparing.text.includes('sync.progress.comparing:{"current":8,"total":12}'), '比对时说的是"正在比对内容"')
+  assert.ok(comparing.text.includes('progress.compare:{"current":8,"total":12}'), '比对时说的是"正在比对内容"')
+})
+
+// ---- 其它长动作的进度 ----
+//
+// 进度块原先只有同步有（见上面那两条）。现在迁移 / 删除 / 回滚 / 导入 / 归档 / 扫库共用同一套地基：
+// 宿主那一侧一个 `streamResult()`（见 src/web.ts），界面这一侧一个 `ProgressBlock`（见
+// ProgressBlock.tsx）。下面几条钉住三件事：每个动作的弹窗正文里真的接上了它、分母为 0 的段不画条、
+// "还没有事件"与"认不出来的段名"各有兜底。
+
+/** 一条进度事件（形状见 src/types.ts 的 `ProgressEvent`）。 */
+const progressOf = (phase, done, total, label) => ({ phase, done, total, id: 's-1', ...(label === undefined ? {} : { label }) })
+
+test('客户端产物：迁移落地时弹窗正文换成进度块（计划表说的是"将要"，这时候已经过期了）', { skip }, () => {
+  const state = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    sessions: [],
+    workspaces: [],
+  }
+  const response = {
+    mode: 'apply',
+    ok: true,
+    preview: {
+      ok: true,
+      problems: [],
+      from: '/home/u/dev/alpha',
+      to: '/home/u/dev/beta',
+      sourceProjectDir: '/home/u/.dsh/sessions/alpha',
+      targetProjectDir: '/home/u/.dsh/sessions/beta',
+      unowned: false,
+      sourceProjectDirs: ['/home/u/.dsh/sessions/alpha'],
+      sessions: [{ id: 's-1', createdAt: 5, registered: true, alreadyAtTarget: false, sourceDir: '/x', targetDir: '/y', files: 1, bytes: 10 }],
+      cascaded: 0,
+      liveSkipped: [],
+      files: 1,
+      bytes: 10,
+      artifacts: null,
+      registryChange: null,
+      summary: 'plan summary',
+    },
+    applied: true,
+    rewritten: 1,
+    moved: 1,
+    artifactsMoved: 0,
+    verified: true,
+    problems: [],
+    summary: 'done',
+    takesEffect: 'immediate',
+  }
+  /*
+   * null 顺序：骨架的 error / 目录字段的两份面板 / **pending**（种成落地完成的那份响应）/ **busy**
+   * （'apply'：假钩子不会点按钮，落地那一段只能这样走进去）/ error / notice / effect / **progress**
+   * ——进度声明排在最后，见 MigrationPanel.tsx 的说明。
+   */
+  const mounted = mount({
+    state,
+    panel: 'migrate',
+    strings: ['/home/u/dev/alpha', '/home/u/dev/beta'],
+    nulls: [null, null, null, { response, error: null }, 'apply', null, null, null, progressOf('rewrite', 7, 253, '会话九')],
+  })
+  const recorded = mounted.recorded
+  const text = strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
+
+  const bar = recorded.find((node) => String(node.props?.className) === 'dsm-progress')
+  assert.ok(bar !== undefined, '落地时弹窗正文里有一条进度条')
+  assert.equal(bar.props['aria-valuenow'], 8, '正在改第 8 份日志（done 是**已经做完**的条数）')
+  assert.equal(bar.props['aria-valuemax'], 253, '分母是这一步真实的工作单位（这里是日志文件数）')
+  assert.ok(text.includes('progress.rewrite:{"current":8,"total":253}'), '正文里写清在改日志')
+  assert.ok(text.includes('会话九'), '当前那一条也在')
+  assert.ok(text.includes('migrate.progress.note'), '并说明中断之后能在「备份」页回退')
+  assert.equal(text.includes('plan summary'), false, '落地时不再摆那份计划摘要（它说的是"将要"）')
+  assert.equal(dialogsOf(recorded)[0].props['aria-label'], 'migrate.running', '标题从「将要迁移」换成「迁移中…」')
+  assert.equal(primaryOf(recorded).props.children, 'migrate.running', '确认按钮变成"迁移中…"')
+  assert.equal(primaryOf(recorded).props.disabled, true, '落地时确认按钮禁用（不能按第二下）')
+  assert.equal(cancelOf(recorded).props.disabled, true, '取消也禁用：中途撒手会在库里留下中间状态')
+
+  // 还没有收到第一条事件（按下确认之后的一瞬）：只有一句"正在准备…"，不画条。
+  const preparing = mount({
+    state,
+    panel: 'migrate',
+    strings: ['/home/u/dev/alpha', '/home/u/dev/beta'],
+    nulls: [null, null, null, { response, error: null }, 'apply'],
+  })
+  const preparingText = strings(preparing.registrations[0].component(preparing.registrations[0].registration.inject()))
+  assert.ok(preparingText.includes('progress.waiting'), '那一段说"正在准备…"')
+  assert.equal(
+    preparing.recorded.some((node) => String(node.props?.className) === 'dsm-progress'),
+    false,
+    '还不知道总数就不画条',
+  )
+})
+
+test('客户端产物：删除与回滚的弹窗正文同样换成进度块', { skip }, () => {
+  const deleteState = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    archiveAvailable: true,
+    sessions: [{ id: 's-1', cwd: '/home/u/dev/alpha', createdAt: 5, dir: '/home/u/dev/alpha', bytes: 2048, files: [] }],
+    workspaces: [{ id: 'w1', path: '/home/u/dev/alpha', title: '工作区甲', sessionIds: ['s-1'] }],
+  }
+  const deletePlan = {
+    mode: 'apply',
+    ok: true,
+    preview: {
+      ok: true,
+      problems: [],
+      entries: [{ id: 's-1', createdAt: 5, dir: '/home/u/.dsh/sessions/alpha/s-1', files: [], bytes: 2048, live: false }],
+      files: 0,
+      bytes: 2048,
+      backupRoot: '/home/u/.dsh/dsh-session-manager/backups',
+    },
+    applied: true,
+    dirsRemoved: 1,
+    removedProjectDirs: [],
+    verified: true,
+    backupDir: '/home/u/.dsh/dsh-session-manager/backups/2026-10-08T00-00-00',
+    problems: [],
+    summary: '已删除 1 个会话',
+    takesEffect: 'restart-required',
+  }
+  // null 顺序：骨架的 error / 会话页的 busy / error / notice / pending / **progress**（勾选集由 arrays 种）。
+  const deleting = mount({
+    state: deleteState,
+    panel: 'manage',
+    arrays: [['s-1']],
+    nulls: [null, 'apply', null, null, { plan: deletePlan, error: null }, progressOf('remove', 0, 1, '会话甲')],
+  })
+  const deletingText = strings(deleting.registrations[0].component(deleting.registrations[0].registration.inject()))
+  assert.ok(deletingText.includes('progress.remove:{"current":1,"total":1}'), '删除那一段说"正在删除"')
+  assert.ok(deletingText.includes('manage.delete.progress.note'), '并说明删除前先备份、中断了能恢复')
+  assert.equal(
+    dialogsOf(deleting.recorded)[0].props['aria-label'],
+    'manage.delete.running',
+    '标题从「将要删除」换成「删除中…」',
+  )
+
+  // 归档：没有弹窗，进度块摆在动作行下面（逐条走宿主能力，勾一整页时这一段是可感知的）。
+  const archiving = mount({
+    state: deleteState,
+    panel: 'manage',
+    arrays: [['s-1']],
+    nulls: [null, 'archive', null, null, null, progressOf('archive', 0, 3, undefined)],
+  })
+  const archivingText = strings(archiving.registrations[0].component(archiving.registrations[0].registration.inject()))
+  assert.ok(archivingText.includes('progress.archive:{"current":1,"total":3}'), '归档那一段说"正在更新归档状态"')
+
+  const backup = {
+    dir: '/home/u/.dsh/dsh-session-manager/backups/2026-10-03T08-00-00',
+    createdAt: '2026-10-03T08:00:00.000Z',
+    sessions: 2,
+    artifacts: 0,
+    kind: 'migrate',
+    from: '/home/u/dev/alpha',
+    to: '/home/u/dev/beta',
+  }
+  // null 顺序：骨架的 error / 备份页的 error / notice / busy / dialog / **progress**。
+  const rolling = mount({
+    state: { sessionsRoot: '/home/u/.dsh/sessions', registryPath: '/home/u/.dsh/registry.json', problems: [], sessions: [], workspaces: [] },
+    panel: 'backup',
+    arrays: [[backup]],
+    nulls: [
+      null,
+      null,
+      null,
+      backup.dir,
+      {
+        backup,
+        plan: {
+          mode: 'apply',
+          dryRun: false,
+          actions: ['把 s-1 搬回 /home/u/dev/alpha'],
+          restoredFiles: 1,
+          restoredArtifacts: 0,
+          registryRestored: true,
+          backupDir: backup.dir,
+          createdAt: backup.createdAt,
+          sessions: 2,
+          artifacts: 0,
+          takesEffect: 'immediate',
+        },
+        error: null,
+      },
+      progressOf('restore', 1, 2, '会话乙'),
+    ],
+  })
+  const rollingText = strings(rolling.registrations[0].component(rolling.registrations[0].registration.inject()))
+  assert.ok(rollingText.includes('progress.restore:{"current":2,"total":2}'), '回滚那一段说"正在还原"')
+  assert.ok(rollingText.includes('backup.progress.note'), '并说明中断了再点一次这份备份即可')
+  assert.equal(dialogsOf(rolling.recorded)[0].props['aria-label'], 'backup.rollback.running', '标题换成「回滚中…」')
+})
+
+test('客户端产物：导入落地时弹窗正文换成进度块', { skip }, () => {
+  const state = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    sessions: [{ id: 's-1', cwd: '/home/u/dev/alpha', createdAt: 5, dir: '/home/u/dev/alpha', bytes: 10, files: [] }],
+    workspaces: [{ id: 'w1', path: '/home/u/dev/alpha', title: '工作区甲', sessionIds: ['s-1'] }],
+  }
+  const plan = {
+    mode: 'apply',
+    bundle: { createdAt: '2026-10-01T00:00:00.000Z', source: {}, sessions: 2 },
+    problems: [],
+    entries: [
+      { id: 's-1', action: 'create', dir: '/home/u/.dsh/sessions/alpha/s-1', files: [{ name: 'session.v4.jsonl.zstd', bytes: 10 }], toCwd: '/home/u/dev/alpha' },
+      { id: 's-2', action: 'skip', reason: '库里已有', dir: '/home/u/.dsh/sessions/alpha/s-2', files: [], fromCwd: '/home/u/dev/alpha' },
+    ],
+    created: ['s-1'],
+    rehomed: ['s-1'],
+    bytes: 10,
+    registryChange: null,
+    ok: true,
+    written: ['s-1'],
+    writtenBytes: 10,
+    registryWritten: true,
+    takesEffect: 'immediate',
+    note: '会话已落盘',
+  }
+  // null 顺序：骨架的 error / 传输页的 file / payload / **pending** / **busy**（'apply'：假钩子不会点
+  // 按钮，落地那一段只能这样走进去）/ error / notice / 目录字段的面板 / 手输路径 / **progress**。
+  const mounted = mount({
+    state,
+    panel: 'transfer',
+    nulls: [null, null, null, { plan, error: null }, 'apply', null, null, null, null, progressOf('write', 0, 1, '会话甲')],
+  })
+  const text = strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
+  assert.ok(text.includes('progress.write:{"current":1,"total":1}'), '落地那一段说"正在写入"')
+  assert.ok(text.includes('transfer.import.progress.note'), '并说明导入只增不覆盖、中断了再导一次')
+  assert.equal(
+    dialogsOf(mounted.recorded)[0].props['aria-label'],
+    'transfer.import.applying',
+    '标题从「将要写入」换成「导入中…」',
+  )
+  assert.equal(text.includes('table.create'), false, '落地时不再摆那张计划表（它说的是"将要"）')
+})
+
+test('客户端产物：进度块的段名是一份共用词汇，认不出来的段名退到一句通用的话', { skip }, () => {
+  const state = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    archiveAvailable: true,
+    sessions: [{ id: 's-1', cwd: '/home/u/dev/alpha', createdAt: 5, dir: '/home/u/dev/alpha', bytes: 2048, files: [] }],
+    workspaces: [{ id: 'w1', path: '/home/u/dev/alpha', title: '工作区甲', sessionIds: ['s-1'] }],
+  }
+  const plan = {
+    mode: 'apply',
+    ok: true,
+    preview: {
+      ok: true,
+      problems: [],
+      entries: [{ id: 's-1', createdAt: 5, dir: '/home/u/.dsh/sessions/alpha/s-1', files: [], bytes: 2048, live: false }],
+      files: 0,
+      bytes: 2048,
+      backupRoot: '/home/u/.dsh/dsh-session-manager/backups',
+    },
+    applied: true,
+    dirsRemoved: 1,
+    removedProjectDirs: [],
+    verified: true,
+    problems: [],
+    summary: '已删除 1 个会话',
+    takesEffect: 'immediate',
+  }
+  /** 种一条进度事件，把弹窗正文摊成文字与元素。 */
+  const render = (progress) => {
+    const mounted = mount({
+      state,
+      panel: 'manage',
+      arrays: [['s-1']],
+      nulls: [null, 'apply', null, null, { plan, error: null }, progress],
+    })
+    return {
+      mounted,
+      text: strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject())),
+      bar: mounted.recorded.find((node) => String(node.props?.className) === 'dsm-progress'),
+    }
+  }
+
+  // 共用词汇里的每一段都有一句话（新增一段却忘了配文案时，这里当场红）。
+  const wording = {
+    scan: 'progress.scan:{"current":5,"total":9}',
+    read: 'progress.read:{"current":5,"total":9}',
+    pack: 'progress.pack:{"current":5,"total":9}',
+    backup: 'progress.backup:{"current":5,"total":9}',
+    rewrite: 'progress.rewrite:{"current":5,"total":9}',
+    move: 'progress.move:{"current":5,"total":9}',
+    write: 'progress.write:{"current":5,"total":9}',
+    remove: 'progress.remove:{"current":5,"total":9}',
+    restore: 'progress.restore:{"current":5,"total":9}',
+    archive: 'progress.archive:{"current":5,"total":9}',
+    verify: 'progress.verify:{"current":5,"total":9}',
+    repo: 'progress.repo:{"current":5,"total":9}',
+    compare: 'progress.compare:{"current":5,"total":9}',
+    pull: 'progress.pull:{"current":5,"total":9}',
+    push: 'progress.push:{"current":5,"total":9}',
+    // 补齐那条是逐条走宿主，有分母
+    warm: 'progress.warm:{"current":5,"total":9}',
+  }
+  for (const [phase, expected] of Object.entries(wording)) {
+    assert.ok(render({ phase, done: 4, total: 9 }).text.includes(expected), `${phase} 那一段有自己的话`)
+  }
+  // 没有分母的三段：只说在做什么，**不画条**。
+  for (const phase of ['registry', 'remote']) {
+    const rendered = render({ phase, done: 0, total: 0 })
+    assert.ok(rendered.text.includes(`progress.${phase}`), `${phase} 那一段有固定的一句话`)
+    assert.equal(rendered.bar, undefined, `${phase} 没有分母，不画条`)
+  }
+  // 宿主比界面新时报一段界面还不认识的段名：退到一句通用的话，整块不许消失。
+  const unknown = render({ phase: 'future-phase', done: 0, total: 0 })
+  assert.ok(unknown.text.includes('progress.working'), '认不出来的段名退到"正在处理…"')
 })
 
 test('客户端产物：确认同步打的是落地端点，读的是一条事件流而不是等一次性 JSON', { skip }, async () => {
@@ -3959,4 +4289,112 @@ test('客户端产物：同步预演读的也是一条事件流（不是等一�
   assert.equal(calls.some((call) => call.text === true), false, '预演也不走一次性 text()')
   assert.equal(index, chunks.length, '三条事件都读出来了（含算计划的那两条）')
   assert.ok(reads >= chunks.length + 1, '一直读到 done（不是读一块就收手）')
+})
+
+test('客户端产物：迁移落地时宿主报的每条进度都进了界面状态（事件流 → 面板的回调）', { skip }, async () => {
+  /*
+   * 上面那几条「弹窗正文换成进度块」是把一份进度**种**进状态里看它怎么画——它们证明不了
+   * "宿主报的进度真的会走到界面上"。这一条从另一头钉：给一个假 `fetch`，让它按 SSE 分帧吐出
+   * 一条进度 + 一条收尾，然后核**面板传给 api 的那个回调真的被调到了**（`sets` 是假钩子记下的
+   * "谁被 set 成了什么"，见 fakeReact）。
+   *
+   * 少了这一条，`migrate(request, setProgress)` 里那个参数掉了也不会红：种进去的进度照样画得出来。
+   */
+  const state = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    sessions: [{ id: 's-1', cwd: '/home/u/dev/alpha', createdAt: 5, dir: '/home/u/dev/alpha', bytes: 2048, files: [] }],
+    workspaces: [{ id: 'w1', path: '/home/u/dev/alpha', title: '工作区甲', sessionIds: ['s-1'] }],
+  }
+  const preview = {
+    ok: true,
+    problems: [],
+    from: '/home/u/dev/alpha',
+    to: '/home/u/dev/beta',
+    sourceProjectDir: '/home/u/.dsh/sessions/alpha',
+    targetProjectDir: '/home/u/.dsh/sessions/beta',
+    unowned: false,
+    sourceProjectDirs: ['/home/u/.dsh/sessions/alpha'],
+    sessions: [
+      { id: 's-1', createdAt: 5, registered: true, alreadyAtTarget: false, sourceDir: '/x', targetDir: '/y', files: 1, bytes: 10 },
+    ],
+    cascaded: 0,
+    liveSkipped: [],
+    files: 1,
+    bytes: 10,
+    artifacts: null,
+    registryChange: null,
+    summary: 'plan summary',
+  }
+  const plan = { mode: 'plan', ok: true, preview, applied: false, rewritten: 0, moved: 0, artifactsMoved: 0, verified: false, problems: [], summary: 'plan summary', takesEffect: 'immediate' }
+  const applied = { mode: 'apply', ok: true, preview, applied: true, rewritten: 1, moved: 1, artifactsMoved: 0, verified: true, problems: [], summary: 'done', takesEffect: 'immediate' }
+  const chunks = [
+    'data: {"type":"progress","progress":{"phase":"rewrite","total":253,"done":6,"id":"s-1","label":"会话甲"}}\n\n',
+    `data: {"type":"result","result":${JSON.stringify(applied)}}\n\n`,
+  ]
+  let index = 0
+  const calls = []
+  const mounted = mount({
+    state,
+    panel: 'migrate',
+    strings: ['/home/u/dev/alpha', '/home/u/dev/beta'],
+    nulls: [null, null, null, { response: plan, error: null }],
+    fetch: async (url, init) => {
+      calls.push({ url: String(url), method: init?.method, accept: init?.headers?.accept, body: init?.body })
+      return {
+        ok: true,
+        status: 200,
+        headers: { get: (name) => (name === 'content-type' ? 'text/event-stream; charset=utf-8' : null) },
+        body: {
+          getReader: () => ({
+            read: async () =>
+              index < chunks.length
+                ? { done: false, value: new TextEncoder().encode(chunks[index++]) }
+                : { done: true },
+          }),
+        },
+        // 一次性那条路必须没被走到：走错的话这里会被调用，用例当场红。
+        text: async () => {
+          throw new Error('落地走的是事件流，不该读一次性 text()')
+        },
+      }
+    },
+  })
+
+  // 假钩子不会点按钮：先把树摊开，再点弹窗底部那枚主动作（确认迁移）。
+  strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
+  primaryOf(mounted.recorded).props.onClick()
+  for (let tries = 0; tries < 50 && index < chunks.length; tries += 1) await new Promise((resolve) => setImmediate(resolve))
+
+  // `/meta` 与 `/state` 是骨架首屏那两条（假钩子把 effect 直接跑了），这里只认落地那一条。
+  const landing = calls.filter((call) => call.url === '/dsh-session-manager/api/migrate')
+  assert.equal(landing.length, 1, '落地只打一次')
+  assert.equal(landing[0].method, 'POST')
+  assert.equal(landing[0].accept, 'text/event-stream', '界面明说自己要事件流')
+  assert.deepEqual(JSON.parse(landing[0].body), {
+    mode: 'apply',
+    from: '/home/u/dev/alpha',
+    to: '/home/u/dev/beta',
+    sessionIds: null,
+    includeUnowned: true,
+    includeArtifacts: false,
+  })
+
+  // 跨 realm：产物在另一个 vm 里，把那条进度摊成宿主这边的普通对象再比。
+  const progressSets = mounted.sets.filter(
+    (entry) => entry.value !== null && typeof entry.value === 'object' && 'phase' in entry.value,
+  )
+  assert.deepEqual(
+    progressSets.map((entry) => ({ ...entry.value })),
+    [{ phase: 'rewrite', total: 253, done: 6, id: 's-1', label: '会话甲' }],
+    '宿主报的那条进度原样进了界面状态（面板真的把 onProgress 接上了）',
+  )
+  // 收尾那条要把进度清掉（不然下一次打开弹窗会先闪一条上一轮的进度）：**同一个状态位**先收到进度、
+  // 之后被置回 null（只看"后面还有没有 null"是不够的——同一段里 setBusy(null) 也会满足它）。
+  const landed = mounted.sets.findIndex((entry) => entry.value !== null && typeof entry.value === 'object' && 'phase' in entry.value)
+  const cleared = mounted.sets.findIndex(
+    (entry, index) => index > landed && entry.slot === mounted.sets[landed].slot && entry.value === null,
+  )
+  assert.ok(cleared > landed, '落地收尾时那条进度被清掉（同一个状态位置回 null）')
 })

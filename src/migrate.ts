@@ -21,6 +21,7 @@ import type {
   DecodeAll,
   EffectOutcome,
   LiveSkip,
+  ProgressReporter,
   RelocationPlan,
   RegistryChange,
   WarmOutcome,
@@ -243,7 +244,7 @@ function previewOf(plan: RelocationPlan): MigrationPreview {
   }
 }
 
-function buildPlan(deps: MigrateDeps, request: MigrateRequest): RelocationPlan {
+function buildPlan(deps: MigrateDeps, request: MigrateRequest, onProgress?: ProgressReporter): RelocationPlan {
   // 空白判据的默认读取器：界面与工具层因此走同一套候选口径（见 MigrateDeps.resolveBlank）。
   const resolveBlank = deps.resolveBlank ?? createBlankResolver({ cacheDir: projectionCacheDir(deps.registryPath) })
   return buildRelocationPlan({
@@ -260,12 +261,21 @@ function buildPlan(deps: MigrateDeps, request: MigrateRequest): RelocationPlan {
     resolveBlank,
     live: deps.liveSessionIds?.() ?? new Set<string>(),
     ...(deps.resolveTitle === undefined ? {} : { resolveTitle: deps.resolveTitle }),
+    ...(onProgress === undefined ? {} : { onProgress }),
   })
 }
 
-/** 只读预演：算出"将会发生什么"，不写任何字节。 */
-export function previewMigration(deps: MigrateDeps, request: MigrateRequest): MigrationPreview {
-  return previewOf(buildPlan(deps, request))
+/**
+ * 只读预演：算出"将会发生什么"，不写任何字节。
+ *
+ * @param options.onProgress 发现阶段的进度（`scan`：扫源目录或整库）。
+ */
+export function previewMigration(
+  deps: MigrateDeps,
+  request: MigrateRequest,
+  options: { onProgress?: ProgressReporter } = {},
+): MigrationPreview {
+  return previewOf(buildPlan(deps, request, options.onProgress))
 }
 
 /**
@@ -275,13 +285,18 @@ export function previewMigration(deps: MigrateDeps, request: MigrateRequest): Mi
  * 因此不存在"预览一套、实做另一套"。
  *
  * 真的改过注册表之后还会把活儿交给宿主自己做（见 `takeEffectOnHost()`）；那是异步的，所以这里也是。
+ *
+ * @param options.onProgress 全程的进度（见 `types.ts` 的 `ProgressEvent`）：预演那条路上只有 `scan`；
+ *   落地那条路上依次是 `scan`（重算一遍计划，与预演同源）、`backup`、`rewrite`、`move`、`registry`、
+ *   `verify`、`warm`。段与段的分母各自独立——合并成一个百分比只会骗人。
  */
 export async function runMigration(
   deps: MigrateDeps,
   request: MigrateRequest,
-  options: { apply: boolean },
+  options: { apply: boolean; onProgress?: ProgressReporter },
 ): Promise<MigrationRun> {
-  const plan = buildPlan(deps, request)
+  const onProgress = options.onProgress
+  const plan = buildPlan(deps, request, onProgress)
   const preview = previewOf(plan)
   if (!plan.ok) {
     return {
@@ -312,8 +327,12 @@ export async function runMigration(
     registryPath: deps.registryPath,
     decodeAll: deps.decodeAll,
     backupRoot: deps.backupRoot,
+    ...(onProgress === undefined ? {} : { onProgress }),
   })
-  const verified = verifyAppliedPlan(plan, { decodeAll: deps.decodeAll })
+  const verified = verifyAppliedPlan(plan, {
+    decodeAll: deps.decodeAll,
+    ...(onProgress === undefined ? {} : { onProgress }),
+  })
   // 复核失败也照样让宿主认：磁盘就是磁盘，宿主该看到的是真实状态，藏起来只会更晚暴露。
   // 注册表终态一并交过去：宿主没接住那一步时它会用内存副本盖掉这次写盘，那时得靠这份终态写回来。
   const effect = await takeEffectOnHost(plan.registryChange, deps, { registry: plan.nextRegistry })
@@ -324,6 +343,7 @@ export async function runMigration(
   const warm = await warmCheckpoints(
     plan.sessions.map((session) => session.id),
     deps,
+    onProgress,
   )
   // 注册表复核：会话 id 只按计划变大、绝不缩水，已存在的工作区 id 与路径不变（见 verifyRegistryChange）。
   const registryCheck = verifyRegistryChangeOnDisk(deps, result.backupDir, plan.registryChange)
@@ -405,10 +425,14 @@ export function readBackup(deps: Pick<MigrateDeps, 'backupRoot'>, backupDir: unk
  */
 export async function rollbackMigration(
   deps: Pick<MigrateDeps, 'backupRoot'>,
-  request: { backupDir: string; dryRun?: boolean },
+  request: { backupDir: string; dryRun?: boolean; onProgress?: ProgressReporter },
 ): Promise<RollbackOutcome> {
   const { dir, manifest } = readBackup(deps, request.backupDir)
-  const result = rollback(manifest, { backupDir: dir, dryRun: request.dryRun === true })
+  const result = rollback(manifest, {
+    backupDir: dir,
+    dryRun: request.dryRun === true,
+    ...(request.onProgress === undefined ? {} : { onProgress: request.onProgress }),
+  })
   // 只有注册表真的被还原过才谈得上"要生效"（删除那类备份从头到尾没碰过它）。
   const effect: EffectOutcome | undefined =
     !result.dryRun && result.registryRestored ? { kind: 'file-only' } : undefined

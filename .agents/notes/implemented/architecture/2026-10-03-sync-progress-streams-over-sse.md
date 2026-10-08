@@ -34,7 +34,7 @@ Status: implemented
 
 - **两条路报同一套事件**：落地要先算一遍计划，所以预演的四段（`scan` 扫本机库、`remote` 读远端索引、
   `repo` 逐个候选目录认仓库身份、`compare` 逐条比对内容）在落地那条路上也照报一遍，之后才是 `pull` 与
-  `push`。界面因此只有一套渲染：同一个 `ProgressBlock`、同一个按 `phase` 选文案的 `progressTextOf`。
+  `push`。界面因此只有一套渲染：同一个 `ProgressBlock`、同一个按 `phase` 选文案的 `progressTextOf`（这一套现在六个动作共用，见 [每个长动作都报进度](./2026-10-08-every-long-action-streams-progress.md)）。
 - **拉取与推送各自一段，分母不同**：`total` 是**那一段要做的条数**。跳过的（库里已有同 id、远端那份没变、
   没配映射、目标目录不存在）**不进分母**——它们不花时间，算进去进度条就走不满。
 - **`total: 0` = 这一段没有分母**：读远端索引是一次网络往返，没有"第几条"可讲。给它一个假的分母
@@ -51,12 +51,12 @@ Status: implemented
   弹窗标题从「将要同步」换成「正在同步」，按钮从「导入中…」换成「同步中…」——落地时它已经不是"将
   要"了。预演那条路上弹窗标题是「将要同步」（它确实还没写盘），正文在计划回来之前就是这段进度。
 - **浏览器半侧只有一个读流的实现**：`fetchSyncPlan` 与 `applySync` 都走
-  `src/client/api.ts` 的 `readSyncResponse(response, onProgress, what)`——先按 `content-type` 分流，
-  是事件流就逐条 `interpretSyncEvent`，否则退回一次性 JSON。错误文案带上 `what`（"预演" / "同步"），
+  `src/client/api.ts` 的 `readEventStream(response, onProgress, what)`——先按 `content-type` 分流，
+  是事件流就逐条 `interpretStreamEvent`，否则退回一次性 JSON。错误文案带上 `what`（"预演" / "同步"），
   两条路的失败提示因此是同一种句子。
 - **没有「取消」**：中途撒手会在宿主侧留下半截状态（远端可能已经收下几个包）。同步是只增不覆盖、可
   重复的，再点一次就接着补齐——这句写在弹窗正文里，取消键在落地期间保持禁用。
-- **分帧与解释放在与 DOM 无关的 `src/client/logic/syncStream.ts`**：一次 `response.body` 的读取
+- **分帧与解释放在与 DOM 无关的 `src/client/logic/eventStream.ts`**：一次 `response.body` 的读取
   边界与事件边界无关，一条事件被拆在两次读取之间是常态（中文标题还会让 UTF-8 多字节跨块），所以
   "攒够一条才吐" 是有状态的。它放在单独一个文件里，是因为 Host 侧那份 tsconfig **没有 DOM**（那
   条边界让"浏览器 API 出现在 Host 代码里"在类型层面就不成立）——把纯字符串处理与
@@ -96,7 +96,7 @@ Status: implemented
 
 - **两条路的成功响应形状都变了**：`GET /sync` 与 `POST /sync?mode=apply` 从 JSON 变成 SSE。仓库内部
   只有浏览器半侧读它们（模型工具 `sync_sessions` 直接调 `runSync`，不走 HTTP），但外部脚本若直接打
-  这两个端点需要按 `content-type` 分流——客户端那条 `readSyncResponse` 就是范例。
+  这两个端点需要按 `content-type` 分流——客户端那条 `readEventStream` 就是范例。
 - **算计划那几段仍然有空档没报**：`repo` 段结束到第一条 `compare` 事件之间还要逐个远端条目探一次目标
   目录是否在（实测 85 条约 0.18 秒），这段在 `planSync` 内部，没有上报点。四段的实测（真实库 88 条
   会话 / 远端 84 条，冷启动）：扫本机 87 条事件 < 1ms、读远端索引 1.74s、认仓库 13 个目录 0.21s、
@@ -105,10 +105,11 @@ Status: implemented
 - 进度分母是"要做的条数"，不是"成功的条数"：某一条推失败时进度照样走到底，失败那条在 `problems`
   清单里（实测 84 次尝试 / 83 条成功时会同时看到 84/84 的进度条与一条"推 xxx 失败"）。
 - 进度事件发在**开始处理**那一条之前，所以一条几 MB 的包会让进度条停一会儿——那是真的在传，不是卡住。
-- 没有做中断（见上），也没有做其它动作的进度：迁移、删除、导入的落地仍是"按下到结束之间没有反馈"
-  （这三个的预演也还是"预演中…"一句：实测删除 85 条 0.11 秒、导入一个 1 MB 的包 0.1 秒、迁移的预演
-  是纯计算，都没有值得分成几段的时间）。
-  它们可以复用同一套地基（`onProgress` 回调 + SSE 端点 + `ProgressBar`），但各自的循环不在这条路径上。
+- 没有做中断（见上）：落地期间取消键禁用，再点一次接着补齐。
+- **其它动作后来也接上了同一套地基**（迁移 / 删除 / 回滚 / 导入 / 归档 / 扫库）：`SyncProgress` 与
+  `readSyncResponse` 因此变成了通用的 `ProgressEvent` 与 `readEventStream`，`ProgressBlock` 从
+  `SyncPanel` 里搬出来共用；`/sync` 那两种响应形状没变。决策与实测见
+  [每个长动作都报进度](./2026-10-08-every-long-action-streams-progress.md)。
 - 实测（真实 dev GUI，两种主题都量过）：轨道 6px / 圆角 3px，浅色 `rgba(0, 0, 0, 0.1)`、深色
   `rgba(255, 255, 255, 0.12)`（都来自 `border-l2`）；填充浅色 `rgb(15, 17, 21)`、深色
   `rgb(249, 250, 251)`（`brand-primary`）；计数行 12px/18px（次要文字那一档），颜色是 `label-secondary`。

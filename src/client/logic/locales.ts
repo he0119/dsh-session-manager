@@ -89,6 +89,7 @@ export const zh = {
   'transfer.import.dialogTitle': '将要写入',
   'transfer.import.apply': '确认导入',
   'transfer.import.applying': '导入中…',
+  'transfer.import.progress.note': '导入只增不覆盖：中断了再导一次，已经落地的那些会跳过。',
   'transfer.import.planSummary': '将创建 {create} 条、跳过 {skip} 条，共 {bytes}',
   'table.action': '动作',
   'table.session': '会话',
@@ -155,6 +156,7 @@ export const zh = {
   'migrate.dialogTitle': '将要迁移',
   'migrate.apply': '确认迁移',
   'migrate.running': '迁移中…',
+  'migrate.progress.note': '这一步会写盘；中断会在库里留下中间状态，之后可以在「备份」页回退。',
   'migrate.summary': '将迁移 {sessions} 条会话（{files} 个日志，{bytes}）',
   'migrate.family':
     '其中 {count} 条是子智能体：它们跟着父会话一起搬（搬完还是不算工作区成员——宿主本来就不把子智能体算进去）。',
@@ -201,6 +203,7 @@ export const zh = {
   'backup.rollback.dialogTitle': '将要回滚',
   'backup.rollback.confirm': '确认回滚',
   'backup.rollback.running': '回滚中…',
+  'backup.progress.note': '还原会逐个会话把目录搬回去、逐文件复写字节；中断了再点一次这份备份即可。',
   'backup.rollback.actions': '以下是回滚会做的 {count} 个动作（还没有写盘）：',
   'backup.rollback.done': '已回滚 {sessions} 条会话、还原 {files} 个文件并恢复注册表。',
   'backup.restore.action': '恢复',
@@ -227,6 +230,7 @@ export const zh = {
   'manage.delete.dialogTitle': '将要删除',
   'manage.delete.apply': '确认删除',
   'manage.delete.running': '删除中…',
+  'manage.delete.progress.note': '删除先备份再删；中断的话这份备份就在「备份」页里，恢复即可。',
   'manage.delete.backupTo': '备份落在：{dir}（要恢复就去「备份」页）',
   'manage.delete.hint':
     '删除会先把整个会话目录备份到本插件的备份根，再删掉它；还活在宿主内存里的会话删不掉。',
@@ -302,12 +306,6 @@ export const zh = {
   'sync.dialogTitle': '将要同步',
   'sync.running': '正在同步',
   'sync.busy': '同步中…',
-  'sync.progress.preparing': '正在读取远端索引…',
-  'sync.progress.scanning': '正在扫描本机会话 {current} / {total}',
-  'sync.progress.matchingRepos': '正在核对本机仓库 {current} / {total}',
-  'sync.progress.comparing': '正在比对内容 {current} / {total}',
-  'sync.progress.pulling': '正在拉取 {current} / {total}',
-  'sync.progress.pushing': '正在推送 {current} / {total}',
   'sync.progress.note': '中断了再点一次「同步」会接着补齐，所以这里没有「取消」；要覆盖本机那份之前会先备份（在「备份」页恢复）。',
   'sync.applyAction': '确认同步',
   'sync.summary': '会拉取 {pull} 条、会推送 {push} 条（本机 {local} 条，远端 {remote} 条）',
@@ -394,6 +392,32 @@ export const zh = {
   'sync.map.duplicate': '第 {line} 行的远端路径重复：{from}',
 
   // ---- 共同 ----
+  // 长动作的进度（迁移 / 删除 / 回滚 / 导入 / 扫库 / 归档 / 同步共用这一套段名）：
+  // 段名 → 一句话由 ProgressBlock.tsx 的 progressTextOf() 挑，这里只摆文字。
+  'progress.scan': '正在扫描会话库 {current} / {total}',
+  'progress.read': '正在读取日志 {current} / {total}',
+  'progress.pack': '正在打包 {current} / {total}',
+  'progress.backup': '正在备份 {current} / {total}',
+  'progress.rewrite': '正在改写日志 {current} / {total}',
+  'progress.move': '正在搬移会话目录 {current} / {total}',
+  'progress.write': '正在写入 {current} / {total}',
+  'progress.remove': '正在删除 {current} / {total}',
+  'progress.restore': '正在还原 {current} / {total}',
+  'progress.archive': '正在更新归档状态 {current} / {total}',
+  'progress.verify': '正在复核 {current} / {total}',
+  'progress.repo': '正在核对本机仓库 {current} / {total}',
+  'progress.compare': '正在比对内容 {current} / {total}',
+  'progress.pull': '正在拉取 {current} / {total}',
+  'progress.push': '正在推送 {current} / {total}',
+  // 补齐那条是逐条请宿主冷读（有分母），所以它的分母与其它段一样在文案里。
+  'progress.warm': '正在请宿主补齐列表元数据 {current} / {total}',
+  // 下面这两段没有分母（一次网络往返、一次注册表落盘）：只说在做什么，不画条。
+  'progress.registry': '正在更新工作区登记…',
+  'progress.remote': '正在读取远端索引…',
+  // 认不出来的段名（宿主比界面新时）与"还没收到第一条事件"这两句兜底。
+  'progress.working': '正在处理…',
+  'progress.waiting': '正在准备…',
+
   'error.failed': '操作失败：{reason}',
   'error.dismiss': '知道了',
 } as const
@@ -457,6 +481,7 @@ export const en: LocaleDictOf<typeof NS> = {
   'transfer.import.dialogTitle': 'About to write',
   'transfer.import.apply': 'Import now',
   'transfer.import.applying': 'Importing…',
+  'transfer.import.progress.note': 'Import only adds, it never overwrites: if it stops, import again and the ones already written are skipped.',
   'transfer.import.planSummary': '{create} to create, {skip} to skip, {bytes} in total',
   'table.action': 'Action',
   'table.session': 'Session',
@@ -525,6 +550,7 @@ export const en: LocaleDictOf<typeof NS> = {
   'migrate.dialogTitle': 'About to migrate',
   'migrate.apply': 'Migrate now',
   'migrate.running': 'Migrating…',
+  'migrate.progress.note': 'This step writes to disk; if it is interrupted the library is left half-done, and you can roll back from the Backups tab afterwards.',
   'migrate.summary': '{sessions} sessions to migrate ({files} logs, {bytes})',
   'migrate.family':
     '{count} of them are subagent sessions: they move with their parent (and still do not count as workspace members — the host never counts subagents as members).',
@@ -567,6 +593,7 @@ export const en: LocaleDictOf<typeof NS> = {
   'backup.rollback.dialogTitle': 'About to roll back',
   'backup.rollback.confirm': 'Confirm rollback',
   'backup.rollback.running': 'Rolling back…',
+  'backup.progress.note': 'Restoring moves every session directory back and rewrites file bytes; if it stops, run this backup again.',
   'backup.rollback.actions': '{count} steps this rollback would take (nothing written yet):',
   'backup.rollback.done': 'Rolled back {sessions} sessions, restored {files} files and the workspace registry.',
   'backup.restore.action': 'Restore',
@@ -592,6 +619,7 @@ export const en: LocaleDictOf<typeof NS> = {
   'manage.delete.dialogTitle': 'About to delete',
   'manage.delete.apply': 'Delete now',
   'manage.delete.running': 'Deleting…',
+  'manage.delete.progress.note': 'Delete backs up first and only then removes; if it stops, restore that backup from the Backups tab.',
   'manage.delete.backupTo': 'Backup lands in: {dir} (restore it from the Backups tab)',
   'manage.delete.hint':
     'Deleting backs the whole session directory up into this plugin’s backup root first, then removes it; a session still living in host memory cannot be deleted.',
@@ -666,12 +694,6 @@ export const en: LocaleDictOf<typeof NS> = {
   'sync.dialogTitle': 'About to sync',
   'sync.running': 'Syncing',
   'sync.busy': 'Syncing…',
-  'sync.progress.preparing': 'Reading the remote index…',
-  'sync.progress.scanning': 'Scanning local sessions {current} / {total}',
-  'sync.progress.matchingRepos': 'Matching local repositories {current} / {total}',
-  'sync.progress.comparing': 'Comparing contents {current} / {total}',
-  'sync.progress.pulling': 'Pulling {current} / {total}',
-  'sync.progress.pushing': 'Pushing {current} / {total}',
   'sync.progress.note': 'If it stops, sync again and it carries on where it left off — that is why there is no Cancel here. A copy about to be overwritten is backed up first (restore it from the Backups tab).',
   'sync.applyAction': 'Sync now',
   'sync.summary': 'Pull {pull}, push {push} (local {local}, remote {remote})',
@@ -757,6 +779,31 @@ export const en: LocaleDictOf<typeof NS> = {
   'sync.map.noFrom': 'Line {line} is missing the remote path.',
   'sync.map.noTo': 'Line {line} is missing the local directory.',
   'sync.map.duplicate': 'Line {line} repeats the remote path: {from}',
+
+  // Long actions share one set of phase names (migrate / delete / rollback / import / scan /
+  // archive / sync): ProgressBlock.tsx maps phase -> key, this is only the copy.
+  'progress.scan': 'Scanning the session library {current} / {total}',
+  'progress.read': 'Reading logs {current} / {total}',
+  'progress.pack': 'Packing {current} / {total}',
+  'progress.backup': 'Backing up {current} / {total}',
+  'progress.rewrite': 'Rewriting logs {current} / {total}',
+  'progress.move': 'Moving session directories {current} / {total}',
+  'progress.write': 'Writing {current} / {total}',
+  'progress.remove': 'Removing {current} / {total}',
+  'progress.restore': 'Restoring {current} / {total}',
+  'progress.archive': 'Updating archive state {current} / {total}',
+  'progress.verify': 'Verifying {current} / {total}',
+  'progress.repo': 'Matching local repositories {current} / {total}',
+  'progress.compare': 'Comparing contents {current} / {total}',
+  'progress.pull': 'Pulling {current} / {total}',
+  'progress.push': 'Pushing {current} / {total}',
+  'progress.warm': 'Asking the host to warm list metadata {current} / {total}',
+  // No denominator for these (one round trip, one registry write): they say what is happening and
+  // draw no bar.
+  'progress.registry': 'Updating the workspace registry…',
+  'progress.remote': 'Reading the remote index…',
+  'progress.working': 'Working…',
+  'progress.waiting': 'Preparing…',
 
   'error.failed': 'Failed: {reason}',
   'error.dismiss': 'Dismiss',

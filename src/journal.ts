@@ -6,7 +6,7 @@
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmdirSync, rmSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 
-import type { SessionMove } from './types.ts'
+import type { ProgressReporter, SessionMove } from './types.ts'
 
 const MANIFEST = 'manifest.json'
 
@@ -76,7 +76,7 @@ export interface CreateBackupOptions {
    * `targetDir` 只有迁移才需要：删除没有"目标目录"，那时它由本函数填成备份目录内那份副本的路径
    * （见 `BackupKind`）。
    */
-  sessions: ReadonlyArray<Pick<SessionMove, 'id' | 'sourceDir' | 'files'> & { targetDir?: string }>
+  sessions: ReadonlyArray<Pick<SessionMove, 'id' | 'sourceDir' | 'files' | 'title'> & { targetDir?: string }>
   /** 计划搬迁的会话产物。 */
   artifacts?: ReadonlyArray<Pick<BackupArtifactEntry, 'sourcePath' | 'targetPath' | 'isDir'>>
   /** 这次备份属于哪一类操作（缺省 `migrate`）。 */
@@ -87,6 +87,13 @@ export interface CreateBackupOptions {
   to?: string
   /** 注入时间，便于测试。 */
   now?: Date
+  /**
+   * 备份进度：**每条会话复制之前**报一次（`phase: 'backup'`，分母是这次要备份的会话数）。
+   *
+   * 备份是整个动作里最贵的一步之一（整份会话目录按字节复制），所以它值得一条进度；产物那一段
+   * 没有逐条报——它的条数通常是个位数。
+   */
+  onProgress?: ProgressReporter
 }
 
 /**
@@ -105,7 +112,8 @@ export function createBackup(options: CreateBackupOptions): {
   cpSync(registryPath, registryBackup)
 
   const entries: BackupSessionEntry[] = []
-  for (const s of sessions) {
+  for (const [index, s] of sessions.entries()) {
+    options.onProgress?.({ phase: 'backup', total: sessions.length, done: index, id: s.id, label: s.title ?? s.id })
     const projectDirName = basename(dirname(s.sourceDir))
     const dest = join(dir, 'sessions', projectDirName, basename(s.sourceDir))
     mkdirSync(dirname(dest), { recursive: true })
@@ -178,14 +186,17 @@ export interface RollbackResult {
  */
 export function rollback(
   manifest: BackupManifest,
-  options: { backupDir: string; dryRun?: boolean },
+  options: { backupDir: string; dryRun?: boolean; onProgress?: ProgressReporter },
 ): RollbackResult {
   const { backupDir, dryRun = false } = options
   if (!backupDir) throw new Error('rollback requires backupDir')
   const actions: string[] = []
   let restoredFiles = 0
 
-  for (const s of manifest.sessions) {
+  for (const [index, s] of manifest.sessions.entries()) {
+    // 还原进度按**会话**报：一条会话的动作是"整个目录搬回去 + 逐文件复写"，分母用会话数才是
+    // 用户认得出的那个数（预演那条路也报：dry-run 照样要逐条走一遍清单，只是不写盘）。
+    options.onProgress?.({ phase: 'restore', total: manifest.sessions.length, done: index, id: s.id, label: s.id })
     // 1) 目录搬回
     //
     // 「源目录 == 目标目录」的会话要**跳过这一步**：迁移时它一个字节都没挪（`cwd` 本来就在目标上——
@@ -267,6 +278,7 @@ export function rollback(
     actions.push(`registry untouched: delete backup (${manifest.registryPath})`)
   } else if (manifest.registryBackup && existsSync(manifest.registryBackup)) {
     actions.push(`restore registry: ${manifest.registryPath}`)
+    options.onProgress?.({ phase: 'registry', total: 0, done: 0 })
     if (!dryRun) cpSync(manifest.registryBackup, manifest.registryPath)
     registryRestored = true
   }

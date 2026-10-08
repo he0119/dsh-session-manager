@@ -24,7 +24,7 @@ import { scanAll, type DiscoveredSession } from './discovery.ts'
 import { familyOf, loneSubagents } from './family.ts'
 import { createBackup } from './journal.ts'
 import type { TitleQuery } from './session-title.ts'
-import type { DecodeAll, SessionLogFile } from './types.ts'
+import type { DecodeAll, ProgressReporter, SessionLogFile } from './types.ts'
 
 /** 删除用到的路径、解码器与探测口（与 `MigrateDeps` 同形，本模块同样不认识 tools.ts）。 */
 export interface RemoveDeps {
@@ -117,9 +117,14 @@ function indexById(sessions: readonly DiscoveredSession[]): Map<string, Discover
  *
  * @param deps 路径与探测口。
  * @param request 要删的会话 id。
+ * @param options.onProgress 发现阶段的进度（`scan`：扫整库找这些会话与它们的后代）。
  * @returns 计划；`problems` 非空时 `ok` 为 false，执行阶段会拒绝。
  */
-export function planRemoval(deps: RemoveDeps, request: RemoveRequest): RemovalPlan {
+export function planRemoval(
+  deps: RemoveDeps,
+  request: RemoveRequest,
+  options: { onProgress?: ProgressReporter } = {},
+): RemovalPlan {
   const problems: string[] = []
   const ids = [...new Set((request.sessionIds ?? []).map((id) => String(id)))]
   if (ids.length === 0) problems.push('缺少要删除的会话（sessionIds）')
@@ -127,7 +132,12 @@ export function planRemoval(deps: RemoveDeps, request: RemoveRequest): RemovalPl
   const live = deps.liveSessionIds?.() ?? new Set<string>()
   let discovered: DiscoveredSession[] = []
   try {
-    discovered = scanAll(deps.sessionsRoot, deps.decodeAll, deps.resolveTitle === undefined ? {} : { resolveTitle: deps.resolveTitle })
+    discovered = scanAll(deps.sessionsRoot, deps.decodeAll, {
+      ...(deps.resolveTitle === undefined ? {} : { resolveTitle: deps.resolveTitle }),
+      ...(options.onProgress === undefined
+        ? {}
+        : { onProgress: (done: number, total: number) => options.onProgress?.({ phase: 'scan', done, total }) }),
+    })
   } catch (error) {
     problems.push(`扫描会话库失败：${error instanceof Error ? error.message : String(error)}`)
   }
@@ -212,10 +222,17 @@ export function planRemoval(deps: RemoveDeps, request: RemoveRequest): RemovalPl
  * @param deps 路径与探测口。
  * @param request 要删的会话 id。
  * @param options.apply 是否真的写盘。
+ * @param options.onProgress 全程进度：`scan`（重算一遍计划）、`backup`（先复制再删）、`remove`（逐条
+ *   删目录）、`verify`（复核删掉了、备份里那份还在）。
  * @returns 执行结果；计划不 ok 时 `applied` 为 false 且原样带回 `problems`。
  */
-export function runRemoval(deps: RemoveDeps, request: RemoveRequest, options: { apply: boolean }): RemovalRun {
-  const plan = planRemoval(deps, request)
+export function runRemoval(
+  deps: RemoveDeps,
+  request: RemoveRequest,
+  options: { apply: boolean; onProgress?: ProgressReporter },
+): RemovalRun {
+  const onProgress = options.onProgress
+  const plan = planRemoval(deps, request, { ...(onProgress === undefined ? {} : { onProgress }) })
   const empty = { plan, problems: plan.problems, verified: false, dirsRemoved: 0, removedProjectDirs: [] }
   if (!plan.ok) return { applied: false, ...empty, summary: `未执行：${plan.problems.join('；')}` }
   /** 整族一起删时把"多出来的那几条"说清楚，否则预演清单里会冒出用户没勾过的会话。 */
@@ -235,13 +252,21 @@ export function runRemoval(deps: RemoveDeps, request: RemoveRequest, options: { 
     backupRoot: deps.backupRoot,
     registryPath: deps.registryPath,
     // 删除没有"目标目录"：清单里每条会话的 targetDir 由 createBackup 填成备份内那份副本。
-    sessions: plan.entries.map((entry) => ({ id: entry.id, sourceDir: entry.dir, files: entry.files })),
+    sessions: plan.entries.map((entry) => ({ id: entry.id, sourceDir: entry.dir, files: entry.files, ...(entry.title === undefined ? {} : { title: entry.title }) })),
     kind: 'delete',
     ...(deps.now === undefined ? {} : { now: deps.now }),
+    ...(onProgress === undefined ? {} : { onProgress }),
   })
 
   // 2) 删会话目录
-  for (const entry of plan.entries) {
+  for (const [index, entry] of plan.entries.entries()) {
+    onProgress?.({
+      phase: 'remove',
+      total: plan.entries.length,
+      done: index,
+      id: entry.id,
+      label: entry.title ?? entry.id,
+    })
     rmSync(entry.dir, { recursive: true, force: true })
   }
 
@@ -263,7 +288,14 @@ export function runRemoval(deps: RemoveDeps, request: RemoveRequest, options: { 
 
   // 4) 独立复核：删掉的东西真的不在了、备份里那份真的在。
   const problems: string[] = []
-  for (const entry of plan.entries) {
+  for (const [index, entry] of plan.entries.entries()) {
+    onProgress?.({
+      phase: 'verify',
+      total: plan.entries.length,
+      done: index,
+      id: entry.id,
+      label: entry.title ?? entry.id,
+    })
     if (existsSync(entry.dir)) problems.push(`session ${entry.id}: 目录还在 ${entry.dir}`)
     const backed = backup.manifest.sessions.find((s) => s.id === entry.id)
     if (backed === undefined || !existsSync(backed.targetDir)) {
