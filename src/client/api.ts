@@ -511,6 +511,12 @@ export interface MigrationPreview {
   sessions: PreviewSession[]
   /** 级联带进来的条数：点名的会话的子智能体后代。 */
   cascaded: number
+  /**
+   * 宿主持在内存里、这次**不搬**的会话（见宿主 `MigrationPreview.liveSkipped`）。
+   *
+   * 它们不在 `sessions` 里：卡片必须提这一条，否则"勾了 22 条、搬走 9 条"没人解释。
+   */
+  liveSkipped: Array<{ id: string; title?: string; createdAt: number; cwd?: string }>
   files: number
   bytes: number
   artifacts: {

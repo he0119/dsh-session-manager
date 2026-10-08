@@ -49,8 +49,11 @@ Status: implemented
   要重启。
 
 探测不到那套动作（只有工具没有界面的前端、老版本宿主）就如实说 `restart-required`；宿主中途拒绝也
-**不把一次成功的迁移说成失败**（文件已经写好了），只报"仍需重启"并把原因原样带给用户。措辞只在
-`describeEffect()` 一处给出，工具层与界面层不会各说各话。
+**不把一次成功的迁移说成失败**（文件已经写好了），只报"仍需重启"并把原因原样带给用户——但拒绝之后
+要补一件事：宿主只要动过手（最迟的一次是 `create()` 新建工作区）就会拿内存里那份整份落盘，插件写好的
+文件当场被盖掉，所以失败路径上要把这次算好的注册表**整份写回**（`TakeEffectOptions.registry` 与
+`EffectDeps.registryPath`，见 `take-effect.ts` 的 `restoreRegistry()`），并把结果记进
+`EffectOutcome.registryRestored`。措辞只在 `describeEffect()` 一处给出，工具层与界面层不会各说各话。
 
 ## Alternatives considered
 
@@ -86,4 +89,6 @@ Status: implemented
   方法，也是宿主自己 `[Service.init]()` 用的两步。这是本插件对宿主内部最靠里的一次触碰，两个名字任一
   变化都会被形状探测抓住。
 - **活着的会话仍然无解**：宿主手里有内存副本与写句柄，改注册表也换不回它——所以那条限制照旧由
-  `liveSessionIds()` 把守，不因为这次改动放松。
+  `liveSessionIds()` 把守，不因为这次改动放松。这条限制在接管这一层里的落法是[迁移的计划层直接把它们
+  摘出去、并如实报出来](../bug-fix/2026-10-08-live-sessions-cannot-move.md)——它们搬不动这件事由计划
+  说话，而不是等宿主在第一条上回绝、顺手把写盘盖掉。

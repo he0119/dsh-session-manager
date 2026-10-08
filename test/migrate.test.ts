@@ -341,3 +341,71 @@ test('宿主没有补检查点那套服务时：如实说"要等第一次点开"
   assert.match(run.summary, /第一次点开才有标题/)
   rmSync(sb.base, { recursive: true, force: true })
 })
+
+test('执行：宿主持着的那条不搬（日志也不动），注册表里它仍归源工作区', async () => {
+  const sb = makeSandbox('migrate-live', ['session-hold', 'session-go'])
+  const run = await runMigration(
+    { ...sb.deps, liveSessionIds: () => new Set(['session-hold']) },
+    { from: FROM, to: TO, title: 'to' },
+    { apply: true },
+  )
+
+  assert.equal(run.applied, true)
+  assert.deepEqual(run.preview.sessions.map((s) => s.id), ['session-go'], '只搬没被宿主持着的那条')
+  assert.deepEqual(run.preview.liveSkipped.map((s) => s.id), ['session-hold'])
+  assert.match(run.summary, /另有 1 条会话宿主持在内存里（还活着），这次没搬：session-hold/)
+  // 少搬的那条必须还在原处、还在源工作区那条记录里：源工作区因此不会被摘空、更不会被删。
+  assert.equal(
+    existsSync(sessionDir(sb.deps.sessionsRoot, FROM, 'session-hold')),
+    true,
+    '活会话的日志不许搬走',
+  )
+  const registry = readRegistry(sb.deps.registryPath)
+  assert.deepEqual(registry.tables.workspaces['ws-from']?.sessionIds, ['session-hold'])
+  assert.deepEqual(run.preview.registryChange?.removedSources, [])
+  rmSync(sb.base, { recursive: true, force: true })
+})
+
+test('宿主没接住时把这次算好的注册表写回文件（它自己那一步已经用内存副本盖过一次）', async () => {
+  const sb = makeSandbox('migrate-effect-clobber')
+  const before = readRegistry(sb.deps.registryPath)
+  let clobbered = 0
+  const deps: MigrateDeps = {
+    ...sb.deps,
+    hostRegistry: () => ({
+      refreshIndex: async () => {},
+      ensureWorkspace: async () => {
+        // 宿主的真实行为：新建工作区那一步它按内存里那份整份落盘（单单元契约），插件写好的文件当场被盖。
+        writeRegistryAtomic(sb.deps.registryPath, before)
+        clobbered += 1
+        return 'ws-host-1'
+      },
+      attachSession: async () => {
+        throw new Error('夹具：宿主拒绝挂靠')
+      },
+      detachSession: async () => {},
+      members: async () => [],
+      removeWorkspace: async () => {},
+    }),
+  }
+  const run = await runMigration(deps, { from: FROM, to: TO, title: 'to' }, { apply: true })
+
+  assert.equal(clobbered, 1, '夹具要真的盖过一次，否则这条测试什么也没测')
+  assert.equal(run.applied, true, '宿主没接住不该把迁移说成失败')
+  assert.equal(run.effect?.kind, 'failed')
+  assert.equal(run.effect?.registryRestored, true, '宿主动过手，就必须把这次的结果写回去')
+  assert.match(run.summary, /注册表已按这次的结果重新写回磁盘/)
+  // 磁盘上留下的必须是这次的结果：目标工作区认下了那条会话，源工作区那条记录没了。
+  const after = readRegistry(sb.deps.registryPath)
+  const target = Object.values(after.tables.workspaces).find((record) => record.path === TO)
+  assert.deepEqual(target?.sessionIds, [sb.sessionId])
+  assert.equal(
+    Object.values(after.tables.workspaces).some((record) => record.path === FROM),
+    false,
+    '源工作区被摘空后应删掉',
+  )
+  // 复核是拿"改动前的备份"与"现在磁盘上那份"比的：写回来了它就该通过——不写回来正是用户撞上的那次 500。
+  assert.equal(run.verified, true, run.problems.join('; '))
+  assert.deepEqual(run.problems, [])
+  rmSync(sb.base, { recursive: true, force: true })
+})

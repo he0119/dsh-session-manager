@@ -1341,8 +1341,11 @@ export async function runSync(
   }
 
   // ── 让宿主认下这批改动：拉取会把会话挂到目标工作区（改注册表），与迁移是同一条语义。
-  //    整批落地之后按顺序收口一次，而不是每条会话各来一遍。
-  const effect = registryWritten ? await takeEffectOnHostAll(registryChanges, deps) : undefined
+  //    整批落地之后按顺序收口一次，而不是每条会话各来一遍。注册表终态一并交过去：宿主没接住时
+  //    它会用内存副本盖掉这次写盘，那时得靠这份终态写回来（见 take-effect.ts 的 `restoreRegistry()`）。
+  const effect = registryWritten
+    ? await takeEffectOnHostAll(registryChanges, deps, { registry })
+    : undefined
   /*
    * ── 接着请宿主把这批会话的列表元数据折出来（同一个收口点）─────────────────────
    *

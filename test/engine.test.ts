@@ -196,6 +196,40 @@ test('未登记会话：默认连带迁移，includeUnowned=false 时报问题',
   rmSync(sb.base, { recursive: true, force: true })
 })
 
+test('宿主持着的会话不搬：留在原目录、源工作区不被摘空，并如实列出来', () => {
+  const sb = makeSandbox('live-hold')
+
+  // 宿主内存里攥着 session-b：它既挂不上新工作区（宿主拿内存里那份 header 校验 cwd），日志也不能搬走。
+  const plan = buildRelocationPlan(opts(sb, { live: new Set(['session-b']) }))
+  assert.equal(plan.ok, true, plan.problems.join('; '))
+  assert.deepEqual(plan.sessions.map((s) => s.id), ['session-a'], '只搬没被宿主攥着的那条')
+  assert.deepEqual(plan.liveSkipped.map((s) => s.id), ['session-b'], '没搬的必须列出来')
+  assert.equal(plan.liveSkipped[0]?.cwd, sb.fromDir, '留在原处：cwd 还是源的')
+  assert.deepEqual(plan.registryChange?.added, ['session-a'], '注册表只登记真搬走的那条')
+  assert.deepEqual(plan.registryChange?.removedSources, [], '源工作区还认着 session-b，不许删')
+  assert.equal(plan.registryChange?.targetPath, sb.toDir)
+  assert.match(describePlan(plan), /另有 1 条会话宿主持在内存里（还活着），这次不搬：session-b/)
+  assert.match(describePlan(plan), /重启 DSH 之后再迁一次/)
+
+  // 点名点到一条活着的会话：不是"找不到"，而是搬不动 + 给下一步。
+  const named = buildRelocationPlan(opts(sb, { live: new Set(['session-b']), sessionIds: ['session-b'] }))
+  assert.equal(named.ok, false)
+  assert.match(named.problems.join('; '), /session-b is live in the host .*restart DSH, then migrate it/)
+
+  // 整个来源都在宿主手里：说清原因，别让用户拿"没选中会话"去查勾选。
+  const allLive = buildRelocationPlan(opts(sb, { live: new Set(['session-a', 'session-b']) }))
+  assert.equal(allLive.ok, false)
+  assert.match(allLive.problems.join('; '), /every session in this source is live in the host \(2\)/)
+
+  // 一个字节都没写：这一层只读（活会话的日志尤其不能动——宿主手里还有写句柄）。
+  assert.deepEqual(readRegistry(sb.registryPath), sb.registry)
+  assert.deepEqual(readFileSync(join(sb.root, sb.sourceProjectDirName, 'session-b', 'session.v4.jsonl.zstd')), sb.logs['b'])
+  assert.equal(existsSync(join(sb.root, sb.targetProjectDir, 'session-b')), false)
+  assert.equal(existsSync(join(sb.root, sb.sourceProjectDirName, 'session-b')), true)
+
+  rmSync(sb.base, { recursive: true, force: true })
+})
+
 test('计划层拒绝：目标不存在 / 源目标同路径 / 有损项目目录名碰撞', () => {
   const sb = makeSandbox('reject')
 

@@ -150,7 +150,7 @@ tsconfig.client.json Web Client 自己的类型工程（DOM + JSX；Host 那份�
 | `src/session-title.ts` | 会话标题：宿主投影缓存优先，缺席时有界地解日志开头 | 无 |
 | `src/visibility.ts` | 侧边栏可见性与「未分组」判据：子智能体 / 空白 / 已归档三条理由（候选与界面共用一份）、`isUngrouped()`＝没认领（`accounting.ts`）**且** 会显示 | 无 |
 | `src/family.ts` | **族**的展开（点名一条会话 → 它自己 + 全部子智能体后代）与「单独点名的子智能体」判据（`loneSubagents()`），删除 / 迁移 / 归档 / 导出共用 | 无 |
-| `src/plan.ts` | 只读计划：目标推导、阻塞问题、注册表变更（候选只取侧边栏看得见的，选中后再向下展开整族） | 无 |
+| `src/plan.ts` | 只读计划：目标推导、阻塞问题、注册表变更（候选只取侧边栏看得见的、且**不是宿主持着的**，选中后再向下展开整族；没搬的那批进 `liveSkipped`） | 无 |
 | `src/journal.ts` | 字节级备份清单与回滚（迁移与删除两种来源） | 无 |
 | `src/execute.ts` | 执行 + 独立复核（含产物目标位校验） | 无 |
 | `src/artifacts.ts` | 会话产物提取（证据分层）、规划（求交/剪枝）、搬迁 | 无 |
@@ -160,7 +160,7 @@ tsconfig.client.json Web Client 自己的类型工程（DOM + JSX；Host 那份�
 | `src/dav.ts` | WebDAV 客户端：PROPFIND / GET / PUT / MKCOL + Basic 鉴权 + 多状态响应解析 | 无 |
 | `src/sync.ts` | WebDAV 同步编排：远端索引、映射、计划（四种关系 + 空白与「谁更新」）、拉取 / 覆盖本机那份 / 推送（都复用 transfer 的导入落地）；整批拉取改完注册表之后收口调一次 `src/take-effect.ts`，再调一次 `src/checkpoint-warm.ts` | 无 |
 | `src/migrate.ts` | 迁移编排：预演 / 执行 / 回滚 / 备份清单（工具与界面两个入口共用）；写盘之后交 `src/take-effect.ts` 把改动交给宿主自己做、`src/checkpoint-warm.ts` 补上被改写 cwd 那几条的检查点，并拿备份与落盘结果复核「会话 id 不变」 | 无 |
-| `src/take-effect.ts` | 「改完注册表之后让宿主立刻认下这处改动」的共用一步：迁移与导入 / 同步拉取都调它（回滚不走——它整份写回文件以保住工作区 id）；探测端口、执行顺序、以及"要不要重启"的措辞只写在这里，**执行时机**留给各自编排层（批量落地时收口一次） | 无 |
+| `src/take-effect.ts` | 「改完注册表之后让宿主立刻认下这处改动」的共用一步：迁移与导入 / 同步拉取都调它（回滚不走——它整份写回文件以保住工作区 id）；探测端口、执行顺序、宿主没接住时把算好的注册表整份写回（`restoreRegistry()`）、以及"要不要重启"的措辞只写在这里，**执行时机**留给各自编排层（批量落地时收口一次） | 无 |
 | `src/checkpoint-warm.ts` | 「落地之后请宿主把这批会话的列表元数据折出来」的共用一步：宿主的侧边栏标题不来自日志，只认它自己写的投影检查点，而检查点只在活着的会话上被写；这里借宿主自己的两个服务（`sessionQuery.readSession()` + `sessionProjectionCache.coldSnapshot()`）冷读一遍补上，逐条兜住失败（导入 / 同步拉取 / 迁移三个落地口共用） | 无 |
 | `src/remove.ts` | 删除编排：预演（活着的拒删、单独点名子智能体拒掉；点名一条就按 `family.ts` 把它的**全部子智能体**一起展开）→ 先备份 → 删目录 → 复核；不碰注册表 | 无 |
 | `src/tools.ts` | 5 个工具注册（+ schema、平台解码器实例、可选服务探测（含 `hostRegistryPort()` 与 `hostCheckpointPort()`：把宿主的注册表实体 API、会话持久化、以及冷读一条会话并写回投影检查点两件事收成端口）、同步配置与运行时） | `dsh-tools` |

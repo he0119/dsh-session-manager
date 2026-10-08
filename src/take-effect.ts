@@ -7,14 +7,27 @@
 //
 // 所以这里做的不是"再写一次文件"，而是**把活儿交给宿主自己做**：
 //   1. 先让它按磁盘重看一眼（刷新 header 缓存 + 重建活会话索引，跟它启动时做的两步一样）——不先做
-//      这一步，下面 `attachSession()` 会拿缓存里的旧 cwd 校验，一口回绝；
+//      这一步，下面 `attachSession()`会拿缓存里的旧 cwd 校验，一口回绝；
 //   2. 再让它自己改：复用/新建目标工作区 → 把会话挂过去 → 从源侧摘掉 → 源侧空了就删掉。
 //      这几件事它自己会写文件、也会通知界面，所以侧边栏不用刷新就变了，进程也不用重启。
 //
+// **它中途拒绝时还有一件必须做的事**：宿主那一步只要动过手（最迟的一次是 `ensureWorkspace()` 新建
+// 工作区），它就会拿内存里那份整份落盘——插件刚写好的 `workspace.json` 当场被盖掉，磁盘上留下的是
+// 宿主的旧归属。所以失败之后要把这次算好的注册表**整份写回来**（`restoreRegistry()`），"重启后一致"
+// 才是真的：重启后宿主读的是磁盘，文件对了就对了。
+//
 // 会话 id 全程只被"挂靠 / 摘掉"，既不新建也不改名；已存在的工作区复用自己那条记录、id 不变。
 //
-// 本模块保持**零 DSH 依赖**：端口由宿主那半侧（`src/tools.ts` 的 `hostRegistryPort()`）探测后注入。
-import type { EffectMode, EffectOutcome, HostRegistryPort, RegistryChange } from './types.ts'
+// 本模块保持**零 DSH 依赖**：端口由宿主那半侧（`src/tools.ts` 的 `hostRegistryPort()`）探测后注入；
+// 写盘只借 `registry.ts` 的原子写，与迁移 / 导入 / 同步用的是同一份。
+import { writeRegistryAtomic } from './registry.ts'
+import type {
+  EffectMode,
+  EffectOutcome,
+  HostRegistryPort,
+  RegistryChange,
+  WorkspaceRegistryState,
+} from './types.ts'
 
 /** 编排层要承认的最小形状：一个"这个宿主能不能当场把账改掉"的探测函数。 */
 export interface EffectDeps {
@@ -24,6 +37,37 @@ export interface EffectDeps {
    * 每次调用**重新探测**：只有工具的前端、老版本宿主都可能没有这套动作，探测结果不该被缓存。
    */
   hostRegistry?: () => HostRegistryPort | undefined
+  /**
+   * `workspace.json` 的路径（可选）。**给了才有力挽狂澜的那一手**：宿主没接住那一步之后，
+   * 用它把这次算好的注册表整份写回来（见 `restoreRegistry()`）。
+   */
+  registryPath?: string
+}
+
+/** `takeEffectOnHost*()` 的选项。 */
+export interface TakeEffectOptions {
+  /**
+   * 这次改动算出来的注册表**终态**：宿主没接住时用它整份写回文件。
+   *
+   * 缺席（`null` / undefined）时不做这一手，措辞也如实分岔——不能硬说文件是对的。
+   */
+  registry?: WorkspaceRegistryState | null
+}
+
+/**
+ * 宿主没接住之后，把这次算好的注册表整份写回文件。
+ * @returns 真的写回去了才 true；没有终态 / 没给路径 / 写盘本身失败都是 false，由措辞如实分岔。
+ */
+function restoreRegistry(deps: EffectDeps, options: TakeEffectOptions): boolean {
+  const registry = options.registry
+  if (deps.registryPath === undefined || registry === null || registry === undefined) return false
+  try {
+    writeRegistryAtomic(deps.registryPath, registry)
+    return true
+  } catch {
+    // 写不回去也不能把已经落地的迁移说成失败：结论里那句"重启前先核对文件"会兜住。
+    return false
+  }
 }
 
 /**
@@ -75,11 +119,16 @@ export async function applyOnHost(
  * 拿不到端口、或宿主中途拒绝，都**如实回报而不抛**——文件已经写好了，这里失败不该把一次成功的
  * 迁移 / 导入说成失败。
  * @param change 这次改动（`null` 或 `unchanged` 表示注册表本来就不用改，那就不必打扰宿主）。
- * @param deps 编排依赖（只看 `hostRegistry`）。
+ * @param deps 编排依赖（只看 `hostRegistry` 与 `registryPath`）。
+ * @param options 见 `TakeEffectOptions`（算好的注册表终态：宿主没接住时写回文件用）。
  * @returns 三态结论；措辞交给 `describeEffect()`。
  */
-export function takeEffectOnHost(change: RegistryChange | null, deps: EffectDeps): Promise<EffectOutcome> {
-  return takeEffectOnHostAll(change === null || change.unchanged ? [] : [change], deps)
+export function takeEffectOnHost(
+  change: RegistryChange | null,
+  deps: EffectDeps,
+  options: TakeEffectOptions = {},
+): Promise<EffectOutcome> {
+  return takeEffectOnHostAll(change === null || change.unchanged ? [] : [change], deps, options)
 }
 
 /**
@@ -87,12 +136,14 @@ export function takeEffectOnHost(change: RegistryChange | null, deps: EffectDeps
  *
  * 任何一条失败就整体报失败：宿主那边可能只改到一半，文件是写对了的，所以退路仍是"重启后一致"。
  * @param changes 按执行顺序排好的改动（`unchanged` 的会被跳过）。
- * @param deps 编排依赖（只看 `hostRegistry`）。
+ * @param deps 编排依赖（只看 `hostRegistry` 与 `registryPath`）。
+ * @param options 见 `TakeEffectOptions`。
  * @returns 三态结论；一条都不用改时直接算 `applied`。
  */
 export async function takeEffectOnHostAll(
   changes: readonly RegistryChange[],
   deps: EffectDeps,
+  options: TakeEffectOptions = {},
 ): Promise<EffectOutcome> {
   const todo = changes.filter((change) => !change.unchanged)
   if (todo.length === 0) return { kind: 'applied' }
@@ -100,7 +151,11 @@ export async function takeEffectOnHostAll(
   try {
     port = deps.hostRegistry?.()
   } catch (error) {
-    return { kind: 'failed', error: error instanceof Error ? error.message : String(error) }
+    return {
+      kind: 'failed',
+      error: error instanceof Error ? error.message : String(error),
+      registryRestored: restoreRegistry(deps, options),
+    }
   }
   if (port === undefined) return { kind: 'unavailable' }
   let targetId: string | undefined
@@ -114,7 +169,12 @@ export async function takeEffectOnHostAll(
       if (change.createdTarget) newTargetIds.add(change.targetId)
     }
   } catch (error) {
-    return { kind: 'failed', error: error instanceof Error ? error.message : String(error) }
+    // 宿主可能已经写过一次文件（最迟在 `ensureWorkspace()` 新建工作区那一步）：把它盖掉的写回来。
+    return {
+      kind: 'failed',
+      error: error instanceof Error ? error.message : String(error),
+      registryRestored: restoreRegistry(deps, options),
+    }
   }
   return { kind: 'applied', ...(targetId === undefined ? {} : { targetId }) }
 }
@@ -129,10 +189,14 @@ export function describeEffect(outcome: EffectOutcome): string {
     case 'applied':
       return '宿主已经自己改完这份注册表（会话只在工作区之间换归属，id 没变），侧边栏这就跟上了，无需重启 DSH。'
     case 'failed':
-      return (
-        `注册表已写入磁盘，但宿主没接住这次改动（${outcome.error ?? '原因未知'}）：` +
-        '仍需重启 DSH 才会生效；重启前请勿再改任何工作区，新建 / 改名 / 归档都会用内存副本把这处改动覆盖掉。'
-      )
+      // 宿主一旦动过手就会按内存整份落盘：写回来了才敢说"磁盘上就是这次的结果"（见 `restoreRegistry()`）。
+      return outcome.registryRestored === true
+        ? `宿主没接住这次改动（${outcome.error ?? '原因未知'}）：` +
+            '注册表已按这次的结果重新写回磁盘，重启 DSH 后一致；重启前请勿再改任何工作区，' +
+            '新建 / 改名 / 归档都会用内存副本把这处改动覆盖掉。'
+        : `宿主没接住这次改动（${outcome.error ?? '原因未知'}）：` +
+            '仍需重启 DSH 才会生效，但宿主可能已经用它内存里那份覆盖过磁盘——重启前请先核对注册表，' +
+            '必要时重跑一次；重启前请勿再改任何工作区。'
     case 'file-only':
       return (
         '注册表已按备份整份写回（工作区 id 原样保留，所以这条路不走宿主那套动作），' +

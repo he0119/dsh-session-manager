@@ -163,6 +163,8 @@ export const zh = {
   'migrate.via': '随父迁',
   'migrate.viaTip':
     '这条是子智能体：它属于你点名的「{name}」（可能隔了几层），所以跟着一起搬；搬完还是不算工作区成员。',
+  'migrate.liveSkipped':
+    '另有 {count} 条会话宿主持在内存里（还活着），这次不搬：它们留在原目录、归属不变。重启 DSH 之后再迁一次即可。',
   'migrate.projectDirs': '项目目录：{from} → {to}',
   'migrate.projectDirsUnowned': '未分组横跨 {projectDirs} 个源项目目录 → {to}',
   'registry.change.title': '注册表变更',
@@ -280,7 +282,7 @@ export const zh = {
   'help.faq.deletedQ': '删掉了，侧边栏为什么还在？',
   'help.faq.deletedA': '侧边栏要等宿主重新扫一遍会话库，扫完之前那几行还会在。',
   'help.faq.restartQ': '迁移完了，什么时候需要重启 DSH？',
-  'help.faq.restartA': '正常不用：改完注册表之后插件把活儿交给宿主自己做——先让它按磁盘重看一眼，再复用 / 新建目标工作区、把会话挂过去、把源侧摘空、删掉空掉的工作区；这些动作宿主自己会落盘、也会通知界面，侧边栏立刻按新归属显示，会话 id 一个都没变。只有宿主上没有那套动作时——比如只有工具没有界面的前端、老版本——才会提示重启；那时别改任何工作区，新建 / 改名 / 归档都会把这次改动覆盖掉。',
+  'help.faq.restartA': '正常不用：改完注册表之后插件把活儿交给宿主自己做——先让它按磁盘重看一眼，再复用 / 新建目标工作区、把会话挂过去、把源侧摘空、删掉空掉的工作区；这些动作宿主自己会落盘、也会通知界面，侧边栏立刻按新归属显示，会话 id 一个都没变。只有宿主上没有那套动作时——比如只有工具没有界面的前端、老版本——才会提示重启；那时别改任何工作区，新建 / 改名 / 归档都会把这次改动覆盖掉。宿主内存里还攥着的会话（列表里带「活动中」标签的那些）这次搬不动：计划把它们摘出来报给你，留在原目录、归属不变，重启 DSH 之后再迁一次；宿主中途拒绝时，插件会把这次算好的注册表整份写回文件，重启后看到的就是这次的结果。',
   'help.faq.backupQ': '备份放在哪？「回滚」和「恢复」差在哪？',
   'help.faq.backupA': '迁移、导入和删除之前都会先备份，清单在「备份」页里。「回滚」把会话目录、日志和工作区注册表一起还原；「恢复」只把删掉的会话目录搬回来——删除本来就没碰过注册表。',
   'help.faq.familyQ': '删掉或迁走一条会话，它的子智能体怎么办？',
@@ -555,6 +557,9 @@ export const en: LocaleDictOf<typeof NS> = {
   'migrate.via': 'with parent',
   'migrate.viaTip':
     'This is a subagent session: it belongs to “{name}”, one of the sessions you named (possibly a few levels up), so it moves with it — and still does not count as a workspace member.',
+  'migrate.liveSkipped':
+    '{count} more sessions are live in the host (it still holds them in memory), so they are not moved: they stay in ' +
+    'their directory with their ownership unchanged. Restart DSH and migrate them again.',
   'migrate.projectDirs': 'Project directory: {from} → {to}',
   'migrate.projectDirsUnowned': 'Ungrouped spans {projectDirs} source project directories → {to}',
   'registry.change.title': 'Registry change',
@@ -665,7 +670,7 @@ export const en: LocaleDictOf<typeof NS> = {
   'help.faq.deletedQ': 'I deleted it — why is it still in the sidebar?',
   'help.faq.deletedA': 'The sidebar drops those rows once the host rescans the session library.',
   'help.faq.restartQ': 'When does a migration ask me to restart DSH?',
-  'help.faq.restartA': 'Normally never: once the registry changes, the plugin hands the work to the host — one fresh look at the disk, then reuse or create the target workspace, attach the sessions, detach them from the sources and delete an emptied workspace. The host persists those itself and notifies the UI, so the sidebar shows the new grouping right away with every session id unchanged. It only asks for a restart when the host lacks those actions — a tools-only front end, or an older version; until then, do not change any workspace: creating, renaming or archiving one would clobber this change.',
+  'help.faq.restartA': 'Normally never: once the registry changes, the plugin hands the work to the host — one fresh look at the disk, then reuse or create the target workspace, attach the sessions, detach them from the sources and delete an emptied workspace. The host persists those itself and notifies the UI, so the sidebar shows the new grouping right away with every session id unchanged. It only asks for a restart when the host lacks those actions — a tools-only front end, or an older version; until then, do not change any workspace: creating, renaming or archiving one would clobber this change. One more case: a session the host still holds in memory (the rows tagged `active`) cannot move — the plan leaves it out and tells you, it stays in its directory with its ownership unchanged, so migrate again after a restart; and if the host refuses halfway, the plugin writes the registry it computed back to the file, so the restart shows this run’s result.',
   'help.faq.backupQ': 'Where do backups go, and how do Roll back and Restore differ?',
   'help.faq.backupA': 'Every migration, import and delete backs up first; the list is on the Backups tab. Roll back restores the session directories, the logs and the workspace registry together; Restore only moves the deleted session directories back — deleting never touched the registry.',
   'help.faq.familyQ': 'What happens to a session’s subagents when I delete or migrate it?',

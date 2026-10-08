@@ -524,6 +524,10 @@ export function MigrationPanel({ t, state, meta, reload, directory }: PanelShare
               </p>
               {/* 级联带进来的子智能体要说明白：勾的是一条父会话，清单里却多出几条没勾过的。 */}
               {preview.cascaded > 0 && <p className="dsm-hint">{t('migrate.family', { count: preview.cascaded })}</p>}
+              {/* 少搬的那批同样要说明白：它们不在下面那张清单里，不提这一句就是"勾了 22 条、搬走 9 条"。 */}
+              {preview.liveSkipped.length > 0 && (
+                <p className="dsm-hint">{t('migrate.liveSkipped', { count: preview.liveSkipped.length })}</p>
+              )}
               <p className="dsm-hint">
                 {preview.unowned
                   ? t('migrate.projectDirsUnowned', { projectDirs: preview.sourceProjectDirs.length, to: preview.targetProjectDir })

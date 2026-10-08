@@ -107,6 +107,21 @@ export interface ArtifactSkip {
   sessionId?: string
 }
 
+/**
+ * 宿主**攥在内存里**、这次不能搬的会话（判据与理由见 plan.ts 的 `splitLive()`）。
+ *
+ * 它们既不能被挂到新工作区（宿主拿内存里那份 header 校验 `cwd`，一口回绝），日志也不能被搬走
+ * （宿主手里还有写句柄，搬走之后它照样往旧路径写）。所以它们留在原目录、归属不变。
+ */
+export interface LiveSkip {
+  id: string
+  /** 界面认人用的标题（读到才有）。 */
+  title?: string
+  createdAt: number
+  /** 它现在的 cwd——也是它留在原处的理由（源工作区那条记录还认它）。 */
+  cwd?: string
+}
+
 /** 一次迁移的完整计划。 */
 export interface RelocationPlan {
   ok: boolean
@@ -132,6 +147,13 @@ export interface RelocationPlan {
   sessions: SessionMove[]
   /** 级联带进来的条数：点名的会话的子智能体后代（见 `SessionMove.via`）。 */
   cascaded: number
+  /**
+   * 宿主持在内存里、这次**不搬**的会话（按发现顺序）。
+   *
+   * 计划因此是一次**部分**迁移：它们没被搬，`sessions` 里没有它们，注册表也不动它们那条归属
+   * （源工作区因此不会被摘空、更不会被删）。调用方必须把这份名单报出来——静默少搬就是坏账。
+   */
+  liveSkipped: LiveSkip[]
   artifacts: { moves: ArtifactMove[]; problems: string[]; skipped: ArtifactSkip[] } | null
   registryChange: RegistryChange | null
   nextRegistry: WorkspaceRegistryState | null
@@ -188,6 +210,14 @@ export interface EffectOutcome {
   targetId?: string
   /** `failed` 时的原因（原样带给用户，别吞）。 */
   error?: string
+  /**
+   * `failed` 时插件**已经把算好的注册表整份写回文件**了（见 `take-effect.ts` 的 `restoreRegistry()`）。
+   *
+   * 为什么必须写回来：宿主那一步只要动过手就会按内存整份落盘，把插件写的那份当场盖掉；不写回来，
+   * "重启后一致"就是假的。走不到这一步（没给注册表路径 / 没有算好的终态）时为 undefined，
+   * 措辞要据此分岔，不能硬说文件是对的。
+   */
+  registryRestored?: boolean
 }
 
 /**
