@@ -1,6 +1,14 @@
-<img src="icon.svg" width="56" alt="">
+<p align="center">
+  <img src="icon.svg" width="56" alt="">
+</p>
+
+<div align="center">
 
 # dsh-session-manager
+
+[![](https://img.shields.io/badge/powered_by-dsh-4D6BFE?style=flat-square&logo=deepseek&logoColor=white)](https://github.com/deepseek-ai/deepseek-harness)
+
+</div>
 
 A session manager for DSH: **move** workspaces and sessions to a new directory, **export / import**
 sessions as `.dshsess` bundles, and **sync** them across machines over **WebDAV**.
