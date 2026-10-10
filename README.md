@@ -1,6 +1,14 @@
-<img src="icon.svg" width="56" alt="">
+<p align="center">
+  <img src="icon.svg" width="56" alt="">
+</p>
+
+<div align="center">
 
 # dsh-session-manager
+
+[![](https://img.shields.io/badge/powered_by-dsh-4D6BFE?style=flat-square&logo=deepseek&logoColor=white)](https://github.com/deepseek-ai/deepseek-harness)
+
+</div>
 
 DSH 的会话管理插件：把工作区与会话**搬到新目录**，把会话**导出 / 导入**成 `.dshsess` 包，以及用
 **WebDAV 在多台机器之间同步**会话。
