@@ -1704,6 +1704,75 @@ test('POST /sync?mode=apply：预演不落地，apply 走事件流拉取远端�
   }
 })
 
+test('POST /sync?mode=apply：带着预演给的 planId 就照着那份计划落地（一份预演只够落地一次）', async () => {
+  const sandbox = makeSandbox('web-sync-preview')
+  writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000)
+  const fixture = await startDavFixture({ root: join(sandbox.base, 'dav') })
+  const dav = createDavClient({ baseUrl: fixture.url })
+  const foreign = join(sandbox.base, 'foreign')
+  mkdirSync(foreign, { recursive: true })
+  const foreignRoot = join(sandbox.base, 'foreign-sessions')
+  try {
+    writeSession(foreignRoot, 'session-remote', foreign, 1500, { title: '远端那条' })
+    await putRemoteSession(dav, 'robot-b', {
+      id: 'session-remote',
+      cwd: foreign,
+      createdAt: 1500,
+      title: '远端那条',
+      logPath: join(sessionDir(foreignRoot, foreign, 'session-remote'), 'session.v4.jsonl.zstd'),
+      logName: 'session.v4.jsonl.zstd',
+      logVersion: 4,
+    })
+    const handlers = createApiHandlers(
+      deps(sandbox, {
+        sync: async () => ({
+          settings: { url: fixture.url, machineId: 'robot-a', mapping: { [foreign]: CWD_A } },
+          dav,
+        }),
+      }),
+    )
+
+    const preview = fakeRes()
+    await handlers['GET|POST /sync']!(fakeReq('GET', `${API_PREFIX}/sync`), preview.res)
+    const planned = payload(preview.captured)
+    assert.equal(typeof planned['planId'], 'string', '预演回一个号码：确认那次带着它回来')
+
+    const applied = fakeRes()
+    await handlers['GET|POST /sync']!(
+      fakeReq('POST', `${API_PREFIX}/sync?mode=apply`, Buffer.from(JSON.stringify({ planId: planned['planId'] }))),
+      applied.res,
+    )
+    assert.deepEqual(
+      progressOf(applied.captured).map((progress) => progress['phase']),
+      ['remote', 'pull', 'push'],
+      '照预演那份走：只重读一次远端索引（验数据有没有变），扫本机 / 问 git / 比对内容那几段不再走',
+    )
+    const outcome = payload(applied.captured)
+    assert.deepEqual(outcome['planSource'], { kind: 'reused' })
+    assert.deepEqual(outcome['pulled'], ['session-remote'])
+    assert.deepEqual((outcome['plan'] as Record<string, unknown>)['pullIds'], ['session-remote'])
+    assert.ok(existsSync(sessionDir(sandbox.sessionsRoot, CWD_A, 'session-remote')), '该落的还是落了')
+
+    // 一份预演只够落地一次：拿着同一个号码再来一次，宿主手里已经没有那份数据了，退回从零重算。
+    const again = fakeRes()
+    await handlers['GET|POST /sync']!(
+      fakeReq('POST', `${API_PREFIX}/sync?mode=apply`, Buffer.from(JSON.stringify({ planId: planned['planId'] }))),
+      again.res,
+    )
+    const second = payload(again.captured)
+    const source = second['planSource'] as Record<string, unknown>
+    assert.equal(source['kind'], 'recomputed')
+    assert.match(String(source['reason']), /不在宿主手里/)
+    assert.ok(
+      progressOf(again.captured).some((progress) => progress['phase'] === 'scan'),
+      '重算那次照旧报算计划那几段',
+    )
+  } finally {
+    await fixture.close()
+    rmSync(sandbox.base, { recursive: true, force: true })
+  }
+})
+
 // ---- 长动作的进度（事件流） ----
 //
 // 这一组钉的不是"某个动作能跑完"（上面那些用例已经钉了结论），而是"**干活的每一段都报了**"：

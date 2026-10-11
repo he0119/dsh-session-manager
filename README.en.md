@@ -337,9 +337,11 @@ the project identity and the local path in that name's tooltip, while a
 row keeps only the action, the session name and its size (the name carries the **same type tags as the session
 list**: subagent / blank / archived / live, for the sessions this machine already has), and the third column of
 the "left alone" table names
-the machine holding the other copy. **Sync now** in that dialog actually pulls and pushes. While it runs, the
-dialog body becomes a progress bar with "Pushing 12 / 84" and the title of the session in flight — the
-denominator is the number of items that leg will really do (skipped ones are not counted), and pulling and
+the machine holding the other copy. **Sync now** in that dialog actually pulls and pushes, and it works from the
+**data the preview already computed** (the same plan is not computed a second time): only when this machine or
+the remote changed after the preview is the plan recomputed from scratch, and the success line says so. While
+it runs, the dialog body becomes a progress bar with "Pushing 12 / 84" and the title of the session in flight —
+the denominator is the number of items that leg will really do (skipped ones are not counted), and pulling and
 pushing each get their own pass.
 The rules and edges:
 

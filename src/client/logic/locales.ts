@@ -316,6 +316,7 @@ export const zh = {
   'sync.machines': '远端机器：{machines}',
   'sync.applied': '已拉取 {pulled} 条、已推送 {pushed} 条（落地 {bytesIn}，上传 {bytesOut}）。',
   'sync.appliedReplaced': '其中 {count} 条覆盖了本机原来那份（旧的那份已进备份，可在「备份」页恢复）。',
+  'sync.replanned': '预演之后本机或远端又有变化，这次重新算了一遍计划。',
   'sync.nothing': '两边一样，没有要同步的。',
   // 三段清单的段头：只留标题，条数由段头里那颗药丸说（复用 `list.sessionsInDir`，与组头同一句）。
   'sync.pullHead': '会拉取',
@@ -710,6 +711,7 @@ export const en: LocaleDictOf<typeof NS> = {
   'sync.machines': 'Remote machines: {machines}',
   'sync.applied': 'Pulled {pulled}, pushed {pushed} ({bytesIn} written, {bytesOut} uploaded).',
   'sync.appliedReplaced': '{count} of them replaced this machine’s copy (the old one is backed up; restore it from the Backups tab).',
+  'sync.replanned': 'This machine or the remote changed after the preview, so the plan was recomputed.',
   'sync.nothing': 'Both sides are in sync.',
   // Section heads for the three lists: the title only; the count is the pill beside it
   // (reusing `list.sessionsInDir`, the same line the project group heads use).

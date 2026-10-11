@@ -21,6 +21,13 @@
 // 为什么一机一格：WebDAV 没有锁，多台机器共写一份 `index.json` 就是"后写的盖掉先写的"。每台机器
 // 只写自己那一格、读别人的全部，就不需要锁。
 //
+// 预演与落地是**两次调用、两份数据**：`prepareSync()` 算计划，并把落地真正要用的输入（本机整库、远端
+// 索引、项目身份、比对过的指纹、投影缓存那两件事）一起留下；界面按下确认之后由 `syncPrepared()` 拿
+// 那份数据落地，不再把同一份计划重算一次。那份数据会旧（它描述的是预演那一刻），所以落地前先由
+// `stalePlanReason()` 验一遍"本机与远端还是不是那个样子"：对得上就照它走，对不上就从零重算一遍
+// （宁慢不错——覆盖本机那份会撤掉本机目录，判据旧了会丢内容）。`runSync()` 是单次调用那条路
+// （工具层与老调用方），算完就用。
+//
 // 冲突口径：**空白不搬运，两边都有按"谁更新"择新**。
 //
 //   - 空白会话（宿主投影缓存判 `blank`，与迁移页同一条口径：建出来但一轮都没开始过）本机不会上传，
@@ -41,7 +48,7 @@
 // 解包、备份还原都会把它抹平），而这两枚钟与日志内容同生共死，落地改写 cwd 时也不受影响。
 // 判据仍然**不**拿时间反推"谁是祖先"：代次那边的四种关系是结构性的，时间只在结构判不出来时分高下。
 import { createHash } from 'node:crypto'
-import { readFileSync, rmSync, statSync } from 'node:fs'
+import { readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { canonicalDir, type DirCanonicalizer } from './canonical-path.ts'
@@ -49,7 +56,7 @@ import { warmCheckpoints, type WarmDeps } from './checkpoint-warm.ts'
 import type { DavPort } from './dav.ts'
 import { scanAll, type DiscoveredSession } from './discovery.ts'
 import { createBackup } from './journal.ts'
-import { encodeSegment } from './paths.ts'
+import { encodeSegment, parseSessionLogName } from './paths.ts'
 import { createGitRunner, repoLocation, type GitRunner, type RepoLocation } from './repo.ts'
 import { readRegistry, validateRegistry } from './registry.ts'
 import { takeEffectOnHostAll, type EffectDeps } from './take-effect.ts'
@@ -62,6 +69,7 @@ import type {
   ProgressEvent,
   ProgressReporter,
   RegistryChange,
+  SessionLogFile,
   WarmOutcome,
   WorkspaceRegistryState,
 } from './types.ts'
@@ -974,8 +982,9 @@ export async function readRemoteLibrary(dav: DavPort, settings: SyncSettings): P
  * 六段（`phase`）各有各的分母，合起来算一个百分比只会骗人：算计划要先扫本机、再读远端索引、再逐个
  * 目录认本机仓库的身份（真机量到这一段比前两段加起来还长：13 个目录跑一轮 `git rev-parse` 约
  * 0.2 秒）、最后逐条比对内容，然后落地再分拉与推两段（先拉的 3 条与后推的 84 条同样不是一个分母）。
- * **预演与落地报的是同一套事件**：落地那边也要先算一遍计划，用户按下确认后到第一条拉取完成之间那段
- * 空档，靠的就是前面这四个阶段。
+ * **预演报的是前四段**；落地那一次要么照着预演那份数据直接走（只多报一条 `remote`——它要重读一次远端
+ * 索引，验数据有没有变），要么（数据变了、或这次没有预演数据）从零重算一遍、把那四段照报一遍。所以
+ * 按下确认到第一条拉取之间总有一条东西在动，不会对着一动不动的按钮干等。
  */
 /**
  * 同步报的那几段（形状与共用词汇完全同源，见 `types.ts` 的 `ProgressEvent`）。
@@ -1020,8 +1029,23 @@ export interface SyncOutcome {
    * 缺席 = 这次没有落到本机的会话（见 checkpoint-warm.ts）。
    */
   warm?: WarmOutcome
+  /**
+   * 这次落地走的哪条路（只有"先预演、后确认"那条路会写它）。
+   *
+   * 单次调用（工具层那一次 `apply:true`，没有"预演那份"这回事）没有这一项。
+   */
+  planSource?: SyncPlanSource
   problems: string[]
 }
+
+/**
+ * 落地走的是哪条路（见 `SyncOutcome.planSource`）。
+ *
+ * - `reused`：预演之后本机与远端一个字节都没变，**照着预演那份计划落地**——不再扫库、不再比对内容、
+ *   也不再把项目身份重问一遍；`plan` 就是用户确认过的那一份（见 `syncPrepared()`）。
+ * - `recomputed`：有一处对不上（`reason` 说明是哪一处），这次从零重算了一遍计划，`plan` 是新的那份。
+ */
+export type SyncPlanSource = { kind: 'reused' } | { kind: 'recomputed'; reason: string }
 
 /** `runSync()` 的依赖。 */
 export interface SyncDeps extends EffectDeps, WarmDeps {
@@ -1086,25 +1110,153 @@ function repoCandidates(deps: SyncDeps, local: readonly DiscoveredSession[]): st
 }
 
 /**
- * 跑一次同步。
+ * 预演算出来的那份数据：**落地要用的东西全在里面**，确认之后照着它走，不再重算（见 `syncPrepared()`）。
  *
- * 拉取那一侧复用 `planImport/applyImport`（与设置页的「导入」是同一条路），所以包的自校验、
- * `.part` 落地、注册表重挂、`_no-cwd` 的口径都不用在这里重写一遍：同步只是"从哪儿拿包"与
- * "往哪儿放包"这两件事不同。
+ * 为什么把计划与它的输入一起留下：算一次计划的四段（扫本机 / 读远端索引 / 逐个候选目录问 git / 逐条
+ * 比对内容）里，后三段全是要等的活——真机量到 13 个候选目录跑一轮 `git rev-parse` 约 0.2 秒，比对要
+ * 读完每一条要参与的日志。预演已经做过一遍，落地再走一遍只是把同样的结论重算一次。
+ *
+ * 这份数据描述的是**预演那一刻**的本机与远端，本身会旧：落地之前由 `stalePlanReason()` 验一遍，
+ * 对不上就从零重算（分叉在 `syncPrepared()`）。
+ */
+export interface SyncPrepared {
+  /** 预演算出来的计划。 */
+  plan: SyncPlan
+  /** 本机整库（`scanAll()` 的结果）。 */
+  local: DiscoveredSession[]
+  /** 读回来的远端索引（落地不再读第二遍）。 */
+  remote: RemoteLibrary
+  /** 项目身份：本机目录 → 仓库根。 */
+  repos: Map<string, string>
+  /**
+   * 目录 → 仓库位置：预演问过 git 的那些。
+   *
+   * 落地推一条会话时要往自己那份索引里写它的项目身份，本来每个目录还要再问一次 git。身份是"这条会话
+   * 属于哪个项目"的机器无关说法，几秒钟之内不会变，而且是给别的机器看的提示——写旧一版不会让谁的
+   * 会话落错地方。
+   */
+  located: Map<string, Promise<RepoLocation | undefined>>
+  /** 宿主投影缓存里那两件事（空白、最后活动时间），按会话读出来的那一份。 */
+  meta: Map<string, SessionMeta | undefined>
+  /**
+   * 比对阶段算过的内容指纹（日志路径 → 指纹）。
+   *
+   * 落地推这些会话时要把它写进自己那份索引：照预演那份走时那些字节已经验过没变，直接用它，不再读
+   * 第二遍。
+   */
+  fingerprints: Map<string, FileFingerprint>
+  /** 预演那一刻的事实快照（只用来判"变了没有"，不参与任何判定）。 */
+  facts: SyncFacts
+}
+
+/** 预演那一刻本机与远端的事实：`stalePlanReason()` 拿它与眼下的一刻比。 */
+interface SyncFacts {
+  /**
+   * 那份计划是在哪套输入下算出来的：远端地址、机器名、映射表与三个库位置。
+   *
+   * 为什么它也算"事实"：界面这次确认时，宿主会**重新解析**一遍同步设置（映射表、机器名都从配置现读），
+   * 拿旧的映射表落地就是把会话落到用户刚改掉的那个目录以外的地方。凭据不进这份摘要——它只影响读远端，
+   * 换了凭据会在远端指纹那一步露出来。
+   */
+  settings: string
+  /** 本机每条会话的代次文件（名字、字节数、mtime）与投影缓存里那两件事。 */
+  local: Array<{
+    id: string
+    dir: string
+    files: Array<{ name: string; bytes: number; mtimeMs?: number }>
+    meta?: SessionMeta
+  }>
+  /** 远端那份索引的指纹（见 `remoteDigest()`）。 */
+  remote: string
+}
+
+/** `SyncFacts.settings`：映射表按键排序，不受配置文档里的书写顺序影响。 */
+function settingsDigest(deps: SyncDeps): string {
+  const mapping = Object.entries(deps.settings.mapping)
+    .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+    .map(([from, to]) => `${from}\u0000${to}`)
+  return [
+    deps.settings.url,
+    deps.settings.machineId,
+    deps.settings.username ?? '',
+    String(deps.settings.timeoutMs ?? ''),
+    deps.sessionsRoot,
+    deps.registryPath,
+    deps.backupRoot,
+    ...mapping,
+  ].join('\n')
+}
+
+/**
+ * 一条日志文件的"预演那一刻长什么样"。
+ *
+ * `mtimeMs` 缺席 = 这一份验不了（stat 失败，或者扫描时读到的字节数与这次 stat 对不上）：调用方按
+ * "不新鲜"处理——宁可重算一遍，也不要照着一份来历不清的指纹落盘。
+ */
+function fileFact(file: SessionLogFile): SyncFacts['local'][number]['files'][number] {
+  try {
+    const stat = statSync(file.path)
+    return { name: file.name, bytes: file.bytes, ...(stat.size === file.bytes ? { mtimeMs: stat.mtimeMs } : {}) }
+  } catch {
+    return { name: file.name, bytes: file.bytes }
+  }
+}
+
+/**
+ * 远端那份索引的指纹：把计划会读到的每个字段按确定的顺序拼出来再哈希。
+ *
+ * 比的是"预演与落地之间远端有没有被动过"（见 `stalePlanReason()`）。为什么不直接
+ * `JSON.stringify()` 那份索引：文件是别的机器写的，键的顺序不在我们手里。
+ *
+ * 只拼各机器自己的索引：`entries`（联集）是从它们推出来的，索引一样、联集就一样。
+ *
+ * @param library 读回来的远端。
+ * @returns sha256。
+ */
+export function remoteDigest(library: RemoteLibrary): string {
+  const lines: string[] = []
+  for (const machine of [...library.machines].sort()) {
+    const index = library.indexes.get(machine)
+    if (index === undefined) {
+      lines.push(`${machine}\u0000`)
+      continue
+    }
+    const entries = [...index.entries].sort((left, right) => (left.id < right.id ? -1 : left.id > right.id ? 1 : 0))
+    for (const entry of entries) {
+      lines.push(
+        [
+          machine,
+          entry.id,
+          entry.cwd ?? '',
+          entry.title ?? '',
+          entry.repo ?? '',
+          entry.repoPath ?? '',
+          String(entry.createdAt),
+          String(entry.lastActiveAt ?? ''),
+          String(entry.lastPromptAt ?? ''),
+          entry.files.map((file) => `${file.version}:${file.bytes}:${file.sha256}`).sort().join(','),
+        ].join('\u0000'),
+      )
+    }
+  }
+  return createHash('sha256').update(lines.join('\n')).digest('hex')
+}
+
+/**
+ * 算一份计划，并且把**落地要用的输入一起留下**。
+ *
+ * 预演走它，落地也走它（后者拿到的那份数据交给 `applyPreparedSync()`）。四段各有各的分母：
+ * `scan` / `remote` / `repo` / `compare`。
  *
  * @param deps 远端、设置与本地库的位置。
- * @param options.apply 为 false 只算计划（除了读远端，什么都不写）。
- * @param options.onProgress 每开始处理一条调一次（见 `SyncProgress`）；调用方拿它推进度条。预演与
- *   落地报的是同一套事件（算计划的四段 + 写盘的两段）。回调同步调用、不 await，所以它自己不许抛
- *   （`src/web.ts` 那一侧把它写进 SSE 响应）。
- * @returns 结果；单条失败只记进 `problems`，不半路放弃整次同步。
+ * @param options.onProgress 每开始处理一条调一次（见 `SyncProgress`）。回调同步调用、不 await，所以
+ *   它自己不许抛（`src/web.ts` 那一侧把它写进 SSE 响应）。
+ * @returns 计划与它的来路。
  */
-export async function runSync(
+export async function prepareSync(
   deps: SyncDeps,
-  options: { apply: boolean; onProgress?: ProgressReporter },
-
-): Promise<SyncOutcome> {
-  const problems: string[] = []
+  options: { onProgress?: ProgressReporter } = {},
+): Promise<SyncPrepared> {
   const report = options.onProgress
   // 第一段：扫本机。冷启动时这一段是大头（每条会话要读头、折标题），所以它值得一条进度。
   const local = scanAll(deps.sessionsRoot, deps.decodeAll, {
@@ -1148,6 +1300,8 @@ export async function runSync(
   // 指纹走"与 cwd 无关"的那份：落地会改写 cwd，按字节比会把拉取来的那份判成"两边各自写过"。
   const contentHash = (path: string, version: number, compression: string | null): FileFingerprint =>
     contentFingerprint(path, version, compression, deps.decodeAll)
+  /** 比对阶段算过的指纹：落地写回自己那份索引时直接用它（见 `SyncPrepared.fingerprints`）。 */
+  const fingerprints = new Map<string, FileFingerprint>()
   //
   // 第四段（比对）的分母：**两边都有**的那些会话的文件数。本机独有的那些只算字节、不读内容，
   // 所以不进分母——不然进度条会停在一半（这正是 `SyncProgress` 一句"各有各的分母"的意思）。
@@ -1160,12 +1314,14 @@ export async function runSync(
   const planHash = (path: string, version: number, compression: string | null): FileFingerprint => {
     report?.({ phase: 'compare', done: compared, total: compareTotal })
     const fingerprint = contentHash(path, version, compression)
+    fingerprints.set(path, fingerprint)
     compared += 1
     return fingerprint
   }
   /*
-   * 投影缓存那两件事（空白、最后活动时间）按会话读一次就够：算计划要它、写回索引时还要它。宿主没给
-   * 这个口子（工具层在没挂投影缓存的宿主上就是这样）时什么都不读，两件事都按"不知道"处理。
+   * 投影缓存那两件事（空白、最后活动时间）按会话读一次就够：算计划要它、写回索引时还要它、落地前
+   * 验"有没有变"也要它。宿主没给这个口子（工具层在没挂投影缓存的宿主上就是这样）时什么都不读，
+   * 两件事都按"不知道"处理。
    */
   const metaCache = new Map<string, SessionMeta | undefined>()
   const metaOf = (session: Pick<DiscoveredSession, 'id' | 'createdAt' | 'cwd'>): SessionMeta | undefined => {
@@ -1194,22 +1350,90 @@ export async function runSync(
   plan.problems.push(...remote.problems)
   plan.ok = plan.problems.length === 0
 
-  if (!options.apply) {
-    return {
-      plan,
-      applied: false,
-      pulled: [],
-      replaced: [],
-      pushed: [],
-      bytesIn: 0,
-      bytesOut: 0,
-      registryWritten: false,
-      indexWritten: false,
-      problems: [],
-    }
+  /*
+   * 事实快照：只记"预演那一刻是什么样"。代次文件、投影缓存那两件事、远端索引的指纹都取自这一刻的读取
+   * 结果——落地前比这三样，比得上就说明"照着这份计划走"与"现在重算一遍"是同一件事。
+   */
+  const facts: SyncFacts = {
+    settings: settingsDigest(deps),
+    local: local.map((session) => {
+      const meta = metaOf(session)
+      return {
+        id: session.id,
+        dir: session.dir,
+        files: session.files.map(fileFact),
+        ...(meta === undefined ? {} : { meta }),
+      }
+    }),
+    remote: remoteDigest(remote),
   }
+  return { plan, local, remote, repos, located, meta: metaCache, fingerprints, facts }
+}
 
+/**
+ * 只预演的那份结果（界面与工具层两条路共用同一个形状）。
+ *
+ * @param prepared 预演算出来的那份数据。
+ * @returns `applied: false` 的结果：计划在里面，写盘那几项全空。
+ */
+export function plannedOutcome(prepared: SyncPrepared): SyncOutcome {
+  return {
+    plan: prepared.plan,
+    applied: false,
+    pulled: [],
+    replaced: [],
+    pushed: [],
+    bytesIn: 0,
+    bytesOut: 0,
+    registryWritten: false,
+    indexWritten: false,
+    problems: [],
+  }
+}
+
+/**
+ * 照着预演那份数据落地：拉取、覆盖、收口、推送、重写自己那份索引。
+ *
+ * 拉取那一侧复用 `planImport/applyImport`（与设置页的「导入」是同一条路），所以包的自校验、
+ * `.part` 落地、注册表重挂、`_no-cwd` 的口径都不用在这里重写一遍：同步只是"从哪儿拿包"与
+ * "往哪儿放包"这两件事不同。
+ *
+ * 这一段几乎不问宿主任何东西：会话库、投影缓存、内存里活着的会话都在预演那一刻的输入里，项目身份也
+ * 接着用预演问过的那些目录（预演一个身份条目都没见过时它一个目录都没问，那几条要推的目录这时候才问
+ * 一次 git）。所以调用方要么刚算完（`runSync()`），要么先验过那份数据还作数（`syncPrepared()`）。
+ *
+ * @param deps 远端、设置与本地库的位置。
+ * @param prepared 预演那份数据。
+ * @param options.onProgress 每开始处理一条调一次（`pull` / `push` 两段）。
+ * @returns 结果；单条失败只记进 `problems`，不半路放弃整次同步。
+ */
+export async function applyPreparedSync(
+  deps: SyncDeps,
+  prepared: SyncPrepared,
+  options: { onProgress?: ProgressReporter } = {},
+): Promise<SyncOutcome> {
+  const problems: string[] = []
+  const { plan, local, remote } = prepared
   const byId = new Map(local.map((session) => [session.id, session]))
+  /**
+   * 预演比对时算过的指纹直接接着用（同一个字节数、同一个 mtime，落地之前验过）。
+   *
+   * 本机独有的那些预演时没算过（它们不进比对，算它才是白花），这里现算——只有真推上去的那几条。
+   */
+  const contentHash = (path: string, version: number, compression: string | null): FileFingerprint =>
+    prepared.fingerprints.get(path) ?? contentFingerprint(path, version, compression, deps.decodeAll)
+  /** 投影缓存那两件事用预演读出来的那一份（落地不再问宿主）。 */
+  const metaOf = (session: Pick<DiscoveredSession, 'id'>): SessionMeta | undefined => prepared.meta.get(session.id)
+  /** 项目身份接着用预演问过 git 的那些；预演没问过的目录（远端一个身份条目都没有时它不问）现在问。 */
+  const git = deps.git ?? createGitRunner()
+  const located = new Map(prepared.located)
+  const locate = (dir: string): Promise<RepoLocation | undefined> => {
+    const cached = located.get(dir)
+    if (cached !== undefined) return cached
+    const pending = repoLocation(dir, git)
+    located.set(dir, pending)
+    return pending
+  }
   const pulled: string[] = []
   const replaced: string[] = []
   const pushed: Array<{ id: string; action: 'upload' | 'update' }> = []
@@ -1483,4 +1707,149 @@ export async function runSync(
     ...(pulled.length === 0 ? {} : { warm }),
     problems,
   }
+}
+
+/** 两枚投影缓存结论是不是同一份（同缺同有、值一样）。 */
+function sameMeta(left: SessionMeta | undefined, right: SessionMeta | undefined): boolean {
+  return (
+    left?.blank === right?.blank &&
+    left?.lastPromptAt === right?.lastPromptAt &&
+    left?.lastMessageAt === right?.lastMessageAt
+  )
+}
+
+/**
+ * 这份预演数据还作不作数（作数 = 落地可以照着它走）。
+ *
+ * 判据只问"预演之后有没有东西变了"，不问"该不该照原来那份走"：计划是纯计算，输入没变，输出就一样。
+ * 五处：
+ *   1. **这份计划是在哪套输入下算的**（远端地址、机器名、映射表、三个库位置）：界面这次确认时宿主会重新
+ *      解析同步设置，拿旧的映射表落地就会落到用户刚改掉的那个目录以外的地方；
+ *   2. **本机的代次文件**：目录里的日志文件不多不少，每个文件的字节数与 mtime 都还是预演那一刻那个
+ *      ——"推哪几条"与内容比对都建立在它上面；
+ *   3. **投影缓存那两件事**（空白、最后活动时间）：它们决定"这条参不参与""两边谁更新"，变了判定就
+ *      可能翻过来；
+ *   4. 计划里要**覆盖本机**的那几条，宿主这会儿还没拿在手里：预演时问过，隔了一会儿可能又活了。
+ *      那一步要撤掉本机那份目录，与删除拒掉活会话同一个理由；
+ *   5. **远端那份索引**：别的机器推过东西就可能把判定翻过来，所以这里重读一次再比指纹。
+ *
+ * 为什么不按"预演过去多久了"判：按时间只能保证"不太旧"，而这里的判据是结构性的（集合与字节都对得
+ * 上），所以隔多久都能照走；反过来，只隔一秒但那条会话刚好又跑了一轮，这里也一定看得出来。预览之后
+ * **新建**的会话不在判据里：它不在那份计划里，这次不参与（下一次同步会带上它）。
+ *
+ * @param deps 远端、设置与本地库的位置。
+ * @param prepared 要验的那份预演数据。
+ * @param options.onProgress 重读远端索引那一下报一条 `remote`（没有分母，见 `prepareSync()`）。
+ * @returns 不能照它走的理由（一句给人看的话）；`undefined` = 还作数。
+ */
+export async function stalePlanReason(
+  deps: SyncDeps,
+  prepared: SyncPrepared,
+  options: { onProgress?: ProgressReporter } = {},
+): Promise<string | undefined> {
+  const byId = new Map(prepared.local.map((session) => [session.id, session]))
+  // 第一件事：这份计划还是不是拿眼下这套设置算出来的（映射表变了，落地的目录就不是用户改后的那个）。
+  if (settingsDigest(deps) !== prepared.facts.settings) {
+    return '同步设置（远端地址 / 机器名 / 映射表 / 库位置）在预演之后改过'
+  }
+  for (const fact of prepared.facts.local) {
+    let names: string[]
+    try {
+      names = readdirSync(fact.dir).filter((name) => parseSessionLogName(name) !== undefined)
+    } catch {
+      return `本机的 ${fact.id} 这条会话目录已经不在了`
+    }
+    if (names.sort().join('\n') !== fact.files.map((file) => file.name).sort().join('\n')) {
+      return `本机的 ${fact.id} 在预演之后多了一代或少了一代（代次文件变了）`
+    }
+    for (const file of fact.files) {
+      let size = -1
+      let mtimeMs = -1
+      try {
+        const stat = statSync(join(fact.dir, file.name))
+        size = stat.size
+        mtimeMs = stat.mtimeMs
+      } catch {
+        return `本机的 ${fact.id} 少了 ${file.name}`
+      }
+      if (file.mtimeMs === undefined || mtimeMs !== file.mtimeMs || size !== file.bytes) {
+        return `本机的 ${fact.id} 在预演之后又动过（${file.name} 与预演那一刻不是一个样子）`
+      }
+    }
+  }
+  if (deps.sessionMeta !== undefined) {
+    for (const fact of prepared.facts.local) {
+      const session = byId.get(fact.id)
+      if (session === undefined) continue
+      const fresh = deps.sessionMeta({
+        id: session.id,
+        createdAt: session.createdAt,
+        ...(session.cwd === undefined ? {} : { cwd: session.cwd }),
+      })
+      if (!sameMeta(fact.meta, fresh)) return `本机的 ${fact.id} 在预演之后又动过（宿主那份列表元数据变了）`
+    }
+  }
+  const live = deps.liveSessionIds?.()
+  if (live !== undefined) {
+    for (const entry of prepared.plan.pull) {
+      // 覆盖本机那份是这个插件里唯一会撤掉本机已有内容的动作（见上面那条说明）。
+      if (entry.action === 'replace' && live.has(entry.id)) {
+        return `${entry.id} 这会儿还在宿主内存里（运行中或已打开），先关掉它再同步`
+      }
+    }
+  }
+  options.onProgress?.({ phase: 'remote', done: 0, total: 0 })
+  const remote = await readRemoteLibrary(deps.dav, deps.settings)
+  if (remoteDigest(remote) !== prepared.facts.remote) {
+    return '远端那份索引在预演之后变了（别的机器推过东西）'
+  }
+  return undefined
+}
+
+/**
+ * 落地一次同步：预演那份数据还作数就照着它走（不再重算），变了就从零重算一遍。
+ *
+ * 这是界面那条路（先预演、后确认）的落地口，`planSource` 报的就是走的哪一条。工具层是单次调用，
+ * 没有"预演那份"这回事，直接走 `runSync()`。
+ *
+ * @param deps 远端、设置与本地库的位置。
+ * @param prepared 预演那份数据（`prepareSync()` 的返回值）。
+ * @param options.onProgress 每开始处理一条调一次。
+ * @returns 落地结果；`planSource.kind === 'recomputed'` 说明这次是重算的（`reason` 是哪一处对不上）。
+ */
+export async function syncPrepared(
+  deps: SyncDeps,
+  prepared: SyncPrepared,
+  options: { onProgress?: ProgressReporter } = {},
+): Promise<SyncOutcome> {
+  const reason = await stalePlanReason(deps, prepared, options)
+  if (reason === undefined) {
+    return { ...(await applyPreparedSync(deps, prepared, options)), planSource: { kind: 'reused' } }
+  }
+  const outcome = await runSync(deps, {
+    apply: true,
+    ...(options.onProgress === undefined ? {} : { onProgress: options.onProgress }),
+  })
+  return { ...outcome, planSource: { kind: 'recomputed', reason } }
+}
+
+/**
+ * 单次跑完一次同步：算计划（落地时接着用它）。
+ *
+ * 工具层与老调用方走这条——一次调用里预演与落地是同一件事，没有"确认"这一步。界面那条"先预演、后
+ * 确认"的路分两次调用：`prepareSync()` + `syncPrepared()`。
+ *
+ * @param deps 远端、设置与本地库的位置。
+ * @param options.apply 为 false 只算计划（除了读远端，什么都不写）。
+ * @param options.onProgress 每开始处理一条调一次（见 `SyncProgress`）；预演与落地报的是同一套事件
+ *   （算计划的四段 + 写盘的两段）。回调同步调用、不 await，所以它自己不许抛。
+ * @returns 结果；单条失败只记进 `problems`，不半路放弃整次同步。
+ */
+export async function runSync(
+  deps: SyncDeps,
+  options: { apply: boolean; onProgress?: ProgressReporter },
+): Promise<SyncOutcome> {
+  const prepared = await prepareSync(deps, options)
+  if (!options.apply) return plannedOutcome(prepared)
+  return applyPreparedSync(deps, prepared, options)
 }

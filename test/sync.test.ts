@@ -21,11 +21,13 @@ import {
   normalizeMapping,
   parseIndex,
   planSync,
+  prepareSync,
   readRemoteLibrary,
   relation,
   remoteBundlePath,
   remoteIndexPath,
   runSync,
+  syncPrepared,
   testSyncConnection,
   type FileFingerprint,
   type RemoteLibrary,
@@ -116,47 +118,59 @@ function settings(machine: Machine, overrides: Partial<SyncSettings> = {}): Sync
   return { url: '', machineId: 'robot-a', mapping: {}, ...overrides }
 }
 
+/** 跑一次同步时可以换掉的几样（见 `syncDepsOf()`）。 */
+interface SyncTestOptions {
+  titles?: Record<string, string>
+  git?: GitRunner
+  onProgress?: (event: SyncProgress) => void
+  /** 读宿主投影缓存那两件事（空白与最后活动时间）；缺省什么都不知道（与没挂投影缓存的宿主一样）。 */
+  sessionMeta?: SyncDeps['sessionMeta']
+  /** 宿主内存里活着的会话。 */
+  liveSessionIds?: () => ReadonlySet<string>
+  /** 宿主那套"改注册表"的动作（见 src/take-effect.ts）；缺省 = 这个宿主没有这个能力。 */
+  hostRegistry?: SyncDeps['hostRegistry']
+  /** 宿主那套"补投影检查点"的服务（见 src/checkpoint-warm.ts）；缺省 = 这个宿主补不了。 */
+  hostCheckpoints?: SyncDeps['hostCheckpoints']
+  /** 备份根目录（缺省 `machine.base/backups`）；指向坏位置可以验"备份不成功就一条都不动"。 */
+  backupRoot?: string
+}
+
+/** 造一次同步的依赖（界面与工具层注入的那一套）。 */
+function syncDepsOf(
+  machine: Machine,
+  dav: ReturnType<typeof createDavClient>,
+  config: SyncSettings,
+  options: SyncTestOptions = {},
+): SyncDeps {
+  return {
+    dav,
+    settings: config,
+    sessionsRoot: machine.sessionsRoot,
+    registryPath: machine.registryPath,
+    backupRoot: options.backupRoot ?? join(machine.base, 'backups'),
+    decodeAll,
+    ...(options.titles === undefined ? {} : { resolveTitle: ({ id }: { id: string }) => options.titles?.[id] }),
+    ...(options.git === undefined ? {} : { git: options.git }),
+    ...(options.sessionMeta === undefined ? {} : { sessionMeta: options.sessionMeta }),
+    ...(options.liveSessionIds === undefined ? {} : { liveSessionIds: options.liveSessionIds }),
+    ...(options.hostRegistry === undefined ? {} : { hostRegistry: options.hostRegistry }),
+    ...(options.hostCheckpoints === undefined ? {} : { hostCheckpoints: options.hostCheckpoints }),
+    pluginVersion: '0.0.1-test',
+    now: () => new Date('2026-10-01T00:00:00.000Z'),
+  }
+}
+
 /** 用一台机器的库跑一次同步。 */
 async function syncMachine(
   machine: Machine,
   dav: ReturnType<typeof createDavClient>,
   config: SyncSettings,
-  options: {
-    apply: boolean
-    titles?: Record<string, string>
-    git?: GitRunner
-    onProgress?: (event: SyncProgress) => void
-    /** 读宿主投影缓存那两件事（空白与最后活动时间）；缺省什么都不知道（与没挂投影缓存的宿主一样）。 */
-    sessionMeta?: (query: { id: string; createdAt: number; cwd?: string }) => { blank?: boolean; lastPromptAt?: number } | undefined
-    /** 宿主内存里活着的会话。 */
-    liveSessionIds?: () => ReadonlySet<string>
-    /** 宿主那套"改注册表"的动作（见 src/take-effect.ts）；缺省 = 这个宿主没有这个能力。 */
-    hostRegistry?: SyncDeps['hostRegistry']
-    /** 宿主那套"补投影检查点"的服务（见 src/checkpoint-warm.ts）；缺省 = 这个宿主补不了。 */
-    hostCheckpoints?: SyncDeps['hostCheckpoints']
-    /** 备份根目录（缺省 `machine.base/backups`）；指向坏位置可以验"备份不成功就一条都不动"。 */
-    backupRoot?: string
-  },
+  options: SyncTestOptions & { apply: boolean },
 ): Promise<Awaited<ReturnType<typeof runSync>>> {
-  return runSync(
-    {
-      dav,
-      settings: config,
-      sessionsRoot: machine.sessionsRoot,
-      registryPath: machine.registryPath,
-      backupRoot: options.backupRoot ?? join(machine.base, 'backups'),
-      decodeAll,
-      ...(options.titles === undefined ? {} : { resolveTitle: ({ id }: { id: string }) => options.titles?.[id] }),
-      ...(options.git === undefined ? {} : { git: options.git }),
-      ...(options.sessionMeta === undefined ? {} : { sessionMeta: options.sessionMeta }),
-      ...(options.liveSessionIds === undefined ? {} : { liveSessionIds: options.liveSessionIds }),
-      ...(options.hostRegistry === undefined ? {} : { hostRegistry: options.hostRegistry }),
-      ...(options.hostCheckpoints === undefined ? {} : { hostCheckpoints: options.hostCheckpoints }),
-      pluginVersion: '0.0.1-test',
-      now: () => new Date('2026-10-01T00:00:00.000Z'),
-    },
-    { apply: options.apply, ...(options.onProgress === undefined ? {} : { onProgress: options.onProgress }) },
-  )
+  return runSync(syncDepsOf(machine, dav, config, options), {
+    apply: options.apply,
+    ...(options.onProgress === undefined ? {} : { onProgress: options.onProgress }),
+  })
 }
 
 /**
@@ -661,6 +675,283 @@ test('sync：端到端——A 推送、B 拉取，cwd 改写成 B 的路径且�
     const noPort = await syncMachine(c, dav, settings(c, { machineId: 'robot-c', mapping: { [a.cwd]: c.cwd } }), { apply: true })
     assert.deepEqual(noPort.pulled.sort(), ['s1', 's2'])
     assert.equal(noPort.effect?.kind, 'unavailable')
+  } finally {
+    await fixture.close()
+    rmSync(SANDBOX, { recursive: true, force: true })
+  }
+})
+
+// ── 预演那份接着落地：确认之后不再把同一份计划算第二遍 ──────────────────────
+//
+// 这一组钉的是"两次调用是一件事"：预演算出来的计划与它的输入留在 `SyncPrepared` 里，确认那次照它走
+// （`syncPrepared()`）；只有那份数据已经不作数时才退回从零重算。判据只有一处能看见——落地那次报的
+// 进度段：照预演走就只剩"重读一次远端索引"（验数据有没有变），重算才有算计划那四段。
+
+test('sync：确认之后照着预演那份数据落地——同一份计划不再算第二遍', async () => {
+  rmSync(SANDBOX, { recursive: true, force: true })
+  mkdirSync(SANDBOX, { recursive: true })
+  const fixture = await startDavFixture({ root: join(SANDBOX, 'dav') })
+  const dav = createDavClient({ baseUrl: fixture.url })
+  const a = makeMachine('robot-a')
+  const b = makeMachine('robot-b')
+  try {
+    // A 先推一条上去：B 这次既有得拉（远端独有），又有得推（本机独有），两段都走得到。
+    // 项目身份用一个认不出任何仓库的假 git：不然真 git 会把这个沙箱认成当前检出的仓库，预演里就多一段
+    // `repo`（那一段与这条用例想钉的东西无关）。
+    writeSession(a, 's1', 1000, { title: '第一条' })
+    await syncMachine(a, dav, settings(a, { machineId: 'robot-a' }), { apply: true, git: fakeGit({}) })
+    writeSession(b, 's2', 2000)
+    const configB = settings(b, { machineId: 'robot-b', mapping: { [a.cwd]: b.cwd } })
+    const deps = syncDepsOf(b, dav, configB, { git: fakeGit({}) })
+
+    const previewPhases: string[] = []
+    const prepared = await prepareSync(deps, { onProgress: (event) => previewPhases.push(event.phase) })
+    assert.deepEqual([...prepared.plan.pullIds], ['s1'])
+    assert.deepEqual([...prepared.plan.pushIds], ['s2'])
+    assert.deepEqual(previewPhases, ['scan', 'remote'], '预演报的是算计划的那几段（这次两边没有同 id 的会话，比对那段一个文件都不用读）')
+
+    const appliedPhases: string[] = []
+    const outcome = await syncPrepared(deps, prepared, { onProgress: (event) => appliedPhases.push(event.phase) })
+    assert.deepEqual(outcome.planSource, { kind: 'reused' })
+    assert.equal(outcome.plan, prepared.plan, '落地用的就是预演那一份计划（同一个对象，不是重算出来的另一份）')
+    assert.deepEqual(outcome.pulled, ['s1'])
+    assert.deepEqual(outcome.pushed, [{ id: 's2', action: 'upload' }])
+    assert.deepEqual(
+      appliedPhases,
+      ['remote', 'pull', 'push'],
+      '落地那次只重读一次远端索引（验那份数据还作不作数），扫本机 / 问 git / 比对内容一段都不再走',
+    )
+
+    // 拉来的那条落在 B 的路径上（cwd 改写过）。
+    assert.ok(existsSync(join(sessionDir(b.sessionsRoot, b.cwd, 's1'), 'session.v4.jsonl.zstd')))
+    assert.equal(readHeader(b, b.cwd, 's1').cwd, b.cwd)
+
+    // 落地把预演算过的指纹写进了自己那一格：再预演一次，两边都不该有事可做（写错指纹的话这里会
+    // 冒出一条"重新推送"）。
+    const after = await syncMachine(b, dav, configB, { apply: false })
+    assert.deepEqual(after.plan.pullIds, [])
+    assert.deepEqual(after.plan.pushIds, [])
+  } finally {
+    await fixture.close()
+    rmSync(SANDBOX, { recursive: true, force: true })
+  }
+})
+
+test('sync：预演之后本机多了一代，落地退回从零重算（旧的计划漏掉了它）', async () => {
+  rmSync(SANDBOX, { recursive: true, force: true })
+  mkdirSync(SANDBOX, { recursive: true })
+  const fixture = await startDavFixture({ root: join(SANDBOX, 'dav') })
+  const dav = createDavClient({ baseUrl: fixture.url })
+  const a = makeMachine('robot-a')
+  const b = makeMachine('robot-b')
+  try {
+    writeSession(a, 's1', 1000)
+    await syncMachine(a, dav, settings(a, { machineId: 'robot-a' }), { apply: true })
+    writeSession(b, 's2', 2000)
+    const configB = settings(b, { machineId: 'robot-b', mapping: { [a.cwd]: b.cwd } })
+    const deps = syncDepsOf(b, dav, configB)
+
+    const prepared = await prepareSync(deps)
+    assert.deepEqual(prepared.plan.pushIds, ['s2'])
+    // 预演之后本机这条又长了一代：照旧那份走只会把 v4 推上去，v5 永远留在本机。
+    addGeneration(b, 's2', 5, '{"type":"user/message","seq":1}')
+
+    const appliedPhases: string[] = []
+    const outcome = await syncPrepared(deps, prepared, { onProgress: (event) => appliedPhases.push(event.phase) })
+    assert.equal(outcome.planSource?.kind, 'recomputed')
+    assert.match(
+      outcome.planSource?.kind === 'recomputed' ? outcome.planSource.reason : '',
+      /s2.*多了一代/,
+      '理由点名是哪一条对不上',
+    )
+    assert.notEqual(outcome.plan, prepared.plan, '重算出来的是一份新的计划')
+    assert.ok(appliedPhases.includes('scan'), '重算那一次把算计划的那几段照报一遍')
+    assert.deepEqual(outcome.pushed, [{ id: 's2', action: 'upload' }])
+
+    // 推上去的是**两代**：重算读的才是眼下真实的本机，旧计划那份只认得 v4。
+    const remote = await readRemoteLibrary(dav, configB)
+    assert.deepEqual(remote.entries.get('s2')?.files.map((file) => file.version), [4, 5])
+  } finally {
+    await fixture.close()
+    rmSync(SANDBOX, { recursive: true, force: true })
+  }
+})
+
+test('sync：预演之后本机那条原文件被改写，落地退回从零重算', async () => {
+  rmSync(SANDBOX, { recursive: true, force: true })
+  mkdirSync(SANDBOX, { recursive: true })
+  const fixture = await startDavFixture({ root: join(SANDBOX, 'dav') })
+  const dav = createDavClient({ baseUrl: fixture.url })
+  const a = makeMachine('robot-a')
+  const b = makeMachine('robot-b')
+  try {
+    writeSession(a, 's1', 1000)
+    await syncMachine(a, dav, settings(a, { machineId: 'robot-a' }), { apply: true })
+    writeSession(b, 's2', 2000)
+    const configB = settings(b, { machineId: 'robot-b', mapping: { [a.cwd]: b.cwd } })
+    const deps = syncDepsOf(b, dav, configB)
+    const prepared = await prepareSync(deps)
+
+    // 文件名集合没变，变的是内容与字节数（宿主重写一整代就是这个形状）。
+    const log = join(sessionDir(b.sessionsRoot, b.cwd, 's2'), 'session.v4.jsonl.zstd')
+    writeFileSync(log, Buffer.concat([readFileSync(log), encodeRawFrame('{"type":"user/message","seq":9}\n')]))
+
+    const outcome = await syncPrepared(deps, prepared)
+    assert.equal(outcome.planSource?.kind, 'recomputed')
+    assert.match(
+      outcome.planSource?.kind === 'recomputed' ? outcome.planSource.reason : '',
+      /s2.*又动过/,
+      '代次文件没多没少、内容变了也算不新鲜（字节数与 mtime 都要对上）',
+    )
+    const remote = await readRemoteLibrary(dav, configB)
+    assert.equal(remote.entries.get('s2')?.files[0]?.bytes, readFileSync(log).length)
+  } finally {
+    await fixture.close()
+    rmSync(SANDBOX, { recursive: true, force: true })
+  }
+})
+
+test('sync：预演之后别的机器推了东西，落地退回从零重算（新那条也拉得到）', async () => {
+  rmSync(SANDBOX, { recursive: true, force: true })
+  mkdirSync(SANDBOX, { recursive: true })
+  const fixture = await startDavFixture({ root: join(SANDBOX, 'dav') })
+  const dav = createDavClient({ baseUrl: fixture.url })
+  const a = makeMachine('robot-a')
+  const b = makeMachine('robot-b')
+  try {
+    writeSession(a, 's1', 1000)
+    await syncMachine(a, dav, settings(a, { machineId: 'robot-a' }), { apply: true })
+    const configB = settings(b, { machineId: 'robot-b', mapping: { [a.cwd]: b.cwd } })
+    const deps = syncDepsOf(b, dav, configB)
+    const prepared = await prepareSync(deps)
+    assert.deepEqual(prepared.plan.pullIds, ['s1'])
+
+    // 预演之后 A 又推了一条：照旧那份走会漏掉它（这一格索引的指纹变了）。
+    writeSession(a, 's9', 3000)
+    await syncMachine(a, dav, settings(a, { machineId: 'robot-a' }), { apply: true })
+
+    const outcome = await syncPrepared(deps, prepared)
+    assert.equal(outcome.planSource?.kind, 'recomputed')
+    assert.match(
+      outcome.planSource?.kind === 'recomputed' ? outcome.planSource.reason : '',
+      /远端.*变了/,
+      '理由说的是远端那份索引对不上',
+    )
+    assert.deepEqual([...outcome.plan.pullIds].sort(), ['s1', 's9'], '新推来的那条这次也拉上')
+    assert.deepEqual([...outcome.pulled].sort(), ['s1', 's9'])
+  } finally {
+    await fixture.close()
+    rmSync(SANDBOX, { recursive: true, force: true })
+  }
+})
+
+test('sync：预演之后要覆盖的那条又活了，落地退回从零重算（这次不动它）', async () => {
+  rmSync(SANDBOX, { recursive: true, force: true })
+  mkdirSync(SANDBOX, { recursive: true })
+  const fixture = await startDavFixture({ root: join(SANDBOX, 'dav') })
+  const dav = createDavClient({ baseUrl: fixture.url })
+  const a = makeMachine('robot-a')
+  const b = makeMachine('robot-b')
+  try {
+    // A 推 v4，B 拉下来；A 再续一代推上去——B 这份因此是"远端领先"，计划里会**覆盖本机**。
+    writeSession(a, 's1', 1000)
+    await syncMachine(a, dav, settings(a, { machineId: 'robot-a' }), { apply: true })
+    const configB = settings(b, { machineId: 'robot-b', mapping: { [a.cwd]: b.cwd } })
+    await syncMachine(b, dav, configB, { apply: true })
+    addGeneration(a, 's1', 5, '{"type":"user/message","seq":1}')
+    await syncMachine(a, dav, settings(a, { machineId: 'robot-a' }), { apply: true })
+
+    const live = new Set<string>()
+    const deps = syncDepsOf(b, dav, configB, { liveSessionIds: () => live })
+    const prepared = await prepareSync(deps)
+    assert.equal(prepared.plan.pull.find((entry) => entry.id === 's1')?.action, 'replace')
+
+    // 预演之后宿主把它打开了：覆盖那一步要撤掉本机目录，与删除拒掉活会话同一个理由。
+    live.add('s1')
+    const outcome = await syncPrepared(deps, prepared)
+    assert.equal(outcome.planSource?.kind, 'recomputed')
+    assert.match(
+      outcome.planSource?.kind === 'recomputed' ? outcome.planSource.reason : '',
+      /s1.*还在宿主内存里/,
+    )
+    assert.deepEqual(outcome.pulled, [], '重算之后这条不改了')
+    assert.deepEqual(outcome.plan.pullIds, [])
+    const kept = outcome.plan.push.find((entry) => entry.id === 's1')
+    assert.equal(kept?.action, 'skip')
+    assert.equal(kept?.code, 'remote-ahead')
+    assert.match(kept?.reason ?? '', /还在宿主内存里/)
+  } finally {
+    await fixture.close()
+    rmSync(SANDBOX, { recursive: true, force: true })
+  }
+})
+
+test('sync：预演之后宿主那份列表元数据变了，落地退回从零重算', async () => {
+  rmSync(SANDBOX, { recursive: true, force: true })
+  mkdirSync(SANDBOX, { recursive: true })
+  const fixture = await startDavFixture({ root: join(SANDBOX, 'dav') })
+  const dav = createDavClient({ baseUrl: fixture.url })
+  const a = makeMachine('robot-a')
+  const b = makeMachine('robot-b')
+  try {
+    // B 已经有远端那条（内容一致）：这份计划两边都不动，判据全落在投影缓存那两件事上。
+    writeSession(a, 's1', 1000)
+    await syncMachine(a, dav, settings(a, { machineId: 'robot-a' }), { apply: true })
+    const configB = settings(b, { machineId: 'robot-b', mapping: { [a.cwd]: b.cwd } })
+    await syncMachine(b, dav, configB, { apply: true })
+
+    // 预演之后宿主又折了一版元数据（最后一条消息的时间晚了）：它决定"两边各自写过时谁更新"，
+    // 照旧那份走就等于拿一刻钟前的判据去覆盖本机。
+    const meta: { blank?: boolean; lastPromptAt?: number; lastMessageAt?: number } = { lastMessageAt: 100 }
+    // 每次读都造一份新的（真实读取器就是这样）：返回同一个对象的话，下面那次改动会把"预演那一刻的那份"
+    // 一起改掉，这条用例就成了自己骗自己。
+    const deps = syncDepsOf(b, dav, configB, { sessionMeta: () => ({ ...meta }) })
+    const prepared = await prepareSync(deps)
+    assert.deepEqual(prepared.plan.pullIds, [])
+    assert.deepEqual(prepared.plan.pushIds, [])
+
+    meta.lastMessageAt = 900
+
+    const outcome = await syncPrepared(deps, prepared)
+    assert.equal(outcome.planSource?.kind, 'recomputed')
+    assert.match(
+      outcome.planSource?.kind === 'recomputed' ? outcome.planSource.reason : '',
+      /s1.*列表元数据/,
+      '理由说的是宿主那份元数据对不上',
+    )
+  } finally {
+    await fixture.close()
+    rmSync(SANDBOX, { recursive: true, force: true })
+  }
+})
+
+test('sync：预演之后同步设置改过，落地退回从零重算（不拿旧映射表落地）', async () => {
+  rmSync(SANDBOX, { recursive: true, force: true })
+  mkdirSync(SANDBOX, { recursive: true })
+  const fixture = await startDavFixture({ root: join(SANDBOX, 'dav') })
+  const dav = createDavClient({ baseUrl: fixture.url })
+  const a = makeMachine('robot-a')
+  const b = makeMachine('robot-b')
+  try {
+    writeSession(a, 's1', 1000)
+    await syncMachine(a, dav, settings(a, { machineId: 'robot-a' }), { apply: true })
+    writeSession(b, 's2', 2000)
+    const configB = settings(b, { machineId: 'robot-b', mapping: { [a.cwd]: b.cwd } })
+    const deps = syncDepsOf(b, dav, configB, { git: fakeGit({}) })
+    const prepared = await prepareSync(deps)
+    assert.deepEqual(prepared.plan.pullIds, ['s1'])
+
+    // 预演之后映射表被改掉（确认那次是宿主重新解析的配置）：照旧那份走会把会话落到旧目录。
+    const changed = syncDepsOf(b, dav, settings(b, { machineId: 'robot-b' }), { git: fakeGit({}) })
+    const outcome = await syncPrepared(changed, prepared)
+    assert.equal(outcome.planSource?.kind, 'recomputed')
+    assert.match(
+      outcome.planSource?.kind === 'recomputed' ? outcome.planSource.reason : '',
+      /同步设置/,
+      '理由说的是那套输入变了',
+    )
+    assert.deepEqual(outcome.pulled, [], '新设置下这条没有映射，落不了地')
+    assert.equal(outcome.plan.pull.find((entry) => entry.id === 's1')?.code, 'no-mapping')
   } finally {
     await fixture.close()
     rmSync(SANDBOX, { recursive: true, force: true })

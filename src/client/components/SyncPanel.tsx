@@ -307,8 +307,8 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
   /**
    * 落地进行到哪了：宿主每开始处理一条推一条事件（见 api.ts 的 `applySync`）。
    *
-   * `null` 有两种时候——还没开始、以及刚开始那一段（宿主在算计划：读远端索引、扫本机库、比指纹，
-   * 没有逐条可报）。后者界面显示"正在读取远端索引…"，所以这里不需要第三个状态位。
+   * `null` 有两种时候——还没开始、以及刚开始那一段（宿主先验一遍预演那份数据还作不作数：重读一次远端
+   * 索引，本机那边只比文件的时间与大小，很快）。前一条进度事件一到就换成真正的进度块。
    */
   const [progress, setProgress] = React.useState<ProgressEvent | null>(null)
 
@@ -351,6 +351,9 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
   /**
    * 弹窗里按「确认同步」：真的拉取与推送。
    *
+   * 带上预演给的 `planId`：宿主对得上就**照着那份计划落地**（不再重算一遍，见 api.ts 的 `applySync`）；
+   * 对不上就由宿主从零算一遍，结果里的 `planSource` 会在下面那句提示里说清。
+   *
    * 逐条失败（某一条拉取失败）照旧把成功的那部分报出来，失败的那些**在页面横幅上逐条留着**——弹窗
    * 关掉之后它们还得看得见；不然用户只知道"同步过了"，不知道有一条没成。
    */
@@ -358,7 +361,8 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
     setBusy('apply')
     setError(null)
     setProgress(null)
-    void applySync(setProgress).then(
+    // 只有"这次看的就是一份预演"时才递那个号码：上一次落地的结果也放在 `sync` 里，它不是预演。
+    void applySync(sync?.mode === 'plan' ? sync.planId : undefined, setProgress).then(
       (result) => {
         setBusy(null)
         setDialog(null)
@@ -374,7 +378,9 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
               bytesOut: formatBytes(result.bytesOut),
             }) +
               // 覆盖本机原来那份是这次同步里唯一"本机内容被换掉"的部分，值得单独说一句（旧的进备份了）。
-              (result.replaced.length === 0 ? '' : ` ${t('sync.appliedReplaced', { count: result.replaced.length })}`),
+              (result.replaced.length === 0 ? '' : ` ${t('sync.appliedReplaced', { count: result.replaced.length })}`) +
+              // 计划是重算的就得说一句：不然"确认时看到的那几条"和"结果里这几条"对不上时没人解释。
+              (result.planSource?.kind === 'recomputed' ? ` ${t('sync.replanned')}` : ''),
           )
         }
         // 拉取的落到本机库里了：列表与工作区归属都要重读（推的那一侧不改本机任何东西）。

@@ -32,7 +32,16 @@ import { readRegistry, validateRegistry } from './registry.ts'
 import { describeEffect, effectOf, takeEffectOnHost } from './take-effect.ts'
 import { runRemoval, type RemoveDeps, type RemovalRun } from './remove.ts'
 import { createTitleResolver, type TitleQuery } from './session-title.ts'
-import { runSync, testSyncConnection, type SyncOutcome, type SyncProgress } from './sync.ts'
+import {
+  plannedOutcome,
+  prepareSync,
+  runSync,
+  syncPrepared,
+  testSyncConnection,
+  type SyncOutcome,
+  type SyncPrepared,
+  type SyncProgress,
+} from './sync.ts'
 import { type EffectMode, type PickerKind, type RegistryOps, type ResolvedPaths, type SyncInfo, type SyncRuntime } from './tools.ts'
 import {
   applyImport,
@@ -499,6 +508,17 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
   const hostCheckpoints = (): CheckpointWarmPort | undefined => deps.hostCheckpoints?.()
 
   /**
+   * 最近一次预演算出来的那份数据（见 sync.ts 的 `SyncPrepared`）。
+   *
+   * 只留一份、而且**一次就消费掉**：界面一次只开一个同步弹窗，确认用的必须是它自己那次预演的结论。
+   * 又一次预演（或者宿主重启、旧页面再来确认）会把它换掉，拿着旧 id 回来的那次自然落到"从零重算"
+   * 那条路上——不错，只是慢。
+   */
+  let preview: { id: string; value: SyncPrepared } | null = null
+  /** 预演编号：只用来把"这次确认"对回"那次预演"，不承担任何安全职责。 */
+  let previewSeq = 0
+
+  /**
    * 先答「库在哪、这个宿主能不能归档」这一份，不等扫库。
    *
    * 为什么单开一条而不是等 `/state`：那一份要扫完整库（每条会话都要读 header、还要折标题），
@@ -843,13 +863,31 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
    * WebDAV 同步：`?mode=apply` 才真跑（拉取 + 推送），`?mode=test` 只探一次连通性，缺省只预演（读远端，
    * 什么都不写）。
    *
-   * 拉取来的会话走的是**导入那条编排**（`runSync()` 内部调 `planImport/applyImport`），所以这里与
+   * 两次调用是一件事：预演算出来的计划与它的输入留在 `preview` 里、响应带回一个 `planId`，确认那次
+   * 带着它回来就照着那份数据落地（见 `SyncPrepared`）——用户按下确认到第一条拉取之间因此不必把同一份
+   * 计划重算一遍。
+   *
+   * 拉取来的会话走的是**导入那条编排**（`planImport/applyImport`），所以这里与
    * 导入端点同一套边界：包必须自校验通过、同 id 只跳过、`_no-cwd` 直接落项目目录。
    */
   const syncSessions = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     const url = new URL(req.url ?? '/', 'http://localhost')
     const mode = url.searchParams.get('mode')
     const apply = mode === 'apply'
+    /*
+     * 确认那次体里带着预演给的 `planId`（见下面 `preview` 那段）。**体要在别的 await 之前读完**：请求体
+     * 是一条流，先去做别的事再回来读，等于让它在这段时间里一直挂着（测试里的假请求更是早就把 `end`
+     * 发完了——等回来接的时候已经没人在听，读的那一头就永远等下去）。
+     */
+    let planId: string | undefined
+    if (apply) {
+      try {
+        const body = (await readJson(req)) as { planId?: unknown } | null
+        if (typeof body?.planId === 'string' && body.planId !== '') planId = body.planId
+      } catch {
+        // 体不是 JSON：按"没有预演那份"处理——这条路上体只用来指认那份缓存，读不出来就不用它。
+      }
+    }
     const runtime = await deps.sync?.()
     if (runtime === undefined) {
       sendJson(res, 409, { error: '这个宿主没有配置 WebDAV 同步（插件配置里的 sync.url 是空的）' })
@@ -918,7 +956,7 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
      * 预演与落地都走事件流：`{type:'progress'}` 每做一条一次、`{type:'result'}` 收尾、`{type:'error'}`
      * 兜底。预演也要进度——它得先扫本机（每条会话读头、折标题）、再读远端索引、最后逐条比对内容，
      * 冷启动时这几秒里界面原来只有一句"预演中…"；落地那边同样受益，按下确认后到第一条拉取完成之间
-     * 算的还是这三个阶段。
+     * 报的是重读远端索引那一条（照预演那份走时）。
      *
      * 流一旦开始，HTTP 状态就已经发出去了（200），所以这一段的错误只能靠事件说——客户端按
      * `content-type` 区分"流"与"一次性 JSON"（没配置同步那类错发生在写头之前，仍然是 JSON +
@@ -927,8 +965,41 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
     sendEventStream(res)
     try {
       const onProgress = (progress: SyncProgress): void => sendEvent(res, { type: 'progress', progress })
-      const outcome = await runSync(syncDeps, apply ? { apply: true, onProgress } : { apply: false, onProgress })
-      sendEvent(res, { type: 'result', result: payloadOf(outcome) })
+      if (!apply) {
+        /*
+         * 预演：算一份计划，并且把那一次算出来的输入留在 `preview` 里（见 `SyncPrepared`）。
+         *
+         * `planId` 就是这个格子的号码：确认那次带着它回来，对得上就**照着这份数据落地**，不再把同一
+         * 份计划重算一次（用户按下确认到第一条拉取之间原来要等的那几秒就是它）。
+         */
+        const planned = await prepareSync(syncDeps, { onProgress })
+        previewSeq += 1
+        const id = `${previewSeq}-${Math.random().toString(36).slice(2, 8)}`
+        preview = { id, value: planned }
+        sendEvent(res, { type: 'result', result: { ...payloadOf(plannedOutcome(planned)), planId: id } })
+      } else {
+        /*
+         * 落地：体里带着预演给的 `planId` 时优先照着那份数据走（见 sync.ts 的 `syncPrepared()`——它会先
+         * 验一遍那份数据还作不作数，变了就从零重算）。对不上（宿主重启过、又一次预演把它换掉了、旧
+         * 客户端没带 id）就照旧从零算一遍；结果里的 `planSource` 说清这次走的哪条路。
+         */
+        const cached = preview !== null && planId !== undefined && preview.id === planId ? preview.value : undefined
+        // 消费掉：一份预演只够落地一次（第二次带着同一个 id 回来就重算一遍）。
+        if (cached !== undefined) preview = null
+        const outcome: SyncOutcome =
+          cached !== undefined
+            ? await syncPrepared(syncDeps, cached, { onProgress })
+            : planId === undefined
+              ? await runSync(syncDeps, { apply: true, onProgress })
+              : {
+                  ...(await runSync(syncDeps, { apply: true, onProgress })),
+                  planSource: {
+                    kind: 'recomputed',
+                    reason: '预演那份已经不在宿主手里了（宿主重启过，或又一次预演把它换掉了）',
+                  },
+                }
+        sendEvent(res, { type: 'result', result: payloadOf(outcome) })
+      }
     } catch (error) {
       sendEvent(res, { type: 'error', error: error instanceof Error ? error.message : String(error) })
     }

@@ -4248,6 +4248,100 @@ test('客户端产物：确认同步打的是落地端点，读的是一条事�
   assert.ok(reads >= chunks.length + 1, '一直读到 done（不是读一块就收手）')
 })
 
+test('客户端产物：确认同步带着预演给的号码（宿主据此不再重算计划）', { skip }, async () => {
+  /*
+   * 预演的响应里带着 `planId`，确认那次要原样带回去——少带一次，宿主只能把那份计划从零重算一遍
+   * （用户按下确认之后那几秒的空档就是它）。这里把预演的那份响应**种**进 `sync` 状态（顺序见
+   * 上面那条用例的 `nulls`），于是弹窗里那份计划就是"刚预演完"的样子，再点确认看它打了什么。
+   */
+  const state = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    sync: { url: 'https://dav.example.com/dsh', machineId: 'robot-a', mappings: 0 },
+    sessions: [],
+    workspaces: [],
+  }
+  const calls = []
+  const plan = {
+    ok: true,
+    problems: [],
+    pull: [],
+    push: [],
+    pullIds: [],
+    pushIds: [],
+    blank: [],
+    bytesIn: 0,
+    bytesOut: 0,
+    localCount: 0,
+    remoteCount: 0,
+    machines: [],
+  }
+  const planned = {
+    mode: 'plan',
+    remote: { url: 'https://dav.example.com/dsh', machineId: 'robot-a' },
+    planId: 'preview-7',
+    plan,
+    applied: false,
+    pulled: [],
+    replaced: [],
+    pushed: [],
+    bytesIn: 0,
+    bytesOut: 0,
+    registryWritten: false,
+    indexWritten: false,
+    problems: [],
+    takesEffect: 'immediate',
+  }
+  const result = {
+    ...planned,
+    mode: 'apply',
+    applied: true,
+    indexWritten: true,
+    planSource: { kind: 'reused' },
+  }
+  const chunks = [
+    'data: {"type":"progress","progress":{"phase":"push","total":2,"done":0,"id":"s-1","label":"一"}}\n\n',
+    `data: {"type":"result","result":${JSON.stringify(result)}}\n\n`,
+  ]
+  let index = 0
+  const mounted = mount({
+    state,
+    panel: 'sync',
+    // 位置约定同上一条：`nulls[1]` 是 sync（这里种成刚预演完的那份）、`nulls[2]` 是弹窗开着。
+    nulls: [null, planned, 'apply'],
+    fetch: async (url, init) => {
+      calls.push({ url: String(url), method: init?.method, body: init?.body })
+      return {
+        ok: true,
+        status: 200,
+        headers: { get: () => 'text/event-stream; charset=utf-8' },
+        body: {
+          getReader: () => ({
+            read: async () =>
+              index < chunks.length ? { done: false, value: new TextEncoder().encode(chunks[index++]) } : { done: true },
+          }),
+        },
+        text: async () => '',
+      }
+    },
+  })
+
+  strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
+  primaryOf(mounted.recorded).props.onClick()
+  for (let tries = 0; tries < 50 && index < chunks.length; tries += 1) {
+    await new Promise((resolve) => setImmediate(resolve))
+  }
+
+  assert.deepEqual(calls, [
+    {
+      url: '/dsh-session-manager/api/sync?mode=apply',
+      method: 'POST',
+      body: JSON.stringify({ planId: 'preview-7' }),
+    },
+  ])
+})
+
 test('客户端产物：同步预演读的也是一条事件流（不是等一次性 JSON）', { skip }, async () => {
   // 预演也要进度：它得先扫本机、再读远端索引、最后逐条比对内容，冷启动时那几秒界面原来只有一句
   // "预演中…"。宿主两条路回的是同一个形状，所以这里钉的就是"点「同步」打的是那个端点、读的是流"。
