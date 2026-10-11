@@ -487,6 +487,25 @@ test('客户端产物：apply 把「会话管理」注册到设置里的一页�
   }
 
   /*
+   * 「活动中的会话删不掉」这句必须连**出路**一起给：Web 端没有「关闭这条会话」这个动作，会话被点开或跑过
+   * 之后一直攥在宿主手里，唯一让它放手的办法是重启 DSH（ACP 客户端另有 session/close）。原来那句"先关掉
+   * 它再删"在 Web 端做不到——照着做的人找不到那个动作。行上的悬浮提示与说明页的问答里都得点名重启；动作页
+   * 那条有"每段最多两行"的预算（见下面 PAGE_PROSE），只留一句"做法见「说明」"指过来，所以这里单独核它指向
+   * 了说明页。
+   */
+  for (const [language, dictionary] of [['zh', zh], ['en', en]]) {
+    const remedy = language === 'zh' ? /重启 DSH/ : /restart(?:ing)? DSH/i
+    for (const key of ['tag.liveTip', 'help.faq.liveA']) {
+      assert.match(String(dictionary[key]), remedy, `${language}：${key} 要说清怎么让宿主放手（重启 DSH）`)
+    }
+    assert.match(
+      String(dictionary['manage.delete.hint']),
+      language === 'zh' ? /说明/ : /Help/,
+      `${language}：删除卡片那条说明要指到「说明」页，做法写在那里`,
+    )
+  }
+
+  /*
    * 拉取 / 推送两张表的动作标签：那一列是 88px（单元格左右各 8px padding → 标签可用 70px），标签自己
    * 还有左右各 6px padding 与 1px 边框。真机（dev GUI）在这一列上量到：zh「分叉·重推」75px、en
    * 'Replace local' 88px、'No mapping' 83px、'目标目录缺失' 87px —— 都超过 70px，画出来是「分叉…」
@@ -2461,8 +2480,8 @@ test('客户端产物：「说明」页把分类词条、每页做什么与边�
   for (const key of ['help.categories.visible', 'tag.subagent', 'tag.blank', 'tag.archived', 'tag.live', 'list.ungrouped']) {
     assert.ok(terms.includes(key), `分类词典缺少「${key}」`)
   }
-  assert.equal(terms.length, 21, '词条数＝分类 6 + 分页 5 + 数据 2 + 疑问 8')
-  assert.equal(recorded.filter((node) => node.type === 'dd').length, 21, '每条词条都有解释')
+  assert.equal(terms.length, 22, '词条数＝分类 6 + 分页 5 + 数据 2 + 疑问 9')
+  assert.equal(recorded.filter((node) => node.type === 'dd').length, 22, '每条词条都有解释')
   assert.ok(terms.includes('page.tab.sync'), '分页那一节要写到「同步」这一页')
   assert.ok(terms.includes('page.tab.backup'), '分页那一节也要写到「备份」这一页')
   // 「数据从哪来」两条路径来自 /state，不是写死在文案里
@@ -2474,6 +2493,7 @@ test('客户端产物：「说明」页把分类词条、每页做什么与边�
     'help.faq.unownedQ',
     'help.faq.deletedQ',
     'help.faq.restartQ',
+    'help.faq.liveQ',
     'help.faq.backupQ',
     'help.faq.familyQ',
     'help.faq.exportQ',
@@ -3120,7 +3140,7 @@ test('客户端产物：同步三张表挂会话列表那套类型标签（本�
   // 与会话列表同一套键与同一套说明（`ATTRIBUTE_TAGS`），文案本身由字典给。
   assert.ok(text.includes('tag.subagent'), '子智能体那条挂「子智能体」')
   assert.ok(text.includes('tag.archived'), '已归档那条挂「已归档」')
-  assert.ok(text.includes('tag.live'), '活着的会话也标出来（覆盖它得先关掉，理由在那一刻才讲清）')
+  assert.ok(text.includes('tag.live'), '活着的会话也标出来（怎么关掉写在悬浮提示里，那一刻才需要）')
   assert.ok(
     mounted.recorded.some((node) => node.props?.children === 'tag.live' && node.props?.title === 'tag.liveTip'),
     '标签的说明挂在 title 上（与会话列表同一套）',

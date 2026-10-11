@@ -186,7 +186,10 @@ export function planRemoval(
     if (isLive) {
       // 只报问题、不进条目：活着的会话不该出现在"要删的东西"里，否则界面会把它列成一个待删项。
       // 后代的"活着"同样挡下整个计划——它是这次要删的整族的一部分，宿主还在往里写。
-      problems.push(`session ${id} 还在宿主内存里活着（运行中或已打开），先关掉它再删${owner}`)
+      problems.push(
+        `session ${id} 还在宿主内存里活着（运行中或已打开），删不了：` +
+          `重启 DSH 让宿主放手，之后别先点开它再删${owner}`,
+      )
       continue
     }
     if (!existsSync(session.dir)) {

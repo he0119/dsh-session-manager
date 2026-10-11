@@ -12,7 +12,7 @@
  * 每页做什么、数据从哪来、常见疑问）。
  *
  * 页面上只有四张卡片：原先单独一张"会碰什么盘"与「常见疑问」逐条重复（回滚与恢复、删完侧边栏为什么
- * 还在、活动中的会话删不掉），独有那几条（备份时机、子智能体跟着父会话走、包里有什么）并进常见疑问。
+ * 还在、活动中的会话怎么关掉），独有那几条（备份时机、子智能体跟着父会话走、包里有什么）并进常见疑问。
  *
  * @module dsh-session-manager/client/HelpPanel
  */
@@ -48,6 +48,7 @@ const FAQ = [
   ['help.faq.unownedQ', 'help.faq.unownedA'],
   ['help.faq.deletedQ', 'help.faq.deletedA'],
   ['help.faq.restartQ', 'help.faq.restartA'],
+  ['help.faq.liveQ', 'help.faq.liveA'],
   ['help.faq.backupQ', 'help.faq.backupA'],
   ['help.faq.familyQ', 'help.faq.familyA'],
   ['help.faq.exportQ', 'help.faq.exportA'],

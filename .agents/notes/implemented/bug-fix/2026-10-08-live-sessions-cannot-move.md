@@ -34,6 +34,12 @@ header（`ctx.sessions` 里那条，`liveSessionIds()` 读的就是它），而�
   `registryRestored` 记进 `EffectOutcome`；措辞由 `describeEffect()` 分岔——写回去了才敢说"重启后
   一致"，没写回去就如实说"宿主可能已经覆盖过磁盘，重启前先核对"。迁移 / 导入 / 同步三个落地口共用
   这一份。
+- **说"它活着"的地方要连出路一起说**：Web 端没有"关闭某条会话"这个动作（宿主进程里活着的实例不主动
+  放掉，只有 ACP 客户端有 `session/close`），让它放手的办法是重启 DSH。原先那几句"先关掉它再删 /
+  再同步"在 Web 端做不到。现在行上的「活动中」悬浮提示（`tag.liveTip`，说明页的分类词典复用同一句）
+  与说明页的常见疑问点名"重启 DSH，之后别先点开它"；删除计划里的 problem（`remove.ts`）与同步拒绝
+  覆盖的两条原因同样带上这句；动作页那条删除说明受"每段最多两行"的预算限制，只写一句"做法见「说明」"
+  指过去。
 
 ## Alternatives considered
 
@@ -64,3 +70,6 @@ GUI 上做不到，功能会被整个卡住。**点名**的那几条仍然拒绝
   迁移的注册表复核也因此不再因为宿主盖过盘而误报。
 - `test/engine.test.ts`（计划层）、`test/migrate.test.ts`（执行 + 写回）、`test/web.test.ts`（界面端点）、
   `test/tools.test.ts`（工具层）各钉住一条，`test/client.test.mjs` 钉住界面那行提示。
+- 出路的措辞也各钉一条：`test/client.test.mjs` 的字典检查要求悬浮提示与说明页那条问答里出现"重启
+  DSH"、删除卡片那条指到「说明」页，`test/remove.test.ts` 要求拒绝信息里带着"重启 DSH 让宿主放手，
+  之后别先点开它再删"。把任一处改回"先关掉它"，两条都会变红。

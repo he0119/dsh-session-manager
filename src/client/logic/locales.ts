@@ -237,7 +237,7 @@ export const zh = {
   'manage.delete.progress.note': '删除先备份再删；中断的话这份备份就在「备份」页里，恢复即可。',
   'manage.delete.backupTo': '备份落在：{dir}（要恢复就去「备份」页）',
   'manage.delete.hint':
-    '删除会先把整个会话目录备份到本插件的备份根，再删掉它；还活在宿主内存里的会话删不掉。',
+    '删除会先把整个会话目录备份到本插件的备份根，再删掉它；还活在宿主内存里的会话删不掉，做法见「说明」。',
   'manage.delete.via': '随父删',
   'manage.delete.viaTip':
     '这条是子智能体：它属于你点名的「{name}」（可能隔了几层），所以跟着一起删——不然它留在盘上，就再也没有入口了。',
@@ -260,7 +260,8 @@ export const zh = {
   'tag.archived': '已归档',
   'tag.archivedTip': '你归档过的会话，侧边栏默认不显示；要看就在侧边栏的「视图选项」里打开。',
   'tag.live': '活动中',
-  'tag.liveTip': '这条会话正开着或者还在跑，删不掉——先关掉它再删。',
+  'tag.liveTip':
+    '这条会话正开着或者还在跑，宿主还没放手：这次删不掉也搬不动。Web 端没法单独关掉它——重启 DSH，重启后别先点开它，直接删。',
 
   // ---- 说明（词条与边界条件：动作页只留"当下要做的决定"） ----
   'page.tab.help': '说明',
@@ -287,6 +288,8 @@ export const zh = {
   'help.faq.deletedA': '侧边栏要等宿主重新扫一遍会话库，扫完之前那几行还会在。',
   'help.faq.restartQ': '迁移完了，什么时候需要重启 DSH？',
   'help.faq.restartA': '正常不用：改完注册表之后插件把活儿交给宿主自己做——先让它按磁盘重看一眼，再复用 / 新建目标工作区、把会话挂过去、把源侧摘空、删掉空掉的工作区；这些动作宿主自己会落盘、也会通知界面，侧边栏立刻按新归属显示，会话 id 一个都没变。只有宿主上没有那套动作时——比如只有工具没有界面的前端、老版本——才会提示重启；那时别改任何工作区，新建 / 改名 / 归档都会把这次改动覆盖掉。宿主内存里还攥着的会话（列表里带「活动中」标签的那些）这次搬不动：计划把它们摘出来报给你，留在原目录、归属不变，重启 DSH 之后再迁一次；宿主中途拒绝时，插件会把这次算好的注册表整份写回文件，重启后看到的就是这次的结果。',
+  'help.faq.liveQ': '「活动中」这条会话怎么关掉？',
+  'help.faq.liveA': 'Web 端没有「关闭某条会话」这个动作：宿主把用过（点开过、跑过回合）的会话取成内存里活着的实例，之后不再主动放掉，插件只能等它放手。让它放手的办法是重启 DSH（就是你启动它的那个进程）——正在跑的回合先停掉再重启；重启后别先点开目标会话，直接删或迁。你当前正在用的那条（侧边栏会自动打开）重启后又会是「活动中」，那是正常的。脚本化的 ACP 客户端另有 session/close，可以单条关闭。',
   'help.faq.backupQ': '备份放在哪？「回滚」和「恢复」差在哪？',
   'help.faq.backupA': '迁移、导入和删除之前都会先备份，清单在「备份」页里。「回滚」把会话目录、日志和工作区注册表一起还原；「恢复」只把删掉的会话目录搬回来——删除本来就没碰过注册表。',
   'help.faq.familyQ': '删掉或迁走一条会话，它的子智能体怎么办？',
@@ -633,7 +636,7 @@ export const en: LocaleDictOf<typeof NS> = {
   'manage.delete.progress.note': 'Delete backs up first and only then removes; if it stops, restore that backup from the Backups tab.',
   'manage.delete.backupTo': 'Backup lands in: {dir} (restore it from the Backups tab)',
   'manage.delete.hint':
-    'Deleting backs the whole session directory up into this plugin’s backup root first, then removes it; a session still living in host memory cannot be deleted.',
+    'Deleting backs the whole session directory up into this plugin’s backup root first, then removes it; a session still living in host memory cannot be deleted — see Help.',
   'manage.delete.via': 'with parent',
   'manage.delete.viaTip':
     'This is a subagent session: it belongs to “{name}”, one of the sessions you ticked (possibly a few levels up), so it is deleted with it — left behind, it would have no way back in.',
@@ -656,7 +659,8 @@ export const en: LocaleDictOf<typeof NS> = {
   'tag.archived': 'archived',
   'tag.archivedTip': 'You archived it, so the sidebar hides it by default — show it again under the sidebar’s View options.',
   'tag.live': 'active',
-  'tag.liveTip': 'This session is open or still running, so it cannot be deleted — close it first.',
+  'tag.liveTip':
+    'This session is open or still running, so the host still holds it: it cannot be deleted or moved this time. The Web side cannot close one session — restart DSH, and after the restart delete it without opening it first.',
 
   'page.tab.help': 'Help',
   'help.hint': 'This page explains the session categories, what each page does, and which files the actions touch.',
@@ -682,6 +686,8 @@ export const en: LocaleDictOf<typeof NS> = {
   'help.faq.deletedA': 'The sidebar drops those rows once the host rescans the session library.',
   'help.faq.restartQ': 'When does a migration ask me to restart DSH?',
   'help.faq.restartA': 'Normally never: once the registry changes, the plugin hands the work to the host — one fresh look at the disk, then reuse or create the target workspace, attach the sessions, detach them from the sources and delete an emptied workspace. The host persists those itself and notifies the UI, so the sidebar shows the new grouping right away with every session id unchanged. It only asks for a restart when the host lacks those actions — a tools-only front end, or an older version; until then, do not change any workspace: creating, renaming or archiving one would clobber this change. One more case: a session the host still holds in memory (the rows tagged `active`) cannot move — the plan leaves it out and tells you, it stays in its directory with its ownership unchanged, so migrate again after a restart; and if the host refuses halfway, the plugin writes the registry it computed back to the file, so the restart shows this run’s result.',
+  'help.faq.liveQ': 'How do I close a session tagged “active”?',
+  'help.faq.liveA': 'The Web side has no “close this session” action: once a session has been used (opened, or run a turn), the host keeps it in memory as a live instance and never lets go on its own, so the plugin can only wait. What makes it let go is restarting DSH (the process you started it with) — stop a running turn first; after the restart, delete or migrate it without opening it. The session you are using right now (the sidebar reopens it) is “active” again, which is expected. Scripted ACP clients have a separate session/close to shut one session down.',
   'help.faq.backupQ': 'Where do backups go, and how do Roll back and Restore differ?',
   'help.faq.backupA': 'Every migration, import and delete backs up first; the list is on the Backups tab. Roll back restores the session directories, the logs and the workspace registry together; Restore only moves the deleted session directories back — deleting never touched the registry.',
   'help.faq.familyQ': 'What happens to a session’s subagents when I delete or migrate it?',

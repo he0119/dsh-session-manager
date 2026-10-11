@@ -656,7 +656,7 @@ export function planSync(input: SyncPlanInput): SyncPlan {
           action: 'skip',
           code: kind,
           machine: remote.machine,
-          reason: `${remote.machine} 那份更新，但本机这条还在宿主内存里（运行中或已打开）——先关掉它再同步`,
+          reason: `${remote.machine} 那份更新，但本机这条还在宿主内存里（运行中或已打开）——重启 DSH 让宿主放手，之后别先点开它再同步`,
         })
         continue
       }
@@ -1794,7 +1794,7 @@ export async function stalePlanReason(
     for (const entry of prepared.plan.pull) {
       // 覆盖本机那份是这个插件里唯一会撤掉本机已有内容的动作（见上面那条说明）。
       if (entry.action === 'replace' && live.has(entry.id)) {
-        return `${entry.id} 这会儿还在宿主内存里（运行中或已打开），先关掉它再同步`
+        return `${entry.id} 这会儿还在宿主内存里（运行中或已打开）：重启 DSH 让宿主放手，之后别先点开它再同步`
       }
     }
   }
