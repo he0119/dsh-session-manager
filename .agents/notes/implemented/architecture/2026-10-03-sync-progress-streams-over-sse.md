@@ -30,11 +30,15 @@ Status: implemented
 - `{ type: 'result', result: <一次性 JSON 那份形状> }`——收尾，形状与原来完全一样。
 - `{ type: 'error', error: '...' }`——流已经开始之后才出的错（那时 HTTP 状态早就是 200 了）。
 
-进程里由 `src/sync.ts` 的 `runSync(deps, { apply, onProgress })` 报事件，`src/web.ts` 转成 SSE。要点：
+进程里由 `src/sync.ts` 的 `runSync(deps, { apply, onProgress })` 报事件，`src/web.ts` 转成 SSE（界面那条
+路是 `prepareSync()` + `syncPrepared()`，见
+[确认之后照着预演那份数据落地](./2026-10-11-sync-confirm-reuses-the-preview.md)）。要点：
 
-- **两条路报同一套事件**：落地要先算一遍计划，所以预演的四段（`scan` 扫本机库、`remote` 读远端索引、
-  `repo` 逐个候选目录认仓库身份、`compare` 逐条比对内容）在落地那条路上也照报一遍，之后才是 `pull` 与
-  `push`。界面因此只有一套渲染：同一个 `ProgressBlock`、同一个按 `phase` 选文案的 `progressTextOf`（这一套现在六个动作共用，见 [每个长动作都报进度](./2026-10-08-every-long-action-streams-progress.md)）。
+- **两条路报同一套事件**：预演报四段（`scan` 扫本机库、`remote` 读远端索引、`repo` 逐个候选目录认仓库
+  身份、`compare` 逐条比对内容）；落地那次要么照预演那份数据直接走（只多报一条 `remote`——它重读一次
+  远端索引验数据有没有变），要么（数据变了、或这次没有预演数据）从零重算一遍、把那四段照报一遍，之后
+  才是 `pull` 与 `push`。界面因此只有一套渲染：同一个 `ProgressBlock`、同一个按 `phase` 选文案的
+  `progressTextOf`（这一套现在六个动作共用，见 [每个长动作都报进度](./2026-10-08-every-long-action-streams-progress.md)）。
 - **拉取与推送各自一段，分母不同**：`total` 是**那一段要做的条数**。跳过的（库里已有同 id、远端那份没变、
   没配映射、目标目录不存在）**不进分母**——它们不花时间，算进去进度条就走不满。
 - **`total: 0` = 这一段没有分母**：读远端索引是一次网络往返，没有"第几条"可讲。给它一个假的分母
@@ -96,7 +100,8 @@ Status: implemented
 
 - **两条路的成功响应形状都变了**：`GET /sync` 与 `POST /sync?mode=apply` 从 JSON 变成 SSE。仓库内部
   只有浏览器半侧读它们（模型工具 `sync_sessions` 直接调 `runSync`，不走 HTTP），但外部脚本若直接打
-  这两个端点需要按 `content-type` 分流——客户端那条 `readEventStream` 就是范例。
+  这两个端点需要按 `content-type` 分流——客户端那条 `readEventStream` 就是范例。落地那次的体里还要带
+  预演给的 `planId`（不带也能用，宿主会把计划重算一遍）。
 - **算计划那几段仍然有空档没报**：`repo` 段结束到第一条 `compare` 事件之间还要逐个远端条目探一次目标
   目录是否在（实测 85 条约 0.18 秒），这段在 `planSync` 内部，没有上报点。四段的实测（真实库 88 条
   会话 / 远端 84 条，冷启动）：扫本机 87 条事件 < 1ms、读远端索引 1.74s、认仓库 13 个目录 0.21s、

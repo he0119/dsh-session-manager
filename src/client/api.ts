@@ -383,6 +383,12 @@ export interface SyncResponse {
   mode: 'plan' | 'apply'
   remote: { url: string; machineId: string }
   plan: SyncPlan
+  /**
+   * 这次预演的号码：确认那次带上它，宿主就照着这份计划落地、不再重算一遍（见 `applySync()`）。
+   *
+   * 只有预演（`mode: 'plan'`）会给；落地那次的响应里没有它。
+   */
+  planId?: string
   applied: boolean
   pulled: string[]
   /** `pulled` 里"覆盖掉本机原来那份"的那些（旧的那份在备份里；界面据此多说一句）。 */
@@ -393,6 +399,13 @@ export interface SyncResponse {
   registryWritten: boolean
   indexWritten: boolean
   problems: string[]
+  /**
+   * 这次落地走的哪条路（只有"先预演、后确认"那条路会给）。
+   *
+   * `reused` = 预演之后本机与远端都没变，照着预演那份计划落的盘；`recomputed` = 有一处对不上（`reason`
+   * 说明是哪一处），宿主这次从零重算了一遍——界面据此说一句，免得计划与结果对不上时没人解释。
+   */
+  planSource?: { kind: 'reused' } | { kind: 'recomputed'; reason: string }
   /**
    * 这次同步要不要重启 DSH 才被承认（与迁移/导入同一套口径）。
    *
@@ -424,13 +437,19 @@ export async function fetchSyncPlan(onProgress?: (event: ProgressEvent) => void)
 /**
  * 真的跑一次同步（拉取 + 推送），边跑边报进度。
  *
- * @param onProgress 每收到一条进度事件调一次（算计划的四段与写盘的两段走同一个回调）。
+ * 把预演给的 `planId` 带上：宿主对得上就**照着那份计划落地**，不再把同一份计划重算一遍（用户按下确认
+ * 到第一条拉取之间原来要等的那几秒正是它），对不上（宿主重启过、又一次预演把它换掉了）就照旧从零
+ * 算一遍；响应里的 `planSource` 说清这次走的哪条路。
+ *
+ * @param planId 预演那次响应里的 `planId`；没有（旧调用方 / 没有预演数据）就按"从零算一遍"处理。
+ * @param onProgress 每收到一条进度事件调一次。
  * @returns 落地结果；单条失败在 `problems` 里，不是抛错。
  */
-export async function applySync(onProgress?: (event: ProgressEvent) => void): Promise<SyncResponse> {
+export async function applySync(planId?: string, onProgress?: (event: ProgressEvent) => void): Promise<SyncResponse> {
   const response = await fetch(`${API_PREFIX}/sync?mode=apply`, {
     method: 'POST',
-    headers: { accept: 'text/event-stream' },
+    headers: { accept: 'text/event-stream', 'content-type': 'application/json' },
+    body: JSON.stringify(planId === undefined || planId === '' ? {} : { planId }),
   })
   return readEventStream<SyncResponse>(response, onProgress, '同步')
 }
