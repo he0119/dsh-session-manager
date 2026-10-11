@@ -188,6 +188,8 @@ test('宿主内存里活着的会话拒删：进 problems，不进待删条目�
   assert.equal(plan.ok, false)
   assert.deepEqual(plan.entries, [])
   assert.match(plan.problems.join('\n'), /还在宿主内存里活着/)
+  // 拒绝的那句话必须给出出路：Web 端没有单条关闭的动作，"先关掉它"是做不到的。
+  assert.match(plan.problems.join('\n'), /重启 DSH 让宿主放手，之后别先点开它再删/)
   const run = runRemoval(withLive, { sessionIds: ['session-doomed'] }, { apply: true })
   assert.equal(run.applied, false)
   assert.equal(existsSync(sessionDir(sandbox.sessionsRoot, sandbox.cwdA, 'session-doomed')), true)

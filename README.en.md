@@ -117,7 +117,8 @@ M" to report.
 - **Delete**: tick rows → **Delete selected** opens a dialog listing every session that would go, the
   file count and where the backup lands → confirm there. Deleting **backs the session directory up into this plugin's backup root
   first**, then removes it; the sidebar drops those rows once the host rescans. A session still live in
-  host memory is refused — close it in the host first. Changed your mind? Restore it from the **Backups**
+  host memory is refused — **restart DSH** so the host lets go, then delete it without opening it first
+  (the Web side has no per-session close; see Help). Changed your mind? Restore it from the **Backups**
   tab;
 - **Subagents follow their parent session**: ticking a parent takes its subagent sessions (and any
   deeper descendants) with it — the dialog lists them row by row, marked as going with the parent, and
@@ -255,7 +256,7 @@ archived / active / Ungrouped, where Ungrouped is exactly the shell sidebar's Un
 it and the sidebar shows it), what the five tabs do, which files the actions touch (backups, roll back vs
 restore, when the sidebar follows), where the data comes from (the library and the registry paths), and the
 common questions (which sessions count as Ungrouped, why a deleted session is still in the sidebar, when a
-migration asks for a restart). The action tabs
+migration asks for a restart, how to close a session tagged active). The action tabs
 (Sessions / Migrate / Transfer / Sync / Backups) keep only the decision at hand, so each explanation there stays
 within two lines.
 
