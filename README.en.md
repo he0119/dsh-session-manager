@@ -131,7 +131,9 @@ M" to report.
   row's timestamp; on touch screens it is always there) — that opens the session's **complete content** —
   the log parsed into a timeline: human messages, model replies, reasoning (collapsed by default), tool
   calls and their results, system messages, and every other event besides (compaction, permissions,
-  approvals, retries — including how the title was decided). A tool result does not carry its tool name,
+  approvals, retries — including how the title was decided). Events are grouped into turns: click a turn
+  heading to fold it away (session-level events that belong to no turn form their own group, which has no
+  heading and therefore does not fold). A tool result does not carry its tool name,
   so the view fills it in by `callId` from the call; one event is one row, and `seq` is shown only as a
   reference because it skips numbers. It **pages** (80 events at a time; scrolling to the bottom pulls
   in the next page), marks a block that
