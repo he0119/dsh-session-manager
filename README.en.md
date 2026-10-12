@@ -238,7 +238,12 @@ M" to report.
   user's call, and hiding one up front only turns "I know I have that session" into a mystery. Migration
   is the other way round (see below);
 - **Export**: tick sessions → the browser downloads one `.dshsess` bundle. The bundle carries the raw
-  bytes of **every generation** of those logs (each with a sha256), not files the session created. The
+  bytes of **every generation** of those logs (each with a sha256) plus the **image/file objects** those
+  logs reference — in a log they are only content-addressed ids, the bytes normally live in this
+  machine's attachment store (`$DSH_HOME/attachments/`), and without them every picture says "image
+  failed to load" on another machine (one object referenced by several sessions is packed once; objects
+  missing from the local store are reported as "N not carried" in the notice after the export). It does
+  not carry the ordinary workspace files the session created. The
   list is **grouped by directory** (group name = workspace title; a directory no workspace registers is named
   after the last segment of its project identity — its git remote when it has one, its path otherwise — and is
   marked either way; the identity and the local path both live in that name's tooltip, and a directory whose
@@ -263,8 +268,13 @@ M" to report.
 - **Import**: pick a bundle and a landing directory — that field is the **same control with the same
   candidates** as the migration target (the value control opens the candidate panel, and you can also type
   a path or browse the file system) → **Import** opens a dialog listing, per session, what will
-  be created, which `cwd` gets rewritten, what is skipped and how the registry changes → confirm there (with
-  nothing to create the confirm button is greyed out). Export never asks: it only packs bytes for download and
+  be created, which `cwd` gets rewritten, what is skipped and how the registry changes (when the bundle
+  also carries attachment objects it adds a line saying how many, and how many this machine lacks) → confirm
+  there (with nothing to create the confirm button is greyed out — except when only attachment objects need
+  writing, where pressing it repairs the missing pictures and touches no session at all). Objects and logs
+  both land from the bundle, **objects first, logs second**, so a session never appears in the library with
+  its pictures still blank; an object that cannot be written is reported separately and never blocks the
+  sessions. Export never asks: it only packs bytes for download and
   touches nothing locally. Import **never overwrites**: a session whose id already exists is skipped and reported; a session with no `cwd` lands in
   the `_no-cwd` project directory and is not registered.
 
@@ -495,7 +505,8 @@ Sync also goes through a plan: the `sync_sessions` tool previews by default and 
 
 - [.agents/notes/](.agents/notes/AGENTS.md) — the reasoning behind each decision and what was rejected
   (Chinese): the silent data loss of multi-frame zstd, the startup invariants, the lossy-encoding
-  collision, the `.dshsess` container trade-offs, the effect mode, how sync decides which copy is newer and
+  collision, the `.dshsess` container trade-offs, **why a bundle carries the attachment objects**, the effect
+  mode, how sync decides which copy is newer and
   why blank sessions are not moved, and the UI decisions
 - [docs/internals.md](docs/internals.md) — a decision map indexing the notes above by topic
 - [docs/development.md](docs/development.md) — local workflow: deps, build, tests, a dev instance

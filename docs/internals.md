@@ -46,6 +46,8 @@
   只解首帧会静默丢掉整个会话，所以解码器由调用方注入、装配时先验守卫。
 - [.dshsess 是一条 gzip 流，不是 tar](../.agents/notes/implemented/architecture/2026-09-27-dshsess-is-one-gzip-stream.md)：
   容器的形状与落地前的四道校验。
+- [会话包要把附件对象一起带走](../.agents/notes/implemented/feature/2026-10-13-bundles-carry-attachment-objects.md)：
+  日志里只有引用、字节在宿主附件库里，所以包得自己带上那几个对象（v2 起），端口缺席时按"只带日志"降级。
 - [导入只跳过，不覆盖](../.agents/notes/implemented/architecture/2026-09-27-import-skips-never-overwrites.md)：
   冲突只报告，落地先写 `.part` 再 rename。
 - [产物证据分层，并做两道收窄](../.agents/notes/implemented/architecture/2026-09-27-artifact-evidence-layers.md)：

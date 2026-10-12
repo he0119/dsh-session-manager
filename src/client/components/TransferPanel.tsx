@@ -176,12 +176,29 @@ export function TransferPanel({ t, state, meta, reload, directory }: PanelShare)
       const result = await exportSessions(picked)
       download(result)
       const chosen = sessions.filter((session) => picked.includes(session.id))
-      // 包里的条数与字节以宿主回报的为准：勾一条父会话时，它的子智能体跟着进包，比勾选数多。
+      /*
+       * 包里的条数与字节以宿主回报的为准：勾一条父会话时，它的子智能体跟着进包，比勾选数多。
+       * 附件对象也照实报：带走了几个（v2 的包里有它们）、以及本机库里缺的那几个——缺的那几个不会
+       * 凭空出现，用户得在**导出这一侧**就知道，而不是到了另一台机器上看到"图片加载失败"。
+       */
       setNotice(
-        t('transfer.export.done', {
-          count: result.count ?? chosen.length,
-          bytes: formatBytes(result.bytes ?? totalBytes(chosen)),
-        }),
+        [
+          t('transfer.export.done', {
+            count: result.count ?? chosen.length,
+            bytes: formatBytes(result.bytes ?? totalBytes(chosen)),
+          }),
+          (result.attachments ?? 0) > 0
+            ? t('transfer.export.attachments', {
+                attachments: result.attachments ?? 0,
+                bytes: formatBytes(result.attachmentBytes ?? 0),
+              })
+            : null,
+          (result.attachmentsMissing ?? 0) > 0
+            ? t('transfer.export.attachmentsMissing', { count: result.attachmentsMissing ?? 0 })
+            : null,
+        ]
+          .filter((line): line is string => line !== null)
+          .join(' '),
       )
     })
   }
@@ -253,9 +270,30 @@ export function TransferPanel({ t, state, meta, reload, directory }: PanelShare)
       (result) => {
         setBusy(null)
         setProgress(null)
-        if (result.written !== undefined && result.written.length > 0) {
+        const wrote = result.written?.length ?? 0
+        const objects = result.attachmentWritten ?? 0
+        /*
+         * 落地算成功有两种：写了会话，或**只补了附件对象**（日志早就在库里、图是挂的——重导一次同一个包
+         * 正是那条修复路径）。两种都要把弹窗收掉并刷新，否则第二种会被当成"什么都没发生"。
+         */
+        if (wrote > 0 || objects > 0) {
           setPending(null)
-          setNotice(t('transfer.import.done', { count: result.written.length, bytes: formatBytes(result.bytes) }))
+          setNotice(
+            [
+              t('transfer.import.done', { count: wrote, bytes: formatBytes(result.bytes) }),
+              objects > 0
+                ? t('transfer.import.doneAttachments', {
+                    count: objects,
+                    bytes: formatBytes(result.attachmentWrittenBytes ?? 0),
+                  })
+                : null,
+            ]
+              .filter((line): line is string => line !== null)
+              .join(' '),
+          )
+          // 落地失败的那几个对象不静默：界面上那句"图片加载失败"正是它们，而用户在这里才知道是为什么。
+          const failed = result.attachmentProblems?.length ?? 0
+          if (failed > 0) setError(t('transfer.import.attachmentProblems', { count: failed }))
           void reload()
           return
         }
@@ -273,6 +311,14 @@ export function TransferPanel({ t, state, meta, reload, directory }: PanelShare)
   const createCount = pending?.plan?.entries.filter((entry) => entry.action === 'create').length ?? 0
   const skipCount = pending?.plan?.entries.filter((entry) => entry.action === 'skip').length ?? 0
   const plan = pending?.plan ?? null
+  /** 包里的附件对象（v1 的老包没有，宿主回的是空数组）。 */
+  const planAttachments = plan?.attachments ?? []
+  /** 其中会写下去的条数：一条会话都不建、只有它非零时也值得点「确认导入」（补图那条路）。 */
+  const attachmentAdds = plan?.attachmentAdds ?? 0
+  /** 包里的对象总字节（含本机已有的那些，所以不能拿 `attachmentBytes` 顶替）。 */
+  const attachmentTotalBytes = planAttachments.reduce((sum, item) => sum + item.bytes, 0)
+  /** 这个宿主落不了的（没有附件服务、认不出引用）：要如实说出来，不能让用户以为图也导进来了。 */
+  const attachmentUnavailable = planAttachments.filter((item) => item.action === 'unavailable').length
 
   return (
     <>
@@ -445,7 +491,7 @@ export function TransferPanel({ t, state, meta, reload, directory }: PanelShare)
             // 预演那一段要逐条读包里的日志折标题（实测 250 条约 1.7 秒），把静态的「预演中…」换成进度。
             planningDetail={progress === null ? undefined : <ProgressBlock t={t} progress={progress} />}
             error={pending.error}
-            disabled={plan === null || !plan.ok || createCount === 0}
+            disabled={plan === null || !plan.ok || (createCount === 0 && attachmentAdds === 0)}
             onConfirm={applyImport}
             onCancel={() => setPending(null)}
           >
@@ -462,6 +508,23 @@ export function TransferPanel({ t, state, meta, reload, directory }: PanelShare)
                   {t('transfer.import.planSummary', { create: createCount, skip: skipCount, bytes: formatBytes(plan.bytes) })}
                   {plan.error !== undefined ? ` · ${plan.error}` : ''}
                 </p>
+                {/*
+                  附件对象那一段：会话日志之外还有多少字节、其中本机缺几个（会写下去）、有没有落不了的。
+                  这三种数字决定了"导完图能不能显示出来"，所以摆在计划表之前而不是表里——表是按会话列
+                  的，而对象不属于哪一条会话（同一个对象可能被好几条引用）。
+                */}
+                {planAttachments.length > 0 && (
+                  <p className={attachmentUnavailable > 0 ? 'dsm-warn' : 'dsm-hint'}>
+                    {t('transfer.import.planAttachments', {
+                      attachments: planAttachments.length,
+                      bytes: formatBytes(attachmentTotalBytes),
+                      adds: attachmentAdds,
+                    })}
+                    {attachmentUnavailable > 0
+                      ? ` ${t('transfer.import.planAttachmentsUnavailable', { count: attachmentUnavailable })}`
+                      : ''}
+                  </p>
+                )}
                 {plan.note !== undefined && <p className="dsm-hint">{plan.note}</p>}
                 {(plan.problems ?? []).map((problem) => (
                   <p key={problem} className="dsm-warn">

@@ -25,8 +25,12 @@ gzip( 'DSHSESS1\n' | u32le 清单长度 | 清单 JSON | 各文件的原始字节
 |---|---|
 | magic 与 `formatVersion` | 不是 `.dshsess`、或是换代后本包读不懂的包 |
 | 每个条目的 `[offset, offset+bytes)` 落在载荷内 | 清单被改坏、偏移溢出 |
-| 每个条目的 sha256 | 载荷被截断或改动了一个字节 |
+| 每个条目的 sha256（附件对象用 `id` 里那一段） | 载荷被截断或改动了一个字节 |
 | 会话目录名 == `encodeSegment(id)` | 宿主启动时会校验目录名与 header id 一致，不满足的包会污染会话库 |
+
+会话日志之后还可以跟一段**附件对象**（格式 v2 起：日志里引用到的图片 / 文件的字节，见
+[会话包要把附件对象一起带走](../feature/2026-10-13-bundles-carry-attachment-objects.md)）。容器本身的
+形状没变：`formatVersion` 现在是 2，读的时候 1 与 2 都认（`BUNDLE_MIN_FORMAT_VERSION`）。
 
 ## Alternatives considered
 

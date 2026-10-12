@@ -150,6 +150,15 @@ export interface ImportEntry {
   files: Array<{ name: string; bytes: number }>
 }
 
+/** 导入计划里的一条附件对象。 */
+export interface ImportAttachmentEntry {
+  id: string
+  kind: 'image' | 'file'
+  bytes: number
+  /** 会写下去 / 本机已有 / 落不了（宿主没有附件服务或认不出这种引用）。 */
+  action: 'create' | 'present' | 'unavailable'
+}
+
 /** 导入（预演或落地）的响应。 */
 export interface ImportResponse {
   mode: 'plan' | 'apply'
@@ -160,8 +169,20 @@ export interface ImportResponse {
   created: string[]
   rehomed: string[]
   bytes: number
+  /** 包里的附件对象（v1 的老包是空数组）。 */
+  attachments: ImportAttachmentEntry[]
+  /** 其中本机没有、会写下去的条数。 */
+  attachmentAdds: number
+  /** 会被写下去的附件字节数。 */
+  attachmentBytes: number
   written?: string[]
   registryWritten?: boolean
+  /** 落地时真写下去的附件对象条数与字节数。 */
+  attachmentWritten?: number
+  attachmentPresent?: number
+  attachmentWrittenBytes?: number
+  /** 没能落地的附件（宿主没有附件服务、路径写不进去…）。 */
+  attachmentProblems?: string[]
   note?: string
   bundle?: { createdAt: string; source: { sessionsRoot?: string; pluginVersion?: string }; sessions: number }
 }
@@ -287,6 +308,11 @@ export interface ExportResult {
   count?: number
   /** 包里日志的总字节数（宿主回报）；缺席时界面按勾中的那些算。 */
   bytes?: number
+  /** 包里带走的附件对象条数与字节数（宿主回报；没有附件服务的宿主上是 0）。 */
+  attachments?: number
+  attachmentBytes?: number
+  /** 日志引用了、但本机附件库里找不到的对象条数（这几个对象这次带不走，图在别的机器上会挂）。 */
+  attachmentsMissing?: number
 }
 
 /** 导出选中的会话。 */
@@ -308,12 +334,19 @@ export async function exportSessions(sessionIds: readonly string[]): Promise<Exp
   // 包里到底几条 / 多少字节：界面那句"已导出 N 条"说的是包里的东西，而包里可能多了跟来的子智能体。
   const count = numberHeader(response, 'x-dsh-session-count')
   const bytes = numberHeader(response, 'x-dsh-session-bytes')
+  // 附件那几枚：带走了几个对象、多少字节，以及本机库里缺的那几个（见宿主 exportSessions）。
+  const attachments = numberHeader(response, 'x-dsh-attachment-count')
+  const attachmentBytes = numberHeader(response, 'x-dsh-attachment-bytes')
+  const attachmentsMissing = numberHeader(response, 'x-dsh-attachment-missing')
   // 文件名以宿主的 Content-Disposition 为准；这条兜底只在没有响应头时用，后缀与它保持一致。
   return {
     blob: await response.blob(),
     filename: matched?.[1] ?? 'dsh-sessions.dshsess',
     ...(count === undefined ? {} : { count }),
     ...(bytes === undefined ? {} : { bytes }),
+    ...(attachments === undefined ? {} : { attachments }),
+    ...(attachmentBytes === undefined ? {} : { attachmentBytes }),
+    ...(attachmentsMissing === undefined ? {} : { attachmentsMissing }),
   }
 }
 

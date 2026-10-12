@@ -1,18 +1,24 @@
 // 会话包传输：容器的字节往返、包校验的拒绝面、导入预演与落地、冲突与无 cwd 的分支。
 import assert from 'node:assert/strict'
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { join, sep } from 'node:path'
+import { createHash } from 'node:crypto'
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { dirname, join, sep } from 'node:path'
 import test from 'node:test'
+import { gunzipSync, gzipSync } from 'node:zlib'
 
 import { decompress } from 'fzstd'
 
+import type { AttachmentPort, AttachmentRef } from '../src/attachments.ts'
 import { sessionDir } from '../src/paths.ts'
 import { projectKey } from '../src/project-key.ts'
 import { readRegistry, validateRegistry } from '../src/registry.ts'
 import type { DecodeAll, SessionHeader, SessionLogFile, WorkspaceRegistryState } from '../src/types.ts'
 import {
   BUNDLE_FORMAT_VERSION,
+  BUNDLE_MAGIC,
+  BUNDLE_MIN_FORMAT_VERSION,
   applyImport,
+  attachmentBytes,
   buildBundle,
   entryBytes,
   planImport,
@@ -36,7 +42,15 @@ function makeRoot(name: string): string {
 /** 造一条会话目录（项目目录 + 会话目录 + 代次文件），返回可用作导出源的描述。 */
 function writeSession(
   root: string,
-  options: { id: string; cwd?: string; version?: number; compression?: string | null; events?: number },
+  options: {
+    id: string
+    cwd?: string
+    version?: number
+    compression?: string | null
+    events?: number
+    /** 逐行替换默认那几条空事件（写"日志里带附件引用"的会话时用它）。 */
+    eventLines?: readonly string[]
+  },
 ): ExportSource {
   const version = options.version ?? 4
   const compression = options.compression === undefined ? 'zstd' : options.compression
@@ -50,11 +64,10 @@ function writeSession(
     ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
   }
   const events = options.events ?? 2
-  const text =
-    JSON.stringify(header) +
-    '\n' +
-    Array.from({ length: events }, (_, i) => JSON.stringify({ type: 'user/message', seq: i, data: {} })).join('\n') +
-    '\n'
+  const body =
+    options.eventLines ??
+    Array.from({ length: events }, (_, i) => JSON.stringify({ type: 'user/message', seq: i, data: {} }))
+  const text = JSON.stringify(header) + '\n' + body.join('\n') + '\n'
   const buf =
     compression === 'zstd'
       ? Buffer.concat(text.split('\n').slice(0, -1).map((line) => encodeRawFrame(line + '\n')))
@@ -67,6 +80,88 @@ function writeSession(
   writeFileSync(path, buf)
   const files: SessionLogFile[] = [{ name, path, version, compression, bytes: buf.length }]
   return { id: options.id, cwd: options.cwd, createdAt: header.createdAt, dir, files }
+}
+
+/** 内容寻址 id：与宿主 `sha256:<hex>` 同一口径。 */
+function attachmentIdOf(bytes: Buffer): string {
+  return `sha256:${createHash('sha256').update(bytes).digest('hex')}`
+}
+
+/**
+ * 把一个 v2 包改写成 v1：格式号写 1、清单里去掉 `attachments` 那一节，载荷原样留着。
+ *
+ * 载荷里那些对象字节没人再指着它们（v1 没有偏移表），读的时候被忽略——这正是"老包能不能导"要验的东西。
+ * 不直接手拼一个包，是因为手拼的清单会漏掉会话那一节的真形状。
+ */
+function downgradeToV1(bundle: Buffer): Buffer {
+  const raw = gunzipSync(bundle)
+  const headerLength = BUNDLE_MAGIC.length + 4
+  const manifestLength = raw.readUInt32LE(BUNDLE_MAGIC.length)
+  const manifest = manifestOf(bundle)
+  delete manifest['attachments']
+  manifest['formatVersion'] = 1
+  const manifestBytes = Buffer.from(JSON.stringify(manifest), 'utf8')
+  const header = Buffer.alloc(headerLength)
+  header.write(BUNDLE_MAGIC, 0, 'utf8')
+  header.writeUInt32LE(manifestBytes.length, BUNDLE_MAGIC.length)
+  return gzipSync(Buffer.concat([header, manifestBytes, raw.subarray(headerLength + manifestLength)]))
+}
+
+/**
+ * 清单原文（`readBundle` 读完之后看不到的字段名要靠它核）：格式号是不是"照包里的内容写的"、
+ * 没对象的包有没有把 `attachments` 那一节省掉，都得看这一份。
+ */
+function manifestOf(bundle: Buffer): Record<string, unknown> {
+  const raw = gunzipSync(bundle)
+  const headerLength = BUNDLE_MAGIC.length + 4
+  const manifestLength = raw.readUInt32LE(BUNDLE_MAGIC.length)
+  return JSON.parse(raw.subarray(headerLength, headerLength + manifestLength).toString('utf8')) as Record<
+    string,
+    unknown
+  >
+}
+
+/** 一条日志行：引用一个附件对象（形状与宿主写进日志的一致）。 */
+function attachmentEvent(ref: AttachmentRef, bytes: number, name = 'image.png'): string {
+  return JSON.stringify({
+    type: 'user/message',
+    seq: 0,
+    data: {
+      content: [
+        { type: ref.kind, attachment: { attachmentId: ref.id, mediaType: 'image/png', width: 1, height: 1, bytes, name } },
+      ],
+    },
+  })
+}
+
+/**
+ * 假附件库：一个根 + 与宿主同形的两个目录（`objects` / `file-objects`，按 sha 前两位分桶）。
+ *
+ * 端口是**纯路径计算**（对象不在也给得出路径），与宿主 `ctx.attachments.imageHostPath()` 同一语义。
+ */
+function makeAttachmentStore(name: string): {
+  root: string
+  port: AttachmentPort
+  put(ref: AttachmentRef, bytes: Buffer): string
+} {
+  const root = join(import.meta.dirname, '.sandbox', name)
+  rmSync(root, { recursive: true, force: true })
+  mkdirSync(root, { recursive: true })
+  const dirOf = (ref: AttachmentRef): string => (ref.kind === 'image' ? 'objects' : 'file-objects')
+  const pathOf = (ref: AttachmentRef): string => {
+    const hex = ref.id.slice('sha256:'.length)
+    return join(root, dirOf(ref), hex.slice(0, 2), hex)
+  }
+  return {
+    root,
+    port: { pathOf },
+    put(ref, bytes) {
+      const path = pathOf(ref)
+      mkdirSync(dirname(path), { recursive: true })
+      writeFileSync(path, bytes)
+      return path
+    },
+  }
 }
 
 function emptyRegistry(): WorkspaceRegistryState {
@@ -85,7 +180,8 @@ test('导出/导入：字节往返，包里的载荷与磁盘上的日志逐字�
   const bundle = buildBundle([source], { now: '2026-09-27T00:00:00.000Z' })
   const parsed = readBundle(bundle)
 
-  assert.equal(parsed.formatVersion, BUNDLE_FORMAT_VERSION)
+  assert.equal(parsed.formatVersion, BUNDLE_MIN_FORMAT_VERSION, '一个对象都不带的包照旧是 v1')
+  assert.equal('attachments' in manifestOf(bundle), false, 'v1 的清单里不该多出 attachments 那一节')
   assert.equal(parsed.createdAt, '2026-09-27T00:00:00.000Z')
   assert.equal(parsed.sessions.length, 1)
   assert.equal(parsed.sessions[0]!.id, 'session-a')
@@ -268,3 +364,289 @@ test('导出/导入：一个包装多条会话（含无 cwd 的那条）时各�
   assert.deepEqual(outcome.written, ['session-a', 'session-b'])
   assert.ok(outcome.bytes > 0)
 })
+
+// ── 附件对象（v2 包里跟着日志一起走的那一段） ─────────────────────────────────
+
+test('导出：日志里引用的附件对象进包（两条会话引用同一个只进一份），字节与对象文件一致', () => {
+  const root = makeRoot('transfer-attach-pack')
+  const store = makeAttachmentStore('transfer-attach-pack-store')
+  const image = Buffer.from('假装这是一张 PNG 的字节')
+  const ref: AttachmentRef = { id: attachmentIdOf(image), kind: 'image' }
+  store.put(ref, image)
+
+  const first = writeSession(root, {
+    id: 'session-a',
+    cwd: FROM_CWD,
+    eventLines: [attachmentEvent(ref, image.length)],
+  })
+  const second = writeSession(root, {
+    id: 'session-b',
+    cwd: FROM_CWD,
+    eventLines: [attachmentEvent(ref, image.length)],
+  })
+
+  let report: { packed: number; bytes: number; missing: number } | undefined
+  const bundle = buildBundle([first, second], {
+    now: '2026-09-27T00:00:00.000Z',
+    attachments: {
+      port: store.port,
+      decodeAll,
+      onReport: (value) => {
+        report = { packed: value.packed, bytes: value.bytes, missing: value.missing.length }
+      },
+    },
+  })
+  const parsed = readBundle(bundle)
+
+  assert.equal(parsed.formatVersion, BUNDLE_FORMAT_VERSION, '真带了对象才升 v2')
+  assert.equal(BUNDLE_MIN_FORMAT_VERSION, 1, '还要读得懂 v1 的老包')
+  // 同一个对象被两条会话引用：载荷里只有一份。
+  assert.deepEqual(
+    parsed.attachments.map((entry) => `${entry.kind}:${entry.id}:${entry.bytes}`),
+    [`image:${ref.id}:${image.length}`],
+  )
+  assert.deepEqual(attachmentBytes(parsed, parsed.attachments[0]!), image)
+  assert.deepEqual(report, { packed: 1, bytes: image.length, missing: 0 })
+  // 日志那一侧照旧：两条会话都在包里。
+  assert.deepEqual(parsed.sessions.map((session) => session.id), ['session-a', 'session-b'])
+})
+
+test('导出：库里找不到的对象照样出包，如实报成 missing（不是抛错）', () => {
+  const root = makeRoot('transfer-attach-missing')
+  const store = makeAttachmentStore('transfer-attach-missing-store')
+  const image = Buffer.from('这个对象没有真的写进库里')
+  const ref: AttachmentRef = { id: attachmentIdOf(image), kind: 'image' }
+  const source = writeSession(root, { id: 'session-a', cwd: FROM_CWD, eventLines: [attachmentEvent(ref, image.length)] })
+
+  let missing: readonly AttachmentRef[] = []
+  const bundle = readBundle(
+    buildBundle([source], {
+      attachments: {
+        port: store.port,
+        decodeAll,
+        onReport: (value) => {
+          missing = value.missing
+        },
+      },
+    }),
+  )
+  assert.deepEqual(bundle.attachments, [], '对象不在库里，包里就没有它')
+  assert.deepEqual(
+    missing.map((item) => item.id),
+    [ref.id],
+    '但要如实报出来：用户要靠它知道这次有几张图带不走',
+  )
+})
+
+test('导出：日志里没有 attachmentId 的会话一个字节都不多解（没有附件服务时也照旧出包）', () => {
+  const root = makeRoot('transfer-attach-none')
+  const source = writeSession(root, { id: 'session-a', cwd: FROM_CWD, events: 3 })
+  // 不给端口：包照旧是 v1、清单里连 attachments 那一节都不写（没有附件服务的宿主就走这一支），
+  // 也就是与升级前逐字节同形——这种包老宿主照旧读得了，不该被格式号挡在门外。
+  const bundle = buildBundle([source])
+  const parsed = readBundle(bundle)
+  assert.deepEqual(parsed.attachments, [])
+  assert.equal(parsed.formatVersion, 1)
+  assert.equal('attachments' in manifestOf(bundle), false)
+})
+
+test('导出：给了端口但引用的对象本机就没有时，包退回 v1 并如实报 missing', () => {
+  const root = makeRoot('transfer-attach-none-2')
+  const store = makeAttachmentStore('transfer-attach-none-2-store')
+  // 日志里引用了一个库里没有的对象：一个都没带成，格式号不该白升。
+  const missing: AttachmentRef = { id: attachmentIdOf(Buffer.from('这个对象本机没有')), kind: 'image' }
+  const source = writeSession(root, {
+    id: 'session-a',
+    cwd: FROM_CWD,
+    eventLines: [attachmentEvent(missing, 18)],
+  })
+  let report: { packed: number; missing: number } | undefined
+  const bundle = buildBundle([source], {
+    attachments: {
+      port: store.port,
+      decodeAll,
+      onReport: (value) => {
+        report = { packed: value.packed, missing: value.missing.length }
+      },
+    },
+  })
+  const parsed = readBundle(bundle)
+  assert.equal(parsed.formatVersion, 1, '一个对象都没带走，包就该是 v1')
+  assert.deepEqual(parsed.attachments, [])
+  assert.deepEqual(report, { packed: 0, missing: 1 })
+  assert.equal('attachments' in manifestOf(bundle), false)
+})
+
+test('导入：包里的对象按库落进目标附件库（内容一致、只读权限），两次导入第二次是 present', () => {
+  const root = makeRoot('transfer-attach-import')
+  const store = makeAttachmentStore('transfer-attach-import-store')
+  const image = Buffer.from('要跟着会话搬过去的图片字节')
+  const file = Buffer.from('还有一份文件对象')
+  const imageRef: AttachmentRef = { id: attachmentIdOf(image), kind: 'image' }
+  const fileRef: AttachmentRef = { id: attachmentIdOf(file), kind: 'file' }
+  store.put(imageRef, image)
+  store.put(fileRef, file)
+
+  const source = writeSession(root, {
+    id: 'session-a',
+    cwd: FROM_CWD,
+    eventLines: [attachmentEvent(imageRef, image.length), attachmentEvent(fileRef, file.length, 'notes.txt')],
+  })
+  const bundle = readBundle(buildBundle([source], { attachments: { port: store.port, decodeAll } }))
+  assert.equal(bundle.attachments.length, 2, '图片与文件是两个库里的两个对象')
+
+  const targetRoot = makeRoot('transfer-attach-import-target')
+  const targetStore = makeAttachmentStore('transfer-attach-import-target-store')
+  const plan = planImport(bundle, { root: targetRoot, targetCwd: TO_CWD, attachments: targetStore.port })
+  assert.equal(plan.attachmentAdds, 2)
+  assert.equal(plan.attachmentBytes, image.length + file.length)
+  assert.deepEqual(
+    plan.attachments.map((entry) => `${entry.kind}:${entry.action}`),
+    ['image:create', 'file:create'],
+  )
+  assert.equal(plan.ok, true)
+
+  const outcome = applyImport(bundle, plan, {
+    root: targetRoot,
+    targetCwd: TO_CWD,
+    decodeAll,
+    attachments: targetStore.port,
+  })
+  assert.deepEqual(outcome.written, ['session-a'])
+  assert.equal(outcome.attachmentWritten, 2)
+  assert.equal(outcome.attachmentPresent, 0)
+  assert.equal(outcome.attachmentBytes, image.length + file.length)
+  assert.deepEqual(outcome.attachmentProblems, [])
+
+  for (const [ref, bytes] of [
+    [imageRef, image],
+    [fileRef, file],
+  ] as const) {
+    const path = targetStore.port.pathOf(ref)!
+    assert.deepEqual(readFileSync(path), bytes, `${ref.kind} 对象落在端口给的那个位置`)
+    assert.equal(statSync(path).mode & 0o777, 0o400, '对象库是只读的：权限与宿主写下来的规格一致')
+  }
+
+  // 第二次导入同一个包：会话还在库里（skip），对象已经在本机（present），一个字节都不再写。
+  const again = planImport(bundle, { root: targetRoot, targetCwd: TO_CWD, attachments: targetStore.port })
+  assert.deepEqual(again.created, [])
+  assert.deepEqual(
+    again.attachments.map((entry) => entry.action),
+    ['present', 'present'],
+  )
+  assert.equal(again.attachmentAdds, 0)
+  const second = applyImport(bundle, again, {
+    root: targetRoot,
+    targetCwd: TO_CWD,
+    decodeAll,
+    attachments: targetStore.port,
+  })
+  assert.deepEqual(second.written, [])
+  assert.equal(second.attachmentWritten, 0)
+  assert.equal(second.attachmentPresent, 2)
+})
+
+test('导入：日志早就在库里、只缺对象时照旧补对象，一条日志都不覆盖（这就是"图挂了"的修复路径）', () => {
+  const root = makeRoot('transfer-attach-repair')
+  const store = makeAttachmentStore('transfer-attach-repair-store')
+  const image = Buffer.from('修复路径用的图片字节')
+  const ref: AttachmentRef = { id: attachmentIdOf(image), kind: 'image' }
+  store.put(ref, image)
+  const source = writeSession(root, { id: 'session-a', cwd: FROM_CWD, eventLines: [attachmentEvent(ref, image.length)] })
+  const bundle = readBundle(buildBundle([source], { attachments: { port: store.port, decodeAll } }))
+
+  // 目标库：会话目录照原样复制过去（模拟"日志早就导过、图是挂的"），附件库是空的。
+  const targetRoot = makeRoot('transfer-attach-repair-target')
+  const targetStore = makeAttachmentStore('transfer-attach-repair-target-store')
+  const dir = sessionDir(targetRoot, FROM_CWD, 'session-a')
+  mkdirSync(dir, { recursive: true })
+  const logName = source.files[0]!.name
+  const before = readFileSync(source.files[0]!.path)
+  writeFileSync(join(dir, logName), before)
+
+  const plan = planImport(bundle, { root: targetRoot, targetCwd: FROM_CWD, attachments: targetStore.port })
+  assert.deepEqual(plan.created, [], '库里已经有这条会话')
+  assert.equal(plan.entries[0]!.action, 'skip')
+  assert.equal(plan.attachmentAdds, 1, '但缺的那个对象要补上')
+  assert.equal(plan.ok, true, '只有附件要补时，计划也是"有可落地内容"')
+
+  const outcome = applyImport(bundle, plan, {
+    root: targetRoot,
+    targetCwd: FROM_CWD,
+    decodeAll,
+    attachments: targetStore.port,
+  })
+  assert.deepEqual(outcome.written, [], '一条会话都没写')
+  assert.equal(outcome.attachmentWritten, 1)
+  assert.deepEqual(readFileSync(targetStore.port.pathOf(ref)!), image)
+  assert.deepEqual(readFileSync(join(dir, logName)), before, '日志逐字节不动（导入永不覆盖）')
+})
+
+test('导入：宿主没有附件服务时对象一条都不落，计划里如实报 unavailable', () => {
+  const root = makeRoot('transfer-attach-noport')
+  const store = makeAttachmentStore('transfer-attach-noport-store')
+  const image = Buffer.from('没有附件服务时带不过去的字节')
+  const ref: AttachmentRef = { id: attachmentIdOf(image), kind: 'image' }
+  store.put(ref, image)
+  const source = writeSession(root, { id: 'session-a', cwd: FROM_CWD, eventLines: [attachmentEvent(ref, image.length)] })
+  const bundle = readBundle(buildBundle([source], { attachments: { port: store.port, decodeAll } }))
+
+  const targetRoot = makeRoot('transfer-attach-noport-target')
+  const plan = planImport(bundle, { root: targetRoot, targetCwd: TO_CWD })
+  assert.deepEqual(
+    plan.attachments.map((entry) => entry.action),
+    ['unavailable'],
+  )
+  assert.equal(plan.attachmentAdds, 0)
+  assert.equal(plan.ok, true, '会话照旧能导：附件落不了不影响日志')
+
+  const outcome = applyImport(bundle, plan, { root: targetRoot, targetCwd: TO_CWD, decodeAll })
+  assert.deepEqual(outcome.written, ['session-a'])
+  assert.equal(outcome.attachmentWritten, 0)
+  assert.match(outcome.attachmentProblems.join('\n'), /没有附件服务/)
+})
+
+test('包校验：附件载荷被改动一个字节时按 id 里的 sha256 拒掉整包', () => {
+  const root = makeRoot('transfer-attach-corrupt')
+  const store = makeAttachmentStore('transfer-attach-corrupt-store')
+  const image = Buffer.from('会被改坏的图片字节')
+  const ref: AttachmentRef = { id: attachmentIdOf(image), kind: 'image' }
+  store.put(ref, image)
+  const source = writeSession(root, { id: 'session-a', cwd: FROM_CWD, eventLines: [attachmentEvent(ref, image.length)] })
+  const bundle = buildBundle([source], { attachments: { port: store.port, decodeAll } })
+
+  const corrupted = Buffer.from(bundle)
+  corrupted[corrupted.length - 1] = corrupted[corrupted.length - 1]! ^ 0xff
+  assert.throws(() => readBundle(corrupted), /gzip|sha256/i)
+
+  // 逐个字节改在载荷里（先解开再压回去）：gzip 层不该抢在附件那条不变式前面报错，否则这条断言
+  // 永远验的是"压缩流坏了"，而不是"对象与它 id 里的 sha256 不符"。
+  const raw = gunzipSync(bundle)
+  raw[raw.length - 1] = raw[raw.length - 1]! ^ 0xff
+  assert.throws(() => readBundle(gzipSync(raw)), /attachment .* failed its sha256 check/i)
+})
+
+test('读包：v1 的老包（没有 attachments 那一节）照旧读得出来、也照旧导得进去', () => {
+  const root = makeRoot('transfer-v1')
+  const store = makeAttachmentStore('transfer-v1-store')
+  const image = Buffer.from('v1 时代的包当然没有这段字节')
+  const ref: AttachmentRef = { id: attachmentIdOf(image), kind: 'image' }
+  store.put(ref, image)
+  const source = writeSession(root, { id: 'session-a', cwd: FROM_CWD, eventLines: [attachmentEvent(ref, image.length)] })
+  const onDisk = readFileSync(source.files[0]!.path)
+  // 造一个真的 v1 包：同一条容器，格式号写 1、清单里没有 attachments 那一节。
+  const bundle = downgradeToV1(buildBundle([source], { attachments: { port: store.port, decodeAll } }))
+  const parsed = readBundle(bundle)
+
+  assert.equal(parsed.formatVersion, 1)
+  assert.deepEqual(parsed.attachments, [], 'v1 没有对象可带，读出来是空表')
+  assert.deepEqual(entryBytes(parsed, parsed.sessions[0]!.files[0]!), onDisk, '日志那一侧照旧逐字节一致')
+
+  const targetRoot = makeRoot('transfer-v1-target')
+  const plan = planImport(parsed, { root: targetRoot, targetCwd: FROM_CWD })
+  assert.deepEqual(plan.created, ['session-a'])
+  const outcome = applyImport(parsed, plan, { root: targetRoot, targetCwd: FROM_CWD, decodeAll })
+  assert.deepEqual(outcome.written, ['session-a'])
+  assert.equal(outcome.attachmentWritten, 0)
+})
+

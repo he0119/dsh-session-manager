@@ -1,10 +1,11 @@
 // 界面用的宿主端点：列会话、导出、导入（预演与落地），以及各条拒绝面。
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import { EventEmitter } from 'node:events'
 import { createServer, request } from 'node:http'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import test from 'node:test'
 
 import { decompress } from 'fzstd'
@@ -13,6 +14,7 @@ import { encodeSegment, projectionCacheDir, sessionDir } from '../src/paths.ts'
 import { projectKey } from '../src/project-key.ts'
 import { readRegistry, validateRegistry, writeRegistryAtomic } from '../src/registry.ts'
 import { createDavClient } from '../src/dav.ts'
+import type { AttachmentPort, AttachmentRef } from '../src/attachments.ts'
 import { SYNC_NAMESPACE_DIR } from '../src/sync.ts'
 import type { DecodeAll, ProgressEvent, SessionHeader, WorkspaceRegistryState } from '../src/types.ts'
 import { API_PREFIX, createApiHandlers, registerWebRoutes, type ApiDeps, type WebRouteLike } from '../src/web.ts'
@@ -57,7 +59,13 @@ function writeSession(
   id: string,
   cwd: string,
   createdAt: number,
-  options: { title?: string; origin?: 'subagent'; parentSession?: string } = {},
+  options: {
+    title?: string
+    origin?: 'subagent'
+    parentSession?: string
+    /** 让这条会话的日志引用一个附件对象（字节不在日志里，在附件库，见 attachments.ts）。 */
+    attachment?: { ref: AttachmentRef; bytes: number }
+  } = {},
 ): void {
   const header: SessionHeader = {
     type: 'session',
@@ -73,6 +81,29 @@ function writeSession(
   const lines = [
     JSON.stringify(header),
     JSON.stringify({ type: 'user/message', seq: 0, data: {} }),
+    ...(options.attachment === undefined
+      ? []
+      : [
+          JSON.stringify({
+            type: 'user/message',
+            seq: 1,
+            data: {
+              content: [
+                {
+                  type: options.attachment.ref.kind,
+                  attachment: {
+                    attachmentId: options.attachment.ref.id,
+                    mediaType: 'image/png',
+                    width: 1,
+                    height: 1,
+                    bytes: options.attachment.bytes,
+                    name: 'image.png',
+                  },
+                },
+              ],
+            },
+          }),
+        ]),
     // 标题在 DSH 里是日志事件（最新一条生效），不是 header 字段——夹具得照这个样子写，
     // 否则测的就不是真实数据形状了（见 src/session-title.ts）。
     ...(options.title === undefined
@@ -85,6 +116,34 @@ function writeSession(
     join(dir, 'session.v4.jsonl.zstd'),
     Buffer.concat(lines.map((line) => encodeRawFrame(`${line}\n`))),
   )
+}
+
+/** 内容寻址 id：与宿主 `sha256:<hex>` 同一口径。 */
+function attachmentIdOf(bytes: Buffer): string {
+  return `sha256:${createHash('sha256').update(bytes).digest('hex')}`
+}
+
+/** 假的附件库：与宿主同形的两个目录 + 纯路径计算的端口（见 src/attachments.ts）。 */
+function makeAttachmentStore(base: string): {
+  root: string
+  port: AttachmentPort
+  put(ref: AttachmentRef, bytes: Buffer): string
+} {
+  const root = join(base, 'attachments')
+  const pathOf = (ref: AttachmentRef): string => {
+    const hex = ref.id.slice('sha256:'.length)
+    return join(root, ref.kind === 'image' ? 'objects' : 'file-objects', hex.slice(0, 2), hex)
+  }
+  return {
+    root,
+    port: { pathOf },
+    put(ref, bytes) {
+      const path = pathOf(ref)
+      mkdirSync(dirname(path), { recursive: true })
+      writeFileSync(path, bytes)
+      return path
+    },
+  }
 }
 
 /** 写一份"事件行自己给"的日志（解析类用例要各种怪形状，`writeSession` 那几个字段不够用）。 */
@@ -753,7 +812,8 @@ test('POST /import：包坏了、目标目录不合法、库已存在同 id，�
     '落地开始干活之后回的是事件流：状态码早就发出去了，结论只能从 result 里读',
   )
   assert.equal(payload(conflictApply.captured)['ok'], false)
-  assert.match(String(payload(conflictApply.captured)['error']), /没有可导入的会话/)
+  // 一件都不会发生（会话都在库里、包里的附件对象本机也都有）时落地在写盘之前就被挡下。
+  assert.match(String(payload(conflictApply.captured)['error']), /没有可导入的内容/)
 })
 
 test('registerWebRoutes：注册十三条精确路由，方法不对回 405', async () => {
@@ -2577,4 +2637,77 @@ test('GET /auto-push：方法检查在路由那一层（POST 回 405）', async 
   const ok = fakeRes()
   await route.handler(fakeReq('GET', `${API_PREFIX}/auto-push`), ok.res)
   assert.notEqual(ok.captured.status, 405)
+})
+
+// ── 附件对象（导出把对象收进包、导入把它落进本机库） ──────────────────────────
+
+test('POST /export：附件对象跟着包走，条数/字节/本机缺的那几个都报在响应头里', async () => {
+  const sandbox = makeSandbox('web-export-attachments')
+  const store = makeAttachmentStore(sandbox.base)
+  const present = Buffer.from('本机附件库里有的那张图')
+  const absent = Buffer.from('只被日志引用、库里已经没有的那张图')
+  const presentRef: AttachmentRef = { id: attachmentIdOf(present), kind: 'image' }
+  const absentRef: AttachmentRef = { id: attachmentIdOf(absent), kind: 'image' }
+  store.put(presentRef, present)
+  writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000, {
+    attachment: { ref: presentRef, bytes: present.length },
+  })
+  writeSession(sandbox.sessionsRoot, 'session-b', CWD_A, 2000, {
+    attachment: { ref: absentRef, bytes: absent.length },
+  })
+
+  const handlers = createApiHandlers(deps(sandbox, { attachments: () => store.port }))
+  const { res, captured } = fakeRes()
+  await handlers['POST /export']!(
+    fakeReq('POST', `${API_PREFIX}/export`, Buffer.from(JSON.stringify({ sessionIds: ['session-a', 'session-b'] }))),
+    res,
+  )
+  assert.equal(captured.status, 200)
+  assert.equal(captured.headers['x-dsh-attachment-count'], '1', '库里有的那个进包')
+  assert.equal(captured.headers['x-dsh-attachment-bytes'], String(present.length))
+  assert.equal(captured.headers['x-dsh-attachment-missing'], '1', '库里没有的那个要如实报，界面据此提醒')
+
+  const { readBundle, attachmentBytes } = await import('../src/transfer.ts')
+  const bundle = readBundle(captured.body)
+  assert.deepEqual(
+    bundle.attachments.map((entry) => entry.id),
+    [presentRef.id],
+  )
+  assert.deepEqual(attachmentBytes(bundle, bundle.attachments[0]!), present)
+})
+
+test('POST /import：日志已在库里、只缺附件对象时照样落地（写会话 0 条、补对象 1 个）', async () => {
+  const source = makeSandbox('web-import-attachments-source')
+  const store = makeAttachmentStore(source.base)
+  const image = Buffer.from('要补进另一个库的图片字节')
+  const ref: AttachmentRef = { id: attachmentIdOf(image), kind: 'image' }
+  store.put(ref, image)
+  writeSession(source.sessionsRoot, 'session-a', CWD_A, 1000, { attachment: { ref, bytes: image.length } })
+
+  const exporter = createApiHandlers(deps(source, { attachments: () => store.port }))
+  const exported = fakeRes()
+  await exporter['POST /export']!(
+    fakeReq('POST', `${API_PREFIX}/export`, Buffer.from(JSON.stringify({ sessionIds: ['session-a'] }))),
+    exported.res,
+  )
+  assert.equal(exported.captured.status, 200)
+
+  // 目标库：会话日志照原样摆进去（"早就导过、图是挂的"），附件库是空的。
+  const target = makeSandbox('web-import-attachments-target')
+  writeSession(target.sessionsRoot, 'session-a', CWD_A, 1000, { attachment: { ref, bytes: image.length } })
+  const targetStore = makeAttachmentStore(target.base)
+  assert.equal(existsSync(targetStore.port.pathOf(ref)!), false, '目标库这会儿确实没有这个对象')
+
+  const importer = createApiHandlers(deps(target, { attachments: () => targetStore.port }))
+  const url = `${API_PREFIX}/import?targetCwd=${encodeURIComponent(CWD_A)}&mode=apply`
+  const applied = fakeRes()
+  await importer['POST /import']!(fakeReq('POST', url, exported.captured.body), applied.res)
+
+  const result = payload(applied.captured)
+  assert.equal(result['ok'], true, '只有附件要补时落地也是成功（界面据此收掉弹窗并刷新）')
+  assert.deepEqual(result['written'], [], '一条会话都没写（库里已经有它）')
+  assert.equal(result['attachmentWritten'], 1)
+  assert.equal(result['attachmentPresent'], 0)
+  assert.deepEqual(result['attachmentProblems'], [])
+  assert.deepEqual(readFileSync(targetStore.port.pathOf(ref)!), image)
 })

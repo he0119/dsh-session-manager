@@ -3993,16 +3993,26 @@ test('客户端产物：导入弹窗里摆的是那张预演表，全是跳过�
     rehomed: [],
     bytes: 10,
   })
+  /** 同一条计划，但包里带着附件对象：一个本机没有（会写）、一个这个宿主落不了。 */
+  const withAttachments = (action) => ({
+    ...planOf(action),
+    attachments: [
+      { id: `sha256:${'a'.repeat(64)}`, kind: 'image', bytes: 64425, action: 'create' },
+      { id: `sha256:${'b'.repeat(64)}`, kind: 'file', bytes: 120, action: 'unavailable' },
+    ],
+    attachmentAdds: 1,
+    attachmentBytes: 64425,
+  })
   // null 顺序：骨架的 error / 传输页的 file / payload / **pending**（第一个空串是导入目标，第二个是搜索词）。
-  const mounted = (action) =>
+  const mounted = (action, plan = planOf(action)) =>
     mount({
       state,
       panel: 'transfer',
       strings: ['', '/home/u/dev/beta'],
-      nulls: [null, null, null, { plan: planOf(action), error: null }],
+      nulls: [null, null, null, { plan, error: null }],
     })
-  const render = (action) => {
-    const item = mounted(action)
+  const render = (action, plan) => {
+    const item = mounted(action, plan)
     return { recorded: item.recorded, text: strings(item.registrations[0].component(item.registrations[0].registration.inject())) }
   }
 
@@ -4021,6 +4031,23 @@ test('客户端产物：导入弹窗里摆的是那张预演表，全是跳过�
     '全是跳过时表还在（要看得到"为什么跳过"）',
   )
   assert.equal(primaryOf(skip.recorded).props.disabled, true, '一条都不会创建时确认按钮禁用')
+
+  // 包里有附件对象：正文多一句说清有几个、多大、其中几个本机没有；落不了的那几个也要点名。
+  const attached = render('create', withAttachments('create'))
+  assert.ok(
+    attached.text.some(
+      (item) => String(item).startsWith('transfer.import.planAttachments') && String(item).includes('63.0 KB'),
+    ),
+    '附件那几个数字要写出来（对象总字节，不是"这次会写的那些"）',
+  )
+  assert.ok(
+    attached.text.some((item) => String(item).includes('transfer.import.planAttachmentsUnavailable')),
+    '这个宿主落不了的那几个要如实说（否则用户以为图也导进来了）',
+  )
+
+  // 一条会话都不建、只有附件要补：确认按钮**可用**——这正是"图挂了，重导同一个包补上"那条路。
+  const repair = render('skip', withAttachments('skip'))
+  assert.equal(primaryOf(repair.recorded).props.disabled, false, '只有附件要补时确认按钮可用')
 })
 
 test('客户端产物：回滚弹窗先摆动作清单再确认（清单就是那次真实写入的形状）', { skip }, () => {
@@ -4651,6 +4678,8 @@ test('客户端产物：进度块的段名是一份共用词汇，认不出来�
     scan: 'progress.scan:{"current":5,"total":9}',
     read: 'progress.read:{"current":5,"total":9}',
     pack: 'progress.pack:{"current":5,"total":9}',
+    // 附件对象那一段（往包里收 / 往库里落）量的是对象数，与会话那几段分开说。
+    attach: 'progress.attach:{"current":5,"total":9}',
     backup: 'progress.backup:{"current":5,"total":9}',
     rewrite: 'progress.rewrite:{"current":5,"total":9}',
     move: 'progress.move:{"current":5,"total":9}',
