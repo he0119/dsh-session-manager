@@ -254,7 +254,8 @@ export const zh = {
   'manage.transcript.problems': '有 {count} 条读不出来（第 {lines} 行），其余照原样摆出。',
   'manage.transcript.counts':
     '共 {events} 条事件：我 {human}｜助手 {assistant}｜工具调用 {toolCalls}｜工具结果 {toolResults}',
-  'manage.transcript.shown': '显示 {shown} / 已读 {loaded} 条',
+  'manage.transcript.shown': '显示 {shown} / 已读 {loaded} / 共 {total} 条',
+  'manage.transcript.loaded': '已读 {loaded} / 共 {total} 条',
   'manage.transcript.turn': '第 {turn} 轮',
   'manage.transcript.reasoning': '思考（折起）',
   'manage.transcript.synthetic': '非人类消息',
@@ -704,7 +705,8 @@ export const en: LocaleDictOf<typeof NS> = {
   'manage.transcript.problems': '{count} lines cannot be read (lines {lines}); everything else is shown as it is.',
   'manage.transcript.counts':
     '{events} events: me {human} | assistant {assistant} | tool calls {toolCalls} | tool results {toolResults}',
-  'manage.transcript.shown': 'showing {shown} of {loaded} loaded',
+  'manage.transcript.shown': 'showing {shown}, loaded {loaded} of {total}',
+  'manage.transcript.loaded': 'loaded {loaded} of {total}',
   'manage.transcript.turn': 'Turn {turn}',
   'manage.transcript.reasoning': 'Reasoning (collapsed)',
   'manage.transcript.synthetic': 'not a human message',

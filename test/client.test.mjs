@@ -4609,7 +4609,7 @@ test('客户端产物：迁移落地时宿主报的每条进度都进了界面�
   assert.ok(cleared > landed, '落地收尾时那条进度被清掉（同一个状态位置回 null）')
 })
 
-test('客户端产物：内容视图没有底部那一行，打开时焦点落在列表上', { skip }, () => {
+test('客户端产物：内容视图没有底部那一行，页头写着已读与总数', { skip }, () => {
   const state = {
     sessionsRoot: '/home/u/.dsh/sessions',
     registryPath: '/home/u/.dsh/registry.json',
@@ -4622,7 +4622,17 @@ test('客户端产物：内容视图没有底部那一行，打开时焦点落�
   // `mount` 的 `nulls` 按渲染顺序种给"以 null 初始化的状态"：会话页里排在 `inspecting` 之前的那几个
   // 保持默认，最后那个种成一条会话，内容视图就开着。顺序要是变了，这条会在下面第一句上失败，
   // 不会静默过（与 `arrays` / `strings` 的种子是同一套约定）。
-  const mounted = mount({ state, panel: 'manage', nulls: [...Array(7).fill(null), { id: 's-1', title: 'T' }] })
+  // 第 8 个种给 `inspecting`（会话页里它排在最后），第 9 个种给内容视图自己的 `page`——有它页头那行
+  // "已读 / 共"才画得出来（假钩子不跑 effect，页不会自己到）。
+  const mounted = mount({
+    state,
+    panel: 'manage',
+    nulls: [
+      ...Array(7).fill(null),
+      { id: 's-1', title: 'T' },
+      { totalEvents: 25, cursor: 0, problems: [], problemCount: 0 },
+    ],
+  })
   const tree = mounted.registrations[0].component(mounted.registrations[0].registration.inject())
   const text = strings(tree)
   const dialog = mounted.recorded.find((node) => node.props?.['aria-label'] === 'manage.transcript.title')
@@ -4640,5 +4650,9 @@ test('客户端产物：内容视图没有底部那一行，打开时焦点落�
     text.some((item) => item === 'manage.transcript.more' || item === 'manage.transcript.done'),
     false,
     '「加载更多」与「已到日志末尾」都不在树上了',
+  )
+  assert.ok(
+    text.some((item) => String(item) === 'manage.transcript.loaded:{"loaded":0,"total":25}'),
+    '页头把已读与总数并排写：总数第一页就有（解析层扫行头数出来的），没筛时不重复写「显示」',
   )
 })
