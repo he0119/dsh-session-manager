@@ -127,6 +127,16 @@ M" to report.
   HTTP endpoint (`POST …/retitle`) takes `includePinned: true` — the page deliberately offers no such
   switch, because the default meaning is "do not touch the user's own names" (useful for a one-off
   cleanup of sessions whose titles were written by a script or an import);
+- **Read content**: every row carries a **Content** button that opens the session's **complete content** —
+  the log parsed into a timeline: human messages, model replies, reasoning (collapsed by default), tool
+  calls and their results, system messages, and every other event besides (compaction, permissions,
+  approvals, retries — including how the title was decided). A tool result does not carry its tool name,
+  so the view fills it in by `callId` from the call; one event is one row, and `seq` is shown only as a
+  reference because it skips numbers. It **pages** (80 events, then **Load more**), marks a block that
+  was cut ("N characters were cut — click to read it in full"), and reports unreadable lines by count and
+  line number while still showing every other event. Filter the view by kind (me / model / tools / other)
+  and **Copy Markdown** what you have loaded. This page **does not go through the host**, so sessions the
+  sidebar cannot reach (blank, orphaned, archived, subagent, imported) can be read here as well;
 - **Delete**: tick rows → **Delete selected** opens a dialog listing every session that would go, the
   file count and where the backup lands → confirm there. Deleting **backs the session directory up into this plugin's backup root
   first**, then removes it; the sidebar drops those rows once the host rescans. A session still live in

@@ -167,6 +167,16 @@ export interface SessionRowProps {
    * 否则用户只能靠试错发现自己点错了。提示里写明该勾哪一条。
    */
   locked?: { tip: string }
+  /**
+   * 这一行能点开看完整内容（只有会话页给）。
+   *
+   * 按钮落在 `<label>` 里面，所以点击时要 `preventDefault()`：标签的默认动作是把这次点击转给勾选框，
+   * 而"看内容"不该顺带改变勾选状态（用户可能已经挑好了一批，只是想先看一眼其中一条）。
+   */
+  onInspect?: () => void
+  /** 「内容」那枚按钮的文案与悬浮提示（都由调用方翻好）。 */
+  inspectLabel?: string
+  inspectTip?: string
   t: Translate
 }
 
@@ -181,6 +191,9 @@ export function SessionRow({
   depth = 0,
   note,
   locked,
+  onInspect,
+  inspectLabel,
+  inspectTip,
   t,
 }: SessionRowProps): React.ReactElement {
   // 行上显示标题、id 退到悬浮提示（见 planRows.sessionLabel）。
@@ -210,6 +223,21 @@ export function SessionRow({
           <span className="dsm-tag dsm-tagIdle" title={note.tip}>
             {note.text}
           </span>
+        )}
+        {onInspect !== undefined && (
+          <button
+            type="button"
+            className="dsm-rowInspect"
+            title={inspectTip}
+            onClick={(event) => {
+              // 先挡掉 `<label>` 的默认动作（它会把这次点击转给里面的勾选框），再只做"打开内容"。
+              event.preventDefault()
+              event.stopPropagation()
+              onInspect()
+            }}
+          >
+            {inspectLabel ?? t('manage.transcript.open')}
+          </button>
         )}
       </span>
       {owner !== undefined && (

@@ -845,6 +845,67 @@ export const CSS = `
 }
 .dsm-backupRow:last-child { border-bottom: none; }
 .dsm-backupMain { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 auto; }
+/* ── 会话内容视图（TranscriptDialog） ─────────────────────────────────────────
+   一条事件一块，头部那行固定是"种类 + 工具名 + 时刻 + seq + 事件类型"：日志里的 seq 会跳号，
+   所以它只当参照物，真正的位置由加载顺序说明（见 TranscriptDialog 的模块注释）。 */
+.dsm-transcriptContent { display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+.dsm-transcriptFacts { display: flex; flex-direction: column; gap: 4px; }
+.dsm-transcriptName { font-size: 14px; font-weight: 600; color: var(--dsw-alias-label-primary, #1f2329); }
+.dsm-transcriptFactsGrid { gap: 2px 12px; font-size: 12px; }
+.dsm-transcriptFilters {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  border-top: 1px solid var(--dsw-alias-border-l1, rgba(0, 0, 0, 0.06));
+  border-bottom: 1px solid var(--dsw-alias-border-l1, rgba(0, 0, 0, 0.06));
+  padding: 6px 0;
+}
+.dsm-chip {
+  border: 1px solid var(--dsw-alias-border-l1, rgba(0, 0, 0, 0.12));
+  background: transparent; color: var(--dsw-alias-label-secondary, #646a73);
+  border-radius: 999px; padding: 2px 10px; font-size: 12px; cursor: pointer;
+}
+.dsm-chip:hover { border-color: var(--dsw-alias-brand-primary, #3370ff); }
+.dsm-chipOn {
+  border-color: var(--dsw-alias-brand-primary, #3370ff);
+  color: var(--dsw-alias-brand-primary, #3370ff);
+}
+.dsm-transcriptList {
+  display: flex; flex-direction: column; gap: 8px;
+  overflow: auto; max-height: 58vh; padding-right: 4px;
+}
+.dsm-turn {
+  position: sticky; top: 0; z-index: 1;
+  background: var(--dsw-alias-bg-base, #fff);
+  color: var(--dsw-alias-label-secondary, #646a73);
+  font-size: 12px; font-weight: 600; padding: 4px 0;
+}
+.dsm-item {
+  border: 1px solid var(--dsw-alias-border-l1, rgba(0, 0, 0, 0.08));
+  border-left-width: 3px; border-radius: 6px; padding: 6px 8px;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.dsm-item-user { border-left-color: var(--dsw-alias-brand-primary, #3370ff); }
+.dsm-item-assistant { border-left-color: var(--dsw-alias-label-secondary, #646a73); }
+.dsm-item-reasoning { border-left-color: var(--dsw-alias-border-l2, rgba(0, 0, 0, 0.2)); }
+.dsm-item-tool-call, .dsm-item-tool-result { border-left-color: var(--dsw-alias-state-warn-primary, #ff8800); }
+.dsm-item-system { border-left-color: var(--dsw-alias-state-success-primary, #34c724); }
+.dsm-itemHead { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; }
+.dsm-itemKind { font-weight: 600; color: var(--dsw-alias-label-primary, #1f2329); }
+.dsm-itemName { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.dsm-itemBody > summary { cursor: pointer; font-size: 12px; color: var(--dsw-alias-label-secondary, #646a73); }
+.dsm-pre {
+  margin: 0; white-space: pre-wrap; word-break: break-word;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; line-height: 18px;
+  color: var(--dsw-alias-label-primary, #1f2329);
+  max-height: 320px; overflow: auto;
+}
+/* 行上那枚「内容」：看着像标签、行为像按钮——它会打开内容视图，但不参与勾选（见 SessionRowProps）。 */
+.dsm-rowInspect {
+  border: 1px solid var(--dsw-alias-border-l1, rgba(0, 0, 0, 0.12));
+  background: transparent; color: var(--dsw-alias-label-secondary, #646a73);
+  border-radius: 4px; padding: 0 6px; font-size: 12px; line-height: 18px; cursor: pointer;
+  flex: 0 0 auto;
+}
+.dsm-rowInspect:hover { border-color: var(--dsw-alias-brand-primary, #3370ff); color: var(--dsw-alias-brand-primary, #3370ff); }
 `
 
 /**

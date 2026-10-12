@@ -39,6 +39,7 @@ import {
 } from '../api.ts'
 import { ConfirmDialog } from './ConfirmDialog.tsx'
 import { ProgressBlock } from './ProgressBlock.tsx'
+import { TranscriptDialog } from './TranscriptDialog.tsx'
 import { groupKey, groupSessions, nestSessions } from '../logic/groups.ts'
 import { deleteFamilyNote, parentDirNote } from '../logic/planRows.ts'
 import { describeRetitle, type RetitleNotes } from '../logic/retitleNotes.ts'
@@ -55,6 +56,7 @@ import {
   useGroupCollapse,
   useSessionFilter,
   useSessionPicking,
+  type RowSession,
 } from './sessionList.tsx'
 import type { PanelShare } from '../types.ts'
 
@@ -105,6 +107,8 @@ export function ManagePanel({ t, state, meta, reload }: PanelShare): React.React
    * 摆出来——"这条你改过名，我没动它"与"这条算的时候报错了"是两件完全不同的事，混在一个横幅里就分不清。
    */
   const [retitle, setRetitle] = React.useState<RetitleResponse | null>(null)
+  /** 正在看内容的那条会话（点行上的「内容」时设它，看完关掉）。 */
+  const [inspecting, setInspecting] = React.useState<RowSession | null>(null)
 
   /**
    * 按目录分组，组内留着筛选之后的那些（空掉的组整组不画：组头底下没有行，看着像坏了）。
@@ -372,6 +376,9 @@ export function ManagePanel({ t, state, meta, reload }: PanelShare): React.React
                         depth={row.depth}
                         note={parentDirNote(row, t)}
                         locked={picking.lockOf(row.session)}
+                        onInspect={() => setInspecting(row.session)}
+                        inspectLabel={t('manage.transcript.open')}
+                        inspectTip={t('manage.transcript.openTip')}
                         t={t}
                       />
                     ))}
@@ -487,6 +494,13 @@ export function ManagePanel({ t, state, meta, reload }: PanelShare): React.React
             </>
           )}
         </ConfirmDialog>
+      )}
+      {inspecting !== null && (
+        <TranscriptDialog
+          session={{ id: inspecting.id, ...(inspecting.title === undefined ? {} : { title: inspecting.title }) }}
+          onClose={() => setInspecting(null)}
+          t={t}
+        />
       )}
     </>
   )
