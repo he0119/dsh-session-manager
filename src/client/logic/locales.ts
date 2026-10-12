@@ -252,9 +252,6 @@ export const zh = {
   'manage.transcript.empty': '这份日志里只有 header，没有事件。',
   'manage.transcript.more': '加载更多',
   'manage.transcript.done': '已到日志末尾',
-  'manage.transcript.copy': '复制 Markdown',
-  'manage.transcript.copied': '已复制到剪贴板。',
-  'manage.transcript.copyFailed': '复制失败：浏览器没给剪贴板权限，可以手动选中复制。',
   'manage.transcript.truncated': '这一格被截断了 {count} 个字符，点这里看全文',
   'manage.transcript.problems': '有 {count} 条读不出来（第 {lines} 行），其余照原样摆出。',
   'manage.transcript.counts':
@@ -707,9 +704,6 @@ export const en: LocaleDictOf<typeof NS> = {
   'manage.transcript.empty': 'This log holds only the header — no events.',
   'manage.transcript.more': 'Load more',
   'manage.transcript.done': 'End of the log',
-  'manage.transcript.copy': 'Copy Markdown',
-  'manage.transcript.copied': 'Copied to the clipboard.',
-  'manage.transcript.copyFailed': 'Copy failed: the browser withheld clipboard access — select the text and copy manually.',
   'manage.transcript.truncated': '{count} characters were cut from this block — click to read it in full',
   'manage.transcript.problems': '{count} lines cannot be read (lines {lines}); everything else is shown as it is.',
   'manage.transcript.counts':

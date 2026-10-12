@@ -6,12 +6,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import {
-  countTranscript,
-  readTranscript,
-  transcriptMarkdown,
-  type TranscriptPage,
-} from '../src/transcript.ts'
+import { countTranscript, readTranscript } from '../src/transcript.ts'
 
 const HEADER = JSON.stringify({
   type: 'session',
@@ -225,18 +220,4 @@ test('readTranscript：header 读不出来就抛（那是"这份日志读不出�
   assert.throws(() => readTranscript([]), /empty/)
   assert.throws(() => readTranscript(['{"type":"session"}']), /header/)
   assert.throws(() => readTranscript(['not json']), /header/)
-})
-
-test('transcriptMarkdown：拼出来的那把文本能直接贴出去', () => {
-  const page: TranscriptPage = readTranscript(LINES)
-  const markdown = transcriptMarkdown(page, '看看日志')
-  assert.match(markdown, /^# 看看日志/)
-  assert.match(markdown, /## 第 1 轮/)
-  assert.match(markdown, /\*\*🧑 我\*\*/)
-  assert.match(markdown, /```json\n\{"command":"ls"\}\n```/)
-  assert.match(markdown, /（合成消息）/)
-  assert.match(markdown, /> 挂在 seq 4/)
-  assert.match(markdown, /- 事件：11 条（人类 1｜助手 1｜工具调用 1｜工具结果 2）/)
-  assert.match(markdown, /- 读不出来：1 条（第 11 行）/)
-
 })
