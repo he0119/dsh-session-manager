@@ -243,9 +243,19 @@ export function TranscriptDialog({ session, onClose, t }: TranscriptDialogProps)
           </button>
         ))}
         <span className="dsm-spacer" />
-        <span className="dsm-meta">
-          {t('manage.transcript.shown', { shown: shown.length, loaded: items.length })}
-        </span>
+        {/* 总数（`totalEvents`）是解析层扫行头数出来的，第一页到手就有；没筛的时候不重复写「显示」。
+            第一页到手之前不摆这一行：那时候拿 0 当结论是假话。 */}
+        {page !== null && (
+          <span className="dsm-meta">
+            {filter === 'all'
+              ? t('manage.transcript.loaded', { loaded: items.length, total: page.totalEvents })
+              : t('manage.transcript.shown', {
+                  shown: shown.length,
+                  loaded: items.length,
+                  total: page.totalEvents,
+                })}
+          </span>
+        )}
       </div>
 
       {error !== null && <div className="dsm-error">{error}</div>}
