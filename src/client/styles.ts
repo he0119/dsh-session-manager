@@ -848,16 +848,27 @@ export const CSS = `
 /* ── 会话内容视图（TranscriptDialog） ─────────────────────────────────────────
    一条事件一块，头部那行固定是"种类 + 工具名 + 时刻 + seq + 事件类型"：日志里的 seq 会跳号，
    所以它只当参照物，真正的位置由加载顺序说明（见 TranscriptDialog 的模块注释）。 */
-.dsm-transcriptContent { display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+.dsm-transcriptContent {
+  display: flex; flex-direction: column; gap: 10px; min-height: 0;
+  /* 正文那一档：字号**必须自己写**，理由同 .dsm-dialogBody——官方 Modal portal 到 document.body，
+     弹窗落在那套 .dsm-root（14px）之外，不写就继承文档根的 16px。真实缺陷（用户截图里量出来的）：
+     不写时筛选条右端那串「显示 25 / 已读 25 条」按 16px 渲染（墨迹 29–32 device px），与紧挨着
+     的芯片（12px，23px）同占一行，一行里两个字号。 */
+  font-size: 14px;
+  line-height: 20px;
+}
 .dsm-transcriptFacts { display: flex; flex-direction: column; gap: 4px; }
 .dsm-transcriptName { font-size: 14px; font-weight: 600; color: var(--dsw-alias-label-primary, #1f2329); }
-.dsm-transcriptFactsGrid { gap: 2px 12px; font-size: 12px; }
+/* 词条是 12px 的字：行高跟着降到 18px（上面 .dsm-defs 那一档是 14px/22px，不改就量到 24px 的行距）。 */
+.dsm-transcriptFactsGrid { gap: 2px 12px; font-size: 12px; line-height: 18px; }
 .dsm-transcriptFilters {
   display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
   border-top: 1px solid var(--dsw-alias-border-l1, rgba(0, 0, 0, 0.06));
   border-bottom: 1px solid var(--dsw-alias-border-l1, rgba(0, 0, 0, 0.06));
   padding: 6px 0;
 }
+/* 右端那串计数与芯片同档（12px/18px）：它是这一行的补充说明，不是正文那一档。 */
+.dsm-transcriptFilters .dsm-meta { font-size: 12px; line-height: 18px; }
 .dsm-chip {
   border: 1px solid var(--dsw-alias-border-l1, rgba(0, 0, 0, 0.12));
   background: transparent; color: var(--dsw-alias-label-secondary, #646a73);
@@ -882,6 +893,11 @@ export const CSS = `
   border: 1px solid var(--dsw-alias-border-l1, rgba(0, 0, 0, 0.08));
   border-left-width: 3px; border-radius: 6px; padding: 6px 8px;
   display: flex; flex-direction: column; gap: 4px;
+  /* 一张事件卡里的一切都是次要那一档（12px/18px）：头行、正文、脚注（item.note）。
+     头行、pre、summary 那三处各自还写着同一档字号——它们是那三类块自己的规格，这里只是兜底，
+     少写这一条时脚注那行会去继承正文层的 14px（再往前是文档根的 16px）。 */
+  font-size: 12px;
+  line-height: 18px;
 }
 .dsm-item-user { border-left-color: var(--dsw-alias-brand-primary, #3370ff); }
 .dsm-item-assistant { border-left-color: var(--dsw-alias-label-secondary, #646a73); }

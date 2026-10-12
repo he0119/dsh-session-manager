@@ -317,6 +317,33 @@ test('正文与次要文字是内建那两档：正文 14px/20px、说明句 12p
   assert.match(hint, /line-height:\s*18px/, '行高 18px，与内建卡片描述同值')
 })
 
+test('弹窗正文层的字号自己写：官方 Modal 落在 .dsm-root 之外，不写就继承文档根的 16px', () => {
+  // 真实缺陷（用户截图里量出来的）：「会话内容」弹窗的正文层原来没有字号声明，于是弹窗里凡是没有
+  // 自己写字号的东西都继承文档根的 16px——筛选条右端那串「显示 25 / 已读 25 条」实测墨迹 29–32
+  // device px（16px），紧挨着的芯片是 23px（12px），同一行里两个字号。官方 Modal portal 到
+  // document.body，落在那套 .dsm-root（14px）之外，所以正文那一档必须自己写（同 .dsm-dialogBody）。
+  const content = ruleBody('.dsm-transcriptContent')
+  assert.notEqual(content, null, '找不到 .dsm-transcriptContent 规则')
+  assert.match(content, /font-size:\s*14px/, '正文那一档要自己写，与 .dsm-dialogBody 同值')
+  assert.match(content, /line-height:\s*20px/, '行高与 .dsm-dialogBody 同值')
+
+  // 次要的几处不靠继承：各自写明 12px/18px。
+  const counts = ruleBody('.dsm-transcriptFilters .dsm-meta')
+  assert.notEqual(counts, null, '筛选条右端那串计数要单独声明')
+  assert.match(counts, /font-size:\s*12px/, '它旁边就是 12px 的芯片，不能比芯片大一档')
+  assert.match(counts, /line-height:\s*18px/, '次要那一档的行高是 18px')
+
+  const item = ruleBody('.dsm-item')
+  assert.notEqual(item, null, '找不到 .dsm-item 规则')
+  assert.match(item, /font-size:\s*12px/, '一条事件卡里的一切都是次要那一档')
+  assert.match(item, /line-height:\s*18px/)
+
+  const facts = ruleBody('.dsm-transcriptFactsGrid')
+  assert.notEqual(facts, null, '找不到 .dsm-transcriptFactsGrid 规则')
+  assert.match(facts, /line-height:\s*18px/, '12px 的字配 18px 行高（.dsm-defs 那一档是 14px/22px）')
+})
+
+
 test('说明页 FAQ 的答案不被挤成零宽：那一栏是单列网格', () => {
   // 真实缺陷（英文界面里一眼能看出来）：`.dsm-defs` 的列是 minmax(0, auto) minmax(0, 1fr)，FAQ 的
   // 问题是一整句话，max-content 把第一列吃满（量到 522px），答案那一列拿到 0px——每个答案一行只放得
