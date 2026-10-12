@@ -4656,3 +4656,68 @@ test('客户端产物：内容视图没有底部那一行，页头写着已读�
     '页头把已读与总数并排写：总数第一页就有（解析层扫行头数出来的），没筛时不重复写「显示」',
   )
 })
+
+test('客户端产物：一回合一节折得起来，标题自己画折叠标记', { skip }, () => {
+  const state = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    sessions: [
+      { id: 's-1', cwd: '/home/u/dev/alpha', createdAt: 9, dir: '/home/u/dev/alpha', bytes: 100, files: [] },
+    ],
+    workspaces: [],
+  }
+  // 头一条不属于任何回合（会话级的 permission/preset 这种），第 1 回合从 `turn/start` 到 `turn/end`。
+  const items = [
+    { index: 0, kind: 'event', type: 'permission/preset', text: 'x' },
+    { index: 1, kind: 'event', type: 'turn/start', turn: 1, text: 'starts' },
+    { index: 2, kind: 'user', type: 'user/message', text: 'hi', time: 1 },
+    { index: 3, kind: 'assistant', type: 'assistant/message', text: 'yo', time: 2 },
+    { index: 4, kind: 'event', type: 'turn/end', turn: 1, text: 'ends' },
+  ]
+  // `nulls` 与 `arrays` 的种子顺序同上面那条用例：会话页里排在前面的那几个保持默认，最后两个种给
+  // `inspecting` 与内容视图的 `page`，第 5 个数组状态种给内容视图的 `items`。
+  const mounted = mount({
+    state,
+    panel: 'manage',
+    nulls: [
+      ...Array(7).fill(null),
+      { id: 's-1', title: 'T' },
+      { totalEvents: 5, cursor: 0, problems: [], problemCount: 0 },
+    ],
+    arrays: [...Array(4).fill([]), items],
+  })
+  // 种子在**第一遍**走树时被消费（假钩子是一次性的），所以下面只看这一遍记下来的元素，
+  // 不再走第二遍——第二遍里 `inspecting` 已经拿不到种子，弹窗根本不会出现。
+  const tree = mounted.registrations[0].component(mounted.registrations[0].registration.inject())
+  const text = strings(tree)
+  const nodes = mounted.recorded
+  const classesOf = (node) => String(node.props?.className ?? '').split(/\s+/)
+  const cards = nodes.filter((node) => classesOf(node).includes('dsm-item'))
+  assert.equal(cards.length, 5, '五条都画出来了')
+  const turns = nodes.filter((node) => classesOf(node).includes('dsm-turn'))
+  assert.equal(turns.length, 1, '只有第 1 回合那一节（不属于任何回合的那条不折）')
+  const turn = turns[0]
+  assert.equal(turn.type, 'details', '用原生 details：折叠、键盘与无障碍都白拿')
+  assert.equal(turn.props.open, true, '默认展开——折起来是读者主动做的事')
+  const head = elementsOf(turn).find((node) => classesOf(node).includes('dsm-turnHead'))
+  assert.equal(head?.type, 'summary', '标题就是那个能点的 summary')
+  assert.ok(
+    elementsOf(head).some((node) => classesOf(node).includes('dsm-chevron')),
+    '折叠标记自己画：浏览器那个三角在 CSS 里去掉，换成与组头同一枚',
+  )
+  assert.ok(text.includes('manage.transcript.turn:{"turn":1}'), '标题说清是第几轮')
+  assert.ok(text.includes('manage.transcript.turnCount:{"count":4}'), '右端说清这一回合几条')
+  assert.equal(
+    elementsOf(turn).filter((node) => classesOf(node).includes('dsm-item')).length,
+    4,
+    '这一回合的四条都在 details 里：折起来要一起走（中间那两条自己不带 turn）',
+  )
+  const body = elementsOf(turn).find((node) => classesOf(node).includes('dsm-turnBody'))
+  assert.ok(body !== undefined, '条目装在自己那一层里（节内间距由它给）')
+  assert.equal(
+    elementsOf(body).filter((node) => classesOf(node).includes('dsm-item')).length,
+    4,
+    '四条都在正文层里',
+  )
+})

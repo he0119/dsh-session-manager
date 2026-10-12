@@ -27,6 +27,8 @@ import { fetchTranscript, type TranscriptFacts, type TranscriptResponse } from '
 import { formatTime } from './sessionList.tsx'
 import type { TranscriptItem, TranscriptKind } from '../../transcript.ts'
 import { shouldLoadMore } from '../logic/transcriptScroll.ts'
+import { turnSections } from '../logic/transcriptTurns.ts'
+import { ChevronIcon } from './icons.tsx'
 import type { SessionManagerKey, Translate } from '../logic/locales.ts'
 
 /** 一个筛选键：它对应哪几类条目。 */
@@ -181,7 +183,39 @@ export function TranscriptDialog({ session, onClose, t }: TranscriptDialogProps)
 
   const shown = filter === 'all' ? items : items.filter((item) => FILTER_OF[item.kind] === filter)
   const counts = page?.counts
-  let lastTurn: number | undefined
+  const sections = turnSections(shown)
+
+  /** 一条事件一张卡。按回合的标题不在这里——它由外面那一节画（`<details>` 的 `summary`）。 */
+  const itemOf = (item: TranscriptItem): React.ReactElement => (
+    <div key={item.index} className={`dsm-item dsm-item-${item.kind}`}>
+      <div className="dsm-itemHead">
+        <span className="dsm-itemKind">{t(KIND_KEY[item.kind])}</span>
+        {item.name !== undefined && <span className="dsm-itemName">{item.name}</span>}
+        {item.isError === true && <span className="dsm-tag dsm-tagIdle dsm-warn">{t('manage.transcript.errorTag')}</span>}
+        {item.synthetic === true && <span className="dsm-tag dsm-tagIdle">{t('manage.transcript.synthetic')}</span>}
+        <span className="dsm-spacer" />
+        {item.time !== undefined && <span className="dsm-meta">{clockOf(item.time)}</span>}
+        {item.seq !== undefined && <span className="dsm-meta">seq {item.seq}</span>}
+        <span className="dsm-meta dsm-path">{item.type}</span>
+      </div>
+      {item.reasoning !== undefined && (
+        <details className="dsm-itemBody">
+          <summary>{t('manage.transcript.reasoning')}</summary>
+          <pre className="dsm-pre">{item.reasoning}</pre>
+        </details>
+      )}
+      {item.args !== undefined && <pre className="dsm-pre">{item.args}</pre>}
+      {item.text !== undefined && item.text !== '' && <pre className="dsm-pre">{item.text}</pre>}
+      {item.note !== undefined && <div className="dsm-meta">{item.note}</div>}
+      {item.truncated !== undefined && (
+        <button type="button" className="dsm-button" disabled={busy} onClick={() => void showFull(item)}>
+          {t('manage.transcript.truncated', {
+            count: item.truncated.reduce((sum, cut) => sum + cut.chars, 0),
+          })}
+        </button>
+      )}
+    </div>
+  )
 
   return (
     <Modal
@@ -268,45 +302,32 @@ export function TranscriptDialog({ session, onClose, t }: TranscriptDialogProps)
       >
         {items.length === 0 && busy && <div className="dsm-hint">{t('manage.transcript.loading')}</div>}
         {page !== null && page.totalEvents === 0 && <div className="dsm-hint">{t('manage.transcript.empty')}</div>}
-        {shown.map((item) => {
-          const turnHead = item.turn !== undefined && item.turn !== lastTurn ? item.turn : undefined
-          if (turnHead !== undefined) lastTurn = turnHead
+        {sections.map((section) => {
+          const first = section.items[0]
+          if (first === undefined) return null
+          if (section.turn === undefined) {
+            // 不属于任何一回合的那些：没有标题可折，照原样摆出来。
+            return <React.Fragment key={`loose-${first.index}`}>{section.items.map(itemOf)}</React.Fragment>
+          }
+          const clocks = section.items
+            .map((item) => item.time)
+            .filter((time): time is number => time !== undefined)
+          const span = clocks.length === 0 ? null : [clockOf(clocks[0]!), clockOf(clocks[clocks.length - 1]!)]
           return (
-            <React.Fragment key={item.index}>
-              {turnHead !== undefined && (
-                <div className="dsm-turn">{t('manage.transcript.turn', { turn: turnHead })}</div>
-              )}
-              <div className={`dsm-item dsm-item-${item.kind}`}>
-                <div className="dsm-itemHead">
-                  <span className="dsm-itemKind">{t(KIND_KEY[item.kind])}</span>
-                  {item.name !== undefined && <span className="dsm-itemName">{item.name}</span>}
-                  {item.isError === true && <span className="dsm-tag dsm-tagIdle dsm-warn">{t('manage.transcript.errorTag')}</span>}
-                  {item.synthetic === true && (
-                    <span className="dsm-tag dsm-tagIdle">{t('manage.transcript.synthetic')}</span>
-                  )}
-                  <span className="dsm-spacer" />
-                  {item.time !== undefined && <span className="dsm-meta">{clockOf(item.time)}</span>}
-                  {item.seq !== undefined && <span className="dsm-meta">seq {item.seq}</span>}
-                  <span className="dsm-meta dsm-path">{item.type}</span>
-                </div>
-                {item.reasoning !== undefined && (
-                  <details className="dsm-itemBody">
-                    <summary>{t('manage.transcript.reasoning')}</summary>
-                    <pre className="dsm-pre">{item.reasoning}</pre>
-                  </details>
+            <details key={`turn-${section.turn}-${first.index}`} className="dsm-turn" open>
+              <summary className="dsm-turnHead">
+                <ChevronIcon />
+                <span className="dsm-turnLabel">{t('manage.transcript.turn', { turn: section.turn })}</span>
+                <span className="dsm-spacer" />
+                {span !== null && (
+                  <span className="dsm-meta">
+                    {span[0]}–{span[1]}
+                  </span>
                 )}
-                {item.args !== undefined && <pre className="dsm-pre">{item.args}</pre>}
-                {item.text !== undefined && item.text !== '' && <pre className="dsm-pre">{item.text}</pre>}
-                {item.note !== undefined && <div className="dsm-meta">{item.note}</div>}
-                {item.truncated !== undefined && (
-                  <button type="button" className="dsm-button" disabled={busy} onClick={() => void showFull(item)}>
-                    {t('manage.transcript.truncated', {
-                      count: item.truncated.reduce((sum, cut) => sum + cut.chars, 0),
-                    })}
-                  </button>
-                )}
-              </div>
-            </React.Fragment>
+                <span className="dsm-meta">{t('manage.transcript.turnCount', { count: section.items.length })}</span>
+              </summary>
+              <div className="dsm-turnBody">{section.items.map(itemOf)}</div>
+            </details>
           )
         })}
         {busy && items.length > 0 && <div className="dsm-hint">{t('manage.transcript.loadingMore')}</div>}

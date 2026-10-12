@@ -924,11 +924,31 @@ export const CSS = `
 .dsm-transcriptList {
   display: flex; flex-direction: column; gap: 8px;
 }
-.dsm-turn {
+/*
+ * 回合那一节：标题自己停在顶上（在正文那一层里 sticky），下面是这一回合的条目；点标题就折起来。
+ *
+ * 底色必须与卡片**同层**（bg-layer-2：官方 Modal 卡片的背景就是它）。用 bg-base 的话深色主题下
+ * 会横出一条比卡片更黑的色带——它看着就像一块贴上去的黑条，而不是这一节的标题。
+ */
+.dsm-turnHead {
   position: sticky; top: 0; z-index: 1;
-  background: var(--dsw-alias-bg-base, #fff);
+  display: flex; align-items: center; gap: 6px;
+  list-style: none; cursor: pointer;
+  padding: 4px 0;
+  background: var(--dsw-alias-bg-layer-2, #fff);
+  border-bottom: 1px solid var(--dsw-alias-border-l1, rgba(0, 0, 0, 0.08));
   color: var(--dsw-alias-label-secondary, #646a73);
-  font-size: 12px; font-weight: 600; padding: 4px 0;
+  font-size: 12px; line-height: 18px; font-weight: 600;
+}
+/* 折叠标记自己画（ChevronIcon），浏览器那个三角不要；右端那几个数是补充说明，不跟着加粗。 */
+.dsm-turnHead::-webkit-details-marker { display: none; }
+.dsm-turnHead .dsm-meta { font-weight: 400; }
+.dsm-turnLabel { color: var(--dsw-alias-label-primary, #1f2329); }
+.dsm-turnHead .dsm-chevron { transition: transform 120ms linear; }
+.dsm-turn:not([open]) .dsm-turnHead .dsm-chevron { transform: rotate(-90deg); }
+.dsm-turnBody { display: flex; flex-direction: column; gap: 8px; padding-top: 8px; }
+@media (prefers-reduced-motion: reduce) {
+  .dsm-turnHead .dsm-chevron { transition: none; }
 }
 .dsm-item {
   border: 1px solid var(--dsw-alias-border-l1, rgba(0, 0, 0, 0.08));
