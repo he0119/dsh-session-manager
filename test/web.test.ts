@@ -87,6 +87,36 @@ function writeSession(
   )
 }
 
+/** 写一份"事件行自己给"的日志（解析类用例要各种怪形状，`writeSession` 那几个字段不够用）。 */
+function writeRawSession(
+  root: string,
+  id: string,
+  cwd: string,
+  createdAt: number,
+  events: Array<unknown>,
+): void {
+  const header: SessionHeader = {
+    type: 'session',
+    version: 4,
+    id,
+    createdAt,
+    cwd,
+    isSeeded: false,
+    delegationDepth: 0,
+  }
+  const lines = [
+    JSON.stringify(header),
+    // 字符串按原样写进去（坏行、半截 JSON 这类用例要的就是"不是合法事件"）。
+    ...events.map((event) => (typeof event === 'string' ? event : JSON.stringify(event))),
+  ]
+  const dir = sessionDir(root, cwd, id)
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(
+    join(dir, 'session.v4.jsonl.zstd'),
+    Buffer.concat(lines.map((line) => encodeRawFrame(`${line}\n`))),
+  )
+}
+
 /** 写一份宿主的投影缓存记录（宿主自己列会话时读它，标题与空白判据都在里面）。 */
 function writeProjectionCache(
   sandbox: Sandbox,
@@ -716,7 +746,7 @@ test('POST /import：包坏了、目标目录不合法、库已存在同 id，�
   assert.match(String(payload(conflictApply.captured)['error']), /没有可导入的会话/)
 })
 
-test('registerWebRoutes：注册十一条精确路由，方法不对回 405', async () => {
+test('registerWebRoutes：注册十二条精确路由，方法不对回 405', async () => {
   const sandbox = makeSandbox('web-routes')
   const routes: WebRouteLike[] = []
   const dispose = registerWebRoutes(
@@ -728,6 +758,7 @@ test('registerWebRoutes：注册十一条精确路由，方法不对回 405', as
     [
       `exact ${API_PREFIX}/meta`,
       `exact ${API_PREFIX}/state`,
+      `exact ${API_PREFIX}/transcript`,
       `exact ${API_PREFIX}/export`,
       `exact ${API_PREFIX}/import`,
       // `/sync` 两种方法共用一条（宿主的 register 对重复 path 会抛错）
@@ -2201,4 +2232,113 @@ test('事件流：每写完一条就把 socket 推给内核（同步循环里也
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()))
   }
+})
+test('GET /transcript：把一条会话的日志折成完整时间线（会话事实、分页、坏行、拒绝都在一次响应里）', async () => {
+  const sandbox = makeSandbox('web-transcript')
+  writeSession(sandbox.sessionsRoot, 'session-plain', CWD_A, 1000, { title: '兜底标题' })
+  writeRawSession(sandbox.sessionsRoot, 'session-rich', CWD_A, 2000, [
+    { type: 'turn/start', seq: 0, time: 1, data: { turn: 1 } },
+    {
+      type: 'user/message',
+      seq: 1,
+      time: 2,
+      data: { content: [{ type: 'text', text: '看看这个日志' }], source: { kind: 'user' } },
+    },
+    {
+      type: 'tool/call',
+      seq: 2,
+      time: 3,
+      data: { turn: 1, step: 1, callId: 'c1', name: 'bash', arguments: '{"command":"ls"}' },
+    },
+    {
+      type: 'tool/result',
+      seq: 3,
+      time: 4,
+      data: {
+        turn: 1,
+        step: 1,
+        message: {
+          role: 'tool',
+          source: { kind: 'tool', callId: 'c1' },
+          toolCallId: 'c1',
+          content: [{ type: 'text', text: 'a.txt\nb.txt' }],
+          isError: false,
+        },
+      },
+    },
+    '{"type":"turn/end","seq":4,"time":5,"data":{ 这行坏了 }}',
+    { type: 'session/title', seq: 5, time: 6, data: { title: '看看日志', source: { kind: 'user' } } },
+  ])
+
+  const handlers = createApiHandlers(deps(sandbox))
+  const call = async (query: string): Promise<Captured> => {
+    const { res, captured } = fakeRes()
+    await handlers['GET /transcript']!(fakeReq('GET', `${API_PREFIX}/transcript${query}`), res)
+    return captured
+  }
+  const itemsOf = (body: Record<string, unknown>): Array<Record<string, unknown>> =>
+    body['items'] as Array<Record<string, unknown>>
+
+  const whole = await call('?id=session-rich')
+  assert.equal(whole.status, 200, String(payload(whole)['error'] ?? ''))
+  const body = payload(whole)
+  const facts = body['session'] as Record<string, unknown>
+  assert.equal(facts['id'], 'session-rich')
+  assert.equal(facts['file'], 'session.v4.jsonl.zstd')
+  assert.equal(facts['generation'], 4)
+  assert.equal(facts['generations'], 1, '"这就是全部内容"的说法要跟目录里的代次数一致')
+  assert.equal(facts['createdAt'], 2000)
+  assert.equal(body['totalEvents'], 6)
+  assert.equal(body['problemCount'], 1, '坏行如实记数，不当成"读不出来"整份拒掉')
+  assert.deepEqual(
+    itemsOf(body).map((item) => item['kind']),
+    ['event', 'user', 'tool-call', 'tool-result', 'event'],
+    '坏行不占条目，其余事件一条不少',
+  )
+  assert.deepEqual(
+    itemsOf(body).map((item) => item['index']),
+    [0, 1, 2, 3, 5],
+    '条目带的是它自己在日志里的位置（看原文要用它）',
+  )
+  assert.equal(itemsOf(body)[3]!['name'], 'bash', '工具名从调用那条补过来')
+  assert.equal(itemsOf(body)[3]!['text'], 'a.txt\nb.txt')
+  assert.equal(itemsOf(body)[0]!['text'], '第 1 轮开始')
+  assert.equal(itemsOf(body)[4]!['text'], '标题（人（改名））：看看日志')
+  assert.deepEqual(body['counts'], {
+    events: 6,
+    byType: { 'turn/start': 1, 'user/message': 1, 'tool/call': 1, 'tool/result': 1, 'turn/end': 1, 'session/title': 1 },
+    human: 1,
+    synthetic: 0,
+    assistant: 0,
+    toolCalls: 1,
+    toolResults: 1,
+    system: 0,
+  })
+
+  // 分页：第二页从第 2 条事件开始（游标是"事件位"，不是 seq）
+  const firstPage = await call('?id=session-rich&limit=2')
+  assert.equal(payload(firstPage)['nextCursor'], 2)
+  assert.deepEqual(itemsOf(payload(firstPage)).map((item) => item['index']), [0, 1])
+  const secondPage = await call('?id=session-rich&from=2&limit=10')
+  assert.deepEqual(itemsOf(payload(secondPage)).map((item) => item['index']), [2, 3, 5])
+  assert.equal(payload(secondPage)['nextCursor'], undefined, '读完了就不给下一次游标')
+
+  // 参数糊涂时当"没提要求"（用缺省值），不当 0：`?from=abc` 不该被理解成"从头再来一遍"以外的意思
+  const sloppy = await call('?id=session-rich&from=abc&limit=')
+  assert.equal(sloppy.status, 200)
+  assert.equal(payload(sloppy)['cursor'], 0)
+
+  // 三处拒绝：没给 id、库里没这条
+  const missing = await call('')
+  assert.equal(missing.status, 400)
+  assert.match(String(payload(missing)['error']), /缺少会话 id/)
+  const absent = await call('?id=session-nope')
+  assert.equal(absent.status, 404)
+  assert.match(String(payload(absent)['error']), /会话库里没有/)
+
+  // 只有 header + 一条人类消息 + 一条标题的普通会话照样读得出来
+  const plain = await call('?id=session-plain')
+  assert.equal(plain.status, 200)
+  assert.equal(payload(plain)['totalEvents'], 2)
+  assert.equal((payload(plain)['session'] as Record<string, unknown>)['title'], '兜底标题')
 })

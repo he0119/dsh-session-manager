@@ -15,6 +15,7 @@
  */
 
 import { SseFrames, interpretStreamEvent, type ProgressEvent } from './logic/eventStream.ts'
+import type { TranscriptPage } from '../transcript.ts'
 
 // 事件流的分帧与解释在 eventStream.ts（那份文件与 DOM 无关，所以 Host 侧的测试图能直接引它）。类型
 // 从这里转出去，界面那一侧只认 api.ts 一个入口。
@@ -831,4 +832,49 @@ export async function retitleSessions(
   const parsed = await readEventStream<RetitleResponse>(response, onProgress, '重新生成标题')
   if (!Array.isArray(parsed.retitled)) throw new Error(parsed.error ?? '重新生成标题没有回结果')
   return parsed
+}
+
+/** 内容视图顶上那几行事实（与 `/transcript` 响应里的 `session` 同形）。 */
+export interface TranscriptFacts {
+  id: string
+  /** 与列表里显示的是同一个标题（宿主那侧同源折出来的）。 */
+  title: string | null
+  cwd: string | null
+  createdAt: number
+  /** 这次解析的那份日志文件的字节数。 */
+  bytes: number
+  /** 代次文件名（`session.v4.jsonl.zstd`）。 */
+  file: string
+  /** 格式代次；`generations` 是这条会话目录里一共有几代（> 1 说明另有历史档）。 */
+  generation: number
+  generations: number
+}
+
+/** 一页会话内容：核心层解析出来的条目与计数，加上这条会话的事实。 */
+export interface TranscriptResponse extends TranscriptPage {
+  session: TranscriptFacts
+}
+
+/**
+ * 读一页会话内容。
+ *
+ * 逐条解析日志（不经过宿主），一次一页：`from` 是**事件位**（不是日志里的 `seq`——那个会跳号），
+ * 响应里的 `nextCursor` 就是下一页该传的 `from`，缺席说明读到日志末尾了。`maxChars` 给单格文本的
+ * 上限（「看全文」按 `from=<那一条>&limit=1&maxChars=…` 取回来）。
+ *
+ * 宿主那侧的三处拒绝（400 缺 id、404 库里没这条、422 整份读不出来）都由 `asJson` 抛成异常，
+ * 界面照原话摆出来。
+ */
+export async function fetchTranscript(
+  id: string,
+  options: { from?: number; limit?: number; maxChars?: number } = {},
+): Promise<TranscriptResponse> {
+  const query = new URLSearchParams({ id })
+  if (options.from !== undefined) query.set('from', String(options.from))
+  if (options.limit !== undefined) query.set('limit', String(options.limit))
+  if (options.maxChars !== undefined) query.set('maxChars', String(options.maxChars))
+  const response = await fetch(`${API_PREFIX}/transcript?${query.toString()}`, {
+    headers: { accept: 'application/json' },
+  })
+  return asJson<TranscriptResponse>(response)
 }

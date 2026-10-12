@@ -125,6 +125,9 @@
 - [重新生成标题：临时把会话挂回宿主](../.agents/notes/implemented/feature/2026-10-12-retitle-attaches-the-session-to-ask-the-title-service.md)：
   标题服务的显式重算入口只认**活会话**，而这里要处理的是整库里早已不在内存里的那些——端口把一条会话
   临时读出来、挂上、重算、冲盘、再摘掉（`src/tools.ts` 的 `titleRefreshPort()` + `src/retitle.ts`）。
+- [会话内容视图：在插件里把日志解析出来](../.agents/notes/implemented/feature/2026-10-12-transcript-view-parses-the-log-itself.md)：
+  一条事件一条条目、工具调用只算一次、上限与分页都在解析层（`src/transcript.ts` + `GET /transcript` +
+  会话页那枚「内容」）；不走宿主，所以侧边栏看不见的会话也能读。
 
 ## 删除与归档
 

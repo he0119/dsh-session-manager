@@ -10,7 +10,7 @@
 //
 // 与 webServer 服务解耦：本模块只要求一个 `{ register(route) }`，测试里用假 req/res 直接打
 // handler，不必起 HTTP 服务。路由路径固定在本插件命名空间下，`(kind, path)` 与别的插件不会撞。
-import { statSync } from 'node:fs'
+import { readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 
@@ -29,6 +29,7 @@ import { familyOf, loneSubagents } from './family.ts'
 import { projectionCacheDir } from './paths.ts'
 import { describeWarm, warmCheckpoints } from './checkpoint-warm.ts'
 import { readRegistry, validateRegistry } from './registry.ts'
+import { readTranscript } from './transcript.ts'
 import { runRetitle } from './retitle.ts'
 import { describeEffect, effectOf, takeEffectOnHost } from './take-effect.ts'
 import { runRemoval, type RemoveDeps, type RemovalRun } from './remove.ts'
@@ -474,6 +475,19 @@ function summarizeWorkspaces(
 async function readJson(req: IncomingMessage, limit = 1024 * 1024): Promise<unknown> {
   const body = await readBody(req, limit)
   return JSON.parse(body.toString('utf8') || '{}')
+}
+
+/**
+ * 读一个整数查询参数。
+ *
+ * 缺席或不是整数时返回 `undefined`——那是"调用方没提要求"，该由核心层用它自己的缺省值；**不回落成
+ * 0**：`?limit=` 与 `?limit=abc` 都不该被当成"只看一条"。
+ */
+function intParam(url: URL, name: string): number | undefined {
+  const raw = url.searchParams.get(name)
+  if (raw === null || raw.trim() === '') return undefined
+  const value = Number(raw)
+  return Number.isSafeInteger(value) ? value : undefined
 }
 
 /** 目标目录必须真实存在：header.cwd 指向一个不存在的目录，导入或迁移出来的会话是坏的。 */
@@ -1139,6 +1153,66 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
   }
 
   /**
+   * 解析一条会话的内容：把日志折成"能从头读到尾的完整时间线"（见 transcript.ts）。
+   *
+   * 一次性响应而不是事件流：这是**一次读一份文件**（最大的那份 6 MB 左右，用户点开时才读），没有逐条
+   * 进度可报；真正要防的是"整库倒进浏览器"，那件事由分页参数（`from` / `limit`）与核心层每页的字符
+   * 上限一起挡住——所以它读的是**最高代次**那一份日志（宿主自己也是这么挑的），一次只解析一页事件。
+   *
+   * 三处拒绝都在响应体里说清楚：没给 id（400）、会话库里没这条（404）、日志整份读不出来（422，例如
+   * header 坏了）。坏行**不算**拒绝——那种行由核心层如实记进 `problems`，其余事件照旧摆出来。
+   */
+  const transcript = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+    const url = new URL(req.url ?? '/', 'http://localhost')
+    const id = (url.searchParams.get('id') ?? '').trim()
+    if (id === '') {
+      sendJson(res, 400, { error: '缺少会话 id（?id=…）' })
+      return
+    }
+    // 标题与 `/state` 同源（`resolveTitle` 先宿主投影缓存、后有界前缀）：内容视图顶上那行标题
+    // 该和列表里显示的是同一个，别自己再折一次。
+    const session = scanLibrary(paths.sessionsRoot, decodeAll, { resolveTitle }).find((item) => item.id === id)
+    if (session === undefined) {
+      sendJson(res, 404, { error: `会话库里没有 ${id}` })
+      return
+    }
+    // 代次日志：`session.v4.jsonl.zstd` 这种文件名里的版本号是格式代次，宿主读的也是最高的那一份
+    // （低的那些是历史档）。库里实测 583 个会话目录都只有一份，但按代次挑才是跟宿主一致的做法。
+    const file = [...session.files].sort((left, right) => right.version - left.version)[0]
+    if (file === undefined) {
+      sendJson(res, 422, { error: '这条会话目录里没有日志文件' })
+      return
+    }
+    try {
+      const buf = readFileSync(file.path)
+      // `decodeAll` 是多帧感知的解码器：一份日志的 JSONL 是分帧压的，单帧解不出全貌。
+      const page = readTranscript(decodeAll(buf).split('\n'), {
+        from: intParam(url, 'from'),
+        limit: intParam(url, 'limit'),
+        maxChars: intParam(url, 'maxChars'),
+      })
+      sendJson(res, 200, {
+        ...page,
+        session: {
+          id: session.id,
+          title: session.title ?? null,
+          cwd: session.cwd ?? null,
+          createdAt: session.createdAt,
+          bytes: file.bytes,
+          file: file.name,
+          generation: file.version,
+          // 这条目录里一共有几代日志：界面上"这就是全部内容"的说法要跟它一致。
+          generations: session.files.length,
+        },
+      })
+    } catch (error) {
+      sendJson(res, 422, {
+        error: `这份日志读不出来：${error instanceof Error ? error.message : String(error)}`,
+      })
+    }
+  }
+
+  /**
    * 重新生成标题：把点名的会话交给宿主的标题服务逐条重算（见 retitle.ts 与 tools.ts 的端口）。
    *
    * 走事件流：每条会话都要整份解一次日志（实测 6MB ≈1.7 秒）再跑一次模型调用（2～3 秒），勾十条就是
@@ -1194,6 +1268,8 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
   return {
     'GET /meta': meta,
     'GET /state': state,
+    // 一条会话的完整内容（分页；只读，不动宿主内存）：会话页点一行看的就是它。
+    'GET /transcript': transcript,
     'POST /export': exportSessions,
     'POST /import': importSessions,
     // 一个资源两种方法写一条：宿主的 `register()` 对重复的 (kind, path) 直接抛错。
