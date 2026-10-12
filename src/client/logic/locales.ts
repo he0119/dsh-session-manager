@@ -250,8 +250,6 @@ export const zh = {
   'manage.transcript.loading': '读取日志…',
   'manage.transcript.loadingMore': '读取中…',
   'manage.transcript.empty': '这份日志里只有 header，没有事件。',
-  'manage.transcript.more': '加载更多',
-  'manage.transcript.done': '已到日志末尾',
   'manage.transcript.truncated': '这一格被截断了 {count} 个字符，点这里看全文',
   'manage.transcript.problems': '有 {count} 条读不出来（第 {lines} 行），其余照原样摆出。',
   'manage.transcript.counts':
@@ -702,8 +700,6 @@ export const en: LocaleDictOf<typeof NS> = {
   'manage.transcript.loading': 'Reading the log…',
   'manage.transcript.loadingMore': 'Reading…',
   'manage.transcript.empty': 'This log holds only the header — no events.',
-  'manage.transcript.more': 'Load more',
-  'manage.transcript.done': 'End of the log',
   'manage.transcript.truncated': '{count} characters were cut from this block — click to read it in full',
   'manage.transcript.problems': '{count} lines cannot be read (lines {lines}); everything else is shown as it is.',
   'manage.transcript.counts':

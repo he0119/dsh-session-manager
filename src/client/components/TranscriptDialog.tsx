@@ -26,6 +26,7 @@ import { fetchTranscript, type TranscriptFacts, type TranscriptResponse } from '
 // 会话行的时刻格式与这里必须是同一份（同一套 "YYYY-MM-DD HH:mm"），所以复用列表那个导出。
 import { formatTime } from './sessionList.tsx'
 import type { TranscriptItem, TranscriptKind } from '../../transcript.ts'
+import { shouldLoadMore } from '../logic/transcriptScroll.ts'
 import type { SessionManagerKey, Translate } from '../logic/locales.ts'
 
 /** 一个筛选键：它对应哪几类条目。 */
@@ -83,8 +84,10 @@ export interface TranscriptDialogProps {
 /**
  * 内容视图本体。
  *
- * 打开即读第一页；「加载更多」按 `nextCursor` 往下接（缺席就是读到日志末尾了）。任何一次读取失败都
- * 只把错误摆出来、**不关掉已经读到的部分**——读到一半失败时用户手上那些内容没有理由消失。
+ * 打开即读第一页；之后正文滚到贴底就按 `nextCursor` 自己往下接（缺席就是读完了）。第一页撑不满
+ * 一屏时没有"滚到底"这个动作可用，所以读完每一页之后还要复查一次（见 `shouldLoadMore()`）。
+ * 任何一次读取失败都只把错误摆出来、**不关掉已经读到的部分**——读到一半失败时用户手上那些内容
+ * 没有理由消失。
  */
 export function TranscriptDialog({ session, onClose, t }: TranscriptDialogProps): React.ReactElement {
   const [items, setItems] = React.useState<TranscriptItem[]>([])
@@ -93,6 +96,7 @@ export function TranscriptDialog({ session, onClose, t }: TranscriptDialogProps)
   const [error, setError] = React.useState<string | null>(null)
   const [busy, setBusy] = React.useState(false)
   const [filter, setFilter] = React.useState<TranscriptFilterKey>('all')
+  const list = React.useRef<HTMLDivElement | null>(null)
 
   const load = React.useCallback(
     async (from: number): Promise<void> => {
@@ -115,6 +119,42 @@ export function TranscriptDialog({ session, onClose, t }: TranscriptDialogProps)
   React.useEffect(() => {
     void load(0)
   }, [load])
+
+  const hasMore = page?.nextCursor !== undefined
+
+  /**
+   * 滚动区是官方给正文用的那一层（`contentClassName` 就落在它上面），列表自己不滚。
+   *
+   * 官方那个正文层本来就是"唯一那个滚动区"（`RiskConfirmation` 也这么用）：再往里套一层自己的滚动区
+   * 会出现两条滚动条，而且内层那份按视口算的 `max-height` 会被卡片的 `overflow: hidden` 裁掉一截。
+   */
+  const scroller = React.useCallback(
+    (): HTMLElement | null => list.current?.closest<HTMLElement>('.dsm-dialogContent') ?? null,
+    [],
+  )
+
+  const loadMore = React.useCallback((): void => {
+    if (page?.nextCursor === undefined) return
+    void load(page.nextCursor)
+  }, [load, page])
+
+  // 滚到底就接下一页。`scroll` 不冒泡，所以这条监听挂在滚动区本体上，不走 React 的 onScroll。
+  React.useEffect(() => {
+    const element = scroller()
+    if (element === null) return
+    const onScroll = (): void => {
+      if (shouldLoadMore(element, hasMore, busy)) loadMore()
+    }
+    element.addEventListener('scroll', onScroll, { passive: true })
+    return () => element.removeEventListener('scroll', onScroll)
+  }, [busy, hasMore, loadMore, scroller])
+
+  // 读完每一页复查一次：还够不着底、又还有下一页，就自己接上（否则那一页之后再也没有下一步）。
+  React.useEffect(() => {
+    const element = scroller()
+    if (element === null) return
+    if (shouldLoadMore(element, hasMore, busy)) loadMore()
+  }, [busy, hasMore, items, loadMore, scroller])
 
   /** 把被截断的那一格原文取回来，盖掉列表里那一条（其余条目不动）。 */
   const showFull = React.useCallback(
@@ -151,26 +191,6 @@ export function TranscriptDialog({ session, onClose, t }: TranscriptDialogProps)
       closeLabel={t('close')}
       className="dsm-dialog dsm-transcript"
       contentClassName="dsm-dialogContent dsm-transcriptContent"
-      footer={
-        <>
-          <button type="button" className="dsm-button" data-modal-autofocus="" onClick={onClose}>
-            {t('close')}
-          </button>
-          <span className="dsm-spacer" />
-          {page?.nextCursor === undefined ? (
-            <span className="dsm-meta">{t('manage.transcript.done')}</span>
-          ) : (
-            <button
-              type="button"
-              className="dsm-button dsm-primary"
-              onClick={() => void load(page.nextCursor!)}
-              disabled={busy}
-            >
-              {busy ? t('manage.transcript.loadingMore') : t('manage.transcript.more')}
-            </button>
-          )}
-        </>
-      }
     >
       <div className="dsm-transcriptFacts">
         <div className="dsm-transcriptName" title={session.id}>
@@ -230,7 +250,12 @@ export function TranscriptDialog({ session, onClose, t }: TranscriptDialogProps)
 
       {error !== null && <div className="dsm-error">{error}</div>}
 
-      <div className="dsm-transcriptList">
+      <div
+        ref={list}
+        className="dsm-transcriptList"
+        tabIndex={0}
+        data-modal-autofocus=""
+      >
         {items.length === 0 && busy && <div className="dsm-hint">{t('manage.transcript.loading')}</div>}
         {page !== null && page.totalEvents === 0 && <div className="dsm-hint">{t('manage.transcript.empty')}</div>}
         {shown.map((item) => {
@@ -274,6 +299,7 @@ export function TranscriptDialog({ session, onClose, t }: TranscriptDialogProps)
             </React.Fragment>
           )
         })}
+        {busy && items.length > 0 && <div className="dsm-hint">{t('manage.transcript.loadingMore')}</div>}
       </div>
     </Modal>
   )

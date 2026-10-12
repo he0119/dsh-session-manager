@@ -133,7 +133,8 @@ M" to report.
   calls and their results, system messages, and every other event besides (compaction, permissions,
   approvals, retries — including how the title was decided). A tool result does not carry its tool name,
   so the view fills it in by `callId` from the call; one event is one row, and `seq` is shown only as a
-  reference because it skips numbers. It **pages** (80 events, then **Load more**), marks a block that
+  reference because it skips numbers. It **pages** (80 events at a time; scrolling to the bottom pulls
+  in the next page), marks a block that
   was cut ("N characters were cut — click to read it in full"), and reports unreadable lines by count and
   line number while still showing every other event. Filter the view by kind (me / model / tools /
   other). This page **does not go through the host**, so sessions the sidebar cannot reach (blank,

@@ -343,6 +343,21 @@ test('弹窗正文层的字号自己写：官方 Modal 落在 .dsm-root 之外�
   assert.match(facts, /line-height:\s*18px/, '12px 的字配 18px 行高（.dsm-defs 那一档是 14px/22px）')
 })
 
+test('会话内容视图的滚动区是官方正文那一层，列表自己不滚', () => {
+  // 这条是"修掉一个有现象可查的缺陷"：列表曾经按视口算 `max-height: 58vh`、自己 `overflow: auto`，
+  // 卡片一封顶（`max-height: 100%`）它就被卡片的 `overflow: hidden` 裁掉最后一截——列表滚到底也
+  // 没用，那一截根本画不出来。官方那个正文层本来就是唯一那个滚动区（`RiskConfirmation` 也这么用），
+  // 所以这里两条一起钉：正文层滚，列表不滚。
+  const content = ruleBody('.dsm-dialogContent')
+  assert.notEqual(content, null, '找不到 .dsm-dialogContent 规则')
+  assert.match(content, /overflow-y:\s*auto/, '正文那一层是滚动区')
+  assert.match(content, /overscroll-behavior:\s*contain/, '滚到底不再把后面的一层跟着推')
+  const list = ruleBody('.dsm-transcriptList')
+  assert.notEqual(list, null, '找不到 .dsm-transcriptList 规则')
+  assert.doesNotMatch(list, /overflow/, '列表自己不滚：再套一层会出现两条滚动条')
+  assert.doesNotMatch(list, /max-height/, '列表不按视口算高度：那样会被卡片裁掉一截')
+})
+
 test('行上的动作等悬停：藏在行尾那一格，静止时行上只有标签', () => {
   // 为什么钉它：原来「内容」是标题那一格（.dsm-rowLabel）里一枚有边框的小块，与「活动中」那枚标签
   // 同字号、同内边距、同文字色（只差 2px 圆角与一档边框色），同一行里读成"第二枚状态标签"。现在它

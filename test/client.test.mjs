@@ -4608,3 +4608,37 @@ test('客户端产物：迁移落地时宿主报的每条进度都进了界面�
   )
   assert.ok(cleared > landed, '落地收尾时那条进度被清掉（同一个状态位置回 null）')
 })
+
+test('客户端产物：内容视图没有底部那一行，打开时焦点落在列表上', { skip }, () => {
+  const state = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    sessions: [
+      { id: 's-1', cwd: '/home/u/dev/alpha', createdAt: 9, dir: '/home/u/dev/alpha', bytes: 100, files: [] },
+    ],
+    workspaces: [],
+  }
+  // `mount` 的 `nulls` 按渲染顺序种给"以 null 初始化的状态"：会话页里排在 `inspecting` 之前的那几个
+  // 保持默认，最后那个种成一条会话，内容视图就开着。顺序要是变了，这条会在下面第一句上失败，
+  // 不会静默过（与 `arrays` / `strings` 的种子是同一套约定）。
+  const mounted = mount({ state, panel: 'manage', nulls: [...Array(7).fill(null), { id: 's-1', title: 'T' }] })
+  const tree = mounted.registrations[0].component(mounted.registrations[0].registration.inject())
+  const text = strings(tree)
+  const dialog = mounted.recorded.find((node) => node.props?.['aria-label'] === 'manage.transcript.title')
+  assert.ok(dialog !== undefined, '内容视图开着（nulls 的种子顺序变了就重数一遍）')
+  assert.equal(
+    mounted.recorded.some((node) => String(node.props?.className) === 'dsm-fakeDialogFooter'),
+    false,
+    '弹窗没有底部那一行：关掉靠标题栏那枚 ×，往下接靠滚到底',
+  )
+  const list = mounted.recorded.find((node) => String(node.props?.className) === 'dsm-transcriptList')
+  assert.ok(list !== undefined, '列表在树上')
+  assert.equal(list.props.tabIndex, 0, '列表自己收焦点，键盘也能滚（只靠滚轮的话下一页够不着）')
+  assert.equal(list.props['data-modal-autofocus'], '', '打开时焦点落在列表上，不落在筛选芯片上')
+  assert.equal(
+    text.some((item) => item === 'manage.transcript.more' || item === 'manage.transcript.done'),
+    false,
+    '「加载更多」与「已到日志末尾」都不在树上了',
+  )
+})

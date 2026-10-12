@@ -830,7 +830,9 @@ export const CSS = `
  * 的注释就是这么要求的：消费者用 max-height: 100% 限高，别自己算视口）。
  */
 .dsm-dialog.dsm-dialog { width: min(640px, 100%); max-height: 100%; }
-.dsm-dialogContent { min-height: 0; overflow-y: auto; }
+/* 官方的正文层就是"唯一那个滚动区"（RiskConfirmation 也这么用）。overscroll-behavior: contain
+   挡住滚动链：正文滚到底之后不再把页面/卡片跟着推。 */
+.dsm-dialogContent { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 /*
  * 正文那一层：块与块之间的节奏（官方那层 body 是纵向 flex 但不给间距）、以及**字号**。
  *
@@ -916,9 +918,11 @@ export const CSS = `
   border-color: var(--dsw-alias-brand-primary, #3370ff);
   color: var(--dsw-alias-brand-primary, #3370ff);
 }
+/* 列表自己不滚：滚动区是上面那一层。它以前按视口算高度（max-height: 58vh + overflow: auto），
+   卡片一封顶（max-height: 100%）它就撑出卡片，被卡片的 overflow: hidden 裁掉最后一截——列表
+   滚到底也没用，那一截根本画不出来。 */
 .dsm-transcriptList {
   display: flex; flex-direction: column; gap: 8px;
-  overflow: auto; max-height: 58vh; padding-right: 4px;
 }
 .dsm-turn {
   position: sticky; top: 0; z-index: 1;
