@@ -170,6 +170,10 @@ export interface SessionRowProps {
   /**
    * 这一行能点开看完整内容（只有会话页给）。
    *
+   * 这枚按钮落在**行尾那一格**，与时刻叠在同一个格子里：悬停或键盘落在这一行时才出场，那时时刻让位
+   * （见 `.dsm-slot`）。摆在标题那一格（`.dsm-rowLabel`）会被读成"第二枚状态标签"——那里是标签的
+   * 领地，同一行里再放一枚同样大小的小块，用户分不出哪个是状态、哪个能点。
+   *
    * 按钮落在 `<label>` 里面，所以点击时要 `preventDefault()`：标签的默认动作是把这次点击转给勾选框，
    * 而"看内容"不该顺带改变勾选状态（用户可能已经挑好了一批，只是想先看一眼其中一条）。
    */
@@ -224,7 +228,22 @@ export function SessionRow({
             {note.text}
           </span>
         )}
-        {onInspect !== undefined && (
+      </span>
+      {owner !== undefined && (
+        <span className="dsm-meta" title={session.cwd ?? ''}>
+          {owner}
+        </span>
+      )}
+      <span className="dsm-meta">{formatBytes(session.bytes)}</span>
+      {onInspect === undefined ? (
+        <span className="dsm-meta">{formatTime(session.createdAt)}</span>
+      ) : (
+        /*
+         * 行尾那一格：时刻与「内容」叠在同一个格子里（见 `.dsm-slot` 的注释），只有给得出
+         * `onInspect` 的行才这么摆——别的页（导出 / 迁移挑选 / 计划清单）仍旧只有时刻一格。
+         */
+        <span className="dsm-meta dsm-slot">
+          <span className="dsm-time">{formatTime(session.createdAt)}</span>
           <button
             type="button"
             className="dsm-rowInspect"
@@ -238,15 +257,8 @@ export function SessionRow({
           >
             {inspectLabel ?? t('manage.transcript.open')}
           </button>
-        )}
-      </span>
-      {owner !== undefined && (
-        <span className="dsm-meta" title={session.cwd ?? ''}>
-          {owner}
         </span>
       )}
-      <span className="dsm-meta">{formatBytes(session.bytes)}</span>
-      <span className="dsm-meta">{formatTime(session.createdAt)}</span>
     </label>
   )
 }

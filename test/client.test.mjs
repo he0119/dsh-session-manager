@@ -2287,6 +2287,50 @@ test('客户端产物：「会话」页的搜索框按标题或 id 筛，筛空�
   )
 })
 
+test('客户端产物：行上的「内容」落在行尾那一格，不在标题那一格', { skip }, () => {
+  // 与 styles.test.mjs 的「行上的动作等悬停」那条配对：结构上它必须与时刻共用一个格子（CSS 靠叠格子
+  // 把动作换出来），且**不在** `.dsm-rowLabel` 里——那里是标签的领地，摆在那儿会被读成第二枚状态标签。
+  const state = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    archiveAvailable: true,
+    sessions: [
+      { id: 's-1', title: '重构迁移编排', cwd: '/home/u/dev/alpha', createdAt: 2, dir: '/home/u/dev/alpha', bytes: 100, files: [], ungrouped: false },
+      { id: 's-2', title: '别的东西', cwd: '/home/u/dev/alpha', createdAt: 1, dir: '/home/u/dev/alpha', bytes: 200, files: [], ungrouped: false },
+    ],
+    workspaces: [{ id: 'w1', path: '/home/u/dev/alpha', title: '工作区甲', sessionIds: ['s-1', 's-2'] }],
+  }
+  const mounted = mount({ state, panel: 'manage' })
+  const tree = mounted.registrations[0].component(mounted.registrations[0].registration.inject())
+  const classesOf = (node) => String(node.props?.className ?? '').split(/\s+/)
+  const rows = elementsOf(tree).filter((node) => classesOf(node).includes('dsm-rowManage'))
+  assert.equal(rows.length, 2, '会话页两行都在')
+
+  for (const row of rows) {
+    const parts = elementsOf(row)
+    const pick = (name) => parts.filter((node) => classesOf(node).includes(name))
+    assert.equal(pick('dsm-rowInspect').length, 1, '一行一枚「内容」')
+    const label = pick('dsm-rowLabel')
+    assert.equal(label.length, 1, '标题与标签同占一格')
+    assert.equal(
+      elementsOf(label[0]).some((node) => classesOf(node).includes('dsm-rowInspect')),
+      false,
+      '"内容"不再摆在标题那一格里',
+    )
+    const slot = pick('dsm-slot')
+    assert.equal(slot.length, 1, '行尾那一格是时刻与动作共用的')
+    assert.ok(
+      elementsOf(slot[0]).some((node) => classesOf(node).includes('dsm-time')),
+      '同一个格子里有时刻',
+    )
+    assert.ok(
+      elementsOf(slot[0]).some((node) => classesOf(node).includes('dsm-rowInspect')),
+      '动作与时刻同格：悬停时靠叠格子互相顶替，行宽不动',
+    )
+  }
+})
+
 test('客户端产物：组头的折叠只影响画不画行，不影响"列出来了哪些"', { skip }, () => {
   const state = {
     sessionsRoot: '/home/u/.dsh/sessions',

@@ -127,7 +127,8 @@ M" to report.
   HTTP endpoint (`POST …/retitle`) takes `includePinned: true` — the page deliberately offers no such
   switch, because the default meaning is "do not touch the user's own names" (useful for a one-off
   cleanup of sessions whose titles were written by a script or an import);
-- **Read content**: every row carries a **Content** button that opens the session's **complete content** —
+- **Read content**: hover a row and a **Content** action appears at its end (it takes the place of that
+  row's timestamp; on touch screens it is always there) — that opens the session's **complete content** —
   the log parsed into a timeline: human messages, model replies, reasoning (collapsed by default), tool
   calls and their results, system messages, and every other event besides (compaction, permissions,
   approvals, retries — including how the title was decided). A tool result does not carry its tool name,

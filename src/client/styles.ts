@@ -423,6 +423,43 @@ export const CSS = `
 .dsm-rowLabel > .dsm-rowId { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dsm-rowLabel > .dsm-tag { flex: none; }
 .dsm-meta { color: var(--dsw-alias-label-secondary, #646a73); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/*
+ * 行尾那一格：时刻与行上的动作（「内容」）叠在同一个格子里，悬停或键盘落在这一行时后者顶掉前者。
+ *
+ * 叠格子而不是并排：格宽取两者的最大值（正好是时刻的宽度），于是切换时行宽不动、右边几列也不动；
+ * 并排则要为平时不出现的动作白留一段宽度，改成 display: none 又会让标题那一格在悬停时被拉宽
+ * （文字跟着跳）。宿主自己的会话列表也是这一套：悬停时动作顶掉时间那一格。
+ *
+ * 两样都摆出来是给触屏留的退路（没有悬停，动作否则永远见不到），见下面那条 @media。
+ */
+.dsm-slot { display: grid; align-items: center; }
+.dsm-slot > * { grid-area: 1 / 1; justify-self: end; }
+/*
+ * 行上那枚「内容」：它是个**动作**，不是标签——所以没有盒子（盒子是标签那套语法）、走 brand 色，
+ * 平时 visibility: hidden（不进 tab 顺序；键盘落到这一行的勾选框时整行 :focus-within 再让它
+ * 出场，那时 Tab 也够得着它）。它与时刻共用一个格子，见 .dsm-slot。
+ */
+.dsm-rowInspect {
+  border: none;
+  background: transparent;
+  padding: 0;
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-brand-primary, #3370ff);
+  cursor: pointer;
+  visibility: hidden;
+}
+/* 悬停 / 键盘落在这一行：时刻让位，动作出场。 */
+.dsm-row:hover .dsm-time, .dsm-row:focus-within .dsm-time { visibility: hidden; }
+.dsm-row:hover .dsm-rowInspect, .dsm-row:focus-within .dsm-rowInspect { visibility: visible; }
+.dsm-rowInspect:hover { text-decoration: underline; }
+.dsm-rowInspect:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary, #3370ff); outline-offset: 1px; }
+/* 触屏没有悬停：两样并排摆出来（那时不叠格子，否则它们会互相盖住）。 */
+@media (hover: none) {
+  .dsm-slot { display: flex; gap: 8px; }
+  .dsm-rowInspect { visibility: visible; }
+}
 .dsm-empty { padding: 14px; color: var(--dsw-alias-label-secondary, #646a73); }
 .dsm-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .dsm-select, .dsm-file {
@@ -914,14 +951,6 @@ export const CSS = `
   color: var(--dsw-alias-label-primary, #1f2329);
   max-height: 320px; overflow: auto;
 }
-/* 行上那枚「内容」：看着像标签、行为像按钮——它会打开内容视图，但不参与勾选（见 SessionRowProps）。 */
-.dsm-rowInspect {
-  border: 1px solid var(--dsw-alias-border-l1, rgba(0, 0, 0, 0.12));
-  background: transparent; color: var(--dsw-alias-label-secondary, #646a73);
-  border-radius: 4px; padding: 0 6px; font-size: 12px; line-height: 18px; cursor: pointer;
-  flex: 0 0 auto;
-}
-.dsm-rowInspect:hover { border-color: var(--dsw-alias-brand-primary, #3370ff); color: var(--dsw-alias-brand-primary, #3370ff); }
 `
 
 /**

@@ -55,4 +55,5 @@ Status: implemented
   [选行工具只有一对](../bug-fix/2026-10-08-one-pair-of-pick-tools.md)），写盘入口在列表下面的动作行里。
 - 这条规矩只覆盖**卡片级**动作。页面级的那枚「刷新」在页签那一行的右端（`page.refresh`，见
   [页头照内建设置页的规格](2026-09-28-page-header-matches-the-builtin-settings.md)），清单行上的动作仍在
-  行上。
+  行上（2026-10-12 起可以在行尾那一格里收起来、悬停才出场，见
+  [行上的动作等悬停](2026-10-12-row-action-waits-for-hover.md)）。

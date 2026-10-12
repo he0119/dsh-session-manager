@@ -343,6 +343,37 @@ test('弹窗正文层的字号自己写：官方 Modal 落在 .dsm-root 之外�
   assert.match(facts, /line-height:\s*18px/, '12px 的字配 18px 行高（.dsm-defs 那一档是 14px/22px）')
 })
 
+test('行上的动作等悬停：藏在行尾那一格，静止时行上只有标签', () => {
+  // 为什么钉它：原来「内容」是标题那一格（.dsm-rowLabel）里一枚有边框的小块，与「活动中」那枚标签
+  // 同字号、同内边距、同文字色（只差 2px 圆角与一档边框色），同一行里读成"第二枚状态标签"。现在它
+  // 挪到行尾与时刻叠在同一个格子里，静止时不摆出来（宿主自己的会话列表也是这一套）。
+  const slot = ruleBody('.dsm-slot')
+  assert.notEqual(slot, null, '找不到 .dsm-slot 规则')
+  assert.match(slot, /display:\s*grid/, '时刻与动作要叠在同一个格子里')
+
+  const cell = ruleBody('.dsm-slot > *')
+  assert.notEqual(cell, null, '叠格子靠的是给两个子元素同一个 grid-area')
+  assert.match(cell, /grid-area:\s*1\s*\/\s*1/, '两者要占同一格，否则并排摆会把行宽撑开')
+
+  const button = ruleBody('.dsm-rowInspect')
+  assert.notEqual(button, null, '找不到 .dsm-rowInspect 规则')
+  assert.match(button, /visibility:\s*hidden/, '静止时不摆出来')
+  assert.match(button, /border:\s*none/, '它没有盒子：盒子是标签那套语法，动作不该长成标签')
+
+  // 悬停 / 键盘落在这一行时：时刻让位、动作出场；触屏没有悬停，两样都摆出来。
+  assert.match(css, /\.dsm-row:hover \.dsm-time[^{]*\{[^}]*visibility:\s*hidden/, '悬停时时刻要让位')
+  assert.match(css, /\.dsm-row:hover \.dsm-rowInspect[^{]*\{[^}]*visibility:\s*visible/, '悬停时动作要出场')
+  assert.match(
+    css,
+    /\.dsm-row:focus-within \.dsm-rowInspect[^{]*\{[^}]*visibility:\s*visible/,
+    '键盘落在这一行时同样出场（`visibility: hidden` 的东西本来不进 tab 顺序）',
+  )
+  assert.match(
+    css,
+    /@media \(hover: none\)[\s\S]*?\.dsm-rowInspect\s*\{[^}]*visibility:\s*visible/,
+    '触屏没有悬停，动作得常显（那时不叠格子，见 .dsm-slot）',
+  )
+})
 
 test('说明页 FAQ 的答案不被挤成零宽：那一栏是单列网格', () => {
   // 真实缺陷（英文界面里一眼能看出来）：`.dsm-defs` 的列是 minmax(0, auto) minmax(0, 1fr)，FAQ 的

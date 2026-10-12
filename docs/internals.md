@@ -149,8 +149,14 @@
   [版面不跟着滚动条动](../.agents/notes/implemented/architecture/2026-09-28-layout-does-not-move-with-the-scrollbar.md)：
   页头没有官方原语可用，规格只能去真实设置页里量；页头里不放动作，页面级的「刷新」挂页签行的右端。
   正文与次要文字是内建那两档（14px/20px 与 12px/18px），行高不跟着字号放大。
+- [弹窗正文层自己写字号](../.agents/notes/implemented/bug-fix/2026-10-12-dialog-body-declares-its-own-type.md)：
+  官方 `Modal` portal 到 `document.body`，落在那套 `.dsm-root` 之外——弹窗正文层不写字号就继承文档根
+  的 16px（会话内容视图的计数、事件卡脚注、错误句都掉在那儿）。
 - [卡片级的主动作放卡片底部的动作行](../.agents/notes/implemented/architecture/2026-10-07-card-actions-live-in-a-footer-row.md)：
   动作跟着它的输入走；卡头只留不动数据的工具（刷新、全选 / 清空、收起 / 展开），清单行上的动作不挪位。
+- [行上的动作等悬停](../.agents/notes/implemented/architecture/2026-10-12-row-action-waits-for-hover.md)：
+  会话页那枚「内容」在行尾那一格里与时刻叠着（`grid-area: 1 / 1`），悬停或键盘落在这一行时出场；
+  无盒子、走 `brand-primary`——它不该长成标签那样的小块。
 - [选行工具全站只有一对](../.agents/notes/implemented/bug-fix/2026-10-08-one-pair-of-pick-tools.md)：
   三张带勾选的清单共用一对常驻的「全选 / 清空」（同一套作用面与禁用判据），位置是清单之上那一行的
   右端；清单就是整张卡时在卡头，清单是卡片里的一段时在它上方那一行。
