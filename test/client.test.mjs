@@ -2480,8 +2480,8 @@ test('客户端产物：「说明」页把分类词条、每页做什么与边�
   for (const key of ['help.categories.visible', 'tag.subagent', 'tag.blank', 'tag.archived', 'tag.live', 'list.ungrouped']) {
     assert.ok(terms.includes(key), `分类词典缺少「${key}」`)
   }
-  assert.equal(terms.length, 22, '词条数＝分类 6 + 分页 5 + 数据 2 + 疑问 9')
-  assert.equal(recorded.filter((node) => node.type === 'dd').length, 22, '每条词条都有解释')
+  assert.equal(terms.length, 23, '词条数＝分类 6 + 分页 5 + 数据 2 + 疑问 10')
+  assert.equal(recorded.filter((node) => node.type === 'dd').length, 23, '每条词条都有解释')
   assert.ok(terms.includes('page.tab.sync'), '分页那一节要写到「同步」这一页')
   assert.ok(terms.includes('page.tab.backup'), '分页那一节也要写到「备份」这一页')
   // 「数据从哪来」两条路径来自 /state，不是写死在文案里

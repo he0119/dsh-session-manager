@@ -26,7 +26,7 @@ import { projectionCacheDir } from './paths.ts'
 import { describeWarm } from './checkpoint-warm.ts'
 import { describeEffect, describePlannedEffect, effectOf } from './take-effect.ts'
 import { runSync, type SyncPlan, type SyncSettings } from './sync.ts'
-import type { CheckpointWarmPort, DecodeAll, EffectMode, HostRegistryPort } from './types.ts'
+import type { CheckpointWarmPort, DecodeAll, EffectMode, HostRegistryPort, RetitleOutcome, TitleRefreshOptions, TitleRefreshPort } from './types.ts'
 import { createSessionMetaResolver } from './visibility.ts'
 
 /**
@@ -453,6 +453,162 @@ export function hostCheckpointPort(ctx: unknown): CheckpointWarmPort | undefined
       // 宿主自己那两步：整份日志读完校验（不建活会话）→ 折叠所有投影单元并写回检查点（它自己 fail-soft）。
       const loaded = await query.readSession!.call(query, sessionId)
       cache.coldSnapshot!.call(cache, loaded.session, loaded.inheritedEventCount, loaded.events)
+    },
+  }
+}
+
+/** 宿主的 `sessions` 服务：本端口只用到"取活的 / 准备 / 入册 / 公告 / 冲刷"这五件。 */
+interface HostSessionStore {
+  get(id: string): unknown
+  prepare(id: string, options: unknown): unknown
+  enter(session: unknown): () => void
+  announce(session: unknown): void
+  flush(session: unknown): Promise<unknown>
+}
+
+/** 宿主的 `sessionTitle` 服务：读当前标题 + 显式重算（它只认活会话，见 titleRefreshPort()）。 */
+interface HostSessionTitle {
+  get(session: unknown): { title?: unknown; source?: { kind?: unknown } } | undefined
+  refresh(session: unknown): Promise<{ title?: unknown; source?: { kind?: unknown } } | undefined>
+}
+
+/**
+ * 宿主的 `sessionPersistence`：只要"开一个写句柄"。
+ *
+ * 这一件是**必须**的，不是可选：会话的 append 只按 id 路由给"已登记写句柄"的那条（见
+ * `dsh-session-persistence-jsonl` 的 `install()`：`this.writers.get(session.id)?.enqueueLive(...)`），
+ * 没有句柄的话新标题只活在内存里，摘挂之后就没影了——那种"报成功却没落地"比不做更糟。
+ */
+interface HostSessionPersistence {
+  open(id: string, access: 'write'): Promise<{ close(): Promise<void> }>
+}
+
+/**
+ * 探测宿主"重算一条会话标题"的能力，收成一个端口交给编排层（见 retitle.ts）。
+ *
+ * 为什么不能只调一次 `sessionTitle.refresh()` 了事：**标题服务只认活会话**
+ * （`refresh()` 第一件事就是 `sessions.get(id) !== session` 就抛），而这里是拿整库的 id 逐条重算，
+ * 那些会话早就不在宿主内存里了。所以这条端口自己完成一次"临时挂载"：
+ *
+ *   1. `sessionQuery.readSession()` 把日志整份读完并校验，拿到 header 与全部事件（**不建活会话**，
+ *      与 checkpoint-warm 那条路同一个调用）；
+ *   2. `sessions.prepare(..., { eventState: 'detached' })` 按宿主自己的重放构造器还原出 Session；
+ *   3. `sessionPersistence.open(id, 'write')` 先开写句柄，这样第 5 步 append 的标题事件才会落盘；
+ *   4. `sessions.enter()` + `sessions.announce()` —— `enter()` 返回的正是**卸载用的那个 disposer**，
+ *      两者是宿主公开成对的挂载原语（`dsh-agent-loop` 的会话创建事务也是这么用的）；
+ *   5. `sessionTitle.refresh()` 重算，随后 `sessions.flush()` 把新标题冲进日志；
+ *   6. 无论成败，关句柄 + `detach()` 把它摘掉，宿主内存里不留痕迹。
+ *
+ * 代价是每条会话要整份解一次日志（实测 6MB ≈1.7 秒），所以编排层顺序跑并报进度——**不并发**，那等于
+ * 同时挂 N 条会话并发 N 个模型请求。
+ *
+ * 会话**已经在宿主内存里**（比如用户正开着的这条）时走另一条路：直接用那条活会话重算，不挂不摘、
+ * 也不碰写句柄（它归宿主的 agent loop 所有，抢来开第二个会直接抛 AlreadyOwned）。
+ *
+ * 认形状不认实现：四件里少一件就当"这个宿主没有这套能力"（界面据此禁用按钮并说明原因）。
+ *
+ * `options.includePinned` 由调用方显式打开时才连 `user` 源（用户改过名 / 脚本或导入写下的）一起重算
+ * ——默认跳过，理由见 `TitleRefreshOptions`。
+ *
+ * @param ctx 宿主上下文。
+ * @returns 端口；这个宿主没有标题服务 / 读日志 / 持久化里任何一件时 undefined。
+ */
+export function titleRefreshPort(ctx: unknown): TitleRefreshPort | undefined {
+  const store = optionalService(ctx, 'sessions') as Partial<HostSessionStore> | undefined
+  const query = optionalService(ctx, 'sessionQuery') as Partial<HostSessionQuery> | undefined
+  const titles = optionalService(ctx, 'sessionTitle') as Partial<HostSessionTitle> | undefined
+  const persistence = optionalService(ctx, 'sessionPersistence') as Partial<HostSessionPersistence> | undefined
+  if (store === undefined || query === undefined || titles === undefined || persistence === undefined) return undefined
+  if (
+    typeof store.get !== 'function' ||
+    typeof store.prepare !== 'function' ||
+    typeof store.enter !== 'function' ||
+    typeof store.announce !== 'function' ||
+    typeof store.flush !== 'function' ||
+    typeof query.readSession !== 'function' ||
+    typeof titles.get !== 'function' ||
+    typeof titles.refresh !== 'function' ||
+    typeof persistence.open !== 'function'
+  ) {
+    return undefined
+  }
+
+  /** 把一份标题快照收成"标题 + 来源种类"两样（缺哪个就是哪个不在）。 */
+  const normalize = (
+    snapshot: { title?: unknown; source?: { kind?: unknown } } | undefined,
+  ): { title?: string; kind?: unknown } => ({
+    ...(typeof snapshot?.title === 'string' ? { title: snapshot.title } : {}),
+    ...(snapshot?.source === undefined ? {} : { kind: snapshot.source.kind }),
+  })
+
+  /** 读一条会话当前的标题快照（活会话与临时挂载的会话同一条路）。 */
+  const snapshotOf = (session: unknown): { title?: string; kind?: unknown } =>
+    normalize(titles.get!.call(titles, session))
+
+  /**
+   * 对一条**活会话**做判定与重算。
+   *
+   * 判定的顺序是刻意的：先看用户有没有手动改过名（`source.kind === 'user'`）——那种标题是用户的，
+   * 一次批量动作不该把它抹掉，所以在**发模型请求之前**就返回（`includePinned` 是给一次性清理留的
+   * 显式口子，见 `TitleRefreshOptions`）；再看重算之后标题还在不在（没有人类消息的会话连兜底标题都
+   * 没有）、provider 有没有真的接过去（没有 provider 时 `refresh()` 只会把兜底标题原样返回，那不是
+   * "算过"）。
+   */
+  const settle = async (session: unknown, options?: TitleRefreshOptions): Promise<RetitleOutcome> => {
+    const before = snapshotOf(session)
+    if (before.kind === 'user' && options?.includePinned !== true) {
+      return { status: 'skipped', reason: 'pinned' }
+    }
+
+    let after: { title?: string; kind?: unknown }
+    try {
+      // `refresh()` 返回的正是它折叠出的最新快照（没有标题时是 undefined），所以不必再读一次。
+      // 对 `user` 源的标题它也是那条**显式重算**的路：宿主把"显式 refresh 覆盖掉钉住的标题"当作
+      // unpin 的设计意图（自动修订那条路才会见到 user 源就短路），provider 端也只把 **provider** 源
+      // 的旧标题当锚点，所以这里一定会重算出一个新标题。
+      after = normalize(await titles.refresh!.call(titles, session))
+    } catch (error) {
+      // 没有路由不是失败：这条会话从来没有过主模型请求（比如从别的工具导进来的），标题 provider
+      // （跟随会话主模型那套）因此无从下手。
+      const message = error instanceof Error ? error.message : String(error)
+      if (message.includes('no logged request route')) return { status: 'skipped', reason: 'no-request-route' }
+      throw error
+    }
+
+    if (after.title === undefined) return { status: 'skipped', reason: 'no-human-message' }
+    if (after.kind !== 'provider') return { status: 'skipped', reason: 'no-title-provider' }
+    return before.kind === 'provider' && before.title === after.title
+      ? { status: 'unchanged', title: after.title }
+      : { status: 'retitled', title: after.title }
+  }
+
+  return {
+    refresh: async (sessionId, options) => {
+      const live = store.get!.call(store, sessionId)
+      // 已经在内存里：直接用那条活会话重算，不挂不摘也不碰写句柄（它归宿主自己所有）。
+      if (live !== undefined) return settle(live, options)
+
+      const loaded = await query.readSession!.call(query, sessionId)
+      const session = store.prepare!.call(store, sessionId, {
+        seed: loaded.events,
+        meta: loaded.session,
+        inheritedEventCount: loaded.inheritedEventCount,
+        eventState: 'detached',
+      })
+      const handle = await persistence.open!.call(persistence, sessionId, 'write')
+      const detach = store.enter!.call(store, session)
+      store.announce!.call(store, session)
+      try {
+        const outcome = await settle(session, options)
+        // 冲一次盘再摘：标题事件是刚 append 的，不冲的话"改了"只存在于内存里。
+        await store.flush!.call(store, session)
+        return outcome
+      } finally {
+        // 先关句柄再 detach：写句柄按 id 独占（第二个 open 会抛 AlreadyOwned），漏掉它会让宿主
+        // 之后再也打不开这条会话的写路径。close() 自己会把缓冲排干，所以失败路径上的诊断事件也在。
+        await handle.close()
+        detach()
+      }
     },
   }
 }

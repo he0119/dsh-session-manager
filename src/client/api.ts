@@ -87,6 +87,11 @@ export interface MetaResponse {
    */
   archiveAvailable?: boolean
   /**
+   * 这个宿主能不能重新生成会话标题（`sessionTitle` 那套服务凑不凑得齐）；
+   * 缺字段（旧宿主）按 `false` 处理——按钮禁用比点了没反应好。
+   */
+  retitleAvailable?: boolean
+  /**
    * WebDAV 同步的非敏感配置（宿主插件配置里的 `sync` 块）；没配时是 `null`。
    * 缺字段（旧宿主）同样按"没配置"处理。
    */
@@ -779,5 +784,51 @@ export async function archiveSessions(
   // 逐条走宿主的注册表动作（每条一次落盘 + 广播），勾一整页时这一段是可感知的，所以它也报进度。
   const parsed = await readEventStream<ArchiveResponse>(response, onProgress, '归档')
   if (!Array.isArray(parsed.failed)) throw new Error(parsed.error ?? '归档没有回结果')
+  return parsed
+}
+
+/** 一条会话重算后的标题（或"没变"）。 */
+export interface RetitleEntry {
+  id: string
+  title: string
+}
+
+/** 重新生成标题的响应（宿主 `src/retitle.ts` 的 `RetitleResult`）。 */
+export interface RetitleResponse {
+  ok: boolean
+  /** provider 给出**不同**标题的那些。 */
+  retitled: RetitleEntry[]
+  /** 重算过但标题没变的那些（模型认为现有的仍然贴切）。 */
+  unchanged: RetitleEntry[]
+  /**
+   * 没被重算的那些，附原因。
+   *
+   * `reason` 是与宿主共用的词汇（`src/types.ts` 的 `RetitleSkipReason`）：`pinned`（用户改过名）、
+   * `subagent`、`no-human-message`、`no-request-route`（这条会话没有过主模型请求）、
+   * `no-title-provider`（宿主没装标题 provider）、`not-found`。
+   */
+  skipped: Array<{ id: string; reason: string }>
+  /** 逐条的失败原因（一条失败不影响其余）。 */
+  failed: Array<{ id: string; error: string }>
+  error?: string
+}
+
+/**
+ * 重新生成所选会话的标题。
+ *
+ * 逐条请宿主的标题服务重算（每条都要整份解一次日志再跑一次模型调用），所以走事件流报进度；
+ * 宿主没有标题服务时接口回 409 且不带 `retitled`，那时按异常抛给错误横幅。
+ */
+export async function retitleSessions(
+  sessionIds: readonly string[],
+  onProgress?: (event: ProgressEvent) => void,
+): Promise<RetitleResponse> {
+  const response = await fetch(`${API_PREFIX}/retitle`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', accept: 'text/event-stream' },
+    body: JSON.stringify({ sessionIds }),
+  })
+  const parsed = await readEventStream<RetitleResponse>(response, onProgress, '重新生成标题')
+  if (!Array.isArray(parsed.retitled)) throw new Error(parsed.error ?? '重新生成标题没有回结果')
   return parsed
 }

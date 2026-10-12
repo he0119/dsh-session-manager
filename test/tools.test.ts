@@ -25,6 +25,7 @@ import {
   registerTools,
   hostCheckpointPort,
   hostRegistryPort,
+  titleRefreshPort,
   type MigrateToolResult,
   type PlanToolResult,
   type SyncToolResult,
@@ -841,4 +842,198 @@ test('补齐列表元数据的端口：认形状，按宿主自己的两步走�
   assert.ok(port, '两件都齐：端口拿得到')
   await port.warm('s-1')
   assert.deepEqual(calls, ['read:s-1', 'coldSnapshot'], '顺序不能反：没有事件就没有可折的东西')
+})
+
+test('重新生成标题的端口：四件齐才认，且按"读日志 → 开写句柄 → 挂载 → 重算 → 冲盘 → 关句柄 → 卸载"走', async () => {
+  const calls: string[] = []
+  const header = { id: 's-1', version: 4, createdAt: 1 }
+  const events = [{ type: 'session' }, { type: 'message', role: 'user' }]
+  /** 端口交给宿主的那个"会话"就是 prepare 的返回值：临时挂载期间所有调用都该用同一个对象。 */
+  const session = { id: 's-1', whatever: true }
+  /** 标题快照：宿主 `sessionTitle.get()` / `refresh()` 的返回值。 */
+  let current: { title?: string; source?: { kind?: string } } | undefined
+  let answers: Array<typeof current> = []
+
+  const store = {
+    // 默认"这条会话不在内存里"：走临时挂载那条路（用例后半段把它改成活的）。
+    get: (id: string): unknown => {
+      calls.push(`get:${id}`)
+      return (store as { live?: unknown }).live
+    },
+    prepare: (id: string, options: unknown): unknown => {
+      calls.push(`prepare:${id}`)
+      // 端口必须把宿主读日志那三件原样转交：header 当 meta、事件当 seed、继承条数照传。
+      assert.deepEqual(options, {
+        seed: events,
+        meta: header,
+        inheritedEventCount: 7,
+        eventState: 'detached',
+      })
+      return session
+    },
+    enter: (target: unknown): (() => void) => {
+      calls.push('enter')
+      assert.equal(target, session)
+      return () => calls.push('detach')
+    },
+    announce: (target: unknown): void => {
+      calls.push('announce')
+      assert.equal(target, session)
+    },
+    flush: async (target: unknown): Promise<boolean> => {
+      calls.push('flush')
+      assert.equal(target, session)
+      return true
+    },
+  }
+  const query = {
+    readSession: async (id: string) => {
+      calls.push(`read:${id}`)
+      return { session: header, inheritedEventCount: 7, events }
+    },
+  }
+  const persistence = {
+    open: async (id: string, access: string) => {
+      calls.push(`open:${id}:${access}`)
+      return {
+        close: async (): Promise<void> => {
+          calls.push('close')
+        },
+      }
+    },
+  }
+  const titles = {
+    get: (_target: unknown): typeof current => current,
+    refresh: async (target: unknown): Promise<typeof current> => {
+      calls.push('refresh')
+      // 重算必须发生在那条会话对象上：临时挂载那条用的是 prepare 的返回值，活会话那条用的是宿主
+      // 已经在内存里的那一个（拿错对象等于对着别人提问）。
+      assert.ok(target === session || target === liveSession, '重算的对象不对')
+      current = answers.shift()
+      return current
+    },
+  }
+  const fakeCtx = (parts: Partial<Record<string, unknown>>): unknown => ({
+    get: (name: string) => parts[name],
+  })
+  const all = { sessions: store, sessionQuery: query, sessionTitle: titles, sessionPersistence: persistence }
+
+  // 四件缺一不可：任何一件不在，界面那一侧就该按"这个宿主没这个能力"禁用按钮，而不是半套上场。
+  assert.equal(titleRefreshPort(fakeCtx({})), undefined, '什么都没有')
+  assert.equal(titleRefreshPort(fakeCtx({ ...all, sessions: undefined })), undefined, '没有 sessions')
+  assert.equal(titleRefreshPort(fakeCtx({ ...all, sessionQuery: undefined })), undefined, '没有 sessionQuery')
+  assert.equal(titleRefreshPort(fakeCtx({ ...all, sessionTitle: undefined })), undefined, '没有 sessionTitle')
+  assert.equal(
+    titleRefreshPort(fakeCtx({ ...all, sessionPersistence: undefined })),
+    undefined,
+    '没有持久化：append 落不了盘，宁可说没有这个能力',
+  )
+  assert.equal(titleRefreshPort(fakeCtx({ ...all, sessions: { get: () => undefined } })), undefined, 'sessions 形状不认')
+  assert.equal(titleRefreshPort(fakeCtx({ ...all, sessionPersistence: {} })), undefined, '持久化形状不认')
+  assert.equal(titleRefreshPort({}), undefined, '连 ctx 形状都不对时也必须给个答案，而不是抛')
+
+  const port = titleRefreshPort(fakeCtx(all))
+  assert.ok(port, '四件都齐：端口拿得到')
+
+  // 一、从兜底标题换成 provider 标题：挂载期间怎么来怎么走，最后句柄与挂载都要还回去。
+  current = { title: '你应该参考 https://github.com/he011', source: { kind: 'fallback' } }
+  answers = [{ title: '修复含网址会话标题生成', source: { kind: 'provider' } }]
+  calls.length = 0
+  assert.deepEqual(await port.refresh('s-1'), { status: 'retitled', title: '修复含网址会话标题生成' })
+  assert.deepEqual(calls, [
+    'get:s-1',
+    'read:s-1',
+    'prepare:s-1',
+    'open:s-1:write',
+    'enter',
+    'announce',
+    'refresh',
+    'flush',
+    'close',
+    'detach',
+  ])
+
+  // 二、用户手动改过名：**一次模型调用都不发**（这是这条端口最先判的事），但挂载照样要收干净。
+  calls.length = 0
+  current = { title: '我自己改的名字', source: { kind: 'user' } }
+  assert.deepEqual(await port.refresh('s-1'), { status: 'skipped', reason: 'pinned' })
+  assert.deepEqual(calls, ['get:s-1', 'read:s-1', 'prepare:s-1', 'open:s-1:write', 'enter', 'announce', 'flush', 'close', 'detach'])
+
+  // 二之二、`includePinned` 显式打开时（一次性清理那些"标题是脚本 / 导入写的"会话）：照样重算，
+  // 而且 provider 那侧只把 provider 源的旧标题当锚点，所以 user 源这条一定会换出新标题。
+  calls.length = 0
+  current = { title: '脚本写下的名字', source: { kind: 'user' } }
+  answers = [{ title: '重算出来的名字', source: { kind: 'provider' } }]
+  assert.deepEqual(await port.refresh('s-1', { includePinned: true }), {
+    status: 'retitled',
+    title: '重算出来的名字',
+  })
+  assert.equal(calls.includes('refresh'), true, '打开 includePinned 就该真的发这次重算')
+  calls.length = 0
+
+  // 三、重算之后还是同一条 provider 标题：那是"没变"，不是"又改了一次"。
+  current = { title: '已经挺好的标题', source: { kind: 'provider' } }
+  answers = [{ title: '已经挺好的标题', source: { kind: 'provider' } }]
+  assert.deepEqual(await port.refresh('s-1'), { status: 'unchanged', title: '已经挺好的标题' })
+
+  // 四、还是没有标题（没有人类消息）：如实说这条没什么可命名的。
+  current = undefined
+  answers = [undefined]
+  assert.deepEqual(await port.refresh('s-1'), { status: 'skipped', reason: 'no-human-message' })
+
+  // 五、只有兜底标题（这个宿主没装 provider）：`refresh()` 把兜底原样返回，那不是"算过"。
+  current = { title: '首句前几个词', source: { kind: 'fallback' } }
+  answers = [{ title: '首句前几个词', source: { kind: 'fallback' } }]
+  assert.deepEqual(await port.refresh('s-1'), { status: 'skipped', reason: 'no-title-provider' })
+
+  // 六、这条会话没有过主模型请求：宿主那句话不是"失败"，是"本来就无从取名"。
+  current = { title: '首句前几个词', source: { kind: 'fallback' } }
+  let failNext = true
+  const refusing = titleRefreshPort(
+    fakeCtx({
+      ...all,
+      sessionTitle: {
+        get: (): typeof current => current,
+        refresh: async (): Promise<typeof current> => {
+          if (failNext) throw new Error('session-title-llm: no logged request route is available; configure provider and model together')
+          return current
+        },
+      },
+    }),
+  )!
+  assert.deepEqual(await refusing.refresh('s-1'), { status: 'skipped', reason: 'no-request-route' })
+
+  // 但别的失败**照样抛**：模型超时、输入超预算那类必须让编排层记成 failed，不能被吞成"跳过"。
+  failNext = false
+  const broken = titleRefreshPort(
+    fakeCtx({
+      ...all,
+      sessionTitle: {
+        get: (): typeof current => current,
+        refresh: async (): Promise<typeof current> => {
+          throw new Error('session-title-llm: 请求超时')
+        },
+      },
+    }),
+  )!
+  await assert.rejects(() => broken.refresh('s-1'), /请求超时/)
+
+  // 七、会话**已经在**宿主内存里（用户正开着这条）：直接用活会话，不挂不摘、也不碰写句柄
+  // （写句柄按 id 独占，抢来开第二个会直接抛 AlreadyOwned）。
+  const liveSession = { id: 's-live' }
+  const liveStore = {
+    ...store,
+    // 这一条在宿主内存里活着：`get()` 认得它（上面那个假 store 的 `get()` 只认它自己那个 `live` 字段，
+    // 所以活会话这一条用例得自己给一个）。
+    get: (id: string): unknown => {
+      calls.push(`get:${id}`)
+      return liveSession
+    },
+  }
+  const livePort = titleRefreshPort(fakeCtx({ ...all, sessions: liveStore }))!
+  current = { title: '旧标题', source: { kind: 'fallback' } }
+  answers = [{ title: '新标题', source: { kind: 'provider' } }]
+  calls.length = 0
+  assert.deepEqual(await livePort.refresh('s-live'), { status: 'retitled', title: '新标题' })
+  assert.deepEqual(calls, ['get:s-live', 'refresh'], '活会话那条路上不该出现读日志 / 挂载 / 写句柄')
 })

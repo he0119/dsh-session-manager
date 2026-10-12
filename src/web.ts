@@ -29,6 +29,7 @@ import { familyOf, loneSubagents } from './family.ts'
 import { projectionCacheDir } from './paths.ts'
 import { describeWarm, warmCheckpoints } from './checkpoint-warm.ts'
 import { readRegistry, validateRegistry } from './registry.ts'
+import { runRetitle } from './retitle.ts'
 import { describeEffect, effectOf, takeEffectOnHost } from './take-effect.ts'
 import { runRemoval, type RemoveDeps, type RemovalRun } from './remove.ts'
 import { createTitleResolver, type TitleQuery } from './session-title.ts'
@@ -52,7 +53,7 @@ import {
   type ImportPlan,
   type ImportOptions,
 } from './transfer.ts'
-import type { CheckpointWarmPort, DecodeAll, HostRegistryPort, ProgressReporter, WorkspaceRegistryState } from './types.ts'
+import type { CheckpointWarmPort, DecodeAll, HostRegistryPort, ProgressReporter, TitleRefreshPort, WorkspaceRegistryState } from './types.ts'
 import { createBlankResolver, createSessionMetaResolver, hiddenReason, isUngrouped, type HiddenReason, type SessionMeta } from './visibility.ts'
 
 /** 本插件占用的路由前缀。 */
@@ -135,6 +136,14 @@ export interface ApiDeps {
   /** 宿主的归档能力；缺席 = 这个宿主改不了归档（界面据此禁用那两个按钮）。 */
   registryOps?: () => RegistryOps | undefined
   /**
+   * 宿主"重算一条会话标题"的能力（`sessions` + `sessionQuery` + `sessionTitle` + `sessionPersistence`，
+   * 见 tools.ts 的 `titleRefreshPort()`）。
+   *
+   * 同 `registryOps`：缺席 = 这个宿主算不了标题（没有标题服务，或者不是 Web profile），界面据此禁用
+   * 「重新生成标题」并说明原因，而不是让按钮点下去之后报一个从服务里抛出来的错。
+   */
+  titleRefresh?: () => TitleRefreshPort | undefined
+  /**
    * 造一次 WebDAV 同步的运行时（远端 + 设置）；没配置同步时返回 undefined。
    *
    * 每次调用都重新解析密码引用：DSH 的口径是"每次操作解析一次引用"，换了环境变量不必重启插件。
@@ -199,6 +208,8 @@ interface MetaFacts {
   registryPath: string
   pickerKind: PickerKind | null
   archiveAvailable: boolean
+  /** 这个宿主能不能重新生成会话标题（`sessionTitle` 在不在，见 ApiDeps.titleRefresh）。 */
+  retitleAvailable: boolean
   sync: SyncInfo | null
 }
 
@@ -532,6 +543,8 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
     pickerKind: deps.pickerKind?.() ?? null,
     // 归档按钮能不能点：这个宿主的 workspaceRegistry 在不在（只有 Web profile 才有它）。
     archiveAvailable: deps.registryOps?.() !== undefined,
+    // 重新生成标题同理：这个宿主的会话标题服务与读日志 / 持久化几件凑不齐就点不了（见 titleRefreshPort）。
+    retitleAvailable: deps.titleRefresh?.() !== undefined,
     // 同步卡片：没有配置就是 null（界面据此说明"没配置 sync.url"，而不是画一个点了没反应的按钮）。
     sync: deps.syncInfo?.() ?? null,
   })
@@ -1125,6 +1138,59 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
     })
   }
 
+  /**
+   * 重新生成标题：把点名的会话交给宿主的标题服务逐条重算（见 retitle.ts 与 tools.ts 的端口）。
+   *
+   * 走事件流：每条会话都要整份解一次日志（实测 6MB ≈1.7 秒）再跑一次模型调用（2～3 秒），勾十条就是
+   * 半分钟——那段时间界面只有一句不动的按钮，所以这一段照归档那套报进度。
+   *
+   * 两处**拒绝**在流开始之前回 JSON 带状态码（那时还没有字节发出去）：一条会话都没勾（400）、
+   * 这个宿主没有标题服务（409，"点了也没反应"的按钮比禁用更糟，两者都要能说清原因）。
+   * 子智能体不在这里拒——它不是错误，是"本来就不该动它"，由编排层按条记成跳过。
+   */
+  const retitleSessions = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+    let body: unknown
+    try {
+      body = await readJson(req)
+    } catch {
+      sendJson(res, 400, { error: '请求体不是合法 JSON' })
+      return
+    }
+    const fields = (body ?? {}) as Record<string, unknown>
+    const ids = Array.isArray(fields['sessionIds']) ? fields['sessionIds'].map((id) => String(id)) : []
+    if (ids.length === 0) {
+      sendJson(res, 400, { error: '请选择至少一个会话（sessionIds）' })
+      return
+    }
+    const port = deps.titleRefresh?.()
+    if (port === undefined) {
+      // 如实拒绝而不是"逐条报失败"：这是**这个宿主**没有这个能力，与"某条会话算不出来"不是一回事。
+      sendJson(res, 409, { error: '这个宿主没有会话标题服务（重新生成标题是它的能力），算不了标题' })
+      return
+    }
+    const all = scanLibrary(paths.sessionsRoot, decodeAll, { resolveTitle })
+    // `includePinned`：连 `user` 源（用户改过名，或者那条标题本来是脚本 / 导入写下的）也一起重算。
+    // 界面**不传**这个字段（默认语义就是"别动用户的名字"），它给一次性清理用——只有显式 `true` 才算。
+    const includePinned = fields['includePinned'] === true
+    await streamResult(res, async (report) => {
+      const result = await runRetitle(
+        {
+          port,
+          // 子智能体由编排层跳过（`origin === 'subagent'`）：勾父会话时它跟着来，但它的标题在侧边栏里
+          // 根本看不到，请模型再算一遍纯属白花。
+          sessions: all.map((session) => ({
+            id: session.id,
+            ...(session.title === undefined ? {} : { title: session.title }),
+            subagent: session.header.origin === 'subagent',
+          })),
+        },
+        { sessionIds: ids, ...(includePinned ? { includePinned: true } : {}) },
+        { onProgress: report },
+      )
+      return result
+    })
+  }
+
   return {
     'GET /meta': meta,
     'GET /state': state,
@@ -1137,6 +1203,7 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
     'POST /rollback': rollbackBackup,
     'POST /delete': deleteSessions,
     'POST /archive': archiveSessions,
+    'POST /retitle': retitleSessions,
   }
 }
 

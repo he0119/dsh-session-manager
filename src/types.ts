@@ -357,9 +357,77 @@ export type ProgressPhase =
   | 'compare'
   | 'pull'
   | 'push'
+  /** 重新生成标题（逐条请宿主重算）。 */
+  | 'retitle'
 
 /** 上报一次进度（同步调用、不 await，所以实现里不许抛）。 */
 export type ProgressReporter = (event: ProgressEvent) => void
+
+/**
+ * 一条会话**没被重算**的原因（见 retitle.ts）。
+ *
+ * 分开写而不是揉成一句错误：这些都是"本来就不该动它"，界面要说的是"为什么跳过"而不是"失败"。
+ */
+export type RetitleSkipReason =
+  /** 这条会话不在库里（界面刚拉完清单，它已被别处删掉）。 */
+  | 'not-found'
+  /** 子智能体会话：标题在侧边栏里根本看不到，不值得请模型再算一遍。 */
+  | 'subagent'
+  /** 用户手动改过名（`session/title` 的 source 是 `user`）：重算会把那个名字覆盖掉。 */
+  | 'pinned'
+  /** 还没有人类消息，没有可命名的东西。 */
+  | 'no-human-message'
+  /**
+   * 这条会话没有任何一次主模型请求，因而没有可用的路由（标题 provider 跟随会话主模型时会拒绝）。
+   * 与"失败"分开：宿主没坏，这条会话本来就无从取名。
+   */
+  | 'no-request-route'
+  /** 这个宿主没装标题 provider（只有确定性兜底标题），没人会来重算。 */
+  | 'no-title-provider'
+
+/** 一条会话重新生成标题的结果。 */
+export type RetitleOutcome =
+  /** provider 给出了新的标题（与原来的不同）。 */
+  | { status: 'retitled'; title: string }
+  /** provider 重算过，但认为现有标题仍然贴切（all-prompts 的锚定规则），原文保留。 */
+  | { status: 'unchanged'; title: string }
+  | { status: 'skipped'; reason: RetitleSkipReason }
+  /** 真失败了（模型调用报错、超时、输入超预算……）。`error` 是宿主那句话的原样。 */
+  | { status: 'failed'; error: string }
+
+/**
+ * 宿主"重算一条会话的标题"的能力（实现见 `src/tools.ts` 的 `titleRefreshPort()`）。
+ *
+ * 只要一件：给 id，把标题重算一遍（或者如实说为什么不用算）。会话不在内存里时，由实现负责临时挂载
+ * 与卸载——那是 DSH 内部的事，核心层不认识。
+ */
+export interface TitleRefreshPort {
+  /**
+   * 重算一条会话的标题。
+   * @param sessionId 会话 id。
+   * @param options 这次重算的选项（见 `TitleRefreshOptions`）。
+   * @returns 这一条的结果；不该由"重算"解决的情况用 `skipped` 说清楚，而不是抛错。
+   * @throws 真正失败时（模型调用报错、日志读不出来）抛，由编排层记成 `failed`。
+   */
+  refresh(sessionId: string, options?: TitleRefreshOptions): Promise<RetitleOutcome>
+}
+
+/**
+ * 一次重算的选项。
+ *
+ * `includePinned` 是给**一次性清理**留的口子：默认跳过 `user` 源的标题（用户手动改过的名字不该被一次
+ * 批量动作抹掉），但历史上存在过"标题是脚本/导入写下的 `user` 源"这种来路——那批不是用户亲手起的名字，
+ * 清理时要能连它们一起重算。界面**不提供**这个开关（默认语义就是"别动用户的名字"），它只走接口。
+ *
+ * 要不要把它当成"删掉 user 源"：`session/title` 是 append-only 的事件（宿主按 seq 连续性校验，没有删除
+ * 事件这回事），所以"删掉 user 源"在这套模型里等于**再写一条更新的标题把它顶掉**——provider 源的标题
+ * 一落，`user` 的钉就没了，之后宿主那条"见到 user 源就不再自动修订"的短路（`onUserMessage()`）也就跟着
+ * 解除。这正是 `refresh()` 的 unpin 语义，不需要动日志。
+ */
+export interface TitleRefreshOptions {
+  /** 连 `user` 源（用户手动改过名 / 由脚本或导入写下）的标题也一起重算。 */
+  includePinned?: boolean
+}
 
 /** `reHome()` 实际发生的动作。 */
 export interface RegistryChange {

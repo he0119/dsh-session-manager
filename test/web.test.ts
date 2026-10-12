@@ -218,11 +218,18 @@ function deps(
 }
 
 /**
- * `/meta` 那五项：界面在清单回来之前要画的就是它们。
+ * `/meta` 那六项：界面在清单回来之前要画的就是它们。
  *
  * 单独列出来是为了"两份取值必须一致"那条断言（见下面两个用例）：一组键、一处来源，漂了就红。
  */
-const META_KEYS = ['sessionsRoot', 'registryPath', 'pickerKind', 'archiveAvailable', 'sync'] as const
+const META_KEYS = [
+  'sessionsRoot',
+  'registryPath',
+  'pickerKind',
+  'archiveAvailable',
+  'retitleAvailable',
+  'sync',
+] as const
 
 test('GET /meta：位置与能力位先答出来，一条会话都不读', async () => {
   const sandbox = makeSandbox('web-meta')
@@ -255,6 +262,8 @@ test('GET /meta：位置与能力位先答出来，一条会话都不读', async
     registryPath: sandbox.registryPath,
     pickerKind: 'browse',
     archiveAvailable: true,
+    // 这一处没给 `titleRefresh`（假宿主没有标题服务）：能力位按"没有"答。
+    retitleAvailable: false,
     sync: { url: 'https://dav.example/dsh', machineId: 'laptop', mappings: 2 },
   })
   assert.equal(touched, 0, '/meta 不该读标题、也不该问项目身份')
@@ -273,22 +282,35 @@ test('/state 与 /meta：同一批字段是同一份取值（界面按"超集"�
   const sandbox = makeSandbox('web-meta-same')
   writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000)
   /** 两种宿主各核一遍：能力位为真与为假都要逐字相同（只核一边就抓不到"自己算一遍"那种漂）。 */
-  const configurations: Array<{ name: string; archiveAvailable: boolean; deps: Parameters<typeof deps>[1] }> = [
+  const configurations: Array<{
+    name: string
+    archiveAvailable: boolean
+    retitleAvailable: boolean
+    deps: Parameters<typeof deps>[1]
+  }> = [
     {
       name: '有归档服务与 native 选择器',
       archiveAvailable: true,
+      retitleAvailable: true,
       deps: {
         pickerKind: () => 'native',
         registryOps: () => ({ archive: async () => {}, unarchive: async () => {} }),
+        titleRefresh: () => ({ refresh: async () => ({ status: 'unchanged', title: '随便' }) }),
         syncInfo: () => ({ url: 'https://dav.example/dsh', machineId: 'desktop', mappings: 0 }),
       },
     },
     {
       // 档案端口**在**、但它说这个宿主没有那个服务（`src/index.ts` 的探测就是这样答"没有"的）：
-      // 按"端口在不在"判就把 false 算成 true 了，这一组专门拦那种写法。
+      // 按"端口在不在"判就把 false 算成 true 了，这一组专门拦那种写法。标题那一枚同理。
       name: '端口在、服务不在；没配同步',
       archiveAvailable: false,
-      deps: { pickerKind: () => null, registryOps: () => undefined, syncInfo: () => undefined },
+      retitleAvailable: false,
+      deps: {
+        pickerKind: () => null,
+        registryOps: () => undefined,
+        titleRefresh: () => undefined,
+        syncInfo: () => undefined,
+      },
     },
   ]
   for (const configuration of configurations) {
@@ -301,10 +323,11 @@ test('/state 与 /meta：同一批字段是同一份取值（界面按"超集"�
     const meta = await call('/meta')
     const state = await call('/state')
     assert.equal(meta['archiveAvailable'], configuration.archiveAvailable, configuration.name)
+    assert.equal(meta['retitleAvailable'], configuration.retitleAvailable, configuration.name)
     assert.deepEqual(
       Object.fromEntries(META_KEYS.map((key) => [key, state[key]])),
       meta,
-      `/state 是 /meta 的超集：这五项必须逐字相同（${configuration.name}）`,
+      `/state 是 /meta 的超集：这六项必须逐字相同（${configuration.name}）`,
     )
     // 反过来：清单只在那一份里
     assert.deepEqual(meta['sessions'], undefined)
@@ -693,7 +716,7 @@ test('POST /import：包坏了、目标目录不合法、库已存在同 id，�
   assert.match(String(payload(conflictApply.captured)['error']), /没有可导入的会话/)
 })
 
-test('registerWebRoutes：注册十条精确路由，方法不对回 405', async () => {
+test('registerWebRoutes：注册十一条精确路由，方法不对回 405', async () => {
   const sandbox = makeSandbox('web-routes')
   const routes: WebRouteLike[] = []
   const dispose = registerWebRoutes(
@@ -714,6 +737,7 @@ test('registerWebRoutes：注册十条精确路由，方法不对回 405', async
       `exact ${API_PREFIX}/rollback`,
       `exact ${API_PREFIX}/delete`,
       `exact ${API_PREFIX}/archive`,
+      `exact ${API_PREFIX}/retitle`,
     ],
   )
 
@@ -1417,6 +1441,106 @@ test('POST /archive：宿主没有 workspaceRegistry 时如实拒绝（不绕过
   )
   assert.equal(captured.status, 409)
   assert.match(String(payload(captured)['error']), /workspaceRegistry/)
+})
+
+test('POST /retitle：逐条请宿主的标题服务重算，跳过与失败分开报，子智能体不惊动宿主', async () => {
+  const sandbox = makeSandbox('web-retitle')
+  writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000, { title: '兜底标题' })
+  writeSession(sandbox.sessionsRoot, 'session-pinned', CWD_A, 2000, { title: '我自己改的名字' })
+  writeSession(sandbox.sessionsRoot, 'session-broken', CWD_A, 3000, { title: '会失败的那条' })
+  writeSession(sandbox.sessionsRoot, 'session-child', CWD_A, 4000, {
+    origin: 'subagent',
+    parentSession: 'session-a',
+    title: '子会话',
+  })
+  /** 宿主那一侧被真正问到的 id：子智能体与不在库里的都不该出现在这里。 */
+  const asked: string[] = []
+  /** 每次请宿主重算时带的选项：`includePinned` 是接口显式传进来的（默认 false）。 */
+  const options: Array<{ includePinned?: boolean } | undefined> = []
+  const handlers = createApiHandlers(
+    deps(sandbox, {
+      titleRefresh: () => ({
+        refresh: async (id: string, given?: { includePinned?: boolean }) => {
+          asked.push(id)
+          options.push(given)
+          if (id === 'session-pinned') return { status: 'skipped', reason: 'pinned' }
+          if (id === 'session-broken') throw new Error('session-title-llm: 模型调用超时')
+          return { status: 'retitled', title: `新标题：${id}` }
+        },
+      }),
+    }),
+  )
+  const post = async (body: unknown): Promise<Captured> => {
+    const { res, captured } = fakeRes()
+    await handlers['POST /retitle']!(fakeReq('POST', `${API_PREFIX}/retitle`, Buffer.from(JSON.stringify(body))), res)
+    return captured
+  }
+
+  const done = await post({
+    sessionIds: ['session-a', 'session-child', 'session-pinned', 'session-broken', 'session-gone'],
+  })
+  assert.equal(done.status, 200)
+  const body = payload(done)
+  // 有失败项时整体 ok 为 false，但成功的与跳过的都照原样在正文里（部分失败同样是"结果"）。
+  assert.equal(body['ok'], false)
+  assert.deepEqual(body['retitled'], [{ id: 'session-a', title: '新标题：session-a' }])
+  assert.deepEqual(body['unchanged'], [])
+  assert.deepEqual(body['skipped'], [
+    { id: 'session-child', reason: 'subagent' },
+    { id: 'session-pinned', reason: 'pinned' },
+    { id: 'session-gone', reason: 'not-found' },
+  ])
+  assert.deepEqual(body['failed'], [{ id: 'session-broken', error: 'session-title-llm: 模型调用超时' }])
+  assert.deepEqual(asked, ['session-a', 'session-pinned', 'session-broken'], '子智能体与不在库里的不该惊动宿主')
+  // 逐条报进度：分母是这次点名的条数，`done` 是"已经做完的条数"。
+  assert.deepEqual(progressOf(done), [
+    { phase: 'retitle', total: 5, done: 0, id: 'session-a', label: '兜底标题' },
+    { phase: 'retitle', total: 5, done: 1, id: 'session-child', label: '子会话' },
+    { phase: 'retitle', total: 5, done: 2, id: 'session-pinned', label: '我自己改的名字' },
+    { phase: 'retitle', total: 5, done: 3, id: 'session-broken', label: '会失败的那条' },
+    { phase: 'retitle', total: 5, done: 4, id: 'session-gone' },
+  ])
+  assert.deepEqual(
+    options,
+    [{ includePinned: false }, { includePinned: false }, { includePinned: false }],
+    '界面那条路（不带 includePinned）永远是明确的 false',
+  )
+
+  // 一次性清理走的那条路：正文里显式写 `includePinned: true`，逐条原样转给宿主。
+  const forced = await post({ sessionIds: ['session-pinned'], includePinned: true })
+  assert.equal(forced.status, 200)
+  assert.deepEqual(payload(forced)['skipped'], [{ id: 'session-pinned', reason: 'pinned' }])
+  assert.deepEqual(options[options.length - 1], { includePinned: true })
+  // 只有显式 `true` 才算：字符串 'true'、1 这类都不该被当成打开。
+  await post({ sessionIds: ['session-pinned'], includePinned: 'true' })
+  assert.deepEqual(options[options.length - 1], { includePinned: false })
+})
+
+test('POST /retitle：空清单回 400，正文不是 JSON 回 400，宿主没有标题服务回 409', async () => {
+  const sandbox = makeSandbox('web-retitle-refusals')
+  writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000)
+
+  const bare = createApiHandlers(deps(sandbox))
+  const call = async (handler: ReturnType<typeof createApiHandlers>, raw: string): Promise<Captured> => {
+    const { res, captured } = fakeRes()
+    await handler['POST /retitle']!(fakeReq('POST', `${API_PREFIX}/retitle`, Buffer.from(raw)), res)
+    return captured
+  }
+
+  const empty = await call(bare, JSON.stringify({ sessionIds: [] }))
+  assert.equal(empty.status, 400)
+  assert.match(String(payload(empty)['error']), /至少一个会话/)
+
+  const broken = await call(bare, '{ 这不是 JSON')
+  assert.equal(broken.status, 400)
+  assert.match(String(payload(broken)['error']), /不是合法 JSON/)
+
+  // 端口**在**但说这个宿主没有那套服务（`src/index.ts` 的探测就是这样答"没有"的）：如实拒绝，
+  // 而不是逐条去试、把"这个宿主没有这个能力"说成五条失败。
+  const withoutService = createApiHandlers(deps(sandbox, { titleRefresh: () => undefined }))
+  const refused = await call(withoutService, JSON.stringify({ sessionIds: ['session-a'] }))
+  assert.equal(refused.status, 409)
+  assert.match(String(payload(refused)['error']), /没有会话标题服务/)
 })
 
 test('POST /rollback：删除备份走恢复（注册表不动），迁移备份照旧还原注册表', async () => {
