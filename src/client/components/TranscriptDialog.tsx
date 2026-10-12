@@ -25,7 +25,7 @@ import { Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import { fetchTranscript, type TranscriptFacts, type TranscriptResponse } from '../api.ts'
 // 会话行的时刻格式与这里必须是同一份（同一套 "YYYY-MM-DD HH:mm"），所以复用列表那个导出。
 import { formatTime } from './sessionList.tsx'
-import { transcriptMarkdown, type TranscriptItem, type TranscriptKind } from '../../transcript.ts'
+import type { TranscriptItem, TranscriptKind } from '../../transcript.ts'
 import type { SessionManagerKey, Translate } from '../logic/locales.ts'
 
 /** 一个筛选键：它对应哪几类条目。 */
@@ -93,7 +93,6 @@ export function TranscriptDialog({ session, onClose, t }: TranscriptDialogProps)
   const [error, setError] = React.useState<string | null>(null)
   const [busy, setBusy] = React.useState(false)
   const [filter, setFilter] = React.useState<TranscriptFilterKey>('all')
-  const [notice, setNotice] = React.useState<string | null>(null)
 
   const load = React.useCallback(
     async (from: number): Promise<void> => {
@@ -140,17 +139,6 @@ export function TranscriptDialog({ session, onClose, t }: TranscriptDialogProps)
     [session.id, t],
   )
 
-  const copy = React.useCallback(async (): Promise<void> => {
-    if (page === null) return
-    const markdown = transcriptMarkdown({ ...page, items }, session.title)
-    try {
-      await navigator.clipboard.writeText(markdown)
-      setNotice(t('manage.transcript.copied'))
-    } catch {
-      setNotice(t('manage.transcript.copyFailed'))
-    }
-  }, [items, page, session.title, t])
-
   const shown = filter === 'all' ? items : items.filter((item) => FILTER_OF[item.kind] === filter)
   const counts = page?.counts
   let lastTurn: number | undefined
@@ -169,14 +157,6 @@ export function TranscriptDialog({ session, onClose, t }: TranscriptDialogProps)
             {t('close')}
           </button>
           <span className="dsm-spacer" />
-          <button
-            type="button"
-            className="dsm-button"
-            onClick={() => void copy()}
-            disabled={items.length === 0}
-          >
-            {t('manage.transcript.copy')}
-          </button>
           {page?.nextCursor === undefined ? (
             <span className="dsm-meta">{t('manage.transcript.done')}</span>
           ) : (
@@ -249,7 +229,6 @@ export function TranscriptDialog({ session, onClose, t }: TranscriptDialogProps)
       </div>
 
       {error !== null && <div className="dsm-error">{error}</div>}
-      {notice !== null && <div className="dsm-hint">{notice}</div>}
 
       <div className="dsm-transcriptList">
         {items.length === 0 && busy && <div className="dsm-hint">{t('manage.transcript.loading')}</div>}
