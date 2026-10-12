@@ -26,6 +26,7 @@ import {
   syncRuntime,
   hostCheckpointPort,
   hostRegistryPort,
+  titleRefreshPort,
 } from './tools.ts'
 import { API_PREFIX, registerWebRoutes, type WebServerLike } from './web.ts'
 
@@ -111,6 +112,9 @@ export function apply(ctx: Context, config: PluginConfigInput = {}): () => void 
       // 端口交出去，`src/web.ts` 因此仍然只认一个形状、不认识 Cordis。服务缺席返回 undefined，
       // 界面据此禁用那两个按钮并说明原因。
       registryOps: () => archiveOps(ctx),
+      // 重新生成标题要读宿主那套标题服务（`sessionTitle` + `sessions` + `sessionQuery` +
+      // `sessionPersistence`），只有这里能探测；缺任何一件就返回 undefined，界面据此禁用按钮。
+      titleRefresh: () => titleRefreshPort(ctx),
       // 删除会拒掉"宿主内存里活着"的会话（它手里还有内存副本与写句柄）。
       liveSessionIds: () => liveSessionIds(ctx),
       // WebDAV 同步：运行时按需造（每次请求重新解析密码引用），/state 只看非敏感的那几个字段。

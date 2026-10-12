@@ -31,7 +31,7 @@ still works.
 
 | Entry point | Good for |
 |---|---|
-| The **Session management** page in Settings | Everyday use: archive or delete single sessions on the **Sessions** tab; pick source and target directories from the candidate panel to migrate (the source may also be Ungrouped); tick sessions to export / import; run a WebDAV sync on the **Sync** tab; roll back or restore on the **Backups** tab |
+| The **Session management** page in Settings | Everyday use: archive, retitle or delete single sessions on the **Sessions** tab; pick source and target directories from the candidate panel to migrate (the source may also be Ungrouped); tick sessions to export / import; run a WebDAV sync on the **Sync** tab; roll back or restore on the **Backups** tab |
 | 5 model tools | Just say "move this workspace's sessions to `~/dev/xxx`" and let the model preview first, apply second |
 
 Both share one migration implementation, so the count the dialog reports is the count you get.
@@ -114,6 +114,19 @@ M" to report.
   no restart. Ticking a parent session archives its subagents with it (the family is the unit; why, see
   the delete bullet below). On a host without that service (non-Web profiles) the buttons are disabled
   and the page says why;
+- **Regenerate titles**: tick rows and ask the host's title service to redo the title from the **whole
+  conversation**. Old sessions tend to keep the deterministic fallback title ("first five words" / 40
+  bytes, which cuts a leading URL in half), because a title provider only revises on the next human
+  message — this button is how you make that happen now. It reports progress per session (each one
+  replays the whole log and runs one model call) and then splits the outcome four ways: **regenerated**,
+  **recomputed but unchanged**, **skipped**, **failed**. Skipped is not failed — it means the session
+  should not be touched: **you renamed it by hand** (regenerating would overwrite your name), **it is a
+  subagent session** (its title is invisible in the sidebar), it has no human message yet, or it never
+  made a main-model request (so there is no route to title it with). On a host without that service the
+  button is disabled and the page says why. To recompute the **you renamed it by hand** ones as well, the
+  HTTP endpoint (`POST …/retitle`) takes `includePinned: true` — the page deliberately offers no such
+  switch, because the default meaning is "do not touch the user's own names" (useful for a one-off
+  cleanup of sessions whose titles were written by a script or an import);
 - **Delete**: tick rows → **Delete selected** opens a dialog listing every session that would go, the
   file count and where the backup lands → confirm there. Deleting **backs the session directory up into this plugin's backup root
   first**, then removes it; the sidebar drops those rows once the host rescans. A session still live in

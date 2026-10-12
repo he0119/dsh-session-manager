@@ -47,6 +47,7 @@ const TAB_LINES = [
 const FAQ = [
   ['help.faq.unownedQ', 'help.faq.unownedA'],
   ['help.faq.deletedQ', 'help.faq.deletedA'],
+  ['help.faq.retitleQ', 'help.faq.retitleA'],
   ['help.faq.restartQ', 'help.faq.restartA'],
   ['help.faq.liveQ', 'help.faq.liveA'],
   ['help.faq.backupQ', 'help.faq.backupA'],

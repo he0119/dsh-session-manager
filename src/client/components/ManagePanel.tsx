@@ -19,17 +19,29 @@
  *     恢复走「迁移」页的「备份与回滚」；
  *   - **归档走宿主能力**（`workspaceRegistry`），一次落盘 + 改内存 + 广播，侧边栏即时跟着变；宿主
  *     没有这个能力时按钮禁用并说明原因，而不是绕过宿主去写注册表文件。
+ *   - **标题也能在这里重算**（见 [retitleNotes.ts](../logic/retitleNotes.ts) 与宿主侧 `src/retitle.ts`）：
+ *     历史会话的标题多半停在"首句前几个词"的兜底标题上，这一枚按钮请宿主的标题服务按整段对话重算一遍
+ *     （逐条挂载 → 重算 → 落盘 → 摘掉，见 `src/tools.ts` 的 `titleRefreshPort()`）。跳过与失败分开说：
+ *     你自己改过名的那些不动，子智能体的不算。
  *
  * @module dsh-session-manager/client/ManagePanel
  */
 
 import * as React from 'react'
 
-import { archiveSessions, deleteSessions, type DeleteResponse, type ProgressEvent } from '../api.ts'
+import {
+  archiveSessions,
+  deleteSessions,
+  retitleSessions,
+  type DeleteResponse,
+  type ProgressEvent,
+  type RetitleResponse,
+} from '../api.ts'
 import { ConfirmDialog } from './ConfirmDialog.tsx'
 import { ProgressBlock } from './ProgressBlock.tsx'
 import { groupKey, groupSessions, nestSessions } from '../logic/groups.ts'
 import { deleteFamilyNote, parentDirNote } from '../logic/planRows.ts'
+import { describeRetitle, type RetitleNotes } from '../logic/retitleNotes.ts'
 import { FILTER_KEYS } from '../logic/sessionFilter.ts'
 import {
   SessionFilterBar,
@@ -53,6 +65,7 @@ export function ManagePanel({ t, state, meta, reload }: PanelShare): React.React
   // "这个宿主没有 workspaceRegistry"画上去。
   const facts = state ?? meta
   const archiveAvailable = facts?.archiveAvailable === true
+  const retitleAvailable = facts?.retitleAvailable === true
 
   /**
    * 勾选：行勾选、整组勾选、全选、清空，以及"这一行为什么不能单独勾"。
@@ -65,7 +78,7 @@ export function ManagePanel({ t, state, meta, reload }: PanelShare): React.React
   const picked = picking.picked
   /** 筛选条：一枚芯片都不勾、关键词为空 = 全都列出来（见 sessionFilter.matchesFilters）。 */
   const filter = useSessionFilter(sessions)
-  const [busy, setBusy] = React.useState<'archive' | 'unarchive' | 'apply' | null>(null)
+  const [busy, setBusy] = React.useState<'archive' | 'unarchive' | 'apply' | 'retitle' | null>(null)
   const [error, setError] = React.useState<string | null>(null)
   const [notice, setNotice] = React.useState<string | null>(null)
   /**
@@ -85,6 +98,13 @@ export function ManagePanel({ t, state, meta, reload }: PanelShare): React.React
    * 的 `nulls`），插在中间会让后面那些种子的位置整体错一格。
    */
   const [progress, setProgress] = React.useState<ProgressEvent | null>(null)
+  /**
+   * 最近一次「重新生成标题」的结果（`null` = 这次进页面之后还没跑过）。
+   *
+   * 单独一份状态而不是复用 `failed`：那个动作的结果有三类（改了 / 没变 / 跳过），跳过还要按原因分类
+   * 摆出来——"这条你改过名，我没动它"与"这条算的时候报错了"是两件完全不同的事，混在一个横幅里就分不清。
+   */
+  const [retitle, setRetitle] = React.useState<RetitleResponse | null>(null)
 
   /**
    * 按目录分组，组内留着筛选之后的那些（空掉的组整组不画：组头底下没有行，看着像坏了）。
@@ -124,6 +144,37 @@ export function ManagePanel({ t, state, meta, reload }: PanelShare): React.React
         )
       }
       if (response.failed.length === 0) picking.clear()
+      await reload()
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setBusy(null)
+      setProgress(null)
+    }
+  }
+
+  /**
+   * 点「重新生成标题」：把勾选的会话交给宿主的标题服务逐条重算。
+   *
+   * 与归档那一下的差别在**结果**上：归档只有"改了 / 没改（失败）"两种，而这里可能是"算了 3 条、
+   * 跳过 5 条（其中 4 条你自己改过名）"，所以结论、跳过原因与失败清单三样分别摆（见 retitleNotes.ts）。
+   *
+   * 失败照旧逐条摆出来，不问其余成功的算不算数：一条模型超时不该把另一条刚算好的标题说成没算。
+   * 逐条失败的那几条**不清勾选**——用户多半要重试它们。
+   */
+  const doRetitle = async (): Promise<void> => {
+    setBusy('retitle')
+    setError(null)
+    setNotice(null)
+    setFailed([])
+    setRetitle(null)
+    setProgress(null)
+    try {
+      const response = await retitleSessions(picked, setProgress)
+      setFailed(response.failed)
+      setRetitle(response)
+      if (response.failed.length === 0) picking.clear()
+      // 列表上的标题是这次动作改的，读回来才看得见（`/state` 每次都重折一遍标题）。
       await reload()
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
@@ -198,6 +249,16 @@ export function ManagePanel({ t, state, meta, reload }: PanelShare): React.React
     )
   }
 
+  /**
+   * 这次重算该说的几句话（改了 / 没变 / 为什么跳过那些）。
+   *
+   * 在渲染期算而不是塞进状态：它是结果的**纯函数**，多存一份只会多一个可能与 `retitle` 不一致的地方。
+   */
+  const retitleNotes: RetitleNotes = React.useMemo(
+    () => (retitle === null ? { skipped: [] } : describeRetitle(retitle, t)),
+    [retitle, t],
+  )
+
   return (
     <>
       {error !== null && (
@@ -228,6 +289,21 @@ export function ManagePanel({ t, state, meta, reload }: PanelShare): React.React
           {item.id}：{item.error}
         </p>
       ))}
+      {retitleNotes.notice !== undefined && (
+        <p className="dsm-banner dsm-ok">
+          <span>{retitleNotes.notice}</span>
+          <span className="dsm-spacer" />
+          <button type="button" className="dsm-button" onClick={() => setRetitle(null)}>
+            {t('error.dismiss')}
+          </button>
+        </p>
+      )}
+      {/* 跳过的那几条单独说：它们不是失败，但用户得知道"我勾了 8 条，为什么只有 3 条换了名字"。 */}
+      {retitleNotes.skipped.map((line) => (
+        <p key={line} className="dsm-hint">
+          {line}
+        </p>
+      ))}
 
       <div className="dsm-card">
         <div className="dsm-cardHead">
@@ -252,6 +328,8 @@ export function ManagePanel({ t, state, meta, reload }: PanelShare): React.React
         <p className="dsm-hint">{t('manage.hint')}</p>
         {/* 能力位还没到（首帧，`/meta` 与 `/state` 都没回来）时先不说结论：那一刻的真相是"还不知道"。 */}
         {facts !== undefined && !archiveAvailable && <p className="dsm-hint">{t('manage.archive.unavailable')}</p>}
+        {/* 重新生成标题同理：宿主没有那套标题服务时先说清原因，而不是留一个点不动的按钮。 */}
+        {facts !== undefined && !retitleAvailable && <p className="dsm-hint">{t('manage.retitle.unavailable')}</p>}
 
         {sessions.length > 0 && <SessionFilterBar keys={FILTER_KEYS} filter={filter} t={t} />}
         {groups.length > 0 && <SessionGroupTools collapse={collapse} t={t} />}
@@ -319,6 +397,18 @@ export function ManagePanel({ t, state, meta, reload }: PanelShare): React.React
             disabled={busy !== null || picked.length === 0 || !archiveAvailable}
           >
             {busy === 'unarchive' ? t('manage.archive.running') : t('manage.archive.undo')}
+          </button>
+          {/*
+            重新生成标题与归档同属"对勾选的这些做一件事"，所以放在同一条动作行上（见 styles.ts 的
+            `.dsm-controls`）；破坏性的「删除」仍在 spacer 之后那一头。
+          */}
+          <button
+            type="button"
+            className="dsm-button"
+            onClick={() => void doRetitle()}
+            disabled={busy !== null || picked.length === 0 || !retitleAvailable}
+          >
+            {busy === 'retitle' ? t('manage.retitle.running') : t('manage.retitle.action')}
           </button>
           <span className="dsm-spacer" />
           <button
