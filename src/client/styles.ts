@@ -900,7 +900,11 @@ export const CSS = `
 .dsm-transcriptName { font-size: 14px; font-weight: 600; color: var(--dsw-alias-label-primary, #1f2329); }
 /* 词条是 12px 的字：行高跟着降到 18px（上面 .dsm-defs 那一档是 14px/22px，不改就量到 24px 的行距）。 */
 .dsm-transcriptFactsGrid { gap: 2px 12px; font-size: 12px; line-height: 18px; }
+/* 筛选与计数那一行在正文那一层里贴顶：滚动时它留在上头，回合标题停在它下面。
+   底色必须与卡片同层（bg-layer-2），否则滚过去的条目会从它背后透出来。 */
 .dsm-transcriptFilters {
+  position: sticky; top: 0; z-index: 2;
+  background: var(--dsw-alias-bg-layer-2, #fff);
   display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
   border-top: 1px solid var(--dsw-alias-border-l1, rgba(0, 0, 0, 0.06));
   border-bottom: 1px solid var(--dsw-alias-border-l1, rgba(0, 0, 0, 0.06));
@@ -931,7 +935,9 @@ export const CSS = `
  * 会横出一条比卡片更黑的色带——它看着就像一块贴上去的黑条，而不是这一节的标题。
  */
 .dsm-turnHead {
-  position: sticky; top: 0; z-index: 1;
+  /* 停在筛选那一行下面：那个偏移量由视图量出来写进 --dsm-turn-top（窄窗口里芯片会折成两行，那一行
+     会变高），没有它时退到 640px 宽下量到的 37px。 */
+  position: sticky; top: var(--dsm-turn-top, 37px); z-index: 1;
   display: flex; align-items: center; gap: 6px;
   list-style: none; cursor: pointer;
   padding: 4px 0;
