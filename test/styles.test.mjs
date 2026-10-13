@@ -474,3 +474,11 @@ test('组内行的缩进由组头那几个尺寸推出来：组头的勾选框�
   )
   assert.ok(padLeft <= 6, '组头左内边距要小：最前面那个折叠开关自己就是这一组的左缘')
 })
+
+test('折起来的轮次整段收掉：不能只靠浏览器对 details 的默认行为', () => {
+  // `.dsm-turnBody` 自己声明了 `display: flex`，作者样式会压过浏览器替 <details> 收内容的默认规则，
+  // 所以必须自己收一次；不收就是"标记折起了、内容还摊在下面"（实测第 3 轮折着还显示 74/75 步）。
+  const rule = ruleBody('.dsm-turn:not([open]) .dsm-turnBody') ?? ''
+  assert.match(rule, /display:\s*none/, '折起来的那一段要真的不显示')
+  assert.match(ruleBody('.dsm-turnBody') ?? '', /display:\s*flex/, '展开时是竖排的条目列表')
+})

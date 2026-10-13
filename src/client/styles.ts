@@ -953,6 +953,11 @@ export const CSS = `
 .dsm-turnHead .dsm-chevron { transition: transform 120ms linear; }
 .dsm-turn:not([open]) .dsm-turnHead .dsm-chevron { transform: rotate(-90deg); }
 .dsm-turnBody { display: flex; flex-direction: column; gap: 8px; padding-top: 8px; }
+.dsm-turn:not([open]) .dsm-turnBody { display: none; }
+/* 折起来就整段收掉。必须显式写：dsm-turnBody 自己声明了 display: flex，作者样式压过浏览器替 details
+   收内容的默认规则，于是标记转了向、内容却还摊在下面（实测：第 3 轮折着，下面照样冒出 74 / 75 步那些
+   条目，看着像"不属于这一轮"）。 */
+
 @media (prefers-reduced-motion: reduce) {
   .dsm-turnHead .dsm-chevron { transition: none; }
 }
