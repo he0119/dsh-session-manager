@@ -6,11 +6,12 @@
 // 已经在读或者没有下一页时一次都不多发。
 //
 // 另一条是"画面正中那一条是第几个"（页头右端写着它）：它按纵坐标二分，所以这里既钉边界（缝里算下一条、
-// 底下没有了算最后一条），也钉"不多探"——条目多起来时它必须是几次探测，不是整列表读一遍。
+// 底下没有了算最后一条），也钉"不多探"——条目多起来时它必须是几次探测，不是整列表读一遍；还钉折起来的
+// 轮次里的那些卡不算（它们的矩形可能全是 0，也可能照旧占着位置，两种都会让"顺序单调"这个前提不成立）。
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { NEAR_BOTTOM, centerPosition, shouldLoadMore } from '../src/client/logic/transcriptScroll.ts'
+import { NEAR_BOTTOM, centerCard, centerPosition, shouldLoadMore } from '../src/client/logic/transcriptScroll.ts'
 
 /** 滚动容器的三条量。1000 高的内容配 300 高的视口时，`scrollTop = 700` 就是真的到底了。 */
 const box = (scrollTop: number) => ({ scrollHeight: 1000, scrollTop, clientHeight: 300 })
@@ -60,4 +61,44 @@ test('一条都没有时报 undefined，条数多的时候也不整列表探一�
   }
   assert.equal(centerPosition(1000, counted, 34_000), 500)
   assert.ok(probes <= 12, `二分最多十来次探测，实际 ${String(probes)} 次`)
+})
+
+test('折起来的轮次里的卡不算进"画面正中"', () => {
+  /** 四条卡：0、1、2、3，每条 68 高、间隔 8，下沿依次 60、128、196、264。 */
+  const card = (index: number, folded = false) => ({
+    index,
+    bottom: (index + 1) * 68 - 8,
+    height: 68,
+    folded,
+  })
+  assert.equal(centerCard([card(0), card(1), card(2), card(3)], 30), 0, '第一条中间')
+  // 第 1 条折起来：0 的下沿是 60，中心线 100 越过它，下一条看得见的是 2（下沿 196）
+  assert.equal(centerCard([card(0), card(1, true), card(2), card(3)], 100), 2)
+  assert.equal(centerCard([card(0), card(1, true), card(2), card(3)], 200), 3, '第三条中间')
+})
+
+test('浏览器没把折起来的内容移出排版时，也不能让它算进画面正中', () => {
+  const keepingLayout = { index: 1, bottom: 128, height: 68, folded: true }
+  const cards = [
+    { index: 0, bottom: 60, height: 68, folded: false },
+    keepingLayout,
+    { index: 2, bottom: 196, height: 68, folded: false },
+  ]
+  assert.equal(centerCard(cards, 100), 2, '它折着就不算，即便矩形还占着位置')
+
+  // 另一头：浏览器把内容藏得没有排版（矩形全 0）时，`closest()` 那条看不出差别，得靠高度剔掉。
+  // 中心线落在末尾那一段没有矩形的卡上时，能看出剔没剔：留着它们，末尾的"最后一条"会落到没排版的卡上。
+  const noLayout = [
+    { index: 0, bottom: 60, height: 68, folded: false },
+    { index: 1, bottom: 128, height: 68, folded: false },
+    { index: 2, bottom: 0, height: 0, folded: false },
+    { index: 3, bottom: 0, height: 0, folded: false },
+  ]
+  assert.equal(centerCard(noLayout, 100), 1, '没有矩形的卡不算，报最后一条看得见的')
+  assert.equal(centerCard(noLayout, 300), 1, '中心线跑到它们后面时也一样')
+})
+
+test('整份都折起来、或者一条都没有时，没有"画面正中"这一条', () => {
+  assert.equal(centerCard([{ index: 0, bottom: 60, height: 68, folded: true }], 30), undefined)
+  assert.equal(centerCard([], 30), undefined)
 })

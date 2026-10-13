@@ -26,7 +26,7 @@ import { fetchTranscript, type TranscriptFacts, type TranscriptResponse } from '
 // 会话行的时刻格式与这里必须是同一份（同一套 "YYYY-MM-DD HH:mm"），所以复用列表那个导出。
 import { formatTime } from './sessionList.tsx'
 import type { TranscriptItem, TranscriptKind } from '../../transcript.ts'
-import { centerPosition, shouldLoadMore } from '../logic/transcriptScroll.ts'
+import { centerCard, shouldLoadMore } from '../logic/transcriptScroll.ts'
 import { turnSections } from '../logic/transcriptTurns.ts'
 import { ChevronIcon } from './icons.tsx'
 import type { SessionManagerKey, Translate } from '../logic/locales.ts'
@@ -93,20 +93,25 @@ export interface TranscriptDialogProps {
  * （几百张卡）重画一遍。滚动事件一秒能来几十个，所以只在下一个动画帧量一次（`requestAnimationFrame`
  * 合并掉中间那些）。
  *
- * 怎么算见 `centerPosition()`：按每张卡的下沿二分，只探几次几何；`data-dsm-index` 是那张卡在日志里
- * 的事件位次（读不出来的坏行也占位，所以这个数会跳号——与右边那个总数是同一套数法）。
+ * 怎么算见 `centerCard()`：折起来的轮次里那些卡不算（它们的矩形可能全是 0，也可能照旧占着位置）。
+ * `data-dsm-index` 是那张卡在日志里的事件位次（读不出来的坏行也占位，所以这个数会跳号——与右边那个
+ * 总数是同一套数法）。
+ *
+ * 什么时候重量：滚一下、窗口缩放、条目换了一批（新一页或「查看全文」把某一格换掉），以及**某一节折
+ * 起来／展开**——折起来不触发 scroll，漏了它读数就会停在折叠前那一条上（实测：折起中心线所在的那一
+ * 节之后，画面上已经是第 150 条，读数还写着第 54 条）。
  */
 function CenterPosition({
   list,
   scroller,
-  loaded,
+  items,
   total,
   translate,
 }: {
   list: React.RefObject<HTMLDivElement | null>
   scroller: () => HTMLElement | null
-  /** 已经读进来多少条：它一变就重量一次（新一页可能把正中那一条换掉）。 */
-  loaded: number
+  /** 现在已经读到的条目：换一批就重量一次（只当依赖用，函数体不读它）。 */
+  items: readonly TranscriptItem[]
   total: number
   translate: Translate
 }): React.ReactElement {
@@ -119,15 +124,19 @@ function CenterPosition({
     let frame = 0
     const measure = (): void => {
       frame = 0
-      const cards = wrapper.querySelectorAll<HTMLElement>('[data-dsm-index]')
       const box = element.getBoundingClientRect()
-      const position = centerPosition(
-        cards.length,
-        (index) => cards[index]!.getBoundingClientRect().bottom,
-        box.top + box.height / 2,
-      )
-      const card = position === undefined ? undefined : cards[position]
-      setAt(card === undefined ? undefined : Number(card.dataset['dsmIndex']) + 1)
+      // 折起来的轮次里的卡也在 DOM 里，得让逻辑层知道哪些不算（见 `centerCard()`）。
+      const cards = [...wrapper.querySelectorAll<HTMLElement>('[data-dsm-index]')].map((card) => {
+        const rect = card.getBoundingClientRect()
+        return {
+          index: Number(card.dataset['dsmIndex']),
+          bottom: rect.bottom,
+          height: rect.height,
+          folded: card.closest('details:not([open])') !== null,
+        }
+      })
+      const index = centerCard(cards, box.top + box.height / 2)
+      setAt(index === undefined ? undefined : index + 1)
     }
     const schedule = (): void => {
       if (frame !== 0) return
@@ -136,12 +145,15 @@ function CenterPosition({
     measure()
     element.addEventListener('scroll', schedule, { passive: true })
     window.addEventListener('resize', schedule)
+    // `toggle` 不冒泡，所以在列表上捕获着听：`<details>` 折起来不触发 scroll。
+    wrapper.addEventListener('toggle', schedule, true)
     return () => {
       element.removeEventListener('scroll', schedule)
       window.removeEventListener('resize', schedule)
+      wrapper.removeEventListener('toggle', schedule, true)
       if (frame !== 0) window.cancelAnimationFrame(frame)
     }
-  }, [list, scroller, loaded])
+  }, [items, list, scroller])
 
   return (
     <span className="dsm-meta">
@@ -373,7 +385,7 @@ export function TranscriptDialog({ session, onClose, t }: TranscriptDialogProps)
           <CenterPosition
             list={list}
             scroller={scroller}
-            loaded={items.length}
+            items={items}
             total={page.totalEvents}
             translate={t}
           />
