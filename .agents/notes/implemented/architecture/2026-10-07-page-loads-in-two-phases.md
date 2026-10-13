@@ -66,4 +66,4 @@ header、再为每条折一次标题（本机 454 条会话，热投影缓存下
 - 界面结构没动，也没有新增颜色或尺寸：`.dsm-intro` / `.dsm-empty` / `.dsm-hint` 还是原来那几个，
   这次改的只是"什么时候说什么"（页头规格见
   [页头照内建设置页的规格](./2026-09-28-page-header-matches-the-builtin-settings.md)，
-  空态画在框里见[三个分页共用一份列表实现](../simplification/2026-09-28-three-pages-share-one-list.md)）。
+  空态画在框里见[列整库的分页共用一份列表实现](../simplification/2026-09-28-one-list-for-the-whole-library.md)）。

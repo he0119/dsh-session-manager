@@ -50,7 +50,6 @@ export const zh = {
   'page.refresh': '刷新',
   'page.tab.transfer': '传输',
   'page.tab.sync': '同步',
-  'page.tab.migrate': '迁移',
   'page.tab.manage': '会话',
   'page.count.sessions': '{count} 个会话',
   'page.count.workspaces': '{count} 个工作区',
@@ -107,8 +106,6 @@ export const zh = {
   'transfer.import.needTarget': '请先选择目标目录。',
 
   // ---- 迁移 ----
-  'migrate.title': '迁移会话',
-  'migrate.hint': '勾上要搬的会话（可以跨目录），点「迁移」，在弹窗里选目标目录；清单里就是会写什么，确认才落盘。',
   'migrate.to.label': '迁移到的目录',
   'list.ungrouped': '未分组',
   'migrate.to.pick': '选择目标目录…',
@@ -136,9 +133,9 @@ export const zh = {
   'migrate.workspaceTitle.placeholder': '目标目录还不是工作区时用',
   'migrate.includeArtifacts': '同时搬迁会话创建过的文件（要全量解码，较慢）',
   'migrate.needTarget': '先在上面选一个目标目录，下面就是这次迁移的清单。',
-  'migrate.lockedHidden':
-    '侧边栏不显示这条会话（已归档 / 空白 / 子智能体），它搬不走：已归档的先去「会话」页取消归档、空白的删掉，' +
-    '子智能体则连着它的父会话一起迁。',
+  'migrate.hiddenSkipped':
+    '另有 {count} 条勾中的会话侧边栏不显示（已归档 / 空白 / 子智能体），宿主不会迁它们，这次不搬：先在列表里' +
+    '单独处理（已归档的取消归档、空白的删掉、子智能体连着它的父会话一起迁）。',
   'migrate.action': '迁移',
   'migrate.dialogTitle': '将要迁移',
   'migrate.apply': '确认迁移',
@@ -205,10 +202,11 @@ export const zh = {
   'backup.restore.actions': '以下是恢复会做的 {count} 个动作（还没有写盘）：',
   'backup.restore.done': '已恢复 {sessions} 条会话、还原 {files} 个文件（注册表未改动）。',
 
-  // ---- 会话（逐条管理：归档与删除） ----
+  // ---- 会话（逐条管理：归档 / 重算名称 / 迁移 / 删除） ----
   'manage.title': '会话库',
   'manage.hint':
-    '整个会话库都在这里，侧边栏点不到的那些也在（标签说明原因）。勾选后归档、重算名称或删除；删除会先备份。分类与代价见「说明」。',
+    '整个会话库都在这里，侧边栏点不到的那些也在（标签说明原因）。勾选后归档、重算名称、迁移或删除；迁移与' +
+    '删除都会先备份。分类与代价见「说明」。',
   'manage.archive.unavailable':
     '这个宿主没有 workspaceRegistry 服务（归档是它的能力，只有 Web profile 才有），所以归档按钮不可用；删除不受影响。',
   'manage.archive.action': '归档所选',
@@ -309,8 +307,7 @@ export const zh = {
   'help.categories.visibleTip': '侧边栏会显示的会话。',
   'help.categories.note': '一条会话可能同时属于几类，行上就挂几枚标签。',
   'help.tabs.title': '每页做什么',
-  'help.tabs.manage': '整个会话库都在这里，侧边栏点不到的那些也在。列表按目录分组，组头是工作区或仓库的名字，悬浮能看到本机路径。勾选后可以归档、重新生成名称或删除：名称那一下是请宿主的名称服务按整段对话重算（每条都要整份解一次日志再跑一次模型调用），你手动改过名的与子智能体会话会跳过。',
-  'help.tabs.migrate': '把勾中的会话搬到一个目标目录：改掉会话记录里的工作目录、把日志目录挪过去、并更新工作区注册表。源就是你勾的那些会话，可以来自不同目录（每条按自己的目录算），它们各自带上自己的子智能体；侧边栏里看不见的那几类——已归档、空白、子智能体——勾不动，先在「会话」页把它们处理掉（子智能体则连着父会话一起迁）再迁。目标目录只在弹窗里选一次，全部会话落到同一个目录。',
+  'help.tabs.manage': '整个会话库都在这里，侧边栏点不到的那些也在。列表按目录分组，组头是工作区或仓库的名字，悬浮能看到本机路径。勾选后可以归档、重新生成名称、迁移或删除：名称那一下是请宿主的名称服务按整段对话重算（每条都要整份解一次日志再跑一次模型调用），你手动改过名的与子智能体会话会跳过。迁移是"把勾中的会话搬到一个目标目录"：改掉会话记录里的工作目录、把日志目录挪过去、并更新工作区注册表；源就是你勾的那些会话，可以来自不同目录（每条按自己的目录算），它们各自带上自己的子智能体；侧边栏里看不见的那几类搬不走（宿主对点名的隐藏会话一律拒），先在列表里单独处理它们再迁。目标目录只在弹窗里选一次，全部会话落到同一个目录。',
   'help.tabs.transfer': '把会话导出成 .dshsess 包，或把包里的会话导入某个工作区。',
   'help.tabs.sync': '在几台机器之间同步会话（WebDAV）：先给一份只读计划，确认才真的拉取与推送。远端地址、机器名与路径映射在这一页改，改完不用重启。',
   'help.tabs.backup': '几个会写盘的操作共同的后悔面：每次迁移、每次删除、每次同步覆盖本机那份之前都会先留一份字节级备份。「回滚」把迁移搬走的那份搬回来（连工作区注册表一起还原），「恢复」只把备份里那份搬回去，注册表不动。',
@@ -495,7 +492,6 @@ export const en: LocaleDictOf<typeof NS> = {
   'page.refresh': 'Refresh',
   'page.tab.transfer': 'Transfer',
   'page.tab.sync': 'Sync',
-  'page.tab.migrate': 'Migrate',
   'page.tab.manage': 'Sessions',
   'page.count.sessions': '{count} sessions',
   'page.count.workspaces': '{count} workspaces',
@@ -548,10 +544,6 @@ export const en: LocaleDictOf<typeof NS> = {
   'transfer.import.needFile': 'Choose a .dshsess bundle first.',
   'transfer.import.needTarget': 'Choose a target directory first.',
 
-  'migrate.title': 'Migrate sessions',
-  'migrate.hint':
-    'Tick the sessions to move (from any directory), press Migrate, then pick the target: the dialog shows what ' +
-    'will be written, and only confirming writes it.',
   'migrate.to.label': 'Directory to migrate into',
   'list.ungrouped': 'Ungrouped',
   'migrate.to.pick': 'Choose a target directory…',
@@ -581,9 +573,10 @@ export const en: LocaleDictOf<typeof NS> = {
   'migrate.workspaceTitle.placeholder': 'Used when the target directory is not a workspace yet',
   'migrate.includeArtifacts': 'Also move files the sessions created (decodes whole logs, slower)',
   'migrate.needTarget': 'Pick a target directory above; the plan below is what this migration will do.',
-  'migrate.lockedHidden':
-    'The sidebar hides this session (archived / blank / subagent), so migration cannot take it: unarchive or delete it ' +
-    'on the Sessions page, or migrate a subagent together with its parent.',
+  'migrate.hiddenSkipped':
+    '{count} of the ticked sessions are hidden from the sidebar (archived / blank / subagent), so the host will not ' +
+    'move them and they stay behind: handle them in the list first (unarchive, delete, or migrate a subagent with ' +
+    'its parent).',
   'migrate.action': 'Migrate',
   'migrate.dialogTitle': 'About to migrate',
   'migrate.apply': 'Migrate now',
@@ -650,7 +643,8 @@ export const en: LocaleDictOf<typeof NS> = {
 
   'manage.title': 'Session library',
   'manage.hint':
-    'The whole library is here, including what the sidebar cannot reach (tags say why). Tick rows to archive, retitle or delete; delete backs up first. Costs are in Help.',
+    'The whole library is here, including what the sidebar cannot reach (tags say why). Tick rows to archive, retitle, ' +
+    'migrate or delete; the last two back up first. Costs in Help.',
   'manage.archive.unavailable':
     'This host has no workspaceRegistry service (archiving is its capability, Web profiles only), so the archive buttons are disabled; deleting still works.',
   'manage.archive.action': 'Archive selected',
@@ -750,8 +744,7 @@ export const en: LocaleDictOf<typeof NS> = {
   'help.categories.visibleTip': 'A session the sidebar shows.',
   'help.categories.note': 'One session can fall into several categories, so a row can carry several tags.',
   'help.tabs.title': 'What each page does',
-  'help.tabs.manage': 'The whole session library is here, including sessions the sidebar cannot reach. The list groups by directory; a group header is the workspace or repository name, and hovering it shows the local path. Ticked rows can be archived, renamesd or deleted: regenerating names asks the host’s names service to redo them from the whole conversation (each one replays its log and runs one model call), and sessions you renamed by hand or subagent sessions are skipped.',
-  'help.tabs.migrate': 'Move the ticked sessions into one target directory: rewrite the working directory recorded in each session, move its log directory, and update the workspace registry. The source is whatever you tick — the rows may sit in different directories, and each one is read from its own — and they take their subagents along. The rows the sidebar hides (archived, blank, subagents) cannot be ticked: deal with them on the Sessions page first (a subagent moves together with its parent). The target directory is picked once in the dialog; every session lands in it.',
+  'help.tabs.manage': 'The whole session library is here, including sessions the sidebar cannot reach. The list groups by directory; a group header is the workspace or repository name, and hovering it shows the local path. Ticked rows can be archived, retitled, migrated or deleted: regenerating names asks the host’s names service to redo them from the whole conversation (each one replays its log and runs one model call), and sessions you renamed by hand or subagent sessions are skipped. Migration moves the ticked sessions into one target directory: it rewrites the working directory recorded in each session, moves its log directory, and updates the workspace registry; the source is whatever you tick — the rows may sit in different directories, each read from its own — and they take their subagents along. The rows the sidebar hides cannot move (the host refuses a hidden session by name), so deal with them in the list first. The target directory is picked once in the dialog; every session lands in it.',
   'help.tabs.transfer': 'Export sessions into a .dshsess bundle, or import a bundle’s sessions into a workspace.',
   'help.tabs.sync': 'Sync sessions between machines over WebDAV: it first shows a read-only plan and only pulls and pushes once you confirm. The remote address, machine names and path mappings are edited on this page, with no restart.',
   'help.tabs.backup': 'The undo surface shared by the operations that write: every migration, every delete and every overwrite of this machine’s copy leaves a byte-level backup first. Roll back brings back what a migration moved (the workspace registry included); Restore only moves the backed-up copy back and leaves the registry alone.',

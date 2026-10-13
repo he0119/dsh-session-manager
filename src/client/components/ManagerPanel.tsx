@@ -1,11 +1,14 @@
 /**
  * 「会话管理」页的骨架：一条标题行 + 页内分页，把三件事收在同一页里。
  *
- * 为什么是页内分页而不是几个设置分节：导出/导入、迁移、逐条管理都是"对着同一个会话库做一件事"，
+ * 为什么是页内分页而不是几个设置分节：导出/导入、逐条管理与迁移都是"对着同一个会话库做一件事"，
  * 共用一份库状态（`/state` 只拉一次）、共用一句"库在哪、有多少条"的说明，分开成几页反而每次都要
- * 重新认一遍上下文。页面本体分别是 [TransferPanel.tsx](./TransferPanel.tsx)、
- * [MigrationPanel.tsx](./MigrationPanel.tsx)、[ManagePanel.tsx](./ManagePanel.tsx) 与
- * [BackupPanel.tsx](./BackupPanel.tsx)（后者是三个写操作共同的后悔面，不属于其中任何一个动作页）。
+ * 重新认一遍上下文。页面本体分别是 [ManagePanel.tsx](./ManagePanel.tsx)（逐条管理，**含迁移**）、
+ * [TransferPanel.tsx](./TransferPanel.tsx) 与 [BackupPanel.tsx](./BackupPanel.tsx)（后者是三个写
+ * 操作共同的后悔面，不属于其中任何一个动作页）。
+ *
+ * 迁移原先单独占一个分页：它的源改成"你勾中的那些会话"之后，那一页就只剩一张与「会话」页逐字同形的
+ * 列表 + 一枚按钮 + 一个弹窗，于是并进了那一页的动作行（见 ManagePanel 的模块说明）。
  *
  * 数据分两份到：`/meta`（库在哪、宿主有哪些能力位，不扫库）与 `/state`（扫完整库的清单）。页头读
  * `state ?? meta`，所以"位置与能力位"不必等那遍扫描；清单没到的分页说「读取中…」，而不是先把
@@ -27,7 +30,6 @@ import { versionCommit, versionLabel, versionTag } from '../logic/version.ts'
 import { BackupPanel } from './BackupPanel.tsx'
 import { HelpPanel } from './HelpPanel.tsx'
 import { ManagePanel } from './ManagePanel.tsx'
-import { MigrationPanel } from './MigrationPanel.tsx'
 import { ProgressBlock } from './ProgressBlock.tsx'
 import { SyncPanel } from './SyncPanel.tsx'
 import { TransferPanel } from './TransferPanel.tsx'
@@ -45,7 +47,7 @@ export interface ManagerPanelProps {
 }
 
 /** 页内分页。 */
-type PanelKey = 'transfer' | 'sync' | 'migrate' | 'manage' | 'backup' | 'help'
+type PanelKey = 'transfer' | 'sync' | 'manage' | 'backup' | 'help'
 
 /** 会话管理页。 */
 export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactElement {
@@ -156,7 +158,7 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
       )}
 
       {/*
-        页签顺序：四个动作页按日常程度排（会话 → 迁移 → 传输 → 同步），「备份」是那三个写操作
+        页签顺序：三个动作页按日常程度排（会话 → 传输 → 同步），「备份」是那三个写操作
         共同的后悔面（迁移 / 删除 / 同步覆盖各留一份），日常程度最低却也不属于其中任何一页，所以
         排在动作页之后、最后的「说明」之前——「说明」是一次性读的参考，不该挤在动作页上（详见
         HelpPanel.tsx 的取舍）。同步紧挨着传输，是因为它落地走的是导入那条编排（见 SyncPanel.tsx
@@ -174,15 +176,6 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
             onClick={() => setPanel('manage')}
           >
             {t('page.tab.manage')}
-          </button>
-          <button
-            type="button"
-            role="tab"
-            className="dsm-tab"
-            aria-selected={panel === 'migrate'}
-            onClick={() => setPanel('migrate')}
-          >
-            {t('page.tab.migrate')}
           </button>
           <button
             type="button"
@@ -236,8 +229,7 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
         </button>
       </div>
 
-      {panel === 'manage' && <ManagePanel t={t} state={state} meta={meta} reload={load} />}
-      {panel === 'migrate' && <MigrationPanel t={t} state={state} meta={meta} reload={load} directory={directory} />}
+      {panel === 'manage' && <ManagePanel t={t} state={state} meta={meta} reload={load} directory={directory} />}
       {panel === 'transfer' && <TransferPanel t={t} state={state} meta={meta} reload={load} directory={directory} />}
       {panel === 'sync' && <SyncPanel t={t} state={state} meta={meta} reload={load} />}
       {panel === 'backup' && <BackupPanel t={t} reload={load} />}

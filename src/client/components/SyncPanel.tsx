@@ -457,7 +457,7 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
    *
    * **只在需要重启时说话**，而且单独一条横幅、不塞进上面那条绿色成功横幅——两件事共用一个颜色底时，
    * 读的人分不出哪句是坏消息。判据取自最近一次结果：`mode === 'apply'` 说明它是落地回来的，不是预演
-   * （与迁移页同一口径，见 [MigrationPanel.tsx](./MigrationPanel.tsx)）。
+   * （与迁移同一口径，见 [ManagePanel.tsx](./ManagePanel.tsx)）。
    */
   const restartWarn =
     sync !== null && sync.mode === 'apply' && sync.pulled.length > 0 && sync.takesEffect === 'restart-required'
