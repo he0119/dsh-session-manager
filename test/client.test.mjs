@@ -4609,7 +4609,7 @@ test('客户端产物：迁移落地时宿主报的每条进度都进了界面�
   assert.ok(cleared > landed, '落地收尾时那条进度被清掉（同一个状态位置回 null）')
 })
 
-test('客户端产物：内容视图没有底部那一行，页头写着已读与总数', { skip }, () => {
+test('客户端产物：内容视图没有底部那一行，页头写着正中那一条的位次与总数', { skip }, () => {
   const state = {
     sessionsRoot: '/home/u/.dsh/sessions',
     registryPath: '/home/u/.dsh/registry.json',
@@ -4652,8 +4652,8 @@ test('客户端产物：内容视图没有底部那一行，页头写着已读�
     '「加载更多」与「已到日志末尾」都不在树上了',
   )
   assert.ok(
-    text.some((item) => String(item) === 'manage.transcript.loaded:{"loaded":0,"total":25}'),
-    '页头把已读与总数并排写：总数第一页就有（解析层扫行头数出来的），没筛时不重复写「显示」',
+    text.some((item) => String(item) === 'manage.transcript.total:{"total":25}'),
+    '还没量到正中那一条时至少报总数：总数第一页就有（解析层扫行头数出来的），没筛时不写「显示」',
   )
 })
 
@@ -4734,6 +4734,11 @@ test('客户端产物：一回合一节折得起来，标题自己画折叠标�
     elementsOf(turn).filter((node) => classesOf(node).includes('dsm-item')).length,
     4,
     '这一回合的四条都在 details 里：折起来要一起走（中间那两条自己不带 turn）',
+  )
+  assert.equal(
+    elementsOf(turn).find((node) => classesOf(node).includes('dsm-item'))?.props['data-dsm-index'],
+    1,
+    '每张卡带着自己在日志里的事件位次：页头那半句"第几条"读的就是它（坏行也占位，所以会跳号）',
   )
   const body = elementsOf(turn).find((node) => classesOf(node).includes('dsm-turnBody'))
   assert.ok(body !== undefined, '条目装在自己那一层里（节内间距由它给）')
