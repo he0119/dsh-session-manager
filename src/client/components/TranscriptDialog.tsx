@@ -26,7 +26,7 @@ import { fetchTranscript, type TranscriptFacts, type TranscriptResponse } from '
 // 会话行的时刻格式与这里必须是同一份（同一套 "YYYY-MM-DD HH:mm"），所以复用列表那个导出。
 import { formatTime } from './sessionList.tsx'
 import type { TranscriptItem, TranscriptKind } from '../../transcript.ts'
-import { shouldLoadMore } from '../logic/transcriptScroll.ts'
+import { centerPosition, shouldLoadMore } from '../logic/transcriptScroll.ts'
 import { turnSections } from '../logic/transcriptTurns.ts'
 import { ChevronIcon } from './icons.tsx'
 import type { SessionManagerKey, Translate } from '../logic/locales.ts'
@@ -84,6 +84,72 @@ export interface TranscriptDialogProps {
   session: { id: string; title?: string }
   onClose: () => void
   t: Translate
+}
+
+/**
+ * 页头右端那半句"画面正中是第几条"。
+ *
+ * 它自己持有状态、自己挂滚动监听：这一行跟着滚动变，状态要是放在视图里，滚一下就会把整份时间线
+ * （几百张卡）重画一遍。滚动事件一秒能来几十个，所以只在下一个动画帧量一次（`requestAnimationFrame`
+ * 合并掉中间那些）。
+ *
+ * 怎么算见 `centerPosition()`：按每张卡的下沿二分，只探几次几何；`data-dsm-index` 是那张卡在日志里
+ * 的事件位次（读不出来的坏行也占位，所以这个数会跳号——与右边那个总数是同一套数法）。
+ */
+function CenterPosition({
+  list,
+  scroller,
+  loaded,
+  total,
+  translate,
+}: {
+  list: React.RefObject<HTMLDivElement | null>
+  scroller: () => HTMLElement | null
+  /** 已经读进来多少条：它一变就重量一次（新一页可能把正中那一条换掉）。 */
+  loaded: number
+  total: number
+  translate: Translate
+}): React.ReactElement {
+  const [at, setAt] = React.useState<number | undefined>(undefined)
+
+  React.useEffect(() => {
+    const wrapper = list.current
+    const element = scroller()
+    if (wrapper === null || element === null) return
+    let frame = 0
+    const measure = (): void => {
+      frame = 0
+      const cards = wrapper.querySelectorAll<HTMLElement>('[data-dsm-index]')
+      const box = element.getBoundingClientRect()
+      const position = centerPosition(
+        cards.length,
+        (index) => cards[index]!.getBoundingClientRect().bottom,
+        box.top + box.height / 2,
+      )
+      const card = position === undefined ? undefined : cards[position]
+      setAt(card === undefined ? undefined : Number(card.dataset['dsmIndex']) + 1)
+    }
+    const schedule = (): void => {
+      if (frame !== 0) return
+      frame = window.requestAnimationFrame(measure)
+    }
+    measure()
+    element.addEventListener('scroll', schedule, { passive: true })
+    window.addEventListener('resize', schedule)
+    return () => {
+      element.removeEventListener('scroll', schedule)
+      window.removeEventListener('resize', schedule)
+      if (frame !== 0) window.cancelAnimationFrame(frame)
+    }
+  }, [list, scroller, loaded])
+
+  return (
+    <span className="dsm-meta">
+      {at === undefined
+        ? translate('manage.transcript.total', { total })
+        : translate('manage.transcript.position', { at, total })}
+    </span>
+  )
 }
 
 /**
@@ -208,7 +274,7 @@ export function TranscriptDialog({ session, onClose, t }: TranscriptDialogProps)
 
   /** 一条事件一张卡。按回合的标题不在这里——它由外面那一节画（`<details>` 的 `summary`）。 */
   const itemOf = (item: TranscriptItem): React.ReactElement => (
-    <div key={item.index} className={`dsm-item dsm-item-${item.kind}`}>
+    <div key={item.index} className={`dsm-item dsm-item-${item.kind}`} data-dsm-index={item.index}>
       <div className="dsm-itemHead">
         <span className="dsm-itemKind">{t(KIND_KEY[item.kind])}</span>
         {item.name !== undefined && <span className="dsm-itemName">{item.name}</span>}
@@ -298,18 +364,19 @@ export function TranscriptDialog({ session, onClose, t }: TranscriptDialogProps)
           </button>
         ))}
         <span className="dsm-spacer" />
-        {/* 总数（`totalEvents`）是解析层扫行头数出来的，第一页到手就有；没筛的时候不重复写「显示」。
-            第一页到手之前不摆这一行：那时候拿 0 当结论是假话。 */}
+        {/* 筛过之后先说清"筛出几条"，再说"画面正中是第几条"。总数（`totalEvents`）是解析层扫行头
+            数出来的，第一页到手就有；第一页到手之前这一行不摆：那时候拿 0 当结论是假话。 */}
+        {filter !== 'all' && (
+          <span className="dsm-meta">{t('manage.transcript.shown', { shown: shown.length })}</span>
+        )}
         {page !== null && (
-          <span className="dsm-meta">
-            {filter === 'all'
-              ? t('manage.transcript.loaded', { loaded: items.length, total: page.totalEvents })
-              : t('manage.transcript.shown', {
-                  shown: shown.length,
-                  loaded: items.length,
-                  total: page.totalEvents,
-                })}
-          </span>
+          <CenterPosition
+            list={list}
+            scroller={scroller}
+            loaded={items.length}
+            total={page.totalEvents}
+            translate={t}
+          />
         )}
       </div>
 
