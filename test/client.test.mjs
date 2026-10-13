@@ -4657,6 +4657,19 @@ test('客户端产物：内容视图没有底部那一行，页头写着已读�
   )
 })
 
+test('样式源码：CSS 正文里没有反引号（模板字面量会被提前截断）', () => {
+  // 现象：CSS 正文里写一个反引号，模板字面量就在那里断开，后面的 CSS 被当成 JS——报错落在很远的地方
+  // （实测：产物报 "transcriptFilters is not defined"，而真凶是几百行之前的一对反引号）。
+  // 这条写在读文件的这个文件里，不放进 styles.test.mjs：那个文件 import 样式模块，模块求值一炸就先抛了，
+  // 人话根本没机会说。
+  const source = readFileSync(join(root, 'src/client/styles.ts'), 'utf8')
+  const openAt = source.indexOf('export const CSS = `')
+  assert.notEqual(openAt, -1, '找不到 CSS 模板字面量')
+  const head = 'export const CSS = `'
+  const body = source.slice(openAt + head.length, source.indexOf('\n`', openAt))
+  const at = body.indexOf('`')
+  assert.equal(at, -1, `CSS 正文第 ${body.slice(0, Math.max(at, 0)).split('\n').length} 行附近出现了反引号`)
+})
 
 test('客户端产物：回合标题的偏移量来自视图量出来的那一行高度', { skip }, () => {
   // 窄窗口里筛选那一行会折成两行（它 flex-wrap: wrap），高度会变，所以 CSS 里那个偏移量是个变量。
