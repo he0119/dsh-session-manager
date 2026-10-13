@@ -440,19 +440,19 @@ function kindText(type: string, data: Record<string, unknown>): string | undefin
     case 'approval/policy':
       return `审批：${String(data['policy'] ?? '')}`
     case 'turn/start':
-      return `第 ${String(data['turn'] ?? '?')} 回合开始`
+      return `第 ${String(data['turn'] ?? '?')} 轮开始`
     case 'turn/end': {
       const reason = data['reason']
       const kind =
         reason !== null && typeof reason === 'object'
           ? (reason as Record<string, unknown>)['kind']
           : undefined
-      return `第 ${String(data['turn'] ?? '?')} 回合结束${kind === undefined ? '' : `（${String(kind)}）`}`
+      return `第 ${String(data['turn'] ?? '?')} 轮结束${kind === undefined ? '' : `（${String(kind)}）`}`
     }
     case 'step/start':
-      return `第 ${String(data['turn'] ?? '?')} 回合第 ${String(data['step'] ?? '?')} 步开始`
+      return `第 ${String(data['turn'] ?? '?')} 轮第 ${String(data['step'] ?? '?')} 步开始`
     case 'step/end':
-      return `第 ${String(data['turn'] ?? '?')} 回合第 ${String(data['step'] ?? '?')} 步结束`
+      return `第 ${String(data['turn'] ?? '?')} 轮第 ${String(data['step'] ?? '?')} 步结束`
     default:
       return undefined
   }

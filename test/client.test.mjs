@@ -4671,7 +4671,7 @@ test('样式源码：CSS 正文里没有反引号（模板字面量会被提前�
   assert.equal(at, -1, `CSS 正文第 ${body.slice(0, Math.max(at, 0)).split('\n').length} 行附近出现了反引号`)
 })
 
-test('客户端产物：回合标题的偏移量来自视图量出来的那一行高度', { skip }, () => {
+test('客户端产物：轮次标题的偏移量来自视图量出来的那一行高度', { skip }, () => {
   // 窄窗口里筛选那一行会折成两行（它 flex-wrap: wrap），高度会变，所以 CSS 里那个偏移量是个变量。
   // 这里钉的是两端写在同一个名字上：CSS 那侧是 `var(--dsm-turn-top, 37px)`，JS 这侧是下面这三处。
   assert.match(code, /TURN_TOP_PROPERTY = "--dsm-turn-top"/, '属性名就写在这一处')
@@ -4679,7 +4679,7 @@ test('客户端产物：回合标题的偏移量来自视图量出来的那一�
   assert.match(code, /style\.removeProperty\(TURN_TOP_PROPERTY/, '弹窗关掉时收回去，别留在官方那一层上')
 })
 
-test('客户端产物：一回合一节折得起来，标题自己画折叠标记', { skip }, () => {
+test('客户端产物：一轮一节折得起来，标题自己画折叠标记', { skip }, () => {
   const state = {
     sessionsRoot: '/home/u/.dsh/sessions',
     registryPath: '/home/u/.dsh/registry.json',
@@ -4689,7 +4689,7 @@ test('客户端产物：一回合一节折得起来，标题自己画折叠标�
     ],
     workspaces: [],
   }
-  // 头一条不属于任何回合（会话级的 permission/preset 这种），第 1 回合从 `turn/start` 到 `turn/end`。
+  // 头一条不属于任何一轮（会话级的 permission/preset 这种），第 1 轮从 `turn/start` 到 `turn/end`。
   const items = [
     { index: 0, kind: 'event', type: 'permission/preset', text: 'x' },
     { index: 1, kind: 'event', type: 'turn/start', turn: 1, text: 'starts' },
@@ -4718,7 +4718,7 @@ test('客户端产物：一回合一节折得起来，标题自己画折叠标�
   const cards = nodes.filter((node) => classesOf(node).includes('dsm-item'))
   assert.equal(cards.length, 5, '五条都画出来了')
   const turns = nodes.filter((node) => classesOf(node).includes('dsm-turn'))
-  assert.equal(turns.length, 1, '只有第 1 回合那一节（不属于任何回合的那条不折）')
+  assert.equal(turns.length, 1, '只有第 1 轮那一节（不属于任何一轮的那条不折）')
   const turn = turns[0]
   assert.equal(turn.type, 'details', '用原生 details：折叠、键盘与无障碍都白拿')
   assert.equal(turn.props.open, true, '默认展开——折起来是读者主动做的事')
@@ -4729,11 +4729,11 @@ test('客户端产物：一回合一节折得起来，标题自己画折叠标�
     '折叠标记自己画：浏览器那个三角在 CSS 里去掉，换成与组头同一枚',
   )
   assert.ok(text.includes('manage.transcript.turn:{"turn":1}'), '标题说清是第几轮')
-  assert.ok(text.includes('manage.transcript.turnCount:{"count":4}'), '右端说清这一回合几条')
+  assert.ok(text.includes('manage.transcript.turnCount:{"count":4}'), '右端说清这一轮几条')
   assert.equal(
     elementsOf(turn).filter((node) => classesOf(node).includes('dsm-item')).length,
     4,
-    '这一回合的四条都在 details 里：折起来要一起走（中间那两条自己不带 turn）',
+    '这一轮的四条都在 details 里：折起来要一起走（中间那两条自己不带 turn）',
   )
   assert.equal(
     elementsOf(turn).find((node) => classesOf(node).includes('dsm-item'))?.props['data-dsm-index'],

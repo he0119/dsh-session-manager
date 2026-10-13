@@ -343,7 +343,7 @@ test('弹窗正文层的字号自己写：官方 Modal 落在 .dsm-root 之外�
   assert.match(facts, /line-height:\s*18px/, '12px 的字配 18px 行高（.dsm-defs 那一档是 14px/22px）')
 })
 
-test('筛选那一行贴在正文顶上，回合标题停在它下面', () => {
+test('筛选那一行贴在正文顶上，轮次标题停在它下面', () => {
   // 现象：滚到下面时筛选与计数那一行跟着滚走，想换个筛选得先滚回顶上。
   const filters = ruleBody('.dsm-transcriptFilters')
   assert.notEqual(filters, null, '找不到 .dsm-transcriptFilters 规则')
@@ -353,7 +353,7 @@ test('筛选那一行贴在正文顶上，回合标题停在它下面', () => {
   const zOf = (body) => Number(/z-index:\s*(-?\d+)/.exec(body ?? '')?.[1] ?? '0')
   assert.ok(
     zOf(filters) > zOf(ruleBody('.dsm-turnHead')),
-    '要压住回合标题（它也是 sticky 的）',
+    '要压住轮次标题（它也是 sticky 的）',
   )
   assert.match(
     ruleBody('.dsm-turnHead') ?? '',
@@ -362,14 +362,14 @@ test('筛选那一行贴在正文顶上，回合标题停在它下面', () => {
   )
 })
 
-test('回合那一节的标题：底色与卡片同层，折叠标记自己画', () => {
+test('轮次那一节的标题：底色与卡片同层，折叠标记自己画', () => {
   // 现象（深色主题里一眼看得出）：标题原先拿 bg-base 当底色，于是卡片上横出一条比卡片更黑的色带——
   // 看着像贴上去的黑条，而不是这一节的标题。bg-layer-2 正是官方 Modal 卡片的背景。
   const head = ruleBody('.dsm-turnHead')
   assert.notEqual(head, null, '找不到 .dsm-turnHead 规则')
   assert.match(head, /background:\s*var\(--dsw-alias-bg-layer-2/, '底色与卡片同层')
   assert.doesNotMatch(head, /bg-base/, 'bg-base 在深色主题下比卡片更黑，就是那条黑条')
-  assert.match(head, /position:\s*sticky/, '标题滚进这一回合时要自己停在顶上')
+  assert.match(head, /position:\s*sticky/, '标题滚进这一轮时要自己停在顶上')
   assert.match(head, /list-style:\s*none/, '浏览器那个三角不要，换成自己画的那一枚')
   assert.match(head, /cursor:\s*pointer/, '这一行是能点的')
   const marker = ruleBody('.dsm-turnHead::-webkit-details-marker')
@@ -378,7 +378,7 @@ test('回合那一节的标题：底色与卡片同层，折叠标记自己画',
   assert.match(closed ?? '', /transform:\s*rotate\(-90deg\)/, '折起来时那枚尖角转向右边')
   const body = ruleBody('.dsm-turnBody')
   assert.match(body ?? '', /gap:\s*8px/, '节内条目间距与列表那一层一致')
-  assert.match(ruleBody('.dsm-turnLabel') ?? '', /label-primary/, '回合名用正文色')
+  assert.match(ruleBody('.dsm-turnLabel') ?? '', /label-primary/, '轮次名用正文色')
   assert.match(ruleBody('.dsm-turnHead .dsm-meta') ?? '', /font-weight:\s*400/, '右端那几个数是补充说明，不跟着标题加粗')
 })
 

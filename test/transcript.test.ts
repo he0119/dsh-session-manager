@@ -133,10 +133,10 @@ test('readTranscript：工具名靠 callId 从调用那条补到结果那条，�
 test('readTranscript：控制事件给一句人话，不认识的原样压一行 JSON', () => {
   const page = readTranscript(LINES)
   assert.equal(page.items[0]!.text, '权限预设：danger-full-access')
-  assert.equal(page.items[1]!.text, '第 1 回合开始')
+  assert.equal(page.items[1]!.text, '第 1 轮开始')
   assert.equal(page.items[6]!.text, '标题（模型）：看看日志')
   assert.equal(page.items[8]!.text, '{"attempt":2}', '不认识的事件也要摆出来（完整优先）')
-  assert.equal(page.items[9]!.text, '第 1 回合结束（completed）')
+  assert.equal(page.items[9]!.text, '第 1 轮结束（completed）')
 })
 
 test('readTranscript：坏行如实记进 problems，不影响其余条目', () => {

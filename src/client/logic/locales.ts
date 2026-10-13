@@ -257,7 +257,7 @@ export const zh = {
   'manage.transcript.shown': '显示 {shown} 条',
   'manage.transcript.position': '第 {at} 条 / 共 {total} 条',
   'manage.transcript.total': '共 {total} 条',
-  'manage.transcript.turn': '第 {turn} 回合',
+  'manage.transcript.turn': '第 {turn} 轮',
   'manage.transcript.turnCount': '{count} 条',
   'manage.transcript.reasoning': '思考（折起）',
   'manage.transcript.synthetic': '非人类消息',
