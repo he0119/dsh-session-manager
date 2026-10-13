@@ -73,7 +73,7 @@
 - [跨机器的项目身份是 git remote](../.agents/notes/implemented/feature/2026-10-01-project-identity-is-the-git-remote.md)：
   索引记身份与仓库内相对路径，落 `本机仓库根 + 相对路径`；显式映射优先，认不出来就跳过并点名仓库。
 - [工作区组头只摆名字与一枚主机标签，项目身份与本机路径进悬浮提示](../.agents/notes/implemented/feature/2026-10-04-workspace-shows-project-identity.md)：
-  列表与同步弹窗的组头、目录字段的候选面板（迁移的源 / 目标与导入的落地目录，见
+  列表与同步弹窗的组头、目录字段的候选面板（迁移的目标与导入的落地目录，见
   [目录字段那篇](../.agents/notes/implemented/architecture/2026-10-07-directory-field-picks-from-a-panel.md)）
   共用 `planRows` 的称呼规则（组头与面板只摆名字 + 一枚主机名标签，路径与条数退到第二行与悬浮提示；
   只有一行可用的值控件里身份与路径都在文本里），身份由 `/state` 的 `repos` 报来（注入的入口带进程内缓存）。
@@ -105,8 +105,10 @@
   一个名字一个定义，三处读同一个结论。
 - [「认领」是宿主那份成员表](../.agents/notes/implemented/bug-fix/2026-10-04-accounted-means-the-hosts-membership.md)：
   注册表里的**登记**不算数，cwd 归一到记录 `path` 才算——判据只在 `src/accounting.ts` 写一遍。
-- [迁移页把「未分组」当独立来源](../.agents/notes/implemented/architecture/2026-09-27-unowned-is-a-migration-source.md)：
-  候选、请求、计划、被关掉的开关，四种口径钉在一起。
+- [迁移的源就是你勾的那些会话](../.agents/notes/implemented/architecture/2026-10-13-source-is-what-you-tick.md)：
+  勾选就是源（可以跨目录），目标目录在弹窗里选一次；`from` 参数与 `includeUnowned` 开关一并删掉。
+  它取代的两条留在否决记录里：[源永远是一个目录](../.agents/notes/rejected/simplification/2026-10-13-ungrouped-is-only-a-label.md)、
+  [「未分组」当独立来源](../.agents/notes/rejected/architecture/2026-09-27-unowned-is-a-migration-source.md)。
 - [迁移排除侧边栏不显示的会话](../.agents/notes/implemented/architecture/2026-09-28-migration-excludes-what-the-sidebar-hides.md)：
   三条隐藏理由的输入来源，与「读不到就按会显示处理」。
 - [三个分页共用一份列表实现](../.agents/notes/implemented/simplification/2026-09-28-three-pages-share-one-list.md)：

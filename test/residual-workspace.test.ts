@@ -198,7 +198,7 @@ function makeFixture(
 test('E2E：只剩悬空登记的源工作区，全量迁移后必须被删掉', async () => {
   const fx = makeFixture('residual-stale-only', { sessions: ['visible'], dangling: true })
 
-  const run = await runMigration(fx.deps, { from: fx.from, to: fx.to }, { apply: true })
+  const run = await runMigration(fx.deps, { sessionIds: ['session-visible'], to: fx.to }, { apply: true })
 
   assert.equal(run.applied, true)
   assert.equal(run.verified, true, run.problems.join('; '))
@@ -227,11 +227,12 @@ test('E2E：只剩悬空登记的源工作区，全量迁移后必须被删掉',
 test('E2E：只剩侧边栏不显示的会话时，源工作区留着，但必须点名说清楚', async () => {
   const fx = makeFixture('residual-hidden', { sessions: ['visible', 'blank', 'archived'], dangling: true })
 
-  const run = await runMigration(fx.deps, { from: fx.from, to: fx.to }, { apply: true })
+  // 只勾看得见的那条：空白与已归档那两行勾不动（界面上是灰的），没勾到就留在源工作区里。
+  const run = await runMigration(fx.deps, { sessionIds: ['session-visible'], to: fx.to }, { apply: true })
 
   assert.equal(run.applied, true)
   assert.equal(run.verified, true, run.problems.join('; '))
-  // 空白与已归档不进候选、这次不搬，因此源工作区留着——两块事实都得报出来。
+  // 空白与已归档没被勾到、这次不搬，因此源工作区留着——两块事实都得报出来。
   assert.deepEqual(run.preview.sessions.map((session) => session.id), ['session-visible'])
   assert.deepEqual(
     run.preview.strandedSources.map((source) => ({
@@ -260,7 +261,7 @@ test('E2E：只剩侧边栏不显示的会话时，源工作区留着，但必�
 test('E2E：只是用户自己挑了子集时，不报"侧边栏不显示"那一句', async () => {
   const fx = makeFixture('residual-subset', { sessions: ['visible', 'visible-2'], dangling: false })
 
-  const run = await runMigration(fx.deps, { from: fx.from, to: fx.to, sessionIds: ['session-visible'] }, { apply: true })
+  const run = await runMigration(fx.deps, { sessionIds: ['session-visible'], to: fx.to }, { apply: true })
 
   assert.equal(run.applied, true)
   assert.deepEqual(run.preview.strandedSources, [], '没被点名的可见会话不是"搬不走的"，别混进这一句')

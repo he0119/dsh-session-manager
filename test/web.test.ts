@@ -791,14 +791,14 @@ test('registerWebRoutes：注册十二条精确路由，方法不对回 405', as
 
 // ---- 会话管理：迁移 / 备份 / 回滚 ----
 
-test('POST /migrate：mode 缺省只预演，预演结果里带上源/目标项目目录与注册表变更', async () => {
+test('POST /migrate：mode 缺省只预演，预演结果里带上来源/目标项目目录与注册表变更', async () => {
   const sandbox = makeSandbox('web-migrate-plan')
   writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000, { title: '要搬走的会话' })
 
   const handlers = createApiHandlers(deps(sandbox))
   const { res, captured } = fakeRes()
   await handlers['POST /migrate']!(
-    fakeReq('POST', `${API_PREFIX}/migrate`, Buffer.from(JSON.stringify({ from: CWD_A, to: CWD_B }))),
+    fakeReq('POST', `${API_PREFIX}/migrate`, Buffer.from(JSON.stringify({ sessionIds: ['session-a'], to: CWD_B }))),
     res,
   )
   assert.equal(captured.status, 200)
@@ -810,8 +810,9 @@ test('POST /migrate：mode 缺省只预演，预演结果里带上源/目标项�
   assert.equal((preview['sessions'] as unknown[]).length, 1)
   // 预演里也带标题：迁移页挑会话与传输页用同一套口径（标题可见、id 退到悬浮提示）。
   assert.equal((preview['sessions'] as Array<Record<string, unknown>>)[0]!['title'], '要搬走的会话')
-  // 项目目录名是**绝对路径**：join(会话根, projectKey(工作区目录))
-  assert.equal(preview['sourceProjectDir'], join(sandbox.sessionsRoot, projectKey(CWD_A)))
+  // 项目目录名是**绝对路径**：join(会话根, projectKey(工作区目录))；来源是**一列**（勾选可以跨目录）
+  assert.deepEqual(preview['sourceProjectDirs'], [join(sandbox.sessionsRoot, projectKey(CWD_A))])
+  assert.deepEqual(preview['sessionIds'], ['session-a'])
   assert.equal(preview['targetProjectDir'], join(sandbox.sessionsRoot, projectKey(CWD_B)))
   assert.equal((preview['registryChange'] as Record<string, unknown>)['targetPath'], CWD_B)
   // 没注入 effectMode 时按保守说法回：注册表落盘还要重启才被承认。
@@ -820,7 +821,7 @@ test('POST /migrate：mode 缺省只预演，预演结果里带上源/目标项�
   assert.equal(existsSync(sessionDir(sandbox.sessionsRoot, CWD_A, 'session-a')), true)
 })
 
-test('POST /migrate：带 sessionIds 时只搬点名的会话（界面「只选其中几条」走的就是这条路）', async () => {
+test('POST /migrate：只搬点名的那些会话（源就是它们，未点名的留在原处）', async () => {
   const sandbox = makeSandbox('web-migrate-subset')
   writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000)
   writeSession(sandbox.sessionsRoot, 'session-b', CWD_A, 2000)
@@ -831,7 +832,7 @@ test('POST /migrate：带 sessionIds 时只搬点名的会话（界面「只选�
     fakeReq(
       'POST',
       `${API_PREFIX}/migrate`,
-      Buffer.from(JSON.stringify({ mode: 'apply', from: CWD_A, to: CWD_B, sessionIds: ['session-b'] })),
+      Buffer.from(JSON.stringify({ mode: 'apply', sessionIds: ['session-b'], to: CWD_B })),
     ),
     res,
   )
@@ -867,7 +868,11 @@ test('POST /migrate：宿主持着的会话不搬，预演里报出 liveSkipped�
   const handlers = createApiHandlers(deps(sandbox, { liveSessionIds: () => new Set(['session-b']) }))
   const planned = fakeRes()
   await handlers['POST /migrate']!(
-    fakeReq('POST', `${API_PREFIX}/migrate`, Buffer.from(JSON.stringify({ from: CWD_A, to: CWD_B }))),
+    fakeReq(
+      'POST',
+      `${API_PREFIX}/migrate`,
+      Buffer.from(JSON.stringify({ sessionIds: ['session-a', 'session-b'], to: CWD_B })),
+    ),
     planned.res,
   )
   assert.equal(planned.captured.status, 200)
@@ -880,7 +885,11 @@ test('POST /migrate：宿主持着的会话不搬，预演里报出 liveSkipped�
 
   const applied = fakeRes()
   await handlers['POST /migrate']!(
-    fakeReq('POST', `${API_PREFIX}/migrate`, Buffer.from(JSON.stringify({ mode: 'apply', from: CWD_A, to: CWD_B }))),
+    fakeReq(
+      'POST',
+      `${API_PREFIX}/migrate`,
+      Buffer.from(JSON.stringify({ mode: 'apply', sessionIds: ['session-a', 'session-b'], to: CWD_B })),
+    ),
     applied.res,
   )
   assert.equal(applied.captured.status, 200)
@@ -890,23 +899,19 @@ test('POST /migrate：宿主持着的会话不搬，预演里报出 liveSkipped�
   assert.deepEqual(readRegistry(sandbox.registryPath).tables.workspaces['ws-a']?.sessionIds, ['session-b'])
   assert.equal(existsSync(sessionDir(sandbox.sessionsRoot, CWD_B, 'session-b')), false)
 
-  // 点名点到活会话：计划层报 problem、说清下一步（不是"找不到"）。
+  // 只点名那条活着的：计划层说清"全在宿主手里、重启再迁"，而不是含糊的"没选中会话"。
   //
-  // 这一条**不再用 409**：干活那一段是事件流，状态码在第一条事件之前就发出去了。结论落在 `result`
-  // 的正文里（与上面"源项目目录不存在"那条同一个理由）。
+  // 这一条**依旧不用 409**：干活那一段是事件流，状态码在第一条事件之前就发出去了。结论落在 `result`
+  // 的正文里（与"目标目录不存在"那条同一个理由）。
   const named = fakeRes()
   await handlers['POST /migrate']!(
-    fakeReq(
-      'POST',
-      `${API_PREFIX}/migrate`,
-      Buffer.from(JSON.stringify({ from: CWD_A, to: CWD_B, sessionIds: ['session-b'] })),
-    ),
+    fakeReq('POST', `${API_PREFIX}/migrate`, Buffer.from(JSON.stringify({ sessionIds: ['session-b'], to: CWD_B }))),
     named.res,
   )
   assert.equal(named.captured.status, 200)
   assert.equal(payload(named.captured)['ok'], false)
-  assert.match((payload(named.captured)['problems'] as string[]).join('; '), /session-b is live in the host/)
-  assert.match((payload(named.captured)['problems'] as string[]).join('; '), /restart DSH, then migrate it/)
+  assert.match((payload(named.captured)['problems'] as string[]).join('; '), /every ticked session is live in the host/)
+  assert.match((payload(named.captured)['problems'] as string[]).join('; '), /restart DSH, then migrate them/)
 })
 
 test('POST /migrate：侧边栏不显示的会话搬不走、源工作区因此留着，预演里报出 strandedSources', async () => {
@@ -933,8 +938,9 @@ test('POST /migrate：侧边栏不显示的会话搬不走、源工作区因此�
 
   const handlers = createApiHandlers(deps(sandbox))
   const planned = fakeRes()
+  // 只勾看得见的那条：空白会话那一行在界面上是灰的（勾不动），它因此留在源工作区里。
   await handlers['POST /migrate']!(
-    fakeReq('POST', `${API_PREFIX}/migrate`, Buffer.from(JSON.stringify({ from: CWD_A, to: CWD_B }))),
+    fakeReq('POST', `${API_PREFIX}/migrate`, Buffer.from(JSON.stringify({ sessionIds: ['session-a'], to: CWD_B }))),
     planned.res,
   )
   assert.equal(planned.captured.status, 200)
@@ -953,7 +959,11 @@ test('POST /migrate：侧边栏不显示的会话搬不走、源工作区因此�
 
   const applied = fakeRes()
   await handlers['POST /migrate']!(
-    fakeReq('POST', `${API_PREFIX}/migrate`, Buffer.from(JSON.stringify({ mode: 'apply', from: CWD_A, to: CWD_B }))),
+    fakeReq(
+      'POST',
+      `${API_PREFIX}/migrate`,
+      Buffer.from(JSON.stringify({ mode: 'apply', sessionIds: ['session-a'], to: CWD_B })),
+    ),
     applied.res,
   )
   assert.equal(applied.captured.status, 200)
@@ -974,7 +984,7 @@ test('POST /migrate：勾中的父会话把子智能体一起带走，条数报�
     fakeReq(
       'POST',
       `${API_PREFIX}/migrate`,
-      Buffer.from(JSON.stringify({ from: CWD_A, to: CWD_B, sessionIds: ['session-parent'] })),
+      Buffer.from(JSON.stringify({ sessionIds: ['session-parent'], to: CWD_B })),
     ),
     res,
   )
@@ -993,37 +1003,94 @@ test('POST /migrate：勾中的父会话把子智能体一起带走，条数报�
   assert.deepEqual((preview['registryChange'] as Record<string, unknown>)['added'], ['session-parent'])
 })
 
-test('POST /migrate：unowned 来源不带 from 也能预演（界面那个跨目录的「未分组」走这条路）', async () => {
-  const sandbox = makeSandbox('web-migrate-unowned')
-  // session-a 登记在 ws-a 名下，session-b 的 cwd 是同一个目录但谁都没认领 —— 未分组来源只认后者。
-  writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000)
-  writeSession(sandbox.sessionsRoot, 'session-b', CWD_A, 2000)
+test('POST /migrate：来源目录已经被删掉也照旧能迁（少了 sessionIds 就 400）', async () => {
+  const sandbox = makeSandbox('web-migrate-deleted-source')
+  // 项目文件夹**已经被删掉**（这个路径从来没建过），会话与日志都还在库里：header 里的 cwd 还是它。
+  // 外壳侧边栏把这批会话显示在「未分组」那一组里，而这只是标签——勾上它们照旧能迁。
+  const gone = join(import.meta.dirname, '.sandbox', 'web-gone-project')
+  rmSync(gone, { recursive: true, force: true })
+  writeSession(sandbox.sessionsRoot, 'session-a', gone, 1000)
+  writeSession(sandbox.sessionsRoot, 'session-b', gone, 2000)
 
   const handlers = createApiHandlers(deps(sandbox))
   const { res, captured } = fakeRes()
   await handlers['POST /migrate']!(
-    fakeReq('POST', `${API_PREFIX}/migrate`, Buffer.from(JSON.stringify({ unowned: true, to: CWD_B }))),
+    fakeReq(
+      'POST',
+      `${API_PREFIX}/migrate`,
+      Buffer.from(JSON.stringify({ sessionIds: ['session-a', 'session-b'], to: CWD_B })),
+    ),
     res,
   )
   assert.equal(captured.status, 200)
-  const body = payload(captured)
-  const preview = body['preview'] as Record<string, unknown>
-  assert.equal(preview['unowned'], true)
-  assert.equal(preview['from'], '')
-  assert.equal(preview['sourceProjectDir'], '')
-  assert.deepEqual(preview['sourceProjectDirs'], [join(sandbox.sessionsRoot, projectKey(CWD_A))])
-  assert.deepEqual((preview['sessions'] as { id: string }[]).map((s) => s.id), ['session-b'])
+  const preview = payload(captured)['preview'] as Record<string, unknown>
+  assert.deepEqual(preview['sessionIds'], ['session-a', 'session-b'])
+  assert.deepEqual(preview['sourceProjectDirs'], [join(sandbox.sessionsRoot, projectKey(gone))])
+  assert.deepEqual((preview['sessions'] as { id: string }[]).map((s) => s.id).sort(), ['session-a', 'session-b'])
+  // 来源目录本身不在盘上这件事不该被当成问题：日志与 header 里的 cwd 都还在。
+  assert.equal(payload(captured)['ok'], true)
   // 预演不写盘
-  assert.equal(existsSync(sessionDir(sandbox.sessionsRoot, CWD_A, 'session-b')), true)
+  assert.equal(existsSync(sessionDir(sandbox.sessionsRoot, gone, 'session-b')), true)
 
-  // 两种源都不给：400，且错误信息要说清有两条路
-  const denied = fakeRes()
+  // 少了 sessionIds：400 —— 源只有"点名了哪几条"这一条路（空数组同理）。
+  for (const body of [{ to: CWD_B }, { to: CWD_B, sessionIds: [] }]) {
+    const denied = fakeRes()
+    await handlers['POST /migrate']!(
+      fakeReq('POST', `${API_PREFIX}/migrate`, Buffer.from(JSON.stringify(body))),
+      denied.res,
+    )
+    assert.equal(denied.captured.status, 400)
+    assert.match(String((payload(denied.captured) as Record<string, unknown>)['error']), /缺少要迁移的会话/)
+  }
+})
+
+test('POST /migrate：勾选跨目录——两个来源目录里的会话一次搬到同一个目标', async () => {
+  const sandbox = makeSandbox('web-migrate-cross-dir')
+  const otherDir = join(sandbox.base, 'other')
+  mkdirSync(otherDir, { recursive: true })
+  writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000)
+  writeSession(sandbox.sessionsRoot, 'session-c', otherDir, 3000)
+
+  const handlers = createApiHandlers(deps(sandbox))
+  const { res, captured } = fakeRes()
   await handlers['POST /migrate']!(
-    fakeReq('POST', `${API_PREFIX}/migrate`, Buffer.from(JSON.stringify({ to: CWD_B }))),
-    denied.res,
+    fakeReq(
+      'POST',
+      `${API_PREFIX}/migrate`,
+      Buffer.from(JSON.stringify({ mode: 'apply', sessionIds: ['session-a', 'session-c'], to: CWD_B })),
+    ),
+    res,
   )
-  assert.equal(denied.captured.status, 400)
-  assert.match(String((payload(denied.captured) as Record<string, unknown>)['error']), /unowned/)
+
+  assert.equal(captured.status, 200)
+  const body = payload(captured)
+  assert.equal(body['applied'], true)
+  const preview = body['preview'] as Record<string, unknown>
+  // 两个来源目录都报出来（按路径排序），目标只有一个
+  assert.deepEqual(
+    preview['sourceProjectDirs'],
+    [join(sandbox.sessionsRoot, projectKey(CWD_A)), join(sandbox.sessionsRoot, projectKey(otherDir))].sort(),
+  )
+  assert.equal(preview['targetProjectDir'], join(sandbox.sessionsRoot, projectKey(CWD_B)))
+  // 两条各自从自己的目录搬进目标项目目录，header 的 cwd 都改成目标
+  for (const id of ['session-a', 'session-c']) {
+    const dir = sessionDir(sandbox.sessionsRoot, CWD_B, id)
+    assert.equal(existsSync(dir), true, `${id} 该落在目标项目目录里`)
+    const header = JSON.parse(decodeAll(readFileSync(join(dir, 'session.v4.jsonl.zstd'))).split('\n')[0]!) as {
+      cwd?: string
+    }
+    assert.equal(header.cwd, CWD_B)
+  }
+  // 两个来源项目目录都被搬空 → 都清掉
+  assert.equal(existsSync(join(sandbox.sessionsRoot, projectKey(CWD_A))), false)
+  assert.equal(existsSync(join(sandbox.sessionsRoot, projectKey(otherDir))), false)
+  // 注册表：两条都挂到目标工作区（ws-a 被摘空后删掉）
+  const registry = readRegistry(sandbox.registryPath)
+  assert.equal(registry.tables.workspaces['ws-a'], undefined)
+  assert.deepEqual(
+    Object.values(registry.tables.workspaces).flatMap((record) => record.sessionIds).sort(),
+    ['session-a', 'session-c'],
+  )
 })
 
 /**
@@ -1080,7 +1147,7 @@ test('POST /migrate：mode=apply 真搬并回可回滚的备份；有那套动�
   const handlers = createApiHandlers({ ...deps(sandbox), hostRegistry: port })
   const { res, captured } = fakeRes()
   await handlers['POST /migrate']!(
-    fakeReq('POST', `${API_PREFIX}/migrate`, Buffer.from(JSON.stringify({ mode: 'apply', from: CWD_A, to: CWD_B }))),
+    fakeReq('POST', `${API_PREFIX}/migrate`, Buffer.from(JSON.stringify({ mode: 'apply', sessionIds: ['session-a'], to: CWD_B }))),
     res,
   )
   assert.equal(captured.status, 200)
@@ -1137,7 +1204,7 @@ test('POST /migrate：宿主没接住时如实报"需要重启"，而不是照�
   })
   const { res, captured } = fakeRes()
   await handlers['POST /migrate']!(
-    fakeReq('POST', `${API_PREFIX}/migrate`, Buffer.from(JSON.stringify({ mode: 'apply', from: CWD_A, to: CWD_B }))),
+    fakeReq('POST', `${API_PREFIX}/migrate`, Buffer.from(JSON.stringify({ mode: 'apply', sessionIds: ['session-a'], to: CWD_B }))),
     res,
   )
   assert.equal(captured.status, 200)
@@ -1156,7 +1223,7 @@ test('POST /rollback：先 dryRun 看动作，再真回滚到原状', async () =
   const handlers = createApiHandlers(deps(sandbox))
   const migrateRes = fakeRes()
   await handlers['POST /migrate']!(
-    fakeReq('POST', `${API_PREFIX}/migrate`, Buffer.from(JSON.stringify({ mode: 'apply', from: CWD_A, to: CWD_B }))),
+    fakeReq('POST', `${API_PREFIX}/migrate`, Buffer.from(JSON.stringify({ mode: 'apply', sessionIds: ['session-a'], to: CWD_B }))),
     migrateRes.res,
   )
   const backupDir = payload(migrateRes.captured)['backupDir'] as string
@@ -1201,16 +1268,16 @@ test('POST /migrate：参数与状态问题各自给出可读的拒绝（400 / 4
   }
 
   assert.equal((await post('{not json')).status, 400)
-  assert.match(String(payload(await post(JSON.stringify({ to: CWD_B })))['error']), /缺少源工作区目录/)
+  assert.match(String(payload(await post(JSON.stringify({ to: CWD_B })))['error']), /缺少要迁移的会话/)
   assert.match(
-    String(payload(await post(JSON.stringify({ from: CWD_A, to: join(sandbox.base, 'nope') })))['error']),
+    String(payload(await post(JSON.stringify({ sessionIds: ['session-a'], to: join(sandbox.base, 'nope') })))['error']),
     /目标工作区目录不存在/,
   )
-  // 状态问题：源项目目录不存在 → 计划本身 ok=false（参数没问题，是库的状态说了不行）。
+  // 状态问题：点名的那条不在库里 → 计划本身 ok=false（参数没问题，是库的状态说了不行）。
   //
   // 这一条**不再用 409**：干活那一段是事件流，状态码在第一条事件之前就发出去了。结论因此落在
   // `result` 的正文里（`ok` 与 `preview.problems` 与原来那份一字不差），界面读的就是它。
-  const missingProjectDir = await post(JSON.stringify({ from: join(sandbox.base, 'ghost'), to: CWD_B }))
+  const missingProjectDir = await post(JSON.stringify({ sessionIds: ['session-ghost'], to: CWD_B }))
   assert.equal(missingProjectDir.status, 200)
   assert.equal(
     missingProjectDir.headers['content-type'],
@@ -1980,7 +2047,7 @@ test('POST /migrate：落地时把 备份 / 改写 / 搬目录 / 注册表 / 复
 
   const { res, captured } = fakeRes()
   await handlers['POST /migrate']!(
-    fakeReq('POST', `${API_PREFIX}/migrate`, Buffer.from(JSON.stringify({ from: CWD_A, to: CWD_B, mode: 'apply' }))),
+    fakeReq('POST', `${API_PREFIX}/migrate`, Buffer.from(JSON.stringify({ sessionIds: ['session-a', 'session-b'], to: CWD_B, mode: 'apply' }))),
     res,
   )
   assert.equal(captured.status, 200)
@@ -2058,7 +2125,8 @@ test('POST /rollback：预演与落地都逐条报"正在还原"，迁移备份�
   writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000, { title: '会话甲' })
   writeSession(sandbox.sessionsRoot, 'session-b', CWD_A, 2000)
   const handlers = createApiHandlers(deps(sandbox))
-  const migrate = (mode: string): Buffer => Buffer.from(JSON.stringify({ from: CWD_A, to: CWD_B, mode }))
+  const migrate = (mode: string): Buffer =>
+    Buffer.from(JSON.stringify({ sessionIds: ['session-a', 'session-b'], to: CWD_B, mode }))
 
   await handlers['POST /migrate']!(fakeReq('POST', `${API_PREFIX}/migrate`, migrate('apply')), fakeRes().res)
   const { res: listRes, captured: listed } = fakeRes()

@@ -185,8 +185,8 @@ export function projectDirOf(root: string, cwd: string): string {
 /**
  * 扫**整个**会话库：根下每个项目目录各扫一遍，合成一份列表（按 createdAt 降序）。
  *
- * 单个项目目录坏掉只跳过它：整页会话列不出来比少一条会话严重得多（界面与迁移的
- * 「未分组」来源都要横跨项目目录，所以这一步不能因为一个坏项目目录就整体失败）。
+ * 单个项目目录坏掉只跳过它：整页会话列不出来比少一条会话严重得多（界面与迁移的族展开都要横跨项目
+ * 目录，所以这一步不能因为一个坏项目目录就整体失败）。
  */
 export function scanAll(root: string, decodeAll: DecodeAll, options: ScanOptions = {}): DiscoveredSession[] {
   const out: DiscoveredSession[] = []

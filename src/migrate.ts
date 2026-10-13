@@ -65,21 +65,18 @@ export interface MigrateDeps extends EffectDeps, WarmDeps {
 
 /** 一次迁移/预演的请求。 */
 export interface MigrateRequest {
-  /** 源工作区目录（绝对路径）。`unowned` 为 true 时可省略（那时源不是一个目录）。 */
-  from?: string
+  /**
+   * 要迁移的会话 id（**必填、非空**）。**源就是它们**：每条会话的源目录是它自己的 `cwd`，所以一次
+   * 迁移可以横跨几个来源目录（勾选跨目录时就是这样），目标只有一个。
+   *
+   * 来源目录**不必还在盘上**（见 `BuildPlanOptions.sessionIds`）：项目文件夹被删掉、会话还在库里的
+   * 那条路照旧能走——点名那几条、给一个重建后的目录即可。
+   */
+  sessionIds: string[]
   /** 目标工作区目录（绝对路径，必须已存在）。 */
   to: string
-  /**
-   * 源取"注册表没认领且有 cwd 的会话"（外壳侧边栏的「未分组」），而不是某个目录。
-   * 可以横跨多个项目目录，所以与 `from` 互斥。
-   */
-  unowned?: boolean
-  /** 只迁移这些会话；缺省（null）为源项目目录内全部。 */
-  sessionIds?: string[] | null
   /** 目标工作区新建时的标题。 */
   title?: string
-  /** 是否连带未分组的会话（注册表没认领的那些，默认 true）。 */
-  includeUnowned?: boolean
   /** 是否同时搬迁会话创建过的文件（默认 false）。 */
   includeArtifacts?: boolean
 }
@@ -104,16 +101,15 @@ export interface PreviewSession {
 export interface MigrationPreview {
   ok: boolean
   problems: string[]
-  /** 源工作区目录；未分组来源时是空串（见 `unowned`）。 */
-  from: string
+  /** 点名的会话 id（源就是它们，见 `MigrateRequest.sessionIds`）。 */
+  sessionIds: string[]
   to: string
-  /** 源项目目录；未分组来源时是空串（源不是一个目录）。 */
-  sourceProjectDir: string
-  targetProjectDir: string
-  /** 源是不是那个跨目录的「未分组」（界面据此换一句项目目录说明）。 */
-  unowned: boolean
-  /** 本次真正会搬动的会话各自所在的源项目目录（去重、排序）——未分组来源下不止一个。 */
+  /**
+   * 这次涉及的来源项目目录（会话日志那一层，去重排序）；来源目录本身不必还在盘上。多于一处的来源
+   * 就是"勾选跨目录"，界面上照实列出来。
+   */
   sourceProjectDirs: string[]
+  targetProjectDir: string
   sessions: PreviewSession[]
   /** 级联带进来的条数：点名的会话的子智能体后代（见 `PreviewSession.via`）。 */
   cascaded: number
@@ -194,6 +190,13 @@ export interface BackupSummary {
   /** 从清单里的会话目录推出来的源/目标（老备份可能没有会话，则为 undefined）。 */
   from?: string
   to?: string
+  /**
+   * 这次迁移涉及几个来源目录（按清单里每条会话的 `sourceDir` 数）。
+   *
+   * 全部会话都来自同一个目录时，`from` 就是那个目录；**多于一处**时 `from` 缺席（没有单一答案，
+   * 见 execute.ts），界面改用这个条数把"从哪儿来"说清楚——一行 `— → 目标` 等于没说。
+   */
+  sourceDirs?: number
 }
 
 /**
@@ -232,13 +235,10 @@ function previewOf(plan: RelocationPlan): MigrationPreview {
   return {
     ok: plan.ok,
     problems: plan.problems,
-    from: plan.from,
+    sessionIds: plan.sessionIds,
     to: plan.to,
-    sourceProjectDir: plan.sourceProjectDir,
+    sourceProjectDirs: plan.sourceProjectDirs,
     targetProjectDir: plan.targetProjectDir,
-    unowned: plan.unowned,
-    // 未分组来源横跨多个项目目录：把每条会话自己的源项目目录去重报给界面，别让界面拿一个空串去猜。
-    sourceProjectDirs: [...new Set(plan.sessions.map((session) => dirname(session.sourceDir)))].sort(),
     sessions,
     cascaded: plan.cascaded,
     liveSkipped: plan.liveSkipped,
@@ -259,13 +259,10 @@ function buildPlan(deps: MigrateDeps, request: MigrateRequest, onProgress?: Prog
   return buildRelocationPlan({
     root: deps.sessionsRoot,
     registry: loadRegistryForWrite(deps.registryPath),
-    from: request.from ?? '',
     to: request.to,
     decodeAll: deps.decodeAll,
-    unowned: request.unowned === true,
-    sessionIds: request.sessionIds ?? null,
+    sessionIds: request.sessionIds,
     title: request.title,
-    includeUnowned: request.includeUnowned !== false,
     includeArtifacts: request.includeArtifacts === true,
     resolveBlank,
     live: deps.liveSessionIds?.() ?? new Set<string>(),
@@ -479,6 +476,8 @@ export function listBackups(deps: Pick<MigrateDeps, 'backupRoot'>): BackupSummar
         kind: manifest.kind ?? 'migrate',
         ...(manifest.from === undefined ? {} : { from: manifest.from }),
         ...(manifest.to === undefined ? {} : { to: manifest.to }),
+        // 迁移清单里每条会话的 `sourceDir` 就在会话日志那一层：数一数涉及几个来源目录（见 BackupSummary）。
+        sourceDirs: new Set(manifest.sessions.map((session) => dirname(session.sourceDir))).size,
       })
     } catch {
       continue

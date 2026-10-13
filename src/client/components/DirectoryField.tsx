@@ -1,7 +1,7 @@
 /**
  * 目录字段：**一枚值控件 + 两条改值的路**（候选面板 / 手输路径），外加宿主那条「浏览文件系统…」。
  *
- * 「迁移」的源目录与目标目录、「导入」的落地目录问的是同一件事——"用哪个目录"，所以三处是同一个组件、
+ * 「迁移」的目标目录与「导入」的落地目录问的是同一件事——"用哪个目录"，所以两处是同一个组件、
  * 同一份候选面板、同一套展开状态，改一处三处一起动（见
  * [决策](../../../.agents/notes/implemented/architecture/2026-10-07-directory-field-picks-from-a-panel.md)）。
  *
@@ -28,7 +28,7 @@ import * as React from 'react'
 
 import { normalizePickedPath, type DirectoryApi } from '../directory.ts'
 import type { Translate } from '../logic/locales.ts'
-import { UNOWNED_SOURCE, pathLabel, type PathRow } from '../logic/planRows.ts'
+import { pathLabel, type PathRow } from '../logic/planRows.ts'
 import { CandidatePanel } from './CandidatePanel.tsx'
 import { ChevronIcon } from './icons.tsx'
 import { DirectoryPicker } from './DirectoryPicker.tsx'
@@ -83,7 +83,7 @@ export interface DirectoryFieldProps<K extends string> {
   field: K
   /** 字段名（值控件的无障碍名字与候选面板的头都用它）。 */
   label: string
-  /** 值控件空着时的提示（"选源目录…"）。 */
+  /** 值控件空着时的提示（"选择目标目录…"）。 */
   placeholder: string
   /** 候选行（调用方已经补过当前值）。 */
   rows: readonly PathRow[]
@@ -102,13 +102,6 @@ export interface DirectoryFieldProps<K extends string> {
   directory?: () => DirectoryApi | undefined
   /** 出事时往页面横幅上报一句（这个字段自己不做横幅）。 */
   onError: (message: string) => void
-  /**
-   * 「手输路径」输入框里显示的东西（缺省 = 当前值）。
-   *
-   * 只给「未分组」用：那个值是个内部哨兵（见 planRows.UNOWNED_SOURCE），原样摆进输入框等于让用户
-   * 看见一个既不是路径也不是人话的东西；框里显示"未分组"，一敲字就变成真路径（onChange 照旧）。
-   */
-  manualValue?: string
 }
 
 /** 一个目录字段。 */
@@ -124,7 +117,6 @@ export function DirectoryField<K extends string>({
   pickerKind,
   directory,
   onError,
-  manualValue,
 }: DirectoryFieldProps<K>): React.ReactElement {
   const api = directory?.()
   // 只有候选面板开在这个字段上时才叫 expanded：切到宿主的浏览框之后，这枚按钮点下去开回来的是候选面板。
@@ -174,18 +166,10 @@ export function DirectoryField<K extends string>({
    * 值控件上显示什么。
    *
    * 值本身是路径，而路径不是人认得出的东西（`/home/u/dev/x` 与 `/home/u/dev/x-legacy` 在框里只差几个
-   * 字符），所以能对上候选时显示候选那一行的称呼（标题／项目名 + 路径，见 `pathLabel()`）。「未分组」
-   * 是哨兵值、不是路径，显示成人话。
+   * 字符），所以能对上候选时显示候选那一行的称呼（标题／项目名 + 路径，见 `pathLabel()`）。
    */
   const current = rows.find((row) => row.path === value)
-  const text =
-    value === ''
-      ? placeholder
-      : value === UNOWNED_SOURCE
-        ? t('list.ungrouped')
-        : current === undefined
-          ? value
-          : pathLabel(current)
+  const text = value === '' ? placeholder : current === undefined ? value : pathLabel(current)
 
   return (
     <div className="dsm-field">
@@ -213,18 +197,17 @@ export function DirectoryField<K extends string>({
           className="dsm-input"
           type="text"
           aria-label={label}
-          value={manualValue ?? value}
+          value={value}
           placeholder={t('pathField.placeholder')}
           onChange={(event) => onChange(event.target.value)}
         />
       )}
-      {/* 起点是这个字段当前的值；「未分组」那个哨兵不是路径，别拿它当起点去问宿主（那会变成一次
-          "列 '@unowned' 下面有什么"的无意义调用）。 */}
+      {/* 起点是这个字段当前的值（路径，可能是一个已经被删掉的目录——浏览框照样从它那儿列）。 */}
       {controls.open?.field === field && controls.open.mode === 'filesystem' && api !== undefined && (
         <DirectoryPicker
           t={t}
           api={api}
-          startPath={value === UNOWNED_SOURCE ? '' : value}
+          startPath={value}
           onPick={apply}
           onClose={controls.settle}
           onCandidates={() => controls.toggle(field, 'candidates')}

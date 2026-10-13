@@ -219,7 +219,7 @@ test('集成：includeArtifacts 时产物随会话一起搬，并可字节级回
   const plan = buildRelocationPlan({
     root: sb.root,
     registry: sb.registry,
-    from: sb.fromDir,
+    sessionIds: ['session-a'],
     to: sb.toDir,
     decodeAll,
     includeArtifacts: true,
@@ -259,13 +259,97 @@ test('集成：includeArtifacts 时产物随会话一起搬，并可字节级回
 
 test('集成：不传 includeArtifacts 时不动任何产物', () => {
   const sb = makeSandbox('no-artifacts')
-  const plan = buildRelocationPlan({ root: sb.root, registry: sb.registry, from: sb.fromDir, to: sb.toDir, decodeAll })
+  const plan = buildRelocationPlan({
+    root: sb.root,
+    registry: sb.registry,
+    sessionIds: ['session-a'],
+    to: sb.toDir,
+    decodeAll,
+  })
   assert.equal(plan.ok, true, plan.problems.join('; '))
   assert.equal(plan.artifacts, null)
   applyPlan(plan, { registryPath: sb.registryPath, decodeAll, backupRoot: sb.backupRoot, now: new Date('2026-09-27T00:00:00Z') })
   assert.ok(existsSync(join(sb.fromDir, 'proj', 'lib', 'x.mjs')), '未要求时产物必须原地不动')
   assert.ok(existsSync(join(sb.fromDir, 'loose.md')))
   rmSync(sb.base, { recursive: true, force: true })
+})
+
+test('集成：勾选跨目录时，每条会话的产物按它自己的来源目录定位', () => {
+  // 产物在日志里是**相对会话自己的 cwd** 记的（见 artifacts.ts 的 `resolveIn(cwd, …)`），而勾选可以跨
+  // 目录：两个来源目录各有一条会话、各写了一个相对路径的文件，两条都得搬走。拿其中一个目录当唯一基准的
+  // 话，另一条会按错的 cwd 解释——那句"盘上已经没有这个文件了"就是这里要修掉的。
+  const base = join(import.meta.dirname, '.sandbox', 'artifacts-multi')
+  rmSync(base, { recursive: true, force: true })
+  const dirA = join(base, 'downloads')
+  const dirB = join(base, 'notes')
+  const toDir = join(base, 'work', 'temp')
+  const root = join(base, 'dsh', 'sessions')
+  for (const dir of [dirA, dirB, toDir, root]) mkdirSync(dir, { recursive: true })
+
+  const makeSession = (id: string, cwd: string, artifact: string): void => {
+    const dir = join(root, projectKey(cwd), id)
+    mkdirSync(dir, { recursive: true })
+    const header = { type: 'session', version: 4, id, createdAt: 1, cwd, isSeeded: false, delegationDepth: 0 }
+    const events = [
+      { type: 'tool/call', seq: 0, time: 1, data: { name: 'write', arguments: JSON.stringify({ file_path: artifact }) } },
+    ]
+    writeFileSync(
+      join(dir, 'session.v4.jsonl.zstd'),
+      Buffer.concat([
+        encodeRawFrame(JSON.stringify(header) + '\n'),
+        ...events.map((e) => encodeRawFrame(JSON.stringify(e) + '\n')),
+      ]),
+    )
+  }
+  makeSession('session-a', dirA, 'a.md')
+  makeSession('session-b', dirB, 'b.md')
+  writeFileSync(join(dirA, 'a.md'), 'a\n')
+  writeFileSync(join(dirB, 'b.md'), 'b\n')
+
+  const registryPath = join(base, 'dsh', 'storages', 'workspace.json')
+  mkdirSync(join(base, 'dsh', 'storages'), { recursive: true })
+  const registry: WorkspaceRegistryState = {
+    unit: { name: 'workspace', version: 2 },
+    global: { initialized: true, workspaceIds: ['ws-a', 'ws-b'], archivedSessionIds: [], pinnedSessionIds: [] },
+    tables: {
+      workspaces: {
+        'ws-a': { path: dirA, title: 'downloads', sessionIds: ['session-a'], createdAt: 'x', updatedAt: 'x' },
+        'ws-b': { path: dirB, title: 'notes', sessionIds: ['session-b'], createdAt: 'x', updatedAt: 'x' },
+      },
+    },
+  }
+  writeFileSync(registryPath, JSON.stringify(registry, null, 2) + '\n')
+
+  const plan = buildRelocationPlan({
+    root,
+    registry,
+    sessionIds: ['session-a', 'session-b'],
+    to: toDir,
+    decodeAll,
+    includeArtifacts: true,
+  })
+  assert.equal(plan.ok, true, plan.problems.join('; '))
+  assert.equal(plan.sourceProjectDirs.length, 2, '两个来源项目目录都在计划里')
+  assert.deepEqual(
+    plan.artifacts?.moves.map((move) => move.relative).sort(),
+    ['a.md', 'b.md'],
+    '两条产物各自从自己的来源目录定位：b.md 不该被当成"a 那边已经没有这个文件"',
+  )
+  assert.deepEqual(plan.artifacts?.skipped, [], '没有一条被判成"盘上已经没有了"')
+
+  const applied = applyPlan(plan, {
+    registryPath,
+    decodeAll,
+    backupRoot: join(base, 'backups'),
+    now: new Date('2026-10-13T00:00:00Z'),
+  })
+  assert.equal(applied.artifactsMoved, 2)
+  assert.equal(readFileSync(join(toDir, 'a.md'), 'utf8'), 'a\n')
+  assert.equal(readFileSync(join(toDir, 'b.md'), 'utf8'), 'b\n')
+  assert.equal(existsSync(join(dirA, 'a.md')), false)
+  assert.equal(existsSync(join(dirB, 'b.md')), false)
+
+  rmSync(base, { recursive: true, force: true })
 })
 
 test('applyArtifactMoves：真实文件系统上搬运并建目录', () => {

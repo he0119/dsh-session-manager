@@ -344,7 +344,7 @@ function loadRegistry(
   }
 }
 
-/** 扫整个会话库（项目目录 → 会话）。实现在 discovery.ts，迁移页的「未分组」来源用的是同一个。 */
+/** 扫整个会话库（项目目录 → 会话）。实现在 discovery.ts；「会话」页与族展开用的是同一个。 */
 export const scanLibrary = scanAll
 
 /**
@@ -791,12 +791,14 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
       return
     }
     const fields = (body ?? {}) as Record<string, unknown>
-    // 源有两种：一个目录（from），或者"注册表没认领的那些会话"（unowned，即外壳侧边栏的「未分组」，
-    // 可以横跨多个目录）。两者互斥时由计划层报 problem——那是"参数说不清"，比这里猜一个更诚实。
-    const unowned = fields['unowned'] === true
-    const from = typeof fields['from'] === 'string' ? fields['from'].trim() : ''
-    if (from === '' && !unowned) {
-      sendJson(res, 400, { error: '缺少源工作区目录（from），或者用 unowned: true 迁移「未分组」里的会话' })
+    /*
+     * **源就是点名的那些会话**（不带源目录这个参数）：它们可以来自不同的目录，每条会话的源目录是它自己的
+     * `cwd`——"把删掉的项目文件夹里那几条迁到重建后的位置"就是点名它们 + 给一个目标目录。所以这里只判
+     * "点名了没有"，来源目录还在不在由项目目录（会话日志那一层）那一侧说话。
+     */
+    const ids = fields['sessionIds']
+    if (!Array.isArray(ids) || ids.length === 0) {
+      sendJson(res, 400, { error: '缺少要迁移的会话（sessionIds）' })
       return
     }
     let to: string
@@ -815,13 +817,9 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
       return
     }
 
-    const ids = fields['sessionIds']
     const request: MigrateRequest = {
-      from,
-      unowned,
       to,
-      sessionIds: Array.isArray(ids) ? ids.map((id) => String(id)) : null,
-      includeUnowned: fields['includeUnowned'] !== false,
+      sessionIds: ids.map((id) => String(id)),
       includeArtifacts: fields['includeArtifacts'] === true,
       ...(typeof fields['title'] === 'string' && fields['title'].trim() !== '' ? { title: fields['title'].trim() } : {}),
     }

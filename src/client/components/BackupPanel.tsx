@@ -200,7 +200,9 @@ export function BackupPanel({ t, reload }: Pick<PanelShare, 't' | 'reload'>): Re
                   <span className="dsm-hint">{t('backup.row', { sessions: backup.sessions, artifacts: backup.artifacts })}</span>
                   {(backup.from !== undefined || backup.to !== undefined) && (
                     <span className="dsm-meta" title={backup.dir}>
-                      {backup.from ?? '—'} → {backup.to ?? '—'}
+                      {/* 勾选跨目录的那次迁移没有单一来源：报来源目录的条数，别只写一个「—」。 */}
+                      {backup.from ?? (backup.sourceDirs === undefined ? '—' : t('backup.sources', { count: backup.sourceDirs }))}{' '}
+                      → {backup.to ?? '—'}
                     </span>
                   )}
                 </div>

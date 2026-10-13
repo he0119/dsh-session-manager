@@ -8,7 +8,7 @@ import { dirname, join } from 'node:path'
 import { accountedOwners } from './accounting.ts'
 import { planArtifactMoves } from './artifacts.ts'
 import { canonicalDir } from './canonical-path.ts'
-import { projectDirOf, scanAll, scanProjectDir, type DiscoveredSession } from './discovery.ts'
+import { projectDirOf, scanAll, type DiscoveredSession } from './discovery.ts'
 import { familyOf } from './family.ts'
 import { projectKey } from './project-key.ts'
 import { reHome, validateRegistry } from './registry.ts'
@@ -26,32 +26,27 @@ import type {
 } from './types.ts'
 import { hiddenReasonOf, type HiddenReason } from './visibility.ts'
 
-/** `buildRelocationPlan()` 的选项。 */
+/**
+ * `buildRelocationPlan()` 的选项。
+ *
+ * **没有"源目录"这个参数**：源就是 `sessionIds` 点名的那些会话，每条会话的源目录是它自己的 `cwd`。
+ * 于是"把删掉的项目文件夹里那几条迁到重建后的位置"就是：点名它们 + 给一个目标目录。
+ */
 export interface BuildPlanOptions {
   /** 会话根目录（即 `$DSH_HOME/sessions`）。 */
   root: string
   /** 已解析的 workspace 注册表对象。 */
   registry: WorkspaceRegistryState
-  /** 源工作区目录（绝对路径）。`unowned` 为 true 时省略（那时源不是一个目录）。 */
-  from?: string
+  /**
+   * 要迁移的会话 id（**必填、非空**）。它们可以来自不同的目录：每条会话各自的源目录是它的 `cwd`，
+   * 一个目标装下全部。空数组/缺省 = 没点名，计划如实报 `sessionIds is required`。
+   */
+  sessionIds?: readonly string[] | null
   /** 目标工作区目录（绝对路径，必须已存在）。 */
   to: string
   decodeAll: DecodeAll
-  /** 只迁移这些会话；缺省迁移源项目目录内全部。 */
-  sessionIds?: string[] | null
-  /**
-   * 源取"外壳侧边栏「未分组」那一组里有 `cwd` 的会话"（判据见 `visibility.ts` 的 `isUngrouped()`），
-   * 而不是某个目录；`cwd` 那一条是这个来源自己的限制（改写 header 需要它）。
-   *
-   * 与 `from` 互斥：一个是目录、一个是"谁都没认领"，同时给就是两种源，谁也说不清用哪个。
-   * 这一支可以横跨多个项目目录，所以每条会话的源目录各不相同（`sessions[].from`），
-   * 计划里的 `from` / `sourceProjectDir` 因此是空串。
-   */
-  unowned?: boolean
   /** 目标工作区新建时的标题。 */
   title?: string
-  /** 是否连带源项目目录中未分组的会话（默认 true；未分组来源下无意义——那批本来就没在册）。 */
-  includeUnowned?: boolean
   /** 是否同时规划"会话中创建的文件"的搬迁（默认 false；需要全量解码，较慢）。 */
   includeArtifacts?: boolean
   /**
@@ -63,8 +58,8 @@ export interface BuildPlanOptions {
   /**
    * 读"宿主判这条会话空白吗"（可选，见 visibility.ts）。
    *
-   * 缺席 = 这次不判空白（按"显示"处理）。**有它才会**把空白会话排除在候选之外，理由见下面
-   * `hiddenOf()` 的说明：这一层的候选必须与外壳侧边栏显示的那些对齐。
+   * 缺席 = 这次不判空白（按"显示"处理）。**有它才会**把空白会话从可迁移的那批里排掉，理由见下面
+   * `hiddenOf()` 的说明：这一层收的必须与外壳侧边栏显示的那些对齐。
    */
   resolveBlank?: (query: { id: string; createdAt: number; cwd?: string }) => boolean | undefined
   /**
@@ -81,9 +76,9 @@ export interface BuildPlanOptions {
   /**
    * 发现阶段的进度（可选）。
    *
-   * 只报**源那一遍**扫描：目录来源下它是"扫这个项目目录"，未分组来源下它是"扫整个库"——两者都是
-   * 用户等的第一步，分母也只有一个。后面为展开子智能体族而扫的第二遍（不带标题）不报：它没有第二个
-   * 分母可分，硬报会让界面上的条跳回 0（那正是 `ProgressEvent` 一句"各有各的分母"的意思）。
+   * 只报**这一遍**扫描（整库：点名的那几条可能散在任意项目目录里）：它是用户等的第一步，分母也只有
+   * 一个。为展开子智能体族要用的那份父子关系就在同一次扫描里，不再有第二遍（`ProgressEvent` 一句
+   * "各有各的分母"）。
    */
   onProgress?: ProgressReporter
 }
@@ -98,36 +93,31 @@ export function buildRelocationPlan(options: BuildPlanOptions): RelocationPlan {
     root,
     registry,
     decodeAll,
-    sessionIds = null,
-    unowned = false,
     title,
-    includeUnowned = true,
     includeArtifacts = false,
     resolveTitle,
     resolveBlank,
     live = new Set<string>(),
     onProgress,
   } = options
-  const from = (options.from ?? '').trim()
   const problems: string[] = []
 
   if (typeof root !== 'string' || !root) problems.push('root is required (path to the sessions root)')
   if (typeof options.to !== 'string' || !options.to) problems.push('to is required (target workspace directory)')
-  if (unowned) {
-    if (from !== '') problems.push('source is ambiguous: pass either from (a directory) or unowned, not both')
-  } else if (from === '') {
-    problems.push('from is required (source workspace directory)')
-  }
+  // 点名的会话：去重、去掉空白项，保持点名顺序（预演与备份都按这个顺序读）。
+  const requested = Array.isArray(options.sessionIds)
+    ? [...new Set(options.sessionIds.filter((id): id is string => typeof id === 'string' && id !== ''))]
+    : []
+  if (requested.length === 0) problems.push('sessionIds is required (the sessions to migrate)')
   if (problems.length) {
     return {
       ok: false,
       problems,
-      from: unowned ? '' : from,
+      sessionIds: requested,
       to: options.to,
       root,
-      sourceProjectDir: '',
+      sourceProjectDirs: [],
       targetProjectDir: '',
-      unowned,
       sessions: [],
       liveSkipped: [],
       strandedSources: [],
@@ -141,12 +131,9 @@ export function buildRelocationPlan(options: BuildPlanOptions): RelocationPlan {
   /*
    * 目标目录换成宿主存的那个拼写（见 canonical-path.ts）：`path` 进注册表、`cwd` 进 header，两者都要是
    * 宿主会存的那个字符串——手输的结尾分隔符、`..` 段、正斜杠、大小写不一致都算另一种拼写。
-   * **源那一侧不归一**：它是注册表的现状，下面那条"会话 header 的 cwd 必须等于源"的检查要按它的原样比。
+   * **源那一侧不归一**：它是注册表的现状，逐条比对要靠它的原样。
    */
   const to = canonicalDir(options.to)
-  const sameDirectory = from !== '' && canonicalDir(from) === to
-
-  if (!unowned && sameDirectory) problems.push('from and to are identical — nothing to migrate')
 
   const regCheck = validateRegistry(registry)
   if (!regCheck.ok) problems.push(...regCheck.problems.map((p) => `registry: ${p}`))
@@ -155,55 +142,34 @@ export function buildRelocationPlan(options: BuildPlanOptions): RelocationPlan {
   if (!existsSync(to)) problems.push(`target directory does not exist: ${to}`)
   else if (!statSync(to).isDirectory()) problems.push(`target is not a directory: ${to}`)
 
-  const sourceProjectDir = unowned ? '' : projectDirOf(root, from)
   const targetProjectDir = projectDirOf(root, to)
-  if (!unowned && !existsSync(sourceProjectDir)) problems.push(`source project directory does not exist: ${sourceProjectDir}`)
 
-  // 有损目录名的碰撞：源与目标项目目录若同名，会话日志会混在一起。同一个目录的**两种拼写**不是碰撞
-  // （上面那条 'identical' 已经在说它了）：那时 projectKey 相同，但两个 cwd 指的是同一处。
-  if (!unowned && !sameDirectory && projectKey(from) === projectKey(to)) {
-    problems.push(`projectKey collision: ${from} and ${to} both encode to ${projectKey(from)}`)
-  }
-
-  /*
-   * 「在册」与「被认领」是两件事（判据与理由见 accounting.ts）：注册表里登记过、但它的目录已经改名或
-   * 删掉的会话，宿主那边**不算**任何工作区的成员——外壳侧边栏把它放进「未分组」。下面每一处"这条有没有
-   * 主"的判断都读被认领的那一份，否则插件会把一条外壳说没人认领的会话当成"已在册"（迁移页那个来源
-   * 因此永远是 0 条，而侧边栏那一组里明明摆着会话）。
-   *
-   * 这一份先按**源**扫出来的那批算（未分组来源那一支马上要用），级联带进来的后代在下面按全库重算一次。
-   */
-  let owned = new Set<string>()
-  const ownedOf = (sessions: readonly DiscoveredSession[]): Set<string> =>
-    new Set(accountedOwners(registry, sessions).keys())
-
-  // 侧边栏看不见的那三类（子智能体 / 空白 / 已归档）不进候选：迁移列表的范围必须与"用户在外壳里
-  // 看得见的那批"对齐，否则面板报的条数与侧边栏不一致，而这个来源里也没有任何东西能解释差额
-  // （判据与理由都在 visibility.ts）。要搬一条已归档的会话，先去「会话」页取消归档。
+  // 侧边栏看不见的那三类（子智能体 / 空白 / 已归档）搬不走：点名点到它们时报一条问题说明，而不是
+  // 静默少搬（判据与理由都在 visibility.ts）。要搬一条已归档的会话，先去「会话」页取消归档。
   const archived = new Set<string>(registry?.global?.archivedSessionIds ?? [])
   const hiddenOf = (session: DiscoveredSession): HiddenReason | undefined =>
     hiddenReasonOf(session, {
       archived,
       ...(resolveBlank === undefined ? {} : { resolveBlank }),
     })
-  /** 源里**因为侧边栏不显示**而没进候选的会话：点名点到它们时，问题说明要比"找不到"准确得多。 */
-  const hiddenInSource = new Map<string, HiddenReason>()
+  /** 整库里**因为侧边栏不显示**而搬不走的会话：点名点到它们时，问题说明要比"找不到"准确得多。 */
+  const hiddenInLibrary = new Map<string, HiddenReason>()
   const splitHidden = (all: DiscoveredSession[]): DiscoveredSession[] =>
     all.filter((session) => {
       const reason = hiddenOf(session)
       if (reason === undefined) return true
-      hiddenInSource.set(session.id, reason)
+      hiddenInLibrary.set(session.id, reason)
       return false
     })
 
   /*
-   * 宿主持在内存里的那批（`live`）与侧边栏看不见的那三类一样，不进候选——但**理由不同**，处置也不同：
+   * 宿主持在内存里的那批（`live`）与侧边栏看不见的那三类一样，搬不走——但**理由不同**，处置也不同：
    * 那三类是"用户在外壳里看不见、要搬先去会话页处理"，这一批是"宿主正攥着它，这次搬不动"，等它放手
-   * （重启 DSH）之后还能再迁一次。所以不能只把它们从候选里滤掉：`liveSkipped` 要一路报到预演、工具
-   * 返回值与界面上，否则用户看到的就是"勾了 22 条、搬走 9 条"而没有任何解释。
+   * （重启 DSH）之后还能再迁一次。所以不能只把它们从可搬的那批里滤掉：`liveSkipped` 要一路报到预演、
+   * 工具返回值与界面上，否则用户看到的就是"勾了 22 条、搬走 9 条"而没有任何解释。
    *
-   * 名单里的来源有两处：源候选（下面 `splitLive`）、以及级联扫全库时在别的项目目录里撞见的活着的后代
-   * （`noteLive`）——后者同样不能搬，不然族会被拆成两半还说不清为什么。
+   * 名单里的来源有两处：点名的那几条里活着的（下面 `splitLive`）、以及它们的后代里活着的（`noteLive`）
+   * ——后者同样不能搬，不然族会被拆成两半还说不清为什么。
    */
   const liveSkipped = new Map<string, LiveSkip>()
   const noteLive = (session: DiscoveredSession): void => {
@@ -227,87 +193,55 @@ export function buildRelocationPlan(options: BuildPlanOptions): RelocationPlan {
       ? {}
       : { onProgress: (done: number, total: number) => onProgress({ phase: 'scan', done, total }) }),
   }
-  // 源目录扫出来的那一份（含侧边栏看不见的：它们不进候选，但选中一条父会话时要把它们当中
-  // "属于这条父会话的子智能体"找出来）。
-  let sourceScanned: DiscoveredSession[] = []
-  let discovered: DiscoveredSession[] = []
-  if (unowned) {
-    // 未分组来源：整个库里落在外壳侧边栏「未分组」那一组里的会话——`!owned` **且** 侧边栏会显示它
-    // （两件事的合取就是 `visibility.ts` 的 `isUngrouped()`，也正是下面的 `!owned` + `splitHidden`）。
-    // 没有 `cwd` 的还排除在外：`relocateHeaderCwd()` 明确拒绝改写一个没有 cwd 的 header（session-log.ts），
-    // 所以它们根本搬不进来——那是这个来源自己的**能力**限制，不是「未分组」的定义（侧边栏那一组里有它们）。
-    // 界面上那个来源的条数与这里必须一致，于是界面读的是宿主发来的同一个结论（planRows.unownedSessions）。
-    sourceScanned = scanAll(root, decodeAll, scanOptions)
-    owned = ownedOf(sourceScanned)
-    discovered = splitLive(
-      splitHidden(sourceScanned.filter((s) => !owned.has(s.id) && typeof s.cwd === 'string' && s.cwd !== '')),
-    )
-  } else if (existsSync(sourceProjectDir)) {
-    sourceScanned = scanProjectDir(sourceProjectDir, decodeAll, scanOptions)
-    owned = ownedOf(sourceScanned)
-    discovered = splitLive(splitHidden(sourceScanned))
-    for (const s of discovered) {
-      if (s.cwd !== from) problems.push(`session ${s.id}: header cwd ${s.cwd} != ${from}`)
-    }
-  }
+  /*
+   * **一遍整库扫描**：点名的会话可能散在任意项目目录里（勾选跨目录就是常态），父子关系与认领也都在
+   * 同一份上算——不再有"源目录那一遍 + 为查族扫的第二遍"。这一遍不带标题的话就是纯 header 扫描，
+   * 带标题时与 `/state` 同一份开销（见 web.ts 的说明）。
+   */
+  const library = scanAll(root, decodeAll, scanOptions)
+  const discovered = splitLive(splitHidden(library))
+  const byId = new Map(library.map((session) => [session.id, session]))
 
-  if (sessionIds) {
-    const known = new Set(discovered.map((s) => s.id))
-    // 点名点到一条隐藏的会话时，子智能体那类要说清"该点名的是谁"——查的是源目录那一份。
-    const sourceById = new Map(sourceScanned.map((session) => [session.id, session]))
-    for (const id of sessionIds) {
-      // 点名的会话不在这次来源的候选里：直接报 problem，不静默少搬（未分组来源下，
-      // "在册"或"没有 cwd"的会话就落在这里——它们不是这个来源能覆盖的东西）。
-      if (known.has(id)) continue
-      const reason = hiddenInSource.get(id)
-      if (reason !== undefined) {
-        // 子智能体是"跟着父会话走"的那一类（见 family.ts）：点名它自己不会把它搬走（那是向上的
-        // 牵连），该点名的是它的父会话——所以这句话要给出下一步，而不只是"我不搬它"。
-        const parent = sourceById.get(id)?.header.parentSession
-        problems.push(
-          reason === 'subagent' && parent !== undefined
-            ? `session ${id} is a subagent session (it follows its parent) — migrate its parent ${parent} instead`
-            : `session ${id} is hidden from the host sidebar (${reason}) — migration does not take it`,
-        )
-        continue
-      }
-      // 点名的会话宿主持着：搬不动（理由见 `BuildPlanOptions.live`），所以给下一步而不是"找不到"。
-      if (liveSkipped.has(id)) {
-        problems.push(
-          `session ${id} is live in the host (it still holds an in-memory copy and a write handle) — ` +
-            'migration does not take it; restart DSH, then migrate it',
-        )
-        continue
-      }
+  // 点名的那几条：不在可搬的那批里就逐条报问题（隐藏 / 宿主攥着 / 根本没有这条），不静默少搬。
+  const known = new Set(discovered.map((session) => session.id))
+  const requestedIds = new Set(requested)
+  for (const id of requested) {
+    if (known.has(id)) continue
+    const reason = hiddenInLibrary.get(id)
+    if (reason !== undefined) {
+      // 子智能体是"跟着父会话走"的那一类（见 family.ts）：点名它自己不会把它搬走（那是向上的
+      // 牵连），该点名的是它的父会话——所以这句话要给出下一步，而不只是"我不搬它"。
+      const parent = byId.get(id)?.header.parentSession
       problems.push(
-        unowned ? `session ${id} is not an unowned session with a cwd` : `session ${id} not found in ${sourceProjectDir}`,
+        reason === 'subagent' && parent !== undefined
+          ? `session ${id} is a subagent session (it follows its parent) — migrate its parent ${parent} instead`
+          : `session ${id} is hidden from the host sidebar (${reason}) — migration does not take it`,
       )
+      continue
     }
+    /*
+     * 点名的会话宿主持着：这次搬不动（理由见 `BuildPlanOptions.live`），但**不算问题**——它已经进了
+     * `liveSkipped`，预演、工具返回值与界面都会说清"少搬了这几条、重启 DSH 之后再迁"。
+     *
+     * 与隐藏的那三类不同：宿主放手之后它就是能搬的（重启即可），所以这里不拦下整份计划；而界面那一侧
+     * 也会把这类行置灰（`/state` 报得出每条的 live），正常路径上勾不到它。
+     */
+    if (liveSkipped.has(id)) continue
+    problems.push(`session ${id} not found in the session library`)
   }
 
-  let selected = discovered
-  if (sessionIds) selected = discovered.filter((s) => sessionIds.includes(s.id))
-  if (!unowned && !includeUnowned) {
-    for (const s of selected) {
-      if (!owned.has(s.id)) problems.push(`session ${s.id} is not accounted by any workspace (use includeUnowned)`)
-    }
-  }
+  const selected = discovered.filter((session) => requestedIds.has(session.id))
+  /*
+   * 「在册」与「被认领」是两件事（判据与理由见 accounting.ts）：注册表里登记过、但它的目录已经改名或
+   * 删掉的会话，宿主那边**不算**任何工作区的成员——外壳侧边栏把它放进「未分组」（那只是标签）。下面
+   * 每一处"这条有没有主"的判断都读被认领的那一份：`registered` 与"哪些登记已经悬空"。按整库算一次，
+   * 级联带进来的后代在别处有主时也一起算进去。
+   */
+  const owned = new Set(accountedOwners(registry, library).keys())
 
-  // **子智能体跟着父会话走**：选中的每条会话都把它的全部后代一起带走（判据与顺序见 family.ts）。
-  //
-  // 找后代要扫全库：子会话的日志落在它自己 cwd 的项目目录里，而那个 cwd 未必还是父会话现在的 cwd
-  // （父会话被单独迁走过一次，孩子就留在旧目录里了）——只扫源项目目录会漏掉那些，正是要修的那种
-  // "族被拆成两半"。这一遍**不读标题**：全库带标题扫一遍实测 1.7s（本机 41 条），而这一遍只用来看
-  // 父子关系；源目录里那份带着标题，合并时优先取它，于是跨目录的后代没有标题（预演卡片不逐条画
-  // `sessions`，标题只在候选列表里用，那份来自 /state，见 migrate.ts 的 previewOf）。
-  const library = unowned ? sourceScanned : scanAll(root, decodeAll)
-  const merged = new Map<string, DiscoveredSession>()
-  for (const session of library) merged.set(session.id, session)
-  for (const session of sourceScanned) merged.set(session.id, session)
-  // 级联带进来的后代可能住在别的项目目录里（上一段的理由）：认领要按这份合并后的全量重算，否则一条
-  // 在别处有主的后代会被判成"从来没在册"，迁移时就不给它改挂（见下面 `registered`）。
-  owned = ownedOf([...merged.values()])
-  const family = familyOf([...merged.values()], selected)
+  // **子智能体跟着父会话走**：点名的每条会话都把它的全部后代一起带走（判据与顺序见 family.ts）。
+  // 全库那一份已经在手上，不需要再扫一遍。
+  const family = familyOf(library, selected)
   const selectedIds = new Set(selected.map((s) => s.id))
 
   // 目标会话目录不得已被占用
@@ -326,27 +260,28 @@ export function buildRelocationPlan(options: BuildPlanOptions): RelocationPlan {
       : { id: familyRoot.id, ...(familyRoot.title === undefined ? {} : { title: familyRoot.title }) }
     const owner = via === undefined ? '' : ` (subagent, follows ${via.title ?? via.id})`
     const targetDir = join(targetProjectDir, s.dirName)
-    // 每条会话各自一个源：未分组来源下它们分散在不同项目目录里；目录来源下**级联带进来的后代**
-    // 也可能不在源目录里（见上面扫全库那段），它的源只能是自己的 cwd。
-    const sessionFrom = unowned || via !== undefined ? s.cwd : from
+    // **每条会话的源就是它自己的 cwd**：点名的那几条按它们各自所在目录算，级联带进来的后代也一样
+    // （后代的 cwd 未必还是父会话现在的 cwd，见上面扫全库那一段）。
+    const sessionFrom = s.cwd
     if (sessionFrom === undefined || sessionFrom === '') {
       // 没有 cwd 就没法改写 header、也没法定位项目目录（relocateHeaderCwd 明确拒绝）。
       problems.push(`session ${s.id}${owner} has no cwd to rewrite — migration cannot take it`)
       continue
     }
-    // `cwd` 已经在目标上的会话（未分组来源下很常见：这条没人认领的会话本来就住在那个目录里，
-    // 只是没登记在册）不需要搬任何东西——它的"目标目录"就是自己现在的位置，所以"目标已存在"
-    // 在这里不是冲突。这一支在单目录来源下够不到（`from === to` 被上面挡了），
-    // 未分组来源下它是**收编**这件事的常态：只补一条注册表记录。
-    // 同一个目录的另一种拼写同样算"已经在目标上"：那一支要做的只是把 header 的拼写改对。
+    // `cwd` 已经在目标上的会话不需要搬任何东西——它的"目标目录"就是自己现在的位置，所以"目标已存在"
+    // 在这里不是冲突。够得到它的是三种情形：勾选里本来就混了目标目录的会话（跨目录勾选）、级联带进来
+    // 的后代、以及"同一个目录的另一种拼写"（那时只是把 header 的拼写改对）。
     const alreadyAtTarget = sessionFrom === to || canonicalDir(sessionFrom) === to
     if (existsSync(targetDir) && !alreadyAtTarget) problems.push(`target session directory already exists: ${targetDir}`)
     if (targetDirs.has(targetDir)) problems.push(`duplicate target directory: ${targetDir}`)
     targetDirs.add(targetDir)
     // 项目目录名与 header 的 cwd 若已经对不上，说明这条会话落错了项目目录（宿主会判它 corrupt）——搬过去正好
     // 修好，但项目目录名相同却是另一个 cwd 时目标项目目录里会撞车，那种情况在这里挡住。
-    if ((unowned || via !== undefined) && !alreadyAtTarget && projectDirOf(root, sessionFrom) === targetProjectDir) {
-      problems.push(`session ${s.id}${owner}: its project directory collides with the target's (${projectKey(to)})`)
+    if (!alreadyAtTarget && projectDirOf(root, sessionFrom) === targetProjectDir) {
+      problems.push(
+        `session ${s.id}${owner}: projectKey collision with the target (${projectKey(to)}) — ` +
+          "its project directory would mix with the target's",
+      )
     }
     sessions.push({
       id: s.id,
@@ -368,18 +303,29 @@ export function buildRelocationPlan(options: BuildPlanOptions): RelocationPlan {
     // 一条都没剩、而且原因是"全被宿主持着"：说清这一点，别让用户拿"没选中会话"去查勾选。
     problems.push(
       liveSkipped.size > 0
-        ? `every session in this source is live in the host (${liveSkipped.size}) — restart DSH, then migrate them`
+        ? `every ticked session is live in the host (${liveSkipped.size}) — restart DSH, then migrate them`
         : 'no sessions selected for migration',
     )
+  } else if (sessions.length > 0 && sessions.every((s) => s.alreadyAtTarget && s.sourceDir === s.targetDir)) {
+    /*
+     * 点名的每一条都已经住在目标目录里（目标就是它们现在这个目录）：目录不用搬、header 也不用改，
+     * 这一次没有东西可搬。报出来而不是走一遍空流程——那会留下一个什么都没做的备份，还会把注册表
+     * 重写一遍。**只在这条判据真的成立时才报**：另一种拼写（`canonicalDir` 相等但字符串不同）与
+     * "级联的后代本来就住在目标里"都不是空流程，前者要改 header 的拼写、后者要改归属。
+     */
+    problems.push('every ticked session already lives in the target directory — nothing to migrate')
   }
 
-  // 可选的产物搬迁：需要**全量解码**会话日志（多帧全解），比发现阶段慢得多，
-  // 因此只在显式要求时做。未分组来源横跨多个目录时不做：产物定位是"相对于源目录"的
-  // （planArtifactMoves 只收一个 fromDir），一次请求里没有哪一个目录当得起这个角色。
+  /*
+   * 可选的产物搬迁：需要**全量解码**会话日志（多帧全解），比发现阶段慢得多，因此只在显式要求时做。
+   *
+   * 产物在日志里是**相对会话自己的 cwd** 记的（`planArtifactMoves()` 把 `fromDir` 当那个基准读
+   * `extractArtifactsFromLog({ cwd })`），而勾选可以跨目录：所以这里按"每条会话自己的源目录"分组、
+   * 每组各规划一次再拼起来。拿一个目录当唯一基准的话，别的来源目录里那几条的产物会按错误的 cwd
+   * 解释（相对路径被拼到别人家去），这一层正是要修掉它。
+   */
   let artifacts: RelocationPlan['artifacts'] = null
-  if (includeArtifacts && unowned && sessions.length > 0) {
-    problems.push('unowned source cannot relocate session artifacts (it spans several source directories)')
-  } else if (includeArtifacts && sessions.length > 0) {
+  if (includeArtifacts && sessions.length > 0) {
     const texts: Array<{ id: string; text: string }> = []
     for (const [index, s] of sessions.entries()) {
       // 产物定位要**全量解码**每份日志（多帧全解），比发现阶段贵得多：这一段同样值得一条进度。
@@ -390,8 +336,22 @@ export function buildRelocationPlan(options: BuildPlanOptions): RelocationPlan {
         text: s.files.map((f) => decodeAll(readFileSync(f.path))).join(''),
       })
     }
-    artifacts = planArtifactMoves({ sessions: texts, fromDir: from, toDir: to })
-    for (const p of artifacts.problems) problems.push(p)
+    const byFromDir = new Map<string, Array<{ id: string; text: string }>>()
+    for (const [index, move] of sessions.entries()) {
+      const group = byFromDir.get(move.from) ?? []
+      group.push(texts[index]!)
+      byFromDir.set(move.from, group)
+    }
+    const merged: NonNullable<RelocationPlan['artifacts']> = { moves: [], problems: [], skipped: [] }
+    // 按来源目录排序再算：跨目录勾选时"先算哪一组"不该由勾选顺序决定（越界问题清单要可比）。
+    for (const fromDir of [...byFromDir.keys()].sort()) {
+      const result = planArtifactMoves({ sessions: byFromDir.get(fromDir)!, fromDir, toDir: to })
+      merged.moves.push(...result.moves)
+      merged.problems.push(...result.problems)
+      merged.skipped.push(...result.skipped)
+    }
+    artifacts = merged
+    for (const p of merged.problems) problems.push(p)
   }
 
   /*
@@ -399,7 +359,7 @@ export function buildRelocationPlan(options: BuildPlanOptions): RelocationPlan {
    *
    * 判"源工作区被搬空了吗"不能拿它们当筹码：宿主自己就是按"认领"算成员的（见 accounting.ts），
    * 侧边栏早就把它们当不存在；只看登记数组的话，这些悬空登记会把那条工作区记录永远钉住。
-   * `owned` 在上面按**整库**重算过，所以这里读的是最终那一份。
+   * `owned` 按**整库**算的那一份就是这里要读的。
    */
   const accountedIds = new Set(owned.keys())
   const staleSessionIds = new Set<string>()
@@ -440,7 +400,7 @@ export function buildRelocationPlan(options: BuildPlanOptions): RelocationPlan {
       if (record === undefined) continue
       const members: StrandedMember[] = []
       for (const sid of record.sessionIds) {
-        const session = merged.get(sid)
+        const session = byId.get(sid)
         const reason = session === undefined ? undefined : hiddenOf(session)
         // 没被点名、可见的那几条是"用户自己挑的子集"，不在这里报——这一段说的是"搬不走的"。
         // 宿主持着的那些由 liveSkipped 单独报账。
@@ -456,12 +416,11 @@ export function buildRelocationPlan(options: BuildPlanOptions): RelocationPlan {
   return {
     ok: problems.length === 0,
     problems,
-    from: unowned ? '' : from,
+    sessionIds: requested,
     to,
     root,
-    sourceProjectDir,
+    sourceProjectDirs: [...new Set(sessions.map((s) => dirname(s.sourceDir)))].sort(),
     targetProjectDir,
-    unowned,
     sessions,
     liveSkipped: [...liveSkipped.values()],
     strandedSources,
@@ -476,13 +435,8 @@ export function buildRelocationPlan(options: BuildPlanOptions): RelocationPlan {
 export function describePlan(plan: RelocationPlan): string {
   const lines: string[] = []
   lines.push(`迁移 ${plan.sessions.length} 个会话：`)
-  // 未分组来源没有"一个源目录"这回事：源项目目录由每条会话自己的 cwd 定，因此只报涉及的项目目录数。
-  const sourceProjectDirs = new Set(plan.sessions.map((s) => dirname(s.sourceDir)))
-  lines.push(
-    plan.unowned
-      ? `  （未分组：横跨 ${sourceProjectDirs.size} 个源项目目录）`
-      : `  ${plan.from}`,
-  )
+  // 源可能有几处（勾选跨目录时就是这样）：逐条列出项目目录，不写"多个来源"这种含糊话。
+  lines.push(`  来源项目目录：${plan.sourceProjectDirs.join('、')}`)
   lines.push(`  -> ${plan.to}`)
   const files = plan.sessions.reduce((n, s) => n + s.files.length, 0)
   lines.push(`  日志文件 ${files} 个；目标项目目录 ${plan.targetProjectDir}`)

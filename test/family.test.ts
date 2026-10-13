@@ -148,9 +148,11 @@ interface Sandbox {
  * 沙箱布局：
  *   dirA（已登记 ws-a，只认领 session-parent）—— 父会话与它的两条直系后代，外加一条没在册的旁观者；
  *   dirB —— **另一个项目目录**里住着父会话的另一个后代（父会话被单独迁走过一次就会长成这样）；
- *   dirTarget —— 目标目录（不在注册表里 → 这次要新建一条工作区记录）。
+ *   dirTarget —— 目标目录（不在注册表里 → 这次要新建一条工作区记录）；
+ *   `atTargetChild`（可选）—— 再放一条后代，它本来就住在 **dirTarget** 里（cwd 就是目标），
+ *   迁移时它一个字节都不挪。
  */
-function makeSandbox(name: string): Sandbox {
+function makeSandbox(name: string, options: { atTargetChild?: boolean } = {}): Sandbox {
   const base = join(import.meta.dirname, '.sandbox', name)
   rmSync(base, { recursive: true, force: true })
   const dirA = join(base, 'dir-a')
@@ -181,6 +183,14 @@ function makeSandbox(name: string): Sandbox {
     ['session-far', dirB],
   ] as const) {
     place(cwd, id)
+  }
+  if (options.atTargetChild === true) {
+    logs['session-home'] = makeLog('session-home', dirTarget, {
+      origin: 'subagent',
+      parentSession: 'session-parent',
+      delegationDepth: 1,
+    })
+    place(dirTarget, 'session-home')
   }
 
   const registryPath = join(base, 'dsh', 'storages', 'workspace.json')
@@ -221,10 +231,10 @@ function makeSandbox(name: string): Sandbox {
   }
 }
 
+// 源是点名的那几条（默认点名父会话，整族因此一起走）；没有"源目录"这个参数。
 const opts = (sb: Sandbox, extra: Record<string, unknown> = {}) => ({
   root: sb.root,
   registry: sb.registry,
-  from: sb.dirA,
   to: sb.dirTarget,
   decodeAll,
   sessionIds: ['session-parent'],
@@ -269,20 +279,19 @@ test('迁移：点名父会话 → 全部后代一起进计划（多级、跨项
   assert.equal(plan.sessions.some((s: SessionMove) => s.id === 'session-stray'), false)
 })
 
-test('迁移：「连同未分组的会话」关掉时不挡跟着走的子智能体，但仍挡未在册的候选', () => {
-  const sb = makeSandbox('family-migrate-include-unowned')
+// 「未分组」只是一枚标签（没人认领的那几条在侧边栏里落在那一组）：点名它照旧能迁，没有"连不连带
+// 未分组"这个开关——勾了就是用户的决定。子智能体那类本来就没在册，它跟着父走从来不需要开关。
+test('迁移：点名一条未分组的会话照旧能迁，它顺手被目标工作区收编', () => {
+  const sb = makeSandbox('family-migrate-unowned')
 
-  // 子智能体本来就没在册——它跟着父走，不该被"未分组"那个开关拦下
-  const following = buildRelocationPlan(opts(sb, { includeUnowned: false }))
-  assert.equal(following.ok, true, following.problems.join('; '))
-  assert.equal(following.cascaded, 3)
-
-  // 而一个真正没在册的**候选**（用户点得到的那条）照旧拦：开关管的是候选，不是族
-  const stray = buildRelocationPlan(opts(sb, { sessionIds: ['session-stray'], includeUnowned: false }))
-  assert.equal(stray.ok, false)
-  assert.deepEqual(stray.problems, ['session session-stray is not accounted by any workspace (use includeUnowned)'])
-  assert.equal(stray.sessions.length, 1, '没在册的那条不进计划，但级联展开照旧发生（它名下没有后代）')
-  assert.equal(stray.cascaded, 0)
+  const stray = buildRelocationPlan(opts(sb, { sessionIds: ['session-stray'] }))
+  assert.equal(stray.ok, true, stray.problems.join('; '))
+  assert.deepEqual(stray.sessions.map((s) => s.id), ['session-stray'])
+  assert.equal(stray.sessions[0]?.registered, false, '没人认领它：注册表里本来没有它这条归属')
+  assert.equal(stray.cascaded, 0, '它名下没有后代')
+  assert.deepEqual(stray.registryChange?.adoptedFromUnowned, ['session-stray'])
+  // 它与父会话同目录，却只点名它自己：源工作区里还留着父会话，那条记录因此不许删。
+  assert.deepEqual(stray.registryChange?.removedSources, [])
 })
 
 test('迁移：整族搬过去（各自改写 cwd、清掉两个空项目目录），回滚把整族按清单搬回来', () => {
@@ -324,6 +333,9 @@ test('迁移：整族搬过去（各自改写 cwd、清掉两个空项目目录�
     [...new Set(manifest.sessions.map((s) => basename(dirname(s.sourceDir))))].sort(),
     [projectKey(sb.dirA), projectKey(sb.dirB)].sort(),
   )
+  // 来源横跨两个目录：清单里那句"从哪儿来"没有单一答案，因此**缺席**（界面按来源目录条数说清楚，
+  // 见 migrate.ts 的 BackupSummary.sourceDirs）。回滚不看它，只认每条会话自己的 sourceDir。
+  assert.equal(manifest.from, undefined)
 
   // 注册表：目标记录收下父会话，ws-a 被摘空
   const registry = readRegistry(sb.registryPath)
@@ -342,4 +354,37 @@ test('迁移：整族搬过去（各自改写 cwd、清掉两个空项目目录�
   const after = readRegistry(sb.registryPath)
   assert.deepEqual(Object.keys(after.tables.workspaces), ['ws-a'])
   assert.deepEqual(after.tables.workspaces['ws-a']?.sessionIds, ['session-parent'])
+})
+
+test('迁移：后代本来就住在目标目录里（cwd == 目标）：不搬目录、不改写，回滚也不去搬它', () => {
+  const sb = makeSandbox('family-migrate-at-target', { atTargetChild: true })
+  const plan = buildRelocationPlan(opts(sb))
+  assert.equal(plan.ok, true, plan.problems.join('; '))
+
+  const home = plan.sessions.find((s) => s.id === 'session-home')
+  assert.ok(home, '跟着父会话走的后代要在计划里')
+  assert.deepEqual(home.via, { id: 'session-parent' })
+  assert.equal(home.alreadyAtTarget, true, '它的 cwd 就是目标目录')
+  assert.equal(home.from, sb.dirTarget)
+  assert.equal(home.sourceDir, home.targetDir, '目标就是它现在的位置')
+  assert.equal(home.registered, false, '子智能体本来就不在册')
+
+  const result = applyPlan(plan, { registryPath: sb.registryPath, decodeAll, backupRoot: sb.backupRoot })
+  // 整族 5 条：只有真的换了项目目录的那 4 条搬了、也改了首帧；住在目标里的那条一个字节都没动。
+  assert.equal(result.moved, 4)
+  assert.equal(result.rewritten, 4)
+  const homeDir = join(sb.root, projectKey(sb.dirTarget), 'session-home')
+  assert.deepEqual(readFileSync(join(homeDir, 'session.v4.jsonl.zstd')), sb.logs['session-home']!)
+  assert.equal(verifyAppliedPlan(plan, { decodeAll }).ok, true)
+
+  // 回滚：那条必须一条动作都没有——"先删掉自己、再把自己改名到自己"丢的是唯一一份会话目录。
+  const { manifest } = readManifest(result.backupDir)
+  const dry = rollback(manifest, { backupDir: result.backupDir, dryRun: true })
+  const moves = dry.actions.filter((action) => action.startsWith('move back:') && action.includes('session-home'))
+  assert.deepEqual(moves, [], '它不在任何搬回动作里（同目录那一步会被跳过）')
+  const rolled = rollback(manifest, { backupDir: result.backupDir })
+  assert.equal(rolled.restoredFiles, 5)
+  assert.deepEqual(readFileSync(join(homeDir, 'session.v4.jsonl.zstd')), sb.logs['session-home']!)
+  assert.equal(existsSync(homeDir), true, '唯一一份会话目录必须还在')
+  assert.deepEqual(readRegistry(sb.registryPath), sb.registry, '注册表回到原状')
 })

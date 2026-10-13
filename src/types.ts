@@ -139,7 +139,7 @@ export interface StrandedMember {
 /**
  * 源工作区搬完**还剩人**、因此不会被删的那一块（见 `RelocationPlan.strandedSources`）。
  *
- * 为什么会剩下：候选只收侧边栏显示的那些（见 visibility.ts），已归档 / 空白 / 父会话不在这次来源里的
+ * 为什么会剩下：迁移只搬点名的那些（外加它们的子智能体后代），已归档 / 空白 / 父会话不在这次点名里的
  * 子智能体因此搬不走；它们的归属留在源工作区的登记里，那条记录就删不掉——侧边栏会画出一个一条都不
  * 显示的工作区。少搬可以，不说清楚"那块工作区为什么还在"才是坏账。
  */
@@ -156,23 +156,20 @@ export interface RelocationPlan {
   ok: boolean
   problems: string[]
   /**
-   * 源工作区目录；**未分组来源**（`unowned`）时是空串——那时源由"谁都没认领"决定（判据见
-   * accounting.ts），可以横跨多个项目目录，每条会话各自的源在 `sessions[].from` 里。
+   * 点名的会话 id（去重、保持点名顺序）。**源就是它们**：每条会话的源目录是它自己的 `cwd`，
+   * 所以一次迁移可以有多个来源目录（勾选跨目录时就是这样），目标只有一个。
    */
-  from: string
+  sessionIds: string[]
   to: string
   root: string
-  /** 源项目目录；未分组来源时是空串（源不是一个目录，见 `unowned`）。 */
-  sourceProjectDir: string
-  targetProjectDir: string
   /**
-   * 源是"外壳侧边栏那个「未分组」里有 cwd 的会话"（判据见 visibility.ts 的 `isUngrouped()`），
-   * 而不是某个目录。
-   *
-   * 这一条决定了执行阶段怎么清理源项目目录（按每条会话自己的项目目录，见 execute.ts 第 5 步）与
-   * 产物搬迁能不能做（跨目录时拒绝，见 plan.ts 的说明）。
+   * 这次涉及的来源目录，按每条会话自己的 `cwd` 推出来的项目目录（`projectKey(cwd)`，去重排序）；
+   * 它们必须存在（会话日志那一层）。**来源目录本身不必还在盘上**：项目文件夹被删掉之后，日志与
+   * header 里的 `cwd` 都还在（外壳侧边栏把这批会话显示在「未分组」那一组里，那只是标签），
+   * 拿这条旧路径当源照旧能迁到重建后的新目录。
    */
-  unowned: boolean
+  sourceProjectDirs: string[]
+  targetProjectDir: string
   sessions: SessionMove[]
   /** 级联带进来的条数：点名的会话的子智能体后代（见 `SessionMove.via`）。 */
   cascaded: number

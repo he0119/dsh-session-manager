@@ -13,8 +13,10 @@ Status: implemented
 ## Decision
 
 判据收进一处：`src/visibility.ts` 的 `hiddenReasonOf()`。计划层（`src/plan.ts`）与界面
-（`src/web.ts` 的 `/state`）读的是同一份结论，`/state` 把结论作为 `hidden` 字段发给「会话」页，
-界面只负责显示。
+（`src/web.ts` 的 `/state`）读的是同一份结论，`/state` 把结论作为 `hidden` 字段发给各分页，界面只负责
+显示。迁移页把这批会话**列出来但勾不动**（勾选框灰着并说明为什么）：列表就是整库，用户要能看见"为什么
+这几条没被搬走"，而"能不能勾"与"宿主会不会搬"必须是同一个集合
+（见[迁移的源就是你勾的那些会话](2026-10-13-source-is-what-you-tick.md)）。
 
 三处输入各自的来源：
 
@@ -35,12 +37,12 @@ Status: implemented
 **读不到空白缓存时按「空白」处理。** 反过来假设它空白，就会把用户看得见的会话从候选里悄悄拿掉，
 而「少迁一条」是无声的。
 
-**把隐藏的会话直接从候选里删掉、不提。** 点名叫一条隐藏的会话必须如实报
+**把隐藏的会话直接从清单里删掉、不提。** 点名叫一条隐藏的会话必须如实报
 `session <id> is hidden from the host sidebar (<理由>) — migration does not take it`：
 「我没选它」和「我选了它但你没动」必须能分辨。
 
 ## Consequences
 
-- 候选集与外壳侧边栏显示的那些一一对应；多出来的那几类各自报明理由。
+- 可勾的集合与外壳侧边栏显示的那些一一对应；多出来的那几类列在清单里、各报各的理由。
 - `test/hidden.test.ts` 把四种输入逐个钉住；`test/visibility.test.ts` 核三条理由的顺序与缓存缺席时
   的回落。

@@ -523,16 +523,15 @@ export interface PreviewSession {
 export interface MigrationPreview {
   ok: boolean
   problems: string[]
-  /** 源工作区目录；未分组来源时是空串（见 `unowned`）。 */
-  from: string
+  /** 点名的会话 id：**源就是它们**（勾选可以跨目录，见宿主 `MigrateRequest.sessionIds`）。 */
+  sessionIds: string[]
   to: string
-  /** 源项目目录；未分组来源时是空串（源不是一个目录）。 */
-  sourceProjectDir: string
-  targetProjectDir: string
-  /** 源是不是那个跨目录的「未分组」（界面据此换一句项目目录说明）。 */
-  unowned: boolean
-  /** 本次会搬动的会话各自所在的源项目目录（去重、排序）；未分组来源下不止一个。 */
+  /**
+   * 这次涉及的来源项目目录（会话日志那一层，去重排序）；来源目录本身不必还在盘上。
+   * 多于一处的来源就是"勾选跨目录"，卡片照实列出来。
+   */
   sourceProjectDirs: string[]
+  targetProjectDir: string
   sessions: PreviewSession[]
   /** 级联带进来的条数：点名的会话的子智能体后代。 */
   cascaded: number
@@ -579,17 +578,10 @@ export interface MigrationPreview {
 /** 迁移请求（与宿主 `MigrateRequest` 同形）。 */
 export interface MigrationRequest {
   mode: 'plan' | 'apply'
-  /** 源目录；`unowned` 为 true 时是空串（那时源不是一个目录）。 */
-  from: string
+  /** 要迁移的会话 id（**必填、非空**）：源就是它们，各自从自己的 `cwd` 来。 */
+  sessionIds: string[]
   to: string
-  /**
-   * 源取"注册表没认领且有 cwd 的会话"（外壳侧边栏的「未分组」），而不是某个目录。
-   * 与 `from` 互斥；界面上的哨兵值（planRows.UNOWNED_SOURCE）到这里才翻译成这个字段。
-   */
-  unowned?: boolean
-  sessionIds?: string[] | null
   title?: string
-  includeUnowned?: boolean
   includeArtifacts?: boolean
 }
 
@@ -618,8 +610,11 @@ export interface BackupSummary {
   artifacts: number
   /** 这份备份是哪一类操作留下的：迁移 / 删除 / 同步时覆盖本机那份（老备份缺字段 = 迁移）。 */
   kind?: 'migrate' | 'delete' | 'replace'
+  /** 全部会话同源时那个来源目录；勾选跨目录的那次没有单一答案，因此缺省（见 `sourceDirs`）。 */
   from?: string
   to?: string
+  /** 这次迁移涉及几个来源目录（勾选跨目录时用它说清"从哪儿来"）。 */
+  sourceDirs?: number
 }
 
 /** `GET /backups` 的响应。 */
@@ -646,11 +641,11 @@ export interface RollbackResponse {
 /**
  * 迁移或只预演。
  *
- * 回的是事件流：预演要扫源目录（未分组来源时是整个库），落地要备份、改写每份日志的首帧、搬目录、
- * 复核、请宿主补检查点——实测 47 条会话 / 67.5 MB 要 45 秒（改写首帧是大头），那段时间原来只有一个
- * 不动的按钮。
+ * 回的是事件流：预演要扫整库（点名的会话可能散在任意项目目录里），落地要备份、改写每份日志的首帧、
+ * 搬目录、复核、请宿主补检查点——实测 47 条会话 / 67.5 MB 要 45 秒（改写首帧是大头），那段时间原来
+ * 只有一个不动的按钮。
  *
- * 计划本身有问题（源目录不存在、目标被占用…）与复核没过**都还是结果**：它们带着完整的 `preview`，
+ * 计划本身有问题（目标不存在、项目目录同名…）与复核没过**都还是结果**：它们带着完整的 `preview`，
  * 页面要把清单与问题摆出来，所以都从 `result` 事件回，而不是当成流的错。
  */
 export async function migrate(
