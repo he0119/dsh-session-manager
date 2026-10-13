@@ -65,14 +65,19 @@ export function applyPlan(plan: RelocationPlan, options: ApplyOptions): ApplyRes
   const artifactMoves = plan.artifacts?.moves ?? []
 
   // 1) 备份（会话目录 + 待搬产物 + 注册表）
+  /*
+   * 清单里那句给人看的"从哪儿来"：**每条会话自己的来源目录**（`SessionMove.from`，也就是它的 cwd）
+   * 只有一个答案时才写得出来。勾选跨目录时没有单一答案，那份 `from` 因此缺席（界面按来源目录条数说
+   * 清楚，见 migrate.ts 的 `BackupSummary.sourceDirs`）；回滚不看它，只认清单里每条会话自己的
+   * `sourceDir`（会话日志那一层）。
+   */
+  const sourceDirs = new Set(plan.sessions.map((session) => session.from))
   const backup = createBackup({
     backupRoot,
     registryPath,
     sessions: plan.sessions,
     artifacts: artifactMoves,
-    // 未分组来源没有"一个源目录"这回事：清单里的 from 是给人看的一句摘要，写一个假路径不如不写
-    // （界面那边把缺席显示成「—」；真正的源头在清单的每条会话记录里，回滚只认那些字段）。
-    ...(plan.unowned ? {} : { from: plan.from }),
+    ...(sourceDirs.size === 1 ? { from: [...sourceDirs][0]! } : {}),
     to: plan.to,
     now,
     ...(onProgress === undefined ? {} : { onProgress }),
@@ -126,9 +131,9 @@ export function applyPlan(plan: RelocationPlan, options: ApplyOptions): ApplyRes
   writeRegistryAtomic(registryPath, plan.nextRegistry)
   say(`registry written (target workspace ${plan.registryChange?.targetId ?? 'n/a'})`)
 
-  // 5) 清理空项目目录：**按每条会话自己的**源项目目录去重。单个目录来源时这就是那一个项目目录（与以前等价），
-  //    未分组来源时可以横跨好几个项目目录。目标项目目录跳过不删：cwd 已经在目标上的那些会话本来就住在那里
-  //    （step 3 会跳过它们），删掉目标项目目录就是删掉刚落好的家。
+  // 5) 清理空项目目录：**按每条会话自己的**源项目目录去重（跟着父会话走的后代可能住在别的项目目录里）。
+  //    目标项目目录跳过不删：cwd 已经在目标上的那些会话本来就住在那里（step 3 会跳过它们），
+  //    删掉目标项目目录就是删掉刚落好的家。
   const sourceProjectDirs = new Set(plan.sessions.map((s) => dirname(s.sourceDir)))
   for (const projectDir of sourceProjectDirs) {
     if (projectDir === plan.targetProjectDir) continue

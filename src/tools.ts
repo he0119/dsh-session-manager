@@ -770,34 +770,33 @@ export function registerTools(ctx: Context, config: PluginConfigInput = {}): Arr
       defineTool({
         name: 'plan_session_migration',
         description:
-          'Read-only plan for migrating DSH sessions from one workspace directory to another. Reports how many ' +
-          'sessions and log files would move, the target session project directory, the workspace-registry ' +
-          'change, and any ' +
+          'Read-only plan for migrating DSH sessions to another workspace directory. The source is the sessions ' +
+          'you name in sessionIds (each session comes from its own cwd, so one call can gather sessions out of ' +
+          'several directories); there is no source-directory parameter, and the source directories do not have ' +
+          'to exist on disk any more. Reports how many ' +
+          'sessions and log files would move, the source and target session project directories, the ' +
+          'workspace-registry change, and any ' +
           'blocking problem (missing target directory, projectKey collision, occupied target directory, invalid ' +
           'registry). Sessions the host still holds in memory (live) cannot move while it holds them: they are ' +
           'left in place and counted in liveSkipped instead of being migrated. Sessions the sidebar hides ' +
-          '(archived, blank, or subagents whose parent is not part of this source) are not candidates either: they ' +
+          '(archived, blank, or subagents) cannot be named either: they ' +
           'stay behind, so their source workspace is not removed from the registry — the summary names them and ' +
           'stranded counts them. Subagent sessions always follow ' +
           'their parent: naming a subagent is refused, and naming a ' +
           'parent takes its whole family along. Writes nothing. Call this before migrate_sessions.',
         parameters: {
-          from: { type: 'string', required: true, description: 'Source workspace directory (absolute path).' },
+          sessionIds: {
+            type: 'array',
+            required: true,
+            items: { type: 'string' },
+            description:
+              'The session ids to migrate (required, non-empty). They may come from different directories. ' +
+              'Subagent descendants always come along with the session they belong to.',
+          },
           to: {
             type: 'string',
             required: true,
             description: 'Target workspace directory (absolute path, must already exist).',
-          },
-          sessionIds: {
-            type: 'array',
-            items: { type: 'string' },
-            description:
-              'Optional: migrate only these session ids (default: every session in the source project directory). ' +
-              'Subagent descendants always come along with the session they belong to.',
-          },
-          includeUnowned: {
-            type: 'boolean',
-            description: 'Optional: also migrate sessions no workspace accounts for (the sidebar Ungrouped group; default true).',
           },
         },
         output: {
@@ -823,10 +822,8 @@ export function registerTools(ctx: Context, config: PluginConfigInput = {}): Arr
         },
         async execute(args): Promise<PlanToolResult> {
           const preview = previewMigration(deps, {
-            from: args.from,
             to: args.to,
-            sessionIds: args.sessionIds ?? null,
-            includeUnowned: args.includeUnowned !== false,
+            sessionIds: args.sessionIds,
           })
           return {
             ok: preview.ok,
@@ -851,34 +848,34 @@ export function registerTools(ctx: Context, config: PluginConfigInput = {}): Arr
       defineTool({
         name: 'migrate_sessions',
         description:
-          'Migrate DSH sessions between workspace directories: rewrite each session log header cwd (only the first ' +
+          'Migrate DSH sessions to another workspace directory: rewrite each session log header cwd (only the first ' +
           'zstd frame; the rest stays byte-identical), move the session directories into the target ' +
           'project directory, and ' +
           're-home the workspace registry (written atomically to disk, then handed to the live host so the ' +
           'change takes effect without a restart; when the host cannot take it, the result says a DSH restart ' +
-          'is required and the registry file still holds this run\'s result). Defaults to dry-run; apply:true ' +
+          'is required and the registry file still holds this run\'s result). The source is the sessions named in ' +
+          'sessionIds — each comes from its own cwd, so one call can gather sessions out of several directories, ' +
+          'and those source directories do not have to exist on disk any more. Defaults to dry-run; apply:true ' +
           'performs it after taking a byte-level ' +
           'backup. Refuses on any blocking problem. Sessions the host still holds in memory (live) cannot move ' +
           'while it holds them: they are left in place and named in the result, and a migration can therefore ' +
-          'move a subset. Sessions the sidebar hides (archived, blank, or subagents whose parent is not part of ' +
-          'this source) are left behind too — their source workspace therefore stays in the registry, and both ' +
+          'move a subset. Sessions the sidebar hides (archived, blank, or subagents) are left behind too — ' +
+          'their source workspace therefore stays in the registry, and both ' +
           'the summary and stranded say so. Subagent sessions always follow their parent (naming one is ' +
           'refused; naming a parent takes its whole family along; their registry membership does not change).',
         parameters: {
-          from: { type: 'string', required: true, description: 'Source workspace directory (absolute path).' },
+          sessionIds: {
+            type: 'array',
+            required: true,
+            items: { type: 'string' },
+            description:
+              'The session ids to migrate (required, non-empty; they may come from different directories). ' +
+              'Subagent descendants always come along.',
+          },
           to: {
             type: 'string',
             required: true,
             description: 'Target workspace directory (absolute path, must already exist).',
-          },
-          sessionIds: {
-            type: 'array',
-            items: { type: 'string' },
-            description: 'Optional: migrate only these session ids (subagent descendants always come along).',
-          },
-          includeUnowned: {
-            type: 'boolean',
-            description: 'Optional: also migrate sessions no workspace accounts for (default true).',
           },
           apply: { type: 'boolean', description: 'Optional: true performs the migration (default false = dry-run).' },
           includeArtifacts: {
@@ -914,10 +911,8 @@ export function registerTools(ctx: Context, config: PluginConfigInput = {}): Arr
           const run = await runMigration(
             deps,
             {
-              from: args.from,
               to: args.to,
-              sessionIds: args.sessionIds ?? null,
-              includeUnowned: args.includeUnowned !== false,
+              sessionIds: args.sessionIds,
               includeArtifacts: args.includeArtifacts === true,
             },
             { apply: args.apply === true },

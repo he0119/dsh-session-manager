@@ -108,14 +108,9 @@ export const zh = {
 
   // ---- 迁移 ----
   'migrate.title': '迁移会话',
-  'migrate.hint':
-    '选来源与目标目录，整个来源一起搬或只挑几条；点「迁移」开弹窗，清单里就是会写什么，确认才落盘。侧边栏里看不见的会话不在候选里，所以这里比「会话」页少。',
-  'migrate.from.label': '源目录',
-  'migrate.to.label': '目标目录',
-  'migrate.from.pick': '选择源目录…',
+  'migrate.hint': '勾上要搬的会话（可以跨目录），点「迁移」，在弹窗里选目标目录；清单里就是会写什么，确认才落盘。',
+  'migrate.to.label': '迁移到的目录',
   'list.ungrouped': '未分组',
-  'migrate.from.unownedHint':
-    '「未分组」＝侧边栏那一组里的会话（可能横跨多个目录），一次全部收进目标工作区；没有工作目录的搬不了，下面两个开关也不适用。',
   'migrate.to.pick': '选择目标目录…',
   // 目录字段（迁移的源 / 目标、导入的落地目录三处共用同一个组件，见 DirectoryField.tsx）：
   'pathField.type': '手输路径',
@@ -140,23 +135,17 @@ export const zh = {
   'migrate.workspaceTitle.label': '新建工作区名称（可选）',
   'migrate.workspaceTitle.placeholder': '目标目录还不是工作区时用',
   'migrate.includeArtifacts': '同时搬迁会话创建过的文件（要全量解码，较慢）',
-  'migrate.includeUnowned': '连同未分组的会话',
-  'migrate.source.count': '源目录下匹配到 {count} 条会话',
-  'migrate.source.none': '库里没有工作目录等于源目录的会话（迁移仍按源项目目录里的实际内容进行）',
-  'migrate.scope.label': '迁移范围',
-  'migrate.scope.all': '全部',
-  'migrate.scope.subset': '只选其中几条',
-  'migrate.scope.tickHint': '整来源一起搬，不按勾选走；勾任意一条或按「全选」，即改为「只选其中几条」',
-  'migrate.scope.subsetHint': '勾选要搬的会话；一次只处理一个源目录。',
-  'migrate.needFrom': '请先填源目录。',
-  'migrate.needTo': '请先填目标目录。',
-  'migrate.needSelection': '请至少勾选一条会话，或选「全部」。',
+  'migrate.needTarget': '先在上面选一个目标目录，下面就是这次迁移的清单。',
+  'migrate.lockedHidden':
+    '侧边栏不显示这条会话（已归档 / 空白 / 子智能体），它搬不走：已归档的先去「会话」页取消归档、空白的删掉，' +
+    '子智能体则连着它的父会话一起迁。',
   'migrate.action': '迁移',
   'migrate.dialogTitle': '将要迁移',
   'migrate.apply': '确认迁移',
   'migrate.running': '迁移中…',
   'migrate.progress.note': '这一步会写盘；中断会在库里留下中间状态，之后可以在「备份」页回退。',
   'migrate.summary': '将迁移 {sessions} 条会话（{files} 个日志，{bytes}）',
+  'migrate.blocked': '这次不会搬任何会话：先解决下面的问题，再按「确认迁移」。',
   'migrate.family':
     '其中 {count} 条是子智能体：它们跟着父会话一起搬（搬完还是不算工作区成员——宿主本来就不把子智能体算进去）。',
   'migrate.via': '随父迁',
@@ -167,8 +156,7 @@ export const zh = {
   'migrate.stranded':
     '另有 {count} 条会话侧边栏不显示（已归档 / 空白 / 子智能体），这次不搬：它们留在源工作区里，那块工作区因此不会被删。' +
     '要清掉它，先在「会话」页处理这几条（已归档的取消归档、空白的删掉、子智能体连着它的父会话一起迁），再迁一次。',
-  'migrate.projectDirs': '项目目录：{from} → {to}',
-  'migrate.projectDirsUnowned': '未分组横跨 {projectDirs} 个源项目目录 → {to}',
+  'migrate.projectDirs': '来源项目目录：{from}；目标项目目录：{to}',
   'registry.change.title': '注册表变更',
   'registry.create': '把目标工作区写进注册表（新建）',
   'registry.reuse': '写进已有的工作区',
@@ -199,6 +187,7 @@ export const zh = {
   'backup.rootLabel': '备份根目录',
   'backup.empty': '还没有备份。',
   'backup.row': '{sessions} 条会话 · {artifacts} 项产物',
+  'backup.sources': '{count} 个来源目录',
   'backup.kind.migrate': '迁移',
   'backup.kind.delete': '删除',
   'backup.kind.replace': '覆盖前',
@@ -321,7 +310,7 @@ export const zh = {
   'help.categories.note': '一条会话可能同时属于几类，行上就挂几枚标签。',
   'help.tabs.title': '每页做什么',
   'help.tabs.manage': '整个会话库都在这里，侧边栏点不到的那些也在。列表按目录分组，组头是工作区或仓库的名字，悬浮能看到本机路径。勾选后可以归档、重新生成名称或删除：名称那一下是请宿主的名称服务按整段对话重算（每条都要整份解一次日志再跑一次模型调用），你手动改过名的与子智能体会话会跳过。',
-  'help.tabs.migrate': '把会话从一个目录搬到另一个目录：改掉会话记录里的工作目录、把日志目录挪过去、并更新工作区注册表。勾中的会话会带上它的子智能体。',
+  'help.tabs.migrate': '把勾中的会话搬到一个目标目录：改掉会话记录里的工作目录、把日志目录挪过去、并更新工作区注册表。源就是你勾的那些会话，可以来自不同目录（每条按自己的目录算），它们各自带上自己的子智能体；侧边栏里看不见的那几类——已归档、空白、子智能体——勾不动，先在「会话」页把它们处理掉（子智能体则连着父会话一起迁）再迁。目标目录只在弹窗里选一次，全部会话落到同一个目录。',
   'help.tabs.transfer': '把会话导出成 .dshsess 包，或把包里的会话导入某个工作区。',
   'help.tabs.sync': '在几台机器之间同步会话（WebDAV）：先给一份只读计划，确认才真的拉取与推送。远端地址、机器名与路径映射在这一页改，改完不用重启。',
   'help.tabs.backup': '几个会写盘的操作共同的后悔面：每次迁移、每次删除、每次同步覆盖本机那份之前都会先留一份字节级备份。「回滚」把迁移搬走的那份搬回来（连工作区注册表一起还原），「恢复」只把备份里那份搬回去，注册表不动。',
@@ -561,13 +550,10 @@ export const en: LocaleDictOf<typeof NS> = {
 
   'migrate.title': 'Migrate sessions',
   'migrate.hint':
-    'Pick a source and a target directory; move it all or just a few rows. Migrate shows the plan in a dialog, then confirm — sessions the sidebar hides are never candidates here.',
-  'migrate.from.label': 'Source directory',
-  'migrate.to.label': 'Target directory',
-  'migrate.from.pick': 'Choose a source directory…',
+    'Tick the sessions to move (from any directory), press Migrate, then pick the target: the dialog shows what ' +
+    'will be written, and only confirming writes it.',
+  'migrate.to.label': 'Directory to migrate into',
   'list.ungrouped': 'Ungrouped',
-  'migrate.from.unownedHint':
-    'Ungrouped = the sidebar’s Ungrouped group, adopted in one go (it can span directories); sessions with no working directory cannot move, and the switches below do not apply.',
   'migrate.to.pick': 'Choose a target directory…',
   // One shared directory field (migration’s source/target and the import’s landing directory — see
   // DirectoryField.tsx):
@@ -594,24 +580,17 @@ export const en: LocaleDictOf<typeof NS> = {
   'migrate.workspaceTitle.label': 'Name for a new workspace (optional)',
   'migrate.workspaceTitle.placeholder': 'Used when the target directory is not a workspace yet',
   'migrate.includeArtifacts': 'Also move files the sessions created (decodes whole logs, slower)',
-  'migrate.includeUnowned': 'Include ungrouped sessions',
-  'migrate.source.count': '{count} sessions in the library match the source directory',
-  'migrate.source.none':
-    'No session in the library has this working directory (the migration still works from the source project directory’s actual contents)',
-  'migrate.scope.label': 'Scope',
-  'migrate.scope.all': 'All',
-  'migrate.scope.subset': 'Only the ticked ones',
-  'migrate.scope.tickHint': 'The whole source moves, ticks aside; tick a row or press “Select all” to switch to “only the ticked ones”',
-  'migrate.scope.subsetHint': 'Tick the sessions to move; one source directory per run.',
-  'migrate.needFrom': 'Fill in the source directory first.',
-  'migrate.needTo': 'Fill in the target directory first.',
-  'migrate.needSelection': 'Tick at least one session, or choose “All”.',
+  'migrate.needTarget': 'Pick a target directory above; the plan below is what this migration will do.',
+  'migrate.lockedHidden':
+    'The sidebar hides this session (archived / blank / subagent), so migration cannot take it: unarchive or delete it ' +
+    'on the Sessions page, or migrate a subagent together with its parent.',
   'migrate.action': 'Migrate',
   'migrate.dialogTitle': 'About to migrate',
   'migrate.apply': 'Migrate now',
   'migrate.running': 'Migrating…',
   'migrate.progress.note': 'This step writes to disk; if it is interrupted the library is left half-done, and you can roll back from the Backups tab afterwards.',
   'migrate.summary': '{sessions} sessions to migrate ({files} logs, {bytes})',
+  'migrate.blocked': 'Nothing will move this time: clear the problems below, then press Migrate now.',
   'migrate.family':
     '{count} of them are subagent sessions: they move with their parent (and still do not count as workspace members — the host never counts subagents as members).',
   'migrate.via': 'with parent',
@@ -625,8 +604,7 @@ export const en: LocaleDictOf<typeof NS> = {
     'stay registered in the source workspace, which therefore is not removed. To get rid of it, handle them on the ' +
     'Sessions tab first (unarchive the archived ones, delete the blank ones, migrate a subagent together with its ' +
     'parent), then migrate again.',
-  'migrate.projectDirs': 'Project directory: {from} → {to}',
-  'migrate.projectDirsUnowned': 'Ungrouped spans {projectDirs} source project directories → {to}',
+  'migrate.projectDirs': 'Source project directories: {from}; target project directory: {to}',
   'registry.change.title': 'Registry change',
   'registry.create': 'Write the target workspace into the registry (new)',
   'registry.reuse': 'Write into an existing workspace',
@@ -652,6 +630,7 @@ export const en: LocaleDictOf<typeof NS> = {
   'backup.rootLabel': 'Backup root',
   'backup.empty': 'No backups yet.',
   'backup.row': '{sessions} sessions · {artifacts} artifacts',
+  'backup.sources': '{count} source directories',
   'backup.kind.migrate': 'migration',
   'backup.kind.delete': 'delete',
   'backup.kind.replace': 'before overwrite',
@@ -772,7 +751,7 @@ export const en: LocaleDictOf<typeof NS> = {
   'help.categories.note': 'One session can fall into several categories, so a row can carry several tags.',
   'help.tabs.title': 'What each page does',
   'help.tabs.manage': 'The whole session library is here, including sessions the sidebar cannot reach. The list groups by directory; a group header is the workspace or repository name, and hovering it shows the local path. Ticked rows can be archived, renamesd or deleted: regenerating names asks the host’s names service to redo them from the whole conversation (each one replays its log and runs one model call), and sessions you renamed by hand or subagent sessions are skipped.',
-  'help.tabs.migrate': 'Move sessions from one directory to another: rewrite the working directory recorded in the session, move the log directory, and update the workspace registry. Ticked sessions take their subagents along.',
+  'help.tabs.migrate': 'Move the ticked sessions into one target directory: rewrite the working directory recorded in each session, move its log directory, and update the workspace registry. The source is whatever you tick — the rows may sit in different directories, and each one is read from its own — and they take their subagents along. The rows the sidebar hides (archived, blank, subagents) cannot be ticked: deal with them on the Sessions page first (a subagent moves together with its parent). The target directory is picked once in the dialog; every session lands in it.',
   'help.tabs.transfer': 'Export sessions into a .dshsess bundle, or import a bundle’s sessions into a workspace.',
   'help.tabs.sync': 'Sync sessions between machines over WebDAV: it first shows a read-only plan and only pulls and pushes once you confirm. The remote address, machine names and path mappings are edited on this page, with no restart.',
   'help.tabs.backup': 'The undo surface shared by the operations that write: every migration, every delete and every overwrite of this machine’s copy leaves a byte-level backup first. Roll back brings back what a migration moved (the workspace registry included); Restore only moves the backed-up copy back and leaves the registry alone.',

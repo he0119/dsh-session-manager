@@ -46,6 +46,8 @@ interface Sandbox {
   registryPath: string
   registry: WorkspaceRegistryState
   logs: Record<string, Buffer>
+  /** 默认点名的那几条（"全选"等价于列出来的都勾上：session-c 只有造了它才在里面）。 */
+  ids: string[]
   fromDir: string
   toDir: string
   sourceProjectDirName: string
@@ -105,13 +107,26 @@ function makeSandbox(name: string, options: { unowned?: boolean } = {}): Sandbox
   }
   writeFileSync(registryPath, JSON.stringify(registry, null, 2) + '\n')
 
-  return { base, root, registryPath, registry, logs, fromDir, toDir, sourceProjectDirName, targetProjectDir, backupRoot: join(base, 'backups') }
+  return {
+    base,
+    root,
+    registryPath,
+    registry,
+    logs,
+    ids: options.unowned ? ['session-a', 'session-b', 'session-c'] : ['session-a', 'session-b'],
+    fromDir,
+    toDir,
+    sourceProjectDirName,
+    targetProjectDir,
+    backupRoot: join(base, 'backups'),
+  }
 }
 
+// 源由 `sessionIds` 决定（没有"源目录"这个参数了）：默认点名夹具里那几条，个别用例自己覆盖。
 const opts = (sb: Sandbox, extra: Record<string, unknown> = {}) => ({
   root: sb.root,
   registry: sb.registry,
-  from: sb.fromDir,
+  sessionIds: sb.ids,
   to: sb.toDir,
   decodeAll,
   ...extra,
@@ -182,16 +197,75 @@ test('端到端：plan → apply → verify → rollback 全链路', () => {
   rmSync(sb.base, { recursive: true, force: true })
 })
 
-test('未登记会话：默认连带迁移，includeUnowned=false 时报问题', () => {
+// 没有"未分组来源"这种来源：没人认领的那条会话就在这个目录里，勾上它（默认点名清单里就有）就一起迁。
+// 不勾它则这次不搬它，也不会有人替它做主——这才是"未分组只是一枚标签"。
+test('未分组的会话：勾上就一起迁（它本来没登记在任何工作区），不勾就不动它', () => {
   const sb = makeSandbox('unowned', { unowned: true })
-  const lenient = buildRelocationPlan(opts(sb))
-  assert.equal(lenient.ok, true, lenient.problems.join('; '))
-  assert.equal(lenient.sessions.length, 3)
-  assert.equal(lenient.sessions.find((s) => s.id === 'session-c')?.registered, false)
+  const all = buildRelocationPlan(opts(sb))
+  assert.equal(all.ok, true, all.problems.join('; '))
+  assert.equal(all.sessions.length, 3)
+  assert.equal(all.sessions.find((s) => s.id === 'session-c')?.registered, false)
+  assert.deepEqual(all.sessionIds, ['session-a', 'session-b', 'session-c'])
 
-  const strict = buildRelocationPlan(opts(sb, { includeUnowned: false }))
-  assert.equal(strict.ok, false)
-  assert.match(strict.problems.join(';'), /not accounted by any workspace/)
+  const two = buildRelocationPlan(opts(sb, { sessionIds: ['session-a', 'session-b'] }))
+  assert.equal(two.ok, true, two.problems.join('; '))
+  assert.deepEqual(two.sessions.map((s) => s.id).sort(), ['session-a', 'session-b'])
+  assert.equal(two.sessions.some((s) => s.id === 'session-c'), false)
+
+  rmSync(sb.base, { recursive: true, force: true })
+})
+
+// 用户那条路：清理文件夹时把项目文件夹删掉，会话就落到外壳侧边栏的「未分组」里（那是标签，不是来源）。
+// 把项目重建到别处之后，勾上那几条照旧能迁：来源取自每条会话 header 里的 cwd（**不要求那个目录还在
+// 盘上**），真正必须存在的是来源项目目录（会话日志那一层）。
+test('来源目录已经不在盘上（项目文件夹删了）：勾上那几条照旧迁到重建后的目录', () => {
+  const sb = makeSandbox('deleted-source')
+  rmSync(sb.fromDir, { recursive: true, force: true })
+
+  const plan = buildRelocationPlan(opts(sb))
+  assert.equal(plan.ok, true, plan.problems.join('; '))
+  assert.deepEqual(plan.sessions.map((s) => s.id).sort(), ['session-a', 'session-b'])
+  assert.deepEqual(plan.sessionIds, ['session-a', 'session-b'])
+  assert.deepEqual(plan.sourceProjectDirs, [join(sb.root, sb.sourceProjectDirName)])
+  // 宿主那边这两条已经不算 ws-downloads 的成员（目录解析不出来 → 侧边栏「未分组」），
+  // 而它们在注册表里还登记着：计划照旧按"从那条记录摘走"处理，源记录摘空后删掉。
+  assert.deepEqual(plan.sessions.map((s) => s.registered), [false, false])
+  assert.deepEqual(plan.registryChange?.movedFrom.map((source) => source.workspaceId), ['ws-downloads'])
+  assert.deepEqual(plan.registryChange?.removedSources.map((source) => source.workspaceId), ['ws-downloads'])
+  assert.deepEqual(plan.registryChange?.added.sort(), ['session-a', 'session-b'])
+
+  const result = applyPlan(plan, { registryPath: sb.registryPath, decodeAll, backupRoot: sb.backupRoot })
+  assert.equal(result.moved, 2)
+  assert.equal(result.rewritten, 2)
+  const verified = verifyAppliedPlan(plan, { decodeAll })
+  assert.equal(verified.ok, true, verified.problems.join('; '))
+
+  // 落位：两条都进了目标项目目录，header 的 cwd 改成目标目录；源项目目录被搬空后删掉
+  for (const [name, id] of [['a', 'session-a'], ['b', 'session-b']] as const) {
+    const dir = join(sb.root, sb.targetProjectDir, id)
+    assert.equal(existsSync(dir), true, `${id} 该落在目标项目目录里`)
+    const header = JSON.parse(decodeAll(readFileSync(join(dir, 'session.v4.jsonl.zstd'))).split('\n')[0]!) as {
+      cwd?: string
+    }
+    assert.equal(header.cwd, sb.toDir)
+    assert.notDeepEqual(readFileSync(join(dir, 'session.v4.jsonl.zstd')), sb.logs[name], '首帧必须真的被改写')
+  }
+  assert.equal(existsSync(join(sb.root, sb.sourceProjectDirName)), false, '搬空的项目目录要删掉')
+
+  // 备份清单里的 from 就是那个（已经不在盘上的）源路径：回滚只认清单，不看目录在不在
+  const { manifest } = readManifest(result.backupDir)
+  assert.equal(manifest.from, sb.fromDir)
+  const rolled = rollback(manifest, { backupDir: result.backupDir })
+  assert.equal(rolled.restoredFiles, 2)
+  for (const [name, id] of [['a', 'session-a'], ['b', 'session-b']] as const) {
+    assert.deepEqual(readFileSync(join(sb.root, sb.sourceProjectDirName, id, 'session.v4.jsonl.zstd')), sb.logs[name])
+  }
+  assert.equal(
+    existsSync(join(sb.root, sb.targetProjectDir)),
+    false,
+    '目标项目目录里没有别的会话：回滚把它当"空掉的目标项目目录"顺手删掉（与 apply 对称）',
+  )
+  assert.deepEqual(readRegistry(sb.registryPath), sb.registry, '注册表必须完全还原')
 
   rmSync(sb.base, { recursive: true, force: true })
 })
@@ -211,15 +285,20 @@ test('宿主持着的会话不搬：留在原目录、源工作区不被摘空�
   assert.match(describePlan(plan), /另有 1 条会话宿主持在内存里（还活着），这次不搬：session-b/)
   assert.match(describePlan(plan), /重启 DSH 之后再迁一次/)
 
-  // 点名点到一条活着的会话：不是"找不到"，而是搬不动 + 给下一步。
+  /*
+   * 只点名那条活着的：这次没有东西可搬，说清是"宿主攥着"（重启后再迁）而不是"没选中会话"。
+   * 它不是拦下整份计划的错误——勾选集里混着一条活会话时，其余几条照搬（上一段就是）。
+   */
   const named = buildRelocationPlan(opts(sb, { live: new Set(['session-b']), sessionIds: ['session-b'] }))
   assert.equal(named.ok, false)
-  assert.match(named.problems.join('; '), /session-b is live in the host .*restart DSH, then migrate it/)
+  assert.deepEqual(named.sessions, [])
+  assert.deepEqual(named.liveSkipped.map((s) => s.id), ['session-b'])
+  assert.match(named.problems.join('; '), /every ticked session is live in the host \(1\) — restart DSH/)
 
   // 整个来源都在宿主手里：说清原因，别让用户拿"没选中会话"去查勾选。
   const allLive = buildRelocationPlan(opts(sb, { live: new Set(['session-a', 'session-b']) }))
   assert.equal(allLive.ok, false)
-  assert.match(allLive.problems.join('; '), /every session in this source is live in the host \(2\)/)
+  assert.match(allLive.problems.join('; '), /every ticked session is live in the host \(2\)/)
 
   // 一个字节都没写：这一层只读（活会话的日志尤其不能动——宿主手里还有写句柄）。
   assert.deepEqual(readRegistry(sb.registryPath), sb.registry)
@@ -230,16 +309,17 @@ test('宿主持着的会话不搬：留在原目录、源工作区不被摘空�
   rmSync(sb.base, { recursive: true, force: true })
 })
 
-test('计划层拒绝：目标不存在 / 源目标同路径 / 有损项目目录名碰撞', () => {
+test('计划层拒绝：目标不存在 / 目标就是来源自己（没东西可搬）/ 有损项目目录名碰撞', () => {
   const sb = makeSandbox('reject')
 
   const missing = buildRelocationPlan(opts(sb, { to: join(sb.base, 'nope', 'missing') }))
   assert.equal(missing.ok, false)
   assert.match(missing.problems.join(';'), /target directory does not exist/)
 
+  // 目标就是这几条会话现在住的那个目录：目录不用搬、header 也不用改，报"没东西可搬"而不是走一遍空流程。
   const same = buildRelocationPlan(opts(sb, { to: sb.fromDir }))
   assert.equal(same.ok, false)
-  assert.match(same.problems.join(';'), /identical/)
+  assert.match(same.problems.join(';'), /nothing to migrate/)
 
   // projectKey 把分隔符折叠成 '-'，因此 '…\collide\downloads' 与 '…\collide-downloads' 同名
   const collideDir = sb.base + '-downloads'
@@ -253,7 +333,7 @@ test('计划层拒绝：目标不存在 / 源目标同路径 / 有损项目目�
   rmSync(collideDir, { recursive: true, force: true })
 })
 
-test('applyPlan 拒绝执行有问题的计划；源项目目录消失后再次计划会如实报错', () => {
+test('applyPlan 拒绝执行有问题的计划；搬完之后再拿同一批 id 计划会如实说"已经在目标里了"', () => {
   const sb = makeSandbox('refuse')
   const bad = buildRelocationPlan(opts(sb, { to: sb.fromDir }))
   assert.equal(bad.ok, false)
@@ -264,9 +344,10 @@ test('applyPlan 拒绝执行有问题的计划；源项目目录消失后再次�
 
   const plan = buildRelocationPlan(opts(sb))
   applyPlan(plan, { registryPath: sb.registryPath, decodeAll, backupRoot: sb.backupRoot, now: new Date('2026-09-27T00:00:00Z') })
+  // 同一批 id 再计划一次：它们已经被扫到目标项目目录里了（cwd 就是目标），这一次没东西可搬。
   const again = buildRelocationPlan(opts(sb))
   assert.equal(again.ok, false)
-  assert.match(again.problems.join(';'), /source project directory does not exist/)
+  assert.match(again.problems.join(';'), /nothing to migrate/)
 
   rmSync(sb.base, { recursive: true, force: true })
 })

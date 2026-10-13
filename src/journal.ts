@@ -200,9 +200,9 @@ export function rollback(
     // 1) 目录搬回
     //
     // 「源目录 == 目标目录」的会话要**跳过这一步**：迁移时它一个字节都没挪（`cwd` 本来就在目标上——
-    // 未分组来源下这是常态：那条没人认领的会话本来就住在那个目录里，只是没登记在册，迁移只补了
-    // 一条注册表记录）。照搬回去等于"先删掉自己、再把自己改名到自己"，`rmSync` 之后 `renameSync`
-    // 必然 ENOENT——丢的是**唯一一份**会话目录。字节还原照做（内容相同，等于一次无害的复写）。
+    // 跟着父会话走的后代就可能是这样：它的日志本来就落在目标项目目录里）。照搬回去等于"先删掉
+    // 自己、再把自己改名到自己"，`rmSync` 之后 `renameSync` 必然 ENOENT——丢的是**唯一一份**会话目录。
+    // 字节还原照做（内容相同，等于一次无害的复写）。
     if (existsSync(s.targetDir) && s.targetDir !== s.sourceDir) {
       const sourceProjectDir = dirname(s.sourceDir)
       if (!dryRun) mkdirSync(sourceProjectDir, { recursive: true })

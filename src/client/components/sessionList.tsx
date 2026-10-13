@@ -354,9 +354,9 @@ export interface PickableSession extends NestableSession {
  *
  * @param library 整个库（**不筛**）：父会话在不在库里只与库有关，与当前筛选 / 折叠无关。
  * @param t 注入面给的翻译函数（锁定提示里点名父会话）。
- * @param lockable 这个清单有没有"不能单独勾"的行。缺省有（子智能体跟着父会话走）；迁移页传 `false`——
- *   它的候选本来就把侧边栏看不见的会话排掉了（见 `planRows.migrationMatching`），而宿主那条迁移路也不
- *   拒单独的子智能体，摆一个永远点不动的灰框才是撒谎。
+ * @param lockable 这个清单有没有"不能单独勾"的行。缺省有（子智能体跟着父会话走）。「迁移」页也用缺省值：
+ *   宿主那条迁移路会拒点名的子智能体（要动它得勾它的父会话，见 `src/plan.ts`），所以那些行必须灰着；
+ *   它另外把侧边栏看不见的空白 / 已归档会话也挡在外面（`library` 只收 `hidden === undefined` 的那些）。
  */
 export interface SessionPicking<S extends PickableSession> {
   /** 眼下真正勾上的那些 id（已经摘掉不在库里的）。 */

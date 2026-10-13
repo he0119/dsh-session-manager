@@ -31,7 +31,7 @@ still works.
 
 | Entry point | Good for |
 |---|---|
-| The **Session management** page in Settings | Everyday use: archive, retitle or delete single sessions on the **Sessions** tab; pick source and target directories from the candidate panel to migrate (the source may also be Ungrouped); tick sessions to export / import; run a WebDAV sync on the **Sync** tab; roll back or restore on the **Backups** tab |
+| The **Session management** page in Settings | Everyday use: archive, retitle or delete single sessions on the **Sessions** tab; tick the sessions to move on the **Migrate** tab (they may come from different directories, and a deleted source directory is no obstacle) and pick the target in the dialog; tick sessions to export / import; run a WebDAV sync on the **Sync** tab; roll back or restore on the **Backups** tab |
 | 5 model tools | Just say "move this workspace's sessions to `~/dev/xxx`" and let the model preview first, apply second |
 
 Both share one migration implementation, so the count the dialog reports is the count you get.
@@ -159,44 +159,35 @@ M" to report.
   history was copied into its own log), it still opens once the parent is gone, so it is not taken
   along.
 
-**Migrate** — move one directory's sessions to another directory
+**Migrate** — move the ticked sessions into one directory
 
-- source and target are each **one value control whose text is the path in use**; clicking it opens the
-  **candidate panel** (the import's landing directory on the **Transfer** tab is the very same control —
-  see **Import** below), whose candidates are registered workspaces **plus any directory the library
-  actually holds sessions for** (annotated with that count) **plus Ungrouped** (only the source has the
-  last two), so no path has to be typed from memory. Each row carries two lines (the name on top, the local path and session count
-  below, the whole string in its tooltip) and the **filter box** above them narrows the list by path,
-  workspace title or project identity — it only filters the candidates and never touches the value.
-  **Clicking a row selects it** (and collapses the panel); the other two routes sit in the panel head and
-  in the field: **Browse the file system…** opens the OS directory dialog on the desktop and expands the
-  in-page directory browser in the browser (on a host with no picker that button is simply not shown),
-  and **Type a path** covers anything outside the candidates. A directory with a git remote reads as
-  **project identity + local path**
+- **The source is whatever you tick, and the ticks may span directories**: this tab's body is the
+  **same list as the Sessions tab** (same grouping by directory, same row tags, same category chips and
+  search box, same tick set) — the only difference is the **Migrate** button at the bottom. So "the
+  project folder was deleted, the project was recreated elsewhere, move those sessions over" reads as:
+  tick them in the list (they sit in the sidebar's Ungrouped group, which is just their label), press
+  **Migrate**, pick the recreated directory in the dialog — one run instead of one run per directory;
+- **the target directory is picked in the dialog**: that field is the **same control with the same
+  candidates** as the import's landing directory on the **Transfer** tab (its value control opens the
+  candidate panel; you can also type a path or browse the file system). Each row carries two lines (the
+  name on top, the local path below, the whole string in its tooltip) and the **filter box** above them
+  narrows the list by path, workspace title or project identity — it only filters the candidates and
+  never touches the value; **clicking a row selects it** (and collapses the panel). A directory with a
+  git remote reads as **project identity + local path**
   (`github.com/he0119/dsh-session-manager — /home/uy_sun/dev/dsh-session-manager`): that control has a
   single line, so the path cannot disappear from here — it is what tells two clones of one repository
-  apart;
-- **the source can also be Ungrouped**: the sessions with a `cwd` that the shell sidebar parks in its
-  Ungrouped group, possibly spread over several directories — adopt them all into the target workspace in
-  one go. It is the only source that spans directories, because "those two
-  unclaimed sessions across two directories" really is one thing. The "carry ungrouped sessions" and
-  "move session artifacts" switches do not apply there (the page says so instead of showing switches that
-  do nothing);
-- the target directory must already exist; there is also an optional title for a newly created workspace,
-  whether to carry the **files the sessions created**, and whether to carry ungrouped sessions;
-- **move the whole source, or only some of it**: the sessions of the source are listed
-  (titles too, ids on hover; under a directory source the Ungrouped rows carry an "Ungrouped" tag), with a
-  **title / id search box** above them to narrow the list, and ticking any row switches to "only the ticked
-  ones"; one source per run. The row above that list carries the same pair as the **Sessions** and
-  **Transfer** tabs: **Select all** picks only what is listed right now (and switches to "only the ticked
-  ones" with it), while the **Clear** next to it empties the whole tick set. Switching back to **All**
-  clears the ticks — "All" moves the whole source and does not go by ticks. This page gets no category
-  chips: its candidates already exclude everything the sidebar cannot show, so those categories would
-  always read 0 here — showing them would only look like a broken filter;
-- **candidates line up with the host sidebar**: subagent sessions (nested under their parent), blank
-  sessions (never started a turn) and archived sessions are never candidates — a session the sidebar
-  cannot show should not be swept along by accident. Naming one of them explicitly makes the plan say
-  it is hidden (for a subagent it also tells you to name its parent instead); they therefore **cannot
+  apart. The target directory must already exist; next to it sit the optional title for a newly created
+  workspace and whether to carry the **files the sessions created**. Picking a target produces a
+  read-only preview (see below) and changing the target fetches a fresh one;
+- **the source directory need not still exist on disk**: once a cleanup deletes the project folder, the
+  session logs stay in the library and the `cwd` in their headers is still that path — tick them, point
+  the target at the recreated directory, and they move over. The old "pick a source directory first"
+  shape had no landing point here: those sessions can sit in several directories while one migration has
+  exactly one target, so it took one run per directory;
+- **a row you cannot tick is a row the host refuses**: subagent sessions (nested under their parent),
+  blank sessions and archived sessions are still **listed** (you need to see why they are not moving),
+  but their checkbox is greyed out and the tooltip says why (for a subagent it names the parent to tick
+  instead). Naming one of them explicitly still makes the plan say it is hidden; they therefore **cannot
   move**, and since their ownership stays in the source workspace, that workspace is not removed — the
   plan and the result name how many are left behind and why (the tools report `stranded`), so the next
   step is to handle them on the Sessions tab (unarchive the archived ones, delete the blank ones, migrate
@@ -208,28 +199,30 @@ M" to report.
   this plugin's lists) still carries the old path, so attaching it is refused and its log cannot be moved
   either. The plan therefore **leaves that batch out** and the dialog says one more line — "N more
   sessions are live in the host, not moved this time" — while they stay in their directory with their
-  ownership unchanged. **Restart DSH and migrate again** to bring the rest over; naming one of them, or a
-  source where every session is live, is refused with that reason (not "no sessions selected");
+  ownership unchanged. **Restart DSH and migrate again** to bring the rest over; naming one of them, or
+  ticking a batch where every session is live, is refused with that reason (not "no sessions selected");
 - **Subagents follow their parent session**: ticking a parent **moves its subagent sessions** (and any
   deeper descendants) with it (archiving and exporting work the same way: the subagents are archived, or
-  packed into the bundle, together with the parent) — each log header's cwd is rewritten and each session directory moves into
-  the target project directory, all in one backup (otherwise the family ends up split across two
-  directories, and a subagent cannot be moved on its own: it is not a candidate, and naming it would be an
-  upward link). **A forked session does not count** either (it is self-contained, and it still opens
-  after the parent has moved). Membership does not change: a subagent was not registered, and still is
-  not; the plan reports how many of the sessions are subagents;
-- **Migrate opens the dialog**, which shows row by row the sessions that move (subagents that come along are
+  packed into the bundle, together with the parent) — each log header's cwd is rewritten and each session
+  directory moves into the target project directory, all in one backup (otherwise the family ends up
+  split across two directories, and a subagent cannot be moved on its own: you cannot tick it, and naming
+  it would be an upward link). **A forked session does not count** either (it is self-contained, and it
+  still opens after the parent has moved). Membership does not change: a subagent was not registered, and
+  still is not; the plan reports how many of the sessions are subagents;
+- **Migrate opens the dialog**, which holds the target directory field (plus the new-workspace title and
+  the artifact switch) and then shows row by row the sessions that move (subagents that come along are
   indented one level and tagged "with parent"), the session / log / byte counts, source → target project
-  directory, **how the registry changes** (create or reuse the target workspace, how many sessions are added,
-  which workspaces lose them, whether an emptied workspace is removed, how many stale registrations were
-  dropped), the artifact plan and its skip reasons; whatever cannot move (live sessions, sessions the sidebar
-  hides) gets its own line — it stays in the source workspace, so that workspace is not removed;
-- **Confirm** then rewrites each log header `cwd` (first frame only, the rest byte-identical) → move the session
-  directories → write the registry → **hand the work to the host** (reuse or create the target workspace, attach
-  the sessions, drop a source workspace once it is empty — see "Things to know" below) → **independent
-  verification** (the host's own corrupt criterion, plus a "session ids unchanged" check) → leave a byte-level
-  backup. Afterwards the page tells you whether the change took effect immediately or **requires a DSH
-  restart**.
+  directory, **how the registry changes** (create or reuse the target workspace, how many sessions are
+  added, which workspaces lose them, whether an emptied workspace is removed, how many stale
+  registrations were dropped), the artifact plan and its skip reasons; whatever cannot move (live
+  sessions, sessions the sidebar hides) gets its own line — it stays in the source workspace, so that
+  workspace is not removed;
+- **Confirm** then rewrites each log header `cwd` (first frame only, the rest byte-identical) → move the
+  session directories → write the registry → **hand the work to the host** (reuse or create the target
+  workspace, attach the sessions, drop a source workspace once it is empty — see "Things to know" below)
+  → **independent verification** (the host's own corrupt criterion, plus a "session ids unchanged" check)
+  → leave a byte-level backup. Afterwards the page tells you whether the change took effect immediately
+  or **requires a DSH restart**.
 
 **Transfer** — take sessions away, bring them back
 

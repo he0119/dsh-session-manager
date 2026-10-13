@@ -17,6 +17,7 @@ import {
   rollbackMigration,
   runMigration,
   type MigrateDeps,
+  type MigrateRequest,
 } from '../src/migrate.ts'
 import { scanAll } from '../src/discovery.ts'
 import { createBackup } from '../src/journal.ts'
@@ -34,7 +35,16 @@ interface Sandbox {
   base: string
   deps: MigrateDeps
   sessionId: string
+  /** 夹具里那几条会话的 id：源就是点名的那些，所以请求默认点名全部。 */
+  ids: string[]
 }
+
+// 源由 `sessionIds` 决定（没有"源目录"这个参数了）；目标只有一个。
+const req = (sb: Sandbox, extra: Record<string, unknown> = {}): MigrateRequest => ({
+  sessionIds: sb.ids,
+  to: TO,
+  ...extra,
+})
 
 /** 造一个最小但完整的沙箱：源工作区里若干条会话 + 指向它们的注册表 + 已存在的目标目录。 */
 function makeSandbox(name: string, ids: readonly string[] = ['session-migrate-1']): Sandbox {
@@ -81,6 +91,7 @@ function makeSandbox(name: string, ids: readonly string[] = ['session-migrate-1'
   return {
     base,
     sessionId: ids[0]!,
+    ids: [...ids],
     deps: { sessionsRoot, registryPath, backupRoot: join(base, 'backups'), decodeAll },
   }
 }
@@ -89,7 +100,7 @@ test('预演：把源项目目录的会话与注册表变更算出来，一个�
   const sb = makeSandbox('migrate-preview')
   const before = readFileSync(join(sb.deps.registryPath), 'utf8')
 
-  const preview = previewMigration(sb.deps, { from: FROM, to: TO })
+  const preview = previewMigration(sb.deps, req(sb))
   assert.equal(preview.ok, true, `预演应当可用：${preview.problems.join('; ')}`)
   assert.equal(preview.sessions.length, 1)
   assert.equal(preview.sessions[0]?.registered, true)
@@ -109,7 +120,7 @@ test('预演：把源项目目录的会话与注册表变更算出来，一个�
 test('预演：目标的另一种拼写先归一（同一个目录不会凭写法多出一条工作区记录）', () => {
   const sb = makeSandbox('migrate-canonical-to')
   // 结尾分隔符是"另一种拼写"里最朴素的一种；Windows 上还有 git 给的正斜杠（见 canonical-path.test.ts）
-  const preview = previewMigration(sb.deps, { from: FROM, to: `${TO}${sep}` })
+  const preview = previewMigration(sb.deps, req(sb, { to: `${TO}${sep}` }))
 
   assert.equal(preview.ok, true, `另一种拼写应当照常可用：${preview.problems.join('; ')}`)
   assert.equal(preview.to, TO, '落地用的是归一之后的那个字符串')
@@ -117,21 +128,21 @@ test('预演：目标的另一种拼写先归一（同一个目录不会凭写�
   rmSync(sb.base, { recursive: true, force: true })
 })
 
-test('预演：同一个目录的两种拼写不算一次迁移', () => {
+test('预演：目标就是这几条会话现在住的那个目录（换种拼写也一样）→ 没东西可搬', () => {
   const sb = makeSandbox('migrate-same-directory')
-  const preview = previewMigration(sb.deps, { from: FROM, to: `${FROM}${sep}` })
+  const preview = previewMigration(sb.deps, req(sb, { to: `${FROM}${sep}` }))
 
   assert.equal(preview.ok, false)
   assert.ok(
-    preview.problems.some((problem) => /identical/.test(problem)),
-    `应当报"源与目标同一个目录"：${preview.problems.join('; ')}`,
+    preview.problems.some((problem) => /nothing to migrate/.test(problem)),
+    `应当报"没东西可搬"：${preview.problems.join('; ')}`,
   )
   rmSync(sb.base, { recursive: true, force: true })
 })
 
 test('dry-run：runMigration(apply:false) 与预演同形，且不写盘', async () => {
   const sb = makeSandbox('migrate-dryrun')
-  const run = await runMigration(sb.deps, { from: FROM, to: TO }, { apply: false })
+  const run = await runMigration(sb.deps, req(sb), { apply: false })
 
   assert.equal(run.applied, false)
   assert.equal(run.backupDir, undefined, 'dry-run 不该有备份目录')
@@ -142,7 +153,7 @@ test('dry-run：runMigration(apply:false) 与预演同形，且不写盘', async
 
 test('执行：改写 header.cwd、搬目录、登记目标工作区，并留下可回滚的备份', async () => {
   const sb = makeSandbox('migrate-apply')
-  const run = await runMigration(sb.deps, { from: FROM, to: TO, title: 'to' }, { apply: true })
+  const run = await runMigration(sb.deps, req(sb, { title: 'to' }), { apply: true })
 
   assert.equal(run.applied, true)
   assert.equal(run.verified, true, `复核应当通过：${run.problems.join('; ')}`)
@@ -176,7 +187,7 @@ test('执行：改写 header.cwd、搬目录、登记目标工作区，并留下
 
 test('子集：只搬点名的会话，源工作区没被搬空就留在注册表里', async () => {
   const sb = makeSandbox('migrate-subset', ['session-keep', 'session-go'])
-  const run = await runMigration(sb.deps, { from: FROM, to: TO, sessionIds: ['session-go'] }, { apply: true })
+  const run = await runMigration(sb.deps, { to: TO, sessionIds: ['session-go'] }, { apply: true })
 
   assert.equal(run.applied, true)
   assert.equal(run.verified, true, `复核应当通过：${run.problems.join('; ')}`)
@@ -199,7 +210,7 @@ test('子集：只搬点名的会话，源工作区没被搬空就留在注册�
 
 test('子集：点名的会话不在源项目目录里 → 预演就报问题，而不是静默少搬', () => {
   const sb = makeSandbox('migrate-subset-unknown', ['session-a'])
-  const preview = previewMigration(sb.deps, { from: FROM, to: TO, sessionIds: ['session-a', 'session-ghost'] })
+  const preview = previewMigration(sb.deps, { to: TO, sessionIds: ['session-a', 'session-ghost'] })
 
   assert.equal(preview.ok, false)
   assert.match(preview.problems.join('; '), /session-ghost not found/)
@@ -208,7 +219,7 @@ test('子集：点名的会话不在源项目目录里 → 预演就报问题，
 
 test('回滚：dryRun 只回动作清单，真跑则目录与字节都回到原位', async () => {
   const sb = makeSandbox('migrate-rollback')
-  const run = await runMigration(sb.deps, { from: FROM, to: TO, title: 'to' }, { apply: true })
+  const run = await runMigration(sb.deps, req(sb, { title: 'to' }), { apply: true })
   const backupDir = run.backupDir!
   const afterMigrate = sessionDir(sb.deps.sessionsRoot, TO, sb.sessionId)
   assert.equal(existsSync(afterMigrate), true)
@@ -275,7 +286,7 @@ test('覆盖前那份备份：目录像删除那样搬回，注册表像迁移�
 
 test('备份目录越界：只认本插件备份根下的目录，其余一律拒', async () => {
   const sb = makeSandbox('migrate-guard')
-  const run = await runMigration(sb.deps, { from: FROM, to: TO, title: 'to' }, { apply: true })
+  const run = await runMigration(sb.deps, req(sb, { title: 'to' }), { apply: true })
   const good = run.backupDir!
 
   assert.equal(assertBackupDir(sb.deps, good), good)
@@ -292,7 +303,7 @@ test('备份目录越界：只认本插件备份根下的目录，其余一律�
 
 test('列举备份：坏目录跳过而不是让整张列表打不开', async () => {
   const sb = makeSandbox('migrate-list')
-  await runMigration(sb.deps, { from: FROM, to: TO, title: 'to' }, { apply: true })
+  await runMigration(sb.deps, req(sb, { title: 'to' }), { apply: true })
   mkdirSync(join(sb.deps.backupRoot, 'garbage'), { recursive: true })
   writeFileSync(join(sb.deps.backupRoot, 'garbage', 'manifest.json'), '{not json')
 
@@ -316,7 +327,7 @@ test('执行后请宿主补检查点：搬动的会话各补一次，补不上�
         },
       }),
     },
-    { from: FROM, to: TO, title: 'to' },
+    req(sb, { title: 'to' }),
     { apply: true },
   )
 
@@ -333,7 +344,7 @@ test('执行后请宿主补检查点：搬动的会话各补一次，补不上�
 
 test('宿主没有补检查点那套服务时：如实说"要等第一次点开"，迁移照旧算成功', async () => {
   const sb = makeSandbox('migrate-warm-unavailable')
-  const run = await runMigration(sb.deps, { from: FROM, to: TO, title: 'to' }, { apply: true })
+  const run = await runMigration(sb.deps, req(sb, { title: 'to' }), { apply: true })
 
   assert.equal(run.applied, true)
   assert.equal(run.verified, true)
@@ -346,7 +357,7 @@ test('执行：宿主持着的那条不搬（日志也不动），注册表里�
   const sb = makeSandbox('migrate-live', ['session-hold', 'session-go'])
   const run = await runMigration(
     { ...sb.deps, liveSessionIds: () => new Set(['session-hold']) },
-    { from: FROM, to: TO, title: 'to' },
+    req(sb, { title: 'to' }),
     { apply: true },
   )
 
@@ -388,7 +399,7 @@ test('宿主没接住时把这次算好的注册表写回文件（它自己那�
       removeWorkspace: async () => {},
     }),
   }
-  const run = await runMigration(deps, { from: FROM, to: TO, title: 'to' }, { apply: true })
+  const run = await runMigration(deps, req(sb, { title: 'to' }), { apply: true })
 
   assert.equal(clobbered, 1, '夹具要真的盖过一次，否则这条测试什么也没测')
   assert.equal(run.applied, true, '宿主没接住不该把迁移说成失败')
@@ -497,7 +508,7 @@ test('宿主全盘接受、却拿内存里那份抹掉了别人的归属：复�
   const host = memoryHost({ registryPath: sb.deps.registryPath, memory, known: new Set([sb.sessionId, stranger]) })
   const deps: MigrateDeps = { ...sb.deps, hostRegistry: () => host.port }
 
-  const run = await runMigration(deps, { from: FROM, to: TO, title: 'to' }, { apply: true })
+  const run = await runMigration(deps, req(sb, { title: 'to' }), { apply: true })
 
   assert.equal(run.applied, true)
   assert.equal(run.effect?.kind, 'applied')
@@ -528,7 +539,7 @@ test('宿主不认的悬空登记只报出来，不写回文件', async () => {
   const host = memoryHost({ registryPath: sb.deps.registryPath, memory, known: new Set([sb.sessionId]) })
   const deps: MigrateDeps = { ...sb.deps, hostRegistry: () => host.port }
 
-  const run = await runMigration(deps, { from: FROM, to: TO, title: 'to' }, { apply: true })
+  const run = await runMigration(deps, req(sb, { title: 'to' }), { apply: true })
 
   assert.equal(run.applied, true)
   assert.equal(run.effect?.membershipsRestored, undefined, '要不回来的不能算要回来了')

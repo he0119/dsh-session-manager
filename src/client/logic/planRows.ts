@@ -84,52 +84,6 @@ export function sessionLabel(subject: LabelSubject): SessionLabel {
   return { text: title, tip: `${title}\n${subject.id}`, kind: 'title' }
 }
 
-// ---- 迁移页的来源：目录候选与「未分组」 ----
-
-/**
- * 迁移页源字段里那个「未分组」用的**哨兵值**。
- *
- * 源是一个值控件（控件的文本就是那个值，见 MigrationPanel 的说明），所以「未分组」也得是一个值；
- * 但它不是一个路径。用哨兵而不是"再加一个单选框"是为了不让同一个字段有两个控件——这个值永远
- * 不会下线：发请求时被翻译成 `unowned: true` 且 `from` 传空串（见 MigrationPanel 的 request()）。
- * 合法的目录值要么是绝对路径（`/…` 或 `C:\…`），要么是空串，撞不上它。
- */
-export const UNOWNED_SOURCE = '@unowned'
-
-/** 判断一条会话能不能进「未分组」来源，只用得上这三个字段。 */
-export interface SourceSubject {
-  /** 会话日志 header 里的 cwd；没有 cwd 的老会话缺省。 */
-  readonly cwd?: string
-  /** 宿主算好的"侧边栏会不会把它放进「未分组」"（见 src/visibility.ts 的 `isUngrouped()`）。 */
-  readonly ungrouped?: boolean
-  /**
-   * 宿主报来的"外壳侧边栏不显示这条会话"的原因（`subagent` / `blank` / `archived`）；缺省 = 会显示。
-   *
-   * 界面上的候选必须与宿主那份计划的候选是同一批：宿主那一侧按同一条判据（`src/visibility.ts`）把
-   * 侧边栏看不见的会话排除在外，界面若照旧把它们算进条数，用户看到的就是"这里 4 条、搬完 1 条"。
-   */
-  readonly hidden?: string
-}
-
-/**
- * 「未分组」来源覆盖的会话：外壳侧边栏那一组里的那些（可以横跨多个目录）。
- *
- * 判据就是宿主发来的 `ungrouped`（在 `src/visibility.ts` 里算一次）——「未分组」在这个插件里只有一个
- * 定义，行上的标签、会话页那枚芯片、这个来源读的是同一个字段，不许各自再推一遍。
- *
- * 为什么还要**有 cwd**：迁移要改写 header 里的 cwd，而 `relocateHeaderCwd()` 明确拒绝一个没有 cwd 的
- * header（换来的是"绝不凭空造一个 cwd"）。这类会话不是这个来源能搬的东西，所以它们既不进候选、也不算
- * 进那个来源的条数——界面上的条数与宿主那份计划的数字必须是同一个口径。这是这个来源自己的**能力**限制，
- * 与「未分组」的定义无关（侧边栏那一组里有它们）。
- *
- * @param sessions 会话库里的全部会话。
- */
-export function unownedSessions<T extends SourceSubject>(sessions: readonly T[]): T[] {
-  return sessions.filter(
-    (session) => session.ungrouped === true && typeof session.cwd === 'string' && session.cwd !== '',
-  )
-}
-
 // ---- 一个目录在界面上怎么称呼：项目身份、标题与本机路径 ----
 
 /**
@@ -234,25 +188,19 @@ export function pathLabel(subject: ProjectSubject): string {
   return title === undefined ? path : `${title} — ${path}`
 }
 
-/** 迁移页一个目录字段里的一行候选。`count` 只有"宿主库里真有会话的目录"才有。 */
+/** 一个目录字段里的一行候选（迁移的目标 / 导入的落地目录共用）。 */
 export interface PathRow extends ProjectSubject {
-  /** 值（也是 React 的 key）：目录路径，或者 UNOWNED_SOURCE。 */
+  /** 值（也是 React 的 key）：目录路径。 */
   path: string
   /** 已登记工作区才有标题（注册表里的名字）。 */
   title?: string
-  /** 库里这个来源下的会话条数。 */
+  /** 库里这个目录下的会话条数（有会话可数的候选才有）。 */
   count?: number
-  /**
-   * 这一行自带的名字（有则不再按"标题 / 项目名 / 路径"推，见 `candidateRow()`）。
-   *
-   * 「未分组」不是路径，拼上哨兵值等于把内部约定漏给用户看，所以那一行自带文案。
-   */
-  label?: string
 }
 
 /** 候选面板里一行怎么摆：名字一行、路径与条数一行，外加整行的悬浮提示。 */
 export interface CandidateRow {
-  /** 主名字：工作区名称 →「未分组」那行自带的文案 → 项目名 → 本机路径（同 `projectLabel()`）。 */
+  /** 主名字：工作区名称 → 项目名 → 本机路径（同 `projectLabel()`）。 */
   readonly name: string
   /** 第二行：本机路径与条数（有哪个写哪个，都没有时缺省）。 */
   readonly meta?: string
@@ -268,22 +216,18 @@ export interface CandidateRow {
  * 一枚按钮、两行文字，于是**名字在第一行**（用户认的是它：工作区名称，没有标题才退到项目名），路径与
  * 条数退到第二行的小字里，完整的一串留给悬浮提示。
  *
- * 「未分组」那一行的 `path` 是哨兵值、不是路径：它只出现在名字与条数里，绝不摆上第二行。
- *
- * @param row 一行候选（`migrationSourceRows()` / 调用方补过当前值的那个列表）。
+ * @param row 一行候选（`directoryTargetRows()` 造出来的那些）。
  * @param t 翻译（只用来拼"N 条会话"）。
  * @returns 两行文字与悬浮提示。
  */
 export function candidateRow(row: PathRow, t: Translate): CandidateRow {
   const label = projectLabel(row, t)
   const count = row.count === undefined ? undefined : t('list.sessionsInDir', { count: row.count })
-  const meta = [row.path === UNOWNED_SOURCE ? undefined : row.path, count].filter(
-    (part): part is string => part !== undefined && part !== '',
-  )
+  const meta = [row.path, count].filter((part): part is string => part !== undefined && part !== '')
   return {
-    name: row.label ?? label.name,
+    name: label.name,
     ...(meta.length === 0 ? {} : { meta: meta.join(' · ') }),
-    tip: [row.label ?? label.tip, count].filter((line): line is string => line !== undefined).join('\n'),
+    tip: [label.tip, count].filter((line): line is string => line !== undefined).join('\n'),
   }
 }
 
@@ -293,14 +237,14 @@ export function candidateRow(row: PathRow, t: Translate): CandidateRow {
  * 候选会长到几十条（工作区一多就是），列表里只能一行行找——面板自己带一个筛选框把这个列表收窄
  * （见 [目录字段是一个值控件，三条改值的路](../../../.agents/notes/implemented/architecture/2026-09-27-directory-field-is-one-value-control.md)）。
  *
- * 关键词对**行自己的事实**匹配：路径、工作区名称、项目身份，外加那个自带文案的「未分组」行。
+ * 关键词对**行自己的事实**匹配：路径、工作区名称、项目身份。
  * 不对"渲染出来的那一整串"匹配——那一串里拼了「— 3 条会话」这样的装饰，拿它当关键词库会让「3」
  * 命中一堆行。大小写不敏感的子串，不做模糊：筛完的顺序仍旧是候选本来的顺序（已登记工作区在前、
  * 库里有会话的目录按路径排在后），筛一下就让行换位置，用户会以为候选变了。
  *
  * 空白关键词 = 原样返回一份新数组（调用方把它当列表内容，不该拿到内部引用）。
  *
- * @param rows 候选行（`migrationSourceRows()` / 调用方补过当前值的那个列表）。
+ * @param rows 候选行（`directoryTargetRows()` 造出来的那些）。
  * @param query 筛选框里的原文（两头空白不算）。
  * @returns 命中的那几行，顺序与输入一致。
  */
@@ -308,57 +252,8 @@ export function filterPathRows(rows: readonly PathRow[], query: string): PathRow
   const needle = query.trim().toLowerCase()
   if (needle === '') return [...rows]
   return rows.filter((row) =>
-    [row.path, row.title ?? '', row.repo ?? '', row.label ?? ''].some((fact) =>
-      fact.toLowerCase().includes(needle),
-    ),
+    [row.path, row.title ?? '', row.repo ?? ''].some((fact) => fact.toLowerCase().includes(needle)),
   )
-}
-
-/**
- * 迁移页的源候选：已登记工作区（注册表顺序在前）+ 库里真有候选会话的目录（按路径排序）+
- * 「未分组」（库里有这类会话时才出现，排在最后——它不是一个目录，位置上也别混进目录堆里）。
- *
- * 每个候选都报**候选条数**（不是库里的会话总数）：注册表的登记条数会骗人，同一个目录下可能还有
- * 没登记在册的会话（那些默认也会被一起搬走），而用户得先看见会话在哪儿；同时侧边栏看不见的那些
- * （子智能体 / 空白 / 已归档）一个都不算进来，因为它们根本不会被搬（见 `SourceSubject.hidden`）。
- *
- * @param sessions 会话库里的全部会话。
- * @param workspaces 已登记的工作区。
- * @param t 翻译（只用来拼"N 条会话"）。
- * @param repos 目录 → 项目身份（宿主 `/state` 的 `repos`）；缺省按"没有身份"处理。
- */
-export function migrationSourceRows(
-  sessions: readonly SourceSubject[],
-  workspaces: ReadonlyArray<{ readonly path: string; readonly title?: string }>,
-  t: Translate,
-  repos: Readonly<Record<string, string>> = {},
-): PathRow[] {
-  const counts = new Map<string, number>()
-  for (const session of sessions) {
-    if (session.hidden !== undefined) continue
-    if (typeof session.cwd !== 'string' || session.cwd === '') continue
-    counts.set(session.cwd, (counts.get(session.cwd) ?? 0) + 1)
-  }
-  const options: PathRow[] = []
-  const seen = new Set<string>()
-  for (const workspace of workspaces) {
-    if (seen.has(workspace.path)) continue
-    seen.add(workspace.path)
-    options.push({
-      path: workspace.path,
-      title: workspace.title,
-      count: counts.get(workspace.path) ?? 0,
-      ...(repos[workspace.path] === undefined ? {} : { repo: repos[workspace.path] }),
-    })
-  }
-  for (const [path, count] of [...counts.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
-    if (seen.has(path)) continue
-    seen.add(path)
-    options.push({ path, count, ...(repos[path] === undefined ? {} : { repo: repos[path] }) })
-  }
-  const unowned = unownedSessions(sessions).length
-  if (unowned > 0) options.push({ path: UNOWNED_SOURCE, label: t('list.ungrouped'), count: unowned })
-  return options
 }
 
 /**
@@ -368,8 +263,8 @@ export function migrationSourceRows(
  * 候选：候选多一份少一份都会变成"换个分页就换个说法"。
  *
  * 与源候选有三处不同：**不带条数**（目标是"要落到哪儿"，不是"这批会话从哪儿来"，条数是来源那一侧的
- * 事实）、没有「未分组」（那不是一个目录）、候选只来自注册表（库里真有会话的目录是**来源**的候选——
- * 目标必须已经存在且已登记，用户要落到别处时走「手输路径」或「浏览文件系统…」）。
+ * 事实）、候选只来自注册表（库里真有会话的目录是**来源**的候选——目标必须已经存在且已登记，用户要落到
+ * 别处时走「手输路径」或「浏览文件系统…」）、以及源那边会列出已被删掉的目录而目标不会。
  *
  * @param workspaces 已登记的工作区。
  * @param repos 目录 → 项目身份（宿主 `/state` 的 `repos`）；缺省按"没有身份"处理。
@@ -478,17 +373,4 @@ export function parentDirNote(
   const path = row.parentPath
   if (path === undefined || path === '') return undefined
   return { text: t('manage.tag.parentElsewhere'), tip: t('manage.tag.parentElsewhereTip', { path }) }
-}
-
-/**
- * 这个来源匹配到的会话（勾选面）。
- *
- * 目录来源按 `cwd` 匹配，同样只收侧边栏看得见的那些；「未分组」来源给的就是 `unownedSessions()`
- * 那一批——于是它天然跨目录，这也是它存在的理由（一个目录一个目录地勾，谁也说不清"这两个目录里
- * 没在册的那两条"是一件事）。
- */
-export function migrationMatching<T extends SourceSubject>(sessions: readonly T[], from: string): T[] {
-  if (from === UNOWNED_SOURCE) return unownedSessions(sessions)
-  if (from === '') return []
-  return sessions.filter((session) => session.cwd === from && session.hidden === undefined)
 }

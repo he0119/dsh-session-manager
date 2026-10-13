@@ -74,6 +74,8 @@ interface Sandbox {
   toDir: string
   projectDirName: string
   logs: Record<string, Buffer>
+  /** 点名的那些会话 id（源就是它们；个别用例自己收紧成一条）。 */
+  ids: string[]
   backupRoot: string
 }
 
@@ -114,7 +116,19 @@ function makeSandbox(name: string): Sandbox {
     },
   }
   writeFileSync(registryPath, JSON.stringify(registry, null, 2) + '\n')
-  return { base, root, registryPath, registry, fromDir, toDir, projectDirName, logs, backupRoot: join(base, 'backups') }
+  return {
+    base,
+    root,
+    registryPath,
+    registry,
+    fromDir,
+    toDir,
+    projectDirName,
+    logs,
+    // 源就是点名的那些会话（没有"源目录"这个参数了）：夹具里这两条，个别用例自己收紧。
+    ids: ['session-a', 'session-b'],
+    backupRoot: join(base, 'backups'),
+  }
 }
 
 /**
@@ -305,9 +319,9 @@ test('工具注册：5 个工具，名称与归一化 schema 符合宿主契约'
     assert.equal(typeof d.execute, 'function')
   }
 
-  // required 被正确归一化（from/to 必填；apply 可选）
+  // required 被正确归一化（sessionIds/to 必填；apply 可选）
   const migrate = m.get('migrate_sessions')!
-  assert.ok(migrate.parameters.required?.includes('from'))
+  assert.ok(migrate.parameters.required?.includes('sessionIds'))
   assert.ok(migrate.parameters.required?.includes('to'))
   assert.ok(!(migrate.parameters.required ?? []).includes('apply'))
   // 数组参数带 items
@@ -402,7 +416,7 @@ test('改完注册表交给宿主自己做：顺序、id 复核、失败退路',
     },
   })
   // 只读的预演不许碰宿主：它一个字节都没写，只说"执行时会怎样"。
-  const planned = (await run(byName(defs).get('migrate_sessions')!, { from: ok.fromDir, to: ok.toDir })) as MigrateToolResult
+  const planned = (await run(byName(defs).get('migrate_sessions')!, { sessionIds: ok.ids, to: ok.toDir })) as MigrateToolResult
   assert.equal(planned.applied, false)
   assert.equal(planned.takesEffect, 'immediate', '预演按探测说"执行时会当场生效"')
   assert.match(planned.summary, /执行时由宿主自己改/)
@@ -410,7 +424,7 @@ test('改完注册表交给宿主自己做：顺序、id 复核、失败退路',
   assert.deepEqual(readRegistry(ok.registryPath), ok.registry, '预演不得改注册表')
 
   const applied = (await run(byName(defs).get('migrate_sessions')!, {
-    from: ok.fromDir,
+    sessionIds: ok.ids,
     to: ok.toDir,
     apply: true,
   })) as MigrateToolResult
@@ -442,7 +456,7 @@ test('改完注册表交给宿主自己做：顺序、id 复核、失败退路',
     wrongTargetId: 'ws-someone-else',
   })
   const wrongRun = (await run(byName(wrongHost.defs).get('migrate_sessions')!, {
-    from: wrong.fromDir,
+    sessionIds: wrong.ids,
     to: wrong.toDir,
     apply: true,
   })) as MigrateToolResult
@@ -454,7 +468,7 @@ test('改完注册表交给宿主自己做：顺序、id 复核、失败退路',
   const bad = makeSandbox('effect-fail')
   const failing = await makeHost(configOf(bad), { registry: bad.registry, persistence: 'ready', attachFails: true })
   const degraded = (await run(byName(failing.defs).get('migrate_sessions')!, {
-    from: bad.fromDir,
+    sessionIds: bad.ids,
     to: bad.toDir,
     apply: true,
   })) as MigrateToolResult
@@ -476,7 +490,7 @@ test('改完注册表交给宿主自己做：顺序、id 复核、失败退路',
     },
   })
   const caught = (await run(byName(tampering.defs).get('migrate_sessions')!, {
-    from: tampered.fromDir,
+    sessionIds: tampered.ids,
     to: tampered.toDir,
     apply: true,
   })) as MigrateToolResult
@@ -503,7 +517,7 @@ test('改完注册表交给宿主自己做：顺序、id 复核、失败退路',
     liveSessions: ['session-b'],
   })
   const heldRun = (await run(byName(holding.defs).get('migrate_sessions')!, {
-    from: held.fromDir,
+    sessionIds: held.ids,
     to: held.toDir,
     apply: true,
   })) as MigrateToolResult
@@ -521,8 +535,9 @@ test('改完注册表交给宿主自己做：顺序、id 复核、失败退路',
   }
   writeFileSync(hidden.registryPath, JSON.stringify(hiddenRegistry, null, 2) + '\n')
   const hiding = await makeHost(configOf(hidden), { registry: hiddenRegistry, persistence: 'ready' })
+  // 只点名看得见的那条：已归档的 session-b 勾不动（界面上那一行是灰的），它因此留在源工作区里。
   const hiddenRun = (await run(byName(hiding.defs).get('migrate_sessions')!, {
-    from: hidden.fromDir,
+    sessionIds: ['session-a'],
     to: hidden.toDir,
     apply: true,
   })) as MigrateToolResult
@@ -551,7 +566,7 @@ test('工具端到端：plan(只读) → migrate(dry-run) → migrate(apply) →
   const m = byName(defs)
 
   // ---- plan：只读 ----
-  const plan = (await run(m.get('plan_session_migration')!, { from: sb.fromDir, to: sb.toDir })) as PlanToolResult
+  const plan = (await run(m.get('plan_session_migration')!, { sessionIds: sb.ids, to: sb.toDir })) as PlanToolResult
   assert.equal(plan.ok, true, plan.problems.join('; '))
   // 两条候选 + 跟着 session-a 走的那条子智能体
   assert.equal(plan.sessions, 3)
@@ -562,14 +577,14 @@ test('工具端到端：plan(只读) → migrate(dry-run) → migrate(apply) →
   assert.deepEqual(readFileSync(join(sb.root, sb.projectDirName, 'session-a', 'session.v4.jsonl.zstd')), sb.logs['a'])
 
   // ---- migrate：默认 dry-run ----
-  const dry = (await run(m.get('migrate_sessions')!, { from: sb.fromDir, to: sb.toDir })) as MigrateToolResult
+  const dry = (await run(m.get('migrate_sessions')!, { sessionIds: sb.ids, to: sb.toDir })) as MigrateToolResult
   assert.equal(dry.applied, false)
   assert.equal(dry.cascaded, 1)
   assert.equal(dry.rewritten, 0)
   assert.deepEqual(readRegistry(sb.registryPath), sb.registry, 'dry-run 不得改注册表')
 
   // ---- migrate：apply ----
-  const applied = (await run(m.get('migrate_sessions')!, { from: sb.fromDir, to: sb.toDir, apply: true })) as MigrateToolResult
+  const applied = (await run(m.get('migrate_sessions')!, { sessionIds: sb.ids, to: sb.toDir, apply: true })) as MigrateToolResult
   assert.equal(applied.applied, true)
   assert.equal(applied.cascaded, 1)
   assert.equal(applied.rewritten, 3)
@@ -614,11 +629,11 @@ test('工具实参校验：缺必填项被宿主 schema 拒绝', async () => {
   const { defs } = await makeHost({ sessionsRoot: sb.root, registryPath: sb.registryPath, backupRoot: sb.backupRoot })
   const m = byName(defs)
 
-  await assert.rejects(() => run(m.get('plan_session_migration')!, { from: sb.fromDir }), /to|required/i)
+  await assert.rejects(() => run(m.get('plan_session_migration')!, { to: sb.toDir }), /to|required/i)
   await assert.rejects(() => run(m.get('migrate_sessions')!, {}), /from|to|required/i)
   // sessionIds 必须是字符串数组（schema 由数组归一化而来）
   await assert.rejects(
-    () => run(m.get('plan_session_migration')!, { from: sb.fromDir, to: sb.toDir, sessionIds: [1, 2] }),
+    () => run(m.get('plan_session_migration')!, { sessionIds: [1, 2], to: sb.toDir }),
     /sessionIds|string/i,
   )
 
@@ -631,8 +646,8 @@ test('工具渲染：render 返回原生内容块', async () => {
   const m = byName(defs)
 
   const tool = m.get('plan_session_migration')!
-  const value = await run(tool, { from: sb.fromDir, to: sb.toDir })
-  const blocks = tool.output.render({ from: sb.fromDir, to: sb.toDir }, value)
+  const value = await run(tool, { sessionIds: sb.ids, to: sb.toDir })
+  const blocks = tool.output.render({ sessionIds: sb.ids, to: sb.toDir }, value)
   assert.ok(Array.isArray(blocks))
   assert.equal(blocks[0]?.type, 'text')
   assert.ok(blocks[0]?.text.includes('迁移'))
