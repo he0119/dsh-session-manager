@@ -68,7 +68,7 @@ const FILTERS: Array<{ key: TranscriptFilterKey; label: SessionManagerKey }> = [
 /** 「看全文」时单条格子的上限：日志里最大的一条工具输出实测 100 KB 上下，这个额度够它落地。 */
 const FULL_ITEM_CHARS = 400_000
 
-/** 筛选那一行的高度交给 CSS 的那个自定义属性（回合标题的 sticky 偏移量）。 */
+/** 筛选那一行的高度交给 CSS 的那个自定义属性（轮次标题的 sticky 偏移量）。 */
 const TURN_TOP_PROPERTY = '--dsm-turn-top'
 
 /** 时刻：只给到时、分、秒（内容视图里日期没意义，会话的建立时间摆在上面）。 */
@@ -205,7 +205,7 @@ export function TranscriptDialog({ session, onClose, t }: TranscriptDialogProps)
     [],
   )
 
-  // 筛选那一行贴在正文那一层的顶上，回合标题要停在它下面——它多高由视图量出来交给 CSS：窄窗口里
+  // 筛选那一行贴在正文那一层的顶上，轮次标题要停在它下面——它多高由视图量出来交给 CSS：窄窗口里
   // 芯片会折成两行，那一行就变高，写死一个数会让标题被它压住。缩放会改字号，所以 resize 也跟一次。
   React.useEffect(() => {
     const element = filters.current
@@ -272,7 +272,7 @@ export function TranscriptDialog({ session, onClose, t }: TranscriptDialogProps)
   const counts = page?.counts
   const sections = turnSections(shown)
 
-  /** 一条事件一张卡。按回合的标题不在这里——它由外面那一节画（`<details>` 的 `summary`）。 */
+  /** 一条事件一张卡。按轮次的标题不在这里——它由外面那一节画（`<details>` 的 `summary`）。 */
   const itemOf = (item: TranscriptItem): React.ReactElement => (
     <div key={item.index} className={`dsm-item dsm-item-${item.kind}`} data-dsm-index={item.index}>
       <div className="dsm-itemHead">
@@ -394,7 +394,7 @@ export function TranscriptDialog({ session, onClose, t }: TranscriptDialogProps)
           const first = section.items[0]
           if (first === undefined) return null
           if (section.turn === undefined) {
-            // 不属于任何一回合的那些：没有标题可折，照原样摆出来。
+            // 不属于任何一轮的那些：没有标题可折，照原样摆出来。
             return <React.Fragment key={`loose-${first.index}`}>{section.items.map(itemOf)}</React.Fragment>
           }
           const clocks = section.items

@@ -2302,7 +2302,7 @@ test('GET /transcript：把一条会话的日志折成完整时间线（会话�
   )
   assert.equal(itemsOf(body)[3]!['name'], 'bash', '工具名从调用那条补过来')
   assert.equal(itemsOf(body)[3]!['text'], 'a.txt\nb.txt')
-  assert.equal(itemsOf(body)[0]!['text'], '第 1 回合开始')
+  assert.equal(itemsOf(body)[0]!['text'], '第 1 轮开始')
   assert.equal(itemsOf(body)[4]!['text'], '标题（人（改名））：看看日志')
   assert.deepEqual(body['counts'], {
     events: 6,

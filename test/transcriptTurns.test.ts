@@ -1,8 +1,8 @@
 // test/transcriptTurns.test.ts — 会话内容视图"一节到哪儿为止"的规则。
 //
-// 折叠把这件事变成了看得见的行为：节切错了，折起来的就不只是那一回合。这里钉的是边界来自日志
+// 折叠把这件事变成了看得见的行为：节切错了，折起来的就不只是那一轮。这里钉的是边界来自日志
 // （`turn/start` 开、`turn/end` 收）而不是"`turn` 字段相等"——真实日志里大多数事件不带 `turn`，
-// 照字段切会把一回合劈成好几节。
+// 照字段切会把一轮劈成好几节。
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
@@ -29,11 +29,11 @@ test('turn/start 到 turn/end 之间的都进这一节，中间不带 turn 的�
       [undefined, [0]],
       [1, [1, 2, 3, 4, 5]],
     ],
-    '不带 turn 的那几条仍在第 1 回合里：它们是这一回合发生的事',
+    '不带 turn 的那几条仍在第 1 轮里：它们是这一轮发生的事',
   )
 })
 
-test('回合收掉之后、下一个回合开始之前的是自己一节', () => {
+test('一轮收掉之后、下一轮开始之前的是自己一节', () => {
   const sections = turnSections([
     at('turn/start', 0, 1),
     at('turn/end', 1, 1),
@@ -50,7 +50,7 @@ test('回合收掉之后、下一个回合开始之前的是自己一节', () =>
   ])
 })
 
-test('没有 turn/end 的回合：下一个 turn/start 就是它的边界', () => {
+test('没有 turn/end 的一轮：下一个 turn/start 就是它的边界', () => {
   const sections = turnSections([
     at('turn/start', 0, 1),
     at('assistant/message', 1),
@@ -63,16 +63,16 @@ test('没有 turn/end 的回合：下一个 turn/start 就是它的边界', () =
       [1, [0, 1]],
       [2, [2, 3]],
     ],
-    '回合被中断（日志里没有 turn/end）时不能把它后面的都吞进来',
+    '轮次被中断（日志里没有 turn/end）时不能把它后面的都吞进来',
   )
 })
 
-test('turn 是 0 也算一回合（假值不是"没有回合"）', () => {
+test('turn 是 0 也算一轮（假值不是"没有轮次"）', () => {
   const sections = turnSections([at('turn/start', 0, 0), at('turn/end', 1, 0)])
   assert.deepEqual(sections.map((section) => section.turn), [0])
 })
 
-test('空输入、通篇没有回合、单条都不出岔子', () => {
+test('空输入、通篇没有轮次、单条都不出岔子', () => {
   assert.deepEqual(turnSections([]), [])
   assert.deepEqual(shape(turnSections([at('permission/preset', 0), at('model/selection', 1)])), [
     [undefined, [0, 1]],

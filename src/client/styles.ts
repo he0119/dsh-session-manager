@@ -900,7 +900,7 @@ export const CSS = `
 .dsm-transcriptName { font-size: 14px; font-weight: 600; color: var(--dsw-alias-label-primary, #1f2329); }
 /* 词条是 12px 的字：行高跟着降到 18px（上面 .dsm-defs 那一档是 14px/22px，不改就量到 24px 的行距）。 */
 .dsm-transcriptFactsGrid { gap: 2px 12px; font-size: 12px; line-height: 18px; }
-/* 筛选与计数那一行在正文那一层里贴顶：滚动时它留在上头，回合标题停在它下面。
+/* 筛选与计数那一行在正文那一层里贴顶：滚动时它留在上头，轮次标题停在它下面。
    底色必须与卡片同层（bg-layer-2），否则滚过去的条目会从它背后透出来。 */
 .dsm-transcriptFilters {
   position: sticky; top: 0; z-index: 2;
@@ -929,7 +929,7 @@ export const CSS = `
   display: flex; flex-direction: column; gap: 8px;
 }
 /*
- * 回合那一节：标题自己停在顶上（在正文那一层里 sticky），下面是这一回合的条目；点标题就折起来。
+ * 轮次那一节：标题自己停在顶上（在正文那一层里 sticky），下面是这一轮的条目；点标题就折起来。
  *
  * 底色必须与卡片**同层**（bg-layer-2：官方 Modal 卡片的背景就是它）。用 bg-base 的话深色主题下
  * 会横出一条比卡片更黑的色带——它看着就像一块贴上去的黑条，而不是这一节的标题。
