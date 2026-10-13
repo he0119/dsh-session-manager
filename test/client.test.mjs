@@ -543,8 +543,9 @@ test('客户端产物：apply 把「会话管理」注册到设置里的一页�
   // 多解释一句，攒起来就是读者每次都要扫过去的散文（实测动作页正文曾经 187 / 382 / 144 字，最长一段
   // 192 字）。这里钉它的机械面：**动作页上的每一段说明都不超过两行**。
   // 两行的容量按实测的排版算：卡片正文宽 534px、说明句 12px（内建描述那一档），一行约 44 个汉字、
-  // 英文约 87 个字符，所以两行的上限在 88 / 174 上下——下面这两个数贴着它（现有最长的一条：中文 75
-  // 字、英文 174 字符，在 dev GUI 里量下来都是两行）。超过上限不是"字太多"，是"这段该搬去「说明」页"。
+  // 英文约 87 个字符，所以两行的上限在 88 / 174 上下——下面这两个数贴着它（现有最长的一条：中文 69
+  // 字、英文 175 字符，都在「会话」页那条 hint 上，在 dev GUI 里量下来都是两行）。超过上限不是"字太多"，
+  // 是"这段该搬去「说明」页"。
   const PAGE_PROSE = {
     zh: 76,
     en: 175,
@@ -552,7 +553,6 @@ test('客户端产物：apply 把「会话管理」注册到设置里的一页�
   const actionKeys = [
     'transfer.export.hint',
     'transfer.import.hint',
-    'migrate.hint',
     'manage.hint',
     'manage.delete.hint',
     'backup.hint',
@@ -584,7 +584,7 @@ test('客户端产物：导航行的文案跟着语言走（同一个 thunk 每�
   assert.equal(label(), 'Session management')
 })
 
-test('客户端产物：页面骨架带着五个动作页（会话 / 迁移 / 传输 / 同步 / 备份）与说明页', { skip }, () => {
+test('客户端产物：页面骨架带着三个动作页（会话 / 传输 / 同步）、备份与说明页', { skip }, () => {
   const { registrations, recorded } = mount()
   const { component } = registrations[0]
   const { inject } = registrations[0].registration
@@ -592,27 +592,35 @@ test('客户端产物：页面骨架带着五个动作页（会话 / 迁移 / �
   const element = component(inject())
   const text = strings(element)
   assert.ok(text.includes('page.tab.transfer'), '页内要有「传输」这一页')
-  assert.ok(text.includes('page.tab.migrate'), '页内要有「迁移」这一页')
-  assert.ok(text.includes('page.tab.manage'), '页内要有「会话」这一页（逐条归档 / 删除）')
+  assert.ok(text.includes('page.tab.manage'), '页内要有「会话」这一页（逐条归档 / 迁移 / 删除）')
   assert.ok(text.includes('page.tab.sync'), '页内要有「同步」这一页（WebDAV）')
   assert.ok(text.includes('page.tab.backup'), '页内要有「备份」这一页（三种写操作共同的后悔面）')
   // 页签顺序：日常的「会话」在最前；「同步」紧挨「传输」（它落地走的是导入那条编排）；「备份」是
-  // 三个写操作共同的后悔面、不属于任何一个动作页，所以排在动作页之后；说明垫底
+  // 三个写操作共同的后悔面、不属于任何一个动作页，所以排在动作页之后；说明垫底。**迁移没有自己的
+  // 页签**：它并进了「会话」页的动作行（见下面那条用例）。
   const tabs = recorded.filter((node) => String(node.props?.className) === 'dsm-tab')
   assert.deepEqual(
     tabs.map((node) => strings(node)[0]),
-    ['page.tab.manage', 'page.tab.migrate', 'page.tab.transfer', 'page.tab.sync', 'page.tab.backup', 'page.tab.help'],
-    '顺序是 会话 → 迁移 → 传输 → 同步 → 备份 → 说明（动作页按日常程度排，参考页垫底）',
+    ['page.tab.manage', 'page.tab.transfer', 'page.tab.sync', 'page.tab.backup', 'page.tab.help'],
+    '顺序是 会话 → 传输 → 同步 → 备份 → 说明（动作页按日常程度排，参考页垫底）',
   )
   assert.deepEqual(
     tabs.map((node) => node.props['aria-selected']),
-    [true, false, false, false, false, false],
+    [true, false, false, false, false],
     '默认停在第一个页签',
   )
+  // 那枚页签从两份字典里一起删掉：留着就等于"同一件事有两个入口"。
+  const { zh: zhDict, en: enDict } = mount().dictionaries[0].dicts
+  for (const key of ['page.tab.migrate', 'migrate.title', 'migrate.hint', 'migrate.lockedHidden', 'help.tabs.migrate']) {
+    assert.ok(
+      !Object.hasOwn(zhDict, key) && !Object.hasOwn(enDict, key),
+      `${key} 该删掉：迁移并进「会话」页之后它没有落点了`,
+    )
+  }
   assert.ok(text.includes('page.title'), '页面标题走同一份字典')
 })
 
-test('客户端产物：备份是独立分页，迁移页上不再有那张清单', { skip }, () => {
+test('客户端产物：备份是独立分页，动作页上不再有那张清单', { skip }, () => {
   // 这张清单里躺的不只是迁移留下的备份：删除与同步覆盖本机那份也各留一份（`kind` 三种）。它原先挂在
   // 「迁移」卡片下面时，界面得在三处替它引路（删除成功的横幅、同步的结果与进度说明、说明页的 FAQ）。
   const state = {
@@ -626,10 +634,10 @@ test('客户端产物：备份是独立分页，迁移页上不再有那张清�
     const mounted = mount({ state, panel })
     return strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
   }
-  const migrate = pageText('migrate')
+  const sessions = pageText('manage')
   const backup = pageText('backup')
   for (const key of ['backup.title', 'backup.hint', 'backup.empty']) {
-    assert.ok(!migrate.includes(key), `迁移页上不该再有备份清单的那部分（${key}）`)
+    assert.ok(!sessions.includes(key), `动作页上不该再有备份清单的那部分（${key}）`)
     assert.ok(backup.includes(key), `「备份」分页上要有清单的那部分（${key}）`)
   }
   // 「会话」页与「同步」页的成功文案都指向「备份」页，不再指向「迁移」页的某张卡：那句话只在弹窗
@@ -678,12 +686,11 @@ test('客户端产物：卡片级的主动作长在卡片底部的动作行里�
     sessions: [{ id: 's-1', cwd: '/home/u/dev/alpha', createdAt: 1, dir: '/home/u/dev/alpha', bytes: 1, files: [] }],
     workspaces: [{ id: 'w1', path: '/home/u/dev/alpha', title: '工作区甲', sessionIds: ['s-1'] }],
   }
-  // 「会话」页那一行放的是归档 / 取消归档 / 删除，三枚都没有 `dsm-primary`（删除是破坏性动作、靠
-  // spacer 顶到右端）；另外三页各有一到两枚主动作：迁移页的「迁移」、传输页的「导出所选 + 导入」、
+  // 「会话」页那一行放的是归档 / 取消归档 / 重新生成名称 / 迁移 / 删除，五枚都没有 `dsm-primary`
+  // （删除是破坏性动作、靠 spacer 顶到右端）；另外两页各有一到两枚主动作：传输页的「导出所选 + 导入」、
   // 同步页的「同步」（那张设置表单自己的「保存」只在宿主有设置接缝时才画，归表单那条用例钉）。
   const expected = {
     manage: [],
-    migrate: ['controls'],
     transfer: ['controls', 'controls'],
     sync: ['controls'],
   }
@@ -864,11 +871,13 @@ test('客户端产物：页面组件在初始状态下能渲染成元素（不�
   // 目录字段的两种分支因此不在这个冒烟用例的射程内，别把断言写在这里骗自己。
 })
 
-test('客户端产物：迁移页的主体就是整库列表（按目录分组、行上有标签），底下一枚「迁移」', { skip }, () => {
-  // 这一页原来是"选一个源目录、再选目标"，列表只是那个来源下的候选。现在**源就是勾中的那些会话**
-  // （见 MigrationPanel.tsx）：主体因此与「会话」页是同一张列表——同一套分组、标签、筛选与勾选，
-  // 差别只在底部那枚动作。侧边栏看不见的那几类照样列出来（勾不动，勾选框是灰的），因为用户要能看见
-  // "为什么这几条没被搬走"。
+test('客户端产物：迁移并进了「会话」页——同一张列表，动作行上多一枚「迁移」', { skip }, () => {
+  // 迁移原先单独占一个分页（"选一个源目录、再选目标"那套）。源改成**勾中的那些会话**之后，那一页剩下
+  // 的只有一张与「会话」页逐字同形的列表 + 一枚按钮 + 一个弹窗，于是并进了这一页的动作行（见
+  // ManagePanel.tsx 的模块说明）。
+  //
+  // 并进来之后**行不再有"迁移专用"的锁**：侧边栏看不见的那几类在这一页照样能勾（这一页正是用来收拾
+  // 它们的：取消归档、删掉空白）；迁移那一侧靠"只把看得见的送进计划 + 弹窗里说清少带了哪几条"来兜。
   const state = {
     sessionsRoot: '/home/u/.dsh/sessions',
     registryPath: '/home/u/.dsh/registry.json',
@@ -886,56 +895,60 @@ test('客户端产物：迁移页的主体就是整库列表（按目录分组�
   // 另外：走一遍树（`strings()`）才会把行 / 组头这些**共用组件**的元素记进 `recorded`（假 createElement 只
   // 记录调用方自己造的那些元素），所以同一个 `tree` 只走一遍——走两遍会把同一行记两次。
   const render = (extra = {}) => {
-    const mounted = mount({ state, panel: 'migrate', ...extra })
+    const mounted = mount({ state, panel: 'manage', ...extra })
     return { mounted, tree: mounted.registrations[0].component(mounted.registrations[0].registration.inject()) }
+  }
+  /** 动作行上那几枚按钮（文案就是字典键）。 */
+  const actionRow = (mounted) => {
+    const controls = mounted.recorded.find((el) => String(el.props?.className) === 'dsm-controls')
+    return elementsOf(controls).filter((el) => el.type === 'button')
   }
 
   const fresh = render()
   const text = strings(fresh.tree)
-  assert.ok(text.includes('page.tab.migrate'), '页签还在（seeded 的那一页就是它）')
-  assert.ok(
-    text.includes('migrate.title') && text.includes('migrate.hint'),
-    '迁移页本体渲染出来了',
-  )
+  assert.ok(text.includes('manage.title') && text.includes('manage.hint'), '会话页本体渲染出来了')
+  assert.ok(text.includes('migrate.action'), '动作行上多了一枚「迁移」')
 
-  // 整库、按目录分组：与「会话」页同一套（两条目录两条组头，一条在册一条没在册）
+  // 整库、按目录分组：两条目录两条组头（一条在册一条没在册）
   const heads = fresh.mounted.recorded.filter((el) => String(el.props?.className) === 'dsm-groupHead')
   assert.equal(heads.length, 2, '两条目录两条组头')
   const rows = fresh.mounted.recorded.filter(
-    (el) => typeof el.type === 'string' && String(el.props?.className).includes('dsm-rowPick'),
+    (el) => typeof el.type === 'string' && String(el.props?.className).includes('dsm-rowManage'),
   )
-  assert.equal(rows.length, 4, '四条会话都在列表里（侧边栏看不见的那条也列出来，只是勾不动）')
+  assert.equal(rows.length, 4, '四条会话都在列表里')
   // 标签与「会话」页同一套：没被认领的那几条挂「未分组」，空白那条挂它自己的标签
   assert.ok(text.includes('list.ungrouped'), '「未分组」是行上的标签（不是第二种来源）')
   assert.ok(text.includes('tag.blank'), '空白那条在行上标出来')
-  // 勾不动的那些：勾选框禁用，提示里说明为什么（这里只核它禁用了——文案由下面那条弹窗用例核）
-  const locked = fresh.mounted.recorded.filter(
-    (el) => el.type === 'label' && String(el.props?.className).includes('dsm-rowPick'),
+  // 这一页没有勾不动的行（锁只给子智能体，这一份里没有）：隐藏的那条也能勾——归档 / 删除要它，
+  // 迁移那一侧不许它，靠"不进计划 + 弹窗里说明"表达。
+  const labels = fresh.mounted.recorded.filter(
+    (el) => el.type === 'label' && String(el.props?.className).includes('dsm-rowManage'),
   )
   assert.equal(
-    locked.filter((label) => elementsOf(label).find((el) => el.type === 'input')?.props?.disabled === true).length,
-    1,
-    '侧边栏不显示的那一条勾不动',
+    labels.filter((label) => elementsOf(label).find((el) => el.type === 'input')?.props?.disabled === true).length,
+    0,
+    '这一页没有勾不动的行',
   )
 
-  // 底部动作行里那枚「迁移」：这是这一页唯一的落地入口，一条都没勾时禁用
-  assert.deepEqual(primaryPlacements(fresh.tree), ['controls'], '主动作在卡片底部的动作行里')
-  const action = fresh.mounted.recorded.find(
-    (el) => el.type === 'button' && String(el.props?.className).includes('dsm-primary'),
+  // 动作行：归档 / 取消归档 / 重新生成名称 / 迁移 ┃ 删除；没有 `dsm-primary`（破坏性的删除靠 spacer
+  // 顶到右端，这一页的主动作是"一批会话做同一件事"，不是某一枚按钮）
+  assert.deepEqual(primaryPlacements(fresh.tree), [], '这一页没有 dsm-primary')
+  assert.deepEqual(
+    actionRow(fresh.mounted).map((el) => strings(el)[0]),
+    ['manage.archive.action', 'manage.archive.undo', 'manage.retitle.action', 'migrate.action', 'manage.delete.action'],
+    '动作行上五枚，迁移排在破坏性的「删除」之前',
   )
-  assert.equal(strings(action)[0], 'migrate.action', '底部的主动作就是「迁移」')
+  const action = actionRow(fresh.mounted).find((el) => strings(el)[0] === 'migrate.action')
   assert.equal(action.props.disabled, true, '一条都没勾时它是禁用的')
 
   // 勾上一条（种进第一个空数组状态＝勾选集）：按钮就能按了，那一行也画成勾上的
   const picked = render({ arrays: [['s-2']] })
   const pickedText = strings(picked.tree)
-  const pickedAction = picked.mounted.recorded.find(
-    (el) => el.type === 'button' && String(el.props?.className).includes('dsm-primary'),
-  )
+  const pickedAction = actionRow(picked.mounted).find((el) => strings(el)[0] === 'migrate.action')
   assert.equal(pickedAction.props.disabled, false, '勾了一条就能按「迁移」')
   assert.ok(pickedText.includes('list.selected:{"count":1}'), '卡头报出勾了几条')
   const pickedRow = picked.mounted.recorded
-    .filter((el) => el.type === 'label' && String(el.props?.className).includes('dsm-rowPick'))
+    .filter((el) => el.type === 'label' && String(el.props?.className).includes('dsm-rowManage'))
     .find((label) => rowParts(label).label === 's-2')
   assert.equal(
     elementsOf(pickedRow).find((el) => el.type === 'input')?.props?.checked,
@@ -1347,10 +1360,11 @@ function pickPlacements(node, inside = 'root', out = []) {
   return pickPlacements(node.props?.children, nested, out)
 }
 
-test('客户端产物：三个分页的选行工具是同一对「全选 / 清空」，禁用判据与位置一致', { skip }, () => {
+test('客户端产物：两个分页的选行工具是同一对「全选 / 清空」，禁用判据与位置一致', { skip }, () => {
   // 现象（用户报的）：会话页有一对常驻的「全选」「清空」，传输页只有一枚**会变脸**的按钮——全勾上了
-  // 它才显示「清空」，勾了一部分时"清空"在界面上根本不存在；迁移页那一对只在「只选其中几条」下出现
-  // （清单摆着却没有工具），而且它的「全选」无视搜索框（作用面是 matching 而不是列出来的那些）。
+  // 它才显示「清空」，勾了一部分时"清空"在界面上根本不存在；迁移页（今天已并进会话页）那一对只在
+  // 「只选其中几条」下出现（清单摆着却没有工具），而且它的「全选」无视搜索框（作用面是 matching 而
+  // 不是列出来的那些）。
   // 统一之后的判据见 .agents/notes/implemented/bug-fix/2026-10-08-one-pair-of-pick-tools.md。
   const state = {
     sessionsRoot: '/home/u/.dsh/sessions',
@@ -1375,15 +1389,14 @@ test('客户端产物：三个分页的选行工具是同一对「全选 / 清�
   const placesOf = (panel, extra = {}) => pickPlacements(render(panel, extra).tree)
   const textOf = (panel, extra = {}) => strings(render(panel, extra).tree)
 
-  // 三页的清单都是整张卡（迁移页也一样：源就是勾中的那些会话，列表就是整库），所以那一对都在卡头。
-  const where = { manage: 'cardHead', transfer: 'cardHead', migrate: 'cardHead' }
+  // 两页的清单都是整张卡，所以那一对都在卡头。
+  const where = { manage: 'cardHead', transfer: 'cardHead' }
 
-  // ① 三个分页都是**常驻的两枚**，顺序固定（全选在前）：一条都没勾时只有「清空」禁用；位置都是"清单
+  // ① 两个分页都是**常驻的两枚**，顺序固定（全选在前）：一条都没勾时只有「清空」禁用；位置都是"清单
   // 之上那一行的右端"。
   const fresh = {
     manage: placesOf('manage'),
     transfer: placesOf('transfer'),
-    migrate: placesOf('migrate'),
   }
   for (const [panel, places] of Object.entries(fresh)) {
     assert.deepEqual(
@@ -1401,7 +1414,6 @@ test('客户端产物：三个分页的选行工具是同一对「全选 / 清�
   const some = {
     manage: placesOf('manage', { arrays: [['s-alpha']] }),
     transfer: placesOf('transfer', { arrays: [['s-alpha']] }),
-    migrate: placesOf('migrate', { arrays: [['s-alpha']] }),
   }
   for (const [panel, places] of Object.entries(some)) {
     assert.deepEqual(
@@ -1412,12 +1424,11 @@ test('客户端产物：三个分页的选行工具是同一对「全选 / 清�
   }
 
   // ③ 「全选」的作用面是**眼下列出来的那些**（不是整份库）：把筛选条件种成筛不到任何一行（类别芯片
-  // 那一个空数组状态），「全选」就必须禁用——否则它会悄悄选上屏幕上看不见的会话。三页的筛选条是同一
-  // 套（迁移页也是），这条同时证明工具**不随清单空掉而消失**（清空照旧可点）。
+  // 那一个空数组状态），「全选」就必须禁用——否则它会悄悄选上屏幕上看不见的会话。两页的筛选条是同一
+  // 套，这条同时证明工具**不随清单空掉而消失**（清空照旧可点）。
   const filtered = {
     manage: placesOf('manage', { arrays: [['s-alpha'], ['blank']] }),
     transfer: placesOf('transfer', { arrays: [['s-alpha'], ['blank']] }),
-    migrate: placesOf('migrate', { arrays: [['s-alpha'], ['blank']] }),
   }
   for (const [panel, places] of Object.entries(filtered)) {
     assert.deepEqual(
@@ -1430,7 +1441,7 @@ test('客户端产物：三个分页的选行工具是同一对「全选 / 清�
     )
   }
 
-  // ④ 一枚变脸的按钮、几份各写一遍的文案都不该再回来：三页问到的都是同一对键，另外那些键从两份字典
+  // ④ 一枚变脸的按钮、几份各写一遍的文案都不该再回来：两页问到的都是同一对键，另外那些键从两份字典
   // 里一起删掉（留着就等于"同一件事有两个词"）。迁移页那三个"来源与范围"的键随旧模型一起没了。
   const { zh, en } = render('manage').mounted.dictionaries[0].dicts
   for (const key of [
@@ -1445,7 +1456,7 @@ test('客户端产物：三个分页的选行工具是同一对「全选 / 清�
   ]) {
     assert.ok(!Object.hasOwn(zh, key) && !Object.hasOwn(en, key), `${key} 该删掉：同一件事只留一个词`)
   }
-  for (const panel of ['manage', 'transfer', 'migrate']) {
+  for (const panel of ['manage', 'transfer']) {
     const text = textOf(panel)
     assert.ok(text.includes('list.selectAll') && text.includes('list.clear'), `${panel} 用共用的那对键`)
   }
@@ -1453,17 +1464,18 @@ test('客户端产物：三个分页的选行工具是同一对「全选 / 清�
   // ⑤ 行勾选只反映勾了什么：种一条勾选，那一行就必须是勾上的（屏幕上与「已选 N」两处说同一件事）。
   //
   // 走 `strings()` 而不是 `elements()`：分页本体包在 Fragment 里，`elements()` 不下穿 Fragment
-  // （见它的注释），而行的记录照样会进 `recorded`。
-  const pickedView = mount({ state, panel: 'migrate', arrays: [['s-alpha']] })
+  // （见它的注释），而行的记录照样会进 `recorded`。迁移并进会话页之后「会话」页就是那张列表，所以
+  // 这一条现在核的是它（`dsm-rowManage`）。
+  const pickedView = mount({ state, panel: 'manage', arrays: [['s-alpha']] })
   strings(pickedView.registrations[0].component(pickedView.registrations[0].registration.inject()))
   const pickedRows = pickedView.recorded.filter(
-    (node) => node.type === 'label' && String(node.props?.className).includes('dsm-rowPick'),
+    (node) => node.type === 'label' && String(node.props?.className).includes('dsm-rowManage'),
   )
-  assert.equal(pickedRows.length, 2, '迁移页把两条会话都画出来了')
+  assert.equal(pickedRows.length, 2, '会话页把两条会话都画出来了')
   assert.deepEqual(
     pickedRows.map((row) => elementsOf(row).find((element) => element.type === 'input')?.props?.['checked']),
     [true, false],
-    '勾中的那条是勾上的（勾选集是这三页唯一的判据）',
+    '勾中的那条是勾上的（勾选集是这一页唯一的判据）',
   )
 })
 
@@ -1706,10 +1718,8 @@ test('客户端产物：导出页也接了同一套筛选条，筛空的组整�
 })
 
 test('客户端产物：迁移弹窗——计划逐条列出会话，跟着父会话进来的那些挂「随父迁」', { skip }, () => {
-  // 弹窗是点了「迁移」之后才在树上的，冒烟里走不到（假钩子给不出点击），所以把 `pending` 种进去。
-  // null 状态的顺序：页面骨架的 error（`state` 由 mount 的 `firstNull` 种）/ 迁移页的
-  // 目录字段的面板 / 手输路径 / **pending**——所以 `nulls` 里先补三个 null，第四个才是那份计划。
-  // 种错位置表现为"弹窗没渲染出来"，当场红。
+  // 弹窗是点了「迁移」之后才在树上的，冒烟里走不到（假钩子给不出点击），所以把 `migratePending` 种进去
+  // （`manageNulls({ migrate })`，顺序见 ManagePanel.tsx 的注释）。种错位置表现为"弹窗没渲染出来"，当场红。
   const state = {
     sessionsRoot: '/home/u/.dsh/sessions',
     registryPath: '/home/u/.dsh/registry.json',
@@ -1766,20 +1776,20 @@ test('客户端产物：迁移弹窗——计划逐条列出会话，跟着父�
     summary: 'plan summary',
     takesEffect: 'restart-required',
   })
-  /** 种一份计划进弹窗（`pending` 的位置见上面的注释）。 */
+  /** 种一份计划进弹窗（`migratePending` 的位置由 `manageNulls` 给）。 */
   const withPlan = (cascaded, live = 0, stranded = 0, ok = true) => {
     const mounted = mount({
       state,
-      panel: 'migrate',
-      strings: ['/home/u/dev/beta'],
-      nulls: [null, null, null, { response: outcomeOf(cascaded, live, stranded, ok), error: null }],
+      panel: 'manage',
+      strings: manageStrings({ to: '/home/u/dev/beta' }),
+      nulls: manageNulls({ migrate: { response: outcomeOf(cascaded, live, stranded, ok), error: null } }),
     })
     const tree = mounted.registrations[0].component(mounted.registrations[0].registration.inject())
     return { mounted, tree, text: strings(tree) }
   }
 
   const withFamily = withPlan(1)
-  assert.ok(withFamily.text.includes('migrate.title'), '迁移页本体渲染出来了')
+  assert.ok(withFamily.text.includes('manage.title'), '「会话」页本体渲染出来了（弹窗开在它上面）')
   assert.ok(
     withFamily.text.some((item) => String(item) === 'migrate.family:{"count":1}'),
     '有一条子智能体跟着走时，弹窗里要说明它是跟着父会话进来的',
@@ -1911,17 +1921,14 @@ test('客户端产物：迁移的「要不要重启」——确认前先说一�
     registryChange,
     summary: 'plan summary',
   })
-  /** `pending` 是第四个 null 状态（目录字段的面板 / 手输路径在它前面），顺序种错就表现为弹窗没渲染出来。 */
+  /** 弹窗那一格由 `manageNulls({ migrate })` 种，顺序种错就表现为弹窗没渲染出来。 */
   const dialog = (registryChange, takesEffect) => {
     const mounted = mount({
       state,
-      panel: 'migrate',
-      strings: ['/home/u/dev/beta'],
-      nulls: [
-        null,
-        null,
-        null,
-        {
+      panel: 'manage',
+      strings: manageStrings({ to: '/home/u/dev/beta' }),
+      nulls: manageNulls({
+        migrate: {
           response: {
             mode: 'plan',
             ok: true,
@@ -1937,7 +1944,7 @@ test('客户端产物：迁移的「要不要重启」——确认前先说一�
           },
           error: null,
         },
-      ],
+      }),
     })
     const tree = mounted.registrations[0].component(mounted.registrations[0].registration.inject())
     return { mounted, text: strings(tree) }
@@ -1985,18 +1992,10 @@ test('客户端产物：迁移的「要不要重启」——确认前先说一�
   const effectBlock = (takesEffect) => {
     const mounted = mount({
       state,
-      panel: 'migrate',
-      // null 顺序：骨架的 error / 目录字段的面板 / 手输路径 / pending / busy / 错误 / notice / **effect**。
-      nulls: [
-        null,
-        null,
-        null,
-        null,
-        null,
-        null,
-        null,
-        { verified: true, backupDir: '/home/u/.dsh/dsh-session-manager/backups/2026-10-06T00-00-00', takesEffect },
-      ],
+      panel: 'manage',
+      nulls: manageNulls({
+        effect: { verified: true, backupDir: '/home/u/.dsh/dsh-session-manager/backups/2026-10-06T00-00-00', takesEffect },
+      }),
     })
     const tree = mounted.registrations[0].component(mounted.registrations[0].registration.inject())
     return { mounted, text: strings(tree) }
@@ -2015,9 +2014,10 @@ test('客户端产物：迁移的「要不要重启」——确认前先说一�
   assert.ok(applied.text.includes('verify.pass'), '复核结论照旧')
 })
 
-test('客户端产物：迁移页的筛选条与「会话」页同一份（含类别芯片，列表就是同一张）', { skip }, () => {
-  // 这一页原来是"源目录下的候选"，隐藏会话不进候选、五类芯片永远是 0，所以只给了一个搜索框。现在
-  // 列表就是整库（源＝勾中的那些会话），筛选条没有理由少一格：芯片能筛、行的标签也照旧。
+test('客户端产物：「会话」页的筛选条含类别芯片（列表就是整库，迁移也在这一页上）', { skip }, () => {
+  // 迁移那一页原来只给一个搜索框：它列的是"某个源目录下的候选"，隐藏会话不进候选、五类芯片永远是 0。
+  // 源改成"勾中的那些会话"、列表就是整库之后，芯片没有理由少一格——并进会话页的今天，这条核的就是
+  // 那一页的筛选条（芯片能筛、行的标签也照旧）。
   const state = {
     sessionsRoot: '/home/u/.dsh/sessions',
     registryPath: '/home/u/.dsh/registry.json',
@@ -2029,8 +2029,7 @@ test('客户端产物：迁移页的筛选条与「会话」页同一份（含�
     ],
     workspaces: [],
   }
-  // 迁移页第一个空串状态是目标目录（MigrationPanel 的 useState('') 顺序：to → title → 搜索词）。
-  const { registrations, recorded } = mount({ state, panel: 'migrate' })
+  const { registrations, recorded } = mount({ state, panel: 'manage' })
   const { component, registration } = registrations[0]
   strings(component(registration.inject()))
 
@@ -2049,14 +2048,20 @@ test('客户端产物：迁移页的筛选条与「会话」页同一份（含�
     '搜索框也在（同一套筛选条）',
   )
 
-  // 整库都列出来：侧边栏看不见的那条（子智能体）也在，只是勾不动
+  // 整库都列出来：侧边栏看不见的那条（子智能体）也在，只是勾不动（会话页那一款行，多一格归属）
   const rowEls = recorded.filter((node) => typeof node.type === 'function' && node.type.name === 'SessionRow')
   assert.deepEqual(rowEls.map((node) => node.props.session.id), ['a-1', 'a-2', 'b-1'])
   assert.ok(
-    rowEls.every((node) => node.props.variant === 'pick'),
-    '三行都是可勾选那一款（子智能体那行勾不动，但照样画出来）',
+    rowEls.every((node) => node.props.variant === 'manage'),
+    '三行都是会话页那一款（子智能体那行勾不动，但照样画出来）',
   )
-  assert.equal(rowEls[1].props.locked === undefined, false, '子智能体那行锁着')
+  // 并进会话页之后，这一款行的锁只来自"父会话也在库里"（父子关系，见 sessionList.lockedParentOf）：这
+  // 一份里的 a-2 是子智能体但没有父会话，所以它照样能勾——迁移那一侧靠 `hidden` 把它挡在计划外，不靠锁。
+  assert.equal(
+    rowEls.every((node) => node.props.locked === undefined),
+    true,
+    '这一份里没有该锁的行（锁按父子关系给，不按"侧边栏看不看得见"）',
+  )
   assert.equal(rowEls[0].props.locked, undefined, '看得见的那行不锁')
 })
 
@@ -2087,12 +2092,46 @@ const MIGRATE_FIELD_STATE = {
 }
 
 /**
- * 一份只读的迁移计划（种进弹窗的 `pending` 状态里）。
+ * 「会话」页（迁移并进来之后）的 null 状态顺序（页面骨架的 `state` 由 mount 的 `firstNull` 种，这里
+ * 从它自己那个 `error` 开始）：骨架 error → `busy` → `error` → `notice` → 删除弹窗 → `progress` →
+ * `retitle` → `inspecting` → 目标字段 open → 目标字段 manual → **迁移弹窗** → **迁移结论**。
+ *
+ * 迁移那一路的状态**声明在原有状态之后**（见 ManagePanel.tsx 的注释），所以既有用例的种子位置不变；
+ * 迁移的用例在这个函数里按名字挑位置，而不是数一串 `null`。
+ */
+const manageNulls = ({
+  busy = null,
+  progress = null,
+  migrate = null,
+  effect = null,
+  fields = null,
+  inspecting = null,
+} = {}) => [
+  null, // 页面骨架自己的 error（它排在分页之前，分页的 `state` 由 mount 的 firstNull 种）
+  busy,
+  null, // error
+  null, // notice
+  null, // 删除弹窗
+  progress,
+  null, // retitle
+  inspecting,
+  ...(fields ?? [null, null]), // 目标字段：候选面板 / 手输路径
+  migrate, // 迁移弹窗
+  effect, // 迁移结论
+]
+
+/**
+ * 「会话」页的空串状态顺序：筛选条的搜索词 → **迁移的目标目录** → 新建工作区名称 →
+ * （候选面板自己那个筛选框，开着时才是下一个）。
+ */
+const manageStrings = ({ query = '', to = '', title = '' } = {}) => [query, to, title]
+
+/**
+ * 一份只读的迁移计划（种进弹窗的 `migratePending` 状态里）。
  *
  * 「迁移」弹窗是点了按钮之后才在树上的——冒烟里给不出点击，所以要走弹窗那一段的用例都把它种进去。
- * 它配 `migratePlanNulls()` 用：那个函数给出种它时要摆在前面的 null 状态——页面骨架的 error、目录字段
- * 的两份展开状态（面板 / 手输路径），第四个才是 `pending`（顺序见 MigrationPanel.tsx 里钩子的调用次序）。
- * `open` 给 `{field:'to', mode:…}` 时，同一次渲染里那个字段的面板就是开着的。
+ * 它配 `migratePlanNulls()` 用：那个函数按「会话」页的 null 状态顺序把它种进 `migratePending` 那一格
+ * （顺序见 ManagePanel.tsx 里钩子的调用次序）。
  */
 const MIGRATE_PLAN = {
   response: {
@@ -2126,16 +2165,21 @@ const MIGRATE_PLAN = {
   },
   error: null,
 }
-/** 见 `MIGRATE_PLAN` 上面那段说明。 */
-const migratePlanNulls = (open = null) => [null, open, null, MIGRATE_PLAN]
+/**
+ * 见 `MIGRATE_PLAN` 上面那段说明。
+ *
+ * `open` 给 `{field:'to', mode:…}` 时，同一次渲染里那个字段的面板就是开着的（装在 `fields.open`
+ * 那个位置上）。
+ */
+const migratePlanNulls = (open = null) => manageNulls({ fields: [open, null], migrate: MIGRATE_PLAN })
 
 test('客户端产物：迁移弹窗里的目标目录是那枚值控件，点开的是候选面板（没有原生下拉框了）', { skip }, () => {
   // 目标目录字段现在住在弹窗里（见 MigrationPanel.tsx 的说明），所以种进去的不只是字段面板，还有那份
-  // 计划：`pending` 是第 4 个 null 状态（MIGRATE_PLAN_NULLS）。
+  // 计划：那一格由 `migratePlanNulls()` 按「会话」页的状态顺序种。
   const mounted = mount({
     state: MIGRATE_FIELD_STATE,
-    panel: 'migrate',
-    strings: ['/home/u/dev/alpha'],
+    panel: 'manage',
+    strings: manageStrings({ to: '/home/u/dev/alpha' }),
     nulls: migratePlanNulls({ field: 'to', mode: 'candidates' }),
   })
   const { component, registration } = mounted.registrations[0]
@@ -2178,8 +2222,9 @@ test('客户端产物：候选面板的筛选只收窄自己那份列表，没�
   const openPanel = (query) =>
     mount({
       state: MIGRATE_FIELD_STATE,
-      panel: 'migrate',
-      strings: ['/home/u/dev/alpha', '', '', query],
+      panel: 'manage',
+      // 空串状态：筛选条的搜索词 → 目标目录 → 新建工作区名称 → **候选面板自己的筛选框**。
+      strings: [...manageStrings({ to: '/home/u/dev/alpha' }), query],
       nulls: migratePlanNulls({ field: 'to', mode: 'candidates' }),
     })
   const render = (mounted) => strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
@@ -2199,8 +2244,8 @@ test('客户端产物：候选面板的筛选只收窄自己那份列表，没�
 test('客户端产物：面板头那枚「浏览文件系统…」把同一处切成宿主的目录浏览框', { skip }, () => {
   const mounted = mount({
     state: MIGRATE_FIELD_STATE,
-    panel: 'migrate',
-    strings: ['/home/u/dev/alpha'],
+    panel: 'manage',
+    strings: manageStrings({ to: '/home/u/dev/alpha' }),
     nulls: migratePlanNulls({ field: 'to', mode: 'filesystem' }),
   })
   const { component, registration } = mounted.registrations[0]
@@ -2221,8 +2266,8 @@ test('客户端产物：宿主没有目录选择器时，候选面板里不摆�
   assert.equal(pickerKind, 'browse', '夹具本来是"有选择器"那一档')
   const mounted = mount({
     state: withoutPicker,
-    panel: 'migrate',
-    strings: ['/home/u/dev/alpha'],
+    panel: 'manage',
+    strings: manageStrings({ to: '/home/u/dev/alpha' }),
     nulls: migratePlanNulls({ field: 'to', mode: 'candidates' }),
   })
   strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
@@ -2300,9 +2345,9 @@ test('客户端产物：传输页的落地目录也能手输（候选之外的�
 })
 
 test('客户端产物：整页一个原生下拉框都没有（目录一律走那枚值控件）', { skip }, () => {
-  // 六个分页各渲染一遍：目录字段在「迁移」与「同步」之外都用同一个组件，「同步」那张映射表里只有
-  // 文本框（远端路径靠 datalist 提示，那一侧在别的机器上、本机给不出候选）。
-  for (const panel of ['manage', 'migrate', 'transfer', 'sync', 'backup', 'help']) {
+  // 五个分页各渲染一遍：目录字段在「会话」（迁移那一路的弹窗里）与「传输」之外都用同一个组件，
+  // 「同步」那张映射表里只有文本框（远端路径靠 datalist 提示，那一侧在别的机器上、本机给不出候选）。
+  for (const panel of ['manage', 'transfer', 'sync', 'backup', 'help']) {
     const mounted = mount({ state: MIGRATE_FIELD_STATE, panel })
     strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
     assert.deepEqual(
@@ -2589,8 +2634,8 @@ test('客户端产物：「说明」页把分类词条、每页做什么与边�
   for (const key of ['help.categories.visible', 'tag.subagent', 'tag.blank', 'tag.archived', 'tag.live', 'list.ungrouped']) {
     assert.ok(terms.includes(key), `分类词典缺少「${key}」`)
   }
-  assert.equal(terms.length, 24, '词条数＝分类 6 + 分页 5 + 数据 2 + 疑问 11')
-  assert.equal(recorded.filter((node) => node.type === 'dd').length, 24, '每条词条都有解释')
+  assert.equal(terms.length, 23, '词条数＝分类 6 + 分页 4 + 数据 2 + 疑问 11')
+  assert.equal(recorded.filter((node) => node.type === 'dd').length, 23, '每条词条都有解释')
   assert.ok(terms.includes('page.tab.sync'), '分页那一节要写到「同步」这一页')
   assert.ok(terms.includes('page.tab.backup'), '分页那一节也要写到「备份」这一页')
   // 「数据从哪来」两条路径来自 /state，不是写死在文案里
@@ -3488,16 +3533,16 @@ test('客户端产物：会写盘的四个动作各自只有一个入口，预�
   }
   const manage = panelText('manage')
   const transfer = panelText('transfer')
-  const migrate = panelText('migrate')
   const sync = panelText('sync')
 
   // 页面上只剩"那个动作"本身；`dialog.previewing`（"预演中…"）只该出现在开着的弹窗里，页面上一律没有。
-  for (const text of [manage, transfer, migrate, sync]) {
+  for (const text of [manage, transfer, sync]) {
     assert.equal(text.includes('dialog.previewing'), false, '关着弹窗时页面上不该有"预演中…"')
   }
   assert.ok(manage.includes('manage.delete.action'), '「会话」页的写入口是「删除所选」')
+  // 迁移并进同一页之后，它那枚「迁移」也在这条动作行上（写入发生在它自己的弹窗里）。
+  assert.ok(manage.includes('migrate.action'), '「会话」页的动作行上还有「迁移」')
   assert.ok(transfer.includes('transfer.import.action'), '传输页的写入口是「导入」（导出不问）')
-  assert.ok(migrate.includes('migrate.action'), '迁移页的写入口是「迁移」')
   assert.ok(sync.includes('sync.action'), '同步页的写入口是「同步」')
 })
 
@@ -4017,15 +4062,19 @@ test('客户端产物：迁移落地时弹窗正文换成进度块（计划表�
     takesEffect: 'immediate',
   }
   /*
-   * null 顺序：骨架的 error / 目录字段的两份面板 / **pending**（种成落地完成的那份响应）/ **busy**
-   * （'apply'：假钩子不会点按钮，落地那一段只能这样走进去）/ error / notice / effect / **progress**
-   * ——进度声明排在最后，见 MigrationPanel.tsx 的说明。
+   * null 顺序由 `manageNulls` 给：**busy**（种成 'migrate'：假钩子不会点按钮，落地那一段只能这样
+   * 走进去）与 **progress**（这一页的进度槽是新的那一个，声明在 `progress` 那个位置）各按名字挑，
+   * 迁移弹窗那一格种成落地完成的那份响应。
    */
   const mounted = mount({
     state,
-    panel: 'migrate',
-    strings: ['/home/u/dev/beta'],
-    nulls: [null, null, null, { response, error: null }, 'apply', null, null, null, progressOf('rewrite', 7, 253, '会话九')],
+    panel: 'manage',
+    strings: manageStrings({ to: '/home/u/dev/beta' }),
+    nulls: manageNulls({
+      busy: 'migrate',
+      progress: progressOf('rewrite', 7, 253, '会话九'),
+      migrate: { response, error: null },
+    }),
   })
   const recorded = mounted.recorded
   const text = strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
@@ -4046,9 +4095,9 @@ test('客户端产物：迁移落地时弹窗正文换成进度块（计划表�
   // 还没有收到第一条事件（按下确认之后的一瞬）：只有一句"正在准备…"，不画条。
   const preparing = mount({
     state,
-    panel: 'migrate',
-    strings: ['/home/u/dev/beta'],
-    nulls: [null, null, null, { response, error: null }, 'apply'],
+    panel: 'manage',
+    strings: manageStrings({ to: '/home/u/dev/beta' }),
+    nulls: manageNulls({ busy: 'migrate', migrate: { response, error: null } }),
   })
   const preparingText = strings(preparing.registrations[0].component(preparing.registrations[0].registration.inject()))
   assert.ok(preparingText.includes('progress.waiting'), '那一段说"正在准备…"')
@@ -4576,7 +4625,11 @@ test('客户端产物：迁移落地时宿主报的每条进度都进了界面�
     sessionsRoot: '/home/u/.dsh/sessions',
     registryPath: '/home/u/.dsh/registry.json',
     problems: [],
-    sessions: [{ id: 's-1', cwd: '/home/u/dev/alpha', createdAt: 5, dir: '/home/u/dev/alpha', bytes: 2048, files: [] }],
+    sessions: [
+      { id: 's-1', cwd: '/home/u/dev/alpha', createdAt: 5, dir: '/home/u/dev/alpha', bytes: 2048, files: [] },
+      // 侧边栏看不见的那条：这一页照样能勾（归档 / 删除要它），但迁移那一侧只送看得见的那些。
+      { id: 's-2', cwd: '/home/u/dev/alpha', createdAt: 4, dir: '/home/u/dev/alpha', bytes: 1024, files: [], hidden: 'blank' },
+    ],
     workspaces: [{ id: 'w1', path: '/home/u/dev/alpha', title: '工作区甲', sessionIds: ['s-1'] }],
   }
   const preview = {
@@ -4608,11 +4661,11 @@ test('客户端产物：迁移落地时宿主报的每条进度都进了界面�
   const calls = []
   const mounted = mount({
     state,
-    panel: 'migrate',
-    strings: ['/home/u/dev/beta'],
-    // 勾选集（第一个空数组状态）里种上那条会话：确认之后发的请求就是"搬这一条"。
-    arrays: [['s-1']],
-    nulls: [null, null, null, { response: plan, error: null }],
+    panel: 'manage',
+    strings: manageStrings({ to: '/home/u/dev/beta' }),
+    // 勾选集（第一个空数组状态）里种上两条：一条看得见、一条侧边栏看不见——落地那次请求只该带前者。
+    arrays: [['s-1', 's-2']],
+    nulls: manageNulls({ migrate: { response: plan, error: null } }),
     fetch: async (url, init) => {
       calls.push({ url: String(url), method: init?.method, accept: init?.headers?.accept, body: init?.body })
       return {
@@ -4636,7 +4689,12 @@ test('客户端产物：迁移落地时宿主报的每条进度都进了界面�
   })
 
   // 假钩子不会点按钮：先把树摊开，再点弹窗底部那枚主动作（确认迁移）。
-  strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
+  const dialogText = strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
+  // 勾了两条、其中一条侧边栏看不见：弹窗里说明少带了 1 条（不然就是"勾了 2 条、搬走 1 条"没人解释）。
+  assert.ok(
+    dialogText.some((item) => String(item) === 'migrate.hiddenSkipped:{"count":1}'),
+    '勾中的隐藏会话要在弹窗里点名（它不进计划）',
+  )
   primaryOf(mounted.recorded).props.onClick()
   for (let tries = 0; tries < 50 && index < chunks.length; tries += 1) await new Promise((resolve) => setImmediate(resolve))
 
@@ -4645,6 +4703,8 @@ test('客户端产物：迁移落地时宿主报的每条进度都进了界面�
   assert.equal(landing.length, 1, '落地只打一次')
   assert.equal(landing[0].method, 'POST')
   assert.equal(landing[0].accept, 'text/event-stream', '界面明说自己要事件流')
+  // 源是"勾中且**搬得走**"的那些：s-2 侧边栏看不见（hidden），请求体里不该有它——宿主对点名的隐藏
+  // 会话一律拒，送进去只会让整次落地失败。
   assert.deepEqual(JSON.parse(landing[0].body), {
     mode: 'apply',
     sessionIds: ['s-1'],
@@ -4681,16 +4741,17 @@ test('客户端产物：内容视图没有底部那一行，页头写着正中�
     workspaces: [],
   }
   // `mount` 的 `nulls` 按渲染顺序种给"以 null 初始化的状态"：会话页里排在 `inspecting` 之前的那几个
-  // 保持默认，最后那个种成一条会话，内容视图就开着。顺序要是变了，这条会在下面第一句上失败，
-  // 不会静默过（与 `arrays` / `strings` 的种子是同一套约定）。
-  // 第 8 个种给 `inspecting`（会话页里它排在最后），第 9 个种给内容视图自己的 `page`——有它页头那行
-  // "已读 / 共"才画得出来（假钩子不跑 effect，页不会自己到）。
+  // 保持默认。顺序要是变了，这条会在下面第一句上失败，不会静默过（与 `arrays` / `strings` 的种子是
+  // 同一套约定）。
+  //
+  // `inspecting` 用 `manageNulls({ inspecting })` 种；排在它后面的四个是**迁移那一路**（目标字段的
+  // 面板 / 手输路径 / 迁移弹窗 / 迁移结论——它们声明在 `inspecting` 之后，见 ManagePanel.tsx），最后
+  // 那个种给内容视图自己的 `page`：有它页头那行"已读 / 共"才画得出来（假钩子不跑 effect，页不会自己到）。
   const mounted = mount({
     state,
     panel: 'manage',
     nulls: [
-      ...Array(7).fill(null),
-      { id: 's-1', title: 'T' },
+      ...manageNulls({ inspecting: { id: 's-1', title: 'T' } }),
       { totalEvents: 25, cursor: 0, problems: [], problemCount: 0 },
     ],
   })

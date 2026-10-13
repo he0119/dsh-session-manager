@@ -18,11 +18,11 @@ Status: implemented
 
 ## Decision
 
-- 「备份与回滚」是页内第六个分页（`src/client/components/BackupPanel.tsx`），页签顺序 会话 → 迁移 →
-  传输 → 同步 → 备份 → 说明：它是三个写操作共同的后悔面，不属于其中任何一个动作页，所以排在动作页
-  之后、"一次性读的参考页"「说明」之前。
-- 迁移页只剩「迁移会话」这一张卡；清单、回滚 / 恢复弹窗与 `isRestore()` / `backupKindLabel()` 整套
-  搬进新分页，迁移页不再 import `fetchBackups` / `rollbackBackup`。
+- 「备份与回滚」是页内第五个分页（`src/client/components/BackupPanel.tsx`），页签顺序 会话 → 传输 →
+  同步 → 备份 → 说明：它是三个写操作共同的后悔面，不属于其中任何一个动作页，所以排在动作页之后、
+  "一次性读的参考页"「说明」之前。
+- 清单、回滚 / 恢复弹窗与 `isRestore()` / `backupKindLabel()` 整套搬进新分页，动作页不再 import
+  `fetchBackups` / `rollbackBackup`。
 - 上述三处引路文案改指「备份」页（`manage.delete.backupTo`、`sync.appliedReplaced`、
   `sync.progress.note`、`help.faq.backupA`），说明页的"每页做什么"多一条 `help.tabs.backup`。
 - 清单的重读不靠别的页通知：切分页会**卸载**上一个分页，这一页每次挂载都自己 `GET /backups`。于是

@@ -31,7 +31,7 @@ still works.
 
 | Entry point | Good for |
 |---|---|
-| The **Session management** page in Settings | Everyday use: archive, retitle or delete single sessions on the **Sessions** tab; tick the sessions to move on the **Migrate** tab (they may come from different directories, and a deleted source directory is no obstacle) and pick the target in the dialog; tick sessions to export / import; run a WebDAV sync on the **Sync** tab; roll back or restore on the **Backups** tab |
+| The **Session management** page in Settings | Everyday use: archive, retitle or delete single sessions on the **Sessions** tab, or tick the sessions to move (they may come from different directories, and a deleted source directory is no obstacle) and press **Migrate** on the action row to pick the target in the dialog; export / import on the **Transfer** tab; run a WebDAV sync on the **Sync** tab; roll back or restore on the **Backups** tab |
 | 5 model tools | Just say "move this workspace's sessions to `~/dev/xxx`" and let the model preview first, apply second |
 
 Both share one migration implementation, so the count the dialog reports is the count you get.
@@ -161,12 +161,13 @@ M" to report.
 
 **Migrate** — move the ticked sessions into one directory
 
-- **The source is whatever you tick, and the ticks may span directories**: this tab's body is the
-  **same list as the Sessions tab** (same grouping by directory, same row tags, same category chips and
-  search box, same tick set) — the only difference is the **Migrate** button at the bottom. So "the
+- **Migration lives on the Sessions tab's action row, and the source is whatever you tick — the ticks may
+  span directories**: the whole library is that page's list (same grouping by directory, same row tags,
+  same category chips and search box, same tick set), and there is **no separate Migrate tab**. So "the
   project folder was deleted, the project was recreated elsewhere, move those sessions over" reads as:
   tick them in the list (they sit in the sidebar's Ungrouped group, which is just their label), press
-  **Migrate**, pick the recreated directory in the dialog — one run instead of one run per directory;
+  **Migrate** on the action row, pick the recreated directory in the dialog — one run instead of one run
+  per directory;
 - **the target directory is picked in the dialog**: that field is the **same control with the same
   candidates** as the import's landing directory on the **Transfer** tab (its value control opens the
   candidate panel; you can also type a path or browse the file system). Each row carries two lines (the
@@ -184,14 +185,16 @@ M" to report.
   the target at the recreated directory, and they move over. The old "pick a source directory first"
   shape had no landing point here: those sessions can sit in several directories while one migration has
   exactly one target, so it took one run per directory;
-- **a row you cannot tick is a row the host refuses**: subagent sessions (nested under their parent),
-  blank sessions and archived sessions are still **listed** (you need to see why they are not moving),
-  but their checkbox is greyed out and the tooltip says why (for a subagent it names the parent to tick
-  instead). Naming one of them explicitly still makes the plan say it is hidden; they therefore **cannot
-  move**, and since their ownership stays in the source workspace, that workspace is not removed — the
-  plan and the result name how many are left behind and why (the tools report `stranded`), so the next
-  step is to handle them on the Sessions tab (unarchive the archived ones, delete the blank ones, migrate
-  a subagent with its parent) and migrate again. **Registrations whose log is already gone** (deleting a
+- **what you can tick is what this page can tidy up; what can move is what the sidebar shows**: the only
+  rows you cannot tick are subagent sessions nested under their parent (greyed out, with the parent to
+  tick named in the tooltip) — blank and archived sessions are tickable here, since archiving and deleting
+  are exactly what they are for. **Migration therefore drops the hidden rows itself**: the host refuses a
+  hidden session named in a request (the tool path still reports that refusal in the plan), so the page
+  only sends the visible ones and the dialog adds "N of the ticked sessions stay behind" with the next
+  step (unarchive the archived ones, delete the blank ones, migrate a subagent with its parent) — the
+  count it promises is the count you get, and one hidden row cannot sink the whole run. They therefore
+  **cannot move**, and since their ownership stays in the source workspace, that workspace is not removed
+  — the plan and the result name how many are left behind and why (the tools report `stranded`). **Registrations whose log is already gone** (deleting a
   session deliberately leaves the registry alone, so such stale entries remain) are not members: the host
   already ignores them, so they no longer count when deciding whether a source was emptied — this run
   drops them from the registry as well;
@@ -277,7 +280,7 @@ it and the sidebar shows it), what the five tabs do, which files the actions tou
 restore, when the sidebar follows), where the data comes from (the library and the registry paths), and the
 common questions (which sessions count as Ungrouped, why a deleted session is still in the sidebar, when a
 migration asks for a restart, how to close a session tagged active). The action tabs
-(Sessions / Migrate / Transfer / Sync / Backups) keep only the decision at hand, so each explanation there stays
+(Sessions / Transfer / Sync / Backups) keep only the decision at hand, so each explanation there stays
 within two lines.
 
 A host without the `webServer` service (tools-only front ends) still loads the plugin — the page simply
@@ -370,7 +373,7 @@ The rules and edges:
   identical contents (apart from the cwd) stay put; a local copy that really is a prefix of the
   remote one is re-uploaded to refresh the remote; a remote copy that is ahead (yours is its
   prefix) or a both-wrote case where the remote is later **backs your copy up and then replaces
-  it** (the old one can always be restored from the backup list on the Migrate tab); if either
+  it** (the old one can always be restored from the **Backups** tab); if either
   side has no last-activity time (an older remote index, or a host without the projection cache)
   or both are equally new, neither copy is touched and the report says whether it is "remote is
   ahead" or "both sides wrote". That last-activity time is the **later** of two clocks the host

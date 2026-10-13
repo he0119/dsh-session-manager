@@ -106,13 +106,14 @@
 - [「认领」是宿主那份成员表](../.agents/notes/implemented/bug-fix/2026-10-04-accounted-means-the-hosts-membership.md)：
   注册表里的**登记**不算数，cwd 归一到记录 `path` 才算——判据只在 `src/accounting.ts` 写一遍。
 - [迁移的源就是你勾的那些会话](../.agents/notes/implemented/architecture/2026-10-13-source-is-what-you-tick.md)：
-  勾选就是源（可以跨目录），目标目录在弹窗里选一次；`from` 参数与 `includeUnowned` 开关一并删掉。
+  勾选就是源（可以跨目录），目标目录在弹窗里选一次，**没有独立的迁移分页**（那枚「迁移」挂在「会话」
+  页的动作行上）；`from` 参数与 `includeUnowned` 开关一并删掉。
   它取代的两条留在否决记录里：[源永远是一个目录](../.agents/notes/rejected/simplification/2026-10-13-ungrouped-is-only-a-label.md)、
   [「未分组」当独立来源](../.agents/notes/rejected/architecture/2026-09-27-unowned-is-a-migration-source.md)。
 - [迁移排除侧边栏不显示的会话](../.agents/notes/implemented/architecture/2026-09-28-migration-excludes-what-the-sidebar-hides.md)：
-  三条隐藏理由的输入来源，与「读不到就按会显示处理」。
-- [三个分页共用一份列表实现](../.agents/notes/implemented/simplification/2026-09-28-three-pages-share-one-list.md)：
-  共用边界划在一行的解剖结构与列表的框上。
+  三条隐藏理由的输入来源、界面上"能勾"与"搬得走"分开管，与「读不到就按会显示处理」。
+- [列整库的分页共用一份列表实现](../.agents/notes/implemented/simplification/2026-09-28-one-list-for-the-whole-library.md)：
+  共用边界划在一行的解剖结构与列表的框上；今天接这条线的是「会话」与「传输」两个分页。
 - [筛选按「它是什么」判](../.agents/notes/implemented/architecture/2026-09-28-filters-read-facts-not-labels.md)：
   读原始事实，不读 `hidden`；「未分组」是唯一例外。
 - [折叠只改「画不画」](../.agents/notes/implemented/architecture/2026-09-28-collapsing-changes-only-the-drawing.md)：
@@ -160,7 +161,7 @@
   会话页那枚「内容」在行尾那一格里与时刻叠着（`grid-area: 1 / 1`），悬停或键盘落在这一行时出场；
   无盒子、走 `brand-primary`——它不该长成标签那样的小块。
 - [选行工具全站只有一对](../.agents/notes/implemented/bug-fix/2026-10-08-one-pair-of-pick-tools.md)：
-  三张带勾选的清单共用一对常驻的「全选 / 清空」（同一套作用面与禁用判据），位置是清单之上那一行的
+  两张带勾选的清单共用一对常驻的「全选 / 清空」（同一套作用面与禁用判据），位置是清单之上那一行的
   右端；清单就是整张卡时在卡头，清单是卡片里的一段时在它上方那一行。
 - [备份清单是独立分页](../.agents/notes/implemented/architecture/2026-10-07-backups-are-their-own-page.md)：
   迁移 / 删除 / 同步覆盖三种来路共用一张清单，页签排在动作页之后、「说明」之前。

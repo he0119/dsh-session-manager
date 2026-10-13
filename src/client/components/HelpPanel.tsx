@@ -34,10 +34,9 @@ const CATEGORIES = [
   ['list.ungrouped', 'list.ungroupedTip'],
 ] as const
 
-/** 五个分页各管什么：与页签同一个顺序（会话 → 迁移 → 传输 → 同步 → 备份）。 */
+/** 四个分页各管什么：与页签同一个顺序（会话 → 传输 → 同步 → 备份）。 */
 const TAB_LINES = [
   ['page.tab.manage', 'help.tabs.manage'],
-  ['page.tab.migrate', 'help.tabs.migrate'],
   ['page.tab.transfer', 'help.tabs.transfer'],
   ['page.tab.sync', 'help.tabs.sync'],
   ['page.tab.backup', 'help.tabs.backup'],
