@@ -68,6 +68,9 @@ const FILTERS: Array<{ key: TranscriptFilterKey; label: SessionManagerKey }> = [
 /** 「看全文」时单条格子的上限：日志里最大的一条工具输出实测 100 KB 上下，这个额度够它落地。 */
 const FULL_ITEM_CHARS = 400_000
 
+/** 筛选那一行的高度交给 CSS 的那个自定义属性（回合标题的 sticky 偏移量）。 */
+const TURN_TOP_PROPERTY = '--dsm-turn-top'
+
 /** 时刻：只给到时、分、秒（内容视图里日期没意义，会话的建立时间摆在上面）。 */
 function clockOf(time: number | undefined): string {
   if (time === undefined) return ''
@@ -99,6 +102,7 @@ export function TranscriptDialog({ session, onClose, t }: TranscriptDialogProps)
   const [busy, setBusy] = React.useState(false)
   const [filter, setFilter] = React.useState<TranscriptFilterKey>('all')
   const list = React.useRef<HTMLDivElement | null>(null)
+  const filters = React.useRef<HTMLDivElement | null>(null)
 
   const load = React.useCallback(
     async (from: number): Promise<void> => {
@@ -134,6 +138,23 @@ export function TranscriptDialog({ session, onClose, t }: TranscriptDialogProps)
     (): HTMLElement | null => list.current?.closest<HTMLElement>('.dsm-dialogContent') ?? null,
     [],
   )
+
+  // 筛选那一行贴在正文那一层的顶上，回合标题要停在它下面——它多高由视图量出来交给 CSS：窄窗口里
+  // 芯片会折成两行，那一行就变高，写死一个数会让标题被它压住。缩放会改字号，所以 resize 也跟一次。
+  React.useEffect(() => {
+    const element = filters.current
+    const scrollerElement = scroller()
+    if (element === null || scrollerElement === null) return
+    const apply = (): void => {
+      scrollerElement.style.setProperty(TURN_TOP_PROPERTY, `${element.offsetHeight}px`)
+    }
+    apply()
+    window.addEventListener('resize', apply)
+    return () => {
+      window.removeEventListener('resize', apply)
+      scrollerElement.style.removeProperty(TURN_TOP_PROPERTY)
+    }
+  }, [scroller])
 
   const loadMore = React.useCallback((): void => {
     if (page?.nextCursor === undefined) return
@@ -265,7 +286,7 @@ export function TranscriptDialog({ session, onClose, t }: TranscriptDialogProps)
         )}
       </div>
 
-      <div className="dsm-transcriptFilters">
+      <div ref={filters} className="dsm-transcriptFilters">
         {FILTERS.map((entry) => (
           <button
             key={entry.key}

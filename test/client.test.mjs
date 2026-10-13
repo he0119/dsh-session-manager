@@ -4657,6 +4657,15 @@ test('客户端产物：内容视图没有底部那一行，页头写着已读�
   )
 })
 
+
+test('客户端产物：回合标题的偏移量来自视图量出来的那一行高度', { skip }, () => {
+  // 窄窗口里筛选那一行会折成两行（它 flex-wrap: wrap），高度会变，所以 CSS 里那个偏移量是个变量。
+  // 这里钉的是两端写在同一个名字上：CSS 那侧是 `var(--dsm-turn-top, 37px)`，JS 这侧是下面这三处。
+  assert.match(code, /TURN_TOP_PROPERTY = "--dsm-turn-top"/, '属性名就写在这一处')
+  assert.match(code, /style\.setProperty\(TURN_TOP_PROPERTY/, '量到的高度写进那个属性')
+  assert.match(code, /style\.removeProperty\(TURN_TOP_PROPERTY/, '弹窗关掉时收回去，别留在官方那一层上')
+})
+
 test('客户端产物：一回合一节折得起来，标题自己画折叠标记', { skip }, () => {
   const state = {
     sessionsRoot: '/home/u/.dsh/sessions',

@@ -343,6 +343,25 @@ test('弹窗正文层的字号自己写：官方 Modal 落在 .dsm-root 之外�
   assert.match(facts, /line-height:\s*18px/, '12px 的字配 18px 行高（.dsm-defs 那一档是 14px/22px）')
 })
 
+test('筛选那一行贴在正文顶上，回合标题停在它下面', () => {
+  // 现象：滚到下面时筛选与计数那一行跟着滚走，想换个筛选得先滚回顶上。
+  const filters = ruleBody('.dsm-transcriptFilters')
+  assert.notEqual(filters, null, '找不到 .dsm-transcriptFilters 规则')
+  assert.match(filters, /position:\s*sticky/, '滚动时这一行留在上头')
+  assert.match(filters, /top:\s*0/, '贴的是正文那一层的顶')
+  assert.match(filters, /background:\s*var\(--dsw-alias-bg-layer-2/, '底色与卡片同层：滚过去的条目不能从它背后透出来')
+  const zOf = (body) => Number(/z-index:\s*(-?\d+)/.exec(body ?? '')?.[1] ?? '0')
+  assert.ok(
+    zOf(filters) > zOf(ruleBody('.dsm-turnHead')),
+    '要压住回合标题（它也是 sticky 的）',
+  )
+  assert.match(
+    ruleBody('.dsm-turnHead') ?? '',
+    /top:\s*var\(--dsm-turn-top,\s*\d+px\)/,
+    '偏移量由视图量出来写进 --dsm-turn-top，没有它时退到实测的那个数',
+  )
+})
+
 test('回合那一节的标题：底色与卡片同层，折叠标记自己画', () => {
   // 现象（深色主题里一眼看得出）：标题原先拿 bg-base 当底色，于是卡片上横出一条比卡片更黑的色带——
   // 看着像贴上去的黑条，而不是这一节的标题。bg-layer-2 正是官方 Modal 卡片的背景。
