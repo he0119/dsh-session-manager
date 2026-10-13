@@ -111,13 +111,13 @@ export function HelpPanel({ t, state, meta }: PanelShare): React.ReactElement {
         <dl className="dsm-defs">
           <dt>{t('help.where.library')}</dt>
           <dd>
-            <span className="dsm-path">{facts?.sessionsRoot ?? t('page.loading')}</span>
+            <span className="dsm-path">{facts?.sessionsRoot ?? t('loading')}</span>
             <br />
             {t('help.where.libraryText')}
           </dd>
           <dt>{t('help.where.registry')}</dt>
           <dd>
-            <span className="dsm-path">{facts?.registryPath ?? t('page.loading')}</span>
+            <span className="dsm-path">{facts?.registryPath ?? t('loading')}</span>
             <br />
             {t('help.where.registryText')}
           </dd>

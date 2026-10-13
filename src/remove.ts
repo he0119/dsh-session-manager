@@ -32,7 +32,7 @@ export interface RemoveDeps {
   registryPath: string
   backupRoot: string
   decodeAll: DecodeAll
-  /** 读会话标题（可选，界面按标题认人）。 */
+  /** 读会话名称（可选，界面按标题认人）。 */
   resolveTitle?: (query: TitleQuery) => string | undefined
   /**
    * 宿主报告"内存里活着"的会话 id（可选，见 `src/index.ts` 的 `liveSessionIds`）。

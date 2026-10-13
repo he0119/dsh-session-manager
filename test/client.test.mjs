@@ -38,7 +38,7 @@ const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
  * `satisfies readonly CommonKey[]` 在**编译期**核这几个词真的是宿主 common 的键（这正是那份类型
  * 声明存在的意义），这里只核另一边：本字典里**没有**它们，查找链才会落到宿主那一份。
  */
-const REUSED_COMMON = ['cancel', 'close', 'save']
+const REUSED_COMMON = ['cancel', 'close', 'loading', 'save']
 
 /**
  * 假的 react：钩子给出初始值，同时把创建出来的元素记下来，供"页签还在吗"这类断言用。
@@ -768,18 +768,18 @@ test('客户端产物：清单还没到时页头先说库在哪与「读取中�
     line.some((text) => text.includes('/home/u/.dsh/sessions')),
     '库的位置来自 /meta，不必等扫完整库',
   )
-  assert.ok(line.some((text) => text.includes('page.loading')), '条数那一段说"读取中…"')
+  assert.ok(line.some((text) => text.includes('loading')), '条数那一段说"读取中…"')
   assert.ok(
     !line.some((text) => text.includes('page.count.sessions')),
     '"还不知道"不能画成"0 个会话"：条数是结论，不是默认值',
   )
   // 列表那一格同理：清单没到说"读取中…"，不说"这个会话库里还没有会话"（默认页就是「会话」）
   const empties = withMeta.recorded.filter((node) => String(node.props?.className) === 'dsm-empty')
-  assert.deepEqual(strings(empties[0]), ['page.loading'], '空列表那一格说"读取中…"')
+  assert.deepEqual(strings(empties[0]), ['loading'], '空列表那一格说"读取中…"')
 
   // 两份都还没到（首帧）：整行只有一句"读取中…"，不是"会话库： · 0 个会话 · 0 个工作区"
   const bare = introOf(mount())
-  assert.ok(bare.includes('page.loading'), '位置也还不知道时，整行说"读取中…"')
+  assert.ok(bare.includes('loading'), '位置也还不知道时，整行说"读取中…"')
   assert.ok(!bare.some((text) => text.includes('page.count')), '首帧一个数字都不报')
 })
 
@@ -803,7 +803,7 @@ test('客户端产物：能力位按 /meta 或 /state 说的来，两份都没�
   assert.ok(!bare.includes('list.empty'), '清单没到不能说"这个会话库里还没有会话"')
   const bareSync = read(mount({ panel: 'sync' }))
   assert.ok(!bareSync.includes('sync.offHint'), '同步配置没读到不能说"这台机器没配同步"')
-  assert.ok(bareSync.includes('page.loading'), '那一刻说的是"读取中…"')
+  assert.ok(bareSync.includes('loading'), '那一刻说的是"读取中…"')
 
   // 读到了、宿主确实没有 / 确实没配：照旧把话说出来（不是一律不说）
   assert.ok(
@@ -969,7 +969,7 @@ test('客户端产物：导出列表按目录分组，组头就是"整组勾选"
 
   // 两级各有各的图形标记：组头是文件夹（工作区），会话行是对话气泡。
   //
-  // 为什么值得钉住：会话标题是**用户自己写的第一句话**，它长得像个工作区名是常事（本机就有一条
+  // 为什么值得钉住：会话名称是**用户自己写的第一句话**，它长得像个工作区名是常事（本机就有一条
   // 叫"dsh-session-manager 使用说明"的会话）。同屏两级混排时，"这行是工作区还是会话"只能靠形状读，
   // 而形状是唯一一种"不用读字"就成立的线索——底色和缩进都会随主题、屏幕、色觉打折。
   // 少了标记不会报错、不会崩，只会让人认错行，所以这里按树核一遍。

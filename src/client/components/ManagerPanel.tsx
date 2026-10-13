@@ -116,9 +116,9 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
   const facts = state ?? meta
   const counts =
     state === null
-      ? t('page.loading')
+      ? t('loading')
       : `${t('page.count.sessions', { count: sessions })} · ${t('page.count.workspaces', { count: workspaces })}`
-  const libraryLine = facts === undefined ? t('page.loading') : `${facts.sessionsRoot} · ${counts}`
+  const libraryLine = facts === undefined ? t('loading') : `${facts.sessionsRoot} · ${counts}`
   // 这一页是哪个构建：构建期写死的版本号，加上直接从 git build 时的短 commit（脏工作区挂 -dirty）。
   const version = versionLabel(PLUGIN_VERSION, PLUGIN_COMMIT, PLUGIN_DIRTY)
   // 提示里版本号与 commit 各占一处，所以这里传的是不带 commit 的那个版本号。
@@ -232,7 +232,7 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
           （右端对齐由 `.dsm-tabsRow > .dsm-button` 的 `margin-left:auto` 做，换行后也贴着右端）。
         */}
         <button type="button" className="dsm-button" onClick={() => void load()} disabled={busy}>
-          {busy ? t('page.loading') : t('page.refresh')}
+          {busy ? t('loading') : t('page.refresh')}
         </button>
       </div>
 

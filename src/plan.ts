@@ -55,7 +55,7 @@ export interface BuildPlanOptions {
   /** 是否同时规划"会话中创建的文件"的搬迁（默认 false；需要全量解码，较慢）。 */
   includeArtifacts?: boolean
   /**
-   * 读会话标题（可选）：界面挑会话时按标题认人（见 session-title.ts）。
+   * 读会话名称（可选）：界面挑会话时按标题认人（见 session-title.ts）。
    *
    * 缺席 = 这次计划不要标题（工具层只报数量，不需要），因此发现阶段一分钱都不多花。
    */

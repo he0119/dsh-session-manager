@@ -114,14 +114,14 @@ M" to report.
   no restart. Ticking a parent session archives its subagents with it (the family is the unit; why, see
   the delete bullet below). On a host without that service (non-Web profiles) the buttons are disabled
   and the page says why;
-- **Regenerate titles**: tick rows and ask the host's title service to redo the title from the **whole
-  conversation**. Old sessions tend to keep the deterministic fallback title ("first five words" / 40
-  bytes, which cuts a leading URL in half), because a title provider only revises on the next human
+- **Regenerate names**: tick rows and ask the host's name service to redo the name from the **whole
+  conversation**. Old sessions tend to keep the deterministic fallback name ("first five words" / 40
+  bytes, which cuts a leading URL in half), because a name provider only revises on the next user
   message — this button is how you make that happen now. It reports progress per session (each one
   replays the whole log and runs one model call) and then splits the outcome four ways: **regenerated**,
   **recomputed but unchanged**, **skipped**, **failed**. Skipped is not failed — it means the session
   should not be touched: **you renamed it by hand** (regenerating would overwrite your name), **it is a
-  subagent session** (its title is invisible in the sidebar), it has no human message yet, or it never
+  subagent session** (its name is invisible in the sidebar), it has no user message yet, or it never
   made a main-model request (so there is no route to title it with). On a host without that service the
   button is disabled and the page says why. To recompute the **you renamed it by hand** ones as well, the
   HTTP endpoint (`POST …/retitle`) takes `includePinned: true` — the page deliberately offers no such
@@ -129,7 +129,7 @@ M" to report.
   cleanup of sessions whose titles were written by a script or an import);
 - **Read content**: hover a row and a **Content** action appears at its end (it takes the place of that
   row's timestamp; on touch screens it is always there) — that opens the session's **complete content** —
-  the log parsed into a timeline: human messages, model replies, reasoning (collapsed by default), tool
+  the log parsed into a timeline: user messages, model replies, reasoning (collapsed by default), tool
   calls and their results, system messages, and every other event besides (compaction, permissions,
   approvals, retries — including how the title was decided). Events are grouped into turns: click a turn
   heading to fold it away (session-level events that belong to no turn form their own group, which has no

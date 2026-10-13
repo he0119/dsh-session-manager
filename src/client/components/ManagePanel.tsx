@@ -20,7 +20,7 @@
  *   - **归档走宿主能力**（`workspaceRegistry`），一次落盘 + 改内存 + 广播，侧边栏即时跟着变；宿主
  *     没有这个能力时按钮禁用并说明原因，而不是绕过宿主去写注册表文件。
  *   - **标题也能在这里重算**（见 [retitleNotes.ts](../logic/retitleNotes.ts) 与宿主侧 `src/retitle.ts`）：
- *     历史会话的标题多半停在"首句前几个词"的兜底标题上，这一枚按钮请宿主的标题服务按整段对话重算一遍
+ *     历史会话的标题多半停在"首句前几个词"的兜底名称上，这一枚按钮请宿主的名称服务按整段对话重算一遍
  *     （逐条挂载 → 重算 → 落盘 → 摘掉，见 `src/tools.ts` 的 `titleRefreshPort()`）。跳过与失败分开说：
  *     你自己改过名的那些不动，子智能体的不算。
  *
@@ -101,7 +101,7 @@ export function ManagePanel({ t, state, meta, reload }: PanelShare): React.React
    */
   const [progress, setProgress] = React.useState<ProgressEvent | null>(null)
   /**
-   * 最近一次「重新生成标题」的结果（`null` = 这次进页面之后还没跑过）。
+   * 最近一次「重新生成名称」的结果（`null` = 这次进页面之后还没跑过）。
    *
    * 单独一份状态而不是复用 `failed`：那个动作的结果有三类（改了 / 没变 / 跳过），跳过还要按原因分类
    * 摆出来——"这条你改过名，我没动它"与"这条算的时候报错了"是两件完全不同的事，混在一个横幅里就分不清。
@@ -158,7 +158,7 @@ export function ManagePanel({ t, state, meta, reload }: PanelShare): React.React
   }
 
   /**
-   * 点「重新生成标题」：把勾选的会话交给宿主的标题服务逐条重算。
+   * 点「重新生成名称」：把勾选的会话交给宿主的名称服务逐条重算。
    *
    * 与归档那一下的差别在**结果**上：归档只有"改了 / 没改（失败）"两种，而这里可能是"算了 3 条、
    * 跳过 5 条（其中 4 条你自己改过名）"，所以结论、跳过原因与失败清单三样分别摆（见 retitleNotes.ts）。
@@ -332,7 +332,7 @@ export function ManagePanel({ t, state, meta, reload }: PanelShare): React.React
         <p className="dsm-hint">{t('manage.hint')}</p>
         {/* 能力位还没到（首帧，`/meta` 与 `/state` 都没回来）时先不说结论：那一刻的真相是"还不知道"。 */}
         {facts !== undefined && !archiveAvailable && <p className="dsm-hint">{t('manage.archive.unavailable')}</p>}
-        {/* 重新生成标题同理：宿主没有那套标题服务时先说清原因，而不是留一个点不动的按钮。 */}
+        {/* 重新生成名称同理：宿主没有那套名称服务时先说清原因，而不是留一个点不动的按钮。 */}
         {facts !== undefined && !retitleAvailable && <p className="dsm-hint">{t('manage.retitle.unavailable')}</p>}
 
         {sessions.length > 0 && <SessionFilterBar keys={FILTER_KEYS} filter={filter} t={t} />}
@@ -343,7 +343,7 @@ export function ManagePanel({ t, state, meta, reload }: PanelShare): React.React
         <SessionListBox fixed>
           {state === null ? (
             // 清单还在读：这一格说"读取中…"而不是"这个会话库里还没有会话"——后者是个结论。
-            <SessionListEmpty text={t('page.loading')} />
+            <SessionListEmpty text={t('loading')} />
           ) : sessions.length === 0 ? (
             <SessionListEmpty text={t('list.empty')} />
           ) : groups.length === 0 ? (
@@ -406,7 +406,7 @@ export function ManagePanel({ t, state, meta, reload }: PanelShare): React.React
             {busy === 'unarchive' ? t('manage.archive.running') : t('manage.archive.undo')}
           </button>
           {/*
-            重新生成标题与归档同属"对勾选的这些做一件事"，所以放在同一条动作行上（见 styles.ts 的
+            重新生成名称与归档同属"对勾选的这些做一件事"，所以放在同一条动作行上（见 styles.ts 的
             `.dsm-controls`）；破坏性的「删除」仍在 spacer 之后那一头。
           */}
           <button

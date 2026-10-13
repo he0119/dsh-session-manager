@@ -292,7 +292,7 @@ test('GET /meta：位置与能力位先答出来，一条会话都不读', async
     registryPath: sandbox.registryPath,
     pickerKind: 'browse',
     archiveAvailable: true,
-    // 这一处没给 `titleRefresh`（假宿主没有标题服务）：能力位按"没有"答。
+    // 这一处没给 `titleRefresh`（假宿主没有名称服务）：能力位按"没有"答。
     retitleAvailable: false,
     sync: { url: 'https://dav.example/dsh', machineId: 'laptop', mappings: 2 },
   })
@@ -1474,9 +1474,9 @@ test('POST /archive：宿主没有 workspaceRegistry 时如实拒绝（不绕过
   assert.match(String(payload(captured)['error']), /workspaceRegistry/)
 })
 
-test('POST /retitle：逐条请宿主的标题服务重算，跳过与失败分开报，子智能体不惊动宿主', async () => {
+test('POST /retitle：逐条请宿主的名称服务重算，跳过与失败分开报，子智能体不惊动宿主', async () => {
   const sandbox = makeSandbox('web-retitle')
-  writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000, { title: '兜底标题' })
+  writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000, { title: '兜底名称' })
   writeSession(sandbox.sessionsRoot, 'session-pinned', CWD_A, 2000, { title: '我自己改的名字' })
   writeSession(sandbox.sessionsRoot, 'session-broken', CWD_A, 3000, { title: '会失败的那条' })
   writeSession(sandbox.sessionsRoot, 'session-child', CWD_A, 4000, {
@@ -1525,7 +1525,7 @@ test('POST /retitle：逐条请宿主的标题服务重算，跳过与失败分�
   assert.deepEqual(asked, ['session-a', 'session-pinned', 'session-broken'], '子智能体与不在库里的不该惊动宿主')
   // 逐条报进度：分母是这次点名的条数，`done` 是"已经做完的条数"。
   assert.deepEqual(progressOf(done), [
-    { phase: 'retitle', total: 5, done: 0, id: 'session-a', label: '兜底标题' },
+    { phase: 'retitle', total: 5, done: 0, id: 'session-a', label: '兜底名称' },
     { phase: 'retitle', total: 5, done: 1, id: 'session-child', label: '子会话' },
     { phase: 'retitle', total: 5, done: 2, id: 'session-pinned', label: '我自己改的名字' },
     { phase: 'retitle', total: 5, done: 3, id: 'session-broken', label: '会失败的那条' },
@@ -1547,7 +1547,7 @@ test('POST /retitle：逐条请宿主的标题服务重算，跳过与失败分�
   assert.deepEqual(options[options.length - 1], { includePinned: false })
 })
 
-test('POST /retitle：空清单回 400，正文不是 JSON 回 400，宿主没有标题服务回 409', async () => {
+test('POST /retitle：空清单回 400，正文不是 JSON 回 400，宿主没有名称服务回 409', async () => {
   const sandbox = makeSandbox('web-retitle-refusals')
   writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000)
 
@@ -1571,7 +1571,7 @@ test('POST /retitle：空清单回 400，正文不是 JSON 回 400，宿主没�
   const withoutService = createApiHandlers(deps(sandbox, { titleRefresh: () => undefined }))
   const refused = await call(withoutService, JSON.stringify({ sessionIds: ['session-a'] }))
   assert.equal(refused.status, 409)
-  assert.match(String(payload(refused)['error']), /没有会话标题服务/)
+  assert.match(String(payload(refused)['error']), /没有会话名称服务/)
 })
 
 test('POST /rollback：删除备份走恢复（注册表不动），迁移备份照旧还原注册表', async () => {
@@ -2235,7 +2235,7 @@ test('事件流：每写完一条就把 socket 推给内核（同步循环里也
 })
 test('GET /transcript：把一条会话的日志折成完整时间线（会话事实、分页、坏行、拒绝都在一次响应里）', async () => {
   const sandbox = makeSandbox('web-transcript')
-  writeSession(sandbox.sessionsRoot, 'session-plain', CWD_A, 1000, { title: '兜底标题' })
+  writeSession(sandbox.sessionsRoot, 'session-plain', CWD_A, 1000, { title: '兜底名称' })
   writeRawSession(sandbox.sessionsRoot, 'session-rich', CWD_A, 2000, [
     { type: 'turn/start', seq: 0, time: 1, data: { turn: 1 } },
     {
@@ -2336,9 +2336,9 @@ test('GET /transcript：把一条会话的日志折成完整时间线（会话�
   assert.equal(absent.status, 404)
   assert.match(String(payload(absent)['error']), /会话库里没有/)
 
-  // 只有 header + 一条人类消息 + 一条标题的普通会话照样读得出来
+  // 只有 header + 一条用户消息 + 一条标题的普通会话照样读得出来
   const plain = await call('?id=session-plain')
   assert.equal(plain.status, 200)
   assert.equal(payload(plain)['totalEvents'], 2)
-  assert.equal((payload(plain)['session'] as Record<string, unknown>)['title'], '兜底标题')
+  assert.equal((payload(plain)['session'] as Record<string, unknown>)['title'], '兜底名称')
 })

@@ -357,7 +357,7 @@ export type ProgressPhase =
   | 'compare'
   | 'pull'
   | 'push'
-  /** 重新生成标题（逐条请宿主重算）。 */
+  /** 重新生成名称（逐条请宿主重算）。 */
   | 'retitle'
 
 /** 上报一次进度（同步调用、不 await，所以实现里不许抛）。 */
@@ -375,17 +375,17 @@ export type RetitleSkipReason =
   | 'subagent'
   /** 用户手动改过名（`session/title` 的 source 是 `user`）：重算会把那个名字覆盖掉。 */
   | 'pinned'
-  /** 还没有人类消息，没有可命名的东西。 */
+  /** 还没有用户消息，没有可命名的东西。 */
   | 'no-human-message'
   /**
-   * 这条会话没有任何一次主模型请求，因而没有可用的路由（标题 provider 跟随会话主模型时会拒绝）。
+   * 这条会话没有任何一次主模型请求，因而没有可用的路由（名称 provider 跟随会话主模型时会拒绝）。
    * 与"失败"分开：宿主没坏，这条会话本来就无从取名。
    */
   | 'no-request-route'
-  /** 这个宿主没装标题 provider（只有确定性兜底标题），没人会来重算。 */
+  /** 这个宿主没装名称 provider（只有确定性兜底名称），没人会来重算。 */
   | 'no-title-provider'
 
-/** 一条会话重新生成标题的结果。 */
+/** 一条会话重新生成名称的结果。 */
 export type RetitleOutcome =
   /** provider 给出了新的标题（与原来的不同）。 */
   | { status: 'retitled'; title: string }

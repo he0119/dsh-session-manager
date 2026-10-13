@@ -133,7 +133,7 @@ export function unownedSessions<T extends SourceSubject>(sessions: readonly T[])
 // ---- 一个目录在界面上怎么称呼：项目身份、标题与本机路径 ----
 
 /**
- * 一个目录的三种称呼来源：本机路径（必有）、注册表里的工作区标题、仓库的项目身份。
+ * 一个目录的三种称呼来源：本机路径（必有）、注册表里的工作区名称、仓库的项目身份。
  *
  * 项目身份是仓库的 git remote，宿主已经规范成 `host/owner/repo`（见宿主 `src/repo.ts`）：同一个项目在
  * 两台机器上可以落在完全不同的目录里，本机路径是**机器特有**的那一个，而身份是仓库自己的名字。组头上
@@ -144,7 +144,7 @@ export function unownedSessions<T extends SourceSubject>(sessions: readonly T[])
 export interface ProjectSubject {
   /** 本机目录的绝对路径；空串 = 没有 cwd 的那一组。 */
   readonly path: string
-  /** 注册表里的工作区标题（未登记目录没有）。 */
+  /** 注册表里的工作区名称（未登记目录没有）。 */
   readonly title?: string
   /** 项目身份（`host/owner/repo`）；认不出来时没有。 */
   readonly repo?: string
@@ -176,7 +176,7 @@ export function repoHost(repo: string): string {
  * 一个组头要说的事：主名字（唯一可见的那串字）、一枚主机标签（有身份时），以及它们的悬浮提示。
  */
 export interface ProjectLabel {
-  /** 主名字：工作区标题 → 项目名（没有标题时）→ 本机路径（都没有时）。 */
+  /** 主名字：工作区名称 → 项目名（没有标题时）→ 本机路径（都没有时）。 */
   readonly name: string
   /**
    * 悬浮提示：**项目身份（有的话）与本机路径各一行**。
@@ -199,7 +199,7 @@ export interface ProjectLabel {
 /**
  * 一个目录组头怎么称呼。
  *
- * 名字取**人认得的那一个**：注册表里的工作区标题优先（那是用户自己起的名字），没有标题才退到项目名
+ * 名字取**人认得的那一个**：注册表里的工作区名称优先（那是用户自己起的名字），没有标题才退到项目名
  * （身份最后一段——未登记目录原来拿整条本机路径当名字，机器特有的绝对路径对认项目没有帮助）。
  *
  * @param subject 路径、标题与身份。
@@ -252,7 +252,7 @@ export interface PathRow extends ProjectSubject {
 
 /** 候选面板里一行怎么摆：名字一行、路径与条数一行，外加整行的悬浮提示。 */
 export interface CandidateRow {
-  /** 主名字：工作区标题 →「未分组」那行自带的文案 → 项目名 → 本机路径（同 `projectLabel()`）。 */
+  /** 主名字：工作区名称 →「未分组」那行自带的文案 → 项目名 → 本机路径（同 `projectLabel()`）。 */
   readonly name: string
   /** 第二行：本机路径与条数（有哪个写哪个，都没有时缺省）。 */
   readonly meta?: string
@@ -265,7 +265,7 @@ export interface CandidateRow {
  *
  * 与值控件（`pathLabel()`）的写法不同：那里只有一行可用，名字、路径与条数只能挤成一整串（挤不下就
  * 截断，所以路径必须留在里面——那枚按钮没有第二行可退，它的悬浮提示给的是完整值）。候选面板里一行是
- * 一枚按钮、两行文字，于是**名字在第一行**（用户认的是它：工作区标题，没有标题才退到项目名），路径与
+ * 一枚按钮、两行文字，于是**名字在第一行**（用户认的是它：工作区名称，没有标题才退到项目名），路径与
  * 条数退到第二行的小字里，完整的一串留给悬浮提示。
  *
  * 「未分组」那一行的 `path` 是哨兵值、不是路径：它只出现在名字与条数里，绝不摆上第二行。
@@ -293,7 +293,7 @@ export function candidateRow(row: PathRow, t: Translate): CandidateRow {
  * 候选会长到几十条（工作区一多就是），列表里只能一行行找——面板自己带一个筛选框把这个列表收窄
  * （见 [目录字段是一个值控件，三条改值的路](../../../.agents/notes/implemented/architecture/2026-09-27-directory-field-is-one-value-control.md)）。
  *
- * 关键词对**行自己的事实**匹配：路径、工作区标题、项目身份，外加那个自带文案的「未分组」行。
+ * 关键词对**行自己的事实**匹配：路径、工作区名称、项目身份，外加那个自带文案的「未分组」行。
  * 不对"渲染出来的那一整串"匹配——那一串里拼了「— 3 条会话」这样的装饰，拿它当关键词库会让「3」
  * 命中一堆行。大小写不敏感的子串，不做模糊：筛完的顺序仍旧是候选本来的顺序（已登记工作区在前、
  * 库里有会话的目录按路径排在后），筛一下就让行换位置，用户会以为候选变了。

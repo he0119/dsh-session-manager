@@ -844,7 +844,7 @@ test('补齐列表元数据的端口：认形状，按宿主自己的两步走�
   assert.deepEqual(calls, ['read:s-1', 'coldSnapshot'], '顺序不能反：没有事件就没有可折的东西')
 })
 
-test('重新生成标题的端口：四件齐才认，且按"读日志 → 开写句柄 → 挂载 → 重算 → 冲盘 → 关句柄 → 卸载"走', async () => {
+test('重新生成名称的端口：四件齐才认，且按"读日志 → 开写句柄 → 挂载 → 重算 → 冲盘 → 关句柄 → 卸载"走', async () => {
   const calls: string[] = []
   const header = { id: 's-1', version: 4, createdAt: 1 }
   const events = [{ type: 'session' }, { type: 'message', role: 'user' }]
@@ -935,11 +935,11 @@ test('重新生成标题的端口：四件齐才认，且按"读日志 → 开�
   const port = titleRefreshPort(fakeCtx(all))
   assert.ok(port, '四件都齐：端口拿得到')
 
-  // 一、从兜底标题换成 provider 标题：挂载期间怎么来怎么走，最后句柄与挂载都要还回去。
+  // 一、从兜底名称换成 provider 标题：挂载期间怎么来怎么走，最后句柄与挂载都要还回去。
   current = { title: '你应该参考 https://github.com/he011', source: { kind: 'fallback' } }
-  answers = [{ title: '修复含网址会话标题生成', source: { kind: 'provider' } }]
+  answers = [{ title: '修复含网址会话名称生成', source: { kind: 'provider' } }]
   calls.length = 0
-  assert.deepEqual(await port.refresh('s-1'), { status: 'retitled', title: '修复含网址会话标题生成' })
+  assert.deepEqual(await port.refresh('s-1'), { status: 'retitled', title: '修复含网址会话名称生成' })
   assert.deepEqual(calls, [
     'get:s-1',
     'read:s-1',
@@ -976,12 +976,12 @@ test('重新生成标题的端口：四件齐才认，且按"读日志 → 开�
   answers = [{ title: '已经挺好的标题', source: { kind: 'provider' } }]
   assert.deepEqual(await port.refresh('s-1'), { status: 'unchanged', title: '已经挺好的标题' })
 
-  // 四、还是没有标题（没有人类消息）：如实说这条没什么可命名的。
+  // 四、还是没有标题（没有用户消息）：如实说这条没什么可命名的。
   current = undefined
   answers = [undefined]
   assert.deepEqual(await port.refresh('s-1'), { status: 'skipped', reason: 'no-human-message' })
 
-  // 五、只有兜底标题（这个宿主没装 provider）：`refresh()` 把兜底原样返回，那不是"算过"。
+  // 五、只有兜底名称（这个宿主没装 provider）：`refresh()` 把兜底原样返回，那不是"算过"。
   current = { title: '首句前几个词', source: { kind: 'fallback' } }
   answers = [{ title: '首句前几个词', source: { kind: 'fallback' } }]
   assert.deepEqual(await port.refresh('s-1'), { status: 'skipped', reason: 'no-title-provider' })
