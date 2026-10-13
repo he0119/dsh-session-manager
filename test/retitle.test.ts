@@ -1,4 +1,4 @@
-// test/retitle.test.ts — 「重新生成标题」的编排：谁被跳过、谁被重算、失败怎么报。
+// test/retitle.test.ts — 「重新生成名称」的编排：谁被跳过、谁被重算、失败怎么报。
 //
 // 这个动作的**顺序与分类**是它的全部价值：宿主那一侧每一件（整份读日志、临时挂载、发模型请求）都很贵，
 // 而"该不该动它"的判断如果错一边，代价是用户的名字被覆盖（pinned 被当成普通会话）或者白花一次模型
@@ -24,7 +24,7 @@ function fakePort(
 }
 
 const SESSIONS = [
-  { id: 'session-a', title: '兜底标题' },
+  { id: 'session-a', title: '兜底名称' },
   { id: 'session-pinned', title: '我自己改的名字' },
   { id: 'session-child', title: '子会话', subagent: true },
 ]
@@ -59,7 +59,7 @@ test('runRetitle：子智能体与不在库里的都不碰宿主，其余按顺�
 
   // 进度是"处理这一条之前"发的：done 是已经做完的条数，label 用库里的标题称呼它。
   assert.deepEqual(events, [
-    { phase: 'retitle', total: 4, done: 0, id: 'session-a', label: '兜底标题' },
+    { phase: 'retitle', total: 4, done: 0, id: 'session-a', label: '兜底名称' },
     { phase: 'retitle', total: 4, done: 1, id: 'session-child', label: '子会话' },
     { phase: 'retitle', total: 4, done: 2, id: 'session-gone' },
     { phase: 'retitle', total: 4, done: 3, id: 'session-pinned', label: '我自己改的名字' },
@@ -115,7 +115,7 @@ test('runRetitle：重复的 id 只算一次，且顺序按第一次出现', asy
   )
 })
 
-test('runRetitle：这个宿主没有标题服务时，每条都如实记成跳过而不是抛错', async () => {
+test('runRetitle：这个宿主没有名称服务时，每条都如实记成跳过而不是抛错', async () => {
   const result = await runRetitle(
     { sessions: SESSIONS, port: undefined },
     { sessionIds: ['session-a', 'session-pinned'] },

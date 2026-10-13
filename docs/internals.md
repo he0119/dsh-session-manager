@@ -100,7 +100,7 @@
 ## 列表、筛选与分组
 
 - [列整库的两个分页按目录分组](../.agents/notes/implemented/architecture/2026-09-27-group-by-directory-not-workspace.md)：
-  分组键是 `cwd`，工作区标题只是路径的标签。
+  分组键是 `cwd`，工作区名称只是路径的标签。
 - [「未分组」就是外壳那一组](../.agents/notes/implemented/bug-fix/2026-09-28-ungrouped-means-the-sidebar-group.md)：
   一个名字一个定义，三处读同一个结论。
 - [「认领」是宿主那份成员表](../.agents/notes/implemented/bug-fix/2026-10-04-accounted-means-the-hosts-membership.md)：
@@ -122,8 +122,8 @@
 - [落地之后请宿主补投影检查点](../.agents/notes/implemented/bug-fix/2026-10-07-landing-warms-the-projection-checkpoint.md)：
   侧边栏的标题 / 空白 / 最后活动时间都只认宿主那份记录，而那份记录只在**活着的**会话上被写；导入、同步
   拉取、迁移落地之后借宿主自己的两个服务冷读一遍补上（`src/checkpoint-warm.ts`）。
-- [重新生成标题：临时把会话挂回宿主](../.agents/notes/implemented/feature/2026-10-12-retitle-attaches-the-session-to-ask-the-title-service.md)：
-  标题服务的显式重算入口只认**活会话**，而这里要处理的是整库里早已不在内存里的那些——端口把一条会话
+- [重新生成名称：临时把会话挂回宿主](../.agents/notes/implemented/feature/2026-10-12-retitle-attaches-the-session-to-ask-the-title-service.md)：
+  名称服务的显式重算入口只认**活会话**，而这里要处理的是整库里早已不在内存里的那些——端口把一条会话
   临时读出来、挂上、重算、冲盘、再摘掉（`src/tools.ts` 的 `titleRefreshPort()` + `src/retitle.ts`）。
 - [会话内容视图：在插件里把日志解析出来](../.agents/notes/implemented/feature/2026-10-12-transcript-view-parses-the-log-itself.md)：
   一条事件一条条目、工具调用只算一次、上限与分页都在解析层（`src/transcript.ts` + `GET /transcript` +

@@ -28,7 +28,7 @@ export interface RetitleSubject {
 /** 编排层的依赖（都可注入，便于测试）。 */
 export interface RetitleDeps {
   /**
-   * 宿主的重算能力；这个宿主没装标题服务时为 `undefined`（界面据此把按钮禁掉并说明原因，见
+   * 宿主的重算能力；这个宿主没装名称服务时为 `undefined`（界面据此把按钮禁掉并说明原因，见
    * `src/web.ts` 的 `/state`）。
    */
   port: TitleRefreshPort | undefined
@@ -92,7 +92,7 @@ function describe(error: unknown): string {
 }
 
 /**
- * 给点名的会话逐条重算标题。
+ * 给点名的会话逐条重算名称。
  *
  * 顺序：去重 → 逐条判定"该不该动" → 交给宿主 → 按结果分类。**不认识的 id 记 `not-found` 而不是抛**：
  * 界面刚拉完清单，别处删了一条是完全正常的，不该让整批动作作废。

@@ -4,7 +4,7 @@
  * 为什么按目录（`cwd`）而不是按注册表里的工作区 id 分组：这两件事经常不是一回事。注册表的
  * `sessionIds` 只是"登记在册"的那部分，同一个目录下完全可能有没登记的会话（迁移页的候选列表
  * 就是为此才按目录数、按目录列）；而注册表记的路径也可能与日志里的 `cwd` 不一致。用户嘴里的
- * "把这个工作区的会话带走"指的永远是**这个目录下的会话**，所以分组键只能是路径，工作区标题
+ * "把这个工作区的会话带走"指的永远是**这个目录下的会话**，所以分组键只能是路径，工作区名称
  * 只是这个路径的**标签**（题外：迁移页选源目录用的是同一套口径，两个分页对同一个库必须给出
  * 同一个心智模型）。
  *
@@ -48,7 +48,7 @@ export interface GroupableWorkspace {
 export interface SessionGroup<S extends GroupableSession = GroupableSession> {
   /** 分组键：目录的绝对路径；没有 cwd 的会话自成一组的键是**空串**。 */
   readonly path: string
-  /** 注册表上这个目录的工作区标题（这个目录不是已登记工作区时没有）。 */
+  /** 注册表上这个目录的工作区名称（这个目录不是已登记工作区时没有）。 */
   readonly title?: string
   /** 组内会话，最近的在前。 */
   readonly sessions: readonly S[]
@@ -99,7 +99,7 @@ export function groupSessions<S extends GroupableSession>(
 }
 
 /**
- * 路径 → 工作区标题。同一个路径在注册表里出现多次（同一目录被登记成两个工作区）时取先出现的那个标题，
+ * 路径 → 工作区名称。同一个路径在注册表里出现多次（同一目录被登记成两个工作区）时取先出现的那个标题，
  * 与迁移页的下拉候选同一个口径。
  */
 export function workspaceTitles(workspaces: readonly GroupableWorkspace[]): Map<string, string> {

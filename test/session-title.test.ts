@@ -1,4 +1,4 @@
-// test/session-title.test.ts — 会话标题的两条路（宿主投影缓存 / 日志开头的有界前缀）。
+// test/session-title.test.ts — 会话名称的两条路（宿主投影缓存 / 日志开头的有界前缀）。
 //
 // 这里要钉死的是三件事：
 //   1. 判据是解析出来的 `type === 'session/title'`，不是子串——`session/title-llm-request` 与

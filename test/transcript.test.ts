@@ -95,7 +95,7 @@ test('readTranscript：一条事件一条条目，工具调用只算一次', () 
   ])
 })
 
-test('readTranscript：人类消息、助手消息（思考与正文分格）、合成消息各自照实', () => {
+test('readTranscript：用户消息、助手消息（思考与正文分格）、合成消息各自照实', () => {
   const page = readTranscript(LINES)
   const human = page.items[2]!
   assert.equal(human.text, '帮我看看这个日志')

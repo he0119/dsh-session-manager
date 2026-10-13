@@ -328,7 +328,7 @@ export function TransferPanel({ t, state, meta, reload, directory }: PanelShare)
         <SessionListBox fixed>
           {state === null ? (
             // 清单还在读：说"读取中…"而不是"这个会话库里还没有会话"（见 ManagerPanel 的两份数据说明）。
-            <SessionListEmpty text={t('page.loading')} />
+            <SessionListEmpty text={t('loading')} />
           ) : sessions.length === 0 ? (
             <SessionListEmpty text={t('list.empty')} />
           ) : groups.length === 0 ? (

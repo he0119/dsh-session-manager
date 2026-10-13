@@ -42,7 +42,7 @@ export interface MigrateDeps extends EffectDeps, WarmDeps {
   backupRoot: string
   decodeAll: DecodeAll
   /**
-   * 读会话标题（可选）：预演结果里带上它，界面挑会话时按标题认人（见 session-title.ts）。
+   * 读会话名称（可选）：预演结果里带上它，界面挑会话时按标题认人（见 session-title.ts）。
    * 缺席就不读——工具层只报数量，不需要。
    */
   resolveTitle?: (query: TitleQuery) => string | undefined

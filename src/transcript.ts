@@ -65,7 +65,7 @@ export interface TranscriptItem {
   /** 事件类型原文（`tool/call` 这种）。 */
   type: string
   kind: TranscriptKind
-  /** 人类消息正文、助手回答、工具结果、系统消息；其余类型是压缩后的一行 JSON。 */
+  /** 用户消息正文、助手回答、工具结果、系统消息；其余类型是压缩后的一行 JSON。 */
   text?: string
   /** 助手的思考块（单独一格，界面默认折起来）。 */
   reasoning?: string
@@ -79,7 +79,7 @@ export interface TranscriptItem {
   /** 这条挂在别的 seq 上（`sourceEventSeqs`），或者 `surfaceOp` 不是 `append`——照实说清楚。 */
   note?: string
   /**
-   * 这条人类消息不是人发的。
+   * 这条用户消息不是人发的。
    *
    * 标题模型那次调用也会以 `user/message` 落进日志（`source.kind` 是 `dsh-session-title-llm`），
    * 时间线上照旧摆出来（"完整"包含它），但标一下，免得被当成用户说过的话。

@@ -128,7 +128,7 @@ export function DirectoryPicker({
 
       {error !== null && <p className="dsm-banner dsm-error">{t('error.failed', { reason: error })}</p>}
 
-      {busy && <p className="dsm-hint">{t('page.loading')}</p>}
+      {busy && <p className="dsm-hint">{t('loading')}</p>}
 
       {!busy && listing !== null && (
         <>

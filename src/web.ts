@@ -108,7 +108,7 @@ export interface ApiDeps {
    */
   pickerKind?: () => PickerKind
   /**
-   * 读会话标题（界面要显示的东西，见 session-title.ts）。
+   * 读会话名称（界面要显示的东西，见 session-title.ts）。
    *
    * 缺省按 `paths.registryPath` 反推宿主的投影缓存目录、缓存没有就折日志开头的有界前缀；
    * 这里留出口子是为了测试能钉住"标题坏了也不影响列出会话"这条边界。
@@ -137,11 +137,11 @@ export interface ApiDeps {
   /** 宿主的归档能力；缺席 = 这个宿主改不了归档（界面据此禁用那两个按钮）。 */
   registryOps?: () => RegistryOps | undefined
   /**
-   * 宿主"重算一条会话标题"的能力（`sessions` + `sessionQuery` + `sessionTitle` + `sessionPersistence`，
+   * 宿主"重算一条会话名称"的能力（`sessions` + `sessionQuery` + `sessionTitle` + `sessionPersistence`，
    * 见 tools.ts 的 `titleRefreshPort()`）。
    *
-   * 同 `registryOps`：缺席 = 这个宿主算不了标题（没有标题服务，或者不是 Web profile），界面据此禁用
-   * 「重新生成标题」并说明原因，而不是让按钮点下去之后报一个从服务里抛出来的错。
+   * 同 `registryOps`：缺席 = 这个宿主算不了标题（没有名称服务，或者不是 Web profile），界面据此禁用
+   * 「重新生成名称」并说明原因，而不是让按钮点下去之后报一个从服务里抛出来的错。
    */
   titleRefresh?: () => TitleRefreshPort | undefined
   /**
@@ -209,7 +209,7 @@ interface MetaFacts {
   registryPath: string
   pickerKind: PickerKind | null
   archiveAvailable: boolean
-  /** 这个宿主能不能重新生成会话标题（`sessionTitle` 在不在，见 ApiDeps.titleRefresh）。 */
+  /** 这个宿主能不能重新生成会话名称（`sessionTitle` 在不在，见 ApiDeps.titleRefresh）。 */
   retitleAvailable: boolean
   sync: SyncInfo | null
 }
@@ -352,7 +352,7 @@ export const scanLibrary = scanAll
  *
  * 子智能体跟着父会话走（见 family.ts）：单独归档 / 导出它，要么在父会话的 `subagent/catalog` 里留下
  * 一条指着不存在会话的条目，要么打出一个父会话不在里面的包。所以这几条路都直接拒，并指名该点谁。
- * 删除那条路在自己的编排里做同一件事（文案在 remove.ts，多一条父会话标题）。
+ * 删除那条路在自己的编排里做同一件事（文案在 remove.ts，多一条父会话名称）。
  */
 function loneSubagentError(
   all: readonly DiscoveredSession[],
@@ -557,7 +557,7 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
     pickerKind: deps.pickerKind?.() ?? null,
     // 归档按钮能不能点：这个宿主的 workspaceRegistry 在不在（只有 Web profile 才有它）。
     archiveAvailable: deps.registryOps?.() !== undefined,
-    // 重新生成标题同理：这个宿主的会话标题服务与读日志 / 持久化几件凑不齐就点不了（见 titleRefreshPort）。
+    // 重新生成名称同理：这个宿主的会话名称服务与读日志 / 持久化几件凑不齐就点不了（见 titleRefreshPort）。
     retitleAvailable: deps.titleRefresh?.() !== undefined,
     // 同步卡片：没有配置就是 null（界面据此说明"没配置 sync.url"，而不是画一个点了没反应的按钮）。
     sync: deps.syncInfo?.() ?? null,
@@ -1213,13 +1213,13 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
   }
 
   /**
-   * 重新生成标题：把点名的会话交给宿主的标题服务逐条重算（见 retitle.ts 与 tools.ts 的端口）。
+   * 重新生成名称：把点名的会话交给宿主的名称服务逐条重算（见 retitle.ts 与 tools.ts 的端口）。
    *
    * 走事件流：每条会话都要整份解一次日志（实测 6MB ≈1.7 秒）再跑一次模型调用（2～3 秒），勾十条就是
    * 半分钟——那段时间界面只有一句不动的按钮，所以这一段照归档那套报进度。
    *
    * 两处**拒绝**在流开始之前回 JSON 带状态码（那时还没有字节发出去）：一条会话都没勾（400）、
-   * 这个宿主没有标题服务（409，"点了也没反应"的按钮比禁用更糟，两者都要能说清原因）。
+   * 这个宿主没有名称服务（409，"点了也没反应"的按钮比禁用更糟，两者都要能说清原因）。
    * 子智能体不在这里拒——它不是错误，是"本来就不该动它"，由编排层按条记成跳过。
    */
   const retitleSessions = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
@@ -1239,7 +1239,7 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
     const port = deps.titleRefresh?.()
     if (port === undefined) {
       // 如实拒绝而不是"逐条报失败"：这是**这个宿主**没有这个能力，与"某条会话算不出来"不是一回事。
-      sendJson(res, 409, { error: '这个宿主没有会话标题服务（重新生成标题是它的能力），算不了标题' })
+      sendJson(res, 409, { error: '这个宿主没有会话名称服务（重新生成名称是它的能力），算不了标题' })
       return
     }
     const all = scanLibrary(paths.sessionsRoot, decodeAll, { resolveTitle })

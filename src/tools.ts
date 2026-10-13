@@ -484,9 +484,9 @@ interface HostSessionPersistence {
 }
 
 /**
- * 探测宿主"重算一条会话标题"的能力，收成一个端口交给编排层（见 retitle.ts）。
+ * 探测宿主"重算一条会话名称"的能力，收成一个端口交给编排层（见 retitle.ts）。
  *
- * 为什么不能只调一次 `sessionTitle.refresh()` 了事：**标题服务只认活会话**
+ * 为什么不能只调一次 `sessionTitle.refresh()` 了事：**名称服务只认活会话**
  * （`refresh()` 第一件事就是 `sessions.get(id) !== session` 就抛），而这里是拿整库的 id 逐条重算，
  * 那些会话早就不在宿主内存里了。所以这条端口自己完成一次"临时挂载"：
  *
@@ -511,7 +511,7 @@ interface HostSessionPersistence {
  * ——默认跳过，理由见 `TitleRefreshOptions`。
  *
  * @param ctx 宿主上下文。
- * @returns 端口；这个宿主没有标题服务 / 读日志 / 持久化里任何一件时 undefined。
+ * @returns 端口；这个宿主没有名称服务 / 读日志 / 持久化里任何一件时 undefined。
  */
 export function titleRefreshPort(ctx: unknown): TitleRefreshPort | undefined {
   const store = optionalService(ctx, 'sessions') as Partial<HostSessionStore> | undefined
@@ -550,8 +550,8 @@ export function titleRefreshPort(ctx: unknown): TitleRefreshPort | undefined {
    *
    * 判定的顺序是刻意的：先看用户有没有手动改过名（`source.kind === 'user'`）——那种标题是用户的，
    * 一次批量动作不该把它抹掉，所以在**发模型请求之前**就返回（`includePinned` 是给一次性清理留的
-   * 显式口子，见 `TitleRefreshOptions`）；再看重算之后标题还在不在（没有人类消息的会话连兜底标题都
-   * 没有）、provider 有没有真的接过去（没有 provider 时 `refresh()` 只会把兜底标题原样返回，那不是
+   * 显式口子，见 `TitleRefreshOptions`）；再看重算之后标题还在不在（没有用户消息的会话连兜底名称都
+   * 没有）、provider 有没有真的接过去（没有 provider 时 `refresh()` 只会把兜底名称原样返回，那不是
    * "算过"）。
    */
   const settle = async (session: unknown, options?: TitleRefreshOptions): Promise<RetitleOutcome> => {
@@ -568,7 +568,7 @@ export function titleRefreshPort(ctx: unknown): TitleRefreshPort | undefined {
       // 的旧标题当锚点，所以这里一定会重算出一个新标题。
       after = normalize(await titles.refresh!.call(titles, session))
     } catch (error) {
-      // 没有路由不是失败：这条会话从来没有过主模型请求（比如从别的工具导进来的），标题 provider
+      // 没有路由不是失败：这条会话从来没有过主模型请求（比如从别的工具导进来的），名称 provider
       // （跟随会话主模型那套）因此无从下手。
       const message = error instanceof Error ? error.message : String(error)
       if (message.includes('no logged request route')) return { status: 'skipped', reason: 'no-request-route' }

@@ -199,7 +199,7 @@ function PlanSectionHead({ title, count, t }: { title: string; count: number; t:
  *
  * 组头的画法与列表那边的组头同一档（字色 12% 兑出来的横幅、工作区图形、名字 + 条数），但没有折叠与
  * 勾选：弹窗里这份清单只是读一遍，不在这儿挑东西。称呼规则也共用一份（`planRows.projectLabel()`）：
- * 那一行只摆名字（工作区标题，没登记就是项目名），项目身份与本机路径一起进悬浮提示——它们都是机器
+ * 那一行只摆名字（工作区名称，没登记就是项目名），项目身份与本机路径一起进悬浮提示——它们都是机器
  * 字符串，摆在行里又长又会被截断，而"这是哪个仓库、在哪儿"是想知道才看的信息。
  */
 function PlanGroupHead({
@@ -425,7 +425,7 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
   const syncClean = syncPlan !== null && syncPulls.length === 0 && syncPushes.length === 0 && syncKept.length === 0
   /**
    * 三张表各自按**项目目录**分组（见 [syncGroups.ts](./syncGroups.ts)）：拉取行按落地后的本机目录、
-   * 推送行按本机目录、「没动」按它自己那一边的目录。工作区标题从 `/state` 来（同一个路径在别处显示
+   * 推送行按本机目录、「没动」按它自己那一边的目录。工作区名称从 `/state` 来（同一个路径在别处显示
    * 成什么名字，这里就是什么名字）；首帧还没读到状态时标题缺席，组头退回路径本身。
    */
   const workspaces = state?.workspaces ?? []
@@ -505,7 +505,7 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
         {/* 没配置同步时只留一句话：摆一个点了没反应的按钮比不摆更糟（与「宿主没有归档能力」同一条口径）。 */}
         <p className="dsm-hint">
           {!syncKnown
-            ? t('page.loading')
+            ? t('loading')
             : syncInfo === null
               ? t('sync.offHint')
               : t('sync.hint', { mappings: syncInfo.mappings })}
