@@ -63,3 +63,28 @@ export function centerPosition(
   }
   return answer
 }
+
+/** 参与"画面正中"计算的一条：位次、下沿、可见高度，以及它是不是在折起来的轮次里。 */
+export interface TranscriptCard {
+  index: number
+  bottom: number
+  height: number
+  folded: boolean
+}
+
+/**
+ * 画面正中那一条是第几条（`index`，事件位次）。
+ *
+ * 折起来的轮次里的卡不参与：浏览器要么把它们的矩形算成 0（内容没有排版），要么照旧占着位置，两种
+ * 都不该算进"画面正中"；留着它们还会让纵坐标不再单调，二分就会落到错的那一条上（实测：折起一节
+ * 之后，页头报出第 10 条，而画面上是日志末尾）。
+ */
+export function centerCard(cards: readonly TranscriptCard[], centerY: number): number | undefined {
+  const laid = cards.filter((card) => !card.folded && card.height > 0)
+  const position = centerPosition(
+    laid.length,
+    (at) => laid[at]!.bottom,
+    centerY,
+  )
+  return position === undefined ? undefined : laid[position]!.index
+}
