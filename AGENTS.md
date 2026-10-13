@@ -14,6 +14,7 @@
 | `README.md` / `README.en.md` | 安装、设置页与四个工具怎么用；两份的键与结构保持对齐 |
 | `AGENTS.md` | 本文件：协作约定、提交信息口径、验证清单、界面硬约束 |
 | `.agents/notes/` | 决策的依据、被否决的备选方案与代价；一条决策一篇，格式由 `test/notes.test.ts` 核 |
+| `.agents/skills/` | 给 agent 的可复用流程，一个技能一个目录（`SKILL.md` + 它自己的资源文件），由 DSH 的技能机制发现；不放决策依据 |
 | `docs/AGENTS.md` | `docs/` 这一层的文档规范与写作规则 |
 | `docs/internals.md` | 决策地图（按主题索引到笔记），以及没有笔记承载的当前机制 |
 | `docs/development.md` | 目录结构、逐文件职责、开发命令 |
@@ -79,7 +80,9 @@ pnpm typecheck && pnpm build && pnpm test && pnpm check:package
   一致、`## Problem` 是不是第一个二级标题、必备章节在不在、`implemented/` 里有没有混进提案用语、
   相对链接能不能解析。改笔记格式就同一次改动里改它。
 - 界面与样式的改动要**在真实 dev GUI 里量**（`getComputedStyle` 的实测值），不要推算色值；
-  深浅两套主题各量一遍再下结论。
+  深浅两套主题各量一遍再下结论。内容视图有一份现成的端到端自检
+  （`bash .agents/skills/transcript-e2e/scripts/run.sh`，驱动真实 dev GUI、只读会话库），动过
+  `TranscriptDialog.tsx` / `logic/transcript*` / `src/transcript.ts` 之后跑一遍它。
 - 真实会话库上的**写操作**（迁移 `apply`、回滚、导入落地）先问再做；验收优先用只读预演。
 - 验收需要临时夹具（假会话等）时用完立刻删干净，并在报告里写明造过什么、清掉了没有。
 
