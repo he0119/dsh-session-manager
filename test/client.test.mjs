@@ -4911,3 +4911,115 @@ test('客户端产物：一轮一节折得起来，标题自己画折叠标记',
     '四条都在正文层里',
   )
 })
+
+test('客户端产物：同步设置表单的字段顺序——自动推送排在最后，紧挨着保存', { skip }, async () => {
+  /*
+   * 这一条钉的是**分组**，不是美观：表单前三组说的是"这条通道是什么"（怎么连、怎么认证、落地到哪），
+   * 自动推送说的是"连上之后让它自己怎么跑"——另一件事。它曾经夹在「超时」与「用户名」之间，把"怎么连"
+   * 那一组切成了两半。
+   *
+   * 判据是用**字段标签在上报文本里的先后**：标签是字典键（`sync.field.*`），假 react 把 text 按渲染
+   * 顺序摆出来，所以"谁先出现"就是"谁在上面"。反事实：把自动推送那两栏挪回超时之后，这一条立刻红。
+   */
+  const state = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    sync: { url: 'https://dav.example.com/dsh', machineId: 'robot-a', mappings: 0 },
+    sessions: [],
+    workspaces: [],
+  }
+  const controller = {
+    getSnapshot: () => ({
+      status: 'ready',
+      writable: true,
+      revision: 4,
+      value: { sync: { url: 'https://dav.example.com/dsh', machineId: 'robot-a', timeoutMs: 30000 } },
+    }),
+    subscribe: () => () => {},
+    mutate: async () => true,
+  }
+  const credentials = {
+    async describe(refs) {
+      return { ok: true, value: Object.fromEntries(refs.map((ref) => [ref, { configured: false, writable: true }])) }
+    },
+    async set() {
+      return { ok: true, value: undefined }
+    },
+  }
+  const mounted = mount({ state, panel: 'sync', configForms: { get: () => controller }, credentials })
+  const text = strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
+
+  const at = (key) => {
+    const index = text.indexOf(key)
+    assert.ok(index >= 0, `表单里该有 ${key}`)
+    return index
+  }
+  const url = at('sync.field.url')
+  const machine = at('sync.field.machine')
+  const timeout = at('sync.field.timeout')
+  const user = at('sync.field.user')
+  const mapping = at('sync.field.mapping')
+  const autoPush = at('sync.field.autoPush')
+
+  // 前三组：怎么连 → 怎么认证 → 落地到哪。
+  assert.ok(url < machine, 'URL 在最上面')
+  assert.ok(machine < timeout, '机器标识与超时同一行，标识在前')
+  assert.ok(timeout < user, '认证那一组在连接参数之后')
+  assert.ok(user < mapping, '落地映射在认证之后')
+  // 自动推送在最后：它不属于上面任何一组，而且是个"存了才生效"的开关，靠近保存。
+  assert.ok(mapping < autoPush, '自动推送排在路径映射之后（曾经的错是夹在超时与用户名之间）')
+  assert.ok(timeout < autoPush && user < autoPush, '它不在"怎么连/怎么认证"那一组里')
+})
+
+test('客户端产物：同步设置的「测试连接」是只读工具，排在字段之上、不跟保存同一行', { skip }, async () => {
+  /*
+   * 位置与**性质**要一致：它一次 PROPFIND、一个字节都不改，所以是这张卡片的只读工具（与「刷新」「全选」
+   * 同一类），该在字段之上；而不是挤在「保存 / 放弃改动」那行**写**操作的旁边——那样读起来像"保存之后
+   * 还有个第二步"。
+   *
+   * 反事实：把它挪回保存那一行之后，`saveBeforeTest` 这条断言立刻红。
+   */
+  const state = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    sync: { url: 'https://dav.example.com/dsh', machineId: 'robot-a', mappings: 0 },
+    sessions: [],
+    workspaces: [],
+  }
+  const controller = {
+    getSnapshot: () => ({
+      status: 'ready',
+      writable: true,
+      revision: 4,
+      value: { sync: { url: 'https://dav.example.com/dsh', machineId: 'robot-a', timeoutMs: 30000 } },
+    }),
+    subscribe: () => () => {},
+    mutate: async () => true,
+  }
+  const credentials = {
+    async describe(refs) {
+      return { ok: true, value: Object.fromEntries(refs.map((ref) => [ref, { configured: false, writable: true }])) }
+    },
+    async set() {
+      return { ok: true, value: undefined }
+    },
+  }
+  const mounted = mount({ state, panel: 'sync', configForms: { get: () => controller }, credentials })
+  const text = strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
+
+  const test = text.indexOf('sync.test.action')
+  const save = text.indexOf('save')
+  assert.ok(test >= 0, '有「测试连接」')
+  assert.ok(save >= 0, '有「保存」')
+  assert.ok(test < save, '「测试连接」在「保存」之前（它是只读的探路工具，不是保存的第二步）')
+  // 它比第一个字段还早：整张表单的最上面那一行。
+  assert.ok(test < text.indexOf('sync.field.url'), '它排在所有字段之上（表单最上面那一行工具）')
+
+  // 那一行是个独立的动作行，与保存那一行不是同一个容器。
+  const toolsRows = mounted.recorded.filter((node) => node.props?.className === 'dsm-syncTools')
+  assert.equal(toolsRows.length, 1, '「测试连接」有自己的那一行（dsm-syncTools）')
+  const button = mounted.recorded.find((node) => node.type === 'button' && node.props?.children === 'sync.test.action')
+  assert.ok(button !== undefined, '按钮是个真的 button')
+})

@@ -758,6 +758,11 @@ export const CSS = `
 .dsm-mapArrow { color: var(--dsw-alias-label-secondary, #646a73); }
 /* 同步设置表单：字段一列排开，配对的两个字段并排一行（窄屏自动换行）。 */
 .dsm-syncForm { display: flex; flex-direction: column; gap: 10px; margin: 4px 0 2px; }
+/*
+ * 「测试连接」那一行：这张卡片的只读工具，所以摆在字段之上（与卡片头部的「刷新 / 全选」同一类）。
+ * 与 dsm-controls 的区别只在下方间距——那一行是动作行的收尾，这一行后面接着字段。
+ */
+.dsm-syncTools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 2px; }
 .dsm-syncRow { display: flex; gap: 12px; flex-wrap: wrap; }
 .dsm-syncRow > .dsm-field { flex: 1 1 16rem; min-width: 0; }
 .dsm-options { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }

@@ -444,10 +444,10 @@ export const zh = {
   // 自动推送：按间隔在后台跑一轮**只推不拉**的同步（表单里那两栏 + 卡片上那句话 + 当场跑一次的结论）
   'sync.field.autoPush': '自动推送',
   'sync.field.autoPushHint':
-    '写完一轮就推送，另外按下面的间隔兜底补一次：只把本机的会话推到远端，绝不拉取、也绝不改动本机任何会话。',
+    '本机写完一轮就推上去（最后一个会话事件之后安静 10 秒，一串事件只推一次），另外按下面的间隔兜底补一次；所以下面那个数不是"每 N 分钟才推一次"。只把本机的会话推到远端，绝不拉取、也绝不改动本机任何会话。',
   'sync.field.autoPushInterval': '自动推送兜底间隔（毫秒）',
   'sync.field.autoPushIntervalHint':
-    '缺省 300000（5 分钟），最小 60000；比 60000 小的值会被抬到 60000。写完一轮不用等它——这是兜底。',
+    '缺省 300000（5 分钟），最小 60000；比 60000 小的值会被抬到 60000。它管的是事件层够不到的那些情况（别的机器推上去的、本机删了会话要收尾索引），意思是"最长多久没推就一定补一次"。',
   'sync.field.autoPushIntervalInvalid': '自动推送间隔要是正整数毫秒。',
   'sync.autoPush.enabled': '自动推送已开：写完一轮就推，另外每 {minutes} 分钟兜底一次。',
   'sync.autoPush.now': '立即推送一次',
@@ -911,9 +911,10 @@ export const en: LocaleDictOf<typeof NS> = {
   // the outcome of running one round right now).
   'sync.field.autoPush': 'Automatic push',
   'sync.field.autoPushHint':
-    'Runs a push-only round in the background on the interval below: it pushes this machine’s sessions to the remote and never pulls, never touches a local session.',
-  'sync.field.autoPushInterval': 'Automatic push interval (ms)',
-  'sync.field.autoPushIntervalHint': '300000 (5 minutes) by default, 60000 minimum; anything below 60000 is raised to 60000.',
+    'Pushes as soon as a turn finishes on this machine (ten seconds after the last session event, so a burst of events pushes once), with a fallback round on the interval below — so that number does not mean "once every N minutes". It pushes this machine’s sessions to the remote and never pulls, never touches a local session.',
+  'sync.field.autoPushInterval': 'Automatic push fallback interval (ms)',
+  'sync.field.autoPushIntervalHint':
+    '300000 (5 minutes) by default, 60000 minimum; anything below 60000 is raised to 60000. It covers what the event layer cannot reach (another machine pushed something up, or a session was deleted locally and the index needs settling): it means "push at least this often".',
   'sync.field.autoPushIntervalInvalid': 'The automatic push interval must be a positive whole number of milliseconds.',
   'sync.autoPush.enabled': 'Automatic push is on: as soon as a turn finishes, plus a fallback every {minutes} minute(s).',
   'sync.autoPush.now': 'Push now',

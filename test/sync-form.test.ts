@@ -366,3 +366,27 @@ test('同步设置：界面认得的 skip 码与核心层的联合类型对得�
     )
   }
 })
+
+test('同步设置：自动推送那几句文案说清了"写完就推、间隔是兜底"（两种语言都要）', () => {
+  /*
+   * 这一组钉的是**文案的语义**，因为它是一处会安静地骗人的地方：那个数字叫「间隔」，用户很容易读成
+   * "每 N 分钟才推一次"——而实际是"写完一轮就推，这个数只兜底"。`LocaleDictOf` 只能核**键集**一致，
+   * 核不了两份译文说的是不是同一件事（上一版就是这样：中文改了、英文留在旧口径上）。
+   *
+   * 所以判据分两层：
+   *   1. 两份译文都得**提到**主触发（写完一轮 / turn finishes）——少了它就退回"按间隔轮询"的读法；
+   *   2. 两份译文都得**点明**那个间隔是兜底/最长间隔（兜底 / fallback / at least）。
+   *
+   * 这不核具体措辞（措辞会变），只核这几件必须说出口的事。
+   */
+  const cases = [
+    ['sync.field.autoPushHint', /写完一轮/, /turn finishes/],
+    ['sync.field.autoPushIntervalHint', /兜底|最长/, /fallback|at least/],
+  ] as const
+  for (const [key, zhPattern, enPattern] of cases) {
+    const zhText = zh[key as keyof typeof zh] as string
+    const enText = en[key as keyof typeof en] as string
+    assert.match(zhText, zhPattern, `${key} 中文没说清（应匹配 ${zhPattern}）：${zhText}`)
+    assert.match(enText, enPattern, `${key} 英文没说清（应匹配 ${enPattern}）：${enText}`)
+  }
+})
