@@ -127,6 +127,14 @@ export interface SyncInfo {
   machineId: string
   /** 显式映射的条数；映射内容在插件配置里，界面只报条数。 */
   mappings: number
+  /**
+   * 自动推送的当前设置（宿主把 `sync.autoPush` / `sync.autoPushIntervalMs` 拍平的结果）；
+   * **没开就是 undefined**，界面据此决定要不要补那一句、要不要摆「立即推送一次」。
+   *
+   * 只有 `intervalMs`：那个"两次真跑之间至少隔多久"的兜底闸（`autoPushMinIntervalMs`）不进这一份
+   * ——界面不摆它，摆出来只会让人以为要配两个间隔。
+   */
+  autoPush?: { intervalMs: number }
 }
 
 /** 导入计划里的一条会话。 */
@@ -329,14 +337,39 @@ export async function importBundle(
   return readEventStream<ImportResponse>(response, onProgress, '导入')
 }
 
+/*
+ * `download()` 用到的那一小片 DOM 面，**就地写出来**而不是靠全局的 `document` / `HTMLAnchorElement`：
+ * 本文件同时被两套工程检查——`tsconfig.client.json` 带 DOM（真实那一套），而 `tsconfig.test.json` 是
+ * Host 侧的、**没有 DOM lib**（那份工程存在的意义就是"浏览器 API 出现在 Host 代码里"在类型层面不
+ * 成立）。测试要引本文件里的纯逻辑（`runAutoPushNow()` 之类）时就会把它拉进没有 DOM 的那一套，于是
+ * 那几行把整个测试工程卡住——而"从测试里 import api.ts"是本仓库既有的写法
+ * （见 test/browser-auto-push.test.ts）。
+ *
+ * 声明的是**用到的那几个成员**，不是一整套 DOM：`download()` 只做"造一个隐藏的 a、点一下、撤掉"。
+ * 真实浏览器里运行时拿到的当然就是那两样全局对象；这里只是让类型检查在两种 lib 下都说得通。
+ */
+interface DownloadAnchor {
+  href: string
+  download: string
+  style: { display: string }
+  click(): void
+  remove(): void
+}
+
+interface DownloadDocument {
+  createElement(tag: 'a'): DownloadAnchor
+  body: { appendChild(node: unknown): void }
+}
+
 /** 触发浏览器下载。 */
 export function download(result: ExportResult): void {
   const url = URL.createObjectURL(result.blob)
-  const anchor = document.createElement('a')
+  const doc = (globalThis as unknown as { document: DownloadDocument }).document
+  const anchor = doc.createElement('a')
   anchor.href = url
   anchor.download = result.filename
   anchor.style.display = 'none'
-  document.body.appendChild(anchor)
+  doc.body.appendChild(anchor)
   anchor.click()
   anchor.remove()
   URL.revokeObjectURL(url)
@@ -506,6 +539,59 @@ export async function testSync(): Promise<SyncTestResponse> {
   return asJson<SyncTestResponse>(
     await fetch(`${API_PREFIX}/sync?mode=test`, { headers: { accept: 'application/json' } }),
   )
+}
+
+// ---- 自动推送（只推不拉） ----
+
+/**
+ * `GET /auto-push` 的响应：**当场**跑一轮自动推送的结论。
+ *
+ * 与 `/sync` 的落地响应同形的那几个字段（`plan` / `pulled` / `pushed` / `bytesIn` / `bytesOut` /
+ * `problems` / `takesEffect` / `planSource`）只在**真跑了**的那一次才有；没跑（`ran: false`）时它
+ * 只报"是因为什么没跑"。`skip` 是机器可读的原因，句子在界面这一侧挑（见 `autoPushSentence()`）。
+ */
+export interface AutoPushResponse {
+  mode: 'auto-push'
+  remote: { url: string; machineId: string }
+  /** 这一轮真跑了没有。 */
+  ran: boolean
+  /** 没跑的原因：没开 / 节拍没到 / 上一轮还在跑 / 没有可推送的。 */
+  skip?: 'disabled' | 'interval' | 'busy' | 'idle'
+  /** 已经连续失败几次（成功清零）。界面据此在连续失败时说一句。 */
+  failures: number
+  /** 最近一次失败 / 问题的原话。 */
+  problem?: string
+  /** 真跑了才有（与 `/sync` 的落地响应同形）。 */
+  plan?: SyncPlan
+  pulled?: string[]
+  pushed?: Array<{ id: string; action: 'upload' | 'update' }>
+  bytesIn?: number
+  bytesOut?: number
+  problems?: string[]
+  takesEffect?: 'immediate' | 'restart-required'
+  planSource?: { kind: 'reused' } | { kind: 'recomputed'; reason: string }
+}
+
+/**
+ * 当场跑一轮自动推送：只把本机的会话推到远端，**一个字节都不拉**，也不动本机任何会话。
+ *
+ * 回的是事件流（与 `/sync` 同一套事件形状，宿主那侧标 `what: 'auto-push'`），所以进度能画在页面
+ * 横幅上。这条路上**没有预演 / 确认**那一步：它只推不改本机，按下去就是一次。
+ *
+ * 没配置同步、或这个宿主没有自动推送的节拍器时，宿主回一次性 JSON + 409，`readEventStream()` 按
+ * `content-type` 分流，异常里带的是宿主的原话。
+ *
+ * @param onProgress 每收到一条进度事件调一次。
+ * @returns 这一轮的结论；单条失败在 `problems` 里，不是抛错。
+ */
+export async function runAutoPushNow(
+  onProgress?: (event: ProgressEvent) => void,
+): Promise<AutoPushResponse> {
+  const response = await fetch(`${API_PREFIX}/auto-push`, {
+    method: 'GET',
+    headers: { accept: 'text/event-stream' },
+  })
+  return readEventStream<AutoPushResponse>(response, onProgress, '自动推送')
 }
 
 // ---- 会话管理：迁移 / 备份 / 回滚 ----

@@ -41,6 +41,8 @@ import * as React from 'react'
 import {
   applySync,
   fetchSyncPlan,
+  runAutoPushNow,
+  type AutoPushResponse,
   type ProgressEvent,
   type SessionSummary,
   type SyncPullEntry,
@@ -51,6 +53,7 @@ import { ConfirmDialog } from './ConfirmDialog.tsx'
 import { groupKey } from '../logic/groups.ts'
 import { WorkspaceIcon } from './icons.tsx'
 import type { SessionManagerKey, Translate } from '../logic/locales.ts'
+import { autoPushMinutes } from '../logic/syncForm.ts'
 import { projectLabel, sessionLabel, type SessionLabel } from '../logic/planRows.ts'
 import { ProgressBlock } from './ProgressBlock.tsx'
 import { formatBytes, sessionTags, type TagCopy } from './sessionList.tsx'
@@ -293,7 +296,32 @@ function SessionCell({
   )
 }
 
-/** 同步页。 */
+/**
+ * 自动推送那一枚「立即推送一次」的结论 → 一句话。
+ *
+ * 判定在宿主侧（`AutoPushOutcome`），这一层只挑句子：真跑了区分"推了 N 条"与"没有要推的"，没跑说清是
+ * 哪**一种**没跑——「等下一轮」与「上一轮还在跑」对用户是两件完全不同的事。认不出来的码**整条退回**
+ * 「没跑」那一句，不编一个原因：界面比宿主旧时说的是"没跑，但宿主没说清为什么"，而不是猜一个。
+ */
+function autoPushSentence(t: Translate, response: AutoPushResponse): string {
+  if (response.ran !== true) {
+    const reason =
+      response.skip === 'disabled' ||
+      response.skip === 'interval' ||
+      response.skip === 'busy' ||
+      response.skip === 'idle'
+        ? t(`sync.autoPush.skip.${response.skip}`)
+        : t('sync.autoPush.noReason')
+    return t('sync.autoPush.skipped', { reason })
+  }
+  const pushed = response.pushed?.length ?? 0
+  if (pushed === 0) return t('sync.autoPush.nothing')
+  return t('sync.autoPush.done', { pushed, bytesOut: formatBytes(response.bytesOut ?? 0) })
+}
+
+/**
+ * 同步页。
+ */
 export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactElement {
   /** 最近一次计划或结果：映射表的远端候选与弹窗正文都读它（关掉弹窗之后候选还得在）。 */
   const [sync, setSync] = React.useState<SyncResponse | null>(null)
@@ -311,6 +339,17 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
    * 索引，本机那边只比文件的时间与大小，很快）。前一条进度事件一到就换成真正的进度块。
    */
   const [progress, setProgress] = React.useState<ProgressEvent | null>(null)
+
+  /**
+   * 「立即推送一次」（`GET /auto-push`，只推不拉）走到哪儿了。
+   *
+   * `null` = 这一轮没在跑（还没按、或刚跑完）。它与 `busy` 分开：那条路**不改本机**，所以它既不该
+   * 禁用「同步」，也不该被「同步」禁用——两条路各自跑自己的。进度走页面横幅，不开确认弹窗：这条路上
+   * 没有"将要发生什么"要确认（见契约 §4.3）。
+   */
+  const [autoPushing, setAutoPushing] = React.useState(false)
+  /** 这一轮的进度事件（`autoPushing` 为真时才可能有；宿主从算计划那几段就开始报）。 */
+  const [autoProgress, setAutoProgress] = React.useState<ProgressEvent | null>(null)
 
   /**
    * 同步配置（宿主插件配置里的 `sync` 块）；`null` 或字段缺席都按"没配置"处理，只画一句说明。
@@ -394,6 +433,41 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
       },
     )
   }
+
+  /**
+   * 点「立即推送一次」：当场跑一轮自动推送（只推不拉）。
+   *
+   * 与「同步」的两处不同：**没有预演与确认**（这条路上不会有东西落到本机，所以没有"将要动什么"要
+   * 摆给人看），并且进度画在页面横幅上而不是弹窗里。逐条失败照旧从 `problems` 里取出来摆到横幅上；
+   * 连续失败那句由宿主随响应给的 `failures` 说（成功清零）。
+   */
+  const doAutoPush = (): void => {
+    if (autoPushing) return
+    setAutoPushing(true)
+    setAutoProgress(null)
+    setError(null)
+    setNotice(null)
+    setFailures([])
+    void runAutoPushNow(setAutoProgress).then(
+      (response) => {
+        setAutoPushing(false)
+        setAutoProgress(null)
+        setNotice(autoPushSentence(t, response))
+        setFailures(response.problems ?? [])
+        // 推的那一侧不改本机任何东西，所以这里**不 reload**（会话列表与工作区归属都不会变）；
+        // 只有宿主说连续失败，才把最近那次的原因也摆出来（它可能来自上一轮，这一轮横幅里没有）。
+        if (response.failures > 0 && response.problem !== undefined) {
+          setFailures((current) => [...current, t('sync.autoPush.problem', { problem: response.problem ?? '' })])
+        }
+      },
+      (cause) => {
+        setAutoPushing(false)
+        setAutoProgress(null)
+        setError(t('error.failed', { reason: reasonOf(cause) }))
+      },
+    )
+  }
+
 
   /**
    * 进度块下面补的那句话：只有真写盘的两段（拉取 / 推送）才有意义——预演阶段还没有东西可覆盖。
@@ -495,6 +569,18 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
         </p>
       ))}
 
+      {/*
+       * 「立即推送一次」那一条路上的进度：它走的是同一个 `ProgressBlock`（同一套事件），只是摆在页面
+       * 横幅的位置而不是弹窗正文里。摆在这一块的是"这一轮在做什么"，与上面那几条"上一次的结论"
+       * 分开——它们说的是两件事。
+       */}
+      {autoPushing && (
+        <div className="dsm-banner dsm-progressBanner">
+          <span className="dsm-hint">{t('sync.autoPush.running')}</span>
+          {autoProgress === null ? null : <ProgressBlock t={t} progress={autoProgress} note={syncNote(autoProgress)} />}
+        </div>
+      )}
+
       <div className="dsm-card">
         <div className="dsm-cardHead">
           <span className="dsm-cardTitle">{t('sync.title')}</span>
@@ -510,6 +596,18 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
               ? t('sync.offHint')
               : t('sync.hint', { mappings: syncInfo.mappings })}
         </p>
+        {/*
+         * 自动推送开着时在 `sync.hint` 之外**再补一句**：上面那句说的是"按一下会做什么"，这一句说的是
+         * "不按也会自己发生"——两件事，少一句用户就不知道这台机器在后台推东西。
+         *
+         * 判据取自宿主给的 `syncInfo.autoPush`（没有这个字段 = 没开），页面不自己从配置表单那两栏推：
+         * 那张表单画的是**草稿**，而这一句要说的是**现在生效的**那份配置。
+         */}
+        {syncInfo?.autoPush !== undefined && (
+          <p className="dsm-hint">
+            {t('sync.autoPush.enabled', { minutes: autoPushMinutes(syncInfo.autoPush.intervalMs) })}
+          </p>
+        )}
         {/* 主动作在卡片底部的动作行里（见 TransferPanel.tsx 的说明）。这一页没有把「同步」放进头部：
             下面那张设置卡有十来行字段，按钮在头部就成了"页面第一件事"、在末尾又得翻过整张表单，
             而它读的是**已保存**的配置——与那张表单没有阅读顺序上的先后。 */}
@@ -518,6 +616,19 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
             <button type="button" className="dsm-button dsm-primary" onClick={openSync} disabled={busy !== null}>
               {t('sync.action')}
             </button>
+            {/*
+             * 「立即推送一次」是同一行里那枚**非 primary** 的动作：主动作仍然只有「同步」一枚（结构与
+             * `test/client.test.mjs` 的 `primaryPlacements()` 钉着这一条）。
+             *
+             * 只在开关开着时才摆：没开时它在界面上等于一个"和按「同步」有什么不一样"的谜（宿主那侧回
+             * 的也会是"这个宿主没开自动推送"）。摆出来时它不禁用自己——这一轮跑着时再按一次由宿主的
+             * `busy` 闸挡住，界面这里只把字换成「正在自动推送…」。
+             */}
+            {syncInfo.autoPush !== undefined && (
+              <button type="button" className="dsm-button" onClick={doAutoPush} disabled={autoPushing}>
+                {autoPushing ? t('sync.autoPush.running') : t('sync.autoPush.now')}
+              </button>
+            )}
           </div>
         )}
       </div>

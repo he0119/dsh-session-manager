@@ -7,7 +7,16 @@
 //     hostRegistryPort()：能把活儿交给宿主自己做就即时生效，否则如实说要重启）。
 import type { Context } from '@deepseek-ai/cordis'
 
-import { DEFAULT_PASSWORD_REF, syncSection, type PluginConfig, type PluginConfigInput, type SyncConfig } from './config.ts'
+import {
+  DEFAULT_AUTO_PUSH_INTERVAL_MS,
+  DEFAULT_PASSWORD_REF,
+  autoPushSection,
+  syncSection,
+  type AutoPushConfig,
+  type PluginConfig,
+  type PluginConfigInput,
+  type SyncConfig,
+} from './config.ts'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync } from 'node:fs'
 import { homedir, hostname } from 'node:os'
@@ -25,7 +34,16 @@ import { projectKey } from './project-key.ts'
 import { projectionCacheDir } from './paths.ts'
 import { describeWarm } from './checkpoint-warm.ts'
 import { describeEffect, describePlannedEffect, effectOf } from './take-effect.ts'
-import { runSync, type SyncPlan, type SyncSettings } from './sync.ts'
+import {
+  createAutoPushTimer,
+  runAutoPush,
+  runSync,
+  type AutoPushOutcome,
+  type AutoPushTimer,
+  type SyncPlan,
+  type SyncDeps,
+  type SyncSettings,
+} from './sync.ts'
 import type { CheckpointWarmPort, DecodeAll, EffectMode, HostRegistryPort, RetitleOutcome, TitleRefreshOptions, TitleRefreshPort } from './types.ts'
 import { createSessionMetaResolver } from './visibility.ts'
 
@@ -45,6 +63,13 @@ export interface SyncInfo {
   machineId: string
   /** 映射条数；映射表本身在配置里，界面只报条数。 */
   mappings: number
+  /**
+   * 自动推送的当前设置；**没开就是缺席**（不是 `enabled: false`）。
+   *
+   * 界面靠它在卡片头下面补一句"自动推送已开：每 N 分钟一次"。间隔在这里报出来的理由：它是拍平之后的
+   * 真值（抬过下限、填缺省），而界面草稿里那一栏留空时显示的是灰字——灰字要写对，得有人算出这个数。
+   */
+  autoPush?: { intervalMs: number }
 }
 
 /** 解析后的默认路径。 */
@@ -143,10 +168,14 @@ export interface SyncRuntime {
 export function describeSyncConfig(config: PluginConfigInput = {}): SyncInfo | undefined {
   const sync = syncSection(config)
   if (sync === undefined || typeof sync.url !== 'string' || sync.url.trim() === '') return undefined
+  const auto = autoPushSection(sync)
   return {
     url: sync.url.trim(),
     machineId: machineIdOf(sync),
     mappings: Object.keys(sync.mapping ?? {}).length,
+    // 只有真的开着才报：界面靠这一项决定"自动推送已开"那句话摆不摆，报一个 `enabled: false` 会让
+    // 每个没开自动推送的人都多读一个字段。
+    ...(auto === undefined || !auto.enabled ? {} : { autoPush: { intervalMs: auto.intervalMs } }),
   }
 }
 
@@ -203,6 +232,9 @@ export async function syncRuntime(ctx: unknown, config: PluginConfigInput = {}):
   const sync = syncSection(config)
   if (sync === undefined || typeof sync.url !== 'string' || sync.url.trim() === '') return undefined
   const password = await resolveSecret(ctx, passwordRefOf(sync))
+  // 自动推送那一节跟着设置一起走：`runAutoPush()` 只读 `settings.autoPush`（它自己不去认配置），
+  // 于是"开没开 / 多久一次"只有一个来源，节拍器与那一轮本身读的是同一份值。
+  const autoPush = autoPushSection(sync)
   const settings: SyncSettings = {
     url: sync.url.trim().replace(/(.)\/+$/, '$1'),
     machineId: machineIdOf(sync),
@@ -210,6 +242,7 @@ export async function syncRuntime(ctx: unknown, config: PluginConfigInput = {}):
     ...(sync.username === undefined || sync.username === '' ? {} : { username: sync.username }),
     ...(password === undefined ? {} : { password }),
     ...(sync.timeoutMs === undefined ? {} : { timeoutMs: sync.timeoutMs }),
+    ...(autoPush === undefined ? {} : { autoPush }),
   }
   return {
     settings,
@@ -220,6 +253,94 @@ export async function syncRuntime(ctx: unknown, config: PluginConfigInput = {}):
       ...(settings.timeoutMs === undefined ? {} : { timeoutMs: settings.timeoutMs }),
     }),
   }
+}
+
+/**
+ * 自动推送的运行时：一份 `SyncDeps` 加一个节拍器。
+ *
+ * 与 `syncRuntime()` 分开而不是改它的返回值：那个函数是**界面与工具**那两条手动路共用的（它们要的
+ * 只是"远端 + 设置"），而自动推送多要一份依赖集合与一个定时器——把它塞进同一个返回值，两条手动路就
+ * 得各自忽略一半字段。
+ *
+ * 两处**必须**一起造的理由（也是这个函数存在的全部意义）：节拍器与那一轮读的配置、远端、库位置都得
+ * 是同一份。少一处就会出现"界面上改了 URL，自动推送还在打旧地址"这种最难查的不一致。
+ *
+ * 依赖里那几样可选服务按**探测**收（与 `src/index.ts` 里 web 端点那一套同一个口径）：这个宿主没有
+ * 投影缓存 / 工作区注册表时，自动推送照旧跑——它只推不拉，本来就用不到"备份"与"请宿主重折检查点"
+ * 那几样（它们挂在"真有东西落到本机"那条路上）。
+ *
+ * @param ctx 宿主上下文（解析密码引用、探测可选服务）。
+ * @param config 插件配置（活引用或普通对象）。
+ * @param paths 三个库位置。
+ * @param options.runOnRequest 这一次请求要不要真的跑一轮（界面那枚「立即推送一次」）。
+ *   默认只**记状态**：`tick()` 在没开自动推送时照样回一句话（用户手点一次不该被开关挡住）。
+ * @returns 运行时；没配 `sync.url` 时 undefined。
+ */
+export async function resolveAutoPushRuntime(
+  ctx: unknown,
+  config: PluginConfigInput = {},
+  paths: ResolvedPaths,
+): Promise<{ deps: SyncDeps; timer: AutoPushTimer } | undefined> {
+  const runtime = await syncRuntime(ctx, config)
+  if (runtime === undefined) return undefined
+  const deps: SyncDeps = {
+    dav: runtime.dav,
+    settings: runtime.settings,
+    sessionsRoot: paths.sessionsRoot,
+    registryPath: paths.registryPath,
+    backupRoot: paths.backupRoot,
+    decodeAll,
+    sessionMeta: createSessionMetaResolver({ cacheDir: projectionCacheDir(paths.registryPath) }),
+    liveSessionIds: () => liveSessionIds(ctx),
+    hostRegistry: () => hostRegistryPort(ctx),
+    hostCheckpoints: () => hostCheckpointPort(ctx),
+    // 这一趟是只推不拉；`what` 让界面能把后台那条流与用户手点的那条分开（两条可能同时在跑）。
+    pushOnly: true,
+    progressWhat: 'auto-push',
+  }
+  /*
+   * 节拍器持有"上一次真跑"与"连续失败几次"两份状态，所以它**每个宿主只造一个**（`src/index.ts` 造、
+   * 挂在插件生命周期上），不能每次请求现造——现造的话间隔闸永远算成"该跑了"，自动推送会变成
+   * "每次有人打开页面就跑一轮"。两份状态因此留在这个闭包里。
+   */
+  let lastRunAt: number | undefined
+  let failures = 0
+  /** 用户手点的那一次要绕过速度闸（见 `runAutoPush()` 的 `force`）。 */
+  let forceNext = false
+  /** 每个宿主只造一个节拍器，所以配置那三个读法每次现读（`sync` 是活引用，改完立即生效）。 */
+  const auto = (): AutoPushConfig | undefined => autoPushSection(syncSection(config))
+  const timer = createAutoPushTimer({
+    clock: {
+      enabled: () => auto()?.enabled === true,
+      // 报的是**生效值**：`autoPushSection()` 已经把用户填的那个数抬到下限、缺席就填缺省。
+      intervalMs: () => auto()?.intervalMs ?? DEFAULT_AUTO_PUSH_INTERVAL_MS,
+    },
+    run: async (options) => {
+      // 每次真跑之前重新解析一次设置：`sync` 是活引用，用户可能刚把 URL 或间隔改掉。
+      const fresh = await syncRuntime(ctx, config)
+      const force = forceNext
+      forceNext = false
+      const outcome = await runAutoPush(
+        { ...deps, ...(fresh === undefined ? {} : { dav: fresh.dav, settings: fresh.settings }) },
+        {
+          force,
+          ...(lastRunAt === undefined ? {} : { lastRunAt }),
+          failures,
+          ...(options?.onProgress === undefined ? {} : { onProgress: options.onProgress }),
+        },
+      )
+      if (outcome.ran) lastRunAt = outcome.finishedAt ?? Date.now()
+      failures = outcome.failures
+      return outcome
+    },
+  })
+  const tick = timer.tick
+  // 用户手点的那一次带上 `force`：节拍器把它转成"这一次不走速度闸"交给 `run()`。
+  timer.tick = (options = {}) => {
+    if (options.force === true) forceNext = true
+    return tick(options)
+  }
+  return { deps, timer }
 }
 
 /** 同步工具的返回值。 */

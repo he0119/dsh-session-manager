@@ -41,6 +41,8 @@ import {
   runSync,
   syncPrepared,
   testSyncConnection,
+  type AutoPushOutcome,
+  type AutoPushTimer,
   type SyncOutcome,
   type SyncPrepared,
   type SyncProgress,
@@ -159,6 +161,14 @@ export interface ApiDeps {
    * 准备工作），不该被列一次会话就触发。
    */
   syncInfo?: () => SyncInfo | undefined
+  /**
+   * 自动推送的节拍器（`src/index.ts` 造一个挂在插件生命周期上，见那里的说明）。
+   *
+   * 一个 thunk 而不是节拍器本身：它得先解析配置与凭据（异步），而 `apply()` 必须保持同步。返回的
+   * promise 在这些情形下解出 `undefined`——这个 profile 没配 `sync.url`、或者造的时候出错了——界面
+   * 据此说明"这个宿主没有自动推送"，而不是点一个没反应的按钮。
+   */
+  autoPush?: () => Promise<AutoPushTimer | undefined>
   /**
    * 认一批目录的项目身份（git remote，见 repo.ts）——界面据此把"本机路径"那一格换成`host/owner/repo`。
    *
@@ -521,6 +531,52 @@ function assertTargetCwd(value: unknown): string {
 function fileName(count: number, at: Date): string {
   const stamp = at.toISOString().replace(/[:.]/g, '-').replace(/Z$/, '')
   return `dsh-sessions-${count}-${stamp}.dshsess`
+}
+
+/**
+ * 自动推送那一轮的响应体。
+ *
+ * 真跑了的时候把那份 `SyncOutcome` **摊平**进来（`plan` / `pulled` / `pushed` / `bytesIn` / `bytesOut`
+ * / `problems` / `planSource` / `takesEffect`），形状与 `/sync` 落地那次逐字段同源——界面因此能复用
+ * 同一套解析，不必为"后台跑的那一轮"再写一遍。没跑（`skip`）时那几项一个都不给：那条路上没有计划、
+ * 没有结果，给一份空的只会让界面去猜哪个字段是真的。
+ *
+ * @param outcome 这一轮的结论。
+ * @param info 同步配置里的非敏感字段（远端地址与机器名）；界面拿来在横幅上说"推到哪儿了"。
+ * @returns 响应体。
+ */
+function autoPushPayload(outcome: AutoPushOutcome, info: SyncInfo | undefined): Record<string, unknown> {
+  const base = {
+    mode: 'auto-push' as const,
+    remote: { url: info?.url ?? '', machineId: info?.machineId ?? '' },
+    ran: outcome.ran,
+    ...(outcome.skip === undefined ? {} : { skip: outcome.skip }),
+    failures: outcome.failures,
+    ...(outcome.problem === undefined ? {} : { problem: outcome.problem }),
+    ...(outcome.startedAt === undefined ? {} : { startedAt: outcome.startedAt }),
+    ...(outcome.finishedAt === undefined ? {} : { finishedAt: outcome.finishedAt }),
+  }
+  const applied = outcome.outcome
+  if (applied === undefined) return base
+  return {
+    ...base,
+    plan: applied.plan,
+    pulled: applied.pulled,
+    replaced: applied.replaced,
+    pushed: applied.pushed,
+    bytesIn: applied.bytesIn,
+    bytesOut: applied.bytesOut,
+    registryWritten: applied.registryWritten,
+    indexWritten: applied.indexWritten,
+    problems: applied.problems,
+    ...(applied.planSource === undefined ? {} : { planSource: applied.planSource }),
+    /*
+     * 只推不拉这条路上**永远不会**需要重启：它不改本机任何会话，注册表一个字节都没动。写死 `immediate`
+     * 而不是走 `effectOf()`——那个探测问的是"宿主能不能接住这次的注册表改动"，而这次根本没有那种改动，
+     * 探出来的结果只会是一句假警告（与迁移那篇决策同一条口径：只在坏消息时说话）。
+     */
+    takesEffect: 'immediate' as const,
+  }
 }
 
 /** 界面用的全部 handler，键是 `METHOD 路径后缀`；方法可以写成 `GET|POST`（`/sync` 两种都要）。 */
@@ -1045,8 +1101,39 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
     res.end()
   }
 
-  const removeDeps: RemoveDeps = {
-    sessionsRoot: paths.sessionsRoot,
+  /**
+   * 自动推送：`GET /auto-push` 当场跑一轮（**只推不拉**），边跑边报进度。
+   *
+   * 为什么只有一个方向、没有 `mode=apply` 那种分岔：自动推送这条路**没有确认那一步**——它不改本机
+   * 任何东西（见 [sync.ts](./sync.ts) 的 `runAutoPush()`），所以"预演"与"落地"在它这里本来就是同一件
+   * 事。界面上那枚「立即推送一次」点下去就是真跑，进度画在页面横幅上。
+   *
+   * 为什么用 `force`：用户手点的这一次不该被"距上次才过了 20 秒"挡住（那个闸是给节拍器兜底的，
+   * 见 `runAutoPush()`）。绕开它只影响这一次，不会把闸门往后推。
+   *
+   * 流已经开始的错只能靠事件说（那时 HTTP 状态早就是 200 了）；没配同步 / 没有节拍器这两件事发生在
+   * 写头之前，仍然是 JSON + 409。
+   */
+  const autoPushNow = async (_req: IncomingMessage, res: ServerResponse): Promise<void> => {
+    const timer = await deps.autoPush?.()
+    if (timer === undefined) {
+      sendJson(res, 409, {
+        error: '这个宿主没有自动推送的节拍器（没有配置 WebDAV 同步，或它启动失败）',
+      })
+      return
+    }
+    sendEventStream(res)
+    try {
+      const onProgress = (progress: SyncProgress): void => sendEvent(res, { type: 'progress', progress })
+      const outcome = await timer.tick({ force: true, onProgress })
+      sendEvent(res, { type: 'result', result: autoPushPayload(outcome, deps.syncInfo?.()) })
+    } catch (error) {
+      sendEvent(res, { type: 'error', error: error instanceof Error ? error.message : String(error) })
+    }
+    res.end()
+  }
+
+  const removeDeps: RemoveDeps = {    sessionsRoot: paths.sessionsRoot,
     registryPath: paths.registryPath,
     backupRoot: paths.backupRoot,
     decodeAll,
@@ -1286,6 +1373,8 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
     'POST /import': importSessions,
     // 一个资源两种方法写一条：宿主的 `register()` 对重复的 (kind, path) 直接抛错。
     'GET|POST /sync': syncSessions,
+    // 自动推送：只推不拉，没有确认那一步（点一次就是真跑），所以只有一个方向。
+    'GET /auto-push': autoPushNow,
     'GET /backups': backups,
     'POST /migrate': migrate,
     'POST /rollback': rollbackBackup,

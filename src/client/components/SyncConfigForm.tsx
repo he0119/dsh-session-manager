@@ -1,5 +1,5 @@
 /**
- * 「同步设置」表单：URL、机器名、账号、密码、超时与映射表，直接改 profile 里那一节。
+ * 「同步设置」表单：URL、机器名、账号、密码、超时、自动推送与映射表，直接改 profile 里那一节。
  *
  * 放在「同步」分页的卡片里，与「同步」挨着——改完 URL 就能立刻同步一次（先看弹窗里那份计划），不必跳到别处。
  * 读写面在 [syncForm.ts](./syncForm.ts)（宿主的设置接缝），密码的写入面在
@@ -31,6 +31,7 @@ import { SettingsSecretField } from '@deepseek-ai/dsh-client-ui-primitives'
 import { testSync, type SyncTestResponse } from '../api.ts'
 import { getCredentialsApi, type CredentialInfo } from '../credentials.ts'
 import {
+  DEFAULT_AUTO_PUSH_INTERVAL_MS,
   draftFrom,
   draftProblems,
   getSyncConfigApi,
@@ -308,6 +309,34 @@ export function SyncConfigForm({
           placeholder="30000"
         />
       </div>
+      {/*
+       * 自动推送：一个勾选框 + 一个间隔数字输入。两栏摆在「超时」之后——它们与上面那一行同属"这条
+       * 通道怎么走"。
+       *
+       * 控件用原生元素（本仓手写控件的口径，见 AGENTS.md）：`.dsm-check` 与迁移页那个「包含产物」
+       * 开关是同一对类，间隔那一栏复用上面那个 `Field`（连灰字在内都是同一套画法）。间隔那一栏**不
+       * 跟着勾选态禁用**：先填间隔再勾选、或先取消勾选再改数，都是平常写法；禁用它只会让人以为那一栏
+       * 坏了（真正生效与否由宿主按 `autoPush` 判）。
+       */}
+      <label className="dsm-check">
+        <input
+          type="checkbox"
+          checked={view.autoPush}
+          disabled={!snapshot.writable}
+          onChange={(event) => edit({ autoPush: event.target.checked })}
+        />
+        <span>{t('sync.field.autoPush')}</span>
+      </label>
+      <p className="dsm-hint">{t('sync.field.autoPushHint')}</p>
+      <div className="dsm-syncRow">
+        <Field
+          label={t('sync.field.autoPushInterval')}
+          hint={t('sync.field.autoPushIntervalHint')}
+          value={view.autoPushIntervalMs}
+          onChange={(autoPushIntervalMs) => edit({ autoPushIntervalMs })}
+          placeholder={String(DEFAULT_AUTO_PUSH_INTERVAL_MS)}
+        />
+      </div>
       <Field
         label={t('sync.field.user')}
         hint={t('sync.field.userHint')}
@@ -386,7 +415,9 @@ export function SyncConfigForm({
         {!snapshot.writable && <span className="dsm-warn">{t('sync.form.readOnly')}</span>}
         {problems.map((problem) => (
           <span key={problem.code} className="dsm-warn">
-            {problem.code === 'mapping' ? problemText(problem.problem, t) : t('sync.field.timeoutInvalid')}
+            {problem.code === 'mapping'
+              ? problemText(problem.problem, t)
+              : t(problem.code === 'timeoutNotPositive' ? 'sync.field.timeoutInvalid' : 'sync.field.autoPushIntervalInvalid')}
           </span>
         ))}
         {failed && <span className="dsm-warn">{t('sync.form.saveFailed')}</span>}

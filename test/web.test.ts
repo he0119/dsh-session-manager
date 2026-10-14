@@ -14,7 +14,7 @@ import { projectKey } from '../src/project-key.ts'
 import { readRegistry, validateRegistry, writeRegistryAtomic } from '../src/registry.ts'
 import { createDavClient } from '../src/dav.ts'
 import { SYNC_NAMESPACE_DIR } from '../src/sync.ts'
-import type { DecodeAll, SessionHeader, WorkspaceRegistryState } from '../src/types.ts'
+import type { DecodeAll, ProgressEvent, SessionHeader, WorkspaceRegistryState } from '../src/types.ts'
 import { API_PREFIX, createApiHandlers, registerWebRoutes, type ApiDeps, type WebRouteLike } from '../src/web.ts'
 import { encodeRawFrame } from '../src/zstd-frame.ts'
 import { putRemoteSession, startDavFixture } from './dav-fixture.ts'
@@ -756,7 +756,7 @@ test('POST /import：包坏了、目标目录不合法、库已存在同 id，�
   assert.match(String(payload(conflictApply.captured)['error']), /没有可导入的会话/)
 })
 
-test('registerWebRoutes：注册十二条精确路由，方法不对回 405', async () => {
+test('registerWebRoutes：注册十三条精确路由，方法不对回 405', async () => {
   const sandbox = makeSandbox('web-routes')
   const routes: WebRouteLike[] = []
   const dispose = registerWebRoutes(
@@ -773,6 +773,8 @@ test('registerWebRoutes：注册十二条精确路由，方法不对回 405', as
       `exact ${API_PREFIX}/import`,
       // `/sync` 两种方法共用一条（宿主的 register 对重复 path 会抛错）
       `exact ${API_PREFIX}/sync`,
+      // 自动推送只有一个方向（点一次就是真跑），所以是 GET 一条。
+      `exact ${API_PREFIX}/auto-push`,
       `exact ${API_PREFIX}/backups`,
       `exact ${API_PREFIX}/migrate`,
       `exact ${API_PREFIX}/rollback`,
@@ -2419,4 +2421,159 @@ test('GET /transcript：把一条会话的日志折成完整时间线（会话�
   assert.equal(plain.status, 200)
   assert.equal(payload(plain)['totalEvents'], 2)
   assert.equal((payload(plain)['session'] as Record<string, unknown>)['title'], '兜底名称')
+})
+
+// ── 自动推送端点（只推不拉，点一次就是真跑）────────────────────────────────────
+
+/** 一个假的节拍器：记下被怎么调用，并回一个给定的结论。 */
+function fakeTimer(outcome: Record<string, unknown>): {
+  timer: NonNullable<Awaited<ReturnType<NonNullable<Parameters<typeof createApiHandlers>[0]['autoPush']>>>>
+  calls: Array<{ force?: boolean; onProgress?: unknown }>
+} {
+  const calls: Array<{ force?: boolean; onProgress?: unknown }> = []
+  const timer = {
+    enabled: () => true,
+    intervalMs: () => 300_000,
+    async tick(options?: { force?: boolean; onProgress?: (event: ProgressEvent) => void }) {
+      calls.push(options ?? {})
+      options?.onProgress?.({ phase: 'push', done: 0, total: 1, id: 'session-a', label: 'a' })
+      return outcome as never
+    },
+    last: () => ({ enabled: true, intervalMs: 300_000, minIntervalMs: 60_000 }),
+    note: () => undefined,
+    stop: () => undefined,
+  }
+  return { timer, calls }
+}
+
+test('GET /auto-push：这个宿主没有节拍器时 409，且没有一个字节被写', async () => {
+  const sandbox = makeSandbox('web-auto-push-off')
+  writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000)
+  const handlers = createApiHandlers(deps(sandbox))
+  const { res, captured } = fakeRes()
+  await handlers['GET /auto-push']!(fakeReq('GET', `${API_PREFIX}/auto-push`), res)
+  assert.equal(captured.status, 409)
+  assert.match(String(payload(captured)['error']), /自动推送的节拍器/)
+  // 没配置同步时没有任何东西该被写。
+  assert.deepEqual(readRegistry(sandbox.registryPath).tables.workspaces['ws-a']?.sessionIds, ['session-a'])
+})
+
+test('GET /auto-push：当场跑一轮，force 绕开速度闸，结果摊平着回来', async () => {
+  const sandbox = makeSandbox('web-auto-push-run')
+  writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000)
+  const { timer, calls } = fakeTimer({
+    ran: true,
+    failures: 0,
+    outcome: {
+      plan: { ok: true, problems: [], pull: [], push: [], pullIds: [], pushIds: ['session-a'], blank: [], bytesIn: 0, bytesOut: 10, localCount: 1, remoteCount: 0, machines: [] },
+      applied: true,
+      pulled: [],
+      replaced: [],
+      pushed: [{ id: 'session-a', action: 'upload' }],
+      bytesIn: 0,
+      bytesOut: 10,
+      registryWritten: false,
+      indexWritten: true,
+      problems: [],
+    },
+  })
+  const handlers = createApiHandlers(
+    deps(sandbox, {
+      autoPush: async () => timer,
+      syncInfo: () => ({ url: 'https://dav.example/', machineId: 'robot-a', mappings: 0, autoPush: { intervalMs: 300_000 } }),
+    }),
+  )
+  const { res, captured } = fakeRes()
+  await handlers['GET /auto-push']!(fakeReq('GET', `${API_PREFIX}/auto-push`), res)
+
+  const result = payload(captured)
+  assert.equal(result['mode'], 'auto-push')
+  assert.deepEqual(result['remote'], { url: 'https://dav.example/', machineId: 'robot-a' })
+  assert.equal(result['ran'], true)
+  assert.equal(result['failures'], 0)
+  // 那份 SyncOutcome 是**摊平**进来的：界面因此能复用 /sync 那一套解析。
+  assert.deepEqual(result['pushed'], [{ id: 'session-a', action: 'upload' }])
+  assert.deepEqual(result['pulled'], [], '只推这条路上拉取永远是空的')
+  assert.equal(result['bytesIn'], 0)
+  assert.equal(result['bytesOut'], 10)
+  assert.equal(result['planSource'], undefined, '自动推送没有"预演那份"，所以没有 planSource')
+  // 只推不改本机 → 永远 immediate（不能走 effectOf 探出一句假警告）。
+  assert.equal(result['takesEffect'], 'immediate')
+  assert.ok(result['plan'] !== undefined, '计划一起带回来（界面按需显示）')
+
+  // 用户手点的那一次必须 force：它不该被"距上次才过了 20 秒"挡住。
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0]?.force, true)
+  assert.equal(typeof calls[0]?.onProgress, 'function', '进度要接上（画在页面横幅上）')
+
+  /*
+   * `what` 那一项由宿主侧的 `runAutoPush()` 盖（它知道自己在报哪条流），端点这一层只是把节拍器交出来
+   * 的事件原样转成 SSE——所以这里核"转过去了"，`what` 的值由 test/auto-push.test.ts 钉。
+   */
+  const progress = progressOf(captured)
+  assert.ok(progress.length > 0, '节拍器报的进度要转成事件')
+  assert.equal(progress[0]?.['phase'], 'push')
+  assert.equal(progress[0]?.['id'], 'session-a')
+})
+
+test('GET /auto-push：没跑（skip）时不带计划也不带结果，只回一句话的码', async () => {
+  const sandbox = makeSandbox('web-auto-push-skip')
+  const { timer } = fakeTimer({ ran: false, skip: 'interval', failures: 0 })
+  const handlers = createApiHandlers(
+    deps(sandbox, {
+      autoPush: async () => timer,
+      syncInfo: () => ({ url: 'https://dav.example/', machineId: 'robot-a', mappings: 0 }),
+    }),
+  )
+  const { res, captured } = fakeRes()
+  await handlers['GET /auto-push']!(fakeReq('GET', `${API_PREFIX}/auto-push`), res)
+
+  const result = payload(captured)
+  assert.equal(result['mode'], 'auto-push')
+  assert.equal(result['ran'], false)
+  assert.equal(result['skip'], 'interval', '跳过原因是机器可读的码（句子在浏览器半侧）')
+  assert.equal(result['plan'], undefined, '没跑就没有计划可给')
+  assert.equal(result['pushed'], undefined, '也没结果——给一份空的只会让界面去猜哪个字段是真的')
+  assert.equal(result['takesEffect'], undefined)
+})
+
+test('GET /auto-push：节拍器抛错时靠事件说，HTTP 状态早就是 200', async () => {
+  const sandbox = makeSandbox('web-auto-push-fail')
+  const timer = {
+    enabled: () => true,
+    intervalMs: () => 300_000,
+    tick: async () => {
+      throw new Error('远端不认这套凭据')
+    },
+    last: () => ({ enabled: true, intervalMs: 300_000, minIntervalMs: 60_000 }),
+    note: () => undefined,
+    stop: () => undefined,
+  }
+  const handlers = createApiHandlers(deps(sandbox, { autoPush: async () => timer as never }))
+  const { res, captured } = fakeRes()
+  await handlers['GET /auto-push']!(fakeReq('GET', `${API_PREFIX}/auto-push`), res)
+  // 流一旦开始，状态就已经发出去了；错误只能靠一条 error 事件说。
+  assert.equal(captured.status, 200)
+  const error = events(captured).find((event) => event['type'] === 'error')
+  assert.ok(error !== undefined, '要以一条 error 收尾')
+  assert.match(String(error['error']), /远端不认这套凭据/)
+})
+
+test('GET /auto-push：方法检查在路由那一层（POST 回 405）', async () => {
+  // 方法白名单由 `registerWebRoutes()` 把关，不在 handler 表里——所以这条要真注册一次路由。
+  const sandbox = makeSandbox('web-auto-push-405')
+  const { timer } = fakeTimer({ ran: false, skip: 'idle', failures: 0 })
+  const routes: WebRouteLike[] = []
+  registerWebRoutes(
+    { register: (route) => { routes.push(route); return () => {} } },
+    deps(sandbox, { autoPush: async () => timer }),
+  )
+  const route = routes.find((item) => item.path.endsWith('/auto-push'))!
+  const { res, captured } = fakeRes()
+  await route.handler(fakeReq('POST', `${API_PREFIX}/auto-push`), res)
+  assert.equal(captured.status, 405)
+  // GET 是它认的那一个（上面几条已经验过行为，这里只核方法位）。
+  const ok = fakeRes()
+  await route.handler(fakeReq('GET', `${API_PREFIX}/auto-push`), ok.res)
+  assert.notEqual(ok.captured.status, 405)
 })

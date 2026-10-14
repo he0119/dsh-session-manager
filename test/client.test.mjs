@@ -2869,10 +2869,21 @@ test('客户端产物：同步设置里的「测试连接」——按钮、只�
     const mounted = mount({ state, panel: 'sync', configForms: { get: () => controller }, credentials, ...extra })
     return { mounted, text: strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject())) }
   }
-  // 假钩子不会点按钮，所以"结论行"由 `nulls` 按顺序种进去：第一个种子被骨架的会话库状态（`state`）
-  // 吃掉，接着七个分别是骨架的错误，同步页的 sync / 弹窗开关 / busy / 错误 / 通知 / 进度，第八个
-  // 才是这张表单的测试结论（顺序见 ManagerPanel / SyncPanel / SyncConfigForm 里 useState 的先后）。
-  const outcomeOf = (outcome) => render({ nulls: [null, null, null, null, null, null, null, outcome] })
+  /*
+   * 假钩子不会点按钮，所以"结论行"由 `nulls` 按顺序种进去。`nulls` 只发到**初始值是 null** 的那些
+   * 状态位（骨架的 `state` 已经被 `firstNull` 吃掉一个），按 ManagerPanel → SyncPanel →
+   * SyncConfigForm 的渲染顺序数：
+   *
+   *   1. 骨架的 `error`（`state` 在外）
+   *   2..7. 同步页的 sync / dialog / busy / error / notice / progress
+   *   8. 同步页自动推送那条进度（`autoProgress`）
+   *   9. 这张表单的测试结论（`testResult`）
+   *
+   * 所以种子是"八个 null + 结论"。**动这三个组件里 useState 的个数或先后就要改这一行**——种偏了
+   * 不会报错，只会让结论行读到一个别的状态值，然后在下一条断言上以"没测过"的样子失败。
+   */
+  const outcomeOf = (outcome) =>
+    render({ nulls: [null, null, null, null, null, null, null, null, outcome] })
 
   const fresh = render()
   assert.ok(fresh.text.some((item) => item === 'sync.test.action'), '有「测试连接」按钮')

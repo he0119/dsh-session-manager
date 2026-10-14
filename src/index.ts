@@ -22,12 +22,14 @@ import {
   directoryPickerKind,
   liveSessionIds,
   registerTools,
+  resolveAutoPushRuntime,
   resolvePaths,
   syncRuntime,
   hostCheckpointPort,
   hostRegistryPort,
   titleRefreshPort,
 } from './tools.ts'
+import type { AutoPushTimer } from './sync.ts'
 import { API_PREFIX, registerWebRoutes, type WebServerLike } from './web.ts'
 
 // 配置 schema 必须从入口导出：Loader 拿它校验 profile 里那一节，设置接缝拿它在插件管理器里生成
@@ -87,6 +89,35 @@ export function apply(ctx: Context, config: PluginConfigInput = {}): () => void 
     `dsh-session-manager 已就绪：sessions=${paths.sessionsRoot} registry=${paths.registryPath} backups=${paths.backupRoot}`,
   )
 
+  /*
+   * 自动推送的节拍器：**每个宿主只造一个**，挂在插件生命周期上。
+   *
+   * 为什么不在每个请求里现造：节拍器手里有两份跨轮的状态（"上一次真跑是什么时候"与"连续失败几次"），
+   * 现造的话间隔闸永远算成"该跑了"——自动推送会退化成"每次有人打开页面就跑一轮"（那既不是自动，也
+   * 比自动更吵）。造它要解析配置与凭据，所以是异步的；`apply()` 必须保持同步（宿主会卸载 async apply
+   * 里 await 之后注册的东西），于是这里起一个自持的 promise，端点按需 await 它——`undefined` 表示
+   * 这个 profile 没配同步，界面据此说明而不是点一个没反应的按钮。
+   *
+   * 配置改了不必重启：节拍器每次醒来现读一遍配置（见 `createAutoPushTimer()`）。
+   */
+  const autoPushPromise: Promise<AutoPushTimer | undefined> = resolveAutoPushRuntime(ctx, config, paths).then(
+    (resolved) => {
+      if (resolved === undefined) return undefined
+      info(
+        `dsh-session-manager 自动推送已就绪：${resolved.timer.enabled() ? `每 ${resolved.timer.intervalMs()} 毫秒一轮` : '当前关闭'}（只推不拉）`,
+      )
+      return resolved.timer
+    },
+    (error: unknown) => {
+      // 造不起来（凭据服务抛了等）不该拖住整个插件：工具与界面照旧，只是没有后台节拍。
+      info(`dsh-session-manager 自动推送未能启动：${error instanceof Error ? error.message : String(error)}`)
+      return undefined
+    },
+  )
+  ctx.effect(() => () => {
+    void autoPushPromise.then((timer) => timer?.stop())
+  }, 'dsh-session-manager: auto-push timer')
+
   // Web 端点用 `ctx.inject` 开一个子 fiber 去等 webServer，而不是在 apply 里直接读 `ctx.webServer`：
   // 一是属性读取要求本 fiber 声明过 inject（那会把插件变成硬依赖），二是子 fiber 顺带解决顺序问题
   // ——webServer 由另一个 bundle 提供，晚于本插件到位时路由会在它到位后补挂，而不是永远缺席。
@@ -120,6 +151,8 @@ export function apply(ctx: Context, config: PluginConfigInput = {}): () => void 
       // WebDAV 同步：运行时按需造（每次请求重新解析密码引用），/state 只看非敏感的那几个字段。
       sync: () => syncRuntime(ctx, config),
       syncInfo: () => describeSyncConfig(config),
+      // 自动推送的节拍器（见上面那段）：界面靠它当场跑一轮、也靠它报"后台在跑吗"。
+      autoPush: () => autoPushPromise,
       // 界面把"本机路径"那一格换成项目身份（git remote）时读它；找不到身份就退回路径。
       repos,
     })
