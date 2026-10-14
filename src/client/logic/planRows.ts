@@ -196,6 +196,16 @@ export interface PathRow extends ProjectSubject {
   title?: string
   /** 库里这个目录下的会话条数（有会话可数的候选才有）。 */
   count?: number
+  /**
+   * 盘上已经没有这个目录了（**只有目标候选能知道**这件事：宿主按工作区报 `exists`，见 `src/web.ts`
+   * 的 `summarizeWorkspaces()`）。
+   *
+   * 目标候选来自注册表，而注册表里的登记不保证盘上还有——项目文件夹被删掉、目录改了名之后，那条
+   * 登记照旧在。这种候选**列出来**（用户要能看见"我登记过的那块工作区还在名单里"）但**点不动**：
+   * 选它只会撞上宿主那句「目标工作区目录不存在」（`assertTargetCwd()`），那正是"点了一行必然报错"。
+   * 判据与文案见 `candidateRow()`。
+   */
+  missing?: boolean
 }
 
 /** 候选面板里一行怎么摆：名字一行、路径与条数一行，外加整行的悬浮提示。 */
@@ -204,6 +214,8 @@ export interface CandidateRow {
   readonly name: string
   /** 第二行：本机路径与条数（有哪个写哪个，都没有时缺省）。 */
   readonly meta?: string
+  /** 名字后面那枚标签：这一行指向的目录盘上已经没有了（`PathRow.missing` 为真时才有）。 */
+  readonly missing?: string
   /** 悬浮提示：项目身份（有的话）与本机路径各一行，再加条数。 */
   readonly tip: string
 }
@@ -216,6 +228,9 @@ export interface CandidateRow {
  * 一枚按钮、两行文字，于是**名字在第一行**（用户认的是它：工作区名称，没有标题才退到项目名），路径与
  * 条数退到第二行的小字里，完整的一串留给悬浮提示。
  *
+ * 盘上已经没有的目录（`PathRow.missing`）多一枚标签与一句悬浮提示：这一行仍在名单里（它是用户登记过的
+ * 工作区），但点下去只会撞上宿主那句「目标工作区目录不存在」，所以标签先把这件事说在点之前。
+ *
  * @param row 一行候选（`directoryTargetRows()` 造出来的那些）。
  * @param t 翻译（只用来拼"N 条会话"）。
  * @returns 两行文字与悬浮提示。
@@ -224,10 +239,15 @@ export function candidateRow(row: PathRow, t: Translate): CandidateRow {
   const label = projectLabel(row, t)
   const count = row.count === undefined ? undefined : t('list.sessionsInDir', { count: row.count })
   const meta = [row.path, count].filter((part): part is string => part !== undefined && part !== '')
+  // 盘上已经没有的目录：名字后面挂一枚标签，悬浮提示里把"为什么点不动"说全（标签上一个字都不解释）。
+  const missing = row.missing === true ? t('pathField.missing') : undefined
   return {
     name: label.name,
     ...(meta.length === 0 ? {} : { meta: meta.join(' · ') }),
-    tip: [label.tip, count].filter((line): line is string => line !== undefined).join('\n'),
+    ...(missing === undefined ? {} : { missing }),
+    tip: [label.tip, count, missing === undefined ? undefined : t('pathField.missingTip')]
+      .filter((line): line is string => line !== undefined)
+      .join('\n'),
   }
 }
 
@@ -262,6 +282,9 @@ export function filterPathRows(rows: readonly PathRow[], query: string): PathRow
  * 「迁移」的目标目录与「导入」的落地目录问的是同一件事——"落到哪个已登记的目录"，所以两处共用这一份
  * 候选：候选多一份少一份都会变成"换个分页就换个说法"。
  *
+ * 盘上已经没有的那些也照旧列出来（`missing: true`，面板里挂一枚标签、点不动）：它们是用户登记过的
+ * 工作区，"名单里怎么少了一块"比"多一条点不动的候选"更难查。
+ *
  * 与源候选有三处不同：**不带条数**（目标是"要落到哪儿"，不是"这批会话从哪儿来"，条数是来源那一侧的
  * 事实）、候选只来自注册表（库里真有会话的目录是**来源**的候选——目标必须已经存在且已登记，用户要落到
  * 别处时走「手输路径」或「浏览文件系统…」）、以及源那边会列出已被删掉的目录而目标不会。
@@ -271,7 +294,7 @@ export function filterPathRows(rows: readonly PathRow[], query: string): PathRow
  * @param current 当前值；缺省空串 = 还没选。
  */
 export function directoryTargetRows(
-  workspaces: ReadonlyArray<{ readonly path: string; readonly title?: string }>,
+  workspaces: ReadonlyArray<{ readonly path: string; readonly title?: string; readonly exists?: boolean }>,
   repos: Readonly<Record<string, string>> = {},
   current = '',
 ): PathRow[] {
@@ -284,6 +307,8 @@ export function directoryTargetRows(
       path: workspace.path,
       title: workspace.title,
       ...(repos[workspace.path] === undefined ? {} : { repo: repos[workspace.path] }),
+      // 宿主说盘上没有了才标：`exists` 缺席（旧宿主 / 夹具）按"还在"处理，不在界面上替宿主猜。
+      ...(workspace.exists === false ? { missing: true } : {}),
     })
   }
   // 当前值补一行（见 CandidatePanel 的说明）：值可能是「浏览文件系统…」选回来的、注册表没登记的目录，

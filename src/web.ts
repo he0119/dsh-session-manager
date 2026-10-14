@@ -15,6 +15,7 @@ import { join } from 'node:path'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 
 import { accountedOwners } from './accounting.ts'
+import { canonicalDirIfExists } from './canonical-path.ts'
 import { scanAll, type DiscoveredSession } from './discovery.ts'
 import {
   assertBackupDir,
@@ -221,6 +222,16 @@ interface WorkspaceSummary {
   title: string
   /** 宿主报给界面的那一份成员（**认领**的那些，见 accounting.ts），不是注册表里的登记原样。 */
   sessionIds: string[]
+  /**
+   * 这个目录在盘上还在不在（解析得出来、而且是个目录，判据用 `canonicalDirIfExists()`）。
+   *
+   * 注册表里的登记不保证盘上还有：项目文件夹被删掉、目录改了名之后，那条登记照旧在，"这块工作区
+   * 是搬空了还是人没了"因此不能只看注册表。界面拿它做一件事——把目标候选里**已经不存在的那些**
+   * 标出来（见 `planRows.directoryTargetRows` 与 `CandidatePanel`）：不标的话，候选列表里
+   * "盘上还在的"与"只剩一条登记的"长得一模一样，点下去只会撞上 `assertTargetCwd()` 那句
+   * 「目标工作区目录不存在」。
+   */
+  exists: boolean
 }
 
 /** 读请求体。 */
@@ -466,6 +477,9 @@ function summarizeWorkspaces(
         path: record.path,
         title: record.title,
         sessionIds: record.sessionIds.filter((sessionId) => accounted.get(sessionId) === id),
+        // 一次 stat（不存在时是一次失败的 realpath），工作区一多也只是十几下；它挡的是"点了一行必然
+        // 报错的候选"。
+        exists: canonicalDirIfExists(record.path) !== undefined,
       },
     ]
   })

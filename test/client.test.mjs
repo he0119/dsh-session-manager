@@ -2217,6 +2217,36 @@ test('客户端产物：迁移弹窗里的目标目录是那枚值控件，点�
   )
 })
 
+test('客户端产物：候选里盘上已经没有的目录挂一枚标签，并且点不动', { skip }, () => {
+  // 注册表里的登记不保证盘上还有（项目文件夹被删掉、目录改了名之后那条登记照旧在）：这种候选照旧
+  // **列出来**（"我登记过的那块工作区还在名单里"），但点下去只会撞上宿主那句「目标工作区目录不存在」
+  // （`assertTargetCwd()`）——所以在点之前就把它标出来、置灰。`exists` 缺席（旧宿主 / 夹具）按"还在"
+  // 处理，不在界面上替宿主猜（见 planRows.directoryTargetRows）。
+  const state = {
+    ...MIGRATE_FIELD_STATE,
+    workspaces: [
+      { id: 'w1', path: '/home/u/dev/alpha', title: '工作区甲', sessionIds: ['a-1'], exists: true },
+      { id: 'w2', path: '/home/u/dev/gone', title: '删掉的工作区', sessionIds: [], exists: false },
+    ],
+  }
+  const mounted = mount({
+    state,
+    panel: 'manage',
+    strings: manageStrings({ to: '/home/u/dev/alpha' }),
+    nulls: migratePlanNulls({ field: 'to', mode: 'candidates' }),
+  })
+  const { component, registration } = mounted.registrations[0]
+  strings(component(registration.inject()))
+
+  const rows = candidateRows(mounted.recorded)
+  assert.deepEqual(rows.map((row) => strings(row)[0]), ['工作区甲', '删掉的工作区'], '两条都列出来（不把登记过的藏起来）')
+  assert.equal(rows[0].props.disabled, false, '盘上还在的那条点得动')
+  assert.equal(rows[1].props.disabled, true, '盘上没有了的那条点不动')
+  assert.ok(strings(rows[1]).includes('pathField.missing'), '它挂着那枚标签')
+  assert.equal(strings(rows[0]).includes('pathField.missing'), false, '别的那条没有这枚标签')
+  assert.ok(String(rows[1].props.title).includes('pathField.missingTip'), '悬浮提示说清为什么点不动')
+})
+
 test('客户端产物：候选面板的筛选只收窄自己那份列表，没命中时给一句说法', { skip }, () => {
   // 空串状态按渲染顺序种：to（迁移页第一个）→ title → 会话搜索词 → **面板里的筛选词**。
   const openPanel = (query) =>

@@ -66,6 +66,13 @@ export interface WorkspaceSummary {
   path: string
   title: string
   sessionIds: string[]
+  /**
+   * 这个目录在盘上还在不在（宿主的一次 stat，见 host 半侧的 `summarizeWorkspaces()`）。
+   *
+   * 缺席按"还在"处理：目标候选据它把已经不存在的那些标出来并点不动（见 `planRows.directoryTargetRows`），
+   * 拿不到这个事实时退回改动之前的样子——不在界面上替宿主猜。
+   */
+  exists?: boolean
 }
 
 /**

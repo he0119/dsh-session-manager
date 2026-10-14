@@ -171,6 +171,8 @@
 - [目录字段是一个值控件，三条改值的路](../.agents/notes/implemented/architecture/2026-09-27-directory-field-is-one-value-control.md)
   与 [「浏览…」按宿主的能力走](../.agents/notes/implemented/bug-fix/2026-09-27-browse-follows-the-picker-capability.md)：
   任意绝对路径要一个值控件，而目录选择器是一只互斥的能力位服务。
+- [候选里盘上已经没有的目录挂着标签、点不动](../.agents/notes/implemented/bug-fix/2026-10-14-candidates-mark-missing-directories.md)：
+  `/state` 的每条工作区报一次 `exists`，目标候选据此把"只剩一条登记的"标出来并置灰。
 - [动作页只留当下要做的决定](../.agents/notes/implemented/architecture/2026-09-28-help-page-owns-the-glossary.md)：
   词条进「说明」页，并钉了一条两行的上限。
 - [说明页 FAQ 的答案不被挤成零宽](../.agents/notes/implemented/bug-fix/2026-10-07-faq-answers-collapse-to-zero-width.md)：

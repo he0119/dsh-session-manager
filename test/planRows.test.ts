@@ -106,6 +106,13 @@ test('候选面板里一行：名字在第一行，路径与条数在第二行�
   })
   // 什么都没有的裸目录：两行都是路径
   assert.deepEqual(candidateRow({ path: '/a' }, t), { name: '/a', meta: '/a', tip: '/a' })
+  // 盘上已经没有的目录：名字后面一枚标签，悬浮提示里补一句"为什么点不动"（面板据此把它置灰）
+  assert.deepEqual(candidateRow({ path: '/gone', title: '旧项目', missing: true }, t), {
+    name: '旧项目',
+    meta: '/gone',
+    missing: 'pathField.missing',
+    tip: '/gone\npathField.missingTip',
+  })
 })
 
 // ---- 候选筛选（`filterPathRows`）----
@@ -221,6 +228,27 @@ test('目标候选：已登记工作区（同一路径只留一条）+ 当前值
   assert.deepEqual(directoryTargetRows([], {}, ''), [])
 })
 
+test('目标候选：宿主说盘上已经没有的那些照旧列出来，但行上带 missing（面板据此置灰）', () => {
+  // 注册表里的登记不保证盘上还有（项目文件夹被删掉、目录改了名）：这种候选**列出来**（"我登记过的
+  // 工作区还在名单里"），但点不动——选它只会撞上宿主那句「目标工作区目录不存在」。
+  assert.deepEqual(
+    directoryTargetRows(
+      [
+        { path: '/a', title: '工作区甲', exists: true },
+        { path: '/gone', title: '删掉的工作区', exists: false },
+        // `exists` 缺席（旧宿主 / 没给这个字段）按"还在"处理：不在界面上替宿主猜
+        { path: '/unknown' },
+      ],
+      {},
+      '',
+    ),
+    [
+      { path: '/a', title: '工作区甲' },
+      { path: '/gone', title: '删掉的工作区', missing: true },
+      { path: '/unknown', title: undefined },
+    ],
+  )
+})
 // ---- 删除预演：「这条是怎么进来的」 ----
 //
 // 删除会沿父子关系向下展开（见 `src/remove.ts` 的 `familyOf()`），所以预演清单里会出现用户**没勾过**

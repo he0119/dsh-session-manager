@@ -116,6 +116,9 @@ export const zh = {
   // 候选面板里的筛选框：只收窄列表里列出来的候选，不改值（值仍由那个字段持有）。
   'pathField.filter': '筛选候选目录',
   'pathField.noMatch': '没有匹配的候选目录；「浏览文件系统…」和「手输路径」不受筛选影响。',
+  'pathField.missing': '不存在',
+  'pathField.missingTip':
+    '这块工作区还登记着，但它指向的目录在盘上已经没有了，当不了目标目录：先把它建回来，或选别的目录。',
   'pathField.unavailable': '这个宿主没有可用的目录选择器，请从列表里挑一个，或手输路径。',
   'pathField.failed': '目录选择器没能返回路径：{reason}',
   // 页面内浏览框（宿主给的是 `browse` 能力时用它）：数据来自宿主的 `list()`，不猜路径。
@@ -555,6 +558,10 @@ export const en: LocaleDictOf<typeof NS> = {
   // The candidate panel’s filter: it only narrows what the list shows, never the value.
   'pathField.filter': 'Filter the candidate directories',
   'pathField.noMatch': 'No candidate matches; “Browse the file system…” and “Type a path” are not filtered.',
+  'pathField.missing': 'Gone',
+  'pathField.missingTip':
+    'This workspace is still registered, but the directory it points at is no longer on disk, so it cannot be a ' +
+    'target: bring it back where it was, or pick another directory.',
   'pathField.unavailable': 'This host has no usable directory picker — choose from the list, or type a path.',
   'pathField.failed': 'The directory picker returned no path: {reason}',
   // The in-page browser (used when the host serves the `browse` capability): its data comes from

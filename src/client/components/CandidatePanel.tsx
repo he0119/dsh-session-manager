@@ -93,9 +93,15 @@ export function CandidatePanel({
                 className="dsm-dirEntry dsm-candidate"
                 title={copy.tip}
                 aria-current={row.path === value ? 'true' : undefined}
+                // 盘上已经没有的目录点不动（标签与悬浮提示说清为什么）：选中它只会在落地那一步撞上
+                // 宿主那句「目标工作区目录不存在」。它照旧列在这里，是因为它是用户登记过的工作区。
+                disabled={copy.missing !== undefined}
                 onClick={() => onPick(row.path)}
               >
-                <span className="dsm-candidateName">{copy.name}</span>
+                <span className="dsm-candidateHead">
+                  <span className="dsm-candidateName">{copy.name}</span>
+                  {copy.missing !== undefined && <span className="dsm-tag dsm-tagSkip">{copy.missing}</span>}
+                </span>
                 {copy.meta !== undefined && <span className="dsm-hint dsm-candidateMeta">{copy.meta}</span>}
               </button>
             )
