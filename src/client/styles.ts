@@ -871,6 +871,14 @@ export const CSS = `
 @media (prefers-reduced-motion: reduce) {
   .dsm-progressFill { transition: none; }
 }
+/*
+ * 「立即推送一次」那一轮的进度：它不走弹窗，进度块直接落在页面横幅里（见 SyncPanel.tsx）。
+ *
+ * .dsm-banner 自己是一行横向 flex（为"一句话 + spacer + 关闭"那种形状写的），而这里装的是竖着排的
+ * 进度块（一句话 / 进度条 / 当前那条 / 说明句，见 ProgressBlock.tsx）——不换方向的话那几行会横着挤成
+ * 一排。这里只改方向与对齐，边框、圆角、间距都留给 .dsm-banner。
+ */
+.dsm-progressBanner { flex-direction: column; align-items: stretch; }
 .dsm-listPlain {
   margin: 0;
   padding-left: 18px;

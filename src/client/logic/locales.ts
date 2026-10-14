@@ -441,6 +441,29 @@ export const zh = {
   'sync.map.noTo': '第 {line} 行缺少本机目录。',
   'sync.map.duplicate': '第 {line} 行的远端路径重复：{from}',
 
+  // 自动推送：按间隔在后台跑一轮**只推不拉**的同步（表单里那两栏 + 卡片上那句话 + 当场跑一次的结论）
+  'sync.field.autoPush': '自动推送',
+  'sync.field.autoPushHint':
+    '按下面的间隔在后台自己推一轮：只把本机的会话推到远端，绝不拉取、也绝不改动本机任何会话。',
+  'sync.field.autoPushInterval': '自动推送间隔（毫秒）',
+  'sync.field.autoPushIntervalHint': '缺省 300000（5 分钟），最小 60000；比 60000 小的值会被抬到 60000。',
+  'sync.field.autoPushIntervalInvalid': '自动推送间隔要是正整数毫秒。',
+  'sync.autoPush.enabled': '自动推送已开：每 {minutes} 分钟一次。',
+  'sync.autoPush.now': '立即推送一次',
+  'sync.autoPush.running': '正在自动推送…',
+  'sync.autoPush.done': '自动推送：已推送 {pushed} 条（上传 {bytesOut}）。',
+  'sync.autoPush.nothing': '自动推送：没有要推的。',
+  'sync.autoPush.skipped': '自动推送这次没跑：{reason}。',
+  'sync.autoPush.failed': '自动推送连续失败 {count} 次。',
+  // `AutoPushOutcome.skip` 四个码各一句话：界面上"没跑"必须说清是哪一种没跑（等下一轮 / 还在跑 /
+  // 没有要推的 / 这个宿主没开），四件事的处置完全不同。
+  'sync.autoPush.skip.disabled': '这个宿主没开自动推送',
+  'sync.autoPush.skip.interval': '离上一次推送还没到最小间隔',
+  'sync.autoPush.skip.busy': '上一轮还在跑',
+  'sync.autoPush.skip.idle': '没有要推送的会话',
+  'sync.autoPush.noReason': '宿主没有说原因',
+  'sync.autoPush.problem': '自动推送最近一次的问题：{problem}',
+
   // ---- 共同 ----
   // 长动作的进度（迁移 / 删除 / 回滚 / 导入 / 扫库 / 归档 / 同步共用这一套段名）：
   // 段名 → 一句话由 ProgressBlock.tsx 的 progressTextOf() 挑，这里只摆文字。
@@ -882,6 +905,30 @@ export const en: LocaleDictOf<typeof NS> = {
   'sync.map.noFrom': 'Line {line} is missing the remote path.',
   'sync.map.noTo': 'Line {line} is missing the local directory.',
   'sync.map.duplicate': 'Line {line} repeats the remote path: {from}',
+
+  // Automatic push: a push-only sync round on a timer (the two form fields, the card's one-liner and
+  // the outcome of running one round right now).
+  'sync.field.autoPush': 'Automatic push',
+  'sync.field.autoPushHint':
+    'Runs a push-only round in the background on the interval below: it pushes this machine’s sessions to the remote and never pulls, never touches a local session.',
+  'sync.field.autoPushInterval': 'Automatic push interval (ms)',
+  'sync.field.autoPushIntervalHint': '300000 (5 minutes) by default, 60000 minimum; anything below 60000 is raised to 60000.',
+  'sync.field.autoPushIntervalInvalid': 'The automatic push interval must be a positive whole number of milliseconds.',
+  'sync.autoPush.enabled': 'Automatic push is on: once every {minutes} minute(s).',
+  'sync.autoPush.now': 'Push now',
+  'sync.autoPush.running': 'Pushing automatically…',
+  'sync.autoPush.done': 'Automatic push: pushed {pushed} ({bytesOut} uploaded).',
+  'sync.autoPush.nothing': 'Automatic push: nothing to push.',
+  'sync.autoPush.skipped': 'Automatic push did not run this time: {reason}.',
+  'sync.autoPush.failed': 'Automatic push has failed {count} time(s) in a row.',
+  // One sentence per `AutoPushOutcome.skip` code: "did not run" has to say which kind (waiting for
+  // the interval, a round still running, nothing to push, not enabled on this host).
+  'sync.autoPush.skip.disabled': 'automatic push is off on this host',
+  'sync.autoPush.skip.interval': 'the minimum interval since the last push has not elapsed',
+  'sync.autoPush.skip.busy': 'the previous round is still running',
+  'sync.autoPush.skip.idle': 'there is nothing to push',
+  'sync.autoPush.noReason': 'the host did not say why',
+  'sync.autoPush.problem': 'The last automatic push reported: {problem}',
 
   // Long actions share one set of phase names (migrate / delete / rollback / import / scan /
   // archive / sync): ProgressBlock.tsx maps phase -> key, this is only the copy.

@@ -57,6 +57,23 @@ export interface SyncConfig {
   mapping?: Record<string, string>
   /** 单次请求超时（毫秒），缺省 30000。 */
   timeoutMs?: number
+  /**
+   * 打开**自动推送**：插件在后台按 {@link SyncConfig.autoPushIntervalMs} 自己跑一轮，**只往远端推**，
+   * 一个字节都不拉。
+   *
+   * 为什么是"只推"而不是"照旧两个方向都做"：后台跑等于无人在场，而拉取那一侧会**动本机已有内容**
+   * （远端更新时先备份再顶掉本机那份，见 [sync.ts](./sync.ts) 的 `planSync()`）。那种动作要人看着——
+   * 界面那条路上它前面还挡着一个确认弹窗。只推的那一半是纯增量的：远端没有的就传上去、本机领先的就
+   * 刷新，本机这边一个字节都不改，所以它可以无人值守地反复跑。
+   */
+  autoPush?: boolean
+  /**
+   * 自动推送的间隔（毫秒），缺省 {@link DEFAULT_AUTO_PUSH_INTERVAL_MS}。
+   *
+   * 比 {@link MIN_AUTO_PUSH_INTERVAL_MS} 小的值会被抬到那个下限：填错了不必报错（用户想的是"勤快点"），
+   * 但也不让一个 0 把远端打爆。
+   */
+  autoPushIntervalMs?: number
 }
 
 /** 插件配置。 */
@@ -80,6 +97,30 @@ export interface PluginConfig {
 export const DEFAULT_PASSWORD_REF = 'DSH_DAV_PASSWORD'
 
 /**
+ * 自动推送的缺省间隔（毫秒）：5 分钟。
+ *
+ * 为什么不是"每次会话一结束就推"：本插件拿不到那个事件（宿主没把它交给插件），而轮询一个更短的间隔
+ * 会把每次整库比对的开销摊到用户头上。5 分钟是"推上去的时候通常只差一两条"与"不白跑"之间的取值，
+ * 而且它可以在界面里改。
+ */
+export const DEFAULT_AUTO_PUSH_INTERVAL_MS = 300_000
+
+/**
+ * 自动推送间隔的下限（毫秒）：1 分钟。
+ *
+ * 一次同步要扫整库、读远端索引、逐条比对内容，真机上那几段是秒级的（实测冷启动 2.33 秒，见
+ * [同步那篇决策](../../.agents/notes/implemented/architecture/2026-10-03-sync-progress-streams-over-sse.md)）。
+ * 比这更勤的间隔只会在同一份内容上反复空跑，所以配置里填了更小的值就抬到这个下限。
+ */
+export const MIN_AUTO_PUSH_INTERVAL_MS = 60_000
+
+/** 自动推送那一节拍平之后的样子（界面与核心层都用这一份形状）。 */
+export interface AutoPushConfig {
+  enabled: boolean
+  intervalMs: number
+}
+
+/**
  * 同步那一节的 schema。
  *
  * 整节 volatile：这是设置面里唯一"改了立即生效"的一节。字段都不带默认值——缺席要好过拿一个空串
@@ -95,6 +136,8 @@ export const SyncConfigSchema = z
     passwordRef: z.string().role('credential-ref'),
     mapping: z.dict(z.string()),
     timeoutMs: z.number().step(1).min(1),
+    autoPush: z.boolean(),
+    autoPushIntervalMs: z.number().step(1).min(1),
   })
   .volatile() as unknown as ConfigSchema
 
@@ -146,4 +189,30 @@ export function syncSection(config: PluginConfigInput | undefined): SyncConfig |
   const read = (raw as { get?: () => SyncConfig | undefined }).get
   if (typeof read === 'function') return read.call(raw) ?? undefined
   return raw as SyncConfig
+}
+
+/**
+ * 把自动推送那一节拍平：开关、以及抬到下限之后的间隔。
+ *
+ * 两个判据都在这一处：
+ *   - **开关**：只有 `autoPush === true` 才算开。`false` 与缺席是同一件事——"没开"，不是"用默认值开"；
+ *   - **间隔**：缺席取 {@link DEFAULT_AUTO_PUSH_INTERVAL_MS}，非有限数（含 `NaN`、手改配置写成的字符串）
+ *     同样取缺省，小于 {@link MIN_AUTO_PUSH_INTERVAL_MS} 的抬到下限。
+ *
+ * 为什么读的时候拍平、而不是在配置里写默认值：schema 的默认值会让这一项进那份设置表单，于是没开自动
+ * 推送的人也会看到一个"已覆盖"的间隔输入框。真值由这里给，表单留空就按缺省走（与 `timeoutMs` 同一个
+ * 口径，见 [那篇决策](../../.agents/notes/implemented/architecture/2026-10-01-sync-config-is-live-in-the-page.md)）。
+ *
+ * @param sync 同步那一节（`syncSection()` 的返回值）。
+ * @returns 拍平后的设置；连同步都没配时是缺席。
+ */
+export function autoPushSection(sync: SyncConfig | undefined): AutoPushConfig | undefined {
+  if (sync === undefined) return undefined
+  const raw = sync.autoPushIntervalMs
+  const interval =
+    typeof raw === 'number' && Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_AUTO_PUSH_INTERVAL_MS
+  return {
+    enabled: sync.autoPush === true,
+    intervalMs: Math.max(MIN_AUTO_PUSH_INTERVAL_MS, Math.round(interval)),
+  }
 }

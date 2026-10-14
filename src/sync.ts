@@ -53,6 +53,7 @@ import { join } from 'node:path'
 
 import { canonicalDir, type DirCanonicalizer } from './canonical-path.ts'
 import { warmCheckpoints, type WarmDeps } from './checkpoint-warm.ts'
+import type { AutoPushConfig } from './config.ts'
 import type { DavPort } from './dav.ts'
 import { scanAll, type DiscoveredSession } from './discovery.ts'
 import { createBackup } from './journal.ts'
@@ -103,6 +104,13 @@ export interface SyncSettings {
   username?: string
   password?: string
   timeoutMs?: number
+  /**
+   * 自动推送那一节（`autoPush` 开关 + 抬到下限之后的间隔）。
+   *
+   * 拍平在 `src/config.ts` 的 `autoPushSection()` 一处，这里是它的解析形态；缺席 = 这个宿主没开
+   * （`runAutoPush()` 据此直接报 `skip: 'disabled'`）。**开关**在这一份里，节拍器因此不必自己去读配置。
+   */
+  autoPush?: AutoPushConfig
 }
 
 /** 一条会话里某个代次日志的指纹。 */
@@ -467,6 +475,13 @@ export interface SyncPlanInput {
    * 测试不必真建目录。
    */
   canonicalize?: DirCanonicalizer
+  /**
+   * **只推不拉**：算出来的计划里只留推送那一侧，拉取与"覆盖本机"一条都不留（见 `planSync()`）。
+   *
+   * 这是自动推送那条路的开关（`src/sync.ts` 的 `runAutoPush()`）。缺席 = false：界面上手动同步照旧
+   * 两个方向都做。
+   */
+  pushOnly?: boolean
 }
 
 /**
@@ -566,7 +581,7 @@ export function planSync(input: SyncPlanInput): SyncPlan {
     // 宿主不认的另一种拼写（见 canonical-path.ts）。
     const target = canonicalize(picked)
     if (!isDirectory(target)) {
-      problems.push(`同步映射把 ${entry.cwd} 指到了 ${target}，但那不是一个存在的目录`)
+      problems.push(`同步映射把 ${entry.cwd} 指到了 ${target}，但那不是一个存在的目录`) // 见 missingTargetProblem()
       pull.push({ ...base, toCwd: target, action: 'skip', code: 'missing-target', reason: `目标目录不存在：${target}` })
       continue
     }
@@ -686,7 +701,7 @@ export function planSync(input: SyncPlanInput): SyncPlan {
           continue
         }
         if (target !== undefined && !isDirectory(target)) {
-          problems.push(`同步映射把 ${remote.cwd ?? ''} 指到了 ${target}，但那不是一个存在的目录`)
+          problems.push(`同步映射把 ${remote.cwd ?? ''} 指到了 ${target}，但那不是一个存在的目录`) // 见 missingTargetProblem()
           push.push({
             ...common,
             action: 'skip',
@@ -730,6 +745,12 @@ export function planSync(input: SyncPlanInput): SyncPlan {
     })
   }
 
+  if (input.pushOnly === true) {
+    narrowToPushOnly({ problems, pull, pullIds, push, pushIds })
+    // 没有拉取就没有入流量：这一项是"这次往本机写了多少"的报告值，跟着那张表一起归零。
+    bytesIn = 0
+  }
+
   return {
     ok: problems.length === 0,
     problems,
@@ -744,6 +765,73 @@ export function planSync(input: SyncPlanInput): SyncPlan {
     remoteCount: input.remote.entries.size,
     machines: input.remote.machines,
   }
+}
+
+/**
+ * 把一份算好的计划收窄成"**只推不拉**"：拉取整表摘掉，推送表只留真会推的那几种。
+ *
+ * 这是自动推送那条路（`runAutoPush()`）唯一改判定的地方，两个动作各自有理由：
+ *
+ * **拉取整表摘掉**。`plan.pull` 不是"远端有什么"，而是"这次要往**本机**放什么"（含"覆盖本机那份"）。
+ * 只推的那条路上一个字都不该落到本机——无人在场，而覆盖本机是这个插件里唯一会撤掉本机已有内容的
+ * 动作。连同 `pullIds` 与 `bytesIn` 一起清掉，消费方（界面、工具返回值、进度分母）读到的就是同一
+ * 件事：这次没有落地。
+ *
+ * **推送表逐条过滤**，留下的恰好是"本机这一侧确实领先"的那几类：
+ *   - `upload` / `missing`（远端没有）：本机独有，推上去只有新增；
+ *   - `update` / `local-ahead`（远端停在旧代次）：远端那份是本机这份的前缀，刷新它是纯增量；
+ *   - `update` / `local-newer`（两边各自写过而本机更新）：把自己这一格刷成最新，**不碰**本机；
+ *   - `skip` / `identical`（内容一致）：留着，它是"这次不用动"的唯一一条说明。
+ *
+ * 其余 `skip` 全部摘掉，它们是三种"要动本机或判不出来"的情形：`remote-ahead`（远端领先，今天走
+ * "覆盖本机那份"）、`diverged`（两边各自写过又判不出谁更新，今天两条都不动，但那是留给**界面**看的
+ * 结论）、以及活会话当前那次 skip。留在纯推送的计划里只会让"这次不推它"看起来像一次判断，而在这条
+ * 路上它根本不是判断——**这个方向本来就不在**。
+ *
+ * 摘掉的行不进 `blank`：`blank` 是"空白会话"专用的名单，混进"因为只推所以不推"的条目就把两件事说成
+ * 一件了。
+ *
+ * **`problems` 里那两条"目录不存在"要改写**：它们是拉取侧算落地目录时记下的（映射指到了一个不存在的
+ * 目录），而只推的这条路**不看落地目录**——那个坑在这次动作里根本不存在，留着它会让自动推送在界面上
+ * 报一个与它无关的错，甚至按 `ok: false` 拦住整轮。原文改成一句把因果说清的话：它只影响拉取。
+ *
+ * @param plan 已经算完的两张表（就地收窄）。
+ */
+function narrowToPushOnly(plan: {
+  problems: string[]
+  pull: SyncPullEntry[]
+  pullIds: string[]
+  push: SyncPushEntry[]
+  pushIds: string[]
+}): void {
+  for (const [index, problem] of plan.problems.entries()) {
+    const rewritten = missingTargetProblem(problem)
+    if (rewritten !== undefined) plan.problems[index] = rewritten
+  }
+  // 拉取整表（含"覆盖本机"那几条）与它的 id 名单一起清空——`bytesIn` 由调用方归零。
+  plan.pull.length = 0
+  plan.pullIds.length = 0
+  const kept = plan.push.filter((entry) => entry.action !== 'skip' || entry.code === 'identical')
+  plan.push.length = 0
+  plan.push.push(...kept)
+  const keptIds = new Set(kept.map((entry) => entry.id))
+  for (let index = plan.pushIds.length - 1; index >= 0; index -= 1) {
+    if (!keptIds.has(plan.pushIds[index] as string)) plan.pushIds.splice(index, 1)
+  }
+}
+
+/** 拉取侧那条"映射指到了不存在的目录"的原话，以及只推时替它说的话（见 `narrowToPushOnly()`）。 */
+const MISSING_TARGET_RE = /^同步映射把 (.*) 指到了 (.*)，但那不是一个存在的目录$/
+
+/**
+ * 把"映射指到了不存在的目录"改写成只推那条路上成立的说法。
+ * @param problem 一条 problem 原话。
+ * @returns 改写后的话；不是那一条就是 undefined（原样留着）。
+ */
+function missingTargetProblem(problem: string): string | undefined {
+  const matched = MISSING_TARGET_RE.exec(problem)
+  if (matched === null) return undefined
+  return `同步映射把 ${matched[1]} 指到了 ${matched[2]}，那个目录在不在不影响这次推送（只有拉取才要落地目录）`
 }
 
 /**
@@ -1075,6 +1163,20 @@ export interface SyncDeps extends EffectDeps, WarmDeps {
   now?: () => Date
   /** 跑 git 的入口（读项目身份用）；缺省是真去跑 git。测试里注入一个假的，不必真建仓库。 */
   git?: GitRunner
+  /**
+   * 这次是**只推不拉**（自动推送那条路，见 `runAutoPush()`）。
+   *
+   * 缺席 = false：界面与工具那两条手动路照旧两个方向都做。它只影响算计划那一步（`planSync()` 据此
+   * 摘掉拉取与"覆盖本机"），落地那一侧不需要分支——一份没有拉取的计划，落地自然只剩推与收尾。
+   */
+  pushOnly?: boolean
+  /**
+   * 这次上报的进度事件是"谁"的（写进 `ProgressEvent.what`）。
+   *
+   * 缺席 = `'sync'`：界面上两条手动路不传它，行为与这一项出现之前逐字节相同。自动推送传
+   * `'auto-push'`——它可能在用户手点一次同步的同时在后台跑另一轮，没有这一项就分不出两条流。
+   */
+  progressWhat?: string
 }
 
 /** 读注册表；读不到按"没有注册表"处理（会话照旧落地，只是不进工作区分组）。 */
@@ -1147,6 +1249,13 @@ export interface SyncPrepared {
   fingerprints: Map<string, FileFingerprint>
   /** 预演那一刻的事实快照（只用来判"变了没有"，不参与任何判定）。 */
   facts: SyncFacts
+  /**
+   * 这份计划是"只推不拉"算出来的（见 `SyncPlanInput.pushOnly`）。
+   *
+   * 落地那一步要看它：只推这份计划里没有一条拉取，所以"落地"实际上只剩"推 + 重写自己那格的索引"。
+   * 留这一项给报告与测试一个可断言的形状——否则"这次为什么什么都没拉"只能从两张空表里反推。
+   */
+  pushOnly: boolean
 }
 
 /** 预演那一刻本机与远端的事实：`stalePlanReason()` 拿它与眼下的一刻比。 */
@@ -1255,17 +1364,26 @@ export function remoteDigest(library: RemoteLibrary): string {
  */
 export async function prepareSync(
   deps: SyncDeps,
-  options: { onProgress?: ProgressReporter } = {},
+  options: { onProgress?: ProgressReporter; pushOnly?: boolean } = {},
 ): Promise<SyncPrepared> {
   const report = options.onProgress
+  /*
+   * 这一趟是"只推不拉"吗。两处来路都收：`SyncDeps.pushOnly`（整份依赖都在说这件事，`runAutoPush()`
+   * 走这条）与 `options.pushOnly`（只管这一次调用）。析取而不是覆盖：一个设了就是设了。
+   */
+  const pushOnly = options.pushOnly === true || deps.pushOnly === true
+  /** 上报一条事件；`what` 只在调用方给了的时候才带上（缺席与今天逐字节相同）。 */
+  const emit = report === undefined ? undefined : (event: Omit<ProgressEvent, 'what'>): void => {
+    report(deps.progressWhat === undefined ? event : { ...event, what: deps.progressWhat })
+  }
   // 第一段：扫本机。冷启动时这一段是大头（每条会话要读头、折标题），所以它值得一条进度。
   const local = scanAll(deps.sessionsRoot, deps.decodeAll, {
     ...(deps.resolveTitle === undefined ? {} : { resolveTitle: deps.resolveTitle }),
-    ...(report === undefined ? {} : { onProgress: (done, total) => report({ phase: 'scan', done, total }) }),
+    ...(emit === undefined ? {} : { onProgress: (done, total) => emit({ phase: 'scan', done, total }) }),
   })
   // 第二段：读远端索引。一次网络往返，没有"第几条"可讲——`total: 0` 就是"这一段没有分母"，
   // 界面只摆那句"正在读取远端索引…"、不摆条（画一条 1/1 的会让人以为已经做完了）。
-  report?.({ phase: 'remote', done: 0, total: 0 })
+  emit?.({ phase: 'remote', done: 0, total: 0 })
   const remote = await readRemoteLibrary(deps.dav, deps.settings)
   const normalized = normalizeMapping(deps.settings.mapping)
 
@@ -1291,7 +1409,7 @@ export async function prepareSync(
     for (let index = 0; index < candidates.length; index += 1) {
       // 第三段：逐个候选目录问一次 git。目录数不多，但每个目录要起一个 git 进程——真机上这一段
       // 比扫本机与读远端索引加起来还长，没有进度的话进度条会停在这儿半秒。
-      report?.({ phase: 'repo', done: index, total: candidates.length })
+      emit?.({ phase: 'repo', done: index, total: candidates.length })
       const found = await locate(candidates[index] as string)
       // 同一个身份在本机只认第一个（候选目录已排序）：结果要确定，不随扫描顺序变。
       if (found !== undefined && !repos.has(found.repo)) repos.set(found.repo, found.root)
@@ -1312,7 +1430,7 @@ export async function prepareSync(
   let compared = 0
   /** 算计划时用的指纹：同一件事顺带报"比对到第几条"。 */
   const planHash = (path: string, version: number, compression: string | null): FileFingerprint => {
-    report?.({ phase: 'compare', done: compared, total: compareTotal })
+    emit?.({ phase: 'compare', done: compared, total: compareTotal })
     const fingerprint = contentHash(path, version, compression)
     fingerprints.set(path, fingerprint)
     compared += 1
@@ -1343,6 +1461,7 @@ export async function prepareSync(
     mapping: normalized.mapping,
     repos,
     hashFile: planHash,
+    pushOnly,
     ...(deps.sessionMeta === undefined ? {} : { sessionMeta: metaOf }),
     ...(live === undefined ? {} : { isLive: (id: string): boolean => live.has(id) }),
   })
@@ -1367,7 +1486,7 @@ export async function prepareSync(
     }),
     remote: remoteDigest(remote),
   }
-  return { plan, local, remote, repos, located, meta: metaCache, fingerprints, facts }
+  return { plan, local, remote, repos, located, meta: metaCache, fingerprints, facts, pushOnly }
 }
 
 /**
@@ -1416,6 +1535,15 @@ export async function applyPreparedSync(
   const { plan, local, remote } = prepared
   const byId = new Map(local.map((session) => [session.id, session]))
   /**
+   * 上报一条写盘阶段的事件。
+   *
+   * 与 `prepareSync()` 里那份同名同形：`what` 只在调用方给了的时候才带上（缺席 = 与今天逐字节相同，
+   * 界面那两条手动路不传它）。
+   */
+  const emit = (event: Omit<ProgressEvent, 'what'>): void => {
+    options.onProgress?.(deps.progressWhat === undefined ? event : { ...event, what: deps.progressWhat })
+  }
+  /**
    * 预演比对时算过的指纹直接接着用（同一个字节数、同一个 mtime，落地之前验过）。
    *
    * 本机独有的那些预演时没算过（它们不进比对，算它才是白花），这里现算——只有真推上去的那几条。
@@ -1457,7 +1585,7 @@ export async function applyPreparedSync(
   const pullTotal = pullJobs.length + replaceJobs.length
   for (let index = 0; index < pullJobs.length; index += 1) {
     const entry = pullJobs[index] as SyncPullEntry
-    options.onProgress?.({
+    emit({
       phase: 'pull',
       total: pullTotal,
       done: index,
@@ -1534,7 +1662,7 @@ export async function applyPreparedSync(
       const session = byId.get(entry.id)
       const bundle = fetched.get(entry.id)
       if (session === undefined || bundle === undefined) continue
-      options.onProgress?.({
+      emit({
         phase: 'pull',
         total: pullTotal,
         done: pullJobs.length + index,
@@ -1624,7 +1752,7 @@ export async function applyPreparedSync(
     const entry = pushJobs[index] as SyncPushEntry
     const session = byId.get(entry.id)
     if (session === undefined) continue
-    options.onProgress?.({
+    emit({
       phase: 'push',
       total: pushJobs.length,
       done: index,
@@ -1798,7 +1926,12 @@ export async function stalePlanReason(
       }
     }
   }
-  options.onProgress?.({ phase: 'remote', done: 0, total: 0 })
+  options.onProgress?.({
+    phase: 'remote',
+    done: 0,
+    total: 0,
+    ...(deps.progressWhat === undefined ? {} : { what: deps.progressWhat }),
+  })
   const remote = await readRemoteLibrary(deps.dav, deps.settings)
   if (remoteDigest(remote) !== prepared.facts.remote) {
     return '远端那份索引在预演之后变了（别的机器推过东西）'
@@ -1852,4 +1985,300 @@ export async function runSync(
   const prepared = await prepareSync(deps, options)
   if (!options.apply) return plannedOutcome(prepared)
   return applyPreparedSync(deps, prepared, options)
+}
+
+// ── 自动推送：后台自己跑一轮，**只推不拉** ─────────────────────────────────────────
+
+/**
+ * 自动推送这一轮跑没跑、跑成了什么。
+ *
+ * 形状刻意分两层：`ran` / `skip` 说"这一轮**动了没有、为什么没动**"，`outcome` 才是真跑之后那份
+ * 落地结果（与手动同步同一个形状，界面因此能复用同一套解析）。不把两者揉成一个可选字段，是因为
+ * "没跑"有三种完全不同的原因（没开、没到点、上一轮还在跑），界面上那三句话也不一样。
+ */
+export interface AutoPushOutcome {
+  /** 这一轮真的算过 / 推过（false 时看 `skip`）。 */
+  ran: boolean
+  /** 没跑的原因（机器可读，句子在浏览器半侧）。 */
+  skip?: AutoPushSkip
+  /** 真跑了的落地结果。 */
+  outcome?: SyncOutcome
+  /** 真跑的开始与结束时刻（毫秒）；没跑就没有。 */
+  startedAt?: number
+  finishedAt?: number
+  /** 已经连续失败几次（跑成功清零）。界面据此在连续失败时说一句。 */
+  failures: number
+  /** 最近一次失败的原话（跑成功时清空）。 */
+  problem?: string
+}
+
+/**
+ * 自动推送没跑的原因。
+ *
+ * - `disabled`：这个宿主/profile 没开自动推送（配置里 `sync.autoPush` 不是 true）；
+ * - `interval`：距离上一次真跑还没到间隔（用户刚在别处跑过一次、或节拍器醒早了）；
+ * - `busy`：上一轮还在跑（网络慢、条数多），这一轮直接让开——不排队：排队会让积压的轮次一个接一个
+ *   跑完，而每一轮读的都是同一份"最新"，重复跑没有意义；
+ * - `idle`：有得算但一条都不用推，而且连要撤下的空白会话都没有——这一轮连收尾都不必做。
+ */
+export type AutoPushSkip = 'disabled' | 'interval' | 'busy' | 'idle'
+
+/**
+ * 节拍器的配置读法：每次醒来看一眼当前值（`sync` 那一节是活引用，改完不必重启）。
+ *
+ * 只有两项，因为拍子上只有两个决定：**开不开**、**多久一次**。间隔的下限不在这一层判——
+ * `autoPushSection()` 读的时候已经把它抬到 `MIN_AUTO_PUSH_INTERVAL_MS` 了，所以这里报出来的
+ * `intervalMs()` 本来就是"合法且生效"的那个值，节拍器与速度闸读它一个就够。
+ */
+export interface AutoPushClock {
+  /** 自动推送此刻开着吗。 */
+  enabled(): boolean
+  /** 两次真跑之间的间隔（毫秒）；**已经抬过下限**。 */
+  intervalMs(): number
+}
+
+/** `createAutoPushTimer()` 的依赖。 */
+export interface AutoPushTimerDeps {
+  /** 跑一轮（`runAutoPush()` 的真身由调用方注入；测试注入一个记账的假实现）。 */
+  run: (options?: { onProgress?: ProgressReporter }) => Promise<AutoPushOutcome>
+  /** 当前配置（活引用现读）。 */
+  clock: AutoPushClock
+  now?: () => number
+  /** 定时器工厂；缺省用全局的 `setTimeout` / `clearTimeout`（测试注入假的，不必真等）。 */
+  setTimer?: (handler: () => void, ms: number) => unknown
+  clearTimer?: (handle: unknown) => void
+}
+
+/** 自动推送节拍器的对外形状。 */
+export interface AutoPushTimer {
+  /** 自动推送此刻开着吗。 */
+  enabled(): boolean
+  /** 当前间隔（毫秒）。 */
+  intervalMs(): number
+  /**
+   * 到点就跑一轮（没到点也会跑，落不落地由 `runAutoPush()` 的闸决定）。
+   *
+   * 界面那枚「立即推送一次」走的就是它：用户手点一次要**当场**算，不该被"距上次才过了 20 秒"挡住，
+   * 所以速度闸放在 `runAutoPush()` 里、由调用方决定放不放行（`force`）。
+   */
+  tick(options?: { force?: boolean; onProgress?: ProgressReporter }): Promise<AutoPushOutcome>
+  /** 最近一次结论（界面轮询它；不碰网络）。 */
+  last(): { enabled: boolean; intervalMs: number; outcome?: AutoPushOutcome }
+  /** 这一次跑完了/已经知道了的结论（`tick()` 自己调，也供外部记一笔）。 */
+  note(outcome: AutoPushOutcome): void
+  /** 停掉（卸载时；停掉之后 `tick()` 仍可用——手动那一条路不依赖定时器）。 */
+  stop(): void
+}
+
+/**
+ * 造一个自动推送的节拍器。
+ *
+ * 为什么是"定时器只按最小粒度醒、每次醒来看一眼配置"，而不是"按当前配置挂一个 `setInterval`"：
+ * `sync` 那一节是**活引用**（见 [配置那篇](../../.agents/notes/implemented/architecture/2026-10-01-sync-config-is-live-in-the-page.md)），
+ * 用户在界面里当场把自动推送打开 / 关掉 / 改间隔，下一次醒来就得按新值走。按配置挂定时器的话，
+ * 关掉之后那个 `setInterval` 还在，得靠再挂一套"配置变了重挂定时器"的订阅——多一份状态，还会在
+ * 重挂的空档里漏掉一次。这里只在**关着**的时候停表（省一个空转的定时器），开着就按最短的那个粒度醒。
+ *
+ * 为什么"最短粒度"是 `min(interval, 60_000)`：醒得比间隔勤没有意义，但**关掉/改小**要能在一个合理
+ * 的时间内生效。60 秒是这条的上界。
+ *
+ * @param deps 跑一轮的动作、配置读法与定时器工厂。
+ * @returns 节拍器；没开时不挂定时器（但仍可 `tick()`）。
+ */
+export function createAutoPushTimer(deps: AutoPushTimerDeps): AutoPushTimer {
+  const now = deps.now ?? ((): number => Date.now())
+  const setTimer = deps.setTimer ?? ((handler: () => void, ms: number): unknown => setTimeout(handler, ms))
+  const clearTimer = deps.clearTimer ?? ((handle: unknown): void => clearTimeout(handle as NodeJS.Timeout))
+  /** 醒来的最密节奏：间隔再大也不超过一分钟醒一次（关掉与改小要能及时生效）。 */
+  const WAKE_CAP_MS = 60_000
+  let handle: unknown
+  let stopped = false
+  /** 正在跑（`busy` 那条判据）：一次只允许一轮，且**由节拍器**把关，不指望 `run()` 自己重入安全。 */
+  let running: Promise<AutoPushOutcome> | undefined
+  let lastOutcome: AutoPushOutcome | undefined
+
+  const note = (outcome: AutoPushOutcome): void => {
+    lastOutcome = outcome
+  }
+
+  /** 这一轮结束（成功、失败、空跑都算）之后重新排下一次。 */
+  const reschedule = (): void => {
+    if (stopped || handle !== undefined) return
+    if (!deps.clock.enabled()) return
+    const wait = Math.min(WAKE_CAP_MS, Math.max(1_000, deps.clock.intervalMs()))
+    handle = setTimer(() => {
+      handle = undefined
+      void tick().finally(reschedule)
+    }, wait)
+  }
+
+  const tick = async (options: { force?: boolean; onProgress?: ProgressReporter } = {}): Promise<AutoPushOutcome> => {
+    /*
+     * 上一轮还在跑：这一轮让开。
+     *
+     * 报的是**上一轮**那份结论（`lastOutcome`）：`busy` 说的是"这一次请求没被受理"，不是"同步失败了"——
+     * 造一条合成的结论会把上一轮真跑出来的结果盖掉，界面上就只剩一句"刚才在忙"。
+     */
+    if (running !== undefined) return { ran: false, skip: 'busy', failures: failuresOf(lastOutcome) }
+    if (!deps.clock.enabled() && options.force !== true) {
+      return { ran: false, skip: 'disabled', failures: failuresOf(lastOutcome) }
+    }
+    const pending = (async (): Promise<AutoPushOutcome> => {
+      const startedAt = now()
+      const outcome = await deps.run(options.onProgress === undefined ? {} : { onProgress: options.onProgress })
+      // `run()` 自己会带 `failures` 与 `problem`（它知道这一轮是失败还是空跑）；这里只补时刻。
+      const stamped: AutoPushOutcome = { ...outcome, ...(outcome.ran ? { startedAt, finishedAt: now() } : {}) }
+      note(stamped)
+      return stamped
+    })()
+    running = pending
+    try {
+      return await pending
+    } finally {
+      running = undefined
+      reschedule()
+    }
+  }
+
+  reschedule()
+
+  return {
+    enabled: () => deps.clock.enabled(),
+    intervalMs: () => deps.clock.intervalMs(),
+    tick: (options = {}) => tick(options),
+    last() {
+      return {
+        enabled: deps.clock.enabled(),
+        intervalMs: deps.clock.intervalMs(),
+        ...(lastOutcome === undefined ? {} : { outcome: lastOutcome }),
+      }
+    },
+    note,
+    stop() {
+      stopped = true
+      if (handle !== undefined) {
+        clearTimer(handle)
+        handle = undefined
+      }
+    },
+  }
+}
+
+/** 一条结论里记着的连续失败次数（没有结论时是 0）。 */
+function failuresOf(outcome: AutoPushOutcome | undefined): number {
+  return outcome?.failures ?? 0
+}
+
+/**
+ * 跑一轮自动推送：**只推不拉**。
+ *
+ * 与手动同步那条路（`runSync()` / `prepareSync()` + `syncPrepared()`）的三处不同，每一处都是
+ * "无人在场"推出来的：
+ *
+ *   1. **只推不拉**（`pushOnly`）：计划里没有拉取、没有"覆盖本机"，所以这一轮**永远不改本机任何
+ *      会话**。这不是省钱，是安全边界——覆盖本机那份要动本机已有内容，界面上那道动作前面挡着一个
+ *      确认弹窗，后台不该绕过它。也正因为没有落地那一段，这一轮不必问宿主"这条还活着吗"、不必
+ *      备份、不写注册表、不请宿主重折投影检查点：那几件事全都挂在"真有东西落到本机"那条路上。
+ *   2. **没有预演与确认**：一次调用算完就落地（`runSync()` 那条单次调用路），而**不是**
+ *      `syncPrepared()`——那个是"照着用户确认过的那份计划落地"，后台没有用户确认过的东西。
+ *   3. **没得推也要收尾一次**：本机删掉的会话得从**自己那一格的索引**里消失，而今天那一步只在
+ *      `applyPreparedSync()` 里（且总是会走到）。所以"计划里一条都不推"时仍要走一次落地——一份空的
+ *      计划，落下去只会重写索引。不这么做的话，删掉的会话会永远留在自己的格子索引里，别的机器照着
+ *      它去取包时取到一个不存在的对象。
+ *
+ * 速度闸放在这里而不是节拍器里：节拍器只管"醒"，"要不要真跑"是这一层的事——界面那枚「立即推送一次」
+ * 绕过它（`force`），因为它这次是用户按的，不是定时器醒的。闸门比的是 `settings.autoPush.intervalMs`
+ * （那份值在 `config.ts` 的 `autoPushSection()` 里已经抬过下限），所以"多久一次"只有一个来源。
+ *
+ * @param deps 远端、设置与本地库的位置；`settings.autoPush` 说这次开没开。
+ * @param options.force 忽略速度闸（用户手点的那一次）。
+ * @param options.lastRunAt 上一次真跑的结束时刻（毫秒）；没跑过就是 undefined。
+ * @param options.failures 这一层维护的连续失败计数（成功清零）。
+ * @param options.onProgress 每开始处理一条调一次（与手动那条路同一套事件）。
+ * @returns 这一轮的结论；**不抛**——后台任务抛出去没人接，失败进 `failures` 与 `problem`。
+ */
+/**
+ * 本机那格的索引里是不是还留着眼下**已经没有**的会话（见 `runAutoPush()` 的 `idle` 判据）。
+ *
+ * 判据是集合包含：索引里记着的每个 id 都得在本机现在的库里。本机删掉一条会话之后那个 id 就不在了，
+ * 于是这一项为真——值得走一趟落地把索引刷新掉。反过来"本机新加了一条"不算（那时 `pushIds` 里有它，
+ * 走不到这个判据）。
+ *
+ * 只看**自己那一格**：别的机器的格子由它们自己维护，那些记录本来就不该由这里撤。
+ *
+ * @param prepared 这一轮算出来的数据（`remote.indexes` 是读回来的各机器索引）。
+ * @param machineId 这台机器的标识（它那一格的目录名按 `machineDirName()` 折算）。
+ * @returns 索引里有本机已经没有的会话时为 true。
+ */
+function indexNeedsSettling(prepared: SyncPrepared, machineId: string): boolean {
+  const own = prepared.remote.indexes.get(machineDirName(machineId))
+  if (own === undefined) return false
+  const present = new Set(prepared.local.map((session) => session.id))
+  return own.entries.some((entry) => !present.has(entry.id))
+}
+
+export async function runAutoPush(
+  deps: SyncDeps,
+  options: {
+    force?: boolean
+    lastRunAt?: number
+    failures?: number
+    now?: () => number
+    onProgress?: ProgressReporter
+  } = {},
+): Promise<AutoPushOutcome> {
+  const now = options.now ?? ((): number => Date.now())
+  const failures = options.failures ?? 0
+  const config = deps.settings.autoPush
+  if (config === undefined || !config.enabled) return { ran: false, skip: 'disabled', failures }
+  const startedAt = now()
+  if (options.force !== true && options.lastRunAt !== undefined && startedAt - options.lastRunAt < config.intervalMs) {
+    return { ran: false, skip: 'interval', failures }
+  }
+  /*
+   * 三个条件都成立才是"真的没事干"（`idle`），此时连落地都不走：索引里要写的东西与远端那份逐字节
+   * 相同，再 PUT 一次只是白跑一趟网络。三条各自挡一种"看着没事、其实要收尾"的情形：
+   *
+   *   1. `pushIds` 非空 → 有会话要推；
+   *   2. `blank` 非空 → 那几条空白会话要从**远端那份索引**里撤下来（它们本机不上传）；
+   *   3. `indexNeedsSettling()` → 本机**删掉**的会话还挂在自己那格索引里。它们不在这一轮的
+   *      `plan.local` 里，所以推送表里连 `identical` 行都没有——只看前两条会整类漏掉，而被删的会话
+   *      留在索引里，别的机器就会照着它去取一个不存在的包。
+   */
+  try {
+    const pushDeps: SyncDeps = { ...deps, pushOnly: true, progressWhat: deps.progressWhat ?? 'auto-push' }
+    const prepared = await prepareSync(pushDeps, {
+      ...(options.onProgress === undefined ? {} : { onProgress: options.onProgress }),
+      pushOnly: true,
+    })
+    const idle =
+      prepared.plan.pushIds.length === 0 &&
+      prepared.plan.blank.length === 0 &&
+      !indexNeedsSettling(prepared, deps.settings.machineId)
+    if (idle) {
+      const finishedAt = now()
+      return { ran: true, skip: 'idle', startedAt, finishedAt, failures }
+    }
+    const outcome = await applyPreparedSync(
+      pushDeps,
+      prepared,
+      options.onProgress === undefined ? {} : { onProgress: options.onProgress },
+    )
+    const finishedAt = now()
+    const failed = outcome.problems.length > 0
+    return {
+      ran: true,
+      outcome,
+      startedAt,
+      finishedAt,
+      failures: failed ? failures + 1 : 0,
+      ...(failed ? { problem: outcome.problems[0] as string } : {}),
+    }
+  } catch (error) {
+    return {
+      ran: false,
+      failures: failures + 1,
+      problem: error instanceof Error ? error.message : String(error),
+    }
+  }
 }

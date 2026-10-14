@@ -10,7 +10,9 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  DEFAULT_AUTO_PUSH_INTERVAL_MS,
   DEFAULT_PASSWORD_REF,
+  autoPushMinutes,
   draftFrom,
   draftOps,
   draftProblems,
@@ -123,6 +125,10 @@ test('同步设置：接缝没给出值时不编造（空节 → 空草稿）', 
     username: '',
     mapping: [],
     timeoutMs: '',
+    // 自动推送那两栏也是"没给就不编"：开关按未勾选、间隔按留空（空 = 用宿主那个缺省值，见
+    // `autoPushSection()` 与 `DEFAULT_AUTO_PUSH_INTERVAL_MS`）。
+    autoPush: false,
+    autoPushIntervalMs: '',
   })
 })
 
@@ -231,4 +237,100 @@ test('同步设置：测试连接的结论翻成哪一句（判定在宿主侧�
   }
   // 认不出来的码不许悄悄说成"连得上"
   assert.notEqual(testVerdict({ ...base, code: 'wat', status: 418, detail: 'teapot' }, 'REF').key, 'sync.test.ok')
+})
+
+// ── 自动推送那两栏（开关 + 间隔）────────────────────────────────────────────
+
+test('同步设置：打开自动推送发一条 set，关掉发 unset（与 timeoutMs 同一条规矩）', () => {
+  /*
+   * 只提交**改动过**的字段：逐字提交会在用户层攒下一堆"等于默认值"的覆盖。所以两种方向各钉一遍：
+   * 从没开改到开 → 一条 `set true`；从开改到关 → 一条 `unset`（退回组合层，而不是写一个 `false`）。
+   */
+  const base = draftFrom({})
+
+  const opened = draftOps({ ...base, autoPush: true }, {})
+  assert.deepEqual(opened, [{ op: 'set', path: ['sync', 'autoPush'], value: true }])
+
+  const closed = draftOps({ ...base, autoPush: false }, { autoPush: true })
+  assert.deepEqual(closed, [{ op: 'unset', path: ['sync', 'autoPush'] }])
+
+  // 没动过就不发编辑：这是"别的字段不跟着被覆盖"的防线。
+  assert.deepEqual(draftOps(base, {}), [], '什么都没改 → 一条编辑都不发')
+  assert.deepEqual(draftOps({ ...base, autoPush: true }, { autoPush: true }), [], '开关本来就开着 → 不发')
+})
+
+test('同步设置：间隔填了发 set、清空发 unset、没动就不发', () => {
+  const base = draftFrom({})
+  assert.deepEqual(draftOps({ ...base, autoPushIntervalMs: '60000' }, {}), [
+    { op: 'set', path: ['sync', 'autoPushIntervalMs'], value: 60000 },
+  ])
+  assert.deepEqual(draftOps({ ...base, autoPushIntervalMs: '' }, { autoPushIntervalMs: 60000 }), [
+    { op: 'unset', path: ['sync', 'autoPushIntervalMs'] },
+  ])
+  assert.deepEqual(
+    draftOps({ ...base, autoPushIntervalMs: '120000' }, { autoPushIntervalMs: 120000 }),
+    [],
+    '值没变（字符串形态与数字形态是同一个值）→ 不发',
+  )
+})
+
+test('同步设置：间隔只收正整数（0 / 负数 / 小数 / 乱填都挡住保存）', () => {
+  /*
+   * 这一栏与 `timeoutMs` 同一档：非法的值不该悄悄存进配置。判据在 `draftProblems()` 里，界面按码取
+   * 文案——所以这里核**码**，不核句子。
+   *
+   * 注意下限（60000）**不在这里挡**：填 1000 是"想勤快点"，宿主会抬到下限（见核心层的
+   * `MIN_AUTO_PUSH_INTERVAL_MS`），不该让用户先撞一次报错才知道有这个规矩。
+   */
+  const base = draftFrom({})
+  const has = (interval: string): boolean =>
+    draftProblems({ ...base, autoPush: true, autoPushIntervalMs: interval }).some(
+      (problem) => problem.code === 'autoPushIntervalNotPositive',
+    )
+  assert.equal(has(''), false, '留空 = 用缺省值，不是错')
+  assert.equal(has('60000'), false, '正整数放行')
+  assert.equal(has('1000'), false, '比下限小也放行（宿主会抬到下限，那不是"填错了"）')
+  assert.equal(has('0'), true, '0 挡')
+  assert.equal(has('-5'), true, '负数挡')
+  assert.equal(has('1.5'), true, '小数挡（毫秒不是秒，半毫秒没有意义）')
+  assert.equal(has('abc'), true, '乱填挡')
+})
+
+test('同步设置：分钟数按四舍五入，坏值退回缺省那份', () => {
+  // 卡片那句"每 N 分钟一次"要用它。`SyncInfo.autoPush.intervalMs` 是宿主拍平之后的真值。
+  assert.equal(autoPushMinutes(DEFAULT_AUTO_PUSH_INTERVAL_MS), 5, '缺省 300000 = 5 分钟')
+  assert.equal(autoPushMinutes(60_000), 1)
+  assert.equal(autoPushMinutes(900_000), 15)
+  // 宿主的 min 是 60000，所以"30 秒"这种值只可能来自坏输入；它必须退回缺省，不能显示成 0 分钟。
+  assert.equal(autoPushMinutes(30_000), 1, '不到一分钟也要说 1 分钟，不能说 0（"每 0 分钟一次"）')
+  assert.equal(autoPushMinutes(0), 5, '0 是坏值 → 缺省')
+  assert.equal(autoPushMinutes(Number.NaN), 5, 'NaN 是坏值 → 缺省')
+})
+
+test('同步设置：自动推送的字典键两种语言都在', () => {
+  // 界面那几处文案全走 `t()`；键写错时界面上会露出键名。这里核"开关 / 间隔 / 立即推送 / 跑完 / 没跑"
+  // 这几组键真的存在——`LocaleDictOf` 已经在编译期核过键集一致，这一条核的是**用到的**那些。
+  const keys = [
+    'sync.field.autoPush',
+    'sync.field.autoPushHint',
+    'sync.field.autoPushInterval',
+    'sync.field.autoPushIntervalHint',
+    'sync.autoPush.now',
+    'sync.autoPush.running',
+    'sync.autoPush.done',
+    'sync.autoPush.nothing',
+    'sync.autoPush.enabled',
+    'sync.autoPush.failed',
+    'sync.autoPush.problem',
+    'sync.autoPush.noReason',
+  ] as const
+  for (const key of keys) {
+    assert.ok(key in zh, `中文缺 ${key}`)
+    assert.ok(key in en, `英文缺 ${key}`)
+  }
+  // `skip` 的四个码各有各的句子（判定在宿主、句子在界面）：少一个界面上就会退回 noReason。
+  for (const code of ['disabled', 'interval', 'busy', 'idle'] as const) {
+    assert.ok(`sync.autoPush.skip.${code}` in zh, `中文缺 sync.autoPush.skip.${code}`)
+    assert.ok(`sync.autoPush.skip.${code}` in en, `英文缺 sync.autoPush.skip.${code}`)
+  }
 })

@@ -40,6 +40,33 @@ export interface SyncSectionValue {
   passwordRef?: string
   mapping?: Record<string, string>
   timeoutMs?: number
+  /** 打开自动推送（缺省 = 没开）；间隔那一栏见 `autoPushIntervalMs`。 */
+  autoPush?: boolean
+  /** 自动推送的间隔毫秒；缺省由核心层给（`DEFAULT_AUTO_PUSH_INTERVAL_MS`）。 */
+  autoPushIntervalMs?: number
+}
+
+/**
+ * 自动推送间隔的缺省值（表单上那行灰字按它说"缺省 5 分钟"）。
+ *
+ * 与 `DEFAULT_PASSWORD_REF` 同一个口径：这里是**副本**，核心层 `src/config.ts` 里那份才是权威，
+ * 浏览器半侧不 import 核心层（那会把 schemastery 拖进客户端产物）。`test/browser-auto-push.test.ts`
+ * 钉住两份相等——灰字报错了用户会按一个根本不生效的数去理解界面。
+ */
+export const DEFAULT_AUTO_PUSH_INTERVAL_MS = 300000
+
+/**
+ * 自动推送间隔的缺省分钟数：卡片上那句"每 N 分钟一次"用它。
+ *
+ * `SyncInfo.autoPush` 只报**间隔毫秒**（宿主已经解析过用户层：没配就是核心层那个缺省值），所以
+ * 界面这一侧不需要自己判断"配没配"，只要把它换成分钟。
+ *
+ * @param intervalMs 宿主给的间隔毫秒。
+ * @returns 四舍五入到分钟的数值；给不出数字时退回缺省值那一档。
+ */
+export function autoPushMinutes(intervalMs: number): number {
+  const value = Number.isFinite(intervalMs) && intervalMs > 0 ? intervalMs : DEFAULT_AUTO_PUSH_INTERVAL_MS
+  return Math.max(1, Math.round(value / 60000))
 }
 
 /** 控制器快照的最小面（与宿主 `configForms.get()` 的快照同形）。 */
@@ -163,6 +190,10 @@ export interface SyncDraft {
   username: string
   mapping: MappingRow[]
   timeoutMs: string
+  /** 自动推送那一栏：原生复选框的勾选态（它是布尔，不像其它几栏那样有"空草稿"这个第三态）。 */
+  autoPush: boolean
+  /** 自动推送间隔那一栏的草稿（与 `timeoutMs` 同一个口径：空 = 没写，保存时 `unset`）。 */
+  autoPushIntervalMs: string
 }
 
 /** 从快照里取出这一节的值。 */
@@ -208,6 +239,8 @@ export function draftFrom(value: SyncSectionValue): SyncDraft {
     username: value.username ?? '',
     mapping: mappingRows(value.mapping),
     timeoutMs: value.timeoutMs === undefined ? '' : String(value.timeoutMs),
+    autoPush: value.autoPush === true,
+    autoPushIntervalMs: value.autoPushIntervalMs === undefined ? '' : String(value.autoPushIntervalMs),
   }
 }
 
@@ -242,6 +275,23 @@ export function draftOps(draft: SyncDraft, value: SyncSectionValue): SyncPathOp[
     ops.push(timeout === '' ? { op: 'unset', path: ['sync', 'timeoutMs'] } : { op: 'set', path: ['sync', 'timeoutMs'], value: Number(timeout) })
   }
 
+  // 自动推送：勾选态发布尔（缺省就是 false，所以取消勾选发 unset 而不是 set false——留一条"等于缺省"
+  // 的覆盖只会在配置文档里攒出一条谁也不需要的记录）；间隔与 `timeoutMs` 逐字同形（空 → unset）。
+  const autoPush = draft.autoPush === true
+  const beforeAutoPush = value.autoPush === true
+  if (autoPush !== beforeAutoPush) {
+    ops.push(autoPush ? { op: 'set', path: ['sync', 'autoPush'], value: true } : { op: 'unset', path: ['sync', 'autoPush'] })
+  }
+  const interval = draft.autoPushIntervalMs.trim()
+  const beforeInterval = value.autoPushIntervalMs === undefined ? '' : String(value.autoPushIntervalMs)
+  if (interval !== beforeInterval) {
+    ops.push(
+      interval === ''
+        ? { op: 'unset', path: ['sync', 'autoPushIntervalMs'] }
+        : { op: 'set', path: ['sync', 'autoPushIntervalMs'], value: Number(interval) },
+    )
+  }
+
   // 映射整表一次写：它是「一整套对应关系」，拆成逐条编辑反而会出现"删了又写回来"的中间态。
   // 有问题的行在场时不发编辑（保存本来就被 draftProblems 挡住了）。
   const next = mappingValue(draft.mapping)
@@ -256,10 +306,20 @@ export function draftOps(draft: SyncDraft, value: SyncSectionValue): SyncPathOp[
 }
 
 /** 草稿里那几个能挡住保存的问题（空数组＝可以保存）；同样是码，文案在字典里。 */
-export type DraftProblem = { code: 'timeoutNotPositive' } | { code: 'mapping'; problem: MappingProblem }
+export type DraftProblem =
+  | { code: 'timeoutNotPositive' }
+  | { code: 'autoPushIntervalNotPositive' }
+  | { code: 'mapping'; problem: MappingProblem }
 
 /**
  * 检查草稿里能当场看出来的问题。
+ *
+ * 两个数字栏的判据都是"填了才查"：空草稿表示没写（保存时 `unset`，退回组合层），不是 0。
+ *
+ * 间隔的下限**不在这里**：核心层会把 60000 以下的值抬到 60000，界面照收（把 30000 当场挡回去，等于
+ * 在界面上多写一条只有核心层才知道的规矩）。这里挡的是那些**根本不成数**的值：0 / 负数 / 小数 /
+ * 非数字——它们送下去只会变成一个不像样的间隔。
+ *
  * @param draft 草稿。
  * @returns 问题列表；空数组表示可以保存。
  */
@@ -267,6 +327,10 @@ export function draftProblems(draft: SyncDraft): DraftProblem[] {
   const problems: DraftProblem[] = []
   const timeout = draft.timeoutMs.trim()
   if (timeout !== '' && (!/^\d+$/.test(timeout) || Number(timeout) <= 0)) problems.push({ code: 'timeoutNotPositive' })
+  const interval = draft.autoPushIntervalMs.trim()
+  if (interval !== '' && (!/^\d+$/.test(interval) || Number(interval) <= 0)) {
+    problems.push({ code: 'autoPushIntervalNotPositive' })
+  }
   for (const problem of mappingProblems(draft.mapping)) problems.push({ code: 'mapping', problem })
   return problems
 }
