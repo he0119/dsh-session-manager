@@ -4972,6 +4972,89 @@ test('客户端产物：同步设置表单的字段顺序——自动推送排�
   assert.ok(timeout < autoPush && user < autoPush, '它不在"怎么连/怎么认证"那一组里')
 })
 
+test('客户端产物：同步设置的「测试连接」——结论紧跟在按钮下面，不在表单末尾', { skip }, async () => {
+  /*
+   * 按钮在最上面、结论在最下面是一个**看不见的失败**：按完之后用户不知道有没有结果，得自己往下翻过整张
+   * 表单才知道。所以结论必须落在按钮那一块里（同一个 `dsm-syncTools` 子树）。
+   *
+   * 用现成的 `strings()` 走那一块的子树：判据是"按钮与结论是同一块的成员"，不是"谁先出现"——后者在
+   * 结论被留在表单末尾时一样成立（它确实更靠后），什么都拦不住。
+   *
+   * 反事实：把结论那两行塞回 `dsm-syncForm` 末尾（映射之后），这一条立刻红。
+   */
+  const state = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    sync: { url: 'https://dav.example.com/dsh', machineId: 'robot-a', mappings: 0 },
+    sessions: [],
+    workspaces: [],
+  }
+  const controller = {
+    getSnapshot: () => ({
+      status: 'ready',
+      writable: true,
+      revision: 4,
+      value: { sync: { url: 'https://dav.example.com/dsh', machineId: 'robot-a', timeoutMs: 30000 } },
+    }),
+    subscribe: () => () => {},
+    mutate: async () => true,
+  }
+  const credentials = {
+    async describe(refs) {
+      return { ok: true, value: Object.fromEntries(refs.map((ref) => [ref, { configured: false, writable: true }])) }
+    },
+    async set() {
+      return { ok: true, value: undefined }
+    },
+  }
+  // 结论那一行由 `nulls` 按 useState 的顺序种进去（见「测试连接」那条用例开头的说明）。
+  const outcome = {
+    mode: 'test',
+    remote: { url: 'https://dav.example.com/dsh', machineId: 'robot-a' },
+    code: 'ok',
+    status: 207,
+    namespaceExists: true,
+    machines: ['robot-test', 'vibe-coding-dev'],
+    entries: 3,
+    username: undefined,
+    hasPassword: true,
+  }
+  const mounted = mount({
+    state,
+    panel: 'sync',
+    configForms: { get: () => controller },
+    credentials,
+    nulls: [null, null, null, null, null, null, null, null, outcome],
+  })
+  const tree = mounted.registrations[0].component(mounted.registrations[0].registration.inject())
+
+  // 整页文本里结论确实渲染了（不然下面那条断言会空过）。
+  const renderedText = strings(tree)
+  assert.ok(
+    renderedText.some((item) => String(item).startsWith('sync.test.ok')),
+    '结论行该渲染出来',
+  )
+
+  // 按钮那一块：`dsm-syncTools`。它的子树里必须同时有按钮与结论。
+  /*
+   * 找那一块用 `recorded` 而不是 `elements()`：分页本体包在 Fragment 里，`elements()` 不下穿
+   * Fragment（见它的注释），而假 `createElement` 把每个元素都记进了 `recorded`。判据本身仍然是
+   * "按钮与结论同处一块"——`recorded` 里只有一个 `dsm-syncTools`。
+   */
+  const blocks = mounted.recorded.filter((node) => node.props?.className === 'dsm-syncTools')
+  assert.equal(blocks.length, 1, '只有一块 dsm-syncTools')
+  const blockText = strings(blocks[0].props?.children)
+  assert.ok(
+    blockText.includes('sync.test.action'),
+    `「测试连接」按钮要在那一块里，实际：${JSON.stringify(blockText)}`,
+  )
+  assert.ok(
+    blockText.some((item) => String(item).startsWith('sync.test.ok')),
+    `结论也要在那一块里——按完按钮答案就该出现在按的地方，实际块内文本：${JSON.stringify(blockText)}`,
+  )
+})
+
 test('客户端产物：同步设置的「测试连接」是只读工具，排在字段之上、不跟保存同一行', { skip }, async () => {
   /*
    * 位置与**性质**要一致：它一次 PROPFIND、一个字节都不改，所以是这张卡片的只读工具（与「刷新」「全选」

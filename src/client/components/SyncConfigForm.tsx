@@ -297,10 +297,21 @@ export function SyncConfigForm({
        * 末尾靠近保存的地方），读起来就是"先探通路、再填其余"。
        */}
       <div className="dsm-syncTools">
-        <button type="button" className="dsm-button" onClick={testConnection} disabled={!canTest}>
-          {testing ? t('sync.test.running') : t('sync.test.action')}
-        </button>
-        <span className="dsm-hint">{dirty ? t('sync.test.dirty') : t('sync.test.hint')}</span>
+        <div className="dsm-controls">
+          <button type="button" className="dsm-button" onClick={testConnection} disabled={!canTest}>
+            {testing ? t('sync.test.running') : t('sync.test.action')}
+          </button>
+          <span className="dsm-hint">{dirty ? t('sync.test.dirty') : t('sync.test.hint')}</span>
+        </div>
+        {/*
+         * 结论紧跟在按钮下面，**不**摆到表单末尾去：按一下按钮，答案就该出现在按的地方。摆末尾的话
+         * 按钮在最上面、结论在最下面，中间隔着整张表单（十几行字段），用户按完不知道结果有没有出来，
+         * 得自己往下翻——这不是美观问题，是"这次点击有没有生效"根本看不见。
+         */}
+        {testError !== undefined && <p className="dsm-warn">{testError}</p>}
+        {verdict !== undefined && (
+          <p className={testResult?.code === 'ok' ? 'dsm-ok' : 'dsm-warn'}>{t(verdict.key, verdict.params)}</p>
+        )}
       </div>
       <Field
         label={t('sync.field.url')}
@@ -447,13 +458,6 @@ export function SyncConfigForm({
         {snapshot.writable && dirty && problems.length === 0 && !failed && <span className="dsm-hint">{t('sync.form.unsaved')}</span>}
       </div>
 
-      {/*
-       * 「测试连接」结论：跟着按钮走，所以也搬到上面去了（见那块工具行的注释）。
-       */}
-      {testError !== undefined && <p className="dsm-warn">{testError}</p>}
-      {verdict !== undefined && (
-        <p className={testResult?.code === 'ok' ? 'dsm-ok' : 'dsm-warn'}>{t(verdict.key, verdict.params)}</p>
-      )}
     </div>
   )
 }

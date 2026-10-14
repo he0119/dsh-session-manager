@@ -759,10 +759,12 @@ export const CSS = `
 /* 同步设置表单：字段一列排开，配对的两个字段并排一行（窄屏自动换行）。 */
 .dsm-syncForm { display: flex; flex-direction: column; gap: 10px; margin: 4px 0 2px; }
 /*
- * 「测试连接」那一行：这张卡片的只读工具，所以摆在字段之上（与卡片头部的「刷新 / 全选」同一类）。
- * 与 dsm-controls 的区别只在下方间距——那一行是动作行的收尾，这一行后面接着字段。
+ * 「测试连接」那一块：这张卡片的只读工具，所以摆在字段之上（与卡片头部的「刷新 / 全选」同一类）。
+ *
+ * 是一列而不是一行：按钮与说明一行，结论另起一行紧贴在下面。结论跟着按钮走是刻意的——按一下按钮，
+ * 答案就该出现在按的地方；摆到表单末尾的话按钮在最上面、结论在最下面，中间隔着整张表单。
  */
-.dsm-syncTools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 2px; }
+.dsm-syncTools { display: flex; flex-direction: column; gap: 6px; margin-bottom: 2px; }
 .dsm-syncRow { display: flex; gap: 12px; flex-wrap: wrap; }
 .dsm-syncRow > .dsm-field { flex: 1 1 16rem; min-width: 0; }
 .dsm-options { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
