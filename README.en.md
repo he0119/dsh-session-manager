@@ -173,8 +173,10 @@ M" to report.
   candidate panel; you can also type a path or browse the file system). Each row carries two lines (the
   name on top, the local path below, the whole string in its tooltip) and the **filter box** above them
   narrows the list by path, workspace title or project identity — it only filters the candidates and
-  never touches the value; **clicking a row selects it** (and collapses the panel). A directory with a
-  git remote reads as **project identity + local path**
+  never touches the value; **clicking a row selects it** (and collapses the panel). A registered
+  workspace whose directory is gone from disk (deleted or renamed) is still listed, with a
+  **"Gone"** tag and no click: picking it would only run into "target directory does not
+  exist". A directory with a git remote reads as **project identity + local path**
   (`github.com/he0119/dsh-session-manager — /home/uy_sun/dev/dsh-session-manager`): that control has a
   single line, so the path cannot disappear from here — it is what tells two clones of one repository
   apart. The target directory must already exist; next to it sit the optional title for a newly created

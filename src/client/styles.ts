@@ -574,6 +574,12 @@ export const CSS = `
 }
 .dsm-candidateName { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dsm-candidateMeta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 第一行是"名字 + 那枚「不存在」的标签"（见 planRows.candidateRow）：名字先让位，标签不缩。 */
+.dsm-candidateHead { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.dsm-candidateHead > .dsm-tag { flex: none; }
+/* 点不动的候选不该再给悬停反馈：那层底色是"这一行能点"的信号。 */
+.dsm-dirEntry:disabled { cursor: default; }
+.dsm-dirEntry:disabled:hover { background: transparent; }
 .dsm-table { width: 100%; border-collapse: collapse; }
 .dsm-table th, .dsm-table td {
   text-align: left;

@@ -471,6 +471,16 @@ test('GET /state：登记过、但目录已经改名的会话算「未分组」�
       ['ws-a', ['session-a']],
     ],
   )
+  // 目标候选靠 `exists` 把"盘上还在的"与"只剩一条登记的"分开（见 CandidatePanel）：目录没了的
+  // 那条候选在界面上挂标签、点不动，不标的话两者长得一模一样、点下去只会撞上「目标工作区目录不存在」。
+  assert.deepEqual(
+    workspaces.map((w) => [w['id'], w['exists']]),
+    [
+      ['ws-gone', false],
+      ['ws-a', true],
+    ],
+    '每条工作区各报一次"盘上还有没有这个目录"',
+  )
 })
 
 test('GET /state：标题优先读宿主投影缓存，缓存对不上身份才回落日志', async () => {
