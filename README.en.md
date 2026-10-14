@@ -311,8 +311,8 @@ sync:
   mapping:                                 # explicit mapping: remote cwd → local directory (each machine writes its own)
     /home/alice/dev/proj: /opt/work/proj
   timeoutMs: 30000                         # optional
-  autoPush: true                           # optional: automatic push (push only, see the paragraph below)
-  autoPushIntervalMs: 300000               # optional: automatic push interval in ms, 300000 (5 minutes) by default, 60000 minimum
+  autoPush: true                           # optional: automatic push (once a turn ends, push only — see below)
+  autoPushIntervalMs: 300000               # optional: fallback interval in ms, 300000 (5 minutes) by default, 60000 minimum
 ```
 
 This section is also editable **in the interface**: in the card on Settings → “Session management” → “Sync”, the URL, machine id, username, password, timeout and mapping are
@@ -324,30 +324,41 @@ by row: the left side is the cwd the remote recorded, the right side a directory
 side must match the other machine’s path character for character, so once you have synced (and the plan in the
 dialog has seen them), the form offers those cwds as suggestions instead of making you copy them by hand.
 
-**Automatic push — push only**: turn it on and the plugin runs a round in the background on an
-interval, **pushing this machine's sessions to the remote and pulling nothing at all**: no pull, no
-replacing the local copy, no backup, no registry write, so not one local session is touched. That is
-a safety boundary, not "a lighter sync" — the pulling side moves content this machine already has
-(a newer remote copy is backed up and then replaced), that needs someone watching, and in the
-interface a confirm dialog stands in front of it, so the background path does only the purely
-additive half. Both fields live on the **Sync settings** form (below the timeout):
+**Automatic push — push only**: turn it on and the plugin pushes a round **as soon as this machine
+finishes a turn** (it acts when the host reports `turn/end` for a session), **pushing this machine's
+sessions to the remote and pulling nothing at all**: no pull, no replacing the local copy, no
+backup, no registry write, so not one local session is touched. That is a safety boundary, not "a
+lighter sync" — the pulling side moves content this machine already has (a newer remote copy is
+backed up and then replaced), that needs someone watching, and in the interface a confirm dialog
+stands in front of it, so the background path does only the purely additive half. Both fields live
+on the **Sync settings** form (below the timeout):
 
 ```yaml
 sync:
   autoPush: true                             # turn automatic push on (off by default)
-  autoPushIntervalMs: 300000                 # interval in ms (300000 = 5 minutes; 60000 minimum)
+  autoPushIntervalMs: 300000                 # **fallback** interval in ms (300000 = 5 minutes; 60000 minimum)
 ```
 
-Anything below 60000 is raised to 60000 (asking for "more often" should not be an error, but a 0
-should not hammer the remote either); an interval change needs **no restart**, the next round uses
-the new value, and turning it off stops it right away. **Whatever the remote has newer is never
-pulled down**: it only pushes, so another machine's edits land here only when you press **Sync**
-yourself and confirm in the dialog. The **Push now** button in the card's footer row (next to Sync,
-shown while the switch is on) runs one round on the spot — it bypasses the minimum-interval gate,
-because your click should not be blocked by "only 20 seconds since the last one"; it is still
-push-only, so there is no confirm dialog and progress is drawn on the page banner. That banner also
-says whether the round ran and, if it did not, why (off / interval not reached / previous round
-still running / nothing to push), plus a line when it keeps failing.
+The push happens **10 seconds after the last session event**: a turn does not fire `turn/end` just
+once (an automatic continuation, a subagent starting or stopping each fire their own), so the plugin
+waits a moment and a burst of events therefore pushes once instead of PUTting the whole bundle over
+and over. This path bypasses the rate gate below — you just finished a turn, and "only 20 seconds
+since the last one" should not hold it back.
+
+`autoPushIntervalMs` is the **fallback interval**, not "push once every 5 minutes": it covers the
+three cases the event layer cannot reach — what another machine pushed to the remote (this machine
+wrote nothing, so no event fires), a session deleted here that needs its index tidied up (again no
+new event), and a missed event layer (DSH crashed, or the session service was not available). So it
+means "push at least this often". Anything below 60000 is raised to 60000 (asking for "more often"
+should not be an error, but a 0 should not hammer the remote either); an interval change needs **no
+restart**, the next round uses the new value, and turning it off stops it right away. **Whatever the
+remote has newer is never pulled down**: it only pushes, so another machine's edits land here only
+when you press **Sync** yourself and confirm in the dialog. The **Push now** button in the card's
+footer row (next to Sync, shown while the switch is on) runs one round on the spot — it bypasses the
+rate gate too, because your click should not be blocked by "only 20 seconds since the last one"; it
+is still push-only, so there is no confirm dialog and progress is drawn on the page banner. That
+banner also says whether the round ran and, if it did not, why (off / the fallback round is not due
+yet / previous round still running / nothing to push), plus a line when it keeps failing.
 
 **The password goes in that same form**: it is a write-only input, and Save stores it in the host credential
 store (`$DSH_HOME/.credentials.yaml`); the configuration file only ever carries the reference, the value is

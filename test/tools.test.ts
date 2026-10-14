@@ -19,7 +19,9 @@ import { readRegistry } from '../src/registry.ts'
 import { remoteBundlePath, remoteIndexPath } from '../src/sync.ts'
 import {
   archiveOps,
+  attachAutoPushToSessions,
   directoryPickerKind,
+  resolveAutoPushRuntime,
   effectMode,
   liveSessionIds,
   registerTools,
@@ -1051,4 +1053,265 @@ test('重新生成名称的端口：四件齐才认，且按"读日志 → 开�
   calls.length = 0
   assert.deepEqual(await livePort.refresh('s-live'), { status: 'retitled', title: '新标题' })
   assert.deepEqual(calls, ['get:s-live', 'refresh'], '活会话那条路上不该出现读日志 / 挂载 / 写句柄')
+})
+
+// ── 事件层接线：turn/end → 落盘 → touched() ─────────────────────────────────────
+//
+// 这一组测的是自动推送的**事件入口**。顺序是它的全部要点：`turn/end` 到的时候日志还没落盘（宿主的
+// checkpoint 策略不管 `turn/end`），而推送读的是磁盘字节——所以必须"先冲盘、再说该推了"。顺序反了
+// 就会推上去一份缺最后几步的半截会话。
+
+/**
+ * 一个只带 `get('sessions')` 与 `on()` 的最小宿主上下文。
+ *
+ * `calls` 是**一条**日志：`flush` 与 `dispose` 都往它里面写，测试也能用 `onCall` 把别处（比如节拍器的
+ * `touched()`）的调用并进来。先后关系只能这样测——两条各记各的数组只能核"都发生了"。
+ */
+function eventHost(options: {
+  /** 显式 `null` = 这个宿主没有 `sessions` 服务；缺省 = 有一个记事的。 */
+  sessions?: unknown
+  withOn?: boolean
+} = {}): {
+  ctx: unknown
+  calls: string[]
+  emit: (session: unknown, event: unknown) => void
+  onCall?: (entry: string) => void
+} {
+  const calls: string[] = []
+  const listeners = new Map<string, Array<(...args: unknown[]) => void>>()
+  const result: {
+    ctx: unknown
+    calls: string[]
+    emit: (session: unknown, event: unknown) => void
+    onCall?: (entry: string) => void
+  } = { ctx: undefined, calls, emit: () => {} }
+
+  const note = (entry: string): void => {
+    calls.push(entry)
+    result.onCall?.(entry)
+  }
+
+  /*
+   * `sessions` 缺席只有一种写法：显式传 `null`。不写成"缺省就是没有"——那样最容易踩的坑是
+   * `eventHost()` 这种无参调用安静地变成"这个宿主没有会话服务"，然后断言全落空却看不出为什么。
+   */
+  const sessions =
+    options.sessions === null
+      ? undefined
+      : {
+          flush: async (session: unknown) => {
+            note(`flush:${String((session as { id?: string } | undefined)?.id)}`)
+            return true
+          },
+          ...((options.sessions ?? {}) as object),
+        }
+
+  result.ctx = {
+    get: (serviceName: string) => (serviceName === 'sessions' ? sessions : undefined),
+    ...(options.withOn === false
+      ? {}
+      : {
+          on: (name: string, listener: (...args: unknown[]) => void) => {
+            const list = listeners.get(name) ?? []
+            list.push(listener)
+            listeners.set(name, list)
+            return () => {
+              const current = listeners.get(name) ?? []
+              listeners.set(name, current.filter((item) => item !== listener))
+              note('dispose')
+            }
+          },
+        }),
+  }
+  result.emit = (session: unknown, event: unknown): void => {
+    for (const listener of listeners.get('session/event') ?? []) listener(session, event)
+  }
+  return result
+}
+
+test('事件接线：turn/end 先落盘、再说该推了（顺序错了会推半截会话）', async () => {
+  /*
+   * 这是事件层的**核心断言**：`flush` 必须排在 `touched()` 前面。反过来的话推送会读到一份还没落盘的
+   * 日志——宿主的 checkpoint 策略只覆盖模型请求 / 工具派发 / 步进三处，`turn/end` 不在其中，所以这不是
+   * 一个"理论上可能"的竞态。
+   *
+   * 两条各记各的数组**测不出先后**（那样只能核"都发生了"）。所以两边往**同一条**日志里写，最后比这条
+   * 日志的顺序。
+   */
+  const host = eventHost()
+  const log: string[] = []
+  const timer = {
+    touched: () => log.push('touched'),
+  } as unknown as Parameters<typeof attachAutoPushToSessions>[1]
+  host.onCall = (entry) => log.push(entry)
+
+  const detach = attachAutoPushToSessions(host.ctx, timer)
+  host.emit({ id: 's-1' }, { type: 'turn/end', turn: 3, reason: { kind: 'completed' } })
+  await new Promise((resolve) => setImmediate(resolve))
+
+  assert.deepEqual(log, ['flush:s-1', 'touched'], '先冲盘、再说该推了——顺序反了就是推半截会话')
+  detach()
+})
+
+test('事件接线：只认 turn/end，别的会话事件一概不理', async () => {
+  /*
+   * `step/end` 一次模型调用就一条，`session/created` 时还没有内容可推。跟着它们推 = 整包 PUT × N。
+   */
+  const host = eventHost()
+  const order: string[] = []
+  const timer = { touched: () => order.push('touched') } as unknown as Parameters<typeof attachAutoPushToSessions>[1]
+  attachAutoPushToSessions(host.ctx, timer)
+
+  for (const type of ['step/end', 'step/start', 'session/created', 'assistant/message', 'turn/start']) {
+    host.emit({ id: 's-1' }, { type })
+  }
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.deepEqual(order, [], '这些事件都不该触发推送')
+  assert.deepEqual(host.calls, [], '也不该白冲盘')
+
+  host.emit({ id: 's-1' }, { type: 'turn/end', turn: 1, reason: { kind: 'completed' } })
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.deepEqual(order, ['touched'], '只有 turn/end 触发')
+})
+
+test('事件接线：冲盘失败也照旧推（吞掉，不打断宿主派发）', async () => {
+  /*
+   * `flush` 只决定"这次读得到多新"，推的活儿本身没错。吞掉的代价是这一次可能推一份略旧的会话，下一轮
+   * 或兜底的定时器会补上；而把异常抛进宿主的事件通道会打断它自己的派发，代价大得多。
+   */
+  const host = eventHost({
+    sessions: {
+      flush: async () => {
+        throw new Error('盘满了')
+      },
+    },
+  })
+  const order: string[] = []
+  const problems: string[] = []
+  const timer = { touched: () => order.push('touched') } as unknown as Parameters<typeof attachAutoPushToSessions>[1]
+  attachAutoPushToSessions(host.ctx, timer, (message) => problems.push(message))
+
+  host.emit({ id: 's-1' }, { type: 'turn/end', turn: 1, reason: { kind: 'completed' } })
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.deepEqual(order, ['touched'], '冲盘失败不影响"该推了"')
+  assert.equal(problems.length, 1, '记了一笔')
+  assert.match(problems[0] ?? '', /盘满了/, '原话带上，方便查')
+})
+
+test('事件接线：没有 sessions 服务 / 没有 on() 时安静地退化成"只有定时器"', async () => {
+  /*
+   * `sessions` 是**可选服务**（不进 `inject`）：没有它的 profile 照旧只有工具，插件不该因此起不来。
+   * 这时事件层缺席，兜底的定时器仍然工作——所以这里只要求"不抛、返回一个能调的卸载函数"。
+   */
+  const order: string[] = []
+  const timer = { touched: () => order.push('touched') } as unknown as Parameters<typeof attachAutoPushToSessions>[1]
+
+  const noSessions = eventHost({ sessions: null })
+  const detachA = attachAutoPushToSessions(noSessions.ctx, timer)
+  assert.equal(typeof detachA, 'function', '照样返回卸载函数')
+  noSessions.emit({ id: 's-1' }, { type: 'turn/end', turn: 1, reason: { kind: 'completed' } })
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.deepEqual(order, [], '没有会话服务时不触发')
+
+  // `sessions` 在、但没有 `flush`：同样退化。
+  const noFlush = eventHost({ sessions: { flush: undefined } })
+  attachAutoPushToSessions(noFlush.ctx, timer)
+  noFlush.emit({ id: 's-1' }, { type: 'turn/end', turn: 1, reason: { kind: 'completed' } })
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.deepEqual(order, [], '拿不到 flush 时不触发')
+
+  // 没有 `on()` 的上下文：不抛。
+  const noOn = eventHost({ withOn: false })
+  assert.equal(typeof attachAutoPushToSessions(noOn.ctx, timer), 'function')
+  assert.deepEqual(order, [])
+})
+
+test('事件接线：卸载函数摘掉监听', async () => {
+  const host = eventHost()
+  const order: string[] = []
+  const timer = { touched: () => order.push('touched') } as unknown as Parameters<typeof attachAutoPushToSessions>[1]
+  const detach = attachAutoPushToSessions(host.ctx, timer)
+
+  host.emit({ id: 's-1' }, { type: 'turn/end', turn: 1, reason: { kind: 'completed' } })
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.equal(order.length, 1)
+
+  detach()
+  host.emit({ id: 's-1' }, { type: 'turn/end', turn: 2, reason: { kind: 'completed' } })
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.equal(order.length, 1, '摘掉之后不再触发')
+})
+
+/**
+ * 造一个**真的**自动推送运行时：真配置（`sync.autoPush`）、真本地库、真 WebDAV 夹具、真节拍器。
+ *
+ * `force` 那条转交链（`tick()` → 注入的 `run()` → `runAutoPush()` 的速度闸）只有用真件才测得出
+ * 来：假件会把中间任何一处"把 force 落了"都糊过去。
+ */
+async function makeAutoPushHost(options: { autoPushIntervalMs?: number } = {}): Promise<{
+  timer: import('../src/sync.ts').AutoPushTimer
+  cleanup: () => void
+}> {
+  const sb = makeSandbox('auto-push-runtime')
+  const fixture = await startDavFixture({ root: join(sb.base, 'dav') })
+  const config: PluginConfig = {
+    sessionsRoot: sb.root,
+    registryPath: sb.registryPath,
+    backupRoot: sb.backupRoot,
+    sync: {
+      url: fixture.url,
+      machineId: 'robot-a',
+      autoPush: true,
+      ...(options.autoPushIntervalMs === undefined ? {} : { autoPushIntervalMs: options.autoPushIntervalMs }),
+    },
+  }
+  const host = new Context()
+  await startSibling(host, 'tools', { register: () => () => {} })
+  const resolved = await resolveAutoPushRuntime(host, config, {
+    sessionsRoot: sb.root,
+    registryPath: sb.registryPath,
+    backupRoot: sb.backupRoot,
+  })
+  assert.ok(resolved !== undefined, '配了 sync.url 就该造出运行时')
+  return {
+    timer: resolved.timer,
+    cleanup: () => {
+      void fixture.close()
+      rmSync(sb.base, { recursive: true, force: true })
+    },
+  }
+}
+
+test('resolveAutoPushRuntime：手点那一次（force）绕过速度闸，兜底那一轮不绕', async () => {
+  /*
+   * 这一条钉的是 `force` 从 `tick()` 到 `runAutoPush()` 的**整条转交链**（契约：界面那枚「立即推送
+   * 一次」与事件层都走 `force`，兜底的定时器不走）。
+   *
+   * 它必须端到端测：`force` 在这个函数里会经过"节拍器 → 注入的 run() → 设置里那个速度闸"三处，
+   * 中间任何一处把它落了，表现都是"这次看起来跑了、其实被闸挡成 skip: 'interval' 交回来"——
+   * 一个不报错、只是没干活的失败。
+   */
+  const host = await makeAutoPushHost({ autoPushIntervalMs: 300_000 })
+  try {
+    // 先真跑一次，把"上一次真跑"立起来，后面的间隔闸才有得比。
+    const first = await host.timer.tick({ force: true })
+    assert.equal(first.ran, true, '第一轮真跑（force）')
+    const finishedAt = first.finishedAt
+
+    // 紧接着再来一次、不带 force：距上一轮才几毫秒，速度闸必须挡住它。
+    const gated = await host.timer.tick()
+    assert.equal(gated.ran, false, '没到间隔就不该跑')
+    assert.equal(gated.skip, 'interval', '挡住它的正是速度闸')
+
+    // 同一时刻、带 force：该放行（用户手点的那一次）。
+    const forced = await host.timer.tick({ force: true })
+    assert.equal(
+      forced.ran,
+      true,
+      `带 force 的一次必须绕开速度闸（实测 finishedAt=${finishedAt}，距上一次只过了几毫秒）`,
+    )
+  } finally {
+    host.timer.stop()
+    host.cleanup()
+  }
 })

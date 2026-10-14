@@ -53,6 +53,7 @@ import { ConfirmDialog } from './ConfirmDialog.tsx'
 import { groupKey } from '../logic/groups.ts'
 import { WorkspaceIcon } from './icons.tsx'
 import type { SessionManagerKey, Translate } from '../logic/locales.ts'
+import { AUTO_PUSH_SKIP_CODES } from '../logic/autoPush.ts'
 import { autoPushMinutes } from '../logic/syncForm.ts'
 import { projectLabel, sessionLabel, type SessionLabel } from '../logic/planRows.ts'
 import { ProgressBlock } from './ProgressBlock.tsx'
@@ -305,13 +306,11 @@ function SessionCell({
  */
 function autoPushSentence(t: Translate, response: AutoPushResponse): string {
   if (response.ran !== true) {
-    const reason =
-      response.skip === 'disabled' ||
-      response.skip === 'interval' ||
-      response.skip === 'busy' ||
-      response.skip === 'idle'
-        ? t(`sync.autoPush.skip.${response.skip}`)
-        : t('sync.autoPush.noReason')
+    // 认得出的码才挑句子；认不出的（宿主比界面新）整条退回"没说清原因"，不编一个。
+    const known = (AUTO_PUSH_SKIP_CODES as readonly string[]).includes(response.skip ?? '')
+    const reason = known && response.skip !== undefined
+      ? t(`sync.autoPush.skip.${response.skip}` as SessionManagerKey)
+      : t('sync.autoPush.noReason')
     return t('sync.autoPush.skipped', { reason })
   }
   const pushed = response.pushed?.length ?? 0

@@ -7,6 +7,7 @@
 // `savePlan()` 是同一件事的另一半：密码那一笔走宿主机凭据库而不是配置文档，写错引用名不会有任何
 // 报错（密码存进去了，同步却照旧因为"没配密码"而 401），所以这里把"写哪个名字、什么时候不写"钉住。
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
 import {
@@ -28,6 +29,7 @@ import {
   type SyncTestSentence,
 } from '../src/client/logic/syncForm.ts'
 import { en, zh } from '../src/client/logic/locales.ts'
+import { AUTO_PUSH_SKIP_CODES } from '../src/client/logic/autoPush.ts'
 import { DEFAULT_PASSWORD_REF as CORE_DEFAULT_PASSWORD_REF } from '../src/config.ts'
 
 test('同步设置：entry id 是 profile 里那个 insert 的 id', () => {
@@ -328,9 +330,39 @@ test('同步设置：自动推送的字典键两种语言都在', () => {
     assert.ok(key in zh, `中文缺 ${key}`)
     assert.ok(key in en, `英文缺 ${key}`)
   }
-  // `skip` 的四个码各有各的句子（判定在宿主、句子在界面）：少一个界面上就会退回 noReason。
-  for (const code of ['disabled', 'interval', 'busy', 'idle'] as const) {
+  /*
+   * `skip` 的每个码都要有各的句子（判定在宿主、句子在界面）：少一个界面上就会退回 noReason。
+   *
+   * 这份清单**从核心层的联合类型推不出来**（类型在运行期不存在），所以它是手抄的——正因为手抄，它是这
+   * 条链路上最容易漏的一环：核心层加一个码时宿主会照实报出来，而界面这一侧少一句话只会安静地退化成
+   * "宿主没有说原因"。所以这里核的是**清单与字典对齐**，并且清单本身要跟 `src/sync.ts` 的 `AutoPushSkip`
+   * 一致（下面那条断言核的就是这件事）。
+   */
+  for (const code of AUTO_PUSH_SKIP_CODES) {
     assert.ok(`sync.autoPush.skip.${code}` in zh, `中文缺 sync.autoPush.skip.${code}`)
     assert.ok(`sync.autoPush.skip.${code}` in en, `英文缺 sync.autoPush.skip.${code}`)
+  }
+})
+
+test('同步设置：界面认得的 skip 码与核心层的联合类型对得上', () => {
+  /*
+   * `AutoPushSkip` 是**类型**，运行期看不到它；而字典的键是字符串。两边对不上的表现是"界面少一句
+   * 话"——不报错、不崩，只是那句原因退回 noReason。所以这条把宿主会报出来的码逐个钉住：
+   * `src/sync.ts` 里 `runAutoPush()` / `createAutoPushTimer()` 返回的每一个 `skip` 都得在这份清单里。
+   *
+   * 反过来（清单里多一个宿主不会报的码）不算错——那样只是字典里多一句用不上的话，无害。
+   */
+  for (const code of AUTO_PUSH_SKIP_CODES) {
+    assert.ok(`sync.autoPush.skip.${code}` in zh, `清单里的 ${code} 中文没句子`)
+  }
+  // 核心层的源码里出现过的 skip 字面量，都得在清单里。
+  const source = readFileSync(new URL('../src/sync.ts', import.meta.url), 'utf8')
+  const declared = [...source.matchAll(/skip:\s*'([a-z]+)'/g)].map((match) => match[1] as string)
+  assert.ok(declared.length > 0, '没扫到任何 skip 字面量——匹配式写错了，这条会变成空断言')
+  for (const code of new Set(declared)) {
+    assert.ok(
+      (AUTO_PUSH_SKIP_CODES as readonly string[]).includes(code),
+      `src/sync.ts 会报 skip:'${code}'，但界面的 AUTO_PUSH_SKIP_CODES 里没有它（字典也就不会有句子）`,
+    )
   }
 })

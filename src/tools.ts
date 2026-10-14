@@ -66,7 +66,7 @@ export interface SyncInfo {
   /**
    * 自动推送的当前设置；**没开就是缺席**（不是 `enabled: false`）。
    *
-   * 界面靠它在卡片头下面补一句"自动推送已开：每 N 分钟一次"。间隔在这里报出来的理由：它是拍平之后的
+   * 界面靠它在卡片头下面补一句"自动推送已开：写完一轮就推，另外每 N 分钟兜底一次"。间隔在这里报出来的理由：它是拍平之后的
    * 真值（抬过下限、填缺省），而界面草稿里那一栏留空时显示的是灰字——灰字要写对，得有人算出这个数。
    */
   autoPush?: { intervalMs: number }
@@ -305,8 +305,6 @@ export async function resolveAutoPushRuntime(
    */
   let lastRunAt: number | undefined
   let failures = 0
-  /** 用户手点的那一次要绕过速度闸（见 `runAutoPush()` 的 `force`）。 */
-  let forceNext = false
   /** 每个宿主只造一个节拍器，所以配置那三个读法每次现读（`sync` 是活引用，改完立即生效）。 */
   const auto = (): AutoPushConfig | undefined => autoPushSection(syncSection(config))
   const timer = createAutoPushTimer({
@@ -318,12 +316,10 @@ export async function resolveAutoPushRuntime(
     run: async (options) => {
       // 每次真跑之前重新解析一次设置：`sync` 是活引用，用户可能刚把 URL 或间隔改掉。
       const fresh = await syncRuntime(ctx, config)
-      const force = forceNext
-      forceNext = false
       const outcome = await runAutoPush(
         { ...deps, ...(fresh === undefined ? {} : { dav: fresh.dav, settings: fresh.settings }) },
         {
-          force,
+          force: options?.force === true,
           ...(lastRunAt === undefined ? {} : { lastRunAt }),
           failures,
           ...(options?.onProgress === undefined ? {} : { onProgress: options.onProgress }),
@@ -334,13 +330,70 @@ export async function resolveAutoPushRuntime(
       return outcome
     },
   })
-  const tick = timer.tick
-  // 用户手点的那一次带上 `force`：节拍器把它转成"这一次不走速度闸"交给 `run()`。
-  timer.tick = (options = {}) => {
-    if (options.force === true) forceNext = true
-    return tick(options)
-  }
   return { deps, timer }
+}
+
+/** 宿主 `sessions` 服务里我们用到的那两件（其余一概不声明）。 */
+interface HostSessionsService {
+  /** 把这条会话缓冲的事件冲进持久存储（宿主契约里的 "THE flush entry point"）。 */
+  flush(session: unknown): Promise<boolean>
+}
+
+/**
+ * 把自动推送接到会话事件上：**本机刚写完一轮就推**（事件层），定时器退成兜底。
+ *
+ * 为什么不能直接把事件当成"该推了"：`turn/end` 到的时候**日志还没落盘**。宿主的
+ * `dsh-session-checkpoint-policy` 只在模型请求、工具派发、agent 步进三处落盘，`turn/end` 不在其中；
+ * `turn/end` 的契约原文就写着 "The loop does not await a flush at turn boundaries… consumers that
+ * read storage after `turn/end` flush themselves"。而推送读的正是磁盘字节——少了这一步，推上去的会
+ * 是一份**缺最后几步**的半截会话（而且远端会把它当成"本机的最新"，下一轮才补上，中间那一版是错的）。
+ *
+ * 所以这里 `await sessions.flush(session)` 之后再调 `timer.touched()`。这是宿主点名的用法：
+ * `sessions.flush()` 的契约称自己是 "THE flush entry point"，并点名"读存储之前自己冲一下的消费者"
+ * 必须走它（不要自己 `ctx.parallel('session/flush', …)`）。
+ *
+ * `flush` 失败**吞掉**：它只决定"这次读得到多新"，推的活儿本身没错。吞掉的代价是这一次可能推一份略旧
+ * 的会话，下一轮或兜底的定时器会补上；而把异常抛进事件通道会打断宿主自己的派发，代价大得多。
+ *
+ * `sessions` 按**可选服务**收（`optionalService()`），不进 `inject`：没有会话服务的 profile（纯工具
+ * 那类前端）照旧只有工具，插件不该因为少一个服务就整个起不来。拿不到服务时返回一个空卸载函数——
+ * 事件层缺席，兜底的定时器仍然工作。
+ *
+ * @param ctx 宿主上下文。
+ * @param timer 已经造好的节拍器（`resolveAutoPushRuntime()` 的那个）。
+ * @param onProblem 冲盘失败时记一笔（宿主日志）；不传就静默。
+ * @returns 卸载函数：摘掉监听（卸载时先调它，再 `timer.stop()`）。
+ */
+export function attachAutoPushToSessions(
+  ctx: unknown,
+  timer: AutoPushTimer,
+  onProblem?: (message: string) => void,
+): () => void {
+  const sessions = optionalService(ctx, 'sessions') as Partial<HostSessionsService> | undefined
+  if (sessions === undefined || typeof sessions.flush !== 'function') return () => {}
+  const on = (ctx as { on?: (name: string, listener: (...args: never[]) => void) => unknown } | undefined)?.on
+  if (typeof on !== 'function') return () => {}
+
+  const dispose = on.call(
+    ctx,
+    'session/event',
+    ((session: unknown, event: { type?: string } | undefined): void => {
+      // 只认 `turn/end`：一轮结束才是"写完了"的边界。`step/end` 太密（一次模型调用一条），
+      // `session/created` 则还没有内容可推。
+      if (event?.type !== 'turn/end') return
+      const flush = sessions.flush
+      if (flush === undefined) return
+      void (async (): Promise<void> => {
+        try {
+          await flush.call(sessions, session)
+        } catch (error) {
+          onProblem?.(`冲盘失败，这一轮按现有内容推：${error instanceof Error ? error.message : String(error)}`)
+        }
+        timer.touched()
+      })()
+    }) as (...args: never[]) => void,
+  )
+  return typeof dispose === 'function' ? (dispose as () => void) : () => {}
 }
 
 /** 同步工具的返回值。 */

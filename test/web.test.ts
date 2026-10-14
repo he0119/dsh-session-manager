@@ -2439,8 +2439,9 @@ function fakeTimer(outcome: Record<string, unknown>): {
       options?.onProgress?.({ phase: 'push', done: 0, total: 1, id: 'session-a', label: 'a' })
       return outcome as never
     },
-    last: () => ({ enabled: true, intervalMs: 300_000, minIntervalMs: 60_000 }),
+    last: () => ({ enabled: true, intervalMs: 300_000 }),
     note: () => undefined,
+    touched: () => undefined,
     stop: () => undefined,
   }
   return { timer, calls }

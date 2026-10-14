@@ -17,6 +17,7 @@ import { createRepoLookup } from './repo.ts'
 import {
   adoptLegacyBackupRoot,
   archiveOps,
+  attachAutoPushToSessions,
   decodeAll,
   describeSyncConfig,
   directoryPickerKind,
@@ -104,7 +105,11 @@ export function apply(ctx: Context, config: PluginConfigInput = {}): () => void 
     (resolved) => {
       if (resolved === undefined) return undefined
       info(
-        `dsh-session-manager 自动推送已就绪：${resolved.timer.enabled() ? `每 ${resolved.timer.intervalMs()} 毫秒一轮` : '当前关闭'}（只推不拉）`,
+        `dsh-session-manager 自动推送已就绪：${
+          resolved.timer.enabled()
+            ? `写完一轮就推，兜底每 ${resolved.timer.intervalMs()} 毫秒`
+            : '当前关闭'
+        }（只推不拉）`,
       )
       return resolved.timer
     },
@@ -114,7 +119,22 @@ export function apply(ctx: Context, config: PluginConfigInput = {}): () => void 
       return undefined
     },
   )
+  /*
+   * 会话事件那一层：本机写完一轮就推（`attachAutoPushToSessions()`），定时器退成兜底。
+   *
+   * 两者都挂在同一个 `autoPushPromise` 上：节拍器要等配置与凭据解析完才存在，而事件可能在那之前就到
+   * （用户刚打开页面就发了一轮）。所以这里同样"先拿着 promise"，到位之后再把监听接上——接晚了不会丢
+   * 那一轮，`turn/end` 之后还有兜底的定时器，而且用户接着写的下一轮马上就会触发。
+   *
+   * 卸载顺序是先摘监听、再停表：摘晚了会有事件在 `stop()` 之后进来（`touched()` 那时已被 `stopped`
+   * 挡住，不会有事，但先摘更干净）。
+   */
+  const detachSessions: Promise<(() => void) | undefined> = autoPushPromise.then(
+    (timer) => (timer === undefined ? undefined : attachAutoPushToSessions(ctx, timer, info)),
+    () => undefined,
+  )
   ctx.effect(() => () => {
+    void detachSessions.then((detach) => detach?.())
     void autoPushPromise.then((timer) => timer?.stop())
   }, 'dsh-session-manager: auto-push timer')
 
