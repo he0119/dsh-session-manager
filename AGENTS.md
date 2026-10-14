@@ -135,15 +135,19 @@ pnpm typecheck && pnpm build && pnpm test && pnpm check:package
 ## Git
 
 - **main 走 PR**：服务端有一条 `default` ruleset——禁删除、禁强推、要求线性历史（merge commit 会被
-  拒，只能 squash / rebase），并要求名为 `check` 的检查通过；没有 bypass，管理员也绕不过。所以改动
+  拒，服务端只放行 squash），并要求名为 `check` 的检查通过；没有 bypass，管理员也绕不过。所以改动
   一律「推分支 → 开 PR → 合并」，那个检查名就是 `.github/workflows/ci.yml` 里的 job id `check`
-  （PR 会自动触发同一个工作流）。合并方式默认 **rebase**：一次逻辑改动一个提交，squash 会把一个分支
-  上的几件事压成一笔，粒度就没了。
+  （PR 会自动触发同一个工作流）。合并方式一律 **squash**：main 上每个 PR 只留一笔，提交信息就是 PR
+  标题，所以分支内部怎么切、有几个提交都不影响 main 的形状。
+- **PR 小而单一**：squash 之后 main 上只剩 PR 标题，所以那个标题必须是这一笔改动的完整说明，一个 PR
+  一件事。一个分支上凑了几件事就拆成多个 PR；后面的改动依赖前面的改动时**叠成 stacked PR**（各自
+  以它前面那个分支为 base，前一个合了再把自己的 base 改回 main），不要为了少开 PR 把它们压进同一个
+  标题里。
 - **没有明确指示不合并**：推分支、开 PR、把 PR 链接与验证结果交出来是默认动作；合并这件事要等维护者
   明说——那个 `check` 绿了也只说明「可以合」，不说明「该我合」。
 - **分支名带类型前缀**：`fix/ledger-label`、`chore/release-notes`、`docs/releasing` 这种，前缀用这个
   分支最终要合的那个提交的类型。仓库里的自动化只读 PR 标题（不看分支名），这条是给人的顺序感。
 - **PR 标题按约定式提交写**：`.github/workflows/autolabeler.yml` 按 PR 标题给 PR 打标签，Release
-  日志的分组（`.github/release.yml`）只认标签，所以标题要是 `feat: …` / `fix: …` 这种形状；PR 里的
-  每个提交同样是这套格式——rebase 合并后它们原样进 main，squash 之后 main 上只剩 PR 标题。
+  日志的分组（`.github/release.yml`）只认标签，所以标题要是 `feat: …` / `fix: …` 这种形状。PR 里的
+  提交不必是同一件事的碎片，squash 之后 main 上只剩 PR 标题，那个标题就是这一笔的全部说明。
 - 改写历史前先留一个备份 ref，并在报告里给出新旧 sha 的对应关系，以及"树有没有变化"的核对方式。

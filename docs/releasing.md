@@ -85,7 +85,7 @@ git add package.json && git commit -m "chore(release): 0.2.0"
 #   因此不会顺带构建。
 git push origin HEAD:refs/heads/chore/release-0.2.0
 gh pr create --base main --fill          # 单个提交，标题直接取提交信息
-gh pr merge --rebase --delete-branch
+gh pr merge --squash --delete-branch
 
 # 2) 拉下合并后的 main，在**它**上面打标签，然后只推标签。
 git fetch origin
@@ -100,9 +100,9 @@ npm view @he0119/dsh-session-manager version   # 几分钟后确认线上的版�
 `git commit -m` 给出；`pnpm version` 自己的 `-m` 只在它代为提交时起作用，而 `--no-git-tag-version`
 下它根本不提交。
 
-合并方式用 **Rebase** 或 **Squash**：ruleset 要求线性历史，merge commit 会被拒。两者都会换掉提交
-SHA，所以标签一律**合并之后**再打——在分支上打的标签会落在被丢弃的那个提交上，合并后 main 上再也
-找不到它。
+合并方式一律用 **Squash**：ruleset 要求线性历史，merge commit 会被拒，而 squash 会把整个分支压成
+main 上的一笔。它换掉提交 SHA，所以标签一律**合并之后**再打——在分支上打的标签会落在被丢弃的那个提交
+上，合并后 main 上再也找不到它。
 
 ## Release 日志怎么分组
 
