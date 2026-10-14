@@ -134,11 +134,12 @@ pnpm typecheck && pnpm build && pnpm test && pnpm check:package
 
 ## Git
 
-- **main 走 PR**：服务端有一条 `default` ruleset——禁删除、禁强推、要求线性历史（merge commit 会被
-  拒，服务端只放行 squash），并要求名为 `check` 的检查通过；没有 bypass，管理员也绕不过。所以改动
-  一律「推分支 → 开 PR → 合并」，那个检查名就是 `.github/workflows/ci.yml` 里的 job id `check`
-  （PR 会自动触发同一个工作流）。合并方式一律 **squash**：main 上每个 PR 只留一笔，提交信息就是 PR
-  标题，所以分支内部怎么切、有几个提交都不影响 main 的形状。
+- **main 走 PR**：服务端有一条 `default` ruleset——禁删除、禁强推、要求线性历史（`merge` 这类
+  会留下 merge commit 的方式被拒，可用的是 `squash` 与 `rebase`），并要求名为 `check` 的检查通过；
+  没有 bypass，管理员也绕不过。所以改动一律「推分支 → 开 PR → 合并」，那个检查名就是
+  `.github/workflows/ci.yml` 里的 job id `check`（PR 会自动触发同一个工作流）。合并方式在服务端放行
+  的两种里选 **squash**：main 上每个 PR 只留一笔，提交信息就是 PR 标题，所以分支内部怎么切、有几个
+  提交都不影响 main 的形状。
 - **PR 小而单一**：squash 之后 main 上只剩 PR 标题，所以那个标题必须是这一笔改动的完整说明，一个 PR
   一件事。一个分支上凑了几件事就拆成多个 PR；后面的改动依赖前面的改动时**叠成 stacked PR**（各自
   以它前面那个分支为 base，前一个合了再把自己的 base 改回 main），不要为了少开 PR 把它们压进同一个
