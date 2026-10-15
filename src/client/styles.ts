@@ -765,6 +765,18 @@ export const CSS = `
  * 答案就该出现在按的地方；摆到表单末尾的话按钮在最上面、结论在最下面，中间隔着整张表单。
  */
 .dsm-syncTools { display: flex; flex-direction: column; gap: 6px; margin-bottom: 2px; }
+/*
+ * 设置页那种"标题 + 说明 + 右端一个开关"的行。规格照内建设置页的开关行量出来的（
+ * dsh-client-ui-settings-general 的 DeveloperToolsRow）：行是 space-between 的两端对齐、纵向居中、
+ * 间距 24px；标题 14px/20px（正文那一档），说明 12px/18px 且用次要色（与 dsm-hint 同一档）。
+ *
+ * 本仓不给它加分割线：内建那一行上下都有 border-bottom，是因为通用设置页把若干行叠成一列；这里只有
+ * 这一行，加线反而像把表单切开。
+ */
+.dsm-toggleRow { display: flex; align-items: center; justify-content: space-between; gap: 24px; }
+.dsm-toggleText { min-width: 0; }
+.dsm-toggleTitle { font-size: 14px; line-height: 20px; }
+.dsm-toggleDesc { margin-top: 4px; color: var(--dsw-alias-label-secondary, #646a73); font-size: 12px; line-height: 18px; }
 .dsm-syncRow { display: flex; gap: 12px; flex-wrap: wrap; }
 .dsm-syncRow > .dsm-field { flex: 1 1 16rem; min-width: 0; }
 .dsm-options { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }

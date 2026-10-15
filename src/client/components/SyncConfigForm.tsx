@@ -26,7 +26,7 @@
 
 import * as React from 'react'
 
-import { SettingsSecretField } from '@deepseek-ai/dsh-client-ui-primitives'
+import { SettingsSecretField, Switch } from '@deepseek-ai/dsh-client-ui-primitives'
 
 import { testSync, type SyncTestResponse } from '../api.ts'
 import { getCredentialsApi, type CredentialInfo } from '../credentials.ts'
@@ -413,21 +413,25 @@ export function SyncConfigForm({
        * 摆最后还有个位置上的好处：它紧挨着「保存」，而它是个**存了才生效**的开关（生效与否由宿主按
        * 已保存的 `autoPush` 判，草稿里改了不勾选也没用）。
        *
-       * 控件用原生元素（本仓手写控件的口径，见 AGENTS.md）：`.dsm-check` 与迁移页那个「包含产物」
-       * 开关是同一对类，间隔那一栏复用上面那个 `Field`（连灰字在内都是同一套画法）。间隔那一栏**不
-       * 跟着勾选态禁用**：先填间隔再勾选、或先取消勾选再改数，都是平常写法；禁用它只会让人以为那一栏
-       * 坏了。
+       * 开关用官方控件库的 `Switch`，并照内建设置页那一行（`DeveloperToolsRow`）的规格摆：左边一列
+       * 是标题 + 说明，开关顶到右端。这一条是"设置页的开关长什么样"的唯一权威——自己拿一个勾选框画
+       * （`dsm-check`）与页面上其它开关不是一套视觉。
+       *
+       * 间隔那一栏复用上面那个 `Field`，并且**不跟着开关态禁用**：先填间隔再打开、或先关掉再改数，
+       * 都是平常写法；禁用它只会让人以为那一栏坏了。
        */}
-      <label className="dsm-check">
-        <input
-          type="checkbox"
+      <div className="dsm-toggleRow">
+        <div className="dsm-toggleText">
+          <div className="dsm-toggleTitle">{t('sync.field.autoPush')}</div>
+          <div className="dsm-toggleDesc">{t('sync.field.autoPushHint')}</div>
+        </div>
+        <Switch
           checked={view.autoPush}
           disabled={!snapshot.writable}
-          onChange={(event) => edit({ autoPush: event.target.checked })}
+          label={t('sync.field.autoPush')}
+          onChange={(next) => edit({ autoPush: next })}
         />
-        <span>{t('sync.field.autoPush')}</span>
-      </label>
-      <p className="dsm-hint">{t('sync.field.autoPushHint')}</p>
+      </div>
       <div className="dsm-syncRow">
         <Field
           label={t('sync.field.autoPushInterval')}

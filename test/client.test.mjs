@@ -257,6 +257,20 @@ function loadBundle({ firstNull, panel, arrays, strings, nulls, meta, fetch } = 
     // 开没开、标题是什么、正文摆了什么、底部那两个按钮是谁"这些**入参**，不是官方控件内部怎么画。
     if (specifier === '@deepseek-ai/dsh-client-ui-primitives') {
       return {
+        /*
+         * `Switch` 的替身：真的那个画一个受控开关（按钮 + 滑块）。用例要核的是"这里是官方那个开关，
+         * 而不是本页手写的勾选框"以及它的三处入参（`checked` / `disabled` / `label`），
+         * 所以按 props 造一个带 `data-switch` 的元素记进 `recorded`。
+         */
+        Switch: (props) =>
+          react.createElement('button', {
+            type: 'button',
+            'data-switch': 'true',
+            'data-checked': props.checked,
+            disabled: props.disabled,
+            'aria-label': props.label,
+            onClick: () => props.onChange(!props.checked),
+          }),
         SettingsSecretField: (props) =>
           react.createElement('input', {
             type: 'password',
@@ -5105,4 +5119,83 @@ test('客户端产物：同步设置的「测试连接」是只读工具，排�
   assert.equal(toolsRows.length, 1, '「测试连接」有自己的那一行（dsm-syncTools）')
   const button = mounted.recorded.find((node) => node.type === 'button' && node.props?.children === 'sync.test.action')
   assert.ok(button !== undefined, '按钮是个真的 button')
+})
+
+test('客户端产物：自动推送是个官方 Switch（不是手写勾选框），标题与说明在左、开关顶到右端', { skip }, async () => {
+  /*
+   * 两件事一起钉：
+   *   1. **控件是官方那个**——设置页上所有的开/关都是 `Switch` 这一套视觉，自己拿 `<input
+   *      type="checkbox">` 画一个（原先的 `dsm-check`）与页面上其它开关不是同一套。这一条核的是
+   *      "产物里用的是官方控件库导出的 `Switch`"，不是"有个长得像开关的东西"。
+   *   2. **摆法照内建设置页那一行**（`DeveloperToolsRow`）：左边一列是标题 + 说明、开关在右端，
+   *      所以标题/说明必须在 `dsm-toggleText` 那一列里，而不是与开关并列成一行。
+   *
+   * 反事实：把 `Switch` 换回 `<input type="checkbox">`，第 1 条红；把说明挪出 `dsm-toggleText`（摆成
+   * 与开关并列），第 2 条红。
+   */
+  const state = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    sync: { url: 'https://dav.example.com/dsh', machineId: 'robot-a', mappings: 0 },
+    sessions: [],
+    workspaces: [],
+  }
+  const controller = {
+    getSnapshot: () => ({
+      status: 'ready',
+      writable: true,
+      revision: 4,
+      // `autoPush` 打开：桩把 `checked` 记在 `data-checked` 上，取值才看得见开/关两态。
+      value: { sync: { url: 'https://dav.example.com/dsh', machineId: 'robot-a', timeoutMs: 30000, autoPush: true } },
+    }),
+    subscribe: () => () => {},
+    mutate: async () => true,
+  }
+  const credentials = {
+    async describe(refs) {
+      return { ok: true, value: Object.fromEntries(refs.map((ref) => [ref, { configured: false, writable: true }])) }
+    },
+    async set() {
+      return { ok: true, value: undefined }
+    },
+  }
+  const mounted = mount({ state, panel: 'sync', configForms: { get: () => controller }, credentials })
+  /*
+   * **先走一遍树**：`SyncConfigForm` 是个函数组件，假 `createElement` 只在它被调用时才把它的元素记进
+   * `recorded`；而调用它的是 `strings()` / `elements()` 这种走树的帮手。不走这一趟，`recorded` 里只有
+   * 面板外壳，表单里什么都没记下来（这一条差点写成"永远找不到开关"的假绿）。
+   */
+  const walk = mounted.registrations[0]
+  strings(walk.component(walk.registration.inject()))
+
+  // ① 是官方 `Switch`（桩给自己盖了 `data-switch`），不是本页手写的 checkbox。
+  const switches = mounted.recorded.filter((node) => node.props?.['data-switch'] === 'true')
+  assert.equal(switches.length, 1, '自动推送用官方 Switch，且只有一个')
+  assert.equal(switches[0].props['data-checked'], true, '开关反映配置里的开态（这里配的是 true）')
+  assert.equal(
+    switches[0].props['aria-label'],
+    'sync.field.autoPush',
+    '无障碍名走同一个键（官方那个 Switch 的 label 是必须的）',
+  )
+  const handRolled = mounted.recorded.filter(
+    (node) => node.type === 'input' && node.props?.type === 'checkbox',
+  )
+  assert.equal(handRolled.length, 0, '这张表单里不该再有手写的勾选框')
+
+  // ② 摆法是"左边标题+说明、开关右端"：标题与说明同处 `dsm-toggleText`，开关在那一行里。
+  const toggleText = mounted.recorded.filter((node) => node.props?.className === 'dsm-toggleText')
+  assert.equal(toggleText.length, 1, '标题与说明同处一列（dsm-toggleText）')
+  const toggleTextStrings = strings(toggleText[0].props?.children)
+  assert.ok(toggleTextStrings.includes('sync.field.autoPush'), '标题在这一列里')
+  assert.ok(
+    toggleTextStrings.includes('sync.field.autoPushHint'),
+    `说明也在同一列里（它该在标题下面，而不是与开关并列），实际：${JSON.stringify(toggleTextStrings)}`,
+  )
+  const row = mounted.recorded.filter((node) => node.props?.className === 'dsm-toggleRow')
+  assert.equal(row.length, 1, '整行是 dsm-toggleRow')
+  assert.ok(
+    strings(row[0].props?.children).includes('sync.field.autoPushHint'),
+    '开关与标题+说明在同一行里',
+  )
 })
