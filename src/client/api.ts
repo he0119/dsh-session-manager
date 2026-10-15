@@ -556,7 +556,7 @@ export interface AutoPushResponse {
   /** 这一轮真跑了没有。 */
   ran: boolean
   /** 没跑的原因：没开 / 节拍没到 / 上一轮还在跑 / 没有可推送的。 */
-  skip?: 'disabled' | 'interval' | 'busy' | 'idle'
+  skip?: 'disabled' | 'interval' | 'busy' | 'settle' | 'idle'
   /** 已经连续失败几次（成功清零）。界面据此在连续失败时说一句。 */
   failures: number
   /** 最近一次失败 / 问题的原话。 */

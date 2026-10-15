@@ -83,8 +83,11 @@
   预演算出来的计划连输入一起留下（`SyncPrepared`），响应带回 `planId`，确认那次照它落地；输入那套设置、
   本机的代次文件、投影缓存那两件事、要覆盖的那几条是否还活着、远端索引有一处对不上就从零重算。
 - [自动推送只往远端推](../.agents/notes/implemented/feature/2026-10-14-auto-push-is-push-only.md)：
-  后台按间隔跑一轮，计划里摘掉拉取与"覆盖本机"那几类，所以它不覆盖、不备份、不写注册表、也不请宿主折
+  后台跑一轮，计划里摘掉拉取与"覆盖本机"那几类，所以它不覆盖、不备份、不写注册表、也不请宿主折
   检查点；间隔与开关是活字段，节拍器每次醒来看一眼当前配置。
+- [自动推送跟着轮次走，定时器退成兜底](../.agents/notes/implemented/architecture/2026-10-14-auto-push-follows-turn-end.md)：
+  两个触发源分工——事件层管"本机刚写完"（快），兜底的定时器管事件层够不到的三类（别的机器推上去的、
+  本机删会话要收尾索引、事件层漏了）；`AutoPushSkip` 因此没有"正在攒连发"这一类码。
 - `src/dav.ts` 是那四种方法与 Basic 鉴权（含宽容的多状态响应解析），`src/sync.ts` 是索引、计划与落地：
   界面那条路是 `prepareSync()` 算计划并把输入留下、确认时 `syncPrepared()` 照它落地（`planId` 指认
   宿主手里那份），`src/tools.ts` 的 `sync_sessions` 走单次调用那条（`runSync()`）。自动推送是同一个
@@ -93,6 +96,17 @@
   空计划把本机那格索引收窄；`createAutoPushTimer()` 只按最小粒度醒、每次醒来现读配置（开关与间隔都是
   活字段，关掉不必重启），`src/tools.ts` 的 `resolveAutoPushRuntime()` 是它唯一的接线（宿主造一个挂在
   插件生命周期上，`GET /auto-push` 端点用同一个，用户手点那一次带 `force` 绕过速度闸）。
+- **自动推送的两个触发源**：事件层管快的那一半——`src/tools.ts` 的 `attachAutoPushToSessions()` 订阅
+  `session/event`、只认 `turn/end`，收到之后先 `await ctx.sessions.flush(session)` 再把
+  `AutoPushTimer.touched()` 叫一下；`touched()` 起/续的是 `AUTO_PUSH_SETTLE_MS`（10 秒）那个静默窗口，
+  窗口里再来事件就重置计时，所以一轮对话里连发的那串 `turn/end` 只推一次，窗口到点那一轮带 `force`
+  （刚写完一轮不该被速度闸挡住）。定时器那一半是兜底，仍走 `autoPushIntervalMs` 那道速度闸，覆盖事件
+  层够不到的三类（别的机器推到远端的、本机删会话要收尾索引、事件层漏了），语义是"最长多久没推就一定
+  补一次"。**为什么 `turn/end` 之后必须显式冲盘**：宿主的 checkpoint 策略只在模型请求、工具派发、agent
+  步进三处 flush，`turn/end` 不在其中（它的注释明说读存储的消费者自己冲），而推送读的是磁盘字节——少
+  这一步推上去的会是一份缺最后几步的半截会话。正解就是契约点名的那个入口 `ctx.sessions.flush(session)`
+  （不要自己 `ctx.parallel('session/flush', …)`）；它失败只当"这次读得更旧"，照旧推，别把异常抛进宿主
+  的事件派发。
 
 ## 什么算一族
 

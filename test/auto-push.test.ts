@@ -26,6 +26,7 @@ import { readRegistry, writeRegistryAtomic } from '../src/registry.ts'
 import {
   SYNC_INDEX_FILE,
   SYNC_NAMESPACE_DIR,
+  AUTO_PUSH_SETTLE_MS,
   createAutoPushTimer,
   planSync,
   readRemoteLibrary,
@@ -859,4 +860,189 @@ test('runAutoPush：填 60000 就按 60000 放行，别拿缺省那个 300000 �
     await fixture.close()
     rmSync(machine.base, { recursive: true, force: true })
   }
+})
+
+// ── 事件层：写完一轮就推 ────────────────────────────────────────────────────────
+//
+// 这一组测的是"会话事件攒一轮"那一层（`touched()`）。它有两个并存的计时器——兜底的轮询与静默窗口——
+// 所以假定时器要能同时记住两个句柄，按"谁被排了第几次"分辨（先排的是兜底那个）。
+
+/** 一个能同时管住两个计时器的假表：返回句柄表，测试按顺序挑一个触发。 */
+function fakeTimers(): {
+  handles: Array<{ handler: () => void; ms: number }>
+  setTimer: (handler: () => void, ms: number) => unknown
+  clearTimer: (handle: unknown) => void
+  /** 触发第 index 个还挂着的计时器（按挂上的先后）。 */
+  fire: (index: number) => void
+  /** 还挂着几个。 */
+  live: () => number
+  /** 每个被排过的（ms 记录用）。 */
+  scheduled: number[]
+} {
+  const handles: Array<{ handler: () => void; ms: number } | undefined> = []
+  const scheduled: number[] = []
+  const liveIndices = (): number[] => handles.map((h, i) => (h === undefined ? -1 : i)).filter((i) => i >= 0)
+  return {
+    handles: handles as Array<{ handler: () => void; ms: number }>,
+    scheduled,
+    setTimer: (handler, ms) => {
+      scheduled.push(ms)
+      handles.push({ handler, ms })
+      return handles.length - 1
+    },
+    clearTimer: (handle) => {
+      handles[handle as number] = undefined
+    },
+    fire: (index) => {
+      const target = liveIndices()[index]
+      assert.ok(target !== undefined, `没有第 ${index} 个还挂着的计时器（共 ${liveIndices().length} 个）`)
+      const entry = handles[target]
+      handles[target] = undefined
+      entry?.handler()
+    },
+    live: () => liveIndices().length,
+  }
+}
+
+test('touched()：静默窗口到了才推一轮，窗口是 AUTO_PUSH_SETTLE_MS', async () => {
+  /*
+   * 事件层的核心：收到 `turn/end` 不是立刻推，而是起一个静默窗口——一轮对话里 `turn/end` 会连发
+   * （goal 续轮、子智能体、compaction），不等一等就是整包 PUT × N。
+   */
+  const timers = fakeTimers()
+  const runs: Array<{ force?: boolean } | undefined> = []
+  const timer = createAutoPushTimer({
+    clock: { enabled: () => true, intervalMs: () => 60_000 },
+    run: async (options) => {
+      runs.push(options as { force?: boolean } | undefined)
+      return { ran: true, failures: 0 }
+    },
+    setTimer: timers.setTimer,
+    clearTimer: timers.clearTimer,
+  })
+  // 挂上之后先排的是兜底那一轮（60 秒）。
+  assert.equal(timers.handles[0]?.ms, 60_000, '兜底那一轮先挂上')
+
+  timer.touched()
+  assert.equal(timers.live(), 2, '兜底 + 静默窗口，两个各算各的')
+  assert.equal(timers.handles[1]?.ms, AUTO_PUSH_SETTLE_MS, `静默窗口是 ${AUTO_PUSH_SETTLE_MS} 毫秒`)
+  assert.equal(runs.length, 0, '窗口没到之前不推')
+
+  timers.fire(1) // 静默窗口那个
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.equal(runs.length, 1, '窗口到了就推一轮')
+  assert.equal(runs[0]?.force, true, '用户刚写完一轮：绕开速度闸（那是给兜底那条路留的）')
+  timer.stop()
+})
+
+test('touched()：窗口里再来事件就重置计时（连发的 turn/end 只推一次）', async () => {
+  const timers = fakeTimers()
+  const runs: number[] = []
+  const timer = createAutoPushTimer({
+    clock: { enabled: () => true, intervalMs: () => 60_000 },
+    run: async () => {
+      runs.push(1)
+      return { ran: true, failures: 0 }
+    },
+    setTimer: timers.setTimer,
+    clearTimer: timers.clearTimer,
+  })
+
+  timer.touched()
+  const firstWindow = timers.handles[1]
+  assert.equal(timers.live(), 2, '兜底 + 一个窗口')
+  timer.touched() // 又写完一条
+  timer.touched() // 再来一条
+
+  assert.equal(timers.handles[1], undefined, '前一个窗口被清掉了（这就是"重置"）')
+  assert.equal(timers.live(), 2, '重置之后仍然只有"兜底 + 一个窗口"，不会越攒越多')
+
+  // 只有最后那个窗口能触发，且只推一次——被重置掉的那个已经不在表里了。
+  const lastWindow = timers.handles[timers.handles.length - 1]
+  assert.notEqual(lastWindow, firstWindow, '是重排出来的新句柄，不是原来那个')
+  timers.fire(1)
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.equal(runs.length, 1, '连发三次也只推一次')
+  timer.stop()
+})
+
+test('touched()：关着的时候什么都不做（不排队、不欠账）', async () => {
+  const timers = fakeTimers()
+  const runs: number[] = []
+  let enabled = false
+  const timer = createAutoPushTimer({
+    clock: { enabled: () => enabled, intervalMs: () => 60_000 },
+    run: async () => {
+      runs.push(1)
+      return { ran: true, failures: 0 }
+    },
+    setTimer: timers.setTimer,
+    clearTimer: timers.clearTimer,
+  })
+  assert.equal(timers.live(), 0, '关着时连兜底都不挂')
+
+  timer.touched()
+  assert.equal(timers.live(), 0, '关着时事件不排任何东西')
+  assert.equal(runs.length, 0)
+
+  // 打开之后，之前那次 touched() 不该"补跑"一次——没有欠账这回事。
+  enabled = true
+  timer.tick()
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.equal(runs.length, 1, '只有显式 tick 的那一次')
+  timer.stop()
+})
+
+test('touched()：上一轮还在跑时记下"补一次"，跑完立刻补推', async () => {
+  /*
+   * 正在跑的那一轮读的是它**开始之前**的快照，里面没有刚写完的这一笔。直接丢掉会让用户觉得
+   * "我写完了它没推"，所以欠着的那一次要在跑完之后补上。
+   */
+  const timers = fakeTimers()
+  let release: (() => void) | undefined
+  const runs: Array<{ force?: boolean } | undefined> = []
+  const timer = createAutoPushTimer({
+    clock: { enabled: () => true, intervalMs: () => 60_000 },
+    run: async (options) => {
+      runs.push(options as { force?: boolean } | undefined)
+      if (runs.length === 1) await new Promise<void>((resolve) => { release = resolve })
+      return { ran: true, failures: 0 }
+    },
+    setTimer: timers.setTimer,
+    clearTimer: timers.clearTimer,
+  })
+
+  const first = timer.tick({ force: true })
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.equal(runs.length, 1, '第一轮在跑')
+
+  timer.touched()
+  assert.equal(timers.live(), 1, '跑着的时候不排窗口（只记账，见下）')
+
+  release?.()
+  await first
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.equal(timers.live(), 2, '跑完补起一个窗口（兜底 + 它）')
+
+  timers.fire(1)
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.equal(runs.length, 2, '欠着的那一次补推了')
+  assert.equal(runs[1]?.force, true, '补的那次也绕开速度闸')
+  timer.stop()
+})
+
+test('touched()：stop() 之后不再排窗口', async () => {
+  const timers = fakeTimers()
+  const timer = createAutoPushTimer({
+    clock: { enabled: () => true, intervalMs: () => 60_000 },
+    run: async () => ({ ran: true, failures: 0 }),
+    setTimer: timers.setTimer,
+    clearTimer: timers.clearTimer,
+  })
+  timer.touched()
+  assert.equal(timers.live(), 2)
+  timer.stop()
+  assert.equal(timers.live(), 0, 'stop() 把兜底与窗口都清掉')
+  timer.touched()
+  assert.equal(timers.live(), 0, '停掉之后事件不再排窗口')
 })

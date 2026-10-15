@@ -56,7 +56,7 @@ export interface SyncSectionValue {
 export const DEFAULT_AUTO_PUSH_INTERVAL_MS = 300000
 
 /**
- * 自动推送间隔的缺省分钟数：卡片上那句"每 N 分钟一次"用它。
+ * 自动推送兜底间隔的缺省分钟数：卡片上那句"兜底每 N 分钟一次"用它。
  *
  * `SyncInfo.autoPush` 只报**间隔毫秒**（宿主已经解析过用户层：没配就是核心层那个缺省值），所以
  * 界面这一侧不需要自己判断"配没配"，只要把它换成分钟。
