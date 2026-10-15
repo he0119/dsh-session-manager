@@ -257,6 +257,20 @@ function loadBundle({ firstNull, panel, arrays, strings, nulls, meta, fetch } = 
     // 开没开、标题是什么、正文摆了什么、底部那两个按钮是谁"这些**入参**，不是官方控件内部怎么画。
     if (specifier === '@deepseek-ai/dsh-client-ui-primitives') {
       return {
+        /*
+         * `Switch` 的替身：真的那个画一个受控开关（按钮 + 滑块）。用例要核的是"这里是官方那个开关，
+         * 而不是本页手写的勾选框"以及它的三处入参（`checked` / `disabled` / `label`），
+         * 所以按 props 造一个带 `data-switch` 的元素记进 `recorded`。
+         */
+        Switch: (props) =>
+          react.createElement('button', {
+            type: 'button',
+            'data-switch': 'true',
+            'data-checked': props.checked,
+            disabled: props.disabled,
+            'aria-label': props.label,
+            onClick: () => props.onChange(!props.checked),
+          }),
         SettingsSecretField: (props) =>
           react.createElement('input', {
             type: 'password',
@@ -4909,5 +4923,358 @@ test('客户端产物：一轮一节折得起来，标题自己画折叠标记',
     elementsOf(body).filter((node) => classesOf(node).includes('dsm-item')).length,
     4,
     '四条都在正文层里',
+  )
+})
+
+test('客户端产物：同步设置表单的字段顺序——自动推送排在最后，紧挨着保存', { skip }, async () => {
+  /*
+   * 这一条钉的是**分组**，不是美观：表单前三组说的是"这条通道是什么"（怎么连、怎么认证、落地到哪），
+   * 自动推送说的是"连上之后让它自己怎么跑"——另一件事。它曾经夹在「超时」与「用户名」之间，把"怎么连"
+   * 那一组切成了两半。
+   *
+   * 判据是用**字段标签在上报文本里的先后**：标签是字典键（`sync.field.*`），假 react 把 text 按渲染
+   * 顺序摆出来，所以"谁先出现"就是"谁在上面"。反事实：把自动推送那两栏挪回超时之后，这一条立刻红。
+   */
+  const state = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    sync: { url: 'https://dav.example.com/dsh', machineId: 'robot-a', mappings: 0 },
+    sessions: [],
+    workspaces: [],
+  }
+  const controller = {
+    getSnapshot: () => ({
+      status: 'ready',
+      writable: true,
+      revision: 4,
+      value: { sync: { url: 'https://dav.example.com/dsh', machineId: 'robot-a', timeoutMs: 30000 } },
+    }),
+    subscribe: () => () => {},
+    mutate: async () => true,
+  }
+  const credentials = {
+    async describe(refs) {
+      return { ok: true, value: Object.fromEntries(refs.map((ref) => [ref, { configured: false, writable: true }])) }
+    },
+    async set() {
+      return { ok: true, value: undefined }
+    },
+  }
+  const mounted = mount({ state, panel: 'sync', configForms: { get: () => controller }, credentials })
+  const text = strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
+
+  const at = (key) => {
+    const index = text.indexOf(key)
+    assert.ok(index >= 0, `表单里该有 ${key}`)
+    return index
+  }
+  const url = at('sync.field.url')
+  const machine = at('sync.field.machine')
+  const timeout = at('sync.field.timeout')
+  const user = at('sync.field.user')
+  const mapping = at('sync.field.mapping')
+  const autoPush = at('sync.field.autoPush')
+
+  // 前三组：怎么连 → 怎么认证 → 落地到哪。
+  assert.ok(url < machine, 'URL 在最上面')
+  assert.ok(machine < timeout, '机器标识与超时同一行，标识在前')
+  assert.ok(timeout < user, '认证那一组在连接参数之后')
+  assert.ok(user < mapping, '落地映射在认证之后')
+  // 自动推送在最后：它不属于上面任何一组，而且是个"存了才生效"的开关，靠近保存。
+  assert.ok(mapping < autoPush, '自动推送排在路径映射之后（曾经的错是夹在超时与用户名之间）')
+  assert.ok(timeout < autoPush && user < autoPush, '它不在"怎么连/怎么认证"那一组里')
+})
+
+test('客户端产物：同步设置的「测试连接」——结论紧跟在按钮下面，不在表单末尾', { skip }, async () => {
+  /*
+   * 按钮在最上面、结论在最下面是一个**看不见的失败**：按完之后用户不知道有没有结果，得自己往下翻过整张
+   * 表单才知道。所以结论必须落在按钮那一块里（同一个 `dsm-syncTools` 子树）。
+   *
+   * 用现成的 `strings()` 走那一块的子树：判据是"按钮与结论是同一块的成员"，不是"谁先出现"——后者在
+   * 结论被留在表单末尾时一样成立（它确实更靠后），什么都拦不住。
+   *
+   * 反事实：把结论那两行塞回 `dsm-syncForm` 末尾（映射之后），这一条立刻红。
+   */
+  const state = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    sync: { url: 'https://dav.example.com/dsh', machineId: 'robot-a', mappings: 0 },
+    sessions: [],
+    workspaces: [],
+  }
+  const controller = {
+    getSnapshot: () => ({
+      status: 'ready',
+      writable: true,
+      revision: 4,
+      value: { sync: { url: 'https://dav.example.com/dsh', machineId: 'robot-a', timeoutMs: 30000 } },
+    }),
+    subscribe: () => () => {},
+    mutate: async () => true,
+  }
+  const credentials = {
+    async describe(refs) {
+      return { ok: true, value: Object.fromEntries(refs.map((ref) => [ref, { configured: false, writable: true }])) }
+    },
+    async set() {
+      return { ok: true, value: undefined }
+    },
+  }
+  // 结论那一行由 `nulls` 按 useState 的顺序种进去（见「测试连接」那条用例开头的说明）。
+  const outcome = {
+    mode: 'test',
+    remote: { url: 'https://dav.example.com/dsh', machineId: 'robot-a' },
+    code: 'ok',
+    status: 207,
+    namespaceExists: true,
+    machines: ['robot-test', 'vibe-coding-dev'],
+    entries: 3,
+    username: undefined,
+    hasPassword: true,
+  }
+  const mounted = mount({
+    state,
+    panel: 'sync',
+    configForms: { get: () => controller },
+    credentials,
+    nulls: [null, null, null, null, null, null, null, null, outcome],
+  })
+  const tree = mounted.registrations[0].component(mounted.registrations[0].registration.inject())
+
+  // 整页文本里结论确实渲染了（不然下面那条断言会空过）。
+  const renderedText = strings(tree)
+  assert.ok(
+    renderedText.some((item) => String(item).startsWith('sync.test.ok')),
+    '结论行该渲染出来',
+  )
+
+  // 按钮那一块：`dsm-syncTools`。它的子树里必须同时有按钮与结论。
+  /*
+   * 找那一块用 `recorded` 而不是 `elements()`：分页本体包在 Fragment 里，`elements()` 不下穿
+   * Fragment（见它的注释），而假 `createElement` 把每个元素都记进了 `recorded`。判据本身仍然是
+   * "按钮与结论同处一块"——`recorded` 里只有一个 `dsm-syncTools`。
+   */
+  const blocks = mounted.recorded.filter((node) => node.props?.className === 'dsm-syncTools')
+  assert.equal(blocks.length, 1, '只有一块 dsm-syncTools')
+  const blockText = strings(blocks[0].props?.children)
+  assert.ok(
+    blockText.includes('sync.test.action'),
+    `「测试连接」按钮要在那一块里，实际：${JSON.stringify(blockText)}`,
+  )
+  assert.ok(
+    blockText.some((item) => String(item).startsWith('sync.test.ok')),
+    `结论也要在那一块里——按完按钮答案就该出现在按的地方，实际块内文本：${JSON.stringify(blockText)}`,
+  )
+})
+
+test('客户端产物：同步设置的「测试连接」是只读工具，排在字段之上、不跟保存同一行', { skip }, async () => {
+  /*
+   * 位置与**性质**要一致：它一次 PROPFIND、一个字节都不改，所以是这张卡片的只读工具（与「刷新」「全选」
+   * 同一类），该在字段之上；而不是挤在「保存 / 放弃改动」那行**写**操作的旁边——那样读起来像"保存之后
+   * 还有个第二步"。
+   *
+   * 反事实：把它挪回保存那一行之后，`saveBeforeTest` 这条断言立刻红。
+   */
+  const state = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    sync: { url: 'https://dav.example.com/dsh', machineId: 'robot-a', mappings: 0 },
+    sessions: [],
+    workspaces: [],
+  }
+  const controller = {
+    getSnapshot: () => ({
+      status: 'ready',
+      writable: true,
+      revision: 4,
+      value: { sync: { url: 'https://dav.example.com/dsh', machineId: 'robot-a', timeoutMs: 30000 } },
+    }),
+    subscribe: () => () => {},
+    mutate: async () => true,
+  }
+  const credentials = {
+    async describe(refs) {
+      return { ok: true, value: Object.fromEntries(refs.map((ref) => [ref, { configured: false, writable: true }])) }
+    },
+    async set() {
+      return { ok: true, value: undefined }
+    },
+  }
+  const mounted = mount({ state, panel: 'sync', configForms: { get: () => controller }, credentials })
+  const text = strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
+
+  const test = text.indexOf('sync.test.action')
+  const save = text.indexOf('save')
+  assert.ok(test >= 0, '有「测试连接」')
+  assert.ok(save >= 0, '有「保存」')
+  assert.ok(test < save, '「测试连接」在「保存」之前（它是只读的探路工具，不是保存的第二步）')
+  // 它比第一个字段还早：整张表单的最上面那一行。
+  assert.ok(test < text.indexOf('sync.field.url'), '它排在所有字段之上（表单最上面那一行工具）')
+
+  // 那一行是个独立的动作行，与保存那一行不是同一个容器。
+  const toolsRows = mounted.recorded.filter((node) => node.props?.className === 'dsm-syncTools')
+  assert.equal(toolsRows.length, 1, '「测试连接」有自己的那一行（dsm-syncTools）')
+  const button = mounted.recorded.find((node) => node.type === 'button' && node.props?.children === 'sync.test.action')
+  assert.ok(button !== undefined, '按钮是个真的 button')
+})
+
+test('客户端产物：自动推送关着时收起间隔那一栏（开着才画），两态都留着值', { skip }, async () => {
+  /*
+   * 收起而不是禁用，是刻意的：禁用会留下一栏灰掉的输入框，用户看不清写了什么、还要去找它为什么灰；
+   * 而关着的时候那一栏根本没有意义（宿主不按它走）。
+   *
+   * 两态各渲染一遍，核的是**同一份草稿**下画出来的东西不同：关着只有开关那一行、开着多出间隔那一栏。
+   * 反事实：去掉那个条件（无条件画间隔那一栏），"关着时看不到"这一条立刻红。
+   */
+  const makeMounted = (autoPush) => {
+    const state = {
+      sessionsRoot: '/home/u/.dsh/sessions',
+      registryPath: '/home/u/.dsh/registry.json',
+      problems: [],
+      sync: { url: 'https://dav.example.com/dsh', machineId: 'robot-a', mappings: 0 },
+      sessions: [],
+      workspaces: [],
+    }
+    const controller = {
+      getSnapshot: () => ({
+        status: 'ready',
+        writable: true,
+        revision: 4,
+        value: {
+          sync: { url: 'https://dav.example.com/dsh', machineId: 'robot-a', timeoutMs: 30000, autoPush },
+        },
+      }),
+      subscribe: () => () => {},
+      mutate: async () => true,
+    }
+    const credentials = {
+      async describe(refs) {
+        return { ok: true, value: Object.fromEntries(refs.map((ref) => [ref, { configured: false, writable: true }])) }
+      },
+      async set() {
+        return { ok: true, value: undefined }
+      },
+    }
+    const mounted = mount({ state, panel: 'sync', configForms: { get: () => controller }, credentials })
+    const walk = mounted.registrations[0]
+    // 走一遍树才会把 `SyncConfigForm` 的元素记进 `recorded`（见上面那条用例里的说明）。
+    const text = strings(walk.component(walk.registration.inject()))
+    return { mounted, text }
+  }
+
+  // 关着：看不到间隔那一栏，但开关那一行还在（不然用户没法打开它）。
+  const off = makeMounted(false)
+  assert.ok(off.text.includes('sync.field.autoPush'), '关着时开关那一行要在')
+  assert.ok(
+    !off.text.includes('sync.field.autoPushInterval'),
+    `关着时不该画间隔那一栏，实际文本里有：${off.text.filter((x) => String(x).includes('autoPushInterval')).join(' / ')}`,
+  )
+  assert.equal(
+    off.mounted.recorded.filter((n) => n.props?.['data-switch'] === 'true').length,
+    1,
+    '关着时开关本身还在（disabled 与否另说）',
+  )
+
+  // 开着：间隔那一栏出现，并且带着草稿里那个值。
+  const on = makeMounted(true)
+  assert.ok(on.text.includes('sync.field.autoPushInterval'), '开着时要画间隔那一栏')
+  assert.ok(on.text.includes('sync.field.autoPushIntervalHint'), '连它的说明一起画')
+  /*
+   * 间隔那一栏是个 `Field`（`label` 是并列的 span，不是 `aria-label`），所以按"包住它的那一格"找：
+   * `dsm-field` 里的标签是间隔那个键，里面有一个输入框。
+   */
+  const intervalField = on.mounted.recorded.find(
+    (n) =>
+      n.props?.className === 'dsm-field' &&
+      strings(n.props?.children).includes('sync.field.autoPushInterval'),
+  )
+  assert.ok(intervalField !== undefined, '间隔那一栏是个 Field')
+  const intervalInput = elements(intervalField).find((n) => n.type === 'input')
+  assert.ok(intervalInput !== undefined, '那一栏里有个输入框')
+  assert.ok(
+    intervalField.props.children.some((child) => child?.props?.value !== undefined),
+    '输入框接着草稿里那个值（收起只是不画，值没丢）',
+  )
+})
+
+test('客户端产物：自动推送是个官方 Switch（不是手写勾选框），标题与说明在左、开关顶到右端', { skip }, async () => {
+  /*
+   * 两件事一起钉：
+   *   1. **控件是官方那个**——设置页上所有的开/关都是 `Switch` 这一套视觉，自己拿 `<input
+   *      type="checkbox">` 画一个（原先的 `dsm-check`）与页面上其它开关不是同一套。这一条核的是
+   *      "产物里用的是官方控件库导出的 `Switch`"，不是"有个长得像开关的东西"。
+   *   2. **摆法照内建设置页那一行**（`DeveloperToolsRow`）：左边一列是标题 + 说明、开关在右端，
+   *      所以标题/说明必须在 `dsm-toggleText` 那一列里，而不是与开关并列成一行。
+   *
+   * 反事实：把 `Switch` 换回 `<input type="checkbox">`，第 1 条红；把说明挪出 `dsm-toggleText`（摆成
+   * 与开关并列），第 2 条红。
+   */
+  const state = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    sync: { url: 'https://dav.example.com/dsh', machineId: 'robot-a', mappings: 0 },
+    sessions: [],
+    workspaces: [],
+  }
+  const controller = {
+    getSnapshot: () => ({
+      status: 'ready',
+      writable: true,
+      revision: 4,
+      // `autoPush` 打开：桩把 `checked` 记在 `data-checked` 上，取值才看得见开/关两态。
+      value: { sync: { url: 'https://dav.example.com/dsh', machineId: 'robot-a', timeoutMs: 30000, autoPush: true } },
+    }),
+    subscribe: () => () => {},
+    mutate: async () => true,
+  }
+  const credentials = {
+    async describe(refs) {
+      return { ok: true, value: Object.fromEntries(refs.map((ref) => [ref, { configured: false, writable: true }])) }
+    },
+    async set() {
+      return { ok: true, value: undefined }
+    },
+  }
+  const mounted = mount({ state, panel: 'sync', configForms: { get: () => controller }, credentials })
+  /*
+   * **先走一遍树**：`SyncConfigForm` 是个函数组件，假 `createElement` 只在它被调用时才把它的元素记进
+   * `recorded`；而调用它的是 `strings()` / `elements()` 这种走树的帮手。不走这一趟，`recorded` 里只有
+   * 面板外壳，表单里什么都没记下来（这一条差点写成"永远找不到开关"的假绿）。
+   */
+  const walk = mounted.registrations[0]
+  strings(walk.component(walk.registration.inject()))
+
+  // ① 是官方 `Switch`（桩给自己盖了 `data-switch`），不是本页手写的 checkbox。
+  const switches = mounted.recorded.filter((node) => node.props?.['data-switch'] === 'true')
+  assert.equal(switches.length, 1, '自动推送用官方 Switch，且只有一个')
+  assert.equal(switches[0].props['data-checked'], true, '开关反映配置里的开态（这里配的是 true）')
+  assert.equal(
+    switches[0].props['aria-label'],
+    'sync.field.autoPush',
+    '无障碍名走同一个键（官方那个 Switch 的 label 是必须的）',
+  )
+  const handRolled = mounted.recorded.filter(
+    (node) => node.type === 'input' && node.props?.type === 'checkbox',
+  )
+  assert.equal(handRolled.length, 0, '这张表单里不该再有手写的勾选框')
+
+  // ② 摆法是"左边标题+说明、开关右端"：标题与说明同处 `dsm-toggleText`，开关在那一行里。
+  const toggleText = mounted.recorded.filter((node) => node.props?.className === 'dsm-toggleText')
+  assert.equal(toggleText.length, 1, '标题与说明同处一列（dsm-toggleText）')
+  const toggleTextStrings = strings(toggleText[0].props?.children)
+  assert.ok(toggleTextStrings.includes('sync.field.autoPush'), '标题在这一列里')
+  assert.ok(
+    toggleTextStrings.includes('sync.field.autoPushHint'),
+    `说明也在同一列里（它该在标题下面，而不是与开关并列），实际：${JSON.stringify(toggleTextStrings)}`,
+  )
+  const row = mounted.recorded.filter((node) => node.props?.className === 'dsm-toggleRow')
+  assert.equal(row.length, 1, '整行是 dsm-toggleRow')
+  assert.ok(
+    strings(row[0].props?.children).includes('sync.field.autoPushHint'),
+    '开关与标题+说明在同一行里',
   )
 })

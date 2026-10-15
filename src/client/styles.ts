@@ -758,6 +758,25 @@ export const CSS = `
 .dsm-mapArrow { color: var(--dsw-alias-label-secondary, #646a73); }
 /* 同步设置表单：字段一列排开，配对的两个字段并排一行（窄屏自动换行）。 */
 .dsm-syncForm { display: flex; flex-direction: column; gap: 10px; margin: 4px 0 2px; }
+/*
+ * 「测试连接」那一块：这张卡片的只读工具，所以摆在字段之上（与卡片头部的「刷新 / 全选」同一类）。
+ *
+ * 是一列而不是一行：按钮与说明一行，结论另起一行紧贴在下面。结论跟着按钮走是刻意的——按一下按钮，
+ * 答案就该出现在按的地方；摆到表单末尾的话按钮在最上面、结论在最下面，中间隔着整张表单。
+ */
+.dsm-syncTools { display: flex; flex-direction: column; gap: 6px; margin-bottom: 2px; }
+/*
+ * 设置页那种"标题 + 说明 + 右端一个开关"的行。规格照内建设置页的开关行量出来的（
+ * dsh-client-ui-settings-general 的 DeveloperToolsRow）：行是 space-between 的两端对齐、纵向居中、
+ * 间距 24px；标题 14px/20px（正文那一档），说明 12px/18px 且用次要色（与 dsm-hint 同一档）。
+ *
+ * 本仓不给它加分割线：内建那一行上下都有 border-bottom，是因为通用设置页把若干行叠成一列；这里只有
+ * 这一行，加线反而像把表单切开。
+ */
+.dsm-toggleRow { display: flex; align-items: center; justify-content: space-between; gap: 24px; }
+.dsm-toggleText { min-width: 0; }
+.dsm-toggleTitle { font-size: 14px; line-height: 20px; }
+.dsm-toggleDesc { margin-top: 4px; color: var(--dsw-alias-label-secondary, #646a73); font-size: 12px; line-height: 18px; }
 .dsm-syncRow { display: flex; gap: 12px; flex-wrap: wrap; }
 .dsm-syncRow > .dsm-field { flex: 1 1 16rem; min-width: 0; }
 .dsm-options { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }

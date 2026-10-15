@@ -26,7 +26,7 @@
 
 import * as React from 'react'
 
-import { SettingsSecretField } from '@deepseek-ai/dsh-client-ui-primitives'
+import { SettingsSecretField, Switch } from '@deepseek-ai/dsh-client-ui-primitives'
 
 import { testSync, type SyncTestResponse } from '../api.ts'
 import { getCredentialsApi, type CredentialInfo } from '../credentials.ts'
@@ -285,6 +285,34 @@ export function SyncConfigForm({
 
   return (
     <div className="dsm-syncForm">
+      {/*
+       * 「测试连接」是这张卡片的**只读工具**，所以摆在最上面那一行（与「刷新」「全选」同一类；见
+       * AGENTS.md 的"卡片头部只放不动数据的工具"）。
+       *
+       * 它原来挤在「保存 / 放弃改动」那一行的旁边——那是**写**操作的行，而这一次探测一个字节都不改
+       * （只 PROPFIND 一次远端）。位置与性质对不上，读起来像"保存之后还有个第二步"。
+       *
+       * 而且它测的是**已保存的**配置（宿主的运行时按配置现读），与草稿无关：所以有草稿时按钮禁用、
+       * 说明换成"先保存"。这一条正是"它属于保存之前还是之后"的判据——把它摆到表单**最上面**（而不是
+       * 末尾靠近保存的地方），读起来就是"先探通路、再填其余"。
+       */}
+      <div className="dsm-syncTools">
+        <div className="dsm-controls">
+          <button type="button" className="dsm-button" onClick={testConnection} disabled={!canTest}>
+            {testing ? t('sync.test.running') : t('sync.test.action')}
+          </button>
+          <span className="dsm-hint">{dirty ? t('sync.test.dirty') : t('sync.test.hint')}</span>
+        </div>
+        {/*
+         * 结论紧跟在按钮下面，**不**摆到表单末尾去：按一下按钮，答案就该出现在按的地方。摆末尾的话
+         * 按钮在最上面、结论在最下面，中间隔着整张表单（十几行字段），用户按完不知道结果有没有出来，
+         * 得自己往下翻——这不是美观问题，是"这次点击有没有生效"根本看不见。
+         */}
+        {testError !== undefined && <p className="dsm-warn">{testError}</p>}
+        {verdict !== undefined && (
+          <p className={testResult?.code === 'ok' ? 'dsm-ok' : 'dsm-warn'}>{t(verdict.key, verdict.params)}</p>
+        )}
+      </div>
       <Field
         label={t('sync.field.url')}
         hint={t('sync.field.urlHint')}
@@ -307,34 +335,6 @@ export function SyncConfigForm({
           value={view.timeoutMs}
           onChange={(timeoutMs) => edit({ timeoutMs })}
           placeholder="30000"
-        />
-      </div>
-      {/*
-       * 自动推送：一个勾选框 + 一个间隔数字输入。两栏摆在「超时」之后——它们与上面那一行同属"这条
-       * 通道怎么走"。
-       *
-       * 控件用原生元素（本仓手写控件的口径，见 AGENTS.md）：`.dsm-check` 与迁移页那个「包含产物」
-       * 开关是同一对类，间隔那一栏复用上面那个 `Field`（连灰字在内都是同一套画法）。间隔那一栏**不
-       * 跟着勾选态禁用**：先填间隔再勾选、或先取消勾选再改数，都是平常写法；禁用它只会让人以为那一栏
-       * 坏了（真正生效与否由宿主按 `autoPush` 判）。
-       */}
-      <label className="dsm-check">
-        <input
-          type="checkbox"
-          checked={view.autoPush}
-          disabled={!snapshot.writable}
-          onChange={(event) => edit({ autoPush: event.target.checked })}
-        />
-        <span>{t('sync.field.autoPush')}</span>
-      </label>
-      <p className="dsm-hint">{t('sync.field.autoPushHint')}</p>
-      <div className="dsm-syncRow">
-        <Field
-          label={t('sync.field.autoPushInterval')}
-          hint={t('sync.field.autoPushIntervalHint')}
-          value={view.autoPushIntervalMs}
-          onChange={(autoPushIntervalMs) => edit({ autoPushIntervalMs })}
-          placeholder={String(DEFAULT_AUTO_PUSH_INTERVAL_MS)}
         />
       </div>
       <Field
@@ -405,6 +405,50 @@ export function SyncConfigForm({
         </div>
       </div>
 
+      {/*
+       * 自动推送摆在**最后**：前三栏是"怎么连"（URL / 机器标识 / 超时），中间是"怎么认证"，再下面
+       * 是"落地到哪"（路径映射）——这三组说的是"这条通道是什么"。自动推送不一样，它说的是"连上之后
+       * 让它自己怎么跑"，是另一件事；夹在连接参数与认证之间会把那一组自然的分组切成两半。
+       *
+       * 摆最后还有个位置上的好处：它紧挨着「保存」，而它是个**存了才生效**的开关（生效与否由宿主按
+       * 已保存的 `autoPush` 判，草稿里改了不勾选也没用）。
+       *
+       * 开关用官方控件库的 `Switch`，并照内建设置页那一行（`DeveloperToolsRow`）的规格摆：左边一列
+       * 是标题 + 说明，开关顶到右端。这一条是"设置页的开关长什么样"的唯一权威——自己拿一个勾选框画
+       * （`dsm-check`）与页面上其它开关不是一套视觉。
+       *
+       * 间隔那一栏**只在开关打开时出现**（收起 `view.autoPush` 为真的那一支）。这是"开关行"的惯例：
+       * 开关是这一行的主控件，从属的设置收在它后面；关着的时候那一栏没有意义（宿主根本不按它走），
+       * 摆出来只会让人以为它随时在生效。收起不是禁用——禁用会留下一栏灰掉、看不清写了什么的输入框，
+       * 而且用户会去找它为什么灰。
+       *
+       * 收起也**不会丢值**：`view.autoPushIntervalMs` 是草稿里的一格，收起只是不画它；关掉再打开，
+       * 写过的数还在（`draftFrom` 那一份没动过）。
+       */}
+      <div className="dsm-toggleRow">
+        <div className="dsm-toggleText">
+          <div className="dsm-toggleTitle">{t('sync.field.autoPush')}</div>
+          <div className="dsm-toggleDesc">{t('sync.field.autoPushHint')}</div>
+        </div>
+        <Switch
+          checked={view.autoPush}
+          disabled={!snapshot.writable}
+          label={t('sync.field.autoPush')}
+          onChange={(next) => edit({ autoPush: next })}
+        />
+      </div>
+      {view.autoPush && (
+        <div className="dsm-syncRow">
+          <Field
+            label={t('sync.field.autoPushInterval')}
+            hint={t('sync.field.autoPushIntervalHint')}
+            value={view.autoPushIntervalMs}
+            onChange={(autoPushIntervalMs) => edit({ autoPushIntervalMs })}
+            placeholder={String(DEFAULT_AUTO_PUSH_INTERVAL_MS)}
+          />
+        </div>
+      )}
+
       <div className="dsm-controls">
         <button type="button" className="dsm-button dsm-primary" onClick={save} disabled={!canSave}>
           {saving ? t('sync.form.saving') : t('save')}
@@ -425,20 +469,6 @@ export function SyncConfigForm({
         {snapshot.writable && dirty && problems.length === 0 && !failed && <span className="dsm-hint">{t('sync.form.unsaved')}</span>}
       </div>
 
-      {/*
-       * 配好之后先探一次：认证过不过、地址对不对。测的是**已保存的**配置（宿主的运行时按配置现读），
-       * 所以有草稿时按钮是禁用的，那句话也换成"先保存"。
-       */}
-      <div className="dsm-controls">
-        <button type="button" className="dsm-button" onClick={testConnection} disabled={!canTest}>
-          {testing ? t('sync.test.running') : t('sync.test.action')}
-        </button>
-        <span className="dsm-hint">{dirty ? t('sync.test.dirty') : t('sync.test.hint')}</span>
-      </div>
-      {testError !== undefined && <p className="dsm-warn">{testError}</p>}
-      {verdict !== undefined && (
-        <p className={testResult?.code === 'ok' ? 'dsm-ok' : 'dsm-warn'}>{t(verdict.key, verdict.params)}</p>
-      )}
     </div>
   )
 }
