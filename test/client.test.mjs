@@ -5121,6 +5121,85 @@ test('客户端产物：同步设置的「测试连接」是只读工具，排�
   assert.ok(button !== undefined, '按钮是个真的 button')
 })
 
+test('客户端产物：自动推送关着时收起间隔那一栏（开着才画），两态都留着值', { skip }, async () => {
+  /*
+   * 收起而不是禁用，是刻意的：禁用会留下一栏灰掉的输入框，用户看不清写了什么、还要去找它为什么灰；
+   * 而关着的时候那一栏根本没有意义（宿主不按它走）。
+   *
+   * 两态各渲染一遍，核的是**同一份草稿**下画出来的东西不同：关着只有开关那一行、开着多出间隔那一栏。
+   * 反事实：去掉那个条件（无条件画间隔那一栏），"关着时看不到"这一条立刻红。
+   */
+  const makeMounted = (autoPush) => {
+    const state = {
+      sessionsRoot: '/home/u/.dsh/sessions',
+      registryPath: '/home/u/.dsh/registry.json',
+      problems: [],
+      sync: { url: 'https://dav.example.com/dsh', machineId: 'robot-a', mappings: 0 },
+      sessions: [],
+      workspaces: [],
+    }
+    const controller = {
+      getSnapshot: () => ({
+        status: 'ready',
+        writable: true,
+        revision: 4,
+        value: {
+          sync: { url: 'https://dav.example.com/dsh', machineId: 'robot-a', timeoutMs: 30000, autoPush },
+        },
+      }),
+      subscribe: () => () => {},
+      mutate: async () => true,
+    }
+    const credentials = {
+      async describe(refs) {
+        return { ok: true, value: Object.fromEntries(refs.map((ref) => [ref, { configured: false, writable: true }])) }
+      },
+      async set() {
+        return { ok: true, value: undefined }
+      },
+    }
+    const mounted = mount({ state, panel: 'sync', configForms: { get: () => controller }, credentials })
+    const walk = mounted.registrations[0]
+    // 走一遍树才会把 `SyncConfigForm` 的元素记进 `recorded`（见上面那条用例里的说明）。
+    const text = strings(walk.component(walk.registration.inject()))
+    return { mounted, text }
+  }
+
+  // 关着：看不到间隔那一栏，但开关那一行还在（不然用户没法打开它）。
+  const off = makeMounted(false)
+  assert.ok(off.text.includes('sync.field.autoPush'), '关着时开关那一行要在')
+  assert.ok(
+    !off.text.includes('sync.field.autoPushInterval'),
+    `关着时不该画间隔那一栏，实际文本里有：${off.text.filter((x) => String(x).includes('autoPushInterval')).join(' / ')}`,
+  )
+  assert.equal(
+    off.mounted.recorded.filter((n) => n.props?.['data-switch'] === 'true').length,
+    1,
+    '关着时开关本身还在（disabled 与否另说）',
+  )
+
+  // 开着：间隔那一栏出现，并且带着草稿里那个值。
+  const on = makeMounted(true)
+  assert.ok(on.text.includes('sync.field.autoPushInterval'), '开着时要画间隔那一栏')
+  assert.ok(on.text.includes('sync.field.autoPushIntervalHint'), '连它的说明一起画')
+  /*
+   * 间隔那一栏是个 `Field`（`label` 是并列的 span，不是 `aria-label`），所以按"包住它的那一格"找：
+   * `dsm-field` 里的标签是间隔那个键，里面有一个输入框。
+   */
+  const intervalField = on.mounted.recorded.find(
+    (n) =>
+      n.props?.className === 'dsm-field' &&
+      strings(n.props?.children).includes('sync.field.autoPushInterval'),
+  )
+  assert.ok(intervalField !== undefined, '间隔那一栏是个 Field')
+  const intervalInput = elements(intervalField).find((n) => n.type === 'input')
+  assert.ok(intervalInput !== undefined, '那一栏里有个输入框')
+  assert.ok(
+    intervalField.props.children.some((child) => child?.props?.value !== undefined),
+    '输入框接着草稿里那个值（收起只是不画，值没丢）',
+  )
+})
+
 test('客户端产物：自动推送是个官方 Switch（不是手写勾选框），标题与说明在左、开关顶到右端', { skip }, async () => {
   /*
    * 两件事一起钉：

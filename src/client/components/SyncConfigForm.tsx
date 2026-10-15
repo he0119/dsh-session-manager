@@ -417,8 +417,13 @@ export function SyncConfigForm({
        * 是标题 + 说明，开关顶到右端。这一条是"设置页的开关长什么样"的唯一权威——自己拿一个勾选框画
        * （`dsm-check`）与页面上其它开关不是一套视觉。
        *
-       * 间隔那一栏复用上面那个 `Field`，并且**不跟着开关态禁用**：先填间隔再打开、或先关掉再改数，
-       * 都是平常写法；禁用它只会让人以为那一栏坏了。
+       * 间隔那一栏**只在开关打开时出现**（收起 `view.autoPush` 为真的那一支）。这是"开关行"的惯例：
+       * 开关是这一行的主控件，从属的设置收在它后面；关着的时候那一栏没有意义（宿主根本不按它走），
+       * 摆出来只会让人以为它随时在生效。收起不是禁用——禁用会留下一栏灰掉、看不清写了什么的输入框，
+       * 而且用户会去找它为什么灰。
+       *
+       * 收起也**不会丢值**：`view.autoPushIntervalMs` 是草稿里的一格，收起只是不画它；关掉再打开，
+       * 写过的数还在（`draftFrom` 那一份没动过）。
        */}
       <div className="dsm-toggleRow">
         <div className="dsm-toggleText">
@@ -432,15 +437,17 @@ export function SyncConfigForm({
           onChange={(next) => edit({ autoPush: next })}
         />
       </div>
-      <div className="dsm-syncRow">
-        <Field
-          label={t('sync.field.autoPushInterval')}
-          hint={t('sync.field.autoPushIntervalHint')}
-          value={view.autoPushIntervalMs}
-          onChange={(autoPushIntervalMs) => edit({ autoPushIntervalMs })}
-          placeholder={String(DEFAULT_AUTO_PUSH_INTERVAL_MS)}
-        />
-      </div>
+      {view.autoPush && (
+        <div className="dsm-syncRow">
+          <Field
+            label={t('sync.field.autoPushInterval')}
+            hint={t('sync.field.autoPushIntervalHint')}
+            value={view.autoPushIntervalMs}
+            onChange={(autoPushIntervalMs) => edit({ autoPushIntervalMs })}
+            placeholder={String(DEFAULT_AUTO_PUSH_INTERVAL_MS)}
+          />
+        </div>
+      )}
 
       <div className="dsm-controls">
         <button type="button" className="dsm-button dsm-primary" onClick={save} disabled={!canSave}>
