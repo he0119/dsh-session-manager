@@ -59,13 +59,13 @@ export const zh = {
 
   // ---- 传输（导出 / 导入会话包） ----
   'transfer.export.title': '导出',
-  'transfer.export.hint': '勾选要带走的会话，导出一个 .dshsess 包；列表按目录分组，组头那一下是整组勾上／取消。包里是什么，见「说明」。',
+  'transfer.export.hint': '勾选会话，导出一个 .dshsess 包；组头那一下是整组勾选／取消。',
   'list.clear': '清空',
   'list.selected': '已选 {count}',
   'list.selectGroup': '整组勾选／取消：{name}',
   'list.unregisteredDir': '未加入工作区',
   'list.ungroupedTip':
-    '不属于任何工作区，但侧边栏会显示它——就是侧边栏「未分组」那一组。工作区被删掉，或者它的目录被改名、删掉之后，会话会落到这里。',
+    '不属于任何工作区，但侧边栏会显示它——就是侧边栏「未分组」那一组。工作区被删掉，或它的目录被改名、删掉之后，会话会落到这里。',
   'list.noCwdGroup': '没有工作目录的会话',
   'list.groupedByDir': '按目录分组',
   'list.collapseAll': '全部收起',
@@ -77,7 +77,7 @@ export const zh = {
   'list.empty': '这个会话库里还没有会话。',
 
   'transfer.import.title': '导入',
-  'transfer.import.hint': '选一个 .dshsess 包和目标目录，点「导入」：弹窗里逐条列出会写什么，确认才落盘。',
+  'transfer.import.hint': '选一个包和目标目录，弹窗里逐条列出会写什么，确认才落盘。',
   'transfer.import.fileLabel': '要导入的包',
   'transfer.import.targetLabel': '目标目录',
   // 与迁移页的目标目录同一个字段（值控件 + 候选面板 + 手输路径），空着时值控件上显示这一句。
@@ -137,8 +137,8 @@ export const zh = {
   'migrate.includeArtifacts': '同时搬迁会话创建过的文件（要全量解码，较慢）',
   'migrate.needTarget': '先在上面选一个目标目录，下面就是这次迁移的清单。',
   'migrate.hiddenSkipped':
-    '另有 {count} 条勾中的会话侧边栏不显示（已归档 / 空白 / 子智能体），宿主不会迁它们，这次不搬：先在列表里' +
-    '单独处理（已归档的取消归档、空白的删掉、子智能体连着它的父会话一起迁）。',
+    '另有 {count} 条勾中的会话侧边栏不显示（已归档 / 空白 / 子智能体），宿主不会迁它们：先在列表里单独处理' +
+    '（已归档的取消归档、空白的删掉、子智能体连着它的父会话一起迁）。',
   'migrate.action': '迁移',
   'migrate.dialogTitle': '将要迁移',
   'migrate.apply': '确认迁移',
@@ -147,7 +147,7 @@ export const zh = {
   'migrate.summary': '将迁移 {sessions} 条会话（{files} 个日志，{bytes}）',
   'migrate.blocked': '这次不会搬任何会话：先解决下面的问题，再按「确认迁移」。',
   'migrate.family':
-    '其中 {count} 条是子智能体：它们跟着父会话一起搬（搬完还是不算工作区成员——宿主本来就不把子智能体算进去）。',
+    '其中 {count} 条是子智能体：它们跟着父会话一起搬（搬完还是不算工作区成员）。',
   'migrate.via': '随父迁',
   'migrate.viaTip':
     '这条是子智能体：它属于你点名的「{name}」（可能隔了几层），所以跟着一起搬；搬完还是不算工作区成员。',
@@ -183,7 +183,7 @@ export const zh = {
   // 页签键跟着它自己那一节走（同 `page.tab.help`）：这一页是独立分页，不再挂在「迁移」底下。
   'page.tab.backup': '备份',
   'backup.title': '备份与回滚',
-  'backup.hint': '每次迁移、每次导入落地、每次删除都会先留一份字节级备份；「回滚」与「恢复」把它还原回去。',
+  'backup.hint': '迁移、导入落地、删除都会先留一份字节级备份，「回滚」与「恢复」把它还原回去。',
   'backup.rootLabel': '备份根目录',
   'backup.empty': '还没有备份。',
   'backup.row': '{sessions} 条会话 · {artifacts} 项产物',
@@ -207,9 +207,7 @@ export const zh = {
 
   // ---- 会话（逐条管理：归档 / 重算名称 / 迁移 / 删除） ----
   'manage.title': '会话库',
-  'manage.hint':
-    '整个会话库都在这里，侧边栏点不到的那些也在（标签说明原因）。勾选后归档、重算名称、迁移或删除；迁移与' +
-    '删除都会先备份。分类与代价见「说明」。',
+  'manage.hint': '整个会话库都在这里，侧边栏点不到的那些也在。勾选后归档、重算名称、迁移或删除，细节见「说明」。',
   'manage.archive.unavailable':
     '这个宿主没有 workspaceRegistry 服务（归档是它的能力，只有 Web profile 才有），所以归档按钮不可用；删除不受影响。',
   'manage.archive.action': '归档所选',
@@ -234,7 +232,7 @@ export const zh = {
   'manage.retitle.skip.other': '跳过 {count} 条（原因未详）。',
   'manage.transcript.open': '内容',
   'manage.transcript.openTip':
-    '看这条会话的完整内容：日志逐条解析，用户消息、模型回答、思考、工具调用与结果都在——连侧边栏看不见的那些会话（空会话、孤儿、归档、导入的）也能看。',
+    '看这条会话的完整内容：日志逐条解析，用户消息、模型回答、思考、工具调用与结果都在。侧边栏看不见的那些会话（空会话、归档、导入的）也能看。',
   'manage.transcript.title': '会话内容',
   'manage.transcript.loading': '正在加载日志…',
   'manage.transcript.loadingMore': '正在加载…',
@@ -276,7 +274,7 @@ export const zh = {
   'manage.delete.progress.note': '删除先备份再删；中断的话这份备份就在「备份」页里，恢复即可。',
   'manage.delete.backupTo': '备份落在：{dir}（要恢复就去「备份」页）',
   'manage.delete.hint':
-    '删除会先把整个会话目录备份到本插件的备份根，再删掉它；还活在宿主内存里的会话删不掉，做法见「说明」。',
+    '删除先把整个会话目录备份到本插件的备份根，再删掉它；还活在宿主内存里的会话删不掉，做法见「说明」。',
   'manage.delete.via': '随父删',
   'manage.delete.viaTip':
     '这条是子智能体：它属于你点名的「{name}」（可能隔了几层），所以跟着一起删——不然它留在盘上，就再也没有入口了。',
@@ -310,10 +308,10 @@ export const zh = {
   'help.categories.visibleTip': '侧边栏会显示的会话。',
   'help.categories.note': '一条会话可能同时属于几类，行上就挂几枚标签。',
   'help.tabs.title': '每页做什么',
-  'help.tabs.manage': '整个会话库都在这里，侧边栏点不到的那些也在。列表按目录分组，组头是工作区或仓库的名字，悬浮能看到本机路径。勾选后可以归档、重新生成名称、迁移或删除：名称那一下是请宿主的名称服务按整段对话重算（每条都要整份解一次日志再跑一次模型调用），你手动改过名的与子智能体会话会跳过。迁移是"把勾中的会话搬到一个目标目录"：改掉会话记录里的工作目录、把日志目录挪过去、并更新工作区注册表；源就是你勾的那些会话，可以来自不同目录（每条按自己的目录算），它们各自带上自己的子智能体；侧边栏里看不见的那几类搬不走（宿主对点名的隐藏会话一律拒），先在列表里单独处理它们再迁。目标目录只在弹窗里选一次，全部会话落到同一个目录。',
+  'help.tabs.manage': '整个会话库都在这里，侧边栏点不到的那些也在，列表按目录分组。勾选后可以归档、重新生成名称、迁移或删除：名称是按整段对话重算的，你手动改过名的与子智能体会话会跳过。迁移把勾中的会话搬到一个目标目录——改写工作目录、挪走日志目录、更新工作区注册表；侧边栏看不见的那几类搬不走，先在列表里单独处理。',
   'help.tabs.transfer': '把会话导出成 .dshsess 包，或把包里的会话导入某个工作区。',
   'help.tabs.sync': '在几台机器之间同步会话（WebDAV）：先给一份只读计划，确认才真的拉取与推送。远端地址、机器名与路径映射在这一页改，改完不用重启。',
-  'help.tabs.backup': '几个会写盘的操作共同的后悔面：每次迁移、每次删除、每次同步覆盖本机那份之前都会先留一份字节级备份。「回滚」把迁移搬走的那份搬回来（连工作区注册表一起还原），「恢复」只把备份里那份搬回去，注册表不动。',
+  'help.tabs.backup': '几个会写盘的操作共同的后悔面：迁移、删除、同步覆盖本机那份之前都会先留一份字节级备份。「回滚」把迁移搬走的那份搬回来（连工作区注册表一起还原），「恢复」只把备份里那份搬回去，注册表不动。',
   'help.where.title': '数据从哪来',
   'help.where.library': '会话库',
   'help.where.libraryText': '每个目录就是一条会话；名称、大小和是否显示都从这里的日志读出来。',
@@ -321,17 +319,17 @@ export const zh = {
   'help.where.registryText': '记着哪些会话属于哪个工作区、哪些被归档。',
   'help.faq.title': '常见疑问',
   'help.faq.unownedQ': '「未分组」到底算哪些会话？',
-  'help.faq.unownedA': '侧边栏里「未分组」那一组就是它：不属于任何工作区，但侧边栏会显示。工作区被删掉，或者这条会话的目录被改名、删掉之后，它就会落到这里。子智能体排在父会话下面，空白与已归档默认不显示，所以它们不算。',
+  'help.faq.unownedA': '就是侧边栏里「未分组」那一组：不属于任何工作区，但侧边栏会显示。工作区被删掉，或它的目录被改名、删掉之后，会话就落到这里。子智能体排在父会话下面，空白与已归档默认不显示，所以不算。',
   'help.faq.transcriptQ': '「内容」里看到的是全部吗？被截断了怎么办？',
-  'help.faq.transcriptA': '是全部：日志里每一条事件都在时间线上（用户消息、模型回答、思考、工具调用与结果、系统消息，以及压缩 / 权限 / 审批 / 重试这些控制事件，连名称是怎么定下来的都在）。为了不让一屏塞进几百 MB，单格文本有上限（默认 4000 个字符），被截的那一格会写明「截断了 N 个字符」并给一个「查看全文」按钮，按事件位把那一格原文单独取回来；一次读 80 条事件，「加载更多」往下接。读不出来的坏行不当成整份失败，而是报出条数与行号，其余照旧。这一页是插件自己解析日志，不经过宿主，所以侧边栏看不见的会话也能读。',
+  'help.faq.transcriptA': '是全部：日志里每一条事件都在时间线上，连名称是怎么定下来的也在。单格文本有上限（默认 4000 个字符），被截的那一格会写明并给一个「查看全文」按钮；一次读 80 条事件，「加载更多」往下接。坏行不当成整份失败，只报出条数与行号。这一页由插件自己解析日志，所以侧边栏看不见的会话也能读。',
   'help.faq.retitleQ': '「重新生成名称」为什么有的会话跳过了？',
-  'help.faq.retitleA': '三种情况会跳过，都不是失败：你手动改过名的（重算会把你起的名字覆盖掉，所以不动）、子智能体会话（它的名称在侧边栏里看不见，算了也没人看）、还没有用户消息或从没有过主模型请求的（没有可命名的东西，或者没有可用的模型路由）。这些都会在动作结束后逐类报出来。历史会话停在「首句前几个词 / 40 字节」的兜底名称上、名称 provider 只在新的用户消息到来时才修订，这两件事合起来就是这一枚按钮存在的理由。',
+  'help.faq.retitleA': '三种情况会跳过，都不是失败：你手动改过名的（重算会覆盖你起的名字）、子智能体会话（名称在侧边栏里看不见）、还没有用户消息或从没有过主模型请求的（没有可命名的东西，或没有可用的路由）。动作结束后会逐类报出来。',
   'help.faq.deletedQ': '删掉了，侧边栏为什么还在？',
   'help.faq.deletedA': '侧边栏要等宿主重新扫一遍会话库，扫完之前那几行还会在。',
   'help.faq.restartQ': '迁移完了，什么时候需要重启 DSH？',
-  'help.faq.restartA': '正常不用：改完注册表之后插件把活儿交给宿主自己做——先让它按磁盘重看一眼，再复用 / 新建目标工作区、把会话挂过去、把源侧摘空、删掉空掉的工作区；这些动作宿主自己会落盘、也会通知界面，侧边栏立刻按新归属显示，会话 id 一个都没变。只有宿主上没有那套动作时——比如只有工具没有界面的前端、老版本——才会提示重启；那时别改任何工作区，新建 / 改名 / 归档都会把这次改动覆盖掉。宿主内存里还攥着的会话（列表里带「活动中」标签的那些）这次搬不动：计划把它们摘出来报给你，留在原目录、归属不变，重启 DSH 之后再迁一次；宿主中途拒绝时，插件会把这次算好的注册表整份写回文件，重启后看到的就是这次的结果。',
+  'help.faq.restartA': '正常不用：改完注册表之后插件把活儿交给宿主自己做，界面立刻按新归属显示，会话 id 一个都没变。只有宿主上没有那套动作时（只有工具没有界面的前端、老版本）才会提示重启；那时别改任何工作区。带「活动中」标签的会话这次搬不动，重启 DSH 之后再迁一次。',
   'help.faq.liveQ': '「活动中」这条会话怎么关掉？',
-  'help.faq.liveA': 'Web 端没有「关闭某条会话」这个动作：宿主把用过（点开过、跑过回合）的会话取成内存里活着的实例，之后不再主动放掉，插件只能等它放手。让它放手的办法是重启 DSH（就是你启动它的那个进程）——正在跑的回合先停掉再重启；重启后别先点开目标会话，直接删或迁。你当前正在用的那条（侧边栏会自动打开）重启后又会是「活动中」，那是正常的。脚本化的 ACP 客户端另有 session/close，可以单条关闭。',
+  'help.faq.liveA': 'Web 端没有「关闭某条会话」：宿主把用过（点开过、跑过轮次）的会话取成内存里活着的实例，之后不再主动放掉。让它放手的办法是重启 DSH——正在跑的轮次先停掉再重启；重启后别先点开目标会话，直接删或迁。你当前正在用的那条重启后又会是「活动中」。脚本化的 ACP 客户端另有 session/close，可以单条关闭。',
   'help.faq.backupQ': '备份放在哪？「回滚」和「恢复」差在哪？',
   'help.faq.backupA': '迁移、导入和删除之前都会先备份，清单在「备份」页里。「回滚」把会话目录、日志和工作区注册表一起还原；「恢复」只把删掉的会话目录搬回来——删除本来就没碰过注册表。',
   'help.faq.familyQ': '删掉或迁走一条会话，它的子智能体怎么办？',
@@ -339,18 +337,18 @@ export const zh = {
   'help.faq.exportQ': '导出包里有什么？',
   'help.faq.exportA': '会话日志本身（包括改写目录时留下的历史日志），不含这条会话创建过的普通文件。',
   'help.faq.forkQ': '同一条会话在两台机器上都聊过，怎么办？',
-  'help.faq.forkA': '以更新的那一份为准：同步按会话 id 认，两边都写过就比「最后活动时间」。远端更晚，会把本机那份先备份再换成远端那份（旧的能从备份里恢复）；本机更晚，就重新推送自己这一格。想彻底避免，约定一条会话只在一台机器上继续。',
+  'help.faq.forkA': '以更新的那一份为准：同步按会话 id 认，两边都写过就比「最后活动时间」。远端更晚，先把本机那份备份再换成远端那份（旧的能从备份里恢复）；本机更晚，就重新推送自己这一格。想彻底避免，约定一条会话只在一台机器上继续。',
   'help.faq.passwordQ': '同步的密码存在哪？',
-  'help.faq.passwordA': '不在配置文件里：点「保存」存进宿主机凭据库（$DSH_HOME/.credentials.yaml），配置里只留一个引用名。密码框是只写的，留空＝不改，换密码就再输一次；要清掉得去凭据文件里删那一条。',
+  'help.faq.passwordA': '不在配置文件里：点「保存」存进宿主机凭据库（$DSH_HOME/.credentials.yaml），配置里只留一个引用名。密码框是只写的，留空＝不改；要清掉得去凭据文件里删那一条。',
 
   // ---- WebDAV 同步 ----
   'sync.title': 'WebDAV 同步',
   'sync.form.title': '同步设置',
   'sync.where': '远端 {url}',
   'sync.hint':
-    '按插件配置里的映射同步：把别处推送来的会话拉取到本机，把本机独有的推送到远端。远端放的是一个个 .dshsess 包，拉取时会按映射改写成这台机器的路径。同一个 id 两边都有时按内容与最后活动时间判谁更新，远端更新会先备份再换掉本机那份。映射 {mappings} 条。',
+    '按插件配置里的映射同步：把别处推送来的会话拉取到本机，把本机独有的推送到远端。同一个 id 两边都有时按内容与最后活动时间判谁更新，远端更新会先备份再换掉本机那份。映射 {mappings} 条。',
   'sync.offHint':
-    '没配置同步：在下面那张表单里填远端地址（WebDAV 集合）并逐行加上路径映射（远端工作目录 → 本机目录），保存后「同步」就会出现。',
+    '没配置同步：在下面那张表单里填远端地址（WebDAV 集合）并逐行加上路径映射，保存后「同步」就会出现。',
   'sync.action': '同步',
   'sync.dialogTitle': '将要同步',
   'sync.running': '正在同步',
@@ -410,7 +408,7 @@ export const zh = {
   'sync.password.shadowed': '这个引用由启动环境提供，那里永远优先，界面改不了；要换就先清掉那个环境变量。',
   'sync.password.unavailable': '这个宿主没给出凭据服务，密码只能放进环境变量（或自己编辑宿主的凭据文件）。',
   'sync.field.mapping': '路径映射',
-  'sync.field.mappingHint': '右边填这台机器上的目录。远端那一栏要逐字对上别的机器记下的工作目录，认不出来就跳过。配了就按配的落地——优先于自动认出来的仓库；留空也行，同一个仓库在本机能认出来时会落到本机那个克隆里。',
+  'sync.field.mappingHint': '右边填这台机器上的目录；远端那一栏要逐字对上别的机器记下的工作目录，认不出来就跳过。配了就按配的落地。',
   'sync.field.mappingEmpty': '还没有映射：远端记的是它自己机器上的工作目录，不映射的话那些会话会被跳过。',
   'sync.map.add': '添加一行',
   'sync.map.remove': '删除',
@@ -444,10 +442,10 @@ export const zh = {
   // 自动推送：按间隔在后台跑一轮**只推不拉**的同步（表单里那两栏 + 卡片上那句话 + 当场跑一次的结论）
   'sync.field.autoPush': '自动推送',
   'sync.field.autoPushHint':
-    '本机写完一轮就推上去（最后一个会话事件之后安静 10 秒，一串事件只推一次），另外按下面的间隔兜底补一次；所以下面那个数不是"每 N 分钟才推一次"。只把本机的会话推到远端，绝不拉取、也绝不改动本机任何会话。',
+    '本机写完一轮就推上去（最后一个会话事件之后安静 10 秒），另外按下面的间隔兜底补一次；只推送、绝不拉取，也不改动本机任何会话。',
   'sync.field.autoPushInterval': '自动推送兜底间隔（毫秒）',
   'sync.field.autoPushIntervalHint':
-    '缺省 300000（5 分钟），最小 60000；比 60000 小的值会被抬到 60000。它管的是事件层够不到的那些情况（别的机器推上去的、本机删了会话要收尾索引），意思是"最长多久没推就一定补一次"。',
+    '缺省 300000（5 分钟），最小 60000；比 60000 小的值会被抬到 60000。它管事件层够不到的那些情况，意思是"最长多久没推就一定补一次"。',
   'sync.field.autoPushIntervalInvalid': '自动推送间隔要是正整数毫秒。',
   'sync.autoPush.enabled': '自动推送已开：写完一轮就推，另外每 {minutes} 分钟兜底一次。',
   'sync.autoPush.now': '立即推送一次',
@@ -526,7 +524,7 @@ export const en: LocaleDictOf<typeof NS> = {
   'page.version.tipBuild': 'Plugin version {version}, local build (git {commit})',
 
   'transfer.export.title': 'Export',
-  'transfer.export.hint': 'Tick the sessions to take away and download one .dshsess bundle; the list is grouped by directory and a header toggles its whole group. What goes in is explained in Help.',
+  'transfer.export.hint': 'Tick sessions and download one .dshsess bundle; a group header toggles its whole group.',
   'list.clear': 'Clear',
   'list.selected': '{count} selected',
   'list.selectGroup': 'Select or clear this whole group: {name}',
@@ -544,7 +542,7 @@ export const en: LocaleDictOf<typeof NS> = {
   'list.empty': 'This library has no sessions yet.',
 
   'transfer.import.title': 'Import',
-  'transfer.import.hint': 'Pick a .dshsess bundle and a target directory, then hit Import: the dialog lists every write before you confirm.',
+  'transfer.import.hint': 'Pick a bundle and a target directory; the dialog lists every write before you confirm.',
   'transfer.import.fileLabel': 'Bundle to import',
   'transfer.import.targetLabel': 'Target directory',
   'transfer.import.targetPlaceholder': 'Choose a target directory…',
@@ -606,8 +604,7 @@ export const en: LocaleDictOf<typeof NS> = {
   'migrate.needTarget': 'Pick a target directory above; the plan below is what this migration will do.',
   'migrate.hiddenSkipped':
     '{count} of the ticked sessions are hidden from the sidebar (archived / blank / subagent), so the host will not ' +
-    'move them and they stay behind: handle them in the list first (unarchive, delete, or migrate a subagent with ' +
-    'its parent).',
+    'move them: handle them in the list first (unarchive, delete, or migrate a subagent with its parent).',
   'migrate.action': 'Migrate',
   'migrate.dialogTitle': 'About to migrate',
   'migrate.apply': 'Migrate now',
@@ -616,7 +613,7 @@ export const en: LocaleDictOf<typeof NS> = {
   'migrate.summary': '{sessions} sessions to migrate ({files} logs, {bytes})',
   'migrate.blocked': 'Nothing will move this time: clear the problems below, then press Migrate now.',
   'migrate.family':
-    '{count} of them are subagent sessions: they move with their parent (and still do not count as workspace members — the host never counts subagents as members).',
+    '{count} of them are subagent sessions: they move with their parent (and still do not count as workspace members).',
   'migrate.via': 'with parent',
   'migrate.viaTip':
     'This is a subagent session: it belongs to “{name}”, one of the sessions you named (possibly a few levels up), so it moves with it — and still does not count as a workspace member.',
@@ -650,7 +647,7 @@ export const en: LocaleDictOf<typeof NS> = {
 
   'page.tab.backup': 'Backups',
   'backup.title': 'Backups & rollback',
-  'backup.hint': 'Every migration, every import that lands and every delete leaves a byte-level backup first; Roll back and Restore put it back.',
+  'backup.hint': 'Every migration, landing import and delete leaves a byte-level backup first; Roll back and Restore put it back.',
   'backup.rootLabel': 'Backup root',
   'backup.empty': 'No backups yet.',
   'backup.row': '{sessions} sessions · {artifacts} artifacts',
@@ -673,9 +670,7 @@ export const en: LocaleDictOf<typeof NS> = {
   'backup.restore.done': 'Restored {sessions} sessions and {files} files (the registry was left untouched).',
 
   'manage.title': 'Session library',
-  'manage.hint':
-    'The whole library is here, including what the sidebar cannot reach (tags say why). Tick rows to archive, retitle, ' +
-    'migrate or delete; the last two back up first. Costs in Help.',
+  'manage.hint': 'The whole library is here, including what the sidebar cannot reach. Tick rows to archive, retitle, migrate or delete; see Help.',
   'manage.archive.unavailable':
     'This host has no workspaceRegistry service (archiving is its capability, Web profiles only), so the archive buttons are disabled; deleting still works.',
   'manage.archive.action': 'Archive selected',
@@ -700,7 +695,7 @@ export const en: LocaleDictOf<typeof NS> = {
   'manage.retitle.skip.other': 'Skipped {count} (reason unknown).',
   'manage.transcript.open': 'Content',
   'manage.transcript.openTip':
-    'Read the complete content of this session: the log parsed event by event — user messages, model replies, reasoning, tool calls and their results. Sessions the sidebar cannot reach (blank, orphaned, archived, imported) work here too.',
+    'Read the complete content of this session: the log parsed event by event — user messages, model replies, reasoning, tool calls and results. Sessions the sidebar cannot reach (blank, archived, imported) work here too.',
   'manage.transcript.title': 'Session content',
   'manage.transcript.loading': 'Loading the log…',
   'manage.transcript.loadingMore': 'Loading…',
@@ -741,8 +736,7 @@ export const en: LocaleDictOf<typeof NS> = {
   'manage.delete.running': 'Deleting…',
   'manage.delete.progress.note': 'Delete backs up first and only then removes; if it stops, restore that backup from the Backups tab.',
   'manage.delete.backupTo': 'Backup lands in: {dir} (restore it from the Backups tab)',
-  'manage.delete.hint':
-    'Deleting backs the whole session directory up into this plugin’s backup root first, then removes it; a session still living in host memory cannot be deleted — see Help.',
+  'manage.delete.hint': 'Deleting backs the session directory up into this plugin’s backup root first; a live session cannot be deleted — see Help.',
   'manage.delete.via': 'with parent',
   'manage.delete.viaTip':
     'This is a subagent session: it belongs to “{name}”, one of the sessions you ticked (possibly a few levels up), so it is deleted with it — left behind, it would have no way back in.',
@@ -775,10 +769,10 @@ export const en: LocaleDictOf<typeof NS> = {
   'help.categories.visibleTip': 'A session the sidebar shows.',
   'help.categories.note': 'One session can fall into several categories, so a row can carry several tags.',
   'help.tabs.title': 'What each page does',
-  'help.tabs.manage': 'The whole session library is here, including sessions the sidebar cannot reach. The list groups by directory; a group header is the workspace or repository name, and hovering it shows the local path. Ticked rows can be archived, retitled, migrated or deleted: regenerating names asks the host’s names service to redo them from the whole conversation (each one replays its log and runs one model call), and sessions you renamed by hand or subagent sessions are skipped. Migration moves the ticked sessions into one target directory: it rewrites the working directory recorded in each session, moves its log directory, and updates the workspace registry; the source is whatever you tick — the rows may sit in different directories, each read from its own — and they take their subagents along. The rows the sidebar hides cannot move (the host refuses a hidden session by name), so deal with them in the list first. The target directory is picked once in the dialog; every session lands in it.',
+  'help.tabs.manage': 'The whole session library is here, including sessions the sidebar cannot reach, grouped by directory. Ticked rows can be archived, retitled, migrated or deleted: names are redone from the whole conversation, and sessions you renamed by hand or subagent sessions are skipped. Migration moves the ticked sessions into one target directory — it rewrites the recorded working directory, moves the log directory and updates the workspace registry. The rows the sidebar hides cannot move, so deal with them in the list first.',
   'help.tabs.transfer': 'Export sessions into a .dshsess bundle, or import a bundle’s sessions into a workspace.',
   'help.tabs.sync': 'Sync sessions between machines over WebDAV: it first shows a read-only plan and only pulls and pushes once you confirm. The remote address, machine names and path mappings are edited on this page, with no restart.',
-  'help.tabs.backup': 'The undo surface shared by the operations that write: every migration, every delete and every overwrite of this machine’s copy leaves a byte-level backup first. Roll back brings back what a migration moved (the workspace registry included); Restore only moves the backed-up copy back and leaves the registry alone.',
+  'help.tabs.backup': 'The undo surface shared by the operations that write: every migration, delete and overwrite of this machine’s copy leaves a byte-level backup first. Roll back brings back what a migration moved (the workspace registry included); Restore only moves the backed-up copy back and leaves the registry alone.',
   'help.where.title': 'Where the data comes from',
   'help.where.library': 'Session library',
   'help.where.libraryText': 'Each directory is one session; names, sizes and visibility are read from the logs here.',
@@ -788,15 +782,15 @@ export const en: LocaleDictOf<typeof NS> = {
   'help.faq.unownedQ': 'Which sessions count as Ungrouped?',
   'help.faq.unownedA': 'Exactly the sidebar’s Ungrouped group: sessions no workspace holds that the sidebar still shows. A session lands there once its workspace is deleted, or its directory is renamed or deleted. Subagents sit under their parent, and blank or archived sessions are hidden by default, so they are not part of it.',
   'help.faq.transcriptQ': 'Is the “Content” view complete? What about truncated text?',
-  'help.faq.transcriptA': 'It is complete: every event in the log appears on the timeline (user messages, model replies, reasoning, tool calls and their results, system messages, plus control events such as compaction, permissions, approvals and retries — including how the title was decided). So that one screen does not pull in hundreds of megabytes, each text block has a cap (4000 characters by default); a cut block says “N characters were cut” and offers a “read it in full” button that fetches just that block by its event position. It reads 80 events at a time, with “Load more” to continue. A line that cannot be parsed does not fail the whole log: the view reports how many and on which lines and shows everything else. This page parses the log inside the plugin rather than through the host, so sessions the sidebar cannot reach can be read here too.',
+  'help.faq.transcriptA': 'It is complete: every event in the log appears on the timeline, including how the title was decided. Each text block has a cap (4000 characters by default); a cut block says so and offers a “read it in full” button. It reads 80 events at a time, with “Load more” to continue. A line that cannot be parsed does not fail the whole log — the view reports how many and on which lines. This page parses the log inside the plugin, so sessions the sidebar cannot reach can be read here too.',
   'help.faq.retitleQ': 'Why did “Regenerate names” skip some sessions?',
-  'help.faq.retitleA': 'Three cases are skipped, and none of them is a failure: sessions you renamed by hand (regenerating would overwrite your name, so they are left alone), subagent sessions (their names are invisible in the sidebar, so nobody would see a new one), and sessions with no user message or no main-model request at all (there is nothing to name, or no route to name them with). The action reports each of those groups when it finishes. Old sessions sitting on the “first five words / 40 bytes” fallback names, plus a names provider that only revises when a new user message arrives — together those are why this button exists.',
+  'help.faq.retitleA': 'Three cases are skipped, and none of them is a failure: sessions you renamed by hand (regenerating would overwrite your name), subagent sessions (their names are invisible in the sidebar), and sessions with no user message or no main-model request at all (there is nothing to name, or no route to name them with). The action reports each of those groups when it finishes.',
   'help.faq.deletedQ': 'I deleted it — why is it still in the sidebar?',
   'help.faq.deletedA': 'The sidebar drops those rows once the host rescans the session library.',
   'help.faq.restartQ': 'When does a migration ask me to restart DSH?',
-  'help.faq.restartA': 'Normally never: once the registry changes, the plugin hands the work to the host — one fresh look at the disk, then reuse or create the target workspace, attach the sessions, detach them from the sources and delete an emptied workspace. The host persists those itself and notifies the UI, so the sidebar shows the new grouping right away with every session id unchanged. It only asks for a restart when the host lacks those actions — a tools-only front end, or an older version; until then, do not change any workspace: creating, renaming or archiving one would clobber this change. One more case: a session the host still holds in memory (the rows tagged `active`) cannot move — the plan leaves it out and tells you, it stays in its directory with its ownership unchanged, so migrate again after a restart; and if the host refuses halfway, the plugin writes the registry it computed back to the file, so the restart shows this run’s result.',
+  'help.faq.restartA': 'Normally never: once the registry changes, the plugin hands the work to the host, so the sidebar shows the new grouping right away with every session id unchanged. It only asks for a restart when the host lacks those actions (a tools-only front end, or an older version); until then, do not change any workspace. A session the host still holds in memory (tagged `active`) cannot move — migrate it again after a restart.',
   'help.faq.liveQ': 'How do I close a session tagged “active”?',
-  'help.faq.liveA': 'The Web side has no “close this session” action: once a session has been used (opened, or run a turn), the host keeps it in memory as a live instance and never lets go on its own, so the plugin can only wait. What makes it let go is restarting DSH (the process you started it with) — stop a running turn first; after the restart, delete or migrate it without opening it. The session you are using right now (the sidebar reopens it) is “active” again, which is expected. Scripted ACP clients have a separate session/close to shut one session down.',
+  'help.faq.liveA': 'The Web side has no “close this session” action: once a session has been used (opened, or run a turn), the host keeps it in memory as a live instance and never lets go on its own. What makes it let go is restarting DSH — stop a running turn first; after the restart, delete or migrate it without opening it. The session you are using right now is “active” again, which is expected. Scripted ACP clients have a separate session/close to shut one session down.',
   'help.faq.backupQ': 'Where do backups go, and how do Roll back and Restore differ?',
   'help.faq.backupA': 'Every migration, import and delete backs up first; the list is on the Backups tab. Roll back restores the session directories, the logs and the workspace registry together; Restore only moves the deleted session directories back — deleting never touched the registry.',
   'help.faq.familyQ': 'What happens to a session’s subagents when I delete or migrate it?',
@@ -806,16 +800,16 @@ export const en: LocaleDictOf<typeof NS> = {
   'help.faq.forkQ': 'The same session was continued on two machines. Now what?',
   'help.faq.forkA': 'The newer copy wins: sync matches sessions by id, and when both sides wrote it compares the last-activity time. If the remote is later, this machine’s copy is backed up and then replaced by the remote one (the old copy can be restored from the backup); if this machine is later, its own cell is re-pushed. To avoid it altogether, agree that one session is continued on one machine only.',
   'help.faq.passwordQ': 'Where is the sync password kept?',
-  'help.faq.passwordA': 'Not in the configuration file: Save stores it in the host credential store ($DSH_HOME/.credentials.yaml), and the configuration keeps only a reference name. The field is write-only: blank keeps the stored one, typing again replaces it, and removing it means deleting that entry in the credential file.',
+  'help.faq.passwordA': 'Not in the configuration file: Save stores it in the host credential store ($DSH_HOME/.credentials.yaml), and the configuration keeps only a reference name. The field is write-only: blank keeps the stored one, and removing it means deleting that entry in the credential file.',
 
   // ---- WebDAV sync ----
   'sync.title': 'WebDAV sync',
   'sync.form.title': 'Sync settings',
   'sync.where': 'Remote {url}',
   'sync.hint':
-    'Syncs through the mapping in the plugin configuration: pulls what other machines pushed, pushes what only this machine has. The remote holds one .dshsess bundle per session, and a pull rewrites the cwd to this machine’s mapped directory. When both sides hold the same session, contents and the last-activity time decide who is newer, and a newer remote backs up the local copy before replacing it. {mappings} mapping(s).',
+    'Syncs through the mapping in the plugin configuration: pulls what other machines pushed, pushes what only this machine has. When both sides hold the same session, contents and the last-activity time decide who is newer, and a newer remote backs up the local copy before replacing it. {mappings} mapping(s).',
   'sync.offHint':
-    'Sync is not configured: fill in the remote URL (the WebDAV collection) and the path mapping (one "remote working directory = local directory" per line) in the form below and save, and Sync appears.',
+    'Sync is not configured: fill in the remote URL (the WebDAV collection) and the path mapping (one "remote working directory = local directory" per line) in the form below and save.',
   'sync.action': 'Sync',
   'sync.dialogTitle': 'About to sync',
   'sync.running': 'Syncing',
@@ -876,7 +870,7 @@ export const en: LocaleDictOf<typeof NS> = {
   'sync.password.shadowed': 'The launching environment supplies this reference and always wins, so it cannot be changed here; clear that variable first.',
   'sync.password.unavailable': 'This host exposes no credential service, so the password has to come from an environment variable (or the host credential file).',
   'sync.field.mapping': 'Path mapping',
-  'sync.field.mappingHint': 'The right side is a directory on this machine. The remote side must match the other machine’s recorded working directory character for character, or the session is skipped. A mapping you set wins over the repository matched automatically; leaving it empty is fine — when the same repository exists on this machine, the session lands in your clone.',
+  'sync.field.mappingHint': 'The right side is a directory on this machine. The remote side must match the other machine’s recorded working directory character for character, or the session is skipped. A mapping you set wins over the repository matched automatically.',
   'sync.field.mappingEmpty': 'No mapping yet: the remote records that machine’s own working directory, and without a mapping those sessions are skipped.',
   'sync.map.add': 'Add a row',
   'sync.map.remove': 'Remove',
@@ -911,10 +905,10 @@ export const en: LocaleDictOf<typeof NS> = {
   // the outcome of running one round right now).
   'sync.field.autoPush': 'Automatic push',
   'sync.field.autoPushHint':
-    'Pushes as soon as a turn finishes on this machine (ten seconds after the last session event, so a burst of events pushes once), with a fallback round on the interval below — so that number does not mean "once every N minutes". It pushes this machine’s sessions to the remote and never pulls, never touches a local session.',
+    'Pushes as soon as a turn finishes on this machine (ten seconds after the last session event), with a fallback round on the interval below. It pushes only and never pulls, and never touches a local session.',
   'sync.field.autoPushInterval': 'Automatic push fallback interval (ms)',
   'sync.field.autoPushIntervalHint':
-    '300000 (5 minutes) by default, 60000 minimum; anything below 60000 is raised to 60000. It covers what the event layer cannot reach (another machine pushed something up, or a session was deleted locally and the index needs settling): it means "push at least this often".',
+    '300000 (5 minutes) by default, 60000 minimum; anything below 60000 is raised to 60000. It covers what the event layer cannot reach: it means "push at least this often".',
   'sync.field.autoPushIntervalInvalid': 'The automatic push interval must be a positive whole number of milliseconds.',
   'sync.autoPush.enabled': 'Automatic push is on: as soon as a turn finishes, plus a fallback every {minutes} minute(s).',
   'sync.autoPush.now': 'Push now',

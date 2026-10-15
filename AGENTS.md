@@ -90,14 +90,20 @@ pnpm typecheck && pnpm build && pnpm test && pnpm check:package
 
 - 浏览器半侧只 `require` **平台基线模块**：`react`、`react/jsx-runtime`、官方控件库
   `@deepseek-ai/dsh-client-ui-primitives`——这三个在 `tsdown.config.ts` 的 `CLIENT_EXTERNALS` 里保持
-  外置，其余内联。控件改用官方控件库（peer 与 devDep 已接线，手写控件逐步替换）；要引非基线模块
+  外置，其余内联。**控制件一律用官方控件库**（`Button` / `Input` / `Checkbox` / `Tag` /
+  `SegmentedControl`），本页的 CSS 只写布局挂钩、不再画控件外观；要引非基线模块
   必须在 `dsh.client.external` 里点名。**只 import 类型不算**：`verbatimModuleSyntax` 下类型导入会被
   完全擦除，产物里一个 `require` 都不会多（`test/client.test.mjs` 按产物文本核这一条）。基线模块的
   API 变化由 `peerDependencies` 的版本范围拦在激活，不会静默走形；`Slot` 条目渲染抛错只会留下一个
-  空 `div`，所以渲染路径上别做会抛的事。
+  空 `div`，所以渲染路径上别做会抛的事。依据与被否决的备选方案见
+  [控制件用官方原语](.agents/notes/implemented/architecture/2026-10-15-controls-come-from-the-official-primitives.md)。
+- 官方 `Tag` **不转发 `title`**：要悬浮提示就写成 `<span className="dsm-tag" title={…}><Tag …/></span>`
+  ——提示挂外层 span，`dsm-tag` 这个布局挂钩挂在两层中的一层（有提示的挂外层、没提示的挂 `Tag`
+  自己）。每枚标签都必须带上它，否则 `flex: none` / 限宽截断 / 行高对齐那几条会**静默失效**。
 - 颜色只用宿主 `Theme` 检查面列出的 `--dsw-alias-*`（`cordis_inspect_query` → client / Theme /
   listTokens），每条声明都带中性回落值；名单外的 token 要登记进 `test/styles.test.mjs` 的例外表
-  并写明理由（现有两例：`label-primary-foreground`、`label-tertiary`）。
+  并写明理由（现有两例：`label-tertiary`、`settings-card-stroke`）。这份检查扫的是
+  `src/client/styles.ts` 的原文（注释也算），所以注释里也别写出"本页已经不用"的 token 名字。
 - 页头与页内分页**没有官方原语可用**（官方设置页自己手写 `h2` / `p` / 本地 CSS），照内建设置页的规格
   写：`h2` 16px/500 独占一行（行高 24px），隔 12px 一行 14px 说明（`label-tertiary`），整体列布局；
   页头里**不放动作**——页面级的那枚「刷新」挂在页签那一行的右端（`.dsm-tabsRow`，下划线随整行铺满）。

@@ -169,6 +169,10 @@
   客户端模块系统的契约，以及收不下就整条 bundle 不装的那道门。
 - [颜色只走检查面的 token](../.agents/notes/implemented/bug-fix/2026-09-27-token-only-colors.md)：
   写死颜色只会在一种主题下错，附带量出来的对比度。
+- [控制件用官方原语，本页只挂布局挂钩](../.agents/notes/implemented/architecture/2026-10-15-controls-come-from-the-official-primitives.md)：
+  `Button` / `Input` / `Checkbox` / `Tag` / `SegmentedControl` 的观感归官方那几份 CSS module，本页
+  CSS 只留"这一页怎么摆它"的布局挂钩；官方 `Tag` 不转发 `title`，悬浮提示挂包着它的那层 `span`，
+  `dsm-tag` 这个挂钩挂在两层中的一层，漏挂只会让布局规格静默失效。
 - [页头照内建设置页的规格](../.agents/notes/implemented/architecture/2026-09-28-page-header-matches-the-builtin-settings.md)
   与 [正文与次要文字照内建设置页的两档](../.agents/notes/implemented/architecture/2026-10-07-body-type-matches-the-builtin-settings.md)、
   [版面不跟着滚动条动](../.agents/notes/implemented/architecture/2026-09-28-layout-does-not-move-with-the-scrollbar.md)：

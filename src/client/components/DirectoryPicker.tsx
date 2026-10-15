@@ -17,6 +17,8 @@
 
 import * as React from 'react'
 
+import { Button } from '@deepseek-ai/dsh-client-ui-primitives'
+
 import { normalizePickedPath, type DirectoryApi, type DirectoryListing } from '../directory.ts'
 import type { Translate } from '../logic/locales.ts'
 
@@ -93,16 +95,16 @@ export function DirectoryPicker({
         <span className="dsm-fieldLabel">{t('dirPicker.title')}</span>
         <span className="dsm-spacer" />
         {onCandidates !== undefined && (
-          <button type="button" className="dsm-button" onClick={onCandidates}>
+          <Button variant="ghost" size="sm" onClick={onCandidates}>
             {t('dirPicker.candidates')}
-          </button>
+          </Button>
         )}
-        <button type="button" className="dsm-button" onClick={() => void open('')} disabled={busy}>
+        <Button variant="ghost" size="sm" onClick={() => void open('')} disabled={busy}>
           {t('dirPicker.home')}
-        </button>
-        <button type="button" className="dsm-button" onClick={onClose}>
+        </Button>
+        <Button variant="ghost" size="sm" onClick={onClose}>
           {t('cancel')}
-        </button>
+        </Button>
       </div>
 
       {crumbs.length > 0 && (
@@ -154,14 +156,15 @@ export function DirectoryPicker({
       )}
 
       <div className="dsm-controls">
-        <button
-          type="button"
-          className="dsm-button dsm-primary"
+        {/* 落地这一下走官方 primary：它写的是值，是这张面板的主动作。 */}
+        <Button
+          variant="primary"
+          size="sm"
           onClick={() => onPick(normalizePickedPath(listing?.path ?? ''))}
           disabled={busy || listing === null}
         >
           {t('dirPicker.pick')}
-        </button>
+        </Button>
         <span className="dsm-hint">{t('dirPicker.hint')}</span>
       </div>
     </div>

@@ -26,7 +26,7 @@
 
 import * as React from 'react'
 
-import { SettingsSecretField, Switch } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, Input, SettingsSecretField, Switch } from '@deepseek-ai/dsh-client-ui-primitives'
 
 import { testSync, type SyncTestResponse } from '../api.ts'
 import { getCredentialsApi, type CredentialInfo } from '../credentials.ts'
@@ -75,7 +75,7 @@ function Field({
   return (
     <label className="dsm-field">
       <span className="dsm-fieldLabel">{label}</span>
-      <input
+      <Input
         className="dsm-input"
         type="text"
         value={value}
@@ -298,9 +298,10 @@ export function SyncConfigForm({
        */}
       <div className="dsm-syncTools">
         <div className="dsm-controls">
-          <button type="button" className="dsm-button" onClick={testConnection} disabled={!canTest}>
+          {/* 「测试连接」只读一次远端（PROPFIND），不动任何数据：官方 ghost。 */}
+          <Button variant="ghost" size="sm" onClick={testConnection} disabled={!canTest}>
             {testing ? t('sync.test.running') : t('sync.test.action')}
-          </button>
+          </Button>
           <span className="dsm-hint">{dirty ? t('sync.test.dirty') : t('sync.test.hint')}</span>
         </div>
         {/*
@@ -363,7 +364,7 @@ export function SyncConfigForm({
           <div className="dsm-mapRows">
             {view.mapping.map((row, index) => (
               <div className="dsm-mapRow" key={index}>
-                <input
+                <Input
                   className="dsm-input"
                   type="text"
                   list={remoteCwds.length > 0 ? 'dsm-mapRemoteCwds' : undefined}
@@ -375,7 +376,7 @@ export function SyncConfigForm({
                 <span className="dsm-mapArrow" aria-hidden="true">
                   →
                 </span>
-                <input
+                <Input
                   className="dsm-input"
                   type="text"
                   aria-label={t('sync.map.localLabel', { line: index + 1 })}
@@ -383,9 +384,10 @@ export function SyncConfigForm({
                   value={row.to}
                   onChange={(event) => editMapping(index, { to: event.target.value })}
                 />
-                <button type="button" className="dsm-button" onClick={() => removeMapping(index)}>
+                {/* 删掉这一行映射：只改草稿，不动已保存的配置——官方 ghost。 */}
+                <Button variant="ghost" size="sm" onClick={() => removeMapping(index)}>
                   {t('sync.map.remove')}
-                </button>
+                </Button>
               </div>
             ))}
           </div>
@@ -398,9 +400,10 @@ export function SyncConfigForm({
           </datalist>
         )}
         <div className="dsm-controls">
-          <button type="button" className="dsm-button" onClick={addMapping}>
+          {/* 加一行空映射：只改草稿，不动已保存的配置——官方 ghost。 */}
+          <Button variant="ghost" size="sm" onClick={addMapping}>
             {t('sync.map.add')}
-          </button>
+          </Button>
           <span className="dsm-hint">{t('sync.field.mappingHint')}</span>
         </div>
       </div>
@@ -450,12 +453,14 @@ export function SyncConfigForm({
       )}
 
       <div className="dsm-controls">
-        <button type="button" className="dsm-button dsm-primary" onClick={save} disabled={!canSave}>
+        {/* 表单的主动作：写的是配置，走官方 primary（原先手写的 .dsm-button.dsm-primary）。 */}
+        <Button variant="primary" size="sm" onClick={save} disabled={!canSave}>
           {saving ? t('sync.form.saving') : t('save')}
-        </button>
-        <button type="button" className="dsm-button" onClick={discard} disabled={!dirty}>
+        </Button>
+        {/* 丢掉草稿、退回已保存的那份：不动数据，官方 ghost。 */}
+        <Button variant="ghost" size="sm" onClick={discard} disabled={!dirty}>
           {t('sync.form.discard')}
-        </button>
+        </Button>
         {!snapshot.writable && <span className="dsm-warn">{t('sync.form.readOnly')}</span>}
         {problems.map((problem) => (
           <span key={problem.code} className="dsm-warn">

@@ -1,4 +1,4 @@
-// test/styles.test.mjs — 样式表的五条硬约束（读源码，不看产物）。
+// test/styles.test.mjs — 样式表的硬约束（读源码，不看产物）。
 //
 // 为什么值得为它单开一个文件：颜色写错**只会在一种主题下错**，而开发者通常只盯着自己那一种。
 // 真实事故（用户截图报的）：`.dsm-primary` 写死 `color: #fff`，浅色主题下白字配深色填充没毛病，
@@ -19,6 +19,9 @@
 //   5) `state-*` 色不许裸当文字色。真实事故（用 agent-browser 打开真实设置页量出来的）：
 //      `.dsm-tagSkip` 拿 `state-idle-primary` 当字色，白底 1.48:1、深色 2.1:1；`.dsm-warn`
 //      拿 `state-warn-primary` 当字色，白底 2.15:1。state 色是指示色，"看不见"是它的正常值域。
+//   6) 卡片与控件的几何照官方量到的规格：卡片圆角 20px + `settings-card-stroke` 描边（内建「插件」页
+//      那张 `.card` 就是 20px / `rgba(0, 0, 0, 0.16)`）。手写控件换官方原语之后，控件自己的几何与配色
+//      不再写在这里——`.dsm-tag` 因此只剩布局挂钩（见那条测试）。
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -76,21 +79,30 @@ const THEME_TOKENS = new Set([
 ])
 
 /**
- * 登记在案的例外：检查面没给、但确实需要的那些，且**必须带回落链**。
+ * 登记在案的例外：检查面没给、但本页声明**确实在用**的那些，且**必须带回落链**。
  *
- * - `--dsw-alias-label-primary-foreground` 是宿主填充按钮自己的前景色（浅色主题 #fff、深色主题
- *   #0f1115），也就是"填充按钮上该用什么字色"的唯一正解；检查面没有它，于是 `.dsm-primary`
- *   写成 `var(--dsw-alias-label-primary-foreground, var(--dsw-alias-bg-layer-1, #fff))`：
- *   拿不到就退到表面色——`brand-primary` 在明暗两套里都是表面的反色，拿表面色当字色读得出来。
+ * 名单里只放本页 CSS 自己引用的 token——这份检查扫的是 `src/client/styles.ts`（注释也算），官方原语
+ * CSS module 里用到的 token 不经过这里，别把"官方在用它"当成"本页要登记它"。
+ *
  * - `--dsw-alias-label-tertiary`（浅色主题 #81858c）是**内建设置页说明行的本色**。在真实设置页里
  *   量过：「内置插件」那一页的 `p` 说明行计算色正是 rgb(129,133,140)，也就是这个 token 在本页作用域
  *   里的解析值；字号/布局都对上了，颜色差一档就会看出"这页和别的页不是一套"。检查面只列到
  *   `label-secondary`（#61666b，比它深一档），所以要登记。回落退到 `label-secondary`：仍是次要
  *   文字色，只是稍深一点，缺 token 的老版本上不会读不出来。
+ * - `--dsw-alias-settings-card-stroke` 是官方给「设置卡片描边」这件事的**专名** token：内建「插件」页
+ *   那张 `.card` 的 `borderTopColor` 在真实 dev GUI 里量到浅色 `rgba(0, 0, 0, 0.16)`，而这个 token
+ *   在同一处解析出来**逐字相同**（浅色 `#00000029` = `rgba(0, 0, 0, 0.16)`、深色 `#fff3` =
+ *   `rgba(255, 255, 255, 0.2)`，官方那张卡在深色下也是它）。检查面只列到 `border-l1`（浅色只到
+ *   `rgba(0, 0, 0, 0.04)`），拿它当卡片描边会让本页的卡片比官方淡一大截——同一页里并排就是"这张卡
+ *   没画框"。回落写 `rgba(0, 0, 0, 0.16)`：就是量到的那个浅色值，缺 token 时至少还是个看得见的框。
+ *
+ * 两条曾经的例外已经删掉：填充按钮的前景色那枚（手写 `.dsm-button.dsm-primary` 连同回落链一起删了，
+ * 现在由官方 `Button` 自己用），以及官方 Tag / Input / SegmentedControl 三份 CSS module 用的那三枚
+ * （本页不再手写那几处几何，本页 CSS 里一次都不出现它们）。
  */
 const REGISTERED_EXCEPTIONS = new Set([
-  '--dsw-alias-label-primary-foreground',
   '--dsw-alias-label-tertiary',
+  '--dsw-alias-settings-card-stroke',
 ])
 
 /** 把 `var(...)` 整段挖掉，剩下的才是"没走 token"的字面量。嵌套的 var 多跑几轮就挖干净了。 */
@@ -174,6 +186,24 @@ test('标签不许折行：它是小块，不是一句话', () => {
   const body = ruleBody('.dsm-tag')
   assert.notEqual(body, null, '找不到 .dsm-tag 规则')
   assert.match(body, /white-space:\s*nowrap/, '窄列里标签会竖成两行（「跳/过」），必须 nowrap')
+})
+
+test('.dsm-tag 只剩布局挂钩：几何与配色都归官方 Tag 原语', () => {
+  // 为什么钉它：标签的圆角/内边距/字号/配色是"标签长什么样"，官方 `Tag.module.css` 已经定死了
+  // （999px 胶囊、padding 1px 8px、11px/17px、字重 500，tone 决定配色）。本页再写一遍就会与官方那份
+  // 打架——两边都是单类选择器，谁生效取决于样式表注入顺序，而官方那份是宿主注入的、顺序不由本插件
+  // 决定。本页只该挂"这一页怎么摆它"的那几条（nowrap、限宽、截断、组头行高对齐）。
+  //
+  // 反事实：把 `border-radius: 6px; padding: 0 6px; font-size: 12px` 写回 .dsm-tag，这条立刻变红。
+  const body = ruleBody('.dsm-tag') ?? ''
+  for (const property of ['border-radius', 'padding', 'font-size', 'background', 'border']) {
+    assert.doesNotMatch(
+      body,
+      new RegExp(`(?:^|;|\\{)\\s*${property}\\s*:`, 'm'),
+      `.dsm-tag 不该再写 ${property}：那是官方 Tag 的几何/配色，写在两处会随注入顺序打架`,
+    )
+  }
+  assert.doesNotMatch(body, /--dsw-alias-/, '.dsm-tag 不该再引用任何配色 token')
 })
 
 test('组头里的标签与名字一样高：行高压到 18px（12px 的字 + 2px 边框 = 名字那一行 20px）', () => {
@@ -299,6 +329,32 @@ test('页头照内建设置页的规格：16px/500 的 h2 标题 + 隔 12px 一�
   assert.notEqual(intro, null, '找不到 .dsm-intro 规则')
   assert.match(intro, /font-size:\s*14px/, '说明行 14px（内建页的说明行就是这一档）')
   assert.match(intro, /--dsw-alias-label-tertiary/, '说明行用 label-tertiary，与内建页的说明行同色')
+})
+
+test('卡片外壳照官方那张 .card：圆角 20px + 1px settings-card-stroke 描边', () => {
+  // 硬数据来自两处，都是量出来的、不是推的：
+  //   - 官方 `qSYn7G_card`（内建「插件」页那张 `.card`）在真实 dev GUI 里是
+  //     border-radius **20px**、border **1px rgba(0, 0, 0, 0.16)**、背景 `rgb(255,255,255)`；
+  //   - `--dsw-alias-settings-card-stroke` 在本页作用域解析出来浅色正是 `rgba(0, 0, 0, 0.16)`、
+  //     深色 `rgba(255, 255, 255, 0.2)`，与官方那张卡的 `borderTopColor` 逐字相同。
+  //
+  // 改之前本页是 12px / `border-l1`（浅色只到 `rgba(0, 0, 0, 0.04)`，实测 computed 就是它）——
+  // 圆角小一档、描边淡到几乎看不见，同一页里并排看就是"这张卡没画框"。
+  //
+  // 反事实：把 border-radius 改回 12px、或把描边改回 border-l1，这条立刻变红。
+  const card = ruleBody('.dsm-card')
+  assert.notEqual(card, null, '找不到 .dsm-card 规则')
+  assert.match(card, /border-radius:\s*20px/, '卡片圆角要跟官方那张 .card 同为 20px')
+  assert.match(
+    card,
+    /border:\s*1px solid var\(--dsw-alias-settings-card-stroke,/,
+    '卡片描边走官方那枚专名 token（浅色实测 rgba(0, 0, 0, 0.16)，与官方 .card 逐字相同）',
+  )
+  assert.doesNotMatch(
+    card,
+    /border:\s*1px solid var\(--dsw-alias-border-l1/,
+    'border-l1 在浅色主题只到 rgba(0, 0, 0, 0.04)，当卡片描边比官方淡一大截',
+  )
 })
 
 test('正文与次要文字是内建那两档：正文 14px/20px、说明句 12px/18px', () => {

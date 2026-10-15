@@ -21,6 +21,8 @@
 
 import * as React from 'react'
 
+import { Button, Checkbox, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
+
 import { ChevronIcon, SessionIcon, WorkspaceIcon } from './icons.tsx'
 import { lockedParentOf, type NestableSession } from '../logic/groups.ts'
 import { projectLabel, sessionLabel } from '../logic/planRows.ts'
@@ -205,11 +207,16 @@ export function SessionRow({
   const tags = sessionTags(session, { ungrouped: ungroupedTag })
   return (
     <label className={`${ROW_CLASS[variant]}${nestClass(depth)}`}>
-      <input
-        type="checkbox"
+      {/*
+        勾选框走官方 `Checkbox`：`label` 给空串——这一行自己有标题（右侧那一格），可见文案再由
+        Checkbox 画一遍就是重复；无障碍名字因此靠外面的 `<label className="dsm-row...">` 兜底
+        （整行仍是可点的那个 label）。`title` 照旧传锁定原因。
+      */}
+      <Checkbox
         checked={checked}
         disabled={locked !== undefined}
-        title={locked?.tip}
+        label=""
+        {...(locked === undefined ? {} : { title: locked.tip })}
         onChange={onToggle}
       />
       <SessionIcon />
@@ -218,14 +225,21 @@ export function SessionRow({
         <span className={label.kind === 'title' ? 'dsm-rowTitle' : 'dsm-rowId'} title={label.tip}>
           {label.text}
         </span>
+        {/*
+          分类标记（子智能体 / 空白 / 已归档 / 未分组）：中性事实，无健康度含义——官方 Tag 的 neutral。
+          官方 `Tag` 不收 `title`（只有 tone / className / children），悬浮提示由外面这一层 span 给。
+          `dsm-tag` 挂在**包着它的那层 span** 上：styles.ts 里那几条是"这一页怎么摆它"的布局挂钩
+          （`flex: none` 不许被压扁、窄列里 nowrap、计划表里限宽截断），`>` 选中的就是这一层；
+          官方 Tag 自己的几何与配色不归本页管，别在它上面再写一遍。
+        */}
         {tags.map((tag) => (
-          <span key={tag.key} className="dsm-tag dsm-tagIdle" title={t(tag.tip)}>
-            {t(tag.key)}
+          <span key={tag.key} className="dsm-tag" title={t(tag.tip)}>
+            <Tag tone="neutral">{t(tag.key)}</Tag>
           </span>
         ))}
         {note !== undefined && (
-          <span className="dsm-tag dsm-tagIdle" title={note.tip}>
-            {note.text}
+          <span className="dsm-tag" title={note.tip}>
+            <Tag tone="neutral">{note.text}</Tag>
           </span>
         )}
       </span>
@@ -294,8 +308,8 @@ export function SessionStaticRow({
           {label.text}
         </span>
         {note !== undefined && (
-          <span className="dsm-tag dsm-tagIdle" title={note.tip}>
-            {note.text}
+          <span className="dsm-tag" title={note.tip}>
+            <Tag tone="neutral">{note.text}</Tag>
           </span>
         )}
       </span>
@@ -312,6 +326,11 @@ export function SessionStaticRow({
  *
  * `indeterminate` 不是能写进 JSX 的属性（那是 DOM 节点上的状态），只能在节点上赋值——少了这一步，
  * 组里勾了一部分时选框画成"空"，用户会以为自己的操作没生效。
+ *
+ * **这里用手写 `<input>` 而不是官方 `Checkbox`**（本页其余勾选框都已换）：官方原语的签名只有
+ * `checked / onChange / label / disabled / title / className`，既不收 `ref`、也没有
+ * `indeterminate`，内部的 input 节点从外面够不着——三态画不出来。硬换的代价是"勾了一部分"这一态
+ * 在界面上消失（组头看起来是全没勾），比样式不一致严重得多，所以这一处保留手写。
  */
 export function GroupCheckbox({
   checked,
@@ -495,13 +514,16 @@ export function SessionGroupHead({
           {label.name}
         </span>
         {/* 有项目身份的目录挂一枚主机名标签：整条身份太长（会被截断），而"这是认得出身份的仓库"值得
-            扫一眼就看见——标签的悬浮提示里给全整条身份。 */}
+            扫一眼就看见——标签的悬浮提示里给全整条身份。`dsm-tag` 挂在包着它的那层 span 上（组头里那条
+            `flex: none` + 行高对齐选中它）。 */}
         {label.host !== undefined && (
-          <span className="dsm-tag dsm-tagIdle" title={repo}>
-            {label.host}
+          <span className="dsm-tag" title={repo}>
+            <Tag tone="neutral">{label.host}</Tag>
           </span>
         )}
-        {title === undefined && path !== '' && <span className="dsm-tag dsm-tagIdle">{t('list.unregisteredDir')}</span>}
+        {title === undefined && path !== '' && (
+          <Tag className="dsm-tag" tone="neutral">{t('list.unregisteredDir')}</Tag>
+        )}
         <span className="dsm-groupCounts">
           <span className="dsm-hint">{t('list.sessionsInDir', { count })}</span>
           <span className="dsm-hint">{t('list.selected', { count: picked })}</span>
@@ -580,12 +602,13 @@ export function SessionPickTools({
 }): React.ReactElement {
   return (
     <>
-      <button type="button" className="dsm-button" onClick={onSelectAll} disabled={selectableCount === 0}>
+      {/* 这一对只动勾选集、不写盘：官方 ghost。禁用态由官方原语的 `disabled` 透传。 */}
+      <Button variant="ghost" size="sm" onClick={onSelectAll} disabled={selectableCount === 0}>
         {t('list.selectAll')}
-      </button>
-      <button type="button" className="dsm-button" onClick={onClear} disabled={pickedCount === 0}>
+      </Button>
+      <Button variant="ghost" size="sm" onClick={onClear} disabled={pickedCount === 0}>
         {t('list.clear')}
-      </button>
+      </Button>
     </>
   )
 }
@@ -595,12 +618,12 @@ export function SessionGroupTools({ collapse, t }: { collapse: GroupCollapse; t:
   return (
     <div className="dsm-groupTools">
       <span className="dsm-hint">{t('list.groupedByDir')}</span>
-      <button type="button" className="dsm-button" disabled={collapse.allCollapsed} onClick={collapse.collapseAll}>
+      <Button variant="ghost" size="sm" disabled={collapse.allCollapsed} onClick={collapse.collapseAll}>
         {t('list.collapseAll')}
-      </button>
-      <button type="button" className="dsm-button" disabled={!collapse.anyCollapsed} onClick={collapse.expandAll}>
+      </Button>
+      <Button variant="ghost" size="sm" disabled={!collapse.anyCollapsed} onClick={collapse.expandAll}>
         {t('list.expandAll')}
-      </button>
+      </Button>
     </div>
   )
 }

@@ -26,6 +26,8 @@
 
 import * as React from 'react'
 
+import { Button, Input } from '@deepseek-ai/dsh-client-ui-primitives'
+
 import { normalizePickedPath, type DirectoryApi } from '../directory.ts'
 import type { Translate } from '../logic/locales.ts'
 import { pathLabel, type PathRow } from '../logic/planRows.ts'
@@ -188,12 +190,13 @@ export function DirectoryField<K extends string>({
           <span className="dsm-pathValueText">{text}</span>
           <ChevronIcon />
         </button>
-        <button type="button" className="dsm-button" aria-expanded={manualOpen} onClick={() => controls.toggleManual(field)}>
+        {/* 展开 / 收起手输框：不动值，走官方 ghost。 */}
+        <Button variant="ghost" size="sm" aria-expanded={manualOpen} onClick={() => controls.toggleManual(field)}>
           {manualOpen ? t('pathField.collapse') : t('pathField.type')}
-        </button>
+        </Button>
       </div>
       {manualOpen && (
-        <input
+        <Input
           className="dsm-input"
           type="text"
           aria-label={label}
