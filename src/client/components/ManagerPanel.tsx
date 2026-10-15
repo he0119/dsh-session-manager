@@ -22,6 +22,8 @@
 
 import * as React from 'react'
 
+import { Button, SegmentedControl } from '@deepseek-ai/dsh-client-ui-primitives'
+
 import { fetchMeta, fetchState, type MetaResponse, type ProgressEvent, type StateResponse } from '../api.ts'
 import { PLUGIN_COMMIT, PLUGIN_DIRTY, PLUGIN_VERSION } from '../build.ts'
 import type { DirectoryApi } from '../directory.ts'
@@ -151,9 +153,10 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
         <p className="dsm-banner dsm-error">
           <span>{error}</span>
           <span className="dsm-spacer" />
-          <button type="button" className="dsm-button" onClick={() => setError(null)}>
+          {/* 关掉一条横幅：不动数据，走官方 ghost（`.dsm-button` 那套手写填充已由官方原语接管）。 */}
+          <Button variant="ghost" size="sm" onClick={() => setError(null)}>
             {t('error.dismiss')}
-          </button>
+          </Button>
         </p>
       )}
 
@@ -167,53 +170,25 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
         「刷新」挂在这一行的右端，不在页头里（见下面 dsm-tabsRow 的说明）。
       */}
       <div className="dsm-tabsRow">
-        <div className="dsm-tabs" role="tablist">
-          <button
-            type="button"
-            role="tab"
-            className="dsm-tab"
-            aria-selected={panel === 'manage'}
-            onClick={() => setPanel('manage')}
-          >
-            {t('page.tab.manage')}
-          </button>
-          <button
-            type="button"
-            role="tab"
-            className="dsm-tab"
-            aria-selected={panel === 'transfer'}
-            onClick={() => setPanel('transfer')}
-          >
-            {t('page.tab.transfer')}
-          </button>
-          <button
-            type="button"
-            role="tab"
-            className="dsm-tab"
-            aria-selected={panel === 'sync'}
-            onClick={() => setPanel('sync')}
-          >
-            {t('page.tab.sync')}
-          </button>
-          <button
-            type="button"
-            role="tab"
-            className="dsm-tab"
-            aria-selected={panel === 'backup'}
-            onClick={() => setPanel('backup')}
-          >
-            {t('page.tab.backup')}
-          </button>
-          <button
-            type="button"
-            role="tab"
-            className="dsm-tab"
-            aria-selected={panel === 'help'}
-            onClick={() => setPanel('help')}
-          >
-            {t('page.tab.help')}
-          </button>
-        </div>
+        {/*
+          页签走官方 `SegmentedControl`：手写那排 `role="tab"` 的 `<button>` 得自己接
+          `aria-selected` / `tabIndex` / 方向键走查 / `aria-controls`，官方原语一并带齐（还多一层
+          滑块指示器）。`id` 是前缀，每段拿 `<id>-<value>` 与 `<id>-<value>-panel`，与下面分页本体
+          的 `id` 配成一对。段与段的值就是 `PanelKey`，受控在 `panel` 那个状态上。
+        */}
+        <SegmentedControl
+          id="dsm-panel"
+          value={panel}
+          label={t('page.title')}
+          onChange={setPanel}
+          options={[
+            { value: 'manage', label: t('page.tab.manage') },
+            { value: 'transfer', label: t('page.tab.transfer') },
+            { value: 'sync', label: t('page.tab.sync') },
+            { value: 'backup', label: t('page.tab.backup') },
+            { value: 'help', label: t('page.tab.help') },
+          ]}
+        />
         {/*
           「刷新」在这一行的右端，不在页头里：它重读的是**整页**的状态（`/meta` + `/state`：库在哪、
           多少个会话、多少个工作区、同步配没配），所以它不属于任何一个分页，只能留在页面这一级；
@@ -222,18 +197,29 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
           摆进去就会把标题那一行撑高、并与设置外壳自己那枚「打开配置文件」在同一个右列里上下叠着。
           排到说明行右端也不行：那一行（`会话库：… · 457 个会话 · 13 个工作区`）实测宽 497px，加上
           按钮与间距要 580px，而内容列只有 564px——它会被挤成两行。这一行右端量下来还有 142px 空着
-          （右端对齐由 `.dsm-tabsRow > .dsm-button` 的 `margin-left:auto` 做，换行后也贴着右端）。
+          （右端对齐由 `.dsm-tabsRow > .dsm-tabsAction` 的 `margin-left:auto` 做，换行后也贴着右端）。
         */}
-        <button type="button" className="dsm-button" onClick={() => void load()} disabled={busy}>
+        {/*
+          这枚按钮要一个自己的类：官方 `Button` 的类名是它 CSS module 的哈希名（认不得、也不该认），
+          所以"推到这一行右端"这条布局得挂在本页自己的类上。
+        */}
+        <Button className="dsm-tabsAction" variant="ghost" size="sm" onClick={() => void load()} disabled={busy}>
           {busy ? t('loading') : t('page.refresh')}
-        </button>
+        </Button>
       </div>
 
-      {panel === 'manage' && <ManagePanel t={t} state={state} meta={meta} reload={load} directory={directory} />}
-      {panel === 'transfer' && <TransferPanel t={t} state={state} meta={meta} reload={load} directory={directory} />}
-      {panel === 'sync' && <SyncPanel t={t} state={state} meta={meta} reload={load} />}
-      {panel === 'backup' && <BackupPanel t={t} reload={load} />}
-      {panel === 'help' && <HelpPanel t={t} state={state} meta={meta} reload={load} />}
+      {/*
+        分页本体外面这一层带上 `id`，与上面 `SegmentedControl` 给每段写的 `aria-controls`
+        （`<id>-<value>-panel`）接上：官方原语按这个约定生成引用，不接上就是一个指向空气的
+        `aria-controls`。`role="tabpanel"` 也在这一层。
+      */}
+      <div id={`dsm-panel-${panel}-panel`} role="tabpanel">
+        {panel === 'manage' && <ManagePanel t={t} state={state} meta={meta} reload={load} directory={directory} />}
+        {panel === 'transfer' && <TransferPanel t={t} state={state} meta={meta} reload={load} directory={directory} />}
+        {panel === 'sync' && <SyncPanel t={t} state={state} meta={meta} reload={load} />}
+        {panel === 'backup' && <BackupPanel t={t} reload={load} />}
+        {panel === 'help' && <HelpPanel t={t} state={state} meta={meta} reload={load} />}
+      </div>
 
       {/*
         版本徽标：这一页的右下角。放在页内分页**之后**而不是页头——它答的是"这一页是哪个构建"，

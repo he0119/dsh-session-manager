@@ -21,7 +21,7 @@
 
 import * as React from 'react'
 
-import { Modal } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 
 import type { Translate } from '../logic/locales.ts'
 
@@ -92,17 +92,23 @@ export function ConfirmDialog({
       contentClassName="dsm-dialogContent"
       footer={
         <>
-          <button type="button" className="dsm-button" data-modal-autofocus="" onClick={onCancel} disabled={busy}>
+          {/*
+            「取消」走官方 `outline`、「确认」走官方 `primary`，都用**缺省尺寸**——这正是官方弹窗
+            （`RiskConfirmation` 那一对）的用法：`.primary` 用的就是 `--dsw-alias-button-primary-fill`
+            与 `--dsw-alias-label-primary-foreground`，本页原先手写填充按钮拼的那条回落链不再需要；
+            缺省尺寸是 36px / 14px，也不再用 `size="sm"`（28px / 12px 在弹窗里比官方那对轻一档）。
+            `data-modal-autofocus` 是官方 `Modal` 认的初始焦点标记，留在「取消」这一枚上。
+          */}
+          <Button variant="outline" data-modal-autofocus="" onClick={onCancel} disabled={busy}>
             {t('cancel')}
-          </button>
-          <button
-            type="button"
-            className="dsm-button dsm-primary"
+          </Button>
+          <Button
+            variant="primary"
             onClick={onConfirm}
             disabled={busy || planning || error !== null || disabled}
           >
             {busy ? busyLabel : confirmLabel}
-          </button>
+          </Button>
         </>
       }
     >

@@ -36,6 +36,8 @@
 
 import * as React from 'react'
 
+import { Button, Checkbox, Input } from '@deepseek-ai/dsh-client-ui-primitives'
+
 import {
   archiveSessions,
   deleteSessions,
@@ -485,18 +487,19 @@ export function ManagePanel({ t, state, meta, reload, directory }: PanelShare): 
         <p className="dsm-banner dsm-error">
           <span>{error}</span>
           <span className="dsm-spacer" />
-          <button type="button" className="dsm-button" onClick={() => setError(null)}>
+          {/* 关掉一条横幅：不动数据，官方 ghost。 */}
+          <Button variant="ghost" size="sm" onClick={() => setError(null)}>
             {t('error.dismiss')}
-          </button>
+          </Button>
         </p>
       )}
       {notice !== null && (
         <p className="dsm-banner dsm-ok">
           <span>{notice}</span>
           <span className="dsm-spacer" />
-          <button type="button" className="dsm-button" onClick={() => setNotice(null)}>
+          <Button variant="ghost" size="sm" onClick={() => setNotice(null)}>
             {t('error.dismiss')}
-          </button>
+          </Button>
         </p>
       )}
       {failed.length > 0 && (
@@ -513,9 +516,9 @@ export function ManagePanel({ t, state, meta, reload, directory }: PanelShare): 
         <p className="dsm-banner dsm-ok">
           <span>{retitleNotes.notice}</span>
           <span className="dsm-spacer" />
-          <button type="button" className="dsm-button" onClick={() => setRetitle(null)}>
+          <Button variant="ghost" size="sm" onClick={() => setRetitle(null)}>
             {t('error.dismiss')}
-          </button>
+          </Button>
         </p>
       )}
       {/* 跳过的那几条单独说：它们不是失败，但用户得知道"我勾了 8 条，为什么只有 3 条换了名字"。 */}
@@ -605,55 +608,61 @@ export function ManagePanel({ t, state, meta, reload, directory }: PanelShare): 
         </SessionListBox>
 
         <div className="dsm-controls">
-          <button
-            type="button"
-            className="dsm-button"
+          {/*
+            归档 / 取消归档 / 重新生成名称 / 迁移：都是"对勾选的这些做一件事"，不动数据的破坏性
+            含义，走官方 ghost。最后那枚「删除」是破坏性动作，靠 spacer 顶到同一行右端（判据见
+            .agents/notes/implemented/architecture/2026-10-07-card-actions-live-in-a-footer-row.md），
+            它也只是打开确认弹窗、自己还不写盘，所以同样是 ghost。
+          */}
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={() => void doArchive(true)}
             disabled={busy !== null || picked.length === 0 || !archiveAvailable}
           >
             {busy === 'archive' ? t('manage.archive.running') : t('manage.archive.action')}
-          </button>
-          <button
-            type="button"
-            className="dsm-button"
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={() => void doArchive(false)}
             disabled={busy !== null || picked.length === 0 || !archiveAvailable}
           >
             {busy === 'unarchive' ? t('manage.archive.running') : t('manage.archive.undo')}
-          </button>
+          </Button>
           {/*
             重新生成名称与归档同属"对勾选的这些做一件事"，所以放在同一条动作行上（见 styles.ts 的
             `.dsm-controls`）；破坏性的「删除」仍在 spacer 之后那一头。
           */}
-          <button
-            type="button"
-            className="dsm-button"
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={() => void doRetitle()}
             disabled={busy !== null || picked.length === 0 || !retitleAvailable}
           >
             {busy === 'retitle' ? t('manage.retitle.running') : t('manage.retitle.action')}
-          </button>
+          </Button>
           {/*
             「迁移」也在这条动作行上：它与归档 / 改名 / 删除是同一句话——"对勾中的这些做一件事"。
             它开自己的弹窗（目标目录 + 预演 + 确认），所以这里只是一枚按钮。
           */}
-          <button
-            type="button"
-            className="dsm-button"
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={openMigrate}
             disabled={busy !== null || picked.length === 0}
           >
             {t('migrate.action')}
-          </button>
+          </Button>
           <span className="dsm-spacer" />
-          <button
-            type="button"
-            className="dsm-button"
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={openDelete}
             disabled={busy !== null || picked.length === 0}
           >
             {t('manage.delete.action')}
-          </button>
+          </Button>
         </div>
         {/* 归档 / 取消归档的进度：逐条走宿主能力，勾一整页时这一段是可感知的。 */}
         {(busy === 'archive' || busy === 'unarchive') &&
@@ -788,7 +797,7 @@ export function ManagePanel({ t, state, meta, reload, directory }: PanelShare): 
 
               <label className="dsm-field">
                 <span className="dsm-fieldLabel">{t('migrate.workspaceTitle.label')}</span>
-                <input
+                <Input
                   className="dsm-input"
                   type="text"
                   value={title}
@@ -802,18 +811,19 @@ export function ManagePanel({ t, state, meta, reload, directory }: PanelShare): 
                 所以跟着重新预演。
               */}
               <div className="dsm-options">
-                <label className="dsm-check">
-                  <input
-                    type="checkbox"
-                    checked={includeArtifacts}
-                    onChange={(event) => {
-                      const next = event.target.checked
-                      setIncludeArtifacts(next)
-                      runPreview(to, next)
-                    }}
-                  />
-                  <span>{t('migrate.includeArtifacts')}</span>
-                </label>
+                {/*
+                  这个开关直接改变计划里的条数（带上产物 vs 只带会话），所以跟着重新预演。
+                  走官方 `Checkbox`：`label` 就是原来那个 `<span>` 里的文案，勾选框与文案一起构成
+                  可见 label（原先的 `<label className="dsm-check">` 那层由官方原语自己长出来）。
+                */}
+                <Checkbox
+                  checked={includeArtifacts}
+                  label={t('migrate.includeArtifacts')}
+                  onChange={(next) => {
+                    setIncludeArtifacts(next)
+                    runPreview(to, next)
+                  }}
+                />
               </div>
 
               {waitingForTarget && <p className="dsm-hint">{t('migrate.needTarget')}</p>}

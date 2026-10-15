@@ -17,6 +17,8 @@
 
 import * as React from 'react'
 
+import { Button, Input, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
+
 import { candidateRow, filterPathRows, type PathRow } from '../logic/planRows.ts'
 import type { Translate } from '../logic/locales.ts'
 
@@ -62,16 +64,16 @@ export function CandidatePanel({
         <span className="dsm-fieldLabel">{label}</span>
         <span className="dsm-spacer" />
         {onFilesystem !== undefined && (
-          <button type="button" className="dsm-button" onClick={onFilesystem}>
+          <Button variant="ghost" size="sm" onClick={onFilesystem}>
             {t('dirPicker.filesystem')}
-          </button>
+          </Button>
         )}
-        <button type="button" className="dsm-button" onClick={onClose}>
+        <Button variant="ghost" size="sm" onClick={onClose}>
           {t('cancel')}
-        </button>
+        </Button>
       </div>
 
-      <input
+      <Input
         className="dsm-search dsm-candidateFilter"
         type="search"
         value={query}
@@ -100,7 +102,13 @@ export function CandidatePanel({
               >
                 <span className="dsm-candidateHead">
                   <span className="dsm-candidateName">{copy.name}</span>
-                  {copy.missing !== undefined && <span className="dsm-tag dsm-tagSkip">{copy.missing}</span>}
+                  {/*
+                    这个目录盘上已经没有了。它是"这条候选不可用"的说明，不是失败态横幅——走官方
+                    `Tag` 的 `quiet`（只有文字、没有底色），对应原先的 `.dsm-tagSkip`。
+                    `dsm-tag` 是给 styles.ts 那条 `flex: none` 用的布局挂钩，挂在官方 Tag 自己身上
+                    （这一处没有悬浮提示，所以没有外层 span）。
+                  */}
+                  {copy.missing !== undefined && <Tag className="dsm-tag" tone="quiet">{copy.missing}</Tag>}
                 </span>
                 {copy.meta !== undefined && <span className="dsm-hint dsm-candidateMeta">{copy.meta}</span>}
               </button>

@@ -11,7 +11,11 @@
  * 1. **一条事件一行**（与核心层一致）：`seq` 只当显示，游标用 `index`——日志里的 `seq` 会跳号（实测
  *    有 4 → 6 这种），拿它当游标会漏条。
  * 2. **思考与正文分格**：助手的 `reasoning` 折在 `<details>` 里（默认收起），正文直接摆出来——"完整"
- *    不等于"一屏塞满"，但折起来的东西一眼看得出还在那儿。
+ *    不等于"一屏塞满"，但折起来的东西一眼看得出还在那儿。**按轮次那一节也用它**：原生 `<details>`
+ *    的折叠、键盘与无障碍都是白拿的，落点又是"一屏里几十条事件"的分节，不是宿主那种紧凑流程行。
+ *    官方控件库的 `DisclosureRow` 因此**没有换上来**：它是受控的（`open` / `onToggle` 由调用方持有）、
+ *    必须给一枚 `icon`、且规格是 24px 紧凑流程行——用它得先把这些分节的状态提到组件里、再自己画
+ *    `<details>` 那套已经白拿的语义，对本页是净损失。
  * 3. **筛选只影响显示，不影响加载**：筛「工具」时不改变"已经读到第几条"，也不改变「加载更多」的语义
  *    ——换筛选条件不该让用户重新等一次网络。
  *
@@ -20,7 +24,7 @@
 
 import * as React from 'react'
 
-import { Modal } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, Modal, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
 
 import { fetchTranscript, type TranscriptFacts, type TranscriptResponse } from '../api.ts'
 // 会话行的时刻格式与这里必须是同一份（同一套 "YYYY-MM-DD HH:mm"），所以复用列表那个导出。
@@ -290,8 +294,13 @@ export function TranscriptDialog({ session, onClose, t }: TranscriptDialogProps)
       <div className="dsm-itemHead">
         <span className="dsm-itemKind">{t(KIND_KEY[item.kind])}</span>
         {item.name !== undefined && <span className="dsm-itemName">{item.name}</span>}
-        {item.isError === true && <span className="dsm-tag dsm-tagIdle dsm-warn">{t('manage.transcript.errorTag')}</span>}
-        {item.synthetic === true && <span className="dsm-tag dsm-tagIdle">{t('manage.transcript.synthetic')}</span>}
+        {/*
+          两个标记的语义不同，所以 tone 也不同：
+            - `isError`：这一条是失败/报错，走 `danger`（红），对应原先 `.dsm-tagIdle.dsm-warn`；
+            - `synthetic`：这条不是日志里真有的、是补出来的——中性事实，走 `neutral`，对应 `.dsm-tagIdle`。
+        */}
+        {item.isError === true && <Tag className="dsm-tag" tone="danger">{t('manage.transcript.errorTag')}</Tag>}
+        {item.synthetic === true && <Tag className="dsm-tag" tone="neutral">{t('manage.transcript.synthetic')}</Tag>}
         <span className="dsm-spacer" />
         {item.time !== undefined && <span className="dsm-meta">{clockOf(item.time)}</span>}
         {item.seq !== undefined && <span className="dsm-meta">seq {item.seq}</span>}
@@ -307,11 +316,12 @@ export function TranscriptDialog({ session, onClose, t }: TranscriptDialogProps)
       {item.text !== undefined && item.text !== '' && <pre className="dsm-pre">{item.text}</pre>}
       {item.note !== undefined && <div className="dsm-meta">{item.note}</div>}
       {item.truncated !== undefined && (
-        <button type="button" className="dsm-button" disabled={busy} onClick={() => void showFull(item)}>
+        /* 把那几格被截断的原文取回来：发起一次网络请求、改的是这一条的显示——普通动作，官方 ghost。 */
+        <Button variant="ghost" size="sm" disabled={busy} onClick={() => void showFull(item)}>
           {t('manage.transcript.truncated', {
             count: item.truncated.reduce((sum, cut) => sum + cut.chars, 0),
           })}
-        </button>
+        </Button>
       )}
     </div>
   )

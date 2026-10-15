@@ -34,6 +34,8 @@
 
 import * as React from 'react'
 
+import { Button, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
+
 import { download, exportSessions, importBundle, type ImportResponse, type ProgressEvent } from '../api.ts'
 import type { ImportEntry } from '../api.ts'
 import { ConfirmDialog } from './ConfirmDialog.tsx'
@@ -278,18 +280,18 @@ export function TransferPanel({ t, state, meta, reload, directory }: PanelShare)
         <p className="dsm-banner dsm-error">
           <span>{error}</span>
           <span className="dsm-spacer" />
-          <button type="button" className="dsm-button" onClick={() => setError(null)}>
+          <Button variant="ghost" size="sm" onClick={() => setError(null)}>
             {t('error.dismiss')}
-          </button>
+          </Button>
         </p>
       )}
       {notice !== null && (
         <p className="dsm-banner dsm-ok">
           <span>{notice}</span>
           <span className="dsm-spacer" />
-          <button type="button" className="dsm-button" onClick={() => setNotice(null)}>
+          <Button variant="ghost" size="sm" onClick={() => setNotice(null)}>
             {t('error.dismiss')}
-          </button>
+          </Button>
         </p>
       )}
       {(state?.problems ?? []).map((problem) => (
@@ -375,9 +377,9 @@ export function TransferPanel({ t, state, meta, reload, directory }: PanelShare)
 
         {/* 卡片级的主动作放底部动作行（见文件头那条规矩）：头部只留"全选 / 清空"这枚选行工具。 */}
         <div className="dsm-controls">
-          <button type="button" className="dsm-button dsm-primary" onClick={doExport} disabled={busy !== null || picked.length === 0}>
+          <Button variant="primary" size="sm" onClick={doExport} disabled={busy !== null || picked.length === 0}>
             {busy === 'export' ? t('transfer.export.running') : t('transfer.export.action')}
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -416,14 +418,14 @@ export function TransferPanel({ t, state, meta, reload, directory }: PanelShare)
         />
 
         <div className="dsm-controls">
-          <button
-            type="button"
-            className="dsm-button dsm-primary"
+          <Button
+            variant="primary"
+            size="sm"
             onClick={openImport}
             disabled={busy !== null || file === null}
           >
             {t('transfer.import.action')}
-          </button>
+          </Button>
         </div>
 
         {/*
@@ -481,9 +483,15 @@ export function TransferPanel({ t, state, meta, reload, directory }: PanelShare)
                       return (
                         <tr key={entry.id}>
                           <td>
-                            <span className={`dsm-tag ${entry.action === 'create' ? 'dsm-tagCreate' : 'dsm-tagSkip'}`}>
+                            {/*
+                              导入计划里的动作列：`create` 是"本机还没有、这条会新建"（`success`），
+                              `skip` 是"这条不动"（`quiet`）。两者都不带 title（原先那几个 span 也没有）。
+                              `dsm-tag` 挂在 Tag 自己身上：styles.ts 的 `.dsm-planTable .dsm-tag`
+                              那条负责"窄列里限宽截断、别顶到邻居那一列"。
+                            */}
+                            <Tag className="dsm-tag" tone={entry.action === 'create' ? 'success' : 'quiet'}>
                               {entry.action === 'create' ? t('table.create') : t('table.skip')}
-                            </span>
+                            </Tag>
                           </td>
                           <td>
                             <span className={label.kind === 'title' ? 'dsm-rowTitle' : 'dsm-rowId'} title={label.tip}>

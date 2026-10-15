@@ -38,6 +38,8 @@
 
 import * as React from 'react'
 
+import { Button, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
+
 import {
   applySync,
   fetchSyncPlan,
@@ -189,7 +191,12 @@ function PlanSectionHead({ title, count, t }: { title: string; count: number; t:
   return (
     <h3 className="dsm-planHead">
       {title}
-      <span className="dsm-tag dsm-tagIdle">{t('list.sessionsInDir', { count })}</span>
+      {/*
+        这一段的条数：中性事实（"有 N 条"），无健康度含义——官方 Tag 的 neutral，对应 .dsm-tagIdle。
+        官方 `Tag` 不收 `title`，这一处本来也没给。`dsm-tag` 挂在 Tag 自己身上：styles.ts 里
+        `.dsm-planHead .dsm-tag` 那条把"药丸里的条数不跟着段头一起加粗"这条规格指到这里。
+      */}
+      <Tag className="dsm-tag" tone="neutral">{t('list.sessionsInDir', { count })}</Tag>
     </h3>
   )
 }
@@ -227,10 +234,11 @@ function PlanGroupHead({
           <span className="dsm-groupTitle" title={label.tip}>
             {label.name}
           </span>
-          {/* 与列表那边同一枚标签：有项目身份的目录挂主机名，悬浮提示里给全整条身份。 */}
+          {/* 与列表那边同一枚标签：有项目身份的目录挂主机名，悬浮提示里给全整条身份。
+              `dsm-tag` 挂在包着它的那层 span 上（弹窗里的组头与列表里的组头同一条行高规格）。 */}
           {label.host !== undefined && (
-            <span className="dsm-tag dsm-tagIdle" title={repo}>
-              {label.host}
+            <span className="dsm-tag" title={repo}>
+              <Tag tone="neutral">{label.host}</Tag>
             </span>
           )}
           <span className="dsm-groupCounts">
@@ -288,8 +296,8 @@ function SessionCell({
           {label.text}
         </span>
         {tags.map((tag) => (
-          <span key={tag.key} className="dsm-tag dsm-tagIdle" title={t(tag.tip)}>
-            {t(tag.key)}
+          <span key={tag.key} className="dsm-tag" title={t(tag.tip)}>
+            <Tag tone="neutral">{t(tag.key)}</Tag>
           </span>
         ))}
       </span>
@@ -541,18 +549,18 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
         <p className="dsm-banner dsm-error">
           <span>{error}</span>
           <span className="dsm-spacer" />
-          <button type="button" className="dsm-button" onClick={() => setError(null)}>
+          <Button variant="ghost" size="sm" onClick={() => setError(null)}>
             {t('error.dismiss')}
-          </button>
+          </Button>
         </p>
       )}
       {notice !== null && (
         <p className="dsm-banner dsm-ok">
           <span>{notice}</span>
           <span className="dsm-spacer" />
-          <button type="button" className="dsm-button" onClick={() => setNotice(null)}>
+          <Button variant="ghost" size="sm" onClick={() => setNotice(null)}>
             {t('error.dismiss')}
-          </button>
+          </Button>
         </p>
       )}
 
@@ -612,9 +620,9 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
             而它读的是**已保存**的配置——与那张表单没有阅读顺序上的先后。 */}
         {syncInfo !== null && (
           <div className="dsm-controls">
-            <button type="button" className="dsm-button dsm-primary" onClick={openSync} disabled={busy !== null}>
+            <Button variant="primary" size="sm" onClick={openSync} disabled={busy !== null}>
               {t('sync.action')}
-            </button>
+            </Button>
             {/*
              * 「立即推送一次」是同一行里那枚**非 primary** 的动作：主动作仍然只有「同步」一枚（结构与
              * `test/client.test.mjs` 的 `primaryPlacements()` 钉着这一条）。
@@ -624,9 +632,9 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
              * `busy` 闸挡住，界面这里只把字换成「正在自动推送…」。
              */}
             {syncInfo.autoPush !== undefined && (
-              <button type="button" className="dsm-button" onClick={doAutoPush} disabled={autoPushing}>
+              <Button variant="ghost" size="sm" onClick={doAutoPush} disabled={autoPushing}>
                 {autoPushing ? t('sync.autoPush.running') : t('sync.autoPush.now')}
-              </button>
+              </Button>
             )}
           </div>
         )}
@@ -720,11 +728,19 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
                         return (
                           <tr key={entry.id}>
                             <td>
-                              <span
-                                className={`dsm-tag ${replace ? 'dsm-tagSkip' : 'dsm-tagCreate'}`}
-                                title={t(replace ? replaceCodeKey(entry.code) : 'sync.why.missingPull')}
-                              >
-                                {t(replace ? 'sync.tag.replace' : 'sync.tag.pull')}
+                              {/*
+                                覆盖本机那份 vs 从无到有拉一条：前者是"远端那版会顶掉本机这份"，
+                                后者是"本机还没有、这是新增"。用 tone 把这层语义说出来——
+                                `replace` 走 `quiet`（只有文字、没有底色，与原 `.dsm-tagSkip` 同形），
+                                `pull` 走 `success`（本机多一条，是"新增"，与原 `.dsm-tagCreate` 同形）。
+                                整句解释仍在外面那一层 span 的 title 上（官方 `Tag` 不收 `title`）。
+                                `dsm-tag` 挂在包着它的那层 span 上：styles.ts 的 `.dsm-planTable .dsm-tag`
+                                那条负责"状态列装不下时限宽截断、别顶到会话名那一列"。
+                              */}
+                              <span className="dsm-tag" title={t(replace ? replaceCodeKey(entry.code) : 'sync.why.missingPull')}>
+                                <Tag tone={replace ? 'quiet' : 'success'}>
+                                  {t(replace ? 'sync.tag.replace' : 'sync.tag.pull')}
+                                </Tag>
                               </span>
                             </td>
                             <SessionCell
@@ -763,8 +779,9 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
                         return (
                           <tr key={entry.id}>
                             <td>
-                              <span className={`dsm-tag ${tag.repush ? 'dsm-tagSkip' : 'dsm-tagCreate'}`} title={tag.title}>
-                                {tag.label}
+                              {/* 同上一张表：`repush` 是"重推一遍、远端已有"，`quiet`；否则是本机新增，`success`。 */}
+                              <span className="dsm-tag" title={tag.title}>
+                                <Tag tone={tag.repush ? 'quiet' : 'success'}>{tag.label}</Tag>
                               </span>
                             </td>
                             <SessionCell label={label} tip={label.tip} tags={typeTagsOf(sessionsById.get(entry.id))} t={t} />
@@ -801,8 +818,9 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
                         return (
                           <tr key={entry.id}>
                             <td>
-                              <span className="dsm-tag dsm-tagSkip" title={syncWhy(entry, t)}>
-                                {syncTag(entry, t)}
+                              {/* "这条不动"：中性事实，不表示健康也不表示新增——`quiet`，与原 `.dsm-tagSkip` 同形。 */}
+                              <span className="dsm-tag" title={syncWhy(entry, t)}>
+                                <Tag tone="quiet">{syncTag(entry, t)}</Tag>
                               </span>
                             </td>
                             <SessionCell label={label} tip={label.tip} tags={typeTagsOf(sessionsById.get(entry.id))} t={t} />

@@ -124,6 +124,105 @@ function fakeReact(recorded = [], firstNull = undefined, panel = undefined, arra
 }
 
 /**
+ * 这一个 `type` 是不是"要下穿一层才看得见里面"的那种组件。
+ *
+ * 官方控件库（`@deepseek-ai/dsh-client-ui-primitives`）的 `Button` / `Tag` / `Input` / `Checkbox` /
+ * `SegmentedControl` 都是 `forwardRef(...)` 或 `memo(...)` 的产物：元素的 `type` 是一个**对象**
+ * （带 `.render` / `.type`），`typeof` 不是 `'function'`。只认函数的话，整棵官方原语子树会被当成
+ * 叶子跳过——**换了官方控件反而"测不到"**：按钮、输入框、标签、页签在冒烟里全不存在，断言就会以
+ * "找不到"的形式失败。所以下穿的判断统一走这里。
+ */
+function isComponentType(type) {
+  if (typeof type === 'function') return true
+  if (type === null || typeof type !== 'object') return false
+  // forwardRef 元素：`{ $$typeof: Symbol(react.forward_ref), render }`。
+  if (typeof type.render === 'function') return true
+  // memo 元素：`{ $$typeof: Symbol(react.memo), type }`（里面可能又套一层 forwardRef）。
+  return isComponentType(type.type)
+}
+
+/**
+ * 把一层组件渲染出来（就是本文件那句"带着 props 调一次"的统一点）。
+ *
+ * 函数组件直接调；`forwardRef` 走 `.render(props, ref)`（这一层不需要 ref，传 `null`）；
+ * `memo` 往下走它的 `.type`。组件可能返回 `null`，调用方按 `node === null` 处理。
+ */
+function renderType(type, props) {
+  if (typeof type === 'function') return type(props)
+  if (typeof type.render === 'function') return type.render(props, null)
+  return renderType(type.type, props)
+}
+
+/**
+ * 组件的显示名（函数组件在 `.name`，forwardRef / memo 包过一层就在 `.render` / `.type` 上）。
+ *
+ * `recorded` 里认组件是按名字认的（`SessionRow` 那几处），官方原语包过之后名字不在 `type.name` 上。
+ */
+function typeNameOf(type) {
+  if (typeof type === 'function') return type.name
+  if (type === null || typeof type !== 'object') return undefined
+  if (typeof type.render === 'function') return type.render.name
+  return typeNameOf(type.type)
+}
+
+/** `recorded` 里名为 `name` 的那些组件元素（名字走 `typeNameOf`，见上）。 */
+function namedElements(recorded, name) {
+  return recorded.filter((node) => isComponentType(node.type) && typeNameOf(node.type) === name)
+}
+
+/**
+ * 页面里的一枚标签，读成「可见文字 + 悬浮提示 + tone」一组。
+ *
+ * 官方 `Tag` 只收 `tone` / `className` / `children`——**不收 `title`**（见 `Tag.d.ts`）。所以本页把
+ * 提示挂在包着它的那层 `<span title>` 上：可见文字在 `Tag` 的 `children`，提示在外层 span 的
+ * `title`，两处分布在两层节点上。判"标签是不是中性档"读 `Tag` 的 `tone`，判"提示说了什么"读外层
+ * span 的 `title`。写成一个三元组，是因为这三样本来就是同一枚标签的三个入参。
+ *
+ * 为什么不能拿 `elementsOf()` 找"名字叫 `Tag` 的元素"：它会把组件元素**替换**成渲染结果（`Tag`
+ * 换成它内部那个带 `data-tone` 的 span），所以名字叫 `Tag` 的东西永远不出现在结果里。要找的是**入参**，
+ * 就往入参那一层读。
+ *
+ * 两处实现都是**纯读**：不调用任何组件。本文件的假 react 把每次 `createElement` 都追加进 `recorded`，
+ * 调用组件等于再走一遍树、把元素又追加一份——"数一数组头有几条"这类断言会凭空翻倍（真实踩到过：
+ * 2 条组头数成 854，因为假 hook 的种子也被再消费一遍）。要读的 span 与 Tag 都是组件当次渲染造出来
+ * 的，已经在 `recorded`（或某个元素的 `props.children`）里了，直接读就好。
+ */
+function recordedTagPairs(recorded) {
+  const out = []
+  for (const node of recorded) {
+    if (node === null || typeof node !== 'object') continue
+    if (node.type !== 'span' || node.props?.title === undefined) continue
+    const children = Array.isArray(node.props.children) ? node.props.children : [node.props.children]
+    const tag = children.find((child) => isComponentType(child?.type) && typeNameOf(child.type) === 'Tag')
+    if (tag !== undefined) {
+      out.push({ title: node.props.title, text: tag.props?.children, tone: tag.props?.tone })
+    }
+  }
+  return out
+}
+
+/**
+ * 在某棵**元素子树**里找上面那种标签组（同上：纯读，遇到组件边界就停）。
+ *
+ * 用在"只能看这一块"的地方（例如某一条组头里那枚主机标签）。组件边界停住不影响它：包着 `Tag` 的那层
+ * `<span title>` 与 `Tag` 本身都是同一个组件当次渲染造出来的 DOM 元素，中间没有再套组件。
+ */
+function tagPairsIn(node, out = []) {
+  if (Array.isArray(node)) {
+    for (const item of node) tagPairsIn(item, out)
+    return out
+  }
+  if (node === null || typeof node !== 'object') return out
+  if (isComponentType(node.type)) return out
+  const children = Array.isArray(node.props?.children) ? node.props.children : [node.props?.children]
+  const tag = children.find((child) => isComponentType(child?.type) && typeNameOf(child.type) === 'Tag')
+  if (node.type === 'span' && tag !== undefined) {
+    out.push({ title: node.props?.title, text: tag.props?.children, tone: tag.props?.tone })
+  }
+  return tagPairsIn(node.props?.children, out)
+}
+
+/**
  * 一行里显示出来的文案与标签。
  *
  * 与 strings() 同理：遇到函数组件要带着 props 调一次才看得见里面（行是共用组件渲染的，
@@ -135,9 +234,17 @@ function rowParts(node, acc = { label: '', tags: [] }) {
     return acc
   }
   if (node === null || typeof node !== 'object') return acc
-  if (typeof node.type === 'function') return rowParts(node.type(node.props), acc)
+  if (isComponentType(node.type)) {
+    // 标签从手写 `<span className="dsm-tag dsm-tagIdle">` 换成了官方 `Tag`（它渲染成
+    // `<span data-tone=…>`，类名是 CSS module 的哈希名）。**在组件那一层按名字认**（`Tag` 的
+    // 显示名就是 `Tag`），再往下走就只剩内层 span 了。判的仍是"行上挂了哪几枚标签"。
+    if (typeNameOf(node.type) === 'Tag') acc.tags.push(node.props?.children)
+    return rowParts(renderType(node.type, node.props), acc)
+  }
+  // 这里**不**再按 `dsm-tag` 类名收标签：那个类现在挂在"包着官方 Tag 的那层 span"上（Tag 不收
+  // `title`，提示只能挂外层），它自己不是标签、children 是 Tag 元素而不是文字，收了就会把同一枚
+  // 标签数成两枚（元素的 children 一次、下穿到 Tag 组件又一次）。标签一律从上面那条 `Tag` 分支收。
   const className = String(node.props?.className ?? '')
-  if (className.includes('dsm-tag')) acc.tags.push(node.props?.children)
   if (className === 'dsm-rowTitle' || className === 'dsm-rowId') acc.label = String(node.props?.children)
   return rowParts(node.props?.children, acc)
 }
@@ -153,7 +260,7 @@ function elementsOf(node, out = []) {
     return out
   }
   if (node === null || typeof node !== 'object') return out
-  if (typeof node.type === 'function') return elementsOf(node.type(node.props), out)
+  if (isComponentType(node.type)) return elementsOf(renderType(node.type, node.props), out)
   out.push(node)
   return elementsOf(node.props?.children, out)
 }
@@ -169,7 +276,7 @@ function strings(node, out = []) {
   if (typeof node === 'string') out.push(node)
   else if (Array.isArray(node)) for (const item of node) strings(item, out)
   else if (node !== null && typeof node === 'object') {
-    if (typeof node.type === 'function') strings(node.type(node.props), out)
+    if (isComponentType(node.type)) strings(renderType(node.type, node.props), out)
     else strings(node.props?.children, out)
   }
   return out
@@ -184,7 +291,7 @@ function strings(node, out = []) {
 function elements(node, out = []) {
   if (Array.isArray(node)) for (const item of node) elements(item, out)
   else if (node !== null && typeof node === 'object') {
-    if (typeof node.type === 'function') elements(node.type(node.props), out)
+    if (isComponentType(node.type)) elements(renderType(node.type, node.props), out)
     else if (typeof node.type === 'string') {
       out.push(node)
       elements(node.props?.children, out)
@@ -257,6 +364,81 @@ function loadBundle({ firstNull, panel, arrays, strings, nulls, meta, fetch } = 
     // 开没开、标题是什么、正文摆了什么、底部那两个按钮是谁"这些**入参**，不是官方控件内部怎么画。
     if (specifier === '@deepseek-ai/dsh-client-ui-primitives') {
       return {
+        /*
+         * `Button` 的替身：真的那个是 `forwardRef`，按 `variant` / `size` 上官方那套类名，并把原生
+         * button 属性透传下去。这里照 props 造一个真的 `<button>`——用例要核的正是"主动作是不是
+         * 落在这个容器里""它禁没禁用""文案对不对"，这些全在**入参**上。
+         */
+        Button: (props) => {
+          const { variant = 'ghost', size = 'md', icon, className, children, ...rest } = props
+          return react.createElement(
+            'button',
+            { type: 'button', ...rest, 'data-variant': variant, 'data-size': size, className },
+            // 没有 icon 时 children 保持原样（不包成数组）：`strings()` 与 `props.children === '…'`
+            // 这类断言都按"文案就是那个字符串"写，多一层数组会让它们读不到。
+            icon === undefined || icon === null ? children : [icon, children],
+          )
+        },
+        /*
+         * `Tag` 的替身：真的那个画 `<span data-tone=…>`（类名是 CSS module 的哈希名）。用例核的是
+         * "这枚标签是不是中性/危险那几档""文案是什么"，所以把 `tone` 原样搬到 `data-tone` 上。
+         */
+        Tag: (props) =>
+          react.createElement('span', { 'data-tone': props.tone ?? 'outline', className: props.className }, props.children),
+        /*
+         * `Input` 的替身：真的那个是 `<span class="wrap">` 包一个内部化的 `<input>`，外部属性全透传给
+         * 那个 input。用例核的是"有没有一个输入框、它的值与提示对不对"。
+         */
+        Input: (props) => {
+          const { icon, className, ...rest } = props
+          // `input` 是空元素，icon 不能塞成子节点（原语里那枚 icon 是包在 span.wrap 里的兄弟节点，
+          // 本页没用到带 icon 的输入框）；这里只把原生属性与 className 透传下去。
+          return react.createElement('input', { ...rest, 'data-primitive-input': 'true', className })
+        },
+        /*
+         * `Checkbox` 的替身：真的那个是 `<label>` 包 `<input type=checkbox>` 与可见 label。用例核的是
+         * 勾选态、禁用态与无障碍名字（`label` 传空串时名字由外面的行 label 兜底）。
+         */
+        Checkbox: (props) =>
+          react.createElement(
+            'input',
+            {
+              type: 'checkbox',
+              checked: props.checked,
+              disabled: props.disabled,
+              title: props.title,
+              'aria-label': props.label,
+              className: props.className,
+              onChange: () => props.onChange(!props.checked),
+            },
+          ),
+        /*
+         * `SegmentedControl` 的替身：真的那个是 `role="tablist"` 包一排 `role="tab"`，类名同样是 hash。
+         * 用例要核的是**顺序与默认页**（顺序 = `options` 的顺序，默认页 = 受控的 `value`），
+         * 所以这里照 `options` 造出真的 `role=tab` 那一排，`aria-selected` 按 `value` 判。
+         */
+        SegmentedControl: (props) =>
+          react.createElement(
+            'div',
+            { role: 'tablist', 'aria-label': props.label, className: props.className, 'data-segment-values': props.options.map((o) => o.value).join(' ') },
+            props.options.map((option) =>
+              react.createElement(
+                'button',
+                {
+                  key: option.value,
+                  id: `${props.id}-${option.value}`,
+                  type: 'button',
+                  role: 'tab',
+                  'aria-selected': option.value === props.value,
+                  'aria-controls': `${props.id}-${option.value}-panel`,
+                  disabled: props.disabled === true || option.disabled === true,
+                  title: option.title,
+                  onClick: () => props.onChange(option.value),
+                },
+                option.label,
+              ),
+            ),
+          ),
         /*
          * `Switch` 的替身：真的那个画一个受控开关（按钮 + 滑块）。用例要核的是"这里是官方那个开关，
          * 而不是本页手写的勾选框"以及它的三处入参（`checked` / `disabled` / `label`），
@@ -557,12 +739,12 @@ test('客户端产物：apply 把「会话管理」注册到设置里的一页�
   // 多解释一句，攒起来就是读者每次都要扫过去的散文（实测动作页正文曾经 187 / 382 / 144 字，最长一段
   // 192 字）。这里钉它的机械面：**动作页上的每一段说明都不超过两行**。
   // 两行的容量按实测的排版算：卡片正文宽 534px、说明句 12px（内建描述那一档），一行约 44 个汉字、
-  // 英文约 87 个字符，所以两行的上限在 88 / 174 上下——下面这两个数贴着它（现有最长的一条：中文 69
-  // 字、英文 175 字符，都在「会话」页那条 hint 上，在 dev GUI 里量下来都是两行）。超过上限不是"字太多"，
-  // 是"这段该搬去「说明」页"。
+  // 英文约 87 个字符，所以两行的上限在 88 / 174 上下。精简之后下面这两个数收到一半多一点（最长的一条：
+  // 中文 50 字、英文 128 字符，都在「会话」页那两条 hint 上，在 dev GUI 里量下来都是两行）。超过上限
+  // 不是"字太多"，是"这段该搬去「说明」页"。
   const PAGE_PROSE = {
-    zh: 76,
-    en: 175,
+    zh: 56,
+    en: 130,
   }
   const actionKeys = [
     'transfer.export.hint',
@@ -612,17 +794,24 @@ test('客户端产物：页面骨架带着三个动作页（会话 / 传输 / �
   // 页签顺序：日常的「会话」在最前；「同步」紧挨「传输」（它落地走的是导入那条编排）；「备份」是
   // 三个写操作共同的后悔面、不属于任何一个动作页，所以排在动作页之后；说明垫底。**迁移没有自己的
   // 页签**：它并进了「会话」页的动作行（见下面那条用例）。
-  const tabs = recorded.filter((node) => String(node.props?.className) === 'dsm-tab')
+  //
+  // 识别方式：手写那排 `<button className="dsm-tab" role="tab" aria-selected>` 换成了官方
+  // `SegmentedControl`（页签是它自己按 `options` 画出来的，类名是它 CSS module 的哈希名，认不得），
+  // 所以判据跟着换成**读它的 `options` 与受控的 `value`**：顺序就是 `options` 的顺序（每段的
+  // `label` 仍是字典键），默认页就是受控的 `value`。判的东西没变：顺序与默认页。
+  const tabControl = recorded.find(
+    (node) => isComponentType(node.type) && Array.isArray(node.props?.options) && node.props?.role !== 'tab',
+  )
+  const tabs = tabControl?.props?.options ?? []
   assert.deepEqual(
-    tabs.map((node) => strings(node)[0]),
+    // `options` 是**产物那个 realm** 里造的数组（客户端产物在 `vm` 里求值），它自己的原型是那个 realm
+    // 的 `Array.prototype`；直接 `.map()` 出来的结果也留在那个 realm，`deepStrictEqual` 会连原型一起比
+    // 于是判不等。先摊进本 realm 的数组字面量再比，判的东西不变（顺序与那五个 label）。
+    [...tabs].map((option) => option.label),
     ['page.tab.manage', 'page.tab.transfer', 'page.tab.sync', 'page.tab.backup', 'page.tab.help'],
     '顺序是 会话 → 传输 → 同步 → 备份 → 说明（动作页按日常程度排，参考页垫底）',
   )
-  assert.deepEqual(
-    tabs.map((node) => node.props['aria-selected']),
-    [true, false, false, false, false],
-    '默认停在第一个页签',
-  )
+  assert.equal(tabControl?.props?.value, 'manage', '默认停在第一个页签（受控值就是「会话」那一页）')
   // 那枚页签从两份字典里一起删掉：留着就等于"同一件事有两个入口"。
   const { zh: zhDict, en: enDict } = mount().dictionaries[0].dicts
   for (const key of ['page.tab.migrate', 'migrate.title', 'migrate.hint', 'migrate.lockedHidden', 'help.tabs.migrate']) {
@@ -668,7 +857,15 @@ test('客户端产物：备份是独立分页，动作页上不再有那张清�
 })
 
 /**
- * 树里每一枚 `dsm-primary` 按钮所在的容器（`cardHead` / `controls` / `root`）。
+ * 树里每一枚主动作按钮所在的容器（`cardHead` / `controls` / `root`）。
+ *
+ * 识别方式：主动作从手写的 `<button className="dsm-button dsm-primary">` 换成了官方
+ * `@deepseek-ai/dsh-client-ui-primitives` 的 `<Button variant="primary">`，所以判据跟着换成
+ * **看 `variant` 这个 prop 是不是 `'primary'`**（`dsm-primary` 那个类名已经不在产物里了）。
+ * 判的东西没变：还是"这枚主动作落在哪个容器里"。
+ *
+ * 官方 `Button` 是 forwardRef，`variant` 挂在**外面那层元素**上（不是它 `render()` 出来的
+ * `<button>` 上），所以要下穿之前先认它。
  *
  * 一次下探里记下来，不分成"先收卡头再收按钮"两趟：函数组件每被调用一次都新建一批元素，两趟比对
  * 身份是对不上的（`strings()` 那条注释里同一个坑）。
@@ -679,10 +876,12 @@ function primaryPlacements(node, inside = 'root', out = []) {
     return out
   }
   if (node === null || typeof node !== 'object') return out
-  if (typeof node.type === 'function') return primaryPlacements(node.type(node.props), inside, out)
   const className = String(node.props?.className ?? '')
   const classes = className.split(/\s+/)
   const nested = classes.includes('dsm-cardHead') ? 'cardHead' : classes.includes('dsm-controls') ? 'controls' : inside
+  // 官方 Button 的主动作：`variant="primary"`（见上面说明）。
+  if (node.props?.variant === 'primary' && node.type !== 'button') out.push(nested)
+  if (isComponentType(node.type)) return primaryPlacements(renderType(node.type, node.props), nested, out)
   if (node.type === 'button' && classes.includes('dsm-primary')) out.push(nested)
   return primaryPlacements(node.props?.children, nested, out)
 }
@@ -759,7 +958,9 @@ test('客户端产物：页头是页面级标题（h2 + 说明行），不是卡
     '「刷新」挂在这一行的右端',
   )
   assert.ok(
-    elementsOf(tabsRow).some((node) => node.props?.className === 'dsm-tabs' && node.props?.role === 'tablist'),
+    // 页签那一排现在是官方 `SegmentedControl`：它自己就渲染成 `role="tablist"`（不再有 `.dsm-tabs`
+    // 那一层包装），所以判据换成"这一行里有个 tablist"。判的东西没变：页签还跟「刷新」同排。
+    elementsOf(tabsRow).some((node) => node.props?.role === 'tablist'),
     '页签那一层还在这一行里（下划线式页签没有变成工具栏）',
   )
 })
@@ -1035,7 +1236,7 @@ test('客户端产物：导出列表按目录分组，组头就是"整组勾选"
     }
     if (node === null || typeof node !== 'object') return out
     // 图形是函数组件给出的：本文件没有渲染器，得自己带着 props 调一次才看得见 <svg>。
-    if (typeof node.type === 'function') return levelIcons(node.type(node.props), out)
+    if (isComponentType(node.type)) return levelIcons(renderType(node.type, node.props), out)
     const className = String(node.props?.className ?? '')
     if (className.includes('dsm-levelIcon')) out.push(className)
     return levelIcons(node.props?.children, out)
@@ -1107,13 +1308,19 @@ test('客户端产物：组头只摆名字，身份与本机路径在悬浮提�
   const heads = mounted.recorded.filter((element) => String(element.props?.className) === 'dsm-groupHead')
   assert.equal(heads.length, 2, '两个目录两条组头')
 
-  /** 一条组头里那枚主机标签（有项目身份的目录才有）。 */
-  const hostsOf = (head) =>
-    elementsOf(head)
-      .filter((element) => String(element.props?.className) === 'dsm-tag dsm-tagIdle' && element.props?.children === 'github.com')
-      .map((element) => element.props?.title)
-  assert.deepEqual(hostsOf(heads[0]), ['github.com/he0119/alpha'], '有身份的组头挂一枚主机标签，标签的悬浮提示给全整条身份')
-  assert.deepEqual(hostsOf(heads[1]), ['github.com/he0119/beta'])
+  /**
+   * 一条组头里那枚主机标签的悬浮提示（有项目身份的目录才有）。
+   *
+   * 标签换成了官方 `Tag`，而 `Tag` 不收 `title`——悬浮提示挂在**包着它的那层 `<span title>`** 上
+   * （见 sessionList.tsx 的 `SessionGroupHead`）。所以先按组件名字找到那枚 Tag，再回到它的祖先
+   * span 上取提示。判的东西没变：组头挂主机标签、提示里给全整条身份。
+   */
+  const hostTipsOf = (head, host) => {
+    const pair = tagPairsIn(head).find((item) => item.text === host)
+    return pair?.title
+  }
+  assert.equal(hostTipsOf(heads[0], 'github.com'), 'github.com/he0119/alpha', '有身份的组头挂一枚主机标签，标签的悬浮提示给全整条身份')
+  assert.equal(hostTipsOf(heads[1], 'github.com'), 'github.com/he0119/beta')
 
   // 已登记的那一组：名字是用户起的标题（身份不该把人的名字顶掉），身份与路径都在它的悬浮提示里
   assert.deepEqual(namesOf(heads[0]), [
@@ -1182,12 +1389,15 @@ test('客户端产物：「会话」页把侧边栏看不见的那三类标出�
 
   assert.ok(text.includes('page.tab.manage'), '页签停在「会话」这一页')
   assert.ok(text.includes('manage.title') && text.includes('manage.hint'), '页面本体渲染出来了')
-  // 三类隐藏理由各挂各的标签：**标签文字**是子节点，**为什么不显示**在悬浮提示里，两处都核
+  // 三类隐藏理由各挂各的标签：**标签文字**是子节点，**为什么不显示**在悬浮提示里，两处都核。
+  //
+  // 识别方式：标签换成了官方 `Tag`，而它不收 `title`——悬浮提示挂在外面那一层 `<span title>` 上，
+  // 里面包着官方 `Tag`。所以判据读 `recordedTagPairs()` 那一组三元组（提示在 span、文字与 tone 在 Tag）。
+  // 判的东西没变：三类理由各挂一枚中性标签、提示里说清为什么不显示。
   const tagged = (key, tip) => {
-    const node = recorded.find((element) => element.type === 'span' && strings(element).includes(key))
-    assert.ok(node, `缺少「${key}」这枚标签`)
-    assert.equal(node.props?.title, tip, `「${key}」要说清它为什么不显示`)
-    assert.equal(node.props?.className, 'dsm-tag dsm-tagIdle', '标签走统一的那套中性样式')
+    const pair = recordedTagPairs(recorded).find((item) => item.title === tip && item.text === key)
+    assert.ok(pair, `缺少「${key}」这枚标签`)
+    assert.equal(pair.tone, 'neutral', `「${key}」是中性事实，该用官方 Tag 的 neutral 档`)
   }
   tagged('tag.subagent', 'tag.subagentTip')
   tagged('tag.blank', 'tag.blankTip')
@@ -1233,6 +1443,56 @@ test('客户端产物：「会话」页把侧边栏看不见的那三类标出�
   assert.equal(actionButton('manage.archive.action')?.props?.['disabled'], false, '宿主有归档能力时按钮可用')
   assert.ok(actionButton('manage.delete.action') !== undefined && text.includes('manage.delete.hint'), '删除入口与说明在')
   assert.ok(!text.includes('manage.archive.unavailable'), '宿主有归档能力时不该显示"改不了归档"那句')
+})
+
+test('客户端产物：每一枚官方 Tag 都挂上本页的布局挂钩类（dsm-tag）', { skip }, () => {
+  // 为什么钉它：官方 `Tag` 的几何与配色归官方，但本页另有几条"这一页怎么摆它"的规格——窄列里
+  // nowrap、组头里与名字同高、计划表里限宽截断、段头药丸不跟着加粗——那些选择器**全挂在 `.dsm-tag`
+  // 上**（见 styles.ts 那段注释）。类名漏传时这些规格会**静默失效**：样式表里规则还在、
+  // `test/styles.test.mjs` 照样绿，只是 DOM 里根本没有带这个类的元素。真实踩到过：换成官方 Tag 之后
+  // 一处 className 都没传，五条布局规则一条都没生效，两处测试却全绿。
+  //
+  // 类名按那一枚标签有没有悬浮提示分两层挂（官方 `Tag` 不收 `title`）：
+  //   - 有提示的那些挂在包着它的 `<span title className="dsm-tag">` 上；
+  //   - 没提示的那些挂在官方 `Tag` 自己身上。
+  // 这条判据就是"每枚 Tag 至少落进其中一种"，不看具体挂在哪一层。
+  const state = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    archiveAvailable: true,
+    sessions: [
+      { id: 's-1', cwd: '/home/u/dev/alpha', createdAt: 5, dir: '/home/u/dev/alpha', bytes: 2048, files: [], ungrouped: false },
+      { id: 's-2', cwd: '/home/u/dev/alpha', createdAt: 4, dir: '/home/u/dev/alpha', bytes: 1024, files: [], origin: 'subagent', hidden: 'subagent', ungrouped: false },
+      { id: 's-3', cwd: '/home/u/dev/alpha', createdAt: 3, dir: '/home/u/dev/alpha', bytes: 900, files: [], blank: true, hidden: 'blank', ungrouped: false },
+      { id: 's-4', cwd: '/home/u/dev/beta', createdAt: 2, dir: '/home/u/dev/beta', bytes: 512, files: [], archived: true, hidden: 'archived', ungrouped: false },
+    ],
+    // 没登记的那一组会挂一枚「未加入工作区」的标签——它是没有悬浮提示的那种，类名挂在 Tag 自己身上。
+    workspaces: [{ id: 'w1', path: '/home/u/dev/alpha', title: '工作区甲', sessionIds: ['s-1'] }],
+  }
+  const { registrations, recorded } = mount({ state, panel: 'manage', arrays: [['s-1']] })
+  const { component } = registrations[0]
+  const { inject } = registrations[0].registration
+  strings(component(inject())) // 走一遍才把各组件里的元素记进 recorded
+
+  const classesOf = (node) => String(node.props?.className ?? '').split(/\s+/)
+  // 被"带 dsm-tag 的 span"直接包着的那几枚 Tag
+  const covered = new Set()
+  for (const node of recorded) {
+    if (node?.type !== 'span' || !classesOf(node).includes('dsm-tag')) continue
+    const children = Array.isArray(node.props?.children) ? node.props.children : [node.props?.children]
+    for (const child of children) {
+      if (isComponentType(child?.type) && typeNameOf(child.type) === 'Tag') covered.add(child)
+    }
+  }
+  const tags = recorded.filter((node) => isComponentType(node.type) && typeNameOf(node.type) === 'Tag')
+  assert.ok(tags.length >= 4, `这一页该有多枚标签（子智能体 / 空白 / 已归档 / 未加入工作区），只数到 ${tags.length} 枚`)
+  const naked = tags.filter((tag) => !covered.has(tag) && !classesOf(tag).includes('dsm-tag'))
+  assert.deepEqual(
+    naked.length,
+    0,
+    `有 ${naked.length} 枚官方 Tag 没挂 dsm-tag（也没被带这个类的 span 包着）：那几条布局规格会静默失效`,
+  )
 })
 
 test('客户端产物：子智能体缩进到父会话的下一级（同一组 / 父在别的组 / 父被筛掉 / 分叉不缩进）', { skip }, () => {
@@ -1349,6 +1609,10 @@ test('客户端产物：子智能体行的勾选框禁用（跟着父会话走�
  *
  * 与 `primaryPlacements()` 同一个走法（一次下探里记下来，不分成两趟）：函数组件每被调用一次都新建
  * 一批元素，两趟比对身份是对不上的。
+ *
+ * 这两枚现在是官方 `Button`（forwardRef）：`disabled` 挂在外层那个元素上，`render()` 出来的内层
+ * `<button>` 不带它。所以认按钮时**在外层就把容器、文案与禁用态一起记下来**（文案从 props.children
+ * 取，就是那枚 `list.selectAll` / `list.clear` 键），再往下走。
  */
 function pickPlacements(node, inside = 'root', out = []) {
   if (Array.isArray(node)) {
@@ -1356,7 +1620,6 @@ function pickPlacements(node, inside = 'root', out = []) {
     return out
   }
   if (node === null || typeof node !== 'object') return out
-  if (typeof node.type === 'function') return pickPlacements(node.type(node.props), inside, out)
   const classes = String(node.props?.className ?? '').split(/\s+/)
   const nested = classes.includes('dsm-cardHead')
     ? 'cardHead'
@@ -1365,11 +1628,16 @@ function pickPlacements(node, inside = 'root', out = []) {
       : classes.includes('dsm-controls')
         ? 'controls'
         : inside
+  // 官方 `Button` 是组件：下穿到它的渲染结果（替身画出来的是一个真的 `<button>`，文案与禁用态
+  // 都在那个元素上）。**不能在这里也记一笔**——否则同一枚按钮会被记两次（一次按组件、一次按它画出来
+  // 的 button），"一对选行工具"就成了两对。判据只有一处：那个真的 `button`。
+  if (isComponentType(node.type)) return pickPlacements(renderType(node.type, node.props), nested, out)
   if (node.type === 'button') {
     const text = strings(node)[0]
     if (text === 'list.selectAll' || text === 'list.clear') {
       out.push({ text, where: nested, disabled: node.props?.['disabled'] === true })
     }
+    return pickPlacements(node.props?.children, nested, out)
   }
   return pickPlacements(node.props?.children, nested, out)
 }
@@ -1662,7 +1930,7 @@ test('客户端产物：「会话」页一条都没筛出来时，那个固定�
       return out
     }
     if (node === null || typeof node !== 'object') return out
-    if (typeof node.type === 'function') return walk(node.type(node.props), out)
+    if (isComponentType(node.type)) return walk(renderType(node.type, node.props), out)
     out.push(node)
     return walk(node.props?.children, out)
   }
@@ -1720,7 +1988,7 @@ test('客户端产物：导出页也接了同一套筛选条，筛空的组整�
   assert.ok(text.includes('list.sessionsInDir:{"count":1}'), '组头报的是筛剩下的条数')
 
   // 行出自共用组件（sessionList.tsx 的 SessionRow），标签也走共用判据
-  const rowEls = recorded.filter((node) => typeof node.type === 'function' && node.type.name === 'SessionRow')
+  const rowEls = namedElements(recorded, 'SessionRow')
   assert.equal(rowEls.length, 1, '筛过之后只有一行')
   assert.equal(rowEls[0].props.variant, 'export')
   const labels = recorded.filter(
@@ -2063,7 +2331,7 @@ test('客户端产物：「会话」页的筛选条含类别芯片（列表就�
   )
 
   // 整库都列出来：侧边栏看不见的那条（子智能体）也在，只是勾不动（会话页那一款行，多一格归属）
-  const rowEls = recorded.filter((node) => typeof node.type === 'function' && node.type.name === 'SessionRow')
+  const rowEls = namedElements(recorded, 'SessionRow')
   assert.deepEqual(rowEls.map((node) => node.props.session.id), ['a-1', 'a-2', 'b-1'])
   assert.ok(
     rowEls.every((node) => node.props.variant === 'manage'),
@@ -2419,9 +2687,7 @@ test('客户端产物：「会话」页的搜索框按标题或 id 筛，筛空�
   const hitText = strings(hit.registrations[0].component(hit.registrations[0].registration.inject()))
   assert.ok(hitText.includes('list.shown:{"shown":1,"total":2}'), '按标题搜到了那一条')
   assert.deepEqual(
-    hit.recorded
-      .filter((node) => typeof node.type === 'function' && node.type.name === 'SessionRow')
-      .map((node) => node.props.session.id),
+    namedElements(hit.recorded, 'SessionRow').map((node) => node.props.session.id),
     ['s-1'],
   )
 
@@ -2505,7 +2771,7 @@ test('客户端产物：组头的折叠只影响画不画行，不影响"列出�
   // 筛「空白」之后列出来的是 a-1 与 b-1（两个组），收起 alpha 那一组
   const one = mount({ state, panel: 'transfer', arrays: [[], ['blank'], [key(alpha)]] })
   const oneText = strings(one.registrations[0].component(one.registrations[0].registration.inject()))
-  const oneRows = one.recorded.filter((node) => typeof node.type === 'function' && node.type.name === 'SessionRow')
+  const oneRows = namedElements(one.recorded, 'SessionRow')
   assert.deepEqual(oneRows.map((node) => node.props.session.id), ['b-1'], '收起的那一组不画行')
   const heads = one.recorded.filter((node) => String(node.props?.className) === 'dsm-groupHead')
   assert.equal(heads.length, 2, '组头一个都不少（收起来的是行，不是整个组）')
@@ -2541,7 +2807,7 @@ test('客户端产物：组头的折叠只影响画不画行，不影响"列出�
       return out
     }
     if (node === null || typeof node !== 'object') return out
-    if (typeof node.type === 'function') return walk(node.type(node.props), out)
+    if (isComponentType(node.type)) return walk(renderType(node.type, node.props), out)
     out.push(node)
     return walk(node.props?.children, out)
   }
@@ -2568,7 +2834,7 @@ test('客户端产物：组头的折叠只影响画不画行，不影响"列出�
   strings(none.registrations[0].component(none.registrations[0].registration.inject()))
   assert.deepEqual(disabled(none.recorded), [false, true], '都没收：全部收起能用、全部展开置灰')
   assert.equal(
-    none.recorded.filter((node) => typeof node.type === 'function' && node.type.name === 'SessionRow').length,
+    namedElements(none.recorded, 'SessionRow').length,
     2,
     '没收起时两组都画出来',
   )
@@ -2578,7 +2844,7 @@ test('客户端产物：组头的折叠只影响画不画行，不影响"列出�
   const allText = strings(all.registrations[0].component(all.registrations[0].registration.inject()))
   assert.deepEqual(disabled(all.recorded), [true, false], '都收着：全部收起置灰、全部展开能用')
   assert.equal(
-    all.recorded.filter((node) => typeof node.type === 'function' && node.type.name === 'SessionRow').length,
+    namedElements(all.recorded, 'SessionRow').length,
     0,
   )
   assert.ok(allText.includes('list.shown:{"shown":2,"total":3}'), '全收着也照样报"显示 2 / 3 条"')
@@ -2626,9 +2892,7 @@ test('客户端产物：「会话」页也按目录分组、也能折叠，勾�
   const { registrations, recorded } = mount({ state, panel: 'manage', arrays: [[], ['blank'], [], [alpha]] })
   const text = strings(registrations[0].component(registrations[0].registration.inject()))
 
-  const rowIds = recorded
-    .filter((node) => typeof node.type === 'function' && node.type.name === 'SessionRow')
-    .map((node) => node.props.session.id)
+  const rowIds = namedElements(recorded, 'SessionRow').map((node) => node.props.session.id)
   assert.deepEqual(rowIds, ['b-1'], '收起的那一组不画行，另一组照画')
   const heads = recorded.filter((node) => String(node.props?.className) === 'dsm-groupHead')
   assert.equal(heads.length, 2, '组头一个都不少')
@@ -3095,15 +3359,15 @@ test('客户端产物：同步预演三张表的状态列只放短标签，整�
     '段头不再是 .dsm-hint 那一行（那正是"和正文分不出"的写法）',
   )
 
-  // 动作列：看得见的是动词，整句在 title 里。
-  const tagOf = (visible, title) =>
-    mounted.recorded.find((node) => node.props?.children === visible && node.props?.title === title)
+  // 动作列：看得见的是动词，整句在 title 里。两样分在两层节点上（官方 `Tag` 不收 title，提示在外层
+  // span 上），所以读 `recordedTagPairs()` 那一组。
+  const tagOf = (visible, title) => recordedTagPairs(mounted.recorded).find((item) => item.text === visible && item.title === title)
   assert.ok(tagOf('sync.tag.pull', 'sync.why.missingPull'), '拉取那张表的标签是「拉取」，整句在 title 上')
   assert.ok(tagOf('sync.tag.push', 'sync.why.missingPush'), '推表新推的那颗是「推送」')
   assert.ok(tagOf('sync.tag.repush', 'sync.why.localAhead'), '本机领先的那颗是「重推刷新」')
   assert.ok(
-    mounted.recorded.some(
-      (node) => node.props?.children === 'sync.tag.diverged' && String(node.props?.title).startsWith('sync.why.diverged'),
+    recordedTagPairs(mounted.recorded).some(
+      (item) => item.text === 'sync.tag.diverged' && String(item.title).startsWith('sync.why.diverged'),
     ),
     '「这次不动」那颗是「两边各自写过」，整句（带机器名）在 title 上',
   )
@@ -3201,17 +3465,18 @@ test('客户端产物：会拉取那张表分得清「拉一条新的」与「�
     takesEffect: 'immediate',
   }
   const mounted = mount({ state, panel: 'sync', nulls: [null, response, 'plan'] })
-  const text = strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
-  const tagOf = (visible, title) =>
-    mounted.recorded.find((node) => node.props?.children === visible && node.props?.title === title)
+  const tree = mounted.registrations[0].component(mounted.registrations[0].registration.inject())
+  const text = strings(tree)
+  // 同上一张表：可见文字在官方 `Tag` 上、整句提示在外层 span 上，读 `recordedTagPairs()` 那一组。
+  const tagOf = (visible, title) => recordedTagPairs(mounted.recorded).find((item) => item.text === visible && item.title === title)
 
   assert.ok(tagOf('sync.tag.pull', 'sync.why.missingPull'), '从无到有那条照旧是「拉取」')
   // 覆盖本机那份：标签说的是动作，title 说清"谁更新、会拿谁换掉本机这份"。
   assert.ok(tagOf('sync.tag.replace', 'sync.why.replaceNewer'), '覆盖那条挂「覆盖本机」+ 它自己那句整句')
   assert.ok(tagOf('sync.tag.localNewer', 'sync.why.localNewer'), '分叉里本机更晚那条是「分叉重推」')
   assert.equal(
-    mounted.recorded.some(
-      (node) => node.props?.children === 'sync.tag.replace' && node.props?.title === 'sync.why.replaceAhead',
+    recordedTagPairs(mounted.recorded).some(
+      (item) => item.text === 'sync.tag.replace' && item.title === 'sync.why.replaceAhead',
     ),
     false,
     '两条覆盖行的整句按各自的码走（这里这条说的是"两边各自写过"）',
@@ -3345,14 +3610,16 @@ test('客户端产物：同步三张表挂会话列表那套类型标签（本�
     takesEffect: 'immediate',
   }
   const mounted = mount({ state, panel: 'sync', nulls: [null, response, 'plan'] })
-  const text = strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
+  const tree = mounted.registrations[0].component(mounted.registrations[0].registration.inject())
+  const text = strings(tree)
+  const typeTagsOf = recordedTagPairs(mounted.recorded)
 
   // 与会话列表同一套键与同一套说明（`ATTRIBUTE_TAGS`），文案本身由字典给。
   assert.ok(text.includes('tag.subagent'), '子智能体那条挂「子智能体」')
   assert.ok(text.includes('tag.archived'), '已归档那条挂「已归档」')
   assert.ok(text.includes('tag.live'), '活着的会话也标出来（怎么关掉写在悬浮提示里，那一刻才需要）')
   assert.ok(
-    mounted.recorded.some((node) => node.props?.children === 'tag.live' && node.props?.title === 'tag.liveTip'),
+    typeTagsOf.some((item) => item.text === 'tag.live' && item.title === 'tag.liveTip'),
     '标签的说明挂在 title 上（与会话列表同一套）',
   )
   // 一条会话能挂几枚挂几枚（已归档 + 活着的两条都真）：本机那两条一共三枚标签，**新建那条一枚都没有**。
@@ -3457,9 +3724,7 @@ test('客户端产物：同步预演三张表按项目分组，路径只在组�
     '身份与本机路径都在那一格的悬浮提示里（同一个仓库的两个克隆靠路径区分）',
   )
   assert.ok(
-    mounted.recorded.some(
-      (node) => String(node.props?.className) === 'dsm-tag dsm-tagIdle' && node.props?.title === 'github.com/he0119/beta',
-    ),
+    recordedTagPairs(mounted.recorded).some((item) => item.tone === 'neutral' && item.title === 'github.com/he0119/beta'),
     '弹窗里也挂同一枚主机标签（标签自己的提示给全整条身份）',
   )
   assert.deepEqual(
@@ -3558,18 +3823,27 @@ function dialogsOf(recorded) {
   return recorded.filter((node) => node.props?.role === 'dialog')
 }
 
-/** 弹窗里的主按钮（footer 里带 `dsm-primary` 的那个）。 */
-function primaryOf(recorded) {
-  return elementsOf(recorded.find((node) => String(node.props?.className) === 'dsm-fakeDialogFooter')).find(
-    (node) => node.type === 'button' && String(node.props?.className).includes('dsm-primary'),
+/**
+ * 弹窗里 footer 那两个按钮。
+ *
+ * 识别方式：手写 `<button className="dsm-button dsm-primary">` 换成了官方 `Button variant="…"`，
+ * 替身把 `variant` 落在 `data-variant` 上（见上面假 require 里 `Button` 的说明），所以判据换成
+ * 看 `data-variant`。判的东西没变：footer 里哪一枚是主动作、哪一枚是取消。
+ */
+function footerButtonsOf(recorded) {
+  return elementsOf(recorded.find((node) => String(node.props?.className) === 'dsm-fakeDialogFooter')).filter(
+    (node) => node.type === 'button',
   )
 }
 
-/** 弹窗里的取消按钮。 */
+/** 弹窗里的主按钮（footer 里 `variant="primary"` 的那个）。 */
+function primaryOf(recorded) {
+  return footerButtonsOf(recorded).find((node) => node.props?.['data-variant'] === 'primary')
+}
+
+/** 弹窗里的取消按钮（footer 里不是 primary 的那一枚）。 */
 function cancelOf(recorded) {
-  return elementsOf(recorded.find((node) => String(node.props?.className) === 'dsm-fakeDialogFooter')).find(
-    (node) => node.type === 'button' && !String(node.props?.className).includes('dsm-primary'),
-  )
+  return footerButtonsOf(recorded).find((node) => node.props?.['data-variant'] !== 'primary')
 }
 
 test('客户端产物：会写盘的四个动作各自只有一个入口，预演不占页面按钮', { skip }, () => {

@@ -1,10 +1,16 @@
 /**
  * 这一页的样式，按 effect 生命周期注入 `<style>`。
  *
- * 颜色只用宿主 `Theme` 检查面列出的那十几个 token（`--dsw-alias-*`），每个都带一个中性的回落值，
- * 深浅主题自动跟随。唯一的例外是 `.dsm-primary` 的字色：那个位置宿主的检查面没给 token，
- * 于是显式写了回落链（见该处注释）——**主题色不能拿"另一个主题下的观感"去估**，深色主题里的
- * `brand-primary` 是近白色，所以填充按钮上写死白字就是白底白字。
+ * 颜色只用宿主 `Theme` 检查面列出的 token（`--dsw-alias-*`），每个都带一个中性的回落值，
+ * 深浅主题自动跟随。检查面之外还有几枚宿主其实在用的 token（卡片描边、次要/最静的文字色等），
+ * 它们逐个登记在 `test/styles.test.mjs` 的例外表里并写明理由——**用了就必须登记**，
+ * 不然"这枚 token 改名了"这件事没人会发现。**主题色不能拿"另一个主题下的观感"去估**：
+ * 深色主题里的 `brand-primary` 是近白色，在它上面写死白字就是白底白字。
+ *
+ * 卡片与控件的几何**不自己发明**，照官方那几份 CSS module 的原文抄，并在真实 dev GUI 里量一遍确认：
+ * 卡片圆角 20px / 1px 描边（内建「插件」页的 `.card`）、输入框 0.5px 描边（`Input.module.css`）、
+ * 标签是胶囊（`Tag.module.css`）。手写控件换官方原语之后，那些控件的几何**由官方给**，
+ * 这里只保留布局类的部分（见 `.dsm-tag` 那段注释）。
  *
  * 不用任何宿主原语包的类名：那些是打包器哈希出来的私有产物，抄不到也不该抄。
  *
@@ -50,9 +56,19 @@ export const CSS = `
   color: var(--dsw-alias-label-tertiary, var(--dsw-alias-label-secondary, #646a73));
 }
 .dsm-spacer { flex: 1 1 auto; }
+/*
+ * 卡片外壳照官方卡片（内建「插件」页那张 .card）量出来的规格：**圆角 20px**、**1px 描边**、底色是表面白。
+ * 描边走 settings-card-stroke 而不是 border-l1：前者是官方给"设置卡片描边"这件事的专名 token，
+ * 真实 dev GUI 里量到浅色 **rgba(0, 0, 0, 0.16)**、深色 **rgba(255, 255, 255, 0.2)**，与官方那张 .card
+ * 的 borderTopColor 逐字相同（浅色主题两处都是 rgba(0, 0, 0, 0.16)）；原来的 border-l1 只到
+ * rgba(0, 0, 0, 0.04)，卡片边界比官方淡了一大截——同一页里并排看就是"这张卡没画框"。
+ *
+ * 圆角不再自己写数值：它对的是官方那张卡的**观感**，官方那边是写死 20px（不是某个 radius token，
+ * --dsw-radius-lg 是 16px、--dsw-radius-panel 是 28px，都对不上），所以这里也写死 20px。
+ */
 .dsm-card {
-  border: 1px solid var(--dsw-alias-border-l1, rgba(0, 0, 0, 0.1));
-  border-radius: 12px;
+  border: 1px solid var(--dsw-alias-settings-card-stroke, rgba(0, 0, 0, 0.16));
+  border-radius: 20px;
   background: var(--dsw-alias-bg-layer-1, transparent);
   padding: 12px 14px;
   display: flex;
@@ -106,34 +122,16 @@ export const CSS = `
 .dsm-defsFaq { grid-template-columns: minmax(0, 1fr); }
 /* 路径这类机器可读的字串：等宽 + 次要灰，避免与正文混成一句。 */
 .dsm-path { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; word-break: break-all; }
-.dsm-button {
-  appearance: none;
-  border: 1px solid var(--dsw-alias-border-l2, rgba(0, 0, 0, 0.18));
-  background: var(--dsw-alias-bg-layer-2, transparent);
-  color: inherit;
-  border-radius: 8px;
-  padding: 4px 10px;
-  font: inherit;
-  cursor: pointer;
-}
-.dsm-button:hover:not(:disabled) { border-color: var(--dsw-alias-brand-primary, #3370ff); }
-.dsm-button:disabled { opacity: 0.5; cursor: default; }
-.dsm-button.dsm-primary {
-  background: var(--dsw-alias-brand-primary, #3370ff);
-  border-color: var(--dsw-alias-brand-primary, #3370ff);
-  /*
-   * 字色**不能写死白**：brand-primary 在深色主题里是 #f9fafb 那种近白（它是"表面的反色"，
-   * 不是为了当填充色才存在），写死 #fff 就是白底白字——按钮整个读不出来。宿主内置按钮用的是
-   * label-primary-foreground（浅色主题 #fff、深色主题 #0f1115），但它不在 Theme 检查面的
-   * 那 14 个 token 里，所以这里挂了回落链：拿不到就退到 bg-layer-1——brand-primary 在明暗
-   * 两套里都是表面的反色，拿**表面色**当字色一定读得出来。
-   */
-  color: var(--dsw-alias-label-primary-foreground, var(--dsw-alias-bg-layer-1, #fff));
-}
-.dsm-button.dsm-primary:hover:not(:disabled) {
-  /* 往表面色混一点点：深色主题里变暗、浅色主题里变亮，两边都像"被按了一下"。 */
-  background: color-mix(in srgb, var(--dsw-alias-brand-primary, #3370ff) 88%, var(--dsw-alias-bg-layer-1, #fff));
-}
+/*
+ * 这一页的按钮不在这里画：动作按钮一律是官方 Button（Button.module.css 那套，variant 决定外观、
+ * size 决定 36px/14px 与 28px/12px 两档，填充与前景色也由官方那份点明）。本页原先手写的那套
+ * .dsm-button / .dsm-primary 已经删掉，连它那条"检查面没给填充按钮的前景色，只好拿表面色当回落"
+ * 的链子一起——那个前景色 token 官方按钮本来就在用，不必本页再拼一遍。
+ *
+ * 这一条注释刻意不写出那个 token 的名字：test/styles.test.mjs 扫 token 时连注释一起扫，写出来就会
+ * 逼着那份名单把它当成"本页在用的 token"再登记一次，而本页已经不用它了。
+ */
+
 /*
  * 一条列表里的两级：**工作区**是组头，**会话**是组头下面缩进的那些行。
  * 区分手段叠了四层，任意一套主题、任意一种色觉下都读得出上下级：
@@ -672,21 +670,28 @@ export const CSS = `
 .dsm-planHead .dsm-tag { font-weight: 400; line-height: 18px; }
 /* cwd 那一格里的路径要能断行（fixed 布局下列宽不会再变），否则长路径顶出格子。 */
 .dsm-cwd { color: var(--dsw-alias-label-secondary, #646a73); overflow-wrap: anywhere; }
-/* 标签是个小块：挤在窄列里也不能折成两行（导入计划表的动作列里曾经折成「跳/过」）。 */
-.dsm-tag { border-radius: 6px; padding: 0 6px; font-size: 12px; white-space: nowrap; }
-/* state 色是指示色，不是文字色：它在浅色主题里淡到读不出来。实测（浏览器里量的，两套主题都量了）
-   state-idle-primary = #d4d4d4，白底 1.48:1；深色 #545557 在 #232324 上 2.1:1。
-   state-warn-primary = #f59e0b，白底 2.15:1。所以文字一律走 label 色（浅 5.8:1 / 深 10.4:1），
-   state 色只留在边框和一层淡填充上——绿色「新建」、灰色「跳过」还是那个颜色，字却是读得出来的。 */
-.dsm-tagCreate {
-  color: var(--dsw-alias-label-primary, #1f2329);
-  border: 1px solid var(--dsw-alias-state-success-primary, #2ea121);
-  background: color-mix(in srgb, var(--dsw-alias-state-success-primary, #2ea121) 14%, transparent);
-}
-/* 中性标签：导入计划里的 skip、导出列表里"不是已登记工作区"的目录，都只是"没什么动作"。 */
-.dsm-tagIdle, .dsm-tagSkip {
-  color: var(--dsw-alias-label-secondary, #646a73);
-  border: 1px solid var(--dsw-alias-border-l2, rgba(0, 0, 0, 0.12));
+/*
+ * .dsm-tag 只是**布局挂钩**：标签的几何与配色都由官方 Tag 原语给（Tag.module.css 是 999px 胶囊 /
+ * padding 1px 8px / 11px 字 / 行高 17px / 字重 500，tone 决定配色），本页只往上挂"这一页怎么摆它"
+ * 的那几条。
+ *
+ * 这个类挂在**两处**，按那一枚标签有没有悬浮提示分：
+ *   - 有提示的（官方 Tag 不收 title，见 ConfirmDialog 那类取舍）挂在包着它的那层 span（带 title）上——
+ *     .dsm-groupPick > / .dsm-rowLabel > / .dsm-candidateHead > 这些子选择器选中的就是这一层；
+ *   - 没提示的挂在官方 Tag 自己身上（上面那几条后代选择器照样命中）。
+ *  一份标签只有一处带这个类，避免同一枚被两条规则各算一遍。
+ *
+ * 为什么这里要 display: inline-flex：本页要用 max-width + overflow 做"窄列里截断"（子选择器那层若
+ * 还是 inline，max-width 根本不生效），官方 Tag 自己是 inline-flex，本页这层得跟它一致。
+ *
+ * 不再写 border-radius / padding / font-size / 配色：那些是"标签长什么样"，归官方管；本页再写一遍
+ * 会与官方那份打架，谁生效取决于样式表注入顺序。nowrap 留在这儿是给竖排字兜底——官方那一份自己
+ * 也有，但标签一旦被换回手写的 span 这一页就会竖起来，测试也钉它。
+ */
+.dsm-tag {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
 }
 /* state 色非当文字色不可的时候，先和 label-primary 兑一下：亮色主题往深里走、深色主题往浅里走，
    同一条声明在两套主题里各自走向可读的一侧（浅色主题实测 warn 5.57:1 / error 9.75:1 / ok 5.82:1）。 */
@@ -701,56 +706,41 @@ export const CSS = `
   align-items: center;
   gap: 8px;
 }
-/* 页内分页：贴着卡片区的下划线式页签，和设置外壳自己的 tab 视觉区分开 */
+/* 页内分页：一排官方 SegmentedControl 段 + 右端那枚「刷新」，下面一条通栏下划线。 */
 .dsm-tabsRow {
   display: flex;
   align-items: center;
   gap: 12px;
-  /* 面板窄到装不下「一排页签 + 刷新」时（英文页签实测 421px）让它换行，而不是把刷新挤出可视区。 */
+  /* 面板窄到装不下「一排页签 + 刷新」时（英文那几段实测 421px）让它换行，而不是把刷新挤出可视区。 */
   flex-wrap: wrap;
   row-gap: 4px;
   border-bottom: 1px solid var(--dsw-alias-border-l1, rgba(0, 0, 0, 0.1));
 }
 /* 页面级的动作（「刷新」）推到这一行的右端：页签整排只占左边一段，右边量下来空着 142px。
-   用 margin-left:auto 而不是一枚 spacer——换行之后它仍然贴着右端。 */
-.dsm-tabsRow > .dsm-button { flex: none; margin-left: auto; }
-.dsm-tabs {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-.dsm-tab {
-  appearance: none;
-  border: none;
-  background: none;
-  color: var(--dsw-alias-label-secondary, #646a73);
-  font: inherit;
-  cursor: pointer;
-  padding: 6px 10px;
-  border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
-}
-.dsm-tab:hover { color: var(--dsw-alias-label-primary, #1f2329); }
-.dsm-tab[aria-selected='true'] {
-  color: var(--dsw-alias-label-primary, #1f2329);
-  border-bottom-color: var(--dsw-alias-brand-primary, #3370ff);
-  font-weight: 600;
-}
-.dsm-tab:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary, #3370ff); outline-offset: -2px; }
+   用 margin-left:auto 而不是一枚 spacer——换行之后它仍然贴着右端。
+   选中本页自己的类名而不是 .dsm-button：那是本页删掉的手写类，官方 Button 的类名是它 CSS module
+   的哈希名，按类名选它既认不得也不该认。 */
+.dsm-tabsRow > .dsm-tabsAction { flex: none; margin-left: auto; }
+/*
+ * 页签本体不在这里画：官方 SegmentedControl 自己带轨道、滑块指示器、三段间距、aria-selected
+ * 配色与方向键走查（SegmentedControl.module.css）。本页原先手写的那套 .dsm-tabs / .dsm-tab
+ * 已经删掉——下划线式页签换成了官方那套分段控件，"和设置外壳自己的 tab 区分开"这件事由它负责。
+ */
 .dsm-fields { display: flex; flex-direction: column; gap: 8px; }
 .dsm-field { display: flex; flex-direction: column; gap: 4px; }
 .dsm-fieldLabel { color: var(--dsw-alias-label-secondary, #646a73); }
+/*
+ * 输入框的外观不在这里画：文本框一律是官方 Input（Input.module.css：外层 32px 高、0.5px 描边、
+ * 圆角 --dsw-radius-md、focus-within 时描边转 state-business-primary）。本页只往上挂"这一页
+ * 怎么摆它"的布局：撑满字段那一列，border-box 免得内边距把宽度顶出父容器。
+ *
+ * 原先那套 border / background / border-radius / padding / :focus-visible 已经删掉——那些
+ * 是"输入框长什么样"，官方那份才是唯一来源；本页再写一遍会与它打架，谁生效取决于样式表注入顺序。
+ */
 .dsm-input {
-  border: 1px solid var(--dsw-alias-border-l2, rgba(0, 0, 0, 0.18));
-  background: var(--dsw-alias-bg-layer-2, transparent);
-  color: inherit;
-  border-radius: 8px;
-  padding: 5px 8px;
-  font: inherit;
   width: 100%;
   box-sizing: border-box;
 }
-.dsm-input:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary, #3370ff); outline-offset: -1px; }
 /* 路径映射：一行一条，左右各一个输入框、右边一个删除；窄屏时整行换行而不是把输入框压扁。 */
 .dsm-mapRows { display: flex; flex-direction: column; gap: 6px; }
 .dsm-mapRow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
@@ -836,7 +826,8 @@ export const CSS = `
 .dsm-filter:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary, #3370ff); outline-offset: 1px; }
 /* 每类各有多少条：数字比标签淡一档，读起来仍走 label-secondary（同 .dsm-tag 的理由）。 */
 .dsm-filterCount { color: var(--dsw-alias-label-secondary, #646a73); margin-left: 5px; }
-.dsm-check { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+/* 勾选框那一层不在这里画：它是官方 Checkbox（Checkbox.module.css 自带 16px 方框、6px 间距与
+   焦点环）。原先手写的 .dsm-check 已经删掉。 */
 /*
  * 确认弹窗：官方 Modal 给遮罩、卡片、标题栏与焦点归还（ConfirmDialog.tsx 里说明了为什么必须用它），
  * 这里只调两件事——宽度与滚动。
@@ -867,9 +858,12 @@ export const CSS = `
  * 两处必须同规格。
  */
 .dsm-dialogBody { display: flex; flex-direction: column; gap: 8px; font-size: 14px; line-height: 20px; }
-/* 底部那对按钮同上：footer 在我们那层 body 之外，字号也会继承文档根的 16px（量到 16px / 34px 高，
-   页面上的同一个类名是 13px / 30px 高）。同一个 .dsm-button 在弹窗里与页面里得是一个规格。 */
-.dsm-dialog .dsm-button { font-size: 14px; }
+/*
+ * 底部那对按钮不再需要本页写字号：它们是官方 Button 的缺省尺寸（36px / 14px），而官方按钮在
+ * Button.module.css 里把 font-size 写在 md 那一档上，不靠继承——原先那条
+ * .dsm-dialog .dsm-button { font-size: 14px } 是给手写按钮补继承的（footer 在我们那层 body 之外，
+ * 会继承文档根的 16px），现在整个删掉。
+ */
 /*
  * 进度条：同步这种"按条走网络"的长动作（整库可能上百条）用它回答"做到第几条了"。
  *

@@ -18,6 +18,8 @@
 
 import * as React from 'react'
 
+import { Button, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
+
 import { fetchBackups, rollbackBackup, type BackupSummary, type ProgressEvent, type RollbackResponse } from '../api.ts'
 import { ConfirmDialog } from './ConfirmDialog.tsx'
 import { ProgressBlock } from './ProgressBlock.tsx'
@@ -154,18 +156,19 @@ export function BackupPanel({ t, reload }: Pick<PanelShare, 't' | 'reload'>): Re
         <p className="dsm-banner dsm-error">
           <span>{error}</span>
           <span className="dsm-spacer" />
-          <button type="button" className="dsm-button" onClick={() => setError(null)}>
+          {/* 关掉一条横幅：不动数据，走官方 ghost。 */}
+          <Button variant="ghost" size="sm" onClick={() => setError(null)}>
             {t('error.dismiss')}
-          </button>
+          </Button>
         </p>
       )}
       {notice !== null && (
         <p className="dsm-banner dsm-ok">
           <span>{notice}</span>
           <span className="dsm-spacer" />
-          <button type="button" className="dsm-button" onClick={() => setNotice(null)}>
+          <Button variant="ghost" size="sm" onClick={() => setNotice(null)}>
             {t('error.dismiss')}
-          </button>
+          </Button>
         </p>
       )}
 
@@ -174,9 +177,9 @@ export function BackupPanel({ t, reload }: Pick<PanelShare, 't' | 'reload'>): Re
           <span className="dsm-cardTitle">{t('backup.title')}</span>
           <span className="dsm-spacer" />
           {/* 头部只放这枚"重新读一遍清单"的工具：它不动任何数据，与卡片级的写操作不是一类。 */}
-          <button type="button" className="dsm-button" onClick={() => void load()} disabled={busy !== null}>
+          <Button variant="ghost" size="sm" onClick={() => void load()} disabled={busy !== null}>
             {t('page.refresh')}
-          </button>
+          </Button>
         </div>
         <p className="dsm-hint">{t('backup.hint')}</p>
         {backupRoot !== '' && (
@@ -194,8 +197,12 @@ export function BackupPanel({ t, reload }: Pick<PanelShare, 't' | 'reload'>): Re
                 <div className="dsm-backupMain">
                   <span className="dsm-rowId">
                     {formatStamp(backup.createdAt)}
-                    {/* 这份备份是哪一类操作留下的：删除与同步覆盖的那份点「恢复」，迁移的那份点「回滚」。 */}
-                    <span className="dsm-tag dsm-tagIdle">{t(backupKindLabel(backup))}</span>
+                    {/*
+                      这份备份是哪一类操作留下的：删除与同步覆盖的那份点「恢复」，迁移的那份点「回滚」。
+                      它是"这份东西是什么"的中性事实，没有健康度含义——走官方 `Tag` 的 `neutral`
+                      （平台灰底），对应原先的 `.dsm-tagIdle`。
+                    */}
+                    <Tag className="dsm-tag" tone="neutral">{t(backupKindLabel(backup))}</Tag>
                   </span>
                   <span className="dsm-hint">{t('backup.row', { sessions: backup.sessions, artifacts: backup.artifacts })}</span>
                   {(backup.from !== undefined || backup.to !== undefined) && (
@@ -206,9 +213,9 @@ export function BackupPanel({ t, reload }: Pick<PanelShare, 't' | 'reload'>): Re
                     </span>
                   )}
                 </div>
-                <button type="button" className="dsm-button" onClick={() => open(backup)} disabled={busy !== null}>
+                <Button variant="outline" size="sm" onClick={() => open(backup)} disabled={busy !== null}>
                   {t(isRestore(backup) ? 'backup.restore.action' : 'backup.rollback.action')}
-                </button>
+                </Button>
               </div>
             ))}
           </div>
