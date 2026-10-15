@@ -3171,6 +3171,8 @@ test('客户端产物：同步设置里的「测试连接」——按钮、只�
   assert.ok(testButton !== undefined, '按钮是个真的 button')
   assert.equal(testButton.props.disabled, false, '配了 url、又没有草稿：可以直接测')
   assert.equal(fresh.text.some((item) => String(item).startsWith('sync.test.ok')), false, '没测之前不摆结论')
+  // 「放弃改动」在没有草稿时不该出现（理由与反事实见下面 `edited` 那一段）。
+  assert.equal(fresh.text.includes('sync.form.discard'), false, '没有草稿时不摆「放弃改动」')
 
   // 401 且库里没有密码：这是最常见的那一次失败，说清"引用名里没有值"（而不是笼统的"认证失败"）。
   const denied = outcomeOf({
@@ -3220,6 +3222,25 @@ test('客户端产物：同步设置里的「测试连接」——按钮、只�
     (node) => node.type === 'button' && node.props?.children === 'sync.test.action',
   )
   assert.equal(editedButton.props.disabled, true, '测的是已保存的配置：有草稿就先别测')
+
+  /*
+   * 「放弃改动」只在真有草稿时出场：没改动时它是一枚永远按不动的按钮，占着主动作旁边那一格却什么
+   * 都做不了（旁边的「未保存」已经把这个状态说出来了）。三枚同处一条动作行，读起来是同一件事的三个
+   * 状态：能存（保存可点）、存了才能测（测试连接灰着）、不想存就退回去（放弃改动）。
+   *
+   * 反事实：去掉那个 `dirty &&`（无条件画），第一条立刻红。
+   */
+  assert.ok(edited.text.some((item) => item === 'sync.form.discard'), '有草稿时才摆「放弃改动」')
+  const dirtyRow = edited.mounted.recorded.find(
+    (node) =>
+      node.props?.className === 'dsm-controls' && strings(node.props?.children).includes('sync.form.discard'),
+  )
+  assert.ok(dirtyRow !== undefined, '「放弃改动」在一条动作行里')
+  const dirtyRowText = strings(dirtyRow.props?.children)
+  assert.ok(
+    dirtyRowText.includes('save') && dirtyRowText.includes('sync.test.action'),
+    `与「保存」「测试连接」同处那一条，实际：${JSON.stringify(dirtyRowText)}`,
+  )
 
   // 点一下按钮：打的是 `/sync?mode=test`（端点写错的话这一条会红——结论行本身是宿主回的，测不到它）。
   const calls = []
@@ -5343,13 +5364,16 @@ test('客户端产物：同步设置的「测试连接」——结论紧跟在�
   )
 })
 
-test('客户端产物：同步设置的「测试连接」是只读工具，排在字段之上、不跟保存同一行', { skip }, async () => {
+test('客户端产物：同步设置的「测试连接」挨着「保存」，排在字段之后', { skip }, async () => {
   /*
-   * 位置与**性质**要一致：它一次 PROPFIND、一个字节都不改，所以是这张卡片的只读工具（与「刷新」「全选」
-   * 同一类），该在字段之上；而不是挤在「保存 / 放弃改动」那行**写**操作的旁边——那样读起来像"保存之后
-   * 还有个第二步"。
+   * 它测的是**已保存的**配置（`canTest` 要求先没有草稿），所以在阅读顺序上它是保存的**下一步**，
+   * 不是字段之前的前置工具：摆在最上面时，第一次配根本用不了——地址还没存过，按钮先是灰的，用户得
+   * 填完、存好、再翻回顶上那一行去按。「只读」说的是它不改数据，不决定它排在表单的哪一头；「刷新 /
+   * 全选」那种列表工具才是"摆在读之前"的。
    *
-   * 反事实：把它挪回保存那一行之后，`saveBeforeTest` 这条断言立刻红。
+   * 判据要能分清"在后面"与"在旁边"：文本先后只说明前者，所以"与「保存」同处一条动作行"按结构核。
+   *
+   * 反事实：把 `dsm-syncTools` 提到字段之前，前两条断言立刻红。
    */
   const state = {
     sessionsRoot: '/home/u/.dsh/sessions',
@@ -5384,13 +5408,19 @@ test('客户端产物：同步设置的「测试连接」是只读工具，排�
   const save = text.indexOf('save')
   assert.ok(test >= 0, '有「测试连接」')
   assert.ok(save >= 0, '有「保存」')
-  assert.ok(test < save, '「测试连接」在「保存」之前（它是只读的探路工具，不是保存的第二步）')
-  // 它比第一个字段还早：整张表单的最上面那一行。
-  assert.ok(test < text.indexOf('sync.field.url'), '它排在所有字段之上（表单最上面那一行工具）')
+  assert.ok(save < test, '「测试连接」排在「保存」之后（它测的是已保存的配置，是保存的下一步）')
+  // 字段之后才是动作行：它不再占表单顶上那一行。
+  assert.ok(test > text.indexOf('sync.field.url'), '它排在所有字段之后（动作行里）')
 
-  // 那一行是个独立的动作行，与保存那一行不是同一个容器。
+  // "挨着"这件事按结构核：它与「保存」同处一条 dsm-controls 动作行。
   const toolsRows = mounted.recorded.filter((node) => node.props?.className === 'dsm-syncTools')
-  assert.equal(toolsRows.length, 1, '「测试连接」有自己的那一行（dsm-syncTools）')
+  assert.equal(toolsRows.length, 1, '只有一块 dsm-syncTools')
+  const actionRow = mounted.recorded.find(
+    (node) =>
+      node.props?.className === 'dsm-controls' && strings(node.props?.children).includes('sync.test.action'),
+  )
+  assert.ok(actionRow !== undefined, '「测试连接」要在一条动作行里')
+  assert.ok(strings(actionRow.props?.children).includes('save'), '并且与「保存」同处那一条')
   const button = mounted.recorded.find((node) => node.type === 'button' && node.props?.children === 'sync.test.action')
   assert.ok(button !== undefined, '按钮是个真的 button')
 })

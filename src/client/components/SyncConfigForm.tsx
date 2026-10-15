@@ -285,35 +285,6 @@ export function SyncConfigForm({
 
   return (
     <div className="dsm-syncForm">
-      {/*
-       * 「测试连接」是这张卡片的**只读工具**，所以摆在最上面那一行（与「刷新」「全选」同一类；见
-       * AGENTS.md 的"卡片头部只放不动数据的工具"）。
-       *
-       * 它原来挤在「保存 / 放弃改动」那一行的旁边——那是**写**操作的行，而这一次探测一个字节都不改
-       * （只 PROPFIND 一次远端）。位置与性质对不上，读起来像"保存之后还有个第二步"。
-       *
-       * 而且它测的是**已保存的**配置（宿主的运行时按配置现读），与草稿无关：所以有草稿时按钮禁用、
-       * 说明换成"先保存"。这一条正是"它属于保存之前还是之后"的判据——把它摆到表单**最上面**（而不是
-       * 末尾靠近保存的地方），读起来就是"先探通路、再填其余"。
-       */}
-      <div className="dsm-syncTools">
-        <div className="dsm-controls">
-          {/* 「测试连接」只读一次远端（PROPFIND），不动任何数据：官方 ghost。 */}
-          <Button variant="ghost" size="sm" onClick={testConnection} disabled={!canTest}>
-            {testing ? t('sync.test.running') : t('sync.test.action')}
-          </Button>
-          <span className="dsm-hint">{dirty ? t('sync.test.dirty') : t('sync.test.hint')}</span>
-        </div>
-        {/*
-         * 结论紧跟在按钮下面，**不**摆到表单末尾去：按一下按钮，答案就该出现在按的地方。摆末尾的话
-         * 按钮在最上面、结论在最下面，中间隔着整张表单（十几行字段），用户按完不知道结果有没有出来，
-         * 得自己往下翻——这不是美观问题，是"这次点击有没有生效"根本看不见。
-         */}
-        {testError !== undefined && <p className="dsm-warn">{testError}</p>}
-        {verdict !== undefined && (
-          <p className={testResult?.code === 'ok' ? 'dsm-ok' : 'dsm-warn'}>{t(verdict.key, verdict.params)}</p>
-        )}
-      </div>
       <Field
         label={t('sync.field.url')}
         hint={t('sync.field.urlHint')}
@@ -452,26 +423,55 @@ export function SyncConfigForm({
         </div>
       )}
 
-      <div className="dsm-controls">
-        {/* 表单的主动作：写的是配置，走官方 primary（原先手写的 .dsm-button.dsm-primary）。 */}
-        <Button variant="primary" size="sm" onClick={save} disabled={!canSave}>
-          {saving ? t('sync.form.saving') : t('save')}
-        </Button>
-        {/* 丢掉草稿、退回已保存的那份：不动数据，官方 ghost。 */}
-        <Button variant="ghost" size="sm" onClick={discard} disabled={!dirty}>
-          {t('sync.form.discard')}
-        </Button>
-        {!snapshot.writable && <span className="dsm-warn">{t('sync.form.readOnly')}</span>}
-        {problems.map((problem) => (
-          <span key={problem.code} className="dsm-warn">
-            {problem.code === 'mapping'
-              ? problemText(problem.problem, t)
-              : t(problem.code === 'timeoutNotPositive' ? 'sync.field.timeoutInvalid' : 'sync.field.autoPushIntervalInvalid')}
-          </span>
-        ))}
-        {failed && <span className="dsm-warn">{t('sync.form.saveFailed')}</span>}
-        {credentialError !== undefined && <span className="dsm-warn">{credentialError}</span>}
-        {snapshot.writable && dirty && problems.length === 0 && !failed && <span className="dsm-hint">{t('sync.form.unsaved')}</span>}
+      {/*
+       * 动作行：保存是**写**（配置 + 凭据库、作用于草稿），「测试连接」紧跟它——它测的是**已保存**的
+       * 配置，所以按完保存、草稿一干净，这枚按钮就在原地当场变成可用。
+       *
+       * 不把它摆到表单最上面去：那样在"第一次配"这条路上根本用不了——地址还没存过，`canTest` 先是
+       * 假的，用户得填完、存好、再翻回最上面去按；「只读工具」这条口径是给「刷新 / 全选」那种**列表**
+       * 工具留的，而这一枚是**配置校验**，它的输入就是刚存下去的那份配置，摆在哪一步之后是明确的。
+       */}
+      <div className="dsm-syncTools">
+        <div className="dsm-controls">
+          {/* 表单的主动作：写的是配置，走官方 primary。 */}
+          <Button variant="primary" size="sm" onClick={save} disabled={!canSave}>
+            {saving ? t('sync.form.saving') : t('save')}
+          </Button>
+          {/* 「测试连接」只读一次远端（PROPFIND），不动任何数据：官方 ghost。 */}
+          <Button variant="ghost" size="sm" onClick={testConnection} disabled={!canTest}>
+            {testing ? t('sync.test.running') : t('sync.test.action')}
+          </Button>
+          {/*
+           * 丢掉草稿、退回已保存的那份：不动数据，官方 ghost。只在真有草稿时出场——没改动时它是个
+           * 永远按不动的按钮，占着主动作旁边的位置却什么都做不了（而且旁边的「未保存」已经把这个
+           * 状态说出来了）。
+           */}
+          {dirty && (
+            <Button variant="ghost" size="sm" onClick={discard}>
+              {t('sync.form.discard')}
+            </Button>
+          )}
+          {!snapshot.writable && <span className="dsm-warn">{t('sync.form.readOnly')}</span>}
+          {problems.map((problem) => (
+            <span key={problem.code} className="dsm-warn">
+              {problem.code === 'mapping'
+                ? problemText(problem.problem, t)
+                : t(problem.code === 'timeoutNotPositive' ? 'sync.field.timeoutInvalid' : 'sync.field.autoPushIntervalInvalid')}
+            </span>
+          ))}
+          {failed && <span className="dsm-warn">{t('sync.form.saveFailed')}</span>}
+          {credentialError !== undefined && <span className="dsm-warn">{credentialError}</span>}
+          {snapshot.writable && dirty && problems.length === 0 && !failed && <span className="dsm-hint">{t('sync.form.unsaved')}</span>}
+        </div>
+        {/*
+         * 探测的说明与结论紧跟在按钮那一行下面：按一下按钮，答案就该出现在按的地方。这一块留在
+         * 动作行里（同一个 dsm-syncTools 子树），由 test/client.test.mjs 按结构钉住。
+         */}
+        <span className="dsm-hint">{dirty ? t('sync.test.dirty') : t('sync.test.hint')}</span>
+        {testError !== undefined && <p className="dsm-warn">{testError}</p>}
+        {verdict !== undefined && (
+          <p className={testResult?.code === 'ok' ? 'dsm-ok' : 'dsm-warn'}>{t(verdict.key, verdict.params)}</p>
+        )}
       </div>
 
     </div>
