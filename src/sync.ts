@@ -1686,6 +1686,7 @@ async function fetchAttachment(
   ref: AttachmentRef,
   counters: SyncAttachmentIn,
   problems: string[],
+  absent: Set<string>,
 ): Promise<void> {
   const path = port.pathOf(ref)
   if (path === undefined) {
@@ -1701,7 +1702,9 @@ async function fetchAttachment(
     }
   } catch (error) {
     if ((error as { status?: number } | null)?.status === 404) {
-      problems.push(`远端共享库里没有 ${ref.id}（${ref.kind}），这一个没能取回来`)
+      // 「远端也没有」不是错误，是"有对象的那些机器还没把它们推上去"这一种状态：**整轮汇总成一句**
+      // （一个会话引用几十张图时，逐条报会把问题清单淹掉，而它们要的处置是同一件事）。
+      absent.add(ref.id)
       return
     }
     problems.push(`取附件 ${ref.id} 失败：${error instanceof Error ? error.message : String(error)}`)
@@ -1720,6 +1723,7 @@ async function pullAttachments(
   refs: readonly AttachmentRef[],
   counters: SyncAttachmentIn,
   problems: string[],
+  absent: Set<string>,
 ): Promise<void> {
   for (const ref of refs) {
     const action = attachmentActionOf(port, ref)
@@ -1727,7 +1731,7 @@ async function pullAttachments(
       counters.present += 1
       continue
     }
-    await fetchAttachment(deps, port, ref, counters, problems)
+    await fetchAttachment(deps, port, ref, counters, problems, absent)
   }
 }
 
@@ -1822,6 +1826,7 @@ async function repairAttachments(
   incoming: SyncAttachmentIn,
   outgoing: SyncAttachmentOut,
   problems: string[],
+  absent: Set<string>,
 ): Promise<void> {
   /** 本机缺的那些（远端有就取回来）。 */
   const wanted = new Map<string, AttachmentRef>()
@@ -1839,20 +1844,14 @@ async function repairAttachments(
     }
   }
   if (wanted.size > 0) {
-    const absent: string[] = []
     for (const ref of wanted.values()) {
       const names = await remoteObjectNamesIn(deps, listed, ref, problems)
       if (names === undefined) continue
       if (!names.has(attachmentHex(ref))) {
-        absent.push(ref.id)
+        absent.add(ref.id)
         continue
       }
-      await fetchAttachment(deps, port, ref, incoming, problems)
-    }
-    if (absent.length > 0) {
-      problems.push(
-        `本机有 ${absent.length} 个附件对象在远端共享库里也没有，这次补不上（有对象的那些机器还没把它们推上去）`,
-      )
+      await fetchAttachment(deps, port, ref, incoming, problems, absent)
     }
   }
   // 远端缺的那些交给推送那一段：它自己按前缀列一次、只传远端真没有的（两个方向共用同一份缓存）。
@@ -1932,6 +1931,11 @@ export async function applyPreparedSync(
   const attachmentOut: SyncAttachmentOut = { uploaded: 0, skipped: 0, bytes: 0, missing: 0 }
   /** 一次同步里每个前缀目录只列一次（`list()` 已经把那一层全部对象名给回来了）。 */
   const remoteObjectNames = new Map<string, Set<string>>()
+  /**
+   * 本机要、远端也没有的那些对象（去重后的 id）。**整轮收尾时汇总成一句**：拉取那条路与补对象那条路
+   * 撞上的是同一种状态（有对象的那些机器还没把它们推上去），逐条报会把问题清单淹掉。
+   */
+  const absentObjects = new Set<string>()
 
   // ── 拉取：取包 → 自校验 → 走导入那条编排 ────────────────────────────────────
   const loose = readRegistryLoose(deps.registryPath)
@@ -1979,6 +1983,7 @@ export async function applyPreparedSync(
           attachmentRefsOfBundle(bundle, deps.decodeAll),
           attachmentIn,
           problems,
+          absentObjects,
         )
       }
       const importPlan = planImport(bundle, importOptions)
@@ -2067,6 +2072,7 @@ export async function applyPreparedSync(
             attachmentRefsOfBundle(bundle, deps.decodeAll),
             attachmentIn,
             problems,
+            absentObjects,
           )
         }
         const importPlan = planImport(bundle, importOptions)
@@ -2249,6 +2255,14 @@ export async function applyPreparedSync(
       attachmentIn,
       attachmentOut,
       problems,
+      absentObjects,
+    )
+  }
+
+  // 一轮一句话：本机要、远端也没有的那些对象（两边都是同一种状态，处置也是同一件事）。
+  if (absentObjects.size > 0) {
+    problems.push(
+      `本机有 ${absentObjects.size} 个附件对象在远端共享库里也没有，这次补不上（有对象的那些机器还没把它们推上去）`,
     )
   }
 
