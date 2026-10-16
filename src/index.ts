@@ -18,6 +18,7 @@ import {
   adoptLegacyBackupRoot,
   archiveOps,
   attachAutoPushToSessions,
+  attachmentPort,
   decodeAll,
   describeSyncConfig,
   directoryPickerKind,
@@ -159,6 +160,9 @@ export function apply(ctx: Context, config: PluginConfigInput = {}): () => void 
       hostCheckpoints: () => hostCheckpointPort(ctx),
       // 同理：目录选择器是"桌面对话框"还是"页面内浏览"，只有宿主自己知道。
       pickerKind: () => directoryPickerKind(ctx),
+      // 附件库（`ctx.attachments` 的两个 host-path 方法）：导出把对象收进包、导入与同步拉取把它落进
+      // 本机附件库。同样是**探测**：没有这个服务就是"只带日志"，与升级前一致。
+      attachments: () => attachmentPort(ctx),
       // 归档与取消归档是宿主的能力（`workspaceRegistry`，Web profile 才有）：这里把两个方法收成
       // 端口交出去，`src/web.ts` 因此仍然只认一个形状、不认识 Cordis。服务缺席返回 undefined，
       // 界面据此禁用那两个按钮并说明原因。

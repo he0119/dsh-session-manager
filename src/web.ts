@@ -27,6 +27,7 @@ import {
   type MigrateRequest,
 } from './migrate.ts'
 import { familyOf, loneSubagents } from './family.ts'
+import type { AttachmentPort } from './attachments.ts'
 import { projectionCacheDir } from './paths.ts'
 import { describeWarm, warmCheckpoints } from './checkpoint-warm.ts'
 import { readRegistry, validateRegistry } from './registry.ts'
@@ -103,6 +104,14 @@ export interface ApiDeps {
    * 只是那些会话在侧边栏要等第一次点开才有标题。
    */
   hostCheckpoints?: () => CheckpointWarmPort | undefined
+  /**
+   * 宿主的附件库端口（`ctx.attachments` 的两个 host-path 方法，见 attachments.ts 与 tools.ts 的
+   * `attachmentPort()`）。
+   *
+   * 同 `hostRegistry`：要读宿主服务，所以由入口探测后注入。缺席 = 这个宿主没有附件服务，导出照旧
+   * 只带日志、导入照旧只落日志（与升级前一致），界面上那两处附件条数就不出现。
+   */
+  attachments?: () => AttachmentPort | undefined
   /**
    * 宿主目录选择器的能力种类（`browse` / `native` / `null`）。
    *
@@ -601,6 +610,9 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
   const hostRegistry = (): HostRegistryPort | undefined => deps.hostRegistry?.()
   // 同理：把宿主的两个冷读服务转手给编排层（迁移 / 导入 / 同步拉取三个落地口共用，见 ApiDeps.hostCheckpoints）。
   const hostCheckpoints = (): CheckpointWarmPort | undefined => deps.hostCheckpoints?.()
+  // 附件库的探测（导出往里收对象、导入往外补对象，见 ApiDeps.attach）。缺席 = 这个宿主没有附件服务：
+  // 包照旧只带日志，导入也照旧只落日志——与升级前完全一致。
+  const attachmentPort = (): AttachmentPort | undefined => deps.attachments?.()
 
   /**
    * 最近一次预演算出来的那份数据（见 sync.ts 的 `SyncPrepared`）。
@@ -713,7 +725,28 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
     })
     const at = now()
     const source: BundleSourceInfo = { sessionsRoot: paths.sessionsRoot, pluginVersion: deps.pluginVersion }
-    const bundle = buildBundle(sources, { now: at.toISOString(), source })
+    /*
+     * 附件对象跟着包走：日志里只有引用，字节在宿主的附件库里。库里没有的那几个照样报出来
+     * ——用户需要知道"这次有几张图没能带走"，而不是等到了另一台机器上才发现图挂了。
+     * 一个都没带成时包是 v1（见 transfer.ts 的 buildBundle），这几枚响应头仍然如实报数。
+     */
+    const port = attachmentPort()
+    let packed: { packed: number; bytes: number; missing: number } = { packed: 0, bytes: 0, missing: 0 }
+    const bundle = buildBundle(sources, {
+      now: at.toISOString(),
+      source,
+      ...(port === undefined
+        ? {}
+        : {
+            attachments: {
+              port,
+              decodeAll,
+              onReport: (report) => {
+                packed = { packed: report.packed, bytes: report.bytes, missing: report.missing.length }
+              },
+            },
+          }),
+    })
     const bytes = sources.reduce((sum, item) => sum + item.files.reduce((s, file) => s + file.bytes, 0), 0)
     sendBytes(res, 200, bundle, {
       'content-type': 'application/octet-stream',
@@ -721,6 +754,11 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
       // 包里到底几条 / 多少字节：界面那句"已导出 N 条"要说的是**包里的**，勾一条父会话时它比勾选数多
       'x-dsh-session-count': String(sources.length),
       'x-dsh-session-bytes': String(bytes),
+      // 附件那两枚：带走了几个对象、有多少字节；`-missing` 是本机附件库里找不到的那几个（日志里有引用、
+      // 对象不在，包带不走），界面据此提醒一句而不是假装没事。
+      'x-dsh-attachment-count': String(packed.packed),
+      'x-dsh-attachment-bytes': String(packed.bytes),
+      'x-dsh-attachment-missing': String(packed.missing),
     })
   }
 
@@ -759,12 +797,16 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
       // 预演的每条会话要显示标题：包里的日志已经整份在内存里，折叠一次比再读盘便宜
       // （见 transfer.bundleTitle）。
       decodeAll,
+      // 附件库里那些对象的去处在宿主手里（见 ApiDeps.attachments）；没有这个端口时计划里那几条一律
+      // 报 unavailable，包里的日志照旧落地。
+      attachments: attachmentPort(),
     }
 
     /*
      * 计划与落地都走事件流：包本身的字节是**请求体**（上传那一段宿主报不了，那是浏览器与网络的事），
-     * 但收到之后还有两段长的——预演要逐条读包里的日志折标题（实测 250 条 / 70.9 MB 约 1.7 秒），落地
-     * 要逐条写盘并改写首帧 cwd（同一条包实测 18.9 秒）。这两段原来界面上只有一句「导入中…」。
+     * 但收到之后还有几段长的——预演要逐条读包里的日志折标题（实测 250 条 / 70.9 MB 约 1.7 秒）、数
+     * 一遍包里的附件对象在不在本机，落地要逐条写盘并改写首帧 cwd（同一条包实测 18.9 秒）。这几段原来
+     * 界面上只有一句「导入中…」。
      */
     await streamResult(res, async (report) => {
       // 计划算不出来（包坏了、注册表重挂失败…）：抛出去就是 `error` 事件，界面照原话报——与原来
@@ -779,11 +821,21 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
         created: plan.created,
         rehomed: plan.rehomed,
         bytes: plan.bytes,
+        attachments: plan.attachments,
+        attachmentAdds: plan.attachmentAdds,
+        attachmentBytes: plan.attachmentBytes,
         registryChange: plan.registryChange,
       }
 
       if (!apply) return { ...payload, ok: plan.ok }
-      if (plan.created.length === 0) return { ...payload, ok: false, error: '没有可导入的会话（都已在库里）' }
+      /*
+       * 一件都不会发生时不必走落地：会话都在库里，包里的附件对象本机也一个不缺。**只缺附件**那种
+       * （日志早就导过、图是挂的）要放行——那正是这次要修的那个现状，落地那一步会把缺的对象补上，
+       * 一个日志字节都不覆盖。
+       */
+      if (plan.created.length === 0 && plan.attachmentAdds === 0) {
+        return { ...payload, ok: false, error: '没有可导入的内容：会话都已在库里，包里的附件对象本机也都有' }
+      }
 
       try {
         const outcome = applyImport(bundle, plan, { ...options, decodeAll, onProgress: report })
@@ -809,6 +861,10 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
           ok: true,
           written: outcome.written,
           writtenBytes: outcome.bytes,
+          attachmentWritten: outcome.attachmentWritten,
+          attachmentPresent: outcome.attachmentPresent,
+          attachmentWrittenBytes: outcome.attachmentBytes,
+          attachmentProblems: outcome.attachmentProblems,
           registryWritten: outcome.registryWritten,
           takesEffect: effectOf(effect, takesEffect()),
           ...(outcome.written.length === 0 ? {} : { warm }),

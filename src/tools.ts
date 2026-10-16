@@ -23,6 +23,7 @@ import { homedir, hostname } from 'node:os'
 import { dirname, join } from 'node:path'
 
 import { createDavClient, type DavPort } from './dav.ts'
+import type { AttachmentPort } from './attachments.ts'
 import { readHeaderQuick } from './discovery.ts'
 import {
   previewMigration,
@@ -800,6 +801,45 @@ export function titleRefreshPort(ctx: unknown): TitleRefreshPort | undefined {
  * 而不是让界面去试错——试探在 `native` 宿主上会真的弹出对话框。
  */
 export type PickerKind = 'browse' | 'native' | null
+
+/**
+ * 宿主附件服务里我们要的那两件（`ctx.attachments`）。
+ *
+ * 两个方法都是**纯路径计算**：宿主的文档写着"returns provider-local path without reading the
+ * object"，对象不存在也给得出路径。本插件因此既能用它在导出侧定位对象，也能用它在导入侧算出"该往
+ * 哪儿写"——不必复刻附件库的目录形状（那是宿主的实现细节，换 provider 就变）。
+ */
+interface HostAttachmentStore {
+  imageHostPath?: (ref: { attachmentId: string }) => string
+  fileHostPath?: (ref: { attachmentId: string }) => string
+}
+
+/**
+ * 探测宿主的附件库，收成一个端口交给核心层（见 attachments.ts）。
+ *
+ * 认形状不认实现：两件少一件就当"这个宿主没有附件服务"（半套上场只会让图片对象落一半）。缺席时核心
+ * 层的行为与升级前完全一致——包只带日志，导入只落日志。
+ *
+ * @param ctx 宿主上下文。
+ * @returns 端口；这个宿主没有附件服务时 undefined。
+ */
+export function attachmentPort(ctx: unknown): AttachmentPort | undefined {
+  const store = optionalService(ctx, 'attachments') as HostAttachmentStore | undefined
+  const image = store?.imageHostPath
+  const file = store?.fileHostPath
+  if (typeof image !== 'function' || typeof file !== 'function') return undefined
+  return {
+    pathOf: (ref) => {
+      try {
+        // 只交 attachmentId：两个方法都只读它（引用里的媒体类型/尺寸是给别的用途的）。
+        return (ref.kind === 'image' ? image : file).call(store, { attachmentId: ref.id })
+      } catch {
+        // 形状不认（引用不是内容寻址 id、宿主换了 provider）：这一个对象落不了，由调用方如实报出去。
+        return undefined
+      }
+    },
+  }
+}
 
 /**
  * 读宿主目录选择器的能力种类。

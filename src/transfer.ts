@@ -2,7 +2,7 @@
 //
 // 容器形状（一条 gzip 流，`gunzip` 之后就是「清单 + 载荷」）：
 //
-//   gzip( 'DSHSESS1\n' | u32le 清单长度 | 清单 JSON | 各文件的原始字节 )
+//   gzip( 'DSHSESS1\n' | u32le 清单长度 | 清单 JSON | 各文件的原始字节 | 各附件对象的原始字节 )
 //
 // 为什么自己拼一层而不是 tar：本模块只需要"清单 + 一段连续载荷"，而 tar 的 512 字节头、
 // 路径长度限制与 PAX 扩展在这个固定用途上全是负担。载荷是**原始日志字节**，不重新编码——
@@ -12,9 +12,20 @@
 // 却把"解出来看一眼"变成要写代码的事。整包 gzip 对**迁移重写过的 raw-block 帧**（未压缩；
 // 本包 zstd-frame 的手写编码器产出的就是这种）是实打实的收益，对已压缩的也只是几十字节开销。
 //
+// 为什么 v2 要带附件对象：日志里只有**引用**（`attachmentId: "sha256:…"`），图片与文件的字节在
+// 宿主的附件库里（见 [attachments.ts](./attachments.ts) 的文件头）。只带日志的包换一个 `$DSH_HOME`
+// 落地，用户看到的是「图片加载失败，点击重试」，而且点多少次都一样——引用在、对象不在。所以 v2 把
+// "这条会话引用到的对象"也放进载荷，清单里各记一条（内容寻址 id、属于哪个库、字节数与偏移）。
+//
+// 读的兼容面：**一个对象都不带的包照旧写 v1**（清单形状与升级前逐字节同形，装旧版的宿主也读得了），
+// **真要带对象才升 v2**；两侧都读 v1 与 v2。向后兼容是刻意的：旧包必须能继续导入，否则"升级一次"
+// 就等于把以前导出的东西作废；反过来，没对象的包也没有理由让别人读不了。
+//
 // 不变式（readBundle 逐条校验，坏包绝不进入导入流程）：
-//   - magic 与 formatVersion 都认；
+//   - magic 认，formatVersion 落在可读范围内（1..2）；
 //   - 每个文件条目的 [offset, offset + bytes) 落在载荷内，且 sha256 对得上；
+//   - 每个附件条目的 [offset, offset + bytes) 落在载荷内，且 sha256 等于它 id 里那一段
+//     （内容寻址的名字就是内容本身，两者不符时这个对象谁都不该信）；
 //   - 会话目录名必须等于 encodeSegment(id)——宿主启动时会校验目录名与 header id 一致，
 //     不满足的包要在这里拒掉，而不是让它去污染会话库。
 import { createHash } from 'node:crypto'
@@ -22,6 +33,15 @@ import { mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSy
 import { join } from 'node:path'
 import { gunzipSync, gzipSync } from 'node:zlib'
 
+import {
+  commitAttachmentObject,
+  decodeLogText,
+  isAttachmentId,
+  scanAttachmentRefs,
+  type AttachmentKind,
+  type AttachmentPort,
+  type AttachmentRef,
+} from './attachments.ts'
 import { canonicalDir } from './canonical-path.ts'
 import { encodeSegment, sessionDir } from './paths.ts'
 import { reHome, writeRegistryAtomic } from './registry.ts'
@@ -31,8 +51,15 @@ import type { DecodeAll, ProgressReporter, RegistryChange, SessionLogFile, Works
 
 /** 容器 magic。换代时改这一串，而不是悄悄改变字段含义。 */
 export const BUNDLE_MAGIC = 'DSHSESS1\n'
-/** 清单格式版本（与 magic 一起构成「这个包我读得懂」的双重判据）。 */
-export const BUNDLE_FORMAT_VERSION = 1
+/** 写出去的清单格式版本（与 magic 一起构成「这个包我读得懂」的双重判据）。 */
+export const BUNDLE_FORMAT_VERSION = 2
+/**
+ * 还读得懂的最老清单版本。
+ *
+ * v1 与 v2 的差别只有"有没有 attachments 那一节"，其余字段同义，所以读法共用一条路：v1 读出来就是
+ * 一张空的附件表。再老的版本不存在（v1 是本插件第一版包格式）。
+ */
+export const BUNDLE_MIN_FORMAT_VERSION = 1
 
 /** 导出源：一条已发现的会话。 */
 export interface ExportSource {
@@ -54,6 +81,22 @@ export interface BundleFileEntry {
   /** 相对载荷起点的偏移。 */
   offset: number
   sha256: string
+}
+
+/**
+ * 清单里的一个附件对象条目。
+ *
+ * 不带 `sha256` 字段：`id` 本身就是内容摘要（`sha256:<hex>`），再写一份只会多出"两处不一致"这种
+ * 可能性，校验时按 `id` 里那一段核载荷。
+ */
+export interface BundleAttachmentEntry {
+  /** 内容寻址 id（`sha256:<hex>`）。 */
+  id: string
+  /** 属于哪个库（图片 / 文件）。 */
+  kind: AttachmentKind
+  bytes: number
+  /** 相对载荷起点的偏移。 */
+  offset: number
 }
 
 /** 清单里的一条会话。 */
@@ -79,8 +122,35 @@ export interface SessionBundle {
   createdAt: string
   source: BundleSourceInfo
   sessions: BundleSession[]
+  /** 包里的附件对象（v1 包没有这一节，读出来是空表）。 */
+  attachments: BundleAttachmentEntry[]
   /** 载荷：各条目原始字节按清单顺序的拼接。 */
   payload: Buffer
+}
+
+/** 带了对象的那些列表：导出侧要在包打出之后才知道"带走了几个、还缺几个"。 */
+export interface AttachmentPackReport {
+  /** 进包的对象条数。 */
+  packed: number
+  /** 进包对象的字节数（未压缩）。 */
+  bytes: number
+  /**
+   * 日志引用了、但本机附件库里找不到的对象。
+   *
+   * 不是错误：库里确实可能没有（对象被清理过、会话是从别处搬来的、宿主换过 `$DSH_HOME`）。
+   * 这几条照样进包就无从谈起，只能如实报出来——用户看到的是"这几张图带不走"，而不是一个失败。
+   */
+  missing: AttachmentRef[]
+}
+
+/** `buildBundle()` 里附件那一段的依赖。 */
+export interface AttachmentPackOptions {
+  /** 附件库端口（引用 → 本机绝对路径）。 */
+  port: AttachmentPort
+  /** 解码器：扫日志里的引用要把日志解开。 */
+  decodeAll: DecodeAll
+  /** 打包完之后报一次（带走了几个、缺几个）。 */
+  onReport?: (report: AttachmentPackReport) => void
 }
 
 function sha256(buf: Buffer): string {
@@ -89,19 +159,33 @@ function sha256(buf: Buffer): string {
 
 /**
  * 把若干会话打成 `.dshsess` 字节。
+ *
+ * 附件的收集分两步：先逐条会话把日志解开、扫出引用（`scanAttachmentRefs()`，同一个对象被多条会话
+ * 引用只算一次），再逐个把对象读进来。扫描是这一步多出来的开销，所以只在 `options.attachments` 给了
+ * 端口时才做——**没有附件服务的宿主上一个字节都不多解**，那个包照旧是 v1（清单里连 `attachments`
+ * 那一节都没有，与升级前同形）。
+ *
  * @param sources 会话源（每个源的所有代次文件都进包，保持与磁盘一致）。
  * @param options.now 清单时间戳，便于测试注入。
  * @param options.onProgress 逐条会话报一次（`phase: 'pack'`）：每条要把它全部代次的字节读出来、
  *   算一次 sha256，整库导出时这一步是真花时间的（实测 250 条 / 70.9 MB 约 1.4 秒）。
+ * @param options.attachments 附件那一段（端口 + 解码器 + 报告回调）；缺席 = 这个包不带对象。
  * @throws 某个文件读不到时抛错（不产出半成品包）。
  */
 export function buildBundle(
   sources: readonly ExportSource[],
-  options: { now?: string; source?: BundleSourceInfo; onProgress?: ProgressReporter } = {},
+  options: {
+    now?: string
+    source?: BundleSourceInfo
+    onProgress?: ProgressReporter
+    attachments?: AttachmentPackOptions
+  } = {},
 ): Buffer {
   const parts: Buffer[] = []
   const sessions: BundleSession[] = []
   let offset = 0
+  /** 收集到的引用：去重键带上 kind（图片库与文件库里的对象互不相干）。 */
+  const wanted = new Map<string, AttachmentRef>()
 
   for (const [index, source] of sources.entries()) {
     options.onProgress?.({
@@ -126,6 +210,11 @@ export function buildBundle(
       })
       parts.push(buf)
       offset += buf.length
+      if (options.attachments !== undefined) {
+        for (const ref of scanAttachmentRefs(decodeLogText(buf, file.compression, options.attachments.decodeAll))) {
+          wanted.set(`${ref.kind}:${ref.id}`, ref)
+        }
+      }
     }
     sessions.push({
       id: source.id,
@@ -136,11 +225,48 @@ export function buildBundle(
     })
   }
 
+  const attachments: BundleAttachmentEntry[] = []
+  const missing: AttachmentRef[] = []
+  let attachmentBytes = 0
+  if (options.attachments !== undefined) {
+    const { port, onReport } = options.attachments
+    const list = [...wanted.values()]
+    for (const [index, ref] of list.entries()) {
+      options.onProgress?.({ phase: 'attach', total: list.length, done: index, id: ref.id })
+      const path = port.pathOf(ref)
+      if (path === undefined) {
+        missing.push(ref)
+        continue
+      }
+      let buf: Buffer
+      try {
+        buf = readFileSync(path)
+      } catch {
+        // 端口给了路径但读不到（对象被清掉、权限不对）：与"库里就没有"同一种交代——用户关心的是
+        // "这张图这次带不走"，不是 errno。
+        missing.push(ref)
+        continue
+      }
+      attachments.push({ id: ref.id, kind: ref.kind, bytes: buf.length, offset })
+      parts.push(buf)
+      offset += buf.length
+      attachmentBytes += buf.length
+    }
+    onReport?.({ packed: attachments.length, bytes: attachmentBytes, missing })
+  }
+
+  /*
+   * 格式号按"这个包到底多带了什么"来定，而不是按"这份代码是哪一版"：一个对象都没有（没给端口、
+   * 日志里没有引用、或者引用的对象本机就没有）时写 v1——清单里连 `attachments` 那一节都不出现，
+   * 与升级前逐字节同形，装旧版的宿主照旧读得了。真要带对象才升 v2，因为那时老宿主确实读不了。
+   */
+  const formatVersion = attachments.length > 0 ? BUNDLE_FORMAT_VERSION : BUNDLE_MIN_FORMAT_VERSION
   const manifest = JSON.stringify({
-    formatVersion: BUNDLE_FORMAT_VERSION,
+    formatVersion,
     createdAt: options.now ?? new Date().toISOString(),
     source: options.source ?? {},
     sessions,
+    ...(attachments.length === 0 ? {} : { attachments }),
   })
   const manifestBytes = Buffer.from(manifest, 'utf8')
   const header = Buffer.alloc(BUNDLE_MAGIC.length + 4)
@@ -188,9 +314,16 @@ export function readBundle(bytes: Buffer): SessionBundle {
     createdAt?: unknown
     source?: unknown
     sessions?: unknown
+    attachments?: unknown
   }
-  if (manifest.formatVersion !== BUNDLE_FORMAT_VERSION) {
-    throw new Error(`unsupported bundle formatVersion ${String(manifest.formatVersion)}`)
+  const formatVersion = manifest.formatVersion
+  if (
+    typeof formatVersion !== 'number' ||
+    !Number.isInteger(formatVersion) ||
+    formatVersion < BUNDLE_MIN_FORMAT_VERSION ||
+    formatVersion > BUNDLE_FORMAT_VERSION
+  ) {
+    throw new Error(`unsupported bundle formatVersion ${String(formatVersion)}`)
   }
   if (!Array.isArray(manifest.sessions)) throw new Error('bundle manifest has no sessions array')
 
@@ -226,19 +359,49 @@ export function readBundle(bytes: Buffer): SessionBundle {
     })
   }
 
+  // v1 没有这一节（`undefined` 才是"老包"，也是现在写出来的"一个对象都没带"那种包）；空数组是别的
+  // 写入者留下的"这包里没有对象"——两者读出来都一样是空表，判定不必再分。写成别的形状就是坏包。
+  if (manifest.attachments !== undefined && !Array.isArray(manifest.attachments)) {
+    throw new Error('bundle manifest attachments is not an array')
+  }
+  const attachments: BundleAttachmentEntry[] = []
+  for (const value of (manifest.attachments ?? []) as BundleAttachmentEntry[]) {
+    if (!isAttachmentId(value?.id)) throw new Error(`bundle attachment has an invalid id ${String(value?.id)}`)
+    if (value.kind !== 'image' && value.kind !== 'file') {
+      throw new Error(`bundle attachment ${value.id} has an unknown kind ${String(value.kind)}`)
+    }
+    if (typeof value.bytes !== 'number' || typeof value.offset !== 'number' || value.bytes < 0 || value.offset < 0) {
+      throw new Error(`bundle attachment ${value.id} has a malformed entry`)
+    }
+    if (value.offset + value.bytes > payload.length) {
+      throw new Error(`bundle attachment ${value.id} points outside the payload`)
+    }
+    const slice = payload.subarray(value.offset, value.offset + value.bytes)
+    if (sha256(slice) !== value.id.slice('sha256:'.length)) {
+      throw new Error(`bundle attachment ${value.id} failed its sha256 check (corrupted bundle)`)
+    }
+    attachments.push({ id: value.id, kind: value.kind, bytes: value.bytes, offset: value.offset })
+  }
+
   return {
-    formatVersion: BUNDLE_FORMAT_VERSION,
+    formatVersion,
     createdAt: typeof manifest.createdAt === 'string' ? manifest.createdAt : '',
     source: (typeof manifest.source === 'object' && manifest.source !== null
       ? manifest.source
       : {}) as BundleSourceInfo,
     sessions,
+    attachments,
     payload,
   }
 }
 
 /** 取某个文件条目的字节。 */
 export function entryBytes(bundle: SessionBundle, entry: BundleFileEntry): Buffer {
+  return bundle.payload.subarray(entry.offset, entry.offset + entry.bytes)
+}
+
+/** 取某个附件条目的字节（读的时候已按 id 里的 sha256 核过）。 */
+export function attachmentBytes(bundle: SessionBundle, entry: BundleAttachmentEntry): Buffer {
   return bundle.payload.subarray(entry.offset, entry.offset + entry.bytes)
 }
 
@@ -304,7 +467,7 @@ export interface ImportEntry {
 
 /** 一次导入的计划（纯计算，不写盘）。 */
 export interface ImportPlan {
-  /** 有可落地内容且无阻塞问题。 */
+  /** 有可落地内容（会创建会话，或会补上附件对象）且无阻塞问题。 */
   ok: boolean
   problems: string[]
   entries: ImportEntry[]
@@ -312,10 +475,30 @@ export interface ImportPlan {
   created: string[]
   /** 会被重新归属到目标工作区的会话 id。 */
   rehomed: string[]
-  /** 载荷总字节数。 */
+  /** 载荷总字节数（日志）。 */
   bytes: number
+  /** 包里的附件对象：本机没有的、本来就在的、落不了的。 */
+  attachments: ImportAttachmentEntry[]
+  /** 本条会话日志之外的附件字节数（会被写下去的）。 */
+  attachmentBytes: number
+  /** 会被写进目标附件库的对象条数（`attachments` 里 action === 'create' 的那些）。 */
+  attachmentAdds: number
   nextRegistry: WorkspaceRegistryState | null
   registryChange: RegistryChange | null
+}
+
+/**
+ * 计划里的一条附件对象。
+ *
+ * 三条分支与"会发生什么"一一对应：`create` 会写下去（本机缺这个对象）、`present` 本机已有（一个字节
+ * 都不写）、`unavailable` 落不了（宿主不认识这种引用，或没有附件服务）——最后一种要如实报出来，
+ * 因为用户会去界面上找那几张图，而它们不会出现。
+ */
+export interface ImportAttachmentEntry {
+  id: string
+  kind: AttachmentKind
+  bytes: number
+  action: 'create' | 'present' | 'unavailable'
 }
 
 /** `planImport()` / `applyImport()` 的选项。 */
@@ -337,11 +520,19 @@ export interface ImportOptions {
    * 不关心标题的调用方（工具层）不传，就一个字节都不解。
    */
   decodeAll?: DecodeAll
+  /**
+   * 目标附件库的端口（引用 → 本机绝对路径）。
+   *
+   * 缺席 = 这个宿主没有附件服务：包里的对象读不出来也落不下去，计划里那几条一律报 `unavailable`，
+   * 日志照旧导入（退化成 v1 那种"只带日志"的结果，与升级前一致）。
+   */
+  attachments?: AttachmentPort
   now?: string
   newId?: string
   /**
    * 预演进度：`scan`（扫一遍库里已有的会话目录，分母 0）→ `read`（逐条读包里的日志折标题，
-   * 分母是包里的条数——这一段是导入预演的大头，包里每条会话都要解一段字节）。
+   * 分母是包里的条数——这一段是导入预演的大头，包里每条会话都要解一段字节）→
+   * `attach`（逐个数一遍包里的附件对象在不在本机，分母是包里的对象数）。
    */
   onProgress?: ProgressReporter
 }
@@ -447,15 +638,56 @@ export function planImport(bundle: SessionBundle, options: ImportOptions): Impor
     }
   }
 
+  /*
+   * 附件对象与"会话会不会被创建"无关：对象是内容寻址的、只补不改，所以**跳过的会话照样补它的对象**。
+   * 这正是"这台机器上已经有日志、只有图挂了"那类现状的修复路径（重导一次同一个包，日志一个字节都不
+   * 覆盖，缺的对象补上）。
+   */
+  const attachmentEntries: ImportAttachmentEntry[] = []
+  let attachmentBytes = 0
+  let attachmentAdds = 0
+  for (const [index, item] of bundle.attachments.entries()) {
+    options.onProgress?.({ phase: 'attach', total: bundle.attachments.length, done: index, id: item.id })
+    const action = attachmentAction(options.attachments, item)
+    if (action === 'create') {
+      attachmentBytes += item.bytes
+      attachmentAdds += 1
+    }
+    attachmentEntries.push({ id: item.id, kind: item.kind, bytes: item.bytes, action })
+  }
+
   return {
-    ok: problems.length === 0 && created.length > 0,
+    ok: problems.length === 0 && (created.length > 0 || attachmentAdds > 0),
     problems,
     entries,
     created,
     rehomed,
     bytes,
+    attachments: attachmentEntries,
+    attachmentBytes,
+    attachmentAdds,
     nextRegistry,
     registryChange,
+  }
+}
+
+/**
+ * 一个包里的对象在本机算什么：要写下去（`create`）、本来就在（`present`）、还是落不了（`unavailable`）。
+ *
+ * 判据是**路径 + 字节数**：对象名就是内容的 sha256，所以"同名同字节数"已经足够说明本机这份就是它
+ * （真读一遍再核 sha256 要把每个对象都过一遍盘，而读写两侧各自都会验一次）。字节数对不上（上次崩在
+ * 半途、被人动过）时不报 `present`——那是**会重写**的一支，计划里必须算进"会发生写"的那些。
+ */
+function attachmentAction(
+  port: AttachmentPort | undefined,
+  entry: BundleAttachmentEntry,
+): ImportAttachmentEntry['action'] {
+  const path = port?.pathOf({ id: entry.id, kind: entry.kind })
+  if (path === undefined) return 'unavailable'
+  try {
+    return statSync(path).size === entry.bytes ? 'present' : 'create'
+  } catch {
+    return 'create'
   }
 }
 
@@ -463,6 +695,19 @@ export function planImport(bundle: SessionBundle, options: ImportOptions): Impor
 export interface ImportOutcome {
   written: string[]
   bytes: number
+  /** 写进目标附件库的对象条数。 */
+  attachmentWritten: number
+  /** 本机本来就有、一个字节都没动的对象条数。 */
+  attachmentPresent: number
+  /** 写下去的附件字节数。 */
+  attachmentBytes: number
+  /**
+   * 没能落地的附件（宿主不认识这种引用、路径写不进去…）。
+   *
+   * 与日志那条路不同，这里**不抛**：日志是这条包的主体，一个附件写不进去不该让整次导入失败
+   * （退化成升级前那种"日志进来了、图还是挂的"），但用户必须看到是哪几个对象没落地。
+   */
+  attachmentProblems: string[]
   /** 注册表是否已落盘。 */
   registryWritten: boolean
 }
@@ -476,11 +721,19 @@ function rewriteCwd(buf: Buffer, compression: string | null, to: string, decodeA
 /**
  * 落地一次导入。
  *
- * 每个文件先写成 `<规范名>.part` 再 rename 过去：`parseSessionLogName` 不认 `.part`，
- * 所以中途崩溃留下的是"发现阶段会忽略的文件"，而不是一个只有半截日志、却看起来正常的会话
- * ——半个会话被宿主读进去比没有会话更糟。
+ * 顺序是**先对象、后日志**：会话目录一旦出现，宿主下一次列会话就会把它连同图片一起读；对象要是这时
+ * 还没落下去，用户看到的就是升级前那种"图挂了"。反过来（先日志后对象）会留下一个窗口期，而这段窗口
+ * 里的表现正是这次要修掉的那个现象。
  *
- * @throws 任一文件写失败时抛错；已写完的会话保留，本函数不做跨会话回滚（由报告交代清楚）。
+ * 每个日志文件先写成 `<规范名>.part` 再 rename 过去：`parseSessionLogName` 不认 `.part`，
+ * 所以中途崩溃留下的是"发现阶段会忽略的文件"，而不是一个只有半截日志、却看起来正常的会话
+ * ——半个会话被宿主读进去比没有会话更糟。附件对象同理（见 attachments.ts 的
+ * `commitAttachmentObject()`）。
+ *
+ * 附件那一条路**不抛**（见 `ImportOutcome.attachmentProblems`）：日志写不进去是失败，对象写不进去是
+ * 这几个对象没补上，退化成升级前的结果而不是整次导入作废。
+ *
+ * @throws 任一日志文件写失败时抛错；已写完的会话保留，本函数不做跨会话回滚（由报告交代清楚）。
  */
 export function applyImport(
   bundle: SessionBundle,
@@ -490,6 +743,37 @@ export function applyImport(
   const byId = new Map(bundle.sessions.map((session) => [session.id, session]))
   const written: string[] = []
   let bytes = 0
+
+  const attachmentProblems: string[] = []
+  let attachmentWritten = 0
+  let attachmentPresent = 0
+  let attachmentBytesWritten = 0
+  if (bundle.attachments.length > 0) {
+    if (options.attachments === undefined) {
+      attachmentProblems.push(`这个宿主没有附件服务，包里的 ${bundle.attachments.length} 个附件对象没有落地`)
+    } else {
+      for (const [index, entry] of bundle.attachments.entries()) {
+        options.onProgress?.({ phase: 'attach', total: bundle.attachments.length, done: index, id: entry.id })
+        const path = options.attachments.pathOf({ id: entry.id, kind: entry.kind })
+        if (path === undefined) {
+          attachmentProblems.push(`宿主容不下附件 ${entry.id}（${entry.kind}），这一个没有落地`)
+          continue
+        }
+        try {
+          if (commitAttachmentObject(path, attachmentBytes(bundle, entry)) === 'present') {
+            attachmentPresent += 1
+          } else {
+            attachmentWritten += 1
+            attachmentBytesWritten += entry.bytes
+          }
+        } catch (error) {
+          attachmentProblems.push(
+            `附件 ${entry.id} 落地失败：${error instanceof Error ? error.message : String(error)}`,
+          )
+        }
+      }
+    }
+  }
 
   const creating = plan.entries.filter((entry) => entry.action === 'create')
   for (const [index, entry] of creating.entries()) {
@@ -523,5 +807,13 @@ export function applyImport(
     registryWritten = true
   }
 
-  return { written, bytes, registryWritten }
+  return {
+    written,
+    bytes,
+    attachmentWritten,
+    attachmentPresent,
+    attachmentBytes: attachmentBytesWritten,
+    attachmentProblems,
+    registryWritten,
+  }
 }

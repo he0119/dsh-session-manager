@@ -35,6 +35,9 @@ export function progressTextOf(t: Translate, progress: ProgressEvent): string {
       return t('progress.read', { current, total })
     case 'pack':
       return t('progress.pack', { current, total })
+    // 附件对象那一段（导出往包里收、导入往库里落）量的是对象，不是会话：与上面那几段分开说。
+    case 'attach':
+      return t('progress.attach', { current, total })
     case 'backup':
       return t('progress.backup', { current, total })
     case 'rewrite':
