@@ -153,8 +153,8 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
         <p className="dsm-banner dsm-error">
           <span>{error}</span>
           <span className="dsm-spacer" />
-          {/* 关掉一条横幅：不动数据，走官方 ghost（`.dsm-button` 那套手写填充已由官方原语接管）。 */}
-          <Button variant="ghost" size="sm" onClick={() => setError(null)}>
+          {/* 关掉一条横幅：本页不用官方缺省的 ghost（那条口径见「动作行里的动作带边框」那篇笔记）。 */}
+          <Button variant="outline" size="sm" onClick={() => setError(null)}>
             {t('error.dismiss')}
           </Button>
         </p>
@@ -203,7 +203,7 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
           这枚按钮要一个自己的类：官方 `Button` 的类名是它 CSS module 的哈希名（认不得、也不该认），
           所以"推到这一行右端"这条布局得挂在本页自己的类上。
         */}
-        <Button className="dsm-tabsAction" variant="ghost" size="sm" onClick={() => void load()} disabled={busy}>
+        <Button className="dsm-tabsAction" variant="outline" size="sm" onClick={() => void load()} disabled={busy}>
           {busy ? t('loading') : t('page.refresh')}
         </Button>
       </div>

@@ -316,8 +316,8 @@ export function TranscriptDialog({ session, onClose, t }: TranscriptDialogProps)
       {item.text !== undefined && item.text !== '' && <pre className="dsm-pre">{item.text}</pre>}
       {item.note !== undefined && <div className="dsm-meta">{item.note}</div>}
       {item.truncated !== undefined && (
-        /* 把那几格被截断的原文取回来：发起一次网络请求、改的是这一条的显示——普通动作，官方 ghost。 */
-        <Button variant="ghost" size="sm" disabled={busy} onClick={() => void showFull(item)}>
+        /* 把那几格被截断的原文取回来：发起一次网络请求、改的是这一条的显示——按钮一律带轮廓。 */
+        <Button variant="outline" size="sm" disabled={busy} onClick={() => void showFull(item)}>
           {t('manage.transcript.truncated', {
             count: item.truncated.reduce((sum, cut) => sum + cut.chars, 0),
           })}

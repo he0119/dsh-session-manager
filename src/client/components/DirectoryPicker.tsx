@@ -95,14 +95,14 @@ export function DirectoryPicker({
         <span className="dsm-fieldLabel">{t('dirPicker.title')}</span>
         <span className="dsm-spacer" />
         {onCandidates !== undefined && (
-          <Button variant="ghost" size="sm" onClick={onCandidates}>
+          <Button variant="outline" size="sm" onClick={onCandidates}>
             {t('dirPicker.candidates')}
           </Button>
         )}
-        <Button variant="ghost" size="sm" onClick={() => void open('')} disabled={busy}>
+        <Button variant="outline" size="sm" onClick={() => void open('')} disabled={busy}>
           {t('dirPicker.home')}
         </Button>
-        <Button variant="ghost" size="sm" onClick={onClose}>
+        <Button variant="outline" size="sm" onClick={onClose}>
           {t('cancel')}
         </Button>
       </div>

@@ -190,8 +190,8 @@ export function DirectoryField<K extends string>({
           <span className="dsm-pathValueText">{text}</span>
           <ChevronIcon />
         </button>
-        {/* 展开 / 收起手输框：不动值，走官方 ghost。 */}
-        <Button variant="ghost" size="sm" aria-expanded={manualOpen} onClick={() => controls.toggleManual(field)}>
+        {/* 展开 / 收起手输框。 */}
+        <Button variant="outline" size="sm" aria-expanded={manualOpen} onClick={() => controls.toggleManual(field)}>
           {manualOpen ? t('pathField.collapse') : t('pathField.type')}
         </Button>
       </div>

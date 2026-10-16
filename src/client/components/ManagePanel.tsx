@@ -487,8 +487,8 @@ export function ManagePanel({ t, state, meta, reload, directory }: PanelShare): 
         <p className="dsm-banner dsm-error">
           <span>{error}</span>
           <span className="dsm-spacer" />
-          {/* 关掉一条横幅：不动数据，官方 ghost。 */}
-          <Button variant="ghost" size="sm" onClick={() => setError(null)}>
+          {/* 关掉一条横幅：本页不用官方缺省的 ghost（那条口径见「动作行里的动作带边框」那篇笔记）。 */}
+          <Button variant="outline" size="sm" onClick={() => setError(null)}>
             {t('error.dismiss')}
           </Button>
         </p>
@@ -497,7 +497,7 @@ export function ManagePanel({ t, state, meta, reload, directory }: PanelShare): 
         <p className="dsm-banner dsm-ok">
           <span>{notice}</span>
           <span className="dsm-spacer" />
-          <Button variant="ghost" size="sm" onClick={() => setNotice(null)}>
+          <Button variant="outline" size="sm" onClick={() => setNotice(null)}>
             {t('error.dismiss')}
           </Button>
         </p>
@@ -516,7 +516,7 @@ export function ManagePanel({ t, state, meta, reload, directory }: PanelShare): 
         <p className="dsm-banner dsm-ok">
           <span>{retitleNotes.notice}</span>
           <span className="dsm-spacer" />
-          <Button variant="ghost" size="sm" onClick={() => setRetitle(null)}>
+          <Button variant="outline" size="sm" onClick={() => setRetitle(null)}>
             {t('error.dismiss')}
           </Button>
         </p>
@@ -609,13 +609,18 @@ export function ManagePanel({ t, state, meta, reload, directory }: PanelShare): 
 
         <div className="dsm-controls">
           {/*
-            归档 / 取消归档 / 重新生成名称 / 迁移：都是"对勾选的这些做一件事"，不动数据的破坏性
-            含义，走官方 ghost。最后那枚「删除」是破坏性动作，靠 spacer 顶到同一行右端（判据见
-            .agents/notes/implemented/architecture/2026-10-07-card-actions-live-in-a-footer-row.md），
-            它也只是打开确认弹窗、自己还不写盘，所以同样是 ghost。
+            归档 / 取消归档 / 重新生成名称 / 迁移：都是"对勾选的这些做一件事"，走官方 `outline`。
+            最后那枚「删除」是破坏性动作，靠 spacer 顶到同一行右端（判据见
+            .agents/notes/implemented/architecture/2026-10-07-card-actions-live-in-a-footer-row.md）。
+
+            这一页**不用官方缺省的 `ghost`**：它是"无边框无底色"，一行动作并排时整行看起来就是一段
+            灰字（真实 dev GUI 里量到 `border-width: 0px`，鼠标放上去才认得出来是按钮），旁边内建的
+            「打开配置文件」反倒是带边的 `outline`（量到 `border: rgba(0, 0, 0, 0.12) 1px`）。所以凡是
+            用官方 `Button` 的地方都给轮廓：主动作 `primary`、其余 `outline`。判据与取舍见
+            .agents/notes/implemented/bug-fix/2026-10-16-actions-carry-their-frame.md。
           */}
           <Button
-            variant="ghost"
+            variant="outline"
             size="sm"
             onClick={() => void doArchive(true)}
             disabled={busy !== null || picked.length === 0 || !archiveAvailable}
@@ -623,7 +628,7 @@ export function ManagePanel({ t, state, meta, reload, directory }: PanelShare): 
             {busy === 'archive' ? t('manage.archive.running') : t('manage.archive.action')}
           </Button>
           <Button
-            variant="ghost"
+            variant="outline"
             size="sm"
             onClick={() => void doArchive(false)}
             disabled={busy !== null || picked.length === 0 || !archiveAvailable}
@@ -635,7 +640,7 @@ export function ManagePanel({ t, state, meta, reload, directory }: PanelShare): 
             `.dsm-controls`）；破坏性的「删除」仍在 spacer 之后那一头。
           */}
           <Button
-            variant="ghost"
+            variant="outline"
             size="sm"
             onClick={() => void doRetitle()}
             disabled={busy !== null || picked.length === 0 || !retitleAvailable}
@@ -647,7 +652,7 @@ export function ManagePanel({ t, state, meta, reload, directory }: PanelShare): 
             它开自己的弹窗（目标目录 + 预演 + 确认），所以这里只是一枚按钮。
           */}
           <Button
-            variant="ghost"
+            variant="outline"
             size="sm"
             onClick={openMigrate}
             disabled={busy !== null || picked.length === 0}
@@ -656,7 +661,7 @@ export function ManagePanel({ t, state, meta, reload, directory }: PanelShare): 
           </Button>
           <span className="dsm-spacer" />
           <Button
-            variant="ghost"
+            variant="outline"
             size="sm"
             onClick={openDelete}
             disabled={busy !== null || picked.length === 0}

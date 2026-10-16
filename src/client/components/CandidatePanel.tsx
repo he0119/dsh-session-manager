@@ -64,11 +64,11 @@ export function CandidatePanel({
         <span className="dsm-fieldLabel">{label}</span>
         <span className="dsm-spacer" />
         {onFilesystem !== undefined && (
-          <Button variant="ghost" size="sm" onClick={onFilesystem}>
+          <Button variant="outline" size="sm" onClick={onFilesystem}>
             {t('dirPicker.filesystem')}
           </Button>
         )}
-        <Button variant="ghost" size="sm" onClick={onClose}>
+        <Button variant="outline" size="sm" onClick={onClose}>
           {t('cancel')}
         </Button>
       </div>

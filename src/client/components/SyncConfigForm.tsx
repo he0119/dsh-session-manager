@@ -355,8 +355,8 @@ export function SyncConfigForm({
                   value={row.to}
                   onChange={(event) => editMapping(index, { to: event.target.value })}
                 />
-                {/* 删掉这一行映射：只改草稿，不动已保存的配置——官方 ghost。 */}
-                <Button variant="ghost" size="sm" onClick={() => removeMapping(index)}>
+                {/* 删掉这一行映射：只改草稿，不动已保存的配置。 */}
+                <Button variant="outline" size="sm" onClick={() => removeMapping(index)}>
                   {t('sync.map.remove')}
                 </Button>
               </div>
@@ -371,8 +371,8 @@ export function SyncConfigForm({
           </datalist>
         )}
         <div className="dsm-controls">
-          {/* 加一行空映射：只改草稿，不动已保存的配置——官方 ghost。 */}
-          <Button variant="ghost" size="sm" onClick={addMapping}>
+          {/* 加一行空映射：动作行上的动作，走官方 outline。 */}
+          <Button variant="outline" size="sm" onClick={addMapping}>
             {t('sync.map.add')}
           </Button>
           <span className="dsm-hint">{t('sync.field.mappingHint')}</span>
@@ -437,17 +437,20 @@ export function SyncConfigForm({
           <Button variant="primary" size="sm" onClick={save} disabled={!canSave}>
             {saving ? t('sync.form.saving') : t('save')}
           </Button>
-          {/* 「测试连接」只读一次远端（PROPFIND），不动任何数据：官方 ghost。 */}
-          <Button variant="ghost" size="sm" onClick={testConnection} disabled={!canTest}>
+          {/*
+           * 「测试连接」只读一次远端（PROPFIND）：照样走官方 outline——"不写盘"不是裸着的理由，
+           * 内建设置页那枚同样只读的「打开配置文件」正是带边框的（量到 `border: rgba(0, 0, 0, 0.12) 1px`）。
+           */}
+          <Button variant="outline" size="sm" onClick={testConnection} disabled={!canTest}>
             {testing ? t('sync.test.running') : t('sync.test.action')}
           </Button>
           {/*
-           * 丢掉草稿、退回已保存的那份：不动数据，官方 ghost。只在真有草稿时出场——没改动时它是个
+           * 丢掉草稿、退回已保存的那份：动作行上的动作，走官方 outline。只在真有草稿时出场——没改动时它是个
            * 永远按不动的按钮，占着主动作旁边的位置却什么都做不了（而且旁边的「未保存」已经把这个
            * 状态说出来了）。
            */}
           {dirty && (
-            <Button variant="ghost" size="sm" onClick={discard}>
+            <Button variant="outline" size="sm" onClick={discard}>
               {t('sync.form.discard')}
             </Button>
           )}

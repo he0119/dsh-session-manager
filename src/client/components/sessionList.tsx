@@ -602,11 +602,11 @@ export function SessionPickTools({
 }): React.ReactElement {
   return (
     <>
-      {/* 这一对只动勾选集、不写盘：官方 ghost。禁用态由官方原语的 `disabled` 透传。 */}
-      <Button variant="ghost" size="sm" onClick={onSelectAll} disabled={selectableCount === 0}>
+      {/* 这一对只动勾选集、不写盘。禁用态由官方原语的 `disabled` 透传。 */}
+      <Button variant="outline" size="sm" onClick={onSelectAll} disabled={selectableCount === 0}>
         {t('list.selectAll')}
       </Button>
-      <Button variant="ghost" size="sm" onClick={onClear} disabled={pickedCount === 0}>
+      <Button variant="outline" size="sm" onClick={onClear} disabled={pickedCount === 0}>
         {t('list.clear')}
       </Button>
     </>
@@ -618,10 +618,10 @@ export function SessionGroupTools({ collapse, t }: { collapse: GroupCollapse; t:
   return (
     <div className="dsm-groupTools">
       <span className="dsm-hint">{t('list.groupedByDir')}</span>
-      <Button variant="ghost" size="sm" disabled={collapse.allCollapsed} onClick={collapse.collapseAll}>
+      <Button variant="outline" size="sm" disabled={collapse.allCollapsed} onClick={collapse.collapseAll}>
         {t('list.collapseAll')}
       </Button>
-      <Button variant="ghost" size="sm" disabled={!collapse.anyCollapsed} onClick={collapse.expandAll}>
+      <Button variant="outline" size="sm" disabled={!collapse.anyCollapsed} onClick={collapse.expandAll}>
         {t('list.expandAll')}
       </Button>
     </div>

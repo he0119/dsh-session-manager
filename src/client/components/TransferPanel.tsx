@@ -326,7 +326,7 @@ export function TransferPanel({ t, state, meta, reload, directory }: PanelShare)
         <p className="dsm-banner dsm-error">
           <span>{error}</span>
           <span className="dsm-spacer" />
-          <Button variant="ghost" size="sm" onClick={() => setError(null)}>
+          <Button variant="outline" size="sm" onClick={() => setError(null)}>
             {t('error.dismiss')}
           </Button>
         </p>
@@ -335,7 +335,7 @@ export function TransferPanel({ t, state, meta, reload, directory }: PanelShare)
         <p className="dsm-banner dsm-ok">
           <span>{notice}</span>
           <span className="dsm-spacer" />
-          <Button variant="ghost" size="sm" onClick={() => setNotice(null)}>
+          <Button variant="outline" size="sm" onClick={() => setNotice(null)}>
             {t('error.dismiss')}
           </Button>
         </p>
