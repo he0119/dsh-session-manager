@@ -230,12 +230,20 @@ npx @deepseek-ai/dsh@next plugin --profile desktop add /path/to/dsh-session-mana
 同步会话库：库里的目录名与 header 的 `cwd` 绑死，换台机器就对不上。这一块的做法是把远端当中转——
 远端放的是 `.dshsess` 包，落地仍然走导入那条路，由它把 `cwd` 改写成这台机器的路径。
 
+**附件对象（图片与文件）走远端一个共享目录**：`dsh-session-manager/attachments/objects/<sha 前两位>/<sha>`
+（文件对象在 `file-objects/`，两者与机器格同级）。包本身只有日志，所以推送时只补远端缺的那些、拉取时只
+取本机缺的那些——同一张图不会因为「一条会话一个包」被反复上传（自动推送每写完一轮就重推一次），也不会
+因为两台机器各推一份而存两份。手动点「同步」时还会多跑一趟**补对象**，专治计划按日志指纹判「两边一样、
+谁也不用动」的那些会话：本机缺的就从共享库取回来（早先拉过来、图一直挂着的那批），远端缺的就传上去（旧
+版本只推过日志的那批）。远端也没有的那些报一句「本机有 N 个附件对象在远端共享库里也没有，这次补不上」。
+宿主没挂 `dsh-attachment-local` 时这一整块不参与：包与索引与升级前逐字节一致。
+
 配置（插件配置里的 `sync` 块）：
 
 ```yaml
 sync:
   url: https://dav.example.com/dsh        # WebDAV 地址（服务器根也行）；插件在它下面自建 dsh-session-manager/
-  machineId: robot-a                       # 可选，缺省取主机名；两台机器别用同一个 id
+  machineId: robot-a                       # 可选，缺省取主机名；两台机器别用同一个 id，也不能叫 attachments
   username: alice                          # 可选（Basic）
   passwordRef: DSH_DAV_PASSWORD            # 可选：**凭据引用名**（环境变量名）；留空就用 DSH_DAV_PASSWORD
   mapping:                                 # 显式映射：远端 cwd → 本机目录（两台机器各写各的）

@@ -1076,6 +1076,9 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
       hostRegistry,
       // 拉取来的会话在本机没有投影检查点：同一次收口里请宿主把列表元数据折出来（见 checkpoint-warm.ts）。
       hostCheckpoints,
+      // 附件对象走远端共享库（`dsh-session-manager/attachments/…`）：推送时只补远端缺的、拉取时只取
+      // 本机缺的，包本身照旧只有日志。宿主没有附件服务时端口缺席，这条路静默降级（见 sync.ts）。
+      attachments: attachmentPort,
       ...(deps.pluginVersion === undefined ? {} : { pluginVersion: deps.pluginVersion }),
       ...(deps.now === undefined ? {} : { now: deps.now }),
     }

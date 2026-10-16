@@ -310,12 +310,24 @@ The same project usually lives in different directories on different machines (`
 to the header `cwd`. Instead the remote is a relay — it holds `.dshsess` bundles, and landing one still goes
 through the import path, which rewrites the `cwd` to this machine's mapped directory.
 
+**Attachment objects (images and files) live in one shared remote directory**:
+`dsh-session-manager/attachments/objects/<first two hex digits>/<sha>` (file objects in `file-objects/`),
+siblings of the per-machine directories. The bundle itself carries only the log, so a push uploads just the
+objects the remote lacks and a pull fetches just the objects this machine lacks — one image is neither
+re-uploaded for every bundle nor stored twice across machines. Pressing “Sync” also runs one extra pass that
+**reconciles objects** for the sessions the plan leaves alone (their logs are byte-identical, so nothing about
+them would otherwise move): objects missing locally are fetched from the shared directory (sessions pulled
+before objects travelled with them), and objects the remote lacks are uploaded (sessions pushed by an older
+version that only carried logs). Objects no machine has pushed yet are reported as “N attachment objects are
+missing on the remote too”. A host without `dsh-attachment-local` skips this whole part: bundles and indexes
+are byte-identical to before.
+
 Config (the `sync` block of the plugin configuration):
 
 ```yaml
 sync:
   url: https://dav.example.com/dsh        # WebDAV address (a server root works); the plugin creates dsh-session-manager/ under it
-  machineId: robot-a                       # optional, defaults to the hostname; never share one id across machines
+  machineId: robot-a                       # optional, defaults to the hostname; never share one id, and not "attachments"
   username: alice                          # optional (Basic)
   passwordRef: DSH_DAV_PASSWORD            # optional: a **credential reference** (an environment-variable name); blank uses DSH_DAV_PASSWORD
   mapping:                                 # explicit mapping: remote cwd → local directory (each machine writes its own)

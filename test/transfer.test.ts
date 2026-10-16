@@ -26,6 +26,7 @@ import {
   type ExportSource,
 } from '../src/transfer.ts'
 import { encodeRawFrame } from '../src/zstd-frame.ts'
+import { attachmentEvent, attachmentIdOf, makeAttachmentStore } from './attachment-fixture.ts'
 
 const decodeAll: DecodeAll = (buf: Uint8Array): string => Buffer.from(decompress(buf)).toString('utf8')
 
@@ -82,11 +83,6 @@ function writeSession(
   return { id: options.id, cwd: options.cwd, createdAt: header.createdAt, dir, files }
 }
 
-/** 内容寻址 id：与宿主 `sha256:<hex>` 同一口径。 */
-function attachmentIdOf(bytes: Buffer): string {
-  return `sha256:${createHash('sha256').update(bytes).digest('hex')}`
-}
-
 /**
  * 把一个 v2 包改写成 v1：格式号写 1、清单里去掉 `attachments` 那一节，载荷原样留着。
  *
@@ -119,49 +115,6 @@ function manifestOf(bundle: Buffer): Record<string, unknown> {
     string,
     unknown
   >
-}
-
-/** 一条日志行：引用一个附件对象（形状与宿主写进日志的一致）。 */
-function attachmentEvent(ref: AttachmentRef, bytes: number, name = 'image.png'): string {
-  return JSON.stringify({
-    type: 'user/message',
-    seq: 0,
-    data: {
-      content: [
-        { type: ref.kind, attachment: { attachmentId: ref.id, mediaType: 'image/png', width: 1, height: 1, bytes, name } },
-      ],
-    },
-  })
-}
-
-/**
- * 假附件库：一个根 + 与宿主同形的两个目录（`objects` / `file-objects`，按 sha 前两位分桶）。
- *
- * 端口是**纯路径计算**（对象不在也给得出路径），与宿主 `ctx.attachments.imageHostPath()` 同一语义。
- */
-function makeAttachmentStore(name: string): {
-  root: string
-  port: AttachmentPort
-  put(ref: AttachmentRef, bytes: Buffer): string
-} {
-  const root = join(import.meta.dirname, '.sandbox', name)
-  rmSync(root, { recursive: true, force: true })
-  mkdirSync(root, { recursive: true })
-  const dirOf = (ref: AttachmentRef): string => (ref.kind === 'image' ? 'objects' : 'file-objects')
-  const pathOf = (ref: AttachmentRef): string => {
-    const hex = ref.id.slice('sha256:'.length)
-    return join(root, dirOf(ref), hex.slice(0, 2), hex)
-  }
-  return {
-    root,
-    port: { pathOf },
-    put(ref, bytes) {
-      const path = pathOf(ref)
-      mkdirSync(dirname(path), { recursive: true })
-      writeFileSync(path, bytes)
-      return path
-    },
-  }
 }
 
 function emptyRegistry(): WorkspaceRegistryState {

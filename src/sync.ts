@@ -52,6 +52,7 @@ import { readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { canonicalDir, type DirCanonicalizer } from './canonical-path.ts'
+import { commitAttachmentObject, decodeLogText, scanAttachmentRefs, type AttachmentPort, type AttachmentRef } from './attachments.ts'
 import { warmCheckpoints, type WarmDeps } from './checkpoint-warm.ts'
 import type { AutoPushConfig } from './config.ts'
 import type { DavPort } from './dav.ts'
@@ -63,7 +64,7 @@ import { readRegistry, validateRegistry } from './registry.ts'
 import { takeEffectOnHostAll, type EffectDeps } from './take-effect.ts'
 import { relocateHeaderCwdShallow, relocateHeaderCwdText } from './session-log.ts'
 import type { TitleQuery } from './session-title.ts'
-import { applyImport, buildBundle, planImport, readBundle, type ExportSource, type ImportOptions, type SessionBundle } from './transfer.ts'
+import { applyImport, attachmentActionOf, buildBundle, entryBytes, planImport, readBundle, type ExportSource, type ImportOptions, type ImportOutcome, type SessionBundle } from './transfer.ts'
 import type {
   DecodeAll,
   EffectOutcome,
@@ -207,9 +208,55 @@ export function machineDirName(machineId: string): string {
   return encodeSegment(machineId)
 }
 
+/**
+ * 这台机器的格子名有没有撞上共享对象库那个保留名。
+ *
+ * `attachments` 这个名字被共享对象库占了（`SYNC_ATTACHMENTS_DIR`，与机器格同级），而列机器格时只按
+ * 目录名筛。一台真的叫 `attachments` 的机器，它那一格会被**所有别的机器**跳过：索引读不到、一条会话都
+ * 同步不出去，而它自己那一侧一切正常。静默失败比报错难查得多，所以这里明说一句。
+ *
+ * 为什么不换个撞不上的名字：机器格名是 `encodeSegment(machineId)` 的结果，字母数字加 `._-~`，任何合法
+ * 段名都可能被某台机器的标识算出来，没有"不可能撞上"的保留名可选。改名会掀掉远端已有的布局。
+ *
+ * @param machineId 配置里的机器标识（缺省主机名）。
+ * @returns 撞上了就是一句给人看的问题说明；没撞上 `undefined`。
+ */
+export function reservedMachineIdProblem(machineId: string): string | undefined {
+  if (machineDirName(machineId) !== SYNC_ATTACHMENTS_DIR) return undefined
+  return `机器标识不能叫 ${SYNC_ATTACHMENTS_DIR}：这个名字留给远端共享的附件对象库了（改 sync.machineId）`
+}
+
 /** 某个格子里那条会话的包路径（相对资源根）。 */
 export function remoteBundlePath(machineId: string, id: string): string {
   return `${SYNC_NAMESPACE_DIR}/${machineDirName(machineId)}/${encodeSegment(id)}${SYNC_BUNDLE_EXT}`
+}
+
+/**
+ * 远端**共享**对象库的目录名（与机器格同级）。
+ *
+ * 对象是内容寻址、写完就不改的，所以两台机器共用一个：同一条会话被两台机器各推一次、同一张图被多条
+ * 会话引用，远端都只留一份。同步**不把对象塞进包里**（包照旧只有日志）：同步是"一条会话一个包"，而
+ * 自动推送每写完一轮就重推一次，塞进包里的话那些一辈子不变的字节会被反复上传一遍。
+ *
+ * 这个名字是**保留的**：列机器格时跳过它，否则远端会多出一台叫 `attachments` 的"机器"。
+ */
+export const SYNC_ATTACHMENTS_DIR = 'attachments'
+
+/** 对象 id 里那 64 位十六进制（远端目录就按它的前两位分桶，与本机附件库同形）。 */
+function attachmentHex(ref: AttachmentRef): string {
+  return ref.id.slice('sha256:'.length)
+}
+
+/** 对象在远端共享库里的路径（相对资源根）。 */
+export function remoteAttachmentPath(ref: AttachmentRef): string {
+  return `${remoteAttachmentDir(ref)}/${attachmentHex(ref)}`
+}
+
+/** 对象所在的那一层目录（`list()` 一次就把这一层已有的对象名全拿到）。 */
+export function remoteAttachmentDir(ref: AttachmentRef): string {
+  const library = ref.kind === 'image' ? 'objects' : 'file-objects'
+  const hex = attachmentHex(ref)
+  return `${SYNC_NAMESPACE_DIR}/${SYNC_ATTACHMENTS_DIR}/${library}/${hex.slice(0, 2)}`
 }
 
 /** 某个格子的索引路径（相对资源根）。 */
@@ -1014,7 +1061,9 @@ export async function readRemoteLibrary(dav: DavPort, settings: SyncSettings): P
   try {
     const listed = await dav.list(SYNC_NAMESPACE_DIR)
     machines = listed
-      .filter((entry) => entry.kind === 'collection')
+      // 共享对象库那一层与机器格同级，不是一台机器（它的 index.json 是 404，本来就什么都不贡献，
+      // 但会显示成"远端机器：attachments"）。
+      .filter((entry) => entry.kind === 'collection' && entry.name !== SYNC_ATTACHMENTS_DIR)
       .map((entry) => entry.name)
       .sort()
   } catch (error) {
@@ -1085,6 +1134,29 @@ export async function readRemoteLibrary(dav: DavPort, settings: SyncSettings): P
  */
 export type SyncProgress = ProgressEvent
 
+/**
+ * 这次从远端共享库取回、落进本机附件库的对象。
+ *
+ * `bytes` 是这些对象的字节数（不含会话日志，`bytesIn` 才是日志那一边）。逐条落不了的写进
+ * `problems`（与会话那边的失败面分开：一个对象取不回来不该把整条会话挡在库外，与导入同一条口径）。
+ */
+export interface SyncAttachmentIn {
+  written: number
+  /** 本来就在本机库里的（远端有、本机也有，一个字节都不取）。 */
+  present: number
+  bytes: number
+}
+
+/** 这次补进远端共享库的对象。 */
+export interface SyncAttachmentOut {
+  uploaded: number
+  /** 远端本来就有、这次没传的。 */
+  skipped: number
+  bytes: number
+  /** 本机库里有引用、但对象不在本机：这次带不上去（与导出那枚 `missing` 同一个交代）。 */
+  missing: number
+}
+
 /** 落地的结果。 */
 export interface SyncOutcome {
   plan: SyncPlan
@@ -1105,6 +1177,15 @@ export interface SyncOutcome {
   bytesIn: number
   /** 实际 PUT 上去的包字节数（gzip 之后的）。 */
   bytesOut: number
+  /**
+   * 附件对象那一段（远端共享库里搬的那些），按**对象**计而不是按引用计：同一个对象被多条会话引用只
+   * 搬一次。宿主没有附件服务时两项都缺席——界面据此什么都不说，而不是报一串 0。
+   *
+   * 只有真跑（`applied`）时才有意义；预演那一步不知道远端有哪些对象（远端索引里只记日志的指纹，
+   * 见 `prepareSync()`），所以计划里报不出这个数。
+   */
+  attachmentIn?: SyncAttachmentIn
+  attachmentOut?: SyncAttachmentOut
   registryWritten: boolean
   indexWritten: boolean
   /**
@@ -1177,6 +1258,14 @@ export interface SyncDeps extends EffectDeps, WarmDeps {
    * `'auto-push'`——它可能在用户手点一次同步的同时在后台跑另一轮，没有这一项就分不出两条流。
    */
   progressWhat?: string
+  /**
+   * 宿主的附件库端口（同 `src/web.ts` 的 `ApiDeps.attachments`：**现探**而不是现拿）。
+   *
+   * 一次同步里要问它很多次（"这个对象在本机哪个路径"），但服务的到达时机由宿主定，建 deps 的时候
+   * 未必已经在了——所以收的是取值函数。缺席 = 这个宿主没有附件服务：包照旧只搬日志、远端共享对象库
+   * 一个字节都不碰，与升级前逐字节一致（见 `src/attachments.ts` 的文件头）。
+   */
+  attachments?: () => AttachmentPort | undefined
 }
 
 /** 读注册表；读不到按"没有注册表"处理（会话照旧落地，只是不进工作区分组）。 */
@@ -1467,6 +1556,9 @@ export async function prepareSync(
   })
   plan.problems.unshift(...normalized.problems)
   plan.problems.push(...remote.problems)
+  // 机器格名撞上共享对象库那个保留名时明说一句（见 `reservedMachineIdProblem()` 里的来由）。
+  const reserved = reservedMachineIdProblem(deps.settings.machineId)
+  if (reserved !== undefined) plan.problems.push(reserved)
   plan.ok = plan.problems.length === 0
 
   /*
@@ -1507,6 +1599,263 @@ export function plannedOutcome(prepared: SyncPrepared): SyncOutcome {
     registryWritten: false,
     indexWritten: false,
     problems: [],
+  }
+}
+
+// ── 附件对象：远端共享库那一侧（见 `SYNC_ATTACHMENTS_DIR`）────────────────────
+
+/**
+ * 一条会话在磁盘上的日志引用了哪些对象（推送那一侧要传的那些）。
+ *
+ * 与导出那条路共用同一套扫描（`scanAttachmentRefs()`：整篇字符串预筛、命中才逐行解析，按 `kind:id`
+ * 去重）：包不带对象，所以这份引用只用来决定"远端共享库里还缺哪些"。
+ */
+function attachmentRefsOfFiles(files: readonly SessionLogFile[], decodeAll: DecodeAll): AttachmentRef[] {
+  const found = new Map<string, AttachmentRef>()
+  for (const file of files) {
+    for (const ref of scanAttachmentRefs(decodeLogText(readFileSync(file.path), file.compression, decodeAll))) {
+      found.set(`${ref.kind}:${ref.id}`, ref)
+    }
+  }
+  return [...found.values()]
+}
+
+/**
+ * 一个包里的日志引用了哪些对象（拉取那一侧要取的那些）。
+ *
+ * 从**包里的字节**读，不读本机那份：拉取与"覆盖本机"这两条路上，本机那份要么还不存在、要么正要被换
+ * 掉。包是自校验过的（`readBundle()` 逐条核过偏移与 sha256），所以这里的偏移一定落在载荷内。
+ *
+ * 包自己带来的对象（v2 的包：旧版本推上去的，或别人手工放进来的）从这份名单里摘掉——它们由导入那条
+ * 路随包落地，共享库里没有它们，去那儿取只会白跑一趟并报一串假问题。
+ */
+function attachmentRefsOfBundle(bundle: SessionBundle, decodeAll: DecodeAll): AttachmentRef[] {
+  const packed = new Set(bundle.attachments.map((entry) => `${entry.kind}:${entry.id}`))
+  const found = new Map<string, AttachmentRef>()
+  for (const session of bundle.sessions) {
+    for (const file of session.files) {
+      const text = decodeLogText(entryBytes(bundle, file), file.compression, decodeAll)
+      for (const ref of scanAttachmentRefs(text)) {
+        const key = `${ref.kind}:${ref.id}`
+        if (!packed.has(key)) found.set(key, ref)
+      }
+    }
+  }
+  return [...found.values()]
+}
+
+/**
+ * 远端这一层已有的对象名（`list()` 一次就把那一层全部名字给回来）。
+ *
+ * 一次同步里每个前缀只列一次并缓存：推送与"补对象"两步共用同一份，问过的层不会问第二遍。
+ *
+ * @returns 名字集合；`undefined` = 这一次列失败（已经记进 `problems`），调用方跳过这个对象。
+ */
+async function remoteObjectNamesIn(
+  deps: SyncDeps,
+  listed: Map<string, Set<string>>,
+  ref: AttachmentRef,
+  problems: string[],
+): Promise<Set<string> | undefined> {
+  const dir = remoteAttachmentDir(ref)
+  const cached = listed.get(dir)
+  if (cached !== undefined) return cached
+  try {
+    const entries = await deps.dav.list(dir)
+    const names = new Set(entries.filter((entry) => entry.kind === 'file').map((entry) => entry.name))
+    listed.set(dir, names)
+    return names
+  } catch (error) {
+    problems.push(`列远端 ${dir} 失败：${error instanceof Error ? error.message : String(error)}`)
+    return undefined
+  }
+}
+
+/**
+ * 从共享库取一个对象落地（调用方已经确认远端有它）。
+ *
+ * 字节照导入那条路的规格落地：`commitAttachmentObject()` 先写 `.part` 再 rename、`0o400`；本机已经有了
+ * 的算 `present`（同一个对象被多条会话引用时只真写一次）。单个对象取不回来只记问题：一个对象缺失不该
+ * 把整条会话挡在库外，与导入同一条口径。
+ */
+async function fetchAttachment(
+  deps: SyncDeps,
+  port: AttachmentPort,
+  ref: AttachmentRef,
+  counters: SyncAttachmentIn,
+  problems: string[],
+): Promise<void> {
+  const path = port.pathOf(ref)
+  if (path === undefined) {
+    problems.push(`宿主容不下附件 ${ref.id}（${ref.kind}），这一个没能从远端取回`)
+    return
+  }
+  try {
+    const bytes = await deps.dav.get(remoteAttachmentPath(ref))
+    if (commitAttachmentObject(path, bytes) === 'present') counters.present += 1
+    else {
+      counters.written += 1
+      counters.bytes += bytes.length
+    }
+  } catch (error) {
+    if ((error as { status?: number } | null)?.status === 404) {
+      problems.push(`远端共享库里没有 ${ref.id}（${ref.kind}），这一个没能取回来`)
+      return
+    }
+    problems.push(`取附件 ${ref.id} 失败：${error instanceof Error ? error.message : String(error)}`)
+  }
+}
+
+/**
+ * 从远端共享库取回这条会话缺的对象。
+ *
+ * 本机已有的（`attachmentActionOf()` 说 `present`）一个字节都不取——这是这条路存在的意义之一：换台
+ * 机器拉同一批会话时，两台机器共用的那张图只传一次。
+ */
+async function pullAttachments(
+  deps: SyncDeps,
+  port: AttachmentPort,
+  refs: readonly AttachmentRef[],
+  counters: SyncAttachmentIn,
+  problems: string[],
+): Promise<void> {
+  for (const ref of refs) {
+    const action = attachmentActionOf(port, ref)
+    if (action === 'present') {
+      counters.present += 1
+      continue
+    }
+    await fetchAttachment(deps, port, ref, counters, problems)
+  }
+}
+
+/**
+ * 把导入那条路落下的**随包对象**记进这次同步的对象账。
+ *
+ * 这一版推上去的包只有日志（对象走共享库），但远端那份包可能是 v2 的（旧版本推的、别人手工放上去的）：
+ * 那种包的对象由 `applyImport()` 落地，不经过下面这条共享库的路。两边都记同一本账，界面那句「另取回
+ * 附件对象 N 个」才对得上这一次到底搬了几个。
+ */
+function countPackedAttachments(outcome: ImportOutcome, counters: SyncAttachmentIn): void {
+  counters.written += outcome.attachmentWritten
+  counters.present += outcome.attachmentPresent
+  counters.bytes += outcome.attachmentBytes
+}
+
+/**
+ * 把这条会话引用到的对象补进远端共享库（远端已有的一个字节都不传）。
+ *
+ * 对象是内容寻址的，"远端已经有这个名字"就等于"内容一模一样"，不必再比大小、也不必先 `ensure()`
+ * （`put()` 自己把父集合建出来）。
+ *
+ * 本机库里没有的对象（引用在、字节不在）算 `missing`：与导出那枚响应头同一个交代——用户需要知道
+ * "这次有几张图没能带走"，而不是等到了另一台机器上才发现图挂了。
+ */
+async function pushAttachments(
+  deps: SyncDeps,
+  port: AttachmentPort,
+  refs: readonly AttachmentRef[],
+  listed: Map<string, Set<string>>,
+  counters: SyncAttachmentOut,
+  problems: string[],
+): Promise<void> {
+  for (const ref of refs) {
+    const path = port.pathOf(ref)
+    if (path === undefined) {
+      counters.missing += 1
+      continue
+    }
+    let bytes: Buffer
+    try {
+      bytes = readFileSync(path)
+    } catch {
+      counters.missing += 1
+      continue
+    }
+    const names = await remoteObjectNamesIn(deps, listed, ref, problems)
+    if (names === undefined) continue
+    const hex = attachmentHex(ref)
+    if (names.has(hex)) {
+      counters.skipped += 1
+      continue
+    }
+    try {
+      await deps.dav.put(remoteAttachmentPath(ref), bytes)
+      names.add(hex)
+      counters.uploaded += 1
+      counters.bytes += bytes.length
+    } catch (error) {
+      problems.push(`推送附件 ${ref.id} 失败：${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+}
+
+/**
+ * 补对象：把本机与远端共享库对齐（两个方向都做）。
+ *
+ * 计划按**日志**的指纹判"两边一样"，对象却不在那个判据里，于是有两类会话它一条都不会动——而它们恰恰
+ * 是这台机器上"图挂了"的全部来路：
+ *
+ *  - **本机缺**：这条会话是早先拉过来的（那时对象还不会跟着同步走）→ 远端有就取回来；
+ *  - **远端缺**：这条会话是旧版本推上去的（那时的包只有日志）→ 本机有就传上去。
+ *
+ * 两条都只发生在"日志两边一样、谁也没打算动这条会话"的情形里，所以放在这里，而不是塞进计划：计划改动
+ * 一条会话意味着写日志、改注册表那一整套，而这两件事一个字节的日志都不动。
+ *
+ * 只在**手动同步**时做（后台那条只推不拉的路不跑）：这一步要把本机带引用的日志都解开扫一遍，是整库
+ * 尺度的开销——值得花在"用户点了同步"这一次上，不值得每写完一轮就花一次。远端也没有的那些只汇总成
+ * 一句（逐条报会把问题清单淹掉）。
+ *
+ * @param handled 这次已经拉取 / 覆盖 / 推送过的会话（它们那两条路自己处理过对象了）。
+ * @param known 远端索引里认得的会话 id：本机有、远端却不认得的那些不替它往共享库传对象（那条会话压根
+ *   还没同步过，凭什么占远端的空间）。
+ */
+async function repairAttachments(
+  deps: SyncDeps,
+  port: AttachmentPort,
+  local: readonly DiscoveredSession[],
+  handled: ReadonlySet<string>,
+  known: ReadonlySet<string>,
+  listed: Map<string, Set<string>>,
+  incoming: SyncAttachmentIn,
+  outgoing: SyncAttachmentOut,
+  problems: string[],
+): Promise<void> {
+  /** 本机缺的那些（远端有就取回来）。 */
+  const wanted = new Map<string, AttachmentRef>()
+  /** 本机有、远端索引里也认得这条会话的对象（远端缺就传上去）。 */
+  const extra = new Map<string, AttachmentRef>()
+  for (const session of local) {
+    // 这次拉取 / 覆盖 / 推送过的那些已经处理过了（那两条路自己搬过它们的对象）。
+    if (handled.has(session.id)) continue
+    const remoteKnows = known.has(session.id)
+    for (const ref of attachmentRefsOfFiles(session.files, deps.decodeAll)) {
+      const key = `${ref.kind}:${ref.id}`
+      // 两个集合按"本机有没有"分开，互不重叠：同一个对象不该既算"没取回来"又算"没传上去"。
+      if (attachmentActionOf(port, ref) === 'create') wanted.set(key, ref)
+      else if (remoteKnows) extra.set(key, ref)
+    }
+  }
+  if (wanted.size > 0) {
+    const absent: string[] = []
+    for (const ref of wanted.values()) {
+      const names = await remoteObjectNamesIn(deps, listed, ref, problems)
+      if (names === undefined) continue
+      if (!names.has(attachmentHex(ref))) {
+        absent.push(ref.id)
+        continue
+      }
+      await fetchAttachment(deps, port, ref, incoming, problems)
+    }
+    if (absent.length > 0) {
+      problems.push(
+        `本机有 ${absent.length} 个附件对象在远端共享库里也没有，这次补不上（有对象的那些机器还没把它们推上去）`,
+      )
+    }
+  }
+  // 远端缺的那些交给推送那一段：它自己按前缀列一次、只传远端真没有的（两个方向共用同一份缓存）。
+  if (extra.size > 0) {
+    await pushAttachments(deps, port, [...extra.values()], listed, outgoing, problems)
   }
 }
 
@@ -1570,6 +1919,17 @@ export async function applyPreparedSync(
   let registryWritten = false
   /** 拉取改的那几笔注册表（按执行顺序），整批落地之后一起交给宿主。 */
   const registryChanges: RegistryChange[] = []
+  /*
+   * 附件对象那一段：远端共享库里搬的那些（见 `SYNC_ATTACHMENTS_DIR`）。端口**这一次现探**，整批共用
+   * 一个取值——中途到达/消失的服务在两台机器之间翻转的话，中途换端口只会让同一批里前后两条会话按不同
+   * 的口径落地。宿主没有这个服务（`port === undefined`）时下面几步全部跳过，包与索引与升级前逐字节
+   * 一致。
+   */
+  const port = deps.attachments?.()
+  const attachmentIn: SyncAttachmentIn = { written: 0, present: 0, bytes: 0 }
+  const attachmentOut: SyncAttachmentOut = { uploaded: 0, skipped: 0, bytes: 0, missing: 0 }
+  /** 一次同步里每个前缀目录只列一次（`list()` 已经把那一层全部对象名给回来了）。 */
+  const remoteObjectNames = new Map<string, Set<string>>()
 
   // ── 拉取：取包 → 自校验 → 走导入那条编排 ────────────────────────────────────
   const loose = readRegistryLoose(deps.registryPath)
@@ -1602,12 +1962,29 @@ export async function applyPreparedSync(
         ...(registry === undefined ? {} : { registry }),
         registryPath: deps.registryPath,
         decodeAll: deps.decodeAll,
+        // 远端那份包万一是自带的（旧版同步推的、或别人手工放上去的），导入那条路照旧把它当成随包带
+        // 来的对象落地；这一版推上去的包只有日志，下面那一步负责从共享库补。
+        ...(port === undefined ? {} : { attachments: port }),
+      }
+      /*
+       * 先落对象、再写日志：会话不会以"图是挂的"状态先出现在库里（与导入那条编排同一条不变式）。
+       * 引用从**包里的日志字节**读，不读本机那份——本机那份这会儿还不存在（或正要被换掉）。
+       */
+      if (port !== undefined) {
+        await pullAttachments(
+          deps,
+          port,
+          attachmentRefsOfBundle(bundle, deps.decodeAll),
+          attachmentIn,
+          problems,
+        )
       }
       const importPlan = planImport(bundle, importOptions)
       if (importPlan.nextRegistry !== null) registry = importPlan.nextRegistry
       if (importPlan.registryChange !== null) registryChanges.push(importPlan.registryChange)
       const outcome = applyImport(bundle, importPlan, importOptions)
       if (outcome.registryWritten) registryWritten = true
+      countPackedAttachments(outcome, attachmentIn)
       pulled.push(...outcome.written)
       bytesIn += outcome.bytes
     } catch (error) {
@@ -1677,12 +2054,25 @@ export async function applyPreparedSync(
           ...(registry === undefined ? {} : { registry }),
           registryPath: deps.registryPath,
           decodeAll: deps.decodeAll,
+          ...(port === undefined ? {} : { attachments: port }),
+        }
+        // 与"新建"那一条同一顺序：对象先落，再写日志。对象是共享的、本机可能早就有，所以这一步多数
+        // 情况下一个字节都不取。
+        if (port !== undefined) {
+          await pullAttachments(
+            deps,
+            port,
+            attachmentRefsOfBundle(bundle, deps.decodeAll),
+            attachmentIn,
+            problems,
+          )
         }
         const importPlan = planImport(bundle, importOptions)
         if (importPlan.nextRegistry !== null) registry = importPlan.nextRegistry
         if (importPlan.registryChange !== null) registryChanges.push(importPlan.registryChange)
         const outcome = applyImport(bundle, importPlan, importOptions)
         if (outcome.registryWritten) registryWritten = true
+        countPackedAttachments(outcome, attachmentIn)
         pulled.push(...outcome.written)
         if (outcome.written.includes(entry.id)) replaced.push(entry.id)
         bytesIn += outcome.bytes
@@ -1767,6 +2157,24 @@ export async function applyPreparedSync(
         dir: session.dir,
         files: session.files,
       }
+      /*
+       * 包**只有日志**（照旧 v1）：对象走远端共享库，已经在远端的一个字节都不再传。同步是"一条会话一个
+       * 包"、自动推送每写完一轮就重推一次，塞进包里就是让那些一辈子不变的字节反复上传。
+       *
+       * 顺序照着"先对象、后包"：包一到位，别的机器立刻就能拉到这条会话并按它去找对象（对象先齐，
+       * 那一侧才不会出现"会话在、图是挂的"）。中途失败只记问题，包照旧推——一个对象传不上去不该把
+       * 整条会话挡在同步之外（与导入那条路同一个口径）。
+       */
+      if (port !== undefined) {
+        await pushAttachments(
+          deps,
+          port,
+          attachmentRefsOfFiles(session.files, deps.decodeAll),
+          remoteObjectNames,
+          attachmentOut,
+          problems,
+        )
+      }
       const bundle = buildBundle([source], {
         now: (deps.now?.() ?? new Date()).toISOString(),
         source: {
@@ -1820,6 +2228,28 @@ export async function applyPreparedSync(
     problems.push(`写远端索引失败：${error instanceof Error ? error.message : String(error)}`)
   }
 
+  /*
+   * ── 补对象：日志两边一样、对象却没对齐的那些会话（两个方向，见 `repairAttachments()`）──
+   *
+   * 放在**推送与索引写完之后**：那时 `pushed` 才是完整的，这一次真搬过对象的会话才摘得干净（放在前面
+   * 会让同一个对象被推送那一段与这一段各算一遍）。这一段只碰"索引里早有、日志也没变"的那些会话——
+   * 它们的索引条目不是这一次写上去的，所以对象晚一步到位不构成"别的机器拉到一条图挂了的会话"。
+   */
+  if (port !== undefined && deps.pushOnly !== true) {
+    const handled = new Set<string>([...pulled, ...replaced, ...pushed.map((entry) => entry.id)])
+    await repairAttachments(
+      deps,
+      port,
+      local,
+      handled,
+      new Set(remote.entries.keys()),
+      remoteObjectNames,
+      attachmentIn,
+      attachmentOut,
+      problems,
+    )
+  }
+
   return {
     plan,
     applied: true,
@@ -1828,6 +2258,8 @@ export async function applyPreparedSync(
     pushed,
     bytesIn,
     bytesOut,
+    // 宿主没有附件服务时两项都缺席（不是"零个对象"）：界面据此什么都不说（见 SyncOutcome 的字段说明）。
+    ...(port === undefined ? {} : { attachmentIn, attachmentOut }),
     registryWritten,
     indexWritten,
     ...(effect === undefined ? {} : { effect }),
