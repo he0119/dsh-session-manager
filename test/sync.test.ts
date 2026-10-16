@@ -2173,10 +2173,49 @@ test('同步拉取：远端共享库里没有这个对象时只记问题，会�
     assert.deepEqual(outcome.pulled, ['s1'], '一个对象取不回来不挡这一条会话落地')
     assert.deepEqual(outcome.attachmentIn, { written: 0, present: 0, bytes: 0 })
     assert.equal(existsSync(storeB.pathOf(ref)), false)
-    assert.equal(
-      outcome.problems.filter((line) => line.includes(ref.id)).length,
-      1,
-      '取不回来的对象逐条记一笔，其余问题不受影响',
+    // 整轮汇总成一句，且**不点名**单个对象：这是"有对象的那些机器还没把它们推上去"这一种状态，
+    // 一个会话引用几十张图时逐条报会把问题清单淹掉。
+    assert.deepEqual(
+      outcome.problems,
+      ['本机有 1 个附件对象在远端共享库里也没有，这次补不上（有对象的那些机器还没把它们推上去）'],
+    )
+  } finally {
+    await fixture.close()
+    rmSync(SANDBOX, { recursive: true, force: true })
+  }
+})
+
+test('同步拉取：两条会话各缺一个对象时也只汇总一句（数量按对象去重）', async () => {
+  rmSync(SANDBOX, { recursive: true, force: true })
+  mkdirSync(SANDBOX, { recursive: true })
+  const fixture = await startDavFixture({ root: join(SANDBOX, 'dav-attach-absent-many') })
+  const dav = createDavClient({ baseUrl: fixture.url })
+  const a = makeMachine('attach-absent-many-a')
+  const b = makeMachine('attach-absent-many-b')
+  const storeB = makeAttachmentStore('attach-absent-many-store-b')
+  const first = Buffer.from('第一条会话要的那张图')
+  const second = Buffer.from('第二条会话要的那张图')
+  const refOne: AttachmentRef = { id: attachmentIdOf(first), kind: 'image' }
+  const refTwo: AttachmentRef = { id: attachmentIdOf(second), kind: 'image' }
+  try {
+    // A 没有附件服务：三条会话的包都只有日志，共享库里那两个对象都没有（前两条引用的是**同一个**）。
+    writeSession(a, 's1', 1000, { eventLines: [attachmentEvent(refOne, first.length)] })
+    writeSession(a, 's2', 2000, { eventLines: [attachmentEvent(refOne, first.length)] })
+    writeSession(a, 's3', 3000, { eventLines: [attachmentEvent(refTwo, second.length)] })
+    await syncMachine(a, dav, settings(a, { machineId: 'robot-a' }), { apply: true })
+
+    const outcome = await syncMachine(
+      b,
+      dav,
+      settings(b, { machineId: 'robot-b', mapping: { [a.cwd]: b.cwd } }),
+      { apply: true, attachments: () => storeB.port },
+    )
+    assert.deepEqual([...outcome.pulled].sort(), ['s1', 's2', 's3'], '三条都落地，取不回对象不挡它们')
+    assert.deepEqual(outcome.attachmentIn, { written: 0, present: 0, bytes: 0 })
+    assert.deepEqual(
+      outcome.problems,
+      // 两条会话引用同一个对象：按**对象**算 2 个（去重），不是按引用次数算 3 个。
+      ['本机有 2 个附件对象在远端共享库里也没有，这次补不上（有对象的那些机器还没把它们推上去）'],
     )
   } finally {
     await fixture.close()
