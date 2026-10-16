@@ -321,7 +321,7 @@ export const zh = {
   'help.tabs.title': '每页做什么',
   'help.tabs.manage': '整个会话库都在这里，侧边栏点不到的那些也在，列表按目录分组。勾选后可以归档、重新生成名称、迁移或删除：名称是按整段对话重算的，你手动改过名的与子智能体会话会跳过。迁移把勾中的会话搬到一个目标目录——改写工作目录、挪走日志目录、更新工作区注册表；侧边栏看不见的那几类搬不走，先在列表里单独处理。',
   'help.tabs.transfer': '把会话导出成 .dshsess 包，或把包里的会话导入某个工作区。',
-  'help.tabs.sync': '在几台机器之间同步会话（WebDAV）：先给一份只读计划，确认才真的拉取与推送。远端地址、机器名与路径映射在这一页改，改完不用重启。',
+  'help.tabs.sync': '在几台机器之间同步会话（WebDAV）：先给一份只读计划，确认才真的拉取与推送。远端地址、机器名与路径映射在这一页改，改完不用重启。会话日志引用的附件对象走远端一个共享目录，字节相同的只传一次：本机缺的取回、远端缺的补上，两边都没有的只报一句（它在计划里不出现）。',
   'help.tabs.backup': '几个会写盘的操作共同的后悔面：迁移、删除、同步覆盖本机那份之前都会先留一份字节级备份。「回滚」把迁移搬走的那份搬回来（连工作区注册表一起还原），「恢复」只把备份里那份搬回去，注册表不动。',
   'help.where.title': '数据从哪来',
   'help.where.library': '会话库',
@@ -377,6 +377,9 @@ export const zh = {
   'sync.appliedObjectsOnly': '这次没有会话要搬。',
   'sync.replanned': '预演之后本机或远端又有变化，这次重新算了一遍计划。',
   'sync.nothing': '两边一样，没有要同步的。',
+  // 计划里只有会话，附件对象那一趟在确认之后才扫（整库尺度，见 repairAttachments()）：计划为空也要
+  // 让用户知道确认仍有意义。
+  'sync.nothingAttachments': '确认之后附件对象还会对一遍：本机缺的从远端共享库取回，远端缺的补上去。',
   // 三段清单的段头：只留标题，条数由段头里那颗药丸说（复用 `list.sessionsInDir`，与组头同一句）。
   'sync.pullHead': '会拉取',
   'sync.pushHead': '会推送',
@@ -799,7 +802,7 @@ export const en: LocaleDictOf<typeof NS> = {
   'help.tabs.title': 'What each page does',
   'help.tabs.manage': 'The whole session library is here, including sessions the sidebar cannot reach, grouped by directory. Ticked rows can be archived, retitled, migrated or deleted: names are redone from the whole conversation, and sessions you renamed by hand or subagent sessions are skipped. Migration moves the ticked sessions into one target directory — it rewrites the recorded working directory, moves the log directory and updates the workspace registry. The rows the sidebar hides cannot move, so deal with them in the list first.',
   'help.tabs.transfer': 'Export sessions into a .dshsess bundle, or import a bundle’s sessions into a workspace.',
-  'help.tabs.sync': 'Sync sessions between machines over WebDAV: it first shows a read-only plan and only pulls and pushes once you confirm. The remote address, machine names and path mappings are edited on this page, with no restart.',
+  'help.tabs.sync': 'Sync sessions between machines over WebDAV: it first shows a read-only plan and only pulls and pushes once you confirm. The remote address, machine names and path mappings are edited on this page, with no restart. Attachment objects referenced by session logs travel through one shared remote folder, and identical bytes are uploaded once: missing ones are fetched, ones the remote lacks are uploaded, and ones nobody has are reported in one line (they never show up in the plan).',
   'help.tabs.backup': 'The undo surface shared by the operations that write: every migration, delete and overwrite of this machine’s copy leaves a byte-level backup first. Roll back brings back what a migration moved (the workspace registry included); Restore only moves the backed-up copy back and leaves the registry alone.',
   'help.where.title': 'Where the data comes from',
   'help.where.library': 'Session library',
@@ -855,6 +858,8 @@ export const en: LocaleDictOf<typeof NS> = {
   'sync.appliedObjectsOnly': 'No session needed to move.',
   'sync.replanned': 'This machine or the remote changed after the preview, so the plan was recomputed.',
   'sync.nothing': 'Both sides are in sync.',
+  'sync.nothingAttachments':
+    'Confirming also reconciles attachment objects: missing ones are fetched from the shared remote store, and ones the remote lacks are uploaded.',
   // Section heads for the three lists: the title only; the count is the pill beside it
   // (reusing `list.sessionsInDir`, the same line the project group heads use).
   'sync.pullHead': 'To pull',

@@ -100,6 +100,11 @@ export interface MetaResponse {
    */
   retitleAvailable?: boolean
   /**
+   * 这个宿主有没有附件库服务（`ctx.attachments`）；有它，手动同步会顺带把附件对象对一遍。
+   * 缺字段（旧宿主）按 `false` 处理——那一句里宁可不提，也别承诺一件做不到的事。
+   */
+  attachments?: boolean
+  /**
    * WebDAV 同步的非敏感配置（宿主插件配置里的 `sync` 块）；没配时是 `null`。
    * 缺字段（旧宿主）同样按"没配置"处理。
    */
