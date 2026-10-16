@@ -373,6 +373,19 @@ test('正文与次要文字是内建那两档：正文 14px/20px、说明句 12p
   assert.match(hint, /line-height:\s*18px/, '行高 18px，与内建卡片描述同值')
 })
 
+test('页内分页那一层自带整页的块间距：相邻两张卡片不能贴在一起', () => {
+  // 现象：「说明」那一页整页都是卡片，卡与卡之间一点缝都没有，只剩各自的 1px 描边分得开——真实 dev GUI
+  // 里量到相邻两张卡片的间距是 **0px**。原因是卡片都长在分页本体那一层里，而 `.dsm-root` 那份 16px 的
+  // gap 只作用于它的**直接**子元素（也就是分页那一层自己），再往里就不传了。
+  //
+  // 16px 与 `.dsm-root` 同值：内建设置页行与行之间的节奏就是每一行自己的 `padding: 16px 0`。
+  const panel = ruleBody('.dsm-panel')
+  assert.notEqual(panel, null, '找不到 .dsm-panel 规则')
+  assert.match(panel, /display:\s*flex/, '竖排得先是 flex 容器，gap 才生效')
+  assert.match(panel, /flex-direction:\s*column/, '卡片是竖着排的')
+  assert.match(panel, /gap:\s*16px/, '与 .dsm-root 同一档（内建设置页每一行的纵向留白就是 16px）')
+})
+
 test('弹窗正文层的字号自己写：官方 Modal 落在 .dsm-root 之外，不写就继承文档根的 16px', () => {
   // 真实缺陷（用户截图里量出来的）：「会话内容」弹窗的正文层原来没有字号声明，于是弹窗里凡是没有
   // 自己写字号的东西都继承文档根的 16px——筛选条右端那串「显示 25 / 已读 25 条」实测墨迹 29–32

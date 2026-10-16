@@ -595,7 +595,7 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
         <p className="dsm-banner dsm-error">
           <span>{error}</span>
           <span className="dsm-spacer" />
-          <Button variant="ghost" size="sm" onClick={() => setError(null)}>
+          <Button variant="outline" size="sm" onClick={() => setError(null)}>
             {t('error.dismiss')}
           </Button>
         </p>
@@ -604,7 +604,7 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
         <p className="dsm-banner dsm-ok">
           <span>{notice}</span>
           <span className="dsm-spacer" />
-          <Button variant="ghost" size="sm" onClick={() => setNotice(null)}>
+          <Button variant="outline" size="sm" onClick={() => setNotice(null)}>
             {t('error.dismiss')}
           </Button>
         </p>
@@ -678,7 +678,7 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
              * `busy` 闸挡住，界面这里只把字换成「正在自动推送…」。
              */}
             {syncInfo.autoPush !== undefined && (
-              <Button variant="ghost" size="sm" onClick={doAutoPush} disabled={autoPushing}>
+              <Button variant="outline" size="sm" onClick={doAutoPush} disabled={autoPushing}>
                 {autoPushing ? t('sync.autoPush.running') : t('sync.autoPush.now')}
               </Button>
             )}

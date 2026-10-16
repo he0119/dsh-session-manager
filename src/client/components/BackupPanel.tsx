@@ -156,8 +156,8 @@ export function BackupPanel({ t, reload }: Pick<PanelShare, 't' | 'reload'>): Re
         <p className="dsm-banner dsm-error">
           <span>{error}</span>
           <span className="dsm-spacer" />
-          {/* 关掉一条横幅：不动数据，走官方 ghost。 */}
-          <Button variant="ghost" size="sm" onClick={() => setError(null)}>
+          {/* 关掉一条横幅：本页不用官方缺省的 ghost（那条口径见「动作行里的动作带边框」那篇笔记）。 */}
+          <Button variant="outline" size="sm" onClick={() => setError(null)}>
             {t('error.dismiss')}
           </Button>
         </p>
@@ -166,7 +166,7 @@ export function BackupPanel({ t, reload }: Pick<PanelShare, 't' | 'reload'>): Re
         <p className="dsm-banner dsm-ok">
           <span>{notice}</span>
           <span className="dsm-spacer" />
-          <Button variant="ghost" size="sm" onClick={() => setNotice(null)}>
+          <Button variant="outline" size="sm" onClick={() => setNotice(null)}>
             {t('error.dismiss')}
           </Button>
         </p>
@@ -177,7 +177,7 @@ export function BackupPanel({ t, reload }: Pick<PanelShare, 't' | 'reload'>): Re
           <span className="dsm-cardTitle">{t('backup.title')}</span>
           <span className="dsm-spacer" />
           {/* 头部只放这枚"重新读一遍清单"的工具：它不动任何数据，与卡片级的写操作不是一类。 */}
-          <Button variant="ghost" size="sm" onClick={() => void load()} disabled={busy !== null}>
+          <Button variant="outline" size="sm" onClick={() => void load()} disabled={busy !== null}>
             {t('page.refresh')}
           </Button>
         </div>

@@ -13,7 +13,7 @@
 //
 // 产物不存在时整组跳过（源码开发不必先构建）。
 import assert from 'node:assert/strict'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
@@ -886,6 +886,36 @@ function primaryPlacements(node, inside = 'root', out = []) {
   return primaryPlacements(node.props?.children, nested, out)
 }
 
+/**
+ * 树里每一枚官方 `Button` 的变体，按它**落在哪个容器里**分类。
+ *
+ * 与 `primaryPlacements()` 同一个走法：官方 `Button` 是 forwardRef，`variant` 挂在外面那层元素上，
+ * 要先认组件那一层再下穿。假原语把变体写在渲染出来的 `data-variant` 上（缺省就是 `ghost`），所以认的
+ * 是那个属性——**没写 `variant` 的按钮也算进来**，它们正是要抓的"裸着"那一类。
+ *
+ * `where` 是收集面：`any`（这一页里的每一枚官方 `Button`）或 `cardActions`（卡片底部那条动作行）。
+ * 后者要求这一枚落在一张 `.dsm-card` 里的 `.dsm-controls` 里、而且不在 `.dsm-field` 里——
+ * `.dsm-controls` 这个布局钩子字段控件也在用（手输路径那一行），那条行装的是工具，不是卡片的动作。
+ */
+function variantsOf(node, where, path = [], out = []) {
+  if (Array.isArray(node)) {
+    for (const item of node) variantsOf(item, where, path, out)
+    return out
+  }
+  if (node === null || typeof node !== 'object') return out
+  const classes = String(node.props?.className ?? '').split(/\s+/).filter(Boolean)
+  const next = [...path, ...classes]
+  if (isComponentType(node.type)) return variantsOf(renderType(node.type, node.props), where, path, out)
+  if (node.type === 'button' && node.props?.['data-variant'] !== undefined) {
+    const hit =
+      where === 'any'
+        ? true
+        : next.includes('dsm-card') && next.includes('dsm-controls') && !next.includes('dsm-field')
+    if (hit) out.push(String(node.props['data-variant']))
+  }
+  return variantsOf(node.props?.children, where, next, out)
+}
+
 test('客户端产物：卡片级的主动作长在卡片底部的动作行里，不长在卡头', { skip }, () => {
   // 同一页上几张卡片的形状不同（列表 / 字段），主动作的位置是同一条规矩：头部只放不动数据的工具
   // （刷新、全选 / 清空、收起 / 展开），会写盘的那枚在卡片底部的动作行里。判据见
@@ -911,6 +941,43 @@ test('客户端产物：卡片级的主动作长在卡片底部的动作行里�
     const mounted = mount({ state, panel })
     const tree = mounted.registrations[0].component(mounted.registrations[0].registration.inject())
     assert.deepEqual(primaryPlacements(tree), places, `${panel} 页的主动作位置`)
+  }
+})
+
+test('客户端产物：页面上凡是官方 Button 都带边框，没有裸着的（缺省 ghost）', { skip }, () => {
+  // 现象：动作行与卡头 / 工具行里并排的按钮全走官方 `Button` 的**缺省**变体 `ghost`——无边框无底色，
+  // 真实 dev GUI 里量到 `border-width: 0px`，鼠标放上去才认得出来是按钮（禁用态还叠加 `opacity: 0.4`，
+  // 更像一段灰字）；旁边内建设置页那枚只读的「打开配置文件」反倒是带边框的 `outline`（量到
+  // `border: rgba(0, 0, 0, 0.12) 1px`）。
+  //
+  // 口径：这一页凡是用官方 `Button` 的地方都给边框——主动作 `primary`、其余 `outline`。两个**手写**的
+  // 文字动作仍在例外面：每行右端悬停才显形的「内容」与分组头那枚开合图标 ▾，它们按行内链接 / 图标画
+  // （`.dsm-rowInspect` / `.dsm-groupToggle`），本来就不是按钮外观。
+  const state = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    archiveAvailable: true,
+    sync: { url: 'https://dav.example.com/dsh', machineId: 'robot-a', mappings: 1 },
+    sessions: [{ id: 's-1', cwd: '/home/u/dev/alpha', createdAt: 1, dir: '/home/u/dev/alpha', bytes: 1, files: [] }],
+    workspaces: [{ id: 'w1', path: '/home/u/dev/alpha', title: '工作区甲', sessionIds: ['s-1'] }],
+  }
+  for (const panel of ['manage', 'transfer', 'sync', 'backup']) {
+    const mounted = mount({ state, panel })
+    const tree = mounted.registrations[0].component(mounted.registrations[0].registration.inject())
+    const all = variantsOf(tree, 'any')
+    assert.ok(all.length > 0, `${panel} 页应当有官方 Button`)
+    assert.ok(
+      all.every((variant) => variant !== 'ghost'),
+      `${panel} 页还有裸着的按钮（缺省 ghost）：${all.join(', ')}`,
+    )
+  }
+  // 卡片底部那条动作行不能是空的：动作要有地方站（位置那条判据在 primaryPlacements 那个用例里）。
+  // 备份页不在此列：它的动作长在**每一行**上，夹具里没有备份条目，那条行根本不会渲染。
+  for (const panel of ['manage', 'transfer', 'sync']) {
+    const mounted = mount({ state, panel })
+    const tree = mounted.registrations[0].component(mounted.registrations[0].registration.inject())
+    assert.ok(variantsOf(tree, 'cardActions').length > 0, `${panel} 页卡片动作行里应当有按钮`)
   }
 })
 
@@ -5170,6 +5237,26 @@ test('样式源码：CSS 正文里没有反引号（模板字面量会被提前�
   const body = source.slice(openAt + head.length, source.indexOf('\n`', openAt))
   const at = body.indexOf('`')
   assert.equal(at, -1, `CSS 正文第 ${body.slice(0, Math.max(at, 0)).split('\n').length} 行附近出现了反引号`)
+})
+
+test('组件源码：一处 variant="ghost" 都不许有（官方缺省的那个变体就是裸的）', () => {
+  // 渲染树那条判据只能盖到夹具里**真渲染出来**的那些：横幅上的关闭、picker 展开之后的工具、备份页
+  // 每一行上的恢复 / 回滚都是按需渲染的，夹具里没有对应的数据就一个都不出现（实测：把横幅那枚改回
+  // ghost，渲染树那条断言仍然是绿的）。所以这一条直接扫源码——`ghost` 是官方 `Button` 的缺省变体，
+  // 用上它就等于"无边框无底色、鼠标放上去才看得出是按钮"。
+  //
+  // 两个**手写**的文字动作不在此列，它们不是官方 `Button`：每行右端悬停才显形的「内容」
+  // （`.dsm-rowInspect`）与分组头那枚开合图标 ▾（`.dsm-groupToggle`）。
+  const dir = join(root, 'src', 'client', 'components')
+  const hits = []
+  for (const name of readdirSync(dir).sort()) {
+    if (!name.endsWith('.tsx')) continue
+    const text = readFileSync(join(dir, name), 'utf8')
+    text.split('\n').forEach((line, index) => {
+      if (line.includes('variant="ghost"')) hits.push(`${name}:${index + 1}`)
+    })
+  }
+  assert.deepEqual(hits, [], `这些地方还在用官方缺省的 ghost（按钮看着像一段文字）：${hits.join('、')}`)
 })
 
 test('客户端产物：轮次标题的偏移量来自视图量出来的那一行高度', { skip }, () => {
