@@ -48,7 +48,7 @@
 // 解包、备份还原都会把它抹平），而这两枚钟与日志内容同生共死，落地改写 cwd 时也不受影响。
 // 判据仍然**不**拿时间反推"谁是祖先"：代次那边的四种关系是结构性的，时间只在结构判不出来时分高下。
 import { createHash } from 'node:crypto'
-import { readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { canonicalDir, type DirCanonicalizer } from './canonical-path.ts'
@@ -1724,13 +1724,16 @@ async function pullAttachments(
   counters: SyncAttachmentIn,
   problems: string[],
   absent: Set<string>,
+  report?: AttachmentReporter,
 ): Promise<void> {
+  // 本机已经有的那些只记个数、不进分母（同上：不花时间的条数不进分母）。
+  const pending: AttachmentRef[] = []
   for (const ref of refs) {
-    const action = attachmentActionOf(port, ref)
-    if (action === 'present') {
-      counters.present += 1
-      continue
-    }
+    if (attachmentActionOf(port, ref) === 'present') counters.present += 1
+    else pending.push(ref)
+  }
+  for (const [index, ref] of pending.entries()) {
+    report?.(index, pending.length, ref)
     await fetchAttachment(deps, port, ref, counters, problems, absent)
   }
 }
@@ -1757,6 +1760,22 @@ function countPackedAttachments(outcome: ImportOutcome, counters: SyncAttachment
  * 本机库里没有的对象（引用在、字节不在）算 `missing`：与导出那枚响应头同一个交代——用户需要知道
  * "这次有几张图没能带走"，而不是等到了另一台机器上才发现图挂了。
  */
+/**
+ * 上报"正在处理第几个附件对象"。
+ *
+ * 相位名与导入那条路一样（`attach`），界面那个进度块两种动作共用 `progress.attach` 那一句。同步这条
+ * 以前只有**会话级**的进度：对象是在某一条会话的步骤里传的（补对象那一趟更是整库尺度），一条会话几十
+ * 张图时，界面会停在同一行上几分钟不动——而"传了多少"恰恰是那一趟唯一在变的东西。
+ *
+ * `total` 数的是"要看过的对象"（含远端已有、本机已缺那几种只需核一下的），不是"要传的字节"：分母与
+ * 分子同口径，条才会匀速走。
+ *
+ * @param done 从 0 开始的序号（界面按 `done + 1` 说"正在处理第几个"，与另外几段同一个口径）。
+ * @param total 这一批要看的对象总数。
+ * @param ref 当前这一个（界面只拿它当 key，认得出是哪个对象）。
+ */
+type AttachmentReporter = (done: number, total: number, ref: AttachmentRef) => void
+
 async function pushAttachments(
   deps: SyncDeps,
   port: AttachmentPort,
@@ -1764,30 +1783,41 @@ async function pushAttachments(
   listed: Map<string, Set<string>>,
   counters: SyncAttachmentOut,
   problems: string[],
+  report?: AttachmentReporter,
 ): Promise<void> {
+  // 先分拣一遍：本机没有的那些（`missing`）与远端已经有的那些（`skipped`）都**不进分母**——它们不花
+  // 时间，算进去进度条就走不满（同一条规矩，见 [同步进度走 SSE](../../.agents/notes/implemented/architecture/2026-10-03-sync-progress-streams-over-sse.md)）。
+  // 这一遍只 stat 不读字节：真要传的那几个留到下一遍再读，内存里不必压着一份整库的对象。
+  const pending: AttachmentRef[] = []
   for (const ref of refs) {
     const path = port.pathOf(ref)
-    if (path === undefined) {
+    if (path === undefined || !existsSync(path)) {
       counters.missing += 1
       continue
     }
+    const names = await remoteObjectNamesIn(deps, listed, ref, problems)
+    if (names === undefined) continue
+    if (names.has(attachmentHex(ref))) {
+      counters.skipped += 1
+      continue
+    }
+    pending.push(ref)
+  }
+  for (const [index, ref] of pending.entries()) {
+    report?.(index, pending.length, ref)
+    const path = port.pathOf(ref)
     let bytes: Buffer
     try {
-      bytes = readFileSync(path)
+      bytes = readFileSync(path as string)
     } catch {
       counters.missing += 1
       continue
     }
     const names = await remoteObjectNamesIn(deps, listed, ref, problems)
     if (names === undefined) continue
-    const hex = attachmentHex(ref)
-    if (names.has(hex)) {
-      counters.skipped += 1
-      continue
-    }
     try {
       await deps.dav.put(remoteAttachmentPath(ref), bytes)
-      names.add(hex)
+      names.add(attachmentHex(ref))
       counters.uploaded += 1
       counters.bytes += bytes.length
     } catch (error) {
@@ -1827,6 +1857,7 @@ async function repairAttachments(
   outgoing: SyncAttachmentOut,
   problems: string[],
   absent: Set<string>,
+  report?: AttachmentReporter,
 ): Promise<void> {
   /** 本机缺的那些（远端有就取回来）。 */
   const wanted = new Map<string, AttachmentRef>()
@@ -1844,6 +1875,8 @@ async function repairAttachments(
     }
   }
   if (wanted.size > 0) {
+    // 先判"远端有没有"（列一次目录就够），再取：远端也没有的那些只进那句汇总，不算进度里的活。
+    const toFetch: AttachmentRef[] = []
     for (const ref of wanted.values()) {
       const names = await remoteObjectNamesIn(deps, listed, ref, problems)
       if (names === undefined) continue
@@ -1851,12 +1884,16 @@ async function repairAttachments(
         absent.add(ref.id)
         continue
       }
+      toFetch.push(ref)
+    }
+    for (const [index, ref] of toFetch.entries()) {
+      report?.(index, toFetch.length, ref)
       await fetchAttachment(deps, port, ref, incoming, problems, absent)
     }
   }
   // 远端缺的那些交给推送那一段：它自己按前缀列一次、只传远端真没有的（两个方向共用同一份缓存）。
   if (extra.size > 0) {
-    await pushAttachments(deps, port, [...extra.values()], listed, outgoing, problems)
+    await pushAttachments(deps, port, [...extra.values()], listed, outgoing, problems, report)
   }
 }
 
@@ -1893,6 +1930,14 @@ export async function applyPreparedSync(
   const emit = (event: Omit<ProgressEvent, 'what'>): void => {
     options.onProgress?.(deps.progressWhat === undefined ? event : { ...event, what: deps.progressWhat })
   }
+  /**
+   * 附件对象那一段的报告器（见 `AttachmentReporter`）。
+   *
+   * `label` 带上这一条会话的名字：对象是在**某一条会话**的步骤里传的，界面把 label 画成一行小标题，
+   * 用户才知道这几兆字节是在给谁搬。补对象那一趟不属于任何一条会话，就不给 label。
+   */
+  const reportAttachments = (label?: string): AttachmentReporter => (done, total, ref) =>
+    emit({ phase: 'attach', done, total, id: ref.id, ...(label === undefined ? {} : { label }) })
   /**
    * 预演比对时算过的指纹直接接着用（同一个字节数、同一个 mtime，落地之前验过）。
    *
@@ -1984,6 +2029,7 @@ export async function applyPreparedSync(
           attachmentIn,
           problems,
           absentObjects,
+          reportAttachments(entry.title ?? entry.id),
         )
       }
       const importPlan = planImport(bundle, importOptions)
@@ -2073,6 +2119,7 @@ export async function applyPreparedSync(
             attachmentIn,
             problems,
             absentObjects,
+            reportAttachments(entry.title ?? session.title ?? entry.id),
           )
         }
         const importPlan = planImport(bundle, importOptions)
@@ -2181,6 +2228,7 @@ export async function applyPreparedSync(
           remoteObjectNames,
           attachmentOut,
           problems,
+          reportAttachments(session.title ?? entry.title ?? entry.id),
         )
       }
       const bundle = buildBundle([source], {
@@ -2256,6 +2304,7 @@ export async function applyPreparedSync(
       attachmentOut,
       problems,
       absentObjects,
+      reportAttachments(),
     )
   }
 

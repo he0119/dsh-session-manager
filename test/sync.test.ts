@@ -204,6 +204,11 @@ function writePhases(events: readonly SyncProgress[]): string[] {
     .map((event) => `${event.phase} ${event.done}/${event.total}`)
 }
 
+/** 只留附件对象那一段的进度（`progress.attach`，推 / 拉 / 补对象三处共用同一个相位名）。 */
+function attachPhases(events: readonly SyncProgress[]): string[] {
+  return events.filter((event) => event.phase === 'attach').map((event) => `attach ${event.done}/${event.total}`)
+}
+
 /** 只留算计划那三段的进度。 */
 function planPhases(events: readonly SyncProgress[]): string[] {
   return events
@@ -2179,6 +2184,77 @@ test('同步拉取：远端共享库里没有这个对象时只记问题，会�
       outcome.problems,
       ['本机有 1 个附件对象在远端共享库里也没有，这次补不上（有对象的那些机器还没把它们推上去）'],
     )
+  } finally {
+    await fixture.close()
+    rmSync(SANDBOX, { recursive: true, force: true })
+  }
+})
+
+test('同步进度：附件对象那一段也报 attach（带发起它的那条会话，补对象那趟不带）', async () => {
+  rmSync(SANDBOX, { recursive: true, force: true })
+  mkdirSync(SANDBOX, { recursive: true })
+  const fixture = await startDavFixture({ root: join(SANDBOX, 'dav-attach-progress') })
+  const dav = createDavClient({ baseUrl: fixture.url })
+  const a = makeMachine('attach-progress-a')
+  const b = makeMachine('attach-progress-b')
+  const storeA = makeAttachmentStore('attach-progress-store-a')
+  const storeB = makeAttachmentStore('attach-progress-store-b')
+  const image = Buffer.from('这一张只为了看进度')
+  const ref: AttachmentRef = { id: attachmentIdOf(image), kind: 'image' }
+  try {
+    writeSession(a, 's1', 1000, { title: '带图的那条', eventLines: [attachmentEvent(ref, image.length)] })
+    storeA.put(ref, image)
+
+    // 推：对象那一段也报 attach，label 是这条会话的名字（几兆字节在给谁搬）。
+    const pushed: SyncProgress[] = []
+    await syncMachine(a, dav, settings(a, { machineId: 'robot-a' }), {
+      apply: true,
+      attachments: () => storeA.port,
+      // 标题由夹具给（真宿主从投影缓存读）：label 断言要的正是"读到的那个名字"。
+      titles: { s1: '带图的那条' },
+      onProgress: (event) => pushed.push(event),
+    })
+    assert.deepEqual(attachPhases(pushed), ['attach 0/1'], '推对象时报一段，分母是这条会话要看的对象数')
+    const pushAttach = pushed.find((event) => event.phase === 'attach')
+    assert.equal(pushAttach?.label, '带图的那条', 'label 说明这一段在给哪条会话搬')
+    assert.equal(pushAttach?.id, ref.id, 'id 是当前那一个对象')
+
+    // 拉：同一条会话的另一台机器也报（包只有日志，对象从共享库取）。
+    const pulled: SyncProgress[] = []
+    await syncMachine(b, dav, settings(b, { machineId: 'robot-b', mapping: { [a.cwd]: b.cwd } }), {
+      apply: true,
+      attachments: () => storeB.port,
+      onProgress: (event) => pulled.push(event),
+    })
+    const pullAttach = pulled.find((event) => event.phase === 'attach')
+    assert.deepEqual(attachPhases(pulled), ['attach 0/1'])
+    assert.equal(pullAttach?.label, '带图的那条', '拉取那一段同样点名是哪条会话')
+
+    // 补对象那一趟：日志两边一样、本机缺对象。它也报，但**不带 label**——它不属于任何一条会话。
+    rmSync(storeB.pathOf(ref), { force: true })
+    const repaired: SyncProgress[] = []
+    await syncMachine(b, dav, settings(b, { machineId: 'robot-b', mapping: { [a.cwd]: b.cwd } }), {
+      apply: true,
+      attachments: () => storeB.port,
+      onProgress: (event) => repaired.push(event),
+    })
+    const repairAttach = repaired.find((event) => event.phase === 'attach')
+    assert.deepEqual(attachPhases(repaired), ['attach 0/1'], '补对象那趟也报（以前这一趟一个字都不报）')
+    assert.equal(repairAttach?.label, undefined, '补对象那一趟不属于任何一条会话，不给 label')
+    assert.equal(existsSync(storeB.pathOf(ref)), true, '而对象确实补回来了')
+
+    // 分拣口径：远端已经有的对象**不进分母**。A 那条会话再长一代重推一次，它的对象远端早有，
+    // 于是这一次一个 attach 都不该报（报了就会出现"正在传 1 / 1"却一个字节都没传）。
+    addGeneration(a, 's1', 5, '{"type":"user/message","seq":9}')
+    const again: SyncProgress[] = []
+    const repush = await syncMachine(a, dav, settings(a, { machineId: 'robot-a' }), {
+      apply: true,
+      attachments: () => storeA.port,
+      onProgress: (event) => again.push(event),
+    })
+    assert.deepEqual(repush.pushed, [{ id: 's1', action: 'update' }], '这一条确实重推了（日志长了一代）')
+    assert.deepEqual(repush.attachmentOut, { uploaded: 0, skipped: 1, bytes: 0, missing: 0 })
+    assert.deepEqual(attachPhases(again), [], '远端早有的对象不进分母：一个 attach 都不报')
   } finally {
     await fixture.close()
     rmSync(SANDBOX, { recursive: true, force: true })
