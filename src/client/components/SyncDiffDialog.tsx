@@ -26,6 +26,7 @@ import { Modal, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
 import { fetchSyncDiff, type SyncDiffResponse } from '../api.ts'
 import { KIND_KEY } from './TranscriptDialog.tsx'
 import { formatBytes, formatTime } from './sessionList.tsx'
+import { sideBlocks, STAT_KEY, statCells } from '../logic/diffStats.ts'
 import { KIND_TONE, RELATION_KEY, RELATION_TONE, SIDE_TONE } from '../logic/diffTags.ts'
 import type { DiffItem, DiffTail } from '../../session-diff.ts'
 import type { Translate } from '../logic/locales.ts'
@@ -55,14 +56,15 @@ function TailBlock({
   side: 'local' | 'remote'
   tail: DiffTail
   t: Translate
-}): React.ReactElement | null {
-  if (tail.count === 0) return null
+}): React.ReactElement {
   return (
     <div className={`dsm-diffTail dsm-diffTail-${side}`}>
       {/* 哪一边独有：一枚标签写在块头上，不用读句子（本机一档、远端另一档，两块一眼分得开）。 */}
       <Tag className="dsm-tag" tone={SIDE_TONE[side]}>
         {t(side === 'local' ? 'sync.diff.tail.local' : 'sync.diff.tail.remote', { count: tail.count })}
       </Tag>
+      {/* 0 条也要摆：那半边"没有多出来的"本身就是一条结论，不是还没查。 */}
+      {tail.count === 0 ? <div className="dsm-hint">{t('sync.diff.tail.empty')}</div> : null}
       {tail.preview.map((item) => (
         // 一行摘要就是内容视图里那一张事件卡的头行（同一个 `.dsm-itemHead`）：种类在左、摘要在中、
         // 时刻在右。种类在这里是一枚官方标签（档位与内容视图那条色边同一套语义，见 KIND_TONE）。
@@ -153,9 +155,7 @@ export function SyncDiffDialog({
         <>
           <div className="dsm-hint">
             {t('sync.diff.summary', {
-              localEvents: diff.local.events,
               localBytes: formatBytes(diff.local.bytes),
-              remoteEvents: diff.remote.events,
               remoteBytes: formatBytes(diff.remote.bytes),
             })}
           </div>
@@ -165,6 +165,15 @@ export function SyncDiffDialog({
             </Tag>
             <span>{relationText(data, t)}</span>
           </p>
+          {/* 三格计数把账摆全：共同 / 本机独有 / 远端独有，一格都不能少（0 也是数字）。 */}
+          <div className="dsm-diffStats">
+            {statCells(diff).map((cell) => (
+              <div key={cell.key} className="dsm-diffStat">
+                <span className="dsm-hint">{t(STAT_KEY[cell.key])}</span>
+                <span>{t('sync.diff.count', { count: cell.count })}</span>
+              </div>
+            ))}
+          </div>
           {diff.header.length === 0 ? null : (
             <div className="dsm-diffHeader">
               <Tag className="dsm-tag" tone="neutral">
@@ -190,8 +199,9 @@ export function SyncDiffDialog({
               </table>
             </div>
           )}
-          <TailBlock side="local" tail={diff.localTail} t={t} />
-          <TailBlock side="remote" tail={diff.remoteTail} t={t} />
+          {sideBlocks(diff).map((block) => (
+            <TailBlock key={block.side} side={block.side} tail={block.tail} t={t} />
+          ))}
           <div className="dsm-hint">{t('sync.diff.readonly')}</div>
         </>
       )}

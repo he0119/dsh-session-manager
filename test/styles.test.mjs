@@ -566,3 +566,10 @@ test('差异页那几块：关系是一行"标签 + 一句话"，弹窗正文照
   // 尾巴里一行摘要是一条事件卡的头行，跟内容视图同一档（12px/18px 来自 `.dsm-item`）。
   assert.match(ruleBody('.dsm-item') ?? '', /font-size:\s*12px/, '条目还是内容视图那一档')
 })
+
+test('差异页顶部三格计数横排一行', () => {
+  // 三格（共同 / 本机独有 / 远端独有）是一行横排；竖排 flex 里默认 stretch 会把块头标签拉成整条
+  // （实测踩过），所以横排与并排这两条各钉一下。
+  assert.match(ruleBody('.dsm-diffStats') ?? '', /display:\s*flex/, '三格横排一行')
+  assert.match(ruleBody('.dsm-diffStat') ?? '', /display:\s*flex/, '一格里标签与数字并排')
+})

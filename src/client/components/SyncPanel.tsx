@@ -815,7 +815,7 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
                 <table className="dsm-table dsm-planTable dsm-syncPlanTable">
                   <thead>
                     <tr>
-                      <th className="dsm-colAction">{t('table.action')}</th>
+                      <th className="dsm-colAction">{t('table.conclusion')}</th>
                       <th className="dsm-colSession">{t('table.session')}</th>
                       <th className="dsm-colBytes">{t('table.bytes')}</th>
                       <th className="dsm-colDiff">{t('sync.diff.column')}</th>
@@ -871,7 +871,7 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
                 <table className="dsm-table dsm-planTable dsm-syncPlanTable">
                   <thead>
                     <tr>
-                      <th className="dsm-colAction">{t('table.action')}</th>
+                      <th className="dsm-colAction">{t('table.conclusion')}</th>
                       <th className="dsm-colSession">{t('table.session')}</th>
                       <th className="dsm-colBytes">{t('table.bytes')}</th>
                       <th className="dsm-colDiff">{t('sync.diff.column')}</th>
@@ -913,7 +913,7 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
                 <table className="dsm-table dsm-planTable dsm-syncPlanTable dsm-keptTable">
                   <thead>
                     <tr>
-                      <th className="dsm-colAction">{t('table.action')}</th>
+                      <th className="dsm-colAction">{t('table.conclusion')}</th>
                       <th className="dsm-colSession">{t('table.session')}</th>
                       <th className="dsm-colMachine">{t('table.machine')}</th>
                       <th className="dsm-colDiff">{t('sync.diff.column')}</th>

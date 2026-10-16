@@ -883,6 +883,9 @@ export const CSS = `
 .dsm-diffHeader { display: flex; flex-direction: column; gap: 4px; }
 .dsm-diffField { width: 120px; }
 .dsm-diffTail { display: flex; flex-direction: column; gap: 6px; }
+/* 顶部三格计数（共同 / 本机独有 / 远端独有）横排一行，标签与数字靠基线对齐。 */
+.dsm-diffStats { display: flex; gap: 16px; flex-wrap: wrap; align-items: baseline; }
+.dsm-diffStat { display: flex; gap: 6px; align-items: baseline; }
 /* 块头那枚标签要**收成小块**：容器是竖排 flex，默认 stretch 会把标签拉成整条，看着像一条横幅而不是
    一枚分类标记（实测第一版就是这样）。只让它自己靠左，下面那些条目卡照旧占满整宽。 */
 .dsm-diffTail > .dsm-tag, .dsm-diffHeader > .dsm-tag { align-self: flex-start; }

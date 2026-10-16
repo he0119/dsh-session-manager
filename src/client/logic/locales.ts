@@ -98,6 +98,7 @@ export const zh = {
   'transfer.import.planAttachmentsUnavailable':
     '其中 {count} 个对象这个宿主落不了（没有附件服务，或认不出这种引用）：它们不会落地，会话照旧导入。',
   'table.action': '动作',
+  'table.conclusion': '结论',
   'table.session': '会话',
   'table.cwd': '工作目录',
   'table.bytes': '大小',
@@ -358,7 +359,7 @@ export const zh = {
   'sync.form.title': '同步设置',
   'sync.where': '远端 {url}',
   'sync.hint':
-    '按插件配置里的映射同步：把别处推送来的会话拉取到本机，把本机独有的推送到远端。同一个 id 两边都有时按内容与最后活动时间判谁更新，远端更新会先备份再换掉本机那份。映射 {mappings} 条。',
+    '按插件配置里的映射同步：把别处推送来的会话拉取到本机，把本机独有的推送到远端。同一个 id 两边都有时按内容与最后活动时间判谁更新，远端更新会先备份再换掉本机那份。两边各自写过的这次不动，预演里可以看差异再定。映射 {mappings} 条。',
   'sync.offHint':
     '没配置同步：在下面那张表单里填远端地址（WebDAV 集合）并逐行加上路径映射，保存后「同步」就会出现。',
   'sync.action': '同步',
@@ -413,7 +414,7 @@ export const zh = {
   'sync.diff.title': '两边的差异',
   'sync.diff.loading': '正在取远端那一份…',
   'sync.diff.remoteMachine': '远端那一份来自 {machine}',
-  'sync.diff.summary': '本机 {localEvents} 条 / {localBytes} · 远端 {remoteEvents} 条 / {remoteBytes}',
+  'sync.diff.summary': '本机 {localBytes} · 远端 {remoteBytes}',
   'sync.diff.same': '事件逐条一致——两边内容一样，保哪一份都一样。',
   'sync.diff.sameHeader': '事件逐条一致，差别只在 header（{fields}）。',
   'sync.diff.localExtends': '远端那份是本机这部分的前缀：本机在同一个延续上又写了 {count} 条。',
@@ -421,6 +422,11 @@ export const zh = {
   'sync.diff.forked': '两边各写各的：共同到第 {common} 条为止，之后本机 {localCount} 条、远端 {remoteCount} 条。',
   'sync.diff.tail.local': '本机独有 {count} 条',
   'sync.diff.tail.remote': '远端独有 {count} 条',
+  'sync.diff.tail.empty': '这半边没有多出来的。',
+  'sync.diff.stat.common': '共同',
+  'sync.diff.stat.local': '本机独有',
+  'sync.diff.stat.remote': '远端独有',
+  'sync.diff.count': '{count} 条',
   // 「分类」本身要看得到：关系一枚标签、两条尾巴各一枚、条目种类各一枚（同内容视图那套语义）。
   'sync.diff.relation.same': '两边一致',
   'sync.diff.relation.extends': '只是续写',
@@ -607,6 +613,7 @@ export const en: LocaleDictOf<typeof NS> = {
   'transfer.import.planAttachmentsUnavailable':
     '{count} of those objects cannot be placed on this host (no attachment service, or an unrecognised reference): they will not be written, and the sessions still import.',
   'table.action': 'Action',
+  'table.conclusion': 'Conclusion',
   'table.session': 'Session',
   'table.cwd': 'Working dir',
   'table.bytes': 'Size',
@@ -920,7 +927,7 @@ export const en: LocaleDictOf<typeof NS> = {
   'sync.diff.title': 'Differences between the two copies',
   'sync.diff.loading': 'Fetching the remote copy…',
   'sync.diff.remoteMachine': 'The remote copy comes from {machine}',
-  'sync.diff.summary': 'here {localEvents} events / {localBytes} · remote {remoteEvents} events / {remoteBytes}',
+  'sync.diff.summary': 'this machine {localBytes} · remote {remoteBytes}',
   'sync.diff.same': 'Every event matches — the two copies have the same content, so either one will do.',
   'sync.diff.sameHeader': 'Every event matches; they differ only in the header ({fields}).',
   'sync.diff.localExtends': "The remote copy is a prefix of this machine's: both continued the same thread, this machine wrote {count} more.",
@@ -928,6 +935,11 @@ export const en: LocaleDictOf<typeof NS> = {
   'sync.diff.forked': 'Both sides wrote their own: they agree up to event {common}, then this machine has {localCount} more and the remote {remoteCount}.',
   'sync.diff.tail.local': '{count} only on this machine',
   'sync.diff.tail.remote': '{count} only on the remote',
+  'sync.diff.tail.empty': 'Nothing extra on this side.',
+  'sync.diff.stat.common': 'Common',
+  'sync.diff.stat.local': 'Only this machine',
+  'sync.diff.stat.remote': 'Only on the remote',
+  'sync.diff.count': '{count} events',
   // The classification itself has to be visible: one tag for the relation, one per tail, one per item
   // kind (the same vocabulary as the transcript view's coloured left edge).
   'sync.diff.relation.same': 'Identical',
