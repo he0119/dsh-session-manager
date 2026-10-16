@@ -863,6 +863,26 @@ export const CSS = `
 /* 官方的正文层就是"唯一那个滚动区"（RiskConfirmation 也这么用）。overscroll-behavior: contain
    挡住滚动链：正文滚到底之后不再把页面/卡片跟着推。 */
 .dsm-dialogContent { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+
+/*
+ * 「看差异」那一页（同步页三张表最后那一列 + 点开之后的比对视图）。
+ *
+ * 条目本身沿用内容视图那套类名（dsm-item / dsm-itemHead，同一张事件卡的头行），所以这里只补**布局**：
+ * 那几块之间各自留间距、列宽固定住（免得三张表的列宽随状态列的标签长短抖动）。一个颜色都不写。
+ */
+.dsm-colDiff { width: 96px; }
+.dsm-diffCell { white-space: nowrap; }
+.dsm-diffContent {
+  display: flex; flex-direction: column; gap: 12px;
+  /* 字号照正文那一档自己写：官方 Modal 会 portal 到 document.body，于是弹窗落在那套 dsm-root（13px 继承
+     链）之外，正文会继承文档根的 16px——同一条会话在弹窗里与在页面里长得不一样（内容视图那层同样自己
+     写了一遍）。量过：不写这条时这里量到 16px/normal，写上之后是 14px/20px。 */
+  font-size: 14px; line-height: 20px;
+}
+.dsm-diffRelation { margin: 0; }
+.dsm-diffHeader { display: flex; flex-direction: column; gap: 4px; }
+.dsm-diffField { width: 120px; }
+.dsm-diffTail { display: flex; flex-direction: column; gap: 6px; }
 /*
  * 正文那一层：块与块之间的节奏（官方那层 body 是纵向 flex 但不给间距）、以及**字号**。
  *

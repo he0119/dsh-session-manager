@@ -76,6 +76,9 @@
 - [两边都有同一个 id 时择新，空白会话不搬](../.agents/notes/implemented/feature/2026-10-04-sync-picks-the-newer-copy.md)：
   按内容与宿主的最后活动时间（提问与消息两枚钟里晚的那枚）择新，远端那份赢时先备份（`kind: replace`）再换；空白会话不上传，并从
   自己那格的索引里撤下。
+- [两边各自写过时先看差异，这一页只读](../.agents/notes/implemented/feature/2026-10-16-both-wrote-gets-a-diff-view.md)：
+  `diverged` 与那几个"一份会顶掉另一份"的结论各带一枚「看差异」：`GET /sync-diff` 取回远端那一个包、
+  逐行比原始日志，header 单独比，结论分成 same / 续写 / 真分叉三类；一个字节都不写。
 - [远端第一层是插件自己的命名空间](../.agents/notes/implemented/architecture/2026-10-02-remote-namespace-is-the-plugins.md)：
   `url` 之下固定一层 `dsh-session-manager/`，机器格直接放在里面（逐层 MKCOL 自建），于是 `url` 可以是
   服务器根。

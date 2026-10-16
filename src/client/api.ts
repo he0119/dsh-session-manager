@@ -16,6 +16,7 @@
 
 import { SseFrames, interpretStreamEvent, type ProgressEvent } from './logic/eventStream.ts'
 import type { TranscriptPage } from '../transcript.ts'
+import type { SessionDiff } from '../session-diff.ts'
 
 // 事件流的分帧与解释在 eventStream.ts（那份文件与 DOM 无关，所以 Host 侧的测试图能直接引它）。类型
 // 从这里转出去，界面那一侧只认 api.ts 一个入口。
@@ -204,6 +205,38 @@ async function asJson<T>(response: Response): Promise<T> {
   const body = parsed as { error?: string }
   if (!response.ok) throw new Error(body.error ?? `HTTP ${response.status}`)
   return parsed as T
+}
+
+/** 两边日志的差异（见 `src/session-diff.ts`）：这一趟只读，宿主一个字节都不写。 */
+export interface SyncDiffResponse {
+  id: string
+  /** 远端那一份是哪台机器贡献的。 */
+  machine: string
+  /** 本机这份日志的文件名（代次看得出是哪一份）。 */
+  localFile: string
+  /** 下这一个远端包花了多少字节。 */
+  bundleBytes: number
+  diff: SessionDiff
+}
+
+/**
+ * 取"本机这一份 vs 远端那台那份"的差异。
+ *
+ * `machine` 一般在计划里已经有了（推送行的 `machine`），指名就让宿主去那一台取；留给不指名的调用
+ * （比如从别处直接打开）一个退路——那时宿主按远端索引里这个 id 记的那台算。
+ */
+export async function fetchSyncDiff(
+  id: string,
+  machine?: string,
+  signal?: AbortSignal,
+): Promise<SyncDiffResponse> {
+  const query = new URLSearchParams({ id })
+  if (machine !== undefined && machine !== '') query.set('machine', machine)
+  const response = await fetch(`${API_PREFIX}/sync-diff?${query.toString()}`, {
+    headers: { accept: 'application/json' },
+    ...(signal === undefined ? {} : { signal }),
+  })
+  return asJson<SyncDiffResponse>(response)
 }
 
 /**
