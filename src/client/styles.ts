@@ -873,19 +873,27 @@ export const CSS = `
 .dsm-colDiff { width: 96px; }
 .dsm-diffCell { white-space: nowrap; }
 .dsm-diffContent {
-  display: flex; flex-direction: column; gap: 12px;
+  display: flex; flex-direction: column; gap: 20px;
   /* 字号照正文那一档自己写：官方 Modal 会 portal 到 document.body，于是弹窗落在那套 dsm-root（13px 继承
      链）之外，正文会继承文档根的 16px——同一条会话在弹窗里与在页面里长得不一样（内容视图那层同样自己
      写了一遍）。量过：不写这条时这里量到 16px/normal，写上之后是 14px/20px。 */
   font-size: 14px; line-height: 20px;
 }
 .dsm-diffRelation { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin: 0; }
+/* 分区：块与块之间 20px（上面那条 gap），一块里面 8px。均匀一种间距会糊成一片——第一版实测就是
+   标题、事实、结论、计数、表、尾巴、尾注全用同一种间距摞着，看着眼花。 */
+.dsm-diffSection { display: flex; flex-direction: column; gap: 8px; }
+.dsm-diffTails { gap: 16px; }
+.dsm-diffHead { display: flex; flex-direction: column; gap: 2px; }
+/* 尾注与正文分开：底下那句"只读"不是尾巴块的一部分。 */
+.dsm-diffNote { border-top: 1px solid var(--dsw-alias-border-l1, rgba(0, 0, 0, 0.08)); padding-top: 8px; }
 .dsm-diffHeader { display: flex; flex-direction: column; gap: 4px; }
 .dsm-diffField { width: 120px; }
 .dsm-diffTail { display: flex; flex-direction: column; gap: 6px; }
-/* 顶部三格计数（共同 / 本机独有 / 远端独有）横排一行，标签与数字靠基线对齐。 */
-.dsm-diffStats { display: flex; gap: 16px; flex-wrap: wrap; align-items: baseline; }
-.dsm-diffStat { display: flex; gap: 6px; align-items: baseline; }
+/* 顶部三格计数（共同 / 本机独有 / 远端独有）：横排一行、每格里标签在上数字在下——横着摆的
+   "标签+数字"三组读起来像一句话，竖着摆才读成三格数据。 */
+.dsm-diffStats { display: flex; gap: 24px; flex-wrap: wrap; }
+.dsm-diffStat { display: flex; flex-direction: column; gap: 2px; min-width: 88px; }
 /* 块头那枚标签要**收成小块**：容器是竖排 flex，默认 stretch 会把标签拉成整条，看着像一条横幅而不是
    一枚分类标记（实测第一版就是这样）。只让它自己靠左，下面那些条目卡照旧占满整宽。 */
 .dsm-diffTail > .dsm-tag, .dsm-diffHeader > .dsm-tag { align-self: flex-start; }
