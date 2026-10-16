@@ -475,6 +475,14 @@ export interface SyncResponse {
   pushed: Array<{ id: string; action: 'upload' | 'update' }>
   bytesIn: number
   bytesOut: number
+  /**
+   * 附件对象那一段（远端共享库里搬的那些，见宿主 `SyncOutcome`）：按对象计，不按引用计。
+   *
+   * 缺席 = 这个宿主没有附件服务（**不是"零个对象"**）：界面据此一个字都不说，而不是报一串 0。两项都
+   * 只在落地那次的响应里可能有（预演不知道远端有哪些对象）。
+   */
+  attachmentIn?: { written: number; present: number; bytes: number }
+  attachmentOut?: { uploaded: number; skipped: number; bytes: number; missing: number }
   registryWritten: boolean
   indexWritten: boolean
   problems: string[]
@@ -600,6 +608,8 @@ export interface AutoPushResponse {
   pushed?: Array<{ id: string; action: 'upload' | 'update' }>
   bytesIn?: number
   bytesOut?: number
+  /** 这一轮补进远端共享库的附件对象（缺席 = 宿主没有附件服务，或这次一个对象都没动）。 */
+  attachmentOut?: { uploaded: number; skipped: number; bytes: number; missing: number }
   problems?: string[]
   takesEffect?: 'immediate' | 'restart-required'
   planSource?: { kind: 'reused' } | { kind: 'recomputed'; reason: string }

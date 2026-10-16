@@ -29,6 +29,14 @@ export interface AttachmentRef {
   /** `sha256:<64 位小写十六进制>`。 */
   id: string
   kind: AttachmentKind
+  /**
+   * 日志里记的字节数（宿主写引用时一定带上）。
+   *
+   * 只有"本机那份还在不在"这一个判据用它（见 `attachmentActionOf()`）：对不上就要重新取。**任何路径
+   * 计算都不看它**（`pathOf()` 只认 id 与 kind），所以老日志缺这一项时功能照旧，只是判"在不在"时
+   * 只能按"文件在就算在"。
+   */
+  bytes?: number
 }
 
 /**
@@ -79,9 +87,15 @@ function refsInValue(value: unknown, found: Map<string, AttachmentRef>): void {
       if (typeof attachment === 'object' && attachment !== null) {
         const id = (attachment as Record<string, unknown>)['attachmentId']
         if (isAttachmentId(id)) {
+          const declared = (attachment as Record<string, unknown>)['bytes']
+          const bytes =
+            typeof declared === 'number' && Number.isSafeInteger(declared) && declared >= 0 ? declared : undefined
           // 同一个 id 在日志里会出现多次（`agent/inbox/spliced` 与随后的 `user/message` 各一份）：
-          // 去重键带上 kind——两个库里的对象互不相干，同一个 sha 在两边都有是两件事。
-          found.set(`${kind}:${id}`, { id, kind })
+          // 去重键带上 kind——两个库里的对象互不相干，同一个 sha 在两边都有是两件事。字节数以**有值的
+          // 那一次**为准：老日志可能不带这一项，不带的那次不能把已知的值抹掉。
+          const key = `${kind}:${id}`
+          const known = bytes ?? found.get(key)?.bytes
+          found.set(key, { id, kind, ...(known === undefined ? {} : { bytes: known }) })
         }
       }
     }

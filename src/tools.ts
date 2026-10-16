@@ -41,6 +41,8 @@ import {
   runSync,
   type AutoPushOutcome,
   type AutoPushTimer,
+  type SyncAttachmentIn,
+  type SyncAttachmentOut,
   type SyncPlan,
   type SyncDeps,
   type SyncSettings,
@@ -295,6 +297,9 @@ export async function resolveAutoPushRuntime(
     liveSessionIds: () => liveSessionIds(ctx),
     hostRegistry: () => hostRegistryPort(ctx),
     hostCheckpoints: () => hostCheckpointPort(ctx),
+    // 自动推送只推不拉，但**推的包里也没有对象**：对象走远端共享库，所以这条路照样要那个端口
+    // （宿主没有附件服务时缺席，整条路退回"只搬日志"）。
+    attachments: () => attachmentPort(ctx),
     // 这一趟是只推不拉；`what` 让界面能把后台那条流与用户手点的那条分开（两条可能同时在跑）。
     pushOnly: true,
     progressWhat: 'auto-push',
@@ -409,6 +414,16 @@ export interface SyncToolResult {
   notes: string[]
   bytesIn: number
   bytesOut: number
+  /**
+   * 附件对象那一段（远端共享库里搬的那些），按**对象**计而不是按引用计。
+   *
+   * 三个数都是 0 表示"这次没搬对象"或"宿主没有附件服务"——工具结果里不区分这两件事（要区分的是界面，
+   * 它读 `SyncOutcome.attachmentIn/Out` 的**缺席**）。
+   */
+  attachmentsIn: number
+  attachmentsOut: number
+  /** 本机有引用、对象却不在本机：这次带不上去的个数。 */
+  attachmentsMissing: number
   machines: string[]
   takesEffect: EffectMode
   summary: string
@@ -444,13 +459,31 @@ function describeSync(
   replaced: readonly string[],
   pushed: readonly string[],
   applied: boolean,
+  attachments?: { in?: SyncAttachmentIn; out?: SyncAttachmentOut },
 ): string {
   const head = `${applied ? '已同步' : '预演'}：拉取 ${plan.pullIds.length} 条、推送 ${plan.pushIds.length} 条（本机 ${plan.localCount} 条，远端 ${plan.remoteCount} 条，来自 ${plan.machines.join('、') || '还没有机器'}）`
   if (!applied) return head
   // 拉取里有多少条是"换掉本机原来那份"值得单独报：旧的进备份了，用户可能想恢复回去。
   const overwrote =
     replaced.length === 0 ? '' : `，其中 ${replaced.length} 条覆盖了本机原来那份（旧的那份已进备份）`
-  return `${head}。实际落地：拉取 ${pulled.length} 条、推送 ${pushed.length} 条${overwrote}`
+  return `${head}。实际落地：拉取 ${pulled.length} 条、推送 ${pushed.length} 条${overwrote}${describeSyncObjects(attachments)}`
+}
+
+/**
+ * 附件对象那一段（远端共享库里搬的那些）。
+ *
+ * 只在真有对象动了（或真有对象没带上）时说：一条会话都没动时多出来的"附件对象 0 个"是噪音。宿主没有
+ * 附件服务时两项都缺席，这里自然什么都不说。
+ */
+function describeSyncObjects(attachments?: { in?: SyncAttachmentIn; out?: SyncAttachmentOut }): string {
+  const written = attachments?.in?.written ?? 0
+  const uploaded = attachments?.out?.uploaded ?? 0
+  const missing = attachments?.out?.missing ?? 0
+  const parts: string[] = []
+  if (written > 0) parts.push(`取回附件对象 ${written} 个`)
+  if (uploaded > 0) parts.push(`上传附件对象 ${uploaded} 个`)
+  if (missing > 0) parts.push(`本机缺 ${missing} 个附件对象（这次没带上）`)
+  return parts.length === 0 ? '' : `，另${parts.join('、')}`
 }
 
 /**
@@ -1299,6 +1332,9 @@ export function registerTools(ctx: Context, config: PluginConfigInput = {}): Arr
               notes: { type: 'array', required: true, items: { type: 'string' } },
               bytesIn: { type: 'integer', required: true },
               bytesOut: { type: 'integer', required: true },
+              attachmentsIn: { type: 'integer', required: true },
+              attachmentsOut: { type: 'integer', required: true },
+              attachmentsMissing: { type: 'integer', required: true },
               machines: { type: 'array', required: true, items: { type: 'string' } },
               takesEffect: { type: 'string', required: true },
               summary: { type: 'string', required: true },
@@ -1321,6 +1357,9 @@ export function registerTools(ctx: Context, config: PluginConfigInput = {}): Arr
               notes: [],
               bytesIn: 0,
               bytesOut: 0,
+              attachmentsIn: 0,
+              attachmentsOut: 0,
+              attachmentsMissing: 0,
               machines: [],
               takesEffect: 'immediate',
               summary: '没有配置 WebDAV 同步：插件配置里的 sync.url 是空的。',
@@ -1343,6 +1382,8 @@ export function registerTools(ctx: Context, config: PluginConfigInput = {}): Arr
               hostRegistry: () => hostRegistryPort(ctx),
               // 同一处收口：拉取来的会话在本机没有投影检查点，请宿主把列表元数据折出来（见 checkpoint-warm.ts）。
               hostCheckpoints: () => hostCheckpointPort(ctx),
+              // 附件对象走远端共享库（推送只补远端缺的、拉取只取本机缺的），包本身照旧只有日志。
+              attachments: () => attachmentPort(ctx),
             },
             { apply: args.apply === true },
           )
@@ -1356,6 +1397,10 @@ export function registerTools(ctx: Context, config: PluginConfigInput = {}): Arr
             notes: planNotes(outcome.plan),
             bytesIn: outcome.applied ? outcome.bytesIn : outcome.plan.bytesIn,
             bytesOut: outcome.applied ? outcome.bytesOut : outcome.plan.bytesOut,
+            // 只落地那一次报得出这两个数：预演不知道远端共享库里有哪些对象（见 SyncOutcome 的字段说明）。
+            attachmentsIn: outcome.attachmentIn?.written ?? 0,
+            attachmentsOut: outcome.attachmentOut?.uploaded ?? 0,
+            attachmentsMissing: outcome.attachmentOut?.missing ?? 0,
             machines: outcome.plan.machines,
             /*
              * 这次同步要不要重启才被承认：落地按真实结果说，预演按探测说（与界面那条路同一个口径，
@@ -1370,7 +1415,10 @@ export function registerTools(ctx: Context, config: PluginConfigInput = {}): Arr
                 ? 'immediate'
                 : mode(),
             summary: [
-              describeSync(outcome.plan, outcome.pulled, outcome.replaced, pushedIds, outcome.applied),
+              describeSync(outcome.plan, outcome.pulled, outcome.replaced, pushedIds, outcome.applied, {
+                in: outcome.attachmentIn,
+                out: outcome.attachmentOut,
+              }),
               describeWarm(outcome.warm),
               // 预演也要把"执行后会怎样"说出来，否则调用方要到落地之后才知道要重启（与迁移工具同一条）。
               outcome.applied || outcome.plan.pullIds.length === 0 ? undefined : describePlannedEffect(mode()),

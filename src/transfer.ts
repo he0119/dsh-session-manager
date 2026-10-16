@@ -672,23 +672,36 @@ export function planImport(bundle: SessionBundle, options: ImportOptions): Impor
 }
 
 /**
- * 一个包里的对象在本机算什么：要写下去（`create`）、本来就在（`present`）、还是落不了（`unavailable`）。
+ * 一个对象在本机算什么：要写下去（`create`）、本来就在（`present`）、还是落不了（`unavailable`）。
  *
  * 判据是**路径 + 字节数**：对象名就是内容的 sha256，所以"同名同字节数"已经足够说明本机这份就是它
  * （真读一遍再核 sha256 要把每个对象都过一遍盘，而读写两侧各自都会验一次）。字节数对不上（上次崩在
  * 半途、被人动过）时不报 `present`——那是**会重写**的一支，计划里必须算进"会发生写"的那些。
+ *
+ * 导入预演与同步两处共用这一条：两处对"本机有没有"必须是同一个说法，否则同一条会话在两个页面会报
+ * 不同的数。声明的大小不知道时（老日志的引用里没有 `bytes`）退回"文件在就算在"。
+ *
+ * @param port 宿主附件库端口；缺席（宿主没有附件服务）= 这一条谁都落不了。
+ * @param ref 引用（`bytes` 是日志或清单里声明的字节数，可以没有）。
  */
+export function attachmentActionOf(
+  port: AttachmentPort | undefined,
+  ref: { id: string; kind: AttachmentKind; bytes?: number },
+): ImportAttachmentEntry['action'] {
+  const path = port?.pathOf({ id: ref.id, kind: ref.kind })
+  if (path === undefined) return 'unavailable'
+  try {
+    return ref.bytes === undefined || statSync(path).size === ref.bytes ? 'present' : 'create'
+  } catch {
+    return 'create'
+  }
+}
+
 function attachmentAction(
   port: AttachmentPort | undefined,
   entry: BundleAttachmentEntry,
 ): ImportAttachmentEntry['action'] {
-  const path = port?.pathOf({ id: entry.id, kind: entry.kind })
-  if (path === undefined) return 'unavailable'
-  try {
-    return statSync(path).size === entry.bytes ? 'present' : 'create'
-  } catch {
-    return 'create'
-  }
+  return attachmentActionOf(port, entry)
 }
 
 /** 落地结果。 */

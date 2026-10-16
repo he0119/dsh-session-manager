@@ -48,6 +48,9 @@
   容器的形状与落地前的四道校验。
 - [会话包要把附件对象一起带走](../.agents/notes/implemented/feature/2026-10-13-bundles-carry-attachment-objects.md)：
   日志里只有引用、字节在宿主附件库里，所以包得自己带上那几个对象（v2 起），端口缺席时按"只带日志"降级。
+- [同步的附件对象走远端一个共享目录](../.agents/notes/implemented/feature/2026-10-16-sync-carries-attachment-objects.md)：
+  同步的包只带日志，对象走远端 `attachments/` 那份内容寻址的共享目录；手动同步还补对象（本机缺的取回、
+  远端缺的传上），端口缺席时整块不参与。
 - [导入只跳过，不覆盖](../.agents/notes/implemented/architecture/2026-09-27-import-skips-never-overwrites.md)：
   冲突只报告，落地先写 `.part` 再 rename。
 - [产物证据分层，并做两道收窄](../.agents/notes/implemented/architecture/2026-09-27-artifact-evidence-layers.md)：

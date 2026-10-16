@@ -2,12 +2,13 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join, sep } from 'node:path'
 import test from 'node:test'
 
 import { decompress } from 'fzstd'
 
+import type { AttachmentRef } from '../src/attachments.ts'
 import { createDavClient, type DavPort } from '../src/dav.ts'
 import { scanAll, type DiscoveredSession } from '../src/discovery.ts'
 import { sessionDir } from '../src/paths.ts'
@@ -24,6 +25,8 @@ import {
   prepareSync,
   readRemoteLibrary,
   relation,
+  SYNC_ATTACHMENTS_DIR,
+  remoteAttachmentPath,
   remoteBundlePath,
   remoteIndexPath,
   runSync,
@@ -39,7 +42,9 @@ import {
 import type { GitRunner } from '../src/repo.ts'
 import type { DecodeAll, SessionHeader, WorkspaceRegistryState } from '../src/types.ts'
 import { encodeRawFrame } from '../src/zstd-frame.ts'
-import { startDavFixture } from './dav-fixture.ts'
+import { attachmentEvent, attachmentIdOf, makeAttachmentStore } from './attachment-fixture.ts'
+import { BUNDLE_MIN_FORMAT_VERSION, buildBundle, readBundle } from '../src/transfer.ts'
+import { putRemoteSession, startDavFixture, type DavFixture } from './dav-fixture.ts'
 
 const decodeAll: DecodeAll = (buf: Uint8Array): string => Buffer.from(decompress(buf)).toString('utf8')
 const SANDBOX = join(import.meta.dirname, '.sandbox', 'sync')
@@ -72,7 +77,12 @@ function makeMachine(name: string): Machine {
 }
 
 /** 往一台机器的库里写一条会话（格式与宿主写的一致：多帧 zstd 的 raw block）。 */
-function writeSession(machine: Machine, id: string, createdAt: number, options: { title?: string; cwd?: string } = {}): void {
+function writeSession(
+  machine: Machine,
+  id: string,
+  createdAt: number,
+  options: { title?: string; cwd?: string; eventLines?: string[] } = {},
+): void {
   const header: SessionHeader = {
     type: 'session',
     version: 4,
@@ -83,6 +93,9 @@ function writeSession(machine: Machine, id: string, createdAt: number, options: 
     delegationDepth: 0,
   }
   const lines = [JSON.stringify(header), JSON.stringify({ type: 'user/message', seq: 0, data: {} })]
+  // 引用附件的那些行由调用方给（见 test/attachment-fixture.ts 的 `attachmentEvent()`）：日志正文的形状
+  // 是宿主那边的事，这一层只管把它写进这一代日志里。
+  lines.push(...(options.eventLines ?? []))
   if (options.title !== undefined) {
     lines.push(JSON.stringify({ type: 'session/title', seq: 1, data: { title: options.title, source: { kind: 'fallback' } } }))
   }
@@ -133,6 +146,10 @@ interface SyncTestOptions {
   hostCheckpoints?: SyncDeps['hostCheckpoints']
   /** 备份根目录（缺省 `machine.base/backups`）；指向坏位置可以验"备份不成功就一条都不动"。 */
   backupRoot?: string
+  /** 宿主的附件库端口（缺省 = 这个宿主没有附件服务，见 `SyncDeps.attachments`）。 */
+  attachments?: SyncDeps['attachments']
+  /** 这次是只推不拉那一路（自动推送那条，见 `SyncDeps.pushOnly`）。 */
+  pushOnly?: boolean
 }
 
 /** 造一次同步的依赖（界面与工具层注入的那一套）。 */
@@ -155,6 +172,8 @@ function syncDepsOf(
     ...(options.liveSessionIds === undefined ? {} : { liveSessionIds: options.liveSessionIds }),
     ...(options.hostRegistry === undefined ? {} : { hostRegistry: options.hostRegistry }),
     ...(options.hostCheckpoints === undefined ? {} : { hostCheckpoints: options.hostCheckpoints }),
+    ...(options.attachments === undefined ? {} : { attachments: options.attachments }),
+    ...(options.pushOnly === undefined ? {} : { pushOnly: options.pushOnly }),
     pluginVersion: '0.0.1-test',
     now: () => new Date('2026-10-01T00:00:00.000Z'),
   }
@@ -1912,6 +1931,515 @@ test('sync：每开始处理一条报一次进度，拉取与推送各自一段'
       planPhases(again),
       ['scan 0/2', 'scan 1/2', 'remote 0/0', 'compare 0/2', 'compare 1/2'],
       '全都跳过时也要报算计划那三段：时间照花（读本机、读远端、逐条比对内容），只是没有写盘那两段',
+    )
+  } finally {
+    await fixture.close()
+    rmSync(SANDBOX, { recursive: true, force: true })
+  }
+})
+
+// ── 附件对象：远端共享库（包本身照旧只有日志） ────────────────────────────────
+
+/** 把对象直接放进远端共享库的落盘位置（模拟"另一台机器推过它"）。 */
+function seedRemoteObject(root: string, ref: AttachmentRef, bytes: Buffer): void {
+  const path = join(root, remoteAttachmentPath(ref))
+  mkdirSync(dirname(path), { recursive: true })
+  writeFileSync(path, bytes)
+}
+
+/** 远端共享库的落盘位置（夹具的服务根就是 `fixture.root`）。 */
+function remoteObjectOnDisk(root: string, ref: AttachmentRef): string {
+  return join(root, remoteAttachmentPath(ref))
+}
+
+/** 这一轮里对共享库发过的请求（`METHOD 路径` 原样，供"一个字节都不该再传"这类断言用）。 */
+function objectRequests(fixture: DavFixture, method: 'GET' | 'PUT' | 'PROPFIND'): string[] {
+  return fixture.requests.filter(
+    (line) => line.startsWith(`${method} `) && line.includes(`/${SYNC_ATTACHMENTS_DIR}/`),
+  )
+}
+
+test('同步推送：引用的对象进远端共享库，包本身照旧只有日志（v1）', async () => {
+  rmSync(SANDBOX, { recursive: true, force: true })
+  mkdirSync(SANDBOX, { recursive: true })
+  const fixture = await startDavFixture({ root: join(SANDBOX, 'dav-attach-push') })
+  const dav = createDavClient({ baseUrl: fixture.url })
+  const a = makeMachine('attach-push-a')
+  const store = makeAttachmentStore('attach-push-store')
+  const image = Buffer.from('推送用的那张图')
+  const ref: AttachmentRef = { id: attachmentIdOf(image), kind: 'image' }
+  try {
+    store.put(ref, image)
+    writeSession(a, 's1', 1000, { eventLines: [attachmentEvent(ref, image.length)] })
+
+    const outcome = await syncMachine(a, dav, settings(a, { machineId: 'robot-a' }), {
+      apply: true,
+      attachments: () => store.port,
+    })
+
+    assert.deepEqual(outcome.pushed.map((entry) => entry.id), ['s1'])
+    assert.deepEqual(
+      outcome.attachmentOut,
+      { uploaded: 1, skipped: 0, bytes: image.length, missing: 0 },
+      '一个对象上传一次，字节数按对象算',
+    )
+    assert.deepEqual(outcome.attachmentIn, { written: 0, present: 0, bytes: 0 }, '推送这一侧不取对象')
+    const hex = ref.id.slice('sha256:'.length)
+    assert.deepEqual(
+      objectRequests(fixture, 'PUT'),
+      [`PUT /dav/${SYNC_NAMESPACE_DIR}/${SYNC_ATTACHMENTS_DIR}/objects/${hex.slice(0, 2)}/${hex}`],
+      '远端布局是字面量：命名空间 / attachments / objects / 前两位 / sha',
+    )
+    assert.deepEqual(readFileSync(remoteObjectOnDisk(fixture.root, ref)), image, '远端那份与本地逐字节相同')
+
+    // 包本身只有日志：格式号照"包里多带了什么"定，一个对象都没带就是 v1、清单里连那一节都没有。
+    const parsed = readBundle(await dav.get(remoteBundlePath('robot-a', 's1')))
+    assert.equal(parsed.formatVersion, BUNDLE_MIN_FORMAT_VERSION)
+    assert.deepEqual(parsed.attachments, [], '包里的对象表是空的：对象走的是共享库那条路')
+
+    // 共享库那一层与机器格同级，列机器格时跳过它（不然远端会多出一台叫 attachments 的"机器"）。
+    const remote = await readRemoteLibrary(dav, settings(a, { machineId: 'robot-a' }))
+    assert.deepEqual(remote.machines, ['robot-a'])
+  } finally {
+    await fixture.close()
+    rmSync(SANDBOX, { recursive: true, force: true })
+  }
+})
+
+test('同步推送：远端已有的对象不再传第二遍（每轮重推时只有包在动）', async () => {
+  rmSync(SANDBOX, { recursive: true, force: true })
+  mkdirSync(SANDBOX, { recursive: true })
+  const fixture = await startDavFixture({ root: join(SANDBOX, 'dav-attach-skip') })
+  const dav = createDavClient({ baseUrl: fixture.url })
+  const a = makeMachine('attach-skip-a')
+  const store = makeAttachmentStore('attach-skip-store')
+  // 挑两个 sha 前两位一样的对象：共享库按前两位分桶，同一层里放两个才验得到"这一层只列一次"。
+  const one = Buffer.from('共享库前缀撞车-10')
+  const two = Buffer.from('共享库前缀撞车-14')
+  const refs: AttachmentRef[] = [
+    { id: attachmentIdOf(one), kind: 'image' },
+    { id: attachmentIdOf(two), kind: 'image' },
+  ]
+  const config = settings(a, { machineId: 'robot-a' })
+  try {
+    assert.equal(
+      refs[0]!.id.slice('sha256:'.length, 'sha256:'.length + 2),
+      refs[1]!.id.slice('sha256:'.length, 'sha256:'.length + 2),
+      '这两个对象必须落在同一层目录里（夹具选材的前提，不成立这条测试就没在验缓存）',
+    )
+    store.put(refs[0]!, one)
+    store.put(refs[1]!, two)
+    writeSession(a, 's1', 1000, {
+      eventLines: [attachmentEvent(refs[0]!, one.length), attachmentEvent(refs[1]!, two.length)],
+    })
+
+    const first = await syncMachine(a, dav, config, { apply: true, attachments: () => store.port })
+    assert.deepEqual(first.attachmentOut, { uploaded: 2, skipped: 0, bytes: one.length + two.length, missing: 0 })
+    assert.equal(objectRequests(fixture, 'PUT').length, 2)
+    assert.equal(objectRequests(fixture, 'PROPFIND').length, 1, '两个对象在同一层：这一层只列一次')
+
+    // 续写一代再推：这条会话这次是 update，包要重推，但对象一个字节都不该再动。
+    addGeneration(a, 's1', 5, JSON.stringify({ type: 'turn/end', seq: 9, data: {} }))
+    const second = await syncMachine(a, dav, config, { apply: true, attachments: () => store.port })
+    assert.deepEqual(second.pushed, [{ id: 's1', action: 'update' }])
+    assert.deepEqual(second.attachmentOut, { uploaded: 0, skipped: 2, bytes: 0, missing: 0 })
+    assert.equal(objectRequests(fixture, 'PUT').length, 2, '重推的包里一个对象都不再传')
+    assert.equal(
+      objectRequests(fixture, 'PROPFIND').length,
+      2,
+      '这次同步照旧把那一层列一次（缓存只在一次同步之内，不是永久记住）',
+    )
+  } finally {
+    await fixture.close()
+    rmSync(SANDBOX, { recursive: true, force: true })
+  }
+})
+
+test('同步推送：本机缺对象时如实报 missing，包照旧推上去', async () => {
+  rmSync(SANDBOX, { recursive: true, force: true })
+  mkdirSync(SANDBOX, { recursive: true })
+  const fixture = await startDavFixture({ root: join(SANDBOX, 'dav-attach-missing') })
+  const dav = createDavClient({ baseUrl: fixture.url })
+  const a = makeMachine('attach-missing-a')
+  const store = makeAttachmentStore('attach-missing-store')
+  const image = Buffer.from('本地库里就没有的那张图')
+  const ref: AttachmentRef = { id: attachmentIdOf(image), kind: 'image' }
+  try {
+    // 只写日志、不往库里放对象：引用在、字节不在。
+    writeSession(a, 's1', 1000, { eventLines: [attachmentEvent(ref, image.length)] })
+    const outcome = await syncMachine(a, dav, settings(a, { machineId: 'robot-a' }), {
+      apply: true,
+      attachments: () => store.port,
+    })
+    assert.deepEqual(outcome.pushed.map((entry) => entry.id), ['s1'], '一个对象缺了不挡这一条会话')
+    assert.deepEqual(outcome.attachmentOut, { uploaded: 0, skipped: 0, bytes: 0, missing: 1 })
+    assert.equal(existsSync(remoteObjectOnDisk(fixture.root, ref)), false)
+  } finally {
+    await fixture.close()
+    rmSync(SANDBOX, { recursive: true, force: true })
+  }
+})
+
+test('同步拉取：包只有日志时，缺的对象从共享库取回（0o400），本机已有的一个字节都不取', async () => {
+  rmSync(SANDBOX, { recursive: true, force: true })
+  mkdirSync(SANDBOX, { recursive: true })
+  const fixture = await startDavFixture({ root: join(SANDBOX, 'dav-attach-pull') })
+  const dav = createDavClient({ baseUrl: fixture.url })
+  const a = makeMachine('attach-pull-a')
+  const b = makeMachine('attach-pull-b')
+  const storeA = makeAttachmentStore('attach-pull-store-a')
+  const storeB = makeAttachmentStore('attach-pull-store-b')
+  const image = Buffer.from('拉过去的那张图')
+  const notes = Buffer.from('拉过去的那个文件对象')
+  const imageRef: AttachmentRef = { id: attachmentIdOf(image), kind: 'image' }
+  const fileRef: AttachmentRef = { id: attachmentIdOf(notes), kind: 'file' }
+  try {
+    storeA.put(imageRef, image)
+    storeA.put(fileRef, notes)
+    writeSession(a, 's1', 1000, {
+      eventLines: [attachmentEvent(imageRef, image.length), attachmentEvent(fileRef, notes.length, 'notes.txt')],
+    })
+    await syncMachine(a, dav, settings(a, { machineId: 'robot-a' }), {
+      apply: true,
+      attachments: () => storeA.port,
+    })
+
+    // B 本来就有那张图（另一条会话早先带过来过）：这一个不该再取，另一个（文件对象）要取回来。
+    storeB.put(imageRef, image)
+    const config = settings(b, { machineId: 'robot-b', mapping: { [a.cwd]: b.cwd } })
+    const outcome = await syncMachine(b, dav, config, { apply: true, attachments: () => storeB.port })
+    assert.deepEqual(outcome.pulled, ['s1'])
+    assert.deepEqual(
+      outcome.attachmentIn,
+      { written: 1, present: 1, bytes: notes.length },
+      '已有的那个按 present 记，缺的那个按 written 记',
+    )
+    assert.deepEqual(outcome.attachmentOut, { uploaded: 0, skipped: 0, bytes: 0, missing: 0 })
+    assert.deepEqual(readFileSync(storeB.pathOf(fileRef)), notes, '文件对象走 file-objects 那个库')
+    assert.equal(statSync(storeB.pathOf(fileRef)).mode & 0o777, 0o400, '落地的对象权限位照本机附件库的规格')
+    assert.deepEqual(
+      objectRequests(fixture, 'GET').map((line) => line.includes(fileRef.id.slice('sha256:'.length))),
+      [true],
+      '只取缺的那一个，本机已有的那个一次都不取',
+    )
+    assert.equal(
+      objectRequests(fixture, 'GET')[0]?.includes(`/${SYNC_ATTACHMENTS_DIR}/file-objects/`),
+      true,
+      '文件对象走 file-objects 那个库（与宿主本机那两个库同形，不是都塞进 objects）',
+    )
+
+    // 再同步一次：两个对象本机都有了，一个字节都不该再取（远端那份也没变，整条会话都是 skip）。
+    await syncMachine(b, dav, config, { apply: true, attachments: () => storeB.port })
+    assert.equal(objectRequests(fixture, 'GET').length, 1, '本机已有的对象不再取第二遍')
+  } finally {
+    await fixture.close()
+    rmSync(SANDBOX, { recursive: true, force: true })
+  }
+})
+
+test('同步拉取：远端共享库里没有这个对象时只记问题，会话照旧落地', async () => {
+  rmSync(SANDBOX, { recursive: true, force: true })
+  mkdirSync(SANDBOX, { recursive: true })
+  const fixture = await startDavFixture({ root: join(SANDBOX, 'dav-attach-absent') })
+  const dav = createDavClient({ baseUrl: fixture.url })
+  const a = makeMachine('attach-absent-a')
+  const b = makeMachine('attach-absent-b')
+  const storeB = makeAttachmentStore('attach-absent-store-b')
+  const image = Buffer.from('远端也没有的那张图')
+  const ref: AttachmentRef = { id: attachmentIdOf(image), kind: 'image' }
+  try {
+    // A 这台机器没有附件服务：包只有日志，共享库里也没有这个对象。
+    writeSession(a, 's1', 1000, { eventLines: [attachmentEvent(ref, image.length)] })
+    const pushing = await syncMachine(a, dav, settings(a, { machineId: 'robot-a' }), { apply: true })
+    assert.equal(pushing.attachmentOut, undefined, '宿主没有附件服务时这一项缺席，不是零')
+
+    const outcome = await syncMachine(
+      b,
+      dav,
+      settings(b, { machineId: 'robot-b', mapping: { [a.cwd]: b.cwd } }),
+      { apply: true, attachments: () => storeB.port },
+    )
+    assert.deepEqual(outcome.pulled, ['s1'], '一个对象取不回来不挡这一条会话落地')
+    assert.deepEqual(outcome.attachmentIn, { written: 0, present: 0, bytes: 0 })
+    assert.equal(existsSync(storeB.pathOf(ref)), false)
+    assert.equal(
+      outcome.problems.filter((line) => line.includes(ref.id)).length,
+      1,
+      '取不回来的对象逐条记一笔，其余问题不受影响',
+    )
+  } finally {
+    await fixture.close()
+    rmSync(SANDBOX, { recursive: true, force: true })
+  }
+})
+
+test('同步补对象：本机已有那条会话（计划里是 skip）也去共享库把缺的对象补回来', async () => {
+  rmSync(SANDBOX, { recursive: true, force: true })
+  mkdirSync(SANDBOX, { recursive: true })
+  const fixture = await startDavFixture({ root: join(SANDBOX, 'dav-attach-repair') })
+  const dav = createDavClient({ baseUrl: fixture.url })
+  const a = makeMachine('attach-repair-a')
+  const b = makeMachine('attach-repair-b')
+  const storeA = makeAttachmentStore('attach-repair-store-a')
+  const storeB = makeAttachmentStore('attach-repair-store-b')
+  const image = Buffer.from('补回来的那张图')
+  const ref: AttachmentRef = { id: attachmentIdOf(image), kind: 'image' }
+  try {
+    storeA.put(ref, image)
+    writeSession(a, 's1', 1000, { eventLines: [attachmentEvent(ref, image.length)] })
+    await syncMachine(a, dav, settings(a, { machineId: 'robot-a' }), {
+      apply: true,
+      attachments: () => storeA.port,
+    })
+
+    // 第一次拉取发生在"对象能跟着同步走"之前的样子：日志落地了，对象一个都没来。
+    const config = settings(b, { machineId: 'robot-b', mapping: { [a.cwd]: b.cwd } })
+    const first = await syncMachine(b, dav, config, { apply: false })
+    assert.deepEqual(first.plan.pullIds, ['s1'])
+    await syncMachine(b, dav, config, { apply: true })
+    assert.equal(existsSync(storeB.pathOf(ref)), false, '没有附件服务时对象不会跟着日志过来')
+
+    // 这次带着附件端口同步：两边日志一模一样（计划里没有一条要拉），但本机缺那个对象——补对象那一步
+    // 才是这条路能修好"早就拉坏了的会话"的地方。
+    const repair = await syncMachine(b, dav, config, { apply: true, attachments: () => storeB.port })
+    assert.deepEqual(repair.pulled, [], '日志两边一样，没有一条要拉')
+    assert.deepEqual(repair.attachmentIn, { written: 1, present: 0, bytes: image.length })
+    assert.deepEqual(readFileSync(storeB.pathOf(ref)), image)
+    assert.equal(repair.problems.length, 0, '补上了就不该报问题')
+  } finally {
+    await fixture.close()
+    rmSync(SANDBOX, { recursive: true, force: true })
+  }
+})
+
+test('同步补对象：远端共享库里也没有时汇总成一句，不逐条刷屏', async () => {
+  rmSync(SANDBOX, { recursive: true, force: true })
+  mkdirSync(SANDBOX, { recursive: true })
+  const fixture = await startDavFixture({ root: join(SANDBOX, 'dav-attach-repair-absent') })
+  const dav = createDavClient({ baseUrl: fixture.url })
+  const a = makeMachine('attach-repair-absent-a')
+  const b = makeMachine('attach-repair-absent-b')
+  const storeB = makeAttachmentStore('attach-repair-absent-store-b')
+  const one = Buffer.from('第一张')
+  const two = Buffer.from('第二张')
+  const refs: AttachmentRef[] = [
+    { id: attachmentIdOf(one), kind: 'image' },
+    { id: attachmentIdOf(two), kind: 'image' },
+  ]
+  try {
+    writeSession(a, 's1', 1000, {
+      eventLines: refs.map((ref, index) => attachmentEvent(ref, index === 0 ? one.length : two.length)),
+    })
+    await syncMachine(a, dav, settings(a, { machineId: 'robot-a' }), { apply: true })
+
+    const config = settings(b, { machineId: 'robot-b', mapping: { [a.cwd]: b.cwd } })
+    await syncMachine(b, dav, config, { apply: true })
+    const repair = await syncMachine(b, dav, config, { apply: true, attachments: () => storeB.port })
+    assert.deepEqual(repair.attachmentIn, { written: 0, present: 0, bytes: 0 })
+    assert.deepEqual(
+      repair.problems.filter((line) => line.includes('在远端共享库里也没有')),
+      ['本机有 2 个附件对象在远端共享库里也没有，这次补不上（有对象的那些机器还没把它们推上去）'],
+      '缺两个也只说一句，而且把数说清楚',
+    )
+  } finally {
+    await fixture.close()
+    rmSync(SANDBOX, { recursive: true, force: true })
+  }
+})
+
+test('同步（没有附件服务）：远端连共享库那一层都不建，行为与升级前逐字节相同', async () => {
+  rmSync(SANDBOX, { recursive: true, force: true })
+  mkdirSync(SANDBOX, { recursive: true })
+  const fixture = await startDavFixture({ root: join(SANDBOX, 'dav-attach-noport') })
+  const dav = createDavClient({ baseUrl: fixture.url })
+  const a = makeMachine('attach-noport-a')
+  const store = makeAttachmentStore('attach-noport-store')
+  const image = Buffer.from('没有附件服务时的那张图')
+  const ref: AttachmentRef = { id: attachmentIdOf(image), kind: 'image' }
+  try {
+    store.put(ref, image)
+    writeSession(a, 's1', 1000, { eventLines: [attachmentEvent(ref, image.length)] })
+    const outcome = await syncMachine(a, dav, settings(a, { machineId: 'robot-a' }), { apply: true })
+    assert.deepEqual(outcome.pushed.map((entry) => entry.id), ['s1'])
+    assert.equal(outcome.attachmentIn, undefined)
+    assert.equal(outcome.attachmentOut, undefined)
+    assert.equal(existsSync(join(fixture.root, remoteAttachmentPath(ref))), false)
+    assert.equal(objectRequests(fixture, 'PROPFIND').length, 0, '一个对象都不扫、一层目录都不列')
+    assert.equal(readBundle(await dav.get(remoteBundlePath('robot-a', 's1'))).formatVersion, BUNDLE_MIN_FORMAT_VERSION)
+  } finally {
+    await fixture.close()
+    rmSync(SANDBOX, { recursive: true, force: true })
+  }
+})
+
+test('同步：机器标识撞上共享对象库那个保留名时明说，而不是让自己的格子谁都读不到', async () => {
+  rmSync(SANDBOX, { recursive: true, force: true })
+  mkdirSync(SANDBOX, { recursive: true })
+  const fixture = await startDavFixture({ root: join(SANDBOX, 'dav-attach-reserved') })
+  const dav = createDavClient({ baseUrl: fixture.url })
+  const a = makeMachine('attach-reserved-a')
+  try {
+    writeSession(a, 's1', 1000)
+    // `attachments` 这一层被共享对象库占了：别的机器列机器格时会跳过它，这台机器推上去的东西谁也读不到。
+    const reserved = await syncMachine(a, dav, settings(a, { machineId: 'attachments' }), { apply: false })
+    assert.equal(reserved.plan.ok, false)
+    assert.deepEqual(
+      reserved.plan.problems,
+      ['机器标识不能叫 attachments：这个名字留给远端共享的附件对象库了（改 sync.machineId）'],
+    )
+
+    // 换个名字照旧一切正常（这条只是把哨兵钉在"正好撞上"那一侧）。
+    const fine = await syncMachine(a, dav, settings(a, { machineId: 'robot-a' }), { apply: false })
+    assert.equal(fine.plan.ok, true)
+    assert.deepEqual(fine.plan.problems, [])
+  } finally {
+    await fixture.close()
+    rmSync(SANDBOX, { recursive: true, force: true })
+  }
+})
+
+test('同步拉取：远端那份包自带对象（v2）时由导入落地，不去共享库白跑一趟', async () => {
+  rmSync(SANDBOX, { recursive: true, force: true })
+  mkdirSync(SANDBOX, { recursive: true })
+  const fixture = await startDavFixture({ root: join(SANDBOX, 'dav-attach-packed') })
+  const dav = createDavClient({ baseUrl: fixture.url })
+  const a = makeMachine('attach-packed-a')
+  const b = makeMachine('attach-packed-b')
+  const storeA = makeAttachmentStore('attach-packed-store-a')
+  const storeB = makeAttachmentStore('attach-packed-store-b')
+  const image = Buffer.from('包里自带的那张图')
+  const ref: AttachmentRef = { id: attachmentIdOf(image), kind: 'image' }
+  try {
+    storeA.put(ref, image)
+    writeSession(a, 's1', 1000, { eventLines: [attachmentEvent(ref, image.length)] })
+    const [source] = scanAll(a.sessionsRoot, decodeAll)
+    assert.ok(source !== undefined)
+    const log = source.files[0]
+    assert.ok(log !== undefined)
+
+    // 远端那一份是**自带对象**的 v2 包（旧版本推上去的、或别人手工放上去的）：同步这一侧照旧读得懂。
+    await putRemoteSession(dav, 'robot-a', {
+      id: 's1',
+      createdAt: 1000,
+      logPath: log.path,
+      logName: log.name,
+      logVersion: log.version,
+      cwd: a.cwd,
+    })
+    const packed = buildBundle(
+      [{ id: 's1', cwd: a.cwd, createdAt: 1000, dir: source.dir, files: source.files }],
+      { now: '2026-10-01T00:00:00.000Z', attachments: { port: storeA.port, decodeAll } },
+    )
+    assert.equal(readBundle(packed).attachments.length, 1, '前提：这一份包确实自带对象')
+    await dav.put(remoteBundlePath('robot-a', 's1'), packed)
+
+    const outcome = await syncMachine(
+      b,
+      dav,
+      settings(b, { machineId: 'robot-b', mapping: { [a.cwd]: b.cwd } }),
+      { apply: true, attachments: () => storeB.port },
+    )
+    assert.deepEqual(outcome.pulled, ['s1'])
+    assert.deepEqual(outcome.attachmentIn, { written: 1, present: 0, bytes: image.length }, '随包来的对象也算进这次搬了几个')
+    assert.deepEqual(readFileSync(storeB.pathOf(ref)), image)
+    assert.equal(objectRequests(fixture, 'GET').length, 0, '包里已经带着它了，不必去共享库取')
+    assert.deepEqual(outcome.problems, [], '也不该因为共享库里没有它而报一句')
+  } finally {
+    await fixture.close()
+    rmSync(SANDBOX, { recursive: true, force: true })
+  }
+})
+
+test('同步补对象：后台那条只推不拉的路不跑它（整库扫一遍只花在手动同步上）', async () => {
+  rmSync(SANDBOX, { recursive: true, force: true })
+  mkdirSync(SANDBOX, { recursive: true })
+  const fixture = await startDavFixture({ root: join(SANDBOX, 'dav-attach-pushonly') })
+  const dav = createDavClient({ baseUrl: fixture.url })
+  const a = makeMachine('attach-pushonly-a')
+  const b = makeMachine('attach-pushonly-b')
+  const storeA = makeAttachmentStore('attach-pushonly-store-a')
+  const storeB = makeAttachmentStore('attach-pushonly-store-b')
+  const image = Buffer.from('只该手动同步才补的那张图')
+  const ref: AttachmentRef = { id: attachmentIdOf(image), kind: 'image' }
+  try {
+    storeA.put(ref, image)
+    writeSession(a, 's1', 1000, { eventLines: [attachmentEvent(ref, image.length)] })
+    await syncMachine(a, dav, settings(a, { machineId: 'robot-a' }), {
+      apply: true,
+      attachments: () => storeA.port,
+    })
+
+    // B 早先不带附件服务拉过一次：会话在库里、对象一个没有。
+    const config = settings(b, { machineId: 'robot-b', mapping: { [a.cwd]: b.cwd } })
+    await syncMachine(b, dav, config, { apply: true })
+
+    const auto = await syncMachine(b, dav, config, { apply: true, attachments: () => storeB.port, pushOnly: true })
+    assert.deepEqual(auto.attachmentIn, { written: 0, present: 0, bytes: 0 })
+    assert.equal(existsSync(storeB.pathOf(ref)), false, '后台那一路不补对象')
+    assert.equal(objectRequests(fixture, 'GET').length, 0)
+
+    const manual = await syncMachine(b, dav, config, { apply: true, attachments: () => storeB.port })
+    assert.deepEqual(manual.attachmentIn, { written: 1, present: 0, bytes: image.length }, '手动同步才补')
+  } finally {
+    await fixture.close()
+    rmSync(SANDBOX, { recursive: true, force: true })
+  }
+})
+
+test('同步补对象：这条会话早就推上去了（旧版本只推了日志），再同步一次把缺的对象补传上去', async () => {
+  rmSync(SANDBOX, { recursive: true, force: true })
+  mkdirSync(SANDBOX, { recursive: true })
+  const fixture = await startDavFixture({ root: join(SANDBOX, 'dav-attach-repush') })
+  const dav = createDavClient({ baseUrl: fixture.url })
+  const a = makeMachine('attach-repush-a')
+  const store = makeAttachmentStore('attach-repush-store')
+  const image = Buffer.from('旧版本推上去的会话缺的那张图')
+  const ref: AttachmentRef = { id: attachmentIdOf(image), kind: 'image' }
+  const config = settings(a, { machineId: 'robot-a' })
+  try {
+    store.put(ref, image)
+    writeSession(a, 's1', 1000, { eventLines: [attachmentEvent(ref, image.length)] })
+
+    // 老样子推一次（这个宿主没有附件服务）：远端有了这条会话与它的索引，共享库里一个对象都没有。
+    await syncMachine(a, dav, config, { apply: true })
+    assert.equal(existsSync(remoteObjectOnDisk(fixture.root, ref)), false)
+
+    // 换上带附件服务的版本之后再同步：日志与远端逐字节一样（计划里是"不动"），但对象要补上去。
+    const outcome = await syncMachine(a, dav, config, { apply: true, attachments: () => store.port })
+    assert.deepEqual(outcome.pushed, [], '日志两边一样，没有一条要推')
+    assert.deepEqual(outcome.attachmentOut, { uploaded: 1, skipped: 0, bytes: image.length, missing: 0 })
+    assert.deepEqual(readFileSync(remoteObjectOnDisk(fixture.root, ref)), image)
+    assert.deepEqual(outcome.problems, [])
+  } finally {
+    await fixture.close()
+    rmSync(SANDBOX, { recursive: true, force: true })
+  }
+})
+
+test('同步补对象：远端压根不认得的那条会话（空白会话）不替它往共享库传对象', async () => {
+  rmSync(SANDBOX, { recursive: true, force: true })
+  mkdirSync(SANDBOX, { recursive: true })
+  const fixture = await startDavFixture({ root: join(SANDBOX, 'dav-attach-unknown') })
+  const dav = createDavClient({ baseUrl: fixture.url })
+  const a = makeMachine('attach-unknown-a')
+  const store = makeAttachmentStore('attach-unknown-store')
+  const image = Buffer.from('那条根本没同步过的会话里的图')
+  const ref: AttachmentRef = { id: attachmentIdOf(image), kind: 'image' }
+  try {
+    store.put(ref, image)
+    writeSession(a, 's1', 1000, { eventLines: [attachmentEvent(ref, image.length)] })
+    // 宿主说这条是空白会话：整类不参与同步（既不推日志，也不该替它把对象占进远端共享库）。
+    const outcome = await syncMachine(a, dav, settings(a, { machineId: 'robot-a' }), {
+      apply: true,
+      attachments: () => store.port,
+      sessionMeta: () => ({ blank: true }),
+    })
+    assert.deepEqual(outcome.pushed, [])
+    assert.deepEqual(outcome.attachmentOut, { uploaded: 0, skipped: 0, bytes: 0, missing: 0 })
+    assert.equal(
+      existsSync(remoteObjectOnDisk(fixture.root, ref)),
+      false,
+      '远端压根不认得这条会话，不替它往共享库里放东西',
     )
   } finally {
     await fixture.close()
