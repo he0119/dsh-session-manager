@@ -551,3 +551,18 @@ test('折起来的轮次整段收掉：不能只靠浏览器对 details 的默�
   assert.match(rule, /display:\s*none/, '折起来的那一段要真的不显示')
   assert.match(ruleBody('.dsm-turnBody') ?? '', /display:\s*flex/, '展开时是竖排的条目列表')
 })
+
+test('差异页那几块：关系是一行"标签 + 一句话"，弹窗正文照正文那一档', () => {
+  // 关系那行现在是横向的：一枚关系标签 + 那句散文。写 `margin: 0` 但忘了横向布局时，标签与文字会
+  // 竖成两行，看着像两块东西（实测就是这样才发现要补 `display: flex`）。
+  const relation = ruleBody('.dsm-diffRelation') ?? ''
+  assert.match(relation, /display:\s*flex/, '关系标签与那句话要并排')
+  assert.match(relation, /gap:/, '两者之间要有间距')
+  // 官方 Modal portal 到 document.body，弹窗落在那套 `dsm-root` 之外：不自己写正文那一档就会继承
+  // 文档根的 16px（实测量到 16px/normal，写上之后 14px/20px）。
+  const content = ruleBody('.dsm-diffContent') ?? ''
+  assert.match(content, /font-size:\s*14px/, '弹窗正文要自己写 14px')
+  assert.match(content, /line-height:\s*20px/, '行高跟着写 20px')
+  // 尾巴里一行摘要是一条事件卡的头行，跟内容视图同一档（12px/18px 来自 `.dsm-item`）。
+  assert.match(ruleBody('.dsm-item') ?? '', /font-size:\s*12px/, '条目还是内容视图那一档')
+})

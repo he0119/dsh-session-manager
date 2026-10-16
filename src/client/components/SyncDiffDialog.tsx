@@ -21,11 +21,12 @@
 
 import * as React from 'react'
 
-import { Modal } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Modal, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
 
 import { fetchSyncDiff, type SyncDiffResponse } from '../api.ts'
 import { KIND_KEY } from './TranscriptDialog.tsx'
 import { formatBytes, formatTime } from './sessionList.tsx'
+import { KIND_TONE, RELATION_KEY, RELATION_TONE, SIDE_TONE } from '../logic/diffTags.ts'
 import type { DiffItem, DiffTail } from '../../session-diff.ts'
 import type { Translate } from '../logic/locales.ts'
 
@@ -57,16 +58,19 @@ function TailBlock({
 }): React.ReactElement | null {
   if (tail.count === 0) return null
   return (
-    <div className="dsm-diffTail">
-      <div className="dsm-hint">
+    <div className={`dsm-diffTail dsm-diffTail-${side}`}>
+      {/* 哪一边独有：一枚标签写在块头上，不用读句子（本机一档、远端另一档，两块一眼分得开）。 */}
+      <Tag className="dsm-tag" tone={SIDE_TONE[side]}>
         {t(side === 'local' ? 'sync.diff.tail.local' : 'sync.diff.tail.remote', { count: tail.count })}
-      </div>
+      </Tag>
       {tail.preview.map((item) => (
         // 一行摘要就是内容视图里那一张事件卡的头行（同一个 `.dsm-itemHead`）：种类在左、摘要在中、
-        // 时刻在右。原文要看另有那一页，这里只求"一眼认出来是哪一条"。
+        // 时刻在右。种类在这里是一枚官方标签（档位与内容视图那条色边同一套语义，见 KIND_TONE）。
         <div key={`${side}-${item.index}`} className={`dsm-item dsm-item-${item.kind}`} data-dsm-index={item.index}>
           <div className="dsm-itemHead">
-            <span className="dsm-itemKind">{t(KIND_KEY[item.kind])}</span>
+            <Tag className="dsm-tag" tone={KIND_TONE[item.kind]}>
+              {t(KIND_KEY[item.kind])}
+            </Tag>
             <span title={item.brief}>{item.brief}</span>
             {item.time === undefined ? null : <span className="dsm-meta">{formatTime(item.time)}</span>}
           </div>
@@ -155,11 +159,25 @@ export function SyncDiffDialog({
               remoteBytes: formatBytes(diff.remote.bytes),
             })}
           </div>
-          <p className="dsm-diffRelation">{relationText(data, t)}</p>
+          <p className="dsm-diffRelation">
+            <Tag className="dsm-tag" tone={RELATION_TONE[diff.relation]}>
+              {t(RELATION_KEY[diff.relation])}
+            </Tag>
+            <span>{relationText(data, t)}</span>
+          </p>
           {diff.header.length === 0 ? null : (
             <div className="dsm-diffHeader">
-              <div className="dsm-hint">{t('sync.diff.headerTitle')}</div>
+              <Tag className="dsm-tag" tone="neutral">
+                {t('sync.diff.headerTitle', { count: diff.header.length })}
+              </Tag>
               <table className="dsm-table dsm-diffTable">
+                <thead>
+                  <tr>
+                    <th className="dsm-diffField">{t('sync.diff.field')}</th>
+                    <th>{t('sync.diff.side.local')}</th>
+                    <th>{t('sync.diff.side.remote')}</th>
+                  </tr>
+                </thead>
                 <tbody>
                   {diff.header.map((field) => (
                     <tr key={field.field}>
