@@ -1793,6 +1793,8 @@ test('sync：测试连接把"命名空间还没建"当成功，并列出已有�
       entries: [
         { name: 'robot-b', kind: 'collection' },
         { name: 'robot-a', kind: 'collection' },
+        // 共享对象库与机器格同级：它不该被念成一台机器（条目数仍然照实算上它）。
+        { name: 'attachments', kind: 'collection' },
         { name: 'stray.txt', kind: 'file' },
       ],
     }),
@@ -1802,7 +1804,7 @@ test('sync：测试连接把"命名空间还没建"当成功，并列出已有�
     status: 207,
     namespaceExists: true,
     machines: ['robot-a', 'robot-b'],
-    entries: 3,
+    entries: 4,
   })
 
   // 命名空间那一次不是 404 也不是 207（例如 403）：那才是失败，码取自它。
@@ -1826,11 +1828,15 @@ test('sync：测试连接打真服务——空远端、已有机器格、凭据�
     // 远端已经有这台机器的格子：报出来（这是"地址对不对"最直接的证据）。
     await good.ensure(`${SYNC_NAMESPACE_DIR}/robot-a`)
 
+    // 远端已经推过附件对象（共享对象库那一层就在旁边）：机器清单里不该出现它。
+    await good.put(`${SYNC_NAMESPACE_DIR}/attachments/objects/ab/${'ab'.repeat(32)}`, Buffer.from('x'))
+
     const before = fixture.requests.length
+
     const withMachine = await testSyncConnection(good)
     assert.deepEqual(withMachine.machines, ['robot-a'])
     assert.equal(withMachine.namespaceExists, true)
-    // 只读：两次 PROPFIND，没有 MKCOL / PUT / GET。
+    // 只读：探测本身只有两次 PROPFIND，没有 MKCOL / PUT / GET（上面那次 PUT 是造夹具，不算在探测里）。
     assert.deepEqual(
       fixture.requests.slice(before).map((line) => line.split(' ')[0]),
       ['PROPFIND', 'PROPFIND'],
