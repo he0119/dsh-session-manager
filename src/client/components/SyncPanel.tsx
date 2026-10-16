@@ -750,6 +750,11 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
               </p>
             ))}
             {syncClean && <p className="dsm-ok">{t('sync.nothing')}</p>}
+            {/* 会话计划里没有的事，在这一趟真会做的时候说出来：确认之后附件对象仍会对一遍（本机缺的取回、
+                远端缺的补上），它不进那三张表（扫一遍是整库尺度的事，见 repairAttachments()）。 */}
+            {syncClean && facts?.attachments === true && (
+              <p className="dsm-hint">{t('sync.nothingAttachments')}</p>
+            )}
 
             {syncPulls.length > 0 && (
               <>

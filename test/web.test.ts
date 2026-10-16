@@ -310,7 +310,7 @@ function deps(
 }
 
 /**
- * `/meta` 那六项：界面在清单回来之前要画的就是它们。
+ * `/meta` 那七项：界面在清单回来之前要画的就是它们。
  *
  * 单独列出来是为了"两份取值必须一致"那条断言（见下面两个用例）：一组键、一处来源，漂了就红。
  */
@@ -320,6 +320,7 @@ const META_KEYS = [
   'pickerKind',
   'archiveAvailable',
   'retitleAvailable',
+  'attachments',
   'sync',
 ] as const
 
@@ -356,6 +357,8 @@ test('GET /meta：位置与能力位先答出来，一条会话都不读', async
     archiveAvailable: true,
     // 这一处没给 `titleRefresh`（假宿主没有名称服务）：能力位按"没有"答。
     retitleAvailable: false,
+    // 同理没给 `attachments`：界面据此不在"没有会话要搬"时提附件对象那一趟。
+    attachments: false,
     sync: { url: 'https://dav.example/dsh', machineId: 'laptop', mappings: 2 },
   })
   assert.equal(touched, 0, '/meta 不该读标题、也不该问项目身份')
@@ -374,20 +377,24 @@ test('/state 与 /meta：同一批字段是同一份取值（界面按"超集"�
   const sandbox = makeSandbox('web-meta-same')
   writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000)
   /** 两种宿主各核一遍：能力位为真与为假都要逐字相同（只核一边就抓不到"自己算一遍"那种漂）。 */
+  const store = makeAttachmentStore(sandbox.base)
   const configurations: Array<{
     name: string
     archiveAvailable: boolean
     retitleAvailable: boolean
+    attachments: boolean
     deps: Parameters<typeof deps>[1]
   }> = [
     {
       name: '有归档服务与 native 选择器',
       archiveAvailable: true,
       retitleAvailable: true,
+      attachments: true,
       deps: {
         pickerKind: () => 'native',
         registryOps: () => ({ archive: async () => {}, unarchive: async () => {} }),
         titleRefresh: () => ({ refresh: async () => ({ status: 'unchanged', title: '随便' }) }),
+        attachments: () => store.port,
         syncInfo: () => ({ url: 'https://dav.example/dsh', machineId: 'desktop', mappings: 0 }),
       },
     },
@@ -397,10 +404,12 @@ test('/state 与 /meta：同一批字段是同一份取值（界面按"超集"�
       name: '端口在、服务不在；没配同步',
       archiveAvailable: false,
       retitleAvailable: false,
+      attachments: false,
       deps: {
         pickerKind: () => null,
         registryOps: () => undefined,
         titleRefresh: () => undefined,
+        attachments: () => undefined,
         syncInfo: () => undefined,
       },
     },
@@ -416,10 +425,13 @@ test('/state 与 /meta：同一批字段是同一份取值（界面按"超集"�
     const state = await call('/state')
     assert.equal(meta['archiveAvailable'], configuration.archiveAvailable, configuration.name)
     assert.equal(meta['retitleAvailable'], configuration.retitleAvailable, configuration.name)
+    // 附件库那一枚按"端口给没给"答：`attachments: () => undefined`（宿主没有这个服务）必须是 false，
+    // 否则界面会对一台补不了对象的机器承诺"确认之后还会对一遍"。
+    assert.equal(meta['attachments'], configuration.attachments, configuration.name)
     assert.deepEqual(
       Object.fromEntries(META_KEYS.map((key) => [key, state[key]])),
       meta,
-      `/state 是 /meta 的超集：这六项必须逐字相同（${configuration.name}）`,
+      `/state 是 /meta 的超集：这七项必须逐字相同（${configuration.name}）`,
     )
     // 反过来：清单只在那一份里
     assert.deepEqual(meta['sessions'], undefined)

@@ -231,6 +231,12 @@ interface MetaFacts {
   archiveAvailable: boolean
   /** 这个宿主能不能重新生成会话名称（`sessionTitle` 在不在，见 ApiDeps.titleRefresh）。 */
   retitleAvailable: boolean
+  /**
+   * 这个宿主有没有附件库服务（`ctx.attachments`，见 attachmentPort()）。有它的机器手动同步时会顺带
+   * 把附件对象对一遍（本机缺的取回、远端缺的补上），界面据此在"没有会话要搬"时补一句——那一趟真正
+   * 会做的事不在会话计划里，光看"没有要同步的"会以为确认了也没意义。
+   */
+  attachments: boolean
   sync: SyncInfo | null
 }
 
@@ -641,6 +647,8 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
     archiveAvailable: deps.registryOps?.() !== undefined,
     // 重新生成名称同理：这个宿主的会话名称服务与读日志 / 持久化几件凑不齐就点不了（见 titleRefreshPort）。
     retitleAvailable: deps.titleRefresh?.() !== undefined,
+    // 附件库服务：它决定"没有会话要搬"时那一句要不要提附件对象（见 MetaFacts.attachments）。
+    attachments: attachmentPort() !== undefined,
     // 同步卡片：没有配置就是 null（界面据此说明"没配置 sync.url"，而不是画一个点了没反应的按钮）。
     sync: deps.syncInfo?.() ?? null,
   })
