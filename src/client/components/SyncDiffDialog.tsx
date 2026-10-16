@@ -188,6 +188,7 @@ export function SyncDiffDialog({
               <Tag className="dsm-tag" tone="neutral">
                 {t('sync.diff.headerTitle', { count: diff.header.length })}
               </Tag>
+              <p className="dsm-hint">{t('sync.diff.headerNote')}</p>
               <table className="dsm-table dsm-diffTable">
                 <thead>
                   <tr>
@@ -199,7 +200,14 @@ export function SyncDiffDialog({
                 <tbody>
                   {diff.header.map((field) => (
                     <tr key={field.field}>
-                      <td className="dsm-diffField">{field.field}</td>
+                      <td className="dsm-diffField">
+                        <span className="dsm-diffFieldName">{field.field}</span>
+                        {field.field === 'cwd' ? (
+                          <span className="dsm-tag" title={t('sync.diff.headerExpectedNote')}>
+                            <Tag tone="quiet">{t('sync.diff.headerExpected')}</Tag>
+                          </span>
+                        ) : null}
+                      </td>
                       <td className="dsm-path">{field.local ?? '—'}</td>
                       <td className="dsm-path">{field.remote ?? '—'}</td>
                     </tr>

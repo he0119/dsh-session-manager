@@ -38,7 +38,9 @@ import {
   type SyncDeps,
   type SyncProgress,
   type SyncSettings,
+  type ContentRelation,
 } from '../src/sync.ts'
+import type { DiffRelation } from '../src/session-diff.ts'
 import type { GitRunner } from '../src/repo.ts'
 import type { DecodeAll, SessionHeader, WorkspaceRegistryState } from '../src/types.ts'
 import { encodeRawFrame } from '../src/zstd-frame.ts'
@@ -458,7 +460,7 @@ test('sync：计划——本机独有要推送，本机领先重推，远端领�
   assert.equal(replaced?.toCwd, '/opt/work/proj', '覆盖时留在本机这条自己的目录里，不跟远端那条路径走')
   // 分叉且一边都没有活动时间（老索引 / 没挂投影缓存）→ 退回旧口径：两条都不动。
   assert.equal(byId.get('fork')?.action, 'skip')
-  assert.match(byId.get('fork')?.reason ?? '', /两边各自写过/)
+  assert.match(byId.get('fork')?.reason ?? '', /各自写了对方没有的条目/)
   assert.match(byId.get('fork')?.reason ?? '', /判不出谁更新/)
   assert.deepEqual(plan.pullIds, ['ahead'], '会拉取的两类：新建（这里没有）与覆盖本机')
   assert.deepEqual(plan.blank, [], '没有投影缓存时谁都不算空白（宁可不判）')
@@ -545,7 +547,7 @@ test('sync：计划——两边各自写过时比最后活动时间；空白会�
   for (const id of ['tie', 'fine-tie', 'unknown-local', 'unknown-remote']) {
     assert.equal(byId.get(id)?.action, 'skip', id)
     assert.equal(byId.get(id)?.code, 'diverged', id)
-    assert.match(byId.get(id)?.reason ?? '', /判不出谁更新|两边各自写过/, id)
+    assert.match(byId.get(id)?.reason ?? '', /判不出谁更新|各自写了对方没有的条目/, id)
   }
   // 空白：本机没内容，远端有 → 以远端为准（走覆盖那条路，不推送）
   assert.equal(plan.pull.find((entry) => entry.id === 'blank-local')?.action, 'replace')
@@ -2571,4 +2573,52 @@ test('同步补对象：远端压根不认得的那条会话（空白会话）�
     await fixture.close()
     rmSync(SANDBOX, { recursive: true, force: true })
   }
+})
+
+
+// ── 判据只有一条：谁是谁的前缀（代次与哈希只是快筛） ─────────────────────────────
+
+const contentOf = (relation: DiffRelation, localTail = 0, remoteTail = 0): ContentRelation => ({ relation, localTail, remoteTail })
+
+test('sync：relation 认内容关系——续写 / 被续写 / 真分叉各归各位', () => {
+  const v0 = fp(0, 'a')
+  assert.equal(relation([v0, fp(1, 'c')], [v0, fp(1, 'b')], contentOf('local-extends', 2, 0)), 'local-ahead')
+  assert.equal(relation([v0, fp(1, 'b')], [v0, fp(1, 'c')], contentOf('remote-extends', 0, 2)), 'remote-ahead')
+  assert.equal(relation([v0, fp(1, 'c')], [v0, fp(1, 'b')], contentOf('forked', 1, 1)), 'diverged')
+  assert.equal(relation([v0, fp(1, 'c')], [v0, fp(1, 'b')], contentOf('same')), 'identical')
+  // 没算内容关系的那些对照旧归分叉：两条都不动（下限是不丢内容）。
+  assert.equal(relation([v0, fp(1, 'c')], [v0, fp(1, 'b')]), 'diverged')
+  // 快筛已经定了的不受内容关系摆布：两边说的是同一件事。
+  assert.equal(relation([v0, fp(1, 'b')], [v0], contentOf('forked', 1, 1)), 'local-ahead')
+})
+
+test('sync：计划——代次筛不动的对按内容关系归类，说明写"续写了几条"', () => {
+  // 计划阶段只为"两边都有"的会话算指纹：sha 编进文件路径，假哈希再拆回来。
+  const fakeHash = (path: string, version: number): FileFingerprint => ({
+    version,
+    bytes: 1,
+    sha256: path.split('@')[0] ?? '',
+  })
+  const base = {
+    local: [fakeSession('s1', [['a', 0], ['c', 1]])],
+    remote: remoteOf([
+      { machine: 'robot-a', id: 's1', cwd: '/home/a/dev/proj', files: [fp(0, 'a'), fp(1, 'b')] },
+    ]),
+    mapping: new Map([['/home/a/dev/proj', '/opt/work/proj']]),
+    hashFile: fakeHash,
+    isDirectory: () => true,
+  }
+  // 没有内容关系：快筛分不出，两条都不动，这一对进"要内容判据"名单。
+  const before = planSync(base)
+  assert.deepEqual(before.push.map((entry) => entry.code), ['diverged'])
+  assert.deepEqual(before.needsContent, ['s1'])
+  // 有了内容关系（远端那份是本机的前缀）：归"本机领先"，自动推送，说明按结论说话。
+  const after = planSync({ ...base, contentRelations: new Map([['s1', contentOf('local-extends', 2, 0)]]) })
+  assert.deepEqual(after.push.map((entry) => entry.code), ['local-ahead'])
+  assert.deepEqual(after.pushIds, ['s1'])
+  assert.match(after.push[0]?.reason ?? '', /本机续写了 2 条/)
+  assert.deepEqual(after.needsContent, [])
+  // 真分叉照旧进时间桶，说明里带上两边各多几条（不再拿"两边各自写过"当桶名）。
+  const forked = planSync({ ...base, contentRelations: new Map([['s1', contentOf('forked', 1, 2)]]) })
+  assert.match(forked.push[0]?.reason ?? '', /各自写了对方没有的条目（本机多 1 条、robot-a 多 2 条）/)
 })

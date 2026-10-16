@@ -889,6 +889,8 @@ export const CSS = `
 .dsm-diffNote { border-top: 1px solid var(--dsw-alias-border-l1, rgba(0, 0, 0, 0.08)); padding-top: 8px; }
 .dsm-diffHeader { display: flex; flex-direction: column; gap: 4px; }
 .dsm-diffField { width: 120px; }
+.dsm-diffField .dsm-tag { margin-top: 2px; }
+.dsm-diffFieldName { display: block; }
 .dsm-diffTail { display: flex; flex-direction: column; gap: 6px; }
 /* 顶部三格计数（共同 / 本机独有 / 远端独有）：横排一行、每格里标签在上数字在下——横着摆的
    "标签+数字"三组读起来像一句话，竖着摆才读成三格数据。 */
