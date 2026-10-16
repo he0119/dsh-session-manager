@@ -864,8 +864,11 @@ export function attachmentPort(ctx: unknown): AttachmentPort | undefined {
   return {
     pathOf: (ref) => {
       try {
-        // 只交 attachmentId：两个方法都只读它（引用里的媒体类型/尺寸是给别的用途的）。
-        return (ref.kind === 'image' ? image : file).call(store, { attachmentId: ref.id })
+        // 图片只认 attachmentId（引用里的媒体类型/尺寸是给别的用途的）；**文件还认名字**——宿主把文件
+        // 摆在 `files/<sha 前两位>/<sha>/<名字>`，`fileHostPath()` 缺名字直接抛错。
+        const wanted: { attachmentId: string; name?: string } = { attachmentId: ref.id }
+        if (ref.name !== undefined) wanted.name = ref.name
+        return (ref.kind === 'image' ? image : file).call(store, wanted)
       } catch {
         // 形状不认（引用不是内容寻址 id、宿主换了 provider）：这一个对象落不了，由调用方如实报出去。
         return undefined

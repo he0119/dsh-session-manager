@@ -2,7 +2,8 @@
 //
 // 为什么需要这一层：日志里**不存图片字节**，只存一条内容寻址的引用
 // （`{"type":"image","attachment":{"attachmentId":"sha256:…"}}`），字节在**宿主自己的附件库**里
-// （`$DSH_HOME/attachments/v1/objects|file-objects/<前两位>/<sha256>`，见宿主的 dsh-attachment-local）。
+// （图片：`$DSH_HOME/attachments/v1/objects/<前两位>/<sha256>`；文件：`files/<前两位>/<sha256>/<名字>`，
+// 内容寻址的那一份在 `file-objects/<前两位>/<sha256>`，见宿主的 dsh-attachment-local）。
 // 于是只带日志的会话包换一个 `$DSH_HOME` 打开，得到的是"引用在、对象不在"——界面上一句
 // 「图片加载失败，点击重试」，点几次都一样。这一层补的就是那段字节：**包把对象一起带走，落地把
 // 对象写进目标库**。
@@ -37,6 +38,12 @@ export interface AttachmentRef {
    * 只能按"文件在就算在"。
    */
   bytes?: number
+  /**
+   * **文件**对象在日志里带的名字（图片没有这一项）。它决定本机路径的最后一段：宿主把文件摆在
+   * `files/<sha 前两位>/<sha>/<名字>`（图片则是 `objects/<前两位>/<sha>`），只给 id 算不出文件路径
+   * ——`ctx.attachments.fileHostPath()` 缺名字会直接抛错（它还要核名字是不是一个合法叶子名）。
+   */
+  name?: string
 }
 
 /**
@@ -90,12 +97,23 @@ function refsInValue(value: unknown, found: Map<string, AttachmentRef>): void {
           const declared = (attachment as Record<string, unknown>)['bytes']
           const bytes =
             typeof declared === 'number' && Number.isSafeInteger(declared) && declared >= 0 ? declared : undefined
+          const declaredName = (attachment as Record<string, unknown>)['name']
+          const name =
+            typeof declaredName === 'string' && declaredName.length > 0 ? declaredName : undefined
           // 同一个 id 在日志里会出现多次（`agent/inbox/spliced` 与随后的 `user/message` 各一份）：
           // 去重键带上 kind——两个库里的对象互不相干，同一个 sha 在两边都有是两件事。字节数以**有值的
           // 那一次**为准：老日志可能不带这一项，不带的那次不能把已知的值抹掉。
           const key = `${kind}:${id}`
-          const known = bytes ?? found.get(key)?.bytes
-          found.set(key, { id, kind, ...(known === undefined ? {} : { bytes: known }) })
+          const seen = found.get(key)
+          const known = bytes ?? seen?.bytes
+          // 名字与字节数同理：不给的那一次不能把已知的值抹掉。
+          const knownName = name ?? seen?.name
+          found.set(key, {
+            id,
+            kind,
+            ...(known === undefined ? {} : { bytes: known }),
+            ...(knownName === undefined ? {} : { name: knownName }),
+          })
         }
       }
     }

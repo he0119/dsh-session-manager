@@ -19,6 +19,7 @@ import { readRegistry } from '../src/registry.ts'
 import { remoteBundlePath, remoteIndexPath } from '../src/sync.ts'
 import {
   archiveOps,
+  attachmentPort,
   attachAutoPushToSessions,
   directoryPickerKind,
   resolveAutoPushRuntime,
@@ -1314,4 +1315,47 @@ test('resolveAutoPushRuntime：手点那一次（force）绕过速度闸，兜�
     host.timer.stop()
     host.cleanup()
   }
+})
+
+test('附件端口：文件引用要把名字交给宿主（缺名字算不出本机路径）', () => {
+  const id = 'sha256:' + 'ab'.repeat(32)
+  const calls: Array<{ method: string; ref: Record<string, unknown> }> = []
+  // 假宿主照 `dsh-attachment-local` 的判据：`fileHostPath()` 只认带合法名字的引用，缺名字直接抛错
+  // （真宿主里是 `ensureFileReference()` 那道校验）；`imageHostPath()` 只读 id。
+  const store = {
+    imageHostPath(ref: Record<string, unknown>): string {
+        calls.push({ method: 'image', ref })
+        return `/lib/objects/${String(ref['attachmentId']).slice(7, 9)}/${String(ref['attachmentId']).slice(7)}`
+      },
+    fileHostPath(ref: Record<string, unknown>): string {
+      calls.push({ method: 'file', ref })
+      const name = ref['name']
+      if (typeof name !== 'string' || name.length === 0) {
+        throw new Error('File attachment reference is invalid.')
+      }
+      return `/lib/files/${String(ref['attachmentId']).slice(7, 9)}/${String(ref['attachmentId']).slice(7)}/${name}`
+    },
+  }
+  // 宿主上下文只需要一个 `get()`（`optionalService()` 就是这么探服务有没有的）。
+  const ctx = { get: (name: string) => (name === 'attachments' ? store : undefined) }
+  const port = attachmentPort(ctx)
+  assert.notEqual(port, undefined)
+
+  // 文件：名字要真的交下去，落点也按宿主那条带名字的路径。
+  assert.equal(
+    port?.pathOf({ id, kind: 'file', name: 'notes.txt' }),
+    `/lib/files/ab/${'ab'.repeat(32)}/notes.txt`,
+  )
+  assert.deepEqual(calls.at(-1), { method: 'file', ref: { attachmentId: id, name: 'notes.txt' } })
+
+  // 引用里没有名字：算不出路径——宿主会抛，端口吞成 undefined（由调用方如实报"这一个落不了"），
+  // 不做成崩溃，也不猜一个名字出来。
+  assert.equal(port?.pathOf({ id, kind: 'file' }), undefined)
+
+  // 图片：只交 id，名字（如果有）不参与。
+  assert.equal(port?.pathOf({ id, kind: 'image' }), `/lib/objects/ab/${'ab'.repeat(32)}`)
+  assert.deepEqual(calls.at(-1), { method: 'image', ref: { attachmentId: id } })
+
+  // 宿主没有附件服务：端口整个缺席（调用方据此什么都不说）。
+  assert.equal(attachmentPort({ get: () => undefined }), undefined)
 })

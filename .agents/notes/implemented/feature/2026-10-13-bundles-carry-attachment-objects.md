@@ -17,7 +17,9 @@ Status: implemented
 
 ## Decision
 
-包的格式升到 v2：清单多一节 `attachments: [{ id, kind, bytes, offset }]`，对象字节追加在载荷尾部（日志
+包的格式升到 v2：清单多一节 `attachments: [{ id, kind, name?, bytes, offset }]`（文件对象那份 `name`
+决定它落回本机时的路径，见
+[文件对象要带上它的名字](../bug-fix/2026-10-16-file-objects-need-their-name.md)），对象字节追加在载荷尾部（日志
 之后），`id` 自带 sha256 所以条目不再单列摘要。**格式号照"这个包里到底多带了什么"定，不照"这份代码是哪
 一版"定**：一个对象都没带成（没给端口、日志里没有引用、或者引用的对象本机就没有）就写 v1——清单里连
 `attachments` 那一节都不出现，与升级前逐字节同形；真要带对象才升 v2，因为那时装旧版的宿主确实读不了。

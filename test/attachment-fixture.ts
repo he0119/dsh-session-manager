@@ -45,7 +45,7 @@ export function attachmentEvent(ref: AttachmentRef, declaredBytes: number, name 
 
 /** 假附件库的句柄。 */
 export interface AttachmentStore {
-  /** 库根（`objects` 与 `file-objects` 两个子目录在它下面）。 */
+  /** 库根（图片在 `objects/` 下，文件在 `files/` 下——与宿主同形）。 */
   root: string
   port: AttachmentPort
   /** 往库里放一个对象，返回它落地的路径（调用方通常还要核权限位）。 */
@@ -55,18 +55,24 @@ export interface AttachmentStore {
 }
 
 /**
- * 假附件库：一个根 + 与宿主同形的两个目录（`objects` / `file-objects`，按 sha 前两位分桶）。
+ * 假附件库：一个根 + 与宿主同形的两条路径（图片 `objects/<前两位>/<sha>`，文件
+ * `files/<前两位>/<sha>/<名字>`，都按 sha 前两位分桶）。
  *
- * 端口是**纯路径计算**（对象不在也给得出路径），与宿主 `ctx.attachments.imageHostPath()` 同一语义。
+ * 端口是**纯路径计算**（对象不在也给得出路径），与宿主 `ctx.attachments.imageHostPath()` /
+ * `fileHostPath()` 同一语义——**包括文件必须带名字这一条**：宿主那边缺名字会抛错，这里也抛，
+ * 免得"引用里丢了名字"这种事只有真宿主才发现。
  */
 export function makeAttachmentStore(name: string): AttachmentStore {
   const root = join(import.meta.dirname, '.sandbox', name)
   rmSync(root, { recursive: true, force: true })
   mkdirSync(root, { recursive: true })
-  const dirOf = (ref: AttachmentRef): string => (ref.kind === 'image' ? 'objects' : 'file-objects')
   const pathOf = (ref: AttachmentRef): string => {
     const hex = ref.id.slice('sha256:'.length)
-    return join(root, dirOf(ref), hex.slice(0, 2), hex)
+    if (ref.kind === 'image') return join(root, 'objects', hex.slice(0, 2), hex)
+    if (ref.name === undefined || ref.name === '') {
+      throw new Error(`文件对象 ${ref.id} 的引用里没有名字：算不出本机路径`)
+    }
+    return join(root, 'files', hex.slice(0, 2), hex, ref.name)
   }
   return {
     root,

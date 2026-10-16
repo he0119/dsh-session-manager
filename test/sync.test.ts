@@ -2098,7 +2098,7 @@ test('同步拉取：包只有日志时，缺的对象从共享库取回（0o400
   const image = Buffer.from('拉过去的那张图')
   const notes = Buffer.from('拉过去的那个文件对象')
   const imageRef: AttachmentRef = { id: attachmentIdOf(image), kind: 'image' }
-  const fileRef: AttachmentRef = { id: attachmentIdOf(notes), kind: 'file' }
+  const fileRef: AttachmentRef = { id: attachmentIdOf(notes), kind: 'file', name: 'notes.txt' }
   try {
     storeA.put(imageRef, image)
     storeA.put(fileRef, notes)
@@ -2121,7 +2121,12 @@ test('同步拉取：包只有日志时，缺的对象从共享库取回（0o400
       '已有的那个按 present 记，缺的那个按 written 记',
     )
     assert.deepEqual(outcome.attachmentOut, { uploaded: 0, skipped: 0, bytes: 0, missing: 0 })
-    assert.deepEqual(readFileSync(storeB.pathOf(fileRef)), notes, '文件对象走 file-objects 那个库')
+    // 落点是宿主那条带名字的路径：名字在日志的引用里，本机缺名字就算不出这个位置。
+    assert.deepEqual(readFileSync(storeB.pathOf(fileRef)), notes, '文件对象落在宿主那条带名字的路径上')
+    assert.deepEqual(
+      storeB.pathOf(fileRef),
+      join(storeB.root, 'files', fileRef.id.slice(7, 9), fileRef.id.slice(7), 'notes.txt'),
+    )
     assert.equal(statSync(storeB.pathOf(fileRef)).mode & 0o777, 0o400, '落地的对象权限位照本机附件库的规格')
     assert.deepEqual(
       objectRequests(fixture, 'GET').map((line) => line.includes(fileRef.id.slice('sha256:'.length))),

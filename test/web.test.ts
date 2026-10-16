@@ -132,7 +132,10 @@ function makeAttachmentStore(base: string): {
   const root = join(base, 'attachments')
   const pathOf = (ref: AttachmentRef): string => {
     const hex = ref.id.slice('sha256:'.length)
-    return join(root, ref.kind === 'image' ? 'objects' : 'file-objects', hex.slice(0, 2), hex)
+    // 与宿主同形：文件落在 `files/<前两位>/<sha>/<名字>`，名字缺了算不出路径。
+    if (ref.kind === 'image') return join(root, 'objects', hex.slice(0, 2), hex)
+    if (ref.name === undefined || ref.name === '') throw new Error('文件对象缺名字')
+    return join(root, 'files', hex.slice(0, 2), hex, ref.name)
   }
   return {
     root,

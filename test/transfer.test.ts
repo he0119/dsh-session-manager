@@ -103,6 +103,20 @@ function downgradeToV1(bundle: Buffer): Buffer {
   return gzipSync(Buffer.concat([header, manifestBytes, raw.subarray(headerLength + manifestLength)]))
 }
 
+/** 换掉清单再压回去（其余字节一个不动）：造"某个字段被改坏"的包用它。 */
+function withManifest(bundle: Buffer, edit: (manifest: Record<string, unknown>) => void): Buffer {
+  const raw = gunzipSync(bundle)
+  const headerLength = BUNDLE_MAGIC.length + 4
+  const manifestLength = raw.readUInt32LE(BUNDLE_MAGIC.length)
+  const manifest = manifestOf(bundle)
+  edit(manifest)
+  const manifestBytes = Buffer.from(JSON.stringify(manifest), 'utf8')
+  const header = Buffer.alloc(headerLength)
+  header.write(BUNDLE_MAGIC, 0, 'utf8')
+  header.writeUInt32LE(manifestBytes.length, BUNDLE_MAGIC.length)
+  return gzipSync(Buffer.concat([header, manifestBytes, raw.subarray(headerLength + manifestLength)]))
+}
+
 /**
  * 清单原文（`readBundle` 读完之后看不到的字段名要靠它核）：格式号是不是"照包里的内容写的"、
  * 没对象的包有没有把 `attachments` 那一节省掉，都得看这一份。
@@ -436,7 +450,8 @@ test('导入：包里的对象按库落进目标附件库（内容一致、只�
   const image = Buffer.from('要跟着会话搬过去的图片字节')
   const file = Buffer.from('还有一份文件对象')
   const imageRef: AttachmentRef = { id: attachmentIdOf(image), kind: 'image' }
-  const fileRef: AttachmentRef = { id: attachmentIdOf(file), kind: 'file' }
+  // 文件的名字来自日志里的引用（`attachment.name`），它决定本机路径的最后一段。
+  const fileRef: AttachmentRef = { id: attachmentIdOf(file), kind: 'file', name: 'notes.txt' }
   store.put(imageRef, image)
   store.put(fileRef, file)
 
@@ -470,6 +485,14 @@ test('导入：包里的对象按库落进目标附件库（内容一致、只�
   assert.equal(outcome.attachmentPresent, 0)
   assert.equal(outcome.attachmentBytes, image.length + file.length)
   assert.deepEqual(outcome.attachmentProblems, [])
+
+  // 文件落在宿主那条带名字的路径上（`files/<sha 前两位>/<sha>/<名字>`），不是 `file-objects/` 下那个
+  // 内容寻址的规范副本——宿主读回来读的就是前者。
+  assert.equal(
+    targetStore.port.pathOf(fileRef),
+    join(targetStore.root, 'files', fileRef.id.slice(7, 9), fileRef.id.slice(7), 'notes.txt'),
+  )
+  assert.equal(existsSync(join(targetStore.root, 'files', fileRef.id.slice(7, 9), fileRef.id.slice(7), 'notes.txt')), true)
 
   for (const [ref, bytes] of [
     [imageRef, image],
@@ -577,6 +600,45 @@ test('包校验：附件载荷被改动一个字节时按 id 里的 sha256 拒�
   const raw = gunzipSync(bundle)
   raw[raw.length - 1] = raw[raw.length - 1]! ^ 0xff
   assert.throws(() => readBundle(gzipSync(raw)), /attachment .* failed its sha256 check/i)
+})
+
+test('包校验：文件条目缺名字时拒掉整包（名字决定它落在哪儿）', () => {
+  const root = makeRoot('transfer-attach-noname')
+  const store = makeAttachmentStore('transfer-attach-noname-store')
+  const file = Buffer.from('一个带名字的文件对象')
+  const ref: AttachmentRef = { id: attachmentIdOf(file), kind: 'file', name: 'notes.txt' }
+  store.put(ref, file)
+  const source = writeSession(root, {
+    id: 'session-a',
+    cwd: FROM_CWD,
+    eventLines: [attachmentEvent(ref, file.length, 'notes.txt')],
+  })
+  const bundle = buildBundle([source], { attachments: { port: store.port, decodeAll } })
+  assert.equal((manifestOf(bundle)['attachments'] as Array<Record<string, unknown>>)[0]?.['name'], 'notes.txt')
+
+  // 补一条没有名字的文件条目：本机路径算不出来，落下去只会是个错位置，所以整包按坏包拒掉。
+  assert.throws(
+    () =>
+      readBundle(
+        withManifest(bundle, (manifest) => {
+          const entries = manifest['attachments'] as Array<Record<string, unknown>>
+          delete entries[0]!['name']
+        }),
+      ),
+    /file without a name/i,
+  )
+
+  // 名字写成一个空串同样拒掉（不是"没有这一项"就不管）。
+  assert.throws(
+    () =>
+      readBundle(
+        withManifest(bundle, (manifest) => {
+          const entries = manifest['attachments'] as Array<Record<string, unknown>>
+          entries[0]!['name'] = ''
+        }),
+      ),
+    /malformed name/i,
+  )
 })
 
 test('读包：v1 的老包（没有 attachments 那一节）照旧读得出来、也照旧导得进去', () => {
