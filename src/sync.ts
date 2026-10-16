@@ -1025,7 +1025,9 @@ export async function testSyncConnection(dav: DavPort): Promise<SyncTestResult> 
     }
   }
   const machines = probe.entries
-    .filter((entry) => entry.kind === 'collection')
+    // 共享对象库那一层与机器格同级，不是一台机器——与 `readRemoteLibrary()` 同一条过滤。这里漏掉的话
+    // 只要远端有过一个附件对象，「测试连接」就会念成"机器：robot-a、attachments"。
+    .filter((entry) => entry.kind === 'collection' && entry.name !== SYNC_ATTACHMENTS_DIR)
     .map((entry) => entry.name)
     .sort()
   return {
