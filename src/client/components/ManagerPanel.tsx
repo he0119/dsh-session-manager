@@ -213,7 +213,7 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
         （`<id>-<value>-panel`）接上：官方原语按这个约定生成引用，不接上就是一个指向空气的
         `aria-controls`。`role="tabpanel"` 也在这一层。
       */}
-      <div id={`dsm-panel-${panel}-panel`} role="tabpanel">
+      <div id={`dsm-panel-${panel}-panel`} role="tabpanel" className="dsm-panel">
         {panel === 'manage' && <ManagePanel t={t} state={state} meta={meta} reload={load} directory={directory} />}
         {panel === 'transfer' && <TransferPanel t={t} state={state} meta={meta} reload={load} directory={directory} />}
         {panel === 'sync' && <SyncPanel t={t} state={state} meta={meta} reload={load} />}

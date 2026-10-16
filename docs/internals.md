@@ -51,6 +51,9 @@
 - [同步的附件对象走远端一个共享目录](../.agents/notes/implemented/feature/2026-10-16-sync-carries-attachment-objects.md)：
   同步的包只带日志，对象走远端 `attachments/` 那份内容寻址的共享目录；手动同步还补对象（本机缺的取回、
   远端缺的传上），端口缺席时整块不参与。
+- [页内分页那一层自己要留块间距](../.agents/notes/implemented/bug-fix/2026-10-16-inner-blocks-need-their-own-gap.md)：
+  `.dsm-root` 那份 16px 只作用于直接子元素，分页本体现在自己带 `gap`——不写这一条相邻两张卡片实测
+  间距 0px。
 - [文件对象要带上它的名字](../.agents/notes/implemented/bug-fix/2026-10-16-file-objects-need-their-name.md)：
   文件在本机是 `files/<sha 前两位>/<sha>/<名字>`（图片没有名字），所以引用与包清单都要带着它，缺了算不出
   路径、整包按坏包拒掉。

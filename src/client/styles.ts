@@ -57,6 +57,19 @@ export const CSS = `
 }
 .dsm-spacer { flex: 1 1 auto; }
 /*
+ * 分页本体那一层。它是 .dsm-root 的直接子元素（拿到的是 .dsm-root 给兄弟之间那份 16px），可卡片
+ * 都在它**里面**——不写这一条，相邻两张卡片就只有各自的 1px 描边分得开，真实 dev GUI 里量到相邻两张
+ * 卡片的间距是 0px（「说明」那一页整页都是卡片，一眼就看出来贴在一起）。
+ *
+ * 16px 是内建设置页量出来的节奏：那边行与行之间靠每一行自己的 padding: 16px 0，与 .dsm-root
+ * 现在那一档同值，所以这里用同一个数、不再另起一档。
+ */
+.dsm-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+/*
  * 卡片外壳照官方卡片（内建「插件」页那张 .card）量出来的规格：**圆角 20px**、**1px 描边**、底色是表面白。
  * 描边走 settings-card-stroke 而不是 border-l1：前者是官方给"设置卡片描边"这件事的专名 token，
  * 真实 dev GUI 里量到浅色 **rgba(0, 0, 0, 0.16)**、深色 **rgba(255, 255, 255, 0.2)**，与官方那张 .card
