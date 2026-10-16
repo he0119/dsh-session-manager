@@ -94,6 +94,11 @@ export interface BundleAttachmentEntry {
   id: string
   /** 属于哪个库（图片 / 文件）。 */
   kind: AttachmentKind
+  /**
+   * 文件对象在日志里的名字。**落回来的时候要它**：文件的本机路径是
+   * `files/<sha 前两位>/<sha>/<名字>`（见 `AttachmentRef.name`），图片没有这一项。
+   */
+  name?: string
   bytes: number
   /** 相对载荷起点的偏移。 */
   offset: number
@@ -247,7 +252,13 @@ export function buildBundle(
         missing.push(ref)
         continue
       }
-      attachments.push({ id: ref.id, kind: ref.kind, bytes: buf.length, offset })
+      attachments.push({
+        id: ref.id,
+        kind: ref.kind,
+        ...(ref.name === undefined ? {} : { name: ref.name }),
+        bytes: buf.length,
+        offset,
+      })
       parts.push(buf)
       offset += buf.length
       attachmentBytes += buf.length
@@ -373,6 +384,13 @@ export function readBundle(bytes: Buffer): SessionBundle {
     if (typeof value.bytes !== 'number' || typeof value.offset !== 'number' || value.bytes < 0 || value.offset < 0) {
       throw new Error(`bundle attachment ${value.id} has a malformed entry`)
     }
+    if (value.name !== undefined && (typeof value.name !== 'string' || value.name.length === 0)) {
+      throw new Error(`bundle attachment ${value.id} has a malformed name`)
+    }
+    // 文件对象的名字决定它落在哪儿，缺了就是个落不下去的条目：写这个格式的只有本插件，所以见到就是坏包。
+    if (value.kind === 'file' && value.name === undefined) {
+      throw new Error(`bundle attachment ${value.id} is a file without a name`)
+    }
     if (value.offset + value.bytes > payload.length) {
       throw new Error(`bundle attachment ${value.id} points outside the payload`)
     }
@@ -380,7 +398,13 @@ export function readBundle(bytes: Buffer): SessionBundle {
     if (sha256(slice) !== value.id.slice('sha256:'.length)) {
       throw new Error(`bundle attachment ${value.id} failed its sha256 check (corrupted bundle)`)
     }
-    attachments.push({ id: value.id, kind: value.kind, bytes: value.bytes, offset: value.offset })
+    attachments.push({
+      id: value.id,
+      kind: value.kind,
+      ...(value.name === undefined ? {} : { name: value.name }),
+      bytes: value.bytes,
+      offset: value.offset,
+    })
   }
 
   return {
@@ -686,9 +710,9 @@ export function planImport(bundle: SessionBundle, options: ImportOptions): Impor
  */
 export function attachmentActionOf(
   port: AttachmentPort | undefined,
-  ref: { id: string; kind: AttachmentKind; bytes?: number },
+  ref: { id: string; kind: AttachmentKind; bytes?: number; name?: string },
 ): ImportAttachmentEntry['action'] {
-  const path = port?.pathOf({ id: ref.id, kind: ref.kind })
+  const path = port?.pathOf({ id: ref.id, kind: ref.kind, ...(ref.name === undefined ? {} : { name: ref.name }) })
   if (path === undefined) return 'unavailable'
   try {
     return ref.bytes === undefined || statSync(path).size === ref.bytes ? 'present' : 'create'
@@ -767,7 +791,11 @@ export function applyImport(
     } else {
       for (const [index, entry] of bundle.attachments.entries()) {
         options.onProgress?.({ phase: 'attach', total: bundle.attachments.length, done: index, id: entry.id })
-        const path = options.attachments.pathOf({ id: entry.id, kind: entry.kind })
+        const path = options.attachments.pathOf({
+          id: entry.id,
+          kind: entry.kind,
+          ...(entry.name === undefined ? {} : { name: entry.name }),
+        })
         if (path === undefined) {
           attachmentProblems.push(`宿主容不下附件 ${entry.id}（${entry.kind}），这一个没有落地`)
           continue

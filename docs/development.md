@@ -154,8 +154,8 @@ tsconfig.client.json Web Client 自己的类型工程（DOM + JSX；Host 那份�
 | `src/journal.ts` | 字节级备份清单与回滚（迁移与删除两种来源） | 无 |
 | `src/execute.ts` | 执行 + 独立复核（含产物目标位校验） | 无 |
 | `src/artifacts.ts` | 会话产物提取（证据分层）、规划（求交/剪枝）、搬迁 | 无 |
-| `src/attachments.ts` | 附件对象（日志里那个 `attachmentId` 指向的字节）：日志逐行扫引用（字符串预筛 + 解析）、按 `kind:id` 去重（引用里带上日志声明的字节数，供「本机这份还在不在」用）、读写宿主附件库的**纯路径端口** `AttachmentPort`（`pathOf()` 只算路径，读与写都在这里）、对象落地的 `.part` + rename 与 `0o400` 规格 | 无 |
-| `src/transfer.ts` | `.dshsess` 容器（导出/解析/校验，格式 v2：日志之外还带一段**附件对象**，读的时候 1 与 2 都认）、导入预演与落地（**先落对象再写日志**，对象落不了只回报不拦会话）；`attachmentActionOf()` 是「这个对象在本机算什么」的唯一判据（导入预演与同步拉取共用） | 无 |
+| `src/attachments.ts` | 附件对象（日志里那个 `attachmentId` 指向的字节）：日志逐行扫引用（字符串预筛 + 解析）、按 `kind:id` 去重（引用里带上日志声明的字节数与**文件对象的名字**——前者供「本机这份还在不在」用，后者是文件本机路径的最后一段）、读写宿主附件库的**纯路径端口** `AttachmentPort`（`pathOf()` 只算路径，读与写都在这里）、对象落地的 `.part` + rename 与 `0o400` 规格 | 无 |
+| `src/transfer.ts` | `.dshsess` 容器（导出/解析/校验，格式 v2：日志之外还带一段**附件对象**，每条是 `{ id, kind, name?, bytes, offset }`，读的时候 1 与 2 都认）、导入预演与落地（**先落对象再写日志**，对象落不了只回报不拦会话）；`attachmentActionOf()` 是「这个对象在本机算什么」的唯一判据（导入预演与同步拉取共用） | 无 |
 | `src/config.ts` | 插件配置的 schema：`sync` 那一节带 `volatile`（活字段，改完不用重启），三个路径字段不带；`syncSection()` 把"活引用"与"普通对象"两种来路收成一份值；自动推送那一节的拍平在 `autoPushSection()` 一处（开关只认 `autoPush === true`，间隔缺席 / 非有限数取 `DEFAULT_AUTO_PUSH_INTERVAL_MS`（300000）、小于 `MIN_AUTO_PUSH_INTERVAL_MS`（60000）的抬到下限），它也是这几个数唯一的解释处 | `@deepseek-ai/schemastery` |
 | `src/repo.ts` | 跨机器的项目身份：git remote 规范化（`host/owner/repo`，去掉 `.git` 与凭据、端口进身份）与"这条目录属于哪个仓库"（仓库根 + 仓库内相对路径）；跑 git 的入口可注入。`createRepoLookup()` 是界面读身份那条路（进程内缓存：一个目录只问一次 git，`/state` 是热路径） | 无 |
 | `src/dav.ts` | WebDAV 客户端：PROPFIND / GET / PUT / MKCOL + Basic 鉴权 + 多状态响应解析 | 无 |

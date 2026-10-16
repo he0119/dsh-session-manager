@@ -51,6 +51,9 @@
 - [同步的附件对象走远端一个共享目录](../.agents/notes/implemented/feature/2026-10-16-sync-carries-attachment-objects.md)：
   同步的包只带日志，对象走远端 `attachments/` 那份内容寻址的共享目录；手动同步还补对象（本机缺的取回、
   远端缺的传上），端口缺席时整块不参与。
+- [文件对象要带上它的名字](../.agents/notes/implemented/bug-fix/2026-10-16-file-objects-need-their-name.md)：
+  文件在本机是 `files/<sha 前两位>/<sha>/<名字>`（图片没有名字），所以引用与包清单都要带着它，缺了算不出
+  路径、整包按坏包拒掉。
 - [导入只跳过，不覆盖](../.agents/notes/implemented/architecture/2026-09-27-import-skips-never-overwrites.md)：
   冲突只报告，落地先写 `.part` 再 rename。
 - [产物证据分层，并做两道收窄](../.agents/notes/implemented/architecture/2026-09-27-artifact-evidence-layers.md)：
