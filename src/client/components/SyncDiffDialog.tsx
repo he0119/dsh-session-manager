@@ -143,22 +143,29 @@ export function SyncDiffDialog({
       className="dsm-dialog dsm-diffDialog"
       contentClassName="dsm-dialogContent dsm-diffContent"
     >
-      <div className="dsm-transcriptName" title={target.id}>
-        {target.title ?? target.id}
+      <div className="dsm-diffHead">
+        <div className="dsm-transcriptName" title={target.id}>
+          {target.title ?? target.id}
+        </div>
+        {data === undefined || diff === undefined ? null : (
+          // 来源与大小并成一行元信息：两行小字挨在一起会跟名字糊成一块。
+          <div className="dsm-hint">
+            <span>{t('sync.diff.remoteMachine', { machine: data.machine })}</span>
+            <span> · </span>
+            <span>
+              {t('sync.diff.summary', {
+                localBytes: formatBytes(diff.local.bytes),
+                remoteBytes: formatBytes(diff.remote.bytes),
+              })}
+            </span>
+          </div>
+        )}
       </div>
-      {data === undefined ? null : (
-        <div className="dsm-hint">{t('sync.diff.remoteMachine', { machine: data.machine })}</div>
-      )}
       {state.status === 'busy' ? <div className="dsm-hint">{t('sync.diff.loading')}</div> : null}
       {state.status === 'error' ? <p className="dsm-banner dsm-error">{state.message}</p> : null}
       {diff === undefined || data === undefined ? null : (
         <>
-          <div className="dsm-hint">
-            {t('sync.diff.summary', {
-              localBytes: formatBytes(diff.local.bytes),
-              remoteBytes: formatBytes(diff.remote.bytes),
-            })}
-          </div>
+          <section className="dsm-diffSection">
           <p className="dsm-diffRelation">
             <Tag className="dsm-tag" tone={RELATION_TONE[diff.relation]}>
               {t(RELATION_KEY[diff.relation])}
@@ -174,7 +181,9 @@ export function SyncDiffDialog({
               </div>
             ))}
           </div>
+          </section>
           {diff.header.length === 0 ? null : (
+            <section className="dsm-diffSection">
             <div className="dsm-diffHeader">
               <Tag className="dsm-tag" tone="neutral">
                 {t('sync.diff.headerTitle', { count: diff.header.length })}
@@ -198,11 +207,15 @@ export function SyncDiffDialog({
                 </tbody>
               </table>
             </div>
+            </section>
           )}
+          {/* 两条尾巴一节：两块之间比块内再松一档。 */}
+          <section className="dsm-diffSection dsm-diffTails">
           {sideBlocks(diff).map((block) => (
             <TailBlock key={block.side} side={block.side} tail={block.tail} t={t} />
           ))}
-          <div className="dsm-hint">{t('sync.diff.readonly')}</div>
+          </section>
+          <div className="dsm-hint dsm-diffNote">{t('sync.diff.readonly')}</div>
         </>
       )}
     </Modal>
