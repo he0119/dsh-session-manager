@@ -5772,6 +5772,13 @@ test('客户端产物：「看差异」只给两边真有可比那两份的行�
     mounted.recorded.some((node) => node.type === 'th' && node.props?.className === 'dsm-colDiff'),
     '那一列还有正经的表头',
   )
+  // 三张表的头一格都叫「结论」：格里的值是拉取 / 推送 / 两边各自写过，全是结论（「动作」只在传输
+  // 那张表里站得住——这张表里它是原因，不是动作）。
+  const conclusionHeads = mounted.recorded.filter(
+    (node) =>
+      node.type === 'th' && node.props?.className === 'dsm-colAction' && node.props?.children === 'table.conclusion',
+  )
+  assert.equal(conclusionHeads.length, 3, '预演三张表的头一格都换成了「结论」')
 
   // 点下去带的是哪一条：把这几次 setState 收到的 id 收集起来，正好是那三条会互相顶掉 / 分叉的。
   for (const button of buttons) button.props?.onClick?.()
