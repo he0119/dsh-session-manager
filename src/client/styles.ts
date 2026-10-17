@@ -879,10 +879,13 @@ export const CSS = `
      写了一遍）。量过：不写这条时这里量到 16px/normal，写上之后是 14px/20px。 */
   font-size: 14px; line-height: 20px;
 }
-.dsm-diffRelation { margin: 0; }
+.dsm-diffRelation { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin: 0; }
 .dsm-diffHeader { display: flex; flex-direction: column; gap: 4px; }
 .dsm-diffField { width: 120px; }
 .dsm-diffTail { display: flex; flex-direction: column; gap: 6px; }
+/* 块头那枚标签要**收成小块**：容器是竖排 flex，默认 stretch 会把标签拉成整条，看着像一条横幅而不是
+   一枚分类标记（实测第一版就是这样）。只让它自己靠左，下面那些条目卡照旧占满整宽。 */
+.dsm-diffTail > .dsm-tag, .dsm-diffHeader > .dsm-tag { align-self: flex-start; }
 /*
  * 正文那一层：块与块之间的节奏（官方那层 body 是纵向 flex 但不给间距）、以及**字号**。
  *
