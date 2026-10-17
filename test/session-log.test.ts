@@ -3,7 +3,7 @@ import test from 'node:test'
 
 import { decompress } from 'fzstd'
 
-import { readSessionLog, relocateHeaderCwd, relocateHeaderCwdShallow } from '../src/session-log.ts'
+import { branchSessionLog, readSessionLog, relocateHeaderCwd, relocateHeaderCwdShallow } from '../src/session-log.ts'
 import type { DecodeAll, SessionHeader } from '../src/types.ts'
 import { encodeRawFrame, splitFirstFrameFast } from '../src/zstd-frame.ts'
 
@@ -176,4 +176,69 @@ test('relocateHeaderCwd：保留 header 的可选字段与顺序', () => {
   assert.equal(r.nextHeader.delegationDepth, 2)
   assert.equal(r.nextHeader.agentPreset, 'standard')
   assert.equal(Object.keys(r.nextHeader).length, Object.keys(rich).length)
+})
+
+
+// ── 落成另一条会话：换 id、插一条标记标题 ────────────────────────────────────────
+
+const branchEvents = [
+  { type: 'session/title', seq: 1, time: '2026-10-12T04:00:00.000Z', data: { title: '原标题' } },
+  { type: 'user/message', seq: 2, time: '2026-10-12T04:01:00.000Z', data: { content: [{ type: 'text', text: '正文一条' }] } },
+  { type: 'session/title', seq: 3, time: '2026-10-12T04:02:00.000Z', data: { title: '改过名' } },
+  { type: 'turn/end', seq: 4, time: '2026-10-12T20:05:00.000Z', data: { turn: 1 } },
+]
+const MARKED = '改过名 · 来自 robot-test 2026-10-12 20:05'
+
+function titlesOf(text: string): string[] {
+  const titles: string[] = []
+  for (const line of text.split('\n')) {
+    if (line === '') continue
+    try {
+      const parsed = JSON.parse(line) as { type?: unknown; data?: { title?: unknown } }
+      if (parsed.type === 'session/title' && typeof parsed.data?.title === 'string') titles.push(parsed.data.title)
+    } catch {
+      /* 不是事件行 */
+    }
+  }
+  return titles
+}
+
+test('branchSessionLog（zstd）：换 id、标记标题是唯一那条、正文一字不动', () => {
+  const out = branchSessionLog(makeLog(header, branchEvents), 'zstd', {
+    newId: 'session-branched',
+    machine: 'robot-test',
+    time: '2026-10-12T21:00:00.000Z',
+    decodeAll,
+  })
+  const { header: h, lines } = readSessionLog(out, decodeAll)
+  assert.equal(h.id, 'session-branched', 'header 的 id 换成了新会话的')
+  // 原文一字不动：两条原标题都还在；标记排在**最后**（最新一条生效，见 foldTitle）。
+  assert.deepEqual(titlesOf(lines.join('\n')), ['原标题', '改过名', MARKED], '原标题都留着，标记排在最后')
+  assert.match(lines.join('\n'), /正文一条/, '正文一字不动')
+  const marker = JSON.parse(lines.find((line) => line.includes(MARKED)) ?? '{}') as { seq?: number; time?: string }
+  assert.equal(marker.seq, 5, '标记那一行 seq = 5（最后一条是 4）')
+  assert.equal(marker.time, '2026-10-12T21:00:00.000Z', '标记那一行的时刻是给定的')
+})
+
+test('branchSessionLog（明文）：同一套语义', () => {
+  const text = [JSON.stringify(header), ...branchEvents.map((e) => JSON.stringify(e))].join('\n') + '\n'
+  const out = branchSessionLog(Buffer.from(text, 'utf8'), null, {
+    newId: 'session-branched',
+    machine: 'robot-test',
+    time: '2026-10-12T21:00:00.000Z',
+    decodeAll,
+  })
+  const lines = out.toString('utf8').split('\n')
+  assert.equal((JSON.parse(lines[0] as string) as { id: string }).id, 'session-branched')
+  assert.deepEqual(titlesOf(out.toString('utf8')), ['原标题', '改过名', MARKED], '明文同义：原标题留着、标记排最后')
+})
+
+test('branchSessionLog：没有原标题时标记只留来源那半句', () => {
+  const out = branchSessionLog(makeLog(header, [branchEvents[1] as never]), 'zstd', {
+    newId: 'session-branched',
+    machine: 'robot-test',
+    time: '2026-10-12T21:00:00.000Z',
+    decodeAll,
+  })
+  assert.deepEqual(titlesOf(readSessionLog(out, decodeAll).lines.join('\n')), ['来自 robot-test 2026-10-12 04:01'])
 })

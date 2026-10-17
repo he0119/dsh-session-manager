@@ -46,6 +46,7 @@ import { canonicalDir } from './canonical-path.ts'
 import { encodeSegment, sessionDir } from './paths.ts'
 import { reHome, writeRegistryAtomic } from './registry.ts'
 import { foldTitleInFrames } from './session-title.ts'
+import { branchSessionLog } from './session-log.ts'
 import { relocateHeaderCwd, relocateHeaderCwdText } from './session-log.ts'
 import type { DecodeAll, ProgressReporter, RegistryChange, SessionLogFile, WorkspaceRegistryState } from './types.ts'
 
@@ -551,6 +552,12 @@ export interface ImportOptions {
    * 日志照旧导入（退化成 v1 那种"只带日志"的结果，与升级前一致）。
    */
   attachments?: AttachmentPort
+  /**
+   * 换 id 落成**另一条会话**（同步裁决里落选那一份的去处）：包里的会话换成 `newId` 落盘，并在最新
+   * 一代日志里插一条标记标题（「原标题 · 来自 <机器> <时刻>」，见 `branchSessionLog()`）。键是包里
+   * 的原 id。
+   */
+  rename?: ReadonlyMap<string, { newId: string; machine: string; time?: string }>
   now?: string
   newId?: string
   /**
@@ -608,24 +615,27 @@ export function planImport(bundle: SessionBundle, options: ImportOptions): Impor
   let bytes = 0
 
   for (const [index, session] of bundle.sessions.entries()) {
+    const rename = options.rename?.get(session.id)
+    // 换过 id 就是**另一条会话**：目录、同 id 冲突、报告都按新 id 算（原 id 那条留给正本去占）。
+    const effectiveId = rename?.newId ?? session.id
     options.onProgress?.({
       phase: 'read',
       total: bundle.sessions.length,
       done: index,
-      id: session.id,
+      id: effectiveId,
       // 标题就是这一步要从日志里折出来的东西，所以它此刻还不知道：用 id 当名字。
-      label: session.id,
+      label: effectiveId,
     })
     const withCwd = hasCwd(session)
-    const dir = sessionDir(root, withCwd ? targetCwd : undefined, session.id)
+    const dir = sessionDir(root, withCwd ? targetCwd : undefined, effectiveId)
     const files = session.files.map((file) => ({ name: file.name, bytes: file.bytes }))
-    const existing = existingDirs.get(encodeSegment(session.id))
+    const existing = existingDirs.get(encodeSegment(effectiveId))
     const sessionTitle = bundleTitle(bundle, session, decodeAll)
     const titled = sessionTitle === undefined ? {} : { title: sessionTitle }
 
     if (existing !== undefined) {
       entries.push({
-        id: session.id,
+        id: effectiveId,
         ...titled,
         action: 'skip',
         reason: `这个库里已经有同 id 的会话：${existing}`,
@@ -637,7 +647,7 @@ export function planImport(bundle: SessionBundle, options: ImportOptions): Impor
     }
 
     entries.push({
-      id: session.id,
+      id: effectiveId,
       ...titled,
       action: 'create',
       fromCwd: session.cwd,
@@ -645,8 +655,8 @@ export function planImport(bundle: SessionBundle, options: ImportOptions): Impor
       dir,
       files,
     })
-    created.push(session.id)
-    if (withCwd) rehomed.push(session.id)
+    created.push(effectiveId)
+    if (withCwd) rehomed.push(effectiveId)
     for (const file of session.files) bytes += file.bytes
   }
 
@@ -777,7 +787,8 @@ export function applyImport(
   plan: ImportPlan,
   options: ImportOptions & { decodeAll: DecodeAll; writeRegistry?: boolean },
 ): ImportOutcome {
-  const byId = new Map(bundle.sessions.map((session) => [session.id, session]))
+  // 换过 id 的会话按**新 id** 认领（计划里的条目写的就是它）。
+  const byId = new Map(bundle.sessions.map((session) => [options.rename?.get(session.id)?.newId ?? session.id, session]))
   const written: string[] = []
   let bytes = 0
 
@@ -830,9 +841,19 @@ export function applyImport(
     if (!session) throw new Error(`internal error: plan entry ${entry.id} has no session in the bundle`)
 
     mkdirSync(entry.dir, { recursive: true })
-    for (const file of session.files) {
+    const rename = options.rename?.get(session.id)
+    for (const [fileIndex, file] of session.files.entries()) {
       const raw = entryBytes(bundle, file)
-      const next = entry.toCwd === undefined ? raw : rewriteCwd(raw, file.compression, entry.toCwd, options.decodeAll)
+      let next = entry.toCwd === undefined ? raw : rewriteCwd(raw, file.compression, entry.toCwd, options.decodeAll)
+      if (rename !== undefined) {
+        // 标记标题只插**最新一代**（读标题只读最新一代）；其余代次只换 id。
+        next = branchSessionLog(next, file.compression, {
+          newId: rename.newId,
+          ...(fileIndex === session.files.length - 1 ? { machine: rename.machine } : {}),
+          ...(rename.time === undefined ? {} : { time: rename.time }),
+          decodeAll: options.decodeAll,
+        })
+      }
       const part = join(entry.dir, `${file.name}.part`)
       writeFileSync(part, next)
       renameSync(part, join(entry.dir, file.name))

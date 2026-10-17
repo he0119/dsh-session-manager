@@ -47,7 +47,7 @@
 // 为什么"谁更新"用的是宿主折出来的活动时间而不是文件修改时间：文件的 mtime 经不起复制（下载、
 // 解包、备份还原都会把它抹平），而这两枚钟与日志内容同生共死，落地改写 cwd 时也不受影响。
 // 判据仍然**不**拿时间反推"谁是祖先"：代次那边的四种关系是结构性的，时间只在结构判不出来时分高下。
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { existsSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -369,6 +369,26 @@ export function relation(mine: readonly FileFingerprint[], theirs: readonly File
   return 'diverged'
 }
 
+/**
+ * 这条会话落地到本机的哪个目录：先取本机这条的 cwd 归一，缺席才把远端记的 cwd 按同步映射（或本机
+ * 仓库）翻过来。"覆盖本机那份"与裁决"以远端为准"两处用的是同一把尺子。
+ */
+function resolveLandedCwd(
+  input: Pick<SyncPlanInput, 'mapping' | 'repos' | 'canonicalize'>,
+  session: Pick<DiscoveredSession, 'cwd'>,
+  remote: { cwd?: string; repo?: string; repoPath?: string },
+): string | undefined {
+  const canonicalize = input.canonicalize ?? canonicalDir
+  const mine = session.cwd === undefined ? undefined : canonicalize(session.cwd)
+  if (mine !== undefined) return mine
+  const viaRepo = remote.repo === undefined ? undefined : input.repos?.get(remote.repo)
+  const picked =
+    remote.cwd === undefined
+      ? undefined
+      : input.mapping.get(remote.cwd) ?? (viaRepo === undefined ? undefined : joinRepoPath(viaRepo, remote.repoPath))
+  return picked === undefined ? undefined : canonicalize(picked)
+}
+
 /** 代次列表的可读描述（报告里用）。 */
 function versionsText(files: readonly FileFingerprint[]): string {
   const versions = files.map((file) => file.version).sort((a, b) => a - b)
@@ -443,7 +463,7 @@ export interface SyncPullEntry {
    */
   action: 'create' | 'replace' | 'skip'
   /** 机器可读的分类（界面按它挑文案与过滤，不去解析 `reason`）。 */
-  code: 'missing' | 'remote-ahead' | 'remote-newer' | 'blank-local' | 'no-mapping' | 'missing-target'
+  code: 'missing' | 'remote-ahead' | 'remote-newer' | 'blank-local' | 'no-mapping' | 'missing-target' | 'keep-remote'
   reason?: string
 }
 
@@ -456,7 +476,7 @@ export interface SyncPushEntry {
   bytes: number
   action: 'upload' | 'update' | 'skip'
   /** 机器可读的分类（界面按它挑文案与过滤，不去解析 `reason`）。 */
-  code: 'missing' | 'local-ahead' | 'local-newer' | 'identical' | 'remote-ahead' | 'diverged'
+  code: 'missing' | 'local-ahead' | 'local-newer' | 'identical' | 'remote-ahead' | 'diverged' | 'keep-local'
   /** 远端那一份由哪台机器贡献（"远端领先 / 两边各自写过"要指名道姓）。 */
   machine?: string
   reason?: string
@@ -484,7 +504,18 @@ export interface SyncPlan {
 }
 
 /** `planSync()` 的入参。 */
+/** 两边各自写过时用户挑的正本：`keep-local` 以本机这份为准、`keep-remote` 以远端那份为准。 */
+export type SyncDecision = 'keep-local' | 'keep-remote'
+
 export interface SyncPlanInput {
+  /**
+   * 两边各自写过时的裁决（会话 id → 挑哪份当正本）。
+   *
+   * 裁决**不是**"删掉另一份"：落选那份先落成一条**新会话**（新 id，标题带「原标题 · 来自 <机器>
+   * <时刻>」的来源标记，见 `branchSessionLog()`），正本再占住原来的 id。所以两条内容都在库里。
+   * 缺席 = 这条没有裁决，照旧两条都不动（`diverged`）。
+   */
+  decisions?: ReadonlyMap<string, SyncDecision>
   /** 本机整库（`scanAll()` 的结果）。 */
   local: readonly DiscoveredSession[]
   remote: RemoteLibrary
@@ -695,6 +726,65 @@ export function planSync(input: SyncPlanInput): SyncPlan {
      * 远端领先是结构性的（本机这份确实是它的前缀），不需要时间就知道它更新；两边各自写过才要时间
      * 分高下，而空白那份不用比分——它没有内容可保。
      */
+    /*
+     * 裁决优先于"比谁新"：两边各自写过时用户已经挑好正本，按它走；另一份由落地那一步落成新会话
+     * （不丢）。空白那份与结构性的"远端领先"不在此列——前者没有内容可保，后者本来就不是分叉。
+     */
+    const decision = isBlank || kind === 'remote-ahead' ? undefined : input.decisions?.get(session.id)
+    /** 落地那一步要用的目录（裁决"以远端为准"要它；与"覆盖本机那份"同一把尺子）。 */
+    const target = resolveLandedCwd(input, session, remote)
+    if (decision === 'keep-local') {
+      push.push({
+        ...common,
+        action: 'update',
+        code: 'keep-local',
+        machine: remote.machine,
+        reason: `同一个 id 两边各自写过，以本机这份为准（${remote.machine} 那份落成一条新会话，不丢）——把自己这一格刷成最新`,
+      })
+      pushIds.push(session.id)
+      bytesOut += bytes
+      continue
+    }
+    if (decision === 'keep-remote') {
+      // 落不了地的两种情形照旧拦下（与"覆盖本机那份"那两道拦同一口径）：没有映射、或映射指到的目录不存在。
+      if (target === undefined && remote.cwd !== undefined) {
+        push.push({
+          ...common,
+          action: 'skip',
+          code: 'diverged',
+          machine: remote.machine,
+          reason: `本机这条没有 cwd，远端记的是 ${remote.cwd}，本机又没有它的同步映射——先补映射再同步`,
+        })
+        continue
+      }
+      if (target !== undefined && session.cwd === undefined && !isDirectory(target)) {
+        problems.push(`同步映射把 ${remote.cwd ?? ''} 指到了 ${target}，但那不是一个存在的目录`) // 见 missingTargetProblem()
+        push.push({ ...common, action: 'skip', code: 'diverged', machine: remote.machine, reason: `目标目录不存在：${target}` })
+        continue
+      }
+      if (input.isLive?.(session.id) === true) {
+        push.push({
+          ...common,
+          action: 'skip',
+          code: 'diverged',
+          machine: remote.machine,
+          reason: '这条会话正开着（宿主手里还有写句柄），裁决这次不生效',
+        })
+        continue
+      }
+      pull.push({
+        ...common,
+        ...(remote.cwd === undefined ? {} : { fromCwd: remote.cwd }),
+        ...(target === undefined ? {} : { toCwd: target }),
+        action: 'replace',
+        code: 'keep-remote',
+        machine: remote.machine,
+        reason: `同一个 id 两边各自写过，以 ${remote.machine} 那份为准（本机那份落成一条新会话，不丢）——先备份本机这份再换成它`,
+      })
+      pullIds.push(session.id)
+      bytesIn += bytes
+      continue
+    }
     const side = kind === 'remote-ahead' || isBlank ? 'remote' : newerSide(mineActiveAt, theirActiveAt)
     if (side === 'local') {
       push.push({
@@ -728,15 +818,8 @@ export function planSync(input: SyncPlanInput): SyncPlan {
        * 同一条路。两种来路都要归一：本机这条的 cwd 也可能是宿主不认的另一种拼写（分隔符、大小写、
        * 结尾分隔符）。
        */
-      let target = session.cwd === undefined ? undefined : canonicalize(session.cwd)
-      if (target === undefined) {
-        const viaRepo = remote.repo === undefined ? undefined : input.repos?.get(remote.repo)
-        const picked =
-          remote.cwd === undefined
-            ? undefined
-            : input.mapping.get(remote.cwd) ??
-              (viaRepo === undefined ? undefined : joinRepoPath(viaRepo, remote.repoPath))
-        target = picked === undefined ? undefined : canonicalize(picked)
+      const target = resolveLandedCwd(input, session, remote)
+      if (session.cwd === undefined) {
         if (target === undefined && remote.cwd !== undefined) {
           push.push({
             ...common,
@@ -1993,6 +2076,76 @@ export async function applyPreparedSync(
    */
   const pullJobs = plan.pull.filter((entry) => entry.action === 'create')
   const replaceJobs = plan.pull.filter((entry) => entry.action === 'replace')
+  /*
+   * 裁决里落选那一份先安个新家：落成一条**新会话**（新 id，标题带「原标题 · 来自 <机器> <时刻>」的
+   * 来源标记），再让正本占住原来的 id。顺序反过来就会先把落选那份覆盖掉——那正是"另一份不丢"要防
+   * 的事。走的是导入那条路（`planImport`/`applyImport`），所以包自校验、改写 header、附件对象与
+   * 注册表都与导入同一条不变式。
+   */
+  for (const entry of plan.pull) {
+    if (entry.code !== 'keep-remote') continue
+    const session = byId.get(entry.id)
+    if (session === undefined) continue
+    try {
+      // 附件对象不必随包搬：落选那份的日志引用还是那几个 sha，本机对象库里已经有它们。
+      const bundle = readBundle(
+        buildBundle(
+          [{ id: session.id, cwd: session.cwd, createdAt: session.createdAt, dir: session.dir, files: session.files }],
+          { now: new Date().toISOString() },
+        ),
+      )
+      const importOptions: ImportOptions & { decodeAll: DecodeAll } = {
+        root: deps.sessionsRoot,
+        targetCwd: session.cwd ?? '',
+        ...(registry === undefined ? {} : { registry }),
+        registryPath: deps.registryPath,
+        decodeAll: deps.decodeAll,
+        ...(port === undefined ? {} : { attachments: port }),
+        rename: new Map([
+          [session.id, { newId: `session-${randomUUID()}`, machine: deps.settings.machineId }],
+        ]),
+      }
+      const importPlan = planImport(bundle, importOptions)
+      if (importPlan.nextRegistry !== null) registry = importPlan.nextRegistry
+      if (importPlan.registryChange !== null) registryChanges.push(importPlan.registryChange)
+      const outcome = applyImport(bundle, importPlan, importOptions)
+      if (outcome.registryWritten) registryWritten = true
+      countPackedAttachments(outcome, attachmentIn)
+      pulled.push(...outcome.written)
+    } catch (error) {
+      problems.push(`把落选的本机那份落成新会话失败：${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+  for (const entry of plan.push) {
+    if (entry.code !== 'keep-local') continue
+    const session = byId.get(entry.id)
+    const machine = entry.machine
+    if (session === undefined || machine === undefined) continue
+    try {
+      const bytes = await deps.dav.get(remoteBundlePath(machine, entry.id))
+      const bundle = readBundle(bytes)
+      const importOptions: ImportOptions & { decodeAll: DecodeAll } = {
+        root: deps.sessionsRoot,
+        targetCwd: session.cwd ?? '',
+        ...(registry === undefined ? {} : { registry }),
+        registryPath: deps.registryPath,
+        decodeAll: deps.decodeAll,
+        ...(port === undefined ? {} : { attachments: port }),
+        rename: new Map([
+          [entry.id, { newId: `session-${randomUUID()}`, machine }],
+        ]),
+      }
+      const importPlan = planImport(bundle, importOptions)
+      if (importPlan.nextRegistry !== null) registry = importPlan.nextRegistry
+      if (importPlan.registryChange !== null) registryChanges.push(importPlan.registryChange)
+      const outcome = applyImport(bundle, importPlan, importOptions)
+      if (outcome.registryWritten) registryWritten = true
+      countPackedAttachments(outcome, attachmentIn)
+      pulled.push(...outcome.written)
+    } catch (error) {
+      problems.push(`把落选的 ${machine} 那份落成新会话失败：${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
   const pullTotal = pullJobs.length + replaceJobs.length
   for (let index = 0; index < pullJobs.length; index += 1) {
     const entry = pullJobs[index] as SyncPullEntry
