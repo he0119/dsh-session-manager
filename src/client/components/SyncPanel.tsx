@@ -61,6 +61,7 @@ import { projectLabel, sessionLabel, type SessionLabel } from '../logic/planRows
 import { ProgressBlock } from './ProgressBlock.tsx'
 import { formatBytes, sessionTags, type TagCopy } from './sessionList.tsx'
 import { SyncConfigForm } from './SyncConfigForm.tsx'
+import { SyncDiffDialog, type SyncDiffTarget } from './SyncDiffDialog.tsx'
 import { groupSyncRows, syncProjectOf, syncPullTip, type SyncGroup, type SyncSide } from '../logic/syncGroups.ts'
 import type { PanelShare } from '../types.ts'
 
@@ -95,6 +96,51 @@ interface SyncRow {
  *
  * 认不出来的码退回原始字符串：新增一类关系时界面上会出现一个生词，好过悄悄显示成"已跳过"。
  */
+/**
+ * 这一行能不能看差异。
+ *
+ * 判据是"两边**真有可比的两份**"，不是"状态看着可疑"：
+ *   - `diverged`：两边各自写过又判不出谁更新（计划里两条都不动）——最需要看的就是它；
+ *   - `remote-newer` / `remote-ahead`：远端那份会**顶掉本机这份**，按下同步之前先看一眼；
+ *   - `local-newer` / `local-ahead`：本机这份会顶掉远端那份，同样先看一眼。
+ *
+ * 其余几种没有可比的两份：`missing`（另一边没有）、`identical`（内容一致，比出来是空）、
+ * `blank-local`（本机这条是空白）、`no-mapping` / `missing-target`（连落地目录都没有）。
+ */
+function diffable(entry: SyncPullEntry | SyncPushEntry): boolean {
+  switch (entry.code) {
+    case 'diverged':
+    case 'remote-newer':
+    case 'remote-ahead':
+    case 'local-newer':
+    case 'local-ahead':
+      return true
+    default:
+      return false
+  }
+}
+
+/** 计划行最后那一格：能比的给一枚「看差异」，不能比的留空（列照旧留着，各行的列才对得齐）。 */
+function DiffCell({
+  entry,
+  onOpen,
+  t,
+}: {
+  entry: SyncPullEntry | SyncPushEntry
+  onOpen: () => void
+  t: Translate
+}): React.ReactElement {
+  return (
+    <td className="dsm-diffCell">
+      {diffable(entry) ? (
+        <Button variant="outline" size="sm" onClick={onOpen}>
+          {t('sync.diff.open')}
+        </Button>
+      ) : null}
+    </td>
+  )
+}
+
 function syncWhy(entry: SyncRow, t: Translate): string {
   switch (entry.code) {
     case 'missing':
@@ -533,6 +579,13 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
 
   const syncPlan = sync?.plan ?? null
   // 覆盖本机那份也摆在「会拉取」这张表里（它同样是往本机落内容），只是行上挂一颗不同的标签。
+  /**
+   * 要看差异的那一条（`undefined` = 没打开）。
+   *
+   * 初值刻意用 `undefined` 而不是 `null`：界面测试的假 React 按"第几个 `useState(null)`"往状态里种
+   * 数据（见 test/client.test.mjs 的 `nulls`），新加一个 null 状态会把后面那些的序号整体挤一位。
+   */
+  const [diffTarget, setDiffTarget] = React.useState<SyncDiffTarget | undefined>(undefined)
   const syncPulls = syncPlan?.pull.filter((entry) => entry.action !== 'skip') ?? []
   const syncPushes = syncPlan?.push.filter((entry) => entry.action !== 'skip') ?? []
   // 空白会话不进那三张表，只在正文里报一句：它们没有内容可同步，逐条列出来只是把表撑长。
@@ -765,13 +818,14 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
                       <th className="dsm-colAction">{t('table.action')}</th>
                       <th className="dsm-colSession">{t('table.session')}</th>
                       <th className="dsm-colBytes">{t('table.bytes')}</th>
+                      <th className="dsm-colDiff">{t('sync.diff.column')}</th>
                     </tr>
                   </thead>
                   {pullGroups.map((group) => (
                     // 每个项目一个 <tbody>：组头是它自己的表头行（colSpan 占满），列对齐由上面那一个
                     // <thead> 统一给。
                     <tbody key={groupKey(group.path)}>
-                      <PlanGroupHead group={group} columns={3} repo={state?.repos?.[group.path]} t={t} />
+                      <PlanGroupHead group={group} columns={4} repo={state?.repos?.[group.path]} t={t} />
                       {group.rows.map((entry) => {
                         const label = sessionLabel(entry)
                         // 覆盖本机那份单独一颗标签、另挂一条整句：它跟"从无到有拉一条"不是一回事。
@@ -801,6 +855,7 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
                               t={t}
                             />
                             <td className="dsm-meta">{formatBytes(entry.bytes)}</td>
+                            <DiffCell entry={entry} onOpen={() => setDiffTarget({ id: entry.id, ...(entry.machine === undefined ? {} : { machine: entry.machine }), ...(entry.title === undefined ? {} : { title: entry.title }) })} t={t} />
                           </tr>
                         )
                       })}
@@ -819,11 +874,12 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
                       <th className="dsm-colAction">{t('table.action')}</th>
                       <th className="dsm-colSession">{t('table.session')}</th>
                       <th className="dsm-colBytes">{t('table.bytes')}</th>
+                      <th className="dsm-colDiff">{t('sync.diff.column')}</th>
                     </tr>
                   </thead>
                   {pushGroups.map((group) => (
                     <tbody key={groupKey(group.path)}>
-                      <PlanGroupHead group={group} columns={3} repo={state?.repos?.[group.path]} t={t} />
+                      <PlanGroupHead group={group} columns={4} repo={state?.repos?.[group.path]} t={t} />
                       {group.rows.map((entry) => {
                         const label = sessionLabel(entry)
                         const tag = pushTag(entry, t)
@@ -837,6 +893,7 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
                             </td>
                             <SessionCell label={label} tip={label.tip} tags={typeTagsOf(sessionsById.get(entry.id))} t={t} />
                             <td className="dsm-meta">{formatBytes(entry.bytes)}</td>
+                            <DiffCell entry={entry} onOpen={() => setDiffTarget({ id: entry.id, ...(entry.machine === undefined ? {} : { machine: entry.machine }), ...(entry.title === undefined ? {} : { title: entry.title }) })} t={t} />
                           </tr>
                         )
                       })}
@@ -859,11 +916,12 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
                       <th className="dsm-colAction">{t('table.action')}</th>
                       <th className="dsm-colSession">{t('table.session')}</th>
                       <th className="dsm-colMachine">{t('table.machine')}</th>
+                      <th className="dsm-colDiff">{t('sync.diff.column')}</th>
                     </tr>
                   </thead>
                   {keptGroups.map((group) => (
                     <tbody key={groupKey(group.path)}>
-                      <PlanGroupHead group={group} columns={3} repo={state?.repos?.[group.path]} t={t} />
+                      <PlanGroupHead group={group} columns={4} repo={state?.repos?.[group.path]} t={t} />
                       {group.rows.map(({ entry }) => {
                         const label = sessionLabel(entry)
                         return (
@@ -876,6 +934,7 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
                             </td>
                             <SessionCell label={label} tip={label.tip} tags={typeTagsOf(sessionsById.get(entry.id))} t={t} />
                             <td className="dsm-cwd">{entry.machine ?? ''}</td>
+                            <DiffCell entry={entry} onOpen={() => setDiffTarget({ id: entry.id, ...(entry.machine === undefined ? {} : { machine: entry.machine }), ...(entry.title === undefined ? {} : { title: entry.title }) })} t={t} />
                           </tr>
                         )
                       })}
@@ -887,6 +946,9 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
           </div>
         )}
         </ConfirmDialog>
+      )}
+      {diffTarget === undefined ? null : (
+        <SyncDiffDialog target={diffTarget} onClose={() => setDiffTarget(undefined)} t={t} />
       )}
     </>
   )

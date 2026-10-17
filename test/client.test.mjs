@@ -5698,3 +5698,87 @@ test('客户端产物：自动推送是个官方 Switch（不是手写勾选框�
     '开关与标题+说明在同一行里',
   )
 })
+
+
+test('客户端产物：「看差异」只给两边真有可比那两份的行，点下去带的是那一条', { skip }, () => {
+  // 判据是"两边**真有可比的两份**"，不是"状态看着可疑"：`missing`（另一边没有）比出来是空的，给一枚
+  // 按钮只会让人白点一次；两边都写过的那几类（远端更新 / 本机更新 / 两边各自写过）按下同步之前最该
+  // 先看一眼——所以那几类必须有。夹具沿用同步预演那条：拉取那条改成"远端更新、会顶掉本机这份"。
+  const state = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    sync: { url: 'https://dav.example.com/dsh', machineId: 'robot-a', mappings: 0 },
+    sessions: [],
+    workspaces: [{ id: 'w1', path: '/home/u/dev/x', title: '测试项目', sessionIds: [] }],
+  }
+  const response = {
+    mode: 'plan',
+    remote: { url: 'https://dav.example.com/dsh', machineId: 'robot-a' },
+    plan: {
+      ok: true,
+      problems: [],
+      pull: [
+        {
+          id: 'session-a',
+          machine: 'robot-b',
+          bytes: 100,
+          action: 'replace',
+          code: 'remote-newer',
+          fromCwd: '/home/b/dev/x',
+          toCwd: '/home/u/dev/x',
+        },
+      ],
+      push: [
+        { id: 'session-b', bytes: 200, action: 'upload', code: 'missing', cwd: '/home/u/dev/x' },
+        { id: 'session-c', bytes: 300, action: 'update', code: 'local-ahead', cwd: '/home/u/dev/x' },
+        { id: 'session-d', bytes: 400, action: 'skip', code: 'diverged', machine: 'robot-b', cwd: '/home/u/dev/x' },
+      ],
+      pullIds: ['session-a'],
+      pushIds: ['session-b', 'session-c'],
+      bytesIn: 100,
+      bytesOut: 500,
+      localCount: 4,
+      remoteCount: 1,
+      machines: ['robot-b'],
+    },
+    applied: false,
+    pulled: [],
+    pushed: [],
+    bytesIn: 0,
+    bytesOut: 0,
+    registryWritten: false,
+    indexWritten: false,
+    problems: [],
+    takesEffect: 'immediate',
+  }
+  // 顺序：骨架的错误 → 同步页的 sync（那份计划）→ 弹窗开关（种成 'plan'，计划表只在弹窗里画）。
+  const mounted = mount({ state, panel: 'sync', nulls: [null, response, 'plan'] })
+
+  // 这一次渲染只会铺出页签那一层骨架：种下去的 sync / 弹窗开关要等树被走一遍才落到页签内容上，
+  // 所以下面照别处一样把树交给 `strings()` 走一遍（它顺带把嵌套组件真正跑起来）。
+  const tree = mounted.registrations[0].component(mounted.registrations[0].registration.inject())
+  strings(tree)
+
+  // 四条计划行各留一格（拉取一条、推送三条），比不了的留空——列才对得齐。
+  const cells = mounted.recorded.filter((node) => node.props?.className === 'dsm-diffCell')
+  assert.equal(cells.length, 4, '每条计划行都留着最后一格，比不了的留空（列才对得齐）')
+  // 页面上别处也有按钮（刷新、预演、确认同步…），所以按文案认自己那几枚。
+  const buttons = mounted.recorded.filter(
+    (node) => node.type === 'button' && node.props?.children === 'sync.diff.open',
+  )
+  assert.equal(buttons.length, 3, '四条计划行里，只有两边真有可比那两份的三条给了「看差异」')
+  assert.ok(
+    mounted.recorded.some((node) => node.type === 'th' && node.props?.className === 'dsm-colDiff'),
+    '那一列还有正经的表头',
+  )
+
+  // 点下去带的是哪一条：把这几次 setState 收到的 id 收集起来，正好是那三条会互相顶掉 / 分叉的。
+  for (const button of buttons) button.props?.onClick?.()
+  const targets = mounted.sets
+    .map((entry) => entry.value)
+    .filter((value) => typeof value === 'object' && value !== null && 'id' in value)
+    .map((value) => String(value.id))
+    .sort()
+  assert.deepEqual(targets, ['session-a', 'session-c', 'session-d'])
+})

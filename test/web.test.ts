@@ -831,7 +831,7 @@ test('POST /import：包坏了、目标目录不合法、库已存在同 id，�
   assert.match(String(payload(conflictApply.captured)['error']), /没有可导入的内容/)
 })
 
-test('registerWebRoutes：注册十三条精确路由，方法不对回 405', async () => {
+test('registerWebRoutes：注册十四条精确路由，方法不对回 405', async () => {
   const sandbox = makeSandbox('web-routes')
   const routes: WebRouteLike[] = []
   const dispose = registerWebRoutes(
@@ -844,6 +844,7 @@ test('registerWebRoutes：注册十三条精确路由，方法不对回 405', as
       `exact ${API_PREFIX}/meta`,
       `exact ${API_PREFIX}/state`,
       `exact ${API_PREFIX}/transcript`,
+      `exact ${API_PREFIX}/sync-diff`,
       `exact ${API_PREFIX}/export`,
       `exact ${API_PREFIX}/import`,
       // `/sync` 两种方法共用一条（宿主的 register 对重复 path 会抛错）
@@ -2725,4 +2726,231 @@ test('POST /import：日志已在库里、只缺附件对象时照样落地（�
   assert.equal(result['attachmentPresent'], 0)
   assert.deepEqual(result['attachmentProblems'], [])
   assert.deepEqual(readFileSync(targetStore.port.pathOf(ref)!), image)
+})
+
+// ── 差异端点：同一个 id 两边各自写过时，"哪儿不一样"的只读出口 ────────────────────────────────
+
+/** 手写一份日志：header 由用例给，事件行一条条给（这样两边只差我想差的那几条）。 */
+function writeLog(root: string, id: string, cwd: string, events: readonly string[]): string {
+  const header: SessionHeader = {
+    type: 'session',
+    version: 4,
+    id,
+    createdAt: 1500,
+    cwd,
+    isSeeded: false,
+    delegationDepth: 0,
+  }
+  const dir = sessionDir(root, cwd, id)
+  mkdirSync(dir, { recursive: true })
+  const path = join(dir, 'session.v4.jsonl.zstd')
+  // header 记得先序列化：直接塞字符串模板会写成 `[object Object]`，那份日志的 header 就废了
+  // （整条会话会被扫描跳过，端点回 404"会话库里没有它"）。
+  writeFileSync(
+    path,
+    Buffer.concat([JSON.stringify(header), ...events].map((line) => encodeRawFrame(`${line}\n`))),
+  )
+  return path
+}
+
+/** 一条用户消息（差异预览的摘要是它的正文）。 */
+const message = (seq: number, text: string): string =>
+  JSON.stringify({
+    type: 'user/message',
+    seq,
+    data: { content: [{ type: 'text', text }], source: { kind: 'user' }, role: 'user' },
+  })
+
+test('GET /sync-diff：两边事件一致、只有 header 的 cwd 不同，且一个字节都不写', async () => {
+  const sandbox = makeSandbox('sync-diff-same')
+  const fixture = await startDavFixture({ root: join(sandbox.base, 'dav') })
+  const dav = createDavClient({ baseUrl: fixture.url })
+  const foreignRoot = join(sandbox.base, 'foreign-sessions')
+  try {
+    const localPath = writeLog(sandbox.sessionsRoot, 'session-shared', CWD_A, [message(0, '同一个起头')])
+    const foreignPath = writeLog(foreignRoot, 'session-shared', CWD_B, [message(0, '同一个起头')])
+    await putRemoteSession(dav, 'robot-b', {
+      id: 'session-shared',
+      cwd: CWD_B,
+      createdAt: 1500,
+      logPath: foreignPath,
+      logName: 'session.v4.jsonl.zstd',
+      logVersion: 4,
+    })
+    const before = readFileSync(localPath)
+    // 夹具记的是这台服务器**收到过的全部**请求，里面已经有搭场景时那两次 PUT——只看端点这一段。
+    const requestsBefore = fixture.requests.length
+    const handlers = createApiHandlers(
+      deps(sandbox, {
+        sync: async () => ({ settings: { url: fixture.url, machineId: 'robot-a', mapping: {} }, dav }),
+      }),
+    )
+    const called = fakeRes()
+    await handlers['GET /sync-diff']!(fakeReq('GET', `${API_PREFIX}/sync-diff?id=session-shared`), called.res)
+    assert.equal(called.captured.status, 200)
+    const body = payload(called.captured)
+    assert.equal(body['machine'], 'robot-b', '远端那一份是哪台机器的')
+    assert.equal(body['localFile'], 'session.v4.jsonl.zstd')
+    assert.ok(Number(body['bundleBytes']) > 0, '下这个包花了多少字节要报出来')
+    const diff = body['diff'] as Record<string, unknown>
+    assert.equal(diff['relation'], 'same', '事件逐条一致')
+    assert.equal(diff['common'], 1)
+    assert.deepEqual(diff['header'], [{ field: 'cwd', local: CWD_A, remote: CWD_B }], '差别只在 header 的 cwd')
+    assert.deepEqual(readFileSync(localPath), before, '只读：本机那份没被动过')
+    assert.deepEqual(
+      fixture.requests
+        .slice(requestsBefore)
+        .filter((item) => item.startsWith('PUT') || item.startsWith('DELETE')),
+      [],
+      '只读：这条路一个字节都没往远端写',
+    )
+  } finally {
+    await fixture.close()
+  }
+})
+
+test('GET /sync-diff：远端接着写的那些条列出来（续写，不是分叉）', async () => {
+  const sandbox = makeSandbox('sync-diff-extends')
+  const fixture = await startDavFixture({ root: join(sandbox.base, 'dav') })
+  const dav = createDavClient({ baseUrl: fixture.url })
+  const foreignRoot = join(sandbox.base, 'foreign-sessions')
+  try {
+    writeLog(sandbox.sessionsRoot, 'session-shared', CWD_A, [message(0, '同一个起头')])
+    const foreignPath = writeLog(foreignRoot, 'session-shared', CWD_B, [
+      message(0, '同一个起头'),
+      message(1, '远端又写了一句'),
+    ])
+    await putRemoteSession(dav, 'robot-b', {
+      id: 'session-shared',
+      cwd: CWD_B,
+      createdAt: 1500,
+      logPath: foreignPath,
+      logName: 'session.v4.jsonl.zstd',
+      logVersion: 4,
+    })
+    const handlers = createApiHandlers(
+      deps(sandbox, {
+        sync: async () => ({ settings: { url: fixture.url, machineId: 'robot-a', mapping: {} }, dav }),
+      }),
+    )
+    const called = fakeRes()
+    await handlers['GET /sync-diff']!(fakeReq('GET', `${API_PREFIX}/sync-diff?id=session-shared`), called.res)
+    assert.equal(called.captured.status, 200)
+    const diff = payload(called.captured)['diff'] as Record<string, unknown>
+    assert.equal(diff['relation'], 'remote-extends', '远端那份是本机这部分的前缀')
+    assert.equal(diff['common'], 1)
+    const tail = diff['remoteTail'] as { count: number; preview: Array<Record<string, unknown>>; hidden: number }
+    assert.equal(tail.count, 1)
+    assert.equal(tail.hidden, 0)
+    assert.deepEqual(
+      tail.preview.map((item) => [item['index'], item['kind'], item['brief']]),
+      [[1, 'user', '远端又写了一句']],
+      '预览给的是摘要，位置是整份日志里的位置',
+    )
+    assert.equal((diff['localTail'] as { count: number }).count, 0)
+  } finally {
+    await fixture.close()
+  }
+})
+
+test('GET /sync-diff：各条拒绝面都说清是哪一步、哪一边', async () => {
+  const sandbox = makeSandbox('sync-diff-refuse')
+  const fixture = await startDavFixture({ root: join(sandbox.base, 'dav') })
+  const dav = createDavClient({ baseUrl: fixture.url })
+  const foreignRoot = join(sandbox.base, 'foreign-sessions')
+  try {
+    writeLog(sandbox.sessionsRoot, 'session-shared', CWD_A, [message(0, '同一个起头')])
+    const foreignPath = writeLog(foreignRoot, 'session-other', CWD_B, [message(0, '别的会话')])
+    await putRemoteSession(dav, 'robot-b', {
+      id: 'session-other',
+      cwd: CWD_B,
+      createdAt: 1600,
+      logPath: foreignPath,
+      logName: 'session.v4.jsonl.zstd',
+      logVersion: 4,
+    })
+    const handlers = createApiHandlers(
+      deps(sandbox, {
+        sync: async () => ({ settings: { url: fixture.url, machineId: 'robot-a', mapping: {} }, dav }),
+      }),
+    )
+    const noId = fakeRes()
+    await handlers['GET /sync-diff']!(fakeReq('GET', `${API_PREFIX}/sync-diff`), noId.res)
+    assert.equal(noId.captured.status, 400)
+    assert.match(String(payload(noId.captured)['error']), /缺少会话 id/)
+
+    const noLocal = fakeRes()
+    await handlers['GET /sync-diff']!(fakeReq('GET', `${API_PREFIX}/sync-diff?id=session-nothing`), noLocal.res)
+    assert.equal(noLocal.captured.status, 404)
+    assert.match(String(payload(noLocal.captured)['error']), /会话库里没有/)
+
+    // 远端索引里只有 `session-other`，本机这条在远端没有对应：这是"没配映射 / 远端没有"那一类，
+    // 不是一个可以比的对象。
+    const noRemote = fakeRes()
+    await handlers['GET /sync-diff']!(fakeReq('GET', `${API_PREFIX}/sync-diff?id=session-shared`), noRemote.res)
+    assert.equal(noRemote.captured.status, 404)
+    assert.match(String(payload(noRemote.captured)['error']), /远端索引里没有/)
+
+    const noRuntime = createApiHandlers(deps(sandbox))
+    const notConfigured = fakeRes()
+    await handlers['GET /sync-diff']!(fakeReq('GET', `${API_PREFIX}/sync-diff?id=session-shared`), notConfigured.res)
+    assert.equal(notConfigured.captured.status, 404, '没有远端那一份时先报"远端没有"，与没配同步是两句')
+    assert.ok(noRuntime !== undefined)
+  } finally {
+    await fixture.close()
+  }
+})
+
+test('GET /sync-diff：没配同步时明确说没配（不是"远端没有这条"）', async () => {
+  const sandbox = makeSandbox('sync-diff-unconfigured')
+  try {
+    writeLog(sandbox.sessionsRoot, 'session-shared', CWD_A, [message(0, '同一个起头')])
+    const handlers = createApiHandlers(deps(sandbox))
+    const called = fakeRes()
+    await handlers['GET /sync-diff']!(fakeReq('GET', `${API_PREFIX}/sync-diff?id=session-shared`), called.res)
+    assert.equal(called.captured.status, 409)
+    assert.match(String(payload(called.captured)['error']), /没有配置 WebDAV 同步/)
+  } finally {
+    rmSync(join(sandbox.base), { recursive: true, force: true })
+  }
+})
+
+test('GET /sync-diff：指名的那台机器与远端索引记的不是同一台时拒绝', async () => {
+  const sandbox = makeSandbox('sync-diff-machine')
+  const fixture = await startDavFixture({ root: join(sandbox.base, 'dav') })
+  const dav = createDavClient({ baseUrl: fixture.url })
+  const foreignRoot = join(sandbox.base, 'foreign-sessions')
+  try {
+    writeLog(sandbox.sessionsRoot, 'session-shared', CWD_A, [message(0, '同一个起头')])
+    const foreignPath = writeLog(foreignRoot, 'session-shared', CWD_B, [message(0, '同一个起头')])
+    await putRemoteSession(dav, 'robot-b', {
+      id: 'session-shared',
+      cwd: CWD_B,
+      createdAt: 1500,
+      logPath: foreignPath,
+      logName: 'session.v4.jsonl.zstd',
+      logVersion: 4,
+    })
+    const handlers = createApiHandlers(
+      deps(sandbox, {
+        sync: async () => ({ settings: { url: fixture.url, machineId: 'robot-a', mapping: {} }, dav }),
+      }),
+    )
+    const wrong = fakeRes()
+    await handlers['GET /sync-diff']!(
+      fakeReq('GET', `${API_PREFIX}/sync-diff?id=session-shared&machine=robot-c`),
+      wrong.res,
+    )
+    assert.equal(wrong.captured.status, 409)
+    assert.match(String(payload(wrong.captured)['error']), /是 robot-b 的，不是 robot-c 的/)
+
+    const right = fakeRes()
+    await handlers['GET /sync-diff']!(
+      fakeReq('GET', `${API_PREFIX}/sync-diff?id=session-shared&machine=robot-b`),
+      right.res,
+    )
+    assert.equal(right.captured.status, 200, '指名对得上就照常比')
+  } finally {
+    await fixture.close()
+  }
 })

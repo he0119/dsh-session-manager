@@ -406,6 +406,24 @@ export const zh = {
   'sync.tag.remoteAhead': '远端更新',
   'sync.tag.noMapping': '缺映射',
   'sync.tag.missingTarget': '目标缺失',
+  // 「看差异」那一页（只读）：列头、按钮、以及三类关系各一句话——"两边各自写过"时人要做的决定
+  // 全靠这一页，所以关系那三句要说得像人话，不能只报数字。
+  'sync.diff.column': '差异',
+  'sync.diff.open': '看差异',
+  'sync.diff.title': '两边的差异',
+  'sync.diff.loading': '正在取远端那一份…',
+  'sync.diff.remoteMachine': '远端那一份来自 {machine}',
+  'sync.diff.summary': '本机 {localEvents} 条 / {localBytes} · 远端 {remoteEvents} 条 / {remoteBytes}',
+  'sync.diff.same': '事件逐条一致——两边内容一样，保哪一份都一样。',
+  'sync.diff.sameHeader': '事件逐条一致，差别只在 header（{fields}）。',
+  'sync.diff.localExtends': '远端那份是本机这部分的前缀：本机在同一个延续上又写了 {count} 条。',
+  'sync.diff.remoteExtends': '本机那份是远端这部分的前缀：远端在同一个延续上又写了 {count} 条。',
+  'sync.diff.forked': '两边各写各的：共同到第 {common} 条为止，之后本机 {localCount} 条、远端 {remoteCount} 条。',
+  'sync.diff.tail.local': '本机多出来的 {count} 条',
+  'sync.diff.tail.remote': '远端多出来的 {count} 条',
+  'sync.diff.headerTitle': 'header 里的差别',
+  'sync.diff.hidden': '还有 {count} 条没列出来',
+  'sync.diff.readonly': '这一页只读：不写本机，也不写远端。',
   'sync.skippedBlank': '跳过 {count} 条空白会话（建出来但一个回合都没聊过），它们不参与同步。',
 
   // 同步设置表单（宿主设置接缝）
@@ -887,6 +905,25 @@ export const en: LocaleDictOf<typeof NS> = {
   'sync.tag.remoteAhead': 'Remote ahead',
   'sync.tag.noMapping': 'No map',
   'sync.tag.missingTarget': 'No dir',
+  // The "compare the two copies" page (read-only): column head, button, and one sentence per relation —
+  // that page carries the whole decision when both sides wrote, so the three sentences have to read like
+  // prose rather than just report numbers.
+  'sync.diff.column': 'Diff',
+  'sync.diff.open': 'Compare',
+  'sync.diff.title': 'Differences between the two copies',
+  'sync.diff.loading': 'Fetching the remote copy…',
+  'sync.diff.remoteMachine': 'The remote copy comes from {machine}',
+  'sync.diff.summary': 'here {localEvents} events / {localBytes} · remote {remoteEvents} events / {remoteBytes}',
+  'sync.diff.same': 'Every event matches — the two copies have the same content, so either one will do.',
+  'sync.diff.sameHeader': 'Every event matches; they differ only in the header ({fields}).',
+  'sync.diff.localExtends': "The remote copy is a prefix of this machine's: both continued the same thread, this machine wrote {count} more.",
+  'sync.diff.remoteExtends': "This machine's copy is a prefix of the remote's: both continued the same thread, the remote wrote {count} more.",
+  'sync.diff.forked': 'Both sides wrote their own: they agree up to event {common}, then this machine has {localCount} more and the remote {remoteCount}.',
+  'sync.diff.tail.local': '{count} only on this machine',
+  'sync.diff.tail.remote': '{count} only on the remote',
+  'sync.diff.headerTitle': 'Differences in the header',
+  'sync.diff.hidden': '{count} more not listed',
+  'sync.diff.readonly': 'Read-only page: it writes neither this machine nor the remote.',
   'sync.skippedBlank': 'Skipping {count} blank session(s) (created but no turn has run); they take no part in sync.',
 
   // Sync settings form (the host settings seam)

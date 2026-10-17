@@ -11,7 +11,7 @@
 // 与 webServer 服务解耦：本模块只要求一个 `{ register(route) }`，测试里用假 req/res 直接打
 // handler，不必起 HTTP 服务。路由路径固定在本插件命名空间下，`(kind, path)` 与别的插件不会撞。
 import { readFileSync, statSync } from 'node:fs'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 
 import { accountedOwners } from './accounting.ts'
@@ -32,6 +32,7 @@ import { projectionCacheDir } from './paths.ts'
 import { describeWarm, warmCheckpoints } from './checkpoint-warm.ts'
 import { readRegistry, validateRegistry } from './registry.ts'
 import { readTranscript } from './transcript.ts'
+import { diffSessionLogs } from './session-diff.ts'
 import { runRetitle } from './retitle.ts'
 import { describeEffect, effectOf, takeEffectOnHost } from './take-effect.ts'
 import { runRemoval, type RemoveDeps, type RemovalRun } from './remove.ts'
@@ -39,6 +40,8 @@ import { createTitleResolver, type TitleQuery } from './session-title.ts'
 import {
   plannedOutcome,
   prepareSync,
+  readRemoteLibrary,
+  remoteBundlePath,
   runSync,
   syncPrepared,
   testSyncConnection,
@@ -52,6 +55,7 @@ import { type EffectMode, type PickerKind, type RegistryOps, type ResolvedPaths,
 import {
   applyImport,
   buildBundle,
+  entryBytes,
   planImport,
   readBundle,
   type BundleSourceInfo,
@@ -1388,6 +1392,124 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
    * 这个宿主没有名称服务（409，"点了也没反应"的按钮比禁用更糟，两者都要能说清原因）。
    * 子智能体不在这里拒——它不是错误，是"本来就不该动它"，由编排层按条记成跳过。
    */
+  /**
+   * 比两份日志：本机这一份，与**远端某台机器**上同一个 id 的那一份。
+   *
+   * 这是同步里"同一个 id 两边各自写过"（计划里的 `diverged`）那条路的只读出口：那个判定只说得出
+   * "两边不一样"，说不出"哪儿不一样、谁多了什么"，而删哪边、留哪边只能由人决定。所以这里把两份日志都
+   * 读出来交给 `diffSessionLogs()` 算一份差异，**一个字节都不写**：不落盘本机、不改远端。
+   *
+   * 远端那一份得先下来：包在 `dsh-session-manager/<机器>/<id>.dshsess`，拉取时取的就是同一个对象，
+   * 所以这一步走网络、按条下（日志平均几百 KB，最大几 MB）。取哪台机器由调用方指名（界面从计划里
+   * 已经知道 `machine` 是谁）；没指名就用远端索引里这个 id 记的那一台。
+   *
+   * 拒绝都在响应体里说清是哪一步、哪一边：没给 id（400）、没配同步（409）、本机库里没有这条（404）、
+   * 远端索引 / 包 / 日志取不到或读不出来（502 / 404 / 422）。**坏行不算拒绝**：它由核心层如实记进
+   * `problems`，条数照报。
+   */
+  const syncDiff = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+    const url = new URL(req.url ?? '/', 'http://localhost')
+    const id = (url.searchParams.get('id') ?? '').trim()
+    if (id === '') {
+      sendJson(res, 400, { error: '缺少会话 id（?id=…）' })
+      return
+    }
+    const runtime = await deps.sync?.()
+    if (runtime === undefined) {
+      sendJson(res, 409, { error: '这个宿主没有配置 WebDAV 同步（插件配置里的 sync.url 是空的）' })
+      return
+    }
+    const session = scanLibrary(paths.sessionsRoot, decodeAll, { resolveTitle }).find((item) => item.id === id)
+    if (session === undefined) {
+      sendJson(res, 404, { error: `会话库里没有 ${id}` })
+      return
+    }
+    // 与内容视图同一口径：读宿主也读的那一份（最高代次）。
+    const file = [...session.files].sort((left, right) => right.version - left.version)[0]
+    if (file === undefined) {
+      sendJson(res, 422, { error: '这条会话目录里没有日志文件' })
+      return
+    }
+    let remote: Awaited<ReturnType<typeof readRemoteLibrary>>
+    try {
+      remote = await readRemoteLibrary(runtime.dav, runtime.settings)
+    } catch (error) {
+      sendJson(res, 502, { error: `读远端索引失败：${error instanceof Error ? error.message : String(error)}` })
+      return
+    }
+    const entry = remote.entries.get(id)
+    if (entry === undefined) {
+      sendJson(res, 404, { error: `远端索引里没有 ${id}` })
+      return
+    }
+    const wanted = (url.searchParams.get('machine') ?? '').trim()
+    if (wanted !== '' && entry.machine !== wanted) {
+      sendJson(res, 409, { error: `远端这一份是 ${entry.machine} 的，不是 ${wanted} 的` })
+      return
+    }
+    let bundleBytes: Buffer
+    try {
+      bundleBytes = await runtime.dav.get(remoteBundlePath(entry.machine, id))
+    } catch (error) {
+      sendJson(res, 502, { error: `取 ${entry.machine} 那份失败：${error instanceof Error ? error.message : String(error)}` })
+      return
+    }
+    let remoteLines: string[]
+    let remoteLogBytes: number
+    try {
+      const bundle = readBundle(bundleBytes)
+      const bundled = bundle.sessions.find((item) => item.id === id)
+      if (bundled === undefined) {
+        sendJson(res, 404, { error: `远端包里没有 ${id}（清单与索引对不上）` })
+        return
+      }
+      const remoteFile = [...bundled.files].sort((left, right) => right.version - left.version)[0]
+      if (remoteFile === undefined) {
+        sendJson(res, 422, { error: '远端那份包里没有日志文件' })
+        return
+      }
+      const bytes = entryBytes(bundle, remoteFile)
+      remoteLines = decodeAll(bytes).split('\n')
+      remoteLogBytes = bytes.byteLength
+    } catch (error) {
+      sendJson(res, 422, { error: `远端那份读不出来：${error instanceof Error ? error.message : String(error)}` })
+      return
+    }
+    let localLines: string[]
+    try {
+      localLines = decodeAll(readFileSync(file.path)).split('\n')
+    } catch (error) {
+      sendJson(res, 422, { error: `本机那份读不出来：${error instanceof Error ? error.message : String(error)}` })
+      return
+    }
+    // 坏行条数交给解析器记账（`limit` 只影响条目，`problemCount` 是整份的账）；header 坏了就直说哪一边。
+    const problemsOf = (lines: readonly string[], label: string): number => {
+      try {
+        return readTranscript(lines, { limit: 1, maxChars: 1 }).problemCount
+      } catch (error) {
+        throw new Error(`${label}那份读不出来：${error instanceof Error ? error.message : String(error)}`)
+      }
+    }
+    try {
+      const diff = diffSessionLogs(localLines, remoteLines, {
+        localBytes: statSync(file.path).size,
+        remoteBytes: remoteLogBytes,
+        localProblems: problemsOf(localLines, '本机'),
+        remoteProblems: problemsOf(remoteLines, '远端'),
+      })
+      sendJson(res, 200, {
+        id,
+        machine: entry.machine,
+        localFile: basename(file.path),
+        // 下这一个包花了多少字节：界面上那句"看差异"背后真的发生了多少流量，说清楚。
+        bundleBytes: bundleBytes.byteLength,
+        diff,
+      })
+    } catch (error) {
+      sendJson(res, 422, { error: error instanceof Error ? error.message : String(error) })
+    }
+  }
+
   const retitleSessions = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     let body: unknown
     try {
@@ -1436,6 +1558,7 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
     'GET /state': state,
     // 一条会话的完整内容（分页；只读，不动宿主内存）：会话页点一行看的就是它。
     'GET /transcript': transcript,
+    'GET /sync-diff': syncDiff,
     'POST /export': exportSessions,
     'POST /import': importSessions,
     // 一个资源两种方法写一条：宿主的 `register()` 对重复的 (kind, path) 直接抛错。

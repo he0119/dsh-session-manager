@@ -50,7 +50,8 @@ const FILTER_OF: Record<TranscriptKind, Exclude<TranscriptFilterKey, 'all'>> = {
 }
 
 /** 条目种类 → 文案键。 */
-const KIND_KEY: Record<TranscriptKind, SessionManagerKey> = {
+/** 种类 → 文案键。差异视图也用同一套（见 SyncDiffDialog.tsx），所以导出。 */
+export const KIND_KEY: Record<TranscriptKind, SessionManagerKey> = {
   user: 'manage.transcript.kind.user',
   assistant: 'manage.transcript.kind.assistant',
   reasoning: 'manage.transcript.kind.reasoning',
