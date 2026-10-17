@@ -58,6 +58,8 @@ export function progressTextOf(t: Translate, progress: ProgressEvent): string {
       return t('progress.repo', { current, total })
     case 'compare':
       return t('progress.compare', { current, total })
+    case 'relate':
+      return t('progress.relate', { current, total })
     case 'pull':
       return t('progress.pull', { current, total })
     case 'push':

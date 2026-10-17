@@ -34,7 +34,7 @@
 //     也会从这台机器自己的那份索引里撤下来——它没有内容可同步，别的机器也就不必再看到它；反过来，
 //     本机这条是空白而远端那条有内容时，以远端为准（空的没什么可保的）。
 //   - 同一 id 两边都有：内容一致不动；本机严格领先（远端确实是本机这份的前缀）重新推送刷新；
-//     **远端领先**（代次是超集）或**两边各自写过**时，比一个"谁更新"——本机那份的最后活动时间取宿主
+//     **远端领先**（代次是超集）或**各自写了对方没有的条目**时，比一个"谁更新"——本机那份的最后活动时间取宿主
 //     投影缓存里的两枚钟（`lastPromptAt` 最后一次提问、`timeContext.lastMessageTime` 最后一条消息，
 //     取晚的那枚），远端那份取索引里记的同一个值。远端更新就把本机那份**先备份再换掉**（走导入那条
 //     编排，理由见下面 pull 的说明）；本机更新就把自己这一格刷成最新。两边的时间有一个读不到（老索引
@@ -48,6 +48,8 @@
 // 解包、备份还原都会把它抹平），而这两枚钟与日志内容同生共死，落地改写 cwd 时也不受影响。
 // 判据仍然**不**拿时间反推"谁是祖先"：代次那边的四种关系是结构性的，时间只在结构判不出来时分高下。
 import { createHash, randomUUID } from 'node:crypto'
+
+import { diffSessionLogs, type DiffRelation } from './session-diff.ts'
 import { existsSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -301,7 +303,7 @@ function contentBytes(bytes: Buffer, compression: string | null, decodeAll: Deco
  * 与"这台机器上的 cwd"无关的内容指纹。
  *
  * 落地会把别人的 cwd 改写成这台机器的路径（库目录名与 header 的 `cwd` 绑死，不改写就落不下来），
- * 于是同一份会话在两台机器上的**字节不同**。判据要是按字节比，拉取来的那份会被判成"两边各自写过"：
+ * 于是同一份会话在两台机器上的**字节不同**。判据要是按字节比，拉取来的那份会被判成"各自写了对方没有的条目"：
  * 报告里的理由是错的（其实是同一份），更要紧的是它在那台机器上**继续写之后也无法再推送回远端**——新代次永远
  * 留在本机。所以索引里存的是把 cwd 归一化之后的哈希：cwd 是"这份会话在这台机器上落在哪儿"，不是
  * "这是哪份会话"。
@@ -355,18 +357,57 @@ function sameContent(left: readonly FileFingerprint[], right: readonly FileFinge
 export type SyncRelation = 'identical' | 'local-ahead' | 'remote-ahead' | 'diverged'
 
 /**
+ * 内容级的关系（`src/session-diff.ts` 那把尺子），外加两边尾巴的条数——计划说明里"续写了几条"用它。
+ */
+export interface ContentRelation {
+  relation: DiffRelation
+  /** 本机比远端多出来的条数。 */
+  localTail: number
+  /** 远端比本机多出来的条数。 */
+  remoteTail: number
+}
+
+/** 内容关系 → 这一层的四种关系（判据只有一条：谁是谁的前缀）。 */
+function contentSyncRelation(content: ContentRelation | undefined): SyncRelation {
+  switch (content?.relation) {
+    case 'same':
+      return 'identical'
+    case 'local-extends':
+      return 'local-ahead'
+    case 'remote-extends':
+      return 'remote-ahead'
+    default:
+      return 'diverged' // 真分叉，或这一对没算出内容关系
+  }
+}
+
+/**
  * 判两个副本的关系。
+ *
+ * 判据只有一条：**谁是谁的前缀**。代次与哈希只是快筛——能确定就直接下结论（同哈希 = 同一份、共有
+ * 代次同哈希且代次领先 = 领先），筛不动的问 `content`（内容关系，由编排那条异步路取两边日志算好传
+ * 进来，见 `prepareSync()`）。快筛与内容说的必须是同一件事，所以两处共用 `session-diff.ts` 那套
+ * `local-extends`/`remote-extends`/`forked`/`same`，不另写判据。
+ *
  * @param mine 本机这份的代次指纹。
  * @param theirs 远端那份的代次指纹。
- * @returns 四种关系之一；不在这四种里的都归 `diverged`（分叉）。
+ * @param content 内容关系（缺席 = 这一对没算，筛不动的归 `diverged`，两条都不动）。
+ * @returns 四种关系之一。
  */
-export function relation(mine: readonly FileFingerprint[], theirs: readonly FileFingerprint[]): SyncRelation {
-  if (sameVersions(mine, theirs)) return sameContent(mine, theirs) ? 'identical' : 'diverged'
+export function relation(
+  mine: readonly FileFingerprint[],
+  theirs: readonly FileFingerprint[],
+  content?: ContentRelation,
+): SyncRelation {
+  if (sameVersions(mine, theirs)) {
+    if (sameContent(mine, theirs)) return 'identical'
+    return contentSyncRelation(content)
+  }
   if (sameContent(mine, theirs)) {
     if (versionsAhead(mine, theirs)) return 'local-ahead'
     if (versionsAhead(theirs, mine)) return 'remote-ahead'
   }
-  return 'diverged'
+  return contentSyncRelation(content)
 }
 
 /**
@@ -389,6 +430,15 @@ function resolveLandedCwd(
   return picked === undefined ? undefined : canonicalize(picked)
 }
 
+/**
+ * 真分叉那一句怎么开头：说清"各自写了对方没有的条目"与各自多几条（内容关系在手就带条数），不再拿
+ * "两边各自写过"当桶名——续写的对已经走 `local-ahead`/`remote-ahead`，说的都是"谁续写了几条"。
+ */
+function forkText(content: ContentRelation | undefined, machine: string): string {
+  if (content === undefined) return '同一个 id 两边各自写了对方没有的条目'
+  return `同一个 id 两边各自写了对方没有的条目（本机多 ${content.localTail} 条、${machine} 多 ${content.remoteTail} 条）`
+}
+
 /** 代次列表的可读描述（报告里用）。 */
 function versionsText(files: readonly FileFingerprint[]): string {
   const versions = files.map((file) => file.version).sort((a, b) => a - b)
@@ -406,7 +456,7 @@ export type NewerSide = 'local' | 'remote' | 'unknown'
  *
  * 两边都拿得到才下结论，缺一个就是 `unknown`——**不下手**好过按半个事实覆盖掉一份；两边一样新也
  * 归 `unknown`（同一次活动各写各的，随手挑一个赢家会凭空丢掉另一份）。这几种都退回旧口径：报告里
- * 说清是"远端更新"还是"两边各自写过"，但一个字节都不动。
+ * 说清是"远端更新"还是"各自写了对方没有的条目"，但一个字节都不动。
  *
  * @param mine 本机那份的最后活动时间（`activeAt()` 折出来的；缺席 = 不知道）。
  * @param theirs 远端索引里记的那一枚（老索引没有这一项）。
@@ -495,6 +545,13 @@ export interface SyncPlan {
   pushIds: string[]
   /** 本机判为空白、这次不参与同步的会话 id（按发现顺序；它们不在上面两张表里）。 */
   blank: string[]
+  /**
+   * 代次与哈希筛不动、需要内容判据的那些对（编排那条异步路据此取两边日志，见 `prepareSync()`）。
+   *
+   * 单列一项而不是让调用方从行里猜：`pushOnly` 那条路会把分叉行整表摘掉（见 `narrowToPushOnly()`），
+   * 而"这一对需要判"与"这一次动不动它"是两件事。
+   */
+  needsContent: string[]
   bytesIn: number
   bytesOut: number
   localCount: number
@@ -508,6 +565,13 @@ export interface SyncPlan {
 export type SyncDecision = 'keep-local' | 'keep-remote'
 
 export interface SyncPlanInput {
+  /**
+   * 内容级的关系（会话 id → 谁是谁的前缀），由编排那条异步路取两边日志算好传进来。
+   *
+   * 只喂"代次与哈希筛不动"的那些对：它们本该落到 `diverged`（两条都不动），有了内容关系就能定成
+   * 领先 / 落后 / 真分叉。缺席 = 没算，照旧归 `diverged`。判据在 `relation()` 一处。
+   */
+  contentRelations?: ReadonlyMap<string, ContentRelation>
   /**
    * 两边各自写过时的裁决（会话 id → 挑哪份当正本）。
    *
@@ -617,6 +681,8 @@ export function planSync(input: SyncPlanInput): SyncPlan {
   const push: SyncPushEntry[] = []
   const pullIds: string[] = []
   const pushIds: string[] = []
+  /** 筛不动、要内容判据的那些对（本机与远端都有、非空白）。 */
+  const needsContent: string[] = []
   const blank: string[] = []
   let bytesIn = 0
   let bytesOut = 0
@@ -696,7 +762,10 @@ export function planSync(input: SyncPlanInput): SyncPlan {
     }
     const mine = fingerprints(session, hashFile)
     const theirs = remote.files
-    const kind = relation(mine, theirs)
+    const kind = relation(mine, theirs, input.contentRelations?.get(session.id))
+    if (kind === 'diverged' && !isBlank) needsContent.push(session.id)
+    /** 这一对的内容关系（有就按它说话：续写几条、各自多几条）。 */
+    const content = input.contentRelations?.get(session.id)
     if (kind === 'identical') {
       // 空白会话不摆成"远端已经有这一份"：它没内容，这一行只会让人以为它参与了同步。
       if (isBlank) blank.push(session.id)
@@ -714,7 +783,10 @@ export function planSync(input: SyncPlanInput): SyncPlan {
         ...common,
         action: 'update',
         code: 'local-ahead',
-        reason: `远端停在 ${versionsText(theirs)}，本机到 ${versionsText(mine)}`,
+        reason:
+          content !== undefined
+            ? `本机续写了 ${content.localTail} 条（远端停在 ${versionsText(theirs)}，本机到 ${versionsText(mine)}）`
+            : `远端停在 ${versionsText(theirs)}，本机到 ${versionsText(mine)}`,
       })
       pushIds.push(session.id)
       bytesOut += bytes
@@ -739,7 +811,7 @@ export function planSync(input: SyncPlanInput): SyncPlan {
         action: 'update',
         code: 'keep-local',
         machine: remote.machine,
-        reason: `同一个 id 两边各自写过，以本机这份为准（${remote.machine} 那份落成一条新会话，不丢）——把自己这一格刷成最新`,
+        reason: forkText(content, remote.machine) + '，以本机这份为准（对方那份落成一条新会话，不丢）——把自己这一格刷成最新',
       })
       pushIds.push(session.id)
       bytesOut += bytes
@@ -779,7 +851,7 @@ export function planSync(input: SyncPlanInput): SyncPlan {
         action: 'replace',
         code: 'keep-remote',
         machine: remote.machine,
-        reason: `同一个 id 两边各自写过，以 ${remote.machine} 那份为准（本机那份落成一条新会话，不丢）——先备份本机这份再换成它`,
+        reason: forkText(content, remote.machine) + `，以 ${remote.machine} 那份为准（本机那份落成一条新会话，不丢）——先备份本机这份再换成它`,
       })
       pullIds.push(session.id)
       bytesIn += bytes
@@ -793,7 +865,7 @@ export function planSync(input: SyncPlanInput): SyncPlan {
         code: 'local-newer',
         machine: remote.machine,
         reason:
-          `同一个 id 两边各自写过（本机 ${versionsText(mine)}，${remote.machine} ${versionsText(theirs)}），` +
+          `${forkText(content, remote.machine)}（本机 ${versionsText(mine)}，${remote.machine} ${versionsText(theirs)}），` +
           `本机这份更新（${timeText(mineActiveAt)} 对 ${timeText(theirActiveAt)}）——重新推送把自己这一格刷成最新`,
       })
       pushIds.push(session.id)
@@ -870,7 +942,7 @@ export function planSync(input: SyncPlanInput): SyncPlan {
       code: 'diverged',
       machine: remote.machine,
       reason:
-        `同一个 id 两边各自写过（本机 ${versionsText(mine)}，${remote.machine} ${versionsText(theirs)}），` +
+        `${forkText(content, remote.machine)}（本机 ${versionsText(mine)}，${remote.machine} ${versionsText(theirs)}），` +
         `又判不出谁更新（本机 ${timeText(mineActiveAt)}、远端 ${timeText(theirActiveAt)}）——两条都不动`,
     })
   }
@@ -889,6 +961,7 @@ export function planSync(input: SyncPlanInput): SyncPlan {
     pullIds,
     pushIds,
     blank,
+    needsContent,
     bytesIn,
     bytesOut,
     localCount: input.local.length,
@@ -1604,6 +1677,9 @@ export async function prepareSync(
   let compared = 0
   /** 算计划时用的指纹：同一件事顺带报"比对到第几条"。 */
   const planHash = (path: string, version: number, compression: string | null): FileFingerprint => {
+    // 缓存先行：内容判据那一步会让计划算两遍，指纹不该跟着算两遍（整库哈希是比对段的大头）。
+    const cached = fingerprints.get(path)
+    if (cached !== undefined) return cached
     emit?.({ phase: 'compare', done: compared, total: compareTotal })
     const fingerprint = contentHash(path, version, compression)
     fingerprints.set(path, fingerprint)
@@ -1627,9 +1703,50 @@ export async function prepareSync(
     metaCache.set(session.id, value)
     return value
   }
+  /**
+   * 筛不动的那些对，逐对取两边日志判谁是谁的前缀（判据与差异页同一份：`session-diff.ts` 的关系）。
+   *
+   * 代价只花在这些对上：代次与哈希已经把"同哈希""共有代次逐条一致"都定完了，剩下的才要读内容（实测
+   * 量级几十对、单条日志几十 KB）。取不到的一对（网络、包坏、日志读不出来）就退回"筛不动"，那一对照旧
+   * 归 `diverged` 两条都不动——下限是不丢内容。
+   */
+  const contentRelationsOf = async (ids: readonly string[]): Promise<Map<string, ContentRelation>> => {
+    const relations = new Map<string, ContentRelation>()
+    const byId = new Map(local.map((session) => [session.id, session]))
+    for (const [index, id] of ids.entries()) {
+      emit?.({ phase: 'relate', done: index, total: ids.length, id })
+      try {
+        const session = byId.get(id)
+        const entry = remote.entries.get(id)
+        if (session === undefined || entry === undefined) continue
+        const bundle = readBundle(await deps.dav.get(remoteBundlePath(entry.machine, id)))
+        const bundled = bundle.sessions.find((item) => item.id === id)
+        const remoteFile = bundled === undefined ? undefined : [...bundled.files].sort((l, r) => r.version - l.version)[0]
+        const localFile = [...session.files].sort((l, r) => r.version - l.version)[0]
+        if (remoteFile === undefined || localFile === undefined) continue
+        // 与差异页同一口径：读宿主也读的那一份（最高代次）。
+        const mine = readFileSync(localFile.path)
+        const theirs = entryBytes(bundle, remoteFile)
+        const diff = diffSessionLogs(
+          decodeLogText(mine, localFile.compression, deps.decodeAll).split('\n'),
+          decodeLogText(theirs, remoteFile.compression, deps.decodeAll).split('\n'),
+          { localBytes: mine.byteLength, remoteBytes: theirs.byteLength },
+        )
+        relations.set(id, {
+          relation: diff.relation,
+          localTail: diff.localTail.count,
+          remoteTail: diff.remoteTail.count,
+        })
+      } catch {
+        // 取不到就不给这一对内容关系：计划那边退回 `diverged`，两条都不动。
+      }
+    }
+    return relations
+  }
+
   // 活会话这件事只读一次：覆盖本机那一步会逐条问它，而宿主那份列表在一次同步里不会变。
   const live = deps.liveSessionIds?.()
-  const plan = planSync({
+  const planInput = {
     local,
     remote,
     mapping: normalized.mapping,
@@ -1638,7 +1755,16 @@ export async function prepareSync(
     pushOnly,
     ...(deps.sessionMeta === undefined ? {} : { sessionMeta: metaOf }),
     ...(live === undefined ? {} : { isLive: (id: string): boolean => live.has(id) }),
-  })
+  }
+  /*
+   * 计划算两遍：第一遍只为拿到 `needsContent`（代次与哈希筛不动的那些对），第二遍带着内容关系算真
+   * 计划。两遍都是纯计算，指纹有缓存（见 `planHash()`），第二遍不重读内容。
+   */
+  const firstPass = planSync(planInput)
+  compared = 0
+  const contentRelations = await contentRelationsOf(firstPass.needsContent)
+  const plan = planSync({ ...planInput, contentRelations })
+  compared = 0
   plan.problems.unshift(...normalized.problems)
   plan.problems.push(...remote.problems)
   // 机器格名撞上共享对象库那个保留名时明说一句（见 `reservedMachineIdProblem()` 里的来由）。
