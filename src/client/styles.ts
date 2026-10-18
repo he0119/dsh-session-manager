@@ -869,33 +869,43 @@ export const CSS = `
  *
  * 条目本身沿用内容视图那套类名（dsm-item / dsm-itemHead，同一张事件卡的头行），所以这里只补**布局**：
  * 那几块之间各自留间距、列宽固定住（免得三张表的列宽随状态列的标签长短抖动）。一个颜色都不写。
+ *
+ * 注意 contentClassName 落在官方 Modal 的**外层**（标题栏 + 正文），真正的正文是里面那层官方
+ * _body_*；它的 display: flex 没有 gap。所以块间那 24px 必须挂在自己的 .dsm-diffBody 上，
+ * 写在 .dsm-diffContent 上只会拉开标题栏与正文，块与块之间仍是 0（实测第一版就是这样）。
  */
 .dsm-colDiff { width: 96px; }
 .dsm-diffCell { white-space: nowrap; }
 .dsm-diffContent {
-  display: flex; flex-direction: column; gap: 20px;
+  display: flex; flex-direction: column;
   /* 字号照正文那一档自己写：官方 Modal 会 portal 到 document.body，于是弹窗落在那套 dsm-root（13px 继承
      链）之外，正文会继承文档根的 16px——同一条会话在弹窗里与在页面里长得不一样（内容视图那层同样自己
      写了一遍）。量过：不写这条时这里量到 16px/normal，写上之后是 14px/20px。 */
   font-size: 14px; line-height: 20px;
 }
+.dsm-diffBody { display: flex; flex-direction: column; gap: 24px; }
 .dsm-diffRelation { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin: 0; }
-/* 分区：块与块之间 20px（上面那条 gap），一块里面 8px。均匀一种间距会糊成一片——第一版实测就是
-   标题、事实、结论、计数、表、尾巴、尾注全用同一种间距摞着，看着眼花。 */
-.dsm-diffSection { display: flex; flex-direction: column; gap: 8px; }
-.dsm-diffTails { gap: 16px; }
-.dsm-diffHead { display: flex; flex-direction: column; gap: 2px; }
+/* 分区：块与块之间 24px（上面那条 gap），一块里面 12px。均匀一种间距会糊成一片；但只收紧不收，
+   标题、事实、结论、计数、表、尾巴、尾注又会挤成一整块。 */
+.dsm-diffSection { display: flex; flex-direction: column; gap: 12px; }
+.dsm-diffTails { gap: 20px; }
+.dsm-diffHead { display: flex; flex-direction: column; gap: 6px; }
+.dsm-diffLive { margin: 0; padding: 8px 12px; }
+
 /* 尾注与正文分开：底下那句"只读"不是尾巴块的一部分。 */
-.dsm-diffNote { border-top: 1px solid var(--dsw-alias-border-l1, rgba(0, 0, 0, 0.08)); padding-top: 8px; }
-.dsm-diffHeader { display: flex; flex-direction: column; gap: 4px; }
+.dsm-diffNote { border-top: 1px solid var(--dsw-alias-border-l1, rgba(0, 0, 0, 0.08)); padding-top: 12px; }
+.dsm-diffHeader { display: flex; flex-direction: column; gap: 8px; }
 .dsm-diffField { width: 120px; }
 .dsm-diffField .dsm-tag { margin-top: 2px; }
 .dsm-diffFieldName { display: block; }
-.dsm-diffTail { display: flex; flex-direction: column; gap: 6px; }
+.dsm-diffTail { display: flex; flex-direction: column; gap: 8px; }
+/* 一张事件卡在差异页里比内容视图更疏一点：这里两侧都是长列表，卡又窄，6px 的卡内边距读起来
+   像一叠贴紧的纸条。只改差异页这一层，内容视图的密度不跟着动。 */
+.dsm-diffTail .dsm-item { padding: 8px 10px; }
 /* 顶部三格计数（共同 / 本机独有 / 远端独有）：横排一行、每格里标签在上数字在下——横着摆的
    "标签+数字"三组读起来像一句话，竖着摆才读成三格数据。 */
-.dsm-diffStats { display: flex; gap: 24px; flex-wrap: wrap; }
-.dsm-diffStat { display: flex; flex-direction: column; gap: 2px; min-width: 88px; }
+.dsm-diffStats { display: flex; gap: 32px; flex-wrap: wrap; }
+.dsm-diffStat { display: flex; flex-direction: column; gap: 4px; min-width: 88px; }
 /* 块头那枚标签要**收成小块**：容器是竖排 flex，默认 stretch 会把标签拉成整条，看着像一条横幅而不是
    一枚分类标记（实测第一版就是这样）。只让它自己靠左，下面那些条目卡照旧占满整宽。 */
 .dsm-diffTail > .dsm-tag, .dsm-diffHeader > .dsm-tag { align-self: flex-start; }

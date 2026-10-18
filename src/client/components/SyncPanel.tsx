@@ -47,6 +47,7 @@ import {
   type AutoPushResponse,
   type ProgressEvent,
   type SessionSummary,
+  type SyncDecision,
   type SyncPullEntry,
   type SyncPushEntry,
   type SyncResponse,
@@ -84,6 +85,7 @@ interface SyncKeptRow {
 
 /** 拉取 / 推送两种计划行的公共字段（只为 `syncWhy()` / `syncTag()` 取字段用）。 */
 interface SyncRow {
+  reason?: string
   code: SyncPullEntry['code'] | SyncPushEntry['code']
   action: string
   machine?: string
@@ -114,6 +116,8 @@ function diffable(entry: SyncPullEntry | SyncPushEntry): boolean {
     case 'remote-ahead':
     case 'local-newer':
     case 'local-ahead':
+    case 'keep-local':
+    case 'keep-remote':
       return true
     default:
       return false
@@ -157,6 +161,10 @@ function syncWhy(entry: SyncRow, t: Translate): string {
       return t('sync.why.noMapping', { from: entry.fromCwd ?? '' })
     case 'missing-target':
       return t('sync.why.missingTarget', { to: entry.toCwd ?? '' })
+    case 'keep-local':
+    case 'keep-remote':
+      // 计划算出来的原话已经写清"以谁为准、另一份去哪"，直接拿它当悬浮提示，不另写一句。
+      return entry.reason ?? String(entry.code)
     default:
       return String(entry.code)
   }
@@ -181,6 +189,10 @@ function syncTag(entry: SyncRow, t: Translate): string {
       return t('sync.tag.noMapping')
     case 'missing-target':
       return t('sync.tag.missingTarget')
+    case 'keep-local':
+      return t('sync.tag.keepLocal')
+    case 'keep-remote':
+      return t('sync.tag.keepRemote')
     default:
       return syncWhy(entry, t)
   }
@@ -427,6 +439,8 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
    * 索引，本机那边只比文件的时间与大小，很快）。前一条进度事件一到就换成真正的进度块。
    */
   const [progress, setProgress] = React.useState<ProgressEvent | null>(null)
+  /** 两边各自写过时用户挑的正本（会话 id → 选择）；预演与落地都把它带上。 */
+  const [decisions, setDecisions] = React.useState<Record<string, SyncDecision>>({})
 
   /**
    * 「立即推送一次」（`GET /auto-push`，只推不拉）走到哪儿了。
@@ -455,14 +469,19 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
    * 计划取不到（没配同步、远端连不上）时**不开空弹窗**：关掉它，把宿主/网络给的原话摆到页面横幅上。
    * 那类错不是"这份计划有什么问题"，留在弹窗里只会让人以为还能按确认。
    */
-  const openSync = (): void => {
+  /**
+   * 按一组裁决重新预演。裁决变了必须重算：计划里这一对会从「两边各写各的」变成会拉取 / 会推送，
+   * 拿旧计划确认会按旧结论落地。重算期间正文让给进度条（`planning`），确认按钮也禁用。
+   */
+  const planWith = (next: Record<string, SyncDecision>): void => {
     setDialog('plan')
     setBusy('plan')
     setError(null)
     setNotice(null)
     setFailures([])
     setProgress(null)
-    void fetchSyncPlan(setProgress).then(
+    const picked = new Map(Object.entries(next))
+    void fetchSyncPlan(setProgress, picked.size === 0 ? undefined : picked).then(
       (response) => {
         setBusy(null)
         setSync(response)
@@ -473,6 +492,20 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
         setError(t('error.failed', { reason: reasonOf(cause) }))
       },
     )
+  }
+
+  /** 点「同步」：清掉上一轮的裁决，算一份全新的只读计划。 */
+  const openSync = (): void => {
+    setDecisions({})
+    planWith({})
+  }
+
+  /** 差异页里选了正本：关上差异页，带着这组选择重新预演（计划表因此换成会拉取 / 会推送的行）。 */
+  const decide = (id: string, decision: SyncDecision): void => {
+    const next = { ...decisions, [id]: decision }
+    setDecisions(next)
+    setDiffTarget(undefined)
+    planWith(next)
   }
 
   /**
@@ -489,12 +522,18 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
     setError(null)
     setProgress(null)
     // 只有"这次看的就是一份预演"时才递那个号码：上一次落地的结果也放在 `sync` 里，它不是预演。
-    void applySync(sync?.mode === 'plan' ? sync.planId : undefined, setProgress).then(
+    const picked = new Map(Object.entries(decisions))
+    void applySync(
+      sync?.mode === 'plan' ? sync.planId : undefined,
+      setProgress,
+      picked.size === 0 ? undefined : picked,
+    ).then(
       (result) => {
         setBusy(null)
         setDialog(null)
         setProgress(null)
         setSync(result)
+        setDecisions({})
         setFailures(result.problems)
         /*
          * 附件对象走的是另一条路（远端共享库），先算出来：**只有对象动了**的时候也得说一句——补对象
@@ -614,6 +653,27 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
    * 这里取（见 `typeTagsOf()`）——判据与会话列表同一套，本页不自己算。
    */
   const sessionsById = new Map((state?.sessions ?? []).map((session) => [session.id, session]))
+  /**
+   * 这些行就算选了正本、或本来就轮到覆盖本机，落地也会因为宿主还开着这条会话而被拦下。
+   *
+   * 计划行的 code 已经在宿主侧表达了这个结论（`diverged` / `remote-*`），页面只拿 `/state` 的
+   * `live` 标出“哪几条是活的”，在打开差异之前就把话说在前面；不替宿主判断能不能落。
+   */
+  const liveBlocked = new Set(
+    [...(syncPlan?.pull ?? []), ...(syncPlan?.push ?? [])]
+      .filter(
+        (entry) =>
+          (entry.code === 'diverged' ||
+            entry.code === 'local-ahead' ||
+            entry.code === 'local-newer' ||
+            entry.code === 'remote-ahead' ||
+            entry.code === 'remote-newer' ||
+            entry.code === 'keep-local' ||
+            entry.code === 'keep-remote') &&
+          sessionsById.get(entry.id)?.live === true,
+      )
+      .map((entry) => entry.id),
+  ).size
   const pullGroups = groupSyncRows(syncPulls, (entry) => syncProjectOf(entry, 'pull'), workspaces)
   const pushGroups = groupSyncRows(syncPushes, (entry) => syncProjectOf(entry, 'push'), workspaces)
   const keptGroups = groupSyncRows(syncKept, (row) => syncProjectOf(row.entry, row.side), workspaces)
@@ -797,6 +857,7 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
             )}
             {/* 空白会话不进那三张表：它们的去处只有这一句（没有内容可同步，也没有"为什么不动"可讲）。 */}
             {syncBlank > 0 && <p className="dsm-hint">{t('sync.skippedBlank', { count: syncBlank })}</p>}
+            {liveBlocked > 0 && <p className="dsm-warn">{t('sync.liveHint', { count: liveBlocked })}</p>}
             {sync.problems.map((problem) => (
               <p key={problem} className="dsm-warn">
                 {problem}
@@ -948,7 +1009,14 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
         </ConfirmDialog>
       )}
       {diffTarget === undefined ? null : (
-        <SyncDiffDialog target={diffTarget} onClose={() => setDiffTarget(undefined)} t={t} />
+        <SyncDiffDialog
+          target={diffTarget}
+          {...(decisions[diffTarget.id] === undefined ? {} : { decision: decisions[diffTarget.id] })}
+          onDecide={(decision) => decide(diffTarget.id, decision)}
+          live={sessionsById.get(diffTarget.id)?.live === true}
+          onClose={() => setDiffTarget(undefined)}
+          t={t}
+        />
       )}
     </>
   )

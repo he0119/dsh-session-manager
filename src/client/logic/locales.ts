@@ -407,6 +407,8 @@ export const zh = {
   'sync.tag.remoteAhead': '远端更新',
   'sync.tag.noMapping': '缺映射',
   'sync.tag.missingTarget': '目标缺失',
+  'sync.tag.keepLocal': '以本机为准',
+  'sync.tag.keepRemote': '以远端为准',
   // 「看差异」那一页（只读）：列头、按钮、以及三类关系各一句话——"两边各自写过"时人要做的决定
   // 全靠这一页，所以关系那三句要说得像人话，不能只报数字。
   'sync.diff.column': '差异',
@@ -420,6 +422,10 @@ export const zh = {
   'sync.diff.localExtends': '远端那份是本机这部分的前缀：本机在同一个延续上又写了 {count} 条。',
   'sync.diff.remoteExtends': '本机那份是远端这部分的前缀：远端在同一个延续上又写了 {count} 条。',
   'sync.diff.forked': '两边各写各的：共同到第 {common} 条为止，之后本机 {localCount} 条、远端 {remoteCount} 条。',
+  'sync.diff.keepLocal': '以本机这份为准',
+  'sync.diff.keepRemote': '以远端这份为准',
+  'sync.diff.choose': '选一份当正本：另一份会落成新会话，不删；选完回到确认弹窗再同步。',
+  'sync.diff.live': '这条会话正开着，现在不能选正本；先切到别的会话或重启宿主再同步。',
   'sync.diff.tail.local': '本机独有 {count} 条',
   'sync.diff.tail.remote': '远端独有 {count} 条',
   'sync.diff.tail.empty': '这半边没有多出来的。',
@@ -439,8 +445,9 @@ export const zh = {
   'sync.diff.headerExpectedNote': '按机器映射换算，本来就会差',
   'sync.diff.headerTitle': 'header 差 {count} 个字段',
   'sync.diff.hidden': '还有 {count} 条没列出来',
-  'sync.diff.readonly': '这一页只读：不写本机，也不写远端。',
+  'sync.diff.readonly': '看差异不写本机，也不写远端；这一步只读。',
   'sync.skippedBlank': '跳过 {count} 条空白会话（建出来但一个回合都没聊过），它们不参与同步。',
+  'sync.liveHint': '有 {count} 条会话正被宿主打开（标着「活动中」）：先切到别的会话或重启宿主，才能覆盖本机那份或选正本。',
 
   // 同步设置表单（宿主设置接缝）
   'sync.form.loading': '正在读配置…',
@@ -923,6 +930,8 @@ export const en: LocaleDictOf<typeof NS> = {
   'sync.tag.remoteAhead': 'Remote ahead',
   'sync.tag.noMapping': 'No map',
   'sync.tag.missingTarget': 'No dir',
+  'sync.tag.keepLocal': 'Keep local',
+  'sync.tag.keepRemote': 'Keep remote',
   // The "compare the two copies" page (read-only): column head, button, and one sentence per relation —
   // that page carries the whole decision when both sides wrote, so the three sentences have to read like
   // prose rather than just report numbers.
@@ -937,6 +946,10 @@ export const en: LocaleDictOf<typeof NS> = {
   'sync.diff.localExtends': "The remote copy is a prefix of this machine's: both continued the same thread, this machine wrote {count} more.",
   'sync.diff.remoteExtends': "This machine's copy is a prefix of the remote's: both continued the same thread, the remote wrote {count} more.",
   'sync.diff.forked': 'Both sides wrote their own: they agree up to event {common}, then this machine has {localCount} more and the remote {remoteCount}.',
+  'sync.diff.keepLocal': 'Keep this machine\'s copy',
+  'sync.diff.keepRemote': 'Keep the remote copy',
+  'sync.diff.choose': 'Pick one as the master copy: the other becomes a new session, not deleted. Then go back to the confirm dialog to sync.',
+  'sync.diff.live': 'This session is open, so you cannot pick a master copy. Switch sessions or restart the host, then sync again.',
   'sync.diff.tail.local': '{count} only on this machine',
   'sync.diff.tail.remote': '{count} only on the remote',
   'sync.diff.tail.empty': 'Nothing extra on this side.',
@@ -957,8 +970,9 @@ export const en: LocaleDictOf<typeof NS> = {
   'sync.diff.headerExpectedNote': 'Rewritten by the machine mapping — always differs',
   'sync.diff.headerTitle': 'header differs in {count} field(s)',
   'sync.diff.hidden': '{count} more not listed',
-  'sync.diff.readonly': 'Read-only page: it writes neither this machine nor the remote.',
+  'sync.diff.readonly': 'Comparing writes neither this machine nor the remote; this step is read-only.',
   'sync.skippedBlank': 'Skipping {count} blank session(s) (created but no turn has run); they take no part in sync.',
+  'sync.liveHint': '{count} session(s) are open in the host (tagged "live"): switch to another session or restart the host before overwriting this machine\'s copy or picking a master copy.',
 
   // Sync settings form (the host settings seam)
   'sync.form.loading': 'Reading the configuration…',

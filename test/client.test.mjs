@@ -5709,7 +5709,9 @@ test('客户端产物：「看差异」只给两边真有可比那两份的行�
     registryPath: '/home/u/.dsh/registry.json',
     problems: [],
     sync: { url: 'https://dav.example.com/dsh', machineId: 'robot-a', mappings: 0 },
-    sessions: [],
+    sessions: [
+      { id: 'session-d', cwd: '/home/u/dev/x', createdAt: 1, dir: '/home/u/dev/x', bytes: 400, files: [], live: true },
+    ],
     workspaces: [{ id: 'w1', path: '/home/u/dev/x', title: '测试项目', sessionIds: [] }],
   }
   const response = {
@@ -5758,7 +5760,11 @@ test('客户端产物：「看差异」只给两边真有可比那两份的行�
   // 这一次渲染只会铺出页签那一层骨架：种下去的 sync / 弹窗开关要等树被走一遍才落到页签内容上，
   // 所以下面照别处一样把树交给 `strings()` 走一遍（它顺带把嵌套组件真正跑起来）。
   const tree = mounted.registrations[0].component(mounted.registrations[0].registration.inject())
-  strings(tree)
+  const text = strings(tree)
+
+  // `session-d` 标着 live，而它正是要裁决的那条：预演里先把「先切走或重启」说出来，
+  // 别让人点进差异才发现按钮没了。
+  assert.ok(text.some((value) => value.includes('sync.liveHint')), '活会话的裁决在预演里就有提示')
 
   // 四条计划行各留一格（拉取一条、推送三条），比不了的留空——列才对得齐。
   const cells = mounted.recorded.filter((node) => node.props?.className === 'dsm-diffCell')
