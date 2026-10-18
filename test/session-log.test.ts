@@ -182,10 +182,10 @@ test('relocateHeaderCwd：保留 header 的可选字段与顺序', () => {
 // ── 落成另一条会话：换 id、插一条标记标题 ────────────────────────────────────────
 
 const branchEvents = [
-  { type: 'session/title', seq: 1, time: '2026-10-12T04:00:00.000Z', data: { title: '原标题' } },
-  { type: 'user/message', seq: 2, time: '2026-10-12T04:01:00.000Z', data: { content: [{ type: 'text', text: '正文一条' }] } },
-  { type: 'session/title', seq: 3, time: '2026-10-12T04:02:00.000Z', data: { title: '改过名' } },
-  { type: 'turn/end', seq: 4, time: '2026-10-12T20:05:00.000Z', data: { turn: 1 } },
+  { type: 'session/title', seq: 0, time: '2026-10-12T04:00:00.000Z', data: { title: '原标题', messageSeqs: [], source: { kind: 'user' } } },
+  { type: 'user/message', seq: 1, time: '2026-10-12T04:01:00.000Z', data: { content: [{ type: 'text', text: '正文一条' }] } },
+  { type: 'session/title', seq: 2, time: '2026-10-12T04:02:00.000Z', data: { title: '改过名', messageSeqs: [], source: { kind: 'user' } } },
+  { type: 'turn/end', seq: 3, time: '2026-10-12T20:05:00.000Z', data: { turn: 1 } },
 ]
 const MARKED = '改过名 · 来自 robot-test 2026-10-12 20:05'
 
@@ -203,7 +203,7 @@ function titlesOf(text: string): string[] {
   return titles
 }
 
-test('branchSessionLog（zstd）：换 id、标记标题是唯一那条、正文一字不动', () => {
+test('branchSessionLog（zstd）：换 id、最后一条标题带来源、正文一字不动', () => {
   const out = branchSessionLog(makeLog(header, branchEvents), 'zstd', {
     newId: 'session-branched',
     machine: 'robot-test',
@@ -212,12 +212,14 @@ test('branchSessionLog（zstd）：换 id、标记标题是唯一那条、正文
   })
   const { header: h, lines } = readSessionLog(out, decodeAll)
   assert.equal(h.id, 'session-branched', 'header 的 id 换成了新会话的')
-  // 原文一字不动：两条原标题都还在；标记排在**最后**（最新一条生效，见 foldTitle）。
-  assert.deepEqual(titlesOf(lines.join('\n')), ['原标题', '改过名', MARKED], '原标题都留着，标记排在最后')
+  // 只改最后一条标题的 data.title；前面的标题与正文原样留着。
+  assert.deepEqual(titlesOf(lines.join('\n')), ['原标题', MARKED], '最后的标题带来源，前面的原标题还在')
   assert.match(lines.join('\n'), /正文一条/, '正文一字不动')
+  const rows = lines.filter((line) => line !== '').map((line) => JSON.parse(line) as { seq?: number })
+  assert.deepEqual(rows.slice(1).map((row) => row.seq), [0, 1, 2, 3], 'seq 仍然与位置一一对应')
   const marker = JSON.parse(lines.find((line) => line.includes(MARKED)) ?? '{}') as { seq?: number; time?: string }
-  assert.equal(marker.seq, 5, '标记那一行 seq = 5（最后一条是 4）')
-  assert.equal(marker.time, '2026-10-12T21:00:00.000Z', '标记那一行的时刻是给定的')
+  assert.equal(marker.seq, 2, '标记仍是原来那条标题的位置（seq=2）')
+  assert.equal(marker.time, '2026-10-12T04:02:00.000Z', '标题事件的时刻不动')
 })
 
 test('branchSessionLog（明文）：同一套语义', () => {
@@ -230,15 +232,25 @@ test('branchSessionLog（明文）：同一套语义', () => {
   })
   const lines = out.toString('utf8').split('\n')
   assert.equal((JSON.parse(lines[0] as string) as { id: string }).id, 'session-branched')
-  assert.deepEqual(titlesOf(out.toString('utf8')), ['原标题', '改过名', MARKED], '明文同义：原标题留着、标记排最后')
+  assert.deepEqual(titlesOf(out.toString('utf8')), ['原标题', MARKED], '明文同义：只改最后一条标题')
 })
 
 test('branchSessionLog：没有原标题时标记只留来源那半句', () => {
-  const out = branchSessionLog(makeLog(header, [branchEvents[1] as never]), 'zstd', {
+  const only = { ...(branchEvents[1] as Record<string, unknown>), seq: 0 }
+  const out = branchSessionLog(makeLog(header, [only]), 'zstd', {
     newId: 'session-branched',
     machine: 'robot-test',
     time: '2026-10-12T21:00:00.000Z',
     decodeAll,
   })
-  assert.deepEqual(titlesOf(readSessionLog(out, decodeAll).lines.join('\n')), ['来自 robot-test 2026-10-12 04:01'])
+  const lines = readSessionLog(out, decodeAll).lines
+  assert.deepEqual(titlesOf(lines.join('\n')), ['来自 robot-test 2026-10-12 04:01'])
+  const marker = JSON.parse(lines.find((line) => line.includes('来自 robot-test')) ?? '{}') as {
+    time?: unknown
+    data?: { messageSeqs?: unknown; source?: unknown }
+  }
+  assert.equal(typeof marker.time, 'number', '没有原标题时标记的 time 是 epoch 毫秒，不是 ISO 字符串')
+  assert.equal(marker.time, Date.parse('2026-10-12T21:00:00.000Z'))
+  assert.deepEqual(marker.data?.messageSeqs, [], 'v4 的标题事件必须有 messageSeqs 数组')
+  assert.deepEqual(marker.data?.source, { kind: 'user' }, '空 messageSeqs 的标题 source 是 user')
 })

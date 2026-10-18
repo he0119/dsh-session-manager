@@ -242,30 +242,31 @@ export function relocateHeaderCwdShallow(buf: Buffer, options: RelocateOptions):
 
 
 /**
- * 把一份日志落成"另一条会话"（同步裁决里落选那一份的去处）：换 header 的 `id`，并插一条**标记标题**
- * （`session/title`），如「原标题 · 来自 robot-test 2026-10-12 20:05」。
+ * 把一份日志落成“另一条会话”（同步裁决里落选那一份的去处）：换 header 的 `id`，并给最新一条标题
+ * 加上来源标记，如「原标题 · 来自 robot-test 2026-10-12 20:05」。
  *
- * 为什么是"插"而不是"改"：标题的语义是**最新一条 `session/title` 生效**（见 `foldTitle()`），所以标记
- * 只要排在所有原标题之后就一定赢。位置取"最后一个含标题事件的那一帧之后"：原标题都在开头（实测前
- * ~26KB），标记因此也在开头——而读标题的两条路都只扫开头（`readLogTitle()` 的 256KB 预算、包预演的
- * 最新帧），排在末尾的标记两头都读不到。**不动**其余帧的字节：原文既不重压也不改内容。
+ * 为什么是“改最后一条标题”而不是“插一条新标题”：v4 日志要求事件 `seq` 与它在正文里的位置一样密
+ * （宿主 `event.seq !== index` 即拒绝）。插在最后一条标题之后、后续事件之前，标记的 `seq` 会比后面
+ * 那些大，整份日志立刻不合法；而改最后一条标题只动它的 `data.title`，`seq` 与位置都不变，原文的标题
+ * 文字仍作为前缀保留。只重压那一帧，其余帧逐字节原样拼回。没有标题时标记追加到末尾（末尾之后没有
+ * 事件，`seq` 仍连续）；小日志的标题读取预算够得着，大日志本来也没有标题可读。
  *
- * 顺序（zstd）：首帧解出 header 换 `id`、用 `compressFrame`（缺省手写 raw-block 帧）写回；其余帧原样
- * 拼接，只在最后一个含标题事件的帧之后插一帧标记；自校验整份解出来只剩一个标题、且是标记那一个。
- * 明文那一半同义（没有帧，逐行改写，自校验也走明文）。
+ * 顺序（zstd）：首帧解出 header 换 `id`、用 `compressFrame`（缺省手写 raw-block 帧）写回；含最后一条
+ * 标题的那一帧用新标题重压，其余帧原样拼接。明文那一半同义（没有帧，逐行改，自校验也走明文）。
  *
- * @throws 首帧没有完整 header、或自校验不过时抛错（不产出半成品）。
+ * @throws 首帧没有完整 header、事件 `seq` 不连续、或自校验不过时抛错（不产出半成品）。
  */
 export function branchSessionLog(
   buf: Buffer,
   compression: string | null,
-  /** `machine` 缺席 = 只换 id 不插标记（多代次里只有最新一代带标记标题）。 */
+  /** `machine` 缺席 = 只换 id 不写标记（多代次里只有最新一代带标记标题）。 */
   options: { newId: string; machine?: string; time?: string; decodeAll: DecodeAll; compressFrame?: CompressFrame },
 ): Buffer {
   const { newId, decodeAll } = options
   const machine = options.machine
   const now = options.time ?? new Date().toISOString()
   const compressFrame = options.compressFrame ?? encodeRawFrame
+
   if (compression === 'zstd') {
     const frames = splitFrames(buf)
     if (frames.length === 0) throw new Error('branchSessionLog: no frames to rewrite')
@@ -277,49 +278,208 @@ export function branchSessionLog(
         throw new Error(`branchSessionLog: frame ${index} does not decode: ${String(error)}`)
       }
     }
-    let after = 0
-    let original = ''
-    for (const [index, text] of texts.entries()) {
-      const folded = foldTitle(text)
-      if (folded !== undefined) {
-        original = folded
-        after = index
+    const last = lastEventInFrames(texts)
+    const title = lastTitleInFrames(texts)
+    if (machine === undefined) {
+      const out = Buffer.concat([
+        compressFrame(rewriteHeaderId(texts[0] as string, newId)),
+        ...frames.slice(1).map((frame) => buf.subarray(frame.start, frame.end)),
+      ])
+      assertBranched(decodeAll(out), newId, undefined)
+      return out
+    }
+    if (title === undefined) {
+      const marked = markedTitle('', machine, last ?? { seq: -1, time: now })
+      const marker = markerLine(marked, (last?.seq ?? -1) + 1, now)
+      const out = Buffer.concat([
+        compressFrame(rewriteHeaderId(texts[0] as string, newId)),
+        ...frames.slice(1).map((frame) => buf.subarray(frame.start, frame.end)),
+        compressFrame(marker),
+      ])
+      assertBranched(decodeAll(out), newId, marked)
+      return out
+    }
+    const marked = markedTitle(title.title, machine, last ?? title)
+    const replaced = markTitleInFrame(texts[title.frame] as string, title.line, marked)
+    const out: Buffer[] = []
+    for (const [index, frame] of frames.entries()) {
+      if (index === title.frame) {
+        out.push(compressFrame(index === 0 ? rewriteHeaderId(replaced, newId) : replaced))
+      } else if (index === 0) {
+        out.push(compressFrame(rewriteHeaderId(texts[0] as string, newId)))
+      } else {
+        out.push(buf.subarray(frame.start, frame.end))
       }
     }
-    const marker = machine === undefined ? undefined : markerLine(original, machine, lastLine(texts), now)
-    const out: Buffer[] = [compressFrame(rewriteHeaderId(texts[0] as string, newId))]
-    if (marker === undefined) {
-      const buffer = Buffer.concat([out[0] as Buffer, ...frames.slice(1).map((frame) => buf.subarray(frame.start, frame.end))])
-      assertBranched(decodeAll(buffer), newId, undefined)
-      return buffer
-    }
-    for (const [index, frame] of frames.entries()) {
-      if (index === 0) continue
-      out.push(buf.subarray(frame.start, frame.end))
-      if (index === after && marker !== undefined) out.push(compressFrame(marker))
-    }
-    if (after === 0) out.splice(1, 0, compressFrame(marker))
     const buffer = Buffer.concat(out)
-    assertBranched(decodeAll(buffer), newId, marker === undefined ? undefined : (JSON.parse(marker) as { data: { title: string } }))
+    assertBranched(decodeAll(buffer), newId, marked)
     return buffer
   }
-  const lines = buf.toString('utf8').split('\n')
-  let after = 0
-  let original = ''
-  for (const [index, line] of lines.entries()) {
-    if (index === 0 || line === '') continue
-    const folded = foldTitle(line)
-    if (folded !== undefined) {
-      original = folded
-      after = index
+
+  const text = buf.toString('utf8')
+  const trailingNewline = text.endsWith('\n')
+  const lines = text.split('\n')
+  if (trailingNewline) lines.pop()
+  if (machine === undefined) {
+    lines[0] = rewriteHeaderId(lines[0] ?? '', newId)
+    const out = Buffer.from(lines.join('\n') + (trailingNewline ? '\n' : ''), 'utf8')
+    assertBranched(out.toString('utf8'), newId, undefined)
+    return out
+  }
+  const last = lastEventInLines(lines)
+  const title = lastTitleInLines(lines)
+  let marked: string
+  if (title === undefined) {
+    marked = markedTitle('', machine, last ?? { seq: -1, time: now })
+    lines.push(markerLine(marked, (last?.seq ?? -1) + 1, now).replace(/\n$/, ''))
+  } else {
+    marked = markedTitle(title.title, machine, last ?? title)
+    lines[title.line] = markTitleLine(lines[title.line] as string, marked)
+  }
+  lines[0] = rewriteHeaderId(lines[0] ?? '', newId)
+  const out = Buffer.from(lines.join('\n') + (trailingNewline ? '\n' : ''), 'utf8')
+  assertBranched(out.toString('utf8'), newId, marked)
+  return out
+}
+
+/** 一份帧文本里最后一条带 `seq` 的事件（header 不算）。 */
+function lastEventInFrames(texts: readonly string[]): { seq: number; time: string } | undefined {
+  for (let index = texts.length - 1; index >= 1; index -= 1) {
+    const found = lastEventInLines((texts[index] as string).split('\n'))
+    if (found !== undefined) return found
+  }
+  return undefined
+}
+
+/** 一组行里最后一条带 `seq` 的事件（header 不算）。 */
+function lastEventInLines(lines: readonly string[]): { seq: number; time: string } | undefined {
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const line = lines[index]
+    if (line === undefined || line === '') continue
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(line)
+    } catch {
+      continue
+    }
+    const event = parsed as { type?: unknown; seq?: unknown; time?: unknown }
+    if (event.type === 'session' || typeof event.seq !== 'number') continue
+    return { seq: event.seq, time: typeof event.time === 'string' ? event.time : new Date().toISOString() }
+  }
+  return undefined
+}
+
+/** 最后一条标题所在的帧与行。 */
+function lastTitleInFrames(texts: readonly string[]): { frame: number; line: number; title: string; seq: number; time: string } | undefined {
+  let found: { frame: number; line: number; title: string; seq: number; time: string } | undefined
+  for (const [frame, text] of texts.entries()) {
+    const lines = text.split('\n')
+    for (const [line, value] of lines.entries()) {
+      const title = foldTitle(value)
+      if (title === undefined) continue
+      const parsed = JSON.parse(value) as { seq?: unknown; time?: unknown }
+      found = {
+        frame,
+        line,
+        title,
+        seq: typeof parsed.seq === 'number' ? parsed.seq : 0,
+        time: typeof parsed.time === 'string' ? parsed.time : new Date().toISOString(),
+      }
     }
   }
-  const marker = machine === undefined ? undefined : markerLine(original, machine, lastLine(lines), now)
-  lines[0] = rewriteHeaderId(lines[0] ?? '', newId)
-  if (marker !== undefined) lines.splice(after + 1, 0, marker)
-  const buffer = Buffer.from(lines.join('\n'), 'utf8')
-  assertBranched(buffer.toString('utf8'), newId, marker === undefined ? undefined : (JSON.parse(marker) as { data: { title: string } }))
-  return buffer
+  return found
+}
+
+/** 最后一条标题所在的行。 */
+function lastTitleInLines(lines: readonly string[]): { line: number; title: string; seq: number; time: string } | undefined {
+  let found: { line: number; title: string; seq: number; time: string } | undefined
+  for (const [line, value] of lines.entries()) {
+    const title = foldTitle(value)
+    if (title === undefined) continue
+    const parsed = JSON.parse(value) as { seq?: unknown; time?: unknown }
+    found = {
+      line,
+      title,
+      seq: typeof parsed.seq === 'number' ? parsed.seq : 0,
+      time: typeof parsed.time === 'string' ? parsed.time : new Date().toISOString(),
+    }
+  }
+  return found
+}
+
+/** 只改一帧文本里指定那一行的标题，其余行逐字节不动。 */
+function markTitleInFrame(text: string, line: number, marked: string): string {
+  const lines = text.split('\n')
+  lines[line] = markTitleLine(lines[line] as string, marked)
+  return lines.join('\n')
+}
+
+/** 只改一行标题事件的 `data.title`，其余字段与转义保持原样。 */
+function markTitleLine(line: string, marked: string): string {
+  const parsed = JSON.parse(line) as { type?: unknown; data?: { title?: unknown } }
+  if (parsed.type !== 'session/title' || typeof parsed.data?.title !== 'string') {
+    throw new Error('branchSessionLog: marker target is not a session/title line')
+  }
+  parsed.data.title = marked
+  return JSON.stringify(parsed)
+}
+
+/** 改 header 那一行的 `id`（只此一处；其余字段一个字节都不动）。 */
+function rewriteHeaderId(headerLine: string, newId: string): string {
+  const parsed: unknown = JSON.parse(headerLine)
+  const header = parsed as Record<string, unknown>
+  if (typeof header['id'] !== 'string') throw new Error('branchSessionLog: header has no id')
+  header['id'] = newId
+  // 行尾的 '\n' 是这一行与下一帧的分界，丢了就会黏成一行（自校验会当场炸）。
+  return JSON.stringify(header) + (headerLine.endsWith('\n') ? '\n' : '')
+}
+
+/** 标记标题的文案：「原标题 · 来自 <机器> <时刻>」——原标题缺席时只留后半句。 */
+function markedTitle(original: string, machine: string, tail: { time: string }): string {
+  const when = tail.time.slice(0, 16).replace('T', ' ')
+  return original === '' ? `来自 ${machine} ${when}` : `${original} · 来自 ${machine} ${when}`
+}
+
+/** 一条独立的标记事件行（无原标题时追加到末尾）。 */
+function markerLine(title: string, seq: number, now: string): string {
+  // 事件 time 是 epoch 毫秒（宿主自己的日志就是数字）；这里不能写 ISO 字符串，否则整条事件
+  // 进不了 committed 前缀，读日志时同样会报成 torn JSONL。
+  const time = Number.isFinite(Date.parse(now)) ? Date.parse(now) : Date.now()
+  return JSON.stringify({
+    type: 'session/title',
+    seq,
+    time,
+    data: { title, messageSeqs: [], source: { kind: 'user' } },
+  }) + '\n'
+}
+
+/**
+ * 自校验：换过的 id 在、标记是唯一那条、也是最新那条；事件 `seq` 从 0 起与位置一一对应
+ * （宿主 v4 的 `event.seq !== index` 就是按这一条拒绝的）。
+ */
+function assertBranched(text: string, newId: string, marker: string | undefined): void {
+  const seen: string[] = []
+  let id = ''
+  let rows = 0
+  for (const line of text.split('\n')) {
+    if (line === '') continue
+    const parsed = JSON.parse(line) as { id?: unknown; seq?: unknown }
+    if (rows === 0) {
+      id = typeof parsed.id === 'string' ? parsed.id : ''
+    } else if (parsed.seq !== rows - 1) {
+      throw new Error(`branchSessionLog: event seq ${String(parsed.seq)} at row ${rows} is not dense`)
+    }
+    rows += 1
+    const folded = foldTitle(line)
+    if (folded !== undefined) seen.push(folded)
+  }
+  if (id !== newId) throw new Error(`branchSessionLog: header id is ${id}, expected ${newId}`)
+  if (marker === undefined) return
+  const last = seen[seen.length - 1]
+  const count = seen.filter((title) => title === marker).length
+  if (count !== 1 || last !== marker) {
+    throw new Error(`branchSessionLog: marker must be the newest title, got ${JSON.stringify(seen)}`)
+  }
 }
 
 /** 按 zstd 魔数把一份字节切成帧（`[start, end)`，顺序即文件顺序）。 */
@@ -343,70 +503,4 @@ function splitFrames(buf: Buffer): Array<{ start: number; end: number }> {
     if (end > start) frames.push({ start, end })
   }
   return frames
-}
-
-/** 改 header 那一行的 `id`（只此一处；其余字段一个字节都不动）。 */
-function rewriteHeaderId(headerLine: string, newId: string): string {
-  const parsed: unknown = JSON.parse(headerLine)
-  const header = parsed as Record<string, unknown>
-  if (typeof header['id'] !== 'string') throw new Error('branchSessionLog: header has no id')
-  header['id'] = newId
-  // 行尾的 '\n' 是这一行与下一帧的分界，丢了就会黏成一行（自校验会当场炸）。
-  return JSON.stringify(header) + (headerLine.endsWith('\n') ? '\n' : '')
-}
-
-/** 整份日志里最后一条非空行（标记行的 `seq` 接着它往下写）。 */
-function lastLine(texts: readonly string[]): { seq: number; time: string } {
-  for (let i = texts.length - 1; i >= 0; i--) {
-    const lines = (texts[i] as string).split('\n').filter((line) => line !== '')
-    const line = lines[lines.length - 1]
-    if (line === undefined) continue
-    try {
-      const parsed = JSON.parse(line) as { seq?: unknown; time?: unknown }
-      return {
-        seq: typeof parsed.seq === 'number' ? parsed.seq : 0,
-        time: typeof parsed.time === 'string' ? parsed.time : new Date().toISOString(),
-      }
-    } catch {
-      return { seq: 0, time: new Date().toISOString() }
-    }
-  }
-  return { seq: 0, time: new Date().toISOString() }
-}
-
-/** 标记那一行：「原标题 · 来自 <机器> <时刻>」——原标题缺席时只留后半句。 */
-function markerLine(
-  original: string,
-  machine: string,
-  tail: { seq: number; time: string },
-  now: string,
-): string {
-  const when = tail.time.slice(0, 16).replace('T', ' ')
-  const marked = original === '' ? `来自 ${machine} ${when}` : `${original} · 来自 ${machine} ${when}`
-  // 事件行都以换行结尾：这一行是**独立一帧**，少了行尾就与下一帧黏成一行。
-  return JSON.stringify({ type: 'session/title', seq: tail.seq + 1, time: now, data: { title: marked } }) + '\n'
-}
-
-/** 自校验：换过的 id 在、标记是唯一那条标题（也是最新那条）。 */
-function assertBranched(text: string, newId: string, marker: { data: { title: string } } | undefined): void {
-  const seen: string[] = []
-  let id = ''
-  for (const [index, line] of text.split('\n').entries()) {
-    if (line === '') continue
-    if (index === 0) {
-      const parsed = JSON.parse(line) as { id?: unknown }
-      id = typeof parsed.id === 'string' ? parsed.id : ''
-    }
-    const folded = foldTitle(line)
-    if (folded !== undefined) seen.push(folded)
-  }
-  if (id !== newId) throw new Error(`branchSessionLog: header id is ${id}, expected ${newId}`)
-  // 标记**不删**原标题（原文一个字节都不动），它只要排在最后就一定赢——所以核的是"最后那条是标记、
-  // 且标记只出现一次"。
-  if (marker === undefined) return
-  const last = seen[seen.length - 1]
-  const count = seen.filter((title) => title === marker.data.title).length
-  if (count !== 1 || last !== marker.data.title) {
-    throw new Error(`branchSessionLog: marker must be the newest title, got ${JSON.stringify(seen)}`)
-  }
 }
