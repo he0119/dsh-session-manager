@@ -399,6 +399,7 @@ M 条」，三张表（会拉取 / 会推送 / 两边都有、这次不动）各
   丢数据、启动不变式、有损编码的碰撞、`.dshsess` 容器的取舍、**为什么包要带上附件对象**、生效模式、
   同步怎么判「谁更新」、空白会话为什么不搬，以及界面上的那些取舍
 - [docs/internals.md](docs/internals.md)——决策地图：按主题索引到上面那些笔记
+- [docs/design.md](docs/design.md)——界面与样式规格：页面骨架、排版、间距、颜色、控件、文案与验收
 - [docs/development.md](docs/development.md)——本地流程：依赖、构建、测试、开发实例
 - [docs/releasing.md](docs/releasing.md)——发版流程
 
