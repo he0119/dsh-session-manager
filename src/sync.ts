@@ -62,6 +62,8 @@ import { scanAll, type DiscoveredSession } from './discovery.ts'
 import { createBackup } from './journal.ts'
 import { encodeSegment, parseSessionLogName } from './paths.ts'
 import { createGitRunner, repoLocation, type GitRunner, type RepoLocation } from './repo.ts'
+import { sessionMetaOfRecord } from './visibility.ts'
+import type { ProjectionCacheReader } from './projection-cache.ts'
 import { readRegistry, validateRegistry } from './registry.ts'
 import { takeEffectOnHostAll, type EffectDeps } from './take-effect.ts'
 import { relocateHeaderCwdShallow, relocateHeaderCwdText } from './session-log.ts'
@@ -1392,6 +1394,13 @@ export interface SyncDeps extends EffectDeps, WarmDeps {
    */
   sessionMeta?: (query: { id: string; createdAt: number; cwd?: string }) => SessionMeta | undefined
   /**
+   * 扫本机时每条会话读一次的投影记录（可选，见 projection-cache.ts 与 discovery.ts 的 `ScanOptions`）。
+   *
+   * 给了就说明"空白与两枚活动时间"在扫描那一趟已经读到了，`sessionMeta` 便不必再按会话读同一个文件；
+   * 两个都给时 `sessionMeta` 优先（它是显式注入的那一个）。
+   */
+  projection?: ProjectionCacheReader
+  /**
    * 宿主内存里活着的会话 id（`ctx.sessions.list()`，见 src/index.ts）。
    *
    * 只有"覆盖本机那份"这一步问它：宿主手里有内存副本与写句柄，日志被换掉之后它还会接着写
@@ -1630,6 +1639,8 @@ export async function prepareSync(
   // 第一段：扫本机。冷启动时这一段是大头（每条会话要读头、折标题），所以它值得一条进度。
   const local = scanAll(deps.sessionsRoot, deps.decodeAll, {
     ...(deps.resolveTitle === undefined ? {} : { resolveTitle: deps.resolveTitle }),
+    // 每条会话的投影记录在这里读一次：标题、空白、两枚活动时间共用它（见 projection-cache.ts）。
+    ...(deps.projection === undefined ? {} : { projection: deps.projection }),
     ...(emit === undefined ? {} : { onProgress: (done, total) => emit({ phase: 'scan', done, total }) }),
   })
   // 第二段：读远端索引。一次网络往返，没有"第几条"可讲——`total: 0` 就是"这一段没有分母"，
@@ -1696,14 +1707,24 @@ export async function prepareSync(
    * 两件事都按"不知道"处理。
    */
   const metaCache = new Map<string, SessionMeta | undefined>()
-  const metaOf = (session: Pick<DiscoveredSession, 'id' | 'createdAt' | 'cwd'>): SessionMeta | undefined => {
-    const cached = metaCache.get(session.id)
-    if (cached !== undefined || metaCache.has(session.id)) return cached
-    const value = deps.sessionMeta?.({
+  /**
+   * 这条本机会话的空白与两枚活动时间。
+   *
+   * 扫描已经读过那条投影记录（`session.meta`）就直接折，不再碰文件；调用方显式注入了 `sessionMeta`
+   * 时以它为准。按 id 记一次：算计划要它、写回索引时还要它、落地前验"有没有变"也要它。
+   */
+  const metaOfSession = (session: Pick<DiscoveredSession, 'id' | 'createdAt' | 'cwd' | 'meta'>): SessionMeta | undefined => {
+    if (deps.sessionMeta === undefined) return sessionMetaOfRecord(session.meta)
+    return deps.sessionMeta({
       id: session.id,
       createdAt: session.createdAt,
       ...(session.cwd === undefined ? {} : { cwd: session.cwd }),
     })
+  }
+  const metaOf = (session: Pick<DiscoveredSession, 'id' | 'createdAt' | 'cwd' | 'meta'>): SessionMeta | undefined => {
+    const cached = metaCache.get(session.id)
+    if (cached !== undefined || metaCache.has(session.id)) return cached
+    const value = metaOfSession(session)
     metaCache.set(session.id, value)
     return value
   }
@@ -2686,15 +2707,19 @@ export async function stalePlanReason(
       }
     }
   }
-  if (deps.sessionMeta !== undefined) {
+  if (deps.sessionMeta !== undefined || deps.projection !== undefined) {
     for (const fact of prepared.facts.local) {
       const session = byId.get(fact.id)
       if (session === undefined) continue
-      const fresh = deps.sessionMeta({
-        id: session.id,
-        createdAt: session.createdAt,
-        ...(session.cwd === undefined ? {} : { cwd: session.cwd }),
-      })
+      // 这里要的是**刚读到的**那一份（`byId` 来自重新扫一遍库），不是预演那一刻缓存下来的值。
+      const fresh =
+        deps.sessionMeta === undefined
+          ? sessionMetaOfRecord(session.meta)
+          : deps.sessionMeta({
+              id: session.id,
+              createdAt: session.createdAt,
+              ...(session.cwd === undefined ? {} : { cwd: session.cwd }),
+            })
       if (!sameMeta(fact.meta, fresh)) return `本机的 ${fact.id} 在预演之后又动过（宿主那份列表元数据变了）`
     }
   }

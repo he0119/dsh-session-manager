@@ -581,6 +581,32 @@ test('GET /state：标题优先读宿主投影缓存，缓存对不上身份才�
   assert.equal(byId.get('session-c')!['title'], '只在日志里的标题')
 })
 
+test('GET /state：投影记录每条会话只读一次，标题与空白都从这一份上取', async () => {
+  const sandbox = makeSandbox('web-state-one-read')
+  writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000, { title: '日志里的标题' })
+  writeSession(sandbox.sessionsRoot, 'session-b', CWD_B, 2000, { title: '日志里的标题' })
+
+  const asked: string[] = []
+  const handlers = createApiHandlers({
+    ...deps(sandbox),
+    // 扫描时每条会话问一次：标题、空白、两枚时间都由这一份供给。
+    projection: (query) => {
+      asked.push(query.id)
+      return query.id === 'session-a'
+        ? { title: '记录里的标题', blank: true, lastPromptAt: 11, lastMessageAt: 22 }
+        : { blank: false }
+    },
+  })
+  const { res, captured } = fakeRes()
+  await handlers['GET /state']!(fakeReq('GET', `${API_PREFIX}/state`), res)
+
+  const byId = new Map((payload(captured)['sessions'] as Array<Record<string, unknown>>).map((s) => [s['id'], s]))
+  assert.equal(byId.get('session-a')!['title'], '记录里的标题', '标题从记录取，不再读缓存文件')
+  assert.equal(byId.get('session-a')!['hidden'], 'blank', '空白也从同一份记录取')
+  assert.equal(byId.get('session-b')!['title'], '日志里的标题', '记录里没有标题就退回日志')
+  assert.deepEqual([...asked].sort(), ['session-a', 'session-b'], '每条会话只问一次')
+})
+
 test('GET /state：读标题失败（注入的读取器抛错）不影响列出会话', async () => {
   const sandbox = makeSandbox('web-state-title-broken')
   writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000, { title: '标题' })

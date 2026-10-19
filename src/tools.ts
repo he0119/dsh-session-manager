@@ -33,6 +33,7 @@ import {
 } from './migrate.ts'
 import { projectKey } from './project-key.ts'
 import { projectionCacheDir } from './paths.ts'
+import { createProjectionReader } from './projection-cache.ts'
 import { describeWarm } from './checkpoint-warm.ts'
 import { describeEffect, describePlannedEffect, effectOf } from './take-effect.ts'
 import {
@@ -294,6 +295,8 @@ export async function resolveAutoPushRuntime(
     backupRoot: paths.backupRoot,
     decodeAll,
     sessionMeta: createSessionMetaResolver({ cacheDir: projectionCacheDir(paths.registryPath) }),
+    // 扫本机那一趟把投影记录读一次，空白与活动时间从它取（见 projection-cache.ts）。
+    projection: createProjectionReader(projectionCacheDir(paths.registryPath)),
     liveSessionIds: () => liveSessionIds(ctx),
     hostRegistry: () => hostRegistryPort(ctx),
     hostCheckpoints: () => hostCheckpointPort(ctx),
@@ -1379,6 +1382,7 @@ export function registerTools(ctx: Context, config: PluginConfigInput = {}): Arr
               decodeAll,
               // 空白与最后活动时间读宿主投影缓存（与界面那条路同一个来源，见 visibility.ts）。
               sessionMeta: createSessionMetaResolver({ cacheDir: projectionCacheDir(paths.registryPath) }),
+              projection: createProjectionReader(projectionCacheDir(paths.registryPath)),
               // 覆盖本机那份之前要问一句"这条还在跑吗"（与删除同一条理由：宿主手里有它的写句柄）。
               liveSessionIds: () => liveSessionIds(ctx),
               // 拉取会把会话重挂到目标工作区（写注册表），所以整批落地之后同样要把宿主重新接管一遍。
