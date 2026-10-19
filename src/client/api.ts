@@ -460,7 +460,14 @@ export interface SyncPullEntry {
   /** `replace` = 本机原来那份被这条顶掉（旧的那份先备份）。 */
   action: 'create' | 'replace' | 'skip'
   /** 机器可读的分类：界面按它挑文案（`reason` 是给模型看的细节）。 */
-  code: 'missing' | 'remote-ahead' | 'remote-newer' | 'blank-local' | 'no-mapping' | 'missing-target'
+  code:
+    | 'missing'
+    | 'remote-ahead'
+    | 'remote-newer'
+    | 'blank-local'
+    | 'no-mapping'
+    | 'missing-target'
+    | 'keep-remote'
   reason?: string
 }
 
@@ -472,11 +479,15 @@ export interface SyncPushEntry {
   bytes: number
   action: 'upload' | 'update' | 'skip'
   /** `local-newer` = 两边各自写过、本机这份更新（`local-ahead` 是"远端确实是本机这份的前缀"）。 */
-  code: 'missing' | 'local-ahead' | 'local-newer' | 'identical' | 'remote-ahead' | 'diverged'
+  code: 'missing' | 'local-ahead' | 'local-newer' | 'identical' | 'remote-ahead' | 'diverged' | 'keep-local'
   /** 远端那份由哪台机器贡献（"远端领先 / 两边各自写过"要指名道姓）。 */
   machine?: string
   reason?: string
 }
+
+
+/** 两边各自写过时用户挑的正本：`keep-local` 以本机这份为准、`keep-remote` 以远端那份为准。 */
+export type SyncDecision = 'keep-local' | 'keep-remote'
 
 /** 同步计划（宿主 `SyncPlan`）。 */
 export interface SyncPlan {
@@ -551,10 +562,23 @@ export interface SyncResponse {
  * @param onProgress 每收到一条进度事件调一次。
  * @returns 计划；问题在 `problems` 里，连接层的失败抛原话。
  */
-export async function fetchSyncPlan(onProgress?: (event: ProgressEvent) => void): Promise<SyncResponse> {
+export async function fetchSyncPlan(
+  onProgress?: (event: ProgressEvent) => void,
+  decisions?: ReadonlyMap<string, SyncDecision>,
+): Promise<SyncResponse> {
+  // 带有裁决的预演必须走 POST：GET 没有请求体，宿主那侧就不知道用户替哪一对挑了正本。没有裁决时
+  // 仍用 GET，保持"预演本来就不写任何东西"的样子。
+  const body =
+    decisions === undefined || decisions.size === 0
+      ? undefined
+      : JSON.stringify({ decisions: Object.fromEntries(decisions) })
   const response = await fetch(`${API_PREFIX}/sync`, {
-    method: 'GET',
-    headers: { accept: 'text/event-stream' },
+    method: body === undefined ? 'GET' : 'POST',
+    headers: {
+      accept: 'text/event-stream',
+      ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+    },
+    ...(body === undefined ? {} : { body }),
   })
   return readEventStream<SyncResponse>(response, onProgress, '预演')
 }
@@ -570,11 +594,18 @@ export async function fetchSyncPlan(onProgress?: (event: ProgressEvent) => void)
  * @param onProgress 每收到一条进度事件调一次。
  * @returns 落地结果；单条失败在 `problems` 里，不是抛错。
  */
-export async function applySync(planId?: string, onProgress?: (event: ProgressEvent) => void): Promise<SyncResponse> {
+export async function applySync(
+  planId?: string,
+  onProgress?: (event: ProgressEvent) => void,
+  decisions?: ReadonlyMap<string, SyncDecision>,
+): Promise<SyncResponse> {
+  const body: { planId?: string; decisions?: Record<string, SyncDecision> } = {}
+  if (planId !== undefined && planId !== '') body.planId = planId
+  if (decisions !== undefined && decisions.size > 0) body.decisions = Object.fromEntries(decisions)
   const response = await fetch(`${API_PREFIX}/sync?mode=apply`, {
     method: 'POST',
     headers: { accept: 'text/event-stream', 'content-type': 'application/json' },
-    body: JSON.stringify(planId === undefined || planId === '' ? {} : { planId }),
+    body: JSON.stringify(body),
   })
   return readEventStream<SyncResponse>(response, onProgress, '同步')
 }

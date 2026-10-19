@@ -574,11 +574,12 @@ test('差异页顶部三格计数横排一行', () => {
   assert.match(ruleBody('.dsm-diffStat') ?? '', /display:\s*flex/, '一格里标签与数字并排')
 })
 
-test('差异页分区有里外两种节奏：块间 20px、块内 8px', () => {
-  // 均匀一种间距会糊成一片：第一版把标题、事实、结论、计数、表、尾巴、尾注全用 12px 摞着，
-  // 看着眼花。所以"块间拉开、块内收紧"这两条各钉一下。
-  assert.match(ruleBody('.dsm-diffContent') ?? '', /gap:\s*20px/, '块与块之间拉开')
-  assert.match(ruleBody('.dsm-diffSection') ?? '', /gap:\s*8px/, '一块里面收紧')
+test('差异页分区有里外两种节奏：块间 24px、块内 12px', () => {
+  // 均匀一种间距会糊成一片：全用同一档摞着时，标题、事实、结论、计数、表、尾巴、尾注读起来是一块。
+  // 所以"块间拉开、块内收紧"这两条各钉一下。
+  assert.match(ruleBody('.dsm-diffBody') ?? '', /display:\s*flex/, '正文块是竖排的')
+  assert.match(ruleBody('.dsm-diffBody') ?? '', /gap:\s*24px/, '块与块之间拉开（挂在真正的正文层，不是 Modal 外层）')
+  assert.match(ruleBody('.dsm-diffSection') ?? '', /gap:\s*12px/, '一块里面稍松')
   // 三格计数是数据不是句子：标签在上、数字在下。
   assert.match(ruleBody('.dsm-diffStat') ?? '', /flex-direction:\s*column/, '一格里标签在上、数字在下')
   // 尾注（"只读"那句）与正文分开，别跟尾巴块里的说明糊成一段。

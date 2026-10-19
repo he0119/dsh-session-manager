@@ -1611,7 +1611,11 @@ export function remoteDigest(library: RemoteLibrary): string {
  */
 export async function prepareSync(
   deps: SyncDeps,
-  options: { onProgress?: ProgressReporter; pushOnly?: boolean } = {},
+  options: {
+    onProgress?: ProgressReporter
+    pushOnly?: boolean
+    decisions?: ReadonlyMap<string, SyncDecision>
+  } = {},
 ): Promise<SyncPrepared> {
   const report = options.onProgress
   /*
@@ -1753,6 +1757,7 @@ export async function prepareSync(
     repos,
     hashFile: planHash,
     pushOnly,
+    ...(options.decisions === undefined ? {} : { decisions: options.decisions }),
     ...(deps.sessionMeta === undefined ? {} : { sessionMeta: metaOf }),
     ...(live === undefined ? {} : { isLive: (id: string): boolean => live.has(id) }),
   }
@@ -2729,7 +2734,7 @@ export async function stalePlanReason(
 export async function syncPrepared(
   deps: SyncDeps,
   prepared: SyncPrepared,
-  options: { onProgress?: ProgressReporter } = {},
+  options: { onProgress?: ProgressReporter; decisions?: ReadonlyMap<string, SyncDecision> } = {},
 ): Promise<SyncOutcome> {
   const reason = await stalePlanReason(deps, prepared, options)
   if (reason === undefined) {
@@ -2738,6 +2743,7 @@ export async function syncPrepared(
   const outcome = await runSync(deps, {
     apply: true,
     ...(options.onProgress === undefined ? {} : { onProgress: options.onProgress }),
+    ...(options.decisions === undefined ? {} : { decisions: options.decisions }),
   })
   return { ...outcome, planSource: { kind: 'recomputed', reason } }
 }
@@ -2756,7 +2762,7 @@ export async function syncPrepared(
  */
 export async function runSync(
   deps: SyncDeps,
-  options: { apply: boolean; onProgress?: ProgressReporter },
+  options: { apply: boolean; onProgress?: ProgressReporter; decisions?: ReadonlyMap<string, SyncDecision> },
 ): Promise<SyncOutcome> {
   const prepared = await prepareSync(deps, options)
   if (!options.apply) return plannedOutcome(prepared)

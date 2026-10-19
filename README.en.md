@@ -462,6 +462,16 @@ The rules and edges:
   actions — the confirm dialog says so **before** you apply, and a single warning line stays on the page
   afterwards (when the host takes the change itself, neither appears).
 
+When both sides wrote and no copy is clearly newer, the row offers **Compare**. The diff page shows both
+tails and, for a real fork, two buttons — **Keep this machine's copy** and **Keep the remote copy**. Picking
+one re-runs the read-only plan with that decision (the row becomes a pull or a push), and the confirm step
+still applies the recomputed plan. The losing copy is not deleted: it first becomes a new session (new id,
+title carrying the source machine and time), and the chosen copy keeps the original id. Comparing itself
+still writes nothing; only confirming the sync does. If the session is open (the plan tags it **live**), the
+plan says up front that the host still holds a write handle and the decision will not take effect; the diff
+page then shows no decision buttons, only the reason and the way out — switch to another session or restart
+the host, then sync again — instead of letting you make a choice that cannot apply.
+
 Sync also goes through a plan: the `sync_sessions` tool previews by default and only writes with `apply:true`.
 
 ### Model tools

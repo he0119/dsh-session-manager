@@ -65,6 +65,8 @@ function writeSession(
     parentSession?: string
     /** 让这条会话的日志引用一个附件对象（字节不在日志里，在附件库，见 attachments.ts）。 */
     attachment?: { ref: AttachmentRef; bytes: number }
+    /** 额外的日志行（造续写 / 分叉用；seq 由调用方自己编）。 */
+    eventLines?: string[]
   } = {},
 ): void {
   const header: SessionHeader = {
@@ -109,6 +111,7 @@ function writeSession(
     ...(options.title === undefined
       ? []
       : [JSON.stringify({ type: 'session/title', seq: 1, data: { title: options.title, source: { kind: 'fallback' } } })]),
+    ...(options.eventLines ?? []),
   ]
   const dir = sessionDir(root, cwd, id)
   mkdirSync(dir, { recursive: true })
@@ -2008,6 +2011,82 @@ test('POST /sync?mode=apply：预演不落地，apply 走事件流拉取远端�
     >
     assert.deepEqual((afterResult['plan'] as Record<string, unknown>)['pullIds'], [], '这条已经在本机了')
     assert.equal(afterResult['takesEffect'], 'immediate', '没有会话要落地就不谈"生效"')
+  } finally {
+    await fixture.close()
+    rmSync(sandbox.base, { recursive: true, force: true })
+  }
+})
+
+test('POST /sync：裁决随预演与落地一起走，keep-remote 落选的那份落成新会话', async () => {
+  const sandbox = makeSandbox('web-sync-decisions')
+  writeSession(sandbox.sessionsRoot, 'session-split', CWD_A, 1000, {
+    eventLines: ['{"type":"user/message","seq":1,"data":{"text":"A-tail"}}'],
+  })
+  const fixture = await startDavFixture({ root: join(sandbox.base, 'dav') })
+  const dav = createDavClient({ baseUrl: fixture.url })
+  const foreign = join(sandbox.base, 'foreign')
+  mkdirSync(foreign, { recursive: true })
+  const foreignRoot = join(sandbox.base, 'foreign-sessions')
+  try {
+    writeSession(foreignRoot, 'session-split', foreign, 1500, {
+      eventLines: ['{"type":"user/message","seq":1,"data":{"text":"B-tail"}}'],
+    })
+    await putRemoteSession(dav, 'robot-b', {
+      id: 'session-split',
+      cwd: foreign,
+      createdAt: 1500,
+      logPath: join(sessionDir(foreignRoot, foreign, 'session-split'), 'session.v4.jsonl.zstd'),
+      logName: 'session.v4.jsonl.zstd',
+      logVersion: 4,
+    })
+
+    const handlers = createApiHandlers(
+      deps(sandbox, {
+        sync: async () => ({
+          settings: { url: fixture.url, machineId: 'robot-a', mapping: { [foreign]: CWD_A } },
+          dav,
+        }),
+      }),
+    )
+
+    const plain = fakeRes()
+    await handlers['GET|POST /sync']!(fakeReq('GET', `${API_PREFIX}/sync`), plain.res)
+    const plainPlan = payload(plain.captured)['plan'] as Record<string, unknown>
+    assert.equal((plainPlan['push'] as Array<Record<string, unknown>>)[0]?.['code'], 'diverged')
+
+    const decisions = { 'session-split': 'keep-remote' }
+    const preview = fakeRes()
+    await handlers['GET|POST /sync']!(
+      fakeReq('POST', `${API_PREFIX}/sync`, Buffer.from(JSON.stringify({ decisions }))),
+      preview.res,
+    )
+    const planned = payload(preview.captured)
+    const plan = planned['plan'] as Record<string, unknown>
+    assert.deepEqual(plan['pullIds'], ['session-split'], '裁决把这一对从"不动"改成了会拉取')
+    assert.equal((plan['pull'] as Array<Record<string, unknown>>)[0]?.['code'], 'keep-remote')
+    assert.equal(typeof planned['planId'], 'string')
+
+    const applied = fakeRes()
+    await handlers['GET|POST /sync']!(
+      fakeReq(
+        'POST',
+        `${API_PREFIX}/sync?mode=apply`,
+        Buffer.from(JSON.stringify({ planId: planned['planId'], decisions })),
+      ),
+      applied.res,
+    )
+    const outcome = payload(applied.captured)
+    assert.deepEqual(outcome['planSource'], { kind: 'reused' }, '同一组裁决能复用预演那份')
+    assert.deepEqual(outcome['replaced'], ['session-split'])
+    const pulled = outcome['pulled'] as string[]
+    assert.equal(pulled.length, 2, '落选的本机那份 + 拉回来的正本')
+    const branchId = pulled.find((id) => id !== 'session-split')
+    assert.ok(branchId !== undefined && branchId.startsWith('session-'))
+    const textOf = (id: string): string =>
+      decodeAll(readFileSync(join(sessionDir(sandbox.sessionsRoot, CWD_A, id), 'session.v4.jsonl.zstd')))
+    assert.match(textOf('session-split'), /B-tail/)
+    assert.match(textOf(branchId), /A-tail/, '本机那份没有丢')
+    assert.doesNotMatch(textOf(branchId), /B-tail/)
   } finally {
     await fixture.close()
     rmSync(sandbox.base, { recursive: true, force: true })

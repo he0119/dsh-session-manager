@@ -50,6 +50,7 @@ import {
   type SyncOutcome,
   type SyncPrepared,
   type SyncProgress,
+  type SyncDecision,
 } from './sync.ts'
 import { type EffectMode, type PickerKind, type RegistryOps, type ResolvedPaths, type SyncInfo, type SyncRuntime } from './tools.ts'
 import {
@@ -631,9 +632,18 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
    * 又一次预演（或者宿主重启、旧页面再来确认）会把它换掉，拿着旧 id 回来的那次自然落到"从零重算"
    * 那条路上——不错，只是慢。
    */
-  let preview: { id: string; value: SyncPrepared } | null = null
+  let preview: { id: string; value: SyncPrepared; decisionsKey: string } | null = null
   /** 预演编号：只用来把"这次确认"对回"那次预演"，不承担任何安全职责。 */
   let previewSeq = 0
+
+  /** 把裁决表折成一个稳定串：确认那次据此判断"还是预演时那组选择吗"。 */
+  const decisionsKeyOf = (decisions: ReadonlyMap<string, SyncDecision> | undefined): string => {
+    if (decisions === undefined || decisions.size === 0) return ''
+    return [...decisions]
+      .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+      .map(([id, decision]) => `${id}\u0000${decision}`)
+      .join('\n')
+  }
 
   /**
    * 先答「库在哪、这个宿主能不能归档」这一份，不等扫库。
@@ -1043,12 +1053,21 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
      * 发完了——等回来接的时候已经没人在听，读的那一头就永远等下去）。
      */
     let planId: string | undefined
-    if (apply) {
+    let decisions: Map<string, SyncDecision> | undefined
+    if (req.method === 'POST') {
       try {
-        const body = (await readJson(req)) as { planId?: unknown } | null
+        const body = (await readJson(req)) as { planId?: unknown; decisions?: unknown } | null
         if (typeof body?.planId === 'string' && body.planId !== '') planId = body.planId
+        // 裁决表：只认两种值，别的键/值当没写——界面与工具都可能把旧数据递回来。
+        if (body?.decisions !== null && typeof body?.decisions === 'object' && !Array.isArray(body.decisions)) {
+          const picked = new Map<string, SyncDecision>()
+          for (const [id, value] of Object.entries(body.decisions)) {
+            if (value === 'keep-local' || value === 'keep-remote') picked.set(id, value)
+          }
+          if (picked.size > 0) decisions = picked
+        }
       } catch {
-        // 体不是 JSON：按"没有预演那份"处理——这条路上体只用来指认那份缓存，读不出来就不用它。
+        // 体不是 JSON：按"没有预演那份"处理——这条路上体只用来指认缓存与裁决，读不出来就不用它们。
       }
     }
     const runtime = await deps.sync?.()
@@ -1138,10 +1157,13 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
          * `planId` 就是这个格子的号码：确认那次带着它回来，对得上就**照着这份数据落地**，不再把同一
          * 份计划重算一次（用户按下确认到第一条拉取之间原来要等的那几秒就是它）。
          */
-        const planned = await prepareSync(syncDeps, { onProgress })
+        const planned = await prepareSync(syncDeps, {
+          onProgress,
+          ...(decisions === undefined ? {} : { decisions }),
+        })
         previewSeq += 1
         const id = `${previewSeq}-${Math.random().toString(36).slice(2, 8)}`
-        preview = { id, value: planned }
+        preview = { id, value: planned, decisionsKey: decisionsKeyOf(decisions) }
         sendEvent(res, { type: 'result', result: { ...payloadOf(plannedOutcome(planned)), planId: id } })
       } else {
         /*
@@ -1149,21 +1171,38 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
          * 验一遍那份数据还作不作数，变了就从零重算）。对不上（宿主重启过、又一次预演把它换掉了、旧
          * 客户端没带 id）就照旧从零算一遍；结果里的 `planSource` 说清这次走的哪条路。
          */
-        const cached = preview !== null && planId !== undefined && preview.id === planId ? preview.value : undefined
+        const candidate = preview !== null && planId !== undefined && preview.id === planId ? preview : undefined
+        // 裁决是预演输入的一部分：同一份 planId 但选择变了，就不能拿旧计划落地。
+        const cached = candidate !== undefined && candidate.decisionsKey === decisionsKeyOf(decisions) ? candidate.value : undefined
         // 消费掉：一份预演只够落地一次（第二次带着同一个 id 回来就重算一遍）。
-        if (cached !== undefined) preview = null
+        if (candidate !== undefined) preview = null
         const outcome: SyncOutcome =
           cached !== undefined
-            ? await syncPrepared(syncDeps, cached, { onProgress })
-            : planId === undefined
-              ? await runSync(syncDeps, { apply: true, onProgress })
-              : {
-                  ...(await runSync(syncDeps, { apply: true, onProgress })),
-                  planSource: {
-                    kind: 'recomputed',
-                    reason: '预演那份已经不在宿主手里了（宿主重启过，或又一次预演把它换掉了）',
-                  },
+            ? await syncPrepared(syncDeps, cached, {
+                onProgress,
+                ...(decisions === undefined ? {} : { decisions }),
+              })
+            : decisions !== undefined
+              ? {
+                  ...(await runSync(syncDeps, { apply: true, onProgress, decisions })),
+                  ...(planId === undefined
+                    ? {}
+                    : {
+                        planSource: {
+                          kind: 'recomputed' as const,
+                          reason: '预演那份的裁决与这次不一致（或那份已经不在宿主手里了），按这次的选择重算',
+                        },
+                      }),
                 }
+              : planId === undefined
+                ? await runSync(syncDeps, { apply: true, onProgress })
+                : {
+                    ...(await runSync(syncDeps, { apply: true, onProgress })),
+                    planSource: {
+                      kind: 'recomputed',
+                      reason: '预演那份已经不在宿主手里了（宿主重启过，或又一次预演把它换掉了）',
+                    },
+                  }
         sendEvent(res, { type: 'result', result: payloadOf(outcome) })
       }
     } catch (error) {

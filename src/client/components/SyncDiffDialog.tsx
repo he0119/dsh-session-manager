@@ -21,7 +21,7 @@
 
 import * as React from 'react'
 
-import { Modal, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, Modal, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
 
 import { fetchSyncDiff, type SyncDiffResponse } from '../api.ts'
 import { KIND_KEY } from './TranscriptDialog.tsx'
@@ -107,27 +107,36 @@ function relationText(data: SyncDiffResponse, t: Translate): string {
 
 export function SyncDiffDialog({
   target,
+  decision,
+  onDecide,
+  live,
   onClose,
   t,
 }: {
   target: SyncDiffTarget
+  /** 这条会话已经选过的正本；再打开时让对应那枚按钮显出选中态。 */
+  decision?: 'keep-local' | 'keep-remote'
+  /** 只有真分叉才给：选一份当正本，另一份由落地那一步落成新会话。 */
+  onDecide?: (decision: 'keep-local' | 'keep-remote') => void
+  /** 宿主手里还有写句柄：不给选择，只说明原因（裁决会被落地那一步拦下）。 */
+  live?: boolean
   onClose: () => void
   t: Translate
 }): React.ReactElement {
   const [state, setState] = React.useState<Loaded>({ status: 'busy' })
 
   React.useEffect(() => {
-    let live = true
+    let active = true
     setState({ status: 'busy' })
     fetchSyncDiff(target.id, target.machine)
       .then((data) => {
-        if (live) setState({ status: 'ready', data })
+        if (active) setState({ status: 'ready', data })
       })
       .catch((cause: unknown) => {
-        if (live) setState({ status: 'error', message: reasonOf(cause) })
+        if (active) setState({ status: 'error', message: reasonOf(cause) })
       })
     return () => {
-      live = false
+      active = false
     }
   }, [target.id, target.machine])
 
@@ -142,7 +151,29 @@ export function SyncDiffDialog({
       closeLabel={t('close')}
       className="dsm-dialog dsm-diffDialog"
       contentClassName="dsm-dialogContent dsm-diffContent"
+      footer={
+        // 续写 / 一致这两类本来就不用选；只有真分叉才摆这两枚。都不预选：哪一份当正本由人定，
+        // 默认高亮一枚会替用户做半个决定。活会话不给按钮：宿主还会接着写，落地那一步必拦，
+        // 摆出来只会让人以为选了就能同步。原因在正文顶部那条 banner 里，底栏不再塞一段字。
+        diff?.relation === 'forked' && onDecide !== undefined && live !== true ? (
+          <>
+            <Button
+              variant={decision === 'keep-remote' ? 'primary' : 'outline'}
+              onClick={() => onDecide('keep-remote')}
+            >
+              {t('sync.diff.keepRemote')}
+            </Button>
+            <Button
+              variant={decision === 'keep-local' ? 'primary' : 'outline'}
+              onClick={() => onDecide('keep-local')}
+            >
+              {t('sync.diff.keepLocal')}
+            </Button>
+          </>
+        ) : undefined
+      }
     >
+      <div className="dsm-diffBody">
       <div className="dsm-diffHead">
         <div className="dsm-transcriptName" title={target.id}>
           {target.title ?? target.id}
@@ -161,6 +192,11 @@ export function SyncDiffDialog({
           </div>
         )}
       </div>
+      {/* 活会话的说明放在正文顶部：它解释了底栏为什么没有两枚按钮。原来塞在 footer 里，
+          flex-end 把它顶到右下角，两行字像一句掉队的脚注，跟"只读"尾注还叠在一起。 */}
+      {live === true && diff?.relation === 'forked' ? (
+        <p className="dsm-banner dsm-warn dsm-diffLive">{t('sync.diff.live')}</p>
+      ) : null}
       {state.status === 'busy' ? <div className="dsm-hint">{t('sync.diff.loading')}</div> : null}
       {state.status === 'error' ? <p className="dsm-banner dsm-error">{state.message}</p> : null}
       {diff === undefined || data === undefined ? null : (
@@ -223,9 +259,12 @@ export function SyncDiffDialog({
             <TailBlock key={block.side} side={block.side} tail={block.tail} t={t} />
           ))}
           </section>
-          <div className="dsm-hint dsm-diffNote">{t('sync.diff.readonly')}</div>
+          <div className="dsm-hint dsm-diffNote">
+            {live === true || diff.relation !== 'forked' ? t('sync.diff.readonly') : t('sync.diff.choose')}
+          </div>
         </>
       )}
+      </div>
     </Modal>
   )
 }
