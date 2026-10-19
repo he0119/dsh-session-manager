@@ -531,6 +531,7 @@ Sync also goes through a plan: the `sync_sessions` tool previews by default and 
   mode, how sync decides which copy is newer and
   why blank sessions are not moved, and the UI decisions
 - [docs/internals.md](docs/internals.md) — a decision map indexing the notes above by topic
+- [docs/design.md](docs/design.md) — the UI design spec: page structure, type, spacing, colors, controls, copy, review
 - [docs/development.md](docs/development.md) — local workflow: deps, build, tests, a dev instance
 - [docs/releasing.md](docs/releasing.md) — release process
 

@@ -2,7 +2,8 @@
 
 本仓库的协作约定，给 AI 助手与贡献者看。安装与用法在 [README](README.md)，决策的依据与被否决的备选
 方案在 [.agents/notes/](.agents/notes/AGENTS.md)，决策地图在 [docs/internals.md](docs/internals.md)，
-目录结构与逐文件职责在 [docs/development.md](docs/development.md)。
+界面与样式的完整规格在 [docs/design.md](docs/design.md)，目录结构与逐文件职责在
+[docs/development.md](docs/development.md)。
 文档、提交信息、给维护者的报告一律用中文（[README.en.md](README.en.md) 是与 README 对齐的英文版）。
 
 ## 文档分工
@@ -16,6 +17,7 @@
 | `.agents/notes/` | 决策的依据、被否决的备选方案与代价；一条决策一篇，格式由 `test/notes.test.ts` 核 |
 | `.agents/skills/` | 给 agent 的可复用流程，一个技能一个目录（`SKILL.md` + 它自己的资源文件），由 DSH 的技能机制发现；不放决策依据 |
 | `docs/AGENTS.md` | `docs/` 这一层的文档规范与写作规则 |
+| `docs/design.md` | 界面与样式的唯一规格：页面骨架、排版、间距、颜色、控件、文案与验收 |
 | `docs/internals.md` | 决策地图（按主题索引到笔记），以及没有笔记承载的当前机制 |
 | `docs/development.md` | 目录结构、逐文件职责、开发命令 |
 | `docs/releasing.md` | 发布流程（推 `v*` 标签触发可信发布） |
@@ -93,47 +95,29 @@ pnpm typecheck && pnpm build && pnpm test && pnpm check:package
 
 ## 界面与样式的硬约束
 
+完整规格（页面骨架、排版、间距、颜色、控件、文案、反馈、验收）在 [docs/design.md](docs/design.md)；
+这里只列违反一次就会静默坏掉、且每轮都要在上下文里的门。
+
 - 浏览器半侧只 `require` **平台基线模块**：`react`、`react/jsx-runtime`、官方控件库
   `@deepseek-ai/dsh-client-ui-primitives`——这三个在 `tsdown.config.ts` 的 `CLIENT_EXTERNALS` 里保持
-  外置，其余内联。**控制件一律用官方控件库**（`Button` / `Input` / `Checkbox` / `Tag` /
-  `SegmentedControl`），本页的 CSS 只写布局挂钩、不再画控件外观；要引非基线模块
-  必须在 `dsh.client.external` 里点名。**只 import 类型不算**：`verbatimModuleSyntax` 下类型导入会被
-  完全擦除，产物里一个 `require` 都不会多（`test/client.test.mjs` 按产物文本核这一条）。基线模块的
-  API 变化由 `peerDependencies` 的版本范围拦在激活，不会静默走形；`Slot` 条目渲染抛错只会留下一个
-  空 `div`，所以渲染路径上别做会抛的事。依据与被否决的备选方案见
+  外置，其余内联。**控制件一律用官方控件库**，本页 CSS 只写布局挂钩、不画控件外观；要引非基线模块
+  必须在 `dsh.client.external` 里点名。依据见
   [控制件用官方原语](.agents/notes/implemented/architecture/2026-10-15-controls-come-from-the-official-primitives.md)。
-- 官方 `Tag` **不转发 `title`**：要悬浮提示就写成 `<span className="dsm-tag" title={…}><Tag …/></span>`
-  ——提示挂外层 span，`dsm-tag` 这个布局挂钩挂在两层中的一层（有提示的挂外层、没提示的挂 `Tag`
-  自己）。每枚标签都必须带上它，否则 `flex: none` / 限宽截断 / 行高对齐那几条会**静默失效**。
-- 颜色只用宿主 `Theme` 检查面列出的 `--dsw-alias-*`（`cordis_inspect_query` → client / Theme /
-  listTokens），每条声明都带中性回落值；名单外的 token 要登记进 `test/styles.test.mjs` 的例外表
-  并写明理由（现有两例：`label-tertiary`、`settings-card-stroke`）。这份检查扫的是
-  `src/client/styles.ts` 的原文（注释也算），所以注释里也别写出"本页已经不用"的 token 名字。
-- 页头与页内分页**没有官方原语可用**（官方设置页自己手写 `h2` / `p` / 本地 CSS），照内建设置页的规格
-  写：`h2` 16px/500 独占一行（行高 24px），隔 12px 一行 14px 说明（`label-tertiary`），整体列布局；
-  页头里**不放动作**——页面级的那枚「刷新」挂在页签那一行的右端（`.dsm-tabsRow`，下划线随整行铺满）。
-  字号的其余几档同样去内建页里量：正文 **14px / 行高 20px**（`.dsm-root`，内建卡片标题就是它），比
-  正文淡一档的字 **12px / 行高 18px**（`.dsm-hint`，内建卡片描述就是它）；行高不跟着字号按比例放大。
-  规格由 `test/styles.test.mjs` 与 `test/client.test.mjs` 两处钉住，依据见
-  [页头那篇](.agents/notes/implemented/architecture/2026-09-28-page-header-matches-the-builtin-settings.md)
-  与 [字号那篇](.agents/notes/implemented/architecture/2026-10-07-body-type-matches-the-builtin-settings.md)。
-- **卡片级的主动作一律放卡片底部的动作行**（`.dsm-controls`），卡片头部只放不动数据的工具（刷新、
-  全选 / 清空、收起 / 展开）；破坏性动作用 `dsm-spacer` 顶到同一行右端，清单行上的动作留在行上。依据
-  见 [决策](.agents/notes/implemented/architecture/2026-10-07-card-actions-live-in-a-footer-row.md)，
-  结构由 `test/client.test.mjs` 的 `primaryPlacements()` 钉住。
-- **带勾选的清单只有一对选行工具**（「全选」`list.selectAll` / 「清空」`list.clear`，作用面是眼下列出来
-  的那些、清空清整个勾选集，两枚各带禁用态），逻辑在 `sessionList.tsx` 的 `useSessionPicking()` 与
-  `SessionPickTools` 一处，位置是清单之上那一行的右端（清单就是整张卡时在卡头，清单是卡片里的一段时在
-  它上方那一行）。依据见
-  [决策](.agents/notes/implemented/bug-fix/2026-10-08-one-pair-of-pick-tools.md)，结构由
-  `test/client.test.mjs` 的 `pickPlacements()` 钉住。
+- 官方 `Tag` **不转发 `title`**：悬浮提示挂外层 `<span className="dsm-tag" title={…}>`，每枚标签都必须
+  带上这个挂钩，否则 `flex: none`、限宽截断、行高对齐那几条会**静默失效**。
+- 颜色只用宿主 Theme 检查面列出的 `--dsw-alias-*`，每条声明都带中性回落值；检查面没有的例外只登记在
+  `test/styles.test.mjs`，别处不再列第二份。
+- **布局：`gap` 只对直接拥有这些子元素的那一层生效。** 页内分页、弹窗正文都要各自包一层拿节奏；
+  官方 `Modal` 的 `contentClassName` 落在**外层**，里面那层官方 body 没有 gap。完整的节奏表与归属规则见
+  [design.md §4](docs/design.md#4-间距与布局归属)。
+- **卡片级主动作放卡片底部动作行**；带勾选的清单全站只有一对「全选 / 清空」；行上的动作等悬停。
+  结构与位置由 `test/client.test.mjs` 的 `primaryPlacements()` / `pickPlacements()` 钉住。
 - `src/client/styles.ts` 的 CSS 正文里**不许出现反引号**（模板字面量会被提前截断，报错落在很远处）；
   类名一律 `dsm-` 前缀。
-- 文案走官方客户端 locale 机制：字典在 `src/client/logic/locales.ts`，`zh` 是键集真源，`en` 由
-  `LocaleDictOf` 逐键核，命名空间合并进 `LocaleNamespaceMap`——少键 / 多键 / `t('…')` 写错键都是编译
-  错误。注册条目带 `locale: NS`，组件从**框架 props** 拿 `t`，不自己 `inject` 一个，也不留中文兜底；
-  键名点分（`page.title`），通用词（取消 / 关闭 / 保存）复用宿主 `common` 命名空间。运行期那一遍在
-  `test/client.test.mjs`：两份字典键集一致、页面问到的每个键都在字典里。
+- 文案走官方客户端 locale 机制：`zh` 是键集真源，`en` 逐键核；组件从**框架 props** 拿 `t`，不自己
+  `inject`，不留中文兜底；键名点分，通用词复用宿主 `common` 命名空间。
+- 界面与样式改动要在**真实 dev GUI** 里量（`getComputedStyle` / `getBoundingClientRect`），深浅两套
+  主题各看一遍；具体验收命令见 [design.md §9](docs/design.md#9-验收)。
 
 ## 代码结构
 

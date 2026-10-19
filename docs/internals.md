@@ -1,7 +1,7 @@
 # 内部设计
 
-用法看 [README](../README.md)，目录结构与逐文件职责看 [development.md](development.md)，发布看
-[releasing.md](releasing.md)。
+用法看 [README](../README.md)，界面与样式的完整规格看 [design.md](design.md)，目录结构与逐文件职责看
+[development.md](development.md)，发布看 [releasing.md](releasing.md)。
 
 每条决策的依据、被否决的备选方案与代价都在 [.agents/notes/](../.agents/notes/AGENTS.md) 下，下面按主题
 指过去。这份文件只做这件事：它是入口，不是第二份笔记。
@@ -79,6 +79,12 @@
 - [两边各自写过时先看差异，这一页只读](../.agents/notes/implemented/feature/2026-10-16-both-wrote-gets-a-diff-view.md)：
   `diverged` 与那几个"一份会顶掉另一份"的结论各带一枚「看差异」：`GET /sync-diff` 取回远端那一个包、
   逐行比原始日志，header 单独比，结论分成 same / 续写 / 真分叉三类；一个字节都不写。
+- [两边各自写过时挑一份当正本，另一份落成新会话](../.agents/notes/implemented/feature/2026-10-16-adjudication-keeps-one-branches-the-other.md)：
+  差异页真分叉时给「以本机为准」「以远端为准」两枚，选择随 `decisions` 进预演并触发重算；落地先把
+  落选那份落成新会话（新 id，标题带来源），正本再占原 id。看差异仍然只读。
+- [落成新会话的标记标题不能打乱事件 seq](../.agents/notes/implemented/bug-fix/2026-10-18-branch-title-keeps-seq-dense.md)：
+  标记不能插在最后一条标题之后（后面的 `seq` 会错位，宿主读成 torn JSONL）；改最后一条标题的
+  `data.title`，没有标题时才追加到末尾，并校验事件 `seq` 与位置一一对应、标题事件满足 v4 形状。
 - [远端第一层是插件自己的命名空间](../.agents/notes/implemented/architecture/2026-10-02-remote-namespace-is-the-plugins.md)：
   `url` 之下固定一层 `dsh-session-manager/`，机器格直接放在里面（逐层 MKCOL 自建），于是 `url` 可以是
   服务器根。
@@ -181,6 +187,8 @@
 
 ## 浏览器半侧
 
+界面与样式的完整口径在 [design.md](design.md)；下面索引的是每条规格背后的决策与代价。
+
 - [产物是经典脚本，只 require 基线模块](../.agents/notes/implemented/architecture/2026-09-27-client-artifact-is-a-classic-script.md)
   与 [peer 范围就是宿主的装配门](../.agents/notes/implemented/architecture/2026-09-28-peer-range-is-the-hosts-assembly-gate.md)：
   客户端模块系统的契约，以及收不下就整条 bundle 不装的那道门。
@@ -198,6 +206,9 @@
 - [弹窗正文层自己写字号](../.agents/notes/implemented/bug-fix/2026-10-12-dialog-body-declares-its-own-type.md)：
   官方 `Modal` portal 到 `document.body`，落在那套 `.dsm-root` 之外——弹窗正文层不写字号就继承文档根
   的 16px（会话内容视图的计数、事件卡脚注、错误句都掉在那儿）。
+- [弹窗正文的块间节奏要挂在真正的正文层](../.agents/notes/implemented/bug-fix/2026-10-18-dialog-body-needs-its-own-gap.md)：
+  `contentClassName` 落在外层，官方里面那层 body 自己 flex 但没有 gap；只在外层写 `gap` 时块与块实测
+  仍是 0px，得在自己的 `.dsm-diffBody` 上给节奏。
 - [卡片级的主动作放卡片底部的动作行](../.agents/notes/implemented/architecture/2026-10-07-card-actions-live-in-a-footer-row.md)：
   动作跟着它的输入走；卡头只留不动数据的工具（刷新、全选 / 清空、收起 / 展开），清单行上的动作不挪位。
 - [行上的动作等悬停](../.agents/notes/implemented/architecture/2026-10-12-row-action-waits-for-hover.md)：
