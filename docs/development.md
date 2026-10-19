@@ -146,7 +146,8 @@ tsconfig.client.json Web Client 自己的类型工程（DOM + JSX；Host 那份�
 | `src/zstd-frame.ts` | raw 帧编码、首帧边界定位、多帧感知守卫 | 无 |
 | `src/session-log.ts` | 单日志读取与**保结构** cwd 改写 | 无 |
 | `src/registry.ts` | 注册表启动不变式校验、`reHome()`、原子落盘 | 无 |
-| `src/discovery.ts` | 项目目录扫描 + 只解首帧读 header（发现阶段快），可注入标题读取器 | 无 |
+| `src/discovery.ts` | 项目目录扫描 + 只解首帧读 header（发现阶段快，只读文件开头 64 KB，解不出来再退回整份），可注入标题读取器与投影记录读取器 | 无 |
+| `src/scan-cache.ts` | 库没变时复用上一次的扫描结果：指纹 = 目录清单 + 每个日志与投影缓存文件的 `size`/`mtimeMs`，加上粗粒度时间戳的 racy 窗口；只给 `GET /state` 用 | 无 |
 | `src/projection-cache.ts` | 读宿主投影缓存的单条记录（标题、`blank` 等列表元数据） | 无 |
 | `src/session-title.ts` | 会话名称：宿主投影缓存优先，缺席时有界地解日志开头 | 无 |
 | `src/visibility.ts` | 侧边栏可见性与「未分组」判据：子智能体 / 空白 / 已归档三条理由（候选与界面共用一份）、`isUngrouped()`＝没认领（`accounting.ts`）**且** 会显示 | 无 |

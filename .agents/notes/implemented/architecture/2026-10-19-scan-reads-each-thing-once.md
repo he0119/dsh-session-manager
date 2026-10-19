@@ -51,7 +51,7 @@ Status: implemented
 I/O 的。实测它只服务声明了 `wire` 的单元：不带 keys 读一条记录只回来 `title`、`goal`、`tokenUsage` 那
 一批，**没有 `sessionListMetadata`，也没有 `timeContext`**——空白与两枚活动时间拿不到。而文件反正要为
 空白读一遍，所以那条路做不出比"每会话只读一趟"更好的结果，只会多一个数据来源。实测数据与判断记在
-[读结果复用](../../proposed/architecture/2026-10-19-reuse-scan-results-between-refreshes.md) 里。
+[读结果复用](2026-10-19-reuse-scan-results-between-refreshes.md) 里。
 
 **每条会话只读一份记录、但照旧从两个注入点取（`resolveTitle` / `resolveBlank` 各读一次，靠记忆化去重）。**
 那要求读取器的记忆化生命周期按"一次请求"算，而这些读取器是建进程时造一次、一直用下去的；把生命周期

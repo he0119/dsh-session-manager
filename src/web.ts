@@ -30,6 +30,7 @@ import { familyOf, loneSubagents } from './family.ts'
 import type { AttachmentPort } from './attachments.ts'
 import { projectionCacheDir } from './paths.ts'
 import { createProjectionReader, type ProjectionCacheReader } from './projection-cache.ts'
+import { createScanCache } from './scan-cache.ts'
 import { describeWarm, warmCheckpoints } from './checkpoint-warm.ts'
 import { readRegistry, validateRegistry } from './registry.ts'
 import { readTranscript } from './transcript.ts'
@@ -630,6 +631,13 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
     deps.sessionMeta ?? createSessionMetaResolver({ cacheDir: projectionCacheDir(paths.registryPath) })
   // 扫库时读一次就够的那份记录（标题、空白、活动时间共用它；见 discovery.ts 的 `ScanOptions.projection`）。
   const projection = deps.projection ?? createProjectionReader(projectionCacheDir(paths.registryPath))
+  /*
+   * 库没变就把上一次的扫描结果直接交出去（见 scan-cache.ts）。
+   *
+   * 它是**按这个 handler 实例**活的（随服务启动建一次），所以只在同一台宿主、同一份配置下复用：库里
+   * 任何一个日志或投影缓存文件变了，指纹就对不上，自然重扫。
+   */
+  const scans = createScanCache()
   // 宿主内存里活着的会话：删除会拒掉它们。端口缺席时按空集（判断不了）——预演的输出里没有
   // 任何一处声称"这些一定没在跑"，界面上那句说明也是这么写的。
   const liveSessionIds = (): ReadonlySet<string> => deps.liveSessionIds?.() ?? new Set<string>()
@@ -696,9 +704,11 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
   const state = async (_req: IncomingMessage, res: ServerResponse): Promise<void> => {
     await streamResult(res, async (report) => {
       const { registry, problems } = loadRegistry(paths.registryPath)
-      const sessions = scanLibrary(paths.sessionsRoot, decodeAll, {
+      const sessions = scans.scan(paths.sessionsRoot, decodeAll, {
         resolveTitle,
         projection,
+        // 标题与空白都从这些文件里读，它们变了结果就得重算。
+        projectionDir: projectionCacheDir(paths.registryPath),
         onProgress: (done, total) => report({ phase: 'scan', done, total }),
       })
       // 「认领」算一次，会话列表那栏与工作区那栏读同一份：宿主发给渲染层的也是同一个取值
