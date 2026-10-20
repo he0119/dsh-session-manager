@@ -15,8 +15,8 @@
 //
 // 一个绕不开的坑：文件系统的时间戳精度。本机 `mtimeMs` 是亚毫秒，但换成只有一秒精度的文件系统时，
 // "同一秒里改两次、大小又一样"这件事指纹看不出来。做法照 git 的 racy 处理：**上一个指纹是在哪一刻取的**
-// 也存下来，这次只要有任何文件的 `mtimeMs` 落在那一刻前 `RACY_WINDOW_MS` 以内，就不复用缓存——那种文件
-// 有可能在我们上一次取指纹之后又被写过、而时间戳恰好落回同一个刻度，指纹分辨不出来。
+// 也存下来，这次只要有任何文件的时间戳与那一刻落在**同一秒**里，就不复用缓存——那种文件有可能在我们上一次
+// 取指纹之后又被写过、而时间戳恰好落回同一格，指纹分辨不出来。
 //
 // 判据用"上一次取指纹的时刻"而不是"现在"：库静止时文件的时间戳早已比那一刻更旧，这条不触发；正在被
 // 追加的日志本来每次都会改指纹，重扫是应该的。
@@ -31,12 +31,17 @@ import { parseSessionLogName } from './paths.ts'
 import type { DecodeAll } from './types.ts'
 
 /**
- * 文件的 `mtimeMs` 落在扫描开始前这么久以内时，这次不复用缓存。
+ * 时间戳的刻度：一秒。
  *
- * 一秒是照着"某些文件系统只有一秒精度"定的：同一条会话在这一秒里被写过两次、大小又没变，指纹会看不出
- * 区别。宁可多扫一次，也不要交出旧结果。
+ * 照着"某些文件系统只有一秒精度"定的。判断方式照 git：把两枚时间戳都按这个刻度取整，落在**同一格**里就
+ * 算分不清——那一秒里再写一次，新时间戳可能还是这一格，指纹看不出区别。
  */
-const RACY_WINDOW_MS = 1000
+const RACY_TICK_MS = 1000
+
+/** 两枚时间戳是不是落在同一个刻度格子里（判"看不出来"用）。 */
+function sameTick(a: number, b: number): boolean {
+  return Math.floor(a / RACY_TICK_MS) === Math.floor(b / RACY_TICK_MS)
+}
 
 /** `scan()` 的选项：在扫描选项之上多要一个"投影缓存目录在哪"。 */
 export interface ScanCacheOptions extends ScanOptions {
@@ -116,7 +121,7 @@ function collectLibrary(root: string, observedAt: number | undefined, out: strin
         try {
           const stat = statSync(path)
           stamp = `${stat.size}:${stat.mtimeMs}`
-          if (observedAt !== undefined && stat.mtimeMs >= observedAt - RACY_WINDOW_MS) racy = true
+          if (observedAt !== undefined && sameTick(stat.mtimeMs, observedAt)) racy = true
         } catch {
           continue
         }
@@ -147,7 +152,7 @@ function collectProjections(dir: string | undefined, observedAt: number | undefi
       continue
     }
     out.push(`c:${name}:${stat.size}:${stat.mtimeMs}`)
-    if (observedAt !== undefined && stat.mtimeMs >= observedAt - RACY_WINDOW_MS) racy = true
+    if (observedAt !== undefined && sameTick(stat.mtimeMs, observedAt)) racy = true
   }
   return racy
 }
