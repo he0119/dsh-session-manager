@@ -50,6 +50,24 @@ export interface ProjectionCacheRecord {
 }
 
 /**
+ * 一条会话的投影记录读取器：把缓存目录与查询收成一个函数。
+ *
+ * 扫描时用它**一次**取齐标题、空白与两枚活动时间，下游（标题、可见性、同步）都从这一份上读——同一个
+ * 文件因此不会每条会话读两遍（本机 994 条实测一趟 680～770 ms）。
+ */
+export type ProjectionCacheReader = (query: ProjectionCacheQuery) => ProjectionCacheRecord | undefined
+
+/**
+ * 造一个读取器。
+ *
+ * @param cacheDir 缓存目录（见 paths.projectionCacheDir）。
+ * @returns 读取器；读不到时 undefined（不抛）。
+ */
+export function createProjectionReader(cacheDir: string): ProjectionCacheReader {
+  return (query) => readProjectionCache(cacheDir, query)
+}
+
+/**
  * 读一条缓存记录。
  *
  * @param cacheDir 缓存目录（见 paths.projectionCacheDir）。

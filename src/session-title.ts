@@ -21,7 +21,7 @@
 // @module dsh-session-manager/session-title
 import { closeSync, fstatSync, openSync, readSync } from 'node:fs'
 
-import { readProjectionCache } from './projection-cache.ts'
+import { readProjectionCache, type ProjectionCacheRecord } from './projection-cache.ts'
 import type { DecodeAll } from './types.ts'
 import { ZSTD_MAGIC } from './zstd-frame.ts'
 
@@ -41,6 +41,13 @@ export interface TitleQuery {
   cwd?: string
   /** 该会话的日志文件；只有最新一代会被读。 */
   files: ReadonlyArray<{ path: string; version: number }>
+  /**
+   * 扫描时已经取到的投影记录（见 discovery.ts 的 `ScanOptions.projection`）。
+   *
+   * 有它就说明扫描已经读过那份记录，这里不再读第二遍——只借里面的 `title`，没有标题才去日志里找。
+   * 缺席（例如别处单点调用这个读取器）时按缓存目录自己读一次。
+   */
+  meta?: ProjectionCacheRecord
 }
 
 /**
@@ -195,10 +202,9 @@ export interface TitleResolverOptions {
 export function createTitleResolver(options: TitleResolverOptions): (query: TitleQuery) => string | undefined {
   const { cacheDir, decodeAll, budgetBytes } = options
   return (query) => {
-    if (cacheDir !== undefined) {
-      const cached = readCachedTitle(cacheDir, query)
-      if (cached !== undefined) return cached
-    }
+    // 扫描已经把记录读出来了（`query.meta`）：直接用，不读第二遍。
+    const cached = query.meta !== undefined ? query.meta.title : cacheDir === undefined ? undefined : readCachedTitle(cacheDir, query)
+    if (cached !== undefined) return cached
     let newest: { path: string; version: number } | undefined
     for (const file of query.files) {
       if (newest === undefined || file.version > newest.version) newest = file

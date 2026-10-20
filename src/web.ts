@@ -29,6 +29,7 @@ import {
 import { familyOf, loneSubagents } from './family.ts'
 import type { AttachmentPort } from './attachments.ts'
 import { projectionCacheDir } from './paths.ts'
+import { createProjectionReader, type ProjectionCacheReader } from './projection-cache.ts'
 import { describeWarm, warmCheckpoints } from './checkpoint-warm.ts'
 import { readRegistry, validateRegistry } from './registry.ts'
 import { readTranscript } from './transcript.ts'
@@ -64,7 +65,7 @@ import {
   type ImportOptions,
 } from './transfer.ts'
 import type { CheckpointWarmPort, DecodeAll, HostRegistryPort, ProgressReporter, TitleRefreshPort, WorkspaceRegistryState } from './types.ts'
-import { createBlankResolver, createSessionMetaResolver, hiddenReason, isUngrouped, type HiddenReason, type SessionMeta } from './visibility.ts'
+import { createSessionMetaResolver, hiddenReason, isUngrouped, type HiddenReason, type SessionMeta } from './visibility.ts'
 
 /** 本插件占用的路由前缀。 */
 export const API_PREFIX = '/dsh-session-manager/api'
@@ -145,6 +146,13 @@ export interface ApiDeps {
    * 要不要搬运、两边各自写过时谁更新"。缺省同样按 `paths.registryPath` 反推投影缓存目录。
    */
   sessionMeta?: (query: { id: string; createdAt: number; cwd?: string }) => SessionMeta | undefined
+  /**
+   * 扫库时每条会话读一次的投影记录（见 projection-cache.ts）。
+   *
+   * 给了它，标题、空白判据与同步要的两枚活动时间就那么一次读出齐——同一个文件因此不会每条会话读两遍
+   * （本机 994 条实测一趟 680～770 ms）。缺省按 `paths.registryPath` 反推宿主投影缓存目录。
+   */
+  projection?: ProjectionCacheReader
   /**
    * 宿主内存里活着的会话 id（`ctx.sessions.list()`，见 src/index.ts）。
    *
@@ -465,9 +473,19 @@ function summarizeSessions(
   },
 ): SessionSummary[] {
   return sessions.map((session) => {
-    const blank = options.resolveBlank?.({ id: session.id, createdAt: session.createdAt, cwd: session.cwd }) === true
+    // 扫描时已经读过那条投影记录（`session.meta`）就直接取，不再按缓存目录读第二遍；只在调用方显式
+    // 注入了读取器时才走它（测试用它钉"读不到空白"的边界）。
+    const blank =
+      options.resolveBlank === undefined
+        ? session.meta?.blank === true
+        : options.resolveBlank({ id: session.id, createdAt: session.createdAt, cwd: session.cwd }) === true
     const archived = options.archived.has(session.id)
-    const facts = { ...(session.header.origin === undefined ? {} : { origin: session.header.origin }), blank, archived }
+    const facts = {
+      ...(session.header.origin === undefined ? {} : { origin: session.header.origin }),
+      // 记录里没有这一条（读不到）时不写 `blank`，与"宿主没说"同一口径（见 visibility.ts）。
+      ...(session.meta?.blank === undefined && options.resolveBlank === undefined ? {} : { blank }),
+      archived,
+    }
     const hidden = hiddenReason(facts)
     return {
       id: session.id,
@@ -607,12 +625,11 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
   // 所以那里扫库时刻意不传 resolveTitle——别为用不上的东西花钱。
   const resolveTitle =
     deps.resolveTitle ?? createTitleResolver({ cacheDir: projectionCacheDir(paths.registryPath), decodeAll })
-  // 空白判据与标题同源：都读宿主自己那份投影缓存（见 visibility.ts）。界面与迁移计划因此共用一条口径。
-  const resolveBlank =
-    deps.resolveBlank ?? createBlankResolver({ cacheDir: projectionCacheDir(paths.registryPath) })
   // 同步要的那两件事（空白、最后活动时间）同源同文件，但问的不是同一个问题（见 ApiDeps.sessionMeta）。
   const sessionMeta =
     deps.sessionMeta ?? createSessionMetaResolver({ cacheDir: projectionCacheDir(paths.registryPath) })
+  // 扫库时读一次就够的那份记录（标题、空白、活动时间共用它；见 discovery.ts 的 `ScanOptions.projection`）。
+  const projection = deps.projection ?? createProjectionReader(projectionCacheDir(paths.registryPath))
   // 宿主内存里活着的会话：删除会拒掉它们。端口缺席时按空集（判断不了）——预演的输出里没有
   // 任何一处声称"这些一定没在跑"，界面上那句说明也是这么写的。
   const liveSessionIds = (): ReadonlySet<string> => deps.liveSessionIds?.() ?? new Set<string>()
@@ -681,6 +698,7 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
       const { registry, problems } = loadRegistry(paths.registryPath)
       const sessions = scanLibrary(paths.sessionsRoot, decodeAll, {
         resolveTitle,
+        projection,
         onProgress: (done, total) => report({ phase: 'scan', done, total }),
       })
       // 「认领」算一次，会话列表那栏与工作区那栏读同一份：宿主发给渲染层的也是同一个取值
@@ -703,7 +721,9 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
         sessions: summarizeSessions(sessions, {
           accounted,
           archived: new Set(registry?.global.archivedSessionIds ?? []),
-          resolveBlank,
+          // 空白判据默认从扫描时读到的 `session.meta` 取（同一个文件不再读第二遍）；只有显式注入了
+          // 读取器时才走它（测试用它钉"读不到空白"的边界）。
+          ...(deps.resolveBlank === undefined ? {} : { resolveBlank: deps.resolveBlank }),
           live: liveSessionIds(),
         }),
         workspaces,
@@ -1101,6 +1121,8 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
       decodeAll,
       resolveTitle,
       sessionMeta,
+      // 扫本机那一趟读一次的投影记录（空白与两枚活动时间从它取，见 sync.ts 的 `SyncDeps.projection`）。
+      projection,
       // 覆盖本机那份之前要问一句"这条还在跑吗"（与删除同一条理由：宿主手里有它的写句柄）。
       liveSessionIds,
       // 拉取会把会话挂到目标工作区（改注册表）：整批落地之后由编排层收口交给宿主一次。

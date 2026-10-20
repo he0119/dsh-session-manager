@@ -24,6 +24,7 @@ import type {
   StrandedSource,
   WorkspaceRegistryState,
 } from './types.ts'
+import type { ProjectionCacheReader } from './projection-cache.ts'
 import { hiddenReasonOf, type HiddenReason } from './visibility.ts'
 
 /**
@@ -63,6 +64,13 @@ export interface BuildPlanOptions {
    */
   resolveBlank?: (query: { id: string; createdAt: number; cwd?: string }) => boolean | undefined
   /**
+   * 读每条会话的投影记录（可选，见 projection-cache.ts）。
+   *
+   * 给了就**在扫描那一趟读一次**，空白判据从 `session.meta` 上取（`hiddenOf()` 不再自己读文件）；
+   * 缺席 = 这次不判空白，除非另给了 `resolveBlank`。
+   */
+  projection?: ProjectionCacheReader
+  /**
    * 宿主持在内存里的会话 id（可选，见 `visibility.ts` 之外的这一条：`liveSessionIds()`）。
    *
    * 这一批**不能搬**，理由两条都是硬的：① 宿主改归属时会拿内存里那份 header 校验 `cwd`，而那条会话的
@@ -97,6 +105,7 @@ export function buildRelocationPlan(options: BuildPlanOptions): RelocationPlan {
     includeArtifacts = false,
     resolveTitle,
     resolveBlank,
+    projection,
     live = new Set<string>(),
     onProgress,
   } = options
@@ -189,6 +198,7 @@ export function buildRelocationPlan(options: BuildPlanOptions): RelocationPlan {
 
   const scanOptions = {
     ...(resolveTitle === undefined ? {} : { resolveTitle }),
+    ...(projection === undefined ? {} : { projection }),
     ...(onProgress === undefined
       ? {}
       : { onProgress: (done: number, total: number) => onProgress({ phase: 'scan', done, total }) }),

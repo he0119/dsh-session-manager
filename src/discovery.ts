@@ -2,16 +2,20 @@
 //
 // 性能取舍：整份解码一条 6MB 日志约 1～2 秒，而发现阶段只需要 header（首个 frame）。
 // 首帧实测仅 ~200 字节，因此这里只解码**候选前缀**，不碰其余帧。
+// 读 header 只抓文件开头一段（`HEADER_PREFIX_BYTES`）：首帧实测 168～299 字节，1003 个文件没有一个超过
+// 64 KB，而日志整份合计 619 MB——为这 212 字节去读整份，是这个库里最贵的一次白读。
+//
 // 严格的自洽性切分（decodeAll(前) + decodeAll(后) === decodeAll(整体)）留给执行阶段，
 // 发现阶段用"前缀可解码 + 以换行结尾 + 能解析成合法 header"三重判据，够严且便宜。
 //
 // 标题（`title`）不在这里读：它不在 header 里，而在日志事件里，读法自成一层（session-title.ts），
 // 由调用方通过 `resolveTitle` 注入——发现阶段该多便宜就多便宜，要不要标题由调用方决定。
-import { readdirSync, readFileSync, statSync } from 'node:fs'
+import { closeSync, openSync, readFileSync, readSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { parseSessionLogName } from './paths.ts'
 import { projectKey } from './project-key.ts'
+import type { ProjectionCacheReader, ProjectionCacheRecord } from './projection-cache.ts'
 import type { TitleQuery } from './session-title.ts'
 import type { DecodeAll, SessionHeader, SessionLogFile } from './types.ts'
 import { ZSTD_MAGIC } from './zstd-frame.ts'
@@ -89,6 +93,52 @@ export function readHeaderQuick(
   return { header, boundary: buf.length, text: firstLine + '\n' }
 }
 
+/**
+ * 读 header 只看文件开头这么多字节。
+ *
+ * 首帧是 header 那一行所在的那一帧，实测 168～299 字节（本机 1003 个日志文件里最大的 299）。给到 64 KB
+ * 是它的两百多倍，留出来的是"某天首帧变胖"的余量。真的超过这个数时 `readHeaderQuick()` 解不出来，
+ * 调用方退回读整份——那条路一直留着，正确性不依赖这个数。
+ */
+const HEADER_PREFIX_BYTES = 64 * 1024
+
+/** 读文件开头的至多 `length` 字节（文件更短时就是整份）。 */
+function readPrefix(path: string, length: number): Buffer {
+  const fd = openSync(path, 'r')
+  try {
+    const buf = Buffer.allocUnsafe(length)
+    const read = readSync(fd, buf, 0, length, 0)
+    return read === length ? buf : buf.subarray(0, read)
+  } finally {
+    closeSync(fd)
+  }
+}
+
+/**
+ * 读一个日志文件的 header，同时给出**整份**文件的字节数。
+ *
+ * 字节数取 `statSync().size` 而不是读到的长度：界面那一列与同步的内容指纹比的是整份日志，不是这一段。
+ *
+ * @param path 日志文件。
+ * @param decodeAll 解码器。
+ * @returns header 与该文件的字节数。
+ * @throws 首帧解不出合法 header 时抛错（与 `readHeaderQuick()` 同口径）。
+ */
+export function readLogHeader(path: string, decodeAll: DecodeAll): { header: SessionHeader; bytes: number } {
+  const bytes = statSync(path).size
+  const take = Math.min(bytes, HEADER_PREFIX_BYTES)
+  const prefix = readPrefix(path, take)
+  if (take < bytes) {
+    try {
+      return { header: readHeaderQuick(prefix, decodeAll).header, bytes }
+    } catch {
+      // 首帧比前缀还大：退回读整份（实测没有这种情况，留着是为了让"读多少"不影响对错）。
+    }
+  }
+  const buf = take === bytes ? prefix : readFileSync(path)
+  return { header: readHeaderQuick(buf, decodeAll).header, bytes }
+}
+
 /** 一个项目目录下发现的会话。 */
 export interface DiscoveredSession {
   /** 目录名（应等于 encodeSegment(header.id)）。 */
@@ -108,6 +158,13 @@ export interface DiscoveredSession {
    * （见 session-title.ts：先宿主投影缓存、后日志开头的有界前缀）。发现阶段自己不读它。
    */
   title?: string
+  /**
+   * 宿主投影缓存里那条记录（标题、空白判据、两枚活动时间都在里面），这次配了 `projection` 才有。
+   *
+   * 扫描时**读一次就挂在这里**：标题从它取，`/state` 的空白判据与同步的"谁更新"也从它取。以前这两处
+   * 各自去读同一个文件，每条会话读两遍（本机 994 条：一趟 680～770 ms）。
+   */
+  meta?: ProjectionCacheRecord
 }
 
 /** `scanProjectDir()` 的选项。 */
@@ -118,6 +175,15 @@ export interface ScanOptions {
    * 抛错按"这条没有标题"处理：标题是装饰，不该让整页会话列不出来。
    */
   resolveTitle?: (query: TitleQuery) => string | undefined
+  /**
+   * 读一条会话的投影记录（可选，见 projection-cache.ts）。
+   *
+   * 给了就**每条会话读一次**，结果挂在 `DiscoveredSession.meta` 上：标题走它、空白判据与同步的活动时间
+   * 也走它。缺席 = 这次扫描不碰投影缓存（导出只要字节，标题与空白都用不到）。
+   *
+   * 抛错按"这条没有记录"处理：与读文件那条路同一口径，坏数据不该让整页列不出来。
+   */
+  projection?: ProjectionCacheReader
   /**
    * 扫到一条之前报一次（同步预演与落地的进度条用）。
    *
@@ -153,16 +219,27 @@ export function scanProjectDir(projectDir: string, decodeAll: DecodeAll, options
       const parsed = parseSessionLogName(name)
       if (!parsed) continue
       const path = join(dir, name)
-      const buf = readFileSync(path)
-      const { header: h } = readHeaderQuick(buf, decodeAll)
+      const { header: h, bytes } = readLogHeader(path, decodeAll)
       if (header && h.id !== header.id) throw new Error(`inconsistent header ids inside ${dir}`)
       if (header && h.cwd !== header.cwd) throw new Error(`inconsistent header cwd inside ${dir}`)
       header = h
-      files.push({ name, path, version: parsed.version, compression: parsed.compression, bytes: buf.length })
+      files.push({ name, path, version: parsed.version, compression: parsed.compression, bytes })
     }
     if (!header || files.length === 0) continue // 只有临时/伴生文件的目录
     files.sort((a, b) => a.version - b.version)
     const session: DiscoveredSession = { dirName, dir, id: header.id, cwd: header.cwd, createdAt: header.createdAt, header, files }
+    if (options.projection !== undefined) {
+      try {
+        const record = options.projection({
+          id: session.id,
+          createdAt: session.createdAt,
+          ...(session.cwd === undefined ? {} : { cwd: session.cwd }),
+        })
+        if (record !== undefined) session.meta = record
+      } catch {
+        // 读不到记录不影响"这条会话在库里"这个事实
+      }
+    }
     if (options.resolveTitle) {
       try {
         const title = options.resolveTitle(session)

@@ -16,7 +16,7 @@
 // 缺失即"看不见"这件事要保守：`blank` 读不到时按 `false` 处理（＝显示），这与宿主自己的冷会话口径
 // 一致（`summarizeCold()` 用 `metadata?.blank ?? false`）。反过来假设它空白，就会把一条用户看得见的
 // 会话从迁移候选里悄悄拿掉，那是这里最不该犯的错。
-import { readProjectionCache, type ProjectionCacheQuery } from './projection-cache.ts'
+import { readProjectionCache, type ProjectionCacheQuery, type ProjectionCacheRecord } from './projection-cache.ts'
 
 /** 侧边栏不显示这条会话的原因。 */
 export type HiddenReason = 'subagent' | 'blank' | 'archived'
@@ -49,6 +49,12 @@ export interface VisibilitySubject {
   createdAt: number
   cwd?: string
   header: { origin?: string }
+  /**
+   * 扫描时已经取到的那条投影记录（见 discovery.ts 的 `ScanOptions.projection`）。
+   *
+   * 有它就说明这趟扫描已经读过那份记录，`blank` 直接从这里取，不再按缓存目录读第二遍。
+   */
+  meta?: Pick<ProjectionCacheRecord, 'blank'>
 }
 
 /** `hiddenReasonOf()` 的选项。 */
@@ -77,7 +83,9 @@ export function visibilityFacts(subject: VisibilitySubject, options: VisibilityO
   return {
     ...(subject.header.origin === undefined ? {} : { origin: subject.header.origin }),
     ...(options.resolveBlank === undefined
-      ? {}
+      ? subject.meta?.blank === undefined
+        ? {}
+        : { blank: subject.meta.blank }
       : { blank: options.resolveBlank({ id: subject.id, createdAt: subject.createdAt, cwd: subject.cwd }) }),
     archived: isArchived,
   }
@@ -166,13 +174,23 @@ export function createSessionMetaResolver(options: {
 }): (query: ProjectionCacheQuery) => SessionMeta | undefined {
   const { cacheDir } = options
   if (cacheDir === undefined) return () => undefined
-  return (query) => {
-    const record = readProjectionCache(cacheDir, query)
-    if (record === undefined) return undefined
-    return {
-      ...(record.blank === undefined ? {} : { blank: record.blank }),
-      ...(record.lastPromptAt === undefined ? {} : { lastPromptAt: record.lastPromptAt }),
-      ...(record.lastMessageAt === undefined ? {} : { lastMessageAt: record.lastMessageAt }),
-    }
+  return (query) => sessionMetaOfRecord(readProjectionCache(cacheDir, query))
+}
+
+/**
+ * 把一条投影记录折成"这条会话是什么"那两件事。
+ *
+ * 扫描时读一次记录、之后从 `session.meta` 上取，所以这一步必须只有一份实现：分成两份就会出现
+ * "空白那条路认这个字段、时间那条路不认"。
+ *
+ * @param record 投影记录；缺席就什么都不知道。
+ * @returns 空白与两枚活动时间；记录里没有的字段不带。
+ */
+export function sessionMetaOfRecord(record: ProjectionCacheRecord | undefined): SessionMeta | undefined {
+  if (record === undefined) return undefined
+  return {
+    ...(record.blank === undefined ? {} : { blank: record.blank }),
+    ...(record.lastPromptAt === undefined ? {} : { lastPromptAt: record.lastPromptAt }),
+    ...(record.lastMessageAt === undefined ? {} : { lastMessageAt: record.lastMessageAt }),
   }
 }

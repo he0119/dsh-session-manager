@@ -13,6 +13,7 @@ import { applyPlan, verifyAppliedPlan } from './execute.ts'
 import { describeWarm, warmCheckpoints, type WarmDeps } from './checkpoint-warm.ts'
 import { readManifest, rollback, type BackupKind, type BackupManifest, type RollbackResult } from './journal.ts'
 import { projectionCacheDir } from './paths.ts'
+import { createProjectionReader, type ProjectionCacheReader } from './projection-cache.ts'
 import { buildRelocationPlan, describePlan, describeStranded } from './plan.ts'
 import { takeEffectOnHost, describeEffect, type EffectDeps } from './take-effect.ts'
 import { readRegistry, validateRegistry, verifyRegistryChange } from './registry.ts'
@@ -28,7 +29,6 @@ import type {
   WarmOutcome,
   WorkspaceRegistryState,
 } from './types.ts'
-import { createBlankResolver } from './visibility.ts'
 
 /**
  * 迁移用到的路径与解码器（与 `ResolvedPaths` 同形，但本模块不认识 tools.ts）。
@@ -53,6 +53,13 @@ export interface MigrateDeps extends EffectDeps, WarmDeps {
    * 必须与外壳侧边栏显示的那批对齐，这是**编排层**的口径，不该因为入口是工具还是界面而不同。
    */
   resolveBlank?: (query: { id: string; createdAt: number; cwd?: string }) => boolean | undefined
+  /**
+   * 读每条会话的投影记录（可选，见 projection-cache.ts）。
+   *
+   * 缺席时按 `registryPath` 反推宿主投影缓存目录造一个：迁移动不动某个来源里的会话，必须与外壳侧边栏
+   * 显示的那批对齐，这是**编排层**的口径，不该因为入口是工具还是界面而不同。
+   */
+  projection?: ProjectionCacheReader
   /**
    * 宿主持在内存里的会话 id（可选，见 plan.ts 的 `BuildPlanOptions.live`）。
    *
@@ -254,8 +261,8 @@ function previewOf(plan: RelocationPlan): MigrationPreview {
 }
 
 function buildPlan(deps: MigrateDeps, request: MigrateRequest, onProgress?: ProgressReporter): RelocationPlan {
-  // 空白判据的默认读取器：界面与工具层因此走同一套候选口径（见 MigrateDeps.resolveBlank）。
-  const resolveBlank = deps.resolveBlank ?? createBlankResolver({ cacheDir: projectionCacheDir(deps.registryPath) })
+  // 空白判据：扫描那一趟就把记录读出来（每条会话一次），界面与工具层因此走同一套候选口径。
+  const projection = deps.projection ?? createProjectionReader(projectionCacheDir(deps.registryPath))
   return buildRelocationPlan({
     root: deps.sessionsRoot,
     registry: loadRegistryForWrite(deps.registryPath),
@@ -264,7 +271,8 @@ function buildPlan(deps: MigrateDeps, request: MigrateRequest, onProgress?: Prog
     sessionIds: request.sessionIds,
     title: request.title,
     includeArtifacts: request.includeArtifacts === true,
-    resolveBlank,
+    projection,
+    ...(deps.resolveBlank === undefined ? {} : { resolveBlank: deps.resolveBlank }),
     live: deps.liveSessionIds?.() ?? new Set<string>(),
     ...(deps.resolveTitle === undefined ? {} : { resolveTitle: deps.resolveTitle }),
     ...(onProgress === undefined ? {} : { onProgress }),
