@@ -167,6 +167,12 @@
   底色 / 缩进 / 字号 / 图形四层。
 - [标题来自日志事件，id 退到悬浮提示](../.agents/notes/implemented/architecture/2026-09-27-session-title-comes-from-an-event.md)：
   投影缓存优先，解日志只读开头 256 KB。
+- [扫描时每样东西只读一次](../.agents/notes/implemented/architecture/2026-10-19-scan-reads-each-thing-once.md)：
+  日志只读开头 64 KB（解不出合法 header 才退回整份）；每条会话的投影记录在扫描时读一次，标题、空白判据
+  与同步的两枚活动时间都从这一份取。
+- [库没变时复用上一次的扫描结果](../.agents/notes/implemented/architecture/2026-10-19-reuse-scan-results-between-refreshes.md)：
+  指纹是目录清单加每个日志与投影缓存文件的 `size`/`mtimeMs`；粗粒度时间戳下的漏判由 racy 窗口兜住，
+  基准取"上一次取指纹的时刻"。只给 `GET /state` 用，不参与写盘判断。
 - [落地之后请宿主补投影检查点](../.agents/notes/implemented/bug-fix/2026-10-07-landing-warms-the-projection-checkpoint.md)：
   侧边栏的标题 / 空白 / 最后活动时间都只认宿主那份记录，而那份记录只在**活着的**会话上被写；导入、同步
   拉取、迁移落地之后借宿主自己的两个服务冷读一遍补上（`src/checkpoint-warm.ts`）。
