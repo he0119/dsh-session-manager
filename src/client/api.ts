@@ -307,29 +307,6 @@ async function readEventStream<T>(
   return result as T
 }
 
-/**
- * 读会话库位置与宿主能力位（不扫库，先于 `/state` 到）。
- *
- * 拿不到时**不该**把整页变成错误：这几项只是"先说清楚"，清单那条路（`fetchState`）照样能把它带回来
- * ——页头因此退回"读取中…"，而不是白屏（见 ManagerPanel 的 load）。
- */
-export async function fetchMeta(): Promise<MetaResponse> {
-  return asJson<MetaResponse>(await fetch(`${API_PREFIX}/meta`, { headers: { accept: 'application/json' } }))
-}
-
-/**
- * 读会话库与工作区清单。
- *
- * 走事件流：这一份要扫完整库（每条会话读 header、折标题），冷启动或大库上是几秒的活，整页都在等它。
- * 拿到之前界面上只有一句「读取中…」，现在跟着 `scan` 那一段一起报"扫到第几条"。
- *
- * @param onProgress 每收到一条进度事件调一次。
- */
-export async function fetchState(onProgress?: (event: ProgressEvent) => void): Promise<StateResponse> {
-  const response = await fetch(`${API_PREFIX}/state`, { headers: { accept: 'text/event-stream' } })
-  return readEventStream<StateResponse>(response, onProgress, '读取会话库')
-}
-
 /** 导出的结果：字节 + 宿主给的文件名。 */
 /** 读一个数字响应头：缺席或不是数字时返回 `undefined`（界面据此回落自己算的那份）。 */
 function numberHeader(response: Response, name: string): number | undefined {
@@ -611,16 +588,17 @@ export async function applySync(
 }
 
 /**
- * `GET /sync?mode=status` 的响应：后台有没有一趟落地在跑、刚才那一趟成没成。
+ * 落地那一趟的状态（面板事件流上 `sync` 那一条的正文）。
  *
- * 为什么要这条只读端点：落地这趟可以**关掉窗口继续跑**（见 [syncJob.ts](./logic/syncJob.ts)），于是它
- * 会比发起它的那个页面活得久。刷新之后的页面、另一个页签都靠这一份知道"刚才那一趟还在跑 / 刚跑完"，
- * 而不是点下去才吃一个 409。
+ * 为什么要它：落地这趟可以**关掉窗口继续跑**（见 [syncJob.ts](./logic/syncJob.ts)），于是它会比发起
+ * 它的那个页面活得久。刷新之后的页面、另一个页签都靠这一份知道"刚才那一趟还在跑 / 刚跑完"。
+ *
+ * 宿主进程内存里只留一份，重启就没了。
  */
-export interface SyncStatusResponse {
+export interface SyncRoundStatus {
   /** 正在跑的那一趟；`null` = 没有。`progress` 是宿主记下的最后一条进度事件。 */
   applying: { startedAt: number; progress: ProgressEvent | null } | null
-  /** 最近一次落地的结论（宿主进程内存里只留一份，重启就没了）。 */
+  /** 最近一次落地的结论。 */
   last: {
     startedAt: number
     finishedAt: number
@@ -629,17 +607,6 @@ export interface SyncStatusResponse {
     pushed: number
     error?: string
   } | null
-}
-
-/**
- * 问一次后台同步的状态。只读：不扫库、不碰远端。
- *
- * @returns 正在跑的那一趟与最近一次落地的结论。
- */
-export async function fetchSyncStatus(): Promise<SyncStatusResponse> {
-  return asJson<SyncStatusResponse>(
-    await fetch(`${API_PREFIX}/sync?mode=status`, { headers: { accept: 'application/json' } }),
-  )
 }
 
 /** `GET|POST /sync?mode=test` 的响应：一次只读探测的结论（判定码在宿主侧，句子在界面）。 */
@@ -717,58 +684,59 @@ export interface AutoPushResponse {
 }
 
 /**
- * `GET /auto-push?mode=status` 的回答：后台那一轮跑到哪了、上一轮成没成。
+ * 自动推送那一轮的状态（面板事件流上 `auto-push` 那一条的正文）。
  *
- * 与 `AutoPushResponse` 分开：这一句是**轮询**用的（进同步页先问一次，跑着的时候每几秒问一次），所以
- * 上一轮只回计数——整份计划由发起那一轮的界面自己拿，不跟着这一句反复搬。
+ * `last` 只有**计数**：整份计划由发起那一轮的界面自己拿（见 `AutoPushResponse`），这条是给"看板上
+ * 那一行"用的，不该每次搬上千行计划。
  */
-export interface AutoPushStatusResponse {
-  mode: 'status'
-  remote: { url: string; machineId: string }
-  /** 现在正跑着的那一轮（谁发起的都可能：兜底定时器、事件层、另一个页面点的）；没在跑就是 null。 */
+export interface AutoPushRoundStatus {
+  /** 正跑着的那一轮（谁发起的都可能：兜底定时器、事件层、另一个页面点的）；没在跑就是 null。 */
   running: { startedAt: number; progress: ProgressEvent | null } | null
   /** 上一轮的结论；这个宿主还没跑过就是 null。 */
-  last: {
-    ran: boolean
-    skip?: AutoPushResponse['skip']
-    failures: number
-    problem?: string
-    startedAt?: number
-    finishedAt?: number
-    /** 推上去几条会话（只给计数：整份结果由发起那一轮的界面自己拿）。 */
-    pushedCount: number
-    bytesOut: number
-    attachmentOut?: { uploaded: number; skipped: number; bytes: number; missing: number }
-    problems: string[]
-  } | null
+  last: AutoPushLast | null
+}
+
+/** 上一轮自动推送的计数。 */
+export interface AutoPushLast {
+  ran: boolean
+  skip?: AutoPushResponse['skip']
+  failures: number
+  problem?: string
+  startedAt?: number
+  finishedAt?: number
+  /** 推上去几条会话（只给计数）。 */
+  pushedCount: number
+  bytesOut: number
+  attachmentOut?: { uploaded: number; skipped: number; bytes: number; missing: number }
+  problems: string[]
 }
 
 /**
- * 问一句"后台那一轮自动推送跑到哪了"。
+ * 面板事件流上的一条事件（`GET /panel/events`）。
  *
- * 只读：宿主那侧不扫库、不碰远端、不改任何状态。界面进同步页时先问这一次；说"在跑"才去开
- * `watchAutoPush()` 那条长连接。
- *
- * @returns 正在跑的那一轮与上一轮的结论。
+ * 这一页打开期间只有这一条连接：清单、落地那一趟、自动推送那一轮、以及"库变了"的通知都从它来。
+ * 形状与 `src/web.ts` 的 `panelEvents()` 一一对应，两处一起改。
  */
-export async function fetchAutoPushStatus(): Promise<AutoPushStatusResponse> {
-  return asJson<AutoPushStatusResponse>(
-    await fetch(`${API_PREFIX}/auto-push?mode=status`, { headers: { accept: 'application/json' } }),
-  )
-}
-
-/** 上一轮自动推送的计数（`mode=status` 与 `mode=watch` 给的是同一份形状）。 */
-export type AutoPushLast = NonNullable<AutoPushStatusResponse['last']>
-
-/** `mode=watch` 推过来的事件。 */
-export type AutoPushWatchEvent =
-  | { type: 'state'; running: AutoPushStatusResponse['running']; last: AutoPushLast | null }
+export type PanelEvent =
+  /** 宿主事实（与 `GET /meta` 同一份取值）：连上就发，页头不必等扫库。 */
+  | ({ type: 'ready' } & { meta: MetaResponse })
+  /** 扫库那一段的进度。 */
   | { type: 'progress'; progress: ProgressEvent }
-  | { type: 'done'; last: AutoPushLast }
+  /** 整库清单（与 `GET /state` 同一份取值）。 */
+  | ({ type: 'snapshot' } & { state: StateResponse })
+  /** 落地那一趟现在什么样。 */
+  | ({ type: 'sync' } & SyncRoundStatus)
+  /** 自动推送那一轮现在什么样。 */
+  | ({ type: 'auto-push' } & AutoPushRoundStatus)
+  /** 本机的会话库被改过了：重连一次要一份新清单。 */
+  | { type: 'stale'; what: string }
+  /** 扫库那一步失败了（之后连接结束）。 */
+  | { type: 'error'; error: string }
+  /** 心跳。 */
   | { type: 'ping' }
 
-/** 把 `mode=watch` 的一条事件体解释成事件；认不出的（宿主比界面新）当没看见。 */
-function parseWatchEvent(data: string): AutoPushWatchEvent | null {
+/** 把流上的一条事件体解释成事件；认不出的（宿主比界面新）当没看见。 */
+function parsePanelEvent(data: string): PanelEvent | null {
   let parsed: unknown
   try {
     parsed = JSON.parse(data)
@@ -777,17 +745,31 @@ function parseWatchEvent(data: string): AutoPushWatchEvent | null {
   }
   if (typeof parsed !== 'object' || parsed === null) return null
   const record = parsed as Record<string, unknown>
-  switch (record['type']) {
-    case 'state':
-      return {
-        type: 'state',
-        running: (record['running'] ?? null) as AutoPushStatusResponse['running'],
-        last: (record['last'] ?? null) as AutoPushLast | null,
-      }
+  const type = record['type']
+  if (typeof type !== 'string') return null
+  switch (type) {
+    case 'ready':
+      return { type: 'ready', meta: record['meta'] as MetaResponse }
     case 'progress':
       return { type: 'progress', progress: record['progress'] as ProgressEvent }
-    case 'done':
-      return { type: 'done', last: record['last'] as AutoPushLast }
+    case 'snapshot':
+      return { type: 'snapshot', state: record['state'] as StateResponse }
+    case 'sync':
+      return {
+        type: 'sync',
+        applying: (record['applying'] ?? null) as SyncRoundStatus['applying'],
+        last: (record['last'] ?? null) as SyncRoundStatus['last'],
+      }
+    case 'auto-push':
+      return {
+        type: 'auto-push',
+        running: (record['running'] ?? null) as AutoPushRoundStatus['running'],
+        last: (record['last'] ?? null) as AutoPushLast | null,
+      }
+    case 'stale':
+      return { type: 'stale', what: String(record['what'] ?? '') }
+    case 'error':
+      return { type: 'error', error: String(record['error'] ?? '') }
     case 'ping':
       return { type: 'ping' }
     default:
@@ -796,46 +778,44 @@ function parseWatchEvent(data: string): AutoPushWatchEvent | null {
 }
 
 /**
- * 订阅后台那一轮的进展：宿主把每一帧进度推过来，跑完再推一条结论。
+ * 开一条面板事件流（`GET /panel/events`）。
  *
- * 什么时候开：`fetchAutoPushStatus()` 说"在跑"才开这一条；不开着的时候不占长连接。开头会先收到一条
- * `state`（现在跑到哪 + 上一轮结论），之后是 `progress`，跑完是 `done`——从"问状态"到"流接上"之间
- * 那一轮可能正好结束，`state` 里的 `running === null` 就是收尾的信号。
- *
- * 断了（宿主重启、代理掐了、页面关了）：这里**不自己重连**，只把 `onEnd` 叫一下，让调用方按它自己的
- * 节奏再开一条（见 `SyncPanel` 的轮询兜底）。
+ * 什么时候开、什么时候关由 [panelEvents.ts](./logic/panelEvents.ts) 说了算（那一份管重连与看门狗）；
+ * 这里只负责把字节读成一帧帧事件。
  *
  * @param onEvent 收到一条事件调一次。
- * @param onEnd 这条流结束了（不管是正常收尾还是断了）。
- * @returns 停止订阅（页面卸掉时调）。
+ * @param onEnd 这条流结束了（正常收尾、断了、或者被 `stop()` 关掉）。
+ * @returns 停止订阅。
  */
-export function watchAutoPush(
-  onEvent: (event: AutoPushWatchEvent) => void,
+export function openPanelStream(
+  onEvent: (event: PanelEvent) => void,
   onEnd?: () => void,
 ): () => void {
   const controller = new AbortController()
   void (async () => {
     try {
-      const response = await fetch(`${API_PREFIX}/auto-push?mode=watch`, {
+      const response = await fetch(`${API_PREFIX}/panel/events`, {
         headers: { accept: 'text/event-stream' },
         signal: controller.signal,
       })
       const contentType = response.headers.get('content-type') ?? ''
-      if (!response.ok || !contentType.includes('text/event-stream')) return
+      if (!response.ok || !contentType.includes('text/event-stream')) {
+        throw new Error(`面板事件流没开起来（HTTP ${response.status}）`)
+      }
       const reader = response.body?.getReader()
-      if (reader === undefined) return
+      if (reader === undefined) throw new Error('这次读不到面板事件流（浏览器不支持流式响应）')
       const frames = new SseFrames()
       const decoder = new TextDecoder()
       for (;;) {
         const { value, done } = await reader.read()
         if (done) break
         for (const data of frames.push(decoder.decode(value, { stream: true }))) {
-          const event = parseWatchEvent(data)
+          const event = parsePanelEvent(data)
           if (event !== null) onEvent(event)
         }
       }
     } catch {
-      // 断了：交给 onEnd，调用方自己决定什么时候再接。
+      // 断了（宿主重启、代理掐了、页面走了）：交给 onEnd，重连的节奏由上面那一层定。
     } finally {
       onEnd?.()
     }
