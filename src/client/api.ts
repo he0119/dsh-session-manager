@@ -610,6 +610,38 @@ export async function applySync(
   return readEventStream<SyncResponse>(response, onProgress, '同步')
 }
 
+/**
+ * `GET /sync?mode=status` 的响应：后台有没有一趟落地在跑、刚才那一趟成没成。
+ *
+ * 为什么要这条只读端点：落地这趟可以**关掉窗口继续跑**（见 [syncJob.ts](./logic/syncJob.ts)），于是它
+ * 会比发起它的那个页面活得久。刷新之后的页面、另一个页签都靠这一份知道"刚才那一趟还在跑 / 刚跑完"，
+ * 而不是点下去才吃一个 409。
+ */
+export interface SyncStatusResponse {
+  /** 正在跑的那一趟；`null` = 没有。`progress` 是宿主记下的最后一条进度事件。 */
+  applying: { startedAt: number; progress: ProgressEvent | null } | null
+  /** 最近一次落地的结论（宿主进程内存里只留一份，重启就没了）。 */
+  last: {
+    startedAt: number
+    finishedAt: number
+    ok: boolean
+    pulled: number
+    pushed: number
+    error?: string
+  } | null
+}
+
+/**
+ * 问一次后台同步的状态。只读：不扫库、不碰远端。
+ *
+ * @returns 正在跑的那一趟与最近一次落地的结论。
+ */
+export async function fetchSyncStatus(): Promise<SyncStatusResponse> {
+  return asJson<SyncStatusResponse>(
+    await fetch(`${API_PREFIX}/sync?mode=status`, { headers: { accept: 'application/json' } }),
+  )
+}
+
 /** `GET|POST /sync?mode=test` 的响应：一次只读探测的结论（判定码在宿主侧，句子在界面）。 */
 export interface SyncTestResponse {
   mode: 'test'

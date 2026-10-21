@@ -2119,6 +2119,101 @@ test('POST /sync：裁决随预演与落地一起走，keep-remote 落选的那�
   }
 })
 
+test('GET /sync?mode=status：后台有没有一趟在跑、刚才那一趟成没成', async () => {
+  const sandbox = makeSandbox('web-sync-status')
+  writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000)
+  const fixture = await startDavFixture({ root: join(sandbox.base, 'dav') })
+  const dav = createDavClient({ baseUrl: fixture.url })
+  const foreign = join(sandbox.base, 'foreign')
+  mkdirSync(foreign, { recursive: true })
+  const foreignRoot = join(sandbox.base, 'foreign-sessions')
+  try {
+    writeSession(foreignRoot, 'session-remote', foreign, 1500, { title: '远端那条' })
+    await putRemoteSession(dav, 'robot-b', {
+      id: 'session-remote',
+      cwd: foreign,
+      createdAt: 1500,
+      title: '远端那条',
+      logPath: join(sessionDir(foreignRoot, foreign, 'session-remote'), 'session.v4.jsonl.zstd'),
+      logName: 'session.v4.jsonl.zstd',
+      logVersion: 4,
+    })
+
+    /*
+     * 远端每次往返都慢 60ms：跑着的那一段才来得及被 state 端点看见。
+     *
+     * 这不是为了让测试稳定而在放水——"后台还在跑"这个状态本来就是**跑着的时候**才有的，一次几百毫秒
+     * 就结束的落地根本来不及展示它。真机上整库同步几十秒，这个窗口到处都是。
+     */
+    const slow: typeof dav = {
+      ...dav,
+      list: async (collection) => {
+        await new Promise((resolve) => setTimeout(resolve, 60))
+        return dav.list(collection)
+      },
+      get: async (path) => {
+        await new Promise((resolve) => setTimeout(resolve, 60))
+        return dav.get(path)
+      },
+    }
+    const handlers = createApiHandlers(
+      deps(sandbox, {
+        sync: async () => ({
+          settings: { url: fixture.url, machineId: 'robot-a', mapping: { [foreign]: CWD_A } },
+          dav: slow,
+        }),
+      }),
+    )
+
+    // 还没跑过任何一趟：如实说"没有"，而不是编一个空结论。
+    const before = fakeRes()
+    await handlers['GET|POST /sync']!(fakeReq('GET', `${API_PREFIX}/sync?mode=status`), before.res)
+    assert.equal(before.captured.status, 200)
+    assert.equal(before.captured.headers['content-type'], 'application/json; charset=utf-8', '这是一次性 JSON，不是事件流')
+    const idle = JSON.parse(before.captured.body.toString('utf8')) as Record<string, unknown>
+    assert.equal(idle['applying'], null)
+    assert.equal(idle['last'], null)
+
+    // 开一趟落地，**不等它**：这一趟在后台跑，紧接着问状态。
+    const applied = fakeRes()
+    const running = handlers['GET|POST /sync']!(fakeReq('POST', `${API_PREFIX}/sync?mode=apply`), applied.res)
+    await new Promise((resolve) => setTimeout(resolve, 40))
+
+    const during = fakeRes()
+    await handlers['GET|POST /sync']!(fakeReq('GET', `${API_PREFIX}/sync?mode=status`), during.res)
+    const busy = JSON.parse(during.captured.body.toString('utf8')) as {
+      applying: { startedAt: number; progress: ProgressEvent | null } | null
+    }
+    assert.notEqual(busy.applying, null, '跑着的时候说在跑（刷新之后的页面据此把横幅摆出来）')
+    assert.equal(typeof busy.applying?.startedAt, 'number')
+    assert.ok(
+      busy.applying?.progress === null || typeof busy.applying?.progress?.phase === 'string',
+      '带上宿主记下的最后一条进度（认领来的那一趟据此画条）',
+    )
+
+    // 第二趟落地被拒：两趟一起跑会互相踩（同一份预演缓存、同一个远端、同一条本机日志）。
+    const second = fakeRes()
+    await handlers['GET|POST /sync']!(fakeReq('POST', `${API_PREFIX}/sync?mode=apply`), second.res)
+    assert.equal(second.captured.status, 409, '上一轮还在跑就不开第二趟')
+    assert.equal(second.captured.headers['content-type'], 'application/json; charset=utf-8')
+    assert.match(String(payload(second.captured)['error']), /还在跑/)
+
+    await running
+    const after = fakeRes()
+    await handlers['GET|POST /sync']!(fakeReq('GET', `${API_PREFIX}/sync?mode=status`), after.res)
+    const done = JSON.parse(after.captured.body.toString('utf8')) as {
+      applying: unknown
+      last: { ok: boolean; pulled: number; pushed: number } | null
+    }
+    assert.equal(done.applying, null, '跑完之后就不再说在跑')
+    assert.equal(done.last?.ok, true)
+    assert.equal(done.last?.pulled, 1, '留下"搬了几条"给刷新之后的页面看')
+  } finally {
+    await fixture.close()
+    rmSync(sandbox.base, { recursive: true, force: true })
+  }
+})
+
 test('POST /sync?mode=apply：带着预演给的 planId 就照着那份计划落地（一份预演只够落地一次）', async () => {
   const sandbox = makeSandbox('web-sync-preview')
   writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000)

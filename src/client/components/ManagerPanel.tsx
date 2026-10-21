@@ -28,6 +28,7 @@ import { fetchMeta, fetchState, type MetaResponse, type ProgressEvent, type Stat
 import { PLUGIN_COMMIT, PLUGIN_DIRTY, PLUGIN_VERSION } from '../build.ts'
 import type { DirectoryApi } from '../directory.ts'
 import type { Translate } from '../logic/locales.ts'
+import { syncJob, type SyncJobSnapshot } from '../logic/syncJob.ts'
 import { versionCommit, versionLabel, versionTag } from '../logic/version.ts'
 import { BackupPanel } from './BackupPanel.tsx'
 import { HelpPanel } from './HelpPanel.tsx'
@@ -73,6 +74,42 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
   const [panel, setPanel] = React.useState<PanelKey>('manage')
   const [busy, setBusy] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
+  /**
+   * 后台那一趟同步跑到哪儿了（见 logic/syncJob.ts）。
+   *
+   * 为什么放在**页面**这一级而不是同步分页里：那一趟的生命周期比任何一页都长——用户可能切到别的分页、
+   * 或者把整个设置窗口关掉，回来时默认停在「会话」那一页。状态挂在模块级，这里只是读它并把横幅画在
+   * 页签上面，所以"关掉再回来还看得见"是它天然的样子，不是特例。
+   */
+  const [job, setJob] = React.useState<SyncJobSnapshot>(syncJob.snapshot())
+  React.useEffect(() => syncJob.subscribe(setJob), [])
+  /**
+   * 这一页刚打开时问一次宿主：后台是不是还有一趟在跑。
+   *
+   * 刷新整个页面之后这一份内存是新的，状态只能从宿主那里认领（`GET /sync?mode=status`）。问不到
+   * （没配同步）就当没有——那本来也不会有活儿在跑。
+   */
+  React.useEffect(() => syncJob.refresh(), [])
+  /** 后台那一趟的结论一句话（页面顶上那一行）；没有结论时 `null`。 */
+  const jobLine = ((): { ok: boolean; text: string } | null => {
+    const done = job.done
+    if (done === null) return null
+    if (!done.ok) return { ok: false, text: t('sync.background.failed', { reason: done.error ?? '' }) }
+    // 宿主那边连"搬了几条"都没留下（进程重启过）：只说结束，不编一个 0。
+    const counts =
+      done.result === undefined && done.adopted === undefined
+        ? null
+        : {
+            pulled: done.result?.pulled.length ?? done.adopted?.pulled ?? 0,
+            pushed: done.result?.pushed.length ?? done.adopted?.pushed ?? 0,
+          }
+    return { ok: true, text: counts === null ? t('sync.background.donePlain') : t('sync.background.done', counts) }
+  })()
+  /**
+   * 那一行要不要摆：同步分页会自己说这一趟的结论（成功说细的那几句、失败说原因），由它说时这里就不
+   * 重复；其余情况——用户在别的分页，或者这一趟是别处发起、同步分页拿不到结论——由这里说。
+   */
+  const showJobLine = jobLine !== null && (panel !== 'sync' || job.done?.adopted !== undefined)
 
   const load = React.useCallback(async (): Promise<void> => {
     setBusy(true)
@@ -109,6 +146,17 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
     loaded.current = true
     void load()
   }, [load])
+
+  /** 上一份已经据此重读过库的结论：同一份别每渲染一次就重读一遍。 */
+  const freshAfter = React.useRef<SyncJobSnapshot['done']>(null)
+  React.useEffect(() => {
+    const done = job.done
+    if (done === null || freshAfter.current === done) return
+    freshAfter.current = done
+    // 拉取落到本机库里了：会话清单与工作区归属都得重读（推的那一侧不改本机任何东西）。
+    const pulled = done.result?.pulled.length ?? done.adopted?.pulled ?? 0
+    if (pulled > 0) void load()
+  }, [job, load])
 
   const sessions = state?.sessions.length ?? 0
   const workspaces = state?.workspaces.length ?? 0
@@ -148,6 +196,32 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
         「读取中…」。摆在页头下面、页签上面——它是这一页自己的事，不属于任何一个分页。
       */}
       {loadProgress !== undefined && <ProgressBlock t={t} progress={loadProgress} />}
+
+      {/*
+        后台同步：跑着的时候是进度条（关掉窗口、切分页都还在），跑完留一行结论直到用户关掉它。
+        摆在页签**上面**是因为它不属于任何一个分页——与「读库的进度」同一个位置、同一条理由。
+      */}
+      {job.running && (
+        <div className="dsm-banner dsm-progressBanner">
+          <span className="dsm-hint">
+            {t(job.adopted ? 'sync.background.adopted' : 'sync.background.running')}
+          </span>
+          {job.progress === null ? null : <ProgressBlock t={t} progress={job.progress} />}
+          {job.adopted ? null : <span className="dsm-hint">{t('sync.background.hint')}</span>}
+        </div>
+      )}
+      {showJobLine && jobLine !== null && (
+        <p className={jobLine.ok ? 'dsm-banner dsm-ok' : 'dsm-banner dsm-error'}>
+          <span>{jobLine.text}</span>
+          <span className="dsm-spacer" />
+          <Button variant="outline" size="sm" onClick={() => setPanel('sync')}>
+            {t('sync.background.open')}
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => syncJob.dismiss()}>
+            {t('close')}
+          </Button>
+        </p>
+      )}
 
       {error !== null && (
         <p className="dsm-banner dsm-error">
