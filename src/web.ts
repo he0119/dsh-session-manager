@@ -836,7 +836,7 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
    * 它替掉的是原来四件事：打开页面时的 `GET /meta` + `GET /state` 两个请求、落地那一趟的
    * `GET /sync?mode=status` 轮询、以及自动推送的 `GET /auto-push?mode=status` 轮询 +
    * `mode=watch` 那条"在跑才开"的流。四处各问一次的时候，问题不只是省几个请求——**没在听的那些
-   * 事永远看不到**：定时器发起的一轮、另一个页签点的同步，页面都得靠"进页面时问一次"去撞。
+   * 事永远看不到**：后台自己跑的一轮、另一个页签点的同步，页面都得靠"进页面时问一次"去撞。
    *
    * 事件（每条都是一行 JSON，`type` 说明是哪一种）：
    *
