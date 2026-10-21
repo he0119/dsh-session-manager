@@ -21,14 +21,13 @@
  * `AutoPushOutcome.skip` 可能出现的全部值（顺序与 `src/sync.ts` 的 `AutoPushSkip` 一致）。
  *
  * - `disabled`：这个宿主/profile 没开自动推送；
- * - `interval`：兜底那一轮还没到点（距离上一次真跑不到间隔）；
  * - `busy`：上一轮还在跑（这一轮直接让开，不排队）；
  * - `idle`：有得算但一条都不用推。
  *
- * **没有"正在攒连发"这一项**：静默窗口只推迟推送，不会让任何一次询问得到"没跑"（`touched()` 与手点
- * 那一次都走 `force`）。见 `src/sync.ts` 里 `AutoPushSkip` 那段。
+ * **没有"正在攒连发"这一项**：静默窗口只推迟推送，不会让任何一次询问得到"没跑"。见 `src/sync.ts` 里
+ * `AutoPushSkip` 那段。
  */
-export const AUTO_PUSH_SKIP_CODES = ['disabled', 'interval', 'busy', 'idle'] as const
+export const AUTO_PUSH_SKIP_CODES = ['disabled', 'busy', 'idle'] as const
 
 /** 清单里的一项。 */
 export type AutoPushSkipCode = (typeof AUTO_PUSH_SKIP_CODES)[number]

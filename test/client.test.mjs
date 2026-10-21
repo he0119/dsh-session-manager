@@ -5547,13 +5547,13 @@ test('客户端产物：同步设置的「测试连接」挨着「保存」，�
   assert.ok(button !== undefined, '按钮是个真的 button')
 })
 
-test('客户端产物：自动推送关着时收起间隔那一栏（开着才画），两态都留着值', { skip }, async () => {
+test('客户端产物：自动推送只有开关那一行，没有间隔那一栏', { skip }, async () => {
   /*
-   * 收起而不是禁用，是刻意的：禁用会留下一栏灰掉的输入框，用户看不清写了什么、还要去找它为什么灰；
-   * 而关着的时候那一栏根本没有意义（宿主不按它走）。
+   * 兜底定时器删掉之后，那一页只剩一个开关——"隔多久跑一次"这个旋钮跟着一起没了。这一条钉住
+   * **两态都没有间隔那一栏**：关着时看不到（宿主不按它走），开着时同样看不到（那个字段已经不存在了）。
    *
-   * 两态各渲染一遍，核的是**同一份草稿**下画出来的东西不同：关着只有开关那一行、开着多出间隔那一栏。
-   * 反事实：去掉那个条件（无条件画间隔那一栏），"关着时看不到"这一条立刻红。
+   * 反事实：把间隔那一栏（`sync.field.autoPushInterval` 那个 `Field`）加回表单，"开着也看不到"这一条
+   * 立刻红——这正是这次删改最容易被顺手带回来的东西。
    */
   const makeMounted = (autoPush) => {
     const state = {
@@ -5591,39 +5591,22 @@ test('客户端产物：自动推送关着时收起间隔那一栏（开着才�
     return { mounted, text }
   }
 
-  // 关着：看不到间隔那一栏，但开关那一行还在（不然用户没法打开它）。
-  const off = makeMounted(false)
-  assert.ok(off.text.includes('sync.field.autoPush'), '关着时开关那一行要在')
-  assert.ok(
-    !off.text.includes('sync.field.autoPushInterval'),
-    `关着时不该画间隔那一栏，实际文本里有：${off.text.filter((x) => String(x).includes('autoPushInterval')).join(' / ')}`,
-  )
-  assert.equal(
-    off.mounted.recorded.filter((n) => n.props?.['data-switch'] === 'true').length,
-    1,
-    '关着时开关本身还在（disabled 与否另说）',
-  )
-
-  // 开着：间隔那一栏出现，并且带着草稿里那个值。
-  const on = makeMounted(true)
-  assert.ok(on.text.includes('sync.field.autoPushInterval'), '开着时要画间隔那一栏')
-  assert.ok(on.text.includes('sync.field.autoPushIntervalHint'), '连它的说明一起画')
-  /*
-   * 间隔那一栏是个 `Field`（`label` 是并列的 span，不是 `aria-label`），所以按"包住它的那一格"找：
-   * `dsm-field` 里的标签是间隔那个键，里面有一个输入框。
-   */
-  const intervalField = on.mounted.recorded.find(
-    (n) =>
-      n.props?.className === 'dsm-field' &&
-      strings(n.props?.children).includes('sync.field.autoPushInterval'),
-  )
-  assert.ok(intervalField !== undefined, '间隔那一栏是个 Field')
-  const intervalInput = elements(intervalField).find((n) => n.type === 'input')
-  assert.ok(intervalInput !== undefined, '那一栏里有个输入框')
-  assert.ok(
-    intervalField.props.children.some((child) => child?.props?.value !== undefined),
-    '输入框接着草稿里那个值（收起只是不画，值没丢）',
-  )
+  for (const autoPush of [false, true]) {
+    const { mounted, text } = makeMounted(autoPush)
+    assert.ok(text.includes('sync.field.autoPush'), `autoPush=${String(autoPush)} 时开关那一行要在`)
+    assert.ok(text.includes('sync.field.autoPushHint'), `autoPush=${String(autoPush)} 时那一行的说明也要在`)
+    assert.ok(
+      !text.includes('sync.field.autoPushInterval'),
+      `autoPush=${String(autoPush)} 时不该有间隔那一栏，实际文本里有：${text
+        .filter((x) => String(x).includes('autoPushInterval'))
+        .join(' / ')}`,
+    )
+    assert.equal(
+      mounted.recorded.filter((n) => n.props?.['data-switch'] === 'true').length,
+      1,
+      `autoPush=${String(autoPush)} 时开关本身还在（两态都画，只是勾选态不同）`,
+    )
+  }
 })
 
 test('客户端产物：自动推送是个官方 Switch（不是手写勾选框），标题与说明在左、开关顶到右端', { skip }, async () => {

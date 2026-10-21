@@ -92,25 +92,21 @@ export function apply(ctx: Context, config: PluginConfigInput = {}): () => void 
   )
 
   /*
-   * 自动推送的节拍器：**每个宿主只造一个**，挂在插件生命周期上。
+   * 自动推送的调度器：**每个宿主只造一个**，挂在插件生命周期上。
    *
-   * 为什么不在每个请求里现造：节拍器手里有两份跨轮的状态（"上一次真跑是什么时候"与"连续失败几次"），
-   * 现造的话间隔闸永远算成"该跑了"——自动推送会退化成"每次有人打开页面就跑一轮"（那既不是自动，也
-   * 比自动更吵）。造它要解析配置与凭据，所以是异步的；`apply()` 必须保持同步（宿主会卸载 async apply
-   * 里 await 之后注册的东西），于是这里起一个自持的 promise，端点按需 await 它——`undefined` 表示
-   * 这个 profile 没配同步，界面据此说明而不是点一个没反应的按钮。
+   * 为什么不在每个请求里现造：调度器手里有跨轮的状态（"正跑着的是哪一轮"与"连续失败几次"），现造的话
+   * 每一轮都从零开始——上一轮还在跑时新的那一轮不会被挡下，界面上也接不上正在跑的进度。造它要解析
+   * 配置与凭据，所以是异步的；`apply()` 必须保持同步（宿主会卸载 async apply 里 await 之后注册的
+   * 东西），于是这里起一个自持的 promise，端点按需 await 它——`undefined` 表示这个 profile 没配同步，
+   * 界面据此说明而不是点一个没反应的按钮。
    *
-   * 配置改了不必重启：节拍器每次醒来现读一遍配置（见 `createAutoPushTimer()`）。
+   * 配置改了不必重启：每次事件来时现读一遍配置（见 `createAutoPushTimer()`）。
    */
   const autoPushPromise: Promise<AutoPushTimer | undefined> = resolveAutoPushRuntime(ctx, config, paths).then(
     (resolved) => {
       if (resolved === undefined) return undefined
       info(
-        `dsh-session-manager 自动推送已就绪：${
-          resolved.timer.enabled()
-            ? `写完一轮就推，兜底每 ${resolved.timer.intervalMs()} 毫秒`
-            : '当前关闭'
-        }（只推不拉）`,
+        `dsh-session-manager 自动推送已就绪：${resolved.timer.enabled() ? '写完一轮就推' : '当前关闭'}（只推不拉）`,
       )
       return resolved.timer
     },
@@ -121,13 +117,13 @@ export function apply(ctx: Context, config: PluginConfigInput = {}): () => void 
     },
   )
   /*
-   * 会话事件那一层：本机写完一轮就推（`attachAutoPushToSessions()`），定时器退成兜底。
+   * 会话事件那一层：本机写完一轮就推（`attachAutoPushToSessions()`）。这是自动推送**唯一**的触发源。
    *
-   * 两者都挂在同一个 `autoPushPromise` 上：节拍器要等配置与凭据解析完才存在，而事件可能在那之前就到
+   * 两者都挂在同一个 `autoPushPromise` 上：调度器要等配置与凭据解析完才存在，而事件可能在那之前就到
    * （用户刚打开页面就发了一轮）。所以这里同样"先拿着 promise"，到位之后再把监听接上——接晚了不会丢
-   * 那一轮，`turn/end` 之后还有兜底的定时器，而且用户接着写的下一轮马上就会触发。
+   * 这一轮，用户接着写的下一轮马上就会触发。
    *
-   * 卸载顺序是先摘监听、再停表：摘晚了会有事件在 `stop()` 之后进来（`touched()` 那时已被 `stopped`
+   * 卸载顺序是先摘监听、再停调度器：摘晚了会有事件在 `stop()` 之后进来（`touched()` 那时已被 `stopped`
    * 挡住，不会有事，但先摘更干净）。
    */
   const detachSessions: Promise<(() => void) | undefined> = autoPushPromise.then(
@@ -175,7 +171,7 @@ export function apply(ctx: Context, config: PluginConfigInput = {}): () => void 
       // WebDAV 同步：运行时按需造（每次请求重新解析密码引用），/state 只看非敏感的那几个字段。
       sync: () => syncRuntime(ctx, config),
       syncInfo: () => describeSyncConfig(config),
-      // 自动推送的节拍器（见上面那段）：界面靠它当场跑一轮、也靠它报"后台在跑吗"。
+      // 自动推送的调度器（见上面那段）：界面靠它当场跑一轮、也靠它报"后台在跑吗"。
       autoPush: () => autoPushPromise,
       // 界面把"本机路径"那一格换成项目身份（git remote）时读它；找不到身份就退回路径。
       repos,

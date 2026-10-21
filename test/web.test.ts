@@ -2752,15 +2752,14 @@ test('GET /panel/events：落地那一趟一起跑，进度与结论都推给面
   }
 })
 
-test('GET /panel/events：自动推送那一轮由节拍器发起时，进度也推给面板', async () => {
+test('GET /panel/events：自动推送那一轮由后台自己发起时，进度也推给面板', async () => {
   const sandbox = makeSandbox('web-panel-autopush')
   writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000)
   const subscribers: Array<(event: never) => void> = []
   const timer = {
     enabled: () => true,
-    intervalMs: () => 60_000,
     tick: async () => ({ ran: true, failures: 0 }) as never,
-    last: () => ({ enabled: true, intervalMs: 60_000 }),
+    last: () => ({ enabled: true }),
     status: () => ({
       running: { startedAt: 1_000, progress: { phase: 'push', done: 1, total: 2 } },
       last: undefined,
@@ -2781,7 +2780,7 @@ test('GET /panel/events：自动推送那一轮由节拍器发起时，进度也
   const pending = handlers['GET /panel/events']!(fakeReq('GET', `${API_PREFIX}/panel/events`), panel.res)
   await new Promise((resolve) => setImmediate(resolve))
   await new Promise((resolve) => setTimeout(resolve, 20))
-  assert.equal(subscribers.length, 1, '面板连上就订了节拍器的进度')
+  assert.equal(subscribers.length, 1, '面板连上就订了调度器的进度')
 
   // 开头那条说的是"现在正跑着第几条"（这一轮是别处发起的，页面进来就能接上）。
   const opened = events(panel.captured).find((event) => event['type'] === 'auto-push')
@@ -2812,7 +2811,7 @@ test('GET /panel/events：自动推送那一轮由节拍器发起时，进度也
 // ── 自动推送端点（只推不拉，点一次就是真跑）────────────────────────────────────
 
 /**
- * 一个假的节拍器：记下被怎么调用，并回一个给定的结论。
+ * 一个假的自动推送调度器：记下被怎么调用，并回一个给定的结论。
  *
  * `status` 由每个用例自己摆（面板流开头那条 `auto-push` 读的就是它）：缺省是"没在跑、也没跑过"。
  */
@@ -2821,20 +2820,19 @@ function fakeTimer(
   status: { running: unknown; last: unknown } = { running: null, last: undefined },
 ): {
   timer: NonNullable<Awaited<ReturnType<NonNullable<Parameters<typeof createApiHandlers>[0]['autoPush']>>>>
-  calls: Array<{ force?: boolean; onProgress?: unknown }>
+  calls: Array<{ onProgress?: unknown }>
   subscribers: Array<(event: never) => void>
 } {
-  const calls: Array<{ force?: boolean; onProgress?: unknown }> = []
+  const calls: Array<{ onProgress?: unknown }> = []
   const subscribers: Array<(event: never) => void> = []
   const timer = {
     enabled: () => true,
-    intervalMs: () => 300_000,
-    async tick(options?: { force?: boolean; onProgress?: (event: ProgressEvent) => void }) {
+    async tick(options?: { onProgress?: (event: ProgressEvent) => void }) {
       calls.push(options ?? {})
       options?.onProgress?.({ phase: 'push', done: 0, total: 1, id: 'session-a', label: 'a' })
       return outcome as never
     },
-    last: () => ({ enabled: true, intervalMs: 300_000 }),
+    last: () => ({ enabled: true }),
     status: () => status as never,
     // 谁订了进展都记下来，用例自己往里塞事件（面板流上的进度就是这么喂的）。
     subscribe: (listener: (event: never) => void) => {
@@ -2851,19 +2849,19 @@ function fakeTimer(
   return { timer, calls, subscribers }
 }
 
-test('GET /auto-push：这个宿主没有节拍器时 409，且没有一个字节被写', async () => {
+test('GET /auto-push：这个宿主没有自动推送的调度器时 409，且没有一个字节被写', async () => {
   const sandbox = makeSandbox('web-auto-push-off')
   writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000)
   const handlers = createApiHandlers(deps(sandbox))
   const { res, captured } = fakeRes()
   await handlers['GET /auto-push']!(fakeReq('GET', `${API_PREFIX}/auto-push`), res)
   assert.equal(captured.status, 409)
-  assert.match(String(payload(captured)['error']), /自动推送的节拍器/)
+  assert.match(String(payload(captured)['error']), /自动推送的调度器/)
   // 没配置同步时没有任何东西该被写。
   assert.deepEqual(readRegistry(sandbox.registryPath).tables.workspaces['ws-a']?.sessionIds, ['session-a'])
 })
 
-test('GET /auto-push：当场跑一轮，force 绕开速度闸，结果摊平着回来', async () => {
+test('GET /auto-push：当场跑一轮，结果摊平着回来', async () => {
   const sandbox = makeSandbox('web-auto-push-run')
   writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000)
   const { timer, calls } = fakeTimer({
@@ -2885,7 +2883,7 @@ test('GET /auto-push：当场跑一轮，force 绕开速度闸，结果摊平着
   const handlers = createApiHandlers(
     deps(sandbox, {
       autoPush: async () => timer,
-      syncInfo: () => ({ url: 'https://dav.example/', machineId: 'robot-a', mappings: 0, autoPush: { intervalMs: 300_000 } }),
+      syncInfo: () => ({ url: 'https://dav.example/', machineId: 'robot-a', mappings: 0, autoPush: { enabled: true } }),
     }),
   )
   const { res, captured } = fakeRes()
@@ -2906,17 +2904,16 @@ test('GET /auto-push：当场跑一轮，force 绕开速度闸，结果摊平着
   assert.equal(result['takesEffect'], 'immediate')
   assert.ok(result['plan'] !== undefined, '计划一起带回来（界面按需显示）')
 
-  // 用户手点的那一次必须 force：它不该被"距上次才过了 20 秒"挡住。
+  // 点一下就跑一轮，不带任何"要不要放行"的判断（那是这一层之上的事，见 runAutoPush()）。
   assert.equal(calls.length, 1)
-  assert.equal(calls[0]?.force, true)
   assert.equal(typeof calls[0]?.onProgress, 'function', '进度要接上（画在页面横幅上）')
 
   /*
-   * `what` 那一项由宿主侧的 `runAutoPush()` 盖（它知道自己在报哪条流），端点这一层只是把节拍器交出来
+   * `what` 那一项由宿主侧的 `runAutoPush()` 盖（它知道自己在报哪条流），端点这一层只是把调度器交出来
    * 的事件原样转成 SSE——所以这里核"转过去了"，`what` 的值由 test/auto-push.test.ts 钉。
    */
   const progress = progressOf(captured)
-  assert.ok(progress.length > 0, '节拍器报的进度要转成事件')
+  assert.ok(progress.length > 0, '调度器报的进度要转成事件')
   assert.equal(progress[0]?.['phase'], 'push')
   assert.equal(progress[0]?.['id'], 'session-a')
 })
@@ -2942,15 +2939,14 @@ test('GET /auto-push：没跑（skip）时不带计划也不带结果，只回�
   assert.equal(result['takesEffect'], undefined)
 })
 
-test('GET /auto-push：节拍器抛错时靠事件说，HTTP 状态早就是 200', async () => {
+test('GET /auto-push：调度器抛错时靠事件说，HTTP 状态早就是 200', async () => {
   const sandbox = makeSandbox('web-auto-push-fail')
   const timer = {
     enabled: () => true,
-    intervalMs: () => 300_000,
     tick: async () => {
       throw new Error('远端不认这套凭据')
     },
-    last: () => ({ enabled: true, intervalMs: 300_000, minIntervalMs: 60_000 }),
+    last: () => ({ enabled: true }),
     note: () => undefined,
     stop: () => undefined,
   }

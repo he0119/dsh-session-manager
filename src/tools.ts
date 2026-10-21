@@ -8,7 +8,6 @@
 import type { Context } from '@deepseek-ai/cordis'
 
 import {
-  DEFAULT_AUTO_PUSH_INTERVAL_MS,
   DEFAULT_PASSWORD_REF,
   autoPushSection,
   syncSection,
@@ -68,12 +67,12 @@ export interface SyncInfo {
   /** 映射条数；映射表本身在配置里，界面只报条数。 */
   mappings: number
   /**
-   * 自动推送的当前设置；**没开就是缺席**（不是 `enabled: false`）。
+   * 自动推送开着没有；**没开就是缺席**（不是 `enabled: false`）。
    *
-   * 界面靠它在卡片头下面补一句"自动推送已开：写完一轮就推，另外每 N 分钟兜底一次"。间隔在这里报出来的理由：它是拍平之后的
-   * 真值（抬过下限、填缺省），而界面草稿里那一栏留空时显示的是灰字——灰字要写对，得有人算出这个数。
+   * 界面靠它在卡片里补一句"自动推送已开：写完一轮就推"。只有这一个字段：什么时候推由事件决定，
+   * 没有"隔多久"这个旋钮了。
    */
-  autoPush?: { intervalMs: number }
+  autoPush?: { enabled: boolean }
 }
 
 /** 解析后的默认路径。 */
@@ -179,7 +178,7 @@ export function describeSyncConfig(config: PluginConfigInput = {}): SyncInfo | u
     mappings: Object.keys(sync.mapping ?? {}).length,
     // 只有真的开着才报：界面靠这一项决定"自动推送已开"那句话摆不摆，报一个 `enabled: false` 会让
     // 每个没开自动推送的人都多读一个字段。
-    ...(auto === undefined || !auto.enabled ? {} : { autoPush: { intervalMs: auto.intervalMs } }),
+    ...(auto === undefined || !auto.enabled ? {} : { autoPush: { enabled: true } }),
   }
 }
 
@@ -237,7 +236,7 @@ export async function syncRuntime(ctx: unknown, config: PluginConfigInput = {}):
   if (sync === undefined || typeof sync.url !== 'string' || sync.url.trim() === '') return undefined
   const password = await resolveSecret(ctx, passwordRefOf(sync))
   // 自动推送那一节跟着设置一起走：`runAutoPush()` 只读 `settings.autoPush`（它自己不去认配置），
-  // 于是"开没开 / 多久一次"只有一个来源，节拍器与那一轮本身读的是同一份值。
+  // 于是"开没开"只有一个来源，调度器与那一轮本身读的是同一份值。
   const autoPush = autoPushSection(sync)
   const settings: SyncSettings = {
     url: sync.url.trim().replace(/(.)\/+$/, '$1'),
@@ -260,13 +259,13 @@ export async function syncRuntime(ctx: unknown, config: PluginConfigInput = {}):
 }
 
 /**
- * 自动推送的运行时：一份 `SyncDeps` 加一个节拍器。
+ * 自动推送的运行时：一份 `SyncDeps` 加一个调度器。
  *
  * 与 `syncRuntime()` 分开而不是改它的返回值：那个函数是**界面与工具**那两条手动路共用的（它们要的
  * 只是"远端 + 设置"），而自动推送多要一份依赖集合与一个定时器——把它塞进同一个返回值，两条手动路就
  * 得各自忽略一半字段。
  *
- * 两处**必须**一起造的理由（也是这个函数存在的全部意义）：节拍器与那一轮读的配置、远端、库位置都得
+ * 两处**必须**一起造的理由（也是这个函数存在的全部意义）：调度器与那一轮读的配置、远端、库位置都得
  * 是同一份。少一处就会出现"界面上改了 URL，自动推送还在打旧地址"这种最难查的不一致。
  *
  * 依赖里那几样可选服务按**探测**收（与 `src/index.ts` 里 web 端点那一套同一个口径）：这个宿主没有
@@ -308,33 +307,24 @@ export async function resolveAutoPushRuntime(
     progressWhat: 'auto-push',
   }
   /*
-   * 节拍器持有"上一次真跑"与"连续失败几次"两份状态，所以它**每个宿主只造一个**（`src/index.ts` 造、
-   * 挂在插件生命周期上），不能每次请求现造——现造的话间隔闸永远算成"该跑了"，自动推送会变成
-   * "每次有人打开页面就跑一轮"。两份状态因此留在这个闭包里。
+   * 调度器持有"连续失败几次"这份状态（还有"正跑着的那一轮"），所以它**每个宿主只造一个**
+   * （`src/index.ts` 造、挂在插件生命周期上），不能每次请求现造。
    */
-  let lastRunAt: number | undefined
   let failures = 0
-  /** 每个宿主只造一个节拍器，所以配置那三个读法每次现读（`sync` 是活引用，改完立即生效）。 */
+  /** 每个宿主只造一个调度器，所以配置这个读法每次现读（`sync` 是活引用，改完立即生效）。 */
   const auto = (): AutoPushConfig | undefined => autoPushSection(syncSection(config))
   const timer = createAutoPushTimer({
-    clock: {
-      enabled: () => auto()?.enabled === true,
-      // 报的是**生效值**：`autoPushSection()` 已经把用户填的那个数抬到下限、缺席就填缺省。
-      intervalMs: () => auto()?.intervalMs ?? DEFAULT_AUTO_PUSH_INTERVAL_MS,
-    },
+    clock: { enabled: () => auto()?.enabled === true },
     run: async (options) => {
-      // 每次真跑之前重新解析一次设置：`sync` 是活引用，用户可能刚把 URL 或间隔改掉。
+      // 每次真跑之前重新解析一次设置：`sync` 是活引用，用户可能刚把 URL 或密码改掉。
       const fresh = await syncRuntime(ctx, config)
       const outcome = await runAutoPush(
         { ...deps, ...(fresh === undefined ? {} : { dav: fresh.dav, settings: fresh.settings }) },
         {
-          force: options?.force === true,
-          ...(lastRunAt === undefined ? {} : { lastRunAt }),
           failures,
           ...(options?.onProgress === undefined ? {} : { onProgress: options.onProgress }),
         },
       )
-      if (outcome.ran) lastRunAt = outcome.finishedAt ?? Date.now()
       failures = outcome.failures
       return outcome
     },
@@ -349,7 +339,7 @@ interface HostSessionsService {
 }
 
 /**
- * 把自动推送接到会话事件上：**本机刚写完一轮就推**（事件层），定时器退成兜底。
+ * 把自动推送接到会话事件上：**本机刚写完一轮就推**。这是自动推送唯一的触发源。
  *
  * 为什么不能直接把事件当成"该推了"：`turn/end` 到的时候**日志还没落盘**。宿主的
  * `dsh-session-checkpoint-policy` 只在模型请求、工具派发、agent 步进三处落盘，`turn/end` 不在其中；
@@ -362,14 +352,14 @@ interface HostSessionsService {
  * 必须走它（不要自己 `ctx.parallel('session/flush', …)`）。
  *
  * `flush` 失败**吞掉**：它只决定"这次读得到多新"，推的活儿本身没错。吞掉的代价是这一次可能推一份略旧
- * 的会话，下一轮或兜底的定时器会补上；而把异常抛进事件通道会打断宿主自己的派发，代价大得多。
+ * 的会话，等这条会话下一轮结束时补上；而把异常抛进事件通道会打断宿主自己的派发，代价大得多。
  *
  * `sessions` 按**可选服务**收（`optionalService()`），不进 `inject`：没有会话服务的 profile（纯工具
  * 那类前端）照旧只有工具，插件不该因为少一个服务就整个起不来。拿不到服务时返回一个空卸载函数——
- * 事件层缺席，兜底的定时器仍然工作。
+ * 那时自动推送不会自己跑，只剩界面那枚「立即推送一次」（它在日志里说一句，见 `src/index.ts`）。
  *
  * @param ctx 宿主上下文。
- * @param timer 已经造好的节拍器（`resolveAutoPushRuntime()` 的那个）。
+ * @param timer 已经造好的调度器（`resolveAutoPushRuntime()` 的那个）。
  * @param onProblem 冲盘失败时记一笔（宿主日志）；不传就静默。
  * @returns 卸载函数：摘掉监听（卸载时先调它，再 `timer.stop()`）。
  */

@@ -9,7 +9,7 @@
 //     与"本机不变"两组断言一起红；
 //   - 把 `narrowToPushOnly()` 里 `code === 'identical'` 那个例外去掉 → "内容一致那几条留着"红；
 //   - 把 `runAutoPush()` 里的 `pushOnly` 传参去掉 → "不落任何本机会话"红；
-//   - 把 `runAutoPush()` 里那个速度闸去掉 → "没到间隔就不跑"红；
+//   - 把 `touched()` 里的静默窗口改成立刻推 → "窗口没到之前不推"红；
 //   - 把 `runAutoPush()` 里 `idle` 那条早退去掉 → "没有可推的就不写索引"红。
 import assert from 'node:assert/strict'
 import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
@@ -18,7 +18,7 @@ import test from 'node:test'
 
 import { decompress } from 'fzstd'
 
-import { DEFAULT_AUTO_PUSH_INTERVAL_MS, MIN_AUTO_PUSH_INTERVAL_MS, autoPushSection } from '../src/config.ts'
+import { autoPushSection } from '../src/config.ts'
 import { createDavClient } from '../src/dav.ts'
 import { scanAll, type DiscoveredSession } from '../src/discovery.ts'
 import { sessionDir } from '../src/paths.ts'
@@ -364,7 +364,7 @@ test('planSync(不带 pushOnly)：两个方向照旧，一个字节都没变', (
 
 /** 一份"这一轮该怎么算"。`enabled` 缺省 true。 */
 function autoSettings(machine: Machine, overrides: Partial<SyncSettings['autoPush']> = {}): SyncSettings {
-  return settings(machine, { autoPush: { enabled: true, intervalMs: 300_000, ...overrides } })
+  return settings(machine, { autoPush: { enabled: true, ...overrides } })
 }
 
 test('runAutoPush：没开自动推送就什么都不做', async () => {
@@ -373,7 +373,7 @@ test('runAutoPush：没开自动推送就什么都不做', async () => {
   try {
     writeSession(machine, 'only-local', 1000)
     const dav = createDavClient({ baseUrl: fixture.url })
-    const outcome = await runAutoPush(depsOf(machine, dav, settings(machine, { autoPush: { enabled: false, intervalMs: 300_000 } })))
+    const outcome = await runAutoPush(depsOf(machine, dav, settings(machine, { autoPush: { enabled: false } })))
     assert.equal(outcome.ran, false)
     assert.equal(outcome.skip, 'disabled')
     assert.equal(outcome.failures, 0)
@@ -383,7 +383,7 @@ test('runAutoPush：没开自动推送就什么都不做', async () => {
   }
 })
 
-test('runAutoPush：没到间隔就不跑（force 能绕过去）', async () => {
+test('runAutoPush：没有"间隔未到"这回事——叫它就跑', async () => {
   const machine = makeMachine('interval')
   const fixture = await startDavFixture({ root: join(machine.base, 'dav') })
   try {
@@ -392,12 +392,8 @@ test('runAutoPush：没到间隔就不跑（force 能绕过去）', async () => 
     const now = 1_000_000
     const deps = depsOf(machine, dav, autoSettings(machine))
 
-    const early = await runAutoPush(deps, { lastRunAt: now - 10_000, now: () => now })
-    assert.equal(early.ran, false)
-    assert.equal(early.skip, 'interval', '距上次真跑才 10 秒，远不到 5 分钟')
-
-    const forced = await runAutoPush(deps, { lastRunAt: now - 10_000, now: () => now, force: true })
-    assert.equal(forced.ran, true, 'force = 用户手点的那一次，不该被间隔挡住')
+    const forced = await runAutoPush(deps, { now: () => now })
+    assert.equal(forced.ran, true, '没有"距上次才过了几秒"这道闸：叫它就跑')
     assert.deepEqual(
       forced.outcome?.pushed.map((entry) => entry.id),
       ['only-local'],
@@ -425,7 +421,7 @@ test('runAutoPush：只推不拉——远端独有的那条不被拉进来，本
     const mineDirExistedBefore = sessionThere(machine, 'theirs')
 
     const deps = depsOf(machine, createDavClient({ baseUrl: fixture.url }), autoSettings(machine))
-    const outcome = await runAutoPush(deps, { force: true })
+    const outcome = await runAutoPush(deps)
     assert.equal(outcome.ran, true)
     assert.deepEqual(
       outcome.outcome?.pulled,
@@ -473,7 +469,7 @@ test('runAutoPush：远端更新、本机落后的那条——本机内容原地
     const backupRoot = join(machine.base, 'backups')
     const dav = createDavClient({ baseUrl: fixture.url })
 
-    const outcome = await runAutoPush(depsOf(machine, dav, autoSettings(machine)), { force: true })
+    const outcome = await runAutoPush(depsOf(machine, dav, autoSettings(machine)))
 
     assert.equal(outcome.ran, true)
     assert.equal(sessionBytes(machine, 'shared'), before, '远端领先也不能动本机那份：只推这条路不覆盖')
@@ -512,7 +508,7 @@ test('runAutoPush：本机删掉的会话从自己那格索引里撤下来（即
     const dav = createDavClient({ baseUrl: fixture.url })
 
     // 第一次：两条都推上去。
-    const first = await runAutoPush(depsOf(machine, dav, autoSettings(machine)), { force: true })
+    const first = await runAutoPush(depsOf(machine, dav, autoSettings(machine)))
     assert.equal(first.ran, true)
     assert.deepEqual([...(first.outcome?.pushed ?? [])].map((entry) => entry.id).sort(), ['deleted', 'kept'])
 
@@ -524,7 +520,7 @@ test('runAutoPush：本机删掉的会话从自己那格索引里撤下来（即
 
     // 本机删掉一条，再跑一轮：这一轮"一条都不推"，但索引必须跟着收窄。
     rmSync(sessionDir(machine.sessionsRoot, machine.cwd, 'deleted'), { recursive: true, force: true })
-    const second = await runAutoPush(depsOf(machine, dav, autoSettings(machine)), { force: true })
+    const second = await runAutoPush(depsOf(machine, dav, autoSettings(machine)))
     assert.equal(second.ran, true)
     assert.equal(
       second.skip,
@@ -552,10 +548,10 @@ test('runAutoPush：本机删掉的会话也要收走索引记录，即使这一
     writeSession(machine, 'a', 1000)
     writeSession(machine, 'b', 2000)
     const dav = createDavClient({ baseUrl: fixture.url })
-    await runAutoPush(depsOf(machine, dav, autoSettings(machine)), { force: true })
+    await runAutoPush(depsOf(machine, dav, autoSettings(machine)))
 
     rmSync(sessionDir(machine.sessionsRoot, machine.cwd, 'b'), { recursive: true, force: true })
-    const second = await runAutoPush(depsOf(machine, dav, autoSettings(machine)), { force: true })
+    const second = await runAutoPush(depsOf(machine, dav, autoSettings(machine)))
     assert.equal(second.ran, true)
     assert.equal(second.skip, undefined, '本机少了一条 → 索引要收尾，不能算 idle')
     assert.equal(second.outcome?.indexWritten, true, '索引这一次必须真的写上去')
@@ -576,12 +572,12 @@ test('runAutoPush：真的没得推时连索引都不写（idle）', async () =>
   try {
     writeSession(machine, 'only', 1000)
     const dav = createDavClient({ baseUrl: fixture.url })
-    await runAutoPush(depsOf(machine, dav, autoSettings(machine)), { force: true })
+    await runAutoPush(depsOf(machine, dav, autoSettings(machine)))
 
     // 把远端那份索引的 mtime 记下来，再跑一轮"什么都没变"的。
     const indexUrl = `${fixture.url}/${SYNC_NAMESPACE_DIR}/robot-a/${SYNC_INDEX_FILE}`
     const before = await (await fetch(indexUrl)).text()
-    const second = await runAutoPush(depsOf(machine, dav, autoSettings(machine)), { force: true })
+    const second = await runAutoPush(depsOf(machine, dav, autoSettings(machine)))
     const after = await (await fetch(indexUrl)).text()
 
     assert.equal(second.ran, true)
@@ -605,7 +601,7 @@ test('runAutoPush：连不上远端时记一笔失败，不把错抛出来', asy
      * 要紧的是 `runAutoPush()` 自己不许抛：后台任务抛出去没人接。
      */
     const dav = createDavClient({ baseUrl: 'http://127.0.0.1:9/nowhere', timeoutMs: 500 })
-    const outcome = await runAutoPush(depsOf(machine, dav, autoSettings(machine)), { force: true })
+    const outcome = await runAutoPush(depsOf(machine, dav, autoSettings(machine)))
     assert.equal(outcome.ran, true)
     assert.equal(outcome.failures, 1, '有 problems → 连续失败计数 +1')
     assert.ok(outcome.problem !== undefined && outcome.problem !== '', '要把原因留下一句')
@@ -620,10 +616,7 @@ test('runAutoPush：跑成功一次就把连续失败清零', async () => {
   try {
     writeSession(machine, 'only', 1000)
     const dav = createDavClient({ baseUrl: fixture.url })
-    const outcome = await runAutoPush(depsOf(machine, dav, autoSettings(machine)), {
-      force: true,
-      failures: 4,
-    })
+    const outcome = await runAutoPush(depsOf(machine, dav, autoSettings(machine)), { failures: 4 })
     assert.equal(outcome.ran, true)
     assert.deepEqual(outcome.outcome?.problems, [])
     assert.equal(outcome.failures, 0, '这一轮没问题 → 计数清零')
@@ -642,7 +635,7 @@ test('runAutoPush：进度事件盖着 auto-push 的名（后台那条流认得�
     const dav = createDavClient({ baseUrl: fixture.url })
     const seen: string[] = []
     const deps = depsOf(machine, dav, autoSettings(machine))
-    await runAutoPush(deps, { force: true, onProgress: (event) => seen.push(`${event.phase}:${String(event.what)}`) })
+    await runAutoPush(deps, { onProgress: (event) => seen.push(`${event.phase}:${String(event.what)}`) })
     assert.ok(seen.length > 0, '算计划那几段总该报点什么')
     assert.ok(
       seen.every((entry) => entry.endsWith(':auto-push')),
@@ -678,58 +671,39 @@ test('手动同步那条路的事件不带 what（形状与以前逐字节相同
   }
 })
 
-// ── 节拍器 ───────────────────────────────────────────────────────────────
+// ── 调度器 ───────────────────────────────────────────────────────────────
 
-test('createAutoPushTimer：到点自己跑一轮，到点之前不跑', async () => {
-  let timerHandle: (() => void) | undefined
-  let scheduled: number | undefined
+test('createAutoPushTimer：没有周期唤醒——挂上之后不挂定时器，也不自己跑', async () => {
+  /*
+   * 兜底定时器删掉之后这里只剩一件事要守：**没人说话就不动**。什么时候推由宿主报的"写完一轮"决定，
+   * 所以刚造出来（配置开着也不行）不该有任何挂着的定时器。
+   */
+  let scheduled = 0
   const runs: number[] = []
-  let enabled = true
   const timer = createAutoPushTimer({
-    clock: { enabled: () => enabled, intervalMs: () => 120_000 },
+    clock: { enabled: () => true },
     run: async () => {
       runs.push(1)
       return { ran: true, failures: 0 }
     },
-    setTimer: (handler, ms) => {
-      timerHandle = handler
-      scheduled = ms
+    setTimer: () => {
+      scheduled += 1
       return 1
     },
-    clearTimer: () => {
-      timerHandle = undefined
-    },
+    clearTimer: () => undefined,
   })
-  assert.equal(scheduled, 60_000, '醒来的节奏被 60 秒那个上界封着（间隔 2 分钟也不能两分钟才醒）')
-  assert.equal(runs.length, 0, '挂上之后不立刻跑')
-  timerHandle?.()
+  assert.equal(scheduled, 0, '开着也不挂（没有"隔多久醒一次"这回事）')
+  assert.equal(runs.length, 0, '挂上之后不自己跑')
   await new Promise((resolve) => setImmediate(resolve))
-  assert.equal(runs.length, 1, '到点了就跑一轮')
+  assert.equal(runs.length, 0, '等一会儿还是不跑')
   timer.stop()
-  assert.equal(timerHandle, undefined, 'stop() 之后没有挂着的定时器')
 })
 
-test('createAutoPushTimer：关掉之后不再挂定时器，也不跑', async () => {
+test('createAutoPushTimer：关着的时候 touched() 连窗口都不排，也不跑', async () => {
   let scheduled = 0
-  let enabled = false
   const runs: number[] = []
-  createAutoPushTimer({
-    clock: { enabled: () => enabled, intervalMs: () => 60_000 },
-    run: async () => {
-      runs.push(1)
-      return { ran: true, failures: 0 }
-    },
-    setTimer: () => {
-      scheduled += 1
-      return 1
-    },
-    clearTimer: () => undefined,
-  })
-  assert.equal(scheduled, 0, '关着的时候连定时器都不挂（省一个空转的）')
-  // 打开之后下一次 tick 就该挂上（配置是活引用，改完不必重启）。
-  enabled = true
   const timer = createAutoPushTimer({
-    clock: { enabled: () => enabled, intervalMs: () => 60_000 },
+    clock: { enabled: () => false },
     run: async () => {
       runs.push(1)
       return { ran: true, failures: 0 }
@@ -740,7 +714,10 @@ test('createAutoPushTimer：关掉之后不再挂定时器，也不跑', async (
     },
     clearTimer: () => undefined,
   })
-  assert.equal(scheduled, 1, '开着就挂')
+  timer.touched()
+  assert.equal(scheduled, 0, '关着的时候连静默窗口都不排（省一个空转的）')
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.equal(runs.length, 0)
   timer.stop()
 })
 
@@ -748,7 +725,7 @@ test('createAutoPushTimer：上一轮还在跑时这一轮让开（busy），不
   let release: (() => void) | undefined
   const started: number[] = []
   const timer = createAutoPushTimer({
-    clock: { enabled: () => true, intervalMs: () => 60_000 },
+    clock: { enabled: () => true },
     run: async () => {
       started.push(1)
       await new Promise<void>((resolve) => {
@@ -773,7 +750,7 @@ test('createAutoPushTimer：status() 从"没在跑"到"跑到第几条"再到"�
   let release: (() => void) | undefined
   let report: ((event: { phase: 'push'; done: number; total: number; id: string }) => void) | undefined
   const timer = createAutoPushTimer({
-    clock: { enabled: () => true, intervalMs: () => 60_000 },
+    clock: { enabled: () => true },
     now: () => 1_000,
     run: async (options) => {
       report = options?.onProgress as typeof report
@@ -789,11 +766,11 @@ test('createAutoPushTimer：status() 从"没在跑"到"跑到第几条"再到"�
   assert.deepEqual(timer.status(), { running: null, last: undefined }, '还没跑：什么都没在跑')
 
   const seen: string[] = []
-  const pending = timer.tick({ force: true, onProgress: (event) => seen.push(event.phase) })
+  const pending = timer.tick({ onProgress: (event) => seen.push(event.phase) })
   // 让出一次，让 run() 里的第一条进度落到状态上。
   await new Promise((resolve) => setImmediate(resolve))
   const during = timer.status()
-  assert.equal(during.running?.startedAt, 1_000, '开始时刻来自节拍器的时钟')
+  assert.equal(during.running?.startedAt, 1_000, '开始时刻来自调度器的时钟')
   assert.deepEqual(during.running?.progress, { phase: 'push', done: 0, total: 2, id: 'session-a' })
   assert.deepEqual(seen, ['push'], '发起那一侧自己给的回调照旧收到（记状态与报进度是两件事）')
 
@@ -814,7 +791,7 @@ test('createAutoPushTimer：subscribe() 一条条收到进度，跑完收到结�
   let release: (() => void) | undefined
   let report: ((event: { phase: 'push'; done: number; total: number; id: string }) => void) | undefined
   const timer = createAutoPushTimer({
-    clock: { enabled: () => true, intervalMs: () => 60_000 },
+    clock: { enabled: () => true },
     now: () => 1_000,
     run: async (options) => {
       report = options?.onProgress as typeof report
@@ -833,7 +810,7 @@ test('createAutoPushTimer：subscribe() 一条条收到进度，跑完收到结�
     events.push(event.type === 'progress' ? `progress:${event.progress.done}` : 'done')
   })
 
-  const pending = timer.tick({ force: true })
+  const pending = timer.tick()
   await new Promise((resolve) => setImmediate(resolve))
   assert.deepEqual(events, ['progress:0'], '订阅之后第一条进度就推过来了')
 
@@ -850,7 +827,7 @@ test('createAutoPushTimer：subscribe() 一条条收到进度，跑完收到结�
   // 第二个订阅者进来：只推之后发生的（这一轮已经在跑，开头不会补发之前那几条）。
   const late: string[] = []
   const unsubscribeLate = timer.subscribe((event) => late.push(event.type))
-  const second = timer.tick({ force: true })
+  const second = timer.tick()
   await new Promise((resolve) => setImmediate(resolve))
   assert.deepEqual(late, ['progress'], '刚订上时不会补发之前那几条，只收之后产生的')
   release?.()
@@ -860,10 +837,10 @@ test('createAutoPushTimer：subscribe() 一条条收到进度，跑完收到结�
   timer.stop()
 })
 
-test('createAutoPushTimer：关着的时候 tick 回 disabled（手动那一次 force 例外）', async () => {
+test('createAutoPushTimer：关着的时候 tick 回 disabled，什么都不跑', async () => {
   const runs: number[] = []
   const timer = createAutoPushTimer({
-    clock: { enabled: () => false, intervalMs: () => 60_000 },
+    clock: { enabled: () => false },
     run: async () => {
       runs.push(1)
       return { ran: true, failures: 0 }
@@ -872,26 +849,20 @@ test('createAutoPushTimer：关着的时候 tick 回 disabled（手动那一次 
     clearTimer: () => undefined,
   })
   const skipped = await timer.tick()
-  assert.equal(skipped.skip, 'disabled')
+  assert.equal(skipped.skip, 'disabled', '没开就是没开：界面上那枚按钮也只报这一句')
   assert.equal(runs.length, 0)
-  const forced = await timer.tick({ force: true })
-  assert.equal(forced.ran, true, 'force 只管速度闸与开关：用户手点的那一次要能跑')
-  assert.equal(runs.length, 1)
   timer.stop()
 })
 
 test('createAutoPushTimer：last() 报出当前设置与最近一次结论', async () => {
   const timer = createAutoPushTimer({
-    clock: { enabled: () => true, intervalMs: () => 123_000 },
+    clock: { enabled: () => true },
     run: async () => ({ ran: true, failures: 0 }),
     setTimer: () => 1,
     clearTimer: () => undefined,
   })
   const before = timer.last()
-  assert.deepEqual(
-    { enabled: before.enabled, intervalMs: before.intervalMs },
-    { enabled: true, intervalMs: 123_000 },
-  )
+  assert.deepEqual({ enabled: before.enabled }, { enabled: true })
   assert.equal(before.outcome, undefined, '还没跑过就没有结论')
   await timer.tick()
   assert.equal(timer.last().outcome?.ran, true)
@@ -899,64 +870,27 @@ test('createAutoPushTimer：last() 报出当前设置与最近一次结论', asy
 })
 
 
-test('autoPushSection：间隔缺席取缺省、小于下限抬到下限、坏值退缺省', () => {
+test('autoPushSection：只报开关，旧配置里那个间隔不再有人读', () => {
   /*
-   * 这一条钉的是**"多久一次"只有一个来源**：用户填进配置的那个数在读的时候就被归一了，节拍器与
-   * `runAutoPush()` 的速度闸读的都是归一之后的值。所以这里核的是"填 60000 就是 60000（不是 300000）"，
-   * 以及"填 1 会被抬到 60000"——后者是那个下限唯一真正生效的地方。
+   * 兜底定时器删掉之后，"多久一次"这个数没有消费者了，于是整项从配置里去掉。这一条钉两件事：
+   * 开关仍只认 `true`；以及**装过旧版的人配置里还留着 `autoPushIntervalMs` 时不该出事**——它既不该
+   * 让这一节解析失败，也不该凭空多出一个字段。
    */
-  const at = (autoPushIntervalMs: number | undefined): number =>
-    autoPushSection({ url: 'https://dav.example/', ...(autoPushIntervalMs === undefined ? {} : { autoPushIntervalMs }) })
-      ?.intervalMs ?? -1
-  assert.equal(at(undefined), DEFAULT_AUTO_PUSH_INTERVAL_MS, '缺席 = 缺省 300000')
-  assert.equal(at(120_000), 120_000, '填了就用填的那个')
-  assert.equal(at(60_000), 60_000, '正好等于下限：原样（不是被抬成缺省！）')
-  assert.equal(at(MIN_AUTO_PUSH_INTERVAL_MS), MIN_AUTO_PUSH_INTERVAL_MS, '下限本身照收')
-  assert.equal(at(1), MIN_AUTO_PUSH_INTERVAL_MS, '比下限小的抬到下限，不退缺省')
-  assert.equal(at(0), DEFAULT_AUTO_PUSH_INTERVAL_MS, '0 当坏值（schema 的 min(1) 会先挡，这里兜住手改配置）')
-  assert.equal(at(Number.NaN), DEFAULT_AUTO_PUSH_INTERVAL_MS, 'NaN 退缺省')
-  assert.equal(at(59_999.6), MIN_AUTO_PUSH_INTERVAL_MS, '整数化之后再判下限')
-  // 开关只认 true：false 与缺席都是"没开"，不是"用默认值开"。
-  assert.equal(autoPushSection({ url: 'x', autoPush: false })?.enabled, false)
-  assert.equal(autoPushSection({ url: 'x' })?.enabled, false)
-  assert.equal(autoPushSection({ url: 'x', autoPush: true })?.enabled, true)
+  assert.deepEqual(autoPushSection({ url: 'x', autoPush: true }), { enabled: true })
+  assert.deepEqual(autoPushSection({ url: 'x', autoPush: false }), { enabled: false })
+  assert.deepEqual(autoPushSection({ url: 'x' }), { enabled: false }, '缺席 = 没开，不是"用默认值开"')
   assert.equal(autoPushSection(undefined), undefined, '连同步都没配就没有这一节')
+
+  // 旧版本写下的那一项（本仓库 git 历史里确有）现在只是个没人读的多余字段。
+  const legacy = { url: 'x', autoPush: true, autoPushIntervalMs: 300_000 } as never
+  assert.deepEqual(autoPushSection(legacy), { enabled: true }, '旧配置里那个数不影响这一节')
 })
 
-test('runAutoPush：填 60000 就按 60000 放行，别拿缺省那个 300000 当闸', async () => {
-  /*
-   * 回归：`autoPushIntervalMs` 填 60000 时，过了 61 秒**必须**放行。这条曾经有过一次"文档写 60000、
-   * 实际要等 300000"的疑点——真正的原因是节拍器上挂了一个没人读的 `minIntervalMs`，看起来像第二道
-   * 闸。现在闸门只比 `settings.autoPush.intervalMs`（读配置时就已归一），所以这条把"填多少就是多少"
-   * 钉死：改回"拿缺省值当闸"，61 秒这一档立刻变红。
-   */
-  const machine = makeMachine('interval-floor')
-  const fixture = await startDavFixture({ root: join(machine.base, 'dav') })
-  try {
-    writeSession(machine, 'only-local', 1000)
-    const dav = createDavClient({ baseUrl: fixture.url })
-    const deps = depsOf(machine, dav, settings(machine, { autoPush: { enabled: true, intervalMs: 60_000 } }))
-    const t0 = 1_000_000
-    const first = await runAutoPush(deps, { force: true, now: () => t0 })
-    assert.equal(first.ran, true)
-
-    // 61 秒之后：按 60000 的间隔该放行。
-    const after = await runAutoPush(deps, { lastRunAt: first.finishedAt, now: () => t0 + 61_000 })
-    assert.notEqual(after.skip, 'interval', '填了 60000 却在 61 秒时仍被挡住 = 闸用错了值')
-    // 30 秒之后：该挡住。
-    const early = await runAutoPush(deps, { lastRunAt: first.finishedAt, now: () => t0 + 30_000 })
-    assert.equal(early.ran, false)
-    assert.equal(early.skip, 'interval', '没到填的那个间隔就该挡住')
-  } finally {
-    await fixture.close()
-    rmSync(machine.base, { recursive: true, force: true })
-  }
-})
 
 // ── 事件层：写完一轮就推 ────────────────────────────────────────────────────────
 //
-// 这一组测的是"会话事件攒一轮"那一层（`touched()`）。它有两个并存的计时器——兜底的轮询与静默窗口——
-// 所以假定时器要能同时记住两个句柄，按"谁被排了第几次"分辨（先排的是兜底那个）。
+// 这一组测的是"会话事件攒一轮"那一层（`touched()`）。它只有静默窗口这一个计时器，所以假定时器只需要
+// 记住"排了几次、每次隔多久"。
 
 /** 一个能同时管住两个计时器的假表：返回句柄表，测试按顺序挑一个触发。 */
 function fakeTimers(): {
@@ -1001,28 +935,26 @@ test('touched()：静默窗口到了才推一轮，窗口是 AUTO_PUSH_SETTLE_MS
    * （goal 续轮、子智能体、compaction），不等一等就是整包 PUT × N。
    */
   const timers = fakeTimers()
-  const runs: Array<{ force?: boolean } | undefined> = []
+  const runs: number[] = []
   const timer = createAutoPushTimer({
-    clock: { enabled: () => true, intervalMs: () => 60_000 },
-    run: async (options) => {
-      runs.push(options as { force?: boolean } | undefined)
+    clock: { enabled: () => true },
+    run: async () => {
+      runs.push(1)
       return { ran: true, failures: 0 }
     },
     setTimer: timers.setTimer,
     clearTimer: timers.clearTimer,
   })
-  // 挂上之后先排的是兜底那一轮（60 秒）。
-  assert.equal(timers.handles[0]?.ms, 60_000, '兜底那一轮先挂上')
+  assert.equal(timers.live(), 0, '刚造出来时一个定时器都没有（没有兜底那一轮）')
 
   timer.touched()
-  assert.equal(timers.live(), 2, '兜底 + 静默窗口，两个各算各的')
-  assert.equal(timers.handles[1]?.ms, AUTO_PUSH_SETTLE_MS, `静默窗口是 ${AUTO_PUSH_SETTLE_MS} 毫秒`)
+  assert.equal(timers.live(), 1, '写完一轮只排这一个窗口')
+  assert.equal(timers.handles[0]?.ms, AUTO_PUSH_SETTLE_MS, `静默窗口是 ${AUTO_PUSH_SETTLE_MS} 毫秒`)
   assert.equal(runs.length, 0, '窗口没到之前不推')
 
-  timers.fire(1) // 静默窗口那个
+  timers.fire(0)
   await new Promise((resolve) => setImmediate(resolve))
   assert.equal(runs.length, 1, '窗口到了就推一轮')
-  assert.equal(runs[0]?.force, true, '用户刚写完一轮：绕开速度闸（那是给兜底那条路留的）')
   timer.stop()
 })
 
@@ -1030,7 +962,7 @@ test('touched()：窗口里再来事件就重置计时（连发的 turn/end 只�
   const timers = fakeTimers()
   const runs: number[] = []
   const timer = createAutoPushTimer({
-    clock: { enabled: () => true, intervalMs: () => 60_000 },
+    clock: { enabled: () => true },
     run: async () => {
       runs.push(1)
       return { ran: true, failures: 0 }
@@ -1040,18 +972,18 @@ test('touched()：窗口里再来事件就重置计时（连发的 turn/end 只�
   })
 
   timer.touched()
-  const firstWindow = timers.handles[1]
-  assert.equal(timers.live(), 2, '兜底 + 一个窗口')
+  const firstWindow = timers.handles[0]
+  assert.equal(timers.live(), 1, '就一个窗口')
   timer.touched() // 又写完一条
   timer.touched() // 再来一条
 
-  assert.equal(timers.handles[1], undefined, '前一个窗口被清掉了（这就是"重置"）')
-  assert.equal(timers.live(), 2, '重置之后仍然只有"兜底 + 一个窗口"，不会越攒越多')
+  assert.equal(timers.handles[0], undefined, '前一个窗口被清掉了（这就是"重置"）')
+  assert.equal(timers.live(), 1, '重置之后仍然只有一个窗口，不会越攒越多')
 
   // 只有最后那个窗口能触发，且只推一次——被重置掉的那个已经不在表里了。
   const lastWindow = timers.handles[timers.handles.length - 1]
   assert.notEqual(lastWindow, firstWindow, '是重排出来的新句柄，不是原来那个')
-  timers.fire(1)
+  timers.fire(0)
   await new Promise((resolve) => setImmediate(resolve))
   assert.equal(runs.length, 1, '连发三次也只推一次')
   timer.stop()
@@ -1062,7 +994,7 @@ test('touched()：关着的时候什么都不做（不排队、不欠账）', as
   const runs: number[] = []
   let enabled = false
   const timer = createAutoPushTimer({
-    clock: { enabled: () => enabled, intervalMs: () => 60_000 },
+    clock: { enabled: () => enabled },
     run: async () => {
       runs.push(1)
       return { ran: true, failures: 0 }
@@ -1091,11 +1023,11 @@ test('touched()：上一轮还在跑时记下"补一次"，跑完立刻补推', 
    */
   const timers = fakeTimers()
   let release: (() => void) | undefined
-  const runs: Array<{ force?: boolean } | undefined> = []
+  const runs: number[] = []
   const timer = createAutoPushTimer({
-    clock: { enabled: () => true, intervalMs: () => 60_000 },
-    run: async (options) => {
-      runs.push(options as { force?: boolean } | undefined)
+    clock: { enabled: () => true },
+    run: async () => {
+      runs.push(1)
       if (runs.length === 1) await new Promise<void>((resolve) => { release = resolve })
       return { ran: true, failures: 0 }
     },
@@ -1103,37 +1035,36 @@ test('touched()：上一轮还在跑时记下"补一次"，跑完立刻补推', 
     clearTimer: timers.clearTimer,
   })
 
-  const first = timer.tick({ force: true })
+  const first = timer.tick()
   await new Promise((resolve) => setImmediate(resolve))
   assert.equal(runs.length, 1, '第一轮在跑')
 
   timer.touched()
-  assert.equal(timers.live(), 1, '跑着的时候不排窗口（只记账，见下）')
+  assert.equal(timers.live(), 0, '跑着的时候不排窗口（只记账，跑完再补）')
 
   release?.()
   await first
   await new Promise((resolve) => setImmediate(resolve))
-  assert.equal(timers.live(), 2, '跑完补起一个窗口（兜底 + 它）')
+  assert.equal(timers.live(), 1, '跑完补起一个窗口')
 
-  timers.fire(1)
+  timers.fire(0)
   await new Promise((resolve) => setImmediate(resolve))
   assert.equal(runs.length, 2, '欠着的那一次补推了')
-  assert.equal(runs[1]?.force, true, '补的那次也绕开速度闸')
   timer.stop()
 })
 
 test('touched()：stop() 之后不再排窗口', async () => {
   const timers = fakeTimers()
   const timer = createAutoPushTimer({
-    clock: { enabled: () => true, intervalMs: () => 60_000 },
+    clock: { enabled: () => true },
     run: async () => ({ ran: true, failures: 0 }),
     setTimer: timers.setTimer,
     clearTimer: timers.clearTimer,
   })
   timer.touched()
-  assert.equal(timers.live(), 2)
+  assert.equal(timers.live(), 1)
   timer.stop()
-  assert.equal(timers.live(), 0, 'stop() 把兜底与窗口都清掉')
+  assert.equal(timers.live(), 0, 'stop() 把窗口清掉')
   timer.touched()
   assert.equal(timers.live(), 0, '停掉之后事件不再排窗口')
 })

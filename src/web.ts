@@ -185,9 +185,9 @@ export interface ApiDeps {
    */
   syncInfo?: () => SyncInfo | undefined
   /**
-   * 自动推送的节拍器（`src/index.ts` 造一个挂在插件生命周期上，见那里的说明）。
+   * 自动推送的调度器（`src/index.ts` 造一个挂在插件生命周期上，见那里的说明）。
    *
-   * 一个 thunk 而不是节拍器本身：它得先解析配置与凭据（异步），而 `apply()` 必须保持同步。返回的
+   * 一个 thunk 而不是调度器本身：它得先解析配置与凭据（异步），而 `apply()` 必须保持同步。返回的
    * promise 在这些情形下解出 `undefined`——这个 profile 没配 `sync.url`、或者造的时候出错了——界面
    * 据此说明"这个宿主没有自动推送"，而不是点一个没反应的按钮。
    */
@@ -865,7 +865,7 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
     /*
      * ② 后台那两种状态的当下：落地那一趟与自动推送那一轮。
      *
-     * 自动推送的节拍器要等配置与凭据解析完才存在（`deps.autoPush()` 是个挂起的 promise），所以这一条
+     * 自动推送的调度器要等配置与凭据解析完才存在（`deps.autoPush()` 是个挂起的 promise），所以这一条
      * 可能比别的晚一点；拿不到就说明这个宿主没有自动推送，`running` / `last` 都是 null。
      */
     const timer = await deps.autoPush?.()
@@ -884,12 +884,12 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
     /*
      * ③ 之后跟着推。
      *
-     * 自动推送那一轮用节拍器自己的 `subscribe()`：三条发起路（兜底定时器、事件层、界面那枚按钮）都会
+     * 自动推送那一轮用调度器自己的 `subscribe()`：两条发起路（写完一轮、界面那枚按钮）都会
      * 经过它，所以"谁发起的一轮"这里都看得见。退订跟着这条连接走（`close` 时）。
      */
     const unsubscribe = timer?.subscribe((event) => {
       if (event.type === 'progress') {
-        // 开始时刻从节拍器那一份取：这一轮可能是别处发起的，不能拿"现在"当它的起点。
+        // 开始时刻从调度器那一份取：这一轮可能是别处发起的，不能拿"现在"当它的起点。
         const startedAt = timer.status().running?.startedAt ?? Date.now()
         sendEvent(res, { type: 'auto-push', running: { startedAt, progress: event.progress }, last: null })
       } else {
@@ -1485,24 +1485,24 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
    * 任何东西（见 [sync.ts](./sync.ts) 的 `runAutoPush()`），所以"预演"与"落地"在它这里本来就是同一件
    * 事。界面上那枚「立即推送一次」点下去就是真跑，进度画在页面横幅上。
    *
-   * 为什么用 `force`：用户手点的这一次不该被"距上次才过了 20 秒"挡住（那个闸是给节拍器兜底的，
-   * 见 `runAutoPush()`）。绕开它只影响这一次，不会把闸门往后推。
+   * 点下去就是真跑，没有"距上次才过了几秒"这种闸——自动推送现在只在写完一轮之后自己跑，这条是让人
+   * 手点一次（见 [那篇决策](../.agents/notes/implemented/simplification/2026-10-21-auto-push-only-after-a-turn.md)）。
    *
-   * 流已经开始的错只能靠事件说（那时 HTTP 状态早就是 200 了）；没配同步 / 没有节拍器这两件事发生在
+   * 流已经开始的错只能靠事件说（那时 HTTP 状态早就是 200 了）；没配同步 / 没有调度器这两件事发生在
    * 写头之前，仍然是 JSON + 409。
    */
   const autoPushNow = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     const timer = await deps.autoPush?.()
     if (timer === undefined) {
       sendJson(res, 409, {
-        error: '这个宿主没有自动推送的节拍器（没有配置 WebDAV 同步，或它启动失败）',
+        error: '这个宿主没有自动推送的调度器（没有配置 WebDAV 同步，或它启动失败）',
       })
       return
     }
     sendEventStream(res)
     try {
       const onProgress = (progress: SyncProgress): void => sendEvent(res, { type: 'progress', progress })
-      const outcome = await timer.tick({ force: true, onProgress })
+      const outcome = await timer.tick({ onProgress })
       sendEvent(res, { type: 'result', result: autoPushPayload(outcome, deps.syncInfo?.()) })
     } catch (error) {
       sendEvent(res, { type: 'error', error: error instanceof Error ? error.message : String(error) })
