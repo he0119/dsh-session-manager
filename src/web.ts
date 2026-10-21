@@ -618,6 +618,89 @@ function autoPushPayload(outcome: AutoPushOutcome, info: SyncInfo | undefined): 
   }
 }
 
+/**
+ * 上一轮自动推送的**计数**（推了几条、搬了多少字节）。
+ *
+ * 不回整份计划：这一份是给"进页面先看一眼""跑完了说一句"用的，上千行的计划不该跟着每次快照/每条
+ * 收尾事件搬过去（计划的正文由发起那一轮的界面自己拿，见 `autoPushPayload()`）。
+ *
+ * @param outcome 上一轮的结论；还没有就是 `undefined`。
+ * @returns 摊平的那几项；没跑过是 null。
+ */
+function autoPushLastPayload(outcome: AutoPushOutcome | undefined): Record<string, unknown> | null {
+  if (outcome === undefined) return null
+  return {
+    ran: outcome.ran,
+    ...(outcome.skip === undefined ? {} : { skip: outcome.skip }),
+    failures: outcome.failures,
+    ...(outcome.problem === undefined ? {} : { problem: outcome.problem }),
+    ...(outcome.startedAt === undefined ? {} : { startedAt: outcome.startedAt }),
+    ...(outcome.finishedAt === undefined ? {} : { finishedAt: outcome.finishedAt }),
+    pushedCount: outcome.outcome?.pushed.length ?? 0,
+    bytesOut: outcome.outcome?.bytesOut ?? 0,
+    ...(outcome.outcome?.attachmentOut === undefined ? {} : { attachmentOut: outcome.outcome.attachmentOut }),
+    problems: outcome.outcome?.problems ?? [],
+  }
+}
+
+/**
+ * `GET /auto-push?mode=status` 的回答：后台那一轮跑到哪了、上一轮的结论。
+ *
+ * 只读的一次性快照。界面进入同步页时先问它一次；说"在跑"才去开 `mode=watch` 那条长连接。
+ */
+function autoPushStatusPayload(timer: AutoPushTimer, info: SyncInfo | undefined): Record<string, unknown> {
+  const status = timer.status()
+  return {
+    mode: 'status',
+    remote: { url: info?.url ?? '', machineId: info?.machineId ?? '' },
+    running:
+      status.running === null
+        ? null
+        : { startedAt: status.running.startedAt, progress: status.running.progress },
+    last: autoPushLastPayload(status.last),
+  }
+}
+
+/**
+ * `GET /auto-push?mode=watch`：把后台那一轮的进展**推**给页面。
+ *
+ * 什么时候开：进页面时先问一次 `mode=status`，说"在跑"才开这一条；那一轮结束（`done`）就关掉，没在跑
+ * 的时候不占长连接。所以它只在这几分钟里挂着一条流，而不是每个打开着的同步页一条。
+ *
+ * 开头先发一条 `state`（现在跑到哪 + 上一轮结论）：从"问状态"到"流接上"之间可能正好跑完，光靠之后
+ * 的 `done` 会漏掉那一轮；客户端拿 `running === null` 与这份 `last` 就能收尾。
+ *
+ * @param timer 自动推送的节拍器。
+ * @param res 这条响应（已经写好 SSE 头）。
+ */
+async function watchAutoPush(timer: AutoPushTimer, res: ServerResponse): Promise<void> {
+  sendEventStream(res)
+  const status = timer.status()
+  sendEvent(res, {
+    type: 'state',
+    running:
+      status.running === null
+        ? null
+        : { startedAt: status.running.startedAt, progress: status.running.progress },
+    last: autoPushLastPayload(status.last),
+  })
+  const unsubscribe = timer.subscribe((event) => {
+    if (event.type === 'progress') sendEvent(res, { type: 'progress', progress: event.progress })
+    else sendEvent(res, { type: 'done', last: autoPushLastPayload(event.outcome) })
+  })
+  /*
+   * 心跳：一轮自动推送可能几十秒没有新进度（正在解一份大日志），而中间任何一层代理都可能把"什么都
+   * 没发"的连接掐掉。它同时让客户端能分辨"还连着"与"断了"。
+   */
+  const heartbeat = setInterval(() => sendEvent(res, { type: 'ping' }), 15_000)
+  await new Promise<void>((resolve) => {
+    res.on('close', resolve)
+  })
+  clearInterval(heartbeat)
+  unsubscribe()
+  res.end()
+}
+
 /** 界面用的全部 handler，键是 `METHOD 路径后缀`；方法可以写成 `GET|POST`（`/sync` 两种都要）。 */
 export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingMessage, res: ServerResponse) => Promise<void>> {
   const { paths, decodeAll } = deps
@@ -1327,12 +1410,31 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
    * 流已经开始的错只能靠事件说（那时 HTTP 状态早就是 200 了）；没配同步 / 没有节拍器这两件事发生在
    * 写头之前，仍然是 JSON + 409。
    */
-  const autoPushNow = async (_req: IncomingMessage, res: ServerResponse): Promise<void> => {
+  const autoPushNow = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     const timer = await deps.autoPush?.()
     if (timer === undefined) {
       sendJson(res, 409, {
         error: '这个宿主没有自动推送的节拍器（没有配置 WebDAV 同步，或它启动失败）',
       })
+      return
+    }
+    /*
+     * `mode=status`：只回答"后台那一轮跑到哪了、上一轮成没成"，当场不跑任何东西。
+     *
+     * 界面进入同步页时先问这一句：后台那一轮可能是兜底定时器或上一轮 `turn/end` 发起的，没有谁在看
+     * 它的进度流（那条流只回给发起的那个请求），所以"正跑着"这件事只能靠这里读出来——不然用户点
+     * 「立即推送一次」只会吃一句"上一轮还在跑"，却看不到它在跑什么。
+     *
+     * 只读：不扫库、不碰远端、不改任何状态，所以可以每几秒问一次。
+     */
+    const url = new URL(req.url ?? '/', 'http://localhost')
+    const mode = url.searchParams.get('mode')
+    if (mode === 'status') {
+      sendJson(res, 200, autoPushStatusPayload(timer, deps.syncInfo?.()))
+      return
+    }
+    if (mode === 'watch') {
+      await watchAutoPush(timer, res)
       return
     }
     sendEventStream(res)

@@ -223,16 +223,22 @@ interface Captured {
   body: Buffer
 }
 
-function fakeRes(): { res: ServerResponse; captured: Captured } {
+function fakeRes(): { res: ServerResponse; captured: Captured; close: () => void } {
   const captured: Captured = { status: 0, headers: {}, body: Buffer.alloc(0) }
   let headersSent = false
   let ended = false
   const push = (chunk: Buffer | string): void => {
     captured.body = Buffer.concat([captured.body, Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)])
   }
+  const closeHandlers: Array<() => void> = []
   const res = {
     get headersSent(): boolean {
       return headersSent
+    },
+    // 长连接（`mode=watch`）收尾靠这个：客户端断开时宿主收到 `close`，把订阅退掉。
+    on(event: string, handler: () => void) {
+      if (event === 'close') closeHandlers.push(handler)
+      return res
     },
     get writableEnded(): boolean {
       return ended
@@ -255,7 +261,11 @@ function fakeRes(): { res: ServerResponse; captured: Captured } {
       ended = true
     },
   }
-  return { res: res as unknown as ServerResponse, captured }
+  /** 模拟客户端断开：把 `close` 的监听都叫一遍（长连接那几条用例用）。 */
+  const close = (): void => {
+    for (const handler of closeHandlers.splice(0)) handler()
+  }
+  return { res: res as unknown as ServerResponse, captured, close }
 }
 
 /**
@@ -2701,12 +2711,21 @@ test('GET /transcript：把一条会话的日志折成完整时间线（会话�
 
 // ── 自动推送端点（只推不拉，点一次就是真跑）────────────────────────────────────
 
-/** 一个假的节拍器：记下被怎么调用，并回一个给定的结论。 */
-function fakeTimer(outcome: Record<string, unknown>): {
+/**
+ * 一个假的节拍器：记下被怎么调用，并回一个给定的结论。
+ *
+ * `status` 由每个用例自己摆（`GET /auto-push?mode=status` 读的就是它）：缺省是"没在跑、也没跑过"。
+ */
+function fakeTimer(
+  outcome: Record<string, unknown>,
+  status: { running: unknown; last: unknown } = { running: null, last: undefined },
+): {
   timer: NonNullable<Awaited<ReturnType<NonNullable<Parameters<typeof createApiHandlers>[0]['autoPush']>>>>
   calls: Array<{ force?: boolean; onProgress?: unknown }>
+  subscribers: Array<(event: never) => void>
 } {
   const calls: Array<{ force?: boolean; onProgress?: unknown }> = []
+  const subscribers: Array<(event: never) => void> = []
   const timer = {
     enabled: () => true,
     intervalMs: () => 300_000,
@@ -2716,11 +2735,20 @@ function fakeTimer(outcome: Record<string, unknown>): {
       return outcome as never
     },
     last: () => ({ enabled: true, intervalMs: 300_000 }),
+    status: () => status as never,
+    // 谁订了进展都记下来，用例自己往里塞事件（`mode=watch` 那条流就是这么喂的）。
+    subscribe: (listener: (event: never) => void) => {
+      subscribers.push(listener)
+      return () => {
+        const at = subscribers.indexOf(listener)
+        if (at >= 0) subscribers.splice(at, 1)
+      }
+    },
     note: () => undefined,
     touched: () => undefined,
     stop: () => undefined,
   }
-  return { timer, calls }
+  return { timer, calls, subscribers }
 }
 
 test('GET /auto-push：这个宿主没有节拍器时 409，且没有一个字节被写', async () => {
@@ -2812,6 +2840,129 @@ test('GET /auto-push：没跑（skip）时不带计划也不带结果，只回�
   assert.equal(result['plan'], undefined, '没跑就没有计划可给')
   assert.equal(result['pushed'], undefined, '也没结果——给一份空的只会让界面去猜哪个字段是真的')
   assert.equal(result['takesEffect'], undefined)
+})
+
+test('GET /auto-push?mode=status：后台那一轮跑到哪了、上一轮推了几条', async () => {
+  const sandbox = makeSandbox('web-auto-push-status')
+  const status: { running: unknown; last: unknown } = { running: null, last: undefined }
+  const { timer, calls } = fakeTimer({ ran: true }, status)
+  const handlers = createApiHandlers(
+    deps(sandbox, {
+      autoPush: async () => timer,
+      syncInfo: () => ({ url: 'https://dav.example/', machineId: 'robot-a', mappings: 0 }),
+    }),
+  )
+
+  // ① 什么都没在跑、也还没跑过：两项都是 null（界面据此把按钮摆回可用）。
+  const idle = fakeRes()
+  await handlers['GET /auto-push']!(fakeReq('GET', `${API_PREFIX}/auto-push?mode=status`), idle.res)
+  assert.equal(idle.captured.status, 200)
+  assert.deepEqual(payload(idle.captured), {
+    mode: 'status',
+    remote: { url: 'https://dav.example/', machineId: 'robot-a' },
+    running: null,
+    last: null,
+  })
+  assert.deepEqual(calls, [], '问状态不跑任何东西')
+
+  // ② 兜底定时器在后台跑着：界面进入同步页时读到的就是这一份。
+  status.running = {
+    startedAt: 1_000,
+    progress: { phase: 'push', done: 3, total: 9, id: 'session-a', label: 'a' },
+  }
+  const running = fakeRes()
+  await handlers['GET /auto-push']!(fakeReq('GET', `${API_PREFIX}/auto-push?mode=status`), running.res)
+  assert.deepEqual(payload(running.captured)['running'], status.running)
+
+  // ③ 跑完了：上一轮的结论只回计数，不回整份计划（这一句每几秒问一次）。
+  status.running = null
+  status.last = {
+    ran: true,
+    failures: 0,
+    startedAt: 1_000,
+    finishedAt: 2_000,
+    outcome: {
+      pushed: [
+        { id: 'session-a', action: 'upload' },
+        { id: 'session-b', action: 'update' },
+      ],
+      bytesOut: 4_096,
+      attachmentOut: { uploaded: 1, skipped: 0, bytes: 512, missing: 0 },
+      problems: [],
+    },
+  }
+  const done = fakeRes()
+  await handlers['GET /auto-push']!(fakeReq('GET', `${API_PREFIX}/auto-push?mode=status`), done.res)
+  const last = payload(done.captured)['last'] as Record<string, unknown>
+  assert.equal(last['ran'], true)
+  assert.equal(last['pushedCount'], 2, '推了几条')
+  assert.equal(last['bytesOut'], 4_096)
+  assert.deepEqual(last['attachmentOut'], { uploaded: 1, skipped: 0, bytes: 512, missing: 0 })
+  assert.equal(last['plan'], undefined, '计划正文不跟着这一句走')
+})
+
+test('GET /auto-push?mode=watch：开头一条 state，之后一帧帧推进度，跑完推结论并退订', async () => {
+  const sandbox = makeSandbox('web-auto-push-watch')
+  const { timer, subscribers } = fakeTimer(
+    { ran: true },
+    {
+      running: { startedAt: 1_000, progress: { phase: 'scan', done: 1, total: 9, id: 'session-a' } },
+      last: undefined,
+    },
+  )
+  const handlers = createApiHandlers(deps(sandbox, { autoPush: async () => timer }))
+  const { res, captured, close } = fakeRes()
+
+  const pending = handlers['GET /auto-push']!(fakeReq('GET', `${API_PREFIX}/auto-push?mode=watch`), res)
+  // 让让道：handler 先写头、发 state，再订阅。
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.equal(captured.headers['content-type'], 'text/event-stream; charset=utf-8')
+
+  const opening = events(captured)
+  assert.equal(opening.length, 1, '连上先只说一句现在什么样')
+  assert.equal(opening[0]!['type'], 'state')
+  assert.deepEqual(opening[0]!['running'], {
+    startedAt: 1_000,
+    progress: { phase: 'scan', done: 1, total: 9, id: 'session-a' },
+  })
+  assert.equal(subscribers.length, 1, '开流之后订上了')
+
+  // 宿主那边每产生一条进度就写一次——不等这一轮跑完。
+  subscribers[0]!({ type: 'progress', progress: { phase: 'push', done: 2, total: 9, id: 'session-b' } } as never)
+  const midway = events(captured)
+  assert.equal(midway.length, 2, '进度是一条条到的')
+  assert.deepEqual(midway[1]!['progress'], { phase: 'push', done: 2, total: 9, id: 'session-b' })
+
+  // 跑完：一条 done，带的是计数（形状与 mode=status 的 last 一致，界面拿同一套话说结论）。
+  subscribers[0]!({
+    type: 'done',
+    outcome: {
+      ran: true,
+      failures: 0,
+      startedAt: 1_000,
+      finishedAt: 2_000,
+      outcome: {
+        pushed: [{ id: 'session-a', action: 'upload' }],
+        bytesOut: 1_024,
+        problems: [],
+      },
+    },
+  } as never)
+  const finished = events(captured)
+  assert.equal(finished.length, 3)
+  assert.equal(finished[2]!['type'], 'done')
+  const last = finished[2]!['last'] as Record<string, unknown>
+  assert.equal(last['ran'], true)
+  assert.equal(last['pushedCount'], 1, '只回计数')
+  assert.equal(last['plan'], undefined, '计划正文不跟着这一句走')
+
+  // 客户端断开：退订，之后宿主再推也不会往这条死连接上写。
+  close()
+  await pending
+  assert.deepEqual(subscribers, [], '连接断了就退订')
+  const before = captured.body.length
+  assert.equal(res.writableEnded, true, '断开之后把响应收尾')
+  assert.equal(captured.body.length, before)
 })
 
 test('GET /auto-push：节拍器抛错时靠事件说，HTTP 状态早就是 200', async () => {

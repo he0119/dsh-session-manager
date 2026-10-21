@@ -717,6 +717,133 @@ export interface AutoPushResponse {
 }
 
 /**
+ * `GET /auto-push?mode=status` 的回答：后台那一轮跑到哪了、上一轮成没成。
+ *
+ * 与 `AutoPushResponse` 分开：这一句是**轮询**用的（进同步页先问一次，跑着的时候每几秒问一次），所以
+ * 上一轮只回计数——整份计划由发起那一轮的界面自己拿，不跟着这一句反复搬。
+ */
+export interface AutoPushStatusResponse {
+  mode: 'status'
+  remote: { url: string; machineId: string }
+  /** 现在正跑着的那一轮（谁发起的都可能：兜底定时器、事件层、另一个页面点的）；没在跑就是 null。 */
+  running: { startedAt: number; progress: ProgressEvent | null } | null
+  /** 上一轮的结论；这个宿主还没跑过就是 null。 */
+  last: {
+    ran: boolean
+    skip?: AutoPushResponse['skip']
+    failures: number
+    problem?: string
+    startedAt?: number
+    finishedAt?: number
+    /** 推上去几条会话（只给计数：整份结果由发起那一轮的界面自己拿）。 */
+    pushedCount: number
+    bytesOut: number
+    attachmentOut?: { uploaded: number; skipped: number; bytes: number; missing: number }
+    problems: string[]
+  } | null
+}
+
+/**
+ * 问一句"后台那一轮自动推送跑到哪了"。
+ *
+ * 只读：宿主那侧不扫库、不碰远端、不改任何状态。界面进同步页时先问这一次；说"在跑"才去开
+ * `watchAutoPush()` 那条长连接。
+ *
+ * @returns 正在跑的那一轮与上一轮的结论。
+ */
+export async function fetchAutoPushStatus(): Promise<AutoPushStatusResponse> {
+  return asJson<AutoPushStatusResponse>(
+    await fetch(`${API_PREFIX}/auto-push?mode=status`, { headers: { accept: 'application/json' } }),
+  )
+}
+
+/** 上一轮自动推送的计数（`mode=status` 与 `mode=watch` 给的是同一份形状）。 */
+export type AutoPushLast = NonNullable<AutoPushStatusResponse['last']>
+
+/** `mode=watch` 推过来的事件。 */
+export type AutoPushWatchEvent =
+  | { type: 'state'; running: AutoPushStatusResponse['running']; last: AutoPushLast | null }
+  | { type: 'progress'; progress: ProgressEvent }
+  | { type: 'done'; last: AutoPushLast }
+  | { type: 'ping' }
+
+/** 把 `mode=watch` 的一条事件体解释成事件；认不出的（宿主比界面新）当没看见。 */
+function parseWatchEvent(data: string): AutoPushWatchEvent | null {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(data)
+  } catch {
+    return null
+  }
+  if (typeof parsed !== 'object' || parsed === null) return null
+  const record = parsed as Record<string, unknown>
+  switch (record['type']) {
+    case 'state':
+      return {
+        type: 'state',
+        running: (record['running'] ?? null) as AutoPushStatusResponse['running'],
+        last: (record['last'] ?? null) as AutoPushLast | null,
+      }
+    case 'progress':
+      return { type: 'progress', progress: record['progress'] as ProgressEvent }
+    case 'done':
+      return { type: 'done', last: record['last'] as AutoPushLast }
+    case 'ping':
+      return { type: 'ping' }
+    default:
+      return null
+  }
+}
+
+/**
+ * 订阅后台那一轮的进展：宿主把每一帧进度推过来，跑完再推一条结论。
+ *
+ * 什么时候开：`fetchAutoPushStatus()` 说"在跑"才开这一条；不开着的时候不占长连接。开头会先收到一条
+ * `state`（现在跑到哪 + 上一轮结论），之后是 `progress`，跑完是 `done`——从"问状态"到"流接上"之间
+ * 那一轮可能正好结束，`state` 里的 `running === null` 就是收尾的信号。
+ *
+ * 断了（宿主重启、代理掐了、页面关了）：这里**不自己重连**，只把 `onEnd` 叫一下，让调用方按它自己的
+ * 节奏再开一条（见 `SyncPanel` 的轮询兜底）。
+ *
+ * @param onEvent 收到一条事件调一次。
+ * @param onEnd 这条流结束了（不管是正常收尾还是断了）。
+ * @returns 停止订阅（页面卸掉时调）。
+ */
+export function watchAutoPush(
+  onEvent: (event: AutoPushWatchEvent) => void,
+  onEnd?: () => void,
+): () => void {
+  const controller = new AbortController()
+  void (async () => {
+    try {
+      const response = await fetch(`${API_PREFIX}/auto-push?mode=watch`, {
+        headers: { accept: 'text/event-stream' },
+        signal: controller.signal,
+      })
+      const contentType = response.headers.get('content-type') ?? ''
+      if (!response.ok || !contentType.includes('text/event-stream')) return
+      const reader = response.body?.getReader()
+      if (reader === undefined) return
+      const frames = new SseFrames()
+      const decoder = new TextDecoder()
+      for (;;) {
+        const { value, done } = await reader.read()
+        if (done) break
+        for (const data of frames.push(decoder.decode(value, { stream: true }))) {
+          const event = parseWatchEvent(data)
+          if (event !== null) onEvent(event)
+        }
+      }
+    } catch {
+      // 断了：交给 onEnd，调用方自己决定什么时候再接。
+    } finally {
+      onEnd?.()
+    }
+  })()
+  return () => controller.abort()
+}
+
+/**
  * 当场跑一轮自动推送：只把本机的会话推到远端，**一个字节都不拉**，也不动本机任何会话。
  *
  * 回的是事件流（与 `/sync` 同一套事件形状，宿主那侧标 `what: 'auto-push'`），所以进度能画在页面

@@ -42,8 +42,13 @@ import { Button, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
 
 import {
   fetchSyncPlan,
+  fetchAutoPushStatus,
+  watchAutoPush,
   runAutoPushNow,
+  type AutoPushLast,
   type AutoPushResponse,
+  type AutoPushStatusResponse,
+  type AutoPushWatchEvent,
   type ProgressEvent,
   type SessionSummary,
   type SyncDecision,
@@ -364,13 +369,33 @@ function SessionCell({
 }
 
 /**
+ * `autoPushSentence()` 用得上的那几项。
+ *
+ * 两条来路：手点那一次拿到的是整份 `AutoPushResponse`；进页面时轮询 `GET /auto-push?mode=status`
+ * 拿到的上一轮只有计数（`pushedCount`），所以这里收窄成"两边都有"的那几项，句子只写一份。
+ */
+type AutoPushSentenceSource = Pick<AutoPushResponse, 'ran' | 'skip' | 'bytesOut' | 'attachmentOut'> & {
+  pushed?: readonly unknown[]
+  pushedCount?: number
+}
+
+/**
  * 自动推送那一枚「立即推送一次」的结论 → 一句话。
  *
  * 判定在宿主侧（`AutoPushOutcome`），这一层只挑句子：真跑了区分"推了 N 条"与"没有要推的"，没跑说清是
  * 哪**一种**没跑——「等下一轮」与「上一轮还在跑」对用户是两件完全不同的事。认不出来的码**整条退回**
  * 「没跑」那一句，不编一个原因：界面比宿主旧时说的是"没跑，但宿主没说清为什么"，而不是猜一个。
  */
-function autoPushSentence(t: Translate, response: AutoPushResponse): string {
+/**
+ * 那条流多久没有动静就当它死了（宿主那边每 15 秒一次 `ping`，这里留三倍的余量）。
+ *
+ * 它只在"流开着"的时候计时：断了就关掉、问一次状态、还在跑就把流接回来。平时不问。
+ */
+const AUTO_PUSH_STREAM_IDLE_MS = 45_000
+/** 流断了之后隔多久问一次状态（只在断了的时候用：接回来之后就不再问）。 */
+const AUTO_PUSH_STREAM_RETRY_MS = 5_000
+
+function autoPushSentence(t: Translate, response: AutoPushSentenceSource): string {
   if (response.ran !== true) {
     // 认得出的码才挑句子；认不出的（宿主比界面新）整条退回"没说清原因"，不编一个。
     const known = (AUTO_PUSH_SKIP_CODES as readonly string[]).includes(response.skip ?? '')
@@ -379,7 +404,8 @@ function autoPushSentence(t: Translate, response: AutoPushResponse): string {
       : t('sync.autoPush.noReason')
     return t('sync.autoPush.skipped', { reason })
   }
-  const pushed = response.pushed?.length ?? 0
+  // 手点那一次给的是整份结果，轮询那一份只给计数（见 `AutoPushStatusResponse.last`）。
+  const pushed = response.pushedCount ?? response.pushed?.length ?? 0
   if (pushed === 0) return t('sync.autoPush.nothing')
   const uploaded = response.attachmentOut?.uploaded ?? 0
   return (
@@ -481,6 +507,15 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
   const [autoPushing, setAutoPushing] = React.useState(false)
   /** 这一轮的进度事件（`autoPushing` 为真时才可能有；宿主从算计划那几段就开始报）。 */
   const [autoProgress, setAutoProgress] = React.useState<ProgressEvent | null>(null)
+  /**
+   * 我们正看着的那一轮的开始时刻（没在看就是 `null`）。
+   *
+   * 用来分清"刚跑完的那一轮"与"几分钟前的旧结论"：只有确实看着它从跑到跑完，才把结论摆出来——
+   * 否则每次进这一页都会把上一轮那句话再说一遍。
+   */
+  const watchingAutoPush = React.useRef<number | null>(null)
+  /** 立刻问一次后台状态（点那一次撞上 busy 时用，见 `doAutoPush`）；由下面那条 effect 摆进来。 */
+  const autoPushRefresh = React.useRef<(() => void) | null>(null)
 
   /**
    * 同步配置（宿主插件配置里的 `sync` 块）；`null` 或字段缺席都按"没配置"处理，只画一句说明。
@@ -637,6 +672,11 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
         setAutoProgress(null)
         setNotice(autoPushSentence(t, response))
         setFailures(response.problems ?? [])
+        /*
+         * 宿主说"上一轮还在跑"：立刻去问那一轮跑到哪了，把横幅与那条流接上（而不是只留这一句话让
+         * 用户干等）。定时那一问也会在几秒内接上，这里只是让它当场发生。
+         */
+        if (response.skip === 'busy') autoPushRefresh.current?.()
         // 推的那一侧不改本机任何东西，所以这里**不 reload**（会话列表与工作区归属都不会变）；
         // 只有宿主说连续失败，才把最近那次的原因也摆出来（它可能来自上一轮，这一轮横幅里没有）。
         if (response.failures > 0 && response.problem !== undefined) {
@@ -651,6 +691,179 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
     )
   }
 
+
+  /**
+   * 后台那一轮自动推送：**进这一页先问一次状态**，说"在跑"才把那条长连接开起来，一帧一帧地收进度。
+   *
+   * 为什么不是一直挂着流：这条流只在那几分钟里有用（一轮跑完就没了），常驻一条长连接不值当；而
+   * "现在有没有在跑"问一句就够了。
+   *
+   * 为什么不是轮询：平时一个请求都不发（除了进页面、浏览器切回来、点那一次撞上 `busy`、以及流断了
+   * 之后补问的那一次）；一轮可能跑几十秒，隔几秒问一次看到的进度是"跳着走"的，而宿主那边每条进度
+   * 本来就是一条条产生的（`GET /auto-push?mode=watch`），推过来才能一帧不落。
+   *
+   * 代价：这一页开着、又没在跑的时候，后台要是正好起了一轮（定时器兜底那一次），页面上不会自己
+   * 冒出来；切到别的页签再回来（或点一下「立即推送一次」）就是一次"进入"，那时会问一次并接上。
+   *
+   * 接上之后与手点那一次走同一套状态（`autoPushing` / `autoProgress`），横幅、按钮的「正在自动推送…」
+   * 都不用再写第二份。看着它跑完才把结论摆出来（`watchingAutoPush` 记着那一轮的开始时刻），免得每次
+   * 进这一页都把上一轮那句话再说一遍。
+   */
+  React.useEffect(() => {
+    let alive = true
+    /** 退订那条流（没开着就是 null）。 */
+    let stop: (() => void) | null = null
+    /** 流断了之后那一次补问（"只在需要时问"：正常跑完、平时闲置都不问）。 */
+    let retry: ReturnType<typeof setTimeout> | undefined
+    /** "这条流还有没有动静"的计时器（见 `AUTO_PUSH_STREAM_IDLE_MS`）。 */
+    let watchdog: ReturnType<typeof setTimeout> | undefined
+
+    const clearWatchdog = (): void => {
+      if (watchdog !== undefined) {
+        clearTimeout(watchdog)
+        watchdog = undefined
+      }
+    }
+
+    /**
+     * 关掉那条流。
+     *
+     * 先把 `stop` 置空再退订：`watchAutoPush()` 结束时会回调 `onEnd`，那个回调靠 `stop === null`
+     * 分辨"是我自己关的"（不重连）与"它自己断了"（补问一次）。
+     */
+    const closeWatch = (): void => {
+      const unsubscribe = stop
+      stop = null
+      clearWatchdog()
+      unsubscribe?.()
+    }
+
+    /** 流断了/没动静了：隔一会儿问一次状态，还在跑就把流接回来（正常跑完不走这条路）。 */
+    const scheduleRetry = (): void => {
+      if (retry !== undefined || !alive) return
+      retry = setTimeout(() => {
+        retry = undefined
+        void refresh()
+      }, AUTO_PUSH_STREAM_RETRY_MS)
+    }
+
+    /** 这一轮结束了：收横幅，把结论摆出来（只在确实看着它跑的时候）。 */
+    const settle = (last: AutoPushLast | null): void => {
+      const startedAt = watchingAutoPush.current
+      watchingAutoPush.current = null
+      closeWatch()
+      setAutoPushing(false)
+      setAutoProgress(null)
+      if (last === null || startedAt === null || (last.startedAt ?? 0) < startedAt) return
+      setNotice(autoPushSentence(t, last))
+      setFailures(last.problems)
+    }
+
+    /** 把"在跑"这一份状态接到横幅上；`running === null` 就是收尾。 */
+    const adopt = (running: AutoPushStatusResponse['running'], last: AutoPushLast | null): void => {
+      if (running === null) {
+        if (watchingAutoPush.current !== null) settle(last)
+        return
+      }
+      watchingAutoPush.current = running.startedAt
+      setAutoPushing(true)
+      setAutoProgress(running.progress)
+      // 正在跑的就是它：上面那句"上一轮还在跑"撤掉，免得两句话同时在屏上。
+      setNotice(null)
+    }
+
+    const handleEvent = (event: AutoPushWatchEvent): void => {
+      if (event.type === 'ping') return
+      if (event.type === 'state') {
+        adopt(event.running, event.last)
+        return
+      }
+      if (event.type === 'progress') {
+        setAutoPushing(true)
+        setAutoProgress(event.progress)
+        setNotice(null)
+        return
+      }
+      // `done`：这一轮跑完了，连接那边也可以收了。
+      settle(event.last)
+    }
+
+    /** 接上那条流：开头宿主会先推一条 `state`（现在跑到哪），之后一条条进度。 */
+    const openWatch = (): void => {
+      if (stop !== null || !alive) return
+      const armWatchdog = (): void => {
+        clearWatchdog()
+        watchdog = setTimeout(() => {
+          // 几十秒没有任何动静（`ping` 都断了）：当它死了，关掉、补问一次。
+          closeWatch()
+          scheduleRetry()
+        }, AUTO_PUSH_STREAM_IDLE_MS)
+      }
+      armWatchdog()
+      stop = watchAutoPush(
+        (event) => {
+          if (!alive) return
+          armWatchdog()
+          handleEvent(event)
+        },
+        () => {
+          clearWatchdog()
+          // `stop === null` 说明是自己关的（跑完了 / 页面走了），不用再接。
+          if (stop === null) return
+          stop = null
+          scheduleRetry()
+        },
+      )
+    }
+
+    /**
+     * 问一次状态。
+     *
+     * **只在需要的时候问**：进这一页、浏览器切回来、点那一次撞上 `busy`、以及流断了之后补这一次。
+     * 没有轮询——平时一个请求都不发；进度由 `mode=watch` 那条流一条条推过来。
+     */
+    async function refresh(): Promise<void> {
+      try {
+        const status = await fetchAutoPushStatus()
+        if (!alive) return
+        if (status.running === null) {
+          // 跑完了（或者本来就没跑）：看着它跑过的那一轮在这里收尾。
+          if (watchingAutoPush.current !== null) settle(status.last)
+          return
+        }
+        if (stop === null) {
+          /*
+           * 在跑、流还没接上：先用这一问的快照把横幅摆出来，再把流开起来。流接上之后进度只认流里
+           * 那一份——这一问的快照可能比流里的旧，拿它盖过去进度条会往回跳。
+           */
+          adopt(status.running, status.last)
+          openWatch()
+        }
+      } catch {
+        // 问不到就当没看见：过一会儿再问。后台在跑这件事不该因为一次失败就报错。
+        scheduleRetry()
+      }
+    }
+
+    /*
+     * 浏览器会把后台页签里的定时器压到一分钟一次（甚至更久）。切回来时补问一次，别拿很久以前的
+     * 状态给人看——"打开这一页就看到现在什么样"是这条功能的全部意义。
+     */
+    const onVisible = (): void => {
+      if (document.visibilityState === 'visible') void refresh()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+
+    autoPushRefresh.current = () => void refresh()
+    void refresh()
+    return () => {
+      alive = false
+      autoPushRefresh.current = null
+      document.removeEventListener('visibilitychange', onVisible)
+      if (retry !== undefined) clearTimeout(retry)
+      closeWatch()
+    }
+  }, [t])
 
   /**
    * 进度块下面补的那句话：只有真写盘的两段（拉取 / 推送）才有意义——预演阶段还没有东西可覆盖。
