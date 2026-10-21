@@ -719,6 +719,14 @@ export const CSS = `
   align-items: center;
   gap: 8px;
 }
+/*
+ * 横幅里那枚按钮不参与收缩。
+ *
+ * 横幅是一行横向 flex（"一句话 + spacer + 按钮"），句子长的时候剩余宽度不够：中文可以在任意两个字之间
+ * 断行，按钮的 min-content 就退成**一个字**宽，于是「知道了」被挤成竖着的两行（真实 dev GUI 里量到
+ * 按钮 40px 宽、两行高）。让这一枚不收缩、把宽度留给句子换行——句子本来就该折行，按钮不该。
+ */
+.dsm-banner > button { flex: none; }
 /* 页内分页：一排官方 SegmentedControl 段 + 右端那枚「刷新」，下面一条通栏下划线。 */
 .dsm-tabsRow {
   display: flex;

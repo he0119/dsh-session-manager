@@ -188,6 +188,17 @@ test('标签不许折行：它是小块，不是一句话', () => {
   assert.match(body, /white-space:\s*nowrap/, '窄列里标签会竖成两行（「跳/过」），必须 nowrap')
 })
 
+test('横幅里那枚按钮不参与收缩：句子长的时候不该把它挤成两行', () => {
+  // 为什么钉它：横幅是"一句话 + spacer + 按钮"的一行横向 flex，句子长、剩余宽度不够时，中文可以在
+  // 任意两个字之间断行，按钮的 min-content 就退成一个字宽——「知道了」被挤成竖着的两行（真实 dev GUI
+  // 里量到 40px 宽、两行高）。句子本来就该折行，按钮不该；给这一枚 `flex: none` 把宽度留给句子。
+  //
+  // 反事实：去掉 `flex: none`（或者换成 `flex: 1`），窄横幅里按钮立刻变回两行。
+  const body = ruleBody('.dsm-banner > button')
+  assert.notEqual(body, null, '找不到 .dsm-banner > button 规则')
+  assert.match(body, /flex:\s*none/, '横幅里的按钮必须不收缩，否则中文会被挤成竖排')
+})
+
 test('.dsm-tag 只剩布局挂钩：几何与配色都归官方 Tag 原语', () => {
   // 为什么钉它：标签的圆角/内边距/字号/配色是"标签长什么样"，官方 `Tag.module.css` 已经定死了
   // （999px 胶囊、padding 1px 8px、11px/17px、字重 500，tone 决定配色）。本页再写一遍就会与官方那份
