@@ -4399,7 +4399,13 @@ test('客户端产物：落地时弹窗正文换成进度条（第几条 / 共�
   assert.equal(recorded.some((node) => node.type === 'table'), false, '落地时不再画计划表（那张表说的是"将要"）')
   assert.equal(primaryOf(recorded).props.children, 'sync.busy', '确认按钮变成"同步中…"')
   assert.equal(primaryOf(recorded).props.disabled, true, '落地时确认按钮禁用（不能按第二下）')
-  assert.equal(cancelOf(recorded).props.disabled, true, '取消也禁用：中途撒手会在宿主侧留下半截状态')
+  /*
+   * 落地时「取消」不再是"取消"：那一趟在宿主那边会一直跑到结束，窗口关掉只等于把它挂到后台，所以这一枚
+   * 变成「转到后台」并且**可以按**（原来这里禁用，用户只能干看着）。关掉之后进度搬到页面顶上的横幅，
+   * 回到这一页还在（见 logic/syncJob.ts 与 ManagerPanel 的说明）。
+   */
+  assert.equal(cancelOf(recorded).props.disabled, false, '落地时这一枚可以按：它只是把窗口收起来')
+  assert.equal(cancelOf(recorded).props.children, 'sync.background', '忙碌时它说的是「转到后台」，不是「取消」')
 
   // 拉取那一段用另一句：两段分母不同，文案得跟着 phase 走。
   const pulling = mount({

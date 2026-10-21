@@ -366,6 +366,17 @@ export const zh = {
   'sync.dialogTitle': '将要同步',
   'sync.running': '正在同步',
   'sync.busy': '同步中…',
+  // 关掉窗口之后那一趟还在跑（见 logic/syncJob.ts）：弹窗里那枚按钮、页面顶上的横幅、以及跑完之后
+  // 那一行结论，用的就是下面这几句。
+  'sync.background': '转到后台',
+  'sync.background.running': '正在同步（后台）',
+  'sync.background.adopted': '这一趟是在别处发起的（刷新之前，或者另一个页签里）：这一页看不到逐条进度，跑完会补上条数。',
+  'sync.background.hint': '关掉窗口、切到别的分页都会继续跑；回到这一页还能看到它跑到哪。',
+  'sync.background.done': '后台同步结束：拉取 {pulled} 条、推送 {pushed} 条。',
+  // 宿主那边连"搬了几条"都没留下（进程重启过）：只说结束，不编数字。
+  'sync.background.donePlain': '后台同步结束。',
+  'sync.background.failed': '后台同步没成：{reason}',
+  'sync.background.open': '查看',
   'sync.progress.note': '中断了再点一次「同步」会接着补齐，所以这里没有「取消」；要覆盖本机那份之前会先备份（在「备份」页恢复）。',
   'sync.applyAction': '确认同步',
   'sync.summary': '会拉取 {pull} 条、会推送 {push} 条（本机 {local} 条，远端 {remote} 条）',
@@ -889,6 +900,15 @@ export const en: LocaleDictOf<typeof NS> = {
   'sync.dialogTitle': 'About to sync',
   'sync.running': 'Syncing',
   'sync.busy': 'Syncing…',
+  'sync.background': 'Run in background',
+  'sync.background.running': 'Syncing (in background)',
+  'sync.background.adopted':
+    'This run was started elsewhere (before a reload, or in another tab): this page cannot show item-by-item progress, but the counts appear here when it finishes.',
+  'sync.background.hint': 'Closing the window or switching tabs keeps it running; come back to this page to see where it is.',
+  'sync.background.done': 'Background sync finished: pulled {pulled}, pushed {pushed}.',
+  'sync.background.donePlain': 'Background sync finished.',
+  'sync.background.failed': 'Background sync failed: {reason}',
+  'sync.background.open': 'View',
   'sync.progress.note': 'If it stops, sync again and it carries on where it left off — that is why there is no Cancel here. A copy about to be overwritten is backed up first (restore it from the Backups tab).',
   'sync.applyAction': 'Sync now',
   'sync.summary': 'Pull {pull}, push {push} (local {local}, remote {remote})',

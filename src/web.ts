@@ -661,6 +661,28 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
   /** 预演编号：只用来把"这次确认"对回"那次预演"，不承担任何安全职责。 */
   let previewSeq = 0
 
+  /**
+   * 正在跑的那一趟落地（`null` = 没有）。
+   *
+   * 为什么要有它：落地这趟现在可以**关掉窗口继续跑**（界面那一侧把进度搬到页面横幅上）。于是它会
+   * 比发起它的那个页面活得久——用户关掉设置、刷新页面、或者换一个页签回来，都可能再点一次「同步」。
+   * 两趟落地同时在跑会互相踩（同一份预演缓存、同一个远端、同一条本机日志），所以这里留一个闸：
+   * 跑着的时候第二趟直接被拒，界面据此说清"上一轮还在跑"。
+   *
+   * 只记"跑没跑、从什么时候开始、最后一条进度"，结果仍在发起那一侧的事件流里——这条状态是给
+   * **没在听那条流的人**（刷新之后的页面、另一个页签）看的。
+   */
+  let applying: { startedAt: number; progress: SyncProgress | null } | null = null
+  /** 最近一次落地的结论（同上：给没在听流的人说"刚才那一趟成没成、搬了几条"）。 */
+  let lastApply: {
+    startedAt: number
+    finishedAt: number
+    ok: boolean
+    pulled: number
+    pushed: number
+    error?: string
+  } | null = null
+
   /** 把裁决表折成一个稳定串：确认那次据此判断"还是预演时那组选择吗"。 */
   const decisionsKeyOf = (decisions: ReadonlyMap<string, SyncDecision> | undefined): string => {
     if (decisions === undefined || decisions.size === 0) return ''
@@ -1105,6 +1127,22 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
       sendJson(res, 409, { error: '这个宿主没有配置 WebDAV 同步（插件配置里的 sync.url 是空的）' })
       return
     }
+    if (mode === 'status') {
+      /*
+       * 只回答"后台有没有一趟在跑、刚才那一趟成没成"。
+       *
+       * 界面那一侧用它做两件事：关掉窗口 / 刷新之后回来，横幅还能照着说"还在跑"；以及在跑着的时候
+       * 把「同步」按钮摆成不可用，而不是让用户点下去才吃一个 409。
+       *
+       * 只读：不扫库、不碰远端、不改任何状态。
+       */
+      sendJson(res, 200, {
+        applying:
+          applying === null ? null : { startedAt: applying.startedAt, progress: applying.progress },
+        last: lastApply,
+      })
+      return
+    }
     if (mode === 'test') {
       // 只读探一次：判定在 sync.ts，这里补上"这次有没有带凭据"两个事实——界面据此把 401 分成
       // "没配上密码"与"服务器不认这套"，那两句的处置完全不同。
@@ -1179,9 +1217,28 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
      * `content-type` 区分"流"与"一次性 JSON"（没配置同步那类错发生在写头之前，仍然是 JSON +
      * 409/500）。
      */
+    /*
+     * 一趟落地还没跑完就不再开第二趟。
+     *
+     * 这道闸挡的是"关掉窗口继续跑"带来的新情况：那趟现在比发起它的页面活得久，用户可能刷新之后、或者
+     * 在另一个页签里再点一次。两趟一起跑会互相踩（同一份预演缓存、同一个远端、同一条本机日志），
+     * 所以第二趟在这里就被拒——一次性 JSON + 409，发生在写响应头之前，界面能照实说清是"还在跑"。
+     */
+    if (apply && applying !== null) {
+      sendJson(res, 409, {
+        error: `上一轮同步还在跑（${new Date(applying.startedAt).toLocaleTimeString('zh-CN')} 开始），等它结束再试`,
+      })
+      return
+    }
     sendEventStream(res)
+    const startedAt = Date.now()
+    if (apply) applying = { startedAt, progress: null }
     try {
-      const onProgress = (progress: SyncProgress): void => sendEvent(res, { type: 'progress', progress })
+      const onProgress = (progress: SyncProgress): void => {
+        // 给"没在听这条流的人"留一份最新进度（刷新之后进来的页面读它）。
+        if (apply && applying !== null) applying.progress = progress
+        sendEvent(res, { type: 'progress', progress })
+      }
       if (!apply) {
         /*
          * 预演：算一份计划，并且把那一次算出来的输入留在 `preview` 里（见 `SyncPrepared`）。
@@ -1235,10 +1292,24 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
                       reason: '预演那份已经不在宿主手里了（宿主重启过，或又一次预演把它换掉了）',
                     },
                   }
+        lastApply = {
+          startedAt,
+          finishedAt: Date.now(),
+          ok: true,
+          pulled: outcome.pulled.length,
+          pushed: outcome.pushed.length,
+        }
+        applying = null
         sendEvent(res, { type: 'result', result: payloadOf(outcome) })
       }
     } catch (error) {
-      sendEvent(res, { type: 'error', error: error instanceof Error ? error.message : String(error) })
+      const message = error instanceof Error ? error.message : String(error)
+      if (apply) {
+        // 失败也留一条：刷新之后进来的页面要能说"刚才那一趟没成、原因是这个"，而不是一片空白。
+        applying = null
+        lastApply = { startedAt, finishedAt: Date.now(), ok: false, pulled: 0, pushed: 0, error: message }
+      }
+      sendEvent(res, { type: 'error', error: message })
     }
     res.end()
   }

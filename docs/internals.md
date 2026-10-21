@@ -105,6 +105,10 @@
 - [确认之后照着预演那份数据落地](../.agents/notes/implemented/architecture/2026-10-11-sync-confirm-reuses-the-preview.md)：
   预演算出来的计划连输入一起留下（`SyncPrepared`），响应带回 `planId`，确认那次照它落地；输入那套设置、
   本机的代次文件、投影缓存那两件事、要覆盖的那几条是否还活着、远端索引有一处对不上就从零重算。
+- [同步关掉窗口之后接着跑，回来还看得见](../.agents/notes/implemented/feature/2026-10-21-sync-keeps-running-when-the-window-closes.md)：
+  落地那一趟的状态搬到模块级（`src/client/logic/syncJob.ts`）：忙碌时弹窗那枚「取消」换成「转到后台」，
+  进度与结束结论搬到页面顶上的横幅（切页签、关设置再回来都还在）；刷新之后靠 `GET /sync?mode=status`
+  认领还在跑的那一趟。宿主那边同一时间只允许一趟落地（第二趟 409）。
 - [自动推送只往远端推](../.agents/notes/implemented/feature/2026-10-14-auto-push-is-push-only.md)：
   后台跑一轮，计划里摘掉拉取与"覆盖本机"那几类，所以它不覆盖、不备份、不写注册表、也不请宿主折
   检查点；间隔与开关是活字段，节拍器每次醒来看一眼当前配置。

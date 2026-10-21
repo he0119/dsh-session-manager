@@ -35,6 +35,14 @@ export interface ConfirmDialogProps {
   busyLabel: string
   /** 动作正在执行：主按钮换成 `busyLabel`，两个按钮都禁用。 */
   busy: boolean
+  /**
+   * 忙碌时「取消」那一枚换成的动作：窗口收起来，活儿继续在后台跑。
+   *
+   * 只有**关掉窗口不代表取消**的动作才给这一项（同步就是：宿主那边会一直跑到结束，见 SyncPanel 的
+   * 说明）。给了它，忙碌时这枚按钮不再禁用、字换成这里这句；没给（迁移 / 导入 / 删除）就仍是禁用——
+   * 那几个动作关掉窗口只是把进度藏起来，结果照样会丢，不该假装做得到。
+   */
+  backgroundLabel?: string
   /** 计划还在算：正文是一行说明，主按钮禁用。 */
   planning?: boolean
   /**
@@ -74,6 +82,7 @@ export function ConfirmDialog({
   confirmLabel,
   busyLabel,
   busy,
+  backgroundLabel,
   planning = false,
   planningDetail,
   error = null,
@@ -99,8 +108,17 @@ export function ConfirmDialog({
             缺省尺寸是 36px / 14px，也不再用 `size="sm"`（28px / 12px 在弹窗里比官方那对轻一档）。
             `data-modal-autofocus` 是官方 `Modal` 认的初始焦点标记，留在「取消」这一枚上。
           */}
-          <Button variant="outline" data-modal-autofocus="" onClick={onCancel} disabled={busy}>
-            {t('cancel')}
+          {/*
+            忙碌时有两种口径：给了 `backgroundLabel` 的（同步）把这一枚变成「转到后台」——窗口关掉、
+            活儿照跑；没给的照旧禁用，因为那几个动作关掉窗口只会把进度藏起来，结果照样丢。
+          */}
+          <Button
+            variant="outline"
+            data-modal-autofocus=""
+            onClick={onCancel}
+            disabled={busy && backgroundLabel === undefined}
+          >
+            {busy && backgroundLabel !== undefined ? backgroundLabel : t('cancel')}
           </Button>
           <Button
             variant="primary"

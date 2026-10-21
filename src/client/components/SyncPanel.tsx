@@ -41,7 +41,6 @@ import * as React from 'react'
 import { Button, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
 
 import {
-  applySync,
   fetchSyncPlan,
   runAutoPushNow,
   type AutoPushResponse,
@@ -57,6 +56,7 @@ import { groupKey } from '../logic/groups.ts'
 import { WorkspaceIcon } from './icons.tsx'
 import type { SessionManagerKey, Translate } from '../logic/locales.ts'
 import { AUTO_PUSH_SKIP_CODES } from '../logic/autoPush.ts'
+import { syncJob, type SyncJobSnapshot } from '../logic/syncJob.ts'
 import { autoPushMinutes } from '../logic/syncForm.ts'
 import { projectLabel, sessionLabel, type SessionLabel } from '../logic/planRows.ts'
 import { ProgressBlock } from './ProgressBlock.tsx'
@@ -425,9 +425,15 @@ function describeSyncedAttachments(t: Translate, result: SyncResponse): string {
 export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactElement {
   /** 最近一次计划或结果：映射表的远端候选与弹窗正文都读它（关掉弹窗之后候选还得在）。 */
   const [sync, setSync] = React.useState<SyncResponse | null>(null)
-  /** 同步弹窗开着吗（`plan` = 正在算计划、`apply` = 正在落地）。 */
+  /**
+   * 同步弹窗开着吗（`plan` = 正在看 / 正在算计划、`apply` = 落地跑着、正文是进度）。
+   *
+   * `apply` 只是**这一扇窗口还开着**；关掉它不等于停——那一趟的生命周期在 `syncJob` 里（模块级），
+   * 关掉之后进度搬到页面顶上的横幅，回来还在（见 logic/syncJob.ts 的说明）。
+   */
   const [dialog, setDialog] = React.useState<'plan' | 'apply' | null>(null)
-  const [busy, setBusy] = React.useState<'plan' | 'apply' | null>(null)
+  /** 预演（只读算计划）在跑：这一段仍然挂在这个组件上，切走就丢——它几秒就完，没有"后台"的必要。 */
+  const [busy, setBusy] = React.useState<'plan' | null>(null)
   const [error, setError] = React.useState<string | null>(null)
   const [notice, setNotice] = React.useState<string | null>(null)
   /** 落地时逐条失败的原因（宿主只把成功的那些算进 pulled/pushed，失败的在这里）。 */
@@ -441,6 +447,29 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
   const [progress, setProgress] = React.useState<ProgressEvent | null>(null)
   /** 两边各自写过时用户挑的正本（会话 id → 选择）；预演与落地都把它带上。 */
   const [decisions, setDecisions] = React.useState<Record<string, SyncDecision>>({})
+
+  /**
+   * 落地那一趟现在跑到哪儿（模块级 store；关掉弹窗、切页签、关掉设置都不影响它）。
+   *
+   * 初值是**当场读一次**而不是传函数：假 React（client.test.mjs）的 `useState` 不会调用惰性初始化，
+   * 传函数会让测试里读到的是函数本身。
+   */
+  const [job, setJob] = React.useState<SyncJobSnapshot>(syncJob.snapshot())
+  React.useEffect(() => syncJob.subscribe(setJob), [])
+  /**
+   * 落地在跑：这一页发起的（store 说在跑），或者窗口正处在落地模式。
+   *
+   * 两个条件都要：store 是"活儿还在跑"，`dialog === 'apply'` 是"这一页刚刚按下确认、结论还没回来"。
+   * 后者覆盖按下到第一条进度之间那一瞬间——那时窗口已经是落地模式，但 store 的通知还没渲染上来。
+   */
+  const applying = job.running || dialog === 'apply'
+  /**
+   * 正文里画哪一条进度：落地那趟的最新一条；它还没来就先沿用预演最后那一条。
+   *
+   * 两段报的是同一套事件（扫本机 / 读远端索引 / 比对内容），预演那一条不会是"另一种活"；而按下确认
+   * 之后先空着、等下一次事件再画，只会让进度块闪一下。
+   */
+  const liveProgress = job.progress ?? progress
 
   /**
    * 「立即推送一次」（`GET /auto-push`，只推不拉）走到哪儿了。
@@ -518,59 +547,75 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
    * 关掉之后它们还得看得见；不然用户只知道"同步过了"，不知道有一条没成。
    */
   const doSyncApply = (): void => {
-    setBusy('apply')
     setError(null)
-    setProgress(null)
+    // 预演那一条进度留着当起点（见 `liveProgress` 的说明），不发出去清空——它马上就会被落地的事件接上。
     // 只有"这次看的就是一份预演"时才递那个号码：上一次落地的结果也放在 `sync` 里，它不是预演。
     const picked = new Map(Object.entries(decisions))
-    void applySync(
-      sync?.mode === 'plan' ? sync.planId : undefined,
-      setProgress,
-      picked.size === 0 ? undefined : picked,
-    ).then(
-      (result) => {
-        setBusy(null)
-        setDialog(null)
-        setProgress(null)
-        setSync(result)
-        setDecisions({})
-        setFailures(result.problems)
-        /*
-         * 附件对象走的是另一条路（远端共享库），先算出来：**只有对象动了**的时候也得说一句——补对象
-         * 那一趟动的是"早先拉坏了的那条会话"，一条会话都没进出，但那正是用户按下同步想看到的结果。
-         */
-        const attachments = describeSyncedAttachments(t, result)
-        const sessionsMoved = result.pulled.length > 0 || result.pushed.length > 0
-        if (sessionsMoved || attachments !== '') {
-          setNotice(
-            // 一条会话都没搬、只搬了对象时换一句引子：那句"已拉取 0 条、已推送 0 条（落地 0 B，上传 0 B）"
-            // 在"补对象"这一趟里全是零，说出来只是噪音。
-            (sessionsMoved
-              ? t('sync.applied', {
-                  pulled: result.pulled.length,
-                  pushed: result.pushed.length,
-                  bytesIn: formatBytes(result.bytesIn),
-                  bytesOut: formatBytes(result.bytesOut),
-                })
-              : t('sync.appliedObjectsOnly')) +
-              // 覆盖本机原来那份是这次同步里唯一"本机内容被换掉"的部分，值得单独说一句（旧的进备份了）。
-              (result.replaced.length === 0 ? '' : ` ${t('sync.appliedReplaced', { count: result.replaced.length })}`) +
-              (attachments === '' ? '' : ` ${attachments}`) +
-              // 计划是重算的就得说一句：不然"确认时看到的那几条"和"结果里这几条"对不上时没人解释。
-              (result.planSource?.kind === 'recomputed' ? ` ${t('sync.replanned')}` : ''),
-          )
-        }
-        // 拉取的落到本机库里了：列表与工作区归属都要重读（推的那一侧不改本机任何东西）。
-        if (result.pulled.length > 0) void reload()
-      },
-      (cause) => {
-        setBusy(null)
-        setDialog(null)
-        setProgress(null)
-        setError(t('error.failed', { reason: reasonOf(cause) }))
-      },
-    )
+    const started = syncJob.start({
+      ...(sync?.mode === 'plan' && sync.planId !== undefined ? { planId: sync.planId } : {}),
+      decisions: picked,
+    })
+    if (!started) {
+      // 已经有一趟在跑（可能就是刷新之前发起、这一页认领来的那一趟）：不再开第二趟，弹窗收起来，
+      // 进度看上面那条横幅。宿主那边同样有一道闸（`/sync?mode=status` 说在跑时第二趟会被拒）。
+      setDialog(null)
+      return
+    }
+    setDialog('apply')
   }
+
+  /**
+   * 这一趟跑完之后的结论：详细的那几句（覆盖了几条、附件对象搬了几个、计划是不是重算的）。
+   *
+   * 为什么要等一份结论、而不是在发起的地方 `.then`：发起之后组件随时可能已经卸载（用户关掉窗口、
+   * 切了页签），而那一趟还在跑。结论留在 store 里，谁挂载谁取走——只有取走的那一方负责说，所以
+   * 不会两个入口各说一遍。
+   */
+  React.useEffect(() => {
+    const done = syncJob.takeResult()
+    if (done === null) return
+    setDialog(null)
+    if (!done.ok) {
+      setError(t('error.failed', { reason: done.error ?? '' }))
+      return
+    }
+    const result = done.result
+    if (result === undefined) return
+    setSync(result)
+    setDecisions({})
+    setFailures(result.problems)
+    /*
+     * 附件对象走的是另一条路（远端共享库），先算出来：**只有对象动了**的时候也得说一句——补对象
+     * 那一趟动的是"早先拉坏了的那条会话"，一条会话都没进出，但那正是用户按下同步想看到的结果。
+     */
+    const attachments = describeSyncedAttachments(t, result)
+    const sessionsMoved = result.pulled.length > 0 || result.pushed.length > 0
+    if (sessionsMoved || attachments !== '') {
+      setNotice(
+        // 一条会话都没搬、只搬了对象时换一句引子：那句"已拉取 0 条、已推送 0 条（落地 0 B，上传 0 B）"
+        // 在"补对象"这一趟里全是零，说出来只是噪音。
+        (sessionsMoved
+          ? t('sync.applied', {
+              pulled: result.pulled.length,
+              pushed: result.pushed.length,
+              bytesIn: formatBytes(result.bytesIn),
+              bytesOut: formatBytes(result.bytesOut),
+            })
+          : t('sync.appliedObjectsOnly')) +
+          // 覆盖本机原来那份是这次同步里唯一"本机内容被换掉"的部分，值得单独说一句（旧的进备份了）。
+          (result.replaced.length === 0 ? '' : ` ${t('sync.appliedReplaced', { count: result.replaced.length })}`) +
+          (attachments === '' ? '' : ` ${attachments}`) +
+          // 计划是重算的就得说一句：不然"确认时看到的那几条"和"结果里这几条"对不上时没人解释。
+          (result.planSource?.kind === 'recomputed' ? ` ${t('sync.replanned')}` : ''),
+      )
+    }
+    /*
+     * 拉取的落到本机库里了：列表与工作区归属都要重读（推的那一侧不改本机任何东西）。
+     *
+     * 这一下由**页面骨架**做（见 ManagerPanel）：那一趟可能是在用户已经切到别的分页、甚至关掉设置
+     * 之后才跑完的，只有页面这一级一定还在。
+     */
+  }, [job])
 
   /**
    * 点「立即推送一次」：当场跑一轮自动推送（只推不拉）。
@@ -779,7 +824,7 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
             而它读的是**已保存**的配置——与那张表单没有阅读顺序上的先后。 */}
         {syncInfo !== null && (
           <div className="dsm-controls">
-            <Button variant="primary" size="sm" onClick={openSync} disabled={busy !== null}>
+            <Button variant="primary" size="sm" onClick={openSync} disabled={busy !== null || applying}>
               {t('sync.action')}
             </Button>
             {/*
@@ -820,10 +865,13 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
         <ConfirmDialog
           t={t}
           // 落地那一段标题也换掉：这时候已经不是"将要"了，正文里正跑着进度。
-          title={t(busy === 'apply' ? 'sync.running' : 'sync.dialogTitle')}
+          title={t(applying ? 'sync.running' : 'sync.dialogTitle')}
           confirmLabel={t('sync.applyAction')}
           busyLabel={t('sync.busy')}
-          busy={busy === 'apply'}
+          busy={applying}
+          // 落地跑着的时候，「取消」换成「转到后台」：窗口收起来，那一趟照跑。这是用户要的那个动作——
+          // 落地可能几分钟，不该因为"我关掉了窗口"就没法看它跑到哪。
+          {...(applying ? { backgroundLabel: t('sync.background') } : {})}
           planning={planning}
           // 预演那几秒不是在空等：先扫本机、再读远端索引、最后逐条比对内容。算到哪一步摆哪一步的进度
           // （还没有事件时退回 ConfirmDialog 那句「预演中…」）。
@@ -833,13 +881,13 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
           onCancel={() => setDialog(null)}
         >
         {/* 落地：前面三个阶段（算计划）与后面两段（拉取 / 推送）报的是同一套事件，画法也一样。 */}
-        {busy === 'apply' &&
-          (progress === null ? (
+        {applying &&
+          (liveProgress === null ? (
             <p className="dsm-hint">{t('progress.waiting')}</p>
           ) : (
-            <ProgressBlock t={t} progress={progress} note={syncNote(progress)} />
+            <ProgressBlock t={t} progress={liveProgress} note={syncNote(liveProgress)} />
           ))}
-        {busy !== 'apply' && !planning && sync !== null && syncPlan !== null && (
+        {!applying && !planning && sync !== null && syncPlan !== null && (
           <div>
             <p className={syncPlan.ok && sync.problems.length === 0 ? 'dsm-ok' : 'dsm-warn'}>
               {t('sync.summary', {
