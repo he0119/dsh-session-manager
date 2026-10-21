@@ -115,7 +115,7 @@ export interface SyncJob {
 /**
  * 造一份同步任务状态。
  *
- * @param deps 落地入口、状态查询与轮询间隔。
+ * @param deps 落地入口与"那一趟跑到哪"的订阅口（订阅走页面那条长连接，见 `panelEvents.ts`）。
  * @returns 那几个口子（见 {@link SyncJob}）。
  */
 export function createSyncJob(deps: SyncJobDeps): SyncJob {

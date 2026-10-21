@@ -368,8 +368,8 @@ function SessionCell({
 /**
  * `autoPushSentence()` 用得上的那几项。
  *
- * 两条来路：手点那一次拿到的是整份 `AutoPushResponse`；进页面时轮询 `GET /auto-push?mode=status`
- * 拿到的上一轮只有计数（`pushedCount`），所以这里收窄成"两边都有"的那几项，句子只写一份。
+ * 两条来路：手点那一次拿到的是整份 `AutoPushResponse`；页面那条长连接推来的上一轮只有计数
+ * （`pushedCount`），所以这里收窄成"两边都有"的那几项，句子只写一份。
  */
 type AutoPushSentenceSource = Pick<AutoPushResponse, 'ran' | 'skip' | 'bytesOut' | 'attachmentOut'> & {
   pushed?: readonly unknown[]
@@ -393,7 +393,7 @@ function autoPushSentence(t: Translate, response: AutoPushSentenceSource): strin
       : t('sync.autoPush.noReason')
     return t('sync.autoPush.skipped', { reason })
   }
-  // 手点那一次给的是整份结果，轮询那一份只给计数（见 `AutoPushStatusResponse.last`）。
+  // 手点那一次给的是整份结果，长连接推来的上一轮只给计数（见 `AutoPushLast`）。
   const pushed = response.pushedCount ?? response.pushed?.length ?? 0
   if (pushed === 0) return t('sync.autoPush.nothing')
   const uploaded = response.attachmentOut?.uploaded ?? 0
@@ -579,7 +579,7 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
     })
     if (!started) {
       // 已经有一趟在跑（可能就是刷新之前发起、这一页认领来的那一趟）：不再开第二趟，弹窗收起来，
-      // 进度看上面那条横幅。宿主那边同样有一道闸（`/sync?mode=status` 说在跑时第二趟会被拒）。
+      // 进度看上面那条横幅。宿主那边同样只放一趟（落地还在跑时，第二趟会拿到 409）。
       setDialog(null)
       return
     }
@@ -874,7 +874,7 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
          * 自动推送开着时在 `sync.hint` 之外**再补一句**：上面那句说的是"按一下会做什么"，这一句说的是
          * "不按也会自己发生"——两件事，少一句用户就不知道这台机器在后台推东西。
          *
-         * 判据取自宿主给的 `syncInfo.autoPush`（没有这个字段 = 没开），页面不自己从配置表单那两栏推：
+         * 判据取自宿主给的 `syncInfo.autoPush`（没有这个字段 = 没开），页面不自己从配置表单那个开关推：
          * 那张表单画的是**草稿**，而这一句要说的是**现在生效的**那份配置。
          */}
         {syncInfo?.autoPush !== undefined && <p className="dsm-hint">{t('sync.autoPush.enabled')}</p>}
