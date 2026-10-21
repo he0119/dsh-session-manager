@@ -394,7 +394,7 @@ test('runAutoPush：没到间隔就不跑（force 能绕过去）', async () => 
 
     const early = await runAutoPush(deps, { lastRunAt: now - 10_000, now: () => now })
     assert.equal(early.ran, false)
-    assert.equal(early.skip, 'interval', '距上次真跑才 10 秒，远不到 5 分钟')
+    assert.equal(early.skip, 'interval', '距上次真跑才 10 秒，远不到设的间隔')
 
     const forced = await runAutoPush(deps, { lastRunAt: now - 10_000, now: () => now, force: true })
     assert.equal(forced.ran, true, 'force = 用户手点的那一次，不该被间隔挡住')
@@ -811,13 +811,13 @@ test('createAutoPushTimer：last() 报出当前设置与最近一次结论', asy
 test('autoPushSection：间隔缺席取缺省、小于下限抬到下限、坏值退缺省', () => {
   /*
    * 这一条钉的是**"多久一次"只有一个来源**：用户填进配置的那个数在读的时候就被归一了，节拍器与
-   * `runAutoPush()` 的速度闸读的都是归一之后的值。所以这里核的是"填 60000 就是 60000（不是 300000）"，
+   * `runAutoPush()` 的速度闸读的都是归一之后的值。所以这里核的是"填 60000 就是 60000（不是缺省值）"，
    * 以及"填 1 会被抬到 60000"——后者是那个下限唯一真正生效的地方。
    */
   const at = (autoPushIntervalMs: number | undefined): number =>
     autoPushSection({ url: 'https://dav.example/', ...(autoPushIntervalMs === undefined ? {} : { autoPushIntervalMs }) })
       ?.intervalMs ?? -1
-  assert.equal(at(undefined), DEFAULT_AUTO_PUSH_INTERVAL_MS, '缺席 = 缺省 300000')
+  assert.equal(at(undefined), DEFAULT_AUTO_PUSH_INTERVAL_MS, '缺席 = 缺省 3600000')
   assert.equal(at(120_000), 120_000, '填了就用填的那个')
   assert.equal(at(60_000), 60_000, '正好等于下限：原样（不是被抬成缺省！）')
   assert.equal(at(MIN_AUTO_PUSH_INTERVAL_MS), MIN_AUTO_PUSH_INTERVAL_MS, '下限本身照收')
@@ -832,10 +832,10 @@ test('autoPushSection：间隔缺席取缺省、小于下限抬到下限、坏�
   assert.equal(autoPushSection(undefined), undefined, '连同步都没配就没有这一节')
 })
 
-test('runAutoPush：填 60000 就按 60000 放行，别拿缺省那个 300000 当闸', async () => {
+test('runAutoPush：填 60000 就按 60000 放行，别拿缺省那个数当闸', async () => {
   /*
    * 回归：`autoPushIntervalMs` 填 60000 时，过了 61 秒**必须**放行。这条曾经有过一次"文档写 60000、
-   * 实际要等 300000"的疑点——真正的原因是节拍器上挂了一个没人读的 `minIntervalMs`，看起来像第二道
+   * 实际要等缺省那个间隔"的疑点——真正的原因是节拍器上挂了一个没人读的 `minIntervalMs`，看起来像第二道
    * 闸。现在闸门只比 `settings.autoPush.intervalMs`（读配置时就已归一），所以这条把"填多少就是多少"
    * 钉死：改回"拿缺省值当闸"，61 秒这一档立刻变红。
    */

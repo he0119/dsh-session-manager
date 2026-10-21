@@ -300,13 +300,13 @@ test('同步设置：间隔只收正整数（0 / 负数 / 小数 / 乱填都挡�
 
 test('同步设置：分钟数按四舍五入，坏值退回缺省那份', () => {
   // 卡片那句"每 N 分钟一次"要用它。`SyncInfo.autoPush.intervalMs` 是宿主拍平之后的真值。
-  assert.equal(autoPushMinutes(DEFAULT_AUTO_PUSH_INTERVAL_MS), 5, '缺省 300000 = 5 分钟')
+  assert.equal(autoPushMinutes(DEFAULT_AUTO_PUSH_INTERVAL_MS), 60, '缺省 3600000 = 60 分钟')
   assert.equal(autoPushMinutes(60_000), 1)
   assert.equal(autoPushMinutes(900_000), 15)
   // 宿主的 min 是 60000，所以"30 秒"这种值只可能来自坏输入；它必须退回缺省，不能显示成 0 分钟。
   assert.equal(autoPushMinutes(30_000), 1, '不到一分钟也要说 1 分钟，不能说 0（"每 0 分钟一次"）')
-  assert.equal(autoPushMinutes(0), 5, '0 是坏值 → 缺省')
-  assert.equal(autoPushMinutes(Number.NaN), 5, 'NaN 是坏值 → 缺省')
+  assert.equal(autoPushMinutes(0), 60, '0 是坏值 → 缺省')
+  assert.equal(autoPushMinutes(Number.NaN), 60, 'NaN 是坏值 → 缺省')
 })
 
 test('同步设置：自动推送的字典键两种语言都在', () => {

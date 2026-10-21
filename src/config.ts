@@ -97,13 +97,15 @@ export interface PluginConfig {
 export const DEFAULT_PASSWORD_REF = 'DSH_DAV_PASSWORD'
 
 /**
- * 自动推送的缺省间隔（毫秒）：5 分钟。
+ * 自动推送的缺省间隔（毫秒）：1 小时。
  *
- * 为什么不是"每次会话一结束就推"：本插件拿不到那个事件（宿主没把它交给插件），而轮询一个更短的间隔
- * 会把每次整库比对的开销摊到用户头上。5 分钟是"推上去的时候通常只差一两条"与"不白跑"之间的取值，
- * 而且它可以在界面里改。
+ * 这个数是**兜底**的间隔，不是"多久才推一次"：写完一轮就推那一路由事件层负责（见
+ * [决策](../../.agents/notes/implemented/architecture/2026-10-14-auto-push-follows-turn-end.md)），
+ * 定时器只需要管事件层够不到的那三类（别的机器推上去的、本机删会话要收尾索引、事件层漏了）。
+ * 那三类都不是"立刻就要"的事，而每一轮都要扫整库、读远端索引、逐条比对内容，所以兜底排得疏一点：
+ * 一小时一次足够把落后的补上，又不至于把整库比对摊到用户头上。它可以在界面里改。
  */
-export const DEFAULT_AUTO_PUSH_INTERVAL_MS = 300_000
+export const DEFAULT_AUTO_PUSH_INTERVAL_MS = 3_600_000
 
 /**
  * 自动推送间隔的下限（毫秒）：1 分钟。

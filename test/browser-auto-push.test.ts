@@ -44,7 +44,7 @@ test('自动推送表单：草稿如实读回，缺省是"没开 + 空间隔"', 
   assert.equal(set.autoPushIntervalMs, '900000', '间隔按字符串进草稿（输入框里的原文）')
 
   // 缺省间隔是多少，核心层与这一侧必须同一个数：界面那行灰字报错了，用户会按一个不生效的数去理解它。
-  assert.equal(DEFAULT_AUTO_PUSH_INTERVAL_MS, 300000)
+  assert.equal(DEFAULT_AUTO_PUSH_INTERVAL_MS, 3_600_000)
   assert.equal(DEFAULT_AUTO_PUSH_INTERVAL_MS, CORE_DEFAULT_AUTO_PUSH_INTERVAL_MS, '两侧的缺省间隔必须同一个')
 })
 
@@ -108,9 +108,11 @@ test('自动推送：间隔换成卡片上那句"每 N 分钟一次"', () => {
   // 不加这个下限的话 30000 会四舍五入成 0，界面上就成了"每 0 分钟一次，那到底是多久"。
   assert.equal(autoPushMinutes(30000), 1, '不到一分钟也要说 1，不说 0')
   assert.equal(autoPushMinutes(29000), 1, '往下取整不到 1 的同样抬到 1')
+  // 60 分钟那一档：缺省现在是一小时，换算过来就是 60，不折成"1 小时"另说一套（同一句话够用）。
+  assert.equal(autoPushMinutes(3_600_000), 60, '缺省那一档')
   // 宿主给了坏数（缺字段、0、NaN）：退回缺省值那一档，别在界面上印一个 NaN。
   for (const bad of [0, -1, Number.NaN]) {
-    assert.equal(autoPushMinutes(bad), 5, `${bad} 该退回缺省那一档`)
+    assert.equal(autoPushMinutes(bad), 60, `${bad} 该退回缺省那一档`)
   }
 })
 

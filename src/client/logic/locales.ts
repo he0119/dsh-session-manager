@@ -516,7 +516,7 @@ export const zh = {
     '本机写完一轮就推上去（最后一个会话事件之后安静 10 秒），另外按下面的间隔兜底补一次；只推送、绝不拉取，也不改动本机任何会话。',
   'sync.field.autoPushInterval': '自动推送兜底间隔（毫秒）',
   'sync.field.autoPushIntervalHint':
-    '缺省 300000（5 分钟），最小 60000；比 60000 小的值会被抬到 60000。它管事件层够不到的那些情况，意思是"最长多久没推就一定补一次"。',
+    '缺省 3600000（60 分钟），最小 60000；比 60000 小的值会被抬到 60000。它管事件层够不到的那些情况，意思是"最长多久没推就一定补一次"。',
   'sync.field.autoPushIntervalInvalid': '自动推送间隔要是正整数毫秒。',
   'sync.autoPush.enabled': '自动推送已开：写完一轮就推，另外每 {minutes} 分钟兜底一次。',
   'sync.autoPush.now': '立即推送一次',
@@ -1051,7 +1051,7 @@ export const en: LocaleDictOf<typeof NS> = {
     'Pushes as soon as a turn finishes on this machine (ten seconds after the last session event), with a fallback round on the interval below. It pushes only and never pulls, and never touches a local session.',
   'sync.field.autoPushInterval': 'Automatic push fallback interval (ms)',
   'sync.field.autoPushIntervalHint':
-    '300000 (5 minutes) by default, 60000 minimum; anything below 60000 is raised to 60000. It covers what the event layer cannot reach: it means "push at least this often".',
+    '3600000 (60 minutes) by default, 60000 minimum; anything below 60000 is raised to 60000. It covers what the event layer cannot reach: it means "push at least this often".',
   'sync.field.autoPushIntervalInvalid': 'The automatic push interval must be a positive whole number of milliseconds.',
   'sync.autoPush.enabled': 'Automatic push is on: as soon as a turn finishes, plus a fallback every {minutes} minute(s).',
   'sync.autoPush.now': 'Push now',

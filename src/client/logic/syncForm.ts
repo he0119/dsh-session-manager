@@ -47,13 +47,13 @@ export interface SyncSectionValue {
 }
 
 /**
- * 自动推送间隔的缺省值（表单上那行灰字按它说"缺省 5 分钟"）。
+ * 自动推送间隔的缺省值（表单上那行灰字按它说"缺省 60 分钟"）。
  *
  * 与 `DEFAULT_PASSWORD_REF` 同一个口径：这里是**副本**，核心层 `src/config.ts` 里那份才是权威，
  * 浏览器半侧不 import 核心层（那会把 schemastery 拖进客户端产物）。`test/browser-auto-push.test.ts`
  * 钉住两份相等——灰字报错了用户会按一个根本不生效的数去理解界面。
  */
-export const DEFAULT_AUTO_PUSH_INTERVAL_MS = 300000
+export const DEFAULT_AUTO_PUSH_INTERVAL_MS = 3600000
 
 /**
  * 自动推送兜底间隔的缺省分钟数：卡片上那句"兜底每 N 分钟一次"用它。

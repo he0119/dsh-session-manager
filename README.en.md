@@ -334,7 +334,7 @@ sync:
     /home/alice/dev/proj: /opt/work/proj
   timeoutMs: 30000                         # optional
   autoPush: true                           # optional: automatic push (once a turn ends, push only — see below)
-  autoPushIntervalMs: 300000               # optional: fallback interval in ms, 300000 (5 minutes) by default, 60000 minimum
+  autoPushIntervalMs: 3600000              # optional: fallback interval in ms, 3600000 (60 minutes) by default, 60000 minimum
 ```
 
 This section is also editable **in the interface**: in the card on Settings → “Session management” → “Sync”, the URL, machine id, username, password, timeout and mapping are
@@ -358,7 +358,7 @@ on the **Sync settings** form (below the timeout):
 ```yaml
 sync:
   autoPush: true                             # turn automatic push on (off by default)
-  autoPushIntervalMs: 300000                 # **fallback** interval in ms (300000 = 5 minutes; 60000 minimum)
+  autoPushIntervalMs: 3600000                # **fallback** interval in ms (3600000 = 60 minutes; 60000 minimum)
 ```
 
 The push happens **10 seconds after the last session event**: a turn does not fire `turn/end` just
@@ -367,7 +367,7 @@ waits a moment and a burst of events therefore pushes once instead of PUTting th
 and over. This path bypasses the rate gate below — you just finished a turn, and "only 20 seconds
 since the last one" should not hold it back.
 
-`autoPushIntervalMs` is the **fallback interval**, not "push once every 5 minutes": it covers the
+`autoPushIntervalMs` is the **fallback interval**, not "push once every 60 minutes": it covers the
 three cases the event layer cannot reach — what another machine pushed to the remote (this machine
 wrote nothing, so no event fires), a session deleted here that needs its index tidied up (again no
 new event), and a missed event layer (DSH crashed, or the session service was not available). So it
