@@ -108,7 +108,11 @@
 - [同步关掉窗口之后接着跑，回来还看得见](../.agents/notes/implemented/feature/2026-10-21-sync-keeps-running-when-the-window-closes.md)：
   落地那一趟的状态搬到模块级（`src/client/logic/syncJob.ts`）：忙碌时弹窗那枚「取消」换成「转到后台」，
   进度与结束结论搬到页面顶上的横幅（切页签、关设置再回来都还在）；刷新之后靠 `GET /sync?mode=status`
-  认领还在跑的那一趟。宿主那边同一时间只允许一趟落地（第二趟 409）。
+  认领还在跑的那一趟。宿主那边同一时间只允许一趟落地（第二趟 409）。自动推送那一轮同理：节拍器记下
+  "正跑着的那一轮"（`AutoPushTimer.status()`）并把之后的每条进度推给订阅者（`subscribe()`），同步页
+  进来先问一句 `GET /auto-push?mode=status`（整页只问这一次，不轮询），说"在跑"才接上
+  `GET /auto-push?mode=watch` 那条长连接——后台那一轮不管是定时器还是事件层发起的，横幅与
+  「正在自动推送…」都能一帧不落地接上，不必点一下才吃一句"上一轮还在跑"。
 - [自动推送只往远端推](../.agents/notes/implemented/feature/2026-10-14-auto-push-is-push-only.md)：
   后台跑一轮，计划里摘掉拉取与"覆盖本机"那几类，所以它不覆盖、不备份、不写注册表、也不请宿主折
   检查点；间隔与开关是活字段，节拍器每次醒来看一眼当前配置。

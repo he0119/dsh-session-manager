@@ -2906,6 +2906,28 @@ export interface AutoPushOutcome {
   problem?: string
 }
 
+/** 自动推送"现在在跑的那一轮"：开始时刻与最后一条进度（还没报过就是 null）。 */
+export interface AutoPushRunning {
+  startedAt: number
+  progress: SyncProgress | null
+}
+
+/** `AutoPushTimer.status()` 的回答：跑着的那一轮（没有就是 null）与上一轮的结论。 */
+export interface AutoPushStatus {
+  running: AutoPushRunning | null
+  last: AutoPushOutcome | undefined
+}
+
+/**
+ * 自动推送那一轮的进展：一条条进度，跑完一条结论。
+ *
+ * 订阅者不止界面的长连接：`GET /auto-push?mode=watch` 就是一个订阅者（见 `src/web.ts`）。事件里带的是
+ * 原始形状（`SyncProgress` / `AutoPushOutcome`），怎么摊平由收的那一侧决定。
+ */
+export type AutoPushEvent =
+  | { type: 'progress'; progress: SyncProgress }
+  | { type: 'done'; outcome: AutoPushOutcome }
+
 /**
  * 会话事件攒一轮的静默窗口（毫秒）：收到第一个"有新写的会话"起算，安静这么久就推一轮。
  *
@@ -2991,6 +3013,23 @@ export interface AutoPushTimer {
   touched(): void
   /** 最近一次结论（界面轮询它；不碰网络）。 */
   last(): { enabled: boolean; intervalMs: number; outcome?: AutoPushOutcome }
+  /**
+   * 这一轮**现在**跑到哪了。
+   *
+   * 与 `last()` 分开：`last()` 说的是"上一轮结论"，这一份说的是"正跑着的那一轮到了第几条"——界面
+   * 进入同步页时拿它接上进度条，而不是让用户只看到一句"上一轮还在跑"（见 `AutoPushRunning`）。
+   */
+  status(): AutoPushStatus
+  /**
+   * 订阅"之后的进展"（进度一条条、跑完一条结论）。
+   *
+   * 只推**订阅之后**发生的事：刚连上来那一轮现在跑到哪，先由 `status()` 说一次（见
+   * `GET /auto-push?mode=watch` 开头的 `state` 事件）。
+   *
+   * @param listener 收到事件时调一次。
+   * @returns 退订函数（连接断了/组件卸了就得调，不然事件一直往死连接上写）。
+   */
+  subscribe(listener: (event: AutoPushEvent) => void): () => void
   /** 这一次跑完了/已经知道了的结论（`tick()` 自己调，也供外部记一笔）。 */
   note(outcome: AutoPushOutcome): void
   /** 停掉（卸载时；停掉之后 `tick()` 仍可用——手动那一条路不依赖定时器）。 */
@@ -3027,6 +3066,25 @@ export function createAutoPushTimer(deps: AutoPushTimerDeps): AutoPushTimer {
   let settleHandle: unknown
   /** 上一轮还在跑的时候又来事件：记下来，跑完立刻补一次（不丢用户的这一轮）。 */
   let settleAgain = false
+  /**
+   * 正跑着的那一轮（`undefined` = 没有）。
+   *
+   * 为什么由节拍器记：一轮可能由三条路发起（兜底定时器、事件层那一下、界面那枚「立即推送一次」），
+   * 而界面要知道的是"**不管谁发起的**，现在这一轮跑到哪了"。进度回调在这里包一层，谁发起都记得下。
+   */
+  let runningState: AutoPushRunning | undefined
+  /** 正在听进展的人（界面那条长连接；没人听时是个空集合，广播什么都不做）。 */
+  const listeners = new Set<(event: AutoPushEvent) => void>()
+  /** 把一条事件发给所有订阅者；订阅者自己的异常吞掉——一个连接坏了不该让这一轮推送失败。 */
+  const broadcast = (event: AutoPushEvent): void => {
+    for (const listener of listeners) {
+      try {
+        listener(event)
+      } catch {
+        // 谁坏了就少收一条；退订由它自己的连接负责。
+      }
+    }
+  }
 
   const note = (outcome: AutoPushOutcome): void => {
     lastOutcome = outcome
@@ -3056,6 +3114,7 @@ export function createAutoPushTimer(deps: AutoPushTimerDeps): AutoPushTimer {
     }
     const pending = (async (): Promise<AutoPushOutcome> => {
       const startedAt = now()
+      runningState = { startedAt, progress: null }
       /*
        * `force` 要**转交**给 `run()`——契约上 `tick({ force: true })` 的语义就是"这一次不走速度闸"，
        * 而速度闸在 `runAutoPush()` 里（见它上面那段"速度闸放在这里而不是节拍器里"）。这里只把它用在
@@ -3065,11 +3124,17 @@ export function createAutoPushTimer(deps: AutoPushTimerDeps): AutoPushTimer {
        */
       const outcome = await deps.run({
         ...(options.force === true ? { force: true } : {}),
-        ...(options.onProgress === undefined ? {} : { onProgress: options.onProgress }),
+        // 谁要看这条流都行：调用方给的那一份照旧收到，同时记进 `runningState` 供界面轮询。
+        onProgress: (progress: SyncProgress): void => {
+          if (runningState !== undefined) runningState.progress = progress
+          options.onProgress?.(progress)
+          broadcast({ type: 'progress', progress })
+        },
       })
       // `run()` 自己会带 `failures` 与 `problem`（它知道这一轮是失败还是空跑）；这里只补时刻。
       const stamped: AutoPushOutcome = { ...outcome, ...(outcome.ran ? { startedAt, finishedAt: now() } : {}) }
       note(stamped)
+      broadcast({ type: 'done', outcome: stamped })
       return stamped
     })()
     running = pending
@@ -3077,6 +3142,7 @@ export function createAutoPushTimer(deps: AutoPushTimerDeps): AutoPushTimer {
       return await pending
     } finally {
       running = undefined
+      runningState = undefined
       reschedule()
       // 跑着的时候又来事件：这一轮读的是它开始之前的快照，那一轮得再补一次。
       if (settleAgain) {
@@ -3122,6 +3188,19 @@ export function createAutoPushTimer(deps: AutoPushTimerDeps): AutoPushTimer {
         enabled: deps.clock.enabled(),
         intervalMs: deps.clock.intervalMs(),
         ...(lastOutcome === undefined ? {} : { outcome: lastOutcome }),
+      }
+    },
+    status() {
+      return {
+        running:
+          runningState === undefined ? null : { startedAt: runningState.startedAt, progress: runningState.progress },
+        last: lastOutcome,
+      }
+    },
+    subscribe(listener) {
+      listeners.add(listener)
+      return () => {
+        listeners.delete(listener)
       }
     },
     note,

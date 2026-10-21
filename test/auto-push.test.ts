@@ -769,6 +769,97 @@ test('createAutoPushTimer：上一轮还在跑时这一轮让开（busy），不
   timer.stop()
 })
 
+test('createAutoPushTimer：status() 从"没在跑"到"跑到第几条"再到"上一轮结论"', async () => {
+  let release: (() => void) | undefined
+  let report: ((event: { phase: 'push'; done: number; total: number; id: string }) => void) | undefined
+  const timer = createAutoPushTimer({
+    clock: { enabled: () => true, intervalMs: () => 60_000 },
+    now: () => 1_000,
+    run: async (options) => {
+      report = options?.onProgress as typeof report
+      report?.({ phase: 'push', done: 0, total: 2, id: 'session-a' })
+      await new Promise<void>((resolve) => {
+        release = resolve
+      })
+      return { ran: true, failures: 0 }
+    },
+    setTimer: () => 1,
+    clearTimer: () => undefined,
+  })
+  assert.deepEqual(timer.status(), { running: null, last: undefined }, '还没跑：什么都没在跑')
+
+  const seen: string[] = []
+  const pending = timer.tick({ force: true, onProgress: (event) => seen.push(event.phase) })
+  // 让出一次，让 run() 里的第一条进度落到状态上。
+  await new Promise((resolve) => setImmediate(resolve))
+  const during = timer.status()
+  assert.equal(during.running?.startedAt, 1_000, '开始时刻来自节拍器的时钟')
+  assert.deepEqual(during.running?.progress, { phase: 'push', done: 0, total: 2, id: 'session-a' })
+  assert.deepEqual(seen, ['push'], '发起那一侧自己给的回调照旧收到（记状态与报进度是两件事）')
+
+  const second = await timer.tick()
+  assert.equal(second.skip, 'busy', '正跑着的时候再点一次只报 busy——界面靠 status() 看进度，不靠再点一次')
+
+  report?.({ phase: 'push', done: 2, total: 2, id: 'session-b' })
+  assert.equal(timer.status().running?.progress?.done, 2, '进度跟着走到最后一条')
+  release?.()
+  await pending
+  const after = timer.status()
+  assert.equal(after.running, null, '跑完就不再是"正在跑"')
+  assert.equal(after.last?.ran, true, '上一轮结论留在 status 里')
+  timer.stop()
+})
+
+test('createAutoPushTimer：subscribe() 一条条收到进度，跑完收到结论，退订之后不再推', async () => {
+  let release: (() => void) | undefined
+  let report: ((event: { phase: 'push'; done: number; total: number; id: string }) => void) | undefined
+  const timer = createAutoPushTimer({
+    clock: { enabled: () => true, intervalMs: () => 60_000 },
+    now: () => 1_000,
+    run: async (options) => {
+      report = options?.onProgress as typeof report
+      report?.({ phase: 'push', done: 0, total: 2, id: 'session-a' })
+      await new Promise<void>((resolve) => {
+        release = resolve
+      })
+      return { ran: true, failures: 0, outcome: { pushed: [], bytesOut: 0, problems: [] } as never }
+    },
+    setTimer: () => 1,
+    clearTimer: () => undefined,
+  })
+
+  const events: string[] = []
+  const unsubscribe = timer.subscribe((event) => {
+    events.push(event.type === 'progress' ? `progress:${event.progress.done}` : 'done')
+  })
+
+  const pending = timer.tick({ force: true })
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.deepEqual(events, ['progress:0'], '订阅之后第一条进度就推过来了')
+
+  report?.({ phase: 'push', done: 1, total: 2, id: 'session-b' })
+  assert.deepEqual(events, ['progress:0', 'progress:1'], '每一条都推，不用等跑完')
+
+  // 退订：这一轮剩下的都不该再推给它（界面关掉同步页就是这条路）。
+  unsubscribe()
+  report?.({ phase: 'push', done: 2, total: 2, id: 'session-c' })
+  release?.()
+  await pending
+  assert.deepEqual(events, ['progress:0', 'progress:1'], '退订之后进度与结论都收不到')
+
+  // 第二个订阅者进来：只推之后发生的（这一轮已经在跑，开头不会补发之前那几条）。
+  const late: string[] = []
+  const unsubscribeLate = timer.subscribe((event) => late.push(event.type))
+  const second = timer.tick({ force: true })
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.deepEqual(late, ['progress'], '刚订上时不会补发之前那几条，只收之后产生的')
+  release?.()
+  await second
+  assert.deepEqual(late, ['progress', 'done'], '跑完推一条结论')
+  unsubscribeLate()
+  timer.stop()
+})
+
 test('createAutoPushTimer：关着的时候 tick 回 disabled（手动那一次 force 例外）', async () => {
   const runs: number[] = []
   const timer = createAutoPushTimer({
