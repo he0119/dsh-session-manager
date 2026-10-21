@@ -643,64 +643,6 @@ function autoPushLastPayload(outcome: AutoPushOutcome | undefined): Record<strin
   }
 }
 
-/**
- * `GET /auto-push?mode=status` 的回答：后台那一轮跑到哪了、上一轮的结论。
- *
- * 只读的一次性快照。界面进入同步页时先问它一次；说"在跑"才去开 `mode=watch` 那条长连接。
- */
-function autoPushStatusPayload(timer: AutoPushTimer, info: SyncInfo | undefined): Record<string, unknown> {
-  const status = timer.status()
-  return {
-    mode: 'status',
-    remote: { url: info?.url ?? '', machineId: info?.machineId ?? '' },
-    running:
-      status.running === null
-        ? null
-        : { startedAt: status.running.startedAt, progress: status.running.progress },
-    last: autoPushLastPayload(status.last),
-  }
-}
-
-/**
- * `GET /auto-push?mode=watch`：把后台那一轮的进展**推**给页面。
- *
- * 什么时候开：进页面时先问一次 `mode=status`，说"在跑"才开这一条；那一轮结束（`done`）就关掉，没在跑
- * 的时候不占长连接。所以它只在这几分钟里挂着一条流，而不是每个打开着的同步页一条。
- *
- * 开头先发一条 `state`（现在跑到哪 + 上一轮结论）：从"问状态"到"流接上"之间可能正好跑完，光靠之后
- * 的 `done` 会漏掉那一轮；客户端拿 `running === null` 与这份 `last` 就能收尾。
- *
- * @param timer 自动推送的节拍器。
- * @param res 这条响应（已经写好 SSE 头）。
- */
-async function watchAutoPush(timer: AutoPushTimer, res: ServerResponse): Promise<void> {
-  sendEventStream(res)
-  const status = timer.status()
-  sendEvent(res, {
-    type: 'state',
-    running:
-      status.running === null
-        ? null
-        : { startedAt: status.running.startedAt, progress: status.running.progress },
-    last: autoPushLastPayload(status.last),
-  })
-  const unsubscribe = timer.subscribe((event) => {
-    if (event.type === 'progress') sendEvent(res, { type: 'progress', progress: event.progress })
-    else sendEvent(res, { type: 'done', last: autoPushLastPayload(event.outcome) })
-  })
-  /*
-   * 心跳：一轮自动推送可能几十秒没有新进度（正在解一份大日志），而中间任何一层代理都可能把"什么都
-   * 没发"的连接掐掉。它同时让客户端能分辨"还连着"与"断了"。
-   */
-  const heartbeat = setInterval(() => sendEvent(res, { type: 'ping' }), 15_000)
-  await new Promise<void>((resolve) => {
-    res.on('close', resolve)
-  })
-  clearInterval(heartbeat)
-  unsubscribe()
-  res.end()
-}
-
 /** 界面用的全部 handler，键是 `METHOD 路径后缀`；方法可以写成 `GET|POST`（`/sync` 两种都要）。 */
 export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingMessage, res: ServerResponse) => Promise<void>> {
   const { paths, decodeAll } = deps
@@ -766,6 +708,34 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
     error?: string
   } | null = null
 
+  /**
+   * 面板事件流的订阅者（每一条 SSE 响应就是一个）。
+   *
+   * 为什么是"广播"而不是"每个请求各查一次"：这一页打开之后要盯的东西有好几种——整库清单、落地那一趟、
+   * 自动推送那一轮、以及"某个动作改完了，重读一次"。它们都发生在宿主这一侧，而且**多数不是这一页发起
+   * 的**（定时器发起的一轮、另一个页签点的同步、工具层调的动作）。所以由宿主推、页面只订一条流。
+   */
+  const panelListeners = new Set<(event: Record<string, unknown>) => void>()
+  /**
+   * 给所有订着的页面发一条事件。
+   *
+   * 订阅者自己的异常吞掉：一个连不上（用户关了页签、网断了）不该让这一轮推送跟着失败——退订由那条
+   * 连接自己的 `close` 负责。
+   */
+  const panelEmit = (event: Record<string, unknown>): void => {
+    for (const listener of panelListeners) {
+      try {
+        listener(event)
+      } catch {
+        // 少发一条而已。
+      }
+    }
+  }
+
+  /** 落地那一趟的当前状态（`null` = 没在跑）。面板流开头那条与之后每条事件都带它。 */
+  const applyingPayload = (): Record<string, unknown> | null =>
+    applying === null ? null : { startedAt: applying.startedAt, progress: applying.progress }
+
   /** 把裁决表折成一个稳定串：确认那次据此判断"还是预演时那组选择吗"。 */
   const decisionsKeyOf = (decisions: ReadonlyMap<string, SyncDecision> | undefined): string => {
     if (decisions === undefined || decisions.size === 0) return ''
@@ -803,47 +773,158 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
 
   /**
    * 整库清单。走事件流：这一份要**扫完整库**（每条会话读 header、还要折标题，实测 468 条 / 232 MB
-   * 约 0.2～0.45 秒，冷缓存与大库上就是几秒），而它是这一页打开时等的第一件事——那段时间原来只有
-   * 一句「读取中…」。`/meta` 仍然先回，且回的是同一次扫库之后要用的那几个能力位。
+   * 约 0.2～0.45 秒，冷缓存与大库上就是几秒），而它是这一页打开时等的第一件事——那段时间只有
+   * 一句「读取中…」加一条"扫到第几条"。
+   *
+   * 界面走的是面板那条连接上的 `snapshot`（同一个 `readState()`）；这一条留着是不开浏览器也能读一眼
+   * 库的一次性入口。
    */
   const state = async (_req: IncomingMessage, res: ServerResponse): Promise<void> => {
-    await streamResult(res, async (report) => {
-      const { registry, problems } = loadRegistry(paths.registryPath)
-      const sessions = scans.scan(paths.sessionsRoot, decodeAll, {
-        resolveTitle,
-        projection,
-        // 标题与空白都从这些文件里读，它们变了结果就得重算。
-        projectionDir: projectionCacheDir(paths.registryPath),
-        onProgress: (done, total) => report({ phase: 'scan', done, total }),
-      })
-      // 「认领」算一次，会话列表那栏与工作区那栏读同一份：宿主发给渲染层的也是同一个取值
-      // （`Workspace.sessionIds` 的过滤，见 accounting.ts），两处各算一遍迟早会分叉。
-      const accounted = accountedOwners(registry, sessions)
-      const workspaces = summarizeWorkspaces(registry, accounted)
-      // 项目身份只认"界面上真会出现的那些目录"：每条会话的 cwd + 注册表登记的工作区路径。别的一律不问
-      // ——`git rev-parse` 是每个目录一次进程，列表页的热路径上多问一个都是白花。
-      const directories = new Set<string>()
-      for (const session of sessions) if (session.cwd !== undefined && session.cwd !== '') directories.add(session.cwd)
-      for (const workspace of workspaces) if (workspace.path !== '') directories.add(workspace.path)
-      const repos = deps.repos === undefined ? new Map<string, string>() : await deps.repos([...directories])
+    await streamResult(res, (report) => readState(report))
+  }
+
+  /**
+   * 扫一遍整库，交出界面要的那一份清单（`/state` 与面板事件流的 `snapshot` 读同一个函数）。
+   *
+   * 抽出来而不是各写一遍：这两处对"清单是什么"必须逐字相同——面板流那一份就是这一份，两处各抄一遍
+   * 迟早会分叉，而分叉的表现是"刚打开时列表少了一条"这类没人查得出来的错。
+   *
+   * @param report 进度回调（扫描那一段逐条报）。
+   * @returns 清单本身（形状与 `StateResponse` 一致）。
+   */
+  const readState = async (report: ProgressReporter): Promise<Record<string, unknown>> => {
+    const { registry, problems } = loadRegistry(paths.registryPath)
+    const sessions = scans.scan(paths.sessionsRoot, decodeAll, {
+      resolveTitle,
+      projection,
+      // 标题与空白都从这些文件里读，它们变了结果就得重算。
+      projectionDir: projectionCacheDir(paths.registryPath),
+      onProgress: (done, total) => report({ phase: 'scan', done, total }),
+    })
+    // 「认领」算一次，会话列表那栏与工作区那栏读同一份：宿主发给渲染层的也是同一个取值
+    // （`Workspace.sessionIds` 的过滤，见 accounting.ts），两处各算一遍迟早会分叉。
+    const accounted = accountedOwners(registry, sessions)
+    const workspaces = summarizeWorkspaces(registry, accounted)
+    // 项目身份只认"界面上真会出现的那些目录"：每条会话的 cwd + 注册表登记的工作区路径。别的一律不问
+    // ——`git rev-parse` 是每个目录一次进程，列表页的热路径上多问一个都是白花。
+    const directories = new Set<string>()
+    for (const session of sessions) if (session.cwd !== undefined && session.cwd !== '') directories.add(session.cwd)
+    for (const workspace of workspaces) if (workspace.path !== '') directories.add(workspace.path)
+    const repos = deps.repos === undefined ? new Map<string, string>() : await deps.repos([...directories])
+    return {
+      // 位置与能力位与 `/meta` 同一份取值，不在这里重算（见 metaFacts）。
+      ...metaFacts(),
+      problems,
+      // 目录 → 项目身份（`host/owner/repo`）：界面把它显示在原来印本机路径的地方。认不出来的目录不在
+      // 表里，界面退回显示路径。
+      repos: Object.fromEntries(repos),
+      sessions: summarizeSessions(sessions, {
+        accounted,
+        archived: new Set(registry?.global.archivedSessionIds ?? []),
+        // 空白判据默认从扫描时读到的 `session.meta` 取（同一个文件不再读第二遍）；只有显式注入了
+        // 读取器时才走它（测试用它钉"读不到空白"的边界）。
+        ...(deps.resolveBlank === undefined ? {} : { resolveBlank: deps.resolveBlank }),
+        live: liveSessionIds(),
+      }),
+      workspaces,
+    }
+  }
+
+  /**
+   * 面板事件流：这一页打开期间**只有这一条长连接**，各种状态都从它来。
+   *
+   * 它替掉的是原来四件事：打开页面时的 `GET /meta` + `GET /state` 两个请求、落地那一趟的
+   * `GET /sync?mode=status` 轮询、以及自动推送的 `GET /auto-push?mode=status` 轮询 +
+   * `mode=watch` 那条"在跑才开"的流。四处各问一次的时候，问题不只是省几个请求——**没在听的那些
+   * 事永远看不到**：定时器发起的一轮、另一个页签点的同步，页面都得靠"进页面时问一次"去撞。
+   *
+   * 事件（每条都是一行 JSON，`type` 说明是哪一种）：
+   *
+   * - `ready`：宿主事实（与 `GET /meta` 同一份取值），连上就先发，页头不必等扫库；
+   * - `progress`：扫库那一段逐条报（`phase: 'scan'`）；
+   * - `snapshot`：整库清单（与 `GET /state` 同一份取值，见 `readState()`）；
+   * - `sync`：落地那一趟的当前状态 + 上一轮结论（`applying` 为 null 就是没在跑）；
+   * - `auto-push`：自动推送那一轮同理（`running` 为 null 就是没在跑）；
+   * - `stale`：本机的会话库被改过了（某个动作落地、或一次同步拉取下来），页面据此重连要一份新清单；
+   * - `ping`：心跳，15 秒一次。
+   *
+   * 为什么开头先来一份"当前状态"再跟着推：从连上到第一条事件之间有可能正好有一轮跑完（那是几十毫秒
+   * 的窗口，但"正好错过"是最难查的那类 bug）。所以每条状态都先说一遍当下，之后才是增量。
+   */
+  const panelEvents = async (_req: IncomingMessage, res: ServerResponse): Promise<void> => {
+    sendEventStream(res)
+    /** 这条连接自己的写出口；`sendEvent()` 内部会跳过已经关掉的响应。 */
+    const listener = (event: Record<string, unknown>): void => sendEvent(res, event)
+    /*
+     * 先挂上订阅、再发"当下"那几条：反过来的话，从读到当下状态到挂上订阅之间那几十毫秒里发生的事
+     * （比如另一个页签点的同步正好跑完）会被漏掉，而且之后没有任何一次补问能把它捡回来。
+     */
+    panelListeners.add(listener)
+    // ① 宿主事实：位置、能力位、同步配置。这一条不扫库，所以页头立刻能画出来。
+    sendEvent(res, { type: 'ready', meta: metaFacts() })
+    /*
+     * ② 后台那两种状态的当下：落地那一趟与自动推送那一轮。
+     *
+     * 自动推送的节拍器要等配置与凭据解析完才存在（`deps.autoPush()` 是个挂起的 promise），所以这一条
+     * 可能比别的晚一点；拿不到就说明这个宿主没有自动推送，`running` / `last` 都是 null。
+     */
+    const timer = await deps.autoPush?.()
+    const autoPushNow = (): Record<string, unknown> => {
+      const status = timer?.status()
       return {
-        // 位置与能力位与 `/meta` 同一份取值，不在这里重算（见 metaFacts）。
-        ...metaFacts(),
-        problems,
-        // 目录 → 项目身份（`host/owner/repo`）：界面把它显示在原来印本机路径的地方。认不出来的目录不在
-        // 表里，界面退回显示路径。
-        repos: Object.fromEntries(repos),
-        sessions: summarizeSessions(sessions, {
-          accounted,
-          archived: new Set(registry?.global.archivedSessionIds ?? []),
-          // 空白判据默认从扫描时读到的 `session.meta` 取（同一个文件不再读第二遍）；只有显式注入了
-          // 读取器时才走它（测试用它钉"读不到空白"的边界）。
-          ...(deps.resolveBlank === undefined ? {} : { resolveBlank: deps.resolveBlank }),
-          live: liveSessionIds(),
-        }),
-        workspaces,
+        running:
+          status?.running === null || status?.running === undefined
+            ? null
+            : { startedAt: status.running.startedAt, progress: status.running.progress },
+        last: autoPushLastPayload(status?.last),
+      }
+    }
+    sendEvent(res, { type: 'sync', applying: applyingPayload(), last: lastApply })
+    sendEvent(res, { type: 'auto-push', ...autoPushNow() })
+    /*
+     * ③ 之后跟着推。
+     *
+     * 自动推送那一轮用节拍器自己的 `subscribe()`：三条发起路（兜底定时器、事件层、界面那枚按钮）都会
+     * 经过它，所以"谁发起的一轮"这里都看得见。退订跟着这条连接走（`close` 时）。
+     */
+    const unsubscribe = timer?.subscribe((event) => {
+      if (event.type === 'progress') {
+        // 开始时刻从节拍器那一份取：这一轮可能是别处发起的，不能拿"现在"当它的起点。
+        const startedAt = timer.status().running?.startedAt ?? Date.now()
+        sendEvent(res, { type: 'auto-push', running: { startedAt, progress: event.progress }, last: null })
+      } else {
+        sendEvent(res, { type: 'auto-push', running: null, last: autoPushLastPayload(event.outcome) })
       }
     })
+    /*
+     * ④ 清单：这一条要真扫库（冷缓存与大库上几秒），所以放在最后，边扫边报进度。
+     *
+     * 扫库是**同步**的一大段（读每条会话的 header、折标题），中间没有 `await` 的地方，所以它跑起来之后
+     * 这条连接上的别的推送也会被挡住——这正是把清单放最后、而不是穿插在状态之间的原因：状态先到，
+     * 用户至少能看出"后台在跑"，而不是干等一份清单。
+     */
+    try {
+      const snapshot = await readState((progress) => sendEvent(res, { type: 'progress', progress }))
+      sendEvent(res, { type: 'snapshot', state: snapshot })
+    } catch (error) {
+      sendEvent(res, { type: 'error', error: error instanceof Error ? error.message : String(error) })
+      panelListeners.delete(listener)
+      unsubscribe?.()
+      res.end()
+      return
+    }
+    /*
+     * 心跳：一轮自动推送或一次扫库可能几十秒没有新事件，中间任何一层代理都可能把"什么都没发"的连接
+     * 掐掉。它同时让页面能分辨"还连着"与"断了"。
+     */
+    const heartbeat = setInterval(() => sendEvent(res, { type: 'ping' }), 15_000)
+    await new Promise<void>((resolve) => {
+      res.on('close', resolve)
+    })
+    clearInterval(heartbeat)
+    panelListeners.delete(listener)
+    unsubscribe?.()
+    res.end()
   }
 
   const exportSessions = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
@@ -1013,6 +1094,8 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
          * 见 checkpoint-warm.ts）。
          */
         const warm = await warmCheckpoints(outcome.written, { hostCheckpoints }, report)
+        // 会话真落到本机了：别的页面（以及本页的清单）得重读一次。
+        if (outcome.written.length > 0) panelEmit({ type: 'stale', what: 'state' })
         return {
           ...payload,
           ok: true,
@@ -1114,6 +1197,10 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
      */
     await streamResult(res, async (report) => {
       const run = await runMigration(migrateDeps, request, { apply, onProgress: report })
+      // 真搬过（或改写过注册表）就意味着别处看到的清单已经过期了。
+      if (apply && (run.moved > 0 || run.rewritten > 0)) {
+        panelEmit({ type: 'stale', what: 'state' })
+      }
       return {
         mode: apply ? 'apply' : 'plan',
         ok: run.preview.ok && (!apply || run.verified),
@@ -1159,6 +1246,7 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
         { backupRoot: paths.backupRoot },
         { backupDir: String(backupDir), dryRun, onProgress: report },
       )
+      if (!dryRun) panelEmit({ type: 'stale', what: 'state' })
       return {
         mode: dryRun ? 'plan' : 'apply',
         ...outcome,
@@ -1208,22 +1296,6 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
     const runtime = await deps.sync?.()
     if (runtime === undefined) {
       sendJson(res, 409, { error: '这个宿主没有配置 WebDAV 同步（插件配置里的 sync.url 是空的）' })
-      return
-    }
-    if (mode === 'status') {
-      /*
-       * 只回答"后台有没有一趟在跑、刚才那一趟成没成"。
-       *
-       * 界面那一侧用它做两件事：关掉窗口 / 刷新之后回来，横幅还能照着说"还在跑"；以及在跑着的时候
-       * 把「同步」按钮摆成不可用，而不是让用户点下去才吃一个 409。
-       *
-       * 只读：不扫库、不碰远端、不改任何状态。
-       */
-      sendJson(res, 200, {
-        applying:
-          applying === null ? null : { startedAt: applying.startedAt, progress: applying.progress },
-        last: lastApply,
-      })
       return
     }
     if (mode === 'test') {
@@ -1315,12 +1387,17 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
     }
     sendEventStream(res)
     const startedAt = Date.now()
-    if (apply) applying = { startedAt, progress: null }
+    if (apply) {
+      applying = { startedAt, progress: null }
+      panelEmit({ type: 'sync', applying: applyingPayload(), last: lastApply })
+    }
     try {
       const onProgress = (progress: SyncProgress): void => {
         // 给"没在听这条流的人"留一份最新进度（刷新之后进来的页面读它）。
         if (apply && applying !== null) applying.progress = progress
         sendEvent(res, { type: 'progress', progress })
+        // 面板那条流上的页面看的就是这一条：它们不会去听这条响应（那是发起者自己的）。
+        if (apply) panelEmit({ type: 'sync', applying: applyingPayload(), last: lastApply })
       }
       if (!apply) {
         /*
@@ -1383,6 +1460,9 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
           pushed: outcome.pushed.length,
         }
         applying = null
+        panelEmit({ type: 'sync', applying: null, last: lastApply })
+        // 拉取会把会话落到本机：别的页面（以及这个页面的清单）都得重读一次。
+        if (outcome.pulled.length > 0 || outcome.replaced.length > 0) panelEmit({ type: 'stale', what: 'state' })
         sendEvent(res, { type: 'result', result: payloadOf(outcome) })
       }
     } catch (error) {
@@ -1391,6 +1471,7 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
         // 失败也留一条：刷新之后进来的页面要能说"刚才那一趟没成、原因是这个"，而不是一片空白。
         applying = null
         lastApply = { startedAt, finishedAt: Date.now(), ok: false, pulled: 0, pushed: 0, error: message }
+        panelEmit({ type: 'sync', applying: null, last: lastApply })
       }
       sendEvent(res, { type: 'error', error: message })
     }
@@ -1416,25 +1497,6 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
       sendJson(res, 409, {
         error: '这个宿主没有自动推送的节拍器（没有配置 WebDAV 同步，或它启动失败）',
       })
-      return
-    }
-    /*
-     * `mode=status`：只回答"后台那一轮跑到哪了、上一轮成没成"，当场不跑任何东西。
-     *
-     * 界面进入同步页时先问这一句：后台那一轮可能是兜底定时器或上一轮 `turn/end` 发起的，没有谁在看
-     * 它的进度流（那条流只回给发起的那个请求），所以"正跑着"这件事只能靠这里读出来——不然用户点
-     * 「立即推送一次」只会吃一句"上一轮还在跑"，却看不到它在跑什么。
-     *
-     * 只读：不扫库、不碰远端、不改任何状态，所以可以每几秒问一次。
-     */
-    const url = new URL(req.url ?? '/', 'http://localhost')
-    const mode = url.searchParams.get('mode')
-    if (mode === 'status') {
-      sendJson(res, 200, autoPushStatusPayload(timer, deps.syncInfo?.()))
-      return
-    }
-    if (mode === 'watch') {
-      await watchAutoPush(timer, res)
       return
     }
     sendEventStream(res)
@@ -1800,6 +1862,8 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
   return {
     'GET /meta': meta,
     'GET /state': state,
+    // 这一页打开期间只有这一条长连接：清单、落地那一趟、自动推送那一轮、以及"库变了"的通知都从它来。
+    'GET /panel/events': panelEvents,
     // 一条会话的完整内容（分页；只读，不动宿主内存）：会话页点一行看的就是它。
     'GET /transcript': transcript,
     'GET /sync-diff': syncDiff,

@@ -24,7 +24,8 @@ import * as React from 'react'
 
 import { Button, SegmentedControl } from '@deepseek-ai/dsh-client-ui-primitives'
 
-import { fetchMeta, fetchState, type MetaResponse, type ProgressEvent, type StateResponse } from '../api.ts'
+import type { MetaResponse, ProgressEvent, StateResponse } from '../api.ts'
+import { panelEvents, type PanelSnapshot } from '../logic/panelEvents.ts'
 import { PLUGIN_COMMIT, PLUGIN_DIRTY, PLUGIN_VERSION } from '../build.ts'
 import type { DirectoryApi } from '../directory.ts'
 import type { Translate } from '../logic/locales.ts'
@@ -54,26 +55,40 @@ type PanelKey = 'transfer' | 'sync' | 'manage' | 'backup' | 'help'
 
 /** 会话管理页。 */
 export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactElement {
+  /**
+   * 这一页的全部数据都从**那一条连接**来（见 [panelEvents.ts](../logic/panelEvents.ts)）：打开页面时连上，
+   * 宿主先发宿主事实、再发两种后台状态的当下，最后发一份整库清单（边扫边报"扫到第几条"）。
+   *
+   * 下面这几个状态是那份快照在渲染里的影子：它们与快照同进同退（见下面那条订阅），不在本地另算一遍。
+   * 分成几个而不是留一份对象，是因为每个在界面上各答一件事——位置/能力位、清单、进度、错。
+   */
   const [state, setState] = React.useState<StateResponse | null>(null)
   /**
-   * 会话库位置与能力位那一份（`/meta`）。
+   * 会话库位置与能力位那一份。
    *
    * 用 `undefined` 而不是 `null` 表示"还没到"：`null` 在本页是"读到了，宿主就是没给"（比如没配同步），
-   * 两者不能混。它比 `state` 先到，页头因此不必等清单。
+   * 两者不能混。它跟着第一条 `ready` 到，页头因此不必等扫库。
    */
   const [meta, setMeta] = React.useState<MetaResponse | undefined>(undefined)
   /**
-   * 这次读库扫到哪儿了（`/state` 是事件流，见 api.ts 的 `fetchState()`）。
+   * 这次读库扫到哪儿了。
    *
-   * `undefined` = 还没收到第一条事件（与 `meta` 同一个语义："还没到"），那时页头照旧只说「读取中…」、
-   * 不画条——还不知道分母。初值取 `undefined` 而不是 `null` 还有一个理由：`null` 在本页是"读到了、
-   * 宿主就是没给"（见上面 `meta` 的说明），两者不能混。
+   * `undefined` = 还没收到第一条进度（与 `meta` 同一个语义："还没到"），那时页头照旧只说「读取中…」、
+   * 不画条——还不知道分母。
    */
   const [loadProgress, setLoadProgress] = React.useState<ProgressEvent | undefined>(undefined)
   // 默认停在第一个页签（「会话」）：它是这一页的日常视图，另外两页是偶发动作。
   const [panel, setPanel] = React.useState<PanelKey>('manage')
+  /**
+   * 手动「刷新」按下去之后、新清单回来之前。
+   *
+   * 它不跟连接状态走：重连期间连接是 `connecting`，但屏幕上是上一次那份清单，那时该画的还是一份清单
+   * 加一条进度，而不是把整页退回「读取中…」。
+   */
   const [busy, setBusy] = React.useState(false)
+  /** 那条连接报的错（连不上、扫库失败），宿主原话；渲染时套进「刚才那件事没成：…」那一句。 */
   const [error, setError] = React.useState<string | null>(null)
+
   /**
    * 后台那一趟同步跑到哪儿了（见 logic/syncJob.ts）。
    *
@@ -84,10 +99,9 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
   const [job, setJob] = React.useState<SyncJobSnapshot>(syncJob.snapshot())
   React.useEffect(() => syncJob.subscribe(setJob), [])
   /**
-   * 这一页刚打开时问一次宿主：后台是不是还有一趟在跑。
+   * 接上宿主那一路"落地那一趟跑到哪"（页面那条唯一的连接上就有，见 panelEvents.ts）。
    *
-   * 刷新整个页面之后这一份内存是新的，状态只能从宿主那里认领（`GET /sync?mode=status`）。问不到
-   * （没配同步）就当没有——那本来也不会有活儿在跑。
+   * 刷新整个页面之后这一份内存是新的，状态只能从宿主那里认领；没配同步时那一路本来也不会有活儿。
    */
   React.useEffect(() => syncJob.refresh(), [])
   /** 后台那一趟的结论一句话（页面顶上那一行）；没有结论时 `null`。 */
@@ -111,41 +125,38 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
    */
   const showJobLine = jobLine !== null && (panel !== 'sync' || job.done?.adopted !== undefined)
 
-  const load = React.useCallback(async (): Promise<void> => {
+  /**
+   * 手动「刷新」：重连一次要一份新清单（宿主会重新扫库，进度照旧画在同一个位置）。
+   *
+   * 别处（面板流上那条 `stale`）走的也是它——读清单只有这一条路。
+   *
+   * @returns 新清单落地（或 30 秒之后）resolve：各分页的 `await reload()` 之后要接着读新清单。
+   */
+  const load = React.useCallback((): Promise<void> => {
     setBusy(true)
-    setError(null)
-    setLoadProgress(undefined)
-    try {
-      // 两份同时发、各自落地：`/meta` 不扫库，通常立刻回来，页头先把位置与能力位画上；`/state` 要扫完
-      // 整库（每条会话读 header + 折标题），回来再填清单与条数。用 allSettled 是为了让先到的那份**先画**，
-      // 而不是等另一份一起。
-      // `/state` 要扫完整库（每条会话读 header、折标题）：这段进度就是"扫到第几条"。
-      const [metaResult, stateResult] = await Promise.allSettled([fetchMeta(), fetchState(setLoadProgress)])
-      if (metaResult.status === 'fulfilled') setMeta(metaResult.value)
-      // `/meta` 拿不到不算这一页的错：那几项只是"先说清楚"，清单那条路照样把它们带回来（页头退回
-      // "读取中…"）。所以这里不报错，也不清掉上一次拿到的位置。
-      if (stateResult.status === 'fulfilled') {
-        setState(stateResult.value)
-      } else {
-        setError(
-          t('error.failed', {
-            reason: stateResult.reason instanceof Error ? stateResult.reason.message : String(stateResult.reason),
-          }),
-        )
-      }
-    } finally {
-      setBusy(false)
-      setLoadProgress(undefined)
-    }
-  }, [t])
+    return panelEvents.reload().finally(() => setBusy(false))
+  }, [])
 
-  // 只跑一次：`t` 不进依赖是有意的——它是渲染期重新绑定的函数，进了依赖会变成每次渲染都重读。
-  const loaded = React.useRef(false)
+  // 页面挂上就连、走了就断：断开之后宿主不再为一个没人看的页面扫库。
   React.useEffect(() => {
-    if (loaded.current) return
-    loaded.current = true
-    void load()
-  }, [load])
+    panelEvents.start()
+    return () => panelEvents.stop()
+  }, [])
+
+  // 快照一变就重画；新清单落地之后收掉"刷新中"。
+  React.useEffect(() => {
+    const read = (snapshot: PanelSnapshot): void => {
+      setState(snapshot.state)
+      setMeta(snapshot.meta ?? undefined)
+      setLoadProgress(snapshot.scan ?? undefined)
+      setError(snapshot.error)
+      if (snapshot.state !== null) setBusy(false)
+    }
+    const unsubscribe = panelEvents.subscribe(read)
+    // 先把当下那一份摊进来：这一页可能是"上次进来读过、这次重新挂着"的情形，那时快照里已经有清单。
+    read(panelEvents.snapshot())
+    return unsubscribe
+  }, [])
 
   /** 上一份已经据此重读过库的结论：同一份别每渲染一次就重读一遍。 */
   const freshAfter = React.useRef<SyncJobSnapshot['done']>(null)
@@ -155,8 +166,9 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
     freshAfter.current = done
     // 拉取落到本机库里了：会话清单与工作区归属都得重读（推的那一侧不改本机任何东西）。
     const pulled = done.result?.pulled.length ?? done.adopted?.pulled ?? 0
-    if (pulled > 0) void load()
-  }, [job, load])
+    if (pulled > 0) panelEvents.refresh()
+  }, [job])
+
 
   const sessions = state?.sessions.length ?? 0
   const workspaces = state?.workspaces.length ?? 0
@@ -225,7 +237,8 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
 
       {error !== null && (
         <p className="dsm-banner dsm-error">
-          <span>{error}</span>
+          {/* 宿主报的是原话（扫库失败、连不上）：界面只负责把它套进「刚才那件事没成：…」那一句。 */}
+          <span>{t('error.failed', { reason: error })}</span>
           <span className="dsm-spacer" />
           {/* 关掉一条横幅：本页不用官方缺省的 ghost（那条口径见「动作行里的动作带边框」那篇笔记）。 */}
           <Button variant="outline" size="sm" onClick={() => setError(null)}>

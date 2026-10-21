@@ -2921,8 +2921,8 @@ export interface AutoPushStatus {
 /**
  * 自动推送那一轮的进展：一条条进度，跑完一条结论。
  *
- * 订阅者不止界面的长连接：`GET /auto-push?mode=watch` 就是一个订阅者（见 `src/web.ts`）。事件里带的是
- * 原始形状（`SyncProgress` / `AutoPushOutcome`），怎么摊平由收的那一侧决定。
+ * 订阅者是面板那条唯一的长连接（`GET /panel/events`，见 `src/web.ts`）。事件里带的是原始形状
+ * （`SyncProgress` / `AutoPushOutcome`），怎么摊平由收的那一侧决定。
  */
 export type AutoPushEvent =
   | { type: 'progress'; progress: SyncProgress }
@@ -3024,7 +3024,7 @@ export interface AutoPushTimer {
    * 订阅"之后的进展"（进度一条条、跑完一条结论）。
    *
    * 只推**订阅之后**发生的事：刚连上来那一轮现在跑到哪，先由 `status()` 说一次（见
-   * `GET /auto-push?mode=watch` 开头的 `state` 事件）。
+   * `GET /panel/events` 开头那条 `auto-push` 事件）。
    *
    * @param listener 收到事件时调一次。
    * @returns 退订函数（连接断了/组件卸了就得调，不然事件一直往死连接上写）。

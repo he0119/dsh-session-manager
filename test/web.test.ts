@@ -235,7 +235,7 @@ function fakeRes(): { res: ServerResponse; captured: Captured; close: () => void
     get headersSent(): boolean {
       return headersSent
     },
-    // 长连接（`mode=watch`）收尾靠这个：客户端断开时宿主收到 `close`，把订阅退掉。
+    // 长连接（`/panel/events`）收尾靠这个：客户端断开时宿主收到 `close`，把订阅退掉。
     on(event: string, handler: () => void) {
       if (event === 'close') closeHandlers.push(handler)
       return res
@@ -870,7 +870,7 @@ test('POST /import：包坏了、目标目录不合法、库已存在同 id，�
   assert.match(String(payload(conflictApply.captured)['error']), /没有可导入的内容/)
 })
 
-test('registerWebRoutes：注册十四条精确路由，方法不对回 405', async () => {
+test('registerWebRoutes：注册十五条精确路由，方法不对回 405', async () => {
   const sandbox = makeSandbox('web-routes')
   const routes: WebRouteLike[] = []
   const dispose = registerWebRoutes(
@@ -882,6 +882,8 @@ test('registerWebRoutes：注册十四条精确路由，方法不对回 405', as
     [
       `exact ${API_PREFIX}/meta`,
       `exact ${API_PREFIX}/state`,
+      // 面板只开这一条长连接（清单、落地那一趟、自动推送那一轮都在它上面）。
+      `exact ${API_PREFIX}/panel/events`,
       `exact ${API_PREFIX}/transcript`,
       `exact ${API_PREFIX}/sync-diff`,
       `exact ${API_PREFIX}/export`,
@@ -2129,101 +2131,6 @@ test('POST /sync：裁决随预演与落地一起走，keep-remote 落选的那�
   }
 })
 
-test('GET /sync?mode=status：后台有没有一趟在跑、刚才那一趟成没成', async () => {
-  const sandbox = makeSandbox('web-sync-status')
-  writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000)
-  const fixture = await startDavFixture({ root: join(sandbox.base, 'dav') })
-  const dav = createDavClient({ baseUrl: fixture.url })
-  const foreign = join(sandbox.base, 'foreign')
-  mkdirSync(foreign, { recursive: true })
-  const foreignRoot = join(sandbox.base, 'foreign-sessions')
-  try {
-    writeSession(foreignRoot, 'session-remote', foreign, 1500, { title: '远端那条' })
-    await putRemoteSession(dav, 'robot-b', {
-      id: 'session-remote',
-      cwd: foreign,
-      createdAt: 1500,
-      title: '远端那条',
-      logPath: join(sessionDir(foreignRoot, foreign, 'session-remote'), 'session.v4.jsonl.zstd'),
-      logName: 'session.v4.jsonl.zstd',
-      logVersion: 4,
-    })
-
-    /*
-     * 远端每次往返都慢 60ms：跑着的那一段才来得及被 state 端点看见。
-     *
-     * 这不是为了让测试稳定而在放水——"后台还在跑"这个状态本来就是**跑着的时候**才有的，一次几百毫秒
-     * 就结束的落地根本来不及展示它。真机上整库同步几十秒，这个窗口到处都是。
-     */
-    const slow: typeof dav = {
-      ...dav,
-      list: async (collection) => {
-        await new Promise((resolve) => setTimeout(resolve, 60))
-        return dav.list(collection)
-      },
-      get: async (path) => {
-        await new Promise((resolve) => setTimeout(resolve, 60))
-        return dav.get(path)
-      },
-    }
-    const handlers = createApiHandlers(
-      deps(sandbox, {
-        sync: async () => ({
-          settings: { url: fixture.url, machineId: 'robot-a', mapping: { [foreign]: CWD_A } },
-          dav: slow,
-        }),
-      }),
-    )
-
-    // 还没跑过任何一趟：如实说"没有"，而不是编一个空结论。
-    const before = fakeRes()
-    await handlers['GET|POST /sync']!(fakeReq('GET', `${API_PREFIX}/sync?mode=status`), before.res)
-    assert.equal(before.captured.status, 200)
-    assert.equal(before.captured.headers['content-type'], 'application/json; charset=utf-8', '这是一次性 JSON，不是事件流')
-    const idle = JSON.parse(before.captured.body.toString('utf8')) as Record<string, unknown>
-    assert.equal(idle['applying'], null)
-    assert.equal(idle['last'], null)
-
-    // 开一趟落地，**不等它**：这一趟在后台跑，紧接着问状态。
-    const applied = fakeRes()
-    const running = handlers['GET|POST /sync']!(fakeReq('POST', `${API_PREFIX}/sync?mode=apply`), applied.res)
-    await new Promise((resolve) => setTimeout(resolve, 40))
-
-    const during = fakeRes()
-    await handlers['GET|POST /sync']!(fakeReq('GET', `${API_PREFIX}/sync?mode=status`), during.res)
-    const busy = JSON.parse(during.captured.body.toString('utf8')) as {
-      applying: { startedAt: number; progress: ProgressEvent | null } | null
-    }
-    assert.notEqual(busy.applying, null, '跑着的时候说在跑（刷新之后的页面据此把横幅摆出来）')
-    assert.equal(typeof busy.applying?.startedAt, 'number')
-    assert.ok(
-      busy.applying?.progress === null || typeof busy.applying?.progress?.phase === 'string',
-      '带上宿主记下的最后一条进度（认领来的那一趟据此画条）',
-    )
-
-    // 第二趟落地被拒：两趟一起跑会互相踩（同一份预演缓存、同一个远端、同一条本机日志）。
-    const second = fakeRes()
-    await handlers['GET|POST /sync']!(fakeReq('POST', `${API_PREFIX}/sync?mode=apply`), second.res)
-    assert.equal(second.captured.status, 409, '上一轮还在跑就不开第二趟')
-    assert.equal(second.captured.headers['content-type'], 'application/json; charset=utf-8')
-    assert.match(String(payload(second.captured)['error']), /还在跑/)
-
-    await running
-    const after = fakeRes()
-    await handlers['GET|POST /sync']!(fakeReq('GET', `${API_PREFIX}/sync?mode=status`), after.res)
-    const done = JSON.parse(after.captured.body.toString('utf8')) as {
-      applying: unknown
-      last: { ok: boolean; pulled: number; pushed: number } | null
-    }
-    assert.equal(done.applying, null, '跑完之后就不再说在跑')
-    assert.equal(done.last?.ok, true)
-    assert.equal(done.last?.pulled, 1, '留下"搬了几条"给刷新之后的页面看')
-  } finally {
-    await fixture.close()
-    rmSync(sandbox.base, { recursive: true, force: true })
-  }
-})
-
 test('POST /sync?mode=apply：带着预演给的 planId 就照着那份计划落地（一份预演只够落地一次）', async () => {
   const sandbox = makeSandbox('web-sync-preview')
   writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000)
@@ -2709,12 +2616,205 @@ test('GET /transcript：把一条会话的日志折成完整时间线（会话�
   assert.equal((payload(plain)['session'] as Record<string, unknown>)['title'], '兜底名称')
 })
 
+// ── 面板事件流（这一页打开期间只有这一条长连接）──────────────────────────────────
+
+test('GET /panel/events：开头 ready + 两种后台状态，扫完推一份清单', async () => {
+  const sandbox = makeSandbox('web-panel-open')
+  writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000)
+  const handlers = createApiHandlers(
+    deps(sandbox, {
+      syncInfo: () => ({ url: 'https://dav.example/', machineId: 'robot-a', mappings: 0 }),
+    }),
+  )
+  const { res, captured, close } = fakeRes()
+  const pending = handlers['GET /panel/events']!(fakeReq('GET', `${API_PREFIX}/panel/events`), res)
+  // 扫库是同步的一大段，等它跑完（`snapshot` 在它之后）。
+  await new Promise((resolve) => setImmediate(resolve))
+  await new Promise((resolve) => setTimeout(resolve, 30))
+  close()
+  await pending
+
+  assert.equal(captured.headers['content-type'], 'text/event-stream; charset=utf-8')
+  const seen = events(captured)
+  const kinds = seen.map((event) => event['type'])
+  assert.equal(kinds[0], 'ready', '连上先说宿主事实（页头不必等扫库）')
+  const meta = seen[0]!['meta'] as Record<string, unknown>
+  assert.equal(meta['sessionsRoot'], sandbox.sessionsRoot)
+  assert.deepEqual(meta['sync'], { url: 'https://dav.example/', machineId: 'robot-a', mappings: 0 })
+
+  // 两种后台状态：这一趟都没跑，所以都是 null。
+  const sync = seen.find((event) => event['type'] === 'sync')
+  assert.ok(sync !== undefined, '要说清落地那一趟现在什么样')
+  assert.equal(sync['applying'], null)
+  assert.equal(sync['last'], null)
+  const autoPush = seen.find((event) => event['type'] === 'auto-push')
+  assert.ok(autoPush !== undefined, '自动推送那一轮同理')
+  assert.equal(autoPush['running'], null)
+  assert.equal(autoPush['last'], null)
+
+  // 清单在最后：这一条要真扫库。
+  assert.equal(kinds[kinds.length - 1], 'snapshot')
+  const state = seen[seen.length - 1]!['state'] as Record<string, unknown>
+  assert.deepEqual(
+    (state['sessions'] as Array<Record<string, unknown>>).map((row) => row['id']),
+    ['session-a'],
+  )
+  // 扫库那一段的进度也在这一条流上（不是另开一个请求）。
+  assert.ok(progressOf(captured).some((event) => event['phase'] === 'scan'), '扫库进度走同一條流')
+})
+
+test('GET /panel/events：落地那一趟一起跑，进度与结论都推给面板（发起者在另一个请求里）', async () => {
+  const sandbox = makeSandbox('web-panel-sync')
+  writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000)
+  const fixture = await startDavFixture({ root: join(sandbox.base, 'dav') })
+  const dav = createDavClient({ baseUrl: fixture.url })
+  const foreign = join(sandbox.base, 'foreign')
+  mkdirSync(foreign, { recursive: true })
+  const foreignRoot = join(sandbox.base, 'foreign-sessions')
+  try {
+    writeSession(foreignRoot, 'session-remote', foreign, 1500, { title: '远端那条' })
+    await putRemoteSession(dav, 'robot-b', {
+      id: 'session-remote',
+      cwd: foreign,
+      createdAt: 1500,
+      title: '远端那条',
+      logPath: join(sessionDir(foreignRoot, foreign, 'session-remote'), 'session.v4.jsonl.zstd'),
+      logName: 'session.v4.jsonl.zstd',
+      logVersion: 4,
+    })
+    // 远端每次往返慢 60ms：跑着的那一段才来得及被这条面板流看见（真机上是几十秒）。
+    const slow: typeof dav = {
+      ...dav,
+      list: async (collection) => {
+        await new Promise((resolve) => setTimeout(resolve, 60))
+        return dav.list(collection)
+      },
+      get: async (path) => {
+        await new Promise((resolve) => setTimeout(resolve, 60))
+        return dav.get(path)
+      },
+    }
+    const handlers = createApiHandlers(
+      deps(sandbox, {
+        sync: async () => ({
+          settings: { url: fixture.url, machineId: 'robot-a', mapping: { [foreign]: CWD_A } },
+          dav: slow,
+        }),
+      }),
+    )
+
+    // 面板先连上（页面上就是"设置开着"这个状态）。
+    const panel = fakeRes()
+    const panelPending = handlers['GET /panel/events']!(fakeReq('GET', `${API_PREFIX}/panel/events`), panel.res)
+    await new Promise((resolve) => setImmediate(resolve))
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    const before = events(panel.captured).length
+
+    // 落地由**另一个请求**发起（真实情形是另一个页签，或者关掉窗口之后重开的那个页面）。
+    const applied = fakeRes()
+    const running = handlers['GET|POST /sync']!(fakeReq('POST', `${API_PREFIX}/sync?mode=apply`), applied.res)
+    await new Promise((resolve) => setTimeout(resolve, 40))
+    // 跑着的时候第二趟被拒：两趟一起跑会互相踩（同一份预演缓存、同一个远端、同一条本机日志）。
+    const second = fakeRes()
+    await handlers['GET|POST /sync']!(fakeReq('POST', `${API_PREFIX}/sync?mode=apply`), second.res)
+    assert.equal(second.captured.status, 409, '上一轮还在跑就不开第二趟')
+    assert.match(String(payload(second.captured)['error']), /还在跑/)
+    await running
+
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    panel.close()
+    await panelPending
+
+    const panelEvents = events(panel.captured).slice(before)
+    const syncs = panelEvents.filter((event) => event['type'] === 'sync')
+    const busyFrames = syncs.filter((event) => event['applying'] !== null)
+    assert.ok(busyFrames.length >= 2, '跑着的这段时间里一直在推（开始一条 + 之后每条进度）')
+    const started = busyFrames[0]!['applying'] as Record<string, unknown>
+    assert.equal(typeof started['startedAt'], 'number')
+    assert.equal(started['progress'], null, '开始那一刻就推一条（不等第一条进度，也不带进度）')
+    // 中间那几条带着逐条进度：面板上的进度条就是它画的。
+    assert.ok(
+      syncs.some((event) => (event['applying'] as Record<string, unknown> | null)?.['progress'] != null),
+      '逐条进度也推过来',
+    )
+    const finished = syncs[syncs.length - 1]!
+    assert.equal(finished['applying'], null, '跑完就不再说在跑')
+    const last = finished['last'] as Record<string, unknown>
+    assert.equal(last['ok'], true)
+    assert.equal(last['pulled'], 1, '留下"搬了几条"给没在听那条流的人看')
+    // 拉取会把会话落到本机：别的页面得重读一次清单。
+    assert.ok(panelEvents.some((event) => event['type'] === 'stale'), '落地之后推一条"库变了"')
+    // 发起的那个请求自己照旧拿到完整结果（面板这条流只给计数）。
+    assert.equal(payload(applied.captured)['mode'], 'apply')
+  } finally {
+    await fixture.close()
+    rmSync(sandbox.base, { recursive: true, force: true })
+  }
+})
+
+test('GET /panel/events：自动推送那一轮由节拍器发起时，进度也推给面板', async () => {
+  const sandbox = makeSandbox('web-panel-autopush')
+  writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000)
+  const subscribers: Array<(event: never) => void> = []
+  const timer = {
+    enabled: () => true,
+    intervalMs: () => 60_000,
+    tick: async () => ({ ran: true, failures: 0 }) as never,
+    last: () => ({ enabled: true, intervalMs: 60_000 }),
+    status: () => ({
+      running: { startedAt: 1_000, progress: { phase: 'push', done: 1, total: 2 } },
+      last: undefined,
+    }),
+    subscribe: (listener: (event: never) => void) => {
+      subscribers.push(listener)
+      return () => {
+        const at = subscribers.indexOf(listener)
+        if (at >= 0) subscribers.splice(at, 1)
+      }
+    },
+    note: () => undefined,
+    touched: () => undefined,
+    stop: () => undefined,
+  }
+  const handlers = createApiHandlers(deps(sandbox, { autoPush: async () => timer as never }))
+  const panel = fakeRes()
+  const pending = handlers['GET /panel/events']!(fakeReq('GET', `${API_PREFIX}/panel/events`), panel.res)
+  await new Promise((resolve) => setImmediate(resolve))
+  await new Promise((resolve) => setTimeout(resolve, 20))
+  assert.equal(subscribers.length, 1, '面板连上就订了节拍器的进度')
+
+  // 开头那条说的是"现在正跑着第几条"（这一轮是别处发起的，页面进来就能接上）。
+  const opened = events(panel.captured).find((event) => event['type'] === 'auto-push')
+  assert.deepEqual(opened?.['running'], {
+    startedAt: 1_000,
+    progress: { phase: 'push', done: 1, total: 2 },
+  })
+
+  // 之后每一条进度、以及跑完那句结论，都从这条流推过来。
+  subscribers[0]!({ type: 'progress', progress: { phase: 'push', done: 2, total: 2 } } as never)
+  subscribers[0]!({
+    type: 'done',
+    outcome: { ran: true, failures: 0, outcome: { pushed: [{ id: 'session-a' }], bytesOut: 2048, problems: [] } },
+  } as never)
+  await new Promise((resolve) => setTimeout(resolve, 10))
+  panel.close()
+  await pending
+
+  const autoPushEvents = events(panel.captured).filter((event) => event['type'] === 'auto-push')
+  const running = autoPushEvents[1]!
+  assert.deepEqual(running['running'], { startedAt: 1_000, progress: { phase: 'push', done: 2, total: 2 } })
+  const done = autoPushEvents[2]!
+  assert.equal(done['running'], null)
+  assert.equal((done['last'] as Record<string, unknown>)['pushedCount'], 1, '结论只回计数')
+  assert.deepEqual(subscribers, [], '面板断开就退订')
+})
+
 // ── 自动推送端点（只推不拉，点一次就是真跑）────────────────────────────────────
 
 /**
  * 一个假的节拍器：记下被怎么调用，并回一个给定的结论。
  *
- * `status` 由每个用例自己摆（`GET /auto-push?mode=status` 读的就是它）：缺省是"没在跑、也没跑过"。
+ * `status` 由每个用例自己摆（面板流开头那条 `auto-push` 读的就是它）：缺省是"没在跑、也没跑过"。
  */
 function fakeTimer(
   outcome: Record<string, unknown>,
@@ -2736,7 +2836,7 @@ function fakeTimer(
     },
     last: () => ({ enabled: true, intervalMs: 300_000 }),
     status: () => status as never,
-    // 谁订了进展都记下来，用例自己往里塞事件（`mode=watch` 那条流就是这么喂的）。
+    // 谁订了进展都记下来，用例自己往里塞事件（面板流上的进度就是这么喂的）。
     subscribe: (listener: (event: never) => void) => {
       subscribers.push(listener)
       return () => {
@@ -2840,129 +2940,6 @@ test('GET /auto-push：没跑（skip）时不带计划也不带结果，只回�
   assert.equal(result['plan'], undefined, '没跑就没有计划可给')
   assert.equal(result['pushed'], undefined, '也没结果——给一份空的只会让界面去猜哪个字段是真的')
   assert.equal(result['takesEffect'], undefined)
-})
-
-test('GET /auto-push?mode=status：后台那一轮跑到哪了、上一轮推了几条', async () => {
-  const sandbox = makeSandbox('web-auto-push-status')
-  const status: { running: unknown; last: unknown } = { running: null, last: undefined }
-  const { timer, calls } = fakeTimer({ ran: true }, status)
-  const handlers = createApiHandlers(
-    deps(sandbox, {
-      autoPush: async () => timer,
-      syncInfo: () => ({ url: 'https://dav.example/', machineId: 'robot-a', mappings: 0 }),
-    }),
-  )
-
-  // ① 什么都没在跑、也还没跑过：两项都是 null（界面据此把按钮摆回可用）。
-  const idle = fakeRes()
-  await handlers['GET /auto-push']!(fakeReq('GET', `${API_PREFIX}/auto-push?mode=status`), idle.res)
-  assert.equal(idle.captured.status, 200)
-  assert.deepEqual(payload(idle.captured), {
-    mode: 'status',
-    remote: { url: 'https://dav.example/', machineId: 'robot-a' },
-    running: null,
-    last: null,
-  })
-  assert.deepEqual(calls, [], '问状态不跑任何东西')
-
-  // ② 兜底定时器在后台跑着：界面进入同步页时读到的就是这一份。
-  status.running = {
-    startedAt: 1_000,
-    progress: { phase: 'push', done: 3, total: 9, id: 'session-a', label: 'a' },
-  }
-  const running = fakeRes()
-  await handlers['GET /auto-push']!(fakeReq('GET', `${API_PREFIX}/auto-push?mode=status`), running.res)
-  assert.deepEqual(payload(running.captured)['running'], status.running)
-
-  // ③ 跑完了：上一轮的结论只回计数，不回整份计划（这一句每几秒问一次）。
-  status.running = null
-  status.last = {
-    ran: true,
-    failures: 0,
-    startedAt: 1_000,
-    finishedAt: 2_000,
-    outcome: {
-      pushed: [
-        { id: 'session-a', action: 'upload' },
-        { id: 'session-b', action: 'update' },
-      ],
-      bytesOut: 4_096,
-      attachmentOut: { uploaded: 1, skipped: 0, bytes: 512, missing: 0 },
-      problems: [],
-    },
-  }
-  const done = fakeRes()
-  await handlers['GET /auto-push']!(fakeReq('GET', `${API_PREFIX}/auto-push?mode=status`), done.res)
-  const last = payload(done.captured)['last'] as Record<string, unknown>
-  assert.equal(last['ran'], true)
-  assert.equal(last['pushedCount'], 2, '推了几条')
-  assert.equal(last['bytesOut'], 4_096)
-  assert.deepEqual(last['attachmentOut'], { uploaded: 1, skipped: 0, bytes: 512, missing: 0 })
-  assert.equal(last['plan'], undefined, '计划正文不跟着这一句走')
-})
-
-test('GET /auto-push?mode=watch：开头一条 state，之后一帧帧推进度，跑完推结论并退订', async () => {
-  const sandbox = makeSandbox('web-auto-push-watch')
-  const { timer, subscribers } = fakeTimer(
-    { ran: true },
-    {
-      running: { startedAt: 1_000, progress: { phase: 'scan', done: 1, total: 9, id: 'session-a' } },
-      last: undefined,
-    },
-  )
-  const handlers = createApiHandlers(deps(sandbox, { autoPush: async () => timer }))
-  const { res, captured, close } = fakeRes()
-
-  const pending = handlers['GET /auto-push']!(fakeReq('GET', `${API_PREFIX}/auto-push?mode=watch`), res)
-  // 让让道：handler 先写头、发 state，再订阅。
-  await new Promise((resolve) => setImmediate(resolve))
-  assert.equal(captured.headers['content-type'], 'text/event-stream; charset=utf-8')
-
-  const opening = events(captured)
-  assert.equal(opening.length, 1, '连上先只说一句现在什么样')
-  assert.equal(opening[0]!['type'], 'state')
-  assert.deepEqual(opening[0]!['running'], {
-    startedAt: 1_000,
-    progress: { phase: 'scan', done: 1, total: 9, id: 'session-a' },
-  })
-  assert.equal(subscribers.length, 1, '开流之后订上了')
-
-  // 宿主那边每产生一条进度就写一次——不等这一轮跑完。
-  subscribers[0]!({ type: 'progress', progress: { phase: 'push', done: 2, total: 9, id: 'session-b' } } as never)
-  const midway = events(captured)
-  assert.equal(midway.length, 2, '进度是一条条到的')
-  assert.deepEqual(midway[1]!['progress'], { phase: 'push', done: 2, total: 9, id: 'session-b' })
-
-  // 跑完：一条 done，带的是计数（形状与 mode=status 的 last 一致，界面拿同一套话说结论）。
-  subscribers[0]!({
-    type: 'done',
-    outcome: {
-      ran: true,
-      failures: 0,
-      startedAt: 1_000,
-      finishedAt: 2_000,
-      outcome: {
-        pushed: [{ id: 'session-a', action: 'upload' }],
-        bytesOut: 1_024,
-        problems: [],
-      },
-    },
-  } as never)
-  const finished = events(captured)
-  assert.equal(finished.length, 3)
-  assert.equal(finished[2]!['type'], 'done')
-  const last = finished[2]!['last'] as Record<string, unknown>
-  assert.equal(last['ran'], true)
-  assert.equal(last['pushedCount'], 1, '只回计数')
-  assert.equal(last['plan'], undefined, '计划正文不跟着这一句走')
-
-  // 客户端断开：退订，之后宿主再推也不会往这条死连接上写。
-  close()
-  await pending
-  assert.deepEqual(subscribers, [], '连接断了就退订')
-  const before = captured.body.length
-  assert.equal(res.writableEnded, true, '断开之后把响应收尾')
-  assert.equal(captured.body.length, before)
 })
 
 test('GET /auto-push：节拍器抛错时靠事件说，HTTP 状态早就是 200', async () => {

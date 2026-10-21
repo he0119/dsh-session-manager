@@ -107,12 +107,15 @@
   本机的代次文件、投影缓存那两件事、要覆盖的那几条是否还活着、远端索引有一处对不上就从零重算。
 - [同步关掉窗口之后接着跑，回来还看得见](../.agents/notes/implemented/feature/2026-10-21-sync-keeps-running-when-the-window-closes.md)：
   落地那一趟的状态搬到模块级（`src/client/logic/syncJob.ts`）：忙碌时弹窗那枚「取消」换成「转到后台」，
-  进度与结束结论搬到页面顶上的横幅（切页签、关设置再回来都还在）；刷新之后靠 `GET /sync?mode=status`
-  认领还在跑的那一趟。宿主那边同一时间只允许一趟落地（第二趟 409）。自动推送那一轮同理：节拍器记下
-  "正跑着的那一轮"（`AutoPushTimer.status()`）并把之后的每条进度推给订阅者（`subscribe()`），同步页
-  进来先问一句 `GET /auto-push?mode=status`（整页只问这一次，不轮询），说"在跑"才接上
-  `GET /auto-push?mode=watch` 那条长连接——后台那一轮不管是定时器还是事件层发起的，横幅与
+  进度与结束结论搬到页面顶上的横幅（切页签、关设置再回来都还在）；刷新之后从面板那条唯一的长连接
+  （`GET /panel/events`）上认领还在跑的那一趟。宿主那边同一时间只允许一趟落地（第二趟 409）。自动推送
+  那一轮同理：节拍器记下"正跑着的那一轮"（`AutoPushTimer.status()`）并把之后的每条进度推给订阅者
+  （`subscribe()`），面板连接把每一条都转给页面——后台那一轮不管是定时器还是事件层发起的，横幅与
   「正在自动推送…」都能一帧不落地接上，不必点一下才吃一句"上一轮还在跑"。
+
+  这一页现在只有**一条**长连接（[一条连接看完这一页](2026-10-21-one-stream-for-the-whole-panel.md)）：
+  宿主事实、扫库进度、整库清单、落地那一趟、自动推送那一轮、以及"库变了"的重读通知都从它来，原来
+  那几条一次性状态端点与"在跑才开"的小流都不在了。
 - [自动推送只往远端推](../.agents/notes/implemented/feature/2026-10-14-auto-push-is-push-only.md)：
   后台跑一轮，计划里摘掉拉取与"覆盖本机"那几类，所以它不覆盖、不备份、不写注册表、也不请宿主折
   检查点；间隔与开关是活字段，节拍器每次醒来看一眼当前配置。
@@ -211,6 +214,10 @@
 - [产物是经典脚本，只 require 基线模块](../.agents/notes/implemented/architecture/2026-09-27-client-artifact-is-a-classic-script.md)
   与 [peer 范围就是宿主的装配门](../.agents/notes/implemented/architecture/2026-09-28-peer-range-is-the-hosts-assembly-gate.md)：
   客户端模块系统的契约，以及收不下就整条 bundle 不装的那道门。
+- [这一页只连一条长连接](../.agents/notes/implemented/architecture/2026-10-21-one-stream-for-the-whole-panel.md)：
+  整库清单、扫库进度、落地那一趟、自动推送那一轮、以及"库被改过了"都走 `GET /panel/events` 这一条
+  SSE；页面不再轮询，也不再有"在跑才开一条流"的那种小流。动作（用户点下去的那一次）的进度仍在它自己
+  那条请求上。
 - [颜色只走检查面的 token](../.agents/notes/implemented/bug-fix/2026-09-27-token-only-colors.md)：
   写死颜色只会在一种主题下错，附带量出来的对比度。
 - [控制件用官方原语，本页只挂布局挂钩](../.agents/notes/implemented/architecture/2026-10-15-controls-come-from-the-official-primitives.md)：

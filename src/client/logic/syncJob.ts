@@ -10,8 +10,9 @@
  *
  * 1. 这一页发起的那一趟：走事件流，进度最细；
  * 2. 关掉弹窗 / 切页签 / 关掉整个设置窗口：都不影响它，回到这一页横幅上照样是它；
- * 3. 刷新了整个页面（或者从另一个页签发起）：那一趟还在宿主里跑，但这一份内存已经没了——于是向宿主
- *    的 `GET /sync?mode=status` 认领：横幅上说"还在跑"，每 3 秒问一次，跑完把"搬了几条"补上。
+ * 3. 刷新了整个页面（或者从另一个页签发起）：那一趟还在宿主里跑，但这一份内存已经没了——于是从
+ *    **面板事件流**（`GET /panel/events` 上 `sync` 那一条）认领：宿主一有变化就推过来，横幅说"还在跑"，
+ *    跑完把"搬了几条"补上。
  *
  * 边界写在明处：**认领来的那一趟没有逐条进度，也没有完整结果**（宿主那边只留"跑没跑、搬了几条"），
  * 细节要以发起它的那个页面为准。
@@ -19,13 +20,8 @@
  * @module dsh-session-manager/client/logic/syncJob
  */
 
-import {
-  applySync,
-  fetchSyncStatus,
-  type ProgressEvent,
-  type SyncResponse,
-  type SyncStatusResponse,
-} from '../api.ts'
+import { applySync, type ProgressEvent, type SyncResponse, type SyncRoundStatus } from '../api.ts'
+import { panelEvents } from './panelEvents.ts'
 import type { SyncDecision } from '../api.ts'
 
 /** 一趟结束之后的结论。 */
@@ -69,10 +65,15 @@ export type SyncJobApply = (
 export interface SyncJobDeps {
   /** 真跑一趟。 */
   apply: SyncJobApply
-  /** 问宿主"后台有没有一趟在跑"（`GET /sync?mode=status`）。 */
-  status: () => Promise<SyncStatusResponse>
-  /** 认领来的那一趟隔多久问一次宿主（毫秒，缺省 3000）。 */
-  pollMs?: number
+  /**
+   * 订阅"后台有没有一趟在跑"（生产上是面板事件流上 `sync` 那一条）。
+   *
+   * 约定：订阅时立刻用**当下那一份**回调一次（不然"页面刚打开、那一趟已经跑了 20 秒"这种情形会漏），
+   * 之后每次变化再回调。
+   *
+   * @returns 退订。
+   */
+  watch: (listener: (status: SyncRoundStatus) => void) => () => void
 }
 
 /** 界面用的那几个口子。 */
@@ -104,7 +105,7 @@ export interface SyncJob {
   /** 关掉结束结论（横幅上那枚「关闭」）。正在跑的那一趟不受影响。 */
   dismiss(): void
   /**
-   * 问一次宿主，认领后台还在跑的那一趟（页面打开时调一次）。
+   * 接上宿主那一路状态（页面打开时调一次；重复调没有副作用）。
    *
    * 这一页自己发起的、正在跑的那一趟不会被它打乱：已经有主的那一份进度更细，不拿粗的盖掉它。
    */
@@ -118,26 +119,18 @@ export interface SyncJob {
  * @returns 那几个口子（见 {@link SyncJob}）。
  */
 export function createSyncJob(deps: SyncJobDeps): SyncJob {
-  const pollMs = deps.pollMs ?? 3000
   const listeners = new Set<(snapshot: SyncJobSnapshot) => void>()
   let current: SyncJobSnapshot = { running: false, adopted: false, startedAt: null, progress: null, done: null }
-  /** 认领来的那一趟的轮询定时器。 */
-  let timer: ReturnType<typeof setInterval> | null = null
+  /** 退订那一路状态（接上过一次就不再重订）。 */
+  let unwatch: (() => void) | null = null
 
   const emit = (patch: Partial<SyncJobSnapshot>): void => {
     current = { ...current, ...patch }
     for (const listener of [...listeners]) listener(current)
   }
 
-  const stopPolling = (): void => {
-    if (timer === null) return
-    clearInterval(timer)
-    timer = null
-  }
-
   /** 把宿主给的"跑完了"折成结论：有结果说结果，只有计数就说计数。 */
-  const finishAdopted = (last: SyncStatusResponse['last']): void => {
-    stopPolling()
+  const finishAdopted = (last: SyncRoundStatus['last']): void => {
     if (last === null) {
       // 宿主那边没有留下结论（进程重启过）：如实说"这一轮结束了"，但不编一个数字。
       emit({ running: false, adopted: false, startedAt: null, progress: null, done: { ok: true } })
@@ -157,22 +150,17 @@ export function createSyncJob(deps: SyncJobDeps): SyncJob {
   }
 
   /**
-   * 问一次宿主。
+   * 宿主说"后台那一趟现在什么样"（面板事件流推过来的每一条）。
    *
-   * 三种结果各走一条：还在跑（没主就认领、有主就更新进度）、跑完了（认领来的那一趟收尾）、
+   * 三种情形各走一条：还在跑（没主就认领、有主就更新进度）、跑完了（认领来的那一趟收尾）、
    * 本来就没有（什么都不做——不能把上一次的旧结论重新摆出来）。
+   *
+   * @param status 宿主推来的那一条。
    */
-  const poll = async (): Promise<void> => {
-    let status: SyncStatusResponse
-    try {
-      status = await deps.status()
-    } catch {
-      // 问不到就当这一轮还不知道：保持现状，下一次再问。断开连接这类错不该把横幅清掉。
-      return
-    }
+  const applyStatus = (status: SyncRoundStatus): void => {
     if (status.applying !== null) {
       if (current.running) {
-        // 自己发起的那一趟进度更细（事件流），不拿这份粗的盖掉；认领来的那一趟就用这份更新。
+        // 自己发起的那一趟进度更细（它自己那条请求带着），不拿这份粗的盖掉；认领来的那一趟才用它更新。
         if (current.adopted) emit({ progress: status.applying.progress })
         return
       }
@@ -183,17 +171,9 @@ export function createSyncJob(deps: SyncJobDeps): SyncJob {
         progress: status.applying.progress,
         done: null,
       })
-      startPolling()
       return
     }
     if (current.running && current.adopted) finishAdopted(status.last)
-  }
-
-  const startPolling = (): void => {
-    if (timer !== null) return
-    timer = setInterval(() => void poll(), pollMs)
-    // 浏览器里 `setInterval` 回的是数字、没有 unref；Node 里有（测试跑在 Node 上，别把进程钉住）。
-    ;(timer as unknown as { unref?: () => void }).unref?.()
   }
 
   return {
@@ -215,11 +195,9 @@ export function createSyncJob(deps: SyncJobDeps): SyncJob {
       }
       void deps.apply(input.planId, onProgress, input.decisions).then(
         (result) => {
-          stopPolling()
           emit({ running: false, adopted: false, startedAt: null, progress: null, done: { ok: true, result } })
         },
         (cause: unknown) => {
-          stopPolling()
           emit({
             running: false,
             adopted: false,
@@ -238,11 +216,11 @@ export function createSyncJob(deps: SyncJobDeps): SyncJob {
       return done
     },
     dismiss() {
-      stopPolling()
       emit({ done: null })
     },
     refresh() {
-      void poll()
+      if (unwatch !== null) return
+      unwatch = deps.watch(applyStatus)
     },
   }
 }
@@ -254,5 +232,10 @@ export function createSyncJob(deps: SyncJobDeps): SyncJob {
  */
 export const syncJob: SyncJob = createSyncJob({
   apply: (planId, onProgress, decisions) => applySync(planId, onProgress, decisions),
-  status: () => fetchSyncStatus(),
+  // 那一路状态挂在页面那条唯一的连接上（见 [panelEvents.ts](./panelEvents.ts)）：订阅时先给当下那一份，
+  // 之后每变一次给一次。
+  watch: (listener) => {
+    listener(panelEvents.snapshot().sync)
+    return panelEvents.subscribe((snapshot) => listener(snapshot.sync))
+  },
 })
