@@ -115,6 +115,11 @@
 - [自动推送跟着轮次走，定时器退成兜底](../.agents/notes/implemented/architecture/2026-10-14-auto-push-follows-turn-end.md)：
   两个触发源分工——事件层管"本机刚写完"（快），兜底的定时器管事件层够不到的三类（别的机器推上去的、
   本机删会话要收尾索引、事件层漏了）；`AutoPushSkip` 因此没有"正在攒连发"这一类码。
+- [内容判据不占主线程，同一对不重算](../.agents/notes/implemented/bug-fix/2026-10-21-content-relations-off-the-main-thread.md)：
+  「两边各自写过」那些对要读整份日志判谁是谁的前缀，原来是一整份同步解压 + 同步读文件，一对大日志
+  就能把宿主主线程按住一两秒；现在包走线程池的 `readBundleAsync()`、日志走分块让出的
+  `decodeLogTextChunked()`，判出来的关系再按两边全部代次的哈希记进 `contentRelationCache`，两边都没
+  再动的那一对第二轮不再从远端重取。
 - `src/dav.ts` 是那四种方法与 Basic 鉴权（含宽容的多状态响应解析），`src/sync.ts` 是索引、计划与落地：
   界面那条路是 `prepareSync()` 算计划并把输入留下、确认时 `syncPrepared()` 照它落地（`planId` 指认
   宿主手里那份），`src/tools.ts` 的 `sync_sessions` 走单次调用那条（`runSync()`）。自动推送是同一个
