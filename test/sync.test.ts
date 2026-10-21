@@ -2789,3 +2789,71 @@ test('sync：计划——代次筛不动的对按内容关系归类，说明写"
   const forked = planSync({ ...base, contentRelations: new Map([['s1', contentOf('forked', 1, 2)]]) })
   assert.match(forked.push[0]?.reason ?? '', /各自写了对方没有的条目（本机多 1 条、robot-a 多 2 条）/)
 })
+
+test('同步内容判据：两边都没再动的那一对，第二轮不再去远端取包、也不再重解日志', async () => {
+  rmSync(SANDBOX, { recursive: true, force: true })
+  mkdirSync(SANDBOX, { recursive: true })
+  const fixture = await startDavFixture({ root: join(SANDBOX, 'dav-relate-cache') })
+  const inner = createDavClient({ baseUrl: fixture.url })
+  /** 这一轮取了几次会话包（`.dshsess`）——内容判据那一步每对要取一份。 */
+  let bundleGets = 0
+  const dav: DavPort = {
+    baseUrl: inner.baseUrl,
+    list: (collection) => inner.list(collection),
+    get: (path) => {
+      if (path.endsWith('.dshsess')) bundleGets += 1
+      return inner.get(path)
+    },
+    put: (path, bytes) => inner.put(path, bytes),
+    ensure: (collection) => inner.ensure(collection),
+    probe: (collection) => inner.probe(collection),
+  }
+  const a = makeMachine('relate-cache-a')
+  const b = makeMachine('relate-cache-b')
+  try {
+    // 远端那一份是 A 写的；B 这边同一条 id、同样的代次、**内容不同**——代次与哈希都筛不动，只能读内容。
+    writeSession(a, 's1', 1000, {
+      eventLines: [JSON.stringify({ type: 'assistant/message', seq: 1, data: { text: 'A 写的那一条' } })],
+    })
+    const [source] = scanAll(a.sessionsRoot, decodeAll)
+    assert.ok(source !== undefined)
+    const log = source.files[0]
+    assert.ok(log !== undefined)
+    await putRemoteSession(inner, 'robot-a', {
+      id: 's1',
+      createdAt: 1000,
+      logPath: log.path,
+      logName: log.name,
+      logVersion: log.version,
+      cwd: a.cwd,
+    })
+    writeSession(b, 's1', 1000, {
+      eventLines: [JSON.stringify({ type: 'assistant/message', seq: 1, data: { text: 'B 写的那一条' } })],
+    })
+
+    const config = settings(b, { machineId: 'robot-b', mapping: { [a.cwd]: b.cwd } })
+    /** 每一轮给一份新的缓存，才看得出"同一个进程里第二轮"有没有省下来。 */
+    const cache = new Map<string, ContentRelation>()
+    const deps = { ...syncDepsOf(b, dav, config, { pushOnly: true }), relationCache: cache }
+    const first = await prepareSync(deps, { pushOnly: true })
+    assert.deepEqual(first.plan.needsContent, ['s1'], '前提：这一对确实要读内容')
+    assert.equal(bundleGets, 1, '第一轮取一份包')
+    assert.equal(cache.size, 1, '判出来的关系记进缓存')
+
+    const second = await prepareSync(deps, { pushOnly: true })
+    assert.equal(bundleGets, 1, '第二轮两边都没动，不该再取包')
+    assert.deepEqual(second.plan.push, first.plan.push, '省掉的是重复劳动，不是判据')
+    assert.deepEqual(second.plan.needsContent, first.plan.needsContent)
+
+    // 本机那一边动了一个字节：键换了，得重新判（缓存不会把旧的结论套上去）。
+    writeSession(b, 's1', 1000, {
+      eventLines: [JSON.stringify({ type: 'assistant/message', seq: 1, data: { text: 'B 又改了一版' } })],
+    })
+    const third = await prepareSync(deps, { pushOnly: true })
+    assert.equal(bundleGets, 2, '本机内容变了就得重新取、重新判')
+    assert.deepEqual(third.plan.needsContent, ['s1'])
+  } finally {
+    await fixture.close()
+    rmSync(SANDBOX, { recursive: true, force: true })
+  }
+})

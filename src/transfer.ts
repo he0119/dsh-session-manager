@@ -31,7 +31,8 @@
 import { createHash } from 'node:crypto'
 import { mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { gunzipSync, gzipSync } from 'node:zlib'
+import { gunzip, gunzipSync, gzipSync } from 'node:zlib'
+import { promisify } from 'node:util'
 
 import {
   commitAttachmentObject,
@@ -49,6 +50,9 @@ import { foldTitleInFrames } from './session-title.ts'
 import { branchSessionLog } from './session-log.ts'
 import { relocateHeaderCwd, relocateHeaderCwdText } from './session-log.ts'
 import type { DecodeAll, ProgressReporter, RegistryChange, SessionLogFile, WorkspaceRegistryState } from './types.ts'
+
+/** `zlib.gunzip` 的 Promise 版：解压在线程池里，主线程不陪着。 */
+const gunzipAsync = promisify(gunzip)
 
 /** 容器 magic。换代时改这一串，而不是悄悄改变字段含义。 */
 export const BUNDLE_MAGIC = 'DSHSESS1\n'
@@ -289,19 +293,11 @@ export function buildBundle(
 }
 
 /**
- * 解析并校验一个包。
- * @param bytes 包字节（`.dshsess` 原文）。
+ * 解析并校验一个包（已经 gunzip 过的那一层）。
+ * @param raw 解开 gzip 之后的包字节。
  * @throws 任何一项不变式不满足时抛错，消息指出是哪一条。
  */
-export function readBundle(bytes: Buffer): SessionBundle {
-  let raw: Buffer
-  try {
-    raw = gunzipSync(bytes)
-  } catch (error) {
-    throw new Error(
-      `not a gzip-compressed session bundle: ${error instanceof Error ? error.message : String(error)}`,
-    )
-  }
+export function parseBundle(raw: Buffer): SessionBundle {
   if (raw.length < BUNDLE_MAGIC.length + 4) throw new Error('bundle is truncated before its manifest')
   if (raw.subarray(0, BUNDLE_MAGIC.length).toString('utf8') !== BUNDLE_MAGIC) {
     throw new Error('bundle magic mismatch (not a .dshsess file, or made by an incompatible version)')
@@ -418,6 +414,45 @@ export function readBundle(bytes: Buffer): SessionBundle {
     attachments,
     payload,
   }
+}
+
+/** 把 gunzip 那一步的失败折成同一句原话（同步与异步两个入口共用）。 */
+function notGzip(error: unknown): Error {
+  return new Error(`not a gzip-compressed session bundle: ${error instanceof Error ? error.message : String(error)}`)
+}
+
+/**
+ * 解析并校验一个包。
+ * @param bytes 包字节（`.dshsess` 原文）。
+ * @throws 任何一项不变式不满足时抛错，消息指出是哪一条。
+ */
+export function readBundle(bytes: Buffer): SessionBundle {
+  let raw: Buffer
+  try {
+    raw = gunzipSync(bytes)
+  } catch (error) {
+    throw notGzip(error)
+  }
+  return parseBundle(raw)
+}
+
+/**
+ * 同上，但 gunzip 走 libuv 线程池（`zlib.gunzip` 的异步入口），不占主线程。
+ *
+ * 同步那条留给"手上已经拿着包、马上就要用"的落地路径；同步里的内容比对（见 `sync.ts` 的
+ * `contentRelationsOf()`）一次要解好几个几十 MB 的包，必须走这一条。
+ *
+ * @param bytes 包字节（`.dshsess` 原文）。
+ * @returns 解析好的包。
+ */
+export async function readBundleAsync(bytes: Buffer): Promise<SessionBundle> {
+  let raw: Buffer
+  try {
+    raw = await gunzipAsync(bytes)
+  } catch (error) {
+    throw notGzip(error)
+  }
+  return parseBundle(raw)
 }
 
 /** 取某个文件条目的字节。 */

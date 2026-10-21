@@ -51,6 +51,7 @@ import { createHash, randomUUID } from 'node:crypto'
 
 import { diffSessionLogs, type DiffRelation } from './session-diff.ts'
 import { existsSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
+import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import { canonicalDir, type DirCanonicalizer } from './canonical-path.ts'
@@ -61,6 +62,7 @@ import type { DavPort } from './dav.ts'
 import { scanAll, type DiscoveredSession } from './discovery.ts'
 import { createBackup } from './journal.ts'
 import { encodeSegment, parseSessionLogName } from './paths.ts'
+import { decodeLogTextChunked } from './log-decode.ts'
 import { createGitRunner, repoLocation, type GitRunner, type RepoLocation } from './repo.ts'
 import { sessionMetaOfRecord } from './visibility.ts'
 import type { ProjectionCacheReader } from './projection-cache.ts'
@@ -68,7 +70,7 @@ import { readRegistry, validateRegistry } from './registry.ts'
 import { takeEffectOnHostAll, type EffectDeps } from './take-effect.ts'
 import { relocateHeaderCwdShallow, relocateHeaderCwdText } from './session-log.ts'
 import type { TitleQuery } from './session-title.ts'
-import { applyImport, attachmentActionOf, buildBundle, entryBytes, planImport, readBundle, type ExportSource, type ImportOptions, type ImportOutcome, type SessionBundle } from './transfer.ts'
+import { applyImport, attachmentActionOf, buildBundle, entryBytes, planImport, readBundle, readBundleAsync, type ExportSource, type ImportOptions, type ImportOutcome, type SessionBundle } from './transfer.ts'
 import type {
   DecodeAll,
   EffectOutcome,
@@ -327,6 +329,56 @@ export function contentFingerprint(
   const bytes = readFileSync(path)
   const content = contentBytes(bytes, compression, decodeAll)
   return { version, bytes: bytes.length, sha256: createHash('sha256').update(content).digest('hex') }
+}
+
+/**
+ * 进程里那份"内容关系"缓存：键是两边全部代次的 sha256，值是对出来的关系。
+ *
+ * 为什么放在进程级：自动推送每五分钟走一遍（见 `runAutoPush()`），而"两边各自写过、谁也没再动"的
+ * 那几对每一轮都一模一样——不缓存的话，同一份几十 MB 的日志每五分钟从 NAS 重下一次、重解一遍、
+ * 重比一遍。键里带着两边**每一个代次**的哈希，任何一边动一个字节都会换键，所以它只省重复劳动。
+ *
+ * 上限按条数（不是字节）：对数是"两边各自写过"的那些会话，量级几十到几百，一条几十字节。
+ */
+const contentRelationCache = new Map<string, ContentRelation>()
+
+/** 缓存最多记多少对（超了就丢最早记进来的那一对）。 */
+const CONTENT_RELATION_CACHE_MAX = 512
+
+/**
+ * 一对会话的缓存键：两边所有代次的 `代次:哈希:字节` 按代次排序拼起来。
+ *
+ * 本机那侧只要有一个代次没拿到指纹就返回 `undefined`（不缓存）：缺了哈希的键可能把两份不同的内容
+ * 认成同一对，宁可白算一次。
+ */
+function relationKey(
+  mine: readonly (FileFingerprint | undefined)[],
+  theirs: readonly FileFingerprint[],
+): string | undefined {
+  const line = (files: readonly (FileFingerprint | undefined)[]): string | undefined => {
+    const parts: string[] = []
+    for (const file of files) {
+      if (file === undefined) return undefined
+      parts.push(`${file.version}:${file.sha256}:${file.bytes}`)
+    }
+    return parts.sort().join(',')
+  }
+  const left = line(mine)
+  const right = line(theirs)
+  if (left === undefined || right === undefined) return undefined
+  return `${left}|${right}`
+}
+
+/** 记一对（超上限就丢最早的；`Map` 的插入顺序就够用，不必再维护 LRU 链表）。 */
+function remember(
+  cache: Map<string, ContentRelation>,
+  key: string,
+  relation: ContentRelation,
+): void {
+  cache.set(key, relation)
+  if (cache.size <= CONTENT_RELATION_CACHE_MAX) return
+  const oldest = cache.keys().next()
+  if (oldest.done !== true) cache.delete(oldest.value)
 }
 
 /** 两条会话的代次集合是否完全一样。 */
@@ -1433,6 +1485,12 @@ export interface SyncDeps extends EffectDeps, WarmDeps {
    * 一个字节都不碰，与升级前逐字节一致（见 `src/attachments.ts` 的文件头）。
    */
   attachments?: () => AttachmentPort | undefined
+  /**
+   * 内容关系那份额外的缓存（同步里"两边各自写过"那些对的对法）。
+   *
+   * 缺省用进程里那一份（见 `contentRelationCache`）；测试要用"每一轮互不影响"的口径时注入一份新的。
+   */
+  relationCache?: Map<string, ContentRelation>
 }
 
 /** 读注册表；读不到按"没有注册表"处理（会话照旧落地，只是不进工作区分组）。 */
@@ -1738,33 +1796,62 @@ export async function prepareSync(
   const contentRelationsOf = async (ids: readonly string[]): Promise<Map<string, ContentRelation>> => {
     const relations = new Map<string, ContentRelation>()
     const byId = new Map(local.map((session) => [session.id, session]))
+    /** 这一份缓存由调用方给（测试要把每一轮隔开），缺省是进程里那一份（见 `contentRelationCache`）。 */
+    const cache = deps.relationCache ?? contentRelationCache
     for (const [index, id] of ids.entries()) {
       emit?.({ phase: 'relate', done: index, total: ids.length, id })
       try {
         const session = byId.get(id)
         const entry = remote.entries.get(id)
         if (session === undefined || entry === undefined) continue
-        const bundle = readBundle(await deps.dav.get(remoteBundlePath(entry.machine, id)))
+        /*
+         * 两边都没变就直接用上一次算出来的关系。
+         *
+         * 为什么要缓存：这条路每五分钟被自动推送走一遍（见 `runAutoPush()`），而"两边各自写过、谁也
+         * 没再动"的那几对**每一轮都一样**——不缓存的话，同一份几十 MB 的日志每五分钟从 NAS 重下一次、
+         * 重解一遍、重比一遍（本机实测三个大对一轮 2.7 秒主线程时间）。键取两边**全部代次的
+         * sha256**，任何一边动了一个字节都会换一个键，所以它只是省掉重复劳动，不改变判据。
+         */
+        const key = relationKey(
+          session.files.map((file) => fingerprints.get(file.path)),
+          entry.files,
+        )
+        const remembered = key === undefined ? undefined : cache.get(key)
+        if (key !== undefined && remembered !== undefined) {
+          relations.set(id, remembered)
+          continue
+        }
+        // gunzip 走线程池、解压分块让出（见 `log-decode.ts`）：这一对再大也别把主线程按死。
+        const bundle = await readBundleAsync(await deps.dav.get(remoteBundlePath(entry.machine, id)))
         const bundled = bundle.sessions.find((item) => item.id === id)
         const remoteFile = bundled === undefined ? undefined : [...bundled.files].sort((l, r) => r.version - l.version)[0]
         const localFile = [...session.files].sort((l, r) => r.version - l.version)[0]
         if (remoteFile === undefined || localFile === undefined) continue
         // 与差异页同一口径：读宿主也读的那一份（最高代次）。
-        const mine = readFileSync(localFile.path)
+        const mine = await readFile(localFile.path)
         const theirs = entryBytes(bundle, remoteFile)
         const diff = diffSessionLogs(
-          decodeLogText(mine, localFile.compression, deps.decodeAll).split('\n'),
-          decodeLogText(theirs, remoteFile.compression, deps.decodeAll).split('\n'),
+          (await decodeLogTextChunked(mine, localFile.compression)).split('\n'),
+          (await decodeLogTextChunked(theirs, remoteFile.compression)).split('\n'),
           { localBytes: mine.byteLength, remoteBytes: theirs.byteLength },
         )
-        relations.set(id, {
+        const relation = {
           relation: diff.relation,
           localTail: diff.localTail.count,
           remoteTail: diff.remoteTail.count,
-        })
+        }
+        relations.set(id, relation)
+        if (key !== undefined) remember(cache, key, relation)
       } catch {
         // 取不到就不给这一对内容关系：计划那边退回 `diverged`，两条都不动。
       }
+      /*
+       * 一对之间让出事件循环。
+       *
+       * 一条再贵也不该让别的事等一整秒：宿主是同一个进程，同步在后台跑的时候界面的 `/state`、别的
+       * 请求都排在这条链子后面（线上那次"网页转圈、SSH 秒回"就是这么来的）。
+       */
+      await new Promise((resolve) => setImmediate(resolve))
     }
     return relations
   }
