@@ -11,9 +11,7 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
 import {
-  DEFAULT_AUTO_PUSH_INTERVAL_MS,
   DEFAULT_PASSWORD_REF,
-  autoPushMinutes,
   draftFrom,
   draftOps,
   draftProblems,
@@ -127,10 +125,8 @@ test('同步设置：接缝没给出值时不编造（空节 → 空草稿）', 
     username: '',
     mapping: [],
     timeoutMs: '',
-    // 自动推送那两栏也是"没给就不编"：开关按未勾选、间隔按留空（空 = 用宿主那个缺省值，见
-    // `autoPushSection()` 与 `DEFAULT_AUTO_PUSH_INTERVAL_MS`）。
+    // 自动推送那一栏也是"没给就不编"：按未勾选（"没开"，不是"用默认值开"）。
     autoPush: false,
-    autoPushIntervalMs: '',
   })
 })
 
@@ -261,62 +257,14 @@ test('同步设置：打开自动推送发一条 set，关掉发 unset（与 tim
   assert.deepEqual(draftOps({ ...base, autoPush: true }, { autoPush: true }), [], '开关本来就开着 → 不发')
 })
 
-test('同步设置：间隔填了发 set、清空发 unset、没动就不发', () => {
-  const base = draftFrom({})
-  assert.deepEqual(draftOps({ ...base, autoPushIntervalMs: '60000' }, {}), [
-    { op: 'set', path: ['sync', 'autoPushIntervalMs'], value: 60000 },
-  ])
-  assert.deepEqual(draftOps({ ...base, autoPushIntervalMs: '' }, { autoPushIntervalMs: 60000 }), [
-    { op: 'unset', path: ['sync', 'autoPushIntervalMs'] },
-  ])
-  assert.deepEqual(
-    draftOps({ ...base, autoPushIntervalMs: '120000' }, { autoPushIntervalMs: 120000 }),
-    [],
-    '值没变（字符串形态与数字形态是同一个值）→ 不发',
-  )
-})
 
-test('同步设置：间隔只收正整数（0 / 负数 / 小数 / 乱填都挡住保存）', () => {
-  /*
-   * 这一栏与 `timeoutMs` 同一档：非法的值不该悄悄存进配置。判据在 `draftProblems()` 里，界面按码取
-   * 文案——所以这里核**码**，不核句子。
-   *
-   * 注意下限（60000）**不在这里挡**：填 1000 是"想勤快点"，宿主会抬到下限（见核心层的
-   * `MIN_AUTO_PUSH_INTERVAL_MS`），不该让用户先撞一次报错才知道有这个规矩。
-   */
-  const base = draftFrom({})
-  const has = (interval: string): boolean =>
-    draftProblems({ ...base, autoPush: true, autoPushIntervalMs: interval }).some(
-      (problem) => problem.code === 'autoPushIntervalNotPositive',
-    )
-  assert.equal(has(''), false, '留空 = 用缺省值，不是错')
-  assert.equal(has('60000'), false, '正整数放行')
-  assert.equal(has('1000'), false, '比下限小也放行（宿主会抬到下限，那不是"填错了"）')
-  assert.equal(has('0'), true, '0 挡')
-  assert.equal(has('-5'), true, '负数挡')
-  assert.equal(has('1.5'), true, '小数挡（毫秒不是秒，半毫秒没有意义）')
-  assert.equal(has('abc'), true, '乱填挡')
-})
-
-test('同步设置：分钟数按四舍五入，坏值退回缺省那份', () => {
-  // 卡片那句"每 N 分钟一次"要用它。`SyncInfo.autoPush.intervalMs` 是宿主拍平之后的真值。
-  assert.equal(autoPushMinutes(DEFAULT_AUTO_PUSH_INTERVAL_MS), 5, '缺省 300000 = 5 分钟')
-  assert.equal(autoPushMinutes(60_000), 1)
-  assert.equal(autoPushMinutes(900_000), 15)
-  // 宿主的 min 是 60000，所以"30 秒"这种值只可能来自坏输入；它必须退回缺省，不能显示成 0 分钟。
-  assert.equal(autoPushMinutes(30_000), 1, '不到一分钟也要说 1 分钟，不能说 0（"每 0 分钟一次"）')
-  assert.equal(autoPushMinutes(0), 5, '0 是坏值 → 缺省')
-  assert.equal(autoPushMinutes(Number.NaN), 5, 'NaN 是坏值 → 缺省')
-})
 
 test('同步设置：自动推送的字典键两种语言都在', () => {
-  // 界面那几处文案全走 `t()`；键写错时界面上会露出键名。这里核"开关 / 间隔 / 立即推送 / 跑完 / 没跑"
+  // 界面那几处文案全走 `t()`；键写错时界面上会露出键名。这里核"开关 / 立即推送 / 跑完 / 没跑"
   // 这几组键真的存在——`LocaleDictOf` 已经在编译期核过键集一致，这一条核的是**用到的**那些。
   const keys = [
     'sync.field.autoPush',
     'sync.field.autoPushHint',
-    'sync.field.autoPushInterval',
-    'sync.field.autoPushIntervalHint',
     'sync.autoPush.now',
     'sync.autoPush.running',
     'sync.autoPush.done',
@@ -367,26 +315,31 @@ test('同步设置：界面认得的 skip 码与核心层的联合类型对得�
   }
 })
 
-test('同步设置：自动推送那几句文案说清了"写完就推、间隔是兜底"（两种语言都要）', () => {
+test('同步设置：自动推送的文案说清了"写完一轮才推"（两种语言都要）', () => {
   /*
-   * 这一组钉的是**文案的语义**，因为它是一处会安静地骗人的地方：那个数字叫「间隔」，用户很容易读成
-   * "每 N 分钟才推一次"——而实际是"写完一轮就推，这个数只兜底"。`LocaleDictOf` 只能核**键集**一致，
-   * 核不了两份译文说的是不是同一件事（上一版就是这样：中文改了、英文留在旧口径上）。
+   * 这一组钉的是**文案的语义**：兜底定时器删掉之后，自动推送只在写完一轮之后发生，界面上不能再出现
+   * "每 N 分钟"这一类的读法。`LocaleDictOf` 只能核**键集**一致，核不了两份译文说不说同一件事，所以这里
+   * 逐条核两件必须说出口的事：
+   *   1. 触发点是"写完一轮"（turn finishes），不是按时间；
+   *   2. 它只推送、绝不拉取（这条是安全边界，用户得能从界面上读到）。
    *
-   * 所以判据分两层：
-   *   1. 两份译文都得**提到**主触发（写完一轮 / turn finishes）——少了它就退回"按间隔轮询"的读法；
-   *   2. 两份译文都得**点明**那个间隔是兜底/最长间隔（兜底 / fallback / at least）。
-   *
-   * 这不核具体措辞（措辞会变），只核这几件必须说出口的事。
+   * 不核具体措辞（措辞会变），只核这几件必须说出口的事；顺带核"没在说时间"——`分钟` / `minute`
+   * 这类字样回来了，说明那套按间隔跑的旧口径漏进了文案。
    */
   const cases = [
     ['sync.field.autoPushHint', /写完一轮/, /turn finishes/],
-    ['sync.field.autoPushIntervalHint', /兜底|最长/, /fallback|at least/],
+    ['sync.autoPush.enabled', /写完一轮/, /turn finishes/],
   ] as const
   for (const [key, zhPattern, enPattern] of cases) {
     const zhText = zh[key as keyof typeof zh] as string
     const enText = en[key as keyof typeof en] as string
     assert.match(zhText, zhPattern, `${key} 中文没说清（应匹配 ${zhPattern}）：${zhText}`)
     assert.match(enText, enPattern, `${key} 英文没说清（应匹配 ${enPattern}）：${enText}`)
+    assert.doesNotMatch(zhText, /分钟|每隔|定时/, `${key} 中文还留着按时间跑的旧口径：${zhText}`)
+    assert.doesNotMatch(enText, /minute|interval|timer/i, `${key} 英文还留着按时间跑的旧口径：${enText}`)
+  }
+  for (const key of ['sync.field.autoPushHint'] as const) {
+    assert.match(zh[key], /不拉|只推/, `${key} 没说"只推不拉"`)
+    assert.match(en[key], /never pulls/, `${key} 没说"只推不拉"`)
   }
 })

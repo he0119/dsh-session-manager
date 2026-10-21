@@ -60,7 +60,6 @@ import { WorkspaceIcon } from './icons.tsx'
 import type { SessionManagerKey, Translate } from '../logic/locales.ts'
 import { AUTO_PUSH_SKIP_CODES } from '../logic/autoPush.ts'
 import { syncJob, type SyncJobSnapshot } from '../logic/syncJob.ts'
-import { autoPushMinutes } from '../logic/syncForm.ts'
 import { projectLabel, sessionLabel, type SessionLabel } from '../logic/planRows.ts'
 import { ProgressBlock } from './ProgressBlock.tsx'
 import { formatBytes, sessionTags, type TagCopy } from './sessionList.tsx'
@@ -682,7 +681,7 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
   /**
    * 自动推送那一轮跑到哪儿了：读**页面那条唯一的连接**（`panelEvents` 上的 `auto-push` 那一半）。
    *
-   * 为什么不再自己开一条流：那一轮多数不是这一页发起的（兜底定时器、写完一轮的事件层、另一个页签
+   * 为什么不再自己开一条流：那一轮多数不是这一页发起的（后台写完一轮、另一个页签
    * 点的「立即推送一次」），而进度只回给发起它的那个请求——页面这边本来什么都看不到，原来只能靠
    * "进页面时问一次 + 在跑才接一条自己的流"。现在这些都在同一条连接上，也就没有"没在听所以看不见"
    * 这件事了。
@@ -878,11 +877,7 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
          * 判据取自宿主给的 `syncInfo.autoPush`（没有这个字段 = 没开），页面不自己从配置表单那两栏推：
          * 那张表单画的是**草稿**，而这一句要说的是**现在生效的**那份配置。
          */}
-        {syncInfo?.autoPush !== undefined && (
-          <p className="dsm-hint">
-            {t('sync.autoPush.enabled', { minutes: autoPushMinutes(syncInfo.autoPush.intervalMs) })}
-          </p>
-        )}
+        {syncInfo?.autoPush !== undefined && <p className="dsm-hint">{t('sync.autoPush.enabled')}</p>}
         {/* 主动作在卡片底部的动作行里（见 TransferPanel.tsx 的说明）。这一页没有把「同步」放进头部：
             下面那张设置卡有十来行字段，按钮在头部就成了"页面第一件事"、在末尾又得翻过整张表单，
             而它读的是**已保存**的配置——与那张表单没有阅读顺序上的先后。 */}

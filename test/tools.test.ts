@@ -1065,7 +1065,7 @@ test('重新生成名称的端口：四件齐才认，且按"读日志 → 开�
 /**
  * 一个只带 `get('sessions')` 与 `on()` 的最小宿主上下文。
  *
- * `calls` 是**一条**日志：`flush` 与 `dispose` 都往它里面写，测试也能用 `onCall` 把别处（比如节拍器的
+ * `calls` 是**一条**日志：`flush` 与 `dispose` 都往它里面写，测试也能用 `onCall` 把别处（比如调度器的
  * `touched()`）的调用并进来。先后关系只能这样测——两条各记各的数组只能核"都发生了"。
  */
 function eventHost(options: {
@@ -1244,12 +1244,11 @@ test('事件接线：卸载函数摘掉监听', async () => {
 })
 
 /**
- * 造一个**真的**自动推送运行时：真配置（`sync.autoPush`）、真本地库、真 WebDAV 夹具、真节拍器。
+ * 造一个**真的**自动推送运行时：真配置（`sync.autoPush`）、真本地库、真 WebDAV 夹具、真调度器。
  *
- * `force` 那条转交链（`tick()` → 注入的 `run()` → `runAutoPush()` 的速度闸）只有用真件才测得出
- * 来：假件会把中间任何一处"把 force 落了"都糊过去。
+ * 用它测那些"接线接对了没有"的事：配置读到了、凭据解析出来了、`run()` 真的走到了远端。
  */
-async function makeAutoPushHost(options: { autoPushIntervalMs?: number } = {}): Promise<{
+async function makeAutoPushHost(): Promise<{
   timer: import('../src/sync.ts').AutoPushTimer
   cleanup: () => void
 }> {
@@ -1259,12 +1258,7 @@ async function makeAutoPushHost(options: { autoPushIntervalMs?: number } = {}): 
     sessionsRoot: sb.root,
     registryPath: sb.registryPath,
     backupRoot: sb.backupRoot,
-    sync: {
-      url: fixture.url,
-      machineId: 'robot-a',
-      autoPush: true,
-      ...(options.autoPushIntervalMs === undefined ? {} : { autoPushIntervalMs: options.autoPushIntervalMs }),
-    },
+    sync: { url: fixture.url, machineId: 'robot-a', autoPush: true },
   }
   const host = new Context()
   await startSibling(host, 'tools', { register: () => () => {} })
@@ -1283,34 +1277,19 @@ async function makeAutoPushHost(options: { autoPushIntervalMs?: number } = {}): 
   }
 }
 
-test('resolveAutoPushRuntime：手点那一次（force）绕过速度闸，兜底那一轮不绕', async () => {
+
+test('resolveAutoPushRuntime：叫它就跑，接连两轮都不该被"间隔"挡住', async () => {
   /*
-   * 这一条钉的是 `force` 从 `tick()` 到 `runAutoPush()` 的**整条转交链**（契约：界面那枚「立即推送
-   * 一次」与事件层都走 `force`，兜底的定时器不走）。
-   *
-   * 它必须端到端测：`force` 在这个函数里会经过"节拍器 → 注入的 run() → 设置里那个速度闸"三处，
-   * 中间任何一处把它落了，表现都是"这次看起来跑了、其实被闸挡成 skip: 'interval' 交回来"——
-   * 一个不报错、只是没干活的失败。
+   * 兜底定时器删掉之后，`tick()` 只剩"现在就推"这一个意思——原来那道"距上次不到间隔就不跑"的闸
+   * 跟着一起没了。这一条用真配置、真本地库、真 WebDAV 走一遍：第二次紧接着第一次跑，必须真跑起来
+   * （闸如果回来了，这里会拿到 `skip: 'interval'`）。
    */
-  const host = await makeAutoPushHost({ autoPushIntervalMs: 300_000 })
+  const host = await makeAutoPushHost()
   try {
-    // 先真跑一次，把"上一次真跑"立起来，后面的间隔闸才有得比。
-    const first = await host.timer.tick({ force: true })
-    assert.equal(first.ran, true, '第一轮真跑（force）')
-    const finishedAt = first.finishedAt
-
-    // 紧接着再来一次、不带 force：距上一轮才几毫秒，速度闸必须挡住它。
-    const gated = await host.timer.tick()
-    assert.equal(gated.ran, false, '没到间隔就不该跑')
-    assert.equal(gated.skip, 'interval', '挡住它的正是速度闸')
-
-    // 同一时刻、带 force：该放行（用户手点的那一次）。
-    const forced = await host.timer.tick({ force: true })
-    assert.equal(
-      forced.ran,
-      true,
-      `带 force 的一次必须绕开速度闸（实测 finishedAt=${finishedAt}，距上一次只过了几毫秒）`,
-    )
+    const first = await host.timer.tick()
+    assert.equal(first.ran, true, '第一轮真跑')
+    const second = await host.timer.tick()
+    assert.equal(second.ran, true, '紧接着再来一次照跑（没有间隔闸）')
   } finally {
     host.timer.stop()
     host.cleanup()

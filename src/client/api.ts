@@ -134,13 +134,10 @@ export interface SyncInfo {
   /** 显式映射的条数；映射内容在插件配置里，界面只报条数。 */
   mappings: number
   /**
-   * 自动推送的当前设置（宿主把 `sync.autoPush` / `sync.autoPushIntervalMs` 拍平的结果）；
-   * **没开就是 undefined**，界面据此决定要不要补那一句、要不要摆「立即推送一次」。
-   *
-   * 只有 `intervalMs`：那个"两次真跑之间至少隔多久"的兜底闸（`autoPushMinIntervalMs`）不进这一份
-   * ——界面不摆它，摆出来只会让人以为要配两个间隔。
+   * 自动推送开着没有（宿主把 `sync.autoPush` 拍平的结果）；**没开就是 undefined**，界面据此决定要不要
+   * 补那一句、要不要摆「立即推送一次」。
    */
-  autoPush?: { intervalMs: number }
+  autoPush?: { enabled: boolean }
 }
 
 /** 导入计划里的一条会话。 */
@@ -690,7 +687,7 @@ export interface AutoPushResponse {
  * 那一行"用的，不该每次搬上千行计划。
  */
 export interface AutoPushRoundStatus {
-  /** 正跑着的那一轮（谁发起的都可能：兜底定时器、事件层、另一个页面点的）；没在跑就是 null。 */
+  /** 正跑着的那一轮（谁发起的都可能：后台写完一轮、另一个页面点的）；没在跑就是 null。 */
   running: { startedAt: number; progress: ProgressEvent | null } | null
   /** 上一轮的结论；这个宿主还没跑过就是 null。 */
   last: AutoPushLast | null
@@ -829,7 +826,7 @@ export function openPanelStream(
  * 回的是事件流（与 `/sync` 同一套事件形状，宿主那侧标 `what: 'auto-push'`），所以进度能画在页面
  * 横幅上。这条路上**没有预演 / 确认**那一步：它只推不改本机，按下去就是一次。
  *
- * 没配置同步、或这个宿主没有自动推送的节拍器时，宿主回一次性 JSON + 409，`readEventStream()` 按
+ * 没配置同步、或这个宿主没有自动推送的调度器时，宿主回一次性 JSON + 409，`readEventStream()` 按
  * `content-type` 分流，异常里带的是宿主的原话。
  *
  * @param onProgress 每收到一条进度事件调一次。

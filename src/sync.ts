@@ -115,7 +115,7 @@ export interface SyncSettings {
    * 自动推送那一节（`autoPush` 开关 + 抬到下限之后的间隔）。
    *
    * 拍平在 `src/config.ts` 的 `autoPushSection()` 一处，这里是它的解析形态；缺席 = 这个宿主没开
-   * （`runAutoPush()` 据此直接报 `skip: 'disabled'`）。**开关**在这一份里，节拍器因此不必自己去读配置。
+   * （`runAutoPush()` 据此直接报 `skip: 'disabled'`）。**开关**在这一份里，调度器因此不必自己去读配置。
    */
   autoPush?: AutoPushConfig
 }
@@ -334,8 +334,8 @@ export function contentFingerprint(
 /**
  * 进程里那份"内容关系"缓存：键是两边全部代次的 sha256，值是对出来的关系。
  *
- * 为什么放在进程级：自动推送每五分钟走一遍（见 `runAutoPush()`），而"两边各自写过、谁也没再动"的
- * 那几对每一轮都一模一样——不缓存的话，同一份几十 MB 的日志每五分钟从 NAS 重下一次、重解一遍、
+ * 为什么放在进程级：自动推送每写完一轮就走一遍（见 `runAutoPush()`），而"两边各自写过、谁也没再动"
+ * 的那几对每一轮都一模一样——不缓存的话，同一份几十 MB 的日志每一轮都从 NAS 重下一次、重解一遍、
  * 重比一遍。键里带着两边**每一个代次**的哈希，任何一边动一个字节都会换键，所以它只省重复劳动。
  *
  * 上限按条数（不是字节）：对数是"两边各自写过"的那些会话，量级几十到几百，一条几十字节。
@@ -1807,8 +1807,8 @@ export async function prepareSync(
         /*
          * 两边都没变就直接用上一次算出来的关系。
          *
-         * 为什么要缓存：这条路每五分钟被自动推送走一遍（见 `runAutoPush()`），而"两边各自写过、谁也
-         * 没再动"的那几对**每一轮都一样**——不缓存的话，同一份几十 MB 的日志每五分钟从 NAS 重下一次、
+         * 为什么要缓存：这条路每写完一轮就被自动推送走一遍（见 `runAutoPush()`），而"两边各自写过、
+         * 谁也没再动"的那几对**每一轮都一样**——不缓存的话，同一份几十 MB 的日志每轮从 NAS 重下一次、
          * 重解一遍、重比一遍（本机实测三个大对一轮 2.7 秒主线程时间）。键取两边**全部代次的
          * sha256**，任何一边动了一个字节都会换一个键，所以它只是省掉重复劳动，不改变判据。
          */
@@ -2945,41 +2945,34 @@ export const AUTO_PUSH_SETTLE_MS = 10_000
  * 自动推送没跑的原因。
  *
  * - `disabled`：这个宿主/profile 没开自动推送（配置里 `sync.autoPush` 不是 true）；
- * - `interval`：距离上一次真跑还没到间隔（用户刚在别处跑过一次、或兜底的定时器醒早了）；
  * - `busy`：上一轮还在跑（网络慢、条数多），这一轮直接让开——不排队：排队会让积压的轮次一个接一个
  *   跑完，而每一轮读的都是同一份"最新"，重复跑没有意义；
  * - `idle`：有得算但一条都不用推，而且连要撤下的空白会话都没有——这一轮连收尾都不必做。
  *
  * **没有"正在攒连发"这个码**：静默窗口只**推迟**推送，不会让任何一次询问得到"没跑"——`touched()` 与
- * 界面那枚「立即推送一次」走的都是 `force`，窗口里照样当场跑。所以"在攒"不是一种 `skip`（那是"这次
+ * 界面那枚「立即推送一次」都是"现在就跑"，窗口里照样当场推。所以"在攒"不是一种 `skip`（那是"这次
  * 没跑"的原因），它只是"还没到"。给一个没有消费者的码会有害：它会看起来像一套不存在的机制
  * （同一类问题见 [自动推送那篇](../../.agents/notes/implemented/feature/2026-10-14-auto-push-is-push-only.md)
  * 里记的那个没有消费者的 `minIntervalMs`）。
  */
-export type AutoPushSkip = 'disabled' | 'interval' | 'busy' | 'idle'
+export type AutoPushSkip = 'disabled' | 'busy' | 'idle'
 
 /**
- * 节拍器的配置读法：每次醒来看一眼当前值（`sync` 那一节是活引用，改完不必重启）。
+ * 调度器的配置读法：每次都现读一眼（`sync` 那一节是活引用，改完不必重启）。
  *
- * 只有两项，因为拍子上只有两个决定：**开不开**、**多久一次**。间隔的下限不在这一层判——
- * `autoPushSection()` 读的时候已经把它抬到 `MIN_AUTO_PUSH_INTERVAL_MS` 了，所以这里报出来的
- * `intervalMs()` 本来就是"合法且生效"的那个值，节拍器与速度闸读它一个就够。
+ * 只剩"开不开"：什么时候跑由事件决定（本机写完一轮），没有"隔多久跑一次"这回事了。
  */
 export interface AutoPushClock {
   /** 自动推送此刻开着吗。 */
   enabled(): boolean
-  /** 两次真跑之间的间隔（毫秒）；**已经抬过下限**。 */
-  intervalMs(): number
 }
 
 /** `createAutoPushTimer()` 的依赖。 */
 export interface AutoPushTimerDeps {
   /**
    * 跑一轮（`runAutoPush()` 的真身由调用方注入；测试注入一个记账的假实现）。
-   *
-   * `force` 由 `tick()` 原样转交：`runAutoPush()` 就是拿它决定放不放行速度闸的。
    */
-  run: (options?: { force?: boolean; onProgress?: ProgressReporter }) => Promise<AutoPushOutcome>
+  run: (options?: { onProgress?: ProgressReporter }) => Promise<AutoPushOutcome>
   /** 当前配置（活引用现读）。 */
   clock: AutoPushClock
   now?: () => number
@@ -2988,19 +2981,16 @@ export interface AutoPushTimerDeps {
   clearTimer?: (handle: unknown) => void
 }
 
-/** 自动推送节拍器的对外形状。 */
+/** 自动推送调度器的对外形状。 */
 export interface AutoPushTimer {
   /** 自动推送此刻开着吗。 */
   enabled(): boolean
-  /** 当前间隔（毫秒）。 */
-  intervalMs(): number
   /**
-   * 到点就跑一轮（没到点也会跑，落不落地由 `runAutoPush()` 的闸决定）。
+   * 当场跑一轮。
    *
-   * 界面那枚「立即推送一次」走的就是它：用户手点一次要**当场**算，不该被"距上次才过了 20 秒"挡住，
-   * 所以速度闸放在 `runAutoPush()` 里、由调用方决定放不放行（`force`）。
+   * 两条来路都走它：本机写完一轮（静默窗口到点，见 `touched()`）与界面那枚「立即推送一次」。
    */
-  tick(options?: { force?: boolean; onProgress?: ProgressReporter }): Promise<AutoPushOutcome>
+  tick(options?: { onProgress?: ProgressReporter }): Promise<AutoPushOutcome>
   /**
    * 有新写的会话了——起（或续）一个静默窗口，安静 {@link AUTO_PUSH_SETTLE_MS} 毫秒之后推一轮。
    *
@@ -3008,11 +2998,11 @@ export interface AutoPushTimer {
    * `attachAutoPushToSessions()`）。事件层与定时器层在这里汇合：窗口内再来事件就把计时**重置**
    * （这就是攒连发），所以一轮对话里那串 `turn/end` 只会推一次。
    *
-   * 关着的时候什么都不做：不排队、不记账——下次打开之后由定时器兜底那条路补上，没有"欠着一次"这回事。
+   * 关着的时候什么都不做：不排队、不记账——打开之后写的下一轮会照常触发，没有"欠着一次"这回事。
    */
   touched(): void
-  /** 最近一次结论（界面轮询它；不碰网络）。 */
-  last(): { enabled: boolean; intervalMs: number; outcome?: AutoPushOutcome }
+  /** 最近一次结论（不碰网络）。 */
+  last(): { enabled: boolean; outcome?: AutoPushOutcome }
   /**
    * 这一轮**现在**跑到哪了。
    *
@@ -3032,45 +3022,40 @@ export interface AutoPushTimer {
   subscribe(listener: (event: AutoPushEvent) => void): () => void
   /** 这一次跑完了/已经知道了的结论（`tick()` 自己调，也供外部记一笔）。 */
   note(outcome: AutoPushOutcome): void
-  /** 停掉（卸载时；停掉之后 `tick()` 仍可用——手动那一条路不依赖定时器）。 */
+  /** 停掉（卸载时）：不再起新的静默窗口；`tick()` 仍可用（界面那枚按钮不依赖它）。 */
   stop(): void
 }
 
 /**
- * 造一个自动推送的节拍器。
+ * 造一个自动推送的调度器。
  *
- * 为什么是"定时器只按最小粒度醒、每次醒来看一眼配置"，而不是"按当前配置挂一个 `setInterval`"：
- * `sync` 那一节是**活引用**（见 [配置那篇](../../.agents/notes/implemented/architecture/2026-10-01-sync-config-is-live-in-the-page.md)），
- * 用户在界面里当场把自动推送打开 / 关掉 / 改间隔，下一次醒来就得按新值走。按配置挂定时器的话，
- * 关掉之后那个 `setInterval` 还在，得靠再挂一套"配置变了重挂定时器"的订阅——多一份状态，还会在
- * 重挂的空档里漏掉一次。这里只在**关着**的时候停表（省一个空转的定时器），开着就按最短的那个粒度醒。
+ * 它只干一件事：收到"本机写完一轮"之后起一个静默窗口，安静下来就推一轮（见 `touched()`）。**没有
+ * 周期唤醒**——什么时候推完全由事件决定（见
+ * [只在写完一轮之后推](../../.agents/notes/implemented/simplification/2026-10-21-auto-push-only-after-a-turn.md)）。
  *
- * 为什么"最短粒度"是 `min(interval, 60_000)`：醒得比间隔勤没有意义，但**关掉/改小**要能在一个合理
- * 的时间内生效。60 秒是这条的上界。
+ * 要守的只有两件：同一时间只跑一轮（`busy`），以及跑着的时候又来了事件就记一笔、跑完补一次
+ * （`settleAgain`）。两份状态都留在这个闭包里，所以它**每个宿主只造一个**。
  *
  * @param deps 跑一轮的动作、配置读法与定时器工厂。
- * @returns 节拍器；没开时不挂定时器（但仍可 `tick()`）。
+ * @returns 调度器；关着的时候不挂任何定时器，但仍可 `tick()`。
  */
 export function createAutoPushTimer(deps: AutoPushTimerDeps): AutoPushTimer {
   const now = deps.now ?? ((): number => Date.now())
   const setTimer = deps.setTimer ?? ((handler: () => void, ms: number): unknown => setTimeout(handler, ms))
   const clearTimer = deps.clearTimer ?? ((handle: unknown): void => clearTimeout(handle as NodeJS.Timeout))
-  /** 醒来的最密节奏：间隔再大也不超过一分钟醒一次（关掉与改小要能及时生效）。 */
-  const WAKE_CAP_MS = 60_000
-  let handle: unknown
   let stopped = false
-  /** 正在跑（`busy` 那条判据）：一次只允许一轮，且**由节拍器**把关，不指望 `run()` 自己重入安全。 */
+  /** 正在跑（`busy` 那条判据）：一次只允许一轮，且**由调度器**把关，不指望 `run()` 自己重入安全。 */
   let running: Promise<AutoPushOutcome> | undefined
   let lastOutcome: AutoPushOutcome | undefined
-  /** 事件层那个静默窗口的计时器（与兜底的 `handle` 各算各的，见 `touched()`）。 */
+  /** 静默窗口那个计时器（见 `touched()`）。 */
   let settleHandle: unknown
   /** 上一轮还在跑的时候又来事件：记下来，跑完立刻补一次（不丢用户的这一轮）。 */
   let settleAgain = false
   /**
    * 正跑着的那一轮（`undefined` = 没有）。
    *
-   * 为什么由节拍器记：一轮可能由三条路发起（兜底定时器、事件层那一下、界面那枚「立即推送一次」），
-   * 而界面要知道的是"**不管谁发起的**，现在这一轮跑到哪了"。进度回调在这里包一层，谁发起都记得下。
+   * 为什么由调度器记：一轮可能由两条路发起（本机写完一轮、界面那枚「立即推送一次」），而界面要知道的
+   * 是"**不管谁发起的**，现在这一轮跑到哪了"。进度回调在这里包一层，谁发起都记得下。
    */
   let runningState: AutoPushRunning | undefined
   /** 正在听进展的人（界面那条长连接；没人听时是个空集合，广播什么都不做）。 */
@@ -3090,18 +3075,7 @@ export function createAutoPushTimer(deps: AutoPushTimerDeps): AutoPushTimer {
     lastOutcome = outcome
   }
 
-  /** 这一轮结束（成功、失败、空跑都算）之后重新排下一次。 */
-  const reschedule = (): void => {
-    if (stopped || handle !== undefined) return
-    if (!deps.clock.enabled()) return
-    const wait = Math.min(WAKE_CAP_MS, Math.max(1_000, deps.clock.intervalMs()))
-    handle = setTimer(() => {
-      handle = undefined
-      void tick().finally(reschedule)
-    }, wait)
-  }
-
-  const tick = async (options: { force?: boolean; onProgress?: ProgressReporter } = {}): Promise<AutoPushOutcome> => {
+  const tick = async (options: { onProgress?: ProgressReporter } = {}): Promise<AutoPushOutcome> => {
     /*
      * 上一轮还在跑：这一轮让开。
      *
@@ -3109,22 +3083,12 @@ export function createAutoPushTimer(deps: AutoPushTimerDeps): AutoPushTimer {
      * 造一条合成的结论会把上一轮真跑出来的结果盖掉，界面上就只剩一句"刚才在忙"。
      */
     if (running !== undefined) return { ran: false, skip: 'busy', failures: failuresOf(lastOutcome) }
-    if (!deps.clock.enabled() && options.force !== true) {
-      return { ran: false, skip: 'disabled', failures: failuresOf(lastOutcome) }
-    }
+    if (!deps.clock.enabled()) return { ran: false, skip: 'disabled', failures: failuresOf(lastOutcome) }
     const pending = (async (): Promise<AutoPushOutcome> => {
       const startedAt = now()
       runningState = { startedAt, progress: null }
-      /*
-       * `force` 要**转交**给 `run()`——契约上 `tick({ force: true })` 的语义就是"这一次不走速度闸"，
-       * 而速度闸在 `runAutoPush()` 里（见它上面那段"速度闸放在这里而不是节拍器里"）。这里只把它用在
-       * 本地那个 `disabled` 判断上、不往下传的话，调用方（事件层、界面那枚「立即推送一次」）就会看到
-       * 一个"接受了 force 但没生效"的接口——那正是最难查的一类。宿主侧另有一层 `forceNext` 闭包
-       * （`src/tools.ts`）在做同样的转交，两处都要有：核心层这个接口本身就得自洽。
-       */
       const outcome = await deps.run({
-        ...(options.force === true ? { force: true } : {}),
-        // 谁要看这条流都行：调用方给的那一份照旧收到，同时记进 `runningState` 供界面轮询。
+        // 谁要看这条流都行：调用方给的那一份照旧收到，同时记进 `runningState` 供界面读。
         onProgress: (progress: SyncProgress): void => {
           if (runningState !== undefined) runningState.progress = progress
           options.onProgress?.(progress)
@@ -3143,7 +3107,6 @@ export function createAutoPushTimer(deps: AutoPushTimerDeps): AutoPushTimer {
     } finally {
       running = undefined
       runningState = undefined
-      reschedule()
       // 跑着的时候又来事件：这一轮读的是它开始之前的快照，那一轮得再补一次。
       if (settleAgain) {
         settleAgain = false
@@ -3171,22 +3134,17 @@ export function createAutoPushTimer(deps: AutoPushTimerDeps): AutoPushTimer {
     if (settleHandle !== undefined) clearTimer(settleHandle)
     settleHandle = setTimer(() => {
       settleHandle = undefined
-      // `force`：用户刚写完一轮，"距上次才过了 20 秒"不该挡住它——那是给兜底那条路留的闸。
-      void tick({ force: true }).finally(reschedule)
+      void tick()
     }, Math.max(1, AUTO_PUSH_SETTLE_MS))
   }
 
-  reschedule()
-
   return {
     enabled: () => deps.clock.enabled(),
-    intervalMs: () => deps.clock.intervalMs(),
     tick: (options = {}) => tick(options),
     touched,
     last() {
       return {
         enabled: deps.clock.enabled(),
-        intervalMs: deps.clock.intervalMs(),
         ...(lastOutcome === undefined ? {} : { outcome: lastOutcome }),
       }
     },
@@ -3206,10 +3164,6 @@ export function createAutoPushTimer(deps: AutoPushTimerDeps): AutoPushTimer {
     note,
     stop() {
       stopped = true
-      if (handle !== undefined) {
-        clearTimer(handle)
-        handle = undefined
-      }
       if (settleHandle !== undefined) {
         clearTimer(settleHandle)
         settleHandle = undefined
@@ -3240,13 +3194,11 @@ function failuresOf(outcome: AutoPushOutcome | undefined): number {
  *      计划，落下去只会重写索引。不这么做的话，删掉的会话会永远留在自己的格子索引里，别的机器照着
  *      它去取包时取到一个不存在的对象。
  *
- * 速度闸放在这里而不是节拍器里：节拍器只管"醒"，"要不要真跑"是这一层的事——界面那枚「立即推送一次」
- * 绕过它（`force`），因为它这次是用户按的，不是定时器醒的。闸门比的是 `settings.autoPush.intervalMs`
- * （那份值在 `config.ts` 的 `autoPushSection()` 里已经抬过下限），所以"多久一次"只有一个来源。
+ * 没有速度闸：两条来路（写完一轮、用户手点一次）都是"现在就该跑"，而"隔多久跑一次"这个旋钮已经跟着
+ * 兜底定时器一起删掉了（见
+ * [只在写完一轮之后推](../../.agents/notes/implemented/simplification/2026-10-21-auto-push-only-after-a-turn.md)）。
  *
  * @param deps 远端、设置与本地库的位置；`settings.autoPush` 说这次开没开。
- * @param options.force 忽略速度闸（用户手点的那一次）。
- * @param options.lastRunAt 上一次真跑的结束时刻（毫秒）；没跑过就是 undefined。
  * @param options.failures 这一层维护的连续失败计数（成功清零）。
  * @param options.onProgress 每开始处理一条调一次（与手动那条路同一套事件）。
  * @returns 这一轮的结论；**不抛**——后台任务抛出去没人接，失败进 `failures` 与 `problem`。
@@ -3274,8 +3226,6 @@ function indexNeedsSettling(prepared: SyncPrepared, machineId: string): boolean 
 export async function runAutoPush(
   deps: SyncDeps,
   options: {
-    force?: boolean
-    lastRunAt?: number
     failures?: number
     now?: () => number
     onProgress?: ProgressReporter
@@ -3286,9 +3236,6 @@ export async function runAutoPush(
   const config = deps.settings.autoPush
   if (config === undefined || !config.enabled) return { ran: false, skip: 'disabled', failures }
   const startedAt = now()
-  if (options.force !== true && options.lastRunAt !== undefined && startedAt - options.lastRunAt < config.intervalMs) {
-    return { ran: false, skip: 'interval', failures }
-  }
   /*
    * 三个条件都成立才是"真的没事干"（`idle`），此时连落地都不走：索引里要写的东西与远端那份逐字节
    * 相同，再 PUT 一次只是白跑一趟网络。三条各自挡一种"看着没事、其实要收尾"的情形：
