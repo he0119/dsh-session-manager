@@ -513,8 +513,8 @@ export const zh = {
   // 自动推送：本机安静下来之后在后台跑一轮**只推不拉**的同步（表单那一栏 + 卡片上那句话 + 当场跑一次的结论）
   'sync.field.autoPush': '自动推送',
   'sync.field.autoPushHint':
-    '这台机器连着 5 分钟没动静，它才把改过的会话推上去；你一直在写，它就一直不动。只推送、绝不拉取，也不动这台机器上的任何会话。',
-  'sync.autoPush.enabled': '自动推送已开：5 分钟没动静才推。',
+    '本机空闲 5 分钟之后，它才把改过的会话推上去；你一直在写，它就一直不动。只推送、绝不拉取，也不动本机的任何会话。',
+  'sync.autoPush.enabled': '自动推送已开：本机空闲 5 分钟才推。',
   'sync.autoPush.now': '立即推送一次',
   'sync.autoPush.running': '正在自动推送…',
   'sync.autoPush.done': '自动推送：已推送 {pushed} 条（上传 {bytesOut}）。',
@@ -1043,8 +1043,8 @@ export const en: LocaleDictOf<typeof NS> = {
   // the card's one-liner and the outcome of running one round right now).
   'sync.field.autoPush': 'Automatic push',
   'sync.field.autoPushHint':
-    'Once this machine has been quiet for five minutes, it uploads the sessions you changed; while you keep writing, it stays put. It pushes only and never pulls, and it never touches any session on this machine.',
-  'sync.autoPush.enabled': 'Automatic push is on: it uploads once the machine has been quiet for five minutes.',
+    'Once this machine has been idle for five minutes, it uploads the sessions you changed; while you keep writing, it stays put. It pushes only and never pulls, and it never touches any session on this machine.',
+  'sync.autoPush.enabled': 'Automatic push is on: it uploads once the machine has been idle for five minutes.',
   'sync.autoPush.now': 'Push now',
   'sync.autoPush.running': 'Pushing automatically…',
   'sync.autoPush.done': 'Automatic push: pushed {pushed} ({bytesOut} uploaded).',
