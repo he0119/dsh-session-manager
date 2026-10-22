@@ -69,7 +69,7 @@ export interface SyncInfo {
   /**
    * 自动推送开着没有；**没开就是缺席**（不是 `enabled: false`）。
    *
-   * 界面靠它在卡片里补一句"自动推送已开：写完一轮就推"。只有这一个字段：什么时候推由事件决定，
+   * 界面靠它在卡片里补一句"自动推送已开：停手 5 分钟就推"。只有这一个字段：什么时候推由安静窗口决定，
    * 没有"隔多久"这个旋钮了。
    */
   autoPush?: { enabled: boolean }
@@ -339,7 +339,7 @@ interface HostSessionsService {
 }
 
 /**
- * 把自动推送接到会话事件上：**本机刚写完一轮就推**。这是自动推送唯一的触发源。
+ * 把自动推送接到会话事件上：**本机安静下来之后才推**。这是自动推送唯一的触发源。
  *
  * 为什么不能直接把事件当成"该推了"：`turn/end` 到的时候**日志还没落盘**。宿主的
  * `dsh-session-checkpoint-policy` 只在模型请求、工具派发、agent 步进三处落盘，`turn/end` 不在其中；
@@ -377,11 +377,21 @@ export function attachAutoPushToSessions(
     ctx,
     'session/event',
     ((session: unknown, event: { type?: string } | undefined): void => {
-      // 只认 `turn/end`：一轮结束才是"写完了"的边界。`step/end` 太密（一次模型调用一条），
-      // `session/created` 则还没有内容可推。
-      if (event?.type !== 'turn/end') return
+      /*
+       * 每个事件都算"还在活动"，都去把那个安静窗口往后推——这正是"人还在用的时候不许推"的实现：
+       * `turn/start`、`step/end`、工具派发、`turn/end` 一连串下来，计时器一直被重置，一轮都推不动。
+       */
+      if (event?.type !== 'turn/end') {
+        // 别的种类只重置计时，不冲盘：`step/end` 一次模型调用就一条，每条都冲一次盘很贵，而且只有
+        // "推之前"才需要磁盘上是新的。
+        timer.touched()
+        return
+      }
       const flush = sessions.flush
-      if (flush === undefined) return
+      if (flush === undefined) {
+        timer.touched()
+        return
+      }
       void (async (): Promise<void> => {
         try {
           await flush.call(sessions, session)

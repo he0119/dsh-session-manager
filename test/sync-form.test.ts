@@ -315,29 +315,31 @@ test('同步设置：界面认得的 skip 码与核心层的联合类型对得�
   }
 })
 
-test('同步设置：自动推送的文案说清了"写完一轮才推"（两种语言都要）', () => {
+test('同步设置：自动推送的文案说清了"停手 5 分钟才推"（两种语言都要）', () => {
   /*
-   * 这一组钉的是**文案的语义**：兜底定时器删掉之后，自动推送只在写完一轮之后发生，界面上不能再出现
-   * "每 N 分钟"这一类的读法。`LocaleDictOf` 只能核**键集**一致，核不了两份译文说不说同一件事，所以这里
-   * 逐条核两件必须说出口的事：
-   *   1. 触发点是"写完一轮"（turn finishes），不是按时间；
-   *   2. 它只推送、绝不拉取（这条是安全边界，用户得能从界面上读到）。
+   * 这一组钉的是**文案的语义**。`LocaleDictOf` 只能核**键集**一致，核不了两份译文说不说同一件事，所以
+   * 这里逐条核三件必须说出口的事：
+   *   1. 触发点是"本机安静满 5 分钟"（quiet for five minutes），不是"写完立刻推"，也不是一个可调的周期；
+   *   2. 窗口是 5 分钟这个数——用户得知道要等多久，否则会以为坏了一直不推；
+   *   3. 它只推送、绝不拉取（这条是安全边界，用户得能从界面上读到）。
    *
-   * 不核具体措辞（措辞会变），只核这几件必须说出口的事；顺带核"没在说时间"——`分钟` / `minute`
-   * 这类字样回来了，说明那套按间隔跑的旧口径漏进了文案。
+   * 不核具体措辞（措辞会变），只核这几件必须说出口的事；顺带核"没有把窗口说成一个旋钮"——
+   * `间隔` / `interval` 这类字样回来了，说明那个被删掉的设置项又从文案里长出来了。
    */
   const cases = [
-    ['sync.field.autoPushHint', /写完一轮/, /turn finishes/],
-    ['sync.autoPush.enabled', /写完一轮/, /turn finishes/],
+    ['sync.field.autoPushHint', /5 分钟/, /five minutes/],
+    ['sync.autoPush.enabled', /5 分钟/, /five minutes/],
   ] as const
   for (const [key, zhPattern, enPattern] of cases) {
     const zhText = zh[key as keyof typeof zh] as string
     const enText = en[key as keyof typeof en] as string
-    assert.match(zhText, zhPattern, `${key} 中文没说清（应匹配 ${zhPattern}）：${zhText}`)
-    assert.match(enText, enPattern, `${key} 英文没说清（应匹配 ${enPattern}）：${enText}`)
-    assert.doesNotMatch(zhText, /分钟|每隔|定时/, `${key} 中文还留着按时间跑的旧口径：${zhText}`)
-    assert.doesNotMatch(enText, /minute|interval|timer/i, `${key} 英文还留着按时间跑的旧口径：${enText}`)
+    assert.match(zhText, zhPattern, `${key} 中文没说清要等多久（应匹配 ${zhPattern}）：${zhText}`)
+    assert.match(enText, enPattern, `${key} 英文没说清要等多久（应匹配 ${enPattern}）：${enText}`)
+    assert.doesNotMatch(zhText, /间隔|每隔|定时器/, `${key} 中文把窗口说成了可调周期：${zhText}`)
+    assert.doesNotMatch(enText, /interval|timer/i, `${key} 英文把窗口说成了可调周期：${enText}`)
   }
+  assert.match(zh['sync.field.autoPushHint'], /安静|停手/, '中文没说是"等安静下来"')
+  assert.match(en['sync.field.autoPushHint'], /quiet/i, '英文没说是"等安静下来"')
   for (const key of ['sync.field.autoPushHint'] as const) {
     assert.match(zh[key], /不拉|只推/, `${key} 没说"只推不拉"`)
     assert.match(en[key], /never pulls/, `${key} 没说"只推不拉"`)

@@ -1154,9 +1154,11 @@ test('事件接线：turn/end 先落盘、再说该推了（顺序错了会推�
   detach()
 })
 
-test('事件接线：只认 turn/end，别的会话事件一概不理', async () => {
+test('事件接线：每个会话事件都重置安静窗口，但只有 turn/end 会先冲盘', async () => {
   /*
-   * `step/end` 一次模型调用就一条，`session/created` 时还没有内容可推。跟着它们推 = 整包 PUT × N。
+   * "人还在用的时候不许推"就靠这一句：`turn/start`、`step/end`、工具派发、`turn/end` 一连串下来，
+   * 每个事件都把窗口往后推，于是连着写多久就多久不推。只有 `turn/end` 那一次先冲盘——其余种类冲盘是
+   * 白费（`step/end` 一次模型调用就一条），而推之前磁盘上必须是新的。
    */
   const host = eventHost()
   const order: string[] = []
@@ -1167,12 +1169,15 @@ test('事件接线：只认 turn/end，别的会话事件一概不理', async ()
     host.emit({ id: 's-1' }, { type })
   }
   await new Promise((resolve) => setImmediate(resolve))
-  assert.deepEqual(order, [], '这些事件都不该触发推送')
-  assert.deepEqual(host.calls, [], '也不该白冲盘')
+  assert.equal(order.length, 5, '五个事件各把窗口往后推了一次')
+  assert.ok(order.every((entry) => entry === 'touched'))
+  assert.deepEqual(host.calls, [], '这些种类都不冲盘')
 
+  order.length = 0
   host.emit({ id: 's-1' }, { type: 'turn/end', turn: 1, reason: { kind: 'completed' } })
   await new Promise((resolve) => setImmediate(resolve))
-  assert.deepEqual(order, ['touched'], '只有 turn/end 触发')
+  assert.deepEqual(order, ['touched'], 'turn/end 也重置窗口')
+  assert.equal(host.calls.length, 1, 'turn/end 先冲一次盘（推之前磁盘上必须是新的）')
 })
 
 test('事件接线：冲盘失败也照旧推（吞掉，不打断宿主派发）', async () => {

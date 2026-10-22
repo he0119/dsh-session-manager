@@ -26,7 +26,7 @@ import { readRegistry, writeRegistryAtomic } from '../src/registry.ts'
 import {
   SYNC_INDEX_FILE,
   SYNC_NAMESPACE_DIR,
-  AUTO_PUSH_SETTLE_MS,
+  AUTO_PUSH_QUIET_MS,
   createAutoPushTimer,
   planSync,
   readRemoteLibrary,
@@ -887,7 +887,7 @@ test('autoPushSection：只报开关，旧配置里那个间隔不再有人读',
 })
 
 
-// ── 事件层：写完一轮就推 ────────────────────────────────────────────────────────
+// ── 事件层：本机安静下来才推 ────────────────────────────────────────────────────
 //
 // 这一组测的是"会话事件攒一轮"那一层（`touched()`）。它只有静默窗口这一个计时器，所以假定时器只需要
 // 记住"排了几次、每次隔多久"。
@@ -929,10 +929,10 @@ function fakeTimers(): {
   }
 }
 
-test('touched()：静默窗口到了才推一轮，窗口是 AUTO_PUSH_SETTLE_MS', async () => {
+test('touched()：安静窗口到了才推一轮，窗口是 AUTO_PUSH_QUIET_MS（5 分钟）', async () => {
   /*
-   * 事件层的核心：收到 `turn/end` 不是立刻推，而是起一个静默窗口——一轮对话里 `turn/end` 会连发
-   * （goal 续轮、子智能体、compaction），不等一等就是整包 PUT × N。
+   * 事件层的核心：收到事件不是立刻推，而是起一个安静窗口。5 分钟不是攒连发用的随手数，而是"用户多半
+   * 已经转头去干别的"的量级——一轮整库推送在千条量级的库上要几十秒、上行几十 MB。
    */
   const timers = fakeTimers()
   const runs: number[] = []
@@ -949,7 +949,8 @@ test('touched()：静默窗口到了才推一轮，窗口是 AUTO_PUSH_SETTLE_MS
 
   timer.touched()
   assert.equal(timers.live(), 1, '写完一轮只排这一个窗口')
-  assert.equal(timers.handles[0]?.ms, AUTO_PUSH_SETTLE_MS, `静默窗口是 ${AUTO_PUSH_SETTLE_MS} 毫秒`)
+  assert.equal(timers.handles[0]?.ms, AUTO_PUSH_QUIET_MS, `安静窗口是 ${AUTO_PUSH_QUIET_MS} 毫秒`)
+  assert.equal(AUTO_PUSH_QUIET_MS, 300_000, '5 分钟：一轮整库推送要几十秒，不能插在人说话中间')
   assert.equal(runs.length, 0, '窗口没到之前不推')
 
   timers.fire(0)
@@ -958,7 +959,7 @@ test('touched()：静默窗口到了才推一轮，窗口是 AUTO_PUSH_SETTLE_MS
   timer.stop()
 })
 
-test('touched()：窗口里再来事件就重置计时（连发的 turn/end 只推一次）', async () => {
+test('touched()：窗口里再来事件就重置计时（正好是"人还在用就不跑"）', async () => {
   const timers = fakeTimers()
   const runs: number[] = []
   const timer = createAutoPushTimer({
@@ -974,8 +975,8 @@ test('touched()：窗口里再来事件就重置计时（连发的 turn/end 只�
   timer.touched()
   const firstWindow = timers.handles[0]
   assert.equal(timers.live(), 1, '就一个窗口')
-  timer.touched() // 又写完一条
-  timer.touched() // 再来一条
+  timer.touched() // 又来了一个事件（工具派发、step/end、又一个 turn/end 都算）
+  timer.touched() // 再来一个
 
   assert.equal(timers.handles[0], undefined, '前一个窗口被清掉了（这就是"重置"）')
   assert.equal(timers.live(), 1, '重置之后仍然只有一个窗口，不会越攒越多')

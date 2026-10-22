@@ -31,8 +31,10 @@ Status: implemented
 - `runAutoPush()` 没有 `force` / `lastRunAt` 两个参数了，"现在该跑"就真跑。
 - `AutoPushSkip` 从 `disabled | interval | busy | idle` 收成 `disabled | busy | idle`；界面上那句
   "兜底那一轮还没到点"与表单里那一栏一起消失，`SyncInfo.autoPush` 只报 `{ enabled: true }`。
-- 保留的三件事不变：`AUTO_PUSH_SETTLE_MS`（10 秒）的静默窗口（攒连发）、`busy`（一次只跑一轮）、
-  `settleAgain`（跑着的时候又来事件，跑完补一次）。
+- 保留的三件事不变：安静窗口、`busy`（一次只跑一轮）、`settleAgain`（跑着的时候又来事件，跑完补一次）。
+  窗口的长度后来又改过一次（原来那个 `AUTO_PUSH_SETTLE_MS` 10 秒换成 `AUTO_PUSH_QUIET_MS` 5 分钟，
+  见[等安静 5 分钟那篇](../bug-fix/2026-10-22-auto-push-waits-for-quiet.md)）——这里只关心"靠事件不靠
+  时钟"这个决定，那个没变。
 
 装过旧版的人配置里可能还留着 `sync.autoPushIntervalMs`：它现在只是一个没人读的多余字段，解析不会报错，
 行为上当作不存在（`test/auto-push.test.ts` 里有一条钉住这件事）。

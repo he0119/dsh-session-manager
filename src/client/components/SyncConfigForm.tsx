@@ -390,8 +390,9 @@ export function SyncConfigForm({
        * 是标题 + 说明，开关顶到右端。这一条是"设置页的开关长什么样"的唯一权威——自己拿一个勾选框画
        * （`dsm-check`）与页面上其它开关不是一套视觉。
        *
-       * 没有"间隔"那一栏了：什么时候推由事件决定（本机写完一轮），不按时间走，所以这一行只有一个开关
-       * （见 [那篇决策](../../../.agents/notes/implemented/simplification/2026-10-21-auto-push-only-after-a-turn.md)）。
+       * 没有"间隔"那一栏了：什么时候推由安静窗口决定（本机停手 5 分钟），不是一个可调的周期，所以这一行
+       * 只有一个开关（见 [那篇决策](../../../.agents/notes/implemented/simplification/2026-10-21-auto-push-only-after-a-turn.md)
+       * 与 [等安静之后再跑](../../../.agents/notes/implemented/bug-fix/2026-10-22-auto-push-waits-for-quiet.md)）。
        */}
       <div className="dsm-toggleRow">
         <div className="dsm-toggleText">

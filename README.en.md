@@ -333,7 +333,7 @@ sync:
   mapping:                                 # explicit mapping: remote cwd → local directory (each machine writes its own)
     /home/alice/dev/proj: /opt/work/proj
   timeoutMs: 30000                         # optional
-  autoPush: true                           # optional: automatic push (once a turn ends, push only — see below)
+  autoPush: true                           # optional: automatic push (five quiet minutes after you stop, push only — see below)
 ```
 
 This section is also editable **in the interface**: in the card on Settings → “Session management” → “Sync”, the URL, machine id, username, password, timeout and mapping are
@@ -359,11 +359,16 @@ sync:
   autoPush: true                             # turn automatic push on (off by default)
 ```
 
-There is exactly one trigger: **a turn finishing on this machine**. A turn does not fire `turn/end`
-just once (an automatic continuation, a subagent starting or stopping each fire their own), so the
-plugin waits for ten quiet seconds after the last session event, which means a burst of events
-pushes once instead of PUTting the whole bundle over and over. It does not run on a clock — there is
-no "look every so often": if nothing happens for a while, nothing runs.
+There is exactly one trigger: **this machine going quiet for five minutes**. Every session event
+(`turn/start`, a tool dispatch, `turn/end`, plus automatic continuations and subagents starting or
+stopping) pushes that window back, so while you keep writing — or while anything still runs in the
+background — it pushes nothing at all. After five quiet minutes it runs one round, which is why a
+burst of events pushes once instead of PUTting the whole bundle over and over.
+
+Five minutes is not arbitrary: on a library of about a thousand sessions one full round takes tens
+of seconds and uploads tens of megabytes, which is a visible stall if it lands between your
+messages. It still does not run on a clock — there is no "look every so often": as long as something
+keeps happening, nothing runs.
 
 **Whatever the remote has newer is never pulled down**: it only pushes, so another machine's edits
 land here only when you press **Sync** yourself and confirm in the dialog. The **Push now** button in
