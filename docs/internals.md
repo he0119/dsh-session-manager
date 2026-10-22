@@ -72,7 +72,7 @@
 ## 跨机器同步
 
 - [WebDAV 同步是运输层，只增不覆盖](../.agents/notes/implemented/feature/2026-10-01-webdav-sync-is-a-transport.md)：
-  远端只放包与索引（一机一格），落地复用导入那条编排；密码只放引用，值进宿主机凭据库。
+  远端只放包与索引（一机一格），落地复用导入那条编排；密码只放引用，值进 DSH 的凭据。
 - [两边都有同一个 id 时择新，空白会话不搬](../.agents/notes/implemented/feature/2026-10-04-sync-picks-the-newer-copy.md)：
   按内容与宿主的最后活动时间（提问与消息两枚钟里晚的那枚）择新，远端那份赢时先备份（`kind: replace`）再换；空白会话不上传，并从
   自己那格的索引里撤下。
@@ -149,7 +149,7 @@
   窗口为什么是 5 分钟见[这篇](../.agents/notes/implemented/bug-fix/2026-10-22-auto-push-waits-for-quiet.md)。
   **为什么 `turn/end` 之后必须显式冲盘**：宿主的 checkpoint 策略只在模型请求、工具派发、agent
   步进三处 flush，`turn/end` 不在其中（它的注释明说读存储的消费者自己冲），而推送读的是磁盘字节——少
-  这一步推上去的会是一份缺最后几步的半截会话。正解就是契约点名的那个入口 `ctx.sessions.flush(session)`
+  这一步推送出去的会是一份缺最后几步的半截会话。正解就是契约点名的那个入口 `ctx.sessions.flush(session)`
   （不要自己 `ctx.parallel('session/flush', …)`）；它失败只当"这次读得更旧"，照旧推，别把异常抛进宿主
   的事件派发。
 

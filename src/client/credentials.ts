@@ -1,5 +1,5 @@
 /**
- * 宿主机凭据服务（浏览器半侧的 `remote.credentials`）的持有处。
+ * 宿主凭据服务（浏览器半侧的 `remote.credentials`）的持有处。
  *
  * 为什么要有这一层：密码的值**不进配置文档**，它由宿主的凭据服务持有、按引用名（环境变量名）解析
  * ——这是 DSH 自己的口径（见 [官方凭据子系统的说明](https://deepseek-harness.github.io/deepseek-harness/reference/subsystems/credentials)），

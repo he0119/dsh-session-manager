@@ -21,6 +21,7 @@
 | `docs/internals.md` | 决策地图（按主题索引到笔记），以及没有笔记承载的当前机制 |
 | `docs/development.md` | 目录结构、逐文件职责、开发命令 |
 | `docs/releasing.md` | 发布流程（推 `v*` 标签触发可信发布） |
+| `docs/glossary.md` | 术语表：官方怎么说、照写什么、别写什么、出处在哪 |
 
 一次改动**引入了新的决策**（安全边界、默认值、对外契约、文件格式、修掉一个有现象可查的缺陷）时，与
 代码同一个提交里写一篇笔记，判据见 [.agents/notes/AGENTS.md](.agents/notes/AGENTS.md)；已经有一篇
@@ -47,17 +48,11 @@
 - [客户端 Slots](https://deepseek-harness.github.io/deepseek-harness/reference/subsystems/slots)：
   Slot / 注入 / 渲染的生命周期；本插件的设置页就是注册进 `settings.section` 的一个 Slot。
 - [新增设置卡片](https://deepseek-harness.github.io/deepseek-harness/reference/cookbook/adding-a-settings-card)：
-  设置页卡片怎么按命名空间配对两侧。官方中文把插件包的两侧叫 **Host 半侧** / **浏览器半侧**，
-  英文文档里是 "Host half" / "browser half"，本仓库跟这个说法（不是"半边"，也不是"客户端侧"）。
+  设置页卡片怎么按命名空间配对两侧（两侧叫什么、别怎么说，见术语表）。
 
-术语跟着官方走，**代码、注释、界面文案与文档同一套**：注册表（不是「账本」）、项目目录（宿主
-`projectDir(root, cwd)`，不是「桶 / 分桶」）、`Slot`（官方保留英文，不译「槽位」）、两侧叫半侧、
-子智能体（官方中文界面的叫法，不是「子代理」）。
-同步的两个方向叫**拉取 / 推送**（不是「拉下来 / 推上去」，也不是单字「拉 / 推」）；会话的一轮叫
-**轮次 / 第 N 轮**（官方客户端就是这么写的：`dsh-client-ui-trajectory` 的「轮次」「展开所有轮次」、
-`dsh-client-ui-chat` 的「第 {turn} 轮」、`dsh-client-ui-conversation` 的 `detail.field.turn` 是
-「轮次」；只有 `dsh-client-ui-workspace` 的归档确认里写了一次「进行中的回合」）。
-新写的东西别再用旧词，旧词只剩历史提交里有。
+术语跟着官方走，**代码、注释、界面文案与文档同一套**；哪个词该怎么写、别写什么、出处在哪，全在
+[docs/glossary.md](docs/glossary.md) 那一张表里。这里只留一条动作：写新词之前先查那张表，表里没有就
+按它的「加新词」三步加一行，别在别处另开一份说法。
 
 ## 提交信息
 
@@ -130,7 +125,7 @@ pnpm typecheck && pnpm build && pnpm test && pnpm check:package
 
 - 核心层（`src/*.ts`，除 `tools.ts` / `index.ts` / `web.ts` 与 `client/**`）**零 DSH 依赖**：
   插件外壳、工具层、界面端点与测试共用同一份编排（`src/migrate.ts`）。
-- `src/client/**` 不在 Host 端 tsconfig 的 include 里（它要 DOM 与 JSX，走 `tsconfig.client.json`）。
+- `src/client/**` 不在 Host 半侧 tsconfig 的 include 里（它要 DOM 与 JSX，走 `tsconfig.client.json`）。
 - `lib/` 是构建产物，不入版本库；`src/`、`test/`、`docs/`、`scripts/`、`.github/` 不进 npm 包
   （`pnpm check:package` 会核，同时核"运行期文件一个都不少"与产物内部相对 import 有没有指到包外）。
 

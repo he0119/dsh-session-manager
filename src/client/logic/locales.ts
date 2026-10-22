@@ -305,7 +305,7 @@ export const zh = {
   'tag.subagent': '子智能体',
   'tag.subagentTip': '子智能体：侧边栏把它排在父会话下面，所以不单独进工作区，也不算「未分组」。',
   'tag.blank': '空白',
-  'tag.blankTip': '建出来但一个回合都没聊过的会话，侧边栏默认不显示。',
+  'tag.blankTip': '建出来但一轮都没聊过的会话，侧边栏默认不显示。',
   'tag.archived': '已归档',
   'tag.archivedTip': '你归档过的会话，侧边栏默认不显示；要看就在侧边栏的「视图选项」里打开。',
   'tag.live': '活动中',
@@ -352,7 +352,7 @@ export const zh = {
   'help.faq.forkQ': '同一条会话在两台机器上都聊过，怎么办？',
   'help.faq.forkA': '以更新的那一份为准：同步按会话 id 认，两边都写过就比「最后活动时间」。远端更晚，先把本机那份备份再换成远端那份（旧的能从备份里恢复）；本机更晚，就重新推送自己这一格。想彻底避免，约定一条会话只在一台机器上继续。',
   'help.faq.passwordQ': '同步的密码存在哪？',
-  'help.faq.passwordA': '不在配置文件里：点「保存」存进宿主机凭据库（$DSH_HOME/.credentials.yaml），配置里只留一个引用名。密码框是只写的，留空＝不改；要清掉得去凭据文件里删那一条。',
+  'help.faq.passwordA': '不在配置文件里：点「保存」存进 DSH 的凭据（$DSH_HOME/.credentials.yaml），配置里只留一个引用名。密码框是只写的，留空＝不改；要清掉得去凭据文件里删那一条。',
 
   // ---- WebDAV 同步 ----
   'sync.title': 'WebDAV 同步',
@@ -439,7 +439,8 @@ export const zh = {
   'sync.diff.live': '这条会话正开着，现在不能选正本；先切到别的会话或重启宿主再同步。',
   'sync.diff.tail.local': '本机独有 {count} 条',
   'sync.diff.tail.remote': '远端独有 {count} 条',
-  'sync.diff.tail.empty': '这半边没有多出来的。',
+  'sync.diff.tail.empty.local': '本机这一侧没有多出来的。',
+  'sync.diff.tail.empty.remote': '远端这一侧没有多出来的。',
   'sync.diff.stat.common': '共同',
   'sync.diff.stat.local': '本机独有',
   'sync.diff.stat.remote': '远端独有',
@@ -457,7 +458,7 @@ export const zh = {
   'sync.diff.headerTitle': 'header 差 {count} 个字段',
   'sync.diff.hidden': '还有 {count} 条没列出来',
   'sync.diff.readonly': '看差异不写本机，也不写远端；这一步只读。',
-  'sync.skippedBlank': '跳过 {count} 条空白会话（建出来但一个回合都没聊过），它们不参与同步。',
+  'sync.skippedBlank': '跳过 {count} 条空白会话（建出来但一轮都没聊过），它们不参与同步。',
   'sync.liveHint': '有 {count} 条会话正被宿主打开（标着「活动中」）：先切到别的会话或重启宿主，才能覆盖本机那份或选正本。',
 
   // 同步设置表单（宿主设置接缝）
@@ -473,7 +474,7 @@ export const zh = {
   'sync.field.user': '用户名',
   'sync.field.userHint': '可选，Basic 鉴权用。',
   'sync.field.password': '密码',
-  'sync.field.passwordHint': '不写入配置文件：按「保存」进宿主机凭据库。留空表示保持已存的那一个。',
+  'sync.field.passwordHint': '不写入配置文件：按「保存」进 DSH 的凭据。留空表示保持已存的那一个。',
   'sync.password.set': '已配置',
   'sync.password.unset': '未配置',
   'sync.password.shadowed': '这个引用由启动环境提供，那里永远优先，界面改不了；要换就先清掉那个环境变量。',
@@ -513,7 +514,7 @@ export const zh = {
   // 自动推送：本机安静下来之后在后台跑一轮**只推不拉**的同步（表单那一栏 + 卡片上那句话 + 当场跑一次的结论）
   'sync.field.autoPush': '自动推送',
   'sync.field.autoPushHint':
-    '本机空闲 5 分钟之后，它才把改过的会话推上去；你一直在写，它就一直不动。只推送、绝不拉取，也不动本机的任何会话。',
+    '本机空闲 5 分钟之后，它才把改过的会话推送出去；你一直在写，它就一直不动。只推送、绝不拉取，也不动本机的任何会话。',
   'sync.autoPush.enabled': '自动推送已开：本机空闲 5 分钟才推。',
   'sync.autoPush.now': '立即推送一次',
   'sync.autoPush.running': '正在自动推送…',
@@ -881,7 +882,7 @@ export const en: LocaleDictOf<typeof NS> = {
   'help.faq.forkQ': 'The same session was continued on two machines. Now what?',
   'help.faq.forkA': 'The newer copy wins: sync matches sessions by id, and when both sides wrote it compares the last-activity time. If the remote is later, this machine’s copy is backed up and then replaced by the remote one (the old copy can be restored from the backup); if this machine is later, its own cell is re-pushed. To avoid it altogether, agree that one session is continued on one machine only.',
   'help.faq.passwordQ': 'Where is the sync password kept?',
-  'help.faq.passwordA': 'Not in the configuration file: Save stores it in the host credential store ($DSH_HOME/.credentials.yaml), and the configuration keeps only a reference name. The field is write-only: blank keeps the stored one, and removing it means deleting that entry in the credential file.',
+  'help.faq.passwordA': 'Not in the configuration file: Save stores it in the DSH credentials ($DSH_HOME/.credentials.yaml), and the configuration keeps only a reference name. The field is write-only: blank keeps the stored one, and removing it means deleting that entry in the credential file.',
 
   // ---- WebDAV sync ----
   'sync.title': 'WebDAV sync',
@@ -967,7 +968,8 @@ export const en: LocaleDictOf<typeof NS> = {
   'sync.diff.live': 'This session is open, so you cannot pick a master copy. Switch sessions or restart the host, then sync again.',
   'sync.diff.tail.local': '{count} only on this machine',
   'sync.diff.tail.remote': '{count} only on the remote',
-  'sync.diff.tail.empty': 'Nothing extra on this side.',
+  'sync.diff.tail.empty.local': 'Nothing extra on the local side.',
+  'sync.diff.tail.empty.remote': 'Nothing extra on the remote side.',
   'sync.diff.stat.common': 'Common',
   'sync.diff.stat.local': 'Only this machine',
   'sync.diff.stat.remote': 'Only on the remote',
@@ -1002,7 +1004,7 @@ export const en: LocaleDictOf<typeof NS> = {
   'sync.field.user': 'Username',
   'sync.field.userHint': 'Optional, for Basic auth.',
   'sync.field.password': 'Password',
-  'sync.field.passwordHint': 'Never written to the settings file: Save stores it in the host credential store. Blank keeps the stored one.',
+  'sync.field.passwordHint': 'Never written to the settings file: Save stores it in the DSH credentials. Blank keeps the stored one.',
   'sync.password.set': 'Configured',
   'sync.password.unset': 'Not set',
   'sync.password.shadowed': 'The launching environment supplies this reference and always wins, so it cannot be changed here; clear that variable first.',

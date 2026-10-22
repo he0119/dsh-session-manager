@@ -11,7 +11,7 @@
  *   - **只提交改动过的字段**：没动过的字段不发编辑，否则用户层里会攒下一堆"等于默认值"的覆盖，
  *     界面上那些字段从此都顶着「已覆盖」徽标（判据见 syncForm.ts 的 draftOps）；
  *   - **密码直接输入、值不进配置**：那个框是官方控件库的只写控件（`SettingsSecretField`），保存时
- *     把输入的密码写进宿主机凭据库（`remote.credentials` 的 `set`），配置里只有引用名——与 DSH 自己
+ *     把输入的密码写进宿主凭据库（`remote.credentials` 的 `set`），配置里只有引用名——与 DSH 自己
  *     的口径一致（配置携带引用，值归凭据提供方）。所以那个框永远从空白开始：没有任何一条读路径会把
  *     值送回来，界面只能报"配没配、能不能写"（`describe`）。留空 = 不动已存的那一个；
  *   - **引用名不在这张表单上**：`sync.passwordRef` 属于插件配置（在插件配置页那份 volatile 表单里改），
@@ -212,7 +212,7 @@ export function SyncConfigForm({
     setPassword('')
     setDraft(undefined)
   }
-  // 一次保存要发的两件事一起算（见 syncForm.ts 的 savePlan）：配置文档里的编辑，以及要写进宿主机
+  // 一次保存要发的两件事一起算（见 syncForm.ts 的 savePlan）：配置文档里的编辑，以及要写进宿主
   // 凭据库的那一笔密码。密码走的是另一条通道，所以这里不是"多一个字段"而是"多一件事"。
   const plan = savePlan(view, section, password, credentials !== undefined)
   const dirty = plan.ops.length > 0 || plan.password !== undefined

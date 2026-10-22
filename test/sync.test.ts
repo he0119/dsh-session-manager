@@ -2347,11 +2347,11 @@ test('同步拉取：远端共享库里没有这个对象时只记问题，会�
     assert.deepEqual(outcome.pulled, ['s1'], '一个对象取不回来不挡这一条会话落地')
     assert.deepEqual(outcome.attachmentIn, { written: 0, present: 0, bytes: 0 })
     assert.equal(existsSync(storeB.pathOf(ref)), false)
-    // 整轮汇总成一句，且**不点名**单个对象：这是"有对象的那些机器还没把它们推上去"这一种状态，
+    // 整轮汇总成一句，且**不点名**单个对象：这是"持有这些对象的机器还没推送它们"这一种状态，
     // 一个会话引用几十张图时逐条报会把问题清单淹掉。
     assert.deepEqual(
       outcome.problems,
-      ['本机有 1 个附件对象在远端共享库里也没有，这次补不上（有对象的那些机器还没把它们推上去）'],
+      ['本机有 1 个附件对象在远端共享库里也没有，这次补不上（持有这些对象的机器还没推送它们）'],
     )
   } finally {
     await fixture.close()
@@ -2460,7 +2460,7 @@ test('同步拉取：两条会话各缺一个对象时也只汇总一句（数�
     assert.deepEqual(
       outcome.problems,
       // 两条会话引用同一个对象：按**对象**算 2 个（去重），不是按引用次数算 3 个。
-      ['本机有 2 个附件对象在远端共享库里也没有，这次补不上（有对象的那些机器还没把它们推上去）'],
+      ['本机有 2 个附件对象在远端共享库里也没有，这次补不上（持有这些对象的机器还没推送它们）'],
     )
   } finally {
     await fixture.close()
@@ -2533,7 +2533,7 @@ test('同步补对象：远端共享库里也没有时汇总成一句，不逐�
     assert.deepEqual(repair.attachmentIn, { written: 0, present: 0, bytes: 0 })
     assert.deepEqual(
       repair.problems.filter((line) => line.includes('在远端共享库里也没有')),
-      ['本机有 2 个附件对象在远端共享库里也没有，这次补不上（有对象的那些机器还没把它们推上去）'],
+      ['本机有 2 个附件对象在远端共享库里也没有，这次补不上（持有这些对象的机器还没推送它们）'],
       '缺两个也只说一句，而且把数说清楚',
     )
   } finally {

@@ -344,7 +344,7 @@ interface HostSessionsService {
  * 为什么不能直接把事件当成"该推了"：`turn/end` 到的时候**日志还没落盘**。宿主的
  * `dsh-session-checkpoint-policy` 只在模型请求、工具派发、agent 步进三处落盘，`turn/end` 不在其中；
  * `turn/end` 的契约原文就写着 "The loop does not await a flush at turn boundaries… consumers that
- * read storage after `turn/end` flush themselves"。而推送读的正是磁盘字节——少了这一步，推上去的会
+ * read storage after `turn/end` flush themselves"。而推送读的正是磁盘字节——少了这一步，推送出去的会
  * 是一份**缺最后几步**的半截会话（而且远端会把它当成"本机的最新"，下一轮才补上，中间那一版是错的）。
  *
  * 所以这里 `await sessions.flush(session)` 之后再调 `timer.touched()`。这是宿主点名的用法：

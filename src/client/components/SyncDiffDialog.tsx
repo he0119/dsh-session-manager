@@ -26,7 +26,7 @@ import { Button, Modal, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
 import { fetchSyncDiff, type SyncDiffResponse } from '../api.ts'
 import { KIND_KEY } from './TranscriptDialog.tsx'
 import { formatBytes, formatTime } from './sessionList.tsx'
-import { sideBlocks, STAT_KEY, statCells } from '../logic/diffStats.ts'
+import { sideBlocks, STAT_KEY, statCells, tailEmptyKey } from '../logic/diffStats.ts'
 import { KIND_TONE, RELATION_KEY, RELATION_TONE, SIDE_TONE } from '../logic/diffTags.ts'
 import type { DiffItem, DiffTail } from '../../session-diff.ts'
 import type { Translate } from '../logic/locales.ts'
@@ -63,8 +63,9 @@ function TailBlock({
       <Tag className="dsm-tag" tone={SIDE_TONE[side]}>
         {t(side === 'local' ? 'sync.diff.tail.local' : 'sync.diff.tail.remote', { count: tail.count })}
       </Tag>
-      {/* 0 条也要摆：那半边"没有多出来的"本身就是一条结论，不是还没查。 */}
-      {tail.count === 0 ? <div className="dsm-hint">{t('sync.diff.tail.empty')}</div> : null}
+      {/* 0 条也要摆：那一侧"没有多出来的"本身就是一条结论，不是还没查。句子按侧分两句——
+          只说"这一侧"的话，读的人还是不知道是本机还是远端。 */}
+      {tail.count === 0 ? <div className="dsm-hint">{t(tailEmptyKey(side))}</div> : null}
       {tail.preview.map((item) => (
         // 一行摘要就是内容视图里那一张事件卡的头行（同一个 `.dsm-itemHead`）：种类在左、摘要在中、
         // 时刻在右。种类在这里是一枚官方标签（档位与内容视图那条色边同一套语义，见 KIND_TONE）。
