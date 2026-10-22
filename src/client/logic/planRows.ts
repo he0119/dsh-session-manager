@@ -13,7 +13,7 @@
  *
  * 判断点摆在一个地方，因此可以被直接测（`test/planRows.test.ts`）。
  *
- * 只用到这几个字段，所以这里**不 import** `/state` 或导入响应的类型：Host 侧的 typecheck 工程
+ * 只用到这几个字段，所以这里**不 import** `/state` 或导入响应的类型：Host 半侧的 typecheck 工程
  * `exclude` 了 `src/client`，而 import 会把它拉进那个没有 DOM 的工程里检查（见 groups.ts 里同一段
  * 说明）。
  *

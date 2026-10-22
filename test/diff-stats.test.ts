@@ -10,7 +10,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { sideBlocks, STAT_KEY, statCells } from '../src/client/logic/diffStats.ts'
+import { sideBlocks, STAT_KEY, statCells, tailEmptyKey } from '../src/client/logic/diffStats.ts'
 import { diffSessionLogs } from '../src/session-diff.ts'
 
 const header = JSON.stringify({
@@ -49,4 +49,14 @@ test('差异视图：三格计数一格不少，共同 / 本机独有 / 远端�
     ['sync.diff.stat.common', 'sync.diff.stat.local', 'sync.diff.stat.remote'],
     '三格各有自己的文案键',
   )
+})
+
+test('tailEmptyKey：0 条那一侧说的是"本机"还是"远端"，两侧不能同一句', () => {
+  /*
+   * 两块长得一样，只说「这一侧没有多出来的」，读的人得靠位置猜那是哪一侧。所以两侧各一句，由这里
+   * 决定挑哪句——判据放在逻辑层，界面只负责 t() 一下。
+   */
+  assert.equal(tailEmptyKey('local'), 'sync.diff.tail.empty.local')
+  assert.equal(tailEmptyKey('remote'), 'sync.diff.tail.empty.remote')
+  assert.notEqual(tailEmptyKey('local'), tailEmptyKey('remote'), '两侧不能指向同一句')
 })

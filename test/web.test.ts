@@ -1047,7 +1047,7 @@ test('POST /migrate：侧边栏不显示的会话搬不走、源工作区因此�
   const sandbox = makeSandbox('web-migrate-stranded')
   writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000)
   writeSession(sandbox.sessionsRoot, 'session-blank', CWD_A, 2000)
-  // 宿主判这条"一个回合都没开始过"（空白会话，侧边栏不显示）——判据在投影缓存里，见 visibility.ts。
+  // 宿主判这条"一轮都没开始过"（空白会话，侧边栏不显示）——判据在投影缓存里，见 visibility.ts。
   const cacheDir = projectionCacheDir(sandbox.registryPath)
   mkdirSync(cacheDir, { recursive: true })
   writeFileSync(

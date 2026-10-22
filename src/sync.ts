@@ -248,7 +248,7 @@ export function remoteBundlePath(machineId: string, id: string): string {
  */
 export const SYNC_ATTACHMENTS_DIR = 'attachments'
 
-/** 对象 id 里那 64 位十六进制（远端目录就按它的前两位分桶，与本机附件库同形）。 */
+/** 对象 id 里那 64 位十六进制（远端目录按它的前两位分成子目录，与本机附件库同形）。 */
 function attachmentHex(ref: AttachmentRef): string {
   return ref.id.slice('sha256:'.length)
 }
@@ -1035,7 +1035,7 @@ export function planSync(input: SyncPlanInput): SyncPlan {
  * 件事：这次没有落地。
  *
  * **推送表逐条过滤**，留下的恰好是"本机这一侧确实领先"的那几类：
- *   - `upload` / `missing`（远端没有）：本机独有，推上去只有新增；
+ *   - `upload` / `missing`（远端没有）：本机独有，推送时只有新增；
  *   - `update` / `local-ahead`（远端停在旧代次）：远端那份是本机这份的前缀，刷新它是纯增量；
  *   - `update` / `local-newer`（两边各自写过而本机更新）：把自己这一格刷成最新，**不碰**本机；
  *   - `skip` / `identical`（内容一致）：留着，它是"这次不用动"的唯一一条说明。
@@ -1950,7 +1950,7 @@ function attachmentRefsOfFiles(files: readonly SessionLogFile[], decodeAll: Deco
  * 从**包里的字节**读，不读本机那份：拉取与"覆盖本机"这两条路上，本机那份要么还不存在、要么正要被换
  * 掉。包是自校验过的（`readBundle()` 逐条核过偏移与 sha256），所以这里的偏移一定落在载荷内。
  *
- * 包自己带来的对象（v2 的包：旧版本推上去的，或别人手工放进来的）从这份名单里摘掉——它们由导入那条
+ * 包自己带来的对象（v2 的包：旧版本推送的，或别人手工放进来的）从这份名单里摘掉——它们由导入那条
  * 路随包落地，共享库里没有它们，去那儿取只会白跑一趟并报一串假问题。
  */
 function attachmentRefsOfBundle(bundle: SessionBundle, decodeAll: DecodeAll): AttachmentRef[] {
@@ -2024,7 +2024,7 @@ async function fetchAttachment(
     }
   } catch (error) {
     if ((error as { status?: number } | null)?.status === 404) {
-      // 「远端也没有」不是错误，是"有对象的那些机器还没把它们推上去"这一种状态：**整轮汇总成一句**
+      // 「远端也没有」不是错误，是"持有这些对象的机器还没推送它们"这一种状态：**整轮汇总成一句**
       // （一个会话引用几十张图时，逐条报会把问题清单淹掉，而它们要的处置是同一件事）。
       absent.add(ref.id)
       return
@@ -2063,7 +2063,7 @@ async function pullAttachments(
 /**
  * 把导入那条路落下的**随包对象**记进这次同步的对象账。
  *
- * 这一版推上去的包只有日志（对象走共享库），但远端那份包可能是 v2 的（旧版本推的、别人手工放上去的）：
+ * 这一版推送的包只有日志（对象走共享库），但远端那份包可能是 v2 的（旧版本推的、别人手工放上去的）：
  * 那种包的对象由 `applyImport()` 落地，不经过下面这条共享库的路。两边都记同一本账，界面那句「另取回
  * 附件对象 N 个」才对得上这一次到底搬了几个。
  */
@@ -2155,7 +2155,7 @@ async function pushAttachments(
  * 是这台机器上"图挂了"的全部来路：
  *
  *  - **本机缺**：这条会话是早先拉过来的（那时对象还不会跟着同步走）→ 远端有就取回来；
- *  - **远端缺**：这条会话是旧版本推上去的（那时的包只有日志）→ 本机有就传上去。
+ *  - **远端缺**：这条会话是旧版本推送的（那时的包只有日志）→ 本机有就传上去。
  *
  * 两条都只发生在"日志两边一样、谁也没打算动这条会话"的情形里，所以放在这里，而不是塞进计划：计划改动
  * 一条会话意味着写日志、改注册表那一整套，而这两件事一个字节的日志都不动。
@@ -2263,7 +2263,7 @@ export async function applyPreparedSync(
   /**
    * 预演比对时算过的指纹直接接着用（同一个字节数、同一个 mtime，落地之前验过）。
    *
-   * 本机独有的那些预演时没算过（它们不进比对，算它才是白花），这里现算——只有真推上去的那几条。
+   * 本机独有的那些预演时没算过（它们不进比对，算它才是白花），这里现算——只有真推送的那几条。
    */
   const contentHash = (path: string, version: number, compression: string | null): FileFingerprint =>
     prepared.fingerprints.get(path) ?? contentFingerprint(path, version, compression, deps.decodeAll)
@@ -2300,7 +2300,7 @@ export async function applyPreparedSync(
   const remoteObjectNames = new Map<string, Set<string>>()
   /**
    * 本机要、远端也没有的那些对象（去重后的 id）。**整轮收尾时汇总成一句**：拉取那条路与补对象那条路
-   * 撞上的是同一种状态（有对象的那些机器还没把它们推上去），逐条报会把问题清单淹掉。
+   * 撞上的是同一种状态（持有这些对象的机器还没推送它们），逐条报会把问题清单淹掉。
    */
   const absentObjects = new Set<string>()
 
@@ -2406,7 +2406,7 @@ export async function applyPreparedSync(
         registryPath: deps.registryPath,
         decodeAll: deps.decodeAll,
         // 远端那份包万一是自带的（旧版同步推的、或别人手工放上去的），导入那条路照旧把它当成随包带
-        // 来的对象落地；这一版推上去的包只有日志，下面那一步负责从共享库补。
+        // 来的对象落地；这一版推送的包只有日志，下面那一步负责从共享库补。
         ...(port === undefined ? {} : { attachments: port }),
       }
       /*
@@ -2703,7 +2703,7 @@ export async function applyPreparedSync(
   // 一轮一句话：本机要、远端也没有的那些对象（两边都是同一种状态，处置也是同一件事）。
   if (absentObjects.size > 0) {
     problems.push(
-      `本机有 ${absentObjects.size} 个附件对象在远端共享库里也没有，这次补不上（有对象的那些机器还没把它们推上去）`,
+      `本机有 ${absentObjects.size} 个附件对象在远端共享库里也没有，这次补不上（持有这些对象的机器还没推送它们）`,
     )
   }
 
@@ -2953,7 +2953,7 @@ export const AUTO_PUSH_QUIET_MS = 300_000
  *   跑完，而每一轮读的都是同一份"最新"，重复跑没有意义；
  * - `idle`：有得算但一条都不用推，而且连要撤下的空白会话都没有——这一轮连收尾都不必做。
  *
- * **没有"正在攒连发"这个码**：静默窗口只**推迟**推送，不会让任何一次询问得到"没跑"——`touched()` 与
+ * **没有"正在攒连发"这个码**：空闲窗口只**推迟**推送，不会让任何一次询问得到"没跑"——`touched()` 与
  * 界面那枚「立即推送一次」都是"现在就跑"，窗口里照样当场推。所以"在攒"不是一种 `skip`（那是"这次
  * 没跑"的原因），它只是"还没到"。给一个没有消费者的码会有害：它会看起来像一套不存在的机制
  * （同一类问题见 [自动推送那篇](../../.agents/notes/implemented/feature/2026-10-14-auto-push-is-push-only.md)
@@ -2992,7 +2992,7 @@ export interface AutoPushTimer {
   /**
    * 当场跑一轮。
    *
-   * 两条来路都走它：本机写完一轮（静默窗口到点，见 `touched()`）与界面那枚「立即推送一次」。
+   * 两条来路都走它：本机写完一轮（空闲窗口到点，见 `touched()`）与界面那枚「立即推送一次」。
    */
   tick(options?: { onProgress?: ProgressReporter }): Promise<AutoPushOutcome>
   /**
@@ -3026,14 +3026,14 @@ export interface AutoPushTimer {
   subscribe(listener: (event: AutoPushEvent) => void): () => void
   /** 这一次跑完了/已经知道了的结论（`tick()` 自己调，也供外部记一笔）。 */
   note(outcome: AutoPushOutcome): void
-  /** 停掉（卸载时）：不再起新的静默窗口；`tick()` 仍可用（界面那枚按钮不依赖它）。 */
+  /** 停掉（卸载时）：不再起新的空闲窗口；`tick()` 仍可用（界面那枚按钮不依赖它）。 */
   stop(): void
 }
 
 /**
  * 造一个自动推送的调度器。
  *
- * 它只干一件事：收到"本机写完一轮"之后起一个静默窗口，安静下来就推一轮（见 `touched()`）。**没有
+ * 它只干一件事：收到"本机写完一轮"之后起一个空闲窗口，空下来就推一轮（见 `touched()`）。**没有
  * 周期唤醒**——什么时候推完全由事件决定（见
  * [只在写完一轮之后推](../../.agents/notes/implemented/simplification/2026-10-21-auto-push-only-after-a-turn.md)）。
  *
@@ -3051,7 +3051,7 @@ export function createAutoPushTimer(deps: AutoPushTimerDeps): AutoPushTimer {
   /** 正在跑（`busy` 那条判据）：一次只允许一轮，且**由调度器**把关，不指望 `run()` 自己重入安全。 */
   let running: Promise<AutoPushOutcome> | undefined
   let lastOutcome: AutoPushOutcome | undefined
-  /** 静默窗口那个计时器（见 `touched()`）。 */
+  /** 空闲窗口那个计时器（见 `touched()`）。 */
   let settleHandle: unknown
   /** 上一轮还在跑的时候又来事件：记下来，跑完立刻补一次（不丢用户的这一轮）。 */
   let settleAgain = false

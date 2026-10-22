@@ -12,7 +12,7 @@
  * 跳过按**原因合并计数**：勾一页会话时逐条念"这条跳过、那条跳过"没人读，用户要的是"5 条没动，其中
  * 4 条是你自己改过名的"。
  *
- * 只用到结果里那几个数组，所以这里**不 import** `../api.ts`（那是浏览器侧的模块，Host 侧的 typecheck
+ * 只用到结果里那几个数组，所以这里**不 import** `../api.ts`（那是浏览器半侧的模块，Host 半侧的 typecheck
  * 工程没有 DOM，import 会把它拉进那个工程里检查——见 planRows.ts 里的同一段说明）。
  *
  * @module dsh-session-manager/client/retitleNotes

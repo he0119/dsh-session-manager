@@ -24,7 +24,7 @@
  * - `busy`：上一轮还在跑（这一轮直接让开，不排队）；
  * - `idle`：有得算但一条都不用推。
  *
- * **没有"正在攒连发"这一项**：静默窗口只推迟推送，不会让任何一次询问得到"没跑"。见 `src/sync.ts` 里
+ * **没有"正在攒连发"这一项**：空闲窗口只推迟推送，不会让任何一次询问得到"没跑"。见 `src/sync.ts` 里
  * `AutoPushSkip` 那段。
  */
 export const AUTO_PUSH_SKIP_CODES = ['disabled', 'busy', 'idle'] as const

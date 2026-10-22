@@ -7,8 +7,8 @@
  * 也共用了一个 `streamResult()`，所以这里跟着改成通用名字、段名不再收窄成同步那几个。
  *
  * 为什么单独一个文件：这里每一行都是**纯字符串处理**（分帧、解释），没有 fetch 也没有 DOM。客户端
- * 半侧有两份 tsconfig，Host 侧那份**没有 DOM**——那条边界正是为了让"浏览器 API 出现在 Host 代码里"
- * 在类型层面就不成立，所以任何能被 Host 侧测试图引入的客户端文件都必须与 DOM 无关。真正的读流
+ * 半侧有两份 tsconfig，Host 半侧那份**没有 DOM**——那条边界正是为了让"浏览器 API 出现在 Host 代码里"
+ * 在类型层面就不成立，所以任何能被 Host 半侧测试图引入的客户端文件都必须与 DOM 无关。真正的读流
  * （fetch 与 `response.body`）留在 [api.ts](../api.ts) 里，这里只认文本。
  *
  * 宿主那一侧的生产者见 `src/web.ts` 的 `sendEventStream()` / `streamResult()`；事件形状的鼻祖是

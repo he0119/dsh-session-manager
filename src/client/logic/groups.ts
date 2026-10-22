@@ -17,7 +17,7 @@
 /**
  * 分组只用到这几个字段，于是这里**不 import `/state` 的响应类型**。
  *
- * 为什么在意这个：Host 侧的 typecheck 工程刻意 `exclude: ["src/client"]`（那一半要 DOM 与 JSX），
+ * 为什么在意这个：Host 半侧的 typecheck 工程刻意 `exclude: ["src/client"]`（那一半要 DOM 与 JSX），
  * 而 TypeScript 的 exclude 只影响**入口集合**——一旦有文件 import 了被排除的文件，它照样会被拉进
  * 这个没有 DOM 的工程里检查，于是浏览器代码在 Host 工程里报 TS2584（找不到 `document`）。
  * 纯函数不绑在响应形状上，这个坑就绕开了；页面那边传 `SessionSummary[]` 进来天然兼容（结构化类型）。

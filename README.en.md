@@ -345,9 +345,11 @@ by row: the left side is the cwd the remote recorded, the right side a directory
 side must match the other machine’s path character for character, so once you have synced (and the plan in the
 dialog has seen them), the form offers those cwds as suggestions instead of making you copy them by hand.
 
-**Automatic push — push only**: turn it on and the plugin pushes a round **as soon as this machine
-finishes a turn** (it acts when the host reports `turn/end` for a session), **pushing this machine's
-sessions to the remote and pulling nothing at all**: no pull, no replacing the local copy, no
+**Automatic push — push only**: turn it on and the plugin pushes a round **once this machine has
+been idle for five minutes** (every session event — `turn/start`, a tool dispatch, `turn/end`, an
+automatic continuation, a subagent starting or stopping — pushes that window back, so nothing runs
+while you keep writing), **pushing this machine's sessions to the remote and pulling nothing at
+all**: no pull, no replacing the local copy, no
 backup, no registry write, so not one local session is touched. That is a safety boundary, not "a
 lighter sync" — the pulling side moves content this machine already has (a newer remote copy is
 backed up and then replaced), that needs someone watching, and in the interface a confirm dialog
@@ -381,8 +383,8 @@ nothing to push), plus a line when it keeps failing.
 sessions written while DSH was not running, and a round whose event was missed. None of those come
 up by themselves — press **Push now** once, or let a manual **Sync** carry them along.
 
-**The password goes in that same form**: it is a write-only input, and Save stores it in the host credential
-store (`$DSH_HOME/.credentials.yaml`); the configuration file only ever carries the reference, the value is
+**The password goes in that same form**: it is a write-only input, and Save stores it in the DSH
+credentials (`$DSH_HOME/.credentials.yaml`); the configuration file only ever carries the reference, the value is
 never echoed back, and the form reports just “configured / not set”. The reference is not on that form: it is
 the configuration’s own `sync.passwordRef` (`DSH_DAV_PASSWORD` by default), so pointing at a name of your own
 (or at a variable you already export) is done on the generic plugin-config form. A variable present in the
@@ -519,7 +521,7 @@ Sync also goes through a plan: the `sync_sessions` tool previews by default and 
 - **Plugin config**: the optional `sessionsRoot` / `registryPath` / `backupRoot` fields override the default
   paths above; a `sync` block configures WebDAV sync (`url` / `machineId` / `username` / `passwordRef` /
   `mapping` / `timeoutMs`). A password is only ever a **reference** (an environment-variable name), never
-  plaintext in the config file: a password typed in the interface goes to the host credential store
+  plaintext in the config file: a password typed in the interface goes to the DSH credentials
   (`$DSH_HOME/.credentials.yaml`), not to this configuration.
 
 ## Docs

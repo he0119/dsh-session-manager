@@ -18,7 +18,7 @@ import { SseFrames, interpretStreamEvent, type ProgressEvent } from './logic/eve
 import type { TranscriptPage } from '../transcript.ts'
 import type { SessionDiff } from '../session-diff.ts'
 
-// 事件流的分帧与解释在 eventStream.ts（那份文件与 DOM 无关，所以 Host 侧的测试图能直接引它）。类型
+// 事件流的分帧与解释在 eventStream.ts（那份文件与 DOM 无关，所以 Host 半侧的测试图能直接引它）。类型
 // 从这里转出去，界面那一侧只认 api.ts 一个入口。
 export type { ProgressEvent }
 
@@ -385,7 +385,7 @@ export async function importBundle(
 /*
  * `download()` 用到的那一小片 DOM 面，**就地写出来**而不是靠全局的 `document` / `HTMLAnchorElement`：
  * 本文件同时被两套工程检查——`tsconfig.client.json` 带 DOM（真实那一套），而 `tsconfig.test.json` 是
- * Host 侧的、**没有 DOM lib**（那份工程存在的意义就是"浏览器 API 出现在 Host 代码里"在类型层面不
+ * Host 半侧的、**没有 DOM lib**（那份工程存在的意义就是"浏览器 API 出现在 Host 代码里"在类型层面不
  * 成立）。测试要引本文件里的纯逻辑（`runAutoPushNow()` 之类）时就会把它拉进没有 DOM 的那一套，于是
  * 那几行把整个测试工程卡住——而"从测试里 import api.ts"是本仓库既有的写法
  * （见 test/browser-auto-push.test.ts）。
@@ -701,7 +701,7 @@ export interface AutoPushLast {
   problem?: string
   startedAt?: number
   finishedAt?: number
-  /** 推上去几条会话（只给计数）。 */
+  /** 推送几条会话（只给计数）。 */
   pushedCount: number
   bytesOut: number
   attachmentOut?: { uploaded: number; skipped: number; bytes: number; missing: number }

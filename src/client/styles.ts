@@ -339,7 +339,7 @@ export const CSS = `
   /* 整页里不必再用 320px 的小窗：给一个随视口的上限，短列表不留空、长列表不把页面推得很长。 */
   max-height: min(420px, 42vh);
   overflow: auto;
-  /* 常驻一条滚动条槽位：装了占位滚动条的环境里，溢出与否都不再改行宽（否则行里右对齐的列会左右跳）。 */
+  /* 常驻一条滚动条占位：装了占位滚动条的环境里，溢出与否都不再改行宽（否则行里右对齐的列会左右跳）。 */
   scrollbar-gutter: stable;
   border: 1px solid var(--dsw-alias-border-l1, rgba(0, 0, 0, 0.1));
   border-radius: 10px;
