@@ -2929,17 +2929,21 @@ export type AutoPushEvent =
   | { type: 'done'; outcome: AutoPushOutcome }
 
 /**
- * 会话事件攒一轮的静默窗口（毫秒）：收到第一个"有新写的会话"起算，安静这么久就推一轮。
+ * 会话事件的安静窗口（毫秒）：末尾那个会话事件之后安静满这么久，才推一轮。5 分钟。
  *
- * 为什么需要它：一轮对话不是只发一次 `turn/end`——goal 自动续轮、子智能体起停、compaction 都会各发
- * 一次，用户连着问几句更是连着来。每个事件推一次就是**整包 PUT × N**（单包实测到过 1.1 MB），所以
- * 先攒一攒。
+ * 它既是"攒连发"也是"等人停手"：一轮对话不是只发一次事件（`turn/start`、`step/end`、工具派发、
+ * `turn/end`、goal 自动续轮、子智能体起停都会各发一次），用户连着问更是连着来。每个事件都只做一件事
+ * ——**把计时重置**。
  *
- * 为什么 10 秒这么短：日志的落盘不靠"等"来保证——宿主侧在调 `touched()` 之前已经
- * `await sessions.flush(session)` 过了（见 `src/tools.ts` 的 `attachAutoPushToSessions()`），所以这个
- * 窗口**纯粹**是攒连发，不必再留落盘的时间。留长了只会让"我刚写完一轮"多等一截。
+ * 为什么是 5 分钟而不是十几秒：一轮整库推送在这台机器的真实库上实测要 **20～90 秒**（1024 条会话 /
+ * 670 MB，其中上行几十 MB），而"写完一轮 10 秒后就推"会把这段重活儿插在用户下一次说话中间。取 5 分钟
+ * 是"用户多半已经转头去干别的"的量级；代价是最后一轮之后最多晚 5 分钟才上云。依据见
+ * [让自动推送等安静之后再跑](../../.agents/notes/implemented/bug-fix/2026-10-22-auto-push-waits-for-quiet.md)。
+ *
+ * 落盘不靠这个窗口等：宿主侧在调 `touched()` 之前已经 `await sessions.flush(session)` 过了（见
+ * `src/tools.ts` 的 `attachAutoPushToSessions()`），窗口纯粹是"别在人还在的时候抢资源"。
  */
-export const AUTO_PUSH_SETTLE_MS = 10_000
+export const AUTO_PUSH_QUIET_MS = 300_000
 
 /**
  * 自动推送没跑的原因。
@@ -2992,11 +2996,11 @@ export interface AutoPushTimer {
    */
   tick(options?: { onProgress?: ProgressReporter }): Promise<AutoPushOutcome>
   /**
-   * 有新写的会话了——起（或续）一个静默窗口，安静 {@link AUTO_PUSH_SETTLE_MS} 毫秒之后推一轮。
+   * 又有会话活动了——起（或续）一个安静窗口，安静 {@link AUTO_PUSH_QUIET_MS} 毫秒之后推一轮。
    *
-   * 由宿主侧在收到 `turn/end` **并且把这一轮落盘之后**调（见 `src/tools.ts` 的
-   * `attachAutoPushToSessions()`）。事件层与定时器层在这里汇合：窗口内再来事件就把计时**重置**
-   * （这就是攒连发），所以一轮对话里那串 `turn/end` 只会推一次。
+   * 由宿主侧在**每一个**会话事件之后调（见 `src/tools.ts` 的 `attachAutoPushToSessions()`：`turn/end`
+   * 那一次是在 `await sessions.flush(session)` 之后调的，其余事件只算"还在活动"）。窗口内再来事件就
+   * 把计时**重置**，所以一整段连着写的时间里一次都不推。
    *
    * 关着的时候什么都不做：不排队、不记账——打开之后写的下一轮会照常触发，没有"欠着一次"这回事。
    */
@@ -3116,11 +3120,11 @@ export function createAutoPushTimer(deps: AutoPushTimerDeps): AutoPushTimer {
   }
 
   /**
-   * 有新写的会话了：重置静默窗口。
+   * 又有会话活动了：重置安静窗口。
    *
-   * 攒连发的全部实现就是"重置计时"这一句——窗口里再来一个事件，旧的计时器被清掉、重新起一个，
-   * 于是"最后一个事件之后安静满 {@link AUTO_PUSH_SETTLE_MS}"才会真跑。一轮对话里那串 `turn/end`
-   * 因此只推一次。
+   * 攒连发与"等人停手"的全部实现就是"重置计时"这一句——每来一个事件，旧的计时器被清掉、重新起一个，
+   * 于是"末尾那个事件之后安静满 {@link AUTO_PUSH_QUIET_MS}"才会真跑。所以用户连着问、或者子智能体
+   * 还在跑，都推不动它。
    *
    * 正在跑时不重置、也不排队，只记一个"跑完补一次"：这一轮读的快照里没有刚写完的那一笔，直接丢掉
    * 会让用户觉得"我写完了它没推"。
@@ -3135,7 +3139,7 @@ export function createAutoPushTimer(deps: AutoPushTimerDeps): AutoPushTimer {
     settleHandle = setTimer(() => {
       settleHandle = undefined
       void tick()
-    }, Math.max(1, AUTO_PUSH_SETTLE_MS))
+    }, Math.max(1, AUTO_PUSH_QUIET_MS))
   }
 
   return {

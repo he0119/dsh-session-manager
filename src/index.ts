@@ -106,7 +106,7 @@ export function apply(ctx: Context, config: PluginConfigInput = {}): () => void 
     (resolved) => {
       if (resolved === undefined) return undefined
       info(
-        `dsh-session-manager 自动推送已就绪：${resolved.timer.enabled() ? '写完一轮就推' : '当前关闭'}（只推不拉）`,
+        `dsh-session-manager 自动推送已就绪：${resolved.timer.enabled() ? '安静 5 分钟后才推' : '当前关闭'}（只推不拉）`,
       )
       return resolved.timer
     },
@@ -117,7 +117,7 @@ export function apply(ctx: Context, config: PluginConfigInput = {}): () => void 
     },
   )
   /*
-   * 会话事件那一层：本机写完一轮就推（`attachAutoPushToSessions()`）。这是自动推送**唯一**的触发源。
+   * 会话事件那一层：本机安静下来才推（`attachAutoPushToSessions()`）。这是自动推送**唯一**的触发源。
    *
    * 两者都挂在同一个 `autoPushPromise` 上：调度器要等配置与凭据解析完才存在，而事件可能在那之前就到
    * （用户刚打开页面就发了一轮）。所以这里同样"先拿着 promise"，到位之后再把监听接上——接晚了不会丢

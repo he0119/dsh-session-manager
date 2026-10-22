@@ -510,11 +510,11 @@ export const zh = {
   'sync.map.noTo': '第 {line} 行缺少本机目录。',
   'sync.map.duplicate': '第 {line} 行的远端路径重复：{from}',
 
-  // 自动推送：本机写完一轮之后在后台跑一轮**只推不拉**的同步（表单那一栏 + 卡片上那句话 + 当场跑一次的结论）
+  // 自动推送：本机安静下来之后在后台跑一轮**只推不拉**的同步（表单那一栏 + 卡片上那句话 + 当场跑一次的结论）
   'sync.field.autoPush': '自动推送',
   'sync.field.autoPushHint':
-    '本机写完一轮就推上去（最后一个会话事件之后安静 10 秒）；只推送、绝不拉取，也不改动本机任何会话。',
-  'sync.autoPush.enabled': '自动推送已开：写完一轮就推。',
+    '本机空闲 5 分钟之后，它才把改过的会话推上去；你一直在写，它就一直不动。只推送、绝不拉取，也不动本机的任何会话。',
+  'sync.autoPush.enabled': '自动推送已开：本机空闲 5 分钟才推。',
   'sync.autoPush.now': '立即推送一次',
   'sync.autoPush.running': '正在自动推送…',
   'sync.autoPush.done': '自动推送：已推送 {pushed} 条（上传 {bytesOut}）。',
@@ -1039,12 +1039,12 @@ export const en: LocaleDictOf<typeof NS> = {
   'sync.map.noTo': 'Line {line} is missing the local directory.',
   'sync.map.duplicate': 'Line {line} repeats the remote path: {from}',
 
-  // Automatic push: a push-only sync round after a turn finishes on this machine (the form switch,
+  // Automatic push: a push-only sync round once this machine goes quiet (the form switch,
   // the card's one-liner and the outcome of running one round right now).
   'sync.field.autoPush': 'Automatic push',
   'sync.field.autoPushHint':
-    'Pushes as soon as a turn finishes on this machine (ten seconds after the last session event). It pushes only and never pulls, and never touches a local session.',
-  'sync.autoPush.enabled': 'Automatic push is on: it pushes as soon as a turn finishes.',
+    'Once this machine has been idle for five minutes, it uploads the sessions you changed; while you keep writing, it stays put. It pushes only and never pulls, and it never touches any session on this machine.',
+  'sync.autoPush.enabled': 'Automatic push is on: it uploads once the machine has been idle for five minutes.',
   'sync.autoPush.now': 'Push now',
   'sync.autoPush.running': 'Pushing automatically…',
   'sync.autoPush.done': 'Automatic push: pushed {pushed} ({bytesOut} uploaded).',

@@ -121,9 +121,13 @@
   检查点；开关是活字段，每次事件来时现读一遍当前配置。
 - [自动推送只在写完一轮之后推](../.agents/notes/implemented/simplification/2026-10-21-auto-push-only-after-a-turn.md)
   （原先那两个触发源的分工见[上一篇](../.agents/notes/implemented/architecture/2026-10-14-auto-push-follows-turn-end.md)）：
-  兜底的定时器与"隔多久跑一次"那个旋钮一起删了——什么时候推完全由宿主报的 `turn/end` 决定，攒 10 秒
-  静默窗口就推一轮；`AutoPushSkip` 因此只剩 `disabled` / `busy` / `idle`。代价是事件层够不到的三类
-  （别的机器推到远端的、DSH 没开着时写下的、事件层漏了）要等用户手点一次「立即推送一次」才带上去。
+  兜底的定时器与"隔多久跑一次"那个旋钮一起删了——什么时候推完全由宿主报的会话事件决定；`AutoPushSkip`
+  因此只剩 `disabled` / `busy` / `idle`。代价是事件层够不到的三类（别的机器推到远端的、DSH 没开着时
+  写下的、事件层漏了）要等用户手点一次「立即推送一次」才带上去。窗口多长见[下一篇](auto-push-waits-for-quiet)。
+- [自动推送等安静 5 分钟再跑](../.agents/notes/implemented/bug-fix/2026-10-22-auto-push-waits-for-quiet.md)：
+  窗口从"最后一个 `turn/end` 之后 10 秒"改成"最后一个会话事件之后 5 分钟"，且**每个**会话事件都重置
+  它（不只是 `turn/end`）：一轮整库推送在千条量级的库上实测 20～90 秒、上行几十 MB，每一轮都跑就等于把
+  这段重活儿插在用户下一次说话中间。冲盘仍只在 `turn/end` 那一次。
 - [内容判据不占主线程，同一对不重算](../.agents/notes/implemented/bug-fix/2026-10-21-content-relations-off-the-main-thread.md)：
   「两边各自写过」那些对要读整份日志判谁是谁的前缀，原来是一整份同步解压 + 同步读文件，一对大日志
   就能把宿主主线程按住一两秒；现在包走线程池的 `readBundleAsync()`、日志走分块让出的
@@ -134,14 +138,15 @@
   宿主手里那份），`src/tools.ts` 的 `sync_sessions` 走单次调用那条（`runSync()`）。自动推送是同一个
   计划层上的第三条路：`runAutoPush()` 用 `pushOnly` 算一份只推的计划（`narrowToPushOnly()` 把
   `skip` 里那些"本机会被远端顶掉"的行摘出去，拉取整表清空），没有预演与确认那一步，没得推时也落一次
-  空计划把本机那格索引收窄；`createAutoPushTimer()` 手里只有静默窗口一个计时器、没有周期唤醒，开关是
+  空计划把本机那格索引收窄；`createAutoPushTimer()` 手里只有安静窗口一个计时器、没有周期唤醒，开关是
   活字段（关掉不必重启），`src/tools.ts` 的 `resolveAutoPushRuntime()` 是它唯一的接线（宿主造一个挂在
   插件生命周期上，`GET /auto-push` 端点用同一个，用户手点那一次就是直接 `tick()`）。
-- **自动推送唯一的触发源是"写完一轮"**：`src/tools.ts` 的 `attachAutoPushToSessions()` 订阅
-  `session/event`、只认 `turn/end`，收到之后先 `await ctx.sessions.flush(session)` 再把
-  `AutoPushTimer.touched()` 叫一下；`touched()` 起/续的是 `AUTO_PUSH_SETTLE_MS`（10 秒）那个静默窗口，
-  窗口里再来事件就重置计时，所以一轮对话里连发的那串 `turn/end` 只推一次。没有兜底的定时器：删掉的
-  理由与代价见[那篇笔记](../.agents/notes/implemented/simplification/2026-10-21-auto-push-only-after-a-turn.md)。
+- **自动推送唯一的触发源是"本机安静下来"**：`src/tools.ts` 的 `attachAutoPushToSessions()` 订阅
+  `session/event`，**每个**事件都把 `AutoPushTimer.touched()` 叫一下（只重置计时、不读盘）；只有
+  `turn/end` 那一次先 `await ctx.sessions.flush(session)` 再叫——推送读的是磁盘字节，别的种类冲盘是白费。
+  `touched()` 起/续的是 `AUTO_PUSH_QUIET_MS`（5 分钟）那个安静窗口，所以用户连着写、或者后台还有活儿
+  在跑的时候一次都不推，停手满 5 分钟才推一轮。没有兜底的定时器：删掉的理由与代价见[那篇笔记](../.agents/notes/implemented/simplification/2026-10-21-auto-push-only-after-a-turn.md)；
+  窗口为什么是 5 分钟见[这篇](../.agents/notes/implemented/bug-fix/2026-10-22-auto-push-waits-for-quiet.md)。
   **为什么 `turn/end` 之后必须显式冲盘**：宿主的 checkpoint 策略只在模型请求、工具派发、agent
   步进三处 flush，`turn/end` 不在其中（它的注释明说读存储的消费者自己冲），而推送读的是磁盘字节——少
   这一步推上去的会是一份缺最后几步的半截会话。正解就是契约点名的那个入口 `ctx.sessions.flush(session)`
