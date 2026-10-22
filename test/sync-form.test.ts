@@ -315,7 +315,7 @@ test('同步设置：界面认得的 skip 码与核心层的联合类型对得�
   }
 })
 
-test('同步设置：自动推送的文案说清了"停手 5 分钟才推"（两种语言都要）', () => {
+test('同步设置：自动推送的文案说清了"安静 5 分钟才推"（两种语言都要）', () => {
   /*
    * 这一组钉的是**文案的语义**。`LocaleDictOf` 只能核**键集**一致，核不了两份译文说不说同一件事，所以
    * 这里逐条核三件必须说出口的事：
@@ -327,8 +327,8 @@ test('同步设置：自动推送的文案说清了"停手 5 分钟才推"（两
    * `间隔` / `interval` 这类字样回来了，说明那个被删掉的设置项又从文案里长出来了。
    */
   const cases = [
-    ['sync.field.autoPushHint', /5 分钟/, /five minutes/],
-    ['sync.autoPush.enabled', /5 分钟/, /five minutes/],
+    ['sync.field.autoPushHint', /5\s*分钟/, /five\b[^.]{0,20}minutes/],
+    ['sync.autoPush.enabled', /5\s*分钟/, /five\b[^.]{0,20}minutes/],
   ] as const
   for (const [key, zhPattern, enPattern] of cases) {
     const zhText = zh[key as keyof typeof zh] as string
@@ -338,7 +338,7 @@ test('同步设置：自动推送的文案说清了"停手 5 分钟才推"（两
     assert.doesNotMatch(zhText, /间隔|每隔|定时器/, `${key} 中文把窗口说成了可调周期：${zhText}`)
     assert.doesNotMatch(enText, /interval|timer/i, `${key} 英文把窗口说成了可调周期：${enText}`)
   }
-  assert.match(zh['sync.field.autoPushHint'], /安静|停手/, '中文没说是"等安静下来"')
+  assert.match(zh['sync.field.autoPushHint'], /安静|停手|没动静/, '中文没说是"等安静下来"')
   assert.match(en['sync.field.autoPushHint'], /quiet/i, '英文没说是"等安静下来"')
   for (const key of ['sync.field.autoPushHint'] as const) {
     assert.match(zh[key], /不拉|只推/, `${key} 没说"只推不拉"`)

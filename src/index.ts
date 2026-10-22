@@ -106,7 +106,7 @@ export function apply(ctx: Context, config: PluginConfigInput = {}): () => void 
     (resolved) => {
       if (resolved === undefined) return undefined
       info(
-        `dsh-session-manager 自动推送已就绪：${resolved.timer.enabled() ? '停手 5 分钟就推' : '当前关闭'}（只推不拉）`,
+        `dsh-session-manager 自动推送已就绪：${resolved.timer.enabled() ? '安静 5 分钟后才推' : '当前关闭'}（只推不拉）`,
       )
       return resolved.timer
     },
