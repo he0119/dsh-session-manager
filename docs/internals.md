@@ -93,6 +93,9 @@
 - [同步配置在页面里就地可改，只有 sync 是活字段](../.agents/notes/implemented/architecture/2026-10-01-sync-config-is-live-in-the-page.md)：
   表单读写 profile 那份配置文档，路径映射按行增删（远端 cwd 那一栏带上次预演见过的候选），三个路径
   字段刻意不做成活的。
+- [5 个模型工具各自能在插件配置里关掉](../.agents/notes/implemented/feature/2026-10-24-tool-switches-in-plugin-config.md)：
+  `tools` 那一节一个键对一个工具，只有显式 `false` 算关；关掉是**不注册**，所以模型那份清单里看不到
+  它。不是活字段，改完要重启宿主。
 - [跨机器的项目身份是 git remote](../.agents/notes/implemented/feature/2026-10-01-project-identity-is-the-git-remote.md)：
   索引记身份与仓库内相对路径，落 `本机仓库根 + 相对路径`；显式映射优先，认不出来就跳过并点名仓库。
 - [工作区组头只摆名字与一枚主机标签，项目身份与本机路径进悬浮提示](../.agents/notes/implemented/feature/2026-10-04-workspace-shows-project-identity.md)：

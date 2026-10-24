@@ -3,10 +3,11 @@
 // 这一层钉的是**设置面能不能改、改完要不要重启**：`sync` 那一节带 volatile，于是它在宿主手里是活
 // 引用，界面改完下一次调用就用新值；三个路径字段不带，于是它们既不会出现在表单里、也不会半生效。
 // 判据不看实现，只看两件事：解析出来的形状里谁带 `.get()`，以及改一次引用后读出来的是不是新值。
+// 工具开关（`tools` 那一节）走的是"不带 volatile"这一边，所以还多钉一条：缺席按开算、只有 false 算关。
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { Config, DEFAULT_PASSWORD_REF, SyncConfigSchema, syncSection, type PluginConfigInput } from '../src/config.ts'
+import { Config, DEFAULT_PASSWORD_REF, SyncConfigSchema, TOOL_BY_SWITCH, syncSection, toolsSection, type PluginConfigInput } from '../src/config.ts'
 import { describeSyncConfig, passwordRefOf, syncRuntime } from '../src/tools.ts'
 
 /**
@@ -124,4 +125,39 @@ test('配置：没写 passwordRef 时也去解析缺省引用名（界面存下�
   asked.length = 0
   await syncRuntime(ctx, { sync: { url: 'https://dav.example.com/dsh', passwordRef: 'MY_DAV_PASSWORD' } })
   assert.deepEqual(asked, ['MY_DAV_PASSWORD'])
+})
+
+test('配置 schema：tools 是普通值，不是活引用（注册只在装配时发生，改了要重启）', () => {
+  const parsed = Config({ tools: { migrate: false } }) as unknown as Record<string, unknown>
+  const tools = parsed['tools'] as { get?: unknown; migrate?: boolean }
+  assert.equal(typeof tools.get, 'undefined', 'tools 不能是活字段：标了就等于承诺"改完立即生效"')
+  assert.equal(tools.migrate, false, '用户写的 false 要原样解析出来')
+})
+
+test('工具开关：缺席与 true 都算开，只有显式 false 算关', () => {
+  const allOn = { plan: true, migrate: true, rollback: true, verify: true, sync: true }
+  assert.deepEqual(toolsSection(undefined), allOn, '整节不写 = 全开（老配置升级上来行为不变）')
+  assert.deepEqual(toolsSection({}), allOn)
+  assert.deepEqual(toolsSection({ tools: {} }), allOn, '空的一节也别当成"全关"')
+  assert.deepEqual(toolsSection({ tools: { sync: true } }), allOn, '只点了一个 true，其余仍按开算')
+
+  const partial = toolsSection({ tools: { plan: false, sync: false } })
+  assert.deepEqual(partial, { plan: false, migrate: true, rollback: true, verify: true, sync: false })
+})
+
+test('工具开关：schema 的五个键与工具名对照表一一对上（加工具时不会漏一个开关）', () => {
+  assert.deepEqual(Object.keys(TOOL_BY_SWITCH).sort(), Object.keys(toolsSection(undefined)).sort())
+  assert.deepEqual(Object.values(TOOL_BY_SWITCH).sort(), [
+    'migrate_sessions',
+    'plan_session_migration',
+    'rollback_session_migration',
+    'sync_sessions',
+    'verify_workspace_sessions',
+  ])
+})
+
+test('工具开关：写了非布尔值在装配时当场抛，而不是当成"开"混过去', () => {
+  assert.throws(() => Config({ tools: { migrate: 'no' } }), '开关不是布尔值')
+  assert.throws(() => Config({ tools: { plan: 0 } }), '数字不是布尔值')
+  assert.doesNotThrow(() => Config({ tools: { plan: false } }))
 })

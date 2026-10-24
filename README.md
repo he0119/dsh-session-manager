@@ -364,6 +364,25 @@ M 条」，三张表（会拉取 / 会推送 / 两边都有、这次不动）各
 | `verify_workspace_sessions` | 否 | 复核某项目目录内日志与 header 的一致性 |
 | `sync_sessions` | 需 `apply:true` | 与 WebDAV 远端同步（拉取别人推送的、推送本机独有的；两边都有同 id 时按内容与最后活动时间择新）；默认 dry-run |
 
+### 关掉不用的工具
+
+5 个工具可以在插件配置的 `tools` 一节里单独关掉。判据只有一条：**显式写 `false` 才算关**——不写这一节、
+写 `true`、或者那一节里只点名了几个键，其余都照旧注册（老配置升级上来行为不变）。
+
+```yaml
+tools:
+  migrate: false      # 关掉 migrate_sessions：不再提供"真搬"这一步
+  rollback: false     # 关掉 rollback_session_migration
+```
+
+键与工具名的对应：`plan` → `plan_session_migration`、`migrate` → `migrate_sessions`、`rollback` →
+`rollback_session_migration`、`verify` → `verify_workspace_sessions`、`sync` → `sync_sessions`。
+
+关掉的工具**连注册都不做**：宿主那份工具清单里就没有它，模型那边也看不到，不是"注册了再拒绝调用"。
+开关只管**模型能调什么**：设置页里的迁移、导入导出、同步照旧可用，它们走界面自己的那条路，不经过工具注册。
+这一节**不在设置页的表单里**，改完配置文件要**重启 DSH** 才生效——注册发生在插件装配那一刻，宿主不会
+为了开关重新装配一次。启动日志会点名这一次没注册哪几个。
+
 ## 注意事项
 
 - **改完注册表交给宿主自己做，正常不必重启**：磁盘上的 `workspace.json` 只是第三份拷贝——宿主内存里那份
@@ -388,7 +407,8 @@ M 条」，三张表（会拉取 / 会推送 / 两边都有、这次不动）各
 - **路径**：会话 `cwd` 与注册表路径都不带结尾斜杠；`projectKey` 会把 `/`、`\`、`:` 折叠成 `-`，
   极少数路径会因此编码碰撞，这种情况计划层会直接拦下。
 - **插件配置**：`sessionsRoot` / `registryPath` / `backupRoot` 三个可选字段可覆盖上述默认路径；
-  `sync` 块配 WebDAV 同步（`url` / `machineId` / `username` / `passwordRef` / `mapping` / `timeoutMs`）。
+  `sync` 块配 WebDAV 同步（`url` / `machineId` / `username` / `passwordRef` / `mapping` / `timeoutMs`）；
+  `tools` 块逐个开关那 5 个模型工具（见上文「关掉不用的工具」）。
   密码只放**引用**（环境变量名），配置文件里没有明文：界面上直接填的密码进的是 DSH 的凭据
   （`$DSH_HOME/.credentials.yaml`），不是这份配置。
 

@@ -68,12 +68,51 @@ export interface SyncConfig {
   autoPush?: boolean
 }
 
+/**
+ * 5 个模型工具各自的开关。
+ *
+ * 键是工具名去掉后缀之后的短名（完整对照见 {@link TOOL_BY_SWITCH}）。判据只有一条：`false` 才关，
+ * 缺席与 `true` 都是开——不写这一节就等于全开，升级上来的老配置因此行为不变。
+ */
+export interface ToolsConfig {
+  /** `plan_session_migration`：只读预演迁移。 */
+  plan?: boolean
+  /** `migrate_sessions`：真搬（要 `apply: true` 才写盘）。 */
+  migrate?: boolean
+  /** `rollback_session_migration`：按备份逐字节回滚。 */
+  rollback?: boolean
+  /** `verify_workspace_sessions`：只读复核日志与 header。 */
+  verify?: boolean
+  /** `sync_sessions`：与 WebDAV 远端同步（要 `apply: true` 才写盘）。 */
+  sync?: boolean
+}
+
+/**
+ * 配置里的开关名 → 实际注册的工具名。
+ *
+ * 全仓库只有这一份对照表：工具层按它挑要注册哪几个，启动日志按它说关掉了哪一个。
+ */
+export const TOOL_BY_SWITCH = {
+  plan: 'plan_session_migration',
+  migrate: 'migrate_sessions',
+  rollback: 'rollback_session_migration',
+  verify: 'verify_workspace_sessions',
+  sync: 'sync_sessions',
+} as const
+
+/** 开关名（{@link TOOL_BY_SWITCH} 的键）。 */
+export type ToolSwitch = keyof typeof TOOL_BY_SWITCH
+
+/** 拍平后的开关表：每一项都已经是确定的布尔值（缺席按开算）。 */
+export type ToolSwitches = Record<ToolSwitch, boolean>
+
 /** 插件配置。 */
 export interface PluginConfig {
   sessionsRoot?: string
   registryPath?: string
   backupRoot?: string
   sync?: SyncConfig
+  tools?: ToolsConfig
 }
 
 /**
@@ -114,6 +153,21 @@ export const SyncConfigSchema = z
   .volatile() as unknown as ConfigSchema
 
 /**
+ * 工具开关那一节的 schema。
+ *
+ * 刻意**不标** volatile：注册发生在插件装配那一刻（`registerTools()` 只跑一次），标成活字段等于承诺
+ * "改完立即生效"，而实际上要重启宿主才会按新开关重新装配。不标就不会出现在设置页那张表单上，用户
+ * 只在配置文件里改，改完重启——与三个路径字段同一类口径（见上面的模块注释）。
+ */
+export const ToolsConfigSchema = z.object({
+  plan: z.boolean(),
+  migrate: z.boolean(),
+  rollback: z.boolean(),
+  verify: z.boolean(),
+  sync: z.boolean(),
+}) as unknown as ConfigSchema
+
+/**
  * 插件配置的 schema。
  *
  * Loader 用它校验 profile 里那一节（非法值在装配时当场抛），设置接缝用它生成那张表单。根节点
@@ -124,6 +178,7 @@ export const Config = z.object({
   registryPath: z.string(),
   backupRoot: z.string(),
   sync: SyncConfigSchema,
+  tools: ToolsConfigSchema,
 }) as unknown as ConfigSchema
 
 /**
@@ -137,6 +192,8 @@ export interface PluginConfigRef {
   registryPath?: string
   backupRoot?: string
   sync?: { get(): SyncConfig | undefined }
+  /** 不是活字段：宿主交来的是快照值（理由见 `ToolsConfigSchema` 的注释）。 */
+  tools?: ToolsConfig
 }
 
 /**
@@ -177,4 +234,27 @@ export function syncSection(config: PluginConfigInput | undefined): SyncConfig |
 export function autoPushSection(sync: SyncConfig | undefined): AutoPushConfig | undefined {
   if (sync === undefined) return undefined
   return { enabled: sync.autoPush === true }
+}
+
+/**
+ * 把工具开关那一节拍平：5 个键，每一项都给出确定的布尔值。
+ *
+ * 判据只有一条：显式写了 `false` 才关。缺席、写了 `true`、整节都不写，三种情况一律当开——手写的一份
+ * 老配置里的 `tools` 块只管它点名的几个键，没点名的照旧注册。
+ *
+ * 这一节不是活字段（见 `ToolsConfigSchema`），宿主交来的就是普通值，所以这里不做 `.get()` 那一套
+ *
+ * @param config 插件配置（活引用或普通对象，也可以是 undefined）。
+ * @returns 5 个开关的当前值；没配这一节就是全开。
+ */
+export function toolsSection(config: PluginConfigInput | undefined): ToolSwitches {
+  const raw = config?.tools
+  const value = (raw ?? {}) as ToolsConfig
+  return {
+    plan: value.plan !== false,
+    migrate: value.migrate !== false,
+    rollback: value.rollback !== false,
+    verify: value.verify !== false,
+    sync: value.sync !== false,
+  }
 }
