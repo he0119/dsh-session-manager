@@ -485,6 +485,28 @@ Sync also goes through a plan: the `sync_sessions` tool previews by default and 
 | `verify_workspace_sessions` | no | Check that a project directory agrees with its headers |
 | `sync_sessions` | needs `apply:true` | Sync with the WebDAV remote (pull what other machines pushed, push what only this machine has; when both sides hold the same id, contents and the last-activity time pick the newer copy); dry-run by default |
 
+### Turning tools off
+
+Each of the five tools can be switched off on its own in the `tools` block of the plugin configuration. The rule is
+one line: **only an explicit `false` turns a tool off** — leaving the block out, writing `true`, or naming just a
+few keys all keep the rest registered, so an existing configuration behaves exactly as before.
+
+```yaml
+tools:
+  migrate: false      # turn off migrate_sessions: no more "actually move things"
+  rollback: false     # turn off rollback_session_migration
+```
+
+Keys map to tools as follows: `plan` → `plan_session_migration`, `migrate` → `migrate_sessions`, `rollback` →
+`rollback_session_migration`, `verify` → `verify_workspace_sessions`, `sync` → `sync_sessions`.
+
+A tool that is off is **never registered at all**: it does not appear in the host's tool list and the model cannot
+see it — this is not "registered but refuses to run". The switches only govern **what the model may call**: the
+settings page still migrates, imports, exports and syncs, because those go through the page's own routes and never
+through tool registration. This block is **not** part of the settings-page form, so editing the configuration file
+requires a **DSH restart**: registration happens when the plugin is assembled, and the host does not re-assemble
+just for the switches. The startup log names the tools this run left out.
+
 ## Things to know
 
 - **The work is handed to the host, so a restart is normally unnecessary**: the `workspace.json` on disk is only
@@ -520,7 +542,8 @@ Sync also goes through a plan: the `sync_sessions` tool previews by default and 
   (see the edges in the Sync section).
 - **Plugin config**: the optional `sessionsRoot` / `registryPath` / `backupRoot` fields override the default
   paths above; a `sync` block configures WebDAV sync (`url` / `machineId` / `username` / `passwordRef` /
-  `mapping` / `timeoutMs`). A password is only ever a **reference** (an environment-variable name), never
+  `mapping` / `timeoutMs`); a `tools` block switches the five model tools on and off one by one (see
+  "Turning tools off" above). A password is only ever a **reference** (an environment-variable name), never
   plaintext in the config file: a password typed in the interface goes to the DSH credentials
   (`$DSH_HOME/.credentials.yaml`), not to this configuration.
 

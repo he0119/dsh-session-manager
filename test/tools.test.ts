@@ -334,6 +334,43 @@ test('工具注册：5 个工具，名称与归一化 schema 符合宿主契约'
   rmSync(sb.base, { recursive: true, force: true })
 })
 
+test('工具开关：在配置里关掉一个就不注册它，别的照旧', async () => {
+  const sb = makeSandbox('switches')
+
+  // 只关掉唯一会"真搬东西"的那个：其余四个照旧注册，名称一个不少。
+  const partial = await makeHost({
+    sessionsRoot: sb.root,
+    registryPath: sb.registryPath,
+    backupRoot: sb.backupRoot,
+    tools: { migrate: false },
+  })
+  assert.equal(partial.defs.length, 4)
+  assert.equal(byName(partial.defs).has('migrate_sessions'), false, '关掉的工具不该出现在宿主那份清单里')
+  for (const n of ['plan_session_migration', 'rollback_session_migration', 'verify_workspace_sessions', 'sync_sessions']) {
+    assert.ok(byName(partial.defs).has(n), `${n} 没被关掉，应当照旧注册`)
+  }
+
+  // 显式写 `true` 与干脆不写都是开：判断"关"只认 `false`。
+  const explicit = await makeHost({
+    sessionsRoot: sb.root,
+    registryPath: sb.registryPath,
+    backupRoot: sb.backupRoot,
+    tools: { plan: true, migrate: true, rollback: true, verify: true, sync: true },
+  })
+  assert.equal(explicit.defs.length, 5)
+
+  // 五个全关：一个都不注册（插件照常装配，只是没有工具）。
+  const none = await makeHost({
+    sessionsRoot: sb.root,
+    registryPath: sb.registryPath,
+    backupRoot: sb.backupRoot,
+    tools: { plan: false, migrate: false, rollback: false, verify: false, sync: false },
+  })
+  assert.deepEqual(none.defs, [])
+
+  rmSync(sb.base, { recursive: true, force: true })
+})
+
 test('目录选择器：宿主报哪种能力就照哪种走，没有/形状不认时按"没有"处理', async () => {
   const sb = makeSandbox('picker')
   const config = { sessionsRoot: sb.root, registryPath: sb.registryPath, backupRoot: sb.backupRoot }

@@ -12,7 +12,7 @@ import { readFileSync } from 'node:fs'
 
 import type { Context } from '@deepseek-ai/cordis'
 
-import { Config, type PluginConfigInput } from './config.ts'
+import { Config, TOOL_BY_SWITCH, toolsSection, type PluginConfigInput, type ToolSwitch } from './config.ts'
 import { createRepoLookup } from './repo.ts'
 import {
   adoptLegacyBackupRoot,
@@ -90,6 +90,13 @@ export function apply(ctx: Context, config: PluginConfigInput = {}): () => void 
   info(
     `dsh-session-manager 已就绪：sessions=${paths.sessionsRoot} registry=${paths.registryPath} backups=${paths.backupRoot}`,
   )
+
+  // 关掉的工具在启动日志里点一次名：配置文件里那一节最容易写完就忘，工具清单里少了哪个得有个去处可查。
+  const switches = toolsSection(config)
+  const off = (Object.keys(TOOL_BY_SWITCH) as ToolSwitch[]).filter((key) => !switches[key])
+  if (off.length > 0) {
+    info(`dsh-session-manager：按配置没有注册 ${off.map((key) => TOOL_BY_SWITCH[key]).join('、')}（改完要重启才生效）`)
+  }
 
   /*
    * 自动推送的调度器：**每个宿主只造一个**，挂在插件生命周期上。

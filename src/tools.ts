@@ -4,19 +4,22 @@
 //   * 读操作（plan / verify）永不写盘；
 //   * 写操作（migrate / rollback / sync）默认 dry-run，必须显式 apply:true；
 //   * 每个写操作的返回值都说明"何时生效"——因为注册表改完还得让宿主认（见 take-effect.ts 与
-//     hostRegistryPort()：能把活儿交给宿主自己做就即时生效，否则如实说要重启）。
+//     hostRegistryPort()：能把活儿交给宿主自己做就即时生效，否则如实说要重启）；
+//   * 每个工具都能在插件配置的 `tools` 一节里单独关掉（见 config.ts 的 `toolsSection()`）：
+//     关掉的连 `register` 都不调，宿主那份工具清单里就没有它。
 import type { Context } from '@deepseek-ai/cordis'
 
 import {
   DEFAULT_PASSWORD_REF,
   autoPushSection,
   syncSection,
+  toolsSection,
   type AutoPushConfig,
   type PluginConfig,
   type PluginConfigInput,
   type SyncConfig,
 } from './config.ts'
-import { defineTool } from '@deepseek-ai/dsh-tools'
+import { defineTool, type ToolDefinition } from '@deepseek-ai/dsh-tools'
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync } from 'node:fs'
 import { homedir, hostname } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -995,7 +998,7 @@ export interface MigrateToolResult {
 }
 
 /**
- * 注册 4 个工具。
+ * 按插件配置里 `tools` 一节的开关注册工具（5 个全开时就是 5 个）。
  * @returns cordis effect disposer 列表（宿主热卸载时逐个调用）。
  */
 export function registerTools(ctx: Context, config: PluginConfigInput = {}): Array<() => void> {
@@ -1016,10 +1019,19 @@ export function registerTools(ctx: Context, config: PluginConfigInput = {}): Arr
     liveSessionIds: () => liveSessionIds(ctx),
   }
   const disposers: Array<() => void> = []
+  const switches = toolsSection(config)
+
+  /*
+   * 按开关决定要不要注册：关掉的那个连 `register` 都不调，宿主那份工具清单里就没有它，模型那边也
+   * 看不到——这是"关"与"注册了再拒绝调用"的区别。关掉时返回的空操作让下面五处 `disposers.push(...)`
+   * 保持同一个形状，卸载时照样安全。
+   */
+  const when = (on: boolean) => (definition: ToolDefinition): (() => void) =>
+    on ? ctx.tools.register(definition) : () => {}
 
   // ---- 只读：计划 ----
   disposers.push(
-    ctx.tools.register(
+    when(switches.plan)(
       defineTool({
         name: 'plan_session_migration',
         description:
@@ -1097,7 +1109,7 @@ export function registerTools(ctx: Context, config: PluginConfigInput = {}): Arr
 
   // ---- 写：迁移 ----
   disposers.push(
-    ctx.tools.register(
+    when(switches.migrate)(
       defineTool({
         name: 'migrate_sessions',
         description:
@@ -1197,7 +1209,7 @@ export function registerTools(ctx: Context, config: PluginConfigInput = {}): Arr
 
   // ---- 写：回滚 ----
   disposers.push(
-    ctx.tools.register(
+    when(switches.rollback)(
       defineTool({
         name: 'rollback_session_migration',
         description:
@@ -1246,7 +1258,7 @@ export function registerTools(ctx: Context, config: PluginConfigInput = {}): Arr
 
   // ---- 只读：复核 ----
   disposers.push(
-    ctx.tools.register(
+    when(switches.verify)(
       defineTool({
         name: 'verify_workspace_sessions',
         description:
@@ -1304,7 +1316,7 @@ export function registerTools(ctx: Context, config: PluginConfigInput = {}): Arr
 
   // ---- WebDAV 同步（默认只预演） ----
   disposers.push(
-    ctx.tools.register(
+    when(switches.sync)(
       defineTool({
         name: 'sync_sessions',
         description:
