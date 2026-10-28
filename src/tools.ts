@@ -671,13 +671,12 @@ export function hostCheckpointPort(ctx: unknown): CheckpointWarmPort | undefined
   }
 }
 
-/** 宿主的 `sessions` 服务：本端口只用到"取活的 / 准备 / 入册 / 公告 / 冲刷"这五件。 */
+/** 宿主的 `sessions` 服务：本端口只用到"取活的 / 准备 / 入册 / 公告"这四件。 */
 interface HostSessionStore {
   get(id: string): unknown
   prepare(id: string, options: unknown): unknown
   enter(session: unknown): () => void
   announce(session: unknown): void
-  flush(session: unknown): Promise<unknown>
 }
 
 /** 宿主的 `sessionTitle` 服务：读当前标题 + 显式重算（它只认活会话，见 titleRefreshPort()）。 */
@@ -686,15 +685,39 @@ interface HostSessionTitle {
   refresh(session: unknown): Promise<{ title?: unknown; source?: { kind?: unknown } } | undefined>
 }
 
+/** 临时挂载出来的会话上，端口只要"把从某条开始的事件取出来"这一件（宿主 `Session.snapshotEvents()` 的形状）。 */
+interface HostSessionLog {
+  snapshotEvents(fromSeq?: number): readonly HostSessionEvent[]
+}
+
+/** 事件上端口只认类型名：用来认 `prepare()` 还原时自己补的那条 `session/end-seed`。 */
+interface HostSessionEvent {
+  type: string
+}
+
+/** 宿主的写句柄：追加一段连续事件 + 关掉。 */
+interface HostSessionHandle {
+  append(events: readonly HostSessionEvent[]): Promise<void>
+  close(): Promise<void>
+}
+
 /**
- * 宿主的 `sessionPersistence`：只要"开一个写句柄"。
+ * 宿主的 `sessionPersistence` 的写入口：要"开一个写句柄"，以及句柄上的"追加一段 / 关掉"。
  *
- * 这一件是**必须**的，不是可选：会话的 append 只按 id 路由给"已登记写句柄"的那条（见
- * `dsh-session-persistence-jsonl` 的 `install()`：`this.writers.get(session.id)?.enqueueLive(...)`），
- * 没有句柄的话新标题只活在内存里，摘挂之后就没影了——那种"报成功却没落地"比不做更糟。
+ * 这一件是**必须**的，不是可选：写盘得由这个句柄做。会话自己的 `append()` 只按 id 路由给"已登记写
+ * 句柄"的那一条（见 `dsh-session-persistence-jsonl` 的 `install()`：
+ * `this.writers.get(session.id)?.enqueueLive(...)`），而路由出去的事件带的是**内存日志里的 seq**。
+ * 可是 `prepare()` 还原会话时会自己补一条 `session/end-seed`（见下），内存副本因此比磁盘多一条、
+ * 后面每条事件的 seq 都比磁盘游标大 1，路由出去必然被宿主的 `assertContiguous` 挡住
+ * （报错原文 `append seq mismatch …: expected N at index 0, got N+1`）。
+ *
+ * 所以端口不用那条路由，而是自己开句柄、把新产生的那几条**按磁盘游标原样追加**：它们的 seq 正好从
+ * 磁盘上的条数开始逐条递增，接得上。宿主自己的 resume 也是这么写构造期那几条的
+ * （`dsh-agent-loop` 的 `appendUnstoredSuffix()`——构造期 append 的事件不会经 `session/event` 再发一遍，
+ * 必须由句柄写下去）。
  */
-interface HostSessionPersistence {
-  open(id: string, access: 'write'): Promise<{ close(): Promise<void> }>
+interface HostSessionWritePort {
+  open(id: string, access: 'write'): Promise<HostSessionHandle>
 }
 
 /**
@@ -706,12 +729,15 @@ interface HostSessionPersistence {
  *
  *   1. `sessionQuery.readSession()` 把日志整份读完并校验，拿到 header 与全部事件（**不建活会话**，
  *      与 checkpoint-warm 那条路同一个调用）；
- *   2. `sessions.prepare(..., { eventState: 'detached' })` 按宿主自己的重放构造器还原出 Session；
- *   3. `sessionPersistence.open(id, 'write')` 先开写句柄，这样第 5 步 append 的标题事件才会落盘；
- *   4. `sessions.enter()` + `sessions.announce()` —— `enter()` 返回的正是**卸载用的那个 disposer**，
+ *   2. `sessions.prepare(..., { eventState: 'detached' })` 按宿主自己的重放构造器还原出 Session。
+ *      **还原出来的副本可能比磁盘多一条**：`Session.fromRestore` 只要发现 seed 的最后一条不是
+ *      `session/end-seed`，构造时就自己补一条，于是后面每条事件的 seq 都比磁盘游标大 1；
+ *   3. `sessions.enter()` + `sessions.announce()` —— `enter()` 返回的正是**卸载用的那个 disposer**，
  *      两者是宿主公开成对的挂载原语（`dsh-agent-loop` 的会话创建事务也是这么用的）；
- *   5. `sessionTitle.refresh()` 重算，随后 `sessions.flush()` 把新标题冲进日志；
- *   6. 无论成败，关句柄 + `detach()` 把它摘掉，宿主内存里不留痕迹。
+ *   4. `sessionTitle.refresh()` 重算（标题事件进的是内存副本；此时没有写句柄，路由无人接）；
+ *   5. 自己 `sessionPersistence.open(id, 'write')` 开句柄，把内存副本里"磁盘上还没有"的那几条
+ *      ——从第 2 步补的那条标记开始，seq 正好接上磁盘游标——原样 `append()` 下去，然后关掉；
+ *   6. 无论成败，`detach()` 把它摘掉，宿主内存里不留痕迹。
  *
  * 代价是每条会话要整份解一次日志（实测 6MB ≈1.7 秒），所以编排层顺序跑并报进度——**不并发**，那等于
  * 同时挂 N 条会话并发 N 个模型请求。
@@ -731,14 +757,13 @@ export function titleRefreshPort(ctx: unknown): TitleRefreshPort | undefined {
   const store = optionalService(ctx, 'sessions') as Partial<HostSessionStore> | undefined
   const query = optionalService(ctx, 'sessionQuery') as Partial<HostSessionQuery> | undefined
   const titles = optionalService(ctx, 'sessionTitle') as Partial<HostSessionTitle> | undefined
-  const persistence = optionalService(ctx, 'sessionPersistence') as Partial<HostSessionPersistence> | undefined
+  const persistence = optionalService(ctx, 'sessionPersistence') as Partial<HostSessionWritePort> | undefined
   if (store === undefined || query === undefined || titles === undefined || persistence === undefined) return undefined
   if (
     typeof store.get !== 'function' ||
     typeof store.prepare !== 'function' ||
     typeof store.enter !== 'function' ||
     typeof store.announce !== 'function' ||
-    typeof store.flush !== 'function' ||
     typeof query.readSession !== 'function' ||
     typeof titles.get !== 'function' ||
     typeof titles.refresh !== 'function' ||
@@ -809,18 +834,38 @@ export function titleRefreshPort(ctx: unknown): TitleRefreshPort | undefined {
         inheritedEventCount: loaded.inheritedEventCount,
         eventState: 'detached',
       })
-      const handle = await persistence.open!.call(persistence, sessionId, 'write')
+      /**
+       * 磁盘上已有的条数，也就是写句柄的游标。
+       *
+       * `prepare()` 可能已经在这之上补了一条 `session/end-seed`（见上），所以"新事件"要从这一条
+       * 开始取——它的 seq 正好等于游标，整批写下去才连得上。
+       */
+      const stored = loaded.events.length
+
       const detach = store.enter!.call(store, session)
-      store.announce!.call(store, session)
       try {
+        store.announce!.call(store, session)
         const outcome = await settle(session, options)
-        // 冲一次盘再摘：标题事件是刚 append 的，不冲的话"改了"只存在于内存里。
-        await store.flush!.call(store, session)
+
+        // 自己开句柄写盘：不用 `sessions.flush()`，那条路按 id 路由出去的事件带的是内存副本里的
+        // seq，而内存副本比磁盘多一条，写盘会被宿主的连续性校验挡住（见 `HostSessionWritePort`）。
+        const produced = (session as HostSessionLog).snapshotEvents(stored)
+        // 头一条就是 `prepare()` 补的那条标记时，它不算"改了东西"：只有它、没有别的新事件时不写，
+        // 免得给日志添一条什么都没发生的记号。
+        const marker = produced[0]?.type === 'session/end-seed' ? 1 : 0
+        if (produced.length > marker) {
+          const handle = await persistence.open!.call(persistence, sessionId, 'write')
+          try {
+            await handle.append(produced)
+          } finally {
+            // 句柄按 id 独占（第二个 open 会抛 AlreadyOwned），无论追加成败都要还回去。
+            await handle.close()
+          }
+        }
         return outcome
       } finally {
-        // 先关句柄再 detach：写句柄按 id 独占（第二个 open 会抛 AlreadyOwned），漏掉它会让宿主
-        // 之后再也打不开这条会话的写路径。close() 自己会把缓冲排干，所以失败路径上的诊断事件也在。
-        await handle.close()
+        // 卸载放在最外层：开句柄失败、追加失败、close 失败都不能把它留在宿主内存里。漏一条的后果是
+        // 它在会话列表里一直挂着"活动中"、还删不掉（宿主拒绝删除活会话），要到重启宿主才清得掉。
         detach()
       }
     },
