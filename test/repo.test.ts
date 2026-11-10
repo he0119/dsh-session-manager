@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 
-import { canonicalRepo, createGitRunner, createRepoLookup, repoLocation, type GitRunner } from '../src/repo.ts'
+import { canonicalRepo, createGitRunner, createRepoLocationCache, createRepoLookup, repoLocation, type GitRunner } from '../src/repo.ts'
 
 test('项目身份：同一个仓库的各种写法归一到同一个身份', () => {
   const same = [
@@ -140,6 +140,32 @@ test('项目身份：真去跑 git（起一个临时仓库）', () => {
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
+})
+
+test('同步用的项目身份：同一个目录只问一次 git，根与相对路径一起给出来', async () => {
+  let calls = 0
+  const run: GitRunner = async (args, cwd) => {
+    calls += 1
+    if (cwd === '/work/proj/packages/web') {
+      if (args[0] === 'rev-parse') return '/work/proj\n'
+      if (args[0] === 'remote') return 'origin\n'
+      if (args[0] === 'config') return 'git@github.com:he0119/proj.git\n'
+    }
+    throw new Error(`git ${args.join(' ')} 退出码 128`)
+  }
+  const lookup = createRepoLocationCache(run)
+  const first = await lookup('/work/proj/packages/web')
+  assert.deepEqual(first, { repo: 'github.com/he0119/proj', repoPath: 'packages/web', root: '/work/proj' })
+  assert.equal(calls, 3, '仓库根、remote 列表、remote 地址：三条命令')
+
+  // 第二次：同一个目录一条命令都不发（一次同步计划要为每个候选目录问一遍，而身份几乎不变）
+  assert.deepEqual(await lookup('/work/proj/packages/web'), first)
+  assert.equal(calls, 3, '缓存命中就不再起 git 进程')
+
+  // 认不出来的目录也记住（不然每次预演都会为它再起一次进程）
+  assert.equal(await lookup('/work/plain'), undefined)
+  assert.equal(await lookup('/work/plain'), undefined)
+  assert.equal(calls, 4, '第二个目录只问一次')
 })
 
 test('界面用的项目身份：一个目录一次进程里只问一次 git，认不出来的不记', async () => {

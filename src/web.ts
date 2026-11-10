@@ -39,6 +39,7 @@ import { diffSessionLogs } from './session-diff.ts'
 import { runRetitle } from './retitle.ts'
 import { describeEffect, effectOf, takeEffectOnHost } from './take-effect.ts'
 import { runRemoval, type RemoveDeps, type RemovalRun } from './remove.ts'
+import type { RepoLocationLookup } from './repo.ts'
 import { createTitleResolver, type TitleQuery } from './session-title.ts'
 import {
   plannedOutcome,
@@ -171,6 +172,13 @@ export interface ApiDeps {
    * 「重新生成名称」并说明原因，而不是让按钮点下去之后报一个从服务里抛出来的错。
    */
   titleRefresh?: () => TitleRefreshPort | undefined
+  /**
+   * 目录 → 项目身份的缓存（见 repo.ts 的 `createRepoLocationCache()`）。
+   *
+   * 由入口注入：`/state` 与同步共用同一份，一次同步计划因此不必为每个候选目录重新起三个 git 进程。
+   * 缺席 = 每次预演现问一遍 git（结论不变，只是慢）。
+   */
+  repoLocations?: RepoLocationLookup
   /**
    * 造一次 WebDAV 同步的运行时（远端 + 设置）；没配置同步时返回 undefined。
    *
@@ -1334,6 +1342,8 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
       sessionMeta,
       // 扫本机那一趟读一次的投影记录（空白与两枚活动时间从它取，见 sync.ts 的 `SyncDeps.projection`）。
       projection,
+      // 项目身份那份 git 缓存（入口注入的那一份，见 `ApiDeps.repoLocations`）。
+      ...(deps.repoLocations === undefined ? {} : { repoLocations: deps.repoLocations }),
       // 覆盖本机那份之前要问一句"这条还在跑吗"（与删除同一条理由：宿主手里有它的写句柄）。
       liveSessionIds,
       // 拉取会把会话挂到目标工作区（改注册表）：整批落地之后由编排层收口交给宿主一次。
@@ -1518,7 +1528,8 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
     res.end()
   }
 
-  const removeDeps: RemoveDeps = {    sessionsRoot: paths.sessionsRoot,
+  const removeDeps: RemoveDeps = {
+    sessionsRoot: paths.sessionsRoot,
     registryPath: paths.registryPath,
     backupRoot: paths.backupRoot,
     decodeAll,

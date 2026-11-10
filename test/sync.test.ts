@@ -2,8 +2,10 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
+import { mkdtempSync, utimesSync } from 'node:fs'
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join, sep } from 'node:path'
+import { tmpdir } from 'node:os'
 import test from 'node:test'
 
 import { decompress } from 'fzstd'
@@ -17,6 +19,7 @@ import { readRegistry, writeRegistryAtomic } from '../src/registry.ts'
 import {
   SYNC_INDEX_FILE,
   contentFingerprint,
+  createFingerprintCache,
   SYNC_NAMESPACE_DIR,
   fileFingerprint,
   normalizeMapping,
@@ -42,7 +45,7 @@ import {
   type ContentRelation,
 } from '../src/sync.ts'
 import type { DiffRelation } from '../src/session-diff.ts'
-import type { GitRunner } from '../src/repo.ts'
+import { createRepoLocationCache, type GitRunner } from '../src/repo.ts'
 import type { DecodeAll, SessionHeader, WorkspaceRegistryState } from '../src/types.ts'
 import { encodeRawFrame } from '../src/zstd-frame.ts'
 import { attachmentEvent, attachmentIdOf, makeAttachmentStore } from './attachment-fixture.ts'
@@ -1367,6 +1370,76 @@ test('contentFingerprint：cwd 不同、内容相同的两份会话哈希相同�
   assert.equal(theirs.sha256, FROZEN, 'cwd 不同不该改哈希')
   assert.equal(mine.bytes, 210, 'bytes 仍是文件的真实长度')
   rmSync(dir, { recursive: true, force: true })
+})
+
+test('createFingerprintCache：同一个文件戳只算一次，写过就重算', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dshsm-fingerprint-'))
+  try {
+    const path = join(dir, 'session.v4.jsonl.zstd')
+    writeFileSync(path, encodeRawFrame('{"type":"user/message","seq":1}\n'))
+    let decoded = 0
+    const counting: DecodeAll = (buf) => {
+      decoded += 1
+      return decodeAll(buf)
+    }
+    const fingerprint = createFingerprintCache(counting)
+    const first = fingerprint(path, 4, 'zstd')
+    const again = fingerprint(path, 4, 'zstd')
+    assert.deepEqual(again, first, '戳没变就给同一个值')
+    assert.equal(decoded, 1, '第二次不再解码这个文件')
+
+    // 改写：显式把 mtime 推后，避开同一毫秒（真实写入不会两次落在同一毫秒里）
+    writeFileSync(path, encodeRawFrame('{"type":"user/message","seq":2}\n'))
+    utimesSync(path, new Date(), new Date(Date.now() + 5000))
+    const changed = fingerprint(path, 4, 'zstd')
+    assert.notEqual(changed.sha256, first.sha256, '写过的文件要重新算')
+    assert.equal(decoded, 2)
+
+    // 文件不在：照原样抛（不拿缓存替它编一个答案）
+    rmSync(path)
+    assert.throws(() => fingerprint(path, 4, 'zstd'), /ENOENT/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('sync：项目身份按目录缓存，第二次预演不再问 git', async () => {
+  rmSync(SANDBOX, { recursive: true, force: true })
+  mkdirSync(SANDBOX, { recursive: true })
+  const fixture = await startDavFixture({ root: join(SANDBOX, 'dav') })
+  const dav = createDavClient({ baseUrl: fixture.url })
+  const a = makeMachine('robot-a')
+  const b = makeMachine('robot-b')
+  const url = 'git@github.com:he0119/demo-proj.git'
+  const gitA = fakeGit({ [a.cwd]: { root: a.cwd, url } })
+  const realB = fakeGit({ [b.cwd]: { root: b.cwd, url } })
+  let calls = 0
+  const gitB: GitRunner = async (args, cwd) => {
+    calls += 1
+    return realB(args, cwd)
+  }
+  const config: SyncSettings = { url: '', machineId: 'robot-a', mapping: {} }
+  try {
+    registerWorkspace(b, b.cwd)
+    writeSession(a, 's1', 1000)
+    await syncMachine(a, dav, { ...config, machineId: 'robot-a' }, { apply: true, git: gitA })
+
+    const deps: SyncDeps = {
+      ...syncDepsOf(b, dav, { ...config, machineId: 'robot-b' }, { git: gitB }),
+      repoLocations: createRepoLocationCache(gitB),
+    }
+    const first = await prepareSync(deps)
+    assert.ok(calls > 0, '第一次预演要为候选目录问 git')
+    const asked = calls
+
+    const second = await prepareSync(deps)
+    assert.equal(calls, asked, '第二次预演一个 git 都不问（目录 → 身份那份缓存）')
+    assert.deepEqual(second.plan.pullIds, first.plan.pullIds, '省掉的是重复劳动，结论不变')
+    assert.deepEqual(second.plan.pushIds, first.plan.pushIds)
+  } finally {
+    await fixture.close()
+    rmSync(SANDBOX, { recursive: true, force: true })
+  }
 })
 
 test('sync：项目身份——一条映射都不配也能落地（两台机器共用同一份配置）', () => {

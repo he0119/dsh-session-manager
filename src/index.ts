@@ -13,7 +13,7 @@ import { readFileSync } from 'node:fs'
 import type { Context } from '@deepseek-ai/cordis'
 
 import { Config, TOOL_BY_SWITCH, toolsSection, type PluginConfigInput, type ToolSwitch } from './config.ts'
-import { createRepoLookup } from './repo.ts'
+import { createGitRunner, createRepoLocationCache, createRepoLookup } from './repo.ts'
 import {
   adoptLegacyBackupRoot,
   archiveOps,
@@ -85,7 +85,11 @@ export function apply(ctx: Context, config: PluginConfigInput = {}): () => void 
 
   // 项目身份（git remote）只在这里造一份：它有进程内缓存（一个目录只问一次 git），而 /state 是页面的
   // 热路径——每次请求都新建一份等于把缓存扔掉。见 src/repo.ts 的 createRepoLookup()。
-  const repos = createRepoLookup()
+  //
+  // 同一份缓存也交给同步（手动那条与后台自动推送那条）：一次同步计划要为每个候选目录起三个 git 进程，
+  // 而项目身份几乎不变——不共用的话，每开一次同步弹窗就是几十个进程。
+  const repoLocations = createRepoLocationCache(createGitRunner())
+  const repos = createRepoLookup({ locations: repoLocations })
 
   info(
     `dsh-session-manager 已就绪：sessions=${paths.sessionsRoot} registry=${paths.registryPath} backups=${paths.backupRoot}`,
@@ -109,7 +113,7 @@ export function apply(ctx: Context, config: PluginConfigInput = {}): () => void 
    *
    * 配置改了不必重启：每次事件来时现读一遍配置（见 `createAutoPushTimer()`）。
    */
-  const autoPushPromise: Promise<AutoPushTimer | undefined> = resolveAutoPushRuntime(ctx, config, paths).then(
+  const autoPushPromise: Promise<AutoPushTimer | undefined> = resolveAutoPushRuntime(ctx, config, paths, { repoLocations }).then(
     (resolved) => {
       if (resolved === undefined) return undefined
       info(
@@ -155,6 +159,8 @@ export function apply(ctx: Context, config: PluginConfigInput = {}): () => void 
       paths,
       decodeAll,
       pluginVersion: pluginVersion(),
+      // 与 `/state` 共用一份"目录 → 项目身份"的 git 缓存（见上面 `repoLocations`）。
+      repoLocations,
       // "迁移何时生效"要读宿主服务（workspaceRegistry、sessionPersistence），那件事只在这里做得了。
       // 交出的是**探测**而不是结论：执行过的那些由编排层按实际结果报（见 src/take-effect.ts）。
       hostRegistry: () => hostRegistryPort(ctx),
