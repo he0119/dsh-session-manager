@@ -90,13 +90,30 @@ export function ProgressBlock({
   note?: string | undefined
 }): React.ReactElement {
   const text = progressTextOf(t, progress)
+  /*
+   * 自上而下：那句"做到哪儿了" → 进度条 → 正在处理的那一条 → 这句话动自己的说明。
+   *
+   * 三处与"随手一摆"不一样的地方（都在真实 dev GUI 里量过）：
+   *
+   * - **那句话在条上面**。原来（以及这里的前几版）是条在上、字在下：条先跳一下，读者才看到"这是第几条"，
+   *   而且条紧贴着标题，看起来像一条分割线。先字后条，读起来是"正在做第 13 / 84 条"，条只是它的量。
+   * - **每条之间 6px**，不许让 `<p>` 的浏览器默认外边距（1em 上下）来定节奏：那会让标题、条、条目、
+   *   说明之间的间距一会儿 2px 一会儿 13px，整块看着忽松忽紧。
+   * - **条目那行是 12/18 的三级色、单行省略**。会话标题可以很长（"Codex · 分析 sing-box 连接超时"），
+   *   原来用 `.dsm-rowTitle`（正文档、主色）摆在条下面，成了这块里最大最亮的一行——比"正在推送到第几条"
+   *   还抢眼，而它只是"现在在搬哪一条"。
+   */
   return (
-    <>
+    <div className="dsm-progressBlock">
+      <p className="dsm-progressText">{text}</p>
       {/* 分母是 0 的那几段没有"第几条"：只摆那句话，不摆条（画一条 1/1 的会让人以为已经做完了）。 */}
       {progress.total > 0 && <ProgressBar current={progress.done + 1} total={progress.total} label={text} />}
-      <p className="dsm-hint">{text}</p>
-      {progress.label === undefined ? null : <p className="dsm-rowTitle">{progress.label}</p>}
-      {note === undefined ? null : <p className="dsm-hint">{note}</p>}
-    </>
+      {progress.label === undefined ? null : (
+        <p className="dsm-progressItem" title={progress.label}>
+          {progress.label}
+        </p>
+      )}
+      {note === undefined ? null : <p className="dsm-progressNote">{note}</p>}
+    </div>
   )
 }

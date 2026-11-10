@@ -51,6 +51,9 @@
 - [同步的附件对象走远端一个共享目录](../.agents/notes/implemented/feature/2026-10-16-sync-carries-attachment-objects.md)：
   同步的包只带日志，对象走远端 `attachments/` 那份内容寻址的共享目录；手动同步还补对象（本机缺的取回、
   远端缺的传上），端口缺席时整块不参与。
+- [进度块四行归位：计数在条上面，条目退出主色](../.agents/notes/implemented/bug-fix/2026-11-10-progress-block-rhythm.md)：
+  四行由容器的 `gap: 6px` 定节奏（`<p>` 外边距归零，否则间距由浏览器默认 1em 决定、忽松忽紧）；进度
+  横幅头部补状态点 + 一句标题，描边与留白照卡片那一档。
 - [页内分页那一层自己要留块间距](../.agents/notes/implemented/bug-fix/2026-10-16-inner-blocks-need-their-own-gap.md)：
   `.dsm-root` 那份 16px 只作用于直接子元素，分页本体现在自己带 `gap`——不写这一条相邻两张卡片实测
   间距 0px。

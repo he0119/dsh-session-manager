@@ -4439,6 +4439,18 @@ test('客户端产物：落地时弹窗正文换成进度条（第几条 / 共�
   const fill = recorded.find((node) => String(node.props?.className) === 'dsm-progressFill')
   assert.equal(fill.props.style.width, `${(13 / 84) * 100}%`, '填充宽度按 13/84 算，不是写死的')
   assert.ok(text.includes('progress.push:{"current":13,"total":84}'), '正文里写清正在推送第几条')
+  // 四行的次序与挂钩：那句计数在条**上面**（先读到"第几条"，条只是它的量）；条目那行是 12/18 的三级字、
+  // 单行省略（完整名字挂 title），不再用正文档的 `.dsm-rowTitle` 抢在计数前面。
+  const block = recorded.find((node) => String(node.props?.className) === 'dsm-progressBlock')
+  const kids = (Array.isArray(block?.props?.children) ? block.props.children : [block?.props?.children]).filter(
+    (child) => child !== null && child !== undefined && child !== false,
+  )
+  const textAt = kids.findIndex((child) => String(child?.props?.className) === 'dsm-progressText')
+  const barAt = kids.findIndex((child) => child?.props?.total === 84)
+  assert.equal(kids[textAt]?.props?.children, 'progress.push:{"current":13,"total":84}', '计数那行单独一块')
+  assert.ok(textAt >= 0 && barAt >= 0 && textAt < barAt, '先读"第几条"，再读那条进度条')
+  const item = recorded.find((node) => String(node.props?.className) === 'dsm-progressItem')
+  assert.equal(item?.props?.title, '会话九', '条目那行的悬浮提示是完整名字')
   assert.ok(text.includes('会话九'), '当前那一条的标题也在（一条几 MB 的包会在这停一会儿）')
   assert.ok(text.includes('sync.progress.note'), '并说明为什么这里没有「取消」')
   assert.equal(recorded.some((node) => node.type === 'table'), false, '落地时不再画计划表（那张表说的是"将要"）')

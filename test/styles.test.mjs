@@ -199,6 +199,19 @@ test('横幅里那枚按钮不参与收缩：句子长的时候不该把它挤�
   assert.match(body, /flex:\s*none/, '横幅里的按钮必须不收缩，否则中文会被挤成竖排')
 })
 
+test('进度块的四行由容器 gap 定节奏，不靠 <p> 的默认外边距', () => {
+  // 为什么钉它：<p> 自带 1em 上下外边距，混在纵向 flex 里时"计数 / 条 / 条目 / 说明"之间的间距会
+  // 一会儿 2px、一会儿 13px（真实页面里那块看着忽松忽紧就是这个）；四行必须归零，节奏统一走
+  // .dsm-progressBlock 的 gap，且那句计数在条上面。
+  //
+  // 反事实：去掉 `.dsm-progressBlock > p { margin: 0 }`，四条间距立刻回到浏览器默认值。
+  const block = ruleBody('.dsm-progressBlock')
+  assert.match(block ?? '', /display:\s*flex/, '进度块是纵向 flex')
+  assert.match(block ?? '', /gap:\s*6px/, '块内节奏 6px（块内 8px 那一档对它太松）')
+  const children = ruleBody('.dsm-progressBlock > p')
+  assert.match(children ?? '', /margin:\s*0/, '行自己的外边距必须归零，否则节奏由浏览器默认值决定')
+})
+
 test('.dsm-tag 只剩布局挂钩：几何与配色都归官方 Tag 原语', () => {
   // 为什么钉它：标签的圆角/内边距/字号/配色是"标签长什么样"，官方 `Tag.module.css` 已经定死了
   // （999px 胶囊、padding 1px 8px、11px/17px、字重 500，tone 决定配色）。本页再写一遍就会与官方那份

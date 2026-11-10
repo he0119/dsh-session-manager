@@ -22,7 +22,7 @@
 
 import * as React from 'react'
 
-import { Button, SegmentedControl } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, SegmentedControl, StateDot } from '@deepseek-ai/dsh-client-ui-primitives'
 
 import type { MetaResponse, ProgressEvent, StateResponse } from '../api.ts'
 import { panelEvents, type PanelSnapshot } from '../logic/panelEvents.ts'
@@ -215,11 +215,19 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
       */}
       {job.running && (
         <div className="dsm-banner dsm-progressBanner">
-          <span className="dsm-hint">
-            {t(job.adopted ? 'sync.background.adopted' : 'sync.background.running')}
-          </span>
+          {/*
+            标题那一行：一枚 ongoing 的官方状态点 + 一句话。点是宿主对"还在跑"的统一说法（转圈、与别的
+            卡片同相），标题才说明这是**哪一趟**（后台同步）。adopted 那一路没有逐条进度可看，它那句话
+            落到下面去当说明——与"关掉窗口也会继续跑"同一位置，因为两件都是"这一趟怎么跑"的交代。
+          */}
+          <div className="dsm-progressHead">
+            <StateDot state="ongoing" />
+            <span className="dsm-progressTitle">{t('sync.background.running')}</span>
+          </div>
           {job.progress === null ? null : <ProgressBlock t={t} progress={job.progress} />}
-          {job.adopted ? null : <span className="dsm-hint">{t('sync.background.hint')}</span>}
+          <p className="dsm-progressNote">
+            {t(job.adopted ? 'sync.background.adopted' : 'sync.background.hint')}
+          </p>
         </div>
       )}
       {showJobLine && jobLine !== null && (
