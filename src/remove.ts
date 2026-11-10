@@ -21,6 +21,7 @@ import { existsSync, readdirSync, rmSync, rmdirSync, statSync } from 'node:fs'
 import { dirname } from 'node:path'
 
 import { scanAll, type DiscoveredSession } from './discovery.ts'
+import type { ProjectionCacheReader } from './projection-cache.ts'
 import { familyOf, loneSubagents } from './family.ts'
 import { createBackup } from './journal.ts'
 import type { TitleQuery } from './session-title.ts'
@@ -34,6 +35,13 @@ export interface RemoveDeps {
   decodeAll: DecodeAll
   /** 读会话名称（可选，界面按标题认人）。 */
   resolveTitle?: (query: TitleQuery) => string | undefined
+  /**
+   * 扫库时每条会话读一次的投影记录（可选，见 projection-cache.ts）。
+   *
+   * 给了它，标题就从扫描那一趟已经读到的记录里取——同一个文件不会每条会话读两遍（界面那侧注入
+   * 的是进程里共用的一份，记录解析过一遍就不再解析）。
+   */
+  projection?: ProjectionCacheReader
   /**
    * 宿主报告"内存里活着"的会话 id（可选，见 `src/index.ts` 的 `liveSessionIds`）。
    *
@@ -134,6 +142,7 @@ export function planRemoval(
   try {
     discovered = scanAll(deps.sessionsRoot, deps.decodeAll, {
       ...(deps.resolveTitle === undefined ? {} : { resolveTitle: deps.resolveTitle }),
+      ...(deps.projection === undefined ? {} : { projection: deps.projection }),
       ...(options.onProgress === undefined
         ? {}
         : { onProgress: (done: number, total: number) => options.onProgress?.({ phase: 'scan', done, total }) }),
