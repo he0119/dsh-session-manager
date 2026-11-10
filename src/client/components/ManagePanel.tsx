@@ -476,6 +476,13 @@ export function ManagePanel({ t, state, meta, reload, directory }: PanelShare): 
   /** 勾中但这次不搬的那几条（侧边栏不显示）：弹窗里要说清，不然"勾了 5 条、只搬 2 条"没有解释。 */
   const hiddenPicked = picked.length - migratable.length
   /**
+   * 勾中的一条都搬不走（全是侧边栏不显示的）。
+   *
+   * 这时**不该**再摆「预演中…」：`runPreview()` 在空集合上直接返回，一份计划都不会去取，那一行等下去
+   * 永远等不到——弹窗里要说的是一句"这些都不搬、先在列表里处理"，而不是一个不会结束的等待。
+   */
+  const nothingMigratable = migratable.length === 0
+  /**
    * 宿主有没有目录选择器、是哪一种；`null`（含旧宿主没这个字段）时候选面板里不摆「浏览文件系统…」。
    * 它来自 `/meta`（与清单无关、先到），所以清单还在读时那枚按钮也不至于晚一步出现。
    */
@@ -758,8 +765,14 @@ export function ManagePanel({ t, state, meta, reload, directory }: PanelShare): 
           confirmLabel={t('migrate.apply')}
           busyLabel={t('migrate.running')}
           busy={busy === 'migrate'}
-          // 目标为空时不算"预演中"：那时正文是一句"先选目标目录"，不是一句等待。
-          planning={!waitingForTarget && migratePending.response === null && migratePending.error === null}
+          // 目标为空时不算"预演中"：那时正文是一句"先选目标目录"，不是一句等待；一条都搬不走时同理
+          //（那一份计划根本不会去取，等下去等不到）。
+          planning={
+            !waitingForTarget &&
+            !nothingMigratable &&
+            migratePending.response === null &&
+            migratePending.error === null
+          }
           // 算计划那一段不是空等（要扫整库认族、算注册表变更），所以有事件就把那句静态的「预演中…」
           // 换成进度。
           planningDetail={progress === null ? undefined : <ProgressBlock t={t} progress={progress} />}
@@ -837,7 +850,14 @@ export function ManagePanel({ t, state, meta, reload, directory }: PanelShare): 
                 勾中的那几条里有一部分搬不走（侧边栏不显示）：它们不进这份计划——宿主对点名的隐藏会话
                 一律拒（见 src/plan.ts），而"我勾了它、你没动它"必须能分辨，所以在这里点名条数。
               */}
-              {hiddenPicked > 0 && <p className="dsm-hint">{t('migrate.hiddenSkipped', { count: hiddenPicked })}</p>}
+              {nothingMigratable ? (
+                // 一条都搬不走时说清"为什么没有计划"（见 nothingMigratable），而不是只报"另有 N 条"。
+                <p className="dsm-warn">{t('migrate.nothingVisible')}</p>
+              ) : (
+                hiddenPicked > 0 && (
+                  <p className="dsm-hint">{t('migrate.hiddenSkipped', { count: hiddenPicked })}</p>
+                )
+              )}
 
               {!waitingForTarget && preview !== null && (
                 <>

@@ -2214,6 +2214,51 @@ test('客户端产物：迁移弹窗——计划逐条列出会话，跟着父�
   )
 })
 
+test('客户端产物：勾中的会话都搬不走时，迁移弹窗不再停在「预演中…」', { skip }, () => {
+  // 侧边栏不显示的会话（已归档 / 空白 / 子智能体）不进迁移计划（见 ManagePanel 的 `migratable`）。
+  // 勾中的只有这种时，`runPreview()` 在空集合上直接返回，一份计划都不会去取——弹窗原来会一直停在
+  // 「预演中…」，而那句话等的是一个永远不会发出的请求。这里种的就是那一刻：picked = 一条已归档，
+  // `migratePending` 是"还没结果"（response 与 error 都是 null）。
+  const state = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    pickerKind: 'browse',
+    sessions: [
+      {
+        id: 's-h',
+        cwd: '/home/u/dev/alpha',
+        createdAt: 3,
+        dir: '/home/u/dev/alpha',
+        bytes: 2048,
+        files: [],
+        ungrouped: true,
+        archived: true,
+        hidden: 'archived',
+      },
+    ],
+    workspaces: [],
+  }
+  const mounted = mount({
+    state,
+    panel: 'manage',
+    arrays: [['s-h']],
+    strings: manageStrings({ to: '/home/u/dev/beta' }),
+    nulls: manageNulls({ migrate: { response: null, error: null } }),
+  })
+  const tree = mounted.registrations[0].component(mounted.registrations[0].registration.inject())
+  const text = strings(tree)
+
+  assert.ok(text.includes('migrate.nothingVisible'), '要说清"这次没有可迁移的会话"，而不是干等着')
+  assert.equal(text.includes('dialog.previewing'), false, '不该再摆一个永远等不到结果的「预演中…」')
+
+  const footer = mounted.recorded.find((node) => String(node.props?.className) === 'dsm-fakeDialogFooter')
+  const apply = elementsOf(footer)
+    .filter((node) => node.type === 'button')
+    .find((button) => strings(button)[0] === 'migrate.apply')
+  assert.equal(apply?.props?.disabled, true, '一条都搬不走时确认按钮是禁用的')
+})
+
 test('客户端产物：迁移的「要不要重启」——确认前先说一句，落地后只在需要重启时留一句', { skip }, () => {
   // 与同步页同一口径（见下面那条同步用例）：「需要重启」是坏消息，既不跟"复核通过"那条绿色结论共用
   // 一块底，也不在没事的时候说一句"无需重启"；而且要在按「确认迁移」**之前**说出来，事后才说等于没提醒
