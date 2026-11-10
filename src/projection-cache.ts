@@ -15,7 +15,7 @@
 //
 // 这是对宿主**内部**文件格式的复刻（与 project-key.ts 复刻宿主的 projectKey 同一性质）：只认字段
 // **形状**、不认版本号。宿主要哪天换了格式，这里自然读不到，各调用方按"缓存缺席"处理。
-import { readFileSync } from 'node:fs'
+import { readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { encodeSegment } from './paths.ts'
@@ -58,14 +58,51 @@ export interface ProjectionCacheRecord {
 export type ProjectionCacheReader = (query: ProjectionCacheQuery) => ProjectionCacheRecord | undefined
 
 /**
- * 造一个读取器。
+ * 造一个读取器：把解析过的记录按"文件没变"缓存起来。
+ *
+ * 为什么值得缓存：宿主的投影文件一条 100 KB 上下（本机 1325 个文件合计 170 MB），而这里只要四个字段。
+ * 每次 `GET /state` 都重读重解一遍实测要 680～790 ms，是列表那一页最贵的一段；而这四个字段在文件不变时
+ * 一定不变。缓存按 `size + mtimeMs + 身份` 判"文件没变"，命中时连文件都不读——所以"库里有别的会话写了
+ * 新东西、这一条没动"时，这一条只花一次 stat。
+ *
+ * 代价：文件在同一毫秒里被改写、又恰好大小不变时，这里会继续用上一次的记录（标题旧一帧）。文件改写
+ * 一般连大小一起变，`mtimeMs` 在这一层又是亚毫秒精度，所以这个窗口只有理论意义；真要说影响，最坏是
+ * 某次列表里显示旧标题，下一次扫描（时间戳变了）自然更新。
  *
  * @param cacheDir 缓存目录（见 paths.projectionCacheDir）。
  * @returns 读取器；读不到时 undefined（不抛）。
  */
 export function createProjectionReader(cacheDir: string): ProjectionCacheReader {
-  return (query) => readProjectionCache(cacheDir, query)
+  const memo = new Map<string, { readonly stamp: string; readonly record: ProjectionCacheRecord | undefined }>()
+  return (query) => {
+    const path = join(cacheDir, `${encodeSegment(query.id)}.json`)
+    let stamp: string
+    try {
+      const stat = statSync(path)
+      stamp = `${stat.size}:${stat.mtimeMs}`
+    } catch {
+      // 文件不在（或读不动）：不当成"记录没变"，把缓存里那条也清掉。
+      memo.delete(path)
+      return undefined
+    }
+    const key = `${stamp}\u0000${query.createdAt}\u0000${query.cwd ?? ''}`
+    const cached = memo.get(path)
+    if (cached !== undefined && cached.stamp === key) return cached.record
+    const record = readProjectionCache(cacheDir, query)
+    // 上限只是兜底：库里的会话数就那么多，正常够用；真撞上（换过库、文件被反复重建）就整体重来一次。
+    if (memo.size >= PROJECTION_MEMO_LIMIT && !memo.has(path)) memo.clear()
+    memo.set(path, { stamp: key, record })
+    return record
+  }
 }
+
+/**
+ * 缓存最多记多少条。
+ *
+ * 一条记录只有四个字段（几十字节），本机 1325 条实测常驻不到 1 MB。给到 4096 是给"库比现在大几倍"留的
+ * 余量，超过就整体清空——它是纯缓存，清掉只是下次多读一遍。
+ */
+const PROJECTION_MEMO_LIMIT = 4096
 
 /**
  * 读一条缓存记录。

@@ -2616,6 +2616,38 @@ test('GET /transcript：把一条会话的日志折成完整时间线（会话�
   assert.equal((payload(plain)['session'] as Record<string, unknown>)['title'], '兜底名称')
 })
 
+test('GET /transcript：翻页读同一份日志，日志被追加之后读到新的（缓存按文件戳失效）', async () => {
+  const sandbox = makeSandbox('web-transcript-cache')
+  writeRawSession(sandbox.sessionsRoot, 'session-grow', CWD_A, 1000, [
+    { type: 'user/message', seq: 0, time: 1, data: { content: [{ type: 'text', text: '一' }], source: { kind: 'user' } } },
+    { type: 'assistant/message', seq: 1, time: 2, data: { content: [{ type: 'text', text: '二' }] } },
+  ])
+
+  const handlers = createApiHandlers(deps(sandbox))
+  const call = async (query: string): Promise<Captured> => {
+    const { res, captured } = fakeRes()
+    await handlers['GET /transcript']!(fakeReq('GET', `${API_PREFIX}/transcript${query}`), res)
+    return captured
+  }
+
+  const first = await call('?id=session-grow')
+  assert.equal(first.status, 200)
+  assert.equal(payload(first)['totalEvents'], 2)
+  // 再读一次：走的是缓存里那份切好的行，结果必须一模一样。
+  const again = await call('?id=session-grow')
+  assert.equal(payload(again)['totalEvents'], 2)
+  assert.deepEqual(payload(again)['items'], payload(first)['items'])
+
+  // 日志被追加：文件大小变了，缓存必须失效，否则翻页会永远停在旧内容上。
+  writeRawSession(sandbox.sessionsRoot, 'session-grow', CWD_A, 1000, [
+    { type: 'user/message', seq: 0, time: 1, data: { content: [{ type: 'text', text: '一' }], source: { kind: 'user' } } },
+    { type: 'assistant/message', seq: 1, time: 2, data: { content: [{ type: 'text', text: '二' }] } },
+    { type: 'user/message', seq: 2, time: 3, data: { content: [{ type: 'text', text: '三' }], source: { kind: 'user' } } },
+  ])
+  const grown = await call('?id=session-grow')
+  assert.equal(payload(grown)['totalEvents'], 3)
+})
+
 // ── 面板事件流（这一页打开期间只有这一条长连接）──────────────────────────────────
 
 test('GET /panel/events：开头 ready + 两种后台状态，扫完推一份清单', async () => {

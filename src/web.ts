@@ -16,7 +16,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 
 import { accountedOwners } from './accounting.ts'
 import { canonicalDirIfExists } from './canonical-path.ts'
-import { scanAll, type DiscoveredSession } from './discovery.ts'
+import { locateSession, scanAll, type DiscoveredSession } from './discovery.ts'
 import {
   assertBackupDir,
   listBackups,
@@ -33,6 +33,7 @@ import { createProjectionReader, type ProjectionCacheReader } from './projection
 import { createScanCache } from './scan-cache.ts'
 import { describeWarm, warmCheckpoints } from './checkpoint-warm.ts'
 import { readRegistry, validateRegistry } from './registry.ts'
+import { createLogTextCache } from './log-text-cache.ts'
 import { readTranscript } from './transcript.ts'
 import { diffSessionLogs } from './session-diff.ts'
 import { runRetitle } from './retitle.ts'
@@ -663,6 +664,13 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
    * 任何一个日志或投影缓存文件变了，指纹就对不上，自然重扫。
    */
   const scans = createScanCache()
+  /*
+   * 同一条会话的日志被连着读好几页时只解压一次（见 log-text-cache.ts）。
+   *
+   * 与 `scans` 一样按 handler 实例活：内容视图一页 80 条事件，翻页与「查看全文」都走同一个文件；留一份
+   * 解开的行，够用且不影响别的会话（换一条会话就把它顶掉）。
+   */
+  const logs = createLogTextCache()
   // 宿主内存里活着的会话：删除会拒掉它们。端口缺席时按空集（判断不了）——预演的输出里没有
   // 任何一处声称"这些一定没在跑"，界面上那句说明也是这么写的。
   const liveSessionIds = (): ReadonlySet<string> => deps.liveSessionIds?.() ?? new Set<string>()
@@ -1635,6 +1643,13 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
    * 进度可报；真正要防的是"整库倒进浏览器"，那件事由分页参数（`from` / `limit`）与核心层每页的字符
    * 上限一起挡住——所以它读的是**最高代次**那一份日志（宿主自己也是这么挑的），一次只解析一页事件。
    *
+   * 定位这一条会话用 `locateSession()`，**不扫整库**：整库 1295 条要 1.4 秒量级，而这里只关心一条；
+   * 目录名就是 id 的编码，走一遍项目目录找同名目录、只读它那一份 header 就够（实测几毫秒）。内容视图
+   * 每翻一页都要发一次这个请求，那一秒多会被乘以页数。
+   *
+   * 读日志用 `logs`（log-text-cache.ts）：同一份日志连着读好几页时只解压一次；日志变了（大小或
+   * 修改时间变了）才重新读。
+   *
    * 三处拒绝都在响应体里说清楚：没给 id（400）、会话库里没这条（404）、日志整份读不出来（422，例如
    * header 坏了）。坏行**不算**拒绝——那种行由核心层如实记进 `problems`，其余事件照旧摆出来。
    */
@@ -1646,8 +1661,9 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
       return
     }
     // 标题与 `/state` 同源（`resolveTitle` 先宿主投影缓存、后有界前缀）：内容视图顶上那行标题
-    // 该和列表里显示的是同一个，别自己再折一次。
-    const session = scanLibrary(paths.sessionsRoot, decodeAll, { resolveTitle }).find((item) => item.id === id)
+    // 该和列表里显示的是同一个，别自己再折一次。投影记录由扫描那条路读一次的那份缓存里取
+    // （`projection` 命中时连文件都不读），所以这里不会为一条会话再整份解一次投影文件。
+    const session = locateSession(paths.sessionsRoot, id, decodeAll, { projection, resolveTitle })
     if (session === undefined) {
       sendJson(res, 404, { error: `会话库里没有 ${id}` })
       return
@@ -1660,9 +1676,10 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
       return
     }
     try {
-      const buf = readFileSync(file.path)
-      // `decodeAll` 是多帧感知的解码器：一份日志的 JSONL 是分帧压的，单帧解不出全貌。
-      const page = readTranscript(decodeAll(buf).split('\n'), {
+      // `decodeAll` 是多帧感知的：一份日志的 JSONL 是分帧压的，单帧解不出全貌。这里走缓存那一层，
+      // 它内部用的是分块解压（块与块之间让出事件循环），整份解压不会把宿主主线程按死。
+      const lines = await logs.linesOf({ path: file.path, compression: file.compression })
+      const page = readTranscript(lines, {
         from: intParam(url, 'from'),
         limit: intParam(url, 'limit'),
         maxChars: intParam(url, 'maxChars'),
@@ -1725,7 +1742,8 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
       sendJson(res, 409, { error: '这个宿主没有配置 WebDAV 同步（插件配置里的 sync.url 是空的）' })
       return
     }
-    const session = scanLibrary(paths.sessionsRoot, decodeAll, { resolveTitle }).find((item) => item.id === id)
+    // 与内容视图同一口径：按 id 直接找（不扫整库），标题也走同一份投影记录。
+    const session = locateSession(paths.sessionsRoot, id, decodeAll, { projection, resolveTitle })
     if (session === undefined) {
       sendJson(res, 404, { error: `会话库里没有 ${id}` })
       return
