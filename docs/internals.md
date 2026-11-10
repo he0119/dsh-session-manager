@@ -136,6 +136,9 @@
   就能把宿主主线程按住一两秒；现在包走线程池的 `readBundleAsync()`、日志走分块让出的
   `decodeLogTextChunked()`，判出来的关系再按两边全部代次的哈希记进 `contentRelationCache`，两边都没
   再动的那一对第二轮不再从远端重取。
+- [同步预演不再每轮重问 git、重算全库指纹](../.agents/notes/implemented/architecture/2026-11-10-sync-preview-reuses-git-and-fingerprints.md)：
+  目录 → 项目身份与文件内容指纹都按进程缓存（后者按 `size + mtimeMs` 失效），入口造一份交给 `/state`、
+  手动同步与自动推送共用：同一份库上预演 8.7 s → 1.5～2 s。
 - `src/dav.ts` 是那四种方法与 Basic 鉴权（含宽容的多状态响应解析），`src/sync.ts` 是索引、计划与落地：
   界面那条路是 `prepareSync()` 算计划并把输入留下、确认时 `syncPrepared()` 照它落地（`planId` 指认
   宿主手里那份），`src/tools.ts` 的 `sync_sessions` 走单次调用那条（`runSync()`）。自动推送是同一个

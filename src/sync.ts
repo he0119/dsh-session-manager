@@ -63,7 +63,7 @@ import { scanAll, type DiscoveredSession } from './discovery.ts'
 import { createBackup } from './journal.ts'
 import { encodeSegment, parseSessionLogName } from './paths.ts'
 import { decodeLogTextChunked } from './log-decode.ts'
-import { createGitRunner, repoLocation, type GitRunner, type RepoLocation } from './repo.ts'
+import { createGitRunner, repoLocation, createRepoLocationCache, type GitRunner, type RepoLocation, type RepoLocationLookup } from './repo.ts'
 import { sessionMetaOfRecord } from './visibility.ts'
 import type { ProjectionCacheReader } from './projection-cache.ts'
 import { readRegistry, validateRegistry } from './registry.ts'
@@ -329,6 +329,53 @@ export function contentFingerprint(
   const bytes = readFileSync(path)
   const content = contentBytes(bytes, compression, decodeAll)
   return { version, bytes: bytes.length, sha256: createHash('sha256').update(content).digest('hex') }
+}
+
+/** 算一条文件的内容指纹（见 `createFingerprintCache()` 与 `contentFingerprint()`）。 */
+export type FingerprintOf = (path: string, version: number, compression: string | null) => FileFingerprint
+
+/** 进程里那份"文件内容指纹"缓存：键是路径，值带 `size:mtimeMs` 作为失效判据。 */
+const sharedFingerprintCache = new Map<string, { stamp: string; value: FileFingerprint }>()
+
+/** 缓存最多记多少个文件（整库的日志文件数量级，超了就整份丢掉重来）。 */
+const FINGERPRINT_CACHE_MAX = 4096
+
+/**
+ * 按"文件戳"记住内容指纹：同一个路径的 `size + mtimeMs` 没变就不再读、不再解、不再哈希。
+ *
+ * 算一次同步计划要为**两边都有**的每条会话的每个日志算一次指纹（读整份、解压、按归一化 cwd 哈希），
+ * 整库时这是比对那一段的全部开销（实测 2.6 秒 / 1285 个文件）；而日志文件只在会话被写时才变，两次预演
+ * 之间绝大多数文件一个字节都没动。键里带上 `size + mtimeMs`，写过的文件自然换键。
+ *
+ * @param decodeAll 多帧感知解码器（指纹要折掉每帧的 cwd，见 `contentFingerprint()`）。
+ * @returns 带缓存的指纹函数；同一个路径只要戳没变就返回同一个值。
+ */
+export function createFingerprintCache(decodeAll: DecodeAll): FingerprintOf {
+  const cache = new Map<string, { stamp: string; value: FileFingerprint }>()
+  return (path, version, compression) => fingerprintCached(cache, decodeAll, path, version, compression)
+}
+
+function fingerprintCached(
+  cache: Map<string, { stamp: string; value: FileFingerprint }>,
+  decodeAll: DecodeAll,
+  path: string,
+  version: number,
+  compression: string | null,
+): FileFingerprint {
+  let stamp: string
+  try {
+    const info = statSync(path)
+    stamp = `${String(info.size)}:${String(info.mtimeMs)}`
+  } catch {
+    // 文件刚被删/换掉：直接算（会抛出与原来同一个错误），别让缓存替它编一个答案。
+    return contentFingerprint(path, version, compression, decodeAll)
+  }
+  const hit = cache.get(path)
+  if (hit !== undefined && hit.stamp === stamp) return hit.value
+  const value = contentFingerprint(path, version, compression, decodeAll)
+  if (cache.size >= FINGERPRINT_CACHE_MAX && !cache.has(path)) cache.clear()
+  cache.set(path, { stamp, value })
+  return value
 }
 
 /**
@@ -1464,6 +1511,20 @@ export interface SyncDeps extends EffectDeps, WarmDeps {
   /** 跑 git 的入口（读项目身份用）；缺省是真去跑 git。测试里注入一个假的，不必真建仓库。 */
   git?: GitRunner
   /**
+   * 目录 → 项目身份的缓存（见 `createRepoLocationCache()`）。
+   *
+   * 缺省按"跑 git 的入口"共用进程里那一份：同一台机器上项目身份几乎不变，而算一次计划要为每个候选
+   * 目录起三个 git 进程（实测 26 个目录 4.3 秒）。测试里注入一份新的，就是"每一轮都重新问"。
+   */
+  repoLocations?: RepoLocationLookup
+  /**
+   * 文件内容指纹（见 `createFingerprintCache()`）。
+   *
+   * 缺省用进程里那一份（键：路径 + size + mtimeMs）：日志只在会话被写时才变，两次预演之间绝大多数
+   * 文件一个字节都没动，没必要再读、再解、再哈希一遍。
+   */
+  fingerprint?: FingerprintOf
+  /**
    * 这次是**只推不拉**（自动推送那条路，见 `runAutoPush()`）。
    *
    * 缺席 = false：界面与工具那两条手动路照旧两个方向都做。它只影响算计划那一步（`planSync()` 据此
@@ -1665,6 +1726,14 @@ export function remoteDigest(library: RemoteLibrary): string {
   return createHash('sha256').update(lines.join('\n')).digest('hex')
 }
 
+/** 缺省的跑 git 入口：只建一次，这样进程里那份缓存有唯一的键（见 `repoLocationsFor()`）。 */
+const defaultGitRunner = createGitRunner()
+
+/** 缺省的内容指纹：走进程里那一份缓存。 */
+function defaultFingerprintOf(decodeAll: DecodeAll): FingerprintOf {
+  return (path, version, compression) => fingerprintCached(sharedFingerprintCache, decodeAll, path, version, compression)
+}
+
 /**
  * 算一份计划，并且把**落地要用的输入一起留下**。
  *
@@ -1714,12 +1783,14 @@ export async function prepareSync(
    * `git rev-parse` 拖慢，而它一条都用不到。同一个目录只问一次（`locate` 缓存），因为一次同步里
    * 会话数远多于项目数。
    */
-  const git = deps.git ?? createGitRunner()
+  const git = deps.git ?? defaultGitRunner
+  const sharedLocate = deps.repoLocations ?? createRepoLocationCache(git)
+  // 这一趟问过哪些目录也记下来：落地照这份清单接着用（见 `SyncPrepared.located`）。
   const located = new Map<string, Promise<RepoLocation | undefined>>()
   const locate = (dir: string): Promise<RepoLocation | undefined> => {
     const cached = located.get(dir)
     if (cached !== undefined) return cached
-    const pending = repoLocation(dir, git)
+    const pending = sharedLocate(dir)
     located.set(dir, pending)
     return pending
   }
@@ -1736,8 +1807,10 @@ export async function prepareSync(
     }
   }
   // 指纹走"与 cwd 无关"的那份：落地会改写 cwd，按字节比会把拉取来的那份判成"两边各自写过"。
+  // 同一份文件在两次预演之间没动时，`fingerprint`（缺省那个带缓存的）直接给上一次的值。
+  const fingerprintOf = deps.fingerprint ?? defaultFingerprintOf(deps.decodeAll)
   const contentHash = (path: string, version: number, compression: string | null): FileFingerprint =>
-    contentFingerprint(path, version, compression, deps.decodeAll)
+    fingerprintOf(path, version, compression)
   /** 比对阶段算过的指纹：落地写回自己那份索引时直接用它（见 `SyncPrepared.fingerprints`）。 */
   const fingerprints = new Map<string, FileFingerprint>()
   //
@@ -2265,17 +2338,19 @@ export async function applyPreparedSync(
    *
    * 本机独有的那些预演时没算过（它们不进比对，算它才是白花），这里现算——只有真推送的那几条。
    */
+  const fingerprintOf = deps.fingerprint ?? defaultFingerprintOf(deps.decodeAll)
   const contentHash = (path: string, version: number, compression: string | null): FileFingerprint =>
-    prepared.fingerprints.get(path) ?? contentFingerprint(path, version, compression, deps.decodeAll)
+    prepared.fingerprints.get(path) ?? fingerprintOf(path, version, compression)
   /** 投影缓存那两件事用预演读出来的那一份（落地不再问宿主）。 */
   const metaOf = (session: Pick<DiscoveredSession, 'id'>): SessionMeta | undefined => prepared.meta.get(session.id)
   /** 项目身份接着用预演问过 git 的那些；预演没问过的目录（远端一个身份条目都没有时它不问）现在问。 */
-  const git = deps.git ?? createGitRunner()
+  const git = deps.git ?? defaultGitRunner
+  const sharedLocate = deps.repoLocations ?? createRepoLocationCache(git)
   const located = new Map(prepared.located)
   const locate = (dir: string): Promise<RepoLocation | undefined> => {
     const cached = located.get(dir)
     if (cached !== undefined) return cached
-    const pending = repoLocation(dir, git)
+    const pending = sharedLocate(dir)
     located.set(dir, pending)
     return pending
   }

@@ -286,6 +286,7 @@ export async function resolveAutoPushRuntime(
   ctx: unknown,
   config: PluginConfigInput = {},
   paths: ResolvedPaths,
+  options: { repoLocations?: SyncDeps['repoLocations'] } = {},
 ): Promise<{ deps: SyncDeps; timer: AutoPushTimer } | undefined> {
   const runtime = await syncRuntime(ctx, config)
   if (runtime === undefined) return undefined
@@ -308,6 +309,8 @@ export async function resolveAutoPushRuntime(
     // 这一趟是只推不拉；`what` 让界面能把后台那条流与用户手点的那条分开（两条可能同时在跑）。
     pushOnly: true,
     progressWhat: 'auto-push',
+    // 界面那边造的那份"目录 → 项目身份"缓存：后台每轮都要重新算计划，不能每轮重新问一遍 git。
+    ...(options.repoLocations === undefined ? {} : { repoLocations: options.repoLocations }),
   }
   /*
    * 调度器持有"连续失败几次"这份状态（还有"正跑着的那一轮"），所以它**每个宿主只造一个**

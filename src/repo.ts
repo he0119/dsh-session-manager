@@ -124,6 +124,34 @@ export async function repoLocation(dir: string, run: GitRunner): Promise<RepoLoc
   return { repo, repoPath: rel === '' ? '.' : rel, root }
 }
 
+/** 一条目录 → 项目身份的查询（见 `createRepoLocationCache()`）。 */
+export type RepoLocationLookup = (dir: string) => Promise<RepoLocation | undefined>
+
+/**
+ * 把 `repoLocation()` 包成"同一个目录只问一次"。
+ *
+ * 一次同步计划要为每个候选目录问 git（三条命令：仓库根、remote 列表、remote 地址）。整库同步时目录
+ * 几十个，每条命令都要起一个进程——实测 26 个目录 4.3 秒，而每一次预演都要重来一遍。同一台机器上项目
+ * 身份几乎不变，所以这一层按目录记住结果；换了 remote 的人重启 DSH 才看到变化（与 `/state` 那份
+ * `createRepoLookup()` 同一条取舍）。
+ *
+ * @param run 跑 git 的入口；同一个入口对应一份缓存（测试给不同的假入口就是各问各的）。
+ * @returns 按目录缓存的查询。
+ */
+export function createRepoLocationCache(run: GitRunner): RepoLocationLookup {
+  const cache = new Map<string, Promise<RepoLocation | undefined>>()
+  /** 目录数受工作区数量约束（几十个）；这里只防"临时目录越攒越多"。 */
+  const limit = 1024
+  return (dir) => {
+    const cached = cache.get(dir)
+    if (cached !== undefined) return cached
+    const pending = repoLocation(dir, run)
+    if (cache.size >= limit && !cache.has(dir)) cache.clear()
+    cache.set(dir, pending)
+    return pending
+  }
+}
+
 /**
  * 真去跑 git 的入口。
  *
@@ -173,22 +201,20 @@ export type RepoMap = ReadonlyMap<string, string>
  * 目录不存在、不是仓库、没有 remote、没装 git——一律记成"没有身份"并缓存下来，不会每次重问。
  *
  * @param options.run 跑 git 的入口（可注入，便于测试）。
+ * @param options.locations 现成的"目录 → 身份"查询（要与同步共用一份缓存时传它）。
  * @returns 认身份的函数。
  */
-export function createRepoLookup(options: { run?: GitRunner } = {}): (dirs: readonly string[]) => Promise<RepoMap> {
-  const run = options.run ?? createGitRunner()
-  const cache = new Map<string, Promise<string | undefined>>()
+export function createRepoLookup(options: { run?: GitRunner; locations?: RepoLocationLookup } = {}): (
+  dirs: readonly string[],
+) => Promise<RepoMap> {
+  // 传进来一份共享的查法时（界面与同步共用一份 git 缓存），这里就不再自己存一遍。
+  const lookup = options.locations ?? createRepoLocationCache(options.run ?? createGitRunner())
   return async (dirs: readonly string[]): Promise<RepoMap> => {
     const wanted = [...new Set(dirs.filter((dir) => dir !== ''))]
     const found = await Promise.all(
       wanted.map(async (dir): Promise<[string, string] | undefined> => {
-        let pending = cache.get(dir)
-        if (pending === undefined) {
-          pending = repoLocation(dir, run).then((location) => location?.repo)
-          cache.set(dir, pending)
-        }
-        const repo = await pending
-        return repo === undefined ? undefined : [dir, repo]
+        const location = await lookup(dir)
+        return location === undefined ? undefined : [dir, location.repo]
       }),
     )
     const out = new Map<string, string>()
