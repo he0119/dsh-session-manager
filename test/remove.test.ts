@@ -15,6 +15,7 @@ import { rollbackMigration } from '../src/migrate.ts'
 import { sessionDir } from '../src/paths.ts'
 import { readRegistry, writeRegistryAtomic } from '../src/registry.ts'
 import { createTitleResolver } from '../src/session-title.ts'
+import type { ProjectionCacheReader, ProjectionCacheRecord } from '../src/projection-cache.ts'
 import { planRemoval, runRemoval, type RemoveDeps } from '../src/remove.ts'
 import type { DecodeAll, SessionHeader, WorkspaceRegistryState } from '../src/types.ts'
 import { encodeRawFrame } from '../src/zstd-frame.ts'
@@ -177,6 +178,21 @@ test('恢复：从备份把整个会话目录搬回原位（含 session.lock）�
   // 注册表保持"删除之后被改坏的那份"，没有被备份里的快照覆盖
   assert.equal(readFileSync(sandbox.registryPath, 'utf8'), mutated)
   assert.notEqual(readFileSync(sandbox.registryPath, 'utf8'), registryBefore)
+})
+
+test('预演：标题优先取扫描那一趟读到的投影记录，一条会话只问一次', () => {
+  const sandbox = makeSandbox('remove-projection')
+  writeSession(sandbox, 'session-doomed', 1000, { title: '日志里的名字' })
+  const reads: string[] = []
+  const projection: ProjectionCacheReader = (query) => {
+    reads.push(query.id)
+    const record: ProjectionCacheRecord = { title: '投影里的名字' }
+    return record
+  }
+  // resolveTitle 走的是真读取器：记录里有标题就不去日志里找（见 session-title.ts）。
+  const plan = planRemoval(deps(sandbox, { projection }), { sessionIds: ['session-doomed'] })
+  assert.equal(plan.entries[0]?.title, '投影里的名字', '标题从扫描读到的记录里取，不再读一遍日志')
+  assert.deepEqual(reads, ['session-doomed'], '一条会话只问一次记录')
 })
 
 test('宿主内存里活着的会话拒删：进 problems，不进待删条目（预演与执行都拦住）', () => {

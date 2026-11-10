@@ -1148,6 +1148,8 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
     decodeAll,
     // 迁移页挑会话时同样按标题认人（与传输页同一套口径）。
     resolveTitle,
+    // 标题从进程里共用那份投影记录取（不含这份的话，每条会话都要把同一个 JSON 重新解析一遍）。
+    projection,
     // 每次调用重新探测（只有工具的前端 / 老版本宿主可能没有这套动作）。
     hostRegistry,
     // 迁移改写了 cwd，旧检查点因此对不上：收口时请宿主重折一遍（见 checkpoint-warm.ts）。
@@ -1534,6 +1536,7 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
     backupRoot: paths.backupRoot,
     decodeAll,
     resolveTitle,
+    projection,
     liveSessionIds,
   }
 
@@ -1865,7 +1868,7 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
       sendJson(res, 409, { error: '这个宿主没有会话名称服务（重新生成名称是它的能力），算不了标题' })
       return
     }
-    const all = scanLibrary(paths.sessionsRoot, decodeAll, { resolveTitle })
+    const all = scanLibrary(paths.sessionsRoot, decodeAll, { resolveTitle, projection })
     // `includePinned`：连 `user` 源（用户改过名，或者那条标题本来是脚本 / 导入写下的）也一起重算。
     // 界面**不传**这个字段（默认语义就是"别动用户的名字"），它给一次性清理用——只有显式 `true` 才算。
     const includePinned = fields['includePinned'] === true
