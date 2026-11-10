@@ -151,6 +151,9 @@ export const zh = {
   'migrate.hiddenSkipped':
     '另有 {count} 条勾中的会话侧边栏不显示（已归档 / 空白 / 子智能体），宿主不会迁它们：先在列表里单独处理' +
     '（已归档的取消归档、空白的删掉、子智能体连着它的父会话一起迁）。',
+  'migrate.nothingVisible':
+    '勾中的会话都侧边栏不显示（已归档 / 空白 / 子智能体），这次没有可迁移的会话：先在列表里单独处理' +
+    '（已归档的取消归档、空白的删掉、子智能体连着它的父会话一起迁），或者改勾父会话。',
   'migrate.action': '迁移',
   'migrate.dialogTitle': '将要迁移',
   'migrate.apply': '确认迁移',
@@ -686,6 +689,9 @@ export const en: LocaleDictOf<typeof NS> = {
   'migrate.hiddenSkipped':
     '{count} of the ticked sessions are hidden from the sidebar (archived / blank / subagent), so the host will not ' +
     'move them: handle them in the list first (unarchive, delete, or migrate a subagent with its parent).',
+  'migrate.nothingVisible':
+    'Every ticked session is hidden from the sidebar (archived / blank / subagent), so there is nothing to migrate: ' +
+    'handle them in the list first (unarchive, delete, or migrate a subagent with its parent), or tick the parent session.',
   'migrate.action': 'Migrate',
   'migrate.dialogTitle': 'About to migrate',
   'migrate.apply': 'Migrate now',
