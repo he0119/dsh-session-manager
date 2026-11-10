@@ -146,9 +146,9 @@ tsconfig.client.json Web Client 自己的类型工程（DOM + JSX；Host 那份�
 | `src/zstd-frame.ts` | raw 帧编码、首帧边界定位、多帧感知守卫 | 无 |
 | `src/session-log.ts` | 单日志读取与**保结构** cwd 改写 | 无 |
 | `src/registry.ts` | 注册表启动不变式校验、`reHome()`、原子落盘 | 无 |
-| `src/discovery.ts` | 项目目录扫描 + 只解首帧读 header（发现阶段快，只读文件开头 64 KB，解不出来再退回整份），可注入标题读取器与投影记录读取器 | 无 |
+| `src/discovery.ts` | 项目目录扫描 + 只解首帧读 header（发现阶段快，只读文件开头 64 KB，解不出来再退回整份），可注入标题读取器与投影记录读取器；`locateSession()` 按 id 直接找一条会话（目录名就是 `encodeSegment(id)`，找不到才退回整库扫描），内容视图与日志对比走它 | 无 |
 | `src/scan-cache.ts` | 库没变时复用上一次的扫描结果：指纹 = 目录清单 + 每个日志与投影缓存文件的 `size`/`mtimeMs`，加上粗粒度时间戳的 racy 窗口；只给 `GET /state` 用 | 无 |
-| `src/projection-cache.ts` | 读宿主投影缓存的单条记录（标题、`blank` 等列表元数据） | 无 |
+| `src/projection-cache.ts` | 读宿主投影缓存的单条记录（标题、`blank` 等列表元数据）；`createProjectionReader()` 按 `size + mtimeMs + 身份` 记住解析结果，重扫时只重解变了的那些 | 无 |
 | `src/session-title.ts` | 会话名称：宿主投影缓存优先，缺席时有界地解日志开头 | 无 |
 | `src/visibility.ts` | 侧边栏可见性与「未分组」判据：子智能体 / 空白 / 已归档三条理由（候选与界面共用一份）、`isUngrouped()`＝没认领（`accounting.ts`）**且** 会显示 | 无 |
 | `src/family.ts` | **族**的展开（点名一条会话 → 它自己 + 全部子智能体后代）与「单独点名的子智能体」判据（`loneSubagents()`），删除 / 迁移 / 归档 / 导出共用 | 无 |
@@ -159,6 +159,7 @@ tsconfig.client.json Web Client 自己的类型工程（DOM + JSX；Host 那份�
 | `src/attachments.ts` | 附件对象（日志里那个 `attachmentId` 指向的字节）：日志逐行扫引用（字符串预筛 + 解析）、按 `kind:id` 去重（引用里带上日志声明的字节数与**文件对象的名字**——前者供「本机这份还在不在」用，后者是文件本机路径的最后一段）、读写宿主附件库的**纯路径端口** `AttachmentPort`（`pathOf()` 只算路径，读与写都在这里）、对象落地的 `.part` + rename 与 `0o400` 规格 | 无 |
 | `src/transfer.ts` | `.dshsess` 容器（导出/解析/校验，格式 v2：日志之外还带一段**附件对象**，每条是 `{ id, kind, name?, bytes, offset }`，读的时候 1 与 2 都认）、导入预演与落地（**先落对象再写日志**，对象落不了只回报不拦会话）；`attachmentActionOf()` 是「这个对象在本机算什么」的唯一判据（导入预演与同步拉取共用）；`parseBundle()` 是校验与解析那一层，`readBundle()` / `readBundleAsync()` 只负责 gunzip（同步入口给手上已经拿着包的落地路径，异步那一路走线程池、不占主线程） | 无 |
 | `src/log-decode.ts` | 日志解码：`decodeAllChunked()` 用 fzstd 的流式解码器按 128 KB 一块推进、块与块之间让出一轮事件循环（块边界切在多字节字符中间由 `StringDecoder` 兜住，输出与 `decodeAll()` 逐字符一致），`decodeLogTextChunked()` 是它与 `decodeLogText()` 同形的入口；同步里「两边各自写过」那些对读整份日志就走它（整份解压一次会把宿主主线程按住一两秒，见 [决策](../.agents/notes/implemented/bug-fix/2026-10-21-content-relations-off-the-main-thread.md)） | 无 |
+| `src/log-text-cache.ts` | 同一份日志连着读好几页时只解压一次：只留一份切好的行，判据是 `路径 + size + mtimeMs + 压缩方式`，解压走 `log-decode.ts` 的分块版本；解开后超过 64M 字符的不缓存（内容视图翻页用它，见 [决策](../.agents/notes/implemented/architecture/2026-11-10-locate-one-session-without-scanning.md)） | 无 |
 | `src/config.ts` | 插件配置的 schema：`sync` 那一节带 `volatile`（活字段，改完不用重启），三个路径字段不带；`syncSection()` 把"活引用"与"普通对象"两种来路收成一份值；自动推送那一节的拍平在 `autoPushSection()` 一处（只剩开关：只有 `autoPush === true` 才算开，`false` 与缺席都是"没开"；原来那个间隔数与它的下限跟着兜底定时器一起删了） | `@deepseek-ai/schemastery` |
 | `src/repo.ts` | 跨机器的项目身份：git remote 规范化（`host/owner/repo`，去掉 `.git` 与凭据、端口进身份）与"这条目录属于哪个仓库"（仓库根 + 仓库内相对路径）；跑 git 的入口可注入。`createRepoLookup()` 是界面读身份那条路（进程内缓存：一个目录只问一次 git，`/state` 是热路径） | 无 |
 | `src/dav.ts` | WebDAV 客户端：PROPFIND / GET / PUT / MKCOL + Basic 鉴权 + 多状态响应解析 | 无 |

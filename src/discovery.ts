@@ -13,7 +13,7 @@
 import { closeSync, openSync, readFileSync, readSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { parseSessionLogName } from './paths.ts'
+import { encodeSegment, parseSessionLogName } from './paths.ts'
 import { projectKey } from './project-key.ts'
 import type { ProjectionCacheReader, ProjectionCacheRecord } from './projection-cache.ts'
 import type { TitleQuery } from './session-title.ts'
@@ -198,6 +198,63 @@ export interface ScanOptions {
 }
 
 /**
+ * 读一个会话目录：代次日志、header、可选的投影记录与标题。
+ *
+ * 从 `scanProjectDir()` 里拆出来是为了让"按 id 定位一条会话"（`locateSession()`）与"扫一遍目录"用同一份
+ * 读法：两条路一旦各写一遍，迟早会出现"列表里这条有标题、点开却没有"这类没人查得出来的差。
+ *
+ * @param dir 会话目录的绝对路径。
+ * @param dirName 目录名（应等于 encodeSegment(header.id)）。
+ * @param decodeAll 多帧感知解码器。
+ * @param options 扫描选项（只用到 `projection` 与 `resolveTitle`）。
+ * @returns 会话；目录里只有临时 / 伴生文件时 undefined。
+ * @throws 同一目录里的代次日志 header 对不上（id 或 cwd 不同）时抛错。
+ */
+function readSessionDir(
+  dir: string,
+  dirName: string,
+  decodeAll: DecodeAll,
+  options: ScanOptions,
+): DiscoveredSession | undefined {
+  const files: SessionLogFile[] = []
+  let header: SessionHeader | null = null
+  for (const name of readdirSync(dir)) {
+    const parsed = parseSessionLogName(name)
+    if (!parsed) continue
+    const path = join(dir, name)
+    const { header: h, bytes } = readLogHeader(path, decodeAll)
+    if (header && h.id !== header.id) throw new Error(`inconsistent header ids inside ${dir}`)
+    if (header && h.cwd !== header.cwd) throw new Error(`inconsistent header cwd inside ${dir}`)
+    header = h
+    files.push({ name, path, version: parsed.version, compression: parsed.compression, bytes })
+  }
+  if (!header || files.length === 0) return undefined // 只有临时/伴生文件的目录
+  files.sort((a, b) => a.version - b.version)
+  const session: DiscoveredSession = { dirName, dir, id: header.id, cwd: header.cwd, createdAt: header.createdAt, header, files }
+  if (options.projection !== undefined) {
+    try {
+      const record = options.projection({
+        id: session.id,
+        createdAt: session.createdAt,
+        ...(session.cwd === undefined ? {} : { cwd: session.cwd }),
+      })
+      if (record !== undefined) session.meta = record
+    } catch {
+      // 读不到记录不影响"这条会话在库里"这个事实
+    }
+  }
+  if (options.resolveTitle) {
+    try {
+      const title = options.resolveTitle(session)
+      if (title !== undefined && title !== '') session.title = title
+    } catch {
+      // 标题读不出来不影响"这条会话在库里"这个事实
+    }
+  }
+  return session
+}
+
+/**
  * 扫描一个项目目录下的全部会话。
  * @param projectDir 形如 `<root>/--C-Users-me-proj--` 的目录。
  * @param decodeAll 多帧感知解码器。
@@ -213,45 +270,65 @@ export function scanProjectDir(projectDir: string, decodeAll: DecodeAll, options
     index += 1
     const dir = join(projectDir, dirName)
     if (!statSync(dir).isDirectory()) continue
-    const files: SessionLogFile[] = []
-    let header: SessionHeader | null = null
-    for (const name of readdirSync(dir)) {
-      const parsed = parseSessionLogName(name)
-      if (!parsed) continue
-      const path = join(dir, name)
-      const { header: h, bytes } = readLogHeader(path, decodeAll)
-      if (header && h.id !== header.id) throw new Error(`inconsistent header ids inside ${dir}`)
-      if (header && h.cwd !== header.cwd) throw new Error(`inconsistent header cwd inside ${dir}`)
-      header = h
-      files.push({ name, path, version: parsed.version, compression: parsed.compression, bytes })
-    }
-    if (!header || files.length === 0) continue // 只有临时/伴生文件的目录
-    files.sort((a, b) => a.version - b.version)
-    const session: DiscoveredSession = { dirName, dir, id: header.id, cwd: header.cwd, createdAt: header.createdAt, header, files }
-    if (options.projection !== undefined) {
-      try {
-        const record = options.projection({
-          id: session.id,
-          createdAt: session.createdAt,
-          ...(session.cwd === undefined ? {} : { cwd: session.cwd }),
-        })
-        if (record !== undefined) session.meta = record
-      } catch {
-        // 读不到记录不影响"这条会话在库里"这个事实
-      }
-    }
-    if (options.resolveTitle) {
-      try {
-        const title = options.resolveTitle(session)
-        if (title !== undefined && title !== '') session.title = title
-      } catch {
-        // 标题读不出来不影响"这条会话在库里"这个事实
-      }
-    }
-    out.push(session)
+    const session = readSessionDir(dir, dirName, decodeAll, options)
+    if (session !== undefined) out.push(session)
   }
   out.sort((a, b) => b.createdAt - a.createdAt)
   return out
+}
+
+/**
+ * 按 id 找到一条会话：只读它自己那一份日志，不碰库里其它会话。
+ *
+ * 为什么需要它：会话目录名就是 `encodeSegment(id)`（见 paths.ts，与宿主同一套）。所以"找一条会话"不必
+ * 把整库 1295 条日志头都读一遍——走一遍项目目录、找同名目录、只读这一条就够了。打开一条会话内容的
+ * 请求（`GET /transcript`）与"比两份日志"（`GET /sync/diff`）都只关心一条会话，实测整库扫一遍要
+ * 1.4 秒量级，而这样找一条是几毫秒。
+ *
+ * 兜底：目录名不是 id 的编码（手改过、早期版本留下的库）时退回整库扫一遍。正常库里这条兜底不会触发，
+ * 但"找不找得到"不该依赖目录命名这个约定。
+ *
+ * @param root 会话库根。
+ * @param id 会话 id。
+ * @param decodeAll 多帧感知解码器。
+ * @param options 扫描选项（`projection` 与 `resolveTitle` 与整库扫描同一个口径）。
+ * @returns 会话；库里没有这一条时 undefined。
+ */
+export function locateSession(
+  root: string,
+  id: string,
+  decodeAll: DecodeAll,
+  options: ScanOptions = {},
+): DiscoveredSession | undefined {
+  const dirName = encodeSegment(id)
+  const found: DiscoveredSession[] = []
+  let projectNames: string[]
+  try {
+    projectNames = readdirSync(root)
+  } catch {
+    return undefined
+  }
+  for (const projectName of projectNames) {
+    const dir = join(root, projectName, dirName)
+    try {
+      if (!statSync(dir).isDirectory()) continue
+    } catch {
+      continue
+    }
+    try {
+      const session = readSessionDir(dir, dirName, decodeAll, options)
+      // 目录名对得上、header 里的 id 也要对得上：同名的残留目录不算"这条会话在库里"。
+      if (session !== undefined && session.id === id) found.push(session)
+    } catch {
+      // 这个候选目录读不动（header 坏了、代次之间对不上）：还有别的候选与下面的兜底。
+    }
+  }
+  if (found.length > 0) {
+    // 同一个 id 出现在两个项目目录里时，取新建的那一条：与整库扫描按 createdAt 降序后取第一条同一口径。
+    found.sort((a, b) => b.createdAt - a.createdAt)
+    return found[0]
+  }
+  return scanAll(root, decodeAll, options).find((session) => session.id === id)
 }
 
 /** 项目目录路径（由 cwd 推出项目目录名）。 */
