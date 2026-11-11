@@ -44,6 +44,7 @@ import { createTitleResolver, type TitleQuery } from './session-title.ts'
 import {
   plannedOutcome,
   prepareSync,
+  replanPrepared,
   readRemoteLibrary,
   remoteBundlePath,
   runSync,
@@ -1426,12 +1427,25 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
          * `planId` 就是这个格子的号码：确认那次带着它回来，对得上就**照着这份数据落地**，不再把同一
          * 份计划重算一次（用户按下确认到第一条拉取之间原来要等的那几秒就是它）。
          */
-        const planned = await prepareSync(syncDeps, {
-          onProgress,
-          ...(decisions === undefined ? {} : { decisions }),
-        })
-        previewSeq += 1
-        const id = `${previewSeq}-${Math.random().toString(36).slice(2, 8)}`
+        /*
+         * 带着上一次的 `planId` 回来、只换了裁决（用户点「以本机为准 / 以远端为准」）：计划只该重算
+         * 那一层——扫本机、读远端索引、问 git、算指纹这些输入都还在那份预演里（见 `replanPrepared()`）。
+         * 几十毫秒，而不是把整条同步流程再走一遍。
+         */
+        const reused = preview !== null && planId !== undefined && preview.id === planId ? preview : undefined
+        let planned: SyncPrepared
+        let id: string
+        if (reused !== undefined) {
+          planned = replanPrepared(reused.value, syncDeps, decisions)
+          id = reused.id
+        } else {
+          planned = await prepareSync(syncDeps, {
+            onProgress,
+            ...(decisions === undefined ? {} : { decisions }),
+          })
+          previewSeq += 1
+          id = `${previewSeq}-${Math.random().toString(36).slice(2, 8)}`
+        }
         preview = { id, value: planned, decisionsKey: decisionsKeyOf(decisions) }
         sendEvent(res, { type: 'result', result: { ...payloadOf(plannedOutcome(planned)), planId: id } })
       } else {

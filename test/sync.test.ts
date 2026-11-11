@@ -26,6 +26,7 @@ import {
   parseIndex,
   planSync,
   prepareSync,
+  replanPrepared,
   readRemoteLibrary,
   relation,
   SYNC_ATTACHMENTS_DIR,
@@ -1784,6 +1785,74 @@ test('sync：裁决 keep-remote——本机那份先落成新会话，原 id 由
     assert.match(textOf(branch), /A-tail/, '本机那份落成了新会话')
     assert.doesNotMatch(textOf(branch), /B-tail/)
     assert.ok(readdirSync(join(a.base, 'backups')).length > 0, '覆盖前留了备份')
+  } finally {
+    await fixture.close()
+    rmSync(SANDBOX, { recursive: true, force: true })
+  }
+})
+
+test('sync：改一次裁决只重算计划那一层——不再读远端包，结果与从零预演逐字相同', async () => {
+  rmSync(SANDBOX, { recursive: true, force: true })
+  mkdirSync(SANDBOX, { recursive: true })
+  const fixture = await startDavFixture({ root: join(SANDBOX, 'dav-replan') })
+  const inner = createDavClient({ baseUrl: fixture.url })
+  /** 这一轮取了几次会话包（`.dshsess`）——内容判据那一步每对要取一份，重算计划一次都不该再取。 */
+  let bundleGets = 0
+  const dav: DavPort = {
+    baseUrl: inner.baseUrl,
+    list: (collection) => inner.list(collection),
+    get: (path) => {
+      if (path.endsWith('.dshsess')) bundleGets += 1
+      return inner.get(path)
+    },
+    put: (path, bytes) => inner.put(path, bytes),
+    ensure: (collection) => inner.ensure(collection),
+    probe: (collection) => inner.probe(collection),
+  }
+  const a = makeMachine('replan-a')
+  const b = makeMachine('replan-b')
+  try {
+    // 远端那一份是 A 写的；B 这边同一条 id、同样的代次、**内容不同**——代次与哈希都筛不掉，只能读内容。
+    writeSession(a, 's1', 1000, {
+      eventLines: [JSON.stringify({ type: 'assistant/message', seq: 1, data: { text: 'A 写的那一条' } })],
+    })
+    const [source] = scanAll(a.sessionsRoot, decodeAll)
+    assert.ok(source !== undefined)
+    const log = source.files[0]
+    assert.ok(log !== undefined)
+    await putRemoteSession(inner, 'robot-a', {
+      id: 's1',
+      createdAt: 1000,
+      logPath: log.path,
+      logName: log.name,
+      logVersion: log.version,
+      cwd: a.cwd,
+    })
+    writeSession(b, 's1', 1000, {
+      eventLines: [JSON.stringify({ type: 'assistant/message', seq: 1, data: { text: 'B 写的那一条' } })],
+    })
+
+    const config = settings(b, { machineId: 'robot-b', mapping: { [a.cwd]: b.cwd } })
+    const deps = syncDepsOf(b, dav, config)
+    const prepared = await prepareSync(deps)
+    assert.deepEqual(prepared.plan.needsContent, ['s1'], '前提：这一对要读内容才判得出来')
+    const getsAfterPrepare = bundleGets
+
+    const decided = replanPrepared(prepared, deps, new Map([['s1', 'keep-local']]))
+    assert.equal(bundleGets, getsAfterPrepare, '重算计划不再读远端包（内容关系已经在预演里判过了）')
+    assert.equal(decided.facts, prepared.facts, '事实快照沿用预演那一份')
+    assert.equal(decided.local, prepared.local, '本机清单也沿用')
+    assert.deepEqual(decided.plan.pullIds, [])
+    assert.equal(decided.plan.push[0]?.code, 'keep-local', '裁决当场生效')
+
+    // 换回"不挑正本"：那一对重新变成"两边都不动"（还是那几对要读内容）。
+    const back = replanPrepared(prepared, deps)
+    assert.equal(back.plan.needsContent.includes('s1'), true)
+    assert.equal(back.plan.push[0]?.code, 'diverged')
+
+    // 与从零预演一次逐字相同：重算不能比"重新走一遍"少算或多算任何一格。
+    const direct = await prepareSync(deps, { decisions: new Map([['s1', 'keep-local']]) })
+    assert.deepEqual(decided.plan, direct.plan)
   } finally {
     await fixture.close()
     rmSync(SANDBOX, { recursive: true, force: true })

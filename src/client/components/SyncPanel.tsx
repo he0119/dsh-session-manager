@@ -532,7 +532,10 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
     setFailures([])
     setProgress(null)
     const picked = new Map(Object.entries(next))
-    void fetchSyncPlan(setProgress, picked.size === 0 ? undefined : picked).then(
+    // 带着上一份计划的 `planId`：宿主对得上就只重算计划那一层（见 web.ts 的 `replanPrepared()`），
+    // 不再重扫本机、重读远端索引、重问 git。
+    const planId = picked.size === 0 ? undefined : sync?.planId
+    void fetchSyncPlan(setProgress, picked.size === 0 ? undefined : picked, planId).then(
       (response) => {
         setBusy(null)
         setSync(response)
