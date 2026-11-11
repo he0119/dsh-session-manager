@@ -137,16 +137,40 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
     return panelEvents.reload().finally(() => setBusy(false))
   }, [])
 
+  /**
+   * 就地改清单（见 statePatch.ts）：动作落地之后先让那一行改对，不等整库快照。
+   *
+   * 写进 `state` 同一个位置，所以它与快照走同一条渲染路径——一份数据，没有"本地副本与快照打架"这回事；
+   * 快照随后到达时直接盖掉它（快照是磁盘的真话）。
+   */
+  const patch = React.useCallback((update: (current: StateResponse) => StateResponse): void => {
+    setState((current) => (current === null ? current : update(current)))
+  }, [])
+
   // 页面挂上就连、走了就断：断开之后宿主不再为一个没人看的页面扫库。
   React.useEffect(() => {
     panelEvents.start()
     return () => panelEvents.stop()
   }, [])
 
+  /**
+   * 已经摊进 `state` 的那份快照。
+   *
+   * 为什么记它：面板流每次 `publish` 都会把**同一份** `snapshot.state` 再发一遍（连接状态、进度、
+   * 后台同步的状态都在变，而清单没变）。原来这里无脑 `setState(snapshot.state)`，于是动作落地后刚
+   * 按响应改过的那几行（见 `patch`）会在下一次 publish 时被旧快照盖回去——实测"取消归档"那一行要等
+   * 整库快照回来（约 1.2 秒）才变。只认**换了对象**的那一份：patch 改过之后，旧快照的引用对不上新
+   * state，自然不再盖回去；新快照到达时引用变了，照旧覆盖。
+   */
+  const lastSnapshotState = React.useRef<StateResponse | null>(null)
+
   // 快照一变就重画；新清单落地之后收掉"刷新中"。
   React.useEffect(() => {
     const read = (snapshot: PanelSnapshot): void => {
-      setState(snapshot.state)
+      if (snapshot.state !== null && snapshot.state !== lastSnapshotState.current) {
+        lastSnapshotState.current = snapshot.state
+        setState(snapshot.state)
+      }
       setMeta(snapshot.meta ?? undefined)
       setLoadProgress(snapshot.scan ?? undefined)
       setError(snapshot.error)
@@ -309,7 +333,9 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
         `aria-controls`。`role="tabpanel"` 也在这一层。
       */}
       <div id={`dsm-panel-${panel}-panel`} role="tabpanel" className="dsm-panel">
-        {panel === 'manage' && <ManagePanel t={t} state={state} meta={meta} reload={load} directory={directory} />}
+        {panel === 'manage' && (
+          <ManagePanel t={t} state={state} meta={meta} reload={load} patch={patch} directory={directory} />
+        )}
         {panel === 'transfer' && <TransferPanel t={t} state={state} meta={meta} reload={load} directory={directory} />}
         {panel === 'sync' && <SyncPanel t={t} state={state} meta={meta} reload={load} />}
         {panel === 'backup' && <BackupPanel t={t} reload={load} />}

@@ -27,6 +27,13 @@ export interface PanelShare {
   /** 重新拉 `/meta` 与 `/state`（写入成功后调用，让列表与注册表归属跟上）。 */
   reload: () => Promise<void>
   /**
+   * 就地改清单里的那几条（见 [statePatch.ts](./logic/statePatch.ts)）。
+   *
+   * 动作落地之后先按响应把改过的行改对：用户点完立刻看到结果，不必等宿主把整库重扫一遍再把快照发
+   * 回来（本机 1423 条上那一步 0.9～1.1 秒）。整库快照随后在后台取回来覆盖它，到了以快照为准。
+   */
+  patch?: (update: (state: StateResponse) => StateResponse) => void
+  /**
    * 取当前可用的宿主目录选择器（注入面给的 thunk，见 [directory.ts](./directory.ts)）。
    * 取到 `undefined` 表示这个宿主没提供选择器，界面要给出提示而不是留一个点了没反应的按钮；
    * 拿到之后用哪个调用面（`pick` / `list`）由宿主报来的 `pickerKind` 决定（见 api.ts 的
