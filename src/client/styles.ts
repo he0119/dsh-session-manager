@@ -953,13 +953,60 @@ export const CSS = `
   .dsm-progressFill { transition: none; }
 }
 /*
- * 「立即推送一次」那一轮的进度：它不走弹窗，进度块直接落在页面横幅里（见 SyncPanel.tsx）。
+ * 进度横幅：后台同步与「立即推送一次」那一轮都落在页面横幅里（见 ManagerPanel.tsx / SyncPanel.tsx）。
  *
  * .dsm-banner 自己是一行横向 flex（为"一句话 + spacer + 关闭"那种形状写的），而这里装的是竖着排的
- * 进度块（一句话 / 进度条 / 当前那条 / 说明句，见 ProgressBlock.tsx）——不换方向的话那几行会横着挤成
- * 一排。这里只改方向与对齐，边框、圆角、间距都留给 .dsm-banner。
+ * 状态卡：标题那行（状态点 + 这是哪一趟）/ 进度块 / 一句说明（见 ProgressBlock.tsx）——不换方向的话
+ * 那几行会横着挤成一排。
+ *
+ * 几何照卡片那一档（内边距 12px 14px、块间 8px、描边走 settings-card-stroke）：它现在装的是三四行
+ * 读数，用"一句话横幅"的 6px 10px 会挤得像一条夹缝，描边用 currentColor（原来那条）则跟着文字色
+ * 变，深色主题里是一圈发灰的粗框。
  */
-.dsm-progressBanner { flex-direction: column; align-items: stretch; }
+.dsm-progressBanner {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  padding: 12px 14px;
+  border-color: var(--dsw-alias-settings-card-stroke, rgba(0, 0, 0, 0.16));
+}
+/* 标题那行：官方 StateDot 的 ongoing 转圈（14px）+ 一句话。点与字都靠中线，转圈时行高不跟着跳。 */
+.dsm-progressHead { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.dsm-progressTitle {
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 500;
+  color: var(--dsw-alias-label-primary, #1f2329);
+}
+/*
+ * 进度块内部：那句"做到哪儿了" → 条 → 正在处理的那一条 → 说明，四样之间 6px（比"块内 8px"紧一档，
+ * 它是一段连续读数而不是四个块）。节奏走容器的 gap，不给 <p> 留浏览器默认外边距——默认 1em 上下会
+ * 让四样之间的间距一会儿 2px、一会儿 13px，整块看着忽松忽紧（这一条是这次重画的主要原因）。
+ */
+.dsm-progressBlock { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.dsm-progressBlock > p { margin: 0; }
+/* 计数那行用等宽数字：条走到 9 → 10 时，"第几条"那串不跟着左右抖。 */
+.dsm-progressText {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-secondary, #646a73);
+  font-variant-numeric: tabular-nums;
+}
+/* 正在处理的那一条：12/18 三级色、单行省略（完整名字在悬浮提示里）。它只是"现在在搬哪一条"，
+   不该比上面那句计数更亮更大。 */
+.dsm-progressItem {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary, var(--dsw-alias-label-secondary, #646a73));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dsm-progressNote {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary, var(--dsw-alias-label-secondary, #646a73));
+}
 .dsm-listPlain {
   margin: 0;
   padding-left: 18px;

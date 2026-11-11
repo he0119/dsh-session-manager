@@ -38,7 +38,7 @@
 
 import * as React from 'react'
 
-import { Button, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, StateDot, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
 
 import {
   fetchSyncPlan,
@@ -850,7 +850,11 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
        */}
       {autoPushing && (
         <div className="dsm-banner dsm-progressBanner">
-          <span className="dsm-hint">{t('sync.autoPush.running')}</span>
+          {/* 与「后台同步」那张同一个头：状态点 + 这是哪一趟（自动推送）。 */}
+          <div className="dsm-progressHead">
+            <StateDot state="ongoing" />
+            <span className="dsm-progressTitle">{t('sync.autoPush.running')}</span>
+          </div>
           {autoProgress === null ? null : <ProgressBlock t={t} progress={autoProgress} note={syncNote(autoProgress)} />}
         </div>
       )}
