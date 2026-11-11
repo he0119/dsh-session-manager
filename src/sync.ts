@@ -589,6 +589,33 @@ function remoteActiveAt(entry: { lastActiveAt?: number; lastPromptAt?: number } 
   return entry?.lastActiveAt ?? entry?.lastPromptAt
 }
 
+/**
+ * 同一代次下比字节数：日志只追加，所以同代次里更长的那份就是续写过的。
+ *
+ * 为什么要有这一条：代次相同、内容不同（两边各自从同一份往下写）在 `relation()` 眼里就是 `diverged`，
+ * 而它只比代次集合与哈希，比不出谁更长。远端合并两格副本时若只按活动时间判，而两边都没记那枚钟
+ * （旧版同步推上去的记录、或投影缓存里没有），就只能退回"格子名排序取第一个"——那跟谁更新毫无关系。
+ * 一条会话在 A 上写过、被 B 拉下来继续写、B 再推上去，之后 A 的格子名恰好排在前面，每次预演都会说
+ * "本机续写了 N 条，重推刷新"，推完还是同一句，永远收敛不了。日志是追加写，同代次更长的那份确实
+ * 就是更新的那份，用它当第一判据比格子名可靠。
+ *
+ * @returns `'local'` = 前者更长，`'remote'` = 后者更长，`'unknown'` = 代次不同或字节数一样（退回比时间）。
+ */
+function longerSide(
+  mine: readonly FileFingerprint[],
+  theirs: readonly FileFingerprint[],
+): NewerSide {
+  const top = (files: readonly FileFingerprint[]): FileFingerprint | undefined =>
+    files.reduce<FileFingerprint | undefined>((best, file) => (best === undefined || file.version > best.version ? file : best), undefined)
+  const left = top(mine)
+  const right = top(theirs)
+  if (left === undefined || right === undefined) return 'unknown'
+  if (left.version !== right.version) return 'unknown'
+  if (left.bytes > right.bytes) return 'local'
+  if (right.bytes > left.bytes) return 'remote'
+  return 'unknown'
+}
+
 export function newerSide(mine: number | undefined, theirs: number | undefined): NewerSide {
   if (mine === undefined || theirs === undefined) return 'unknown'
   if (mine > theirs) return 'local'
@@ -1359,9 +1386,12 @@ export async function readRemoteLibrary(dav: DavPort, settings: SyncSettings): P
        * 结果确定）。
        */
       const relationNow = relation(full.files, existing.files)
+      // 同代次、内容不同时先看字节数（追加写的日志里更长的就是更新的），比不出长短才退回活动时间。
+      const longer = relationNow === 'diverged' ? longerSide(full.files, existing.files) : 'unknown'
       const leading =
         relationNow === 'local-ahead' ||
-        (relationNow === 'diverged' && newerSide(remoteActiveAt(full), remoteActiveAt(existing)) === 'local')
+        (relationNow === 'diverged' &&
+          (longer === 'local' || (longer === 'unknown' && newerSide(remoteActiveAt(full), remoteActiveAt(existing)) === 'local')))
       if (leading) entries.set(entry.id, full)
     }
   }

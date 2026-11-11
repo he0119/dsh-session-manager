@@ -1724,6 +1724,45 @@ test('sync：拉取之后继续写，还能推送回远端（判据不看 cwd，
   }
 })
 
+test('同步：从别的机器拉回来、续写一条再推上去，下一轮预演不该还叫「重推刷新」', async () => {
+  rmSync(SANDBOX, { recursive: true, force: true })
+  mkdirSync(SANDBOX, { recursive: true })
+  const fixture = await startDavFixture({ root: join(SANDBOX, 'dav-pull-then-push') })
+  const dav = createDavClient({ baseUrl: fixture.url })
+  const a = makeMachine('pull-push-a')
+  const b = makeMachine('pull-push-b')
+  const gitNone: GitRunner = async () => {
+    throw new Error('没有身份可用')
+  }
+  const configA = settings(a, { machineId: 'robot-a' })
+  const configB = settings(b, { machineId: 'robot-b', mapping: { [a.cwd]: b.cwd } })
+  try {
+    // A 写一条、推上去；B 拉下来——这一步之后这条会话的副本在远端属于 A 的格子。
+    writeSession(a, 's1', 1000)
+    await syncMachine(a, dav, configA, { apply: true, git: gitNone })
+    await syncMachine(b, dav, configB, { apply: true, git: gitNone })
+    assert.equal(scanAll(b.sessionsRoot, decodeAll).length, 1, '前提：B 拉到了这一条')
+
+    // B 这边续写一条（宿主在同一份日志后面追加），再推上去。
+    appendToLatest(b, 's1', '{"type":"user/message","seq":1,"data":{"text":"B 又写了一条"}}')
+    const pushed = await syncMachine(b, dav, configB, { apply: true, git: gitNone })
+    assert.deepEqual(pushed.problems, [])
+    assert.deepEqual(pushed.pushed, [{ id: 's1', action: 'update' }])
+
+    // 远端那两格现在都记着 s1：B 的格子更长（续写过），合并视图该选它。
+    const remote = await readRemoteLibrary(dav, configB)
+    assert.equal(remote.entries.get('s1')?.machine, 'robot-b', '同一代次下更长的那份是续写过的，合并时它赢')
+
+    // 于是再预演一次：两边就是同一份，不该再要求重推。
+    const prepared = await prepareSync(syncDepsOf(b, dav, configB, { git: gitNone }))
+    const row = prepared.plan.push.find((entry) => entry.id === 's1')
+    assert.equal(row?.code, 'identical', `推完一轮之后这一条不该再要求重推（实际 ${row?.code}）`)
+  } finally {
+    await fixture.close()
+    rmSync(SANDBOX, { recursive: true, force: true })
+  }
+})
+
 test('sync：裁决 keep-remote——本机那份先落成新会话，原 id 由远端那份占住', async () => {
   rmSync(SANDBOX, { recursive: true, force: true })
   mkdirSync(SANDBOX, { recursive: true })

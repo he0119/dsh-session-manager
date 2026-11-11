@@ -139,6 +139,10 @@
   就能把宿主主线程按住一两秒；现在包走线程池的 `readBundleAsync()`、日志走分块让出的
   `decodeLogTextChunked()`，判出来的关系再按两边全部代次的哈希记进 `contentRelationCache`，两边都没
   再动的那一对第二轮不再从远端重取。
+- [远端两格副本同代次时更长的赢](../.agents/notes/implemented/bug-fix/2026-11-12-sync-merge-prefers-longer-cell.md)：
+  同一 id 在多台机器的格子里都有副本时，`readRemoteLibrary()` 原来在"同代次、内容不同、活动时间也读
+  不到"时按格子名排序取第一个——格子名与谁更新无关，于是续写过的那份永远被旧副本盖住，每轮预演都
+  叫「重推刷新」。现在先比最高代次的字节数（日志只追加，更长就是续写过的）。
 - [同步预演不再每轮重问 git、重算全库指纹](../.agents/notes/implemented/architecture/2026-11-10-sync-preview-reuses-git-and-fingerprints.md)：
   目录 → 项目身份与文件内容指纹都按进程缓存（后者按 `size + mtimeMs` 失效），入口造一份交给 `/state`、
   手动同步与自动推送共用：同一份库上预演 8.7 s → 1.5～2 s。
