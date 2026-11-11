@@ -1,12 +1,13 @@
 # AGENTS.md — 文档规范
 
-本目录的六份文档各有一个家；同一条信息只在一处展开，别处放链接或一句话指过去。
+本目录的七份文档各有一个家；同一条信息只在一处展开，别处放链接或一句话指过去。
 
 | 文档 | 写什么 | 不写什么 |
 | --- | --- | --- |
 | [internals.md](internals.md) | 决策地图（按主题索引到笔记）、当前机制里没有笔记承载的部分 | 决策依据与被否决的备选方案（→ [.agents/notes/](../.agents/notes/AGENTS.md)） |
 | [design.md](design.md) | 界面与样式的完整规格：页面骨架、排版、间距、颜色、控件、文案、验收 | 决策依据与被否决的备选方案（→ 笔记）；逐文件职责（→ development.md） |
 | [development.md](development.md) | 目录结构、逐文件职责、开发命令、开发实例怎么起 | 会与 `package.json` 脚本漂移的逐条清单 |
+| [formats.md](formats.md) | 落盘格式：本机会话库、远端同步格子、会话包 `.dshsess` 的字段与校验 | 决策依据（→ 笔记）；界面规格（→ design.md）；逐文件职责（→ development.md） |
 | [releasing.md](releasing.md) | 发布流程、落点三道校验、PR 标题与日志分组 | 历史（→ git 与 PR） |
 | [glossary.md](glossary.md) | 术语：官方怎么说的、照写什么、别写什么、出处在哪 | 决策依据（→ 笔记）；机制说明（→ internals.md） |
 | 根 [AGENTS.md](../AGENTS.md) | 协作约定、硬约束、提交信息口径、验证清单、界面与样式的硬约束 | 故事、完整例子、能从链到的家读到的内容 |

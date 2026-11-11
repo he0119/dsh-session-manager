@@ -128,7 +128,7 @@ src/client/     浏览器半侧 → lib/client.js：入口 index.ts、纯逻辑 
 lib/            构建产物（tsdown 输出，已 gitignore）
 locale/         插件展示元信息：meta.title / meta.description，en.json 是宿主的发现入口
 test/           测试（run-all.mjs 是进程内 runner）
-docs/           本目录（design.md 是界面与样式的规格入口）
+docs/           本目录（formats.md 是落盘格式、design.md 是界面与样式的规格入口）
 AGENTS.md       给 AI 助手与贡献者的协作约定（提交信息口径、验证清单、界面硬约束）
 tsdown.config.ts 三份构建配置：host（lib/index.js）、types（lib/types/*.d.ts）、client（lib/client.js，
                 平台基线模块 react / react-jsx-runtime / dsh-client-ui-primitives 保持 require，其余内联）
