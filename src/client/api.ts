@@ -539,13 +539,20 @@ export interface SyncResponse {
 export async function fetchSyncPlan(
   onProgress?: (event: ProgressEvent) => void,
   decisions?: ReadonlyMap<string, SyncDecision>,
+  planId?: string,
 ): Promise<SyncResponse> {
   // 带有裁决的预演必须走 POST：GET 没有请求体，宿主那侧就不知道用户替哪一对挑了正本。没有裁决时
   // 仍用 GET，保持"预演本来就不写任何东西"的样子。
+  //
+  // 带上 `planId` 是另一件事：宿主对得上就**只重算计划那一层**（见 `replanPrepared()`），不再把整条
+  // 同步流程走一遍——用户点一次「以本机为准」原来要等的那几秒就是它。
   const body =
-    decisions === undefined || decisions.size === 0
+    (decisions === undefined || decisions.size === 0) && planId === undefined
       ? undefined
-      : JSON.stringify({ decisions: Object.fromEntries(decisions) })
+      : JSON.stringify({
+          ...(planId === undefined ? {} : { planId }),
+          ...(decisions === undefined || decisions.size === 0 ? {} : { decisions: Object.fromEntries(decisions) }),
+        })
   const response = await fetch(`${API_PREFIX}/sync`, {
     method: body === undefined ? 'GET' : 'POST',
     headers: {

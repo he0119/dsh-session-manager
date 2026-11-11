@@ -1622,6 +1622,14 @@ export interface SyncPrepared {
    * 第二遍。
    */
   fingerprints: Map<string, FileFingerprint>
+  /**
+   * 预演判过的"两边各自写过"那几对的内容关系（会话 id → 关系）。
+   *
+   * 改一次裁决就要重算计划（那一对从"分叉、都不动"变成推或拉）。关系已经读回来了——读远端包、解压、
+   * 比对，一对大日志就是一两秒——重算只该换 `decisions` 再跑一遍纯计算（见 `replanPrepared()`），不能
+   * 把这一趟重做。
+   */
+  relations: Map<string, ContentRelation>
   /** 预演那一刻的事实快照（只用来判"变了没有"，不参与任何判定）。 */
   facts: SyncFacts
   /**
@@ -1975,7 +1983,55 @@ export async function prepareSync(
     }),
     remote: remoteDigest(remote),
   }
-  return { plan, local, remote, repos, located, meta: metaCache, fingerprints, facts, pushOnly }
+  return { plan, local, remote, repos, located, meta: metaCache, fingerprints, relations: contentRelations, facts, pushOnly }
+}
+
+/**
+ * 只重算计划本身：换一组裁决，不重读任何东西。
+ *
+ * 为什么要有它：同步弹窗里每改一次「以本机为准 / 以远端为准」，计划表就要跟着变（那一对从"分叉、两边都
+ * 不动"变成推或拉）。原来这条路是重新走一遍 `prepareSync()`——重扫本机、重读远端索引、重问 git、重算
+ * 比对的指纹，几秒起步；而它需要的输入（本机清单、远端索引、项目身份、内容指纹、那几对的内容关系）在
+ * 预演那一刻已经全部算出来了，改的只是 `decisions` 这一个参数。计划本身是纯计算（`planSync`），几十
+ * 毫秒就够。
+ *
+ * @param prepared 上一次预演留下的那份（`prepareSync()` 的返回值）。
+ * @param deps 只用到设置（映射表与机器名）、活会话与投影记录这几个读法；不会碰磁盘或网络。
+ * @param decisions 新的裁决表；缺省 = 不替任何一对挑正本。
+ * @returns 换过计划的那一份；其余输入原样带过去（落地的指纹、事实快照都还用得上）。
+ */
+export function replanPrepared(
+  prepared: SyncPrepared,
+  deps: Pick<SyncDeps, 'settings' | 'liveSessionIds' | 'sessionMeta' | 'decodeAll'>,
+  decisions?: ReadonlyMap<string, SyncDecision>,
+): SyncPrepared {
+  const normalized = normalizeMapping(deps.settings.mapping)
+  /*
+   * 指纹只查预演算过的那一份：日志没变的话那个值就是眼下这一份（落地前还会再验一遍事实）。查不到
+   * （预演之后新出现的文件）才现算——那是少数，且只在真的要比对时才走到。
+   */
+  const hashFile = (path: string, version: number, compression: string | null): FileFingerprint =>
+    prepared.fingerprints.get(path) ?? contentFingerprint(path, version, compression, deps.decodeAll)
+  const metaOf = (session: Pick<DiscoveredSession, 'id'>): SessionMeta | undefined => prepared.meta.get(session.id)
+  const live = deps.liveSessionIds?.()
+  const plan = planSync({
+    local: prepared.local,
+    remote: prepared.remote,
+    mapping: normalized.mapping,
+    repos: prepared.repos,
+    hashFile,
+    pushOnly: prepared.pushOnly,
+    contentRelations: prepared.relations,
+    ...(decisions === undefined ? {} : { decisions }),
+    ...(deps.sessionMeta === undefined ? {} : { sessionMeta: metaOf }),
+    ...(live === undefined ? {} : { isLive: (id: string): boolean => live.has(id) }),
+  })
+  plan.problems.unshift(...normalized.problems)
+  plan.problems.push(...prepared.remote.problems)
+  const reserved = reservedMachineIdProblem(deps.settings.machineId)
+  if (reserved !== undefined) plan.problems.push(reserved)
+  plan.ok = plan.problems.length === 0
+  return { ...prepared, plan }
 }
 
 /**

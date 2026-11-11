@@ -16,6 +16,8 @@ import { readRegistry, validateRegistry, writeRegistryAtomic } from '../src/regi
 import { createDavClient } from '../src/dav.ts'
 import type { AttachmentPort, AttachmentRef } from '../src/attachments.ts'
 import { SYNC_NAMESPACE_DIR } from '../src/sync.ts'
+import type { DavPort } from '../src/dav.ts'
+import type { SyncSettings } from '../src/sync.ts'
 import type { DecodeAll, ProgressEvent, SessionHeader, WorkspaceRegistryState } from '../src/types.ts'
 import { API_PREFIX, createApiHandlers, registerWebRoutes, type ApiDeps, type WebRouteLike } from '../src/web.ts'
 import { encodeRawFrame } from '../src/zstd-frame.ts'
@@ -868,6 +870,57 @@ test('POST /import：包坏了、目标目录不合法、库已存在同 id，�
   assert.equal(payload(conflictApply.captured)['ok'], false)
   // 一件都不会发生（会话都在库里、包里的附件对象本机也都有）时落地在写盘之前就被挡下。
   assert.match(String(payload(conflictApply.captured)['error']), /没有可导入的内容/)
+})
+
+test('POST /sync：带着预演给的 planId 回来，只重算计划、不再读一遍远端索引', async () => {
+  const sandbox = makeSandbox('web-sync-replan')
+  writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000, { title: '要同步的会话' })
+  const fixture = await startDavFixture({ root: join(sandbox.base, 'dav') })
+  const inner = createDavClient({ baseUrl: fixture.url })
+  /** 远端被问了几次（list + get）：整条同步流程读索引，重算计划一次都不该问。 */
+  let remoteCalls = 0
+  const dav: DavPort = {
+    baseUrl: inner.baseUrl,
+    list: (collection) => {
+      remoteCalls += 1
+      return inner.list(collection)
+    },
+    get: (path) => {
+      remoteCalls += 1
+      return inner.get(path)
+    },
+    put: (path, bytes) => inner.put(path, bytes),
+    ensure: (collection) => inner.ensure(collection),
+    probe: (collection) => inner.probe(collection),
+  }
+  try {
+    const settings: SyncSettings = { url: fixture.url, machineId: 'laptop', mapping: {} }
+    const handlers = createApiHandlers(deps(sandbox, { sync: async () => ({ settings, dav }) }))
+    const call = async (body?: unknown): Promise<Record<string, unknown>> => {
+      const { res, captured } = fakeRes()
+      await handlers['GET|POST /sync']!(
+        fakeReq(body === undefined ? 'GET' : 'POST', `${API_PREFIX}/sync`, body === undefined ? undefined : Buffer.from(JSON.stringify(body))),
+        res,
+      )
+      return payload(captured)
+    }
+
+    const first = await call()
+    assert.equal(first['mode'], 'plan')
+    assert.equal((first['plan'] as Record<string, unknown>)['ok'], true)
+    const planId = String(first['planId'])
+    const callsAfterFirst = remoteCalls
+    assert.ok(callsAfterFirst > 0, '第一次预演要读远端索引')
+
+    // 界面在弹窗里改一次裁决就是这一次调用：同一份 planId、换一组 decisions。
+    const second = await call({ planId, decisions: {} })
+    assert.equal(remoteCalls, callsAfterFirst, '带着 planId 回来不再读远端索引（只重算计划那一层）')
+    assert.equal(second['planId'], planId, '计划 id 沿用：落地那次仍对得上')
+    assert.deepEqual(second['plan'], first['plan'], '同一组裁决算出来的计划不变')
+  } finally {
+    await fixture.close()
+    rmSync(sandbox.base, { recursive: true, force: true })
+  }
 })
 
 test('registerWebRoutes：注册十五条精确路由，方法不对回 405', async () => {

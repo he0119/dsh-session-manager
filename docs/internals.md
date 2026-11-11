@@ -142,6 +142,10 @@
 - [同步预演不再每轮重问 git、重算全库指纹](../.agents/notes/implemented/architecture/2026-11-10-sync-preview-reuses-git-and-fingerprints.md)：
   目录 → 项目身份与文件内容指纹都按进程缓存（后者按 `size + mtimeMs` 失效），入口造一份交给 `/state`、
   手动同步与自动推送共用：同一份库上预演 8.7 s → 1.5～2 s。
+- [改一次裁决只重算计划](../.agents/notes/implemented/architecture/2026-11-12-replan-on-decision.md)：
+  弹窗里每点一次「以本机为准 / 以远端为准」，原来重走一遍 `prepareSync()`（预演 2.1 s）；现在带着
+  `planId` 回来，宿主用预演留下的输入（本机清单、远端索引、项目身份、内容指纹、那几对的内容关系）只
+  跑一遍纯计划计算（`replanPrepared()`），几十毫秒。
 - `src/dav.ts` 是那四种方法与 Basic 鉴权（含宽容的多状态响应解析），`src/sync.ts` 是索引、计划与落地：
   界面那条路是 `prepareSync()` 算计划并把输入留下、确认时 `syncPrepared()` 照它落地（`planId` 指认
   宿主手里那份），`src/tools.ts` 的 `sync_sessions` 走单次调用那条（`runSync()`）。自动推送是同一个
