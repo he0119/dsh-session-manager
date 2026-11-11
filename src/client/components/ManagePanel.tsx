@@ -78,6 +78,7 @@ import {
   useSessionPicking,
   type RowSession,
 } from './sessionList.tsx'
+import { patchArchived, patchMoved, patchRemoved, patchTitles } from '../logic/statePatch.ts'
 import type { PanelShare } from '../types.ts'
 
 /** 一次迁移落地之后的结论：复核过没过、备份在哪、要不要重启（原样透出宿主报的三件事）。 */
@@ -88,7 +89,7 @@ interface MigrationEffect {
 }
 
 /** 「会话」分页（含迁移那一路）。 */
-export function ManagePanel({ t, state, meta, reload, directory }: PanelShare): React.ReactElement {
+export function ManagePanel({ t, state, meta, reload, patch, directory }: PanelShare): React.ReactElement {
   const sessions = state?.sessions ?? []
   // 归档能力位与清单无关（`/meta` 先给），所以它用 `state ?? meta`：清单还在读时也不会先把
   // "这个宿主没有 workspaceRegistry"画上去。
@@ -313,6 +314,14 @@ export function ManagePanel({ t, state, meta, reload, directory }: PanelShare): 
             ' ' +
             (response.verified ? t('verify.pass') : t('verify.fail')),
         )
+        // 搬走的那几条先在清单里换到目标目录（分组跟着换），整库快照随后到。
+        patch?.((current) =>
+          patchMoved(
+            current,
+            response.preview.sessions.map((session) => ({ id: session.id, dir: session.targetDir })),
+            response.preview.to,
+          ),
+        )
         void reload()
       },
       (cause) => {
@@ -339,9 +348,11 @@ export function ManagePanel({ t, state, meta, reload, directory }: PanelShare): 
           t(archived ? 'manage.archive.done' : 'manage.archive.undone', { count: response.archived.length }) +
             ` ${t('manage.archive.immediate')}`,
         )
+        // 先改这几行（含级联带上的子智能体），整库快照随后在后台取回来覆盖它。
+        patch?.((current) => patchArchived(current, response.archived, archived))
       }
       if (response.failed.length === 0) picking.clear()
-      await reload()
+      void reload()
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
     } finally {
@@ -371,8 +382,9 @@ export function ManagePanel({ t, state, meta, reload, directory }: PanelShare): 
       setFailed(response.failed)
       setRetitle(response)
       if (response.failed.length === 0) picking.clear()
-      // 列表上的标题是这次动作改的，读回来才看得见（`/state` 每次都重折一遍标题）。
-      await reload()
+      // 列表上的标题是这次动作改的：先按结果改这几行，整库快照随后在后台取回来（`/state` 每次重折标题）。
+      patch?.((current) => patchTitles(current, response.retitled))
+      void reload()
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
     } finally {
@@ -432,6 +444,8 @@ export function ManagePanel({ t, state, meta, reload, directory }: PanelShare): 
           setNotice(response.summary)
           picking.clear()
           setPending(null)
+          // 删掉的那些（含级联）先从清单里摘掉，不必等整库重扫；快照随后到，以快照为准。
+          patch?.((current) => patchRemoved(current, response.preview.entries.map((entry) => entry.id)))
           void reload()
           return
         }

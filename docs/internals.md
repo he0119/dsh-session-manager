@@ -51,6 +51,9 @@
 - [同步的附件对象走远端一个共享目录](../.agents/notes/implemented/feature/2026-10-16-sync-carries-attachment-objects.md)：
   同步的包只带日志，对象走远端 `attachments/` 那份内容寻址的共享目录；手动同步还补对象（本机缺的取回、
   远端缺的传上），端口缺席时整块不参与。
+- [动作之后先改那几行，不等整库快照](../.agents/notes/implemented/architecture/2026-11-11-actions-patch-the-list-first.md)：
+  归档 / 删除 / 迁移 / 重算名称的成功响应里就写着改了哪几条，先按它改（`statePatch.ts`），整库快照随后
+  在后台覆盖；订阅处只认换了对象的快照，免得旧快照把补丁盖回去——「取消归档」一条的标签 1.97 s → 0.87 s。
 - [进度块四行归位：计数在条上面，条目退出主色](../.agents/notes/implemented/bug-fix/2026-11-10-progress-block-rhythm.md)：
   四行由容器的 `gap: 6px` 定节奏（`<p>` 外边距归零，否则间距由浏览器默认 1em 决定、忽松忽紧）；进度
   横幅头部补状态点 + 一句标题，描边与留白照卡片那一档。
