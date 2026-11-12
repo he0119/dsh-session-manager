@@ -839,7 +839,7 @@ test('客户端产物：导航行的文案跟着语言走（同一个 thunk 每�
   assert.equal(entry.registration.label(), 'Session management')
 })
 
-test('客户端产物：页面骨架带着三个动作页（会话 / 传输 / 同步）、备份与说明页', { skip }, () => {
+test('客户端产物：页面骨架带着四个页签（会话 / 传输 / 同步 / 备份），说明从页头的 ? 进', { skip }, () => {
   const { registrations, recorded } = mount()
   const { component } = registrations[0]
   const { inject } = registrations[0].registration
@@ -867,8 +867,8 @@ test('客户端产物：页面骨架带着三个动作页（会话 / 传输 / �
     // 的 `Array.prototype`；直接 `.map()` 出来的结果也留在那个 realm，`deepStrictEqual` 会连原型一起比
     // 于是判不等。先摊进本 realm 的数组字面量再比，判的东西不变（顺序与那五个 label）。
     [...tabs].map((option) => option.label),
-    ['page.tab.manage', 'page.tab.transfer', 'page.tab.sync', 'page.tab.backup', 'page.tab.help'],
-    '顺序是 会话 → 传输 → 同步 → 备份 → 说明（动作页按日常程度排，参考页垫底）',
+    ['page.tab.manage', 'page.tab.transfer', 'page.tab.sync', 'page.tab.backup'],
+    '顺序是 会话 → 传输 → 同步 → 备份（说明不再是页签，从页头那枚 ? 进）',
   )
   assert.equal(tabControl?.props?.value, 'manage', '默认停在第一个页签（受控值就是「会话」那一页）')
   // 那枚页签从两份字典里一起删掉：留着就等于"同一件事有两个入口"。
@@ -1040,10 +1040,11 @@ test('客户端产物：页面上凡是官方 Button 都带边框，没有裸着
   }
 })
 
-test('客户端产物：页头是页面级标题（h2 + 说明行），不是卡片式的小标题', { skip }, () => {
-  // 真实事故（用户报的）：这一页标题曾是 14px 的 `span`，跟内建设置页（`h2` 16px + 14px 说明行）
-  // 摆在一起就是两种规格。结构层面的差别得在产物里钉住，不然改样式时很容易又退回 span。
-  const { registrations, recorded } = mount()
+test('客户端产物：页头是一条工具条——标题、页签、页面级动作同排', { skip }, () => {
+  // 这一页从侧栏进来，占的是整块主栏，不是设置弹窗里的一格。所以页头不再是「标题一行 + 说明一行」，
+  // 而是一条工具条：标题、页内分页、刷新与「插件设置」都排在同一行；库路径与条数挪到底部状态栏。
+  // 结构层面的差别得在产物里钉住，不然改样式时很容易又退回两行。
+  const { registrations } = mount()
   const { component } = registrations[0]
   const { inject } = registrations[0].registration
   const tree = elements(component(inject()))
@@ -1051,63 +1052,54 @@ test('客户端产物：页头是页面级标题（h2 + 说明行），不是卡
   const heading = tree.find((node) => node.props?.className === 'dsm-title')
   assert.equal(heading?.type, 'h2', '页面标题必须是 h2（内建页就是 h2）')
   assert.ok(strings(heading).includes('page.title'), '标题文案走字典')
-  assert.equal(tree.some((node) => node.props?.className === 'dsm-sub'), false, '旧的 .dsm-sub 不该再出现')
 
-  const intro = tree.find((node) => node.props?.className === 'dsm-intro')
-  assert.equal(intro?.type, 'p', '说明行是 p')
-  assert.ok(
-    strings(intro).some((text) => text.includes('page.library')),
-    '说明行里带着会话库信息（路径与条数）',
-  )
-  // 页头两行：标题那一行（标题 + 一枚「插件设置」）与说明行。「刷新」不在这里，它在页签那一行的右端
-  // （见下一条）——它是列表工具，而「插件设置」是**页面级**的入口：配置不在这一页，整页都该够得着。
-  //
-  // 反例有两代：标题与「刷新」同排（标题那一行被按钮从 24px 撑到 30px，按钮还与设置外壳自己那枚
-  // 「打开配置文件」在同一个右列里上下叠着）；说明行与「刷新」同排（说明行实测宽 497px，加上按钮
-  // 与间距要 580px，而内容列只有 564px，它会被挤成两行）。
   const head = tree.find((node) => node.props?.className === 'dsm-head')
   assert.equal(head?.type, 'header', '页头是 header')
-  const headRow = tree.find((node) => node.props?.className === 'dsm-headRow')
-  assert.equal(headRow?.type, 'div', '标题与页面级动作同处一行')
   const headKids = Array.isArray(head?.props?.children) ? head.props.children : [head?.props?.children]
-  assert.ok(headKids.includes(headRow), '标题那一行是页头的直接子节点')
-  assert.ok(headKids.includes(intro), '说明行也是页头的直接子节点')
-  assert.equal(tree.some((node) => node.props?.className === 'dsm-titleRow'), false, '旧标题行那一层不该再出现')
-  const rowKids = Array.isArray(headRow?.props?.children) ? headRow.props.children : [headRow?.props?.children]
-  assert.ok(rowKids.includes(heading), '标题在这一行里')
-  // 页头里**只有**这一枚页面级动作：「刷新」仍然在页签那一行（列表工具与页面级入口不是一回事）。
+  assert.ok(headKids.includes(heading), '标题是页头的直接子节点')
+  assert.ok(
+    elementsOf(head).some((node) => node.props?.role === 'tablist'),
+    '页签（官方 SegmentedControl 的 tablist）也在这一行里',
+  )
+
+  // 页头里两枚页面级动作：「刷新」重读整页状态、「插件设置」跳插件页。两者都不属于任何一个分页。
   const headButtons = elementsOf(head).filter((node) => node.type === 'button')
   assert.ok(
     headButtons.some((node) => node.props?.children === 'sync.settings.action'),
-    '页头那一枚是「插件设置」',
+    '页头有「插件设置」',
   )
-  assert.equal(headButtons.length, 1, '页头只放一枚页面级动作')
+  assert.ok(
+    strings(head).some((text) => text.includes('page.refresh')),
+    '页头有「刷新」',
+  )
+  // 说明从页头那枚「?」进：不再是第五枚页签，但入口与无障碍名字要在。
+  const helpButton = headButtons.find((node) => node.props?.children === '?')
+  assert.ok(helpButton, '页头有说明入口「?」')
+  assert.equal(helpButton.props['aria-label'], 'page.help.open', '「?」的无障碍名字走字典')
+  assert.equal(helpButton.props['aria-haspopup'], 'dialog', '它开的是一个弹窗')
 
-  // 「刷新」在页签那一行的右端：整页的状态（`/meta` + `/state`）不属于任何一个分页，只能挂在页面
-  // 这一级；页签整排只占左边一段，右边量下来空着 142px。
-  const tabsRow = tree.find((node) => node.props?.className === 'dsm-tabsRow')
-  assert.equal(tabsRow?.type, 'div', '页签与「刷新」同排在一个 div 里')
+  // 说明行不在了：库在哪、多少条收进底部状态栏，纵向空间留给列表。
+  assert.equal(tree.some((node) => node.props?.className === 'dsm-intro'), false, '旧的说明行不该再出现')
+  const status = tree.find((node) => node.props?.className === 'dsm-statusBar')
+  assert.equal(status?.type, 'footer', '状态栏是页脚')
   assert.ok(
-    strings(tabsRow).some((text) => text.includes('page.refresh')),
-    '「刷新」挂在这一行的右端',
+    strings(status).some((text) => text.includes('page.library')),
+    '状态栏里带着会话库信息（路径与条数）',
   )
-  assert.ok(
-    // 页签那一排现在是官方 `SegmentedControl`：它自己就渲染成 `role="tablist"`（不再有 `.dsm-tabs`
-    // 那一层包装），所以判据换成"这一行里有个 tablist"。判的东西没变：页签还跟「刷新」同排。
-    elementsOf(tabsRow).some((node) => node.props?.role === 'tablist'),
-    '页签那一层还在这一行里（下划线式页签没有变成工具栏）',
-  )
+  const root = tree.find((node) => String(node.props?.className).includes('dsm-root'))
+  const rootKids = Array.isArray(root?.props?.children) ? root.props.children : [root?.props?.children]
+  assert.equal(rootKids.at(-1), status, '状态栏是这一页的最后一个直接子节点（不随分页切换消失）')
 })
 
-test('客户端产物：清单还没到时页头先说库在哪与「读取中…」，不说 0 条', { skip }, () => {
+test('客户端产物：清单还没到时，底部状态栏说库在哪与「读取中…」，不说 0 条', { skip }, () => {
   /**
-   * 渲染一整页（`strings` 会走进函数组件，包括分页那个 Fragment），并返回页头说明行的文字。
+   * 渲染一整页（`strings` 会走进函数组件，包括分页那个 Fragment），并返回状态栏里那段文字。
    *
    * 走 `strings` 而不是 `elements`：分页本体包在 Fragment 里，`elements` 不下穿 Fragment。
    */
-  const introOf = (mounted) => {
+  const libOf = (mounted) => {
     strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
-    return strings(mounted.recorded.find((node) => node.props?.className === 'dsm-intro'))
+    return strings(mounted.recorded.find((node) => node.props?.className === 'dsm-statusLib'))
   }
 
   // 只给 `/meta`：它就是"先回来的那一份"（不扫库），`/state` 还在扫，state 保持 null。
@@ -1117,8 +1109,8 @@ test('客户端产物：清单还没到时页头先说库在哪与「读取中�
     archiveAvailable: true,
   }
   const withMeta = mount({ meta })
-  const line = introOf(withMeta)
-  assert.ok(line.includes('page.library'), '说明行还是"会话库：…"这一句')
+  const line = libOf(withMeta)
+  assert.ok(line.includes('page.library'), '状态栏还是"会话库：…"这一句')
   assert.ok(
     line.some((text) => text.includes('/home/u/.dsh/sessions')),
     '库的位置来自 /meta，不必等扫完整库',
@@ -1131,9 +1123,18 @@ test('客户端产物：清单还没到时页头先说库在哪与「读取中�
   // 列表那一格同理：清单没到说"读取中…"，不说"这个会话库里还没有会话"（默认页就是「会话」）
   const empties = withMeta.recorded.filter((node) => String(node.props?.className) === 'dsm-empty')
   assert.deepEqual(strings(empties[0]), ['loading'], '空列表那一格说"读取中…"')
+  // 左栏同样不能把"还没读到"画成"0 个项目"：那一刻一个项目行、一枚筛选芯片都不该有
+  const tree = withMeta.recorded.find((node) => String(node.props?.className ?? '').split(/\s+/).includes('dsm-tree'))
+  assert.ok(strings(tree).includes('loading'), '项目栏在清单没到时说"读取中…"')
+  assert.equal(strings(tree).includes('list.project.all'), false, '不画"全部项目 0"')
+  assert.equal(
+    withMeta.recorded.filter((node) => String(node.props?.className) === 'dsm-treeFilters').length,
+    0,
+    '筛选芯片也不画（每类都是 0 会读成"这个库没有会话"）',
+  )
 
   // 两份都还没到（首帧）：整行只有一句"读取中…"，不是"会话库： · 0 个会话 · 0 个工作区"
-  const bare = introOf(mount())
+  const bare = libOf(mount())
   assert.ok(bare.includes('loading'), '位置也还不知道时，整行说"读取中…"')
   assert.ok(!bare.some((text) => text.includes('page.count')), '首帧一个数字都不报')
 })
@@ -1168,7 +1169,7 @@ test('客户端产物：能力位按 /meta 或 /state 说的来，两份都没�
   assert.ok(read(mount({ panel: 'sync', state: base })).includes('sync.offHint'), '读到了确实没配同步，就要说明')
 })
 
-test('客户端产物：右下角那枚版本徽标说得出这是哪个构建', { skip }, () => {
+test('客户端产物：底部状态栏那枚版本徽标说得出这是哪个构建', { skip }, () => {
   // 徽标是「这一页是哪个构建」的自述：版本号永远在，直接从 git build 的产物再多一个短 commit
   // （发布构建只有版本号——标签与版本号本来就是同一件事）。三个常量由 `tsdown.config.ts` 的
   // `define` 在编译期写进产物，判据在 scripts/build-identity.ts；没注入的话源码里那三个标识符是
@@ -1178,10 +1179,9 @@ test('客户端产物：右下角那枚版本徽标说得出这是哪个构建',
   const { component, registration } = registrations[0]
   const tree = elements(component(registration.inject()))
 
-  const badge = tree.find((node) => node.props?.className === 'dsm-version')
-  assert.equal(badge?.type, 'p', '徽标是一行说明文字')
-  // 「右下角」在结构上就是"页面的最后一个元素"：挪到页内分页之前就不再是页脚了。
-  assert.equal(tree.at(-1), badge, '徽标是这一页的最后一个元素（页脚）')
+  const status = tree.find((node) => node.props?.className === 'dsm-statusBar')
+  const badge = elementsOf(status).find((node) => node.props?.className === 'dsm-statusVersion')
+  assert.equal(badge?.type, 'span', '徽标是状态栏里的一段文字')
 
   const label = String(badge?.props?.children ?? '')
   assert.ok(label.startsWith(`v${pkg.version}`), `徽标要报出版本号：${label}`)
@@ -1258,13 +1258,28 @@ test('客户端产物：迁移并进了「会话」页——同一张列表，�
   assert.ok(text.includes('manage.title') && text.includes('manage.hint'), '会话页本体渲染出来了')
   assert.ok(text.includes('migrate.action'), '动作行上多了一枚「迁移」')
 
-  // 整库、按目录分组：两条目录两条组头（一条在册一条没在册）
+  // 平铺表格：组头不在了，每一行自己带「项目」那一格；表头三列可排。
   const heads = fresh.mounted.recorded.filter((el) => String(el.props?.className) === 'dsm-groupHead')
-  assert.equal(heads.length, 2, '两条目录两条组头')
+  assert.equal(heads.length, 0, '平铺之后没有组头')
   const rows = fresh.mounted.recorded.filter(
     (el) => typeof el.type === 'string' && String(el.props?.className).includes('dsm-rowManage'),
   )
   assert.equal(rows.length, 4, '四条会话都在列表里')
+  assert.ok(text.includes('工作区甲'), '在册项目用工作区标题填「项目」那一格')
+  // 表头：标题 / 项目 / 大小 / 时间；后三列各有自己的排序按钮（标题那一列也是按钮）
+  const tableHead = fresh.mounted.recorded.find((el) => String(el.props?.className) === 'dsm-tableHead')
+  assert.ok(tableHead, '平铺的表有一个表头')
+  const sortButtons = elementsOf(tableHead).filter((el) =>
+    String(el.props?.className ?? '').split(/\s+/).includes('dsm-sort'),
+  )
+  assert.equal(sortButtons.length, 3, '标题 / 大小 / 时间三列都能点着排')
+  assert.ok(strings(tableHead).includes('list.project.column'), '表头里有一列叫「项目」')
+  // 项目树：平铺之后整组处理走"在左栏选一个项目 → 全选"，它代替了组头
+  const tree = fresh.mounted.recorded.find((el) => String(el.props?.className ?? '').split(/\s+/).includes('dsm-tree'))
+  assert.ok(tree, '左边有项目与筛选那一栏')
+  assert.ok(strings(tree).some((item) => item.includes('list.project.all')), '树上有「全部项目」')
+  assert.ok(strings(tree).some((item) => item.includes('list.filter.label')), '筛选芯片也在这一栏里')
+
   // 标签与「会话」页同一套：没被认领的那几条挂「未分组」，空白那条挂它自己的标签
   assert.ok(text.includes('list.ungrouped'), '「未分组」是行上的标签（不是第二种来源）')
   assert.ok(text.includes('tag.blank'), '空白那条在行上标出来')
@@ -1327,6 +1342,19 @@ test('客户端产物：导出列表按目录分组，组头就是"整组勾选"
   // 假钩子不会真的 setState，所以这里只验证**结构**：分组、组名、组头的调用面。
   // 勾选的增删逻辑在 test/groups.test.ts，靠这里的假钩子点不出来。
   const text = strings(component(registration.inject()))
+
+  // 宽屏并排：导出与导入两张卡在同一个网格里，窄屏由 CSS 叠回去（容器查询，见 styles.test.mjs）。
+  const grid = recorded.find((element) => String(element.props?.className) === 'dsm-transferGrid')
+  assert.ok(grid, '传输页的两张卡要包在 dsm-transferGrid 里')
+  // 只数直接子元素：`elementsOf(grid)` 会把子组件再渲染一遍，组头的计数就不再是"一遍"了。
+  const gridKids = Array.isArray(grid.props.children) ? grid.props.children : [grid.props.children]
+  assert.equal(gridKids.length, 2, '网格里正好两张卡：导出与导入')
+  assert.ok(
+    gridKids.every((child) => String(child.props?.className ?? '').split(/\s+/).includes('dsm-card')),
+    '网格的直接子元素是两张卡',
+  )
+  assert.ok(text.some((item) => item.includes('transfer.export.title')), '网格里有导出卡')
+  assert.ok(text.some((item) => item.includes('transfer.import.title')), '网格里有导入卡')
 
   assert.ok(text.includes('工作区甲'), '已登记的工作区拿标题当组名')
   // 组头只摆名字：路径（以及认出来的项目身份）都在名字那一格的悬浮提示里，判定见下面那个用例。
@@ -1537,27 +1565,20 @@ test('客户端产物：「会话」页把侧边栏看不见的那三类标出�
   tagged('tag.blank', 'tag.blankTip')
   tagged('tag.archived', 'tag.archivedTip')
   tagged('tag.live', 'tag.liveTip')
-  // 归属进了组头：按目录分组（组头写工作区标题，目录路径在那一格的悬浮提示里），行上不再重复那一列
+  // 平铺之后归属进了一枚自己的格子（组头没了）：在册项目写工作区标题，没登记的写路径。
   const heads = recorded.filter((node) => String(node.props?.className) === 'dsm-groupHead')
-  assert.equal(heads.length, 2, 'alpha 与 beta 各一组')
-  assert.ok(strings(heads[0]).includes('工作区甲'), '登记过的那一组写工作区标题')
-  assert.ok(
-    recorded.some(
-      (node) =>
-        String(node.props?.className) === 'dsm-groupTitle' &&
-        String(node.props?.title).includes('/home/u/dev/alpha'),
-    ),
-    '组头那一格的悬浮提示里给出目录（这个夹具没有项目身份，提示就是路径）',
-  )
+  assert.equal(heads.length, 0, '平铺之后没有组头')
+  assert.ok(text.includes('工作区甲'), '在册项目的那一格写工作区标题')
+  assert.ok(text.includes('/home/u/dev/beta'), '没登记的项目写着路径')
   const manageRows = recorded.filter(
     (node) => node.type === 'label' && String(node.props?.className).includes('dsm-rowManage'),
   )
-  // 归属那一列没了：五个格子（勾选框 / 标记 / 标题 / 字节 / 时间）。
-  // 数的是**元素**：JSX 里那个 `owner !== undefined && …` 为假时会留一个 false 在 children 里。
+  // 六个格子：勾选框 / 标记 / 标题 / 项目 / 字节 / 时间。
+  // 数的是**元素**：JSX 里条件为假时会留一个 false 在 children 里。
   const cells = (Array.isArray(manageRows[0].props.children) ? manageRows[0].props.children : []).filter(
     (child) => child !== null && typeof child === 'object',
   )
-  assert.equal(cells.length, 5, '行里不再有归属那一列（勾选框 / 标记 / 标题 / 字节 / 时间）')
+  assert.equal(cells.length, 6, '行里六个格子（勾选框 / 标记 / 标题 / 项目 / 字节 / 时间）')
   // 子智能体**不是**「未分组」：它确实没在册，但侧边栏把它嵌在父会话下面，从来不放进那一组。
   // 这条以前是反的（判据只看"有没有认领"），所以两行都钉住。
   assert.deepEqual(
@@ -1601,7 +1622,7 @@ test('客户端产物：每一枚官方 Tag 都挂上本页的布局挂钩类（
       { id: 's-3', cwd: '/home/u/dev/alpha', createdAt: 3, dir: '/home/u/dev/alpha', bytes: 900, files: [], blank: true, hidden: 'blank', ungrouped: false },
       { id: 's-4', cwd: '/home/u/dev/beta', createdAt: 2, dir: '/home/u/dev/beta', bytes: 512, files: [], archived: true, hidden: 'archived', ungrouped: false },
     ],
-    // 没登记的那一组会挂一枚「未加入工作区」的标签——它是没有悬浮提示的那种，类名挂在 Tag 自己身上。
+    // 平铺之后组头没有了，「未加入工作区」那枚标签跟着组头一起消失；剩下的三类标签都挂在行上。
     workspaces: [{ id: 'w1', path: '/home/u/dev/alpha', title: '工作区甲', sessionIds: ['s-1'] }],
   }
   const { registrations, recorded } = mount({ state, panel: 'manage', arrays: [['s-1']] })
@@ -1620,7 +1641,7 @@ test('客户端产物：每一枚官方 Tag 都挂上本页的布局挂钩类（
     }
   }
   const tags = recorded.filter((node) => isComponentType(node.type) && typeNameOf(node.type) === 'Tag')
-  assert.ok(tags.length >= 4, `这一页该有多枚标签（子智能体 / 空白 / 已归档 / 未加入工作区），只数到 ${tags.length} 枚`)
+  assert.ok(tags.length >= 3, `这一页该有多枚标签（子智能体 / 空白 / 已归档），只数到 ${tags.length} 枚`)
   const naked = tags.filter((tag) => !covered.has(tag) && !classesOf(tag).includes('dsm-tag'))
   assert.deepEqual(
     naked.length,
@@ -1629,18 +1650,17 @@ test('客户端产物：每一枚官方 Tag 都挂上本页的布局挂钩类（
   )
 })
 
-test('客户端产物：子智能体缩进到父会话的下一级（同一组 / 父在别的组 / 父被筛掉 / 分叉不缩进）', { skip }, () => {
-  // 列表里的父子关系与删除 / 迁移的级联展开是同一条边（`parentSession` + `origin === "subagent"`）。
-  // 缩进错了不会抛错、不会崩，只会让"删父会话会带上谁"与眼睛看到的对不上，所以按行核顺序与缩进类名。
+test('客户端产物：「会话」页平铺——不缩进，子智能体靠标签与「父在别处」的备注区分', { skip }, () => {
+  // 平铺之后没有组内的父子缩进了（排序跨项目，缩进会把人骗了）。父子关系仍然要看得见：子智能体挂标签；
+  // 父会话在**别的项目**里时再挂一枚「父在别处」——它回答"删了这条会带走谁"，这条信息不能一起丢。
+  // 分叉（`sessions.fork()`：有父指针、没有 origin）是自洽的普通会话，不挂标签也不挂备注。
   const sessions = [
-    // alpha 组：父 → 子 → 孙，外加一条无关的（它排在子树之后：顶层按新→旧）
     { id: 'p1', cwd: '/home/u/dev/alpha', createdAt: 5, dir: '/home/u/dev/alpha', bytes: 100, files: [], archived: true },
     { id: 'c1', cwd: '/home/u/dev/alpha', createdAt: 4, dir: '/home/u/dev/alpha', bytes: 200, files: [], origin: 'subagent', hidden: 'subagent', parentSession: 'p1' },
     { id: 'c2', cwd: '/home/u/dev/alpha', createdAt: 3, dir: '/home/u/dev/alpha', bytes: 300, files: [], origin: 'subagent', hidden: 'subagent', parentSession: 'c1' },
     { id: 'lone', cwd: '/home/u/dev/alpha', createdAt: 2, dir: '/home/u/dev/alpha', bytes: 400, files: [] },
-    // 分叉（`sessions.fork()`）：有父指针、没有 origin，是自洽的普通会话——不缩进、也不挂标签
     { id: 'f1', cwd: '/home/u/dev/alpha', createdAt: 1, dir: '/home/u/dev/alpha', bytes: 400, files: [], parentSession: 'p1' },
-    // beta 组：这条子智能体的父会话在 alpha（父被单独迁走过一次就会长成这样）
+    // beta 项目里的子智能体：父会话在 alpha（父被单独迁走过一次就会长成这样）
     { id: 'x1', cwd: '/home/u/dev/beta', createdAt: 1, dir: '/home/u/dev/beta', bytes: 500, files: [], origin: 'subagent', hidden: 'subagent', parentSession: 'p1' },
   ]
   const state = {
@@ -1651,45 +1671,33 @@ test('客户端产物：子智能体缩进到父会话的下一级（同一组 /
     sessions,
     workspaces: [{ id: 'w1', path: '/home/u/dev/alpha', title: '工作区甲', sessionIds: [] }],
   }
-  const rowsOf = (recorded) =>
-    recorded
-      .filter((node) => node.type === 'label' && String(node.props?.className).includes('dsm-rowManage'))
-      .map((row) => ({
-        label: rowParts(row).label,
-        tags: rowParts(row).tags,
-        // 缩进由类名表达（样式在 styles.ts 里按级数给缩进与导引线）
-        nest: (String(row.props.className).match(/dsm-rowNest(\d)/) ?? [])[1] ?? '0',
-      }))
+  const mounted = mount({ state, panel: 'manage' })
+  const { component, registration } = mounted.registrations[0]
+  strings(component(registration.inject()))
 
-  /** 渲染一页：假钩子不自动跑，得自己带着注入面调一次（同本文件别处的写法）。 */
-  const render = (mounted) => {
-    const { component, registration } = mounted.registrations[0]
-    const element = component(registration.inject())
-    return { recorded: mounted.recorded, text: strings(element) }
-  }
+  const rows = mounted.recorded
+    .filter((node) => node.type === 'label' && String(node.props?.className).includes('dsm-rowManage'))
+    .map((row) => ({
+      label: rowParts(row).label,
+      tags: rowParts(row).tags,
+      nest: (String(row.props.className).match(/dsm-rowNest(\d)/) ?? [])[1] ?? '0',
+    }))
 
-  // ① 不筛：父在前、子紧随其后，子挂一级、孙挂两级；父在别的组的那条留在自己组里挂一级并说明父在哪儿
-  const first = render(mount({ state, panel: 'manage' }))
-  const text = first.text
-  assert.deepEqual(rowsOf(first.recorded), [
+  // 默认按时间从新到旧，与所在的组无关（x1 与 f1 同一毫秒，再按 id 定序）
+  assert.deepEqual(rows, [
     { label: 'p1', tags: ['tag.archived'], nest: '0' },
-    { label: 'c1', tags: ['tag.subagent'], nest: '1' },
-    { label: 'c2', tags: ['tag.subagent'], nest: '2' },
+    { label: 'c1', tags: ['tag.subagent'], nest: '0' },
+    { label: 'c2', tags: ['tag.subagent'], nest: '0' },
     { label: 'lone', tags: [], nest: '0' },
     { label: 'f1', tags: [], nest: '0' },
-    { label: 'x1', tags: ['tag.subagent', 'manage.tag.parentElsewhere'], nest: '1' },
+    { label: 'x1', tags: ['tag.subagent', 'manage.tag.parentElsewhere'], nest: '0' },
   ])
-  // 缩进只改画法：组头报的条数还是这一组有几条会话（子智能体照样算）
-  assert.ok(text.some((item) => String(item).includes('list.sessionsInDir:{"count":5}')), 'alpha 组 5 条（分叉也算一条）')
-  assert.ok(text.some((item) => String(item).includes('list.sessionsInDir:{"count":1}')), 'beta 组 1 条')
-
-  // ② 只筛「子智能体」：父会话被筛走，子智能体按普通行画（不凭空多一级）；孙的父还在，于是只它缩进
-  const second = render(mount({ state, panel: 'manage', arrays: [[], ['subagent']] }))
-  assert.deepEqual(rowsOf(second.recorded), [
-    { label: 'c1', tags: ['tag.subagent'], nest: '0' },
-    { label: 'c2', tags: ['tag.subagent'], nest: '1' },
-    { label: 'x1', tags: ['tag.subagent'], nest: '0' },
-  ])
+  // 平铺之后没有组头
+  assert.equal(
+    mounted.recorded.filter((node) => String(node.props?.className) === 'dsm-groupHead').length,
+    0,
+    '会话页不再画组头',
+  )
 })
 
 test('客户端产物：子智能体行的勾选框禁用（跟着父会话走），全选也只勾能单独勾的那些', { skip }, () => {
@@ -2008,29 +2016,32 @@ test('客户端产物：「会话」页的筛选条把不匹配的行筛掉，�
   // 筛过之后头部报"显示了其中几条"，别让人以为库里的会话变少了
   assert.ok(text.includes('list.shown:{"shown":2,"total":5}'), '筛过之后报出 显示 N / M 条')
 
-  // 说明句「多选＝任一命中」必须**自己一行**（筛选条后面那个 <p>），不能挤在胶囊那一行里。
-  // 挤回去不会报错、不会崩，只会让它重新跟着容器右边缘跑：外层滚动条一进一出就让这条边的位置变
-  // （实测旧写法 9px；装了经典滚动条的环境是 15px），胶囊行余量也只剩三十来px、窄一点就整行换行。
+  // 说明句「多选＝任一命中」必须**自己一行**（筛选芯片后面那个 <p>），不能挤在胶囊那一行里。
+  // 挤进去不会报错、不会崩，只会让它跟着容器右边缘跑；胶囊行余量也只剩三十来px、窄一点就整行换行。
   // 位置这种东西没法在这里量，所以按结构核：它在不在 .dsm-filters 里面。
   const filterRow = recorded.find((node) => String(node.props?.className) === 'dsm-filters')
   assert.equal(strings(filterRow).includes('list.filter.hint'), false, '说明句不在胶囊那一行里')
-  const searchRow = recorded.find((node) => String(node.props?.className) === 'dsm-filterSearch')
-  assert.ok(strings(searchRow).includes('list.filter.hint'), '说明句与胶囊不在同一行（都在固定的左边界上）')
-  // 搜索框本身：值的来源是筛选状态，占位符与无障碍名字走字典（它们是 props，strings() 看不见）
+  const treeFilters = recorded.find((node) => String(node.props?.className) === 'dsm-treeFilters')
+  assert.ok(strings(treeFilters).includes('list.filter.hintAny'), '说明句在项目树的筛选段里、紧跟胶囊')
+  // 搜索框本身：值的来源是筛选状态，占位符与无障碍名字走字典（它们是 props，strings() 看不见）。
+  // 它现在在卡头（筛选芯片搬进左栏之后，卡头只留这一个列表工具）。
   const search = recorded.find((node) => String(node.props?.className) === 'dsm-search')
   assert.equal(search?.props?.type, 'search', '搜索框是原生 input[type=search]（自带清空按钮）')
   assert.equal(search?.props?.placeholder, 'list.filter.search', '占位符说明它搜什么')
   assert.equal(search?.props?.['aria-label'], 'list.filter.search', '搜索框要有无障碍名字')
+  const cardHead = recorded.find((node) => String(node.props?.className) === 'dsm-cardHead')
   assert.ok(
-    (Array.isArray(searchRow.props.children) ? searchRow.props.children : [searchRow.props.children]).includes(search),
-    '搜索框在搜索那一行里',
+    elementsOf(cardHead).some((node) => String(node.props?.className) === 'dsm-search'),
+    '搜索框在卡头里',
   )
+  // 卡头不再有项目选择器：项目与筛选都在左栏
+  assert.equal(recorded.some((node) => String(node.props?.className ?? '').includes('dsm-projectValue')), false, '卡头没有项目选择器')
 })
 
-test('客户端产物：「会话」页一条都没筛出来时，那个固定的列表框还在（高度不跟着筛选变）', { skip }, () => {
-  // 列表高度是固定的（styles.ts 的 .dsm-list）：筛空时如果把框换成一句 <p>，这一页的高度就跟着筛选
-  // 变，设置弹窗外层那条滚动条又会一进一出，占位滚动条的环境里卡片右边缘就跟着挪 15px。所以空态必须
-  // 画在框**里面**。这里种一个库里没有的类别（夹具里没有"活动中"的会话）来走到那个分支。
+test('客户端产物：「会话」页一条都没筛出来时，那个吃满高度的列表框还在（表头不跟着消失）', { skip }, () => {
+  // 主栏那一版列表吃满卡片剩下的高度、自己滚（styles.ts 的 .dsm-listFill）。筛空时如果把框换成一句
+  // <p>，表头与那片区域就一起收掉了：表头是列的说明，不该因为"这一筛没命中"而消失。所以空态必须画在
+  // 框**里面**。这里种一个库里没有的类别（夹具里没有"活动中"的会话）来走到那个分支。
   const state = {
     sessionsRoot: '/home/u/.dsh/sessions',
     registryPath: '/home/u/.dsh/registry.json',
@@ -2053,8 +2064,8 @@ test('客户端产物：「会话」页一条都没筛出来时，那个固定�
   assert.ok(strings(empties[0]).includes('list.noMatch'), '空态说的是"没有符合筛选条件的会话"')
   // 空态必须是框的子节点，不能是它的兄弟（换成兄弟就等于把框撤了）
   assert.ok(
-    String(lists[0].props.className).includes('dsm-listFixed'),
-    '「会话」页那个框还得是固定高度的那一款（其余两页的列表照旧按内容长）',
+    String(lists[0].props.className).includes('dsm-listFill'),
+    '「会话」页那个框是吃满高度、自己滚的那一款（其余两页的列表照旧按内容长）',
   )
   // 空态是共用组件（sessionList.tsx 的 SessionListEmpty），所以要看的是**它渲染出来**的 .dsm-empty
    // 是不是落在这个框里面——函数组件得带着 props 调一次才看得见（同本文件其它遍历）。
@@ -2910,6 +2921,7 @@ test('客户端产物：行上的「内容」落在行尾那一格，不在标�
     const parts = elementsOf(row)
     const pick = (name) => parts.filter((node) => classesOf(node).includes(name))
     assert.equal(pick('dsm-rowInspect').length, 1, '一行一枚「内容」')
+    assert.equal(pick('dsm-rowDetail').length, 1, '一行一枚「详情」')
     const label = pick('dsm-rowLabel')
     assert.equal(label.length, 1, '标题与标签同占一格')
     assert.equal(
@@ -2925,7 +2937,11 @@ test('客户端产物：行上的「内容」落在行尾那一格，不在标�
     )
     assert.ok(
       elementsOf(slot[0]).some((node) => classesOf(node).includes('dsm-rowInspect')),
-      '动作与时刻同格：悬停时靠叠格子互相顶替，行宽不动',
+      '「内容」与时刻同格：悬停时靠叠格子互相顶替，行宽不动',
+    )
+    assert.ok(
+      elementsOf(slot[0]).some((node) => classesOf(node).includes('dsm-rowDetail')),
+      '「详情」也在同一格的动作组里',
     )
   }
 })
@@ -3050,7 +3066,10 @@ test('客户端产物：一个组都没有时不摆折叠工具栏', { skip }, (
   )
 })
 
-test('客户端产物：「会话」页也按目录分组、也能折叠，勾选口径与传输页一致', { skip }, () => {
+test('客户端产物：「会话」页平铺——项目树代替组头，整组处理走「选项目 → 全选」', { skip }, () => {
+  // 平铺之后组头与折叠工具栏都不画了：组的边界由「项目」那一列与左侧项目树表达，排序才能跨项目。
+  // "把这个旧项目的会话都归档"因此变成两步：在树上点一个项目，再按那对「全选 / 清空」。树上的整组
+  // 勾选框是同一个动作的快捷入口（作用面同样是筛出来的那些）。点一下不会重新渲染，所以这里只核结构。
   const state = {
     sessionsRoot: '/home/u/.dsh/sessions',
     registryPath: '/home/u/.dsh/registry.json',
@@ -3064,44 +3083,74 @@ test('客户端产物：「会话」页也按目录分组、也能折叠，勾�
     ],
     workspaces: [{ id: 'w1', path: '/home/u/dev/alpha', title: '工作区甲', sessionIds: ['a-1'] }],
   }
-  // 会话页的空数组状态按顺序是：勾选集、筛选条（useSessionFilter）、失败的删除记录、折叠状态
-  // （useGroupCollapse 在 groups 之后）。种子按这个顺序发，错一位就会当场断言失败，不会静默过。
-  const alpha = '/home/u/dev/alpha'
-  // 筛「空白」→ 列出来的是 a-2 与 b-1（两组），把 alpha 那组收起来
-  const { registrations, recorded } = mount({ state, panel: 'manage', arrays: [[], ['blank'], [], [alpha]] })
+  const { registrations, recorded } = mount({ state, panel: 'manage', arrays: [[], ['blank']] })
   const text = strings(registrations[0].component(registrations[0].registration.inject()))
 
   const rowIds = namedElements(recorded, 'SessionRow').map((node) => node.props.session.id)
-  assert.deepEqual(rowIds, ['b-1'], '收起的那一组不画行，另一组照画')
-  const heads = recorded.filter((node) => String(node.props?.className) === 'dsm-groupHead')
-  assert.equal(heads.length, 2, '组头一个都不少')
-  assert.ok(text.includes('list.sessionsInDir:{"count":1}'), '收起的组头照样报"这组几条"')
-  assert.ok(text.includes('list.shown:{"shown":2,"total":4}'), '折叠不改"列出来了哪些"（仍是 2 条）')
-  assert.ok(text.includes('工作区甲'), '组头写工作区标题')
-  // 组头那一下就是整组勾选（勾选集是空的，于是两个组头的选框都没勾上）
-  const boxes = heads.map((node) => elementsOf(node).find((child) => child.type === 'input'))
-  assert.deepEqual(boxes.map((node) => node.props.checked), [false, false], '整组勾选的选框在组头上')
+  assert.deepEqual(rowIds, ['a-2', 'b-1'], '筛「空白」之后跨两个项目的两条都在')
+  assert.equal(
+    recorded.filter((node) => String(node.props?.className) === 'dsm-groupHead').length,
+    0,
+    '组头不画了',
+  )
+  assert.equal(
+    recorded.filter((node) => String(node.props?.className) === 'dsm-groupTools').length,
+    0,
+    '折叠工具栏也不在会话页上了（它仍然属于导出页）',
+  )
 
-  // 折叠工具栏也在，且与传输页同一个组件
-  const bar = recorded.find((node) => String(node.props?.className) === 'dsm-groupTools')
-  assert.ok(bar, '会话页也给「全部收起 / 全部展开」')
+  // 左栏：全部项目 + 两个项目，各带条数；默认选中「全部项目」
+  const tree = recorded.find((node) => String(node.props?.className ?? '').split(/\s+/).includes('dsm-tree'))
+  assert.ok(tree, '左边有项目与筛选那一栏')
+  assert.equal(tree.props['aria-label'], 'list.tree.label')
+  assert.equal(tree.props.id, 'dsm-tree', '卡头那枚开关用 aria-controls 指着它')
+  const treeRows = recorded.filter((node) => String(node.props?.className) === 'dsm-treeRow')
+  assert.deepEqual(treeRows.map((node) => strings(node).join('|')), [
+    'list.project.all',
+    '工作区甲',
+    '/home/u/dev/beta',
+  ], '项目树按"全部 + 每个项目"排')
   assert.deepEqual(
-    elementsOf(bar)
-      .filter((node) => node.type === 'button')
-      .map((node) => node.props.disabled),
-    [false, false],
-    '收了一组：两个按钮都能用',
+    recorded
+      .filter((node) => String(node.props?.className) === 'dsm-treeCount')
+      .map((node) => String(node.props.children)),
+    ['4', '2', '2'],
+    '每一行右端的条数（全部 / 工作区甲 / 未登记目录）',
+  )
+  assert.equal(treeRows[0].props['data-selected'], 'true', '默认选中「全部项目」')
+  // 每个项目行都有一枚整组勾选框（全部项目那一行没有：全选由卡头那一对负责）
+  assert.equal(namedElements(recorded, 'GroupCheckbox').length, 2, '两个项目各一枚整组勾选框')
+  assert.ok(
+    namedElements(recorded, 'GroupCheckbox').every((node) => String(node.props.label).startsWith('list.selectGroup')),
+    '勾选框的无障碍名字点名这个项目',
+  )
+
+  // 每一行的「项目」那一格：在册项目用工作区标题，没登记的目录用路径
+  assert.ok(text.includes('工作区甲'), '在册项目那一格写工作区标题')
+  assert.ok(text.includes('/home/u/dev/beta'), '没登记的目录那一格写路径')
+  assert.ok(text.includes('list.shown:{"shown":2,"total":4}'), '筛过之后报"显示 2 / 4 条"')
+  // 卡头这枚开关只在窄屏出现（CSS 藏起来），它是项目栏收成浮层之后唯一的入口
+  const toggle = recorded.find((node) => String(node.props?.className) === 'dsm-treeToggle')
+  assert.ok(toggle, '卡头有项目栏的窄屏开关')
+  assert.equal(toggle.props['aria-expanded'], false, '默认收起')
+  assert.equal(toggle.props['aria-controls'], 'dsm-tree', '开关点名它展开的是哪一栏')
+
+  // 右栏详情：宽屏一直摆着，没选会话时是一句提示；行尾多一枚「详情」，它才是右栏的入口
+  const inspector = recorded.find((node) =>
+    String(node.props?.className ?? '').split(/\s+/).includes('dsm-inspector'),
+  )
+  assert.ok(inspector, '工作台里有右栏')
+  assert.equal(inspector.props.id, 'dsm-inspector')
+  assert.equal(inspector.props['data-empty'], 'true', '默认没选会话')
+  assert.ok(strings(inspector).includes('manage.detail.empty.title'), '没选时给一句"选一条会话"')
+  assert.equal(
+    recorded.filter((node) => String(node.props?.className) === 'dsm-rowDetail').length,
+    rowIds.length,
+    '每一行都有一枚「详情」',
   )
 })
 
-// ---- 「说明」页（词条与边界条件）----
-//
-// 这一页的存在理由是"把动作页上的散文搬走"，所以它的验收点有两个：词条**复用了行上那几枚标签的文案**
-// （同一件事在两处各写一份就会漂），以及边界条件确实讲全了（分类、每页做什么、数据从哪来、常见疑问）。
-// 四张卡片：原先"会碰什么盘"那节的独有内容并进常见疑问，与既有问答重复的那三条不再各写一份。
-// 动作页那边由上面那条"每段最多两行"的预算盯着。
-
-test('客户端产物：「说明」页把分类词条、每页做什么与边界条件摆出来', { skip }, () => {
+test('客户端产物：「说明」弹窗把分类词条、每页做什么与边界条件摆出来', { skip }, () => {
   const state = {
     sessionsRoot: '/home/u/.dsh/sessions',
     registryPath: '/home/u/.dsh/registry.json',
@@ -3112,6 +3161,10 @@ test('客户端产物：「说明」页把分类词条、每页做什么与边�
   }
   const { registrations, recorded } = mount({ state, panel: 'help' })
   const text = strings(registrations[0].component(registrations[0].registration.inject()))
+  assert.ok(
+    recorded.some((node) => String(node.props?.className ?? '').includes('dsm-helpDialog')),
+    '说明从页头那枚「?」开成弹窗，不再占一枚页签',
+  )
 
   for (const key of ['help.categories.title', 'help.tabs.title', 'help.where.title', 'help.faq.title']) {
     assert.ok(text.includes(key), `缺少小节「${key}」`)
@@ -3145,9 +3198,9 @@ test('客户端产物：「说明」页把分类词条、每页做什么与边�
     assert.ok(text.includes(key), `常见疑问缺少「${key}」`)
   }
   // 四张卡片：会碰什么盘那节撤了，独有那三条（备份与回滚、子智能体跟着父会话走、包里有什么）并入常见疑问
-  assert.ok(!text.includes('helpDiskTitle'), '说明页不该再有单独的一张"会碰什么盘"')
+  assert.ok(!text.includes('helpDiskTitle'), '说明弹窗不该再有单独的一张"会碰什么盘"')
   // 文案本身是纯文本（不能摆 Markdown 星号）由上面那条字典检查盯着：这里渲染的是键名，看不出值
-  // 说明页不该长成一个"什么都往里塞"的垃圾桶：正文段落本身就是词条，没有额外的大段散文
+  // 说明弹窗不该长成一个"什么都往里塞"的垃圾桶：正文段落本身就是词条，没有额外的大段散文
   assert.ok(text.includes('help.hint'), '页首要有一句话说明这一页讲什么')
 })
 
@@ -5460,7 +5513,7 @@ test('客户端产物：一轮一节折得起来，标题自己画折叠标记',
       { id: 's-1', title: 'T' },
       { totalEvents: 5, cursor: 0, problems: [], problemCount: 0 },
     ],
-    arrays: [...Array(4).fill([]), items],
+    arrays: [...Array(3).fill([]), items],
   })
   // 种子在**第一遍**走树时被消费（假钩子是一次性的），所以下面只看这一遍记下来的元素，
   // 不再走第二遍——第二遍里 `inspecting` 已经拿不到种子，弹窗根本不会出现。

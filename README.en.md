@@ -71,7 +71,7 @@ one-line bump at that point.
 
 ## Usage
 
-### Settings → Session management
+### Sidebar → Session management
 
 Every action that can take a while **reports progress**: the dialog body of migration, deletion, rollback and
 import (preview and apply), the action row of archiving, and the page header during the library scan all say
@@ -85,30 +85,34 @@ M" to report.
 
 **Sessions** — manage the whole library row by row
 
-- The list is **grouped by directory** with foldable headers (**Collapse all / Expand all** sit above the
-  list), and clicking a header toggles that whole group — so
-  "archive every session of this old project" is one click. A header carries **only the name of its
-  group**: the workspace title, or for a directory no workspace registers **the project name** (the last
-  segment of its project identity — `dsh-session-manager` — when it has a git remote, and the local path
-  when it does not), so rows no longer repeat the owner; **the project identity and the local path both
-  live in that name's tooltip** (two lines: identity first, path below — the path is what tells two
-  clones of one repository apart), a directory whose identity is known also carries a small **host tag**
-  (`github.com`, `git.hehome.xyz`) after the name, so a glance shows which directories are repositories the
-  identity knows about, and that tag's own tooltip gives the full identity, and a session sitting in the
-  shell sidebar's Ungrouped group carries a small "Ungrouped" tag (the header is the directory, the tag says
-  where the shell puts the row). **Subagent sessions are indented one level under their parent** (they
-  follow it; when the parent lives in another directory group the row stays in its own group, indented, and
-  says where the parent is), so which row belongs to which never has to be guessed from tags. Every row
-  shows the title, the byte count and the creation time. Sessions the
-  host sidebar cannot show **are listed here** (the sidebar cannot reach them), each carrying a tag saying
-  why: `subagent` / `blank` / `archived`, plus `active` for a session still live in host memory;
-- **Filter**: a row of small chips — subagent / blank / archived / ungrouped / active, each with the
-  count in the library. Tick several to see several kinds (multiple = either), **All** clears them. The
-  line below is a **title / id search box** (both are searched: "name it by id" and "the one where I asked
-  about that" are both everyday needs). The header then reports "showing N / M", and **Select all picks
-  what is listed right now** (filter to blank, select all, delete them), with **Clear** sitting next to it
-  (it empties the whole tick set, so a partial tick can be cleared too), while ticking survives switching
-  filters;
+- On the left is the **project rail**: All projects plus one row per directory (the workspace title, or
+  for a directory no workspace registers **the project name** — the last segment of its git identity, or
+  the local path when it has none), each with its whole-library count. Clicking a name shows only that
+  project; hovering a row reveals a checkbox that selects that project's listed sessions in one click, so
+  "archive every session of this old project" does not need row-by-row ticking. **The project identity and
+  the local path both live in the name's tooltip** (identity first, path below — the path is what tells two
+  clones of one repository apart). On a narrow window the rail becomes a **Projects and filters** drawer.
+- On the right is a **flat table**: one row per session with six cells (check, marker, title and tags,
+  project, size, time). The title / size / time headers sort, time newest first by default, and the header
+  sticks while the list scrolls. The **Project** column names the owner. **Subagents are no longer indented
+  under their parent**: they carry a `subagent` tag, and when the parent lives in another project the row
+  says where it is. Sessions the host sidebar cannot show **are listed here** (the sidebar cannot reach
+  them), each carrying a tag saying why: `subagent` / `blank` / `archived`, plus `active` for a session
+  still live in host memory; a session in the shell sidebar's Ungrouped group carries an `ungrouped` tag;
+- **Right pane**: hovering a row end shows **Details** and **Content**. Details fills the right pane with
+  the **first two turns** (the human message and the answer, four lines each), then the title, project,
+  directory, created time, size, file count and single-row actions (open full content, archive /
+  unarchive, select / deselect); Content opens the full timeline directly. The opening reads one page of
+  the log, not the whole timeline. On wide screens the pane stays put with a hint until a session is
+  picked; below 1180px of workbench width it becomes a drawer from the right, closed with Close. The row
+  the pane is showing gets a brand-colored edge.
+- **Filter**: a row of small chips at the bottom of the project rail — subagent / blank / archived /
+  ungrouped / active, each with the count in the library. Tick several to see several kinds (multiple =
+  either), **All** clears them. The search box sits above the table (both title and id are searched: "name
+  it by id" and "the one where I asked about that" are both everyday needs). The header then reports
+  "showing N / M", and **Select all picks what is listed right now** (filter to blank, select all, delete
+  them), with **Clear** sitting next to it (it empties the whole tick set, so a partial tick can be cleared
+  too), while ticking survives switching filters;
 - **Archive / Unarchive**: tick rows and put them away or bring them back in one click. It goes through
   the host's own archiving capability and takes effect **immediately** — the sidebar follows right away,
   no restart. Ticking a parent session archives its subagents with it (the family is the unit; why, see
@@ -231,6 +235,10 @@ M" to report.
 
 **Transfer** — take sessions away, bring them back
 
+On wide screens Export and Import sit **side by side**: the export list (wide) on the left, the import
+fields (narrow, at least 320px) on the right; at 1600 the 1080 body splits 626 + 433, so import no longer
+falls below the fold. Below 900 they stack.
+
 - Rows show a session's **title**, with the full title and the id on hover: a uuid tells a human nothing,
   and people pick sessions by "the one where I asked about that"; a session with no title falls back to
   its id. Both the export list and the **Sessions** tab take the whole library, sidebar-hidden sessions
@@ -286,13 +294,13 @@ the migration cleaning up an emptied source project directory). A backup from a 
 overwriting this machine’s copy offers **Restore**: it only moves the backed-up copy back — those two never
 touched the registry.
 
-**Help** — the vocabulary and the costs in one place: the category dictionary (visible / subagent / blank /
-archived / active / Ungrouped, where Ungrouped is exactly the shell sidebar's Ungrouped group: nothing claims
-it and the sidebar shows it), what the five tabs do, which files the actions touch (backups, roll back vs
-restore, when the sidebar follows), where the data comes from (the library and the registry paths), and the
-common questions (which sessions count as Ungrouped, why a deleted session is still in the sidebar, when a
-migration asks for a restart, how to close a session tagged active). The action tabs
-(Sessions / Transfer / Sync / Backups) keep only the decision at hand, so each explanation there stays
+The **?** in the page header — the vocabulary and the costs in one dialog: the category dictionary (visible /
+subagent / blank / archived / active / Ungrouped, where Ungrouped is exactly the shell sidebar's Ungrouped
+group: nothing claims it and the sidebar shows it), what the four tabs do, which files the actions touch
+(backups, roll back vs restore, when the sidebar follows), where the data comes from (the library and the
+registry paths), and the common questions (which sessions count as Ungrouped, why a deleted session is still
+in the sidebar, when a migration asks for a restart, how to close a session tagged active). The four action
+tabs (Sessions / Transfer / Sync / Backups) keep only the decision at hand, so each explanation there stays
 within two lines.
 
 A host without the `webServer` service (tools-only front ends) still loads the plugin — the page simply

@@ -38,7 +38,7 @@
   界面与工具返回值。
 - [生效提示先说在事前，且只在需要重启时说话](../.agents/notes/implemented/architecture/2026-10-06-restart-notice-up-front-and-only-on-bad-news.md)：
   `/sync` 与 `sync_sessions` 的预演一律按探测回答"执行时会不会需要重启"（迁移那条路本来就是），界面在
-  确认弹窗里先说、落地后只在需要重启时留一条 warn 横幅；长解释只在说明页的 FAQ。
+  确认弹窗里先说、落地后只在需要重启时留一条 warn 横幅；长解释只在说明弹窗的 FAQ。
 
 ## 文件格式与搬运
 
@@ -196,8 +196,10 @@
 
 ## 列表、筛选与分组
 
-- [列整库的两个分页按目录分组](../.agents/notes/implemented/architecture/2026-09-27-group-by-directory-not-workspace.md)：
-  分组键是 `cwd`，工作区名称只是路径的标签。
+- [列整库的分页按目录分组](../.agents/notes/implemented/architecture/2026-09-27-group-by-directory-not-workspace.md)：
+  分组键是 `cwd`，工作区名称只是路径的标签。今天还分组的是「传输」页与同步预演；「会话」页改成平铺
+  表格（项目是一列）+ 左侧项目树（项目与筛选、整组勾选），见
+  [全宽工作台那篇](../.agents/notes/implemented/architecture/2026-11-12-session-page-is-a-full-width-workbench.md)。
 - [「未分组」就是外壳那一组](../.agents/notes/implemented/bug-fix/2026-09-28-ungrouped-means-the-sidebar-group.md)：
   一个名字一个定义，三处读同一个结论。
 - [「认领」是宿主那份成员表](../.agents/notes/implemented/bug-fix/2026-10-04-accounted-means-the-hosts-membership.md)：
@@ -214,7 +216,7 @@
 - [筛选按「它是什么」判](../.agents/notes/implemented/architecture/2026-09-28-filters-read-facts-not-labels.md)：
   读原始事实，不读 `hidden`；「未分组」是唯一例外。
 - [折叠只改「画不画」](../.agents/notes/implemented/architecture/2026-09-28-collapsing-changes-only-the-drawing.md)：
-  收起来的是显示，不是「算不算」。
+  收起来的是显示，不是「算不算」。这条现在作用于「传输」页：会话页平铺之后没有组头与折叠。
 - [两级在一眼之内分得开](../.agents/notes/implemented/architecture/2026-09-27-two-levels-in-one-glance.md)：
   底色 / 缩进 / 字号 / 图形四层。
 - [标题来自日志事件，id 退到悬浮提示](../.agents/notes/implemented/architecture/2026-09-27-session-title-comes-from-an-event.md)：
@@ -268,11 +270,15 @@
   `Button` / `Input` / `Checkbox` / `Tag` / `SegmentedControl` 的观感归官方那几份 CSS module，本页
   CSS 只留"这一页怎么摆它"的布局挂钩；官方 `Tag` 不转发 `title`，悬浮提示挂包着它的那层 `span`，
   `dsm-tag` 这个挂钩挂在两层中的一层，漏挂只会让布局规格静默失效。
-- [页头照内建设置页的规格](../.agents/notes/implemented/architecture/2026-09-28-page-header-matches-the-builtin-settings.md)
+- [会话管理页从设置区块变成全宽工作台](../.agents/notes/implemented/architecture/2026-11-12-session-page-is-a-full-width-workbench.md)：
+  从侧栏进来之后内容列占满主栏、页面本身不滚；页头是一条工具条（标题 / 页签 / 刷新 / 插件设置），
+  库路径与版本收进底部状态栏；「会话」页平铺、表头吸顶、动作行钉底。它取代了下面那条在设置弹窗里
+  成立的两行页头。
+- [页头照内建设置页的规格](../.agents/notes/implemented/architecture/2026-09-28-page-header-matches-the-builtin-settings.md)（已被上一条取代）
   与 [正文与次要文字照内建设置页的两档](../.agents/notes/implemented/architecture/2026-10-07-body-type-matches-the-builtin-settings.md)、
   [版面不跟着滚动条动](../.agents/notes/implemented/architecture/2026-09-28-layout-does-not-move-with-the-scrollbar.md)：
-  页头没有官方原语可用，规格只能去真实设置页里量；页头里不放动作，页面级的「刷新」挂页签行的右端。
-  正文与次要文字是内建那两档（14px/20px 与 12px/18px），行高不跟着字号放大。
+  标题那一档仍是 16px/500/24px；正文与次要文字是内建那两档（14px/20px 与 12px/18px），行高不跟着
+  字号放大。那篇里的"页头两行、刷新挂页签行右端"只适用于设置弹窗里的一格。
 - [弹窗正文层自己写字号](../.agents/notes/implemented/bug-fix/2026-10-12-dialog-body-declares-its-own-type.md)：
   官方 `Modal` portal 到 `document.body`，落在那套 `.dsm-root` 之外——弹窗正文层不写字号就继承文档根
   的 16px（会话内容视图的计数、事件卡脚注、错误句都掉在那儿）。
@@ -299,7 +305,7 @@
   `/state` 的每条工作区报一次 `exists`，目标候选据此把"只剩一条登记的"标出来并置灰。
 - [动作页只留当下要做的决定](../.agents/notes/implemented/architecture/2026-09-28-help-page-owns-the-glossary.md)：
   词条进「说明」页，并钉了一条两行的上限。
-- [说明页 FAQ 的答案不被挤成零宽](../.agents/notes/implemented/bug-fix/2026-10-07-faq-answers-collapse-to-zero-width.md)：
+- [说明弹窗 FAQ 的答案不被挤成零宽](../.agents/notes/implemented/bug-fix/2026-10-07-faq-answers-collapse-to-zero-width.md)：
   FAQ 是"问题一行、答案一行"，那一栏自己声明单列，不能沿用词条表那套两列网格。
 - [预演表的状态列只放短标签，整句挂 title](../.agents/notes/implemented/bug-fix/2026-10-03-status-column-holds-a-short-tag.md)：
   窄列装不下整句时改文案与列宽，不是让标签顶到邻居身上；三段清单同形，状态与会话名分成两列。

@@ -41,6 +41,8 @@ export interface RowSession extends SessionFacts {
   readonly cwd?: string
   readonly createdAt: number
   readonly bytes: number
+  /** 子智能体挂在哪条会话下面（平铺之后用来提示"父在别的项目里"，见 planRows.parentDirNote）。 */
+  readonly parentSession?: string
 }
 
 /** 一行的列组合：导出 / 挑选是五列，会话页多一格归属。 */
@@ -183,6 +185,17 @@ export interface SessionRowProps {
   /** 「内容」那枚按钮的文案与悬浮提示（都由调用方翻好）。 */
   inspectLabel?: string
   inspectTip?: string
+  /**
+   * 行尾第二枚动作：「详情」——把这一条交给右栏（`SessionInspector`），而不是打开完整时间线。
+   *
+   * 与「内容」并排出现：两个动作回答的是两件事（"快速看一眼"与"读完整日志"），挤成一枚会让人
+   * 以为右栏就是完整日志。两枚都挡掉 `<label>` 的默认动作，点它们不改变勾选。
+   */
+  onOpenDetail?: () => void
+  detailLabel?: string
+  detailTip?: string
+  /** 这一行是不是右栏正开着的那一条：给行加一层底色，看右栏时知道它对应哪一行。 */
+  opened?: boolean
   t: Translate
 }
 
@@ -200,13 +213,20 @@ export function SessionRow({
   onInspect,
   inspectLabel,
   inspectTip,
+  onOpenDetail,
+  detailLabel,
+  detailTip,
+  opened = false,
   t,
 }: SessionRowProps): React.ReactElement {
   // 行上显示标题、id 退到悬浮提示（见 planRows.sessionLabel）。
   const label = sessionLabel(session)
   const tags = sessionTags(session, { ungrouped: ungroupedTag })
   return (
-    <label className={`${ROW_CLASS[variant]}${nestClass(depth)}`}>
+    <label
+      className={`${ROW_CLASS[variant]}${nestClass(depth)}`}
+      {...(opened ? { 'data-opened': 'true' } : {})}
+    >
       {/*
         勾选框走官方 `Checkbox`：`label` 给空串——这一行自己有标题（右侧那一格），可见文案再由
         Checkbox 画一遍就是重复；无障碍名字因此靠外面的 `<label className="dsm-row...">` 兜底
@@ -244,33 +264,53 @@ export function SessionRow({
         )}
       </span>
       {owner !== undefined && (
-        <span className="dsm-meta" title={session.cwd ?? ''}>
+        <span className="dsm-meta dsm-owner" title={session.cwd ?? ''}>
           {owner}
         </span>
       )}
       <span className="dsm-meta">{formatBytes(session.bytes)}</span>
-      {onInspect === undefined ? (
+      {onInspect === undefined && onOpenDetail === undefined ? (
         <span className="dsm-meta">{formatTime(session.createdAt)}</span>
       ) : (
         /*
-         * 行尾那一格：时刻与「内容」叠在同一个格子里（见 `.dsm-slot` 的注释），只有给得出
-         * `onInspect` 的行才这么摆——别的页（导出 / 迁移挑选 / 计划清单）仍旧只有时刻一格。
+         * 行尾那一格：时刻与行上的动作叠在同一个格子里（见 `.dsm-slot` 的注释），只有给得出动作的
+         * 行才这么摆——别的页（导出 / 迁移挑选 / 计划清单）仍旧只有时刻一格。
+         *
+         * 动作装在一个 `.dsm-slotActions` 里：两枚按钮并排，整组一起出现在悬停时；各自再挡掉
+         * `<label>` 的默认动作（它会把点击转给里面的勾选框）。
          */
         <span className="dsm-meta dsm-slot">
           <span className="dsm-time">{formatTime(session.createdAt)}</span>
-          <button
-            type="button"
-            className="dsm-rowInspect"
-            title={inspectTip}
-            onClick={(event) => {
-              // 先挡掉 `<label>` 的默认动作（它会把这次点击转给里面的勾选框），再只做"打开内容"。
-              event.preventDefault()
-              event.stopPropagation()
-              onInspect()
-            }}
-          >
-            {inspectLabel ?? t('manage.transcript.open')}
-          </button>
+          <span className="dsm-slotActions">
+            {onOpenDetail !== undefined && (
+              <button
+                type="button"
+                className="dsm-rowDetail"
+                title={detailTip}
+                onClick={(event) => {
+                  event.preventDefault()
+                  event.stopPropagation()
+                  onOpenDetail()
+                }}
+              >
+                {detailLabel ?? t('manage.detail.open')}
+              </button>
+            )}
+            {onInspect !== undefined && (
+              <button
+                type="button"
+                className="dsm-rowInspect"
+                title={inspectTip}
+                onClick={(event) => {
+                  event.preventDefault()
+                  event.stopPropagation()
+                  onInspect()
+                }}
+              >
+                {inspectLabel ?? t('manage.transcript.open')}
+              </button>
+            )}
+          </span>
         </span>
       )}
     </label>
@@ -633,15 +673,20 @@ export function SessionGroupTools({ collapse, t }: { collapse: GroupCollapse; t:
  *
  * @param fixed 这个列表会不会随筛选变行数。会的话高度必须固定（见 styles.ts 的 `.dsm-listFixed`）：
  *   框一变矮，整页跟着变矮，设置弹窗外层那条滚动条就一进一出，占位滚动条的环境里整个卡片会横移 15px。
+ *   主栏那一版（`.dsm-listFill`）不用这一档：它自己就是那一页的滚动视口，高度由卡片剩余空间给。
+ * @param fill 列表吃掉卡片剩下的高度，自己滚（主栏「会话」页）。与 `fixed` 互斥。
  */
 export function SessionListBox({
   fixed = false,
+  fill = false,
   children,
 }: {
   fixed?: boolean
+  fill?: boolean
   children: React.ReactNode
 }): React.ReactElement {
-  return <div className={fixed ? 'dsm-list dsm-listFixed' : 'dsm-list'}>{children}</div>
+  const classes = ['dsm-list', fixed ? 'dsm-listFixed' : '', fill ? 'dsm-listFill' : ''].filter(Boolean).join(' ')
+  return <div className={classes}>{children}</div>
 }
 
 /** 框里的空态。放在框**里面**，框才不会因为"没内容"而消失。 */
@@ -712,51 +757,70 @@ export interface SessionFilterBarProps {
 }
 
 /**
+ * 一排类别芯片：`筛选` + `全部` + 每类一枚（带条数）。
+ *
+ * 从 [SessionFilterBar] 拆出来，是因为它现在有两个落点：「会话」页在左侧项目树里，「传输」页仍在
+ * 列表上方那一行。拆的是**渲染**，状态仍由页面的 `useSessionFilter()` 持有——两处读同一份。
+ */
+export function SessionFilterChips({ keys, filter, t }: SessionFilterBarProps): React.ReactElement {
+  return (
+    <div className="dsm-filters">
+      <span className="dsm-hint">{t('list.filter.label')}</span>
+      <button
+        type="button"
+        className="dsm-filter"
+        aria-pressed={filter.filters.length === 0}
+        onClick={filter.clear}
+      >
+        {t('list.filter.all')}
+      </button>
+      {keys.map((key) => (
+        <button
+          key={key}
+          type="button"
+          className="dsm-filter"
+          aria-pressed={filter.filters.includes(key)}
+          title={t(CHIP_LABELS[key].tip)}
+          onClick={() => filter.toggle(key)}
+        >
+          {t(CHIP_LABELS[key].key)}
+          <span className="dsm-filterCount">{filter.counts[key]}</span>
+        </button>
+      ))}
+    </div>
+  )
+}
+
+/** 搜索框：占位符与无障碍名字都走字典；值来自同一个筛选状态。 */
+export function SessionSearch({ filter, t }: { filter: SessionFilter; t: Translate }): React.ReactElement {
+  return (
+    <input
+      className="dsm-search"
+      type="search"
+      value={filter.query}
+      placeholder={t('list.filter.search')}
+      aria-label={t('list.filter.search')}
+      onChange={(event) => filter.setQuery(event.target.value)}
+    />
+  )
+}
+
+/**
  * 筛选条：一排类别芯片，底下一行是搜索框与那句说明。
  *
  * 两行是刻意的：胶囊那一行只剩一百来 px 余量（窄 135px 就会换行），把那句说明或搜索框塞进去，容器
  * 一窄就整块换行、位置乱跳（见 styles.ts 的 .dsm-filters 注释）。搜索框单独一行则两边都固定。
+ *
+ * 「会话」页不用这条整条：它的芯片在左侧项目树里、搜索框在卡头，两处各取上面那一个组件。
  */
 export function SessionFilterBar({ keys, filter, t }: SessionFilterBarProps): React.ReactElement {
   const chips = keys.length > 0
   return (
     <>
-      {chips && (
-        <div className="dsm-filters">
-          <span className="dsm-hint">{t('list.filter.label')}</span>
-          <button
-            type="button"
-            className="dsm-filter"
-            aria-pressed={filter.filters.length === 0}
-            onClick={filter.clear}
-          >
-            {t('list.filter.all')}
-          </button>
-          {keys.map((key) => (
-            <button
-              key={key}
-              type="button"
-              className="dsm-filter"
-              aria-pressed={filter.filters.includes(key)}
-              title={t(CHIP_LABELS[key].tip)}
-              onClick={() => filter.toggle(key)}
-            >
-              {t(CHIP_LABELS[key].key)}
-              <span className="dsm-filterCount">{filter.counts[key]}</span>
-            </button>
-          ))}
-        </div>
-      )}
+      {chips && <SessionFilterChips keys={keys} filter={filter} t={t} />}
       <div className="dsm-filterSearch">
         {!chips && <span className="dsm-hint">{t('list.filter.label')}</span>}
-        <input
-          className="dsm-search"
-          type="search"
-          value={filter.query}
-          placeholder={t('list.filter.search')}
-          aria-label={t('list.filter.search')}
-          onChange={(event) => filter.setQuery(event.target.value)}
-        />
+        <SessionSearch filter={filter} t={t} />
         {chips && <span className="dsm-hint">{t('list.filter.hint')}</span>}
       </div>
     </>

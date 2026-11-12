@@ -40,12 +40,12 @@ export const CSS = `
  * 走这一层继承，凡是"比正文淡一档"的字都显式写成 12px/18px，而不是只换个颜色。
  */
 /*
- * 主栏那一版（侧栏入口点开之后的落点）：宿主给的容器是定高的 flex 列，且 overflow 是 hidden，滚动视口
- * 得由占位方自己给——设置弹窗那条路的滚动与内边距归设置外壳，所以 .dsm-root 自己没有滚动容器，这一层
- * 就是为"换一个落点"补上的那一段。内容列最宽 960px、居中，与主栏里别的页面同一个节奏。
+ * 主栏那一版（侧栏入口点开之后的落点）：宿主给的容器是定高的 flex 列，且 overflow 是 hidden。
+ *
+ * 这里的骨架从"一列限宽的内容"换成了"整页工作台"：内容列**占满**主栏，页面本身不滚；滚的是
+ * .dsm-panel（其余分页）或卡片里的列表（「会话」页）。960px 上下限那一版是给设置弹窗里的格子用的，
+ * 从侧栏进来整块主栏时，1920 的窗口两侧会各空出三百多像素。
  */
-/* 页头那一行：标题在左、动作在右（属性与 .dsm-head 那个纵向节奏一致，只是把标题与按钮排成一行）。 */
-.dsm-headRow { display: flex; align-items: center; gap: 12px; }
 /*
  * 插件页里这一包的那格配置（plugins.bundle.config）。形状照 dsh-context 那张配置卡：一组一个标题
  * （16/600），组里一行一件事——标签与说明在左、控件在右；组与组之间一条发丝线。控件外观仍归官方
@@ -79,26 +79,51 @@ export const CSS = `
   overflow: hidden;
   background: var(--dsw-alias-bg-base, #ffffff);
 }
-.dsm-globalScroll { flex: 1; min-height: 0; overflow: auto; scrollbar-gutter: stable; }
-.dsm-globalContent { max-width: 960px; margin: 0 auto; padding: 24px clamp(24px, 4vw, 48px) 48px; }
+.dsm-globalScroll { flex: 1; min-height: 0; overflow: hidden; display: flex; }
+.dsm-globalContent {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 18px 24px 16px;
+  box-sizing: border-box;
+}
 
 .dsm-root {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  flex: 1;
+  min-height: 0;
   color: var(--dsw-alias-label-primary, #1f2329);
   font-size: 14px;
   line-height: 20px;
 }
-.dsm-head { display: flex; flex-direction: column; gap: 12px; }
-.dsm-title { margin: 0; font-size: 16px; font-weight: 500; line-height: 24px; }
-.dsm-intro {
-  margin: 0;
-  font-size: 14px;
-  line-height: 22px;
-  color: var(--dsw-alias-label-tertiary, var(--dsw-alias-label-secondary, #646a73));
-}
+/*
+ * 页头是一条工具条：标题、页内分页、页面级动作同排。窄到放不下时换行（页签整排不拆），
+ * 行距收回 8px——换行之后两行仍是一块头，不该按块间距 16px 拉开。
+ */
+.dsm-head { display: flex; align-items: center; gap: 16px; row-gap: 8px; flex-wrap: wrap; flex: none; }
+.dsm-title { flex: none; margin: 0; font-size: 16px; font-weight: 500; line-height: 24px; }
+.dsm-tabs { flex: none; display: flex; min-width: 0; }
+.dsm-headAction { flex: none; }
 .dsm-spacer { flex: 1 1 auto; }
+/* 底部状态栏：库在哪、多少条、哪个构建。整页只此一行，不随分页切换。 */
+.dsm-statusBar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--dsw-alias-border-l1, rgba(0, 0, 0, 0.1));
+  color: var(--dsw-alias-label-tertiary, var(--dsw-alias-label-secondary, #646a73));
+  font-size: 12px;
+  line-height: 18px;
+}
+.dsm-statusLib { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dsm-statusVersion { flex: none; }
 /*
  * 分页本体那一层。它是 .dsm-root 的直接子元素（拿到的是 .dsm-root 给兄弟之间那份 16px），可卡片
  * 都在它**里面**——不写这一条，相邻两张卡片就只有各自的 1px 描边分得开，真实 dev GUI 里量到相邻两张
@@ -111,6 +136,40 @@ export const CSS = `
   display: flex;
   flex-direction: column;
   gap: 16px;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-gutter: stable;
+}
+/* 「会话」页不整页滚：卡片吃满高度，滚的是里面的表格。 */
+.dsm-panel[data-panel="manage"] { overflow: hidden; }
+/*
+ * 其余分页是表单与清单：内容限在可读宽度里居中（1080px），「会话」工作台仍然吃满。
+ * 不这么做的话，1600 窗口下一段同步说明会拉成一千二百多像素长的一行，表单控件全挤在左边。
+ */
+.dsm-panel[data-panel="transfer"],
+.dsm-panel[data-panel="sync"],
+.dsm-panel[data-panel="backup"] {
+  width: 100%;
+  max-width: 1080px;
+  align-self: center;
+}
+/*
+ * 「传输」在宽屏并排：左边是导出清单（它要宽），右边是导入字段（至少 320px）。1600 窗口下 1080 的
+ * 正文分成 629 + 435，导入卡不再落到首屏之外；窄到 900 以下两栏叠回去。
+ *
+ * 阈值读的是这一块自己的宽度（wrapper 上的容器查询），不是窗口：宿主侧栏收起时同一个窗口下
+ * 正文能宽出两百多像素。
+ */
+.dsm-transferWrap { container-type: inline-size; }
+.dsm-transferGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(320px, 0.9fr);
+  gap: 16px;
+  align-items: start;
+}
+@container (max-width: 900px) {
+  .dsm-transferGrid { grid-template-columns: minmax(0, 1fr); }
 }
 /*
  * 卡片外壳照官方卡片（内建「插件」页那张 .card）量出来的规格：**圆角 20px**、**1px 描边**、底色是表面白。
@@ -131,6 +190,8 @@ export const CSS = `
   flex-direction: column;
   gap: 10px;
 }
+/* 「会话」页那张卡片：吃满分页剩下的高度，头、筛选、动作行不动，中间的表自己滚。 */
+.dsm-cardFill { flex: 1; min-height: 0; overflow: hidden; }
 .dsm-cardHead { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .dsm-cardTitle { font-weight: 600; }
 /*
@@ -141,18 +202,6 @@ export const CSS = `
   font-size: 12px;
   line-height: 18px;
   color: var(--dsw-alias-label-secondary, #646a73);
-}
-/*
- * 页脚那枚版本徽标：这一页的右下角。字号比正文小一档（与内建设置页那些注脚同级），颜色取页内
- * 最静的那一档（label-tertiary，与页头那行说明同一个 token），靠右对齐——它是"这一页是哪个
- * 构建"的自述，不该跟内容抢注意力。
- */
-.dsm-version {
-  margin: 0;
-  text-align: right;
-  color: var(--dsw-alias-label-tertiary, var(--dsw-alias-label-secondary, #646a73));
-  font-size: 12px;
-  line-height: 18px;
 }
 /*
  * 说明页：词条（dt 词 / dd 解释）与问答共用一个两列网格。词比解释重一档，解释用次要灰；
@@ -398,6 +447,44 @@ export const CSS = `
  */
 .dsm-listFixed { height: min(420px, 42vh); }
 /*
+ * 主栏那一版：列表吃掉卡片剩下的高度，自己成为滚动视口。固定 420px 是给设置弹窗那一版的——
+ * 宽屏上会变成一条 1600×420 的横带，而且翻到下面时筛选条早滚走了。
+ */
+.dsm-listFill { flex: 1; min-height: 0; max-height: none; }
+/*
+ * 表头：列的说明，跟列表一起滚，但贴在框顶。必须不透明——滚过去的行不能从它背后透出来。
+ * 列宽与 .dsm-rowManage 逐字一致，两处改一处就会错位。
+ */
+.dsm-tableHead {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: 24px 16px minmax(120px, 1.4fr) 168px 84px 120px;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--dsw-alias-bg-layer-1, #fff);
+  border-bottom: 1px solid var(--dsw-alias-border-l1, rgba(0, 0, 0, 0.08));
+  color: var(--dsw-alias-label-secondary, #646a73);
+  font-size: 12px;
+  line-height: 18px;
+}
+.dsm-sort {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.dsm-sort:hover { color: var(--dsw-alias-label-primary, #1f2329); }
+.dsm-sort:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary, #3370ff); outline-offset: 2px; border-radius: 2px; }
+.dsm-sortStatic { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 数字与时间右对齐：表头与行里的值贴同一条边，列才读得成一张表。 */
+.dsm-sortNum { text-align: right; }
+/*
  * 勾选式列表行（导出列表 / 迁移挑选）：五列 = 勾选框、层级标记、标题、字节、时间。
  * 行里不再重复 cwd：它在组头上（导出）或字段上（迁移），重复一遍只会把标题挤窄。
  */
@@ -411,10 +498,11 @@ export const CSS = `
   cursor: pointer;
 }
 .dsm-row:last-child { border-bottom: none; }
-/*
- * 「会话」页那一行曾经多一列（"这条属于哪个工作区"）：那一页现在也按目录分组了，归属进了组头，
- * 行因此回到与导出列表同一个五列模板——那个类只剩"这是管理页的行"这个标记作用（测试拿它当选择器）。
- */
+/* 「会话」页那一行：勾选框、图形标记、标题与标签、项目、字节、时间（六列，与表头逐列对齐）。 */
+.dsm-rowManage { grid-template-columns: 24px 16px minmax(120px, 1.4fr) 168px 84px 120px; }
+.dsm-rowManage > .dsm-meta { text-align: right; }
+/* 「项目」那一格是文字，不跟着数字右对齐：它与表头一起从左边读。 */
+.dsm-rowManage > .dsm-owner { text-align: left; }
 /* 计划清单里那一行没有勾选框（清单不是勾选面），于是少一列，且它不可点。 */
 .dsm-rowPlan {
   grid-template-columns: 16px minmax(120px, 1.4fr) auto auto;
@@ -489,11 +577,18 @@ export const CSS = `
 .dsm-slot { display: grid; align-items: center; }
 .dsm-slot > * { grid-area: 1 / 1; justify-self: end; }
 /*
- * 行上那枚「内容」：它是个**动作**，不是标签——所以没有盒子（盒子是标签那套语法）、走 brand 色，
- * 平时 visibility: hidden（不进 tab 顺序；键盘落到这一行的勾选框时整行 :focus-within 再让它
- * 出场，那时 Tab 也够得着它）。它与时刻共用一个格子，见 .dsm-slot。
+ * 行尾那组动作（「详情」「内容」）与时刻叠在同一格：整组平时 visibility: hidden（不进 tab 顺序；
+ * 键盘落到这一行的勾选框时整行 :focus-within 再让它出场，那时 Tab 也够得着它们）。
+ *
+ * 两枚按钮放在一个 flex 容器里、整组控制显隐：只给按钮自己写 visibility 时，悬停规则会各自打架，
+ * 而且两枚都绝对定位在同一格里会互相盖住。
  */
-.dsm-rowInspect {
+.dsm-slotActions { display: flex; align-items: center; gap: 8px; visibility: hidden; }
+/*
+ * 行上的动作是**动作**，不是标签——所以没有盒子（盒子是标签那套语法）、走 brand 色。
+ * visibility 继承自 .dsm-slotActions：整组出现时两枚一起出现。
+ */
+.dsm-rowInspect, .dsm-rowDetail {
   border: none;
   background: transparent;
   padding: 0;
@@ -502,19 +597,190 @@ export const CSS = `
   line-height: 18px;
   color: var(--dsw-alias-brand-primary, #3370ff);
   cursor: pointer;
-  visibility: hidden;
+  visibility: inherit;
 }
 /* 悬停 / 键盘落在这一行：时刻让位，动作出场。 */
 .dsm-row:hover .dsm-time, .dsm-row:focus-within .dsm-time { visibility: hidden; }
-.dsm-row:hover .dsm-rowInspect, .dsm-row:focus-within .dsm-rowInspect { visibility: visible; }
-.dsm-rowInspect:hover { text-decoration: underline; }
-.dsm-rowInspect:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary, #3370ff); outline-offset: 1px; }
-/* 触屏没有悬停：两样并排摆出来（那时不叠格子，否则它们会互相盖住）。 */
+.dsm-row:hover .dsm-slotActions, .dsm-row:focus-within .dsm-slotActions { visibility: visible; }
+.dsm-rowInspect:hover, .dsm-rowDetail:hover { text-decoration: underline; }
+.dsm-rowInspect:focus-visible, .dsm-rowDetail:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary, #3370ff);
+  outline-offset: 1px;
+}
+/* 触屏没有悬停：动作并排摆出来（那时不叠格子，否则它们会互相盖住）；时刻让位给两枚按钮。 */
 @media (hover: none) {
   .dsm-slot { display: flex; gap: 8px; }
-  .dsm-rowInspect { visibility: visible; }
+  .dsm-slotActions { visibility: visible; }
+  .dsm-rowManage .dsm-time { display: none; }
 }
 .dsm-empty { padding: 14px; color: var(--dsw-alias-label-secondary, #646a73); }
+/*
+ * 「会话」页的工作台：左栏（项目与筛选）+ 列表。整块高度由分页给，两边各自滚。
+ *
+ * container-type: inline-size 让下面那条 @container 读的是**这一块自己的宽度**，不是窗口宽度：
+ * 宿主侧栏可以收起，同一个窗口下页面可用宽能差两百多像素，按窗口分档会在收起侧栏的一瞬间判错。
+ */
+.dsm-workbench {
+  position: relative;
+  display: flex;
+  gap: 16px;
+  flex: 1;
+  min-height: 0;
+  container-type: inline-size;
+}
+.dsm-workbenchMain { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
+/*
+ * 左栏是一张卡片：宽度固定 208px，里面分三段——头、项目清单（自己滚）、筛选。
+ * 不用边框竖线而用一张卡，是为了和右边那张列表卡同一套几何（圆角 / 描边 / 内边距）。
+ */
+.dsm-tree {
+  box-sizing: border-box;
+  width: 208px;
+  flex: none;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow: hidden;
+}
+.dsm-treeHead { flex: none; }
+.dsm-treeList {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0 -4px;
+  scrollbar-gutter: stable;
+}
+.dsm-treeRow { display: flex; align-items: center; gap: 6px; min-height: 30px; padding: 0 6px; border-radius: 8px; }
+.dsm-treeRow:hover { background: color-mix(in srgb, var(--dsw-alias-label-primary, #1f2329) 6%, transparent); }
+.dsm-treeRow[data-selected='true'] {
+  background: color-mix(in srgb, var(--dsw-alias-brand-primary, #3370ff) 12%, transparent);
+}
+/*
+ * 行上的整组勾选框：平时收起，悬停 / 键盘落在这一行时出现；已经勾了（含勾了一半）就一直显形——
+ * 否则"我勾了两条"这件事在静止状态下看不见。
+ */
+.dsm-treeCheck { flex: none; width: 14px; display: flex; align-items: center; opacity: 0; }
+.dsm-treeRow:hover .dsm-treeCheck, .dsm-treeRow:focus-within .dsm-treeCheck { opacity: 1; }
+.dsm-treeCheck:has(input:checked), .dsm-treeCheck:has(input:indeterminate) { opacity: 1; }
+/*
+ * 名字与条数是同一个按钮：点整行就是"只看这个项目"。勾选框是它的兄弟节点，不是它的子节点——
+ * 按钮里套 checkbox 是非法嵌套，点勾选框也会被读成"选了项目"。
+ */
+.dsm-treePick {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.dsm-treePick:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary, #3370ff); outline-offset: 1px; border-radius: 6px; }
+.dsm-treeIcon { flex: none; width: 14px; height: 14px; }
+.dsm-treeName { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.dsm-treeCount { flex: none; font-size: 11px; color: var(--dsw-alias-label-secondary, #646a73); font-variant-numeric: tabular-nums; }
+.dsm-treeRow[data-selected='true'] .dsm-treeName { color: var(--dsw-alias-label-primary, #1f2329); font-weight: 500; }
+.dsm-treeRow[data-selected='true'] .dsm-treeCount { color: var(--dsw-alias-brand-primary, #3370ff); }
+/* 筛选那一段钉在栏底：项目多的时候滚的是上面那份清单，筛选一直在。 */
+.dsm-treeFilters {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--dsw-alias-border-l1, rgba(0, 0, 0, 0.1));
+}
+.dsm-treeFilters .dsm-filters { padding: 0; }
+/* 宽屏上这枚开关与「关闭」都不出现：左栏一直摆着。 */
+.dsm-treeToggle, .dsm-treeClose { display: none; }
+/*
+ * 「会话」页右栏：一条会话的详情。宽屏上一直摆着（没选时是一句提示），窄屏收成浮层（见文末的
+ * 容器查询）。宽度 340 是量出来的：再宽，1600 窗口下列表的标题列就只剩一百多像素。
+ */
+.dsm-inspector {
+  box-sizing: border-box;
+  width: 340px;
+  flex: none;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow: hidden;
+}
+.dsm-inspectorEmpty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 6px;
+  padding: 24px 8px;
+  text-align: center;
+}
+.dsm-inspectorEmptyTitle { margin: 0; font-size: 14px; font-weight: 500; color: var(--dsw-alias-label-primary, #1f2329); }
+.dsm-inspectorBody { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 12px; }
+.dsm-inspectorName { margin: 0; font-size: 16px; line-height: 24px; font-weight: 600; overflow-wrap: anywhere; }
+.dsm-inspectorTags { display: flex; flex-wrap: wrap; gap: 6px; }
+/*
+ * 开头两轮：一段只读的摘要，不是时间线。每轮一行轮次标签，加「你 / 答」两行；每格最多四行，
+ * 再多就交给「打开完整内容」。上下各一条发丝线，与元数据分开。
+ */
+.dsm-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 0;
+  border-top: 1px solid var(--dsw-alias-border-l1, rgba(0, 0, 0, 0.1));
+  border-bottom: 1px solid var(--dsw-alias-border-l1, rgba(0, 0, 0, 0.1));
+}
+.dsm-previewHead { font-size: 12px; line-height: 18px; font-weight: 600; color: var(--dsw-alias-label-secondary, #646a73); }
+.dsm-previewTurn { display: flex; flex-direction: column; gap: 3px; }
+.dsm-previewLabel { font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-secondary, #646a73); }
+.dsm-previewRow { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 6px; align-items: start; }
+.dsm-previewWho { font-size: 12px; line-height: 20px; color: var(--dsw-alias-label-secondary, #646a73); }
+.dsm-previewText {
+  margin: 0;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--dsw-alias-label-primary, #1f2329);
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  overflow: hidden;
+}
+.dsm-facts {
+  display: grid;
+  grid-template-columns: 62px minmax(0, 1fr);
+  gap: 8px 10px;
+  margin: 0;
+  font-size: 12px;
+  line-height: 18px;
+}
+.dsm-facts dt { color: var(--dsw-alias-label-secondary, #646a73); }
+.dsm-facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.dsm-inspectorId { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
+.dsm-inspectorActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--dsw-alias-border-l1, rgba(0, 0, 0, 0.1));
+}
+/* 右栏正开着的那一行：左缘一条品牌色细线 + 一点底色，知道右栏说的是哪一条。 */
+.dsm-rowManage[data-opened='true'] {
+  background: color-mix(in srgb, var(--dsw-alias-brand-primary, #3370ff) 6%, transparent);
+  box-shadow: inset 2px 0 0 0 var(--dsw-alias-brand-primary, #3370ff);
+}
 .dsm-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .dsm-select, .dsm-file {
   border: 1px solid var(--dsw-alias-border-l2, rgba(0, 0, 0, 0.18));
@@ -770,25 +1036,10 @@ export const CSS = `
  * 按钮 40px 宽、两行高）。让这一枚不收缩、把宽度留给句子换行——句子本来就该折行，按钮不该。
  */
 .dsm-banner > button { flex: none; }
-/* 页内分页：一排官方 SegmentedControl 段 + 右端那枚「刷新」，下面一条通栏下划线。 */
-.dsm-tabsRow {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  /* 面板窄到装不下「一排页签 + 刷新」时（英文那几段实测 421px）让它换行，而不是把刷新挤出可视区。 */
-  flex-wrap: wrap;
-  row-gap: 4px;
-  border-bottom: 1px solid var(--dsw-alias-border-l1, rgba(0, 0, 0, 0.1));
-}
-/* 页面级的动作（「刷新」）推到这一行的右端：页签整排只占左边一段，右边量下来空着 142px。
-   用 margin-left:auto 而不是一枚 spacer——换行之后它仍然贴着右端。
-   选中本页自己的类名而不是 .dsm-button：那是本页删掉的手写类，官方 Button 的类名是它 CSS module
-   的哈希名，按类名选它既认不得也不该认。 */
-.dsm-tabsRow > .dsm-tabsAction { flex: none; margin-left: auto; }
 /*
  * 页签本体不在这里画：官方 SegmentedControl 自己带轨道、滑块指示器、三段间距、aria-selected
- * 配色与方向键走查（SegmentedControl.module.css）。本页原先手写的那套 .dsm-tabs / .dsm-tab
- * 已经删掉——下划线式页签换成了官方那套分段控件，"和设置外壳自己的 tab 区分开"这件事由它负责。
+ * 配色与方向键走查（SegmentedControl.module.css）。本页原先手写的那套下划线式页签已经删掉；
+ * 页头里那个 .dsm-tabs 只是"让分段控件不参与收缩"的布局壳，不画任何外观。
  */
 .dsm-fields { display: flex; flex-direction: column; gap: 8px; }
 .dsm-field { display: flex; flex-direction: column; gap: 4px; }
@@ -909,6 +1160,11 @@ export const CSS = `
  * 的注释就是这么要求的：消费者用 max-height: 100% 限高，别自己算视口）。
  */
 .dsm-dialog.dsm-dialog { width: min(640px, 100%); max-height: 100%; }
+/* 说明弹窗比一般确认弹窗宽一档：四节词条，640 里「每页做什么」会挤成很窄的两列。 */
+.dsm-dialog.dsm-helpDialog { width: min(760px, 100%); }
+.dsm-helpBody { display: flex; flex-direction: column; gap: 16px; }
+/* 弹窗自己已经是卡片：说明里那四节不再各套一圈卡片壳，留标题与正文的节奏。 */
+.dsm-helpDialog .dsm-card { border: none; background: transparent; padding: 0; }
 /* 官方的正文层就是"唯一那个滚动区"（RiskConfirmation 也这么用）。overscroll-behavior: contain
    挡住滚动链：正文滚到底之后不再把页面/卡片跟着推。 */
 .dsm-dialogContent { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
@@ -1169,6 +1425,48 @@ export const CSS = `
   color: var(--dsw-alias-label-primary, #1f2329);
   max-height: 320px; overflow: auto;
 }
+/*
+ * 窄屏（这一块自己的宽度 ≤960px）：左栏收成从左边滑出的浮层。
+ *
+ * 960 是量出来的门槛：再窄下去，208px 的左栏 + 列表最少 532px + 16px 间距就装不下了（表会先横向滚）。
+ * 浮层与左栏是**同一份 DOM**：不渲染两套，项目选中态与筛选芯片就不会各说各话。
+ */
+@container (max-width: 960px) {
+  .dsm-tree {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 6;
+    width: 280px;
+    display: none;
+    border-radius: 0 20px 20px 0;
+    box-shadow: 10px 0 28px color-mix(in srgb, var(--dsw-alias-label-primary, #1f2329) 18%, transparent);
+  }
+  .dsm-tree.dsm-treeOpen { display: flex; }
+  .dsm-treeToggle, .dsm-treeClose { display: inline-flex; }
+}
+/*
+ * 窄屏（这一块自己的宽度 ≤1180px）：右栏从文档流里出来、贴右边浮着；没选会话时整栏不出现。
+ *
+ * 1180 是量出来的门槛：再窄，208px 的左栏 + 340px 的右栏 + 两边间距之后，列表只剩不到 600px，
+ * 六列就不够了（时间列会被压到 120px 以下）。宽窄是同一份 DOM，靠容器查询换位置。
+ */
+@container (max-width: 1180px) {
+  .dsm-inspector {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 7;
+    width: 340px;
+    display: none;
+    border-radius: 20px 0 0 20px;
+    box-shadow: -10px 0 28px color-mix(in srgb, var(--dsw-alias-label-primary, #1f2329) 18%, transparent);
+  }
+  .dsm-inspector[data-empty='false'] { display: flex; }
+}
+
 `
 
 /**
