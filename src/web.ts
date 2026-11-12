@@ -48,6 +48,7 @@ import {
   readRemoteLibrary,
   remoteBundlePath,
   runSync,
+  runTidy,
   syncPrepared,
   testSyncConnection,
   tidySummary,
@@ -1397,6 +1398,32 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
      * `content-type` 区分"流"与"一次性 JSON"（没配置同步那类错发生在写头之前，仍然是 JSON +
      * 409/500）。
      */
+    /*
+     * 只整理远端：`?mode=tidy`，GET 只算账（读远端、不写），POST 真删。
+     *
+     * 与落地分开是因为它不碰本机任何东西：不扫库、不拉不推、不写注册表。所以它既不需要预演缓存
+     * （没有 planId），也没有"要不要重启"那一套；只需要跟落地同一道闸——两边都写自己那一格的索引，
+     * 同时跑会互相踩。进度照旧走事件流：一次整理可能几百个包、几十秒。
+     */
+    if (mode === 'tidy') {
+      const tidyApply = req.method === 'POST'
+      if (tidyApply && applying !== null) {
+        sendJson(res, 409, {
+          error: `上一轮同步还在跑（${new Date(applying.startedAt).toLocaleTimeString('zh-CN')} 开始），等它结束再试`,
+        })
+        return
+      }
+      await streamResult(res, async (report) => {
+        const outcome = await runTidy(syncDeps, { apply: tidyApply, onProgress: report })
+        return {
+          mode: tidyApply ? 'apply' : 'plan',
+          remote: { url: runtime.settings.url, machineId: runtime.settings.machineId },
+          ...outcome,
+        }
+      })
+      return
+    }
+
     /*
      * 一趟落地还没跑完就不再开第二趟。
      *

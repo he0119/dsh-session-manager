@@ -1398,6 +1398,30 @@ export async function readRemoteLibrary(dav: DavPort, settings: SyncSettings): P
   return { machines, entries, indexes, problems }
 }
 
+/**
+ * 一台机器格的 `index.json` 正文。
+ *
+ * 推送、整理两处都写这一份东西，形状必须一致（`parseIndex()` 只认这一种）：谁写都经过这里，免得一边
+ * 加了字段、另一边漏掉，远端出现两份长得不一样的索引。
+ */
+function indexPayload(deps: SyncDeps, entries: RemoteIndex['entries']): Buffer {
+  return Buffer.from(
+    JSON.stringify(
+      {
+        unit: SYNC_INDEX_UNIT,
+        version: SYNC_INDEX_VERSION,
+        machineId: deps.settings.machineId,
+        updatedAt: (deps.now?.() ?? new Date()).toISOString(),
+        ...(deps.pluginVersion === undefined ? {} : { pluginVersion: deps.pluginVersion }),
+        entries,
+      },
+      null,
+      2,
+    ) + '\n',
+    'utf8',
+  )
+}
+
 /** 整理远端时的一条：自己那一格里哪个包可以删、留下的那份在哪一格。 */
 export interface TidyEntry {
   id: string
@@ -1486,6 +1510,107 @@ export function planTidy(remote: RemoteLibrary, machineId: string): TidyPlan {
     bytes += size
   }
   return { entries, bytes }
+}
+
+/** 只整理远端（不拉不推）跑出来的结果。 */
+export interface TidyOutcome {
+  /** 真删了没有（`apply: false` 只是读一遍远端、算一遍账）。 */
+  applied: boolean
+  /** 账目：`applied: false` 是"将要删的"，`applied: true` 是"实际删掉的"。 */
+  tidy: SyncTidyResult
+  /** 读远端、写索引、删包时的失败（单条失败不中断整趟）。 */
+  problems: string[]
+}
+
+/**
+ * 只整理远端：删掉自己那一格里多余的包，不拉取、不推送、不动本机任何会话。
+ *
+ * 与同步落地里那一步（`applyPreparedSync()` 的 `tidy` 分支）共用判据与顺序，区别只有一点：这里不扫
+ * 本机库、不算计划——清理不该逼着人先跑一趟完整同步。
+ *
+ * 顺序照旧是先写索引再删包：中途失败最多留下几个没人引用的包（下一次整理按孤儿清掉），不会留下指向空
+ * 文件的条目；索引写失败就一个包都不删。
+ *
+ * @param deps 远端与同步设置（本机库那几项这条路用不到）。
+ * @param options.apply 为 false 只读远端、算账（界面拿它显示"将删 N 个"）。
+ * @param options.onProgress 每开始删一个包报一次（段名 `tidy`）。
+ * @returns 账目与失败；单条失败只记进 `problems`，不半路放弃。
+ */
+export async function runTidy(
+  deps: SyncDeps,
+  options: { apply: boolean; onProgress?: ProgressReporter },
+): Promise<TidyOutcome> {
+  const problems: string[] = []
+  const emit = (event: Omit<ProgressEvent, 'what'>): void => {
+    options.onProgress?.(deps.progressWhat === undefined ? event : { ...event, what: deps.progressWhat })
+  }
+  const remote = await readRemoteLibrary(deps.dav, deps.settings)
+  problems.push(...remote.problems)
+  const plan = planTidy(remote, deps.settings.machineId)
+  const ownDir = machineDirName(deps.settings.machineId)
+  const own = remote.indexes.get(ownDir)
+  // 已知的包 = 索引里留下的 + 这一趟正要删的（少算后一半，刚删掉的会又被当成孤儿删一遍）。
+  let orphans: Array<{ name: string; bytes: number }> = []
+  try {
+    orphans = await orphanBundles(
+      deps.dav,
+      deps.settings.machineId,
+      new Set([...(own?.entries ?? []).map((entry) => entry.id), ...plan.entries.map((entry) => entry.id)]),
+    )
+  } catch (error) {
+    problems.push(`整理远端：列自己那一格失败：${error instanceof Error ? error.message : String(error)}`)
+  }
+  const total = plan.entries.length + orphans.length
+  const bytes = plan.bytes + orphans.reduce((sum, orphan) => sum + orphan.bytes, 0)
+  if (!options.apply) {
+    return { applied: false, tidy: { removed: plan.entries.length, orphans: orphans.length, bytes }, problems }
+  }
+  if (total === 0) return { applied: true, tidy: { removed: 0, orphans: 0, bytes: 0 }, problems }
+
+  // 先把要删的条目从自己那格的索引里摘掉：这一步失败就一个包都不删。
+  if (own !== undefined) {
+    const drop = new Set(plan.entries.map((entry) => entry.id))
+    try {
+      await deps.dav.put(
+        remoteIndexPath(deps.settings.machineId),
+        indexPayload(
+          deps,
+          own.entries.filter((entry) => !drop.has(entry.id)),
+        ),
+      )
+    } catch (error) {
+      problems.push(
+        `整理远端：写自己那一格的索引失败，这次一个包都没删：${error instanceof Error ? error.message : String(error)}`,
+      )
+      return { applied: true, tidy: { removed: 0, orphans: 0, bytes: 0 }, problems }
+    }
+  }
+
+  let removed = 0
+  let orphansRemoved = 0
+  let done = 0
+  for (const entry of plan.entries) {
+    // 没有本机库可查，标题取不到：进度那行小字只能给 id。
+    emit({ phase: 'tidy', total, done, id: entry.id })
+    try {
+      await deps.dav.delete(remoteBundlePath(deps.settings.machineId, entry.id))
+      removed += 1
+    } catch (error) {
+      problems.push(`整理远端：删 ${entry.id} 的旧包失败：${error instanceof Error ? error.message : String(error)}`)
+    }
+    done += 1
+  }
+  for (const orphan of orphans) {
+    emit({ phase: 'tidy', total, done, id: orphan.name })
+    try {
+      await deps.dav.delete(`${SYNC_NAMESPACE_DIR}/${ownDir}/${orphan.name}`)
+      orphansRemoved += 1
+    } catch (error) {
+      problems.push(`整理远端：删 ${orphan.name} 失败：${error instanceof Error ? error.message : String(error)}`)
+    }
+    done += 1
+  }
+  return { applied: true, tidy: { removed, orphans: orphansRemoved, bytes }, problems }
 }
 
 /**
@@ -2951,23 +3076,14 @@ export async function applyPreparedSync(
 
   let indexWritten = false
   try {
-    const payload = Buffer.from(
-      JSON.stringify(
-        {
-          unit: SYNC_INDEX_UNIT,
-          version: SYNC_INDEX_VERSION,
-          machineId: deps.settings.machineId,
-          updatedAt: (deps.now?.() ?? new Date()).toISOString(),
-          ...(deps.pluginVersion === undefined ? {} : { pluginVersion: deps.pluginVersion }),
-          // 整理掉了的那几条不再写回索引：先写索引、再删包，中途失败最多留下几个没人引用的包。
-          entries: [...ownEntries.values()].filter((entry) => !tidyIds.has(entry.id)),
-        },
-        null,
-        2,
-      ) + '\n',
-      'utf8',
+    // 整理掉了的那几条不再写回索引：先写索引、再删包，中途失败最多留下几个没人引用的包。
+    await deps.dav.put(
+      remoteIndexPath(deps.settings.machineId),
+      indexPayload(
+        deps,
+        [...ownEntries.values()].filter((entry) => !tidyIds.has(entry.id)),
+      ),
     )
-    await deps.dav.put(remoteIndexPath(deps.settings.machineId), payload)
     indexWritten = true
   } catch (error) {
     problems.push(`写远端索引失败：${error instanceof Error ? error.message : String(error)}`)

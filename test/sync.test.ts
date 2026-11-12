@@ -36,6 +36,7 @@ import {
   remoteBundlePath,
   remoteIndexPath,
   runSync,
+  runTidy,
   syncPrepared,
   testSyncConnection,
   type FileFingerprint,
@@ -3160,6 +3161,71 @@ test('sync：整理远端顺手清掉没有索引条目的包（上次推送中�
     assert.equal(existsSync(orphan), false)
     // 真的那条包不动。
     assert.equal(existsSync(join(cell, 's1.dshsess')), true)
+  } finally {
+    await fixture.close()
+    rmSync(SANDBOX, { recursive: true, force: true })
+  }
+})
+
+test('sync：只整理远端——预演只算账、落地才删，索引重写后别的格子原样', async () => {
+  rmSync(SANDBOX, { recursive: true, force: true })
+  mkdirSync(SANDBOX, { recursive: true })
+  const fixture = await startDavFixture({ root: join(SANDBOX, 'dav-tidy-only') })
+  const dav = createDavClient({ baseUrl: fixture.url })
+  const a = makeMachine('tidyonly-a')
+  const b = makeMachine('tidyonly-b')
+  const gitNone: GitRunner = async () => {
+    throw new Error('没有身份可用')
+  }
+  const configA = settings(a, { machineId: 'robot-a' })
+  const configB = settings(b, { machineId: 'robot-b', mapping: { [a.cwd]: b.cwd } })
+  const depsA = syncDepsOf(a, dav, configA, { git: gitNone })
+  const cellA = join(fixture.root, SYNC_NAMESPACE_DIR, machineDirName('robot-a'))
+  const cellB = join(fixture.root, SYNC_NAMESPACE_DIR, machineDirName('robot-b'))
+  try {
+    // A 推一条；B 拉下来、续写、再推——B 那份更长，A 那格里的这一条就成了被取代的旧副本。
+    writeSession(a, 's1', 1000)
+    await syncMachine(a, dav, configA, { apply: true, git: gitNone })
+    await syncMachine(b, dav, configB, { apply: true, git: gitNone })
+    appendToLatest(b, 's1', '{"type":"user/message","seq":1,"data":{"text":"B 又写了一条"}}')
+    await syncMachine(b, dav, configB, { apply: true, git: gitNone })
+
+    // 预演：报一条，但一个字节都不动（连 DELETE 都不该发出去）。
+    fixture.requests.length = 0
+    const plan = await runTidy(depsA, { apply: false })
+    assert.deepEqual(plan.problems, [])
+    assert.equal(plan.applied, false)
+    assert.equal(plan.tidy.removed, 1)
+    assert.equal(plan.tidy.orphans, 0)
+    assert.equal(
+      fixture.requests.some((line) => line.startsWith('DELETE')),
+      false,
+      '预演不删任何东西',
+    )
+    assert.equal(
+      fixture.requests.some((line) => line.startsWith('PUT')),
+      false,
+      '预演也不写索引',
+    )
+    assert.equal(existsSync(join(cellA, 's1.dshsess')), true)
+
+    // 落地：删掉 A 那格的旧包、重写它的索引；B 那格一个字节都不动。
+    const events: Array<{ phase: string; done: number; total: number }> = []
+    const done = await runTidy(depsA, { apply: true, onProgress: (event) => events.push({ phase: event.phase, done: event.done, total: event.total }) })
+    assert.deepEqual(done.problems, [])
+    assert.equal(done.applied, true)
+    assert.equal(done.tidy.removed, 1)
+    assert.deepEqual(events, [{ phase: 'tidy', done: 0, total: 1 }])
+    assert.equal(existsSync(join(cellA, 's1.dshsess')), false, '旧包删掉了')
+    assert.equal(existsSync(join(cellB, 's1.dshsess')), true, '别人的包不动')
+    const indexA = JSON.parse(readFileSync(join(cellA, 'index.json'), 'utf8')) as { entries: Array<{ id: string }> }
+    assert.deepEqual(indexA.entries, [], '索引里也不再有这一条')
+    const remote = await readRemoteLibrary(dav, configB)
+    assert.equal(remote.entries.get('s1')?.machine, 'robot-b', '合并视图仍取得到（从 B 那格）')
+
+    // 再跑一次：已经没有可整理的了（幂等）。
+    const again = await runTidy(depsA, { apply: true })
+    assert.equal(again.tidy.removed + again.tidy.orphans, 0)
   } finally {
     await fixture.close()
     rmSync(SANDBOX, { recursive: true, force: true })

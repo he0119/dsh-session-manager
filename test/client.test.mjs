@@ -3113,8 +3113,12 @@ test('客户端产物：同步页的同步块——没配置只说明，配置�
   assert.ok(onText.includes('sync.hint:{"mappings":2}'), '要报出映射条数')
   // 机器名不再重复印在标题上：它挪到了机器名那一栏的**灰字**里（宿主解析出来的缺省值，没配就是
   // 主机名），与「超时」那一栏的 30000 同一个口径——留空不等于没有值。那一栏归表单那条用例钉。
-  // 一个动作一个按钮：弹窗里的「确认同步」只有开了弹窗才在树上，卡片头上只有「同步」这一个入口。
-  assert.deepEqual(buttonTexts(on).filter((label) => label.startsWith('sync')), ['sync.action'])
+  // 卡片头上两个入口：「同步」（主动作）与「整理远端」（只删本机那一格里多余的包，不拉不推）。
+  // 弹窗里的「确认同步」只有开了弹窗才在树上。
+  assert.deepEqual(buttonTexts(on).filter((label) => label.startsWith('sync')), [
+    'sync.action',
+    'sync.tidy.action',
+  ])
 })
 
 test('客户端产物：同步设置表单按 entry id 向设置接缝取控制器，宿主没提供时说实话', { skip }, () => {
