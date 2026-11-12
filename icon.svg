@@ -1,17 +1,21 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 36 36" width="64" height="64" role="img" aria-label="dsh-session-manager">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 36 36" width="36" height="36" role="img" aria-label="dsh-session-manager">
   <!-- 会话日志卡 + 向右的箭头：一个会话被搬走 / 带走。刻意不画底板——宿主在插件列表里
        自带一圈 48px 圆角边框（卡片位）与 40px（行位），再套一个方块就成了双层框；
-       官方 artwork 与同门的 dsh-aperture 也都是透明底。渐变两端的明度都够，深浅底都能看。 -->
+       官方 artwork 与同门的 dsh-aperture 也都是透明底。渐变两端的明度都够，深浅底都能看。
+
+       占位按宿主实际显示尺寸定：图形连箭头占 25.7×21.2 格（左空 5.0、右空 5.3、上下各 7.4），
+       与旁边已装的插件图标（约 24×28）同一量级——早先画到 31.8 格宽，在 48px 卡片里几乎顶满
+       边框，且左重右轻看起来偏；现在把卡片收窄、箭头补齐分量，重心落回格子中间。 -->
   <defs>
-    <linearGradient id="sessionManagerShift" x1="3" y1="6" x2="33" y2="30" gradientUnits="userSpaceOnUse">
+    <linearGradient id="sessionManagerShift" x1="6" y1="8" x2="29" y2="28" gradientUnits="userSpaceOnUse">
       <stop stop-color="#1FB6D4"/>
       <stop offset="1" stop-color="#3B6FF5"/>
     </linearGradient>
   </defs>
   <g fill="none" stroke="url(#sessionManagerShift)" stroke-linecap="round" stroke-linejoin="round">
-    <rect x="2.8" y="7.4" width="16.8" height="21.2" rx="4.2" stroke-width="2.6"/>
-    <path d="M8.2 14.2h6.2M8.2 19.4h3.8" stroke-width="2.4"/>
-    <path d="M22.6 18h8.8" stroke-width="2.8"/>
-    <path d="M27.8 14.2 31.9 18l-4.1 3.8" stroke-width="2.8"/>
+    <rect x="6.2" y="8.6" width="13" height="18.8" rx="3.5" stroke-width="2.4"/>
+    <path d="M10 15.4h5.8M10 20.6h3.4" stroke-width="2.2"/>
+    <path d="M22.4 18h5.4" stroke-width="2.6"/>
+    <path d="M25.2 14.4 29.4 18l-4.2 3.6" stroke-width="2.6"/>
   </g>
 </svg>
