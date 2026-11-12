@@ -1,17 +1,17 @@
 /**
- * 会话列表的共用骨架：三个分页里"一行会话长什么样、怎么勾、挂哪几枚标签、列表框的框、筛选条"都从
- * 这里出。
+ * 会话列表的共用骨架：列表与「导出 / 导入」弹窗里"一行会话长什么样、怎么勾、挂哪几枚标签、列表框的
+ * 框、筛选条"都从这里出。
  *
  * 这三件事原先在每个分页里各写了一遍（`.dsm-rowExport` / `.dsm-rowPick` / `.dsm-rowManage` 三份
  * 行标记，`formatBytes` / `formatTime` 三份，标签判断两份），代价已经出现过两次：时间格式在迁移页
  * 是另一套（那边绕了一圈 ISO 串），「未分组」那枚标签在三页里叫两个名字。一处逻辑写三遍，改一处
  * 就会漏两处——所以共用的边界划在**一行的解剖结构**与**列表的框**上。
  *
- * 留在各分页里的，是各页自己的东西：传输页的组头（按目录分组，见 `groups.ts`）、会话页的归属那一格
- * 与删除计划、迁移页的「全部 / 子集」单选框。
+ * 留在各自那一处的，是那一处自己的东西：导出清单的组头（按目录分组，见 `groups.ts`）、列表里归属
+ * 那一格与删除计划。
  *
  * 勾选那一套也在这里：`useSessionPicking()`（行勾选 / 整组勾选 / 全选 / 清空 / 锁定的判据）与
- * `SessionPickTools`（那对常驻的「全选 / 清空」）三页共用一份，位置与作用面见
+ * `SessionPickTools`（那对常驻的「全选 / 清空」）两处共用一份，位置与作用面见
  * [决策](../../../.agents/notes/implemented/bug-fix/2026-10-08-one-pair-of-pick-tools.md)。
  *
  * 样式只在 [styles.ts](./styles.ts) 里定义，颜色只用 `--dsw-alias-*` 主题 token。
@@ -36,7 +36,7 @@ import {
 } from '../logic/sessionFilter.ts'
 import type { SessionManagerKey, Translate } from '../logic/locales.ts'
 
-/** 一行会话要显示的字段（三个分页传进来的 `SessionSummary` 都满足它）。 */
+/** 一行会话要显示的字段（两处传进来的 `SessionSummary` 都满足它）。 */
 export interface RowSession extends SessionFacts {
   readonly cwd?: string
   readonly createdAt: number
@@ -409,7 +409,7 @@ export interface PickableSession extends NestableSession {
  *   - 判据只有一条（禁用的集合就是宿主会拒的集合，见 [groups.lockedParentOf](../logic/groups.ts)）；
  *   - 眼下的勾选永远只算**库还在**的会话（见下面的 `picked`：删完 / 换源之后再读，条数不会先报一个
  *     已经不存在的数）；
- *   - 选行那一对按钮（下面的 `SessionPickTools`）拿到的数字同源，三个分页的禁用态因此一致。
+ *   - 选行那一对按钮（下面的 `SessionPickTools`）拿到的数字同源，两处的禁用态因此一致。
  *
  * @param library 整个库（**不筛**）：父会话在不在库里只与库有关，与当前筛选 / 折叠无关。
  * @param t 注入面给的翻译函数（锁定提示里点名父会话）。
@@ -611,7 +611,7 @@ export function useGroupCollapse(keys: readonly string[]): GroupCollapse {
 }
 
 /**
- * 清单的选行工具：一枚「全选」、一枚「清空」——三个分页共用同一对、同一套禁用判据。
+ * 清单的选行工具：一枚「全选」、一枚「清空」——两处共用同一对、同一套禁用判据。
  *
  * 为什么是**常驻的两枚**，而不是一枚会变脸的（全勾上了才显示「清空」）：勾了一部分时那枚按钮只剩
  * 「全选」一个词可读，而那一刻用户最想点的偏偏是「清空」——它在界面上不存在，只能一行行点回去。

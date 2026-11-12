@@ -1,5 +1,6 @@
 /**
- * 「会话」分页：对着整个会话库逐条管理——归档 / 取消归档、重新生成名称、删除，以及**迁移**。
+ * 会话列表：这一页唯一常驻的那一面，对着整个会话库逐条管理——归档 / 取消归档、重新生成名称、
+ * 删除，以及**迁移**（导出 / 导入在同一行上打开一个弹窗，见 TransferPanel）。
  *
  * 与「传输」页的分工：传输页是"把会话带走 / 带回来"，这一页是"这条会话我不要了 / 先收起来 / 换个
  * 目录"。两页共用同一份 `/state`（页面骨架只拉一次）与同一套列表骨架
@@ -96,8 +97,8 @@ interface MigrationEffect {
   takesEffect: MigrationResponse['takesEffect']
 }
 
-/** 「会话」分页（含迁移那一路）。 */
-export function ManagePanel({ t, state, meta, reload, patch, directory }: PanelShare): React.ReactElement {
+/** 会话列表（含迁移那一路）。 */
+export function ManagePanel({ t, state, meta, reload, patch, directory, openTransfer }: PanelShare): React.ReactElement {
   const sessions = state?.sessions ?? []
   // 归档能力位与清单无关（`/meta` 先给），所以它用 `state ?? meta`：清单还在读时也不会先把
   // "这个宿主没有 workspaceRegistry"画上去。
@@ -821,6 +822,14 @@ export function ManagePanel({ t, state, meta, reload, patch, directory }: PanelS
                 disabled={busy !== null || picked.length === 0}
               >
                 {t('migrate.action')}
+              </Button>
+              {/*
+                「导出 / 导入」是这条动作行上唯一**不**要求勾选的一枚：导出要用勾选（进去就能看到勾中
+                的那几条），导入不用——包里带什么与列表里勾了什么无关。所以它只受"这一行正忙着"影响。
+                它开的是页面骨架持有的那个宽弹窗（见 ManagerPanel），页面本身不换。
+              */}
+              <Button variant="outline" size="sm" onClick={openTransfer} disabled={busy !== null}>
+                {t('manage.transfer.action')}
               </Button>
               <span className="dsm-spacer" />
               <Button

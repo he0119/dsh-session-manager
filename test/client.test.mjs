@@ -78,11 +78,24 @@ function fakeReact(recorded = [], firstNull = undefined, panel = undefined, arra
   return {
     // 只在**真的传了**位置参数时才覆盖 children：jsx-runtime 是把 children 放在 props 里的，
     // 无条件写会把它清掉（第一版就是这么把整棵树抹平的）。
-    createElement: (type, props, ...children) =>
-      record(type, {
+    createElement: (type, props, ...children) => {
+      const element = record(type, {
         ...(props ?? {}),
         ...(children.length === 0 ? {} : { children: children.length > 1 ? children : children[0] }),
-      }),
+      })
+      /*
+       * 开了弹窗的用例里，列表那一棵**不往下渲染**。
+       *
+       * 列表一直挂在页面上（这是对的：弹窗打开时勾选不能丢），可它会把同一批「全选 / 清空」、同一排
+       * 筛选条、同一套勾选框再记一遍——按整棵树数数的断言于是从 3 变 6。这些用例要核的是弹窗里的
+       * 东西，所以列表停在"元素已造、内容不展开"上：它在 `recorded` 里仍然看得见（`ManagePanel`
+       * 那一条），只是不参与数数。列表自己的表现由 `panel: 'manage'` 那批用例覆盖。
+       */
+      if (panel !== undefined && panel !== 'manage' && typeNameOf(type) === 'ManagePanel') {
+        return null
+      }
+      return element
+    },
     useState: (value) => {
       // 假钩子**不改**状态（每次渲染都还是种子那个值），但把"谁被 set 成了什么"记下来：面板把
       // `onProgress` 接没接到 api 上、落地之后有没有清掉进度，只有这一条路能看见（见下面「迁移落地
@@ -92,6 +105,14 @@ function fakeReact(recorded = [], firstNull = undefined, panel = undefined, arra
       const set = (next) => {
         sets.push({ slot: mine, value: next })
       }
+      /*
+       * 列表总是挂在页面上（弹窗打开时它不卸载——勾选要跟着留下来）。开了弹窗的用例里，种子是发给
+       * 弹窗那一面的；列表那一棵要是也按顺序吃种子，两边就抢同一份队列。所以只要这一层的外面有
+       * `ManagePanel`，状态就停在初始值上。`panel: 'manage'`（什么都没开）时照旧，列表才是主角。
+       */
+      if (panel !== undefined && panel !== 'manage' && ownerStack.includes('ManagePanel')) {
+        return [value, set]
+      }
       if (value === null && nullSeeds.length > 0) {
         return [nullSeeds.shift(), set]
       }
@@ -99,11 +120,13 @@ function fakeReact(recorded = [], firstNull = undefined, panel = undefined, arra
       if (value === undefined && undefinedSeeds.length > 0) {
         return [undefinedSeeds.shift(), set]
       }
-      // 页内分页的状态：假钩子不会点页签，于是除默认那一页之外的 JSX 在冒烟里一次都跑不到。
-      // 只替换**第一个** `useState('manage')`（骨架里那个，默认页就是它），其余字符串状态照旧。
-      if (!seededPanel && value === 'manage' && panel !== undefined) {
+      // 页面上那几块"做事的面"的状态（`useState('none')`）：假钩子不会点按钮，于是列表之外的
+      // 三个弹窗与说明在冒烟里一次都跑不到。只替换**第一个** `useState('none')`（骨架里那个，
+      // 默认就是列表），其余字符串状态照旧。用例仍旧用 `panel: 'transfer'` 这种写法点名要开哪一面；
+      // 传 `'manage'` 表示"什么都不开"，就是这一页默认的样子。
+      if (!seededPanel && value === 'none' && panel !== undefined) {
         seededPanel = true
-        return [panel, set]
+        return [panel === 'manage' ? 'none' : panel, set]
       }
       // 勾选集 / 筛选条：分页组件自己的 `useState([])`。不给勾选集种子，"按钮禁没禁用"就只能撞上
       // "一条都没勾所以禁用"这条分支，断言等于没测到宿主能力那件事（见下面那个用例的注释）。
@@ -142,15 +165,31 @@ function isComponentType(type) {
 }
 
 /**
+ * 正在被调用的那一串组件名（外到内）。假钩子靠它判断"这个状态位是谁的"。
+ *
+ * 为什么需要：本文件的状态种子是**按调用顺序**发的（见 `fakeReact` 的说明）。页面上现在列表常驻、
+ * 弹窗叠在上面，于是同一个渲染里会先后跑到列表与弹窗两套状态；只按顺序发，种子就会喂给列表。
+ * 有了这条链就能说清"列表那一棵不吃种子"——它只在 `panel: 'manage'` 的用例里是主角。
+ */
+const ownerStack = []
+
+/**
  * 把一层组件渲染出来（就是本文件那句"带着 props 调一次"的统一点）。
  *
  * 函数组件直接调；`forwardRef` 走 `.render(props, ref)`（这一层不需要 ref，传 `null`）；
  * `memo` 往下走它的 `.type`。组件可能返回 `null`，调用方按 `node === null` 处理。
+ *
+ * 调用前后把组件名压栈 / 出栈：里面的钩子因此知道自己长在哪一棵上。
  */
 function renderType(type, props) {
-  if (typeof type === 'function') return type(props)
-  if (typeof type.render === 'function') return type.render(props, null)
-  return renderType(type.type, props)
+  ownerStack.push(typeNameOf(type))
+  try {
+    if (typeof type === 'function') return type(props)
+    if (typeof type.render === 'function') return type.render(props, null)
+    return renderType(type.type, props)
+  } finally {
+    ownerStack.pop()
+  }
 }
 
 /**
@@ -263,6 +302,18 @@ function elementsOf(node, out = []) {
   if (isComponentType(node.type)) return elementsOf(renderType(node.type, node.props), out)
   out.push(node)
   return elementsOf(node.props?.children, out)
+}
+
+/**
+ * 打开着的那一层弹窗，从外到内取**最里面**那一层。
+ *
+ * 页面上现在列表常驻、弹窗叠在上面；弹窗里再开确认弹窗时（同步的计划、回滚动作清单），外面那层
+ * 宽弹窗仍然开着，只有里面那层是这次动作的正文。读标题、数按钮都该读它。
+ */
+function topDialog(recorded) {
+  const dialogs = recorded.filter((node) => node.props?.role === 'dialog')
+  assert.ok(dialogs.length > 0, '这一步该有一个开着的弹窗')
+  return dialogs[dialogs.length - 1]
 }
 
 /**
@@ -839,47 +890,53 @@ test('客户端产物：导航行的文案跟着语言走（同一个 thunk 每�
   assert.equal(entry.registration.label(), 'Session management')
 })
 
-test('客户端产物：页面骨架带着四个页签（会话 / 传输 / 同步 / 备份），说明从页头的 ? 进', { skip }, () => {
-  const { registrations, recorded } = mount()
+test('客户端产物：页面上没有页签，四件事各是一处入口', { skip }, () => {
+  // 现象（用户截图报的）：页头那排「会话 / 传输 / 同步 / 备份」把四件事摆成同级，切一次就丢一次勾选。
+  // 现在页面只剩列表，另外三件各自是一处入口，点开是宽弹窗（见下面那条用例）。
+  const { registrations } = mount()
   const { component } = registrations[0]
   const { inject } = registrations[0].registration
   // 用注入面给的 t（键回显）渲染，于是文案就等于字典键，断言不依赖任何一种语言。
-  const element = component(inject())
-  const text = strings(element)
-  assert.ok(text.includes('page.tab.transfer'), '页内要有「传输」这一页')
-  assert.ok(text.includes('page.tab.manage'), '页内要有「会话」这一页（逐条归档 / 迁移 / 删除）')
-  assert.ok(text.includes('page.tab.sync'), '页内要有「同步」这一页（WebDAV）')
-  assert.ok(text.includes('page.tab.backup'), '页内要有「备份」这一页（三种写操作共同的后悔面）')
-  // 页签顺序：日常的「会话」在最前；「同步」紧挨「传输」（它落地走的是导入那条编排）；「备份」是
-  // 三个写操作共同的后悔面、不属于任何一个动作页，所以排在动作页之后；说明垫底。**迁移没有自己的
-  // 页签**：它并进了「会话」页的动作行（见下面那条用例）。
-  //
-  // 识别方式：手写那排 `<button className="dsm-tab" role="tab" aria-selected>` 换成了官方
-  // `SegmentedControl`（页签是它自己按 `options` 画出来的，类名是它 CSS module 的哈希名，认不得），
-  // 所以判据跟着换成**读它的 `options` 与受控的 `value`**：顺序就是 `options` 的顺序（每段的
-  // `label` 仍是字典键），默认页就是受控的 `value`。判的东西没变：顺序与默认页。
-  const tabControl = recorded.find(
-    (node) => isComponentType(node.type) && Array.isArray(node.props?.options) && node.props?.role !== 'tab',
-  )
-  const tabs = tabControl?.props?.options ?? []
-  assert.deepEqual(
-    // `options` 是**产物那个 realm** 里造的数组（客户端产物在 `vm` 里求值），它自己的原型是那个 realm
-    // 的 `Array.prototype`；直接 `.map()` 出来的结果也留在那个 realm，`deepStrictEqual` 会连原型一起比
-    // 于是判不等。先摊进本 realm 的数组字面量再比，判的东西不变（顺序与那五个 label）。
-    [...tabs].map((option) => option.label),
-    ['page.tab.manage', 'page.tab.transfer', 'page.tab.sync', 'page.tab.backup'],
-    '顺序是 会话 → 传输 → 同步 → 备份（说明不再是页签，从页头那枚 ? 进）',
-  )
-  assert.equal(tabControl?.props?.value, 'manage', '默认停在第一个页签（受控值就是「会话」那一页）')
-  // 那枚页签从两份字典里一起删掉：留着就等于"同一件事有两个入口"。
+  const tree = component(inject())
+  const text = strings(tree)
+  const tabs = elementsOf(tree).filter((node) => node.props?.role === 'tablist')
+  assert.equal(tabs.length, 0, '页签整层删掉了：不再有 role=tablist，也没有 aria-selected 那一排')
+  // 来源是那份官方 `SegmentedControl`：产物里不该再 require 它。
+  assert.equal(code.includes('SegmentedControl'), false, '客户端产物不再引用官方分段控件')
+  // 三处入口：列表底部的动作行、页头的同步状态、底部状态栏的备份与回滚。
+  assert.ok(text.includes('manage.transfer.action'), '动作行里有「导出 / 导入…」')
+  assert.ok(text.includes('place.sync'), '页头那枚同步状态（没读到配置时说的是「同步」）')
+  assert.ok(text.includes('place.backup'), '状态栏那枚「备份与回滚」')
+  // 四件事的名字还在字典里：说明页「哪里做什么」那一节与按钮上的字共用同一份。
   const { zh: zhDict, en: enDict } = mount().dictionaries[0].dicts
-  for (const key of ['page.tab.migrate', 'migrate.title', 'migrate.hint', 'migrate.lockedHidden', 'help.tabs.migrate']) {
-    assert.ok(
-      !Object.hasOwn(zhDict, key) && !Object.hasOwn(enDict, key),
-      `${key} 该删掉：迁移并进「会话」页之后它没有落点了`,
-    )
+  for (const key of ['page.tab.manage', 'page.tab.transfer', 'page.tab.sync', 'page.tab.backup', 'page.tab.help']) {
+    assert.ok(!Object.hasOwn(zhDict, key) && !Object.hasOwn(enDict, key), `${key} 该删掉：页签没有了`)
+  }
+  for (const key of ['place.sessions', 'place.transfer', 'place.sync', 'place.backup']) {
+    assert.ok(Object.hasOwn(zhDict, key) && Object.hasOwn(enDict, key), `${key} 要两份字典都有`)
   }
   assert.ok(text.includes('page.title'), '页面标题走同一份字典')
+})
+
+test('客户端产物：点哪个入口就开哪个宽弹窗，列表一直挂在后面', { skip }, () => {
+  // 三件事各自是一个 1080 宽的弹窗（`.dsm-workDialog`），标题说的就是那件事。列表**不卸载**——
+  // 勾选与滚动位置要跟着留下来；这里的夹具不往下渲染它（见 loadBundle 里那条说明），但元素还在。
+  for (const [surface, title] of [
+    ['transfer', 'transfer.dialogTitle'],
+    ['sync', 'sync.title'],
+    ['backup', 'backup.title'],
+  ]) {
+    const { registrations, recorded } = mount({ panel: surface })
+    strings(registrations[0].component(registrations[0].registration.inject()))
+    const dialogs = dialogsOf(recorded)
+    assert.equal(dialogs.length, 1, `${surface}：开一个弹窗`)
+    assert.equal(dialogs[0].props['aria-label'], title, `${surface}：标题说的是那件事`)
+    assert.ok(String(dialogs[0].props.className).includes('dsm-workDialog'), `${surface}：宽弹窗那一档`)
+    assert.ok(
+      recorded.some((node) => isComponentType(node.type) && typeNameOf(node.type) === 'ManagePanel'),
+      `${surface}：列表还在页面上（只是没有跟着弹窗一起重画）`,
+    )
+  }
 })
 
 test('客户端产物：备份是独立分页，动作页上不再有那张清单', { skip }, () => {
@@ -1057,13 +1114,12 @@ test('客户端产物：页头是一条工具条——标题、页签、页面�
   assert.equal(head?.type, 'header', '页头是 header')
   const headKids = Array.isArray(head?.props?.children) ? head.props.children : [head?.props?.children]
   assert.ok(headKids.includes(heading), '标题是页头的直接子节点')
-  assert.ok(
-    elementsOf(head).some((node) => node.props?.role === 'tablist'),
-    '页签（官方 SegmentedControl 的 tablist）也在这一行里',
-  )
-
-  // 页头里两枚页面级动作：「刷新」重读整页状态、「插件设置」跳插件页。两者都不属于任何一个分页。
+  // 页头里两枚页面级动作：「刷新」重读整页状态、「插件设置」跳插件页。两者都不属于任何一面。
   const headButtons = elementsOf(head).filter((node) => node.type === 'button')
+  // 页签的位置换成了那枚同步状态：它是官方 Button（带一枚 StateDot），点开才是同步那一面。
+  const chip = headButtons.find((node) => String(node.props?.className ?? '').includes('dsm-headChip'))
+  assert.ok(chip, '页头有同步状态（标题右边那枚）')
+  assert.equal(chip.props['aria-haspopup'], 'dialog', '它开的是一个弹窗')
   assert.ok(
     headButtons.some((node) => node.props?.children === 'sync.settings.action'),
     '页头有「插件设置」',
@@ -1294,14 +1350,24 @@ test('客户端产物：迁移并进了「会话」页——同一张列表，�
     '这一页没有勾不动的行',
   )
 
-  // 动作行：归档 / 取消归档 / 重新生成名称 / 迁移 ┃ 删除；没有 `dsm-primary`（破坏性的删除靠 spacer
-  // 顶到右端，这一页的主动作是"一批会话做同一件事"，不是某一枚按钮）
+  // 动作行：归档 / 取消归档 / 重新生成名称 / 迁移 / 导出·导入 ┃ 删除；没有 `dsm-primary`（破坏性的
+  // 删除靠 spacer 顶到右端，这一页的主动作是"一批会话做同一件事"，不是某一枚按钮）
   assert.deepEqual(primaryPlacements(fresh.tree), [], '这一页没有 dsm-primary')
   assert.deepEqual(
     actionRow(fresh.mounted).map((el) => strings(el)[0]),
-    ['manage.archive.action', 'manage.archive.undo', 'manage.retitle.action', 'migrate.action', 'manage.delete.action'],
-    '动作行上五枚，迁移排在破坏性的「删除」之前',
+    [
+      'manage.archive.action',
+      'manage.archive.undo',
+      'manage.retitle.action',
+      'migrate.action',
+      'manage.transfer.action',
+      'manage.delete.action',
+    ],
+    '动作行上六枚，迁移与导出·导入排在破坏性的「删除」之前',
   )
+  // 「导出 / 导入」是这一行上唯一不要求勾选的一枚：导入与列表里勾了什么无关，所以它总是可点。
+  const transferAction = actionRow(fresh.mounted).find((el) => strings(el)[0] === 'manage.transfer.action')
+  assert.equal(transferAction.props.disabled, false, '一条都没勾时「导出 / 导入…」照样可点')
   const action = actionRow(fresh.mounted).find((el) => strings(el)[0] === 'migrate.action')
   assert.equal(action.props.disabled, true, '一条都没勾时它是禁用的')
 
@@ -1549,8 +1615,7 @@ test('客户端产物：「会话」页把侧边栏看不见的那三类标出�
   const { inject } = registrations[0].registration
   const text = strings(component(inject()))
 
-  assert.ok(text.includes('page.tab.manage'), '页签停在「会话」这一页')
-  assert.ok(text.includes('manage.title') && text.includes('manage.hint'), '页面本体渲染出来了')
+  assert.ok(text.includes('manage.title') && text.includes('manage.hint'), '列表本体就画在页面上（不再是"四个里选一个"）')
   // 三类隐藏理由各挂各的标签：**标签文字**是子节点，**为什么不显示**在悬浮提示里，两处都核。
   //
   // 识别方式：标签换成了官方 `Tag`，而它不收 `title`——悬浮提示挂在外面那一层 `<span title>` 上，
@@ -3166,7 +3231,7 @@ test('客户端产物：「说明」弹窗把分类词条、每页做什么与�
     '说明从页头那枚「?」开成弹窗，不再占一枚页签',
   )
 
-  for (const key of ['help.categories.title', 'help.tabs.title', 'help.where.title', 'help.faq.title']) {
+  for (const key of ['help.categories.title', 'help.entry.title', 'help.where.title', 'help.faq.title']) {
     assert.ok(text.includes(key), `缺少小节「${key}」`)
   }
   // 词条与解释成对，且词条就是行上那几枚标签的键
@@ -3174,10 +3239,10 @@ test('客户端产物：「说明」弹窗把分类词条、每页做什么与�
   for (const key of ['help.categories.visible', 'tag.subagent', 'tag.blank', 'tag.archived', 'tag.live', 'list.ungrouped']) {
     assert.ok(terms.includes(key), `分类词典缺少「${key}」`)
   }
-  assert.equal(terms.length, 23, '词条数＝分类 6 + 分页 4 + 数据 2 + 疑问 11')
+  assert.equal(terms.length, 23, '词条数＝分类 6 + 四件事 4 + 数据 2 + 疑问 11')
   assert.equal(recorded.filter((node) => node.type === 'dd').length, 23, '每条词条都有解释')
-  assert.ok(terms.includes('page.tab.sync'), '分页那一节要写到「同步」这一页')
-  assert.ok(terms.includes('page.tab.backup'), '分页那一节也要写到「备份」这一页')
+  assert.ok(terms.includes('place.sync'), '「哪里做什么」那一节要写到同步')
+  assert.ok(terms.includes('place.backup'), '那一节也要写到备份与回滚')
   // 「数据从哪来」两条路径来自 /state，不是写死在文案里
   assert.ok(
     text.includes('/home/u/.dsh/sessions') && text.includes('/home/u/.dsh/registry.json'),
@@ -4361,9 +4426,12 @@ test('客户端产物：回滚弹窗先摆动作清单再确认（清单就是�
     ],
   })
   const text = strings(item.registrations[0].component(item.registrations[0].registration.inject()))
-  const dialogs = item.recorded.filter((node) => node.props?.role === 'dialog')
-  assert.equal(dialogs.length, 1, '点「回滚」只开一个弹窗（不再有"看回滚动作"那一步）')
-  assert.equal(dialogs[0].props['aria-label'], 'backup.rollback.dialogTitle', '标题说的是那个动作')
+  // 两层：外面那层是备份清单（宽弹窗，一直开着），点「回滚」在它里面再开一层确认弹窗——仍然没有
+  // "先看回滚动作、再确认"那两步。
+  const dialogs = dialogsOf(item.recorded)
+  assert.equal(dialogs.length, 2, '清单那一层 + 回滚确认那一层')
+  assert.equal(dialogs[0].props['aria-label'], 'backup.title', '外面那层是备份清单')
+  assert.equal(topDialog(item.recorded).props['aria-label'], 'backup.rollback.dialogTitle', '里面那层说的是那个动作')
   assert.ok(text.some((item) => String(item).startsWith('backup.rollback.actions')), '那句"以下是回滚会做的 N 个动作"照旧在')
   assert.ok(text.some((item) => String(item) === '把 s-1 搬回 /home/u/dev/alpha'), '动作清单逐条摆出来')
   assert.deepEqual(
@@ -4443,9 +4511,9 @@ test('客户端产物：备份清单认三种来源——迁移/删除/覆盖前
   })
   // 先把树走一遍（`recorded` 只有走过才填上），再找那个弹窗。
   strings(replacing.registrations[0].component(replacing.registrations[0].registration.inject()))
-  const dialogs = replacing.recorded.filter((node) => node.props?.role === 'dialog')
-  assert.equal(dialogs.length, 1)
-  assert.equal(dialogs[0].props['aria-label'], 'backup.restore.dialogTitle', '覆盖前那份开的是「恢复」弹窗')
+  const dialogs = dialogsOf(replacing.recorded)
+  assert.equal(dialogs.length, 2, '清单那一层 + 恢复确认那一层')
+  assert.equal(topDialog(replacing.recorded).props['aria-label'], 'backup.restore.dialogTitle', '覆盖前那份开的是「恢复」弹窗')
   assert.deepEqual(
     strings(cancelOf(replacing.recorded)).concat(strings(primaryOf(replacing.recorded))),
     ['cancel', 'backup.restore.confirm'],
@@ -4867,7 +4935,7 @@ test('客户端产物：删除与回滚的弹窗正文同样换成进度块', { 
   const rollingText = strings(rolling.registrations[0].component(rolling.registrations[0].registration.inject()))
   assert.ok(rollingText.includes('progress.restore:{"current":2,"total":2}'), '回滚那一段说"正在还原"')
   assert.ok(rollingText.includes('backup.progress.note'), '并说明中断了再点一次这份备份即可')
-  assert.equal(dialogsOf(rolling.recorded)[0].props['aria-label'], 'backup.rollback.running', '标题换成「回滚中…」')
+  assert.equal(topDialog(rolling.recorded).props['aria-label'], 'backup.rollback.running', '标题换成「回滚中…」')
 })
 
 test('客户端产物：导入落地时弹窗正文换成进度块', { skip }, () => {
@@ -4908,7 +4976,7 @@ test('客户端产物：导入落地时弹窗正文换成进度块', { skip }, (
   assert.ok(text.includes('progress.write:{"current":1,"total":1}'), '落地那一段说"正在写入"')
   assert.ok(text.includes('transfer.import.progress.note'), '并说明导入只增不覆盖、中断了再导一次')
   assert.equal(
-    dialogsOf(mounted.recorded)[0].props['aria-label'],
+    topDialog(mounted.recorded).props['aria-label'],
     'transfer.import.applying',
     '标题从「将要写入」换成「导入中…」',
   )

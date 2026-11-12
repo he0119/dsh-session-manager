@@ -1,8 +1,8 @@
 /**
- * 页内两个分页共用的入参。
+ * 列表与那三个弹窗共用的入参。
  *
- * 数据只取一次：`/state` 由页面骨架（[ManagerPanel.tsx](./ManagerPanel.tsx)）拉，分页只管渲染
- * 与自己的动作。这样切分页不会各拉一份，也避免"两个分页对同一个库给出不同数字"。
+ * 数据只取一次：`/state` 由页面骨架（[ManagerPanel.tsx](./ManagerPanel.tsx)）拉，面板只管渲染
+ * 与自己的动作。这样开关弹窗不会各拉一份，也避免"两处对同一个库给出不同数字"。
  *
  * @module dsh-session-manager/client/types
  */
@@ -11,7 +11,7 @@ import type { MetaResponse, StateResponse } from './api.ts'
 import type { DirectoryApi } from './directory.ts'
 import type { Translate } from './logic/locales.ts'
 
-/** 分页入参。 */
+/** 面板入参。 */
 export interface PanelShare {
   /** 注入面带来的翻译函数。 */
   t: Translate
@@ -26,6 +26,13 @@ export interface PanelShare {
   meta: MetaResponse | undefined
   /** 重新拉 `/meta` 与 `/state`（写入成功后调用，让列表与注册表归属跟上）。 */
   reload: () => Promise<void>
+  /**
+   * 开「导出 / 导入」那一面（弹窗由页面骨架持有，见 [ManagerPanel.tsx](./components/ManagerPanel.tsx)）。
+   *
+   * 它是列表动作行里唯一**不**要求勾选的一枚：导出要用勾选，导入不用——一个包里带什么与列表里勾了
+   * 什么无关。所以它总是可点，进去之后导出那一栏才看得到勾中的那几条。
+   */
+  openTransfer?: () => void
   /**
    * 就地改清单里的那几条（见 [statePatch.ts](./logic/statePatch.ts)）。
    *

@@ -364,6 +364,7 @@ test('页头是一条工具条：16px/500 的标题、页签与页面级动作�
   // 旧的两行页头与页签行那套样式删干净：留着就会有人照着它改回去。
   assert.equal(ruleBody('.dsm-intro'), null, '旧的 .dsm-intro 不该还在')
   assert.equal(ruleBody('.dsm-tabsRow'), null, '旧的 .dsm-tabsRow 不该还在')
+  assert.equal(ruleBody('.dsm-tabs'), null, '页签的布局壳随页签一起删掉')
   assert.equal(ruleBody('.dsm-version'), null, '旧的页脚徽标样式不该还在（版本号进了状态栏）')
 })
 
@@ -399,16 +400,18 @@ test('传输页宽屏并排：导出宽、导入窄，窄到 900 叠回去', () 
   )
 })
 
-test('非会话分页限在可读宽度：1080px 居中；会话工作台不受限', () => {
-  // 为什么钉它：1600 窗口下一段同步说明拉成一千二百多像素的长行，表单控件全挤在左边。
-  // 「会话」是工作台，继续吃满；其余三页是表单与清单，限宽并居中。
-  const group = /\.dsm-panel\[data-panel="transfer"\],[\s\S]*?\.dsm-panel\[data-panel="backup"\]\s*\{([^}]*)\}/.exec(css)
-  assert.notEqual(group, null, '找不到传输 / 同步 / 备份三页共用的限宽规则')
-  assert.match(group[1], /max-width:\s*1080px/, '可读宽度是 1080px')
-  assert.match(group[1], /align-self:\s*center/, '限宽之后要居中，不能贴着左边')
-  const manage = ruleBody('.dsm-panel[data-panel="manage"]')
-  assert.notEqual(manage, null)
-  assert.doesNotMatch(manage, /max-width/, '「会话」不跟着限宽：它要占满主栏')
+test('做事的三面是 1080 宽的弹窗，确认弹窗仍是 640', () => {
+  // 为什么钉它：导出 / 导入、同步、备份与回滚原来各占一页，正文限在 1080px 居中；搬进弹窗之后宽度
+  // 不变，靠的是这一档。窄下去，传输那两栏与同步的计划表都要折行。
+  const work = ruleBody('.dsm-dialog.dsm-workDialog')
+  assert.notEqual(work, null, '找不到宽弹窗的宽度规则')
+  assert.match(work, /width:\s*min\(1080px, 100%\)/, '三件事共用 1080 这一档，窄窗口自己收')
+  // 确认弹窗不跟着变宽：它的正文是"一句话 + 清单"，拉宽只会把说明拉成很长的一行。
+  const confirm = ruleBody('.dsm-dialog.dsm-dialog')
+  assert.notEqual(confirm, null, '找不到确认弹窗的宽度规则')
+  assert.match(confirm, /width:\s*min\(640px, 100%\)/, '确认弹窗仍是 640')
+  // 页面这一级不再有限宽那一层：页签删掉之后页面只剩工作台，它要占满主栏。
+  assert.equal(ruleBody('.dsm-panel'), null, '.dsm-panel 那层限宽随页签一起删掉了')
 })
 
 test('说明弹窗：760px，四节不再各套一圈卡片壳', () => {
@@ -519,17 +522,17 @@ test('正文与次要文字是内建那两档：正文 14px/20px、说明句 12p
   assert.match(hint, /line-height:\s*18px/, '行高 18px，与内建卡片描述同值')
 })
 
-test('页内分页那一层自带整页的块间距：相邻两张卡片不能贴在一起', () => {
-  // 现象：「说明」那一页整页都是卡片，卡与卡之间一点缝都没有，只剩各自的 1px 描边分得开——真实 dev GUI
-  // 里量到相邻两张卡片的间距是 **0px**。原因是卡片都长在分页本体那一层里，而 `.dsm-root` 那份 16px 的
-  // gap 只作用于它的**直接**子元素（也就是分页那一层自己），再往里就不传了。
+test('宽弹窗的正文层自带整页的块间距：横幅与卡片不能贴在一起', () => {
+  // 现象（同一条缺陷换了地方）：卡片长在正文那一层里，而 `.dsm-root` 那份 16px 的 gap 只作用于它的
+  // **直接**子元素。弹窗正文里的横幅与卡片之间、两张卡片之间，都得由这一层自己给节奏，否则只剩各自
+  // 的 1px 描边分得开（真实 dev GUI 里量到相邻两张卡片的间距是 0px）。
   //
   // 16px 与 `.dsm-root` 同值：内建设置页行与行之间的节奏就是每一行自己的 `padding: 16px 0`。
-  const panel = ruleBody('.dsm-panel')
-  assert.notEqual(panel, null, '找不到 .dsm-panel 规则')
-  assert.match(panel, /display:\s*flex/, '竖排得先是 flex 容器，gap 才生效')
-  assert.match(panel, /flex-direction:\s*column/, '卡片是竖着排的')
-  assert.match(panel, /gap:\s*16px/, '与 .dsm-root 同一档（内建设置页每一行的纵向留白就是 16px）')
+  const body = ruleBody('.dsm-workBody')
+  assert.notEqual(body, null, '找不到 .dsm-workBody 规则')
+  assert.match(body, /display:\s*flex/, '竖排得先是 flex 容器，gap 才生效')
+  assert.match(body, /flex-direction:\s*column/, '块是竖着排的')
+  assert.match(body, /gap:\s*16px/, '与 .dsm-root 同一档')
 })
 
 test('弹窗正文层的字号自己写：官方 Modal 落在 .dsm-root 之外，不写就继承文档根的 16px', () => {

@@ -1,5 +1,5 @@
 /**
- * 「传输」分页：把会话带走（导出 .dshsess）或带回来（导入）。
+ * 「导出 / 导入」弹窗：把会话带走（导出 .dshsess）或带回来（导入）。
  *
  * 这一层只做三件事：调宿主端点、记本地草稿、把结果摆出来。所有判定都在宿主侧
  * （`src/web.ts` + `src/transfer.ts`）：计划返回的就是将要发生的事，页面不自己推算
@@ -17,12 +17,12 @@
  * 判据见 [决策](../../../.agents/notes/implemented/architecture/2026-10-07-card-actions-live-in-a-footer-row.md)：
  * 动作跟着它的输入走——字段与清单在上、动作在下，与确认弹窗、与内建设置页的表单同一个阅读顺序。
  *
- * WebDAV 同步**不在这里**：它是一条常设通道（远端地址、机器名、映射表与确认弹窗），与本页的正交，
- * 见 [SyncPanel.tsx](./SyncPanel.tsx)。两件事挤在一页时，同步那块只能排在导出列表与导入计划表之后。
+ * WebDAV 同步**不在这一面**：它是一条常设通道（远端地址、机器名、映射表与确认弹窗），与本弹窗正交，
+ * 见 [SyncPanel.tsx](./SyncPanel.tsx)。两件事挤在一面时，同步那块只能排在导出列表与导入计划表之后。
  *
- * 会话库数据由页面骨架（[ManagerPanel.tsx](./ManagerPanel.tsx)）拉好传进来：切分页不该各拉一份，
- * 也不该出现"两个分页对同一个库给出不同数字"。列表行、组头、列表框与筛选条都出自
- * [sessionList.tsx](./sessionList.tsx)——三个分页的行是同一套解剖结构。
+ * 会话库数据由页面骨架（[ManagerPanel.tsx](./ManagerPanel.tsx)）拉好传进来：开关弹窗不该各拉一份，
+ * 也不该出现"两处对同一个库给出不同数字"。列表行、组头、列表框与筛选条都出自
+ * [sessionList.tsx](./sessionList.tsx)——两处的行是同一套解剖结构。
  *
  * 样式只在 [styles.ts](./styles.ts) 里定义，颜色只用 `--dsw-alias-*` 主题 token；控件以手写的原生
  * 元素为主，确认弹窗外壳走官方控件库的 `Modal`（[ConfirmDialog.tsx](./ConfirmDialog.tsx) 里说了为

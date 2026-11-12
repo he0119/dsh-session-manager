@@ -44,13 +44,16 @@ export type Translate = TranslateNS<typeof NS>
 
 /** 中文文案（键集真源）。 */
 export const zh = {
-  // 页面骨架：设置导航里的那一行 + 页面标题 + 页内分页
+  // 页面骨架：侧栏那一行 + 页面标题 + 页头那几枚页面级动作
   'page.title': '会话管理',
   'page.library': '会话库',
   'page.refresh': '刷新',
-  'page.tab.transfer': '传输',
-  'page.tab.sync': '同步',
-  'page.tab.manage': '会话',
+  // 四件事各自的名字。它既是入口按钮上的字，也是说明页「哪里做什么」那一节的词条：同一个名字在两处
+  // 必须一模一样，所以只写一份（原先那套 `page.tab.*` 随页签一起删掉了）。
+  'place.sessions': '会话列表',
+  'place.transfer': '导出 / 导入',
+  'place.sync': '同步',
+  'place.backup': '备份与回滚',
   'page.count.sessions': '{count} 个会话',
   'page.count.workspaces': '{count} 个工作区',
   // 右下角那枚版本徽标的悬浮提示。徽标本体（`v0.3.1 · 3c9f1ab`）是标识符，不进字典。
@@ -81,6 +84,9 @@ export const zh = {
   'list.empty': '这个会话库里还没有会话。',
 
   'transfer.import.title': '导入',
+  'transfer.dialogTitle': '导出 / 导入',
+  // 列表动作行上那枚入口：它开的就是上面那个弹窗（导出要用勾选，导入不用，所以它不受勾选限制）。
+  'manage.transfer.action': '导出 / 导入…',
   'transfer.import.hint': '选一个包和目标目录，弹窗里逐条列出会写什么，确认才落盘。',
   'transfer.import.fileLabel': '要导入的包',
   'transfer.import.targetLabel': '目标目录',
@@ -195,8 +201,7 @@ export const zh = {
   'problems.title': '问题',
 
   // ---- 备份与回滚 ----
-  // 页签键跟着它自己那一节走（同 `page.tab.help`）：这一页是独立分页，不再挂在「迁移」底下。
-  'page.tab.backup': '备份',
+  // 入口在底部状态栏（`place.backup`），不是页签：三种写操作共同的后悔面不属于其中任何一件动作。
   'backup.title': '备份与回滚',
   'backup.hint': '迁移、导入落地、删除都会先留一份字节级备份，「回滚」与「恢复」把它还原回去。',
   'backup.rootLabel': '备份根目录',
@@ -352,18 +357,18 @@ export const zh = {
     '这条会话正开着或者还在跑，宿主还没放手：这次删不掉也搬不动。Web 端没法单独关掉它——重启 DSH，重启后别先点开它，直接删。',
 
   // ---- 说明（词条与边界条件：动作页只留"当下要做的决定"） ----
-  'page.tab.help': '说明',
+  'page.help.title': '说明',
   'page.help.open': '说明',
-  'help.hint': '这一页解释会话的分类、每页做什么、动作会碰到哪些文件。',
+  'help.hint': '这一页解释会话的分类、每件事在哪儿做、动作会碰到哪些文件。',
   'help.categories.title': '会话分类',
   'help.categories.visible': '可见',
   'help.categories.visibleTip': '侧边栏会显示的会话。',
   'help.categories.note': '一条会话可能同时属于几类，行上就挂几枚标签。',
-  'help.tabs.title': '每页做什么',
-  'help.tabs.manage': '整个会话库都在这里，侧边栏点不到的那些也在：左边按项目筛，中间是平铺的表，行尾可以看详情。勾选后可以归档、重新生成名称、迁移或删除：名称是按整段对话重算的，你手动改过名的与子智能体会话会跳过。迁移把勾中的会话搬到一个目标目录——改写工作目录、挪走日志目录、更新工作区注册表；侧边栏看不见的那几类搬不走，先在列表里单独处理。',
-  'help.tabs.transfer': '把会话导出成 .dshsess 包，或把包里的会话导入某个工作区。',
-  'help.tabs.sync': '在几台机器之间同步会话（WebDAV）：先给一份只读计划，确认才真的拉取与推送。远端地址、机器名与路径映射在这一页改，改完不用重启。会话日志引用的附件对象走远端一个共享目录，字节相同的只传一次：本机缺的取回、远端缺的补上，两边都没有的只报一句（它在计划里不出现）。',
-  'help.tabs.backup': '几个会写盘的操作共同的后悔面：迁移、删除、同步覆盖本机那份之前都会先留一份字节级备份。「回滚」把迁移搬走的那份搬回来（连工作区注册表一起还原），「恢复」只把备份里那份搬回去，注册表不动。',
+  'help.entry.title': '哪里做什么',
+  'help.entry.sessions': '整个会话库都在这里，侧边栏点不到的那些也在：左边按项目筛，中间是平铺的表，行尾可以看详情。勾选后可以归档、重新生成名称、迁移、导出或删除：名称是按整段对话重算的，你手动改过名的与子智能体会话会跳过。迁移把勾中的会话搬到一个目标目录——改写工作目录、挪走日志目录、更新工作区注册表；侧边栏看不见的那几类搬不走，先在列表里单独处理。',
+  'help.entry.transfer': '列表底部那条动作行里的「导出 / 导入」打开：勾中的那几条已经带在弹窗里，另一栏是导入。导出把会话打成 .dshsess 包，导入把包里的会话放进某个工作区。',
+  'help.entry.sync': '页头那枚同步状态打开：在几台机器之间同步会话（WebDAV），先给一份只读计划，确认才真的拉取与推送。远端地址、机器名与路径映射在插件设置里改，改完不用重启。会话日志引用的附件对象走远端一个共享目录，字节相同的只传一次：本机缺的取回、远端缺的补上，两边都没有的只报一句（它在计划里不出现）。',
+  'help.entry.backup': '底部状态栏那枚「备份与回滚」打开：几个会写盘的操作共同的后悔面，迁移、删除、同步覆盖本机那份之前都会先留一份字节级备份。「回滚」把迁移搬走的那份搬回来（连工作区注册表一起还原），「恢复」只把备份里那份搬回去，注册表不动。',
   'help.where.title': '数据从哪来',
   'help.where.library': '会话库',
   'help.where.libraryText': '每个目录就是一条会话；名称、大小和是否显示都从这里的日志读出来。',
@@ -396,6 +401,10 @@ export const zh = {
 
   // ---- WebDAV 同步 ----
   'sync.title': 'WebDAV 同步',
+  // 页头那枚状态按钮：只报本地知道的事（配没配 / 自动推送开没开 / 这一趟跑完没有）。
+  'sync.chip.off': '同步未配置',
+  'sync.chip.auto': '同步 · 自动推送',
+  'sync.chip.tip': '打开同步：远端、计划、差异与确认',
   'sync.form.title': '同步设置',
   'sync.where': '远端 {url}',
   'sync.hint':
@@ -411,7 +420,7 @@ export const zh = {
   'sync.background': '转到后台',
   'sync.background.running': '正在同步（后台）',
   'sync.background.adopted': '这一趟是在别处发起的（刷新之前，或者另一个页签里）：这一页看不到逐条进度，跑完会补上条数。',
-  'sync.background.hint': '关掉窗口、切到别的分页都会继续跑；回到这一页还能看到它跑到哪。',
+  'sync.background.hint': '关掉窗口、开别的弹窗都会继续跑；回到列表还能看到它跑到哪。',
   'sync.background.done': '后台同步结束：拉取 {pulled} 条、推送 {pushed} 条。',
   // 宿主那边连"搬了几条"都没留下（进程重启过）：只说结束，不编数字。
   'sync.background.donePlain': '后台同步结束。',
@@ -637,9 +646,10 @@ export const en: LocaleDictOf<typeof NS> = {
   'page.title': 'Session management',
   'page.library': 'Session library',
   'page.refresh': 'Refresh',
-  'page.tab.transfer': 'Transfer',
-  'page.tab.sync': 'Sync',
-  'page.tab.manage': 'Sessions',
+  'place.sessions': 'Session list',
+  'place.transfer': 'Export / Import',
+  'place.sync': 'Sync',
+  'place.backup': 'Backups & rollback',
   'page.count.sessions': '{count} sessions',
   'page.count.workspaces': '{count} workspaces',
   'page.version.tip': 'Plugin version {version}',
@@ -667,6 +677,8 @@ export const en: LocaleDictOf<typeof NS> = {
   'list.empty': 'This library has no sessions yet.',
 
   'transfer.import.title': 'Import',
+  'transfer.dialogTitle': 'Export / Import',
+  'manage.transfer.action': 'Export / Import…',
   'transfer.import.hint': 'Pick a bundle and a target directory; the dialog lists every write before you confirm.',
   'transfer.import.fileLabel': 'Bundle to import',
   'transfer.import.targetLabel': 'Target directory',
@@ -781,7 +793,6 @@ export const en: LocaleDictOf<typeof NS> = {
   'effect.plannedRestart': 'A DSH restart will be needed before this takes effect.',
   'problems.title': 'Problems',
 
-  'page.tab.backup': 'Backups',
   'backup.title': 'Backups & rollback',
   'backup.hint': 'Every migration, landing import and delete leaves a byte-level backup first; Roll back and Restore put it back.',
   'backup.rootLabel': 'Backup root',
@@ -934,18 +945,18 @@ export const en: LocaleDictOf<typeof NS> = {
   'tag.liveTip':
     'This session is open or still running, so the host still holds it: it cannot be deleted or moved this time. The Web side cannot close one session — restart DSH, and after the restart delete it without opening it first.',
 
-  'page.tab.help': 'Help',
+  'page.help.title': 'Help',
   'page.help.open': 'Help',
-  'help.hint': 'This page explains the session categories, what each page does, and which files the actions touch.',
+  'help.hint': 'This page explains the session categories, where each thing is done, and which files the actions touch.',
   'help.categories.title': 'Session categories',
   'help.categories.visible': 'visible',
   'help.categories.visibleTip': 'A session the sidebar shows.',
   'help.categories.note': 'One session can fall into several categories, so a row can carry several tags.',
-  'help.tabs.title': 'What each page does',
-  'help.tabs.manage': 'The whole session library is here, including sessions the sidebar cannot reach: the left rail filters by project, the middle is a flat table, and the row end opens details. Ticked rows can be archived, retitled, migrated or deleted: names are redone from the whole conversation, and sessions you renamed by hand or subagent sessions are skipped. Migration moves the ticked sessions into one target directory — it rewrites the recorded working directory, moves the log directory and updates the workspace registry. The rows the sidebar hides cannot move, so deal with them in the list first.',
-  'help.tabs.transfer': 'Export sessions into a .dshsess bundle, or import a bundle’s sessions into a workspace.',
-  'help.tabs.sync': 'Sync sessions between machines over WebDAV: it first shows a read-only plan and only pulls and pushes once you confirm. The remote address, machine names and path mappings are edited on this page, with no restart. Attachment objects referenced by session logs travel through one shared remote folder, and identical bytes are uploaded once: missing ones are fetched, ones the remote lacks are uploaded, and ones nobody has are reported in one line (they never show up in the plan).',
-  'help.tabs.backup': 'The undo surface shared by the operations that write: every migration, delete and overwrite of this machine’s copy leaves a byte-level backup first. Roll back brings back what a migration moved (the workspace registry included); Restore only moves the backed-up copy back and leaves the registry alone.',
+  'help.entry.title': 'What lives where',
+  'help.entry.sessions': 'The whole session library is here, including sessions the sidebar cannot reach: the left rail filters by project, the middle is a flat table, and the row end opens details. Ticked rows can be archived, retitled, migrated, exported or deleted: names are redone from the whole conversation, and sessions you renamed by hand or subagent sessions are skipped. Migration moves the ticked sessions into one target directory — it rewrites the recorded working directory, moves the log directory and updates the workspace registry. The rows the sidebar hides cannot move, so deal with them in the list first.',
+  'help.entry.transfer': 'Opened from Export / Import in the action row under the list: the ticked rows already travel into the dialog, and the other column is import. Export packs sessions into a .dshsess bundle; import puts a bundle’s sessions into a workspace.',
+  'help.entry.sync': 'Opened from the sync state in the header: syncs sessions between machines over WebDAV and first shows a read-only plan, pulling and pushing only once you confirm. The remote address, machine names and path mappings are set in the plugin settings, with no restart. Attachment objects referenced by session logs travel through one shared remote folder, and identical bytes are uploaded once: missing ones are fetched, ones the remote lacks are uploaded, and ones nobody has are reported in one line (they never show up in the plan).',
+  'help.entry.backup': 'Opened from Backups & rollback in the status bar: the undo surface shared by the operations that write, where every migration, delete and overwrite of this machine’s copy leaves a byte-level backup first. Roll back brings back what a migration moved (the workspace registry included); Restore only moves the backed-up copy back and leaves the registry alone.',
   'help.where.title': 'Where the data comes from',
   'help.where.library': 'Session library',
   'help.where.libraryText': 'Each directory is one session; names, sizes and visibility are read from the logs here.',
@@ -978,6 +989,9 @@ export const en: LocaleDictOf<typeof NS> = {
 
   // ---- WebDAV sync ----
   'sync.title': 'WebDAV sync',
+  'sync.chip.off': 'Sync not configured',
+  'sync.chip.auto': 'Sync · auto-push',
+  'sync.chip.tip': 'Open sync: remote, plan, diff and confirm',
   'sync.form.title': 'Sync settings',
   'sync.where': 'Remote {url}',
   'sync.hint':
@@ -992,7 +1006,7 @@ export const en: LocaleDictOf<typeof NS> = {
   'sync.background.running': 'Syncing (in background)',
   'sync.background.adopted':
     'This run was started elsewhere (before a reload, or in another tab): this page cannot show item-by-item progress, but the counts appear here when it finishes.',
-  'sync.background.hint': 'Closing the window or switching tabs keeps it running; come back to this page to see where it is.',
+  'sync.background.hint': 'Closing the window or opening another panel keeps it running; come back to the list to see where it is.',
   'sync.background.done': 'Background sync finished: pulled {pulled}, pushed {pushed}.',
   'sync.background.donePlain': 'Background sync finished.',
   'sync.background.failed': 'Background sync failed: {reason}',

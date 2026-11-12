@@ -1,5 +1,6 @@
 /**
- * 「备份」分页：那几件会写盘的操作共同的后悔面。
+ * 「备份与回滚」弹窗：那几件会写盘的操作共同的后悔面。入口在页面底部状态栏（不是页签：它不属于
+ * 其中任何一件动作），见 [ManagerPanel.tsx](./ManagerPanel.tsx)。
  *
  * 为什么单独一页、而不是留在「迁移」页底部：这张清单里躺的不只是迁移留下的备份——删除（`delete`）
  * 与同步覆盖本机那份（`replace`）也各留一份（来源写在 `kind` 上，见 `src/journal.ts`）。它挂在迁移
@@ -45,7 +46,7 @@ function backupKindLabel(
   return 'backup.kind.migrate'
 }
 
-/** 「备份」分页。 */
+/** 「备份与回滚」弹窗。 */
 export function BackupPanel({ t, reload }: Pick<PanelShare, 't' | 'reload'>): React.ReactElement {
   const [backups, setBackups] = React.useState<BackupSummary[]>([])
   const [backupRoot, setBackupRoot] = React.useState('')
@@ -82,7 +83,7 @@ export function BackupPanel({ t, reload }: Pick<PanelShare, 't' | 'reload'>): Re
     }
   }, [])
 
-  // 只跑一次：分页切换会卸载这一页，下次进来重新读一遍清单（这正是"刚做完迁移/删除/同步，切过来
+  // 只跑一次：关掉弹窗会卸载它，下次打开重新读一遍清单（这正是"刚做完迁移/删除/同步，点进来
   // 就能看见它留下的那一份"的实现方式——那份备份不必由做动作的那一页去通知这里刷新）。
   const loaded = React.useRef(false)
   React.useEffect(() => {
