@@ -42,6 +42,8 @@
 
 ## 文件格式与搬运
 
+路径、字段与落地前的校验写在 [formats.md](formats.md)；这一节只列决策。
+
 - [多帧 zstd 变成启动期硬失败](../.agents/notes/implemented/bug-fix/2026-09-27-multiframe-zstd-is-a-hard-failure.md)：
   只解首帧会静默丢掉整个会话，所以解码器由调用方注入、装配时先验守卫。
 - [.dshsess 是一条 gzip 流，不是 tar](../.agents/notes/implemented/architecture/2026-09-27-dshsess-is-one-gzip-stream.md)：

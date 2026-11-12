@@ -1,10 +1,11 @@
 # AGENTS.md
 
-本仓库的协作约定，给 AI 助手与贡献者看。安装与用法在 [README](README.md)，决策的依据与被否决的备选
-方案在 [.agents/notes/](.agents/notes/AGENTS.md)，决策地图在 [docs/internals.md](docs/internals.md)，
-界面与样式的完整规格在 [docs/design.md](docs/design.md)，目录结构与逐文件职责在
-[docs/development.md](docs/development.md)。
-文档、提交信息、给维护者的报告一律用中文（[README.en.md](README.en.md) 是与 README 对齐的英文版）。
+本仓库的协作约定，给 AI 助手与贡献者看。安装与用法在 [README](README.md)，
+决策的依据与被否决的备选方案在 [.agents/notes/](.agents/notes/AGENTS.md)，决策地图在
+[docs/internals.md](docs/internals.md)，界面与样式的完整规格在 [docs/design.md](docs/design.md)，
+落盘格式在 [docs/formats.md](docs/formats.md)，各种操作的流程在 [docs/flows.md](docs/flows.md)，
+目录结构与逐文件职责在 [docs/development.md](docs/development.md)。文档、提交信息、
+给维护者的报告一律用中文（[README.en.md](README.en.md) 是与 README 对齐的英文版）。
 
 ## 文档分工
 
@@ -20,6 +21,8 @@
 | `docs/design.md` | 界面与样式的唯一规格：页面骨架、排版、间距、颜色、控件、文案与验收 |
 | `docs/internals.md` | 决策地图（按主题索引到笔记），以及没有笔记承载的当前机制 |
 | `docs/development.md` | 目录结构、逐文件职责、开发命令 |
+| `docs/formats.md` | 落盘格式：本机会话库、远端同步格子、会话包 `.dshsess` |
+| `docs/flows.md` | 各种操作的流程：从界面动作到宿主动作，读写哪些文件 |
 | `docs/releasing.md` | 发布流程（推 `v*` 标签触发可信发布） |
 | `docs/glossary.md` | 术语表：官方怎么说、照写什么、别写什么、出处在哪 |
 
