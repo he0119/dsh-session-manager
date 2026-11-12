@@ -41,6 +41,8 @@ export interface RowSession extends SessionFacts {
   readonly cwd?: string
   readonly createdAt: number
   readonly bytes: number
+  /** 子智能体挂在哪条会话下面（平铺之后用来提示"父在别的项目里"，见 planRows.parentDirNote）。 */
+  readonly parentSession?: string
 }
 
 /** 一行的列组合：导出 / 挑选是五列，会话页多一格归属。 */
@@ -633,15 +635,20 @@ export function SessionGroupTools({ collapse, t }: { collapse: GroupCollapse; t:
  *
  * @param fixed 这个列表会不会随筛选变行数。会的话高度必须固定（见 styles.ts 的 `.dsm-listFixed`）：
  *   框一变矮，整页跟着变矮，设置弹窗外层那条滚动条就一进一出，占位滚动条的环境里整个卡片会横移 15px。
+ *   主栏那一版（`.dsm-listFill`）不用这一档：它自己就是那一页的滚动视口，高度由卡片剩余空间给。
+ * @param fill 列表吃掉卡片剩下的高度，自己滚（主栏「会话」页）。与 `fixed` 互斥。
  */
 export function SessionListBox({
   fixed = false,
+  fill = false,
   children,
 }: {
   fixed?: boolean
+  fill?: boolean
   children: React.ReactNode
 }): React.ReactElement {
-  return <div className={fixed ? 'dsm-list dsm-listFixed' : 'dsm-list'}>{children}</div>
+  const classes = ['dsm-list', fixed ? 'dsm-listFixed' : '', fill ? 'dsm-listFill' : ''].filter(Boolean).join(' ')
+  return <div className={classes}>{children}</div>
 }
 
 /** 框里的空态。放在框**里面**，框才不会因为"没内容"而消失。 */

@@ -52,28 +52,28 @@ import {
 import { ConfirmDialog } from './ConfirmDialog.tsx'
 import { DirectoryField, useDirectoryFields } from './DirectoryField.tsx'
 import { ProgressBlock } from './ProgressBlock.tsx'
+import { ProjectPicker } from './ProjectPicker.tsx'
 import { TranscriptDialog } from './TranscriptDialog.tsx'
-import { groupKey, groupSessions, nestSessions } from '../logic/groups.ts'
+import { groupSessions } from '../logic/groups.ts'
 import {
   deleteFamilyNote,
   directoryTargetRows,
   migrateFamilyNote,
   parentDirNote,
+  projectLabel,
   type PathRow,
 } from '../logic/planRows.ts'
+import { defaultDir, sessionsInProject, sortSessions, type SessionSortKey } from '../logic/manageRows.ts'
 import { describeRetitle, type RetitleNotes } from '../logic/retitleNotes.ts'
 import { FILTER_KEYS } from '../logic/sessionFilter.ts'
 import {
   SessionFilterBar,
-  SessionGroupHead,
-  SessionGroupTools,
   SessionListBox,
   SessionListEmpty,
   SessionPickTools,
   SessionRow,
   SessionStaticRow,
   formatBytes,
-  useGroupCollapse,
   useSessionFilter,
   useSessionPicking,
   type RowSession,
@@ -170,27 +170,84 @@ export function ManagePanel({ t, state, meta, reload, patch, directory }: PanelS
   } | null>(null)
   /** 上一次迁移落地之后的结论（复核 / 备份 / 生效方式）：弹窗关了之后它还得在页面上留着。 */
   const [effect, setEffect] = React.useState<MigrationEffect | null>(null)
+  /**
+   * 只看某一个项目（`null` = 全部）。
+   *
+   * 平铺之后没有组头了，「整组处理」这件事改成"先按项目筛，再全选"：选中一个项目，清单就只剩它，
+   * 卡头那对「全选 / 清空」的作用面跟着变成这一批。取一个对象而不是一个字符串，是因为冒烟用例按
+   * 位置往空串状态里种值（见 test/client.test.mjs 的 mount），多一个字符串会让后面那些种子整体错一格。
+   */
+  const [project, setProject] = React.useState<{ path: string | null }>({ path: null })
+  /**
+   * 表头那一列的排序：点一下换列，再点一下换方向。
+   *
+   * 同样用对象状态：它不该占掉字符串种子的位置。默认按时间从新到旧——这一页最常见的问法是
+   * "我最近那条在哪"。
+   */
+  const [sort, setSort] = React.useState<{ key: SessionSortKey; dir: 'asc' | 'desc' }>({ key: 'time', dir: 'desc' })
 
   /**
-   * 按目录分组，组内留着筛选之后的那些（空掉的组整组不画：组头底下没有行，看着像坏了）。
+   * 全库按目录分一次组：项目下拉的选项、每一行「项目」那一格都从它来。
    *
-   * 与「传输」页逐字同形（那边也是这几步），理由见 groups.ts：分组键是目录而不是注册表里的工作区 id，
-   * 因为同一个目录下常有没登记的会话，而用户说"这个工作区的会话"指的是这个目录。
+   * 这里**不再按筛选裁组**（平铺之后组头没了），裁的是下面 `listed` 那一份；选项上的条数因此是
+   * 整个项目的条数，不是"筛完剩几条"——会跳的计数没人信得过。
    */
-  const groups = React.useMemo(() => {
-    const filtered = groupSessions(sessions, state?.workspaces ?? [])
-      .map((group) => ({ group, sessions: group.sessions.filter(filter.matches) }))
-      .filter((item) => item.sessions.length > 0)
-    // 缩进在**筛完之后**才算：父被筛掉时子按普通行画（见 groups.nestSessions 的三条边界）。
-    const visible = new Set(filtered.flatMap((item) => item.sessions.map((session) => session.id)))
-    return filtered.map((item) => ({ group: item.group, rows: nestSessions(item.sessions, sessions, visible) }))
-  }, [sessions, state, filter.matches])
-  /** 折叠：只把组内的行收起来，不改"列出来了哪些"（见 TransferPanel 里的同一段说明）。 */
-  const collapse = useGroupCollapse(groups.map((item) => groupKey(item.group.path)))
-  /** 当前列出来的那些（筛过之后，按组摊平）。缩进只改画法，不改"列出来了哪些"。 */
-  const listed = React.useMemo(() => groups.flatMap((item) => item.rows.map((row) => row.session)), [groups])
+  const projectGroups = React.useMemo(
+    () => groupSessions(sessions, state?.workspaces ?? []),
+    [sessions, state],
+  )
+  const projectOptions = React.useMemo(
+    () =>
+      projectGroups.map((group) => ({
+        path: group.path,
+        name: projectLabel(
+          { path: group.path, title: group.title, repo: state?.repos?.[group.path] },
+          t,
+        ).name,
+        count: group.sessions.length,
+      })),
+    [projectGroups, state, t],
+  )
+  /** 一行属于哪个项目：组头的称呼规则（项目身份优先、没有身份用标题、再没有用路径）。 */
+  const projectNameOf = React.useCallback(
+    (session: RowSession): string => {
+      const key = session.cwd ?? ''
+      const hit = projectGroups.find((group) => group.path === key)
+      if (hit === undefined) return key === '' ? t('list.noCwdGroup') : key
+      return projectLabel(
+        { path: hit.path, title: hit.title, repo: state?.repos?.[hit.path] },
+        t,
+      ).name
+    },
+    [projectGroups, state, t],
+  )
+  /** 当前列出来的那些：项目与筛选都过一遍，再按表头那一列排（两件事都是纯函数，见 manageRows.ts）。 */
+  const listed = React.useMemo(
+    () => sortSessions(sessionsInProject(sessions, project.path).filter(filter.matches), sort),
+    [sessions, project.path, filter.matches, sort],
+  )
+  /**
+   * 子智能体的父会话在**别的项目**里时的那枚备注（原先写在组内缩进那一行上）。
+   *
+   * 平铺之后没有父子缩进了，这条信息不能一起丢掉：删 / 迁子会话会连带父会话，父不在眼前时得说一声。
+   */
+  const parentElsewhereOf = React.useCallback(
+    (session: RowSession): { text: string; tip: string } | undefined => {
+      if (session.origin !== 'subagent' || session.parentSession === undefined) return undefined
+      const parent = sessions.find((item) => item.id === session.parentSession)
+      if (parent === undefined || (parent.cwd ?? '') === (session.cwd ?? '')) return undefined
+      return parentDirNote({ parentPath: parent.cwd }, t)
+    },
+    [sessions, t],
+  )
   /** 眼下列出来的那些里能单独勾的（「全选」的作用面与禁用判据）。 */
   const pickable = picking.selectableOf(listed)
+  /** 表头点一下：换列时给这一列一个顺手的默认方向，同一列再点就翻方向。 */
+  const toggleSort = (key: SessionSortKey): void => {
+    setSort((current) =>
+      current.key === key ? { key, dir: current.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: defaultDir(key) },
+    )
+  }
 
   // ------------------------------- 迁移 -------------------------------
 
@@ -501,6 +558,8 @@ export function ManagePanel({ t, state, meta, reload, patch, directory }: PanelS
    * 它来自 `/meta`（与清单无关、先到），所以清单还在读时那枚按钮也不至于晚一步出现。
    */
   const pickerKind = (state ?? meta)?.pickerKind ?? null
+  /** 表头那一列的箭头：只有当前排序列才有。 */
+  const sortArrow = (key: SessionSortKey): string => (sort.key === key ? (sort.dir === 'asc' ? ' ↑' : ' ↓') : '')
 
   return (
     <>
@@ -549,14 +608,25 @@ export function ManagePanel({ t, state, meta, reload, patch, directory }: PanelS
         </p>
       ))}
 
-      <div className="dsm-card">
+      <div className="dsm-card dsm-cardFill">
         <div className="dsm-cardHead">
           <span className="dsm-cardTitle">{t('manage.title')}</span>
-          <span className="dsm-hint">{t('list.selected', { count: picked.length })}</span>
-          {filter.active && (
+          {/*
+            项目选择器：平铺之后组头没了，「整组处理」改成"选一个项目 → 全选"两步。选项上的条数是**整个
+            项目**的条数，不随筛选跳；选中的项目与筛选芯片是「与」的关系。
+          */}
+          <ProjectPicker
+            t={t}
+            options={projectOptions}
+            value={project.path}
+            total={sessions.length}
+            onChange={(path) => setProject({ path })}
+          />
+          {(filter.active || project.path !== null) && (
             <span className="dsm-hint">{t('list.shown', { shown: listed.length, total: sessions.length })}</span>
           )}
           <span className="dsm-spacer" />
+          <span className="dsm-hint">{t('list.selected', { count: picked.length })}</span>
           {/*
             筛过之后「全选」要的是"这几类都选上"，不是"把看不见的也选上"；不能单独勾的那些也不进来：
             子智能体跟着父会话走，勾父会话就等于勾了它。这一对与「传输」「迁移」两页是同一个组件。
@@ -576,57 +646,59 @@ export function ManagePanel({ t, state, meta, reload, patch, directory }: PanelS
         {facts !== undefined && !retitleAvailable && <p className="dsm-hint">{t('manage.retitle.unavailable')}</p>}
 
         {sessions.length > 0 && <SessionFilterBar keys={FILTER_KEYS} filter={filter} t={t} />}
-        {groups.length > 0 && <SessionGroupTools collapse={collapse} t={t} />}
 
-        {/* 高度固定：连"一条都没筛出来"（以及库里一条都没有）也画在这个框里，否则那些状态会把
-            这一页的高度改回去，外层滚动条又能把整个卡片挪动 15px（见 styles.ts 的 .dsm-listFixed）。 */}
-        <SessionListBox fixed>
+        {/*
+          平铺表格：一行一条，按目录分组时写在各组头上的「项目」变成一列。表头跟列表一起滚没意义，
+          它是列的说明，所以贴在列表顶部（见 styles.ts 的 .dsm-tableHead）。
+
+          排序只在界面上排，不写盘：同一份清单换一种看法，不该留下副作用。
+        */}
+        <SessionListBox fill>
+          <div className="dsm-tableHead">
+            <span />
+            <span />
+            <button type="button" className="dsm-sort" onClick={() => toggleSort('title')} title={t('list.sort.tip')}>
+              {t('list.sort.title')}
+              {sortArrow('title')}
+            </button>
+            <span className="dsm-sortStatic">{t('list.project.column')}</span>
+            <button type="button" className="dsm-sort dsm-sortNum" onClick={() => toggleSort('size')} title={t('list.sort.tip')}>
+              {t('list.sort.size')}
+              {sortArrow('size')}
+            </button>
+            <button type="button" className="dsm-sort dsm-sortNum" onClick={() => toggleSort('time')} title={t('list.sort.tip')}>
+              {t('list.sort.time')}
+              {sortArrow('time')}
+            </button>
+          </div>
           {state === null ? (
             // 清单还在读：这一格说"读取中…"而不是"这个会话库里还没有会话"——后者是个结论。
             <SessionListEmpty text={t('loading')} />
           ) : sessions.length === 0 ? (
             <SessionListEmpty text={t('list.empty')} />
-          ) : groups.length === 0 ? (
+          ) : listed.length === 0 ? (
             <SessionListEmpty text={t('list.noMatch')} />
           ) : (
-            groups.map(({ group, rows }) => {
-              const key = groupKey(group.path)
-              const collapsed = collapse.isCollapsed(key)
-              return (
-                <div key={key} className="dsm-group">
-                  <SessionGroupHead
-                    path={group.path}
-                    title={group.title}
-                    repo={state?.repos?.[group.path]}
-                    count={rows.length}
-                    picked={rows.filter((row) => picked.includes(row.session.id)).length}
-                    collapsed={collapsed}
-                    onToggle={() => picking.toggleGroup(rows.map((row) => row.session))}
-                    onToggleCollapse={() => collapse.toggle(key)}
-                    t={t}
-                  />
-                  {!collapsed &&
-                    rows.map((row) => (
-                      <SessionRow
-                        key={row.session.id}
-                        session={row.session}
-                        variant="manage"
-                        checked={picked.includes(row.session.id)}
-                        onToggle={() => picking.toggle(row.session)}
-                        depth={row.depth}
-                        note={parentDirNote(row, t)}
-                        locked={picking.lockOf(row.session)}
-                        onInspect={() => setInspecting(row.session)}
-                        inspectLabel={t('manage.transcript.open')}
-                        inspectTip={t('manage.transcript.openTip')}
-                        t={t}
-                      />
-                    ))}
-                </div>
-              )
-            })
+            listed.map((session) => (
+              <SessionRow
+                key={session.id}
+                session={session}
+                variant="manage"
+                checked={picked.includes(session.id)}
+                onToggle={() => picking.toggle(session)}
+                owner={projectNameOf(session)}
+                note={parentElsewhereOf(session)}
+                locked={picking.lockOf(session)}
+                onInspect={() => setInspecting(session)}
+                inspectLabel={t('manage.transcript.open')}
+                inspectTip={t('manage.transcript.openTip')}
+                t={t}
+              />
+            ))
           )}
         </SessionListBox>
+
+        <p className="dsm-hint">{t('manage.delete.hint')}</p>
 
         <div className="dsm-controls">
           {/*
@@ -709,7 +781,6 @@ export function ManagePanel({ t, state, meta, reload, patch, directory }: PanelS
             {effect.takesEffect === 'restart-required' && <p className="dsm-warn">{t('effect.restart')}</p>}
           </div>
         )}
-        <p className="dsm-hint">{t('manage.delete.hint')}</p>
       </div>
 
       {/* 删除弹窗：清单与「确认」在同一块地方（见 ConfirmDialog.tsx 的说明）。 */}

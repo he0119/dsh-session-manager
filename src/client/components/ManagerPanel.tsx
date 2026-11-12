@@ -220,31 +220,59 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
         })
 
   return (
-    <section className="dsm-root" data-plugin="dsh-session-manager">
-      <header className="dsm-head">
-        {/*
-          标题行右端放「插件设置」：这一包的配置挂在**插件页**上（`plugins.bundle.config`，见
-          PluginConfigCard.tsx），不在这一页，也不在设置里。官方的「上下文洞察」页也是这个形状——
-          标题右边一枚按钮，点过去就是它自己的插件页。
+    <section className="dsm-root" data-plugin="dsh-session-manager" data-panel={panel}>
+      {/*
+        页头是一条**工具条**：标题、页内分页、页面级动作排在同一行。
 
-          它**不看"配没配同步"**：恰恰是没配的时候最需要它。宿主没装插件管理器时禁用（点了没反应比
-          禁用更糟）。
-        */}
-        <div className="dsm-headRow">
-          <h2 className="dsm-title">{t('page.title')}</h2>
-          <span className="dsm-spacer" />
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => getNavigationApi()?.openPackage()}
-            disabled={getNavigationApi() === undefined}
-          >
-            {t('sync.settings.action')}
-          </Button>
+        为什么不再用「标题一行 + 说明一行」那种设置页的形状：这一页现在从侧栏进来，占的是整块主栏，
+        不是设置弹窗里的一格。宽屏上那两行会把列表往下推 60px，而库路径与条数每天都在看、却要占掉
+        一行；挪到底部状态栏之后，视线从列表移到底部才看它，正好。
+
+        「插件设置」仍在标题这一行：配置挂在**插件页**上（`plugins.bundle.config`，见 PluginConfigCard），
+        不在这一页。「刷新」也搬到这里——它重读整页的状态（`/meta` + `/state`），不属于任何一个分页。
+
+        分页顺序按日常程度排：会话 → 传输 → 同步 → 备份 → 说明。「备份」是那三个写操作共同的后悔面，
+        「说明」是一次性读的参考，两者都不该挤在动作页前面。
+
+        它**不看"配没配同步"**：恰恰是没配的时候最需要它。宿主没装插件管理器时禁用（点了没反应比
+        禁用更糟）。
+      */}
+      <header className="dsm-head">
+        <h2 className="dsm-title">{t('page.title')}</h2>
+        <div className="dsm-tabs">
+          <SegmentedControl
+            id="dsm-panel"
+            value={panel}
+            label={t('page.title')}
+            onChange={setPanel}
+            options={[
+              { value: 'manage', label: t('page.tab.manage') },
+              { value: 'transfer', label: t('page.tab.transfer') },
+              { value: 'sync', label: t('page.tab.sync') },
+              { value: 'backup', label: t('page.tab.backup') },
+              { value: 'help', label: t('page.tab.help') },
+            ]}
+          />
         </div>
-        <p className="dsm-intro">
-          {t('page.library')}：{libraryLine}
-        </p>
+        <span className="dsm-spacer" />
+        <Button
+          className="dsm-headAction"
+          variant="outline"
+          size="sm"
+          onClick={() => void load()}
+          disabled={busy}
+        >
+          {busy ? t('loading') : t('page.refresh')}
+        </Button>
+        <Button
+          className="dsm-headAction"
+          variant="outline"
+          size="sm"
+          onClick={() => getNavigationApi()?.openPackage()}
+          disabled={getNavigationApi() === undefined}
+        >
+          {t('sync.settings.action')}
+        </Button>
       </header>
 
       {/*
@@ -300,59 +328,11 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
       )}
 
       {/*
-        页签顺序：三个动作页按日常程度排（会话 → 传输 → 同步），「备份」是那三个写操作
-        共同的后悔面（迁移 / 删除 / 同步覆盖各留一份），日常程度最低却也不属于其中任何一页，所以
-        排在动作页之后、最后的「说明」之前——「说明」是一次性读的参考，不该挤在动作页上（详见
-        HelpPanel.tsx 的取舍）。同步紧挨着传输，是因为它落地走的是导入那条编排（见 SyncPanel.tsx
-        的说明）。顺序与页签、页面本体两处都跟着走对齐，默认页就是第一个（见上面 useState 的初值）。
-
-        「刷新」挂在这一行的右端，不在页头里（见下面 dsm-tabsRow 的说明）。
-      */}
-      <div className="dsm-tabsRow">
-        {/*
-          页签走官方 `SegmentedControl`：手写那排 `role="tab"` 的 `<button>` 得自己接
-          `aria-selected` / `tabIndex` / 方向键走查 / `aria-controls`，官方原语一并带齐（还多一层
-          滑块指示器）。`id` 是前缀，每段拿 `<id>-<value>` 与 `<id>-<value>-panel`，与下面分页本体
-          的 `id` 配成一对。段与段的值就是 `PanelKey`，受控在 `panel` 那个状态上。
-        */}
-        <SegmentedControl
-          id="dsm-panel"
-          value={panel}
-          label={t('page.title')}
-          onChange={setPanel}
-          options={[
-            { value: 'manage', label: t('page.tab.manage') },
-            { value: 'transfer', label: t('page.tab.transfer') },
-            { value: 'sync', label: t('page.tab.sync') },
-            { value: 'backup', label: t('page.tab.backup') },
-            { value: 'help', label: t('page.tab.help') },
-          ]}
-        />
-        {/*
-          「刷新」在这一行的右端，不在页头里：它重读的是**整页**的状态（`/meta` + `/state`：库在哪、
-          多少个会话、多少个工作区、同步配没配），所以它不属于任何一个分页，只能留在页面这一级；
-          而页头只有标题与说明行两行（规格与内建设置页对齐，见
-          [决策](../../../.agents/notes/implemented/architecture/2026-09-28-page-header-matches-the-builtin-settings.md)），
-          摆进去就会把标题那一行撑高、并与设置外壳自己那枚「打开配置文件」在同一个右列里上下叠着。
-          排到说明行右端也不行：那一行（`会话库：… · 457 个会话 · 13 个工作区`）实测宽 497px，加上
-          按钮与间距要 580px，而内容列只有 564px——它会被挤成两行。这一行右端量下来还有 142px 空着
-          （右端对齐由 `.dsm-tabsRow > .dsm-tabsAction` 的 `margin-left:auto` 做，换行后也贴着右端）。
-        */}
-        {/*
-          这枚按钮要一个自己的类：官方 `Button` 的类名是它 CSS module 的哈希名（认不得、也不该认），
-          所以"推到这一行右端"这条布局得挂在本页自己的类上。
-        */}
-        <Button className="dsm-tabsAction" variant="outline" size="sm" onClick={() => void load()} disabled={busy}>
-          {busy ? t('loading') : t('page.refresh')}
-        </Button>
-      </div>
-
-      {/*
         分页本体外面这一层带上 `id`，与上面 `SegmentedControl` 给每段写的 `aria-controls`
         （`<id>-<value>-panel`）接上：官方原语按这个约定生成引用，不接上就是一个指向空气的
         `aria-controls`。`role="tabpanel"` 也在这一层。
       */}
-      <div id={`dsm-panel-${panel}-panel`} role="tabpanel" className="dsm-panel">
+      <div id={`dsm-panel-${panel}-panel`} role="tabpanel" className="dsm-panel" data-panel={panel}>
         {panel === 'manage' && (
           <ManagePanel t={t} state={state} meta={meta} reload={load} patch={patch} directory={directory} />
         )}
@@ -363,13 +343,22 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
       </div>
 
       {/*
-        版本徽标：这一页的右下角。放在页内分页**之后**而不是页头——它答的是"这一页是哪个构建"，
-        与"你要做什么"无关；悬浮提示把"发布版还是直接 build 的"说全（判据见 build.ts 与
-        scripts/build-identity.ts）。一句话里的数字来自构建期常量，渲染路径上没有任何 IO。
+        底部状态栏：库在哪、有多少条、这一页是哪个构建。
+
+        这三样原来在页头那行说明与页脚各占一处，现在收进这一行，理由与页头合成工具条是同一个：
+        从侧栏进来占的是整块主栏，纵向空间该留给列表。状态栏**不随分页切换消失**——"库在哪 / 多少条"
+        是整页的上下文，不是某一个分页的。版本号的悬浮提示把"发布版还是直接 build 的"说全（判据见
+        build.ts 与 scripts/build-identity.ts）；一句话里的数字来自构建期常量，渲染路径上没有任何 IO。
       */}
-      <p className="dsm-version" title={versionTip}>
-        {version}
-      </p>
+      <footer className="dsm-statusBar">
+        <span className="dsm-statusLib" title={facts?.sessionsRoot ?? ''}>
+          {t('page.library')}：{libraryLine}
+        </span>
+        <span className="dsm-spacer" />
+        <span className="dsm-statusVersion" title={versionTip}>
+          {version}
+        </span>
+      </footer>
     </section>
   )
 }

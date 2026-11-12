@@ -333,26 +333,52 @@ test('state 色不许裸当文字色：它是指示色，浅色主题下淡到�
   assert.deepEqual(offenders, [], 'state 色要当文字色，得先用 color-mix 和 label-primary 兑过')
 })
 
-test('页头照内建设置页的规格：16px/500 的 h2 标题 + 隔 12px 一行 14px 的说明行', () => {
-  // 为什么钉它：这一页的页头是**手写**的（官方设置页也是手写 h2 + p，没有现成原语可复用），
-  // 规格只能照量出来的数字抄。抄错的后果就是真实事故里那种"看着不对但没人说得清哪不对"——
-  // 抄错参照页也会：18px/600 那一档量的是「插件」**整页**的标题，而本页是设置外壳里的一个区块，
-  // 相邻的「模型」「内置插件」「Agent 预设」三个区块的标题都是 16px/500、说明行 14px/22px。
+test('页头是一条工具条：16px/500 的标题、页签与页面级动作同排；库路径收进底部状态栏', () => {
+  // 这一页从侧栏进来、占整块主栏之后，页头不再是「标题 + 说明」两行（那是设置弹窗里一格的高度预算）。
+  // 标题那一档仍然是 16px/500/24px——与「模型」「内置插件」「Agent 预设」那几页同一个规格；变的是
+  // 它跟谁排在一行，以及"库在哪、多少条"挪去了页脚状态栏。
   const head = ruleBody('.dsm-head')
   assert.notEqual(head, null, '找不到 .dsm-head 规则')
-  assert.match(head, /flex-direction:\s*column/, '标题与说明要上下排（内建页就是列布局），不该挤成一行')
-  assert.match(head, /gap:\s*12px/, '标题与说明之间是 12px，与内建页的节奏一致')
+  assert.match(head, /display:\s*flex/, '页头是横向一条')
+  assert.match(head, /align-items:\s*center/, '标题、页签、动作按中线对齐')
+  assert.match(head, /gap:\s*16px/, '几块之间 16px，与页面块间距同档')
+  assert.match(head, /flex-wrap:\s*wrap/, '窄到放不下时换行，而不是把动作挤出可视区')
+  assert.doesNotMatch(head, /flex-direction:\s*column/, '标题与页签是同排的工具条，不该退回上下两行')
 
   const title = ruleBody('.dsm-title')
   assert.notEqual(title, null, '找不到 .dsm-title 规则')
-  assert.match(title, /font-size:\s*16px/, '区块标题是 16px（与「模型」「内置插件」那几页同规格）')
+  assert.match(title, /font-size:\s*16px/, '标题仍然是 16px（与「模型」「内置插件」那几页同规格）')
   assert.match(title, /font-weight:\s*500/)
   assert.match(title, /line-height:\s*24px/, '标题行高 24px——量出来的就是它，不是按字号算的比例')
+  assert.match(title, /flex:\s*none/, '标题不参与收缩（页签换行时它不该先被压扁）')
 
-  const intro = ruleBody('.dsm-intro')
-  assert.notEqual(intro, null, '找不到 .dsm-intro 规则')
-  assert.match(intro, /font-size:\s*14px/, '说明行 14px（内建页的说明行就是这一档）')
-  assert.match(intro, /--dsw-alias-label-tertiary/, '说明行用 label-tertiary，与内建页的说明行同色')
+  // 底部状态栏：库在哪、多少条、哪个构建。12px/18px 是最小那一档；路径单行省略，完整值在 title 里。
+  const status = ruleBody('.dsm-statusBar')
+  assert.notEqual(status, null, '找不到 .dsm-statusBar 规则')
+  assert.match(status, /font-size:\s*12px/, '状态栏是次要文字那一档')
+  assert.match(status, /border-top:/, '与内容之间有一条发丝线')
+  const lib = ruleBody('.dsm-statusLib')
+  assert.notEqual(lib, null, '找不到 .dsm-statusLib 规则')
+  assert.match(lib, /text-overflow:\s*ellipsis/, '长路径单行省略，不把状态栏顶宽')
+
+  // 旧的两行页头与页签行那套样式删干净：留着就会有人照着它改回去。
+  assert.equal(ruleBody('.dsm-intro'), null, '旧的 .dsm-intro 不该还在')
+  assert.equal(ruleBody('.dsm-tabsRow'), null, '旧的 .dsm-tabsRow 不该还在')
+  assert.equal(ruleBody('.dsm-version'), null, '旧的页脚徽标样式不该还在（版本号进了状态栏）')
+})
+
+test('平铺表的表头与行用同一套列宽', () => {
+  // 表头与行是两条独立的 grid 声明（一条在 .dsm-tableHead、一条在 .dsm-rowManage），列宽写错一处
+  // 不会报错，只会让"项目"与"时间"两列错开几个像素——真实 dev GUI 里看着像表格串了行。列宽是设计，
+  // 所以这里把六个值写死；改设计就要同一次改这条断言与 docs/design.md。
+  const columns = (body) => {
+    const hit = /grid-template-columns:\s*([^;]+);/.exec(body ?? '')
+    return hit === null ? null : hit[1].replace(/\s+/g, ' ').trim()
+  }
+  const head = columns(ruleBody('.dsm-tableHead'))
+  const row = columns(ruleBody('.dsm-rowManage'))
+  assert.equal(head, '24px 16px minmax(120px, 1.4fr) 168px 84px 120px')
+  assert.equal(row, head, '表头与行的列宽必须逐字相同（两处改一处就会错位）')
 })
 
 test('卡片外壳照官方那张 .card：圆角 20px + 1px settings-card-stroke 描边', () => {

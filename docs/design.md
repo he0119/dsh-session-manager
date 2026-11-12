@@ -34,7 +34,7 @@
   时，每次同步都得先翻过十来个字段的配置卡，改配置又得先滚到底。设置页里不放本包的入口——那边的
   通用 / 模型 / 插件 / 账户 / Agent 预设才是官方那几页的位置。
 - 主栏页标题右边一枚「插件设置」：跳插件页（宿主 `pluginNavigation.openBundle(包名)`）。它是页面级的
-  入口，所以与标题同排；「刷新」是列表工具，仍在页签那一行的右端。
+  入口，与标题同排；「刷新」重读整页状态（`/meta` + `/state`），也不属于任何分页，同样在这一行。
 - 插件页那一格是**分组设置**的形状，照官方 `dsh-context` 那张配置卡（
   `src/client/components/settingsCard.tsx`）：一组一个 16px/600 的组标题，组里一行一件事——标签
   14px 与它的说明 12px 在左、控件靠右（输入框固定 320px，不随窗口拉成长条）；组与组之间一条
@@ -43,20 +43,24 @@
   未设置）。**不要用 `SettingsSecretField`**——它是个整块的字段（标签 / 徽标 / 输入框 / 说明竖着四层），
   混进这张横排的卡里就是唯一一行长得不一样的东西。只写语义不变：值不进响应，留空即保留已存的那一个。
 - 主栏那一版外面多一层 `.dsm-globalPage`：宿主的 `.mainPanel` 是定高 flex 列、`overflow: hidden`，
-  滚动视口得由占位方自己给；内容列最宽 960px 居中，与主栏里别的页面同一个节奏。
-- 页头没有官方原语，照内建设置页手写：`h2` **16px / 行高 24px / 500** 独占一行，隔 **12px** 一行
-  14px 说明（`label-tertiary`）；整体列布局。页头里**不放动作**。
-- 页面级的「刷新」挂在页签那一行的右端（`.dsm-tabsRow`），下划线随整行铺满。
+  滚动视口得由占位方自己给。**内容占满主栏的宽度，页面本身不滚**：其余分页在 `.dsm-panel` 里滚，
+  「会话」页滚的是卡片里的列表（`.dsm-listFill`）。宽度上限（旧版是 960px 居中）不再有——那是设置
+  弹窗里一格的高度预算，不是整页的。
+- 页头是**一条工具条**：`h2` **16px / 行高 24px / 500**、官方 `SegmentedControl` 的页签、右端的
+  「刷新」与「插件设置」同排；窄到放不下时整排换行（`flex-wrap: wrap`，行距 8px）。
+- 库路径、会话数、工作区数、版本号在底部**状态栏**（`.dsm-statusBar`，12px/18px，上方一条发丝线）：
+  它们答的是"这一页在看哪个库、是哪个构建"，不随分页切换。清单没到时状态栏说「读取中…」，不画 0。
 - 页内分页用官方 `SegmentedControl`，分页顺序是「会话 → 传输 → 同步 → 备份 → 说明」；迁移是
   「会话」页上的动作，不单独占一页。每页本体是 `.dsm-panel`，自己带 `gap: 16px`——`.dsm-root`
   那份 gap 只作用于直接子元素，不再往里传。
-- 依据：[页头那篇](../.agents/notes/implemented/architecture/2026-09-28-page-header-matches-the-builtin-settings.md)、
+- 依据：[全宽工作台那篇](../.agents/notes/implemented/architecture/2026-11-12-session-page-is-a-full-width-workbench.md)、
   [分页间距那篇](../.agents/notes/implemented/bug-fix/2026-10-16-inner-blocks-need-their-own-gap.md)。
 
 ### 2.2 卡片
 
 - 卡片外壳照官方卡片：圆角 **20px**、1px `settings-card-stroke` 描边、`bg-layer-1` 底色、
-  内边距 **12px 14px**、纵向 `gap: 10px`。
+  内边距 **12px 14px**、纵向 `gap: 10px`。「会话」页那张是 `.dsm-cardFill`：吃满分页剩下的高度，
+  头、筛选、动作行不动，中间的表自己滚。
 - 卡片头部只放不动数据的工具（刷新、全选 / 清空、收起 / 展开）；**卡片级的主动作一律放底部动作行**
   （`.dsm-controls`），破坏性动作用 `dsm-spacer` 顶到同一行右端。清单行上的动作留在行上。
 - 带勾选的清单全站只有一对选行工具：「全选」/「清空」，作用面是眼下列出来的那些；位置在清单之上那一
@@ -66,11 +70,17 @@
 
 ### 2.3 列表
 
-- 列表按项目目录分组；组头只摆名字 + 一枚主机名标签，项目身份与本机路径在悬浮提示里。组头是一条
-  粘住的横幅，会话行缩进并带左缘导引线；层次同时靠底色、缩进 / 导引线、字号、图标四层区分。
+- **「会话」页是平铺表格**：每行六个格子（勾选框 / 图形标记 / 标题与标签 / 项目 / 大小 / 时间）。
+  「项目」那一列在册项目写工作区标题、没登记的写路径——平铺之后它是"这条属于哪个目录"的唯一出处。
+- 表头三列可点着排（标题 / 大小 / 时间），默认时间从新到旧；**表头吸顶**（`position: sticky`），
+  滚的是列表自己。排序只改看，不写盘；比较与筛选在 `logic/manageRows.ts`，`test/manageRows.test.ts` 直接测。
+- 会话页没有组头与折叠：整组处理改成"项目选择器选一个项目 → 卡头全选"两步；下一版由左侧项目树
+  恢复成一次点击。**「传输」页仍按目录分组**，那套组头 / 折叠 / 整组勾选还在（`SessionGroupHead`）。
 - 行上的「内容」等动作藏在行尾，悬停或键盘落在这一行时出场；静止时行上只有标签与时刻。
-- 空态、加载态不编造结论：清单没到之前说「读取中…」，不把"0 个会话"画上去。
-- 依据：[项目身份与组头](../.agents/notes/implemented/feature/2026-10-04-workspace-shows-project-identity.md)、
+- 空态、加载态不编造结论：清单没到之前说「读取中…」，不把"0 个会话"画上去。空态画在列表框**里面**，
+  表头不能因为"这一筛没命中"而消失。
+- 依据：[全宽工作台那篇](../.agents/notes/implemented/architecture/2026-11-12-session-page-is-a-full-width-workbench.md)、
+  [项目身份与组头](../.agents/notes/implemented/feature/2026-10-04-workspace-shows-project-identity.md)、
   [行上动作](../.agents/notes/implemented/architecture/2026-10-12-row-action-waits-for-hover.md)、
   [两阶段加载](../.agents/notes/implemented/architecture/2026-10-07-page-loads-in-two-phases.md)。
 
@@ -91,9 +101,8 @@
 | 层级 | 字号 / 行高 | 用在哪 | 实现 |
 | --- | --- | --- | --- |
 | 页面标题 | 16px / 24px / 500 | 页头 `h2` | `.dsm-title` |
-| 页面说明 | 14px / 22px | 页头下面那句 | `.dsm-intro` |
 | 正文 | 14px / 20px | 页面与弹窗正文 | `.dsm-root`、`.dsm-dialogBody`、`.dsm-diffContent` |
-| 次要文字 | 12px / 18px | 说明句、标签、脚注、事件卡 | `.dsm-hint`、`.dsm-item` |
+| 次要文字 | 12px / 18px | 说明句、标签、脚注、事件卡、底部状态栏 | `.dsm-hint`、`.dsm-item`、`.dsm-statusBar` |
 | 路径 | 12px / 等宽 | cwd、id、机器名 | `.dsm-path` |
 | 输入框 | 13px / 18px | 搜索框（内建输入框那一档） | `.dsm-search` |
 
@@ -222,7 +231,8 @@ pnpm typecheck && pnpm build && pnpm test && pnpm check:package
 
 | 主题 | 决策笔记 |
 | --- | --- |
-| 页头照内建设置页 | [2026-09-28](../.agents/notes/implemented/architecture/2026-09-28-page-header-matches-the-builtin-settings.md) |
+| 全宽工作台与平铺表 | [2026-11-12](../.agents/notes/implemented/architecture/2026-11-12-session-page-is-a-full-width-workbench.md) |
+| 页头照内建设置页（已被取代） | [2026-09-28](../.agents/notes/implemented/architecture/2026-09-28-page-header-matches-the-builtin-settings.md) |
 | 正文与次要文字两档 | [2026-10-07](../.agents/notes/implemented/architecture/2026-10-07-body-type-matches-the-builtin-settings.md) |
 | 控制件用官方原语 | [2026-10-15](../.agents/notes/implemented/architecture/2026-10-15-controls-come-from-the-official-primitives.md) |
 | 卡片动作行 | [2026-10-07](../.agents/notes/implemented/architecture/2026-10-07-card-actions-live-in-a-footer-row.md) |
