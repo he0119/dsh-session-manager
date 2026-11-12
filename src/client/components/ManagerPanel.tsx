@@ -26,6 +26,7 @@ import { Button, SegmentedControl, StateDot } from '@deepseek-ai/dsh-client-ui-p
 
 import type { MetaResponse, ProgressEvent, StateResponse } from '../api.ts'
 import { panelEvents, type PanelSnapshot } from '../logic/panelEvents.ts'
+import { getNavigationApi } from '../navigation.ts'
 import { PLUGIN_COMMIT, PLUGIN_DIRTY, PLUGIN_VERSION } from '../build.ts'
 import type { DirectoryApi } from '../directory.ts'
 import type { Translate } from '../logic/locales.ts'
@@ -221,7 +222,26 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
   return (
     <section className="dsm-root" data-plugin="dsh-session-manager">
       <header className="dsm-head">
-        <h2 className="dsm-title">{t('page.title')}</h2>
+        {/*
+          标题行右端放「插件设置」：这一包的配置挂在**插件页**上（`plugins.bundle.config`，见
+          PluginConfigCard.tsx），不在这一页，也不在设置里。官方的「上下文洞察」页也是这个形状——
+          标题右边一枚按钮，点过去就是它自己的插件页。
+
+          它**不看"配没配同步"**：恰恰是没配的时候最需要它。宿主没装插件管理器时禁用（点了没反应比
+          禁用更糟）。
+        */}
+        <div className="dsm-headRow">
+          <h2 className="dsm-title">{t('page.title')}</h2>
+          <span className="dsm-spacer" />
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => getNavigationApi()?.openPackage()}
+            disabled={getNavigationApi() === undefined}
+          >
+            {t('sync.settings.action')}
+          </Button>
+        </div>
         <p className="dsm-intro">
           {t('page.library')}：{libraryLine}
         </p>

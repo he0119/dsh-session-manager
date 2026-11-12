@@ -144,6 +144,10 @@
   就能把宿主主线程按住一两秒；现在包走线程池的 `readBundleAsync()`、日志走分块让出的
   `decodeLogTextChunked()`，判出来的关系再按两边全部代次的哈希记进 `contentRelationCache`，两边都没
   再动的那一对第二轮不再从远端重取。
+- [配置在插件页，侧栏那一页做事](../.agents/notes/implemented/architecture/2026-11-12-config-on-plugin-page.md)：
+  「会话管理」两个落点：侧栏那页（`main` + `sidebar.panellist`，同 id 配对）做事，标题右边一枚
+  「插件设置」跳到插件页；配置挂 `plugins.bundle.config`（按包名作键），按功能分小节（「同步」）。
+  分法照官方 `dsh-context`。
 - [整理远端只清自己那一格](../.agents/notes/implemented/feature/2026-11-12-sync-tidy-own-cell.md)：
   同一条会话常在两格里各有一份（本机实测 1417 条里 1066 条如此）。落地时勾「顺手整理远端」只删**自己
   那一格**里多余的包：另一格更全的、或一模一样的（一样时留格子名最靠前的那格，两台机器算出来同一份，

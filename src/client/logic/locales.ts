@@ -364,7 +364,7 @@ export const zh = {
   'sync.hint':
     '按插件配置里的映射同步：把别处推送来的会话拉取到本机，把本机独有的推送到远端。同一个 id 两边都有时按内容与最后活动时间判谁更新，远端更新会先备份再换掉本机那份。两边各自写过的这次不动，预演里可以看差异再定。映射 {mappings} 条。',
   'sync.offHint':
-    '没配置同步：在下面那张表单里填远端地址（WebDAV 集合）并逐行加上路径映射，保存后「同步」就会出现。',
+    '没配置同步：去 设置 →「会话管理」里填远端地址（WebDAV 集合）与路径映射，保存后回这里就能同步。',
   'sync.action': '同步',
   'sync.dialogTitle': '将要同步',
   'sync.running': '正在同步',
@@ -387,6 +387,8 @@ export const zh = {
   'sync.applied': '已拉取 {pulled} 条、已推送 {pushed} 条（落地 {bytesIn}，上传 {bytesOut}）。',
   'sync.tidy.check': '顺手整理远端：删掉本机这一格里多余的 {count} 个包（约 {size}）',
   'sync.tidy.action': '整理远端',
+  'sync.settings.action': '插件设置',
+  'sync.config.title': '同步',
   'sync.tidy.dialogTitle': '整理远端',
   'sync.tidy.confirm': '开始整理',
   'sync.tidy.running': '整理中…',
@@ -907,7 +909,7 @@ export const en: LocaleDictOf<typeof NS> = {
   'sync.hint':
     'Syncs through the mapping in the plugin configuration: pulls what other machines pushed, pushes what only this machine has. When both sides hold the same session, contents and the last-activity time decide who is newer, and a newer remote backs up the local copy before replacing it. {mappings} mapping(s).',
   'sync.offHint':
-    'Sync is not configured: fill in the remote URL (the WebDAV collection) and the path mapping (one "remote working directory = local directory" per line) in the form below and save.',
+    'Sync is not configured: fill in the remote URL (the WebDAV collection) and the path mapping under Settings → “Session management”, then come back here.',
   'sync.action': 'Sync',
   'sync.dialogTitle': 'About to sync',
   'sync.running': 'Syncing',
@@ -928,6 +930,8 @@ export const en: LocaleDictOf<typeof NS> = {
   'sync.applied': 'Pulled {pulled}, pushed {pushed} ({bytesIn} written, {bytesOut} uploaded).',
   'sync.tidy.check': 'Also tidy the remote: delete {count} redundant bundles in this machine’s cell (~{size})',
   'sync.tidy.action': 'Tidy remote',
+  'sync.settings.action': 'Plugin settings',
+  'sync.config.title': 'Sync',
   'sync.tidy.dialogTitle': 'Tidy the remote',
   'sync.tidy.confirm': 'Start tidying',
   'sync.tidy.running': 'Tidying…',

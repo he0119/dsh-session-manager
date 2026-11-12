@@ -39,6 +39,49 @@ export const CSS = `
  * （内建卡片的标题就是它），次要那一档是 **12px / 行高 18px**（内建卡片的描述就是它）。所以正文字号
  * 走这一层继承，凡是"比正文淡一档"的字都显式写成 12px/18px，而不是只换个颜色。
  */
+/*
+ * 主栏那一版（侧栏入口点开之后的落点）：宿主给的容器是定高的 flex 列，且 overflow 是 hidden，滚动视口
+ * 得由占位方自己给——设置弹窗那条路的滚动与内边距归设置外壳，所以 .dsm-root 自己没有滚动容器，这一层
+ * 就是为"换一个落点"补上的那一段。内容列最宽 960px、居中，与主栏里别的页面同一个节奏。
+ */
+/* 页头那一行：标题在左、动作在右（属性与 .dsm-head 那个纵向节奏一致，只是把标题与按钮排成一行）。 */
+.dsm-headRow { display: flex; align-items: center; gap: 12px; }
+/*
+ * 插件页里这一包的那格配置（plugins.bundle.config）。形状照 dsh-context 那张配置卡：一组一个标题
+ * （16/600），组里一行一件事——标签与说明在左、控件在右；组与组之间一条发丝线。控件外观仍归官方
+ * 控件库，这里只管摆位与分组。
+ */
+.dsm-settingPrefs { padding: 4px 0; display: flex; flex-direction: column; }
+.dsm-settingGroup { display: flex; flex-direction: column; gap: 2px; }
+.dsm-settingGroup + .dsm-settingGroup {
+  border-top: 0.5px solid var(--dsw-alias-border-l2, rgba(0, 0, 0, 0.16));
+  margin-top: 18px;
+  padding-top: 18px;
+}
+.dsm-settingGroupTitle { color: var(--dsw-alias-label-primary, #1f2329); font-size: 16px; font-weight: 600; line-height: 24px; }
+.dsm-settingRow { display: flex; align-items: center; gap: 16px; padding: 8px 0; }
+.dsm-settingText { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.dsm-settingLabel { color: var(--dsw-alias-label-primary, #1f2329); font-size: 14px; line-height: 22px; }
+/* 标签那一行的横排（标签 + 一枚状态标签，比如密码的「已配置」）。 */
+.dsm-settingLabelRow { display: flex; align-items: center; gap: 6px; }
+.dsm-settingNote { color: var(--dsw-alias-label-secondary, #646a73); font-size: 12px; line-height: 1.5; }
+.dsm-settingColumn { display: flex; flex-direction: column; gap: 8px; padding: 8px 0; }
+/* 右侧那一列控件固定宽度：一行一件事，不随窗口拉成一条长条。 */
+.dsm-settingInput { flex: none; width: 320px; }
+.dsm-settingColumn > .dsm-settingInput, .dsm-mapRow > .dsm-settingInput { width: auto; flex: 1 1 12rem; min-width: 0; }
+
+.dsm-globalPage {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--dsw-alias-bg-base, #ffffff);
+}
+.dsm-globalScroll { flex: 1; min-height: 0; overflow: auto; scrollbar-gutter: stable; }
+.dsm-globalContent { max-width: 960px; margin: 0 auto; padding: 24px clamp(24px, 4vw, 48px) 48px; }
+
 .dsm-root {
   display: flex;
   flex-direction: column;
@@ -789,8 +832,6 @@ export const CSS = `
 .dsm-toggleText { min-width: 0; }
 .dsm-toggleTitle { font-size: 14px; line-height: 20px; }
 .dsm-toggleDesc { margin-top: 4px; color: var(--dsw-alias-label-secondary, #646a73); font-size: 12px; line-height: 18px; }
-.dsm-syncRow { display: flex; gap: 12px; flex-wrap: wrap; }
-.dsm-syncRow > .dsm-field { flex: 1 1 16rem; min-width: 0; }
 .dsm-options { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
 /*
  * 「会话」页的筛选条：与行上的小标签同一套视觉（一排小胶囊），选中的那一枚用品牌色描边 + 淡填充。

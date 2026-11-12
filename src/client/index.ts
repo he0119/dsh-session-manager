@@ -1,12 +1,21 @@
 /**
- * `dsh-session-manager` 的 Web Client 端：把「会话管理」注册成设置里的独立一页。
+ * `dsh-session-manager` 的 Web Client 端：把「会话管理」拆成两个落点注册出去。
  *
- * 页面主体在 [ManagerPanel.tsx](./ManagerPanel.tsx)（页内分「会话」「迁移」「传输」「同步」「说明」五个分页），
- * 文案在 [locales.ts](./locales.ts)，端点调用在 [api.ts](./api.ts)，样式在 [styles.ts](./styles.ts)
- * ——这里只做组装。
+ * **侧栏那一页做事**（挑会话、迁移、导入导出、同步、备份）：`main` 放页面本身，`sidebar.panellist`
+ * 放侧栏那一行图标，两者用同一个 id 配对（宿主按 id 把侧栏那条指到主栏那一页）。
  *
- * 注册进 `settings.section`：设置左侧导航里的一页，与「通用 / 模型 / 插件 / 账户 / Agent 预设」
- * 并列。没有选另外两个相似的 Slot，理由是它们各自有一个真问题：
+ * **设置里那一页只放怎么配**：`settings.section` 挂的是 [SettingsPanel.tsx](./SettingsPanel.tsx)，
+ * 里面只有 WebDAV 那张配置卡。为什么分两页：配置一年改两次，操作用天天用——挤在一页里时，每次同步
+ * 都得先翻过十来个字段的配置卡，改配置又得先滚到底。官方的 `dsh-context` 也是这么分的（设置里只有
+ * 偏好项，数据在侧栏那一页）。
+ *
+ * 页面主体在 [ManagerPanel.tsx](./ManagerPanel.tsx)（页内分「会话」「迁移」「传输」「同步」「说明」
+ * 五个分页），侧栏那一版外面多一层 [SessionManagerPage.tsx](./components/SessionManagerPage.tsx)
+ * （主栏要自己带滚动视口），文案在 [locales.ts](./locales.ts)，端点调用在 [api.ts](./api.ts)，
+ * 样式在 [styles.ts](./styles.ts)——这里只做组装。
+ *
+ * 设置那一页与「通用 / 模型 / 插件 / 账户 / Agent 预设」并列。没有选另外两个相似的 Slot，理由是
+ * 它们各自有一个真问题：
  *   - `plugins.detail.section`（插件详情页里的一段）归属感最贴，但要按 subject
  *     （`item` / `row` / `bundle`）自过滤，而判断依据是**包在插件管理器里的表示形态**；
  *     猜错不报错，只是永远不渲染——静默空白。它还会在包内每一行的页面上各渲染一次，
@@ -50,18 +59,32 @@
 import type { BuiltInLocaleId } from '@deepseek-ai/dsh-client-locale/client'
 import type { LocaleDictOf } from '@deepseek-ai/dsh-client-ui-slots'
 
-import { ManagerPanel } from './components/ManagerPanel.tsx'
 import { type CredentialsApi, setCredentialsApi } from './credentials.ts'
 import { type DirectoryListing, getDirectoryApi, setDirectoryApi } from './directory.ts'
 import { NS, en, zh, type Translate } from './logic/locales.ts'
+import { SessionManagerIcon } from './components/icons.tsx'
+import { SessionManagerPage } from './components/SessionManagerPage.tsx'
+import { PluginConfigCard } from './components/PluginConfigCard.tsx'
+import { setNavigationApi } from './navigation.ts'
+import { PLUGIN_NAME } from './plugin.ts'
 import { installStyles } from './styles.ts'
 import { SYNC_SECTION, setSyncConfigApi, type SyncConfigApi } from './logic/syncForm.ts'
 
 /** 插件名（客户端模块系统里的 factory id，等于包名）。 */
-export const name = '@he0119/dsh-session-manager'
+export { PLUGIN_NAME as name } from './plugin.ts'
 
 /** 本页注册的 Slot：设置左侧导航里的一页。 */
 export const SECTION_SLOT = 'settings.section'
+/**
+ * 插件页里这一包的那格配置。键是**包名**（`plugins.bundle.config` 的契约），不是设置命名空间。
+ */
+export const CONFIG_SLOT = 'plugins.bundle.config'
+
+/** 宿主插件管理器的导航面（`pluginNavigation` 服务）：`openBundle` 切到插件页并打开这个包。 */
+interface PluginNavigationService {
+  /** 切到插件页的「已安装」栏并打开这个包的页面。 */
+  openBundle(packageName: string): void
+}
 /**
  * 本页的 Slot id（也是设置外壳 `only` 过滤时用的那个键）。
  *
@@ -72,10 +95,29 @@ export const SECTION_ID = 'session-manager'
 /** 排在官方那几页之后（账户 -10 / 通用 0 / 模型 10 / 插件 15 / Agent 预设 20），不插队。 */
 export const SECTION_ORDER = 30
 
+/**
+ * 侧栏入口 + 主栏页面用的 Slot 与 id。
+ *
+ * 宿主那两侧按 id 配对：`main` 的 `key` 与 `sidebar.panellist` 的 `id` 必须是同一个值，点了侧栏那一行
+ * 主栏就换到它（见 `@deepseek-ai/dsh-client-ui-sidebar` 的 slot 契约：「Each list id addresses the
+ * matching main panel」）。与设置里那一页共用 `SECTION_ID`——同一个页面，两个落点。
+ */
+export const PANEL_SLOT = 'main'
+/** 侧栏那一条：宿主负责按钮与无障碍名字，条目只提供图标。 */
+export const PANEL_LIST_SLOT = 'sidebar.panellist'
+/**
+ * 侧栏里的顺序：官方那几个各有自己的位置（插件 …、自动化任务 10、上下文洞察 20），本页排在自动化
+ * 任务之后、上下文洞察之前——都在"全局面板"这一串里，谁挨着谁不重要，别插到最前面抢先就行。
+ */
+export const PANEL_ORDER = 12
+
 /** Slot 注册的入参形状（只取本模块用得到的字段）。 */
 interface SlotRegistration {
   name: string
-  id: string
+  /** 列表型 Slot（`settings.section`、`sidebar.panellist`）用 id。 */
+  id?: string
+  /** 键控型 Slot（`main`）用 key，与列表那一条的 id 相同。 */
+  key?: string
   order?: number
   label?: string | (() => string)
   locale?: string
@@ -193,20 +235,59 @@ export function apply(ctx: ClientContext): void {
     },
   )
 
-  ctx.slots.inject(SECTION_SLOT, () =>
+  // 「去插件页看看配置」那条路：插件管理器在运行时 `provide` 一个 `pluginNavigation`（`openBundle`）。
+  // 同样是可选依赖——宿主没装插件管理器时，那一枚按钮自己说明"这个宿主没有插件页"。
+  ctx.inject<{ pluginNavigation?: PluginNavigationService }>(['pluginNavigation'], (scoped) => {
+    const navigation = scoped.pluginNavigation
+    if (navigation === undefined) return undefined
+    setNavigationApi({ openPackage: () => navigation.openBundle(PLUGIN_NAME) })
+    return () => setNavigationApi(undefined)
+  })
+
+  /*
+   * 侧栏入口 + 主栏页面：**做事**的地方（挑会话、迁移、导入导出、同步、备份）。
+   * 设置里那一页只放**怎么配**（见文件末尾那条注册）——两种读者的状态不一样：配置一年改两次，
+   * 操作用天天用。这一点与官方的 `dsh-context` 同一个分法（设置里是偏好项，数据在侧栏那一页）。
+   */
+  ctx.slots.inject(PANEL_SLOT, () =>
     ctx.slots.register(
       {
-        name: SECTION_SLOT,
-        id: SECTION_ID,
-        order: SECTION_ORDER,
-        // thunk：外壳投影导航行时会调用它，切语言后重新投影即可，不必重新注册。
-        label: () => ctx.locale.bind(NS)('page.title'),
+        name: PANEL_SLOT,
+        key: SECTION_ID,
         locale: NS,
-        // 只给一个**取选择器的函数**：投影时它可能还没到位，点击那一刻才作数。
-        // `t` 不在这里——它由框架按 `locale` 送进组件 props（`PropsLocale`）。
         inject: () => ({ directory: () => getDirectoryApi() }),
       },
-      ManagerPanel,
+      SessionManagerPage,
+    ),
+  )
+
+  ctx.slots.inject(PANEL_LIST_SLOT, () =>
+    ctx.slots.register(
+      {
+        name: PANEL_LIST_SLOT,
+        id: SECTION_ID,
+        order: PANEL_ORDER,
+        // thunk：切语言后重新投影即可；无障碍名字由宿主从这一份 label 里取。
+        label: () => ctx.locale.bind(NS)('page.title'),
+        locale: NS,
+      },
+      SessionManagerIcon,
+    ),
+  )
+
+  /*
+   * 插件页里这一包的那格配置（`plugins.bundle.config`，**按包名作键**）：WebDAV 地址、机器标识、
+   * 账号与密码引用、路径映射、自动推送。设置页不再有本包的一页——那里只放官方那几项。
+   */
+  ctx.slots.inject(CONFIG_SLOT, () =>
+    ctx.slots.register(
+      {
+        name: CONFIG_SLOT,
+        key: PLUGIN_NAME,
+        locale: NS,
+        inject: () => ({}),
+      },
+      PluginConfigCard,
     ),
   )
 }
