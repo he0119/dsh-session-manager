@@ -1101,6 +1101,12 @@ export const CSS = `
  * 两张卡片之间都会贴住。
  */
 .dsm-workBody { display: flex; flex-direction: column; gap: 16px; }
+/*
+ * 官方弹窗 portal 到 document.body，落在本页 .dsm-root 之外：那里面的段落带的是宿主正文默认的上下
+ * 外边距（12px），叠在 gap 上就成了 28——两块之间比设计的 16 宽出一截。本页的规矩是「间距只由 gap
+ * 给」，所以这一层直接把外边距收掉（只收直接子元素，表格、清单里的段落照旧）。
+ */
+.dsm-workBody > * { margin-block: 0; }
 .dsm-helpBody { display: flex; flex-direction: column; gap: 16px; }
 /* 弹窗自己已经是卡片：说明里那四节不再各套一圈卡片壳，留标题与正文的节奏。 */
 .dsm-helpDialog .dsm-card { border: none; background: transparent; padding: 0; }

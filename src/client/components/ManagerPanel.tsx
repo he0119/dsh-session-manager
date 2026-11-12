@@ -335,7 +335,7 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
    * "上次同步几点、待拉几条"要跑一趟计划（联网），这一枚不能为了它去联网——那一趟在点开之后的计划
    * 面里看；宿主那侧目前也没记上一次同步的时间，所以这里不编一个出来。
    */
-  const syncInfo = meta?.sync ?? null
+  const syncInfo = (meta ?? state)?.sync ?? null
   /** 「多久以前」那句话：档位由纯函数判（见 logic/relativeTime.ts），这里只把键交给字典。 */
   const ago = (at: string): string => {
     const label = relativeLabel(Date.parse(at), Date.now())
@@ -569,7 +569,14 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
         />
       )}
       {surface === 'sync' && (
-        <WorkDialog t={t} title={t('sync.title')} onClose={close}>
+        <WorkDialog
+          t={t}
+          title={t('sync.title')}
+          // 远端地址属于"在跟谁说话"，放标题下面那一行；没配置时没有可说的，就不带。
+          description={syncInfo === null ? undefined : t('sync.where', { url: syncInfo.url })}
+          size="narrow"
+          onClose={close}
+        >
           <SyncPanel t={t} state={state} meta={meta} reload={load} />
         </WorkDialog>
       )}

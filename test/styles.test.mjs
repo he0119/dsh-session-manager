@@ -526,6 +526,11 @@ test('宽弹窗的正文层自带整页的块间距：横幅与卡片不能贴�
   assert.match(body, /display:\s*flex/, '竖排得先是 flex 容器，gap 才生效')
   assert.match(body, /flex-direction:\s*column/, '块是竖着排的')
   assert.match(body, /gap:\s*16px/, '与 .dsm-root 同一档')
+  // 那 16px 得真的落在相邻两块之间：官方的段落带 12px 上下外边距（弹窗 portal 到 body，落在这页的
+  // 重置之外），不收掉的话实测间隔是 28px。
+  const strip = ruleBody('.dsm-workBody > *')
+  assert.notEqual(strip, null, '找不到 .dsm-workBody > * 规则（弹窗里段落的外边距没收掉）')
+  assert.match(strip, /margin-block:\s*0/, '直接子元素的外边距收成 0，间距只由 gap 给')
 })
 
 test('弹窗正文层的字号自己写：官方 Modal 落在 .dsm-root 之外，不写就继承文档根的 16px', () => {

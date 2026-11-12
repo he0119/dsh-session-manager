@@ -519,6 +519,10 @@ function loadBundle({ firstNull, panel, arrays, strings, nulls, meta, fetch } = 
                   'data-close-label': props.closeLabel,
                 },
                 react.createElement('h2', { className: 'dsm-fakeDialogTitle' }, props.title),
+                // 真那个在标题下面摆一行支撑句（描述远端地址那类事实），夹具照它来，否则用例看不见这段话。
+                props.description === undefined
+                  ? null
+                  : react.createElement('p', { className: 'dsm-fakeDialogDescription' }, props.description),
                 props.children,
                 props.footer === undefined
                   ? null
@@ -983,7 +987,8 @@ test('客户端产物：点哪个入口就开哪一面，列表一直挂在后�
   // 但元素还在。
   for (const [surface, title, wide] of [
     ['import', 'import.dialogTitle', false],
-    ['sync', 'sync.title', true],
+    // 同步那一面正文只有几句话与一排按钮，铺到 1080 一句话两行半；它走 640，表在计划那个弹窗里。
+    ['sync', 'sync.title', false],
     ['backup', 'backup.title', true],
   ]) {
     const { registrations, recorded } = mount({ panel: surface })
@@ -1158,8 +1163,9 @@ test('客户端产物：页面上凡是官方 Button 都带边框，没有裸着
   }
   // 卡片底部那条动作行不能是空的：动作要有地方站（位置那条判据在 primaryPlacements 那个用例里）。
   // 备份页不在此列：它的动作长在**每一行**上，夹具里没有备份条目，那条行根本不会渲染。
-  // 导入那面没有卡片壳（弹窗本身就是容器），它的动作行归上面 `primaryPlacements` 那条钉。
-  for (const panel of ['manage', 'sync']) {
+  // 只有「会话」页还有卡片壳；导入与同步那两面都是"弹窗即容器"（卡片会在对话框里再画一圈边框），
+  // 它们的动作行归上面 `primaryPlacements` 那条钉。
+  for (const panel of ['manage']) {
     const mounted = mount({ state, panel })
     const tree = mounted.registrations[0].component(mounted.registrations[0].registration.inject())
     assert.ok(variantsOf(tree, 'cardActions').length > 0, `${panel} 页卡片动作行里应当有按钮`)
@@ -2966,7 +2972,17 @@ test('客户端产物：同步页的同步块——没配置只说明，配置�
     panel: 'sync',
   })
   const onText = text(on)
-  assert.ok(onText.includes('sync.where:{"url":"https://dav.example.com/dsh"}'), '卡片标题只报远端')
+  assert.ok(
+    onText.includes('sync.where:{"url":"https://dav.example.com/dsh"}'),
+    '远端地址在弹窗标题下面那一行（不再是卡片自己的标题）',
+  )
+  // 这一面不许再套一张卡片：弹窗已经是容器，卡片只会在对话框里再画一圈边框，而它的标题与弹窗标题
+  // 一字不差——同屏两遍，正是"看着套了两层"的来源。
+  assert.equal(
+    on.recorded.filter((node) => String(node.props?.className ?? '').split(/\s+/).includes('dsm-card')).length,
+    0,
+    '同步那一面里没有卡片壳',
+  )
   assert.ok(onText.includes('sync.hint:{"mappings":2}'), '要报出映射条数')
   // 机器名不再重复印在标题上：它挪到了机器名那一栏的**灰字**里（宿主解析出来的缺省值，没配就是
   // 主机名），与「超时」那一栏的 30000 同一个口径——留空不等于没有值。那一栏归表单那条用例钉。
@@ -5269,6 +5285,20 @@ test('组件源码：一处 variant="ghost" 都不许有（官方缺省的那个
     })
   }
   assert.deepEqual(hits, [], `这些地方还在用官方缺省的 ghost（按钮看着像一段文字）：${hits.join('、')}`)
+})
+
+test('组件源码：同步那一面是窄弹窗、它的计划弹窗是宽的那一档（表要宽度，话不要）', () => {
+  // 为什么扫源码：计划那个弹窗要靠真跑一趟同步才会出现，夹具里种不出 planId 那一套状态。而"谁该宽、
+  // 谁该窄"正是那次返工里最容易再倒回去的一条——同步那一面正文只有几句话，铺到 1080 一句话要拉两行半；
+  // 计划那三张表在 640 下会被挤成一个字。
+  const manager = readFileSync(join(root, 'src/client/components/ManagerPanel.tsx'), 'utf8')
+  const panel = manager.slice(manager.indexOf("surface === 'sync'"))
+  const workDialog = panel.slice(0, panel.indexOf('</WorkDialog>'))
+  assert.match(workDialog, /size="narrow"/, '同步那一面走 640（WorkDialog 的 narrow）')
+  const sync = readFileSync(join(root, 'src/client/components/SyncPanel.tsx'), 'utf8')
+  const at = sync.indexOf('wide')
+  assert.notEqual(at, -1, '同步的计划弹窗要传 wide')
+  assert.match(sync.slice(at - 200, at + 20), /<ConfirmDialog[\s\S]*wide/, 'wide 传在计划那枚 ConfirmDialog 上')
 })
 
 test('客户端产物：轮次标题的偏移量来自视图量出来的那一行高度', { skip }, () => {

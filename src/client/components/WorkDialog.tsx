@@ -24,25 +24,53 @@ import type { Translate } from '../logic/locales.ts'
 
 export interface WorkDialogProps {
   t: Translate
-  /** 弹窗标题：说的就是这件事（「导出 / 导入」「WebDAV 同步」「备份与回滚」）。 */
+  /** 弹窗标题：说的就是这件事（「WebDAV 同步」「备份与回滚」）。 */
   title: string
+  /**
+   * 标题下面那一行支撑句（官方 `Modal` 的 `description`）。
+   *
+   * 给这件事的**一个事实**用（同步用的是远端地址）：它属于"你在跟谁说话"，而不是正文里的第一条内容，
+   * 所以走这一格，正文从要做的决定开始。
+   */
+  description?: string
+  /**
+   * 宽度按**里面装什么**选：
+   * - `wide`（缺省，1080）：里面是表或清单（备份那一份）；
+   * - `narrow`（640）：里面是几句话加一排按钮（同步那一面）——正文铺到一千像素，一句话拉到两行半，
+   *   读起来比窄的费劲。
+   */
+  size?: 'wide' | 'narrow'
   /** 关掉它：清掉这一件事的本地草稿，回到列表。 */
   onClose: () => void
   children: React.ReactNode
 }
 
 /** 宽弹窗外壳。 */
-export function WorkDialog({ t, title, onClose, children }: WorkDialogProps): React.ReactElement {
+export function WorkDialog({
+  t,
+  title,
+  description,
+  size = 'wide',
+  onClose,
+  children,
+}: WorkDialogProps): React.ReactElement {
   return (
     <Modal
       open
       onClose={onClose}
       title={title}
+      {...(description === undefined ? {} : { description })}
       closeLabel={t('close')}
-      className="dsm-dialog dsm-workDialog"
-      contentClassName="dsm-dialogContent dsm-workBody"
+      // 窄的那一档就是确认弹窗那枚宽度（640）：两边都用同一个类，别为"窄一点的宽弹窗"再造一档。
+      className={size === 'wide' ? 'dsm-dialog dsm-workDialog' : 'dsm-dialog'}
+      contentClassName="dsm-dialogContent"
     >
-      {children}
+      {/*
+        块间距挂在**正文自己那一层**上，而不是 `contentClassName` 上：那个类落在官方弹窗最外面那层，
+        里面依次是标题、说明（`description`）、正文——把 gap 写在那儿，标题与说明、说明与正文之间也会
+        各多出一段，看着就是"标题下面空一块"。包一层之后 16px 只管正文里的那些块。
+      */}
+      <div className="dsm-workBody">{children}</div>
     </Modal>
   )
 }

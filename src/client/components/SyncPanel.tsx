@@ -943,13 +943,15 @@ export function SyncPanel({ t, state, meta, reload }: Pick<PanelShare, 't' | 'st
         </div>
       )}
 
-      <div className="dsm-card">
-        <div className="dsm-cardHead">
-          <span className="dsm-cardTitle">{t('sync.title')}</span>
-          {syncInfo !== null && (
-            <span className="dsm-hint">{t('sync.where', { url: syncInfo.url })}</span>
-          )}
-        </div>
+      {/*
+        这一面**不再套一张卡片**：弹窗本身已经是容器，卡片只会在对话框里再画一圈边框，而它的标题与弹窗标题
+        一字不差（都是「WebDAV 同步」）——同屏两遍，读起来像套了两层。远端地址改由弹窗那一行说明（
+        `description`）承担，正文从"按一下会发生什么"开始。
+
+        卡片底部那条动作行留在原处：卡片级的主动作放卡片底部是那一页的规矩，而这里没有卡片了，这一行就是
+        弹窗正文的最后一段——位置与观感都没变，少的是外面那圈边框与重复的标题。
+      */}
+      <>
         {/* 没配置同步时只留一句话：摆一个点了没反应的按钮比不摆更糟（与「宿主没有归档能力」同一条口径）。 */}
         <p className="dsm-hint">
           {!syncKnown
@@ -997,12 +999,14 @@ export function SyncPanel({ t, state, meta, reload }: Pick<PanelShare, 't' | 'st
             </>
           )}
         </div>
-      </div>
+      </>
 
       {/* 同步弹窗：计划与「确认」同框（见 ConfirmDialog.tsx 的说明）。 */}
       {dialog !== null && (
         <ConfirmDialog
           t={t}
+          // 正文是三张表（会拉取 / 会推送 / 本机独有的那些），640 会把动作列挤成一个字，所以走宽那一档。
+          wide
           // 落地那一段标题也换掉：这时候已经不是"将要"了，正文里正跑着进度。
           title={t(applying ? 'sync.running' : 'sync.dialogTitle')}
           confirmLabel={t('sync.applyAction')}
