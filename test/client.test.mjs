@@ -918,7 +918,8 @@ test('客户端产物：页面上没有页签，四件事各是一处入口', { 
   for (const key of ['page.tab.manage', 'page.tab.transfer', 'page.tab.sync', 'page.tab.backup', 'page.tab.help']) {
     assert.ok(!Object.hasOwn(zhDict, key) && !Object.hasOwn(enDict, key), `${key} 该删掉：页签没有了`)
   }
-  for (const key of ['place.sessions', 'place.transfer', 'place.sync', 'place.backup']) {
+  // 导出与导入是两处入口，所以「哪里做什么」那一节给它们各一个词条（原来是一个 `place.transfer`）。
+  for (const key of ['place.sessions', 'place.export', 'place.import', 'place.sync', 'place.backup']) {
     assert.ok(Object.hasOwn(zhDict, key) && Object.hasOwn(enDict, key), `${key} 要两份字典都有`)
   }
   assert.ok(text.includes('page.title'), '页面标题走同一份字典')
@@ -2887,8 +2888,9 @@ test('客户端产物：「说明」弹窗把分类词条、每页做什么与�
   for (const key of ['help.categories.visible', 'tag.subagent', 'tag.blank', 'tag.archived', 'tag.live', 'list.ungrouped']) {
     assert.ok(terms.includes(key), `分类词典缺少「${key}」`)
   }
-  assert.equal(terms.length, 23, '词条数＝分类 6 + 四件事 4 + 数据 2 + 疑问 11')
-  assert.equal(recorded.filter((node) => node.type === 'dd').length, 23, '每条词条都有解释')
+  // 导出与导入拆成两条之后，「哪里做什么」那一节是 5 条（页面 + 导出 + 导入 + 同步 + 备份）。
+  assert.equal(terms.length, 24, '词条数＝分类 6 + 五处入口 5 + 数据 2 + 疑问 11')
+  assert.equal(recorded.filter((node) => node.type === 'dd').length, 24, '每条词条都有解释')
   assert.ok(terms.includes('place.sync'), '「哪里做什么」那一节要写到同步')
   assert.ok(terms.includes('place.backup'), '那一节也要写到备份与回滚')
   // 「数据从哪来」两条路径来自 /state，不是写死在文案里
@@ -5285,6 +5287,33 @@ test('组件源码：一处 variant="ghost" 都不许有（官方缺省的那个
     })
   }
   assert.deepEqual(hits, [], `这些地方还在用官方缺省的 ghost（按钮看着像一段文字）：${hits.join('、')}`)
+})
+
+test('客户端产物：备份那一面也不在弹窗里套卡片（与同步同一条理由）', { skip }, () => {
+  // 弹窗本身已经是容器；再套一张标题与弹窗标题一字不差的卡片，就是同屏两遍标题。
+  const state = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    sessions: [],
+    workspaces: [],
+  }
+  const mounted = mount({ state, panel: 'backup', arrays: [[], []] })
+  // 先把树渲染一遍：`recorded` 是渲染时记下来的，不渲染就什么也没有。
+  const text = strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
+  assert.ok(text.includes('backup.hint'), '那一面真渲染出来了')
+  assert.equal(
+    mounted.recorded.filter((node) => String(node.props?.className ?? '').split(/\s+/).includes('dsm-card')).length,
+    0,
+    '备份那一面里没有卡片壳',
+  )
+  // 那一面自己的工具（重新读一遍清单）还在，只是从卡头挪进了正文那一行。
+  assert.ok(
+    mounted.recorded.some(
+      (node) => node.type === 'button' && node.props?.children === 'page.refresh',
+    ),
+    '「刷新」这枚工具还在',
+  )
 })
 
 test('组件源码：同步的进度在状态栏那一格里说，列表上方不再摆横幅', () => {

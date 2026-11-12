@@ -37,12 +37,14 @@ const CATEGORIES = [
 /**
  * 四件事各在哪儿做：顺序按"从最常看到的最不常看到的"排（列表 → 导出导入 → 同步 → 备份与回滚）。
  *
- * 页签去掉之后这一节的回答从「哪一页」变成「哪儿」：前一件是页面本身，后三件各是一处入口
- * （动作行、页头状态、状态栏），词条就是那三处入口按钮上的字（`place.*`）。
+ * 页签去掉之后这一节的回答从「哪一页」变成「哪儿」：前一件是页面本身，后几件各是一处入口
+ * （动作行 / 状态栏 / 页头状态），词条就是那几处入口按钮上的字（`place.*`）。
  */
 const ENTRY_LINES = [
   ['place.sessions', 'help.entry.sessions'],
-  ['place.transfer', 'help.entry.transfer'],
+  // 导出与导入是两处入口：导出跟着勾选走（动作行），导入跟勾选无关（状态栏）。
+  ['place.export', 'help.entry.export'],
+  ['place.import', 'help.entry.import'],
   ['place.sync', 'help.entry.sync'],
   ['place.backup', 'help.entry.backup'],
 ] as const

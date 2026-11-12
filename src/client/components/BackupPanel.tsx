@@ -198,16 +198,20 @@ export function BackupPanel({
         </p>
       )}
 
-      <div className="dsm-card">
-        <div className="dsm-cardHead">
-          <span className="dsm-cardTitle">{t('backup.title')}</span>
+      {/*
+        这一面**不套卡片**（与同步那一面同一条理由）：弹窗本身已经是容器，卡片只会在对话框里再画一圈
+        边框，而它的标题与弹窗标题一字不差——同屏两遍。清单从正文直接开始，"重新读一遍"那枚工具与
+        说明排在同一行。
+      */}
+      <>
+        <div className="dsm-controls">
+          <p className="dsm-hint">{t('backup.hint')}</p>
           <span className="dsm-spacer" />
-          {/* 头部只放这枚"重新读一遍清单"的工具：它不动任何数据，与卡片级的写操作不是一类。 */}
+          {/* 这一行只放"重新读一遍清单"这枚工具：它不动任何数据，与行上的恢复 / 回滚不是一类。 */}
           <Button variant="outline" size="sm" onClick={() => void load()} disabled={busy !== null}>
             {t('page.refresh')}
           </Button>
         </div>
-        <p className="dsm-hint">{t('backup.hint')}</p>
         {backupRoot !== '' && (
           <p className="dsm-hint">
             {t('backup.rootLabel')}：{backupRoot}
@@ -246,7 +250,7 @@ export function BackupPanel({
             ))}
           </div>
         )}
-      </div>
+      </>
 
       {/* 回滚 / 恢复弹窗：动作清单与「确认」同框（见 ConfirmDialog.tsx 的说明）。 */}
       {dialog !== null && (
