@@ -69,6 +69,13 @@ export interface DavPort {
   get(path: string): Promise<Buffer>
   /** 写一个文件；父集合不存在会先建出来，这一实例里已经建过的层级不再问第二遍。 */
   put(path: string, bytes: Buffer): Promise<void>
+  /**
+   * 删一个文件；本来就不在（404 / 410）不算错。
+   *
+   * 为什么"不在"要当成成功：整理远端时同一份清单可能已经被别的机器先删掉——那正是这件事想要的结果，
+   * 报一个错只会让一次成功的整理看起来失败了一半。
+   */
+  delete(path: string): Promise<void>
   /** 保证一个集合存在（逐层 MKCOL，已存在不算错；同一个客户端里每层只 MKCOL 一次）。 */
   ensure(collection: string): Promise<void>
   /** 只读探一次：资源根在不在、认证过不过、这个集合在不在（不改远端任何东西）。 */
@@ -365,6 +372,25 @@ export function createDavClient(options: DavOptions): DavPort {
           path,
         )
       }
+    },
+
+    async delete(path: string): Promise<void> {
+      const response = await request('DELETE', path)
+      // 200 / 204 = 删掉了；404 / 410 = 本来就不在。其余（401 / 403 / 409 / 507……）如实抛。
+      if (
+        response.status === 200 ||
+        response.status === 204 ||
+        response.status === 404 ||
+        response.status === 410
+      ) {
+        return
+      }
+      throw new DavError(
+        `DELETE ${urlOf(path)} 返回 ${response.status} ${response.statusText}`,
+        response.status,
+        'DELETE',
+        path,
+      )
     },
 
     ensure,

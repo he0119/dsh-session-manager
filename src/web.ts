@@ -50,6 +50,7 @@ import {
   runSync,
   syncPrepared,
   testSyncConnection,
+  tidySummary,
   type AutoPushOutcome,
   type AutoPushTimer,
   type SyncOutcome,
@@ -1296,10 +1297,13 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
      */
     let planId: string | undefined
     let decisions: Map<string, SyncDecision> | undefined
+    /** 落地这次要不要顺手整理自己那一格（预演那次不算它——整理会删远端的东西）。 */
+    let tidy = false
     if (req.method === 'POST') {
       try {
-        const body = (await readJson(req)) as { planId?: unknown; decisions?: unknown } | null
+        const body = (await readJson(req)) as { planId?: unknown; decisions?: unknown; tidy?: unknown } | null
         if (typeof body?.planId === 'string' && body.planId !== '') planId = body.planId
+        if (body?.tidy === true) tidy = true
         // 裁决表：只认两种值，别的键/值当没写——界面与工具都可能把旧数据递回来。
         if (body?.decisions !== null && typeof body?.decisions === 'object' && !Array.isArray(body.decisions)) {
           const picked = new Map<string, SyncDecision>()
@@ -1447,7 +1451,16 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
           id = `${previewSeq}-${Math.random().toString(36).slice(2, 8)}`
         }
         preview = { id, value: planned, decisionsKey: decisionsKeyOf(decisions) }
-        sendEvent(res, { type: 'result', result: { ...payloadOf(plannedOutcome(planned)), planId: id } })
+        sendEvent(res, {
+          type: 'result',
+          result: {
+            ...payloadOf(plannedOutcome(planned)),
+            planId: id,
+            // 预演里也报一次"整理能删多少"：界面据此决定那个勾选框摆不摆、写多少个包。它只是账目，
+            // 真删的条件与判据在落地那次由 `planTidy()` 按当时的远端索引重算一遍。
+            tidy: tidySummary(planned.remote, runtime.settings.machineId),
+          },
+        })
       } else {
         /*
          * 落地：体里带着预演给的 `planId` 时优先照着那份数据走（见 sync.ts 的 `syncPrepared()`——它会先
@@ -1464,10 +1477,16 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
             ? await syncPrepared(syncDeps, cached, {
                 onProgress,
                 ...(decisions === undefined ? {} : { decisions }),
+                ...(tidy ? { tidy: true } : {}),
               })
             : decisions !== undefined
               ? {
-                  ...(await runSync(syncDeps, { apply: true, onProgress, decisions })),
+                  ...(await runSync(syncDeps, {
+                    apply: true,
+                    onProgress,
+                    decisions,
+                    ...(tidy ? { tidy: true } : {}),
+                  })),
                   ...(planId === undefined
                     ? {}
                     : {
@@ -1478,9 +1497,9 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
                       }),
                 }
               : planId === undefined
-                ? await runSync(syncDeps, { apply: true, onProgress })
+                ? await runSync(syncDeps, { apply: true, onProgress, ...(tidy ? { tidy: true } : {}) })
                 : {
-                    ...(await runSync(syncDeps, { apply: true, onProgress })),
+                    ...(await runSync(syncDeps, { apply: true, onProgress, ...(tidy ? { tidy: true } : {}) })),
                     planSource: {
                       kind: 'recomputed',
                       reason: '预演那份已经不在宿主手里了（宿主重启过，或又一次预演把它换掉了）',

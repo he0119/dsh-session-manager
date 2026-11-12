@@ -385,6 +385,8 @@ export const zh = {
   'sync.summary': '会拉取 {pull} 条、会推送 {push} 条（本机 {local} 条，远端 {remote} 条）',
   'sync.machines': '远端机器：{machines}',
   'sync.applied': '已拉取 {pulled} 条、已推送 {pushed} 条（落地 {bytesIn}，上传 {bytesOut}）。',
+  'sync.tidy.check': '顺手整理远端：删掉本机这一格里多余的 {count} 个包（约 {size}）',
+  'sync.tidy.done': '整理远端：删掉 {count} 个多余的包（约 {size}）。',
   'sync.appliedReplaced': '其中 {count} 条覆盖了本机原来那份（旧的那份已进备份，可在「备份」页恢复）。',
   'sync.appliedAttachmentsIn': '取回附件对象 {written} 个（{bytes}）。',
   'sync.appliedAttachmentsOut': '上传附件对象 {uploaded} 个（{bytes}）。',
@@ -554,6 +556,7 @@ export const zh = {
   'progress.relate': '正在判内容关系 {current} / {total}',
   'progress.pull': '正在拉取 {current} / {total}',
   'progress.push': '正在推送 {current} / {total}',
+  'progress.tidy': '正在整理远端：第 {current} / {total} 个包',
   // 补齐那条是逐条请宿主冷读（有分母），所以它的分母与其它段一样在文案里。
   'progress.warm': '正在请宿主补齐列表元数据 {current} / {total}',
   // 下面这两段没有分母（一次网络往返、一次注册表落盘）：只说在做什么，不画条。
@@ -916,6 +919,8 @@ export const en: LocaleDictOf<typeof NS> = {
   'sync.summary': 'Pull {pull}, push {push} (local {local}, remote {remote})',
   'sync.machines': 'Remote machines: {machines}',
   'sync.applied': 'Pulled {pulled}, pushed {pushed} ({bytesIn} written, {bytesOut} uploaded).',
+  'sync.tidy.check': 'Also tidy the remote: delete {count} redundant bundles in this machine’s cell (~{size})',
+  'sync.tidy.done': 'Remote tidied: deleted {count} redundant bundles (~{size}).',
   'sync.appliedReplaced': '{count} of them replaced this machine’s copy (the old one is backed up; restore it from the Backups tab).',
   'sync.appliedAttachmentsIn': 'Fetched {written} attachment object(s) ({bytes}).',
   'sync.appliedAttachmentsOut': 'Uploaded {uploaded} attachment object(s) ({bytes}).',
@@ -1087,6 +1092,7 @@ export const en: LocaleDictOf<typeof NS> = {
   'progress.relate': 'Judging content relations {current} / {total}',
   'progress.pull': 'Pulling {current} / {total}',
   'progress.push': 'Pushing {current} / {total}',
+  'progress.tidy': 'Tidying the remote: {current} / {total} bundles',
   'progress.warm': 'Asking the host to warm list metadata {current} / {total}',
   // No denominator for these (one round trip, one registry write): they say what is happening and
   // draw no bar.

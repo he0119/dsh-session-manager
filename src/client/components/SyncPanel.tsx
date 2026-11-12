@@ -38,7 +38,7 @@
 
 import * as React from 'react'
 
-import { Button, StateDot, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, Checkbox, StateDot, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
 
 import {
   fetchSyncPlan,
@@ -441,6 +441,13 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
   /** 最近一次计划或结果：映射表的远端候选与弹窗正文都读它（关掉弹窗之后候选还得在）。 */
   const [sync, setSync] = React.useState<SyncResponse | null>(null)
   /**
+   * 落地这次要不要顺手整理远端（勾选框）。
+   *
+   * 默认不勾：它会删远端的东西（虽然删的只是自己那一格里多余的副本）。挂在这一页而不在 store 里——
+   * 它属于"这一次落地"，弹窗一关就该回到默认。
+   */
+  const [tidy, setTidy] = React.useState(false)
+  /**
    * 同步弹窗开着吗（`plan` = 正在看 / 正在算计划、`apply` = 落地跑着、正文是进度）。
    *
    * `apply` 只是**这一扇窗口还开着**；关掉它不等于停——那一趟的生命周期在 `syncJob` 里（模块级），
@@ -551,6 +558,7 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
   /** 点「同步」：清掉上一轮的裁决，算一份全新的只读计划。 */
   const openSync = (): void => {
     setDecisions({})
+    setTidy(false)
     planWith({})
   }
 
@@ -579,6 +587,7 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
     const started = syncJob.start({
       ...(sync?.mode === 'plan' && sync.planId !== undefined ? { planId: sync.planId } : {}),
       decisions: picked,
+      ...(tidy ? { tidy: true } : {}),
     })
     if (!started) {
       // 已经有一趟在跑（可能就是刷新之前发起、这一页认领来的那一趟）：不再开第二趟，弹窗收起来，
@@ -614,6 +623,12 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
      * 那一趟动的是"早先拉坏了的那条会话"，一条会话都没进出，但那正是用户按下同步想看到的结果。
      */
     const attachments = describeSyncedAttachments(t, result)
+    // 整理远端那一步只在勾了、且真删到东西时才有话说（数字是落地那次实际删掉的）。
+    const tidied = result.tidy !== undefined && 'removed' in result.tidy ? result.tidy : null
+    const tidyLine =
+      tidied !== null && tidied.removed + tidied.orphans > 0
+        ? t('sync.tidy.done', { count: tidied.removed + tidied.orphans, size: formatBytes(tidied.bytes) })
+        : ''
     const sessionsMoved = result.pulled.length > 0 || result.pushed.length > 0
     if (sessionsMoved || attachments !== '') {
       setNotice(
@@ -630,6 +645,7 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
           // 覆盖本机原来那份是这次同步里唯一"本机内容被换掉"的部分，值得单独说一句（旧的进备份了）。
           (result.replaced.length === 0 ? '' : ` ${t('sync.appliedReplaced', { count: result.replaced.length })}`) +
           (attachments === '' ? '' : ` ${attachments}`) +
+          (tidyLine === '' ? '' : ` ${tidyLine}`) +
           // 计划是重算的就得说一句：不然"确认时看到的那几条"和"结果里这几条"对不上时没人解释。
           (result.planSource?.kind === 'recomputed' ? ` ${t('sync.replanned')}` : ''),
       )
@@ -728,6 +744,11 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
     event.phase === 'pull' || event.phase === 'push' ? t('sync.progress.note') : undefined
 
   const syncPlan = sync?.plan ?? null
+  /**
+   * 预演报上来的"整理能删多少"（见 api.ts 的 `SyncTidy`）。缺席 = 没有可整理的，或旧宿主不认这件事——
+   * 那时这一个勾选框根本不摆。
+   */
+  const syncTidy = sync?.tidy !== undefined && 'count' in sync.tidy ? sync.tidy : null
   // 覆盖本机那份也摆在「会拉取」这张表里（它同样是往本机落内容），只是行上挂一颗不同的标签。
   /**
    * 要看差异的那一条（`undefined` = 没打开）。
@@ -971,6 +992,19 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
             )}
             {/* 空白会话不进那三张表：它们的去处只有这一句（没有内容可同步，也没有"为什么不动"可讲）。 */}
             {syncBlank > 0 && <p className="dsm-hint">{t('sync.skippedBlank', { count: syncBlank })}</p>}
+            {/*
+              整理远端：只删本机这一格里多余的包（另一格有一模一样的、或更全的）。默认不勾——它会删
+              远端的东西；勾了之后落地那次才做，预演这一下只是把"能删几个"报出来。
+            */}
+            {syncTidy !== null && syncTidy.count > 0 && (
+              <div className="dsm-options">
+                <Checkbox
+                  checked={tidy}
+                  label={t('sync.tidy.check', { count: syncTidy.count, size: formatBytes(syncTidy.bytes) })}
+                  onChange={setTidy}
+                />
+              </div>
+            )}
             {liveBlocked > 0 && <p className="dsm-warn">{t('sync.liveHint', { count: liveBlocked })}</p>}
             {sync.problems.map((problem) => (
               <p key={problem} className="dsm-warn">

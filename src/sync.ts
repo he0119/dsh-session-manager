@@ -1398,6 +1398,130 @@ export async function readRemoteLibrary(dav: DavPort, settings: SyncSettings): P
   return { machines, entries, indexes, problems }
 }
 
+/** 整理远端时的一条：自己那一格里哪个包可以删、留下的那份在哪一格。 */
+export interface TidyEntry {
+  id: string
+  /** 留下来的那份所在的格子（报告里指名）。 */
+  machine: string
+  /** `duplicate` = 另一格那份与这一份一模一样；`superseded` = 另一格那份更全。 */
+  reason: 'duplicate' | 'superseded'
+  /** 这一份在索引里记的代次字节数之和（给界面报"约多少 MB"）。 */
+  bytes: number
+}
+
+/** 一次整理要删的东西（只涉及这台机器自己那一格）。 */
+export interface TidyPlan {
+  entries: TidyEntry[]
+  bytes: number
+}
+
+/** 整理远端那一步的结果。 */
+export interface SyncTidyResult {
+  /** 删掉的重复 / 被取代的包。 */
+  removed: number
+  /** 顺手清掉的"索引里没有"的包。 */
+  orphans: number
+  /** 删掉的字节数（索引里记的代次字节数 + 孤儿包的文件大小）。 */
+  bytes: number
+}
+
+/**
+ * 算出「这台机器自己那一格里哪些包是多余的」。
+ *
+ * 远端是一机一格，同一条会话可能同时存在于几格（A 推过、B 拉下来继续写又推过）。合并视图只挑一份，
+ * 其余的包没人再读、却一直占着远端。整理就是各机器删掉自己那一格里的多余副本。
+ *
+ * 规则（每台机器只清自己那一格，且两台机器算出来的是同一份答案）：
+ * - 另一格有一份代次超集的（`local-ahead`）→ 本机这份是被取代的旧副本，删；
+ * - 另一格有一份一模一样的 → 只留格子名排序最靠前的那个格子，名字靠后的机器各自删自己那一格；
+ * - 两边各自写过（`diverged`）→ 不动，留给用户裁决。
+ *
+ * 为什么排序用码位比较而不是拼写习惯：`machines` 那份列表就是按 `.sort()` 排的，两处用同一套比较，
+ * 两台机器才算出同一个"谁留下"。判断不是对称的就会互相删，最后远端一份都没有。
+ *
+ * @param remote 读回来的远端库（各机器格的索引都在 `indexes` 里）。
+ * @param machineId 这台机器的标识（它那一格的目录名由 `machineDirName()` 算）。
+ * @returns 要删的条目与它们的字节数合计；自己那一格还没建时是空的。
+ */
+export function planTidy(remote: RemoteLibrary, machineId: string): TidyPlan {
+  const mine = machineDirName(machineId)
+  const index = remote.indexes.get(mine)
+  if (index === undefined) return { entries: [], bytes: 0 }
+  /** 同一个 id 在别的格子里的副本。 */
+  const rivals = new Map<string, Array<{ machine: string; files: FileFingerprint[] }>>()
+  for (const [machine, other] of remote.indexes) {
+    if (machine === mine) continue
+    for (const entry of other.entries) {
+      const list = rivals.get(entry.id)
+      const item = { machine, files: entry.files }
+      if (list === undefined) rivals.set(entry.id, [item])
+      else list.push(item)
+    }
+  }
+  const entries: TidyEntry[] = []
+  let bytes = 0
+  for (const entry of index.entries) {
+    const others = rivals.get(entry.id)
+    if (others === undefined) continue
+    const size = entry.files.reduce((sum, file) => sum + file.bytes, 0)
+    /*
+     * "被取代"有两种：别的格子那份代次是超集（结构性），或者同代次但更长（日志只追加，更长就是续写
+     * 过的）。后者与 `readRemoteLibrary()` 合并两格副本时那条判据同源——两处要认同一件事，否则会出现
+     * "合并时挑中它、整理时又觉得自己的更好"这种两边都不删的死角。
+     */
+    const superseded = others.find(
+      (other) =>
+        relation(other.files, entry.files) === 'local-ahead' || longerSide(other.files, entry.files) === 'local',
+    )
+    if (superseded !== undefined) {
+      entries.push({ id: entry.id, machine: superseded.machine, reason: 'superseded', bytes: size })
+      bytes += size
+      continue
+    }
+    const same = others.filter((other) => relation(entry.files, other.files) === 'identical')
+    if (same.length === 0) continue
+    const keep = same.map((other) => other.machine).sort()[0] as string
+    if (mine < keep) continue
+    entries.push({ id: entry.id, machine: keep, reason: 'duplicate', bytes: size })
+    bytes += size
+  }
+  return { entries, bytes }
+}
+
+/**
+ * 预演里报给界面的整理账目：能删几个包、多少字节。
+ *
+ * 只报数不列清单：界面那一个勾选框只需要"有多少"，真要逐条看的话用 `planTidy()` 自己算一份。
+ */
+export function tidySummary(remote: RemoteLibrary, machineId: string): { count: number; bytes: number } {
+  const plan = planTidy(remote, machineId)
+  return { count: plan.entries.length, bytes: plan.bytes }
+}
+
+/**
+ * 自己那一格里没有索引条目的包（上一次推送或整理中断留下的）。
+ *
+ * 只报文件名：它们在索引里没有条目，删掉不会让任何机器拉到一个 404。
+ */
+async function orphanBundles(
+  dav: DavPort,
+  machineId: string,
+  ids: ReadonlySet<string>,
+): Promise<Array<{ name: string; bytes: number }>> {
+  const cell = `${SYNC_NAMESPACE_DIR}/${machineDirName(machineId)}`
+  let listed
+  try {
+    listed = await dav.list(cell)
+  } catch {
+    return []
+  }
+  const known = new Set([...ids].map((id) => `${encodeSegment(id)}${SYNC_BUNDLE_EXT}`))
+
+  return listed
+    .filter((entry) => entry.kind === 'file' && entry.name.endsWith(SYNC_BUNDLE_EXT) && !known.has(entry.name))
+    .map((entry) => ({ name: entry.name, bytes: entry.bytes ?? 0 }))
+}
+
 /**
  * 一次同步进行中的一条进度事件。
  *
@@ -1477,6 +1601,11 @@ export interface SyncOutcome {
   attachmentOut?: SyncAttachmentOut
   registryWritten: boolean
   indexWritten: boolean
+  /**
+   * 整理远端那一步（勾了才做）：删掉自己那一格里多余的包与没有索引条目的包。
+   * 缺席 = 这次没勾、或索引没写成功（那时一个包都不动）。
+   */
+  tidy?: SyncTidyResult
   /**
    * 拉取改的那几笔注册表有没有被宿主接住（见 take-effect.ts）：`undefined` = 这次没写注册表
    * （预演或纯推送）。
@@ -2397,10 +2526,16 @@ async function repairAttachments(
 export async function applyPreparedSync(
   deps: SyncDeps,
   prepared: SyncPrepared,
-  options: { onProgress?: ProgressReporter } = {},
+  options: { onProgress?: ProgressReporter; tidy?: boolean } = {},
 ): Promise<SyncOutcome> {
   const problems: string[] = []
   const { plan, local, remote } = prepared
+  /*
+   * 整理远端：只算"自己那一格里多余的那些"，删的动作放在索引写完之后（见下面的注释）。预演那次不算它，
+   * 那次不改远端；界面在预演里看到的数字由 `/sync` 那一侧按同一份远端索引算一遍。
+   */
+  const tidyPlan = options.tidy === true ? planTidy(remote, deps.settings.machineId) : undefined
+  const tidyIds = new Set((tidyPlan?.entries ?? []).map((entry) => entry.id))
   const byId = new Map(local.map((session) => [session.id, session]))
   /**
    * 上报一条写盘阶段的事件。
@@ -2824,7 +2959,8 @@ export async function applyPreparedSync(
           machineId: deps.settings.machineId,
           updatedAt: (deps.now?.() ?? new Date()).toISOString(),
           ...(deps.pluginVersion === undefined ? {} : { pluginVersion: deps.pluginVersion }),
-          entries: [...ownEntries.values()],
+          // 整理掉了的那几条不再写回索引：先写索引、再删包，中途失败最多留下几个没人引用的包。
+          entries: [...ownEntries.values()].filter((entry) => !tidyIds.has(entry.id)),
         },
         null,
         2,
@@ -2835,6 +2971,60 @@ export async function applyPreparedSync(
     indexWritten = true
   } catch (error) {
     problems.push(`写远端索引失败：${error instanceof Error ? error.message : String(error)}`)
+  }
+
+  /*
+   * ── 整理自己那一格（勾了才做）──────────────────────────────────────────────
+   *
+   * 只碰自己那一格：别的机器那格的索引是它下次推送时整份重写的，删它的条目会复活；只删包不删条目更
+   * 糟，别人拉取时撞 404。规则与判据见 `planTidy()`。
+   *
+   * 写索引失败时一步都不删：那时索引里还留着这些条目，删了包就是"条目指向空气"。
+   */
+  let tidy: SyncTidyResult | undefined
+  if (tidyPlan !== undefined && indexWritten) {
+    // 孤儿包先列出来：两段合成一个分母，界面那一条进度条才走得完（一次整理只画一条）。
+    let orphans: Array<{ name: string; bytes: number }> = []
+    try {
+      /*
+       * 已知的包 = 索引里留下的 + 这一次正要删的。少了后一半，刚删掉的那些会在列目录时又被当成"没有
+       * 索引条目的孤儿"再删一遍（404 不算错，但账上会多出一笔孤儿）。
+       */
+      orphans = await orphanBundles(deps.dav, deps.settings.machineId, new Set([...ownEntries.keys(), ...tidyIds]))
+    } catch (error) {
+      problems.push(`整理远端：列自己那一格失败：${error instanceof Error ? error.message : String(error)}`)
+    }
+    const total = tidyPlan.entries.length + orphans.length
+    let done = 0
+    let removed = 0
+    let orphansRemoved = 0
+    let bytes = tidyPlan.bytes
+    for (const entry of tidyPlan.entries) {
+      // 每开始删一个就报一次（`done` 是已完成的条数，与其它段同一套口径）；名字带标题，界面那行
+      // 小字才不是一串 id。
+      emit({ phase: 'tidy', total, done, id: entry.id, label: byId.get(entry.id)?.title ?? entry.id })
+      try {
+        await deps.dav.delete(remoteBundlePath(deps.settings.machineId, entry.id))
+        removed += 1
+      } catch (error) {
+        problems.push(
+          `整理远端：删 ${entry.id} 的旧包失败：${error instanceof Error ? error.message : String(error)}`,
+        )
+      }
+      done += 1
+    }
+    for (const orphan of orphans) {
+      emit({ phase: 'tidy', total, done, id: orphan.name })
+      try {
+        await deps.dav.delete(`${SYNC_NAMESPACE_DIR}/${ownDirName}/${orphan.name}`)
+        orphansRemoved += 1
+        bytes += orphan.bytes
+      } catch (error) {
+        problems.push(`整理远端：删 ${orphan.name} 失败：${error instanceof Error ? error.message : String(error)}`)
+      }
+      done += 1
+    }
+    tidy = { removed, orphans: orphansRemoved, bytes }
   }
 
   /*
@@ -2883,6 +3073,8 @@ export async function applyPreparedSync(
     ...(effect === undefined ? {} : { effect }),
     // 没落到本机任何一条时（纯推送 / 什么都没做）这一步根本没跑，就别摆一个空结论。
     ...(pulled.length === 0 ? {} : { warm }),
+    // 没勾整理、或索引没写成功时都缺席：界面据此什么都不说。
+    ...(tidy === undefined ? {} : { tidy }),
     problems,
   }
 }
@@ -3007,7 +3199,11 @@ export async function stalePlanReason(
 export async function syncPrepared(
   deps: SyncDeps,
   prepared: SyncPrepared,
-  options: { onProgress?: ProgressReporter; decisions?: ReadonlyMap<string, SyncDecision> } = {},
+  options: {
+    onProgress?: ProgressReporter
+    decisions?: ReadonlyMap<string, SyncDecision>
+    tidy?: boolean
+  } = {},
 ): Promise<SyncOutcome> {
   const reason = await stalePlanReason(deps, prepared, options)
   if (reason === undefined) {
@@ -3017,6 +3213,7 @@ export async function syncPrepared(
     apply: true,
     ...(options.onProgress === undefined ? {} : { onProgress: options.onProgress }),
     ...(options.decisions === undefined ? {} : { decisions: options.decisions }),
+    ...(options.tidy === undefined ? {} : { tidy: options.tidy }),
   })
   return { ...outcome, planSource: { kind: 'recomputed', reason } }
 }
@@ -3035,7 +3232,12 @@ export async function syncPrepared(
  */
 export async function runSync(
   deps: SyncDeps,
-  options: { apply: boolean; onProgress?: ProgressReporter; decisions?: ReadonlyMap<string, SyncDecision> },
+  options: {
+    apply: boolean
+    onProgress?: ProgressReporter
+    decisions?: ReadonlyMap<string, SyncDecision>
+    tidy?: boolean
+  },
 ): Promise<SyncOutcome> {
   const prepared = await prepareSync(deps, options)
   if (!options.apply) return plannedOutcome(prepared)

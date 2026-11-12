@@ -18,6 +18,7 @@ import { projectKey } from '../src/project-key.ts'
 import { readRegistry, writeRegistryAtomic } from '../src/registry.ts'
 import {
   SYNC_INDEX_FILE,
+  machineDirName,
   contentFingerprint,
   createFingerprintCache,
   SYNC_NAMESPACE_DIR,
@@ -25,6 +26,7 @@ import {
   normalizeMapping,
   parseIndex,
   planSync,
+  planTidy,
   prepareSync,
   replanPrepared,
   readRemoteLibrary,
@@ -169,6 +171,8 @@ interface SyncTestOptions {
   pushOnly?: boolean
   /** 两边各自写过时的裁决（会话 id → 正本）。 */
   decisions?: ReadonlyMap<string, SyncDecision>
+  /** 落地这次要不要顺手整理自己那一格（见 `planTidy()`）。 */
+  tidy?: boolean
 }
 
 /** 造一次同步的依赖（界面与工具层注入的那一套）。 */
@@ -209,6 +213,7 @@ async function syncMachine(
     apply: options.apply,
     ...(options.onProgress === undefined ? {} : { onProgress: options.onProgress }),
     ...(options.decisions === undefined ? {} : { decisions: options.decisions }),
+    ...(options.tidy === undefined ? {} : { tidy: options.tidy }),
   })
 }
 
@@ -1845,6 +1850,7 @@ test('sync：改一次裁决只重算计划那一层——不再读远端包，�
       return inner.get(path)
     },
     put: (path, bytes) => inner.put(path, bytes),
+    delete: (path) => inner.delete(path),
     ensure: (collection) => inner.ensure(collection),
     probe: (collection) => inner.probe(collection),
   }
@@ -2092,6 +2098,7 @@ function probeStub(probe: {
     list: async () => [],
     get: async () => Buffer.alloc(0),
     put: async () => {},
+    delete: async () => {},
     ensure: async () => {},
     probe: async () => ({ entries: [], ...probe }),
   }
@@ -2986,6 +2993,7 @@ test('同步内容判据：两边都没再动的那一对，第二轮不再去�
       return inner.get(path)
     },
     put: (path, bytes) => inner.put(path, bytes),
+    delete: (path) => inner.delete(path),
     ensure: (collection) => inner.ensure(collection),
     probe: (collection) => inner.probe(collection),
   }
@@ -3033,6 +3041,125 @@ test('同步内容判据：两边都没再动的那一对，第二轮不再去�
     const third = await prepareSync(deps, { pushOnly: true })
     assert.equal(bundleGets, 2, '本机内容变了就得重新取、重新判')
     assert.deepEqual(third.plan.needsContent, ['s1'])
+  } finally {
+    await fixture.close()
+    rmSync(SANDBOX, { recursive: true, force: true })
+  }
+})
+
+// ── 整理远端（只动自己那一格）─────────────────────────────────────────────
+
+test('sync：整理远端——同代次一致时只留格子名最靠前的一格，被取代的那份也挑出来', () => {
+  const fp = (bytes: number, sha: string): FileFingerprint => ({ version: 4, bytes, sha256: sha })
+  /** 索引里的条目没有 `machine`（那是由目录名补上的）。 */
+  const entry = (id: string, files: FileFingerprint[]): Omit<RemoteSessionEntry, 'machine'> => ({ id, createdAt: 1, files })
+  const remote: RemoteLibrary = {
+    machines: ['robot-a', 'robot-b'],
+    entries: new Map(),
+    indexes: new Map([
+      ['robot-a', { machineId: 'robot-a', entries: [entry('s1', [fp(100, 'a')]), entry('s2', [fp(100, 'old')]), entry('s3', [fp(100, 'x')]), entry('s4', [fp(100, 'p')])] }],
+      ['robot-b', { machineId: 'robot-b', entries: [entry('s1', [fp(100, 'a')]), entry('s2', [fp(220, 'new')]), entry('s4', [fp(100, 'q')])] }],
+    ]),
+    problems: [],
+  }
+
+  // a 这一格里：s2 被 b 那份取代（同代次更长的就是续写过的），s1 与 b 一模一样时由 b 来删（b 的名字靠后）。
+  const a = planTidy(remote, 'robot-a')
+  assert.deepEqual(
+    a.entries.map((item) => [item.id, item.reason, item.machine]),
+    [['s2', 'superseded', 'robot-b']],
+  )
+  assert.equal(a.bytes, 100, '字节数按索引里记的代次数算')
+
+  // b 这一格里：s1 与 a 一模一样 → 留 a 那一份，b 删自己那格。
+  const b = planTidy(remote, 'robot-b')
+  assert.deepEqual(
+    b.entries.map((item) => [item.id, item.reason, item.machine]),
+    [['s1', 'duplicate', 'robot-a']],
+  )
+
+  // 只有一边有的（s3）、两边各自写过又不是续写的（s4）都不动：前者没有重复，后者等用户裁决。
+  assert.equal(a.entries.some((item) => item.id === 's3' || item.id === 's4'), false)
+  assert.equal(b.entries.some((item) => item.id === 's4'), false)
+  // 自己那一格还没建索引时什么都不删。
+  assert.deepEqual(planTidy(remote, 'robot-c'), { entries: [], bytes: 0 })
+})
+
+test('sync：整理远端只手自己那一格——被取代的旧包删掉，别人的格子一个字节都不动', async () => {
+  rmSync(SANDBOX, { recursive: true, force: true })
+  mkdirSync(SANDBOX, { recursive: true })
+  const fixture = await startDavFixture({ root: join(SANDBOX, 'dav-tidy') })
+  const dav = createDavClient({ baseUrl: fixture.url })
+  const a = makeMachine('tidy-a')
+  const b = makeMachine('tidy-b')
+  const gitNone: GitRunner = async () => {
+    throw new Error('没有身份可用')
+  }
+  const configA = settings(a, { machineId: 'robot-a' })
+  const configB = settings(b, { machineId: 'robot-b', mapping: { [a.cwd]: b.cwd } })
+  try {
+    // A 推一条；B 拉下来、续写一条、再推上去——B 那一格的那份更长。
+    writeSession(a, 's1', 1000)
+    await syncMachine(a, dav, configA, { apply: true, git: gitNone })
+    await syncMachine(b, dav, configB, { apply: true, git: gitNone })
+    appendToLatest(b, 's1', '{"type":"user/message","seq":1,"data":{"text":"B 又写了一条"}}')
+    await syncMachine(b, dav, configB, { apply: true, git: gitNone })
+
+    // A 再同步一次，并勾上整理：本机这份被远端顶掉，自己那一格里的旧包删掉。
+    const events: Array<{ phase: string; done: number; total: number; id?: string }> = []
+    const outcome = await syncMachine(a, dav, configA, {
+      apply: true,
+      git: gitNone,
+      tidy: true,
+      onProgress: (event) => events.push({ phase: event.phase, done: event.done, total: event.total, id: event.id }),
+    })
+    assert.deepEqual(outcome.problems, [])
+    assert.deepEqual(outcome.pulled, ['s1'], '本机那份落后，先拉回更新的')
+    assert.equal(outcome.tidy?.removed, 1, 'A 那一格的旧包被删掉')
+    assert.equal(outcome.tidy?.orphans, 0)
+    // 整理那一段也有进度：一个包一条，分母是"要删几个"（界面那一条进度条就是靠它走完的）。
+    const tidyEvents = events.filter((event) => event.phase === 'tidy')
+    assert.deepEqual(tidyEvents.map((event) => [event.done, event.total]), [[0, 1]])
+
+    const remote = await readRemoteLibrary(dav, configB)
+    const cells = new Map<string, string[]>()
+    for (const [machine, index] of remote.indexes) cells.set(machine, index.entries.map((entry) => entry.id))
+    assert.deepEqual(cells.get('robot-a'), [], 'A 那一格里不再有这一条')
+    assert.deepEqual(cells.get('robot-b'), ['s1'], 'B 那一格原样留着')
+    assert.equal(existsSync(join(fixture.root, SYNC_NAMESPACE_DIR, machineDirName('robot-a'), `${'s1'}.dshsess`)), false)
+    assert.equal(existsSync(join(fixture.root, SYNC_NAMESPACE_DIR, machineDirName('robot-b'), `${'s1'}.dshsess`)), true, '别人的包不动')
+    // 合并视图仍然取得到这一条（B 那一格）。
+    assert.equal(remote.entries.get('s1')?.machine, 'robot-b')
+  } finally {
+    await fixture.close()
+    rmSync(SANDBOX, { recursive: true, force: true })
+  }
+})
+
+test('sync：整理远端顺手清掉没有索引条目的包（上次推送中断留下的）', async () => {
+  rmSync(SANDBOX, { recursive: true, force: true })
+  mkdirSync(SANDBOX, { recursive: true })
+  const fixture = await startDavFixture({ root: join(SANDBOX, 'dav-tidy-orphan') })
+  const dav = createDavClient({ baseUrl: fixture.url })
+  const a = makeMachine('orphan-a')
+  const gitNone: GitRunner = async () => {
+    throw new Error('没有身份可用')
+  }
+  const configA = settings(a, { machineId: 'robot-a' })
+  try {
+    writeSession(a, 's1', 1000)
+    // 先推一次把格子和索引建出来。
+    await syncMachine(a, dav, configA, { apply: true, git: gitNone })
+    const cell = join(fixture.root, SYNC_NAMESPACE_DIR, machineDirName('robot-a'))
+    // 一个没有索引条目的包：索引里没有它，别的机器永远拉不到，删了不会让谁撞 404。
+    const orphan = join(cell, 'session-orphan.dshsess')
+    writeFileSync(orphan, Buffer.from('stray'))
+
+    const outcome = await syncMachine(a, dav, configA, { apply: true, git: gitNone, tidy: true })
+    assert.equal(outcome.tidy?.orphans, 1)
+    assert.equal(existsSync(orphan), false)
+    // 真的那条包不动。
+    assert.equal(existsSync(join(cell, 's1.dshsess')), true)
   } finally {
     await fixture.close()
     rmSync(SANDBOX, { recursive: true, force: true })

@@ -59,6 +59,7 @@ export type SyncJobApply = (
   planId: string | undefined,
   onProgress: (event: ProgressEvent) => void,
   decisions: ReadonlyMap<string, SyncDecision> | undefined,
+  tidy: boolean | undefined,
 ) => Promise<SyncResponse>
 
 /** 造一份 store 时给的依赖。 */
@@ -93,7 +94,7 @@ export interface SyncJob {
    * @param input 预演给的 `planId` 与这一趟的裁决；都没有就是"从零算一遍"。
    * @returns 已经有一趟在跑时返回 `false`（这一趟没开）。
    */
-  start(input: { planId?: string; decisions?: ReadonlyMap<string, SyncDecision> }): boolean
+  start(input: { planId?: string; decisions?: ReadonlyMap<string, SyncDecision>; tidy?: boolean }): boolean
   /**
    * 取走**这一页发起的**那一趟的结论（取走即清空，免得两个入口各说一遍）。
    *
@@ -193,7 +194,7 @@ export function createSyncJob(deps: SyncJobDeps): SyncJob {
         if (!current.running) return
         emit({ progress })
       }
-      void deps.apply(input.planId, onProgress, input.decisions).then(
+      void deps.apply(input.planId, onProgress, input.decisions, input.tidy).then(
         (result) => {
           emit({ running: false, adopted: false, startedAt: null, progress: null, done: { ok: true, result } })
         },
@@ -231,7 +232,7 @@ export function createSyncJob(deps: SyncJobDeps): SyncJob {
  * 生产上直接用它；测试要换掉落地入口时用 {@link createSyncJob} 造一份自己的。
  */
 export const syncJob: SyncJob = createSyncJob({
-  apply: (planId, onProgress, decisions) => applySync(planId, onProgress, decisions),
+  apply: (planId, onProgress, decisions, tidy) => applySync(planId, onProgress, decisions, tidy),
   // 那一路状态挂在页面那条唯一的连接上（见 [panelEvents.ts](./panelEvents.ts)）：订阅时先给当下那一份，
   // 之后每变一次给一次。
   watch: (listener) => {

@@ -524,7 +524,17 @@ export interface SyncResponse {
    */
   takesEffect: 'immediate' | 'restart-required'
   error?: string
+  /**
+   * 整理远端那一步的账目。
+   *
+   * 预演那次报"能删几个包"（`count`），落地那次报"实际删了几个"（`removed` + `orphans`）。缺席 = 这次
+   * 没有可整理的，或这台宿主/这一版不认这件事（旧宿主）。
+   */
+  tidy?: SyncTidy
 }
+
+/** 整理远端那一步的账目（见 `SyncResponse.tidy`）。 */
+export type SyncTidy = { count: number; bytes: number } | { removed: number; orphans: number; bytes: number }
 
 /**
  * 预演一次同步（读远端，什么都不写），边算边报进度。
@@ -579,10 +589,12 @@ export async function applySync(
   planId?: string,
   onProgress?: (event: ProgressEvent) => void,
   decisions?: ReadonlyMap<string, SyncDecision>,
+  tidy?: boolean,
 ): Promise<SyncResponse> {
-  const body: { planId?: string; decisions?: Record<string, SyncDecision> } = {}
+  const body: { planId?: string; decisions?: Record<string, SyncDecision>; tidy?: boolean } = {}
   if (planId !== undefined && planId !== '') body.planId = planId
   if (decisions !== undefined && decisions.size > 0) body.decisions = Object.fromEntries(decisions)
+  if (tidy === true) body.tidy = true
   const response = await fetch(`${API_PREFIX}/sync?mode=apply`, {
     method: 'POST',
     headers: { accept: 'text/event-stream', 'content-type': 'application/json' },

@@ -890,6 +890,7 @@ test('POST /sync：带着预演给的 planId 回来，只重算计划、不再�
       return inner.get(path)
     },
     put: (path, bytes) => inner.put(path, bytes),
+    delete: (path) => inner.delete(path),
     ensure: (collection) => inner.ensure(collection),
     probe: (collection) => inner.probe(collection),
   }

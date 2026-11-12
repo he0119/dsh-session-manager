@@ -9,7 +9,7 @@
 // dav.test.ts、sync.test.ts 与 tools.test.ts 共用的夹具。
 import { createHash } from 'node:crypto'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
 import type { DavPort } from '../src/dav.ts'
@@ -134,6 +134,15 @@ export async function startDavFixture(options: {
       mkdirSync(dirname(disk), { recursive: true })
       writeFileSync(disk, body)
       res.writeHead(201).end()
+      return
+    }
+    if (method === 'DELETE') {
+      if (!existsSync(disk) || statSync(disk).isDirectory()) {
+        res.writeHead(404).end()
+        return
+      }
+      rmSync(disk)
+      res.writeHead(204).end()
       return
     }
     if (method === 'MKCOL') {
