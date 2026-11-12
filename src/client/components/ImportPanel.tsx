@@ -25,7 +25,9 @@ import type { ImportEntry } from '../api.ts'
 import { ConfirmDialog } from './ConfirmDialog.tsx'
 import { DirectoryField, useDirectoryFields } from './DirectoryField.tsx'
 import { ProgressBlock } from './ProgressBlock.tsx'
+import { useFileDrop } from './useFileDrop.ts'
 import { formatBytes, totalBytes } from './sessionList.tsx'
+import { chooseBundle } from '../logic/fileDrop.ts'
 import { describeCwd, directoryTargetRows, sessionLabel } from '../logic/planRows.ts'
 import type { Translate } from '../logic/locales.ts'
 import type { PanelShare } from '../types.ts'
@@ -51,6 +53,12 @@ export interface ImportPanelProps extends Pick<PanelShare, 't' | 'state' | 'meta
    * 目录控件照旧可改、可手输——它只是不要再问一遍同样的问题。
    */
   defaultTarget?: string
+  /**
+   * 从页面上拖进来的那个包（见 ManagerPanel 的落点）。
+   *
+   * 有它时这一面一打开就已经拿着包了——"把 .dshsess 拖到页面上"这条路不该再多一步选择。
+   */
+  initialFile?: File
   /** 关掉这一面（取消、右上角叉、Escape、点遮罩）。 */
   onClose: () => void
   /**
@@ -69,10 +77,13 @@ export function ImportPanel({
   reload,
   directory,
   defaultTarget = '',
+  initialFile,
   onClose,
   onDone,
 }: ImportPanelProps): React.ReactElement {
   const [file, setFile] = React.useState<File | null>(null)
+  /** 原生文件选择框藏起来了（见下面那个字段的说明），按官方按钮那一下要能转手点它。 */
+  const filePicker = React.useRef<HTMLInputElement>(null)
   const [payload, setPayload] = React.useState<ArrayBuffer | null>(null)
   const [target, setTarget] = React.useState(defaultTarget)
   /**
@@ -106,20 +117,56 @@ export function ImportPanel({
     [state?.workspaces, state?.repos, target],
   )
 
+  /**
+   * 收下一个包：选文件、拖进来、页面那层转进来的三条路都走这里。
+   *
+   * 读完字节才允许「导入」——`payload === null` 时那枚按钮是灰的（见下面的 footer）。
+   */
+  const acceptFile = React.useCallback(
+    (chosen: File | null): void => {
+      setFile(chosen)
+      setPending(null)
+      setError(null)
+      if (chosen === null) {
+        setPayload(null)
+        return
+      }
+      void chosen
+        .arrayBuffer()
+        .then((buffer) => setPayload(buffer))
+        .catch((cause: unknown) =>
+          setError(t('error.failed', { reason: cause instanceof Error ? cause.message : String(cause) })),
+        )
+    },
+    [t],
+  )
+
   const pickFile = (event: React.ChangeEvent<HTMLInputElement>): void => {
-    const chosen = event.target.files?.[0] ?? null
-    setFile(chosen)
-    setPending(null)
-    setError(null)
-    if (chosen === null) {
-      setPayload(null)
+    acceptFile(event.target.files?.[0] ?? null)
+  }
+
+  /**
+   * 从页面上拖进来的那一个（`initialFile`）：这一面每次打开都是新挂的，所以只看第一帧。
+   *
+   * 放在 effect 里而不是渲染期：读 `arrayBuffer()` 是副作用，渲染期做它等于每次重画都读一遍。
+   */
+  const seeded = React.useRef(false)
+  React.useEffect(() => {
+    if (seeded.current || initialFile === undefined) return
+    seeded.current = true
+    acceptFile(initialFile)
+  }, [acceptFile, initialFile])
+
+  /** 拖到这一面里的那个包：只认 `.dshsess`，一次一个（判据在 logic/fileDrop.ts）。 */
+  const drop = useFileDrop((files) => {
+    const choice = chooseBundle(files)
+    if (choice.kind === 'empty') return
+    if (choice.kind === 'unknownSuffix') {
+      setError(t('import.needBundle'))
       return
     }
-    void chosen
-      .arrayBuffer()
-      .then((buffer) => setPayload(buffer))
-      .catch((cause: unknown) => setError(t('error.failed', { reason: cause instanceof Error ? cause.message : String(cause) })))
-  }
+    acceptFile(choice.file)
+  })
 
   /**
    * 点「导入」：开确认弹窗，同时把只读的导入计划取回来（`mode=plan` 不写盘）。
@@ -215,103 +262,125 @@ export function ImportPanel({
   /** 这个宿主落不了的（没有附件服务、认不出引用）：要如实说出来，不能让用户以为图也导进来了。 */
   const attachmentUnavailable = planAttachments.filter((item) => item.action === 'unavailable').length
 
-  return (
-    <>
-      <Modal
-        open
-        onClose={onClose}
-        title={t('import.dialogTitle')}
-        closeLabel={t('close')}
-        className="dsm-dialog"
-        contentClassName="dsm-dialogContent dsm-importBody"
-      >
-        <p className="dsm-hint">{t('import.hint')}</p>
+  /** 弹窗处在哪一段：填表单 → 看计划 → 正在写盘。三段同处一个弹窗（与删除、迁移、回滚同一套形状）。 */
+  const phase: 'form' | 'plan' | 'apply' = pending === null ? 'form' : busy === 'apply' ? 'apply' : 'plan'
 
-        {error !== null && (
-          <p className="dsm-banner dsm-error">
-            <span>{error}</span>
-            <span className="dsm-spacer" />
-            <Button variant="outline" size="sm" onClick={() => setError(null)}>
-              {t('error.dismiss')}
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      // 标题跟着那一段走：填表单时是"导入会话包"，看计划时是"将要写入"，写盘时是"导入中…"。
+      title={t(phase === 'form' ? 'import.dialogTitle' : phase === 'apply' ? 'import.applying' : 'import.confirmTitle')}
+      closeLabel={t('close')}
+      className="dsm-dialog"
+      contentClassName="dsm-dialogContent"
+      /*
+        那句说明走官方 `Modal` 的 `description`（标题下面那一行支撑句），而不是塞进正文第一段：
+        正文从字段开始，"标题 → 一句为什么/怎么用 → 字段"才是这枚弹窗的读法。上一版把它摆在正文里，
+        标题与那句话之间空出四十来像素，看着像漏了一块。
+      */
+      description={phase === 'form' ? t('import.hint') : undefined}
+      /*
+        底部这一对走官方 `Modal` 的 footer（与确认弹窗同一处）：官方弹窗自己管右对齐、间距与那颗
+        36px 的尺寸，本页不再自己摆一排按钮——上一版把按钮放在正文里靠左，看着像没人收的尾巴。
+      */
+      footer={
+        phase === 'form' ? (
+          <>
+            <Button variant="outline" data-modal-autofocus="" onClick={onClose}>
+              {t('cancel')}
             </Button>
-          </p>
+            <Button variant="primary" onClick={openImport} disabled={file === null || payload === null}>
+              {t('import.action')}
+            </Button>
+          </>
+        ) : (
+          <>
+            {/*
+              「取消」在这一段是**回表单**（不是关窗）：包与目标目录还在，改一改再算一次比重选一遍省事。
+              写盘那一趟里它照旧禁用——那几个动作关掉窗口只是把进度藏起来，结果照样会丢。
+            */}
+            <Button variant="outline" onClick={() => setPending(null)} disabled={busy === 'apply'}>
+              {phase === 'apply' ? t('cancel') : t('import.back')}
+            </Button>
+            <Button
+              variant="primary"
+              onClick={applyImport}
+              disabled={busy === 'apply' || plan === null || !plan.ok || (createCount === 0 && attachmentAdds === 0)}
+            >
+              {busy === 'apply' ? t('import.applying') : t('import.apply')}
+            </Button>
+          </>
+        )
+      }
+    >
+      {/* 正文自己再包一层（同 ConfirmDialog）：官方 `.body` 不给块间距，而这里摆的是段落 + 字段 + 表格。 */}
+      <div className="dsm-dialogBody">
+        {error !== null && <p className="dsm-error">{error}</p>}
+
+        {phase === 'form' && (
+          <>
+            {/* 与「迁移」那一面同一套字段摆法：一件输入一个字段（带标签）。
+                文件那一个不摆原生 `<input type="file">`：它会带出浏览器自己那颗「选择文件」灰按钮，与本页
+                其余控件（官方 Button 的外观）不是一套。改成官方按钮 + 隐藏的 input，选完之后把文件名写在
+                按钮右边。后缀必须与宿主导出的文件名一致（`src/web.ts` 的 `fileName()`）——这里曾经写成
+                `.dhsess`：刚导出的包在选择框的过滤器里被挡掉，用户以为导入坏了，所以测试里钉着它。 */}
+            <div className="dsm-field">
+              <span className="dsm-fieldLabel">{t('import.fileLabel')}</span>
+              {/* 这一格既是"选文件"的按钮，也是落点：把 .dshsess 拖到框里就行（虚线是"可以往这儿放"的
+                  通用说法）。悬停时描边转品牌色，松手就收下。 */}
+              <div className="dsm-dropZone" data-over={drop.over ? 'true' : 'false'} {...drop.handlers}>
+                <Button variant="outline" size="sm" onClick={() => filePicker.current?.click()}>
+                  {t('import.pickFile')}
+                </Button>
+                <span className="dsm-hint" title={file === null ? undefined : file.name}>
+                  {file === null ? t('import.dropHere') : file.name}
+                </span>
+              </div>
+              <input ref={filePicker} type="file" accept=".dshsess" hidden onChange={pickFile} />
+            </div>
+
+            {/* 落地目录：与「迁移」的目标目录是同一个组件、同一份候选（见 DirectoryField.tsx）。 */}
+            <DirectoryField
+              t={t}
+              controls={fields}
+              field="target"
+              label={t('import.targetLabel')}
+              placeholder={t('import.targetPlaceholder')}
+              rows={targetRows}
+              value={target}
+              onChange={(path) => {
+                setTarget(path)
+                setPending(null)
+              }}
+              pickerKind={pickerKind}
+              directory={directory}
+              onError={setError}
+            />
+          </>
         )}
 
-        {/* 与「迁移」那一面同一套字段摆法：一件输入一个字段（带标签），卡片级的主动作落在底部那行。 */}
-        <label className="dsm-field">
-          <span className="dsm-fieldLabel">{t('import.fileLabel')}</span>
-          {/* 后缀必须与宿主导出的文件名一致（`src/web.ts` 的 `fileName()`）。这里曾经写成
-              `.dhsess`：刚导出的包在选择框的过滤器里被挡掉，用户以为导入坏了——一个错字把功能
-              弄坏了，所以 test/client.test.mjs 里钉了一条。 */}
-          <input className="dsm-file" type="file" accept=".dshsess" onChange={pickFile} />
-        </label>
-
-        {/* 落地目录：与「迁移」的目标目录是同一个组件、同一份候选（见 DirectoryField.tsx）。 */}
-        <DirectoryField
-          t={t}
-          controls={fields}
-          field="target"
-          label={t('import.targetLabel')}
-          placeholder={t('import.targetPlaceholder')}
-          rows={targetRows}
-          value={target}
-          onChange={(path) => {
-            setTarget(path)
-            setPending(null)
-          }}
-          pickerKind={pickerKind}
-          directory={directory}
-          onError={setError}
-        />
-
-        <div className="dsm-controls">
-          <Button variant="outline" size="sm" onClick={onClose}>
-            {t('cancel')}
-          </Button>
-          <Button variant="primary" size="sm" onClick={openImport} disabled={busy !== null || file === null}>
-            {t('import.action')}
-          </Button>
-        </div>
-
-        {/*
-          确认弹窗：计划只读、不改本机任何东西，所以「取消」不会留下半个动作（同 ConfirmDialog.tsx）。
-          列类名是给列宽用的：这张表是 table-layout: fixed，宽度写在样式里。
-          自动布局在长路径面前会把「跳过」标签挤成一列一个字。
-        */}
-        {pending !== null && (
-          <ConfirmDialog
-            t={t}
-            // 落地那一段标题也换掉：这时候已经不是"将要"了，正文里正跑着进度。
-            title={t(busy === 'apply' ? 'import.applying' : 'import.confirmTitle')}
-            confirmLabel={t('import.apply')}
-            busyLabel={t('import.applying')}
-            busy={busy === 'apply'}
-            planning={plan === null && pending.error === null}
-            // 预演那一段要逐条读包里的日志折标题（实测 250 条约 1.7 秒），把静态的「预演中…」换成进度。
-            planningDetail={progress === null ? undefined : <ProgressBlock t={t} progress={progress} />}
-            error={pending.error}
-            disabled={plan === null || !plan.ok || (createCount === 0 && attachmentAdds === 0)}
-            onConfirm={applyImport}
-            onCancel={() => setPending(null)}
-          >
-            {/* 落地：逐条写盘并改写首帧 cwd，正文换成进度（那张计划表说的是"将要"，这时候已经过期了）。 */}
-            {busy === 'apply' &&
+        {phase !== 'form' && (
+          <>
+            {/* 写盘那一段：正文换成进度（上面那张计划表说的是"将要"，这时候已经过期了）。 */}
+            {phase === 'apply' &&
               (progress === null ? (
                 <p className="dsm-hint">{t('progress.waiting')}</p>
               ) : (
                 <ProgressBlock t={t} progress={progress} note={t('import.progress.note')} />
               ))}
-            {busy !== 'apply' && plan !== null && (
+            {phase === 'plan' && plan === null && (
+              <>
+                <p className="dsm-hint">{t('dialog.previewing')}</p>
+                {progress === null ? null : <ProgressBlock t={t} progress={progress} />}
+              </>
+            )}
+            {phase === 'plan' && plan !== null && (
               <>
                 <p className={plan.ok ? 'dsm-ok' : 'dsm-warn'}>
                   {t('import.planSummary', { create: createCount, skip: skipCount, bytes: formatBytes(plan.bytes) })}
                   {plan.error !== undefined ? ` · ${plan.error}` : ''}
                 </p>
-                {/*
-                  附件对象那一段：会话日志之外还有多少字节、其中本机缺几个（会写下去）、有没有落不了的。
-                  这三种数字决定了"导完图能不能显示出来"，所以摆在计划表之前而不是表里——表是按会话列
-                  的，而对象不属于哪一条会话（同一个对象可能被好几条引用）。
-                */}
                 {planAttachments.length > 0 && (
                   <p className={attachmentUnavailable > 0 ? 'dsm-warn' : 'dsm-hint'}>
                     {t('import.planAttachments', {
@@ -345,11 +414,8 @@ export function ImportPanel({
                       return (
                         <tr key={entry.id}>
                           <td>
-                            {/*
-                              导入计划里的动作列：`create` 是"本机还没有、这条会新建"，`skip` 是"这条不动"。
-                              `dsm-tag` 挂在 Tag 自己身上：styles.ts 的 `.dsm-planTable .dsm-tag` 那条负责
-                              "窄列里限宽截断、别顶到邻居那一列"。
-                            */}
+                            {/* `dsm-tag` 挂在 Tag 自己身上：styles.ts 的 `.dsm-planTable .dsm-tag` 那条
+                                负责"窄列里限宽截断、别顶到邻居那一列"。 */}
                             <Tag className="dsm-tag" tone={entry.action === 'create' ? 'success' : 'quiet'}>
                               {entry.action === 'create' ? t('table.create') : t('table.skip')}
                             </Tag>
@@ -369,9 +435,9 @@ export function ImportPanel({
                 </table>
               </>
             )}
-          </ConfirmDialog>
+          </>
         )}
-      </Modal>
-    </>
+      </div>
+    </Modal>
   )
 }

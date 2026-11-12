@@ -246,6 +246,9 @@ Two doors, because the two halves relate to ticks differently:
   **Import…** entry in the status bar opens a 640 dialog — pick a bundle, pick a target directory, press
   Import to see a read-only plan and confirm. The target defaults to the project selected in the left tree
   and can be changed or typed in by hand.
+- **Bundles can be dropped in**: drag a `.dshsess` onto the page and the import dialog opens with the bundle
+  already in hand (while dragging, the page shows a dashed frame and "Drop to import this bundle"); the same
+  works on the field inside the dialog. One bundle at a time, suffix only.
 
 - Rows show a session's **title**, with the full title and the id on hover: a uuid tells a human nothing,
   and people pick sessions by "the one where I asked about that"; a session with no title falls back to

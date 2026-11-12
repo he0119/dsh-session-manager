@@ -86,6 +86,12 @@ export const zh = {
   // 列表动作行上那枚入口：它开的就是上面那个弹窗（导出要用勾选，导入不用，所以它不受勾选限制）。
   'import.hint': '选一个包和目标目录；按「导入」先算一份只读计划，逐条列出会写什么，确认才落盘。',
   'import.fileLabel': '要导入的包',
+  'import.pickFile': '选择文件…',
+  'import.noFile': '还没有选',
+  // 拖放：这一格既是按钮也是落点（见 ImportPanel 的那一格与 useFileDrop）。
+  'import.dropHere': '还没有选；把 .dshsess 拖到这里，或点左边选一个',
+  'import.needBundle': '这个文件不是 .dshsess 包：拖进来（或选一个）会话包，一次一个。',
+  'import.dropVeil': '松手就导入这个包',
   'import.targetLabel': '目标目录',
   // 与迁移页的目标目录同一个字段（值控件 + 候选面板 + 手输路径），空着时值控件上显示这一句。
   'import.targetPlaceholder': '选择目标目录…',
@@ -94,6 +100,7 @@ export const zh = {
   'import.dialogTitle': '导入会话包',
   'import.confirmTitle': '将要写入',
   'import.apply': '确认导入',
+  'import.back': '返回',
   'import.applying': '导入中…',
   'import.progress.note': '导入只增不覆盖：中断了再导一次，已经落地的那些会跳过。',
   'import.planSummary': '将创建 {create} 条、跳过 {skip} 条，共 {bytes}',
@@ -689,6 +696,11 @@ export const en: LocaleDictOf<typeof NS> = {
 
   'import.hint': 'Pick a bundle and a target directory; Import computes a read-only plan that lists every write before you confirm.',
   'import.fileLabel': 'Bundle to import',
+  'import.pickFile': 'Choose a file…',
+  'import.noFile': 'nothing chosen yet',
+  'import.dropHere': 'nothing chosen yet; drop a .dshsess here, or pick one on the left',
+  'import.needBundle': 'That file is not a .dshsess bundle: drop (or pick) a session bundle, one at a time.',
+  'import.dropVeil': 'Drop to import this bundle',
   'import.targetLabel': 'Target directory',
   'import.targetPlaceholder': 'Choose a target directory…',
   'dialog.previewing': 'Previewing…',
@@ -696,6 +708,7 @@ export const en: LocaleDictOf<typeof NS> = {
   'import.dialogTitle': 'Import a session bundle',
   'import.confirmTitle': 'About to write',
   'import.apply': 'Import now',
+  'import.back': 'Back',
   'import.applying': 'Importing…',
   'import.progress.note': 'Import only adds, it never overwrites: if it stops, import again and the ones already written are skipped.',
   'import.planSummary': '{create} to create, {skip} to skip, {bytes} in total',

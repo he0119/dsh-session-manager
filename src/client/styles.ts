@@ -139,6 +139,50 @@ export const CSS = `
  */
 .dsm-importBody { display: flex; flex-direction: column; gap: 16px; }
 /*
+ * 拖放：那一格既是「选择文件」的按钮，也是落点；整页在拖着文件时蒙一层虚线框。
+ *
+ * 虚线是"可以往这儿放"的通用说法，所以静止时就是虚线；悬停时描边转品牌色、底色兑一层淡的——只有一个
+ * 提示，没有再加文字按钮或图标。两层都不吃鼠标事件（pointer-events: none）：盖住的那一层要是能接住
+ * 指针，拖到页面上的 dragover 就会被它拦下，落点反而失效。
+ */
+.dsm-dropZone {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 6px 10px;
+  border: 1px dashed var(--dsw-alias-border-l2, rgba(0, 0, 0, 0.18));
+  border-radius: 10px;
+}
+.dsm-dropZone[data-over='true'] {
+  border-color: var(--dsw-alias-brand-primary, #4d6bfe);
+  background: color-mix(in srgb, var(--dsw-alias-brand-primary, #4d6bfe) 6%, transparent);
+}
+.dsm-dropVeil {
+  position: fixed;
+  inset: 12px;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* 只画一圈虚线，不蒙白：蒙一层半透明的底会把整页洗淡，读起来像"又一个弹窗"，而不是"松手放到这儿"。 */
+  border: 2px dashed var(--dsw-alias-brand-primary, #4d6bfe);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--dsw-alias-brand-primary, #4d6bfe) 4%, transparent);
+  pointer-events: none;
+}
+/* 那句话自己带一块底：虚线框里直接写字会被下面的列表透过来干扰。 */
+.dsm-dropVeilPill {
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: var(--dsw-alias-bg-layer-1, #fff);
+  color: var(--dsw-alias-label-primary, #1f2329);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.16);
+  font-size: 14px;
+  line-height: 20px;
+}
+
+/*
  * 卡片外壳照官方卡片（内建「插件」页那张 .card）量出来的规格：**圆角 20px**、**1px 描边**、底色是表面白。
  * 描边走 settings-card-stroke 而不是 border-l1：前者是官方给"设置卡片描边"这件事的专名 token，
  * 真实 dev GUI 里量到浅色 **rgba(0, 0, 0, 0.16)**、深色 **rgba(255, 255, 255, 0.2)**，与官方那张 .card

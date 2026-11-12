@@ -1059,7 +1059,10 @@ function primaryPlacements(node, inside = 'root', out = []) {
   if (node === null || typeof node !== 'object') return out
   const className = String(node.props?.className ?? '')
   const classes = className.split(/\s+/)
-  const nested = classes.includes('dsm-cardHead') ? 'cardHead' : classes.includes('dsm-controls') ? 'controls' : inside
+  // 官方 `Modal` 的底部动作行：真那个的类名来自 CSS module（`_footer_xxxx`），夹具里的替身叫
+  // `dsm-fakeDialogFooter`。弹窗级的主动作就该站在这儿。
+  const footer = classes.some((name) => name.startsWith('_footer_') || name === 'dsm-fakeDialogFooter')
+  const nested = footer ? 'dialogFooter' : classes.includes('dsm-cardHead') ? 'cardHead' : classes.includes('dsm-controls') ? 'controls' : inside
   // 官方 Button 的主动作：`variant="primary"`（见上面说明）。
   if (node.props?.variant === 'primary' && node.type !== 'button') out.push(nested)
   if (isComponentType(node.type)) return primaryPlacements(renderType(node.type, node.props), nested, out)
@@ -1115,7 +1118,7 @@ test('客户端产物：卡片级的主动作长在卡片底部的动作行里�
   // （那张设置表单自己的「保存」只在宿主有设置接缝时才画，归表单那条用例钉）。
   const expected = {
     manage: [],
-    import: ['controls'],
+    import: ['dialogFooter'],
     sync: ['controls'],
   }
   for (const [panel, places] of Object.entries(expected)) {
@@ -3943,6 +3946,52 @@ test('客户端产物：删除弹窗摆出清单与备份位置，计划不 ok �
   const waitingText = strings(waiting.registrations[0].component(waiting.registrations[0].registration.inject()))
   assert.ok(waitingText.includes('dialog.previewing'), '计划在路上时正文是"预演中…"')
   assert.equal(primaryOf(waitingRecorded).props.disabled, true, '计划没到手时确认按钮禁用')
+})
+
+test('客户端产物：会话包能拖进来——弹窗那一格与整页都是落点', { skip }, () => {
+  // 拖进来是最省事的那一步：手上不必先有"打开导入弹窗"这个动作。两个落点（弹窗里那一格、整页）都收在
+  // 同一个判定上（logic/fileDrop.ts 的 chooseBundle），这里只核**接没接上事件**。
+  const state = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    sessions: [],
+    workspaces: [],
+  }
+  const page = mount({ state, panel: 'manage' })
+  const tree = page.registrations[0].component(page.registrations[0].registration.inject())
+  const root = elementsOf(tree).find((node) => String(node.props?.className).includes('dsm-root'))
+  assert.ok(root !== undefined, '页面根上挂着落点')
+  for (const handler of ['onDragOver', 'onDragEnter', 'onDrop']) {
+    assert.equal(typeof root.props[handler], 'function', `页面根接了 ${handler}`)
+  }
+  // 默认没有拖放进来的东西：那层"松手就导入"的提示不该凭空出现。
+  assert.equal(
+    page.recorded.some((node) => String(node.props?.className) === 'dsm-dropVeil'),
+    false,
+    '没在拖文件时没有那层提示',
+  )
+
+  // 导入弹窗里那一格：虚线框 + 同样四个处理器（它自己也是一个落点）。
+  const dialog = mount({ state, panel: 'import' })
+  const dialogTree = dialog.registrations[0].component(dialog.registrations[0].registration.inject())
+  const zone = elementsOf(dialogTree).find((node) => String(node.props?.className).includes('dsm-dropZone'))
+  assert.ok(zone !== undefined, '导入那一面的文件那一格是落点')
+  assert.equal(zone.props['data-over'], 'false', '没在拖的时候不高亮')
+  for (const handler of ['onDragOver', 'onDragEnter', 'onDrop']) {
+    assert.equal(typeof zone.props[handler], 'function', `那一格接了 ${handler}`)
+  }
+  // 那一格里仍有"选择文件…"与隐藏的原生 input（拖着不方便时还有那条老路）。
+  assert.equal(
+    elementsOf(zone).some((node) => node.type === 'button' && strings(node)[0] === 'import.pickFile'),
+    true,
+    '格子里还有「选择文件…」',
+  )
+  assert.equal(
+    dialog.recorded.filter((node) => node.type === 'input' && node.props?.type === 'file').length,
+    1,
+    '原生 input 还在（隐藏着），accept 仍由它管',
+  )
 })
 
 test('客户端产物：导入那一面没有第二张列表（筛选条、分组、勾选框都不在里面）', { skip }, () => {

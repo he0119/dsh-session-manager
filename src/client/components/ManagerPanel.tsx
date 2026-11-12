@@ -35,6 +35,7 @@ import { PLUGIN_COMMIT, PLUGIN_DIRTY, PLUGIN_VERSION } from '../build.ts'
 import type { DirectoryApi } from '../directory.ts'
 import type { Translate } from '../logic/locales.ts'
 import { syncJob, type SyncJobSnapshot } from '../logic/syncJob.ts'
+import { chooseBundle } from '../logic/fileDrop.ts'
 import { relativeLabel } from '../logic/relativeTime.ts'
 import { versionCommit, versionLabel, versionTag } from '../logic/version.ts'
 import { BackupPanel } from './BackupPanel.tsx'
@@ -43,6 +44,7 @@ import { ManagePanel } from './ManagePanel.tsx'
 import { ProgressBlock } from './ProgressBlock.tsx'
 import { SyncPanel } from './SyncPanel.tsx'
 import { ImportPanel } from './ImportPanel.tsx'
+import { useFileDrop } from './useFileDrop.ts'
 import { useSessionPicking } from './sessionList.tsx'
 import { WorkDialog } from './WorkDialog.tsx'
 
@@ -98,6 +100,13 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
    * 种子发给 null 状态（见 test/client.test.mjs 的 `nulls`），这里插一个 null 会让后面整体错一格。
    */
   const [notice, setNotice] = React.useState<string | undefined>(undefined)
+  /**
+   * 从页面上拖进来的那个包（松手之后交给导入那一面）。
+   *
+   * 它只活到弹窗打开那一刻：`ImportPanel` 在新挂载的那一帧把它读成"已经选好的文件"，之后改由它自己持有。
+   * 用 `undefined` 起头，不去抢 null 状态那颗种子（同上面 `notice`）。
+   */
+  const [droppedFile, setDroppedFile] = React.useState<File | undefined>(undefined)
   // 这一页一进来就是列表：它不再是"四个里选一个"的默认项，而是唯一常驻的那一面。
   const [surface, setSurface] = React.useState<Surface>('none')
 
@@ -120,6 +129,25 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
   }, [countBackups])
 
   /**
+   * 页面这一层也是落点：把 `.dshsess` 拖到列表上，松手就开导入那一面，并且包已经拿在手里。
+   *
+   * 为什么页面也要接：用户手上多半没有"打开导入弹窗"这个前置动作——拖进来正是最省事的那一步。弹窗自己
+   * 也接（见 ImportPanel），两条路都落到同一处 `acceptFile()`。
+   *
+   * 后缀不对时只在页面上说一句，不打开空弹窗：那不是"要导的东西"，不必拉用户进去。
+   */
+  const pageDrop = useFileDrop((files) => {
+    const choice = chooseBundle(files)
+    if (choice.kind === 'empty') return
+    if (choice.kind === 'unknownSuffix') {
+      setNotice(t('import.needBundle'))
+      return
+    }
+    setDroppedFile(choice.file)
+    setSurface('import')
+  })
+
+  /**
    * 关掉正在开的那一面：等于回到列表。
    *
    * 顺带重数一遍备份份数：那一面里刚做完的动作（导入落地、回滚、同步）都会留下或还原一份备份，
@@ -128,6 +156,8 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
   const close = React.useCallback((): void => {
     setSurface('none')
     setBackupFocus(undefined)
+    // 拖进来的包只属于"这一次打开"：关掉之后再开不该又冒出上次那个文件。
+    setDroppedFile(undefined)
     countBackups()
   }, [countBackups])
   /**
@@ -349,7 +379,25 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
         : 'idle'
 
   return (
-    <section className="dsm-root" data-plugin="dsh-session-manager">
+    <section
+      className="dsm-root"
+      data-plugin="dsh-session-manager"
+      /*
+        整页都是落点：拖一个 .dshsess 上来，松手就开导入那一面（见 `pageDrop`）。弹窗开着的时候
+        遮罩挡在前面，拖到弹窗里的那一层由 ImportPanel 自己接。
+      */
+      {...(surface === 'none' ? pageDrop.handlers : {})}
+      data-drop-over={pageDrop.over && surface === 'none' ? 'true' : undefined}
+    >
+      {/*
+        拖到页面上时的提示：一层不挡事件的虚线框，写的正是"松手会发生什么"。
+        它只在这一页同时满足"没有开着别的面 + 正拖着文件"时存在。
+      */}
+      {pageDrop.over && surface === 'none' && (
+        <div className="dsm-dropVeil">
+          <span className="dsm-dropVeilPill">{t('import.dropVeil')}</span>
+        </div>
+      )}
       {/*
         页头是一条**工具条**：标题、同步状态、页面级动作排在同一行。
 
@@ -511,6 +559,7 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
           reload={load}
           directory={directory}
           defaultTarget={project.path ?? ''}
+          initialFile={droppedFile}
           onClose={close}
           onDone={(text) => {
             // 成功就关掉它：写入的条数与字节正是页面顶部那条提示该报的，列表也已经重读过了。
