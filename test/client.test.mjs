@@ -839,7 +839,7 @@ test('客户端产物：导航行的文案跟着语言走（同一个 thunk 每�
   assert.equal(entry.registration.label(), 'Session management')
 })
 
-test('客户端产物：页面骨架带着三个动作页（会话 / 传输 / 同步）、备份与说明页', { skip }, () => {
+test('客户端产物：页面骨架带着四个页签（会话 / 传输 / 同步 / 备份），说明从页头的 ? 进', { skip }, () => {
   const { registrations, recorded } = mount()
   const { component } = registrations[0]
   const { inject } = registrations[0].registration
@@ -867,8 +867,8 @@ test('客户端产物：页面骨架带着三个动作页（会话 / 传输 / �
     // 的 `Array.prototype`；直接 `.map()` 出来的结果也留在那个 realm，`deepStrictEqual` 会连原型一起比
     // 于是判不等。先摊进本 realm 的数组字面量再比，判的东西不变（顺序与那五个 label）。
     [...tabs].map((option) => option.label),
-    ['page.tab.manage', 'page.tab.transfer', 'page.tab.sync', 'page.tab.backup', 'page.tab.help'],
-    '顺序是 会话 → 传输 → 同步 → 备份 → 说明（动作页按日常程度排，参考页垫底）',
+    ['page.tab.manage', 'page.tab.transfer', 'page.tab.sync', 'page.tab.backup'],
+    '顺序是 会话 → 传输 → 同步 → 备份（说明不再是页签，从页头那枚 ? 进）',
   )
   assert.equal(tabControl?.props?.value, 'manage', '默认停在第一个页签（受控值就是「会话」那一页）')
   // 那枚页签从两份字典里一起删掉：留着就等于"同一件事有两个入口"。
@@ -1072,6 +1072,11 @@ test('客户端产物：页头是一条工具条——标题、页签、页面�
     strings(head).some((text) => text.includes('page.refresh')),
     '页头有「刷新」',
   )
+  // 说明从页头那枚「?」进：不再是第五枚页签，但入口与无障碍名字要在。
+  const helpButton = headButtons.find((node) => node.props?.children === '?')
+  assert.ok(helpButton, '页头有说明入口「?」')
+  assert.equal(helpButton.props['aria-label'], 'page.help.open', '「?」的无障碍名字走字典')
+  assert.equal(helpButton.props['aria-haspopup'], 'dialog', '它开的是一个弹窗')
 
   // 说明行不在了：库在哪、多少条收进底部状态栏，纵向空间留给列表。
   assert.equal(tree.some((node) => node.props?.className === 'dsm-intro'), false, '旧的说明行不该再出现')
@@ -3132,7 +3137,7 @@ test('客户端产物：「会话」页平铺——项目树代替组头，整�
   )
 })
 
-test('客户端产物：「说明」页把分类词条、每页做什么与边界条件摆出来', { skip }, () => {
+test('客户端产物：「说明」弹窗把分类词条、每页做什么与边界条件摆出来', { skip }, () => {
   const state = {
     sessionsRoot: '/home/u/.dsh/sessions',
     registryPath: '/home/u/.dsh/registry.json',
@@ -3143,6 +3148,10 @@ test('客户端产物：「说明」页把分类词条、每页做什么与边�
   }
   const { registrations, recorded } = mount({ state, panel: 'help' })
   const text = strings(registrations[0].component(registrations[0].registration.inject()))
+  assert.ok(
+    recorded.some((node) => String(node.props?.className ?? '').includes('dsm-helpDialog')),
+    '说明从页头那枚「?」开成弹窗，不再占一枚页签',
+  )
 
   for (const key of ['help.categories.title', 'help.tabs.title', 'help.where.title', 'help.faq.title']) {
     assert.ok(text.includes(key), `缺少小节「${key}」`)
@@ -3176,9 +3185,9 @@ test('客户端产物：「说明」页把分类词条、每页做什么与边�
     assert.ok(text.includes(key), `常见疑问缺少「${key}」`)
   }
   // 四张卡片：会碰什么盘那节撤了，独有那三条（备份与回滚、子智能体跟着父会话走、包里有什么）并入常见疑问
-  assert.ok(!text.includes('helpDiskTitle'), '说明页不该再有单独的一张"会碰什么盘"')
+  assert.ok(!text.includes('helpDiskTitle'), '说明弹窗不该再有单独的一张"会碰什么盘"')
   // 文案本身是纯文本（不能摆 Markdown 星号）由上面那条字典检查盯着：这里渲染的是键名，看不出值
-  // 说明页不该长成一个"什么都往里塞"的垃圾桶：正文段落本身就是词条，没有额外的大段散文
+  // 说明弹窗不该长成一个"什么都往里塞"的垃圾桶：正文段落本身就是词条，没有额外的大段散文
   assert.ok(text.includes('help.hint'), '页首要有一句话说明这一页讲什么')
 })
 

@@ -38,7 +38,7 @@
   界面与工具返回值。
 - [生效提示先说在事前，且只在需要重启时说话](../.agents/notes/implemented/architecture/2026-10-06-restart-notice-up-front-and-only-on-bad-news.md)：
   `/sync` 与 `sync_sessions` 的预演一律按探测回答"执行时会不会需要重启"（迁移那条路本来就是），界面在
-  确认弹窗里先说、落地后只在需要重启时留一条 warn 横幅；长解释只在说明页的 FAQ。
+  确认弹窗里先说、落地后只在需要重启时留一条 warn 横幅；长解释只在说明弹窗的 FAQ。
 
 ## 文件格式与搬运
 
@@ -305,7 +305,7 @@
   `/state` 的每条工作区报一次 `exists`，目标候选据此把"只剩一条登记的"标出来并置灰。
 - [动作页只留当下要做的决定](../.agents/notes/implemented/architecture/2026-09-28-help-page-owns-the-glossary.md)：
   词条进「说明」页，并钉了一条两行的上限。
-- [说明页 FAQ 的答案不被挤成零宽](../.agents/notes/implemented/bug-fix/2026-10-07-faq-answers-collapse-to-zero-width.md)：
+- [说明弹窗 FAQ 的答案不被挤成零宽](../.agents/notes/implemented/bug-fix/2026-10-07-faq-answers-collapse-to-zero-width.md)：
   FAQ 是"问题一行、答案一行"，那一栏自己声明单列，不能沿用词条表那套两列网格。
 - [预演表的状态列只放短标签，整句挂 title](../.agents/notes/implemented/bug-fix/2026-10-03-status-column-holds-a-short-tag.md)：
   窄列装不下整句时改文案与列宽，不是让标签顶到邻居身上；三段清单同形，状态与会话名分成两列。

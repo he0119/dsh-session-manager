@@ -288,13 +288,13 @@ the migration cleaning up an emptied source project directory). A backup from a 
 overwriting this machine’s copy offers **Restore**: it only moves the backed-up copy back — those two never
 touched the registry.
 
-**Help** — the vocabulary and the costs in one place: the category dictionary (visible / subagent / blank /
-archived / active / Ungrouped, where Ungrouped is exactly the shell sidebar's Ungrouped group: nothing claims
-it and the sidebar shows it), what the five tabs do, which files the actions touch (backups, roll back vs
-restore, when the sidebar follows), where the data comes from (the library and the registry paths), and the
-common questions (which sessions count as Ungrouped, why a deleted session is still in the sidebar, when a
-migration asks for a restart, how to close a session tagged active). The action tabs
-(Sessions / Transfer / Sync / Backups) keep only the decision at hand, so each explanation there stays
+The **?** in the page header — the vocabulary and the costs in one dialog: the category dictionary (visible /
+subagent / blank / archived / active / Ungrouped, where Ungrouped is exactly the shell sidebar's Ungrouped
+group: nothing claims it and the sidebar shows it), what the four tabs do, which files the actions touch
+(backups, roll back vs restore, when the sidebar follows), where the data comes from (the library and the
+registry paths), and the common questions (which sessions count as Ungrouped, why a deleted session is still
+in the sidebar, when a migration asks for a restart, how to close a session tagged active). The four action
+tabs (Sessions / Transfer / Sync / Backups) keep only the decision at hand, so each explanation there stays
 within two lines.
 
 A host without the `webServer` service (tools-only front ends) still loads the plugin — the page simply

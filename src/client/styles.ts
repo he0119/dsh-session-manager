@@ -144,6 +144,17 @@ export const CSS = `
 /* 「会话」页不整页滚：卡片吃满高度，滚的是里面的表格。 */
 .dsm-panel[data-panel="manage"] { overflow: hidden; }
 /*
+ * 其余分页是表单与清单：内容限在可读宽度里居中（1080px），「会话」工作台仍然吃满。
+ * 不这么做的话，1600 窗口下一段同步说明会拉成一千二百多像素长的一行，表单控件全挤在左边。
+ */
+.dsm-panel[data-panel="transfer"],
+.dsm-panel[data-panel="sync"],
+.dsm-panel[data-panel="backup"] {
+  width: 100%;
+  max-width: 1080px;
+  align-self: center;
+}
+/*
  * 卡片外壳照官方卡片（内建「插件」页那张 .card）量出来的规格：**圆角 20px**、**1px 描边**、底色是表面白。
  * 描边走 settings-card-stroke 而不是 border-l1：前者是官方给"设置卡片描边"这件事的专名 token，
  * 真实 dev GUI 里量到浅色 **rgba(0, 0, 0, 0.16)**、深色 **rgba(255, 255, 255, 0.2)**，与官方那张 .card
@@ -1105,6 +1116,11 @@ export const CSS = `
  * 的注释就是这么要求的：消费者用 max-height: 100% 限高，别自己算视口）。
  */
 .dsm-dialog.dsm-dialog { width: min(640px, 100%); max-height: 100%; }
+/* 说明弹窗比一般确认弹窗宽一档：四节词条，640 里「每页做什么」会挤成很窄的两列。 */
+.dsm-dialog.dsm-helpDialog { width: min(760px, 100%); }
+.dsm-helpBody { display: flex; flex-direction: column; gap: 16px; }
+/* 弹窗自己已经是卡片：说明里那四节不再各套一圈卡片壳，留标题与正文的节奏。 */
+.dsm-helpDialog .dsm-card { border: none; background: transparent; padding: 0; }
 /* 官方的正文层就是"唯一那个滚动区"（RiskConfirmation 也这么用）。overscroll-behavior: contain
    挡住滚动链：正文滚到底之后不再把页面/卡片跟着推。 */
 .dsm-dialogContent { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }

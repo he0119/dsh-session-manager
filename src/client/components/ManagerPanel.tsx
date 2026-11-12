@@ -22,7 +22,7 @@
 
 import * as React from 'react'
 
-import { Button, SegmentedControl, StateDot } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, Modal, SegmentedControl, StateDot } from '@deepseek-ai/dsh-client-ui-primitives'
 
 import type { MetaResponse, ProgressEvent, StateResponse } from '../api.ts'
 import { panelEvents, type PanelSnapshot } from '../logic/panelEvents.ts'
@@ -80,6 +80,10 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
   const [loadProgress, setLoadProgress] = React.useState<ProgressEvent | undefined>(undefined)
   // 默认停在第一个页签（「会话」）：它是这一页的日常视图，另外两页是偶发动作。
   const [panel, setPanel] = React.useState<PanelKey>('manage')
+  /** 「说明」不再是页签：页头那枚 `?` 把它开成弹窗。 */
+  const [helpOpen, setHelpOpen] = React.useState(false)
+  /** `panel === 'help'` 只为冒烟夹具保留（那条测试直接以说明页挂载）；生产只有 `helpOpen`。 */
+  const showHelp = helpOpen || panel === 'help'
   /**
    * 手动「刷新」按下去之后、新清单回来之前。
    *
@@ -242,7 +246,7 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
         <div className="dsm-tabs">
           <SegmentedControl
             id="dsm-panel"
-            value={panel}
+            value={panel === 'help' ? 'manage' : panel}
             label={t('page.title')}
             onChange={setPanel}
             options={[
@@ -250,11 +254,26 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
               { value: 'transfer', label: t('page.tab.transfer') },
               { value: 'sync', label: t('page.tab.sync') },
               { value: 'backup', label: t('page.tab.backup') },
-              { value: 'help', label: t('page.tab.help') },
             ]}
           />
         </div>
         <span className="dsm-spacer" />
+        {/*
+          说明是一次性读的参考，不再占一枚页签：页头这枚 `?` 把它开成弹窗，关掉就回到原来的分页。
+          按钮只有「?」一个字，悬浮提示与无障碍名字走字典。
+        */}
+        <Button
+          className="dsm-headAction"
+          variant="outline"
+          size="sm"
+          aria-label={t('page.help.open')}
+          title={t('page.help.open')}
+          aria-haspopup="dialog"
+          aria-expanded={showHelp}
+          onClick={() => setHelpOpen(true)}
+        >
+          ?
+        </Button>
         <Button
           className="dsm-headAction"
           variant="outline"
@@ -339,9 +358,31 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
         {panel === 'transfer' && <TransferPanel t={t} state={state} meta={meta} reload={load} directory={directory} />}
         {panel === 'sync' && <SyncPanel t={t} state={state} meta={meta} reload={load} />}
         {panel === 'backup' && <BackupPanel t={t} reload={load} />}
-        {panel === 'help' && <HelpPanel t={t} state={state} meta={meta} reload={load} />}
       </div>
 
+      {/*
+        说明弹窗：四张卡片（分类 / 每页做什么 / 数据从哪来 / 常见疑问）原样搬进来，换的是外面那层
+        卡片壳——弹窗已经是容器，再套四张卡片只会多四圈描边。正文层自己滚（官方 Modal 的正文层
+        就是唯一滚动区，见 styles.ts 的 .dsm-dialogContent）。
+      */}
+      {showHelp && (
+        <Modal
+          open
+          onClose={() => {
+            setHelpOpen(false)
+            // 夹具那条 `panel: 'help'` 的挂载也要能关：关掉之后回到「会话」，不留一个空的页签。
+            if (panel === 'help') setPanel('manage')
+          }}
+          title={t('page.tab.help')}
+          closeLabel={t('close')}
+          className="dsm-dialog dsm-helpDialog"
+          contentClassName="dsm-dialogContent dsm-helpContent"
+        >
+          <div className="dsm-helpBody">
+            <HelpPanel t={t} state={state} meta={meta} reload={load} />
+          </div>
+        </Modal>
+      )}
       {/*
         底部状态栏：库在哪、有多少条、这一页是哪个构建。
 

@@ -367,6 +367,33 @@ test('页头是一条工具条：16px/500 的标题、页签与页面级动作�
   assert.equal(ruleBody('.dsm-version'), null, '旧的页脚徽标样式不该还在（版本号进了状态栏）')
 })
 
+test('非会话分页限在可读宽度：1080px 居中；会话工作台不受限', () => {
+  // 为什么钉它：1600 窗口下一段同步说明拉成一千二百多像素的长行，表单控件全挤在左边。
+  // 「会话」是工作台，继续吃满；其余三页是表单与清单，限宽并居中。
+  const group = /\.dsm-panel\[data-panel="transfer"\],[\s\S]*?\.dsm-panel\[data-panel="backup"\]\s*\{([^}]*)\}/.exec(css)
+  assert.notEqual(group, null, '找不到传输 / 同步 / 备份三页共用的限宽规则')
+  assert.match(group[1], /max-width:\s*1080px/, '可读宽度是 1080px')
+  assert.match(group[1], /align-self:\s*center/, '限宽之后要居中，不能贴着左边')
+  const manage = ruleBody('.dsm-panel[data-panel="manage"]')
+  assert.notEqual(manage, null)
+  assert.doesNotMatch(manage, /max-width/, '「会话」不跟着限宽：它要占满主栏')
+})
+
+test('说明弹窗：760px，四节不再各套一圈卡片壳', () => {
+  const dialog = ruleBody('.dsm-dialog.dsm-helpDialog')
+  assert.notEqual(dialog, null, '找不到说明弹窗的宽度规则')
+  assert.match(dialog, /width:\s*min\(760px, 100%\)/, '比一般确认弹窗宽一档')
+  const body = ruleBody('.dsm-helpBody')
+  assert.notEqual(body, null, '找不到说明弹窗正文那一层')
+  assert.match(body, /display:\s*flex/, '四节要各自留间距，不能贴在一起')
+  assert.match(body, /gap:\s*16px/, '节与节之间 16px')
+  assert.match(
+    css,
+    /\.dsm-helpDialog \.dsm-card\s*\{[^}]*border:\s*none/,
+    '弹窗已经是容器，说明里那四节不再画卡片边框',
+  )
+})
+
 test('右栏详情：340px，窄到 1180px 收成浮层，没选会话时不出现', () => {
   const panel = ruleBody('.dsm-inspector')
   assert.match(panel, /width:\s*340px/, '右栏固定 340px，不跟着窗口拉长')
