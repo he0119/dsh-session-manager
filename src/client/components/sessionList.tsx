@@ -185,6 +185,17 @@ export interface SessionRowProps {
   /** 「内容」那枚按钮的文案与悬浮提示（都由调用方翻好）。 */
   inspectLabel?: string
   inspectTip?: string
+  /**
+   * 行尾第二枚动作：「详情」——把这一条交给右栏（`SessionInspector`），而不是打开完整时间线。
+   *
+   * 与「内容」并排出现：两个动作回答的是两件事（"快速看一眼"与"读完整日志"），挤成一枚会让人
+   * 以为右栏就是完整日志。两枚都挡掉 `<label>` 的默认动作，点它们不改变勾选。
+   */
+  onOpenDetail?: () => void
+  detailLabel?: string
+  detailTip?: string
+  /** 这一行是不是右栏正开着的那一条：给行加一层底色，看右栏时知道它对应哪一行。 */
+  opened?: boolean
   t: Translate
 }
 
@@ -202,13 +213,20 @@ export function SessionRow({
   onInspect,
   inspectLabel,
   inspectTip,
+  onOpenDetail,
+  detailLabel,
+  detailTip,
+  opened = false,
   t,
 }: SessionRowProps): React.ReactElement {
   // 行上显示标题、id 退到悬浮提示（见 planRows.sessionLabel）。
   const label = sessionLabel(session)
   const tags = sessionTags(session, { ungrouped: ungroupedTag })
   return (
-    <label className={`${ROW_CLASS[variant]}${nestClass(depth)}`}>
+    <label
+      className={`${ROW_CLASS[variant]}${nestClass(depth)}`}
+      {...(opened ? { 'data-opened': 'true' } : {})}
+    >
       {/*
         勾选框走官方 `Checkbox`：`label` 给空串——这一行自己有标题（右侧那一格），可见文案再由
         Checkbox 画一遍就是重复；无障碍名字因此靠外面的 `<label className="dsm-row...">` 兜底
@@ -251,28 +269,48 @@ export function SessionRow({
         </span>
       )}
       <span className="dsm-meta">{formatBytes(session.bytes)}</span>
-      {onInspect === undefined ? (
+      {onInspect === undefined && onOpenDetail === undefined ? (
         <span className="dsm-meta">{formatTime(session.createdAt)}</span>
       ) : (
         /*
-         * 行尾那一格：时刻与「内容」叠在同一个格子里（见 `.dsm-slot` 的注释），只有给得出
-         * `onInspect` 的行才这么摆——别的页（导出 / 迁移挑选 / 计划清单）仍旧只有时刻一格。
+         * 行尾那一格：时刻与行上的动作叠在同一个格子里（见 `.dsm-slot` 的注释），只有给得出动作的
+         * 行才这么摆——别的页（导出 / 迁移挑选 / 计划清单）仍旧只有时刻一格。
+         *
+         * 动作装在一个 `.dsm-slotActions` 里：两枚按钮并排，整组一起出现在悬停时；各自再挡掉
+         * `<label>` 的默认动作（它会把点击转给里面的勾选框）。
          */
         <span className="dsm-meta dsm-slot">
           <span className="dsm-time">{formatTime(session.createdAt)}</span>
-          <button
-            type="button"
-            className="dsm-rowInspect"
-            title={inspectTip}
-            onClick={(event) => {
-              // 先挡掉 `<label>` 的默认动作（它会把这次点击转给里面的勾选框），再只做"打开内容"。
-              event.preventDefault()
-              event.stopPropagation()
-              onInspect()
-            }}
-          >
-            {inspectLabel ?? t('manage.transcript.open')}
-          </button>
+          <span className="dsm-slotActions">
+            {onOpenDetail !== undefined && (
+              <button
+                type="button"
+                className="dsm-rowDetail"
+                title={detailTip}
+                onClick={(event) => {
+                  event.preventDefault()
+                  event.stopPropagation()
+                  onOpenDetail()
+                }}
+              >
+                {detailLabel ?? t('manage.detail.open')}
+              </button>
+            )}
+            {onInspect !== undefined && (
+              <button
+                type="button"
+                className="dsm-rowInspect"
+                title={inspectTip}
+                onClick={(event) => {
+                  event.preventDefault()
+                  event.stopPropagation()
+                  onInspect()
+                }}
+              >
+                {inspectLabel ?? t('manage.transcript.open')}
+              </button>
+            )}
+          </span>
         </span>
       )}
     </label>

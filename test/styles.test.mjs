@@ -367,6 +367,27 @@ test('页头是一条工具条：16px/500 的标题、页签与页面级动作�
   assert.equal(ruleBody('.dsm-version'), null, '旧的页脚徽标样式不该还在（版本号进了状态栏）')
 })
 
+test('右栏详情：340px，窄到 1180px 收成浮层，没选会话时不出现', () => {
+  const panel = ruleBody('.dsm-inspector')
+  assert.match(panel, /width:\s*340px/, '右栏固定 340px，不跟着窗口拉长')
+  assert.match(panel, /box-sizing:\s*border-box/, '内边距要算在 340px 里')
+  const at = css.indexOf('@container (max-width: 1180px)')
+  assert.notEqual(at, -1, '窄屏分档读的是工作台自己的宽度（容器查询），不是窗口宽度')
+  const narrow = css.slice(at)
+  assert.match(narrow, /\.dsm-inspector\s*\{[^}]*position:\s*absolute/, '窄屏右栏从文档流里出来')
+  assert.match(
+    narrow,
+    /\.dsm-inspector\[data-empty='false'\]\s*\{\s*display:\s*flex/,
+    '没选会话时整栏不出现；选了才滑出来',
+  )
+  // 右栏正开着的那一行：左缘一条品牌色细线（与底色一起，知道右栏说的是哪一条）
+  assert.match(
+    css,
+    /\.dsm-rowManage\[data-opened='true'\]\s*\{[^}]*box-shadow:\s*inset 2px 0 0 0 var\(--dsw-alias-brand-primary/,
+    '右栏开着的那一行要有左缘细线',
+  )
+})
+
 test('左栏项目树：208px 宽，窄到 960px 收成浮层', () => {
   const tree = ruleBody('.dsm-tree')
   assert.match(tree, /width:\s*208px/, '左栏是固定 208px，不跟着窗口拉长')
@@ -534,8 +555,9 @@ test('会话内容视图的滚动区是官方正文那一层，列表自己不�
 
 test('行上的动作等悬停：藏在行尾那一格，静止时行上只有标签', () => {
   // 为什么钉它：原来「内容」是标题那一格（.dsm-rowLabel）里一枚有边框的小块，与「活动中」那枚标签
-  // 同字号、同内边距、同文字色（只差 2px 圆角与一档边框色），同一行里读成"第二枚状态标签"。现在它
-  // 挪到行尾与时刻叠在同一个格子里，静止时不摆出来（宿主自己的会话列表也是这一套）。
+  // 同字号、同内边距、同文字色（只差 2px 圆角与一档边框色），同一行里读成"第二枚状态标签"。现在动作
+  // 挪到行尾与时刻叠在同一个格子里，静止时不摆出来（宿主自己的会话列表也是这一套）。「详情」与
+  // 「内容」两枚装在同一个 .dsm-slotActions 里，整组一起显隐。
   const slot = ruleBody('.dsm-slot')
   assert.notEqual(slot, null, '找不到 .dsm-slot 规则')
   assert.match(slot, /display:\s*grid/, '时刻与动作要叠在同一个格子里')
@@ -544,22 +566,30 @@ test('行上的动作等悬停：藏在行尾那一格，静止时行上只有�
   assert.notEqual(cell, null, '叠格子靠的是给两个子元素同一个 grid-area')
   assert.match(cell, /grid-area:\s*1\s*\/\s*1/, '两者要占同一格，否则并排摆会把行宽撑开')
 
-  const button = ruleBody('.dsm-rowInspect')
-  assert.notEqual(button, null, '找不到 .dsm-rowInspect 规则')
-  assert.match(button, /visibility:\s*hidden/, '静止时不摆出来')
-  assert.match(button, /border:\s*none/, '它没有盒子：盒子是标签那套语法，动作不该长成标签')
+  const actions = ruleBody('.dsm-slotActions')
+  assert.notEqual(actions, null, '找不到 .dsm-slotActions 规则')
+  assert.match(actions, /visibility:\s*hidden/, '静止时整组动作不摆出来')
 
-  // 悬停 / 键盘落在这一行时：时刻让位、动作出场；触屏没有悬停，两样都摆出来。
+  const button = /\.dsm-rowInspect,\s*\.dsm-rowDetail\s*\{([^}]*)\}/.exec(css)
+  assert.notEqual(button, null, '找不到两枚行上动作共用的规则')
+  assert.match(button[1], /border:\s*none/, '它没有盒子：盒子是标签那套语法，动作不该长成标签')
+  assert.match(button[1], /visibility:\s*inherit/, '显隐由 .dsm-slotActions 整组控制')
+
+  // 悬停 / 键盘落在这一行时：时刻让位、动作出场；触屏没有悬停，动作常显。
   assert.match(css, /\.dsm-row:hover \.dsm-time[^{]*\{[^}]*visibility:\s*hidden/, '悬停时时刻要让位')
-  assert.match(css, /\.dsm-row:hover \.dsm-rowInspect[^{]*\{[^}]*visibility:\s*visible/, '悬停时动作要出场')
   assert.match(
     css,
-    /\.dsm-row:focus-within \.dsm-rowInspect[^{]*\{[^}]*visibility:\s*visible/,
+    /\.dsm-row:hover \.dsm-slotActions[^{]*\{[^}]*visibility:\s*visible/,
+    '悬停时动作要出场',
+  )
+  assert.match(
+    css,
+    /\.dsm-row:focus-within \.dsm-slotActions[^{]*\{[^}]*visibility:\s*visible/,
     '键盘落在这一行时同样出场（`visibility: hidden` 的东西本来不进 tab 顺序）',
   )
   assert.match(
     css,
-    /@media \(hover: none\)[\s\S]*?\.dsm-rowInspect\s*\{[^}]*visibility:\s*visible/,
+    /@media \(hover: none\)[\s\S]*?\.dsm-slotActions\s*\{[^}]*visibility:\s*visible/,
     '触屏没有悬停，动作得常显（那时不叠格子，见 .dsm-slot）',
   )
 })

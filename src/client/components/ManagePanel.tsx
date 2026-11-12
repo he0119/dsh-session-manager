@@ -52,6 +52,7 @@ import {
 import { ConfirmDialog } from './ConfirmDialog.tsx'
 import { DirectoryField, useDirectoryFields } from './DirectoryField.tsx'
 import { ProgressBlock } from './ProgressBlock.tsx'
+import { SessionInspector } from './SessionInspector.tsx'
 import { SessionTree } from './SessionTree.tsx'
 import { TranscriptDialog } from './TranscriptDialog.tsx'
 import { groupSessions } from '../logic/groups.ts'
@@ -61,6 +62,7 @@ import {
   migrateFamilyNote,
   parentDirNote,
   projectLabel,
+  sessionLabel,
   type PathRow,
 } from '../logic/planRows.ts'
 import {
@@ -197,6 +199,13 @@ export function ManagePanel({ t, state, meta, reload, patch, directory }: PanelS
    * 宽屏上这一栏一直摆着，这个值不起作用；CSS 只在容器查询那一档读 `.dsm-treeOpen`。
    */
   const [treeOpen, setTreeOpen] = React.useState(false)
+  /**
+   * 右栏正开着的那一条会话。
+   *
+   * 只记 id、不记整条会话：整库更新（归档 / 改名 / 删除 / 同步）之后，右栏要从**新清单**里重新取，
+   * 否则它会一直摆着旧标题与旧标签。对象包着 id 与项目状态同一个理由：别占掉假 React 的字符串种子。
+   */
+  const [detail, setDetail] = React.useState<{ id: string | null }>({ id: null })
 
   /**
    * 全库按目录分一次组：项目下拉的选项、每一行「项目」那一格都从它来。
@@ -268,6 +277,19 @@ export function ManagePanel({ t, state, meta, reload, patch, directory }: PanelS
   const toggleProject = (path: string): void => {
     picking.toggleGroup(listed.filter((session) => (session.cwd ?? '') === path))
   }
+
+  /**
+   * 右栏那一条：按 id 从**整库**里取，不按 `listed` 取——换了项目或筛选之后，右栏不该自己关掉；
+   * 会话被删掉时它自然变成 `null`，右栏回到提示。
+   */
+  const inspected = detail.id === null ? null : sessions.find((session) => session.id === detail.id) ?? null
+  const inspectedProject = inspected === null ? '' : projectNameOf(inspected)
+  const inspectedParent =
+    inspected?.parentSession === undefined
+      ? undefined
+      : sessions.find((session) => session.id === inspected.parentSession)
+  const inspectedParentTitle = inspectedParent === undefined ? undefined : sessionLabel(inspectedParent).text
+  const inspectedLock = inspected === null ? undefined : picking.lockOf(inspected)
   /** 表头点一下：换列时给这一列一个顺手的默认方向，同一列再点就翻方向。 */
   const toggleSort = (key: SessionSortKey): void => {
     setSort((current) =>
@@ -416,14 +438,14 @@ export function ManagePanel({ t, state, meta, reload, patch, directory }: PanelS
     )
   }
 
-  const doArchive = async (archived: boolean): Promise<void> => {
+  const doArchive = async (archived: boolean, ids: readonly string[] = picked): Promise<void> => {
     setBusy(archived ? 'archive' : 'unarchive')
     setError(null)
     setNotice(null)
     setFailed([])
     setProgress(null)
     try {
-      const response = await archiveSessions(picked, archived, setProgress)
+      const response = await archiveSessions(ids, archived, setProgress)
       // 逐条失败照旧摆出来：一条因为"正在跑"被宿主拒了，不该把其余成功的说成失败。
       setFailed(response.failed)
       if (response.archived.length > 0) {
@@ -434,7 +456,8 @@ export function ManagePanel({ t, state, meta, reload, patch, directory }: PanelS
         // 先改这几行（含级联带上的子智能体），整库快照随后在后台取回来覆盖它。
         patch?.((current) => patchArchived(current, response.archived, archived))
       }
-      if (response.failed.length === 0) picking.clear()
+      // 从右栏归档**单条**时不清勾选：手上那批勾选与这一条是两件事。
+      if (response.failed.length === 0 && ids === picked) picking.clear()
       void reload()
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
@@ -735,6 +758,10 @@ export function ManagePanel({ t, state, meta, reload, patch, directory }: PanelS
                     onInspect={() => setInspecting(session)}
                     inspectLabel={t('manage.transcript.open')}
                     inspectTip={t('manage.transcript.openTip')}
+                    onOpenDetail={() => setDetail({ id: session.id })}
+                    detailLabel={t('manage.detail.open')}
+                    detailTip={t('manage.detail.openTip')}
+                    opened={detail.id === session.id}
                     t={t}
                   />
                 ))
@@ -826,6 +853,28 @@ export function ManagePanel({ t, state, meta, reload, patch, directory }: PanelS
             )}
           </div>
         </div>
+
+        <SessionInspector
+          t={t}
+          session={inspected}
+          projectName={inspectedProject}
+          parentTitle={inspectedParentTitle}
+          fileCount={inspected === null ? undefined : inspected.files.length}
+          checked={inspected !== null && picked.includes(inspected.id)}
+          archiveAvailable={archiveAvailable}
+          busy={busy !== null}
+          lockedTip={inspectedLock?.tip}
+          onClose={() => setDetail({ id: null })}
+          onTranscript={() => {
+            if (inspected !== null) setInspecting(inspected)
+          }}
+          onArchive={() => {
+            if (inspected !== null) void doArchive(inspected.archived !== true, [inspected.id])
+          }}
+          onPick={() => {
+            if (inspected !== null) picking.toggle(inspected)
+          }}
+        />
       </div>
 
       {/* 删除弹窗：清单与「确认」在同一块地方（见 ConfirmDialog.tsx 的说明）。 */}

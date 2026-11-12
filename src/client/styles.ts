@@ -549,11 +549,18 @@ export const CSS = `
 .dsm-slot { display: grid; align-items: center; }
 .dsm-slot > * { grid-area: 1 / 1; justify-self: end; }
 /*
- * 行上那枚「内容」：它是个**动作**，不是标签——所以没有盒子（盒子是标签那套语法）、走 brand 色，
- * 平时 visibility: hidden（不进 tab 顺序；键盘落到这一行的勾选框时整行 :focus-within 再让它
- * 出场，那时 Tab 也够得着它）。它与时刻共用一个格子，见 .dsm-slot。
+ * 行尾那组动作（「详情」「内容」）与时刻叠在同一格：整组平时 visibility: hidden（不进 tab 顺序；
+ * 键盘落到这一行的勾选框时整行 :focus-within 再让它出场，那时 Tab 也够得着它们）。
+ *
+ * 两枚按钮放在一个 flex 容器里、整组控制显隐：只给按钮自己写 visibility 时，悬停规则会各自打架，
+ * 而且两枚都绝对定位在同一格里会互相盖住。
  */
-.dsm-rowInspect {
+.dsm-slotActions { display: flex; align-items: center; gap: 8px; visibility: hidden; }
+/*
+ * 行上的动作是**动作**，不是标签——所以没有盒子（盒子是标签那套语法）、走 brand 色。
+ * visibility 继承自 .dsm-slotActions：整组出现时两枚一起出现。
+ */
+.dsm-rowInspect, .dsm-rowDetail {
   border: none;
   background: transparent;
   padding: 0;
@@ -562,17 +569,21 @@ export const CSS = `
   line-height: 18px;
   color: var(--dsw-alias-brand-primary, #3370ff);
   cursor: pointer;
-  visibility: hidden;
+  visibility: inherit;
 }
 /* 悬停 / 键盘落在这一行：时刻让位，动作出场。 */
 .dsm-row:hover .dsm-time, .dsm-row:focus-within .dsm-time { visibility: hidden; }
-.dsm-row:hover .dsm-rowInspect, .dsm-row:focus-within .dsm-rowInspect { visibility: visible; }
-.dsm-rowInspect:hover { text-decoration: underline; }
-.dsm-rowInspect:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary, #3370ff); outline-offset: 1px; }
-/* 触屏没有悬停：两样并排摆出来（那时不叠格子，否则它们会互相盖住）。 */
+.dsm-row:hover .dsm-slotActions, .dsm-row:focus-within .dsm-slotActions { visibility: visible; }
+.dsm-rowInspect:hover, .dsm-rowDetail:hover { text-decoration: underline; }
+.dsm-rowInspect:focus-visible, .dsm-rowDetail:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary, #3370ff);
+  outline-offset: 1px;
+}
+/* 触屏没有悬停：动作并排摆出来（那时不叠格子，否则它们会互相盖住）；时刻让位给两枚按钮。 */
 @media (hover: none) {
   .dsm-slot { display: flex; gap: 8px; }
-  .dsm-rowInspect { visibility: visible; }
+  .dsm-slotActions { visibility: visible; }
+  .dsm-rowManage .dsm-time { display: none; }
 }
 .dsm-empty { padding: 14px; color: var(--dsw-alias-label-secondary, #646a73); }
 /*
@@ -664,6 +675,57 @@ export const CSS = `
 .dsm-treeFilters .dsm-filters { padding: 0; }
 /* 宽屏上这枚开关与「关闭」都不出现：左栏一直摆着。 */
 .dsm-treeToggle, .dsm-treeClose { display: none; }
+/*
+ * 「会话」页右栏：一条会话的详情。宽屏上一直摆着（没选时是一句提示），窄屏收成浮层（见文末的
+ * 容器查询）。宽度 340 是量出来的：再宽，1600 窗口下列表的标题列就只剩一百多像素。
+ */
+.dsm-inspector {
+  box-sizing: border-box;
+  width: 340px;
+  flex: none;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow: hidden;
+}
+.dsm-inspectorEmpty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 6px;
+  padding: 24px 8px;
+  text-align: center;
+}
+.dsm-inspectorEmptyTitle { margin: 0; font-size: 14px; font-weight: 500; color: var(--dsw-alias-label-primary, #1f2329); }
+.dsm-inspectorBody { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 12px; }
+.dsm-inspectorName { margin: 0; font-size: 16px; line-height: 24px; font-weight: 600; overflow-wrap: anywhere; }
+.dsm-inspectorTags { display: flex; flex-wrap: wrap; gap: 6px; }
+.dsm-facts {
+  display: grid;
+  grid-template-columns: 62px minmax(0, 1fr);
+  gap: 8px 10px;
+  margin: 0;
+  font-size: 12px;
+  line-height: 18px;
+}
+.dsm-facts dt { color: var(--dsw-alias-label-secondary, #646a73); }
+.dsm-facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.dsm-inspectorId { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
+.dsm-inspectorActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--dsw-alias-border-l1, rgba(0, 0, 0, 0.1));
+  margin-top: auto;
+}
+/* 右栏正开着的那一行：左缘一条品牌色细线 + 一点底色，知道右栏说的是哪一条。 */
+.dsm-rowManage[data-opened='true'] {
+  background: color-mix(in srgb, var(--dsw-alias-brand-primary, #3370ff) 6%, transparent);
+  box-shadow: inset 2px 0 0 0 var(--dsw-alias-brand-primary, #3370ff);
+}
 .dsm-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .dsm-select, .dsm-file {
   border: 1px solid var(--dsw-alias-border-l2, rgba(0, 0, 0, 0.18));
@@ -1323,6 +1385,26 @@ export const CSS = `
   }
   .dsm-tree.dsm-treeOpen { display: flex; }
   .dsm-treeToggle, .dsm-treeClose { display: inline-flex; }
+}
+/*
+ * 窄屏（这一块自己的宽度 ≤1180px）：右栏从文档流里出来、贴右边浮着；没选会话时整栏不出现。
+ *
+ * 1180 是量出来的门槛：再窄，208px 的左栏 + 340px 的右栏 + 两边间距之后，列表只剩不到 600px，
+ * 六列就不够了（时间列会被压到 120px 以下）。宽窄是同一份 DOM，靠容器查询换位置。
+ */
+@container (max-width: 1180px) {
+  .dsm-inspector {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 7;
+    width: 340px;
+    display: none;
+    border-radius: 20px 0 0 20px;
+    box-shadow: -10px 0 28px color-mix(in srgb, var(--dsw-alias-label-primary, #1f2329) 18%, transparent);
+  }
+  .dsm-inspector[data-empty='false'] { display: flex; }
 }
 
 `

@@ -2903,6 +2903,7 @@ test('客户端产物：行上的「内容」落在行尾那一格，不在标�
     const parts = elementsOf(row)
     const pick = (name) => parts.filter((node) => classesOf(node).includes(name))
     assert.equal(pick('dsm-rowInspect').length, 1, '一行一枚「内容」')
+    assert.equal(pick('dsm-rowDetail').length, 1, '一行一枚「详情」')
     const label = pick('dsm-rowLabel')
     assert.equal(label.length, 1, '标题与标签同占一格')
     assert.equal(
@@ -2918,7 +2919,11 @@ test('客户端产物：行上的「内容」落在行尾那一格，不在标�
     )
     assert.ok(
       elementsOf(slot[0]).some((node) => classesOf(node).includes('dsm-rowInspect')),
-      '动作与时刻同格：悬停时靠叠格子互相顶替，行宽不动',
+      '「内容」与时刻同格：悬停时靠叠格子互相顶替，行宽不动',
+    )
+    assert.ok(
+      elementsOf(slot[0]).some((node) => classesOf(node).includes('dsm-rowDetail')),
+      '「详情」也在同一格的动作组里',
     )
   }
 })
@@ -3111,6 +3116,20 @@ test('客户端产物：「会话」页平铺——项目树代替组头，整�
   assert.ok(toggle, '卡头有项目栏的窄屏开关')
   assert.equal(toggle.props['aria-expanded'], false, '默认收起')
   assert.equal(toggle.props['aria-controls'], 'dsm-tree', '开关点名它展开的是哪一栏')
+
+  // 右栏详情：宽屏一直摆着，没选会话时是一句提示；行尾多一枚「详情」，它才是右栏的入口
+  const inspector = recorded.find((node) =>
+    String(node.props?.className ?? '').split(/\s+/).includes('dsm-inspector'),
+  )
+  assert.ok(inspector, '工作台里有右栏')
+  assert.equal(inspector.props.id, 'dsm-inspector')
+  assert.equal(inspector.props['data-empty'], 'true', '默认没选会话')
+  assert.ok(strings(inspector).includes('manage.detail.empty.title'), '没选时给一句"选一条会话"')
+  assert.equal(
+    recorded.filter((node) => String(node.props?.className) === 'dsm-rowDetail').length,
+    rowIds.length,
+    '每一行都有一枚「详情」',
+  )
 })
 
 test('客户端产物：「说明」页把分类词条、每页做什么与边界条件摆出来', { skip }, () => {
