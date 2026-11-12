@@ -132,22 +132,12 @@ export const CSS = `
 .dsm-statusAction { flex: none; }
 .dsm-statusVersion { flex: none; }
 /*
- * 「传输」在宽屏并排：左边是导出清单（它要宽），右边是导入字段（至少 320px）。1600 窗口下 1080 的
- * 正文分成 629 + 435，导入卡不再落到首屏之外；窄到 900 以下两栏叠回去。
+ * 「导入」那一面：一个 640 的窄弹窗，正文是两个字段加一对按钮，纵向排、16px 一道缝。
  *
- * 阈值读的是这一块自己的宽度（wrapper 上的容器查询），不是窗口：宿主侧栏收起时同一个窗口下
- * 正文能宽出两百多像素。
+ * 导出不再有弹窗——它按下去就打包下载（见 ManagePanel 的 doExport），所以原来那套"两栏并排 +
+ * 容器查询叠回一列"的布局没有对象了，跟它一起去掉。
  */
-.dsm-transferWrap { container-type: inline-size; }
-.dsm-transferGrid {
-  display: grid;
-  grid-template-columns: minmax(0, 1.3fr) minmax(320px, 0.9fr);
-  gap: 16px;
-  align-items: start;
-}
-@container (max-width: 900px) {
-  .dsm-transferGrid { grid-template-columns: minmax(0, 1fr); }
-}
+.dsm-importBody { display: flex; flex-direction: column; gap: 16px; }
 /*
  * 卡片外壳照官方卡片（内建「插件」页那张 .card）量出来的规格：**圆角 20px**、**1px 描边**、底色是表面白。
  * 描边走 settings-card-stroke 而不是 border-l1：前者是官方给"设置卡片描边"这件事的专名 token，
@@ -215,90 +205,8 @@ export const CSS = `
  */
 
 /*
- * 一条列表里的两级：**工作区**是组头，**会话**是组头下面缩进的那些行。
- * 区分手段叠了四层，任意一套主题、任意一种色觉下都读得出上下级：
- *   ① 底色——组头是一条实心横幅，会话行是卡片底色；
- *   ② 缩进 + 竖向导引线——会话行整行往里缩，并沿左缘挂一条线（"这几行属于上面那个组头"）；
- *   ③ 字号——组头 14px/600，会话行跟着页面的 13px/400；
- *   ④ 图形——组头是文件夹，会话行是对话气泡（见 [icons.tsx](./icons.tsx)）。
- * 为什么不靠"更深一点的底色"单独扛：浅色主题里 bg-layer-1/2/3 全是同一个白（见下面 .dsm-row:hover
- * 的注释），能用的只有"字色兑出来的薄雾"，而它对屏幕、亮度、色觉都敏感——层次不能只挂在它身上。
- */
-.dsm-group { display: block; }
-.dsm-group:first-child .dsm-groupHead { border-top: none; }
-/*
- * 组头是一条"带底色、随列表滚动粘住"的横幅：底色用字色薄雾兑在**卡片表面色**上，于是它既是不透明
- * 的（粘住时底下的行不会透出来），又在明暗两套主题里都是"比卡片略深/略浅一层"的区分色。
- * 前一条声明是给不认 color-mix 的浏览器留的退路：没有底色也还读得出来，只是少了横向的分组感。
- *
- * 12% 而不是更淡：组头的底色要一眼看出是"另一个层级"，不是"某一行被选中了"。
- */
-.dsm-groupHead {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  /*
-   * 一条组头永远只占一行：nowrap + 名字截断（见下面的 .dsm-groupTitle）+ 计数块 flex: none。
-   * 反面教材是本次改之前的写法：wrap + 机器字符串用内容宽度参与折行计算，于是它一长，右手的两个
-   * 计数就被挤到第二行——组头长成两行、数字跑到左边，看着像坏了（532px 宽的列表里真实发生过）。
-   * 换行是**最后**的手段，截断才是。
-   */
-  flex-wrap: nowrap;
-  /* 左边只留 4px：最前面那个折叠开关自己就是"这一组的左缘"，留 10px 会让它离边框太远。 */
-  padding: 8px 10px 8px 4px;
-  /* 组头自己不是点整组的地方（那一块是里面的 .dsm-groupPick），鼠标形状跟着那个 label 走。 */
-  cursor: default;
-  background: var(--dsw-alias-bg-layer-1, transparent);
-  background: color-mix(in srgb, var(--dsw-alias-label-primary, #1f2329) 12%, var(--dsw-alias-bg-layer-1, #fff));
-  border-top: 1px solid var(--dsw-alias-border-l2, rgba(0, 0, 0, 0.12));
-  border-bottom: 1px solid var(--dsw-alias-border-l2, rgba(0, 0, 0, 0.12));
-}
-/*
- * 组头里"点一下就是整组勾选／取消"的那一块：勾选框、图形标记、名字、可选的那枚标签，以及右端的计数。
- *
- * 它独占组头除折叠按钮以外的全部宽度（点击面因此仍是整行）；右端那两串数字靠自己的 margin-left: auto
- * 贴住右缘，名字与它之间那段空白就是这个 flex 行里剩下的地方。
- */
-.dsm-groupPick {
-  flex: 1 1 auto;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  cursor: pointer;
-}
-/*
- * 组头右端的折叠开关：一个 20px 的方形按钮（够得着、能聚焦），图形是 12px 的尖角。
- * 收起时把尖角转成朝右——图形只有一份，状态由 aria-expanded 表达（读屏与视觉同一个来源）。
- */
-.dsm-groupToggle {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  padding: 0;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--dsw-alias-label-secondary, #646a73);
-  cursor: pointer;
-}
-.dsm-groupToggle:hover { background: var(--dsw-alias-bg-layer-2, rgba(0, 0, 0, 0.06)); }
-.dsm-groupToggle[aria-expanded='false'] .dsm-chevron { transform: rotate(-90deg); }
-.dsm-chevron { display: block; }
-/*
- * 分组列表的工具栏（"按目录分组" ＋ 全部收起 / 全部展开）：自己占一行、靠左排。
- * 靠左是刻意的：挂到右边缘的东西会随容器宽度动，而卡片宽度会被外层滚动条一进一出改掉 15px。
- */
-.dsm-groupTools { display: flex; align-items: center; gap: 6px; }
-/*
- * 组头里的名字：它就是这一行**唯一**的字（项目身份与本机路径都在它的悬浮提示里，见
- * planRows.projectLabel()），不折行；实在挤不下时截断。
+ * 分组表头里的名字（同步弹窗那几张按项目分组的三张表，见 SyncPanel）：它就是那一行**唯一**的字
+ * （项目身份与本机路径都在它的悬浮提示里，见 planRows.projectLabel()），不折行；实在挤不下时截断。
  */
 .dsm-groupTitle {
   font-size: 14px;

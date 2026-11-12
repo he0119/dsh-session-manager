@@ -42,6 +42,8 @@ import { Button, Checkbox, Input } from '@deepseek-ai/dsh-client-ui-primitives'
 import {
   archiveSessions,
   deleteSessions,
+  download,
+  exportSessions,
   migrate,
   retitleSessions,
   type DeleteResponse,
@@ -83,6 +85,7 @@ import {
   SessionSearch,
   SessionStaticRow,
   formatBytes,
+  totalBytes,
   useSessionFilter,
   useSessionPicking,
   type RowSession,
@@ -106,7 +109,8 @@ export function ManagePanel({
   patch,
   directory,
   picking,
-  openTransfer,
+  project,
+  setProject,
   openBackup,
 }: PanelShare): React.ReactElement {
   const sessions = state?.sessions ?? []
@@ -126,7 +130,7 @@ export function ManagePanel({
   const picked = picking.picked
   /** 筛选条：一枚芯片都不勾、关键词为空 = 全都列出来（见 sessionFilter.matchesFilters）。 */
   const filter = useSessionFilter(sessions)
-  const [busy, setBusy] = React.useState<'archive' | 'unarchive' | 'apply' | 'retitle' | 'migrate' | null>(null)
+  const [busy, setBusy] = React.useState<'archive' | 'unarchive' | 'apply' | 'retitle' | 'migrate' | 'export' | null>(null)
   const [error, setError] = React.useState<string | null>(null)
   const [notice, setNotice] = React.useState<string | null>(null)
   /**
@@ -213,7 +217,8 @@ export function ManagePanel({
    * 卡头那对「全选 / 清空」的作用面跟着变成这一批。取一个对象而不是一个字符串，是因为冒烟用例按
    * 位置往空串状态里种值（见 test/client.test.mjs 的 mount），多一个字符串会让后面那些种子整体错一格。
    */
-  const [project, setProject] = React.useState<{ path: string | null }>({ path: null })
+  // 「项目」这一格由页面骨架持有（导入要拿它当目标目录的初值，见 ManagerPanel 的说明），这里只读写它。
+  const projectPath = project?.path ?? null
   /**
    * 表头那一列的排序：点一下换列，再点一下换方向。
    *
@@ -271,8 +276,8 @@ export function ManagePanel({
   )
   /** 当前列出来的那些：项目与筛选都过一遍，再按表头那一列排（两件事都是纯函数，见 manageRows.ts）。 */
   const listed = React.useMemo(
-    () => sortSessions(sessionsInProject(sessions, project.path).filter(filter.matches), sort),
-    [sessions, project.path, filter.matches, sort],
+    () => sortSessions(sessionsInProject(sessions, projectPath).filter(filter.matches), sort),
+    [sessions, projectPath, filter.matches, sort],
   )
   /**
    * 子智能体的父会话在**别的项目**里时的那枚备注（原先写在组内缩进那一行上）。
@@ -402,6 +407,49 @@ export function ManagePanel({
    *
    * 计划回来时弹窗可能已经被取消掉了：`current === null` 时原地作废（同删除弹窗）。
    */
+  /**
+   * 导出：把勾中的那些打成 `.dshsess`，交给浏览器下载。
+   *
+   * 为什么这一枚不问一句：它只把已有字节打成包，不改本机任何东西（写作的那一面是导入，它要看清计划）。
+   * 包里的条数、字节与附件对象以**宿主回报的**为准：勾一条父会话时它的子智能体跟着进包，比勾选数多；
+   * 附件对象也照实报——缺的那几个不会凭空出现，用户得在导出这一侧就知道，而不是到另一台机器上看到
+   * "图片加载失败"。
+   */
+  const doExport = async (): Promise<void> => {
+    if (picked.length === 0) return
+    setBusy('export')
+    setError(null)
+    notify(null)
+    try {
+      const result = await exportSessions(picked)
+      download(result)
+      const chosen = sessions.filter((session) => picked.includes(session.id))
+      notify(
+        [
+          t('export.done', {
+            count: result.count ?? chosen.length,
+            bytes: formatBytes(result.bytes ?? totalBytes(chosen)),
+          }),
+          (result.attachments ?? 0) > 0
+            ? t('export.attachments', {
+                attachments: result.attachments ?? 0,
+                bytes: formatBytes(result.attachmentBytes ?? 0),
+              })
+            : null,
+          (result.attachmentsMissing ?? 0) > 0
+            ? t('export.attachmentsMissing', { count: result.attachmentsMissing ?? 0 })
+            : null,
+        ]
+          .filter((line): line is string => line !== null)
+          .join(' '),
+      )
+    } catch (cause) {
+      setError(t('error.failed', { reason: cause instanceof Error ? cause.message : String(cause) }))
+    } finally {
+      setBusy(null)
+    }
+  }
+
   const openMigrate = (): void => {
     if (picked.length === 0) return
     setError(null)
@@ -710,8 +758,8 @@ export function ManagePanel({
           t={t}
           total={sessions.length}
           options={projectOptions}
-          value={project.path}
-          onPick={(path) => setProject({ path })}
+          value={projectPath}
+          onPick={(path) => setProject?.({ path })}
           filter={filter}
           pickState={treePickState}
           onToggleGroup={toggleProject}
@@ -739,7 +787,7 @@ export function ManagePanel({
               </Button>
               <SessionSearch filter={filter} t={t} />
               <span className="dsm-spacer" />
-              {(filter.active || project.path !== null) && (
+              {(filter.active || projectPath !== null) && (
                 <span className="dsm-hint">{t('list.shown', { shown: listed.length, total: sessions.length })}</span>
               )}
               <span className="dsm-hint">{t('list.selected', { count: picked.length })}</span>
@@ -871,12 +919,18 @@ export function ManagePanel({
                 {t('migrate.action')}
               </Button>
               {/*
-                「导出 / 导入」是这条动作行上唯一**不**要求勾选的一枚：导出要用勾选（进去就能看到勾中
-                的那几条），导入不用——包里带什么与列表里勾了什么无关。所以它只受"这一行正忙着"影响。
-                它开的是页面骨架持有的那个宽弹窗（见 ManagerPanel），页面本身不换。
+                导出**不问**：它只把已有字节打成包给浏览器下载，不改本机任何东西。所以这一枚按下去就做，
+                完成之后那一条提示报出包里有几条、多少字节、带走了几个附件对象。包里带什么就是列表里
+                勾的那几个（父子会话跟着走的那几条也在），列表上「已选 N」与之一致。
+                导入不在这条行上：它跟勾选无关，在底部状态栏（见 ManagerPanel）。
               */}
-              <Button variant="outline" size="sm" onClick={openTransfer} disabled={busy !== null}>
-                {t('manage.transfer.action')}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void doExport()}
+                disabled={busy !== null || picked.length === 0}
+              >
+                {busy === 'export' ? t('export.running') : t('export.action')}
               </Button>
               <span className="dsm-spacer" />
               <Button

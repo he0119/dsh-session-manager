@@ -61,8 +61,6 @@ export const zh = {
   'page.version.tipBuild': '插件版本 {version}，本地构建（git {commit}）',
 
   // ---- 传输（导出 / 导入会话包） ----
-  'transfer.export.title': '导出',
-  'transfer.export.hint': '勾选会话，导出一个 .dshsess 包；组头那一下是整组勾选／取消。',
   'list.clear': '清空',
   'list.selected': '已选 {count}',
   'list.selectGroup': '整组勾选／取消：{name}',
@@ -74,34 +72,34 @@ export const zh = {
   'list.collapseAll': '全部收起',
   'list.expandAll': '全部展开',
   'list.toggleGroup': '展开／收起这一组：{name}',
-  'transfer.export.action': '导出所选',
-  'transfer.export.running': '打包中…',
-  'transfer.export.done': '已导出 {count} 条会话（{bytes}）。',
+  'export.action': '导出所选',
+  // 状态栏那枚入口（导入与勾选无关，所以它不在动作行上）。
+  'import.entry': '导入…',
+  'export.running': '打包中…',
+  'export.done': '已导出 {count} 条会话（{bytes}）。',
   // 附件对象跟着包走（.dshsess v2）：带走几个、多少字节，以及本机库里缺的那几个（缺的这次带不走）。
-  'transfer.export.attachments': '另带附件对象 {attachments} 个（{bytes}）。',
-  'transfer.export.attachmentsMissing':
+  'export.attachments': '另带附件对象 {attachments} 个（{bytes}）。',
+  'export.attachmentsMissing':
     '有 {count} 个附件对象在本机附件库里找不到，这次没能带走——它们在别的机器上会显示「图片加载失败」。',
   'list.empty': '这个会话库里还没有会话。',
 
-  'transfer.import.title': '导入',
-  'transfer.dialogTitle': '导出 / 导入',
   // 列表动作行上那枚入口：它开的就是上面那个弹窗（导出要用勾选，导入不用，所以它不受勾选限制）。
-  'manage.transfer.action': '导出 / 导入…',
-  'transfer.import.hint': '选一个包和目标目录，弹窗里逐条列出会写什么，确认才落盘。',
-  'transfer.import.fileLabel': '要导入的包',
-  'transfer.import.targetLabel': '目标目录',
+  'import.hint': '选一个包和目标目录；按「导入」先算一份只读计划，逐条列出会写什么，确认才落盘。',
+  'import.fileLabel': '要导入的包',
+  'import.targetLabel': '目标目录',
   // 与迁移页的目标目录同一个字段（值控件 + 候选面板 + 手输路径），空着时值控件上显示这一句。
-  'transfer.import.targetPlaceholder': '选择目标目录…',
+  'import.targetPlaceholder': '选择目标目录…',
   'dialog.previewing': '预演中…',
-  'transfer.import.action': '导入',
-  'transfer.import.dialogTitle': '将要写入',
-  'transfer.import.apply': '确认导入',
-  'transfer.import.applying': '导入中…',
-  'transfer.import.progress.note': '导入只增不覆盖：中断了再导一次，已经落地的那些会跳过。',
-  'transfer.import.planSummary': '将创建 {create} 条、跳过 {skip} 条，共 {bytes}',
+  'import.action': '导入',
+  'import.dialogTitle': '导入会话包',
+  'import.confirmTitle': '将要写入',
+  'import.apply': '确认导入',
+  'import.applying': '导入中…',
+  'import.progress.note': '导入只增不覆盖：中断了再导一次，已经落地的那些会跳过。',
+  'import.planSummary': '将创建 {create} 条、跳过 {skip} 条，共 {bytes}',
   // 包里有附件对象时补一句：会话日志之外还有一段要落地的字节，它决定了"导完图能不能显示出来"。
-  'transfer.import.planAttachments': '包里还有附件对象 {attachments} 个（{bytes}），其中 {adds} 个本机没有，会一并落进本机附件库。',
-  'transfer.import.planAttachmentsUnavailable':
+  'import.planAttachments': '包里还有附件对象 {attachments} 个（{bytes}），其中 {adds} 个本机没有，会一并落进本机附件库。',
+  'import.planAttachmentsUnavailable':
     '其中 {count} 个对象这个宿主落不了（没有附件服务，或认不出这种引用）：它们不会落地，会话照旧导入。',
   'table.action': '动作',
   'table.conclusion': '结论',
@@ -115,13 +113,12 @@ export const zh = {
   'cwd.keep': '没有工作目录（落 _no-cwd）',
   // 跳过的行**没有** toCwd，但那不是"没有 cwd"：它们根本不会被写盘。
   'cwd.skipped': '跳过，不改写',
-  'transfer.import.done': '已写入 {count} 条会话（{bytes}）。',
+  'import.done': '已写入 {count} 条会话（{bytes}）。',
   // 只补附件的那种落地（日志早就在库里、图是挂的）：会话那一条是 0，得有一句说清这次写的是什么。
-  'transfer.import.doneAttachments': '另写入附件对象 {count} 个（{bytes}）。',
-  'transfer.import.attachmentProblems': '有 {count} 个附件对象没能落地，它们对应的图片/文件会加载失败。',
-  'transfer.import.needSelection': '请先勾选至少一个会话。',
-  'transfer.import.needFile': '请先选择要导入的 .dshsess 包。',
-  'transfer.import.needTarget': '请先选择目标目录。',
+  'import.doneAttachments': '另写入附件对象 {count} 个（{bytes}）。',
+  'import.attachmentProblems': '有 {count} 个附件对象没能落地，它们对应的图片/文件会加载失败。',
+  'import.needFile': '请先选择要导入的 .dshsess 包。',
+  'import.needTarget': '请先选择目标目录。',
 
   // ---- 迁移 ----
   'migrate.to.label': '迁移到的目录',
@@ -670,8 +667,6 @@ export const en: LocaleDictOf<typeof NS> = {
   'page.version.tip': 'Plugin version {version}',
   'page.version.tipBuild': 'Plugin version {version}, local build (git {commit})',
 
-  'transfer.export.title': 'Export',
-  'transfer.export.hint': 'Tick sessions and download one .dshsess bundle; a group header toggles its whole group.',
   'list.clear': 'Clear',
   'list.selected': '{count} selected',
   'list.selectGroup': 'Select or clear this whole group: {name}',
@@ -683,31 +678,30 @@ export const en: LocaleDictOf<typeof NS> = {
   'list.collapseAll': 'Collapse all',
   'list.expandAll': 'Expand all',
   'list.toggleGroup': 'Expand or collapse this group: {name}',
-  'transfer.export.action': 'Export selected',
-  'transfer.export.running': 'Packing…',
-  'transfer.export.done': 'Exported {count} sessions ({bytes}).',
-  'transfer.export.attachments': 'Carried {attachments} attachment objects as well ({bytes}).',
-  'transfer.export.attachmentsMissing':
+  'export.action': 'Export selected',
+  'import.entry': 'Import…',
+  'export.running': 'Packing…',
+  'export.done': 'Exported {count} sessions ({bytes}).',
+  'export.attachments': 'Carried {attachments} attachment objects as well ({bytes}).',
+  'export.attachmentsMissing':
     '{count} attachment objects are missing from this machine’s attachment store and were not carried — they will show “Image failed to load” on another machine.',
   'list.empty': 'This library has no sessions yet.',
 
-  'transfer.import.title': 'Import',
-  'transfer.dialogTitle': 'Export / Import',
-  'manage.transfer.action': 'Export / Import…',
-  'transfer.import.hint': 'Pick a bundle and a target directory; the dialog lists every write before you confirm.',
-  'transfer.import.fileLabel': 'Bundle to import',
-  'transfer.import.targetLabel': 'Target directory',
-  'transfer.import.targetPlaceholder': 'Choose a target directory…',
+  'import.hint': 'Pick a bundle and a target directory; Import computes a read-only plan that lists every write before you confirm.',
+  'import.fileLabel': 'Bundle to import',
+  'import.targetLabel': 'Target directory',
+  'import.targetPlaceholder': 'Choose a target directory…',
   'dialog.previewing': 'Previewing…',
-  'transfer.import.action': 'Import',
-  'transfer.import.dialogTitle': 'About to write',
-  'transfer.import.apply': 'Import now',
-  'transfer.import.applying': 'Importing…',
-  'transfer.import.progress.note': 'Import only adds, it never overwrites: if it stops, import again and the ones already written are skipped.',
-  'transfer.import.planSummary': '{create} to create, {skip} to skip, {bytes} in total',
-  'transfer.import.planAttachments':
+  'import.action': 'Import',
+  'import.dialogTitle': 'Import a session bundle',
+  'import.confirmTitle': 'About to write',
+  'import.apply': 'Import now',
+  'import.applying': 'Importing…',
+  'import.progress.note': 'Import only adds, it never overwrites: if it stops, import again and the ones already written are skipped.',
+  'import.planSummary': '{create} to create, {skip} to skip, {bytes} in total',
+  'import.planAttachments':
     'The bundle also carries {attachments} attachment objects ({bytes}); {adds} of them are not on this machine yet and will be written into its attachment store.',
-  'transfer.import.planAttachmentsUnavailable':
+  'import.planAttachmentsUnavailable':
     '{count} of those objects cannot be placed on this host (no attachment service, or an unrecognised reference): they will not be written, and the sessions still import.',
   'table.action': 'Action',
   'table.conclusion': 'Conclusion',
@@ -721,13 +715,12 @@ export const en: LocaleDictOf<typeof NS> = {
   'cwd.keep': 'no working directory (lands in _no-cwd)',
   // A skipped row has **no** toCwd, but that is not "no cwd": nothing will be written at all.
   'cwd.skipped': 'skipped, unchanged',
-  'transfer.import.done': 'Wrote {count} sessions ({bytes}).',
-  'transfer.import.doneAttachments': 'Wrote {count} attachment objects as well ({bytes}).',
-  'transfer.import.attachmentProblems':
+  'import.done': 'Wrote {count} sessions ({bytes}).',
+  'import.doneAttachments': 'Wrote {count} attachment objects as well ({bytes}).',
+  'import.attachmentProblems':
     '{count} attachment objects could not be written; the images or files they belong to will fail to load.',
-  'transfer.import.needSelection': 'Tick at least one session first.',
-  'transfer.import.needFile': 'Choose a .dshsess bundle first.',
-  'transfer.import.needTarget': 'Choose a target directory first.',
+  'import.needFile': 'Choose a .dshsess bundle first.',
+  'import.needTarget': 'Choose a target directory first.',
 
   'migrate.to.label': 'Directory to migrate into',
   'list.ungrouped': 'Ungrouped',

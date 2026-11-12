@@ -28,19 +28,21 @@ export interface PanelShare {
   /** 重新拉 `/meta` 与 `/state`（写入成功后调用，让列表与注册表归属跟上）。 */
   reload: () => Promise<void>
   /**
-   * 开「导出 / 导入」那一面（弹窗由页面骨架持有，见 [ManagerPanel.tsx](./components/ManagerPanel.tsx)）。
-   *
-   * 它是列表动作行里唯一**不**要求勾选的一枚：导出要用勾选，导入不用——一个包里带什么与列表里勾了
-   * 什么无关。所以它总是可点，进去之后导出那一栏才看得到勾中的那几条。
-   */
-  openTransfer?: () => void
-  /**
    * 开「备份与回滚」，并直接指着某一份备份（删除 / 迁移之后那枚「撤销」走的这条）。
    *
    * 弹窗由页面骨架持有（见 [ManagerPanel.tsx](./components/ManagerPanel.tsx)）：动作页只报"刚留下
    * 哪一份"，由它把那面打开并把那份备份交给备份清单——回滚的动作清单与确认框仍由那边摆。
    */
   openBackup?: (dir: string) => void
+  /**
+   * 左栏「项目」筛着的那个（`null` = 全部项目）。
+   *
+   * 它由页面骨架持有：列表拿它筛，导入那一面拿它当目标目录的初值（"落到哪个项目"这件事，用户在左栏
+   * 已经说过一次了）。
+   */
+  project?: { path: string | null }
+  /** 换一个项目（左栏那一列点一下）。 */
+  setProject?: (next: { path: string | null }) => void
   /**
    * 这一页的勾选集。
    *

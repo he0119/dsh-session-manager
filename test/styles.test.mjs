@@ -230,10 +230,10 @@ test('.dsm-tag 只剩布局挂钩：几何与配色都归官方 Tag 原语', () 
   assert.doesNotMatch(body, /--dsw-alias-/, '.dsm-tag 不该再引用任何配色 token')
 })
 
-test('组头里的标签与名字一样高：行高压到 18px（12px 的字 + 2px 边框 = 名字那一行 20px）', () => {
-  // 为什么钉它：标签默认行高 20px，加上下各 1px 边框就是 22px，于是挂了标签的组头比没挂的高 2px
-  // （真实 dev GUI 里量到 39 vs 38px），同一列组头的下沿参差。列表与弹窗两处选择器不同、值同一个。
-  for (const selector of ['.dsm-groupPick > .dsm-tag', '.dsm-planGroupHead .dsm-tag']) {
+test('分组表头里的标签与名字一样高：行高压到 18px（12px 的字 + 2px 边框 = 名字那一行 20px）', () => {
+  // 为什么钉它：标签默认行高 20px，加上下各 1px 边框就是 22px，于是挂了标签的表头比没挂的高 2px
+  // （真实 dev GUI 里量到 39 vs 38px），同一列表头的下沿参差。
+  for (const selector of ['.dsm-planGroupHead .dsm-tag']) {
     const body = ruleBody(selector)
     assert.notEqual(body, null, `找不到 ${selector} 规则`)
     assert.match(body, /line-height:\s*18px/, `${selector} 的行高要与名字那一行（20px）对得上`)
@@ -380,32 +380,25 @@ test('右栏开头两轮：每格四行截断，整段用一列节奏', () => {
   assert.match(preview, /flex-direction:\s*column/, '竖排')
 })
 
-test('传输页宽屏并排：导出宽、导入窄，窄到 900 叠回去', () => {
-  // 为什么钉它：1600 下导入卡原来落在首屏之外，要滚过整张导出列表才看得到；并排之后两张卡
-  // 都在第一屏。列宽不是一比一：导出是清单，需要更宽。
-  const grid = ruleBody('.dsm-transferGrid')
-  assert.notEqual(grid, null, '找不到 .dsm-transferGrid 规则')
-  assert.match(grid, /display:\s*grid/, '两张卡走网格')
-  assert.match(grid, /grid-template-columns:\s*minmax\(0, 1\.3fr\) minmax\(320px, 0\.9fr\)/, '导出宽、导入窄，导入至少 320px')
-  assert.match(grid, /align-items:\s*start/, '两张卡各自按内容高度，不被拉成一样高')
-  const wrap = ruleBody('.dsm-transferWrap')
-  assert.notEqual(wrap, null, '找不到 .dsm-transferWrap 规则')
-  assert.match(wrap, /container-type:\s*inline-size/, '阈值读这一块自己的宽度')
-  const at = css.indexOf('@container (max-width: 900px)')
-  assert.notEqual(at, -1, '窄屏分档是容器查询')
-  assert.match(
-    css.slice(at),
-    /\.dsm-transferGrid\s*\{\s*grid-template-columns:\s*minmax\(0, 1fr\)/,
-    '窄到 900 以下叠回一列',
-  )
+test('导入那一面是 640 的窄弹窗，正文自己带 16px 的块间距', () => {
+  // 为什么钉它：导出与导入拆成两处入口之后，导入只剩两个字段（包 / 目标目录）与一对按钮，没有清单要摆；
+  // 原来那条"两栏并排 + 容器查询叠回一列"的布局跟着导出清单一起没了，别让它以别的名字回来。
+  assert.equal(ruleBody('.dsm-transferGrid'), null, '两栏网格跟着导出清单一起去掉')
+  assert.equal(ruleBody('.dsm-transferWrap'), null, '容器查询那一层也不需要了')
+  const body = ruleBody('.dsm-importBody')
+  assert.notEqual(body, null, '找不到 .dsm-importBody 规则')
+  assert.match(body, /display:\s*flex/, '字段与按钮纵向排')
+  assert.match(body, /flex-direction:\s*column/)
+  assert.match(body, /gap:\s*16px/, '16px 一道缝：弹窗正文层的节奏与别处一致')
 })
 
-test('做事的三面是 1080 宽的弹窗，确认弹窗仍是 640', () => {
-  // 为什么钉它：导出 / 导入、同步、备份与回滚原来各占一页，正文限在 1080px 居中；搬进弹窗之后宽度
-  // 不变，靠的是这一档。窄下去，传输那两栏与同步的计划表都要折行。
+test('同步与备份是 1080 宽的弹窗，导入与确认弹窗仍是 640', () => {
+  // 为什么钉它：同步与备份与回滚原来各占一页，正文限在 1080px 居中；搬进弹窗之后宽度不变，靠的是
+  // 这一档（窄下去同步那几张计划表要折行）。导入只有两个字段，不需要宽的那一档——它跟确认弹窗一起
+  // 停在 640。
   const work = ruleBody('.dsm-dialog.dsm-workDialog')
   assert.notEqual(work, null, '找不到宽弹窗的宽度规则')
-  assert.match(work, /width:\s*min\(1080px, 100%\)/, '三件事共用 1080 这一档，窄窗口自己收')
+  assert.match(work, /width:\s*min\(1080px, 100%\)/, '同步与备份共用 1080 这一档，窄窗口自己收')
   // 确认弹窗不跟着变宽：它的正文是"一句话 + 清单"，拉宽只会把说明拉成很长的一行。
   const confirm = ruleBody('.dsm-dialog.dsm-dialog')
   assert.notEqual(confirm, null, '找不到确认弹窗的宽度规则')
@@ -670,36 +663,12 @@ test('说明页 FAQ 的答案不被挤成零宽：那一栏是单列网格', () 
   )
 })
 
-test('组内行的缩进由组头那几个尺寸推出来：组头的勾选框恒在行勾选框左边 16px', () => {
-  // 为什么钉它：折叠开关从组头右端挪到**最前**之后，组头的内容整体右移了一个开关的宽度，组内那些行
-  // 的缩进必须跟着加同样多。少加了会怎样：组头的勾选框跑到组内行的**右边**去，"这些行挂在这个组头
-  // 下面"当场读反（这条是量出来的：改回 26px 时组头勾选框 x=504、行勾选框 x=498）。
-  // 几何值本身是量着调的，所以这里钉的不是某一个 px 数，而是**它们之间的关系**。
-  const head = ruleBody('.dsm-groupHead')
-  const toggle = ruleBody('.dsm-groupToggle')
-  const row = ruleBody('.dsm-group > .dsm-row')
-  assert.notEqual(head, null, '找不到 .dsm-groupHead 规则')
-  assert.notEqual(toggle, null, '找不到 .dsm-groupToggle 规则')
-  assert.notEqual(row, null, '找不到 .dsm-group > .dsm-row 规则')
-
-  const px = (body, pattern, what) => {
-    const match = pattern.exec(body)
-    assert.notEqual(match, null, `读不到${what}`)
-    return Number(match[1])
+test('分组列表那一套（组头、折叠开关、组内缩进）跟着导出清单一起去掉了', () => {
+  // 为什么钉它：去掉页签之后导出清单是一张自己的列表（组头、折叠、组内缩进都各有一份），而那一层
+  // 正是第二处勾选框。导出改成"按下去就打包"之后它没有消费者了，别让这些规则以别的名字回来。
+  for (const selector of ['.dsm-groupHead', '.dsm-groupToggle', '.dsm-groupTools', '.dsm-groupPick']) {
+    assert.equal(ruleBody(selector), null, `${selector} 该删掉：列表不分组，导出清单也不在了`)
   }
-  // 四值 padding 的第四个是左边（上 右 下 左）
-  const padLeft = px(head, /padding:\s*[\d.]+px\s+[\d.]+px\s+[\d.]+px\s+([\d.]+)px/, '组头的左内边距')
-  const gap = px(head, /gap:\s*([\d.]+)px/, '组头的间距')
-  const toggleWidth = px(toggle, /width:\s*([\d.]+)px/, '折叠开关的宽度')
-  const rowPad = px(row, /padding-left:\s*([\d.]+)px/, '组内行的左内边距')
-
-  // 16px 就是这个层级差（本来是 26px 与组头 10px 内边距凑出来的，见 styles.ts 的注释）
-  assert.equal(
-    rowPad,
-    padLeft + toggleWidth + gap + 16,
-    '组内行的缩进要等于"组头内容左缘 + 16px"，否则组头的勾选框会跑到行勾选框右边',
-  )
-  assert.ok(padLeft <= 6, '组头左内边距要小：最前面那个折叠开关自己就是这一组的左缘')
 })
 
 test('折起来的轮次整段收掉：不能只靠浏览器对 details 的默认行为', () => {

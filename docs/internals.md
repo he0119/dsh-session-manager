@@ -275,10 +275,14 @@
   平铺、表头吸顶、动作行钉底。它取代了下面那条在设置弹窗里成立的两行页头。它自己的"页头里放页签"
   那一半已被 [去掉页签那篇](../.agents/notes/implemented/architecture/2026-11-12-no-page-tabs.md) 取代。
 - [去掉页签：四件事各是一处入口 + 一个宽弹窗](../.agents/notes/implemented/architecture/2026-11-12-no-page-tabs.md)：
-  页面只剩列表，勾选成了唯一的输入；导出 / 导入进动作行、同步变页头状态、备份进状态栏，三面都是
-  1080 宽的弹窗。它取代了上面那条的"页头里放页签"，也取代了
+  页面只剩列表，勾选成了唯一的输入；导出进动作行（按下去就下载）、导入与备份进状态栏、同步变页头
+  状态，后两件是 1080 宽的弹窗、导入是 640 的窄弹窗。它取代了上面那条的"页头里放页签"，也取代了
   [备份是独立分页](../.agents/notes/implemented/architecture/2026-10-07-backups-are-their-own-page.md)
   的落点（那份清单还在，位置换成状态栏那枚入口）。
+- [导出与导入是两处入口](../.agents/notes/implemented/architecture/2026-11-12-export-and-import-are-two-doors.md)：
+  导出跟着勾选走（动作行里按下去就打包下载，不弹窗），导入跟勾选无关（状态栏那枚，640 的窄弹窗，
+  目标目录默认填左栏选中的项目）。原来那一面把列表又画了一遍（筛选条、分组、勾选框），删掉之后
+  组头 / 折叠 / 整组勾选那一套也一起没了。
 - [页头照内建设置页的规格](../.agents/notes/implemented/architecture/2026-09-28-page-header-matches-the-builtin-settings.md)（已被上一条取代）
   与 [正文与次要文字照内建设置页的两档](../.agents/notes/implemented/architecture/2026-10-07-body-type-matches-the-builtin-settings.md)、
   [版面不跟着滚动条动](../.agents/notes/implemented/architecture/2026-09-28-layout-does-not-move-with-the-scrollbar.md)：

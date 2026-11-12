@@ -12,7 +12,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { MAX_NEST_DEPTH, groupKey, groupSessions, lockedParentOf, nestSessions } from '../src/client/logic/groups.ts'
+import { groupKey, groupSessions, lockedParentOf } from '../src/client/logic/groups.ts'
 
 // 注意这里**不 import** `src/client/api.ts` 的响应类型：Host 侧的 typecheck 工程
 // `exclude` 了 `src/client`，但 import 会把它拉进来在"没有 DOM 的工程"里检查
@@ -111,21 +111,16 @@ test('分组：空库给出空列表（页面据此显示"还没有会话"）', 
 })
 
 test('组的稳定键：路径本身，没有 cwd 的那一组换成一个撞不上的键', () => {
-  // key 与折叠状态都拿它当身份（见 sessionList.useGroupCollapse），所以哨兵只写一处
+  // React 的 key 与各处按目录分组的身份都靠它，所以哨兵只写一处
   assert.equal(groupKey('/home/u/dev/alpha'), '/home/u/dev/alpha')
   assert.equal(groupKey(''), '\u0000no-cwd', '没有 cwd 的那一组不能用空串：折叠状态与 React key 都靠它')
   // 真实路径不可能是这个（NUL 不在文件名的字符集里），所以撞不上
   assert.ok(!groupKey('').includes('/'))
 })
 
-// ---- 子智能体缩进到父会话的下一级（`nestSessions`）----
-//
-// 这一层是**显示**关系：列表里的父子与删除/迁移的级联展开读的是同一条边（`parentSession` +
-// `origin === "subagent"`），所以缩进错了不会抛错、不会崩，只会让"删父会话会带上谁"与眼睛看到的对不上。
-// 边界各自钉一条。
 
 /**
- * 造一条带父指针的会话（缩进只用到 id / parentSession / origin / cwd / createdAt）。
+ * 造一条带父指针的会话（锁只用到 id / parentSession / origin / cwd / createdAt）。
  * 给了 `parentSession` 的默认是**子智能体**（`origin: "subagent"`）；分叉用 `forkLink()`。
  */
 function link(id: string, parentSession?: string, cwd = '/home/u/dev/alpha', options: { subagent?: boolean } = {}) {
@@ -139,100 +134,10 @@ function link(id: string, parentSession?: string, cwd = '/home/u/dev/alpha', opt
   }
 }
 
-/** 分叉：有 `parentSession`、没有 `origin`（`sessions.fork()` 出来的那种自洽会话），不该缩进。 */
+/** 分叉：有 `parentSession`、没有 `origin`（`sessions.fork()` 出来的那种自洽会话），不该被锁。 */
 function forkLink(id: string, parentSession: string, cwd = '/home/u/dev/alpha') {
   return link(id, parentSession, cwd, { subagent: false })
 }
-
-test('缩进：子智能体排在父会话后面、缩进一级，孙代再深一级', () => {
-  const rows = nestSessions([link('child', 'parent'), link('parent'), link('grand', 'child')], [link('parent'), link('child', 'parent'), link('grand', 'child')], new Set(['parent', 'child', 'grand']))
-  assert.deepEqual(rows.map((row) => [row.session.id, row.depth]), [
-    ['parent', 0],
-    ['child', 1],
-    ['grand', 2],
-  ])
-  // 输入里子排在父前面也照样把子树收到父下面：顶层行的相对顺序由"根"决定，子行永远紧跟它的父
-  const reordered = nestSessions([link('child', 'parent'), link('parent')], [link('parent'), link('child', 'parent')], new Set(['parent', 'child']))
-  assert.deepEqual(reordered.map((row) => [row.session.id, row.depth]), [
-    ['parent', 0],
-    ['child', 1],
-  ])
-  assert.equal(reordered.length, 2, '一条不多一条不少')
-})
-
-test('缩进：父会话在别的目录组里时留在自己这组，缩进一级并给出父所在的目录', () => {
-  const rows = nestSessions(
-    [link('child', 'parent', '/home/u/dev/alpha')],
-    [link('parent', undefined, '/home/u/dev/beta'), link('child', 'parent', '/home/u/dev/alpha')],
-    new Set(['parent', 'child']),
-  )
-  assert.deepEqual(rows.map((row) => [row.session.id, row.depth, row.parentPath]), [
-    ['child', 1, '/home/u/dev/beta'],
-  ])
-})
-
-test('缩进：父会话没在当前视图里（被筛掉 / 不在库里）时按普通行画，不凭空多一级', () => {
-  const library = [link('parent'), link('child', 'parent')]
-  // 父被筛选条筛掉了：它不在 visibleIds 里
-  const filtered = nestSessions([link('child', 'parent')], library, new Set(['child']))
-  assert.deepEqual(filtered.map((row) => [row.session.id, row.depth, row.parentPath]), [['child', 0, undefined]])
-  // 父压根不在库里（孤儿）
-  const orphan = nestSessions([link('child', 'gone')], [link('child', 'gone')], new Set(['child']))
-  assert.deepEqual(orphan.map((row) => [row.session.id, row.depth]), [['child', 0]])
-  // 父会话的 cwd 是空串：仍然是缩进一级，只是没有可写的目录
-  const noCwd = nestSessions([link('child', 'parent')], [link('parent', undefined, ''), link('child', 'parent')], new Set(['parent', 'child']))
-  assert.deepEqual(noCwd.map((row) => [row.session.id, row.depth, row.parentPath]), [['child', 1, undefined]])
-})
-
-test('缩进：分叉按普通行画不缩进，而它自己的子智能体照旧缩进到它下面', () => {
-  const rows = nestSessions(
-    [forkLink('fork', 'parent'), link('parent'), link('sub', 'fork')],
-    [link('parent'), forkLink('fork', 'parent'), link('sub', 'fork')],
-    new Set(['parent', 'fork', 'sub']),
-  )
-  assert.deepEqual(rows.map((row) => [row.session.id, row.depth]), [
-    ['fork', 0],
-    ['sub', 1],
-    ['parent', 0],
-  ], '分叉是顶层行（顺序仍按输入），它的子智能体跟着它缩进一级')
-
-  // 分叉排在父后面（真实库里分叉通常比父新）也不能被收进父的子树里
-  const after = nestSessions(
-    [link('parent'), forkLink('fork', 'parent')],
-    [link('parent'), forkLink('fork', 'parent')],
-    new Set(['parent', 'fork']),
-  )
-  assert.deepEqual(after.map((row) => [row.session.id, row.depth]), [
-    ['parent', 0],
-    ['fork', 0],
-  ], '父在前也一样：分叉不缩进')
-})
-
-test('缩进：坏数据里的环不会让会话消失，也不会无限递归', () => {
-  const rows = nestSessions(
-    [link('a', 'b'), link('b', 'a')],
-    [link('a', 'b'), link('b', 'a')],
-    new Set(['a', 'b']),
-  )
-  assert.deepEqual(rows.map((row) => row.session.id).sort(), ['a', 'b'], '环路里的会话也得画出来')
-  assert.equal(rows.length, 2)
-  // 自己当自己的父：同样只画一次
-  const self = nestSessions([link('self', 'self')], [link('self', 'self')], new Set(['self']))
-  assert.deepEqual(self.map((row) => [row.session.id, row.depth]), [['self', 0]])
-})
-
-test('缩进：级数封顶（更深的链条按最后一级算，别把标题挤没）', () => {
-  const chain = ['s1', 's2', 's3', 's4', 's5']
-  const library = chain.map((id, index) => link(id, index === 0 ? undefined : chain[index - 1]!))
-  const rows = nestSessions(library, library, new Set(chain))
-  assert.deepEqual(rows.map((row) => [row.session.id, row.depth]), [
-    ['s1', 0],
-    ['s2', 1],
-    ['s3', 2],
-    ['s4', 3],
-    ['s5', MAX_NEST_DEPTH],
-  ])
-})
 
 test('能不能单独勾：只有"子智能体 + 父会话在库里"才不能（判据与宿主那几条路同源）', () => {
   const parent = link('p', undefined)

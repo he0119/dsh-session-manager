@@ -42,7 +42,7 @@ import { HelpPanel } from './HelpPanel.tsx'
 import { ManagePanel } from './ManagePanel.tsx'
 import { ProgressBlock } from './ProgressBlock.tsx'
 import { SyncPanel } from './SyncPanel.tsx'
-import { TransferPanel } from './TransferPanel.tsx'
+import { ImportPanel } from './ImportPanel.tsx'
 import { useSessionPicking } from './sessionList.tsx'
 import { WorkDialog } from './WorkDialog.tsx'
 
@@ -64,7 +64,7 @@ export interface ManagerPanelProps {
  * `none` 是列表本身（这一页常驻的那一面）；其余四个各是一个弹窗。原来它们是一个 `PanelKey` 的
  * 页签值，`manage` 那一档随页签一起去掉了——列表不再是"四个里选一个"，而是这一页唯一的样子。
  */
-type Surface = 'none' | 'transfer' | 'sync' | 'backup' | 'help'
+type Surface = 'none' | 'import' | 'sync' | 'backup' | 'help'
 
 /** 会话管理页。 */
 export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactElement {
@@ -90,6 +90,14 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
    * 不画条——还不知道分母。
    */
   const [loadProgress, setLoadProgress] = React.useState<ProgressEvent | undefined>(undefined)
+  /**
+   * 这一页自己那条"做完了"的提示（目前只有导入用它）。
+   *
+   * 为什么放在页面这一级：导入成功之后弹窗就关掉了，写入的条数与字节总得有个地方说；列表顶部那条
+   * 横幅正是删除、迁移、归档那几件事共用的位置。用 `undefined` 起头而不是 `null`：冒烟夹具按顺序把
+   * 种子发给 null 状态（见 test/client.test.mjs 的 `nulls`），这里插一个 null 会让后面整体错一格。
+   */
+  const [notice, setNotice] = React.useState<string | undefined>(undefined)
   // 这一页一进来就是列表：它不再是"四个里选一个"的默认项，而是唯一常驻的那一面。
   const [surface, setSurface] = React.useState<Surface>('none')
 
@@ -146,6 +154,13 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
    * 下次手点状态栏那枚入口是从清单开始。
    */
   const [backupFocus, setBackupFocus] = React.useState<string | undefined>(undefined)
+  /**
+   * 左栏「项目」筛着的那个（`null` = 全部项目）。
+   *
+   * 它原先在列表那一层，这里上移一格是为了导入：导入要回答"落到哪个项目"，而用户在看这一页时已经用
+   * 左栏说过一次了——弹窗里的目标目录默认就填它，不用再问第二遍。
+   */
+  const [project, setProject] = React.useState<{ path: string | null }>({ path: null })
   /**
    * 列表与导出清单共用的勾选集（见 types.ts 的 `picking`）。
    *
@@ -441,6 +456,16 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
         </p>
       )}
 
+      {notice !== undefined && (
+        <p className="dsm-banner dsm-ok">
+          <span>{notice}</span>
+          <span className="dsm-spacer" />
+          <Button variant="outline" size="sm" onClick={() => setNotice(undefined)}>
+            {t('error.dismiss')}
+          </Button>
+        </p>
+      )}
+
       {error !== null && (
         <p className="dsm-banner dsm-error">
           {/* 宿主报的是原话（扫库失败、连不上）：界面只负责把它套进「刚才那件事没成：…」那一句。 */}
@@ -465,7 +490,8 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
         patch={patch}
         directory={directory}
         picking={picking}
-        openTransfer={() => setSurface('transfer')}
+        project={project}
+        setProject={setProject}
         openBackup={(dir) => {
           setBackupFocus(dir)
           setSurface('backup')
@@ -473,13 +499,25 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
       />
 
       {/*
-        三件事各是一个宽弹窗（见 WorkDialog.tsx 的说明）。开哪个由 `surface` 决定；关掉就是卸载，
-        本地草稿随之清掉。它们与列表共用同一份 `/state`：同一个库不会出现两套数字。
+        同步与备份各是一个宽弹窗（见 WorkDialog.tsx 的说明），导入是一个 640 的窄弹窗（见
+        ImportPanel.tsx：它只有两个字段，没有清单要摆）。开哪个由 `surface` 决定；关掉就是卸载，本地
+        草稿随之清掉。它们与列表共用同一份 `/state`：同一个库不会出现两套数字。
       */}
-      {surface === 'transfer' && (
-        <WorkDialog t={t} title={t('transfer.dialogTitle')} onClose={close}>
-          <TransferPanel t={t} state={state} meta={meta} reload={load} directory={directory} picking={picking} />
-        </WorkDialog>
+      {surface === 'import' && (
+        <ImportPanel
+          t={t}
+          state={state}
+          meta={meta}
+          reload={load}
+          directory={directory}
+          defaultTarget={project.path ?? ''}
+          onClose={close}
+          onDone={(text) => {
+            // 成功就关掉它：写入的条数与字节正是页面顶部那条提示该报的，列表也已经重读过了。
+            close()
+            setNotice(text)
+          }}
+        />
       )}
       {surface === 'sync' && (
         <WorkDialog t={t} title={t('sync.title')} onClose={close}>
@@ -525,9 +563,19 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
         </span>
         <span className="dsm-spacer" />
         {/*
-          备份与回滚是三种写操作（迁移 / 删除 / 同步覆盖本机那份）共同的后悔面，不属于其中任何一件，
-          所以它不跟着动作走，而是跟"库在哪"这一档信息一起待在状态栏。
+          库这一级的两件事：导入（往库里放东西，与勾选无关）与备份回滚（三种写操作共同的后悔面，
+          不属于其中任何一件）。它们都不跟着动作走，所以跟"库在哪"这一档信息一起待在状态栏。
         */}
+        <Button
+          className="dsm-statusAction"
+          variant="outline"
+          size="sm"
+          aria-haspopup="dialog"
+          aria-expanded={surface === 'import'}
+          onClick={() => setSurface('import')}
+        >
+          {t('import.entry')}
+        </Button>
         <Button
           className="dsm-statusAction"
           variant="outline"

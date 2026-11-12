@@ -31,7 +31,7 @@ still works.
 
 | Entry point | Good for |
 |---|---|
-| The **Session management** page in Settings | Everyday use: the page is the whole library's flat table; tick the sessions to handle (they may come from different directories, and a deleted source directory is no obstacle) and archive, retitle, migrate, export / import or delete them on the action row; the sync state at the right of the header opens the plan and the run; **Backups & rollback** in the status bar opens roll back and restore |
+| The **Session management** page in Settings | Everyday use: the page is the whole library's flat table; tick the sessions to handle (they may come from different directories, and a deleted source directory is no obstacle) and archive, retitle, migrate, export or delete them on the action row (import lives in the status bar); the sync state at the right of the header opens the plan and the run; **Backups & rollback** in the status bar opens roll back and restore |
 | 5 model tools | Just say "move this workspace's sessions to `~/dev/xxx`" and let the model preview first, apply second |
 
 Both share one migration implementation, so the count the dialog reports is the count you get.
@@ -174,7 +174,7 @@ M" to report.
   **Migrate** on the action row, pick the recreated directory in the dialog — one run instead of one run
   per directory;
 - **the target directory is picked in the dialog**: that field is the **same control with the same
-  candidates** as the import's landing directory in the **Export / Import** dialog (its value control opens the
+  candidates** as the import's landing directory in the **Import** dialog (its value control opens the
   candidate panel; you can also type a path or browse the file system). Each row carries two lines (the
   name on top, the local path below, the whole string in its tooltip) and the **filter box** above them
   narrows the list by path, workspace title or project identity — it only filters the candidates and
@@ -236,17 +236,20 @@ M" to report.
 
 **Transfer** — take sessions away, bring them back
 
-Opened from **Export / Import…** on the list's action row: the ticked sessions already travel into the export
-column, and the other column is import. It does not depend on ticks (what a bundle carries has nothing to do
-with what the list has ticked), so it opens with nothing ticked too.
+Two doors, because the two halves relate to ticks differently:
 
-On wide screens Export and Import sit **side by side**: the export list (wide) on the left, the import
-fields (narrow, at least 320px) on the right; at 1600 the 1080 body splits 626 + 433, so import no longer
-falls below the fold. Below 900 they stack.
+- **Export** follows the ticks: **Export selected** on the list's action row packs the bundle and downloads it,
+  with no dialog. It is greyed out with nothing ticked (it exports exactly the ticked sessions, cascaded
+  subagents included); the notice at the top of the page then reports the session count, the bytes and how
+  many attachment objects travelled.
+- **Import** has nothing to do with ticks (what a bundle carries is independent of the selection): the
+  **Import…** entry in the status bar opens a 640 dialog — pick a bundle, pick a target directory, press
+  Import to see a read-only plan and confirm. The target defaults to the project selected in the left tree
+  and can be changed or typed in by hand.
 
 - Rows show a session's **title**, with the full title and the id on hover: a uuid tells a human nothing,
   and people pick sessions by "the one where I asked about that"; a session with no title falls back to
-  its id. Both the export list and the session list on the page take the whole library, sidebar-hidden sessions
+  its id. The list takes the whole library, sidebar-hidden sessions
   (subagent / blank / archived) included — whether a session is worth taking away or deleting is the
   user's call, and hiding one up front only turns "I know I have that session" into a mystery. Migration
   is the other way round (see below);
