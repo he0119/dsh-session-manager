@@ -100,10 +100,12 @@ M" to report.
   them), each carrying a tag saying why: `subagent` / `blank` / `archived`, plus `active` for a session
   still live in host memory; a session in the shell sidebar's Ungrouped group carries an `ungrouped` tag;
 - **Right pane**: hovering a row end shows **Details** and **Content**. Details fills the right pane with
-  the title, project, directory, created time, size, file count and single-row actions (open full content,
-  archive / unarchive, select / deselect); Content opens the full timeline directly. On wide screens the
-  pane stays put with a hint until a session is picked; below 1180px of workbench width it becomes a
-  drawer from the right, closed with Close. The row the pane is showing gets a brand-colored edge.
+  the **first two turns** (the human message and the answer, four lines each), then the title, project,
+  directory, created time, size, file count and single-row actions (open full content, archive /
+  unarchive, select / deselect); Content opens the full timeline directly. The opening reads one page of
+  the log, not the whole timeline. On wide screens the pane stays put with a hint until a session is
+  picked; below 1180px of workbench width it becomes a drawer from the right, closed with Close. The row
+  the pane is showing gets a brand-colored edge.
 - **Filter**: a row of small chips at the bottom of the project rail — subagent / blank / archived /
   ungrouped / active, each with the count in the library. Tick several to see several kinds (multiple =
   either), **All** clears them. The search box sits above the table (both title and id are searched: "name

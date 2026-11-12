@@ -17,9 +17,27 @@ import * as React from 'react'
 
 import { Button, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
 
+import { fetchTranscript } from '../api.ts'
 import type { Translate } from '../logic/locales.ts'
 import { sessionLabel } from '../logic/planRows.ts'
+import { previewTurns, type PreviewTurn } from '../logic/preview.ts'
 import { formatBytes, formatTime, sessionTags, type RowSession } from './sessionList.tsx'
+
+/** 右栏开头那一段的取数状态。`id` 与当前会话不同时说明还在等新的那一条。 */
+interface PreviewState {
+  id: string | null
+  loading: boolean
+  error: boolean
+  turns: PreviewTurn[]
+}
+
+const EMPTY_PREVIEW: PreviewState = { id: null, loading: false, error: false, turns: [] }
+
+/** 开头取多少条事件：两轮对话通常远小于这个数；再多就是工具调用的长尾。 */
+const PREVIEW_EVENTS = 240
+
+/** 每格文字的上限（与 CSS 的四行截断一起用，先让网络那一侧小下来）。 */
+const PREVIEW_CHARS = 600
 
 export interface SessionInspectorProps {
   t: Translate
@@ -68,6 +86,46 @@ export function SessionInspector({
   const label = session === null ? null : sessionLabel(session)
   const tags = session === null ? [] : sessionTags(session, { ungrouped: true })
 
+  /**
+   * 开头两轮：选中一条才读，读的是 `/transcript` 的第一页（不是整份日志）。
+   *
+   * 同一页里选来选去时不重复读：读到过的结果按会话 id 留在这个组件里；宿主那侧还有日志解压缓存，
+   * 所以第二次选同一条连解析都省了。读失败不写缓存，下次选中会再试。
+   */
+  const [preview, setPreview] = React.useState<PreviewState>(EMPTY_PREVIEW)
+  const previewCache = React.useRef(new Map<string, PreviewState>())
+  const sessionId = session?.id ?? null
+  React.useEffect(() => {
+    if (sessionId === null) {
+      setPreview(EMPTY_PREVIEW)
+      return
+    }
+    const cached = previewCache.current.get(sessionId)
+    if (cached !== undefined) {
+      setPreview(cached)
+      return
+    }
+    let cancelled = false
+    setPreview({ id: sessionId, loading: true, error: false, turns: [] })
+    void fetchTranscript(sessionId, { limit: PREVIEW_EVENTS, maxChars: PREVIEW_CHARS })
+      .then((page) => {
+        const next: PreviewState = {
+          id: sessionId,
+          loading: false,
+          error: false,
+          turns: previewTurns(page.items, undefined, page.nextCursor !== undefined),
+        }
+        previewCache.current.set(sessionId, next)
+        if (!cancelled) setPreview(next)
+      })
+      .catch(() => {
+        if (!cancelled) setPreview({ id: sessionId, loading: false, error: true, turns: [] })
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [sessionId])
+
   return (
     <aside
       id="dsm-inspector"
@@ -105,6 +163,42 @@ export function SessionInspector({
             </div>
           )}
 
+          <div className="dsm-preview">
+            <div className="dsm-previewHead">{t('manage.detail.preview')}</div>
+            {preview.id !== session.id || preview.loading ? (
+              <p className="dsm-hint">{t('manage.detail.previewLoading')}</p>
+            ) : preview.error ? (
+              <p className="dsm-hint">{t('manage.detail.previewError')}</p>
+            ) : preview.turns.length === 0 ? (
+              <p className="dsm-hint">{t('manage.detail.previewEmpty')}</p>
+            ) : (
+              <>
+                {preview.turns.map((turn) => (
+                  <div key={turn.turn} className="dsm-previewTurn">
+                    <div className="dsm-previewLabel">
+                      {t('manage.transcript.turn', { turn: turn.turn })}
+                    </div>
+                    {turn.user !== null && (
+                      <div className="dsm-previewRow">
+                        <span className="dsm-previewWho">{t('manage.detail.previewUser')}</span>
+                        <p className="dsm-previewText">{turn.user}</p>
+                      </div>
+                    )}
+                    {turn.answer !== null ? (
+                      <div className="dsm-previewRow">
+                        <span className="dsm-previewWho">{t('manage.detail.previewAnswer')}</span>
+                        <p className="dsm-previewText">{turn.answer}</p>
+                      </div>
+                    ) : (
+                      <p className="dsm-hint">{t('manage.detail.previewNoAnswer')}</p>
+                    )}
+                  </div>
+                ))}
+                <p className="dsm-hint">{t('manage.detail.previewNote')}</p>
+              </>
+            )}
+          </div>
+
           <dl className="dsm-facts">
             <dt>{t('manage.detail.project')}</dt>
             <dd title={session.cwd ?? ''}>{projectName}</dd>
@@ -126,34 +220,36 @@ export function SessionInspector({
               </>
             )}
           </dl>
+        </div>
+      )}
 
-          <div className="dsm-inspectorActions">
-            <Button
-              variant="primary"
-              size="sm"
-              title={t('manage.detail.transcriptTip')}
-              onClick={onTranscript}
-            >
-              {t('manage.detail.transcript')}
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={busy || !archiveAvailable}
-              onClick={onArchive}
-            >
-              {session.archived === true ? t('manage.detail.unarchive') : t('manage.detail.archive')}
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={lockedTip !== undefined}
-              title={lockedTip}
-              onClick={onPick}
-            >
-              {checked ? t('manage.detail.unpick') : t('manage.detail.pick')}
-            </Button>
-          </div>
+      {session !== null && label !== null && (
+        <div className="dsm-inspectorActions">
+          <Button
+            variant="primary"
+            size="sm"
+            title={t('manage.detail.transcriptTip')}
+            onClick={onTranscript}
+          >
+            {t('manage.detail.transcript')}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={busy || !archiveAvailable}
+            onClick={onArchive}
+          >
+            {session.archived === true ? t('manage.detail.unarchive') : t('manage.detail.archive')}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={lockedTip !== undefined}
+            title={lockedTip}
+            onClick={onPick}
+          >
+            {checked ? t('manage.detail.unpick') : t('manage.detail.pick')}
+          </Button>
         </div>
       )}
     </aside>

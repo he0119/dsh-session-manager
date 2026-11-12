@@ -713,6 +713,34 @@ export const CSS = `
 .dsm-inspectorBody { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 12px; }
 .dsm-inspectorName { margin: 0; font-size: 16px; line-height: 24px; font-weight: 600; overflow-wrap: anywhere; }
 .dsm-inspectorTags { display: flex; flex-wrap: wrap; gap: 6px; }
+/*
+ * 开头两轮：一段只读的摘要，不是时间线。每轮一行轮次标签，加「你 / 答」两行；每格最多四行，
+ * 再多就交给「打开完整内容」。上下各一条发丝线，与元数据分开。
+ */
+.dsm-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 0;
+  border-top: 1px solid var(--dsw-alias-border-l1, rgba(0, 0, 0, 0.1));
+  border-bottom: 1px solid var(--dsw-alias-border-l1, rgba(0, 0, 0, 0.1));
+}
+.dsm-previewHead { font-size: 12px; line-height: 18px; font-weight: 600; color: var(--dsw-alias-label-secondary, #646a73); }
+.dsm-previewTurn { display: flex; flex-direction: column; gap: 3px; }
+.dsm-previewLabel { font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-secondary, #646a73); }
+.dsm-previewRow { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 6px; align-items: start; }
+.dsm-previewWho { font-size: 12px; line-height: 20px; color: var(--dsw-alias-label-secondary, #646a73); }
+.dsm-previewText {
+  margin: 0;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--dsw-alias-label-primary, #1f2329);
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  overflow: hidden;
+}
 .dsm-facts {
   display: grid;
   grid-template-columns: 62px minmax(0, 1fr);
@@ -730,7 +758,6 @@ export const CSS = `
   gap: 8px;
   padding-top: 10px;
   border-top: 1px solid var(--dsw-alias-border-l1, rgba(0, 0, 0, 0.1));
-  margin-top: auto;
 }
 /* 右栏正开着的那一行：左缘一条品牌色细线 + 一点底色，知道右栏说的是哪一条。 */
 .dsm-rowManage[data-opened='true'] {

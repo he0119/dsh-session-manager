@@ -367,6 +367,18 @@ test('页头是一条工具条：16px/500 的标题、页签与页面级动作�
   assert.equal(ruleBody('.dsm-version'), null, '旧的页脚徽标样式不该还在（版本号进了状态栏）')
 })
 
+test('右栏开头两轮：每格四行截断，整段用一列节奏', () => {
+  // 为什么钉它：预览里一格回答可以有一两千字；不截断会把右栏撑成一面文字墙，把动作行挤到看不见。
+  const text = ruleBody('.dsm-previewText')
+  assert.notEqual(text, null, '找不到 .dsm-previewText 规则')
+  assert.match(text, /-webkit-line-clamp:\s*4/, '每格最多四行')
+  assert.match(text, /overflow:\s*hidden/, '截断之外的内容要收掉')
+  const preview = ruleBody('.dsm-preview')
+  assert.notEqual(preview, null, '找不到 .dsm-preview 规则')
+  assert.match(preview, /display:\s*flex/, '轮次与说明竖着排')
+  assert.match(preview, /flex-direction:\s*column/, '竖排')
+})
+
 test('非会话分页限在可读宽度：1080px 居中；会话工作台不受限', () => {
   // 为什么钉它：1600 窗口下一段同步说明拉成一千二百多像素的长行，表单控件全挤在左边。
   // 「会话」是工作台，继续吃满；其余三页是表单与清单，限宽并居中。
