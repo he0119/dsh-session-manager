@@ -64,3 +64,36 @@ export function sortSessions<T extends SortableSession>(rows: readonly T[], sort
     return (left.createdAt - right.createdAt) * direction
   })
 }
+
+/** 项目行上那枚勾选框的三态。 */
+export interface GroupPickState {
+  readonly checked: boolean
+  readonly indeterminate: boolean
+  /** 这一组里有没有能单独勾的行；没有就不画勾选框。 */
+  readonly available: boolean
+}
+
+/**
+ * 项目行勾选框的状态：只看**传进来的这些行**（界面按"当前筛出来的"传），能单独勾的才算。
+ *
+ * 勾了一部分时给 indeterminate（横杠），不是一律画成没勾：否则"我勾了两条，这一组看起来像没动过"。
+ * 一条可勾的都没有（空组，或整组都是跟着父会话走的子智能体）时 `available: false`——画一个点不动的
+ * 勾选框只是噪音。
+ *
+ * @param rows 这一组眼下列出来的行。
+ * @param picked 已选 id。
+ * @param selectable 这一行能不能单独勾（子智能体不能）。
+ */
+export function groupPickState<T extends { id: string }>(
+  rows: readonly T[],
+  picked: readonly string[],
+  selectable: (row: T) => boolean,
+): GroupPickState {
+  const choices = rows.filter(selectable)
+  const chosen = choices.filter((row) => picked.includes(row.id)).length
+  return {
+    checked: choices.length > 0 && chosen === choices.length,
+    indeterminate: chosen > 0 && chosen < choices.length,
+    available: choices.length > 0,
+  }
+}

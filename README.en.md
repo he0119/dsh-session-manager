@@ -71,7 +71,7 @@ one-line bump at that point.
 
 ## Usage
 
-### Settings → Session management
+### Sidebar → Session management
 
 Every action that can take a while **reports progress**: the dialog body of migration, deletion, rollback and
 import (preview and apply), the action row of archiving, and the page header during the library scan all say
@@ -85,30 +85,27 @@ M" to report.
 
 **Sessions** — manage the whole library row by row
 
-- The list is **grouped by directory** with foldable headers (**Collapse all / Expand all** sit above the
-  list), and clicking a header toggles that whole group — so
-  "archive every session of this old project" is one click. A header carries **only the name of its
-  group**: the workspace title, or for a directory no workspace registers **the project name** (the last
-  segment of its project identity — `dsh-session-manager` — when it has a git remote, and the local path
-  when it does not), so rows no longer repeat the owner; **the project identity and the local path both
-  live in that name's tooltip** (two lines: identity first, path below — the path is what tells two
-  clones of one repository apart), a directory whose identity is known also carries a small **host tag**
-  (`github.com`, `git.hehome.xyz`) after the name, so a glance shows which directories are repositories the
-  identity knows about, and that tag's own tooltip gives the full identity, and a session sitting in the
-  shell sidebar's Ungrouped group carries a small "Ungrouped" tag (the header is the directory, the tag says
-  where the shell puts the row). **Subagent sessions are indented one level under their parent** (they
-  follow it; when the parent lives in another directory group the row stays in its own group, indented, and
-  says where the parent is), so which row belongs to which never has to be guessed from tags. Every row
-  shows the title, the byte count and the creation time. Sessions the
-  host sidebar cannot show **are listed here** (the sidebar cannot reach them), each carrying a tag saying
-  why: `subagent` / `blank` / `archived`, plus `active` for a session still live in host memory;
-- **Filter**: a row of small chips — subagent / blank / archived / ungrouped / active, each with the
-  count in the library. Tick several to see several kinds (multiple = either), **All** clears them. The
-  line below is a **title / id search box** (both are searched: "name it by id" and "the one where I asked
-  about that" are both everyday needs). The header then reports "showing N / M", and **Select all picks
-  what is listed right now** (filter to blank, select all, delete them), with **Clear** sitting next to it
-  (it empties the whole tick set, so a partial tick can be cleared too), while ticking survives switching
-  filters;
+- On the left is the **project rail**: All projects plus one row per directory (the workspace title, or
+  for a directory no workspace registers **the project name** — the last segment of its git identity, or
+  the local path when it has none), each with its whole-library count. Clicking a name shows only that
+  project; hovering a row reveals a checkbox that selects that project's listed sessions in one click, so
+  "archive every session of this old project" does not need row-by-row ticking. **The project identity and
+  the local path both live in the name's tooltip** (identity first, path below — the path is what tells two
+  clones of one repository apart). On a narrow window the rail becomes a **Projects and filters** drawer.
+- On the right is a **flat table**: one row per session with six cells (check, marker, title and tags,
+  project, size, time). The title / size / time headers sort, time newest first by default, and the header
+  sticks while the list scrolls. The **Project** column names the owner. **Subagents are no longer indented
+  under their parent**: they carry a `subagent` tag, and when the parent lives in another project the row
+  says where it is. Sessions the host sidebar cannot show **are listed here** (the sidebar cannot reach
+  them), each carrying a tag saying why: `subagent` / `blank` / `archived`, plus `active` for a session
+  still live in host memory; a session in the shell sidebar's Ungrouped group carries an `ungrouped` tag;
+- **Filter**: a row of small chips at the bottom of the project rail — subagent / blank / archived /
+  ungrouped / active, each with the count in the library. Tick several to see several kinds (multiple =
+  either), **All** clears them. The search box sits above the table (both title and id are searched: "name
+  it by id" and "the one where I asked about that" are both everyday needs). The header then reports
+  "showing N / M", and **Select all picks what is listed right now** (filter to blank, select all, delete
+  them), with **Clear** sitting next to it (it empties the whole tick set, so a partial tick can be cleared
+  too), while ticking survives switching filters;
 - **Archive / Unarchive**: tick rows and put them away or bring them back in one click. It goes through
   the host's own archiving capability and takes effect **immediately** — the sidebar follows right away,
   no restart. Ticking a parent session archives its subagents with it (the family is the unit; why, see

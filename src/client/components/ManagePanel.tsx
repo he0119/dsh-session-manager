@@ -52,7 +52,7 @@ import {
 import { ConfirmDialog } from './ConfirmDialog.tsx'
 import { DirectoryField, useDirectoryFields } from './DirectoryField.tsx'
 import { ProgressBlock } from './ProgressBlock.tsx'
-import { ProjectPicker } from './ProjectPicker.tsx'
+import { SessionTree } from './SessionTree.tsx'
 import { TranscriptDialog } from './TranscriptDialog.tsx'
 import { groupSessions } from '../logic/groups.ts'
 import {
@@ -63,15 +63,21 @@ import {
   projectLabel,
   type PathRow,
 } from '../logic/planRows.ts'
-import { defaultDir, sessionsInProject, sortSessions, type SessionSortKey } from '../logic/manageRows.ts'
-import { describeRetitle, type RetitleNotes } from '../logic/retitleNotes.ts'
-import { FILTER_KEYS } from '../logic/sessionFilter.ts'
 import {
-  SessionFilterBar,
+  defaultDir,
+  groupPickState,
+  sessionsInProject,
+  sortSessions,
+  type GroupPickState,
+  type SessionSortKey,
+} from '../logic/manageRows.ts'
+import { describeRetitle, type RetitleNotes } from '../logic/retitleNotes.ts'
+import {
   SessionListBox,
   SessionListEmpty,
   SessionPickTools,
   SessionRow,
+  SessionSearch,
   SessionStaticRow,
   formatBytes,
   useSessionFilter,
@@ -185,6 +191,12 @@ export function ManagePanel({ t, state, meta, reload, patch, directory }: PanelS
    * "我最近那条在哪"。
    */
   const [sort, setSort] = React.useState<{ key: SessionSortKey; dir: 'asc' | 'desc' }>({ key: 'time', dir: 'desc' })
+  /**
+   * 窄屏（页面可用宽 ≤960px）下项目树是否展开成浮层。
+   *
+   * 宽屏上这一栏一直摆着，这个值不起作用；CSS 只在容器查询那一档读 `.dsm-treeOpen`。
+   */
+  const [treeOpen, setTreeOpen] = React.useState(false)
 
   /**
    * 全库按目录分一次组：项目下拉的选项、每一行「项目」那一格都从它来。
@@ -198,14 +210,13 @@ export function ManagePanel({ t, state, meta, reload, patch, directory }: PanelS
   )
   const projectOptions = React.useMemo(
     () =>
-      projectGroups.map((group) => ({
-        path: group.path,
-        name: projectLabel(
+      projectGroups.map((group) => {
+        const label = projectLabel(
           { path: group.path, title: group.title, repo: state?.repos?.[group.path] },
           t,
-        ).name,
-        count: group.sessions.length,
-      })),
+        )
+        return { path: group.path, name: label.name, count: group.sessions.length, tip: label.tip }
+      }),
     [projectGroups, state, t],
   )
   /** 一行属于哪个项目：组头的称呼规则（项目身份优先、没有身份用标题、再没有用路径）。 */
@@ -242,6 +253,21 @@ export function ManagePanel({ t, state, meta, reload, patch, directory }: PanelS
   )
   /** 眼下列出来的那些里能单独勾的（「全选」的作用面与禁用判据）。 */
   const pickable = picking.selectableOf(listed)
+  /**
+   * 项目树上某个项目的勾选状态：只看"筛出来的、而且能单独勾的"那些，与卡头「全选」同一个作用面。
+   *
+   * 勾了一部分时给 indeterminate（横杠），而不是一律画成没勾：否则"我勾了两条，这一组看起来像没动过"。
+   */
+  const treePickState = (path: string): GroupPickState =>
+    groupPickState(
+      listed.filter((session) => (session.cwd ?? '') === path),
+      picked,
+      (session) => picking.lockOf(session) === undefined,
+    )
+  /** 项目行上的勾选框：整组勾选／取消，作用面同上（筛出来的那些）。 */
+  const toggleProject = (path: string): void => {
+    picking.toggleGroup(listed.filter((session) => (session.cwd ?? '') === path))
+  }
   /** 表头点一下：换列时给这一列一个顺手的默认方向，同一列再点就翻方向。 */
   const toggleSort = (key: SessionSortKey): void => {
     setSort((current) =>
@@ -608,179 +634,198 @@ export function ManagePanel({ t, state, meta, reload, patch, directory }: PanelS
         </p>
       ))}
 
-      <div className="dsm-card dsm-cardFill">
-        <div className="dsm-cardHead">
-          <span className="dsm-cardTitle">{t('manage.title')}</span>
-          {/*
-            项目选择器：平铺之后组头没了，「整组处理」改成"选一个项目 → 全选"两步。选项上的条数是**整个
-            项目**的条数，不随筛选跳；选中的项目与筛选芯片是「与」的关系。
-          */}
-          <ProjectPicker
-            t={t}
-            options={projectOptions}
-            value={project.path}
-            total={sessions.length}
-            onChange={(path) => setProject({ path })}
-          />
-          {(filter.active || project.path !== null) && (
-            <span className="dsm-hint">{t('list.shown', { shown: listed.length, total: sessions.length })}</span>
-          )}
-          <span className="dsm-spacer" />
-          <span className="dsm-hint">{t('list.selected', { count: picked.length })}</span>
-          {/*
-            筛过之后「全选」要的是"这几类都选上"，不是"把看不见的也选上"；不能单独勾的那些也不进来：
-            子智能体跟着父会话走，勾父会话就等于勾了它。这一对与「传输」「迁移」两页是同一个组件。
-          */}
-          <SessionPickTools
-            selectableCount={pickable.length}
-            pickedCount={picked.length}
-            onSelectAll={() => picking.selectAll(listed)}
-            onClear={picking.clear}
-            t={t}
-          />
-        </div>
-        <p className="dsm-hint">{t('manage.hint')}</p>
-        {/* 能力位还没到（首帧，`/meta` 与 `/state` 都没回来）时先不说结论：那一刻的真相是"还不知道"。 */}
-        {facts !== undefined && !archiveAvailable && <p className="dsm-hint">{t('manage.archive.unavailable')}</p>}
-        {/* 重新生成名称同理：宿主没有那套名称服务时先说清原因，而不是留一个点不动的按钮。 */}
-        {facts !== undefined && !retitleAvailable && <p className="dsm-hint">{t('manage.retitle.unavailable')}</p>}
-
-        {sessions.length > 0 && <SessionFilterBar keys={FILTER_KEYS} filter={filter} t={t} />}
-
-        {/*
-          平铺表格：一行一条，按目录分组时写在各组头上的「项目」变成一列。表头跟列表一起滚没意义，
-          它是列的说明，所以贴在列表顶部（见 styles.ts 的 .dsm-tableHead）。
-
-          排序只在界面上排，不写盘：同一份清单换一种看法，不该留下副作用。
-        */}
-        <SessionListBox fill>
-          <div className="dsm-tableHead">
-            <span />
-            <span />
-            <button type="button" className="dsm-sort" onClick={() => toggleSort('title')} title={t('list.sort.tip')}>
-              {t('list.sort.title')}
-              {sortArrow('title')}
-            </button>
-            <span className="dsm-sortStatic">{t('list.project.column')}</span>
-            <button type="button" className="dsm-sort dsm-sortNum" onClick={() => toggleSort('size')} title={t('list.sort.tip')}>
-              {t('list.sort.size')}
-              {sortArrow('size')}
-            </button>
-            <button type="button" className="dsm-sort dsm-sortNum" onClick={() => toggleSort('time')} title={t('list.sort.tip')}>
-              {t('list.sort.time')}
-              {sortArrow('time')}
-            </button>
-          </div>
-          {state === null ? (
-            // 清单还在读：这一格说"读取中…"而不是"这个会话库里还没有会话"——后者是个结论。
-            <SessionListEmpty text={t('loading')} />
-          ) : sessions.length === 0 ? (
-            <SessionListEmpty text={t('list.empty')} />
-          ) : listed.length === 0 ? (
-            <SessionListEmpty text={t('list.noMatch')} />
-          ) : (
-            listed.map((session) => (
-              <SessionRow
-                key={session.id}
-                session={session}
-                variant="manage"
-                checked={picked.includes(session.id)}
-                onToggle={() => picking.toggle(session)}
-                owner={projectNameOf(session)}
-                note={parentElsewhereOf(session)}
-                locked={picking.lockOf(session)}
-                onInspect={() => setInspecting(session)}
-                inspectLabel={t('manage.transcript.open')}
-                inspectTip={t('manage.transcript.openTip')}
+      <div className="dsm-workbench">
+        <SessionTree
+          t={t}
+          total={sessions.length}
+          options={projectOptions}
+          value={project.path}
+          onPick={(path) => setProject({ path })}
+          filter={filter}
+          pickState={treePickState}
+          onToggleGroup={toggleProject}
+          onClose={() => setTreeOpen(false)}
+          open={treeOpen}
+          loading={state === null}
+        />
+        <div className="dsm-workbenchMain">
+          <div className="dsm-card dsm-cardFill">
+            <div className="dsm-cardHead">
+              <span className="dsm-cardTitle">{t('manage.title')}</span>
+              {/*
+                窄屏（工作台可用宽 ≤960px）才出现：那一条项目栏收成浮层，用这枚按钮打开。宽屏上项目栏
+                一直摆着，CSS 把这枚按钮藏起来（见 styles.ts 的容器查询）。
+              */}
+              <Button
+                className="dsm-treeToggle"
+                variant="outline"
+                size="sm"
+                aria-expanded={treeOpen}
+                aria-controls="dsm-tree"
+                onClick={() => setTreeOpen(true)}
+              >
+                {t('list.tree.open')}
+              </Button>
+              <SessionSearch filter={filter} t={t} />
+              <span className="dsm-spacer" />
+              {(filter.active || project.path !== null) && (
+                <span className="dsm-hint">{t('list.shown', { shown: listed.length, total: sessions.length })}</span>
+              )}
+              <span className="dsm-hint">{t('list.selected', { count: picked.length })}</span>
+              {/*
+                筛过之后「全选」要的是"这几类都选上"，不是"把看不见的也选上"；不能单独勾的那些也不进来：
+                子智能体跟着父会话走，勾父会话就等于勾了它。这一对与「传输」「迁移」两页是同一个组件。
+              */}
+              <SessionPickTools
+                selectableCount={pickable.length}
+                pickedCount={picked.length}
+                onSelectAll={() => picking.selectAll(listed)}
+                onClear={picking.clear}
                 t={t}
               />
-            ))
-          )}
-        </SessionListBox>
+            </div>
+            <p className="dsm-hint">{t('manage.hint')}</p>
+            {/* 能力位还没到（首帧，`/meta` 与 `/state` 都没回来）时先不说结论：那一刻的真相是"还不知道"。 */}
+            {facts !== undefined && !archiveAvailable && <p className="dsm-hint">{t('manage.archive.unavailable')}</p>}
+            {/* 重新生成名称同理：宿主没有那套名称服务时先说清原因，而不是留一个点不动的按钮。 */}
+            {facts !== undefined && !retitleAvailable && <p className="dsm-hint">{t('manage.retitle.unavailable')}</p>}
 
-        <p className="dsm-hint">{t('manage.delete.hint')}</p>
+            {/*
+              平铺表格：一行一条，按目录分组时写在各组头上的「项目」变成一列。表头跟列表一起滚没意义，
+              它是列的说明，所以贴在列表顶部（见 styles.ts 的 .dsm-tableHead）。
 
-        <div className="dsm-controls">
-          {/*
-            归档 / 取消归档 / 重新生成名称 / 迁移：都是"对勾选的这些做一件事"，走官方 `outline`。
-            最后那枚「删除」是破坏性动作，靠 spacer 顶到同一行右端（判据见
-            .agents/notes/implemented/architecture/2026-10-07-card-actions-live-in-a-footer-row.md）。
+              排序只在界面上排，不写盘：同一份清单换一种看法，不该留下副作用。
+            */}
+            <SessionListBox fill>
+              <div className="dsm-tableHead">
+                <span />
+                <span />
+                <button type="button" className="dsm-sort" onClick={() => toggleSort('title')} title={t('list.sort.tip')}>
+                  {t('list.sort.title')}
+                  {sortArrow('title')}
+                </button>
+                <span className="dsm-sortStatic">{t('list.project.column')}</span>
+                <button type="button" className="dsm-sort dsm-sortNum" onClick={() => toggleSort('size')} title={t('list.sort.tip')}>
+                  {t('list.sort.size')}
+                  {sortArrow('size')}
+                </button>
+                <button type="button" className="dsm-sort dsm-sortNum" onClick={() => toggleSort('time')} title={t('list.sort.tip')}>
+                  {t('list.sort.time')}
+                  {sortArrow('time')}
+                </button>
+              </div>
+              {state === null ? (
+                // 清单还在读：这一格说"读取中…"而不是"这个会话库里还没有会话"——后者是个结论。
+                <SessionListEmpty text={t('loading')} />
+              ) : sessions.length === 0 ? (
+                <SessionListEmpty text={t('list.empty')} />
+              ) : listed.length === 0 ? (
+                <SessionListEmpty text={t('list.noMatch')} />
+              ) : (
+                listed.map((session) => (
+                  <SessionRow
+                    key={session.id}
+                    session={session}
+                    variant="manage"
+                    checked={picked.includes(session.id)}
+                    onToggle={() => picking.toggle(session)}
+                    owner={projectNameOf(session)}
+                    note={parentElsewhereOf(session)}
+                    locked={picking.lockOf(session)}
+                    onInspect={() => setInspecting(session)}
+                    inspectLabel={t('manage.transcript.open')}
+                    inspectTip={t('manage.transcript.openTip')}
+                    t={t}
+                  />
+                ))
+              )}
+            </SessionListBox>
 
-            这一页**不用官方缺省的 `ghost`**：它是"无边框无底色"，一行动作并排时整行看起来就是一段
-            灰字（真实 dev GUI 里量到 `border-width: 0px`，鼠标放上去才认得出来是按钮），旁边内建的
-            「打开配置文件」反倒是带边的 `outline`（量到 `border: rgba(0, 0, 0, 0.12) 1px`）。所以凡是
-            用官方 `Button` 的地方都给轮廓：主动作 `primary`、其余 `outline`。判据与取舍见
-            .agents/notes/implemented/bug-fix/2026-10-16-actions-carry-their-frame.md。
-          */}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => void doArchive(true)}
-            disabled={busy !== null || picked.length === 0 || !archiveAvailable}
-          >
-            {busy === 'archive' ? t('manage.archive.running') : t('manage.archive.action')}
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => void doArchive(false)}
-            disabled={busy !== null || picked.length === 0 || !archiveAvailable}
-          >
-            {busy === 'unarchive' ? t('manage.archive.running') : t('manage.archive.undo')}
-          </Button>
-          {/*
-            重新生成名称与归档同属"对勾选的这些做一件事"，所以放在同一条动作行上（见 styles.ts 的
-            `.dsm-controls`）；破坏性的「删除」仍在 spacer 之后那一头。
-          */}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => void doRetitle()}
-            disabled={busy !== null || picked.length === 0 || !retitleAvailable}
-          >
-            {busy === 'retitle' ? t('manage.retitle.running') : t('manage.retitle.action')}
-          </Button>
-          {/*
-            「迁移」也在这条动作行上：它与归档 / 改名 / 删除是同一句话——"对勾中的这些做一件事"。
-            它开自己的弹窗（目标目录 + 预演 + 确认），所以这里只是一枚按钮。
-          */}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={openMigrate}
-            disabled={busy !== null || picked.length === 0}
-          >
-            {t('migrate.action')}
-          </Button>
-          <span className="dsm-spacer" />
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={openDelete}
-            disabled={busy !== null || picked.length === 0}
-          >
-            {t('manage.delete.action')}
-          </Button>
-        </div>
-        {/* 归档 / 取消归档的进度：逐条走宿主能力，勾一整页时这一段是可感知的。 */}
-        {(busy === 'archive' || busy === 'unarchive') &&
-          (progress === null ? (
-            <p className="dsm-hint">{t('progress.waiting')}</p>
-          ) : (
-            <ProgressBlock t={t} progress={progress} />
-          ))}
-        {/* 迁移落地之后的结论：弹窗关了，这三件事（复核 / 备份位置 / 生效方式）还得留在页面上。 */}
-        {effect !== null && (
-          <div className="dsm-effect">
-            <p className={effect.verified ? 'dsm-ok' : 'dsm-warn'}>
-              {effect.verified ? t('verify.pass') : t('verify.fail')}
-              {effect.backupDir !== undefined ? ` · ${effect.backupDir}` : ''}
-            </p>
-            {/* **只在需要重启时说话**（与同步页同一口径）：宿主自己接住时这里再说一句"无需重启"只是噪音，
-                而两句话都用同一个颜色时反而分不出哪句是坏消息。 */}
-            {effect.takesEffect === 'restart-required' && <p className="dsm-warn">{t('effect.restart')}</p>}
+            <p className="dsm-hint">{t('manage.delete.hint')}</p>
+
+            <div className="dsm-controls">
+              {/*
+                归档 / 取消归档 / 重新生成名称 / 迁移：都是"对勾选的这些做一件事"，走官方 `outline`。
+                最后那枚「删除」是破坏性动作，靠 spacer 顶到同一行右端（判据见
+                .agents/notes/implemented/architecture/2026-10-07-card-actions-live-in-a-footer-row.md）。
+
+                这一页**不用官方缺省的 `ghost`**：它是"无边框无底色"，一行动作并排时整行看起来就是一段
+                灰字（真实 dev GUI 里量到 `border-width: 0px`，鼠标放上去才认得出来是按钮），旁边内建的
+                「打开配置文件」反倒是带边的 `outline`（量到 `border: rgba(0, 0, 0, 0.12) 1px`）。所以凡是
+                用官方 `Button` 的地方都给轮廓：主动作 `primary`、其余 `outline`。判据与取舍见
+                .agents/notes/implemented/bug-fix/2026-10-16-actions-carry-their-frame.md。
+              */}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void doArchive(true)}
+                disabled={busy !== null || picked.length === 0 || !archiveAvailable}
+              >
+                {busy === 'archive' ? t('manage.archive.running') : t('manage.archive.action')}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void doArchive(false)}
+                disabled={busy !== null || picked.length === 0 || !archiveAvailable}
+              >
+                {busy === 'unarchive' ? t('manage.archive.running') : t('manage.archive.undo')}
+              </Button>
+              {/*
+                重新生成名称与归档同属"对勾选的这些做一件事"，所以放在同一条动作行上（见 styles.ts 的
+                `.dsm-controls`）；破坏性的「删除」仍在 spacer 之后那一头。
+              */}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void doRetitle()}
+                disabled={busy !== null || picked.length === 0 || !retitleAvailable}
+              >
+                {busy === 'retitle' ? t('manage.retitle.running') : t('manage.retitle.action')}
+              </Button>
+              {/*
+                「迁移」也在这条动作行上：它与归档 / 改名 / 删除是同一句话——"对勾中的这些做一件事"。
+                它开自己的弹窗（目标目录 + 预演 + 确认），所以这里只是一枚按钮。
+              */}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={openMigrate}
+                disabled={busy !== null || picked.length === 0}
+              >
+                {t('migrate.action')}
+              </Button>
+              <span className="dsm-spacer" />
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={openDelete}
+                disabled={busy !== null || picked.length === 0}
+              >
+                {t('manage.delete.action')}
+              </Button>
+            </div>
+            {/* 归档 / 取消归档的进度：逐条走宿主能力，勾一整页时这一段是可感知的。 */}
+            {(busy === 'archive' || busy === 'unarchive') &&
+              (progress === null ? (
+                <p className="dsm-hint">{t('progress.waiting')}</p>
+              ) : (
+                <ProgressBlock t={t} progress={progress} />
+              ))}
+            {/* 迁移落地之后的结论：弹窗关了，这三件事（复核 / 备份位置 / 生效方式）还得留在页面上。 */}
+            {effect !== null && (
+              <div className="dsm-effect">
+                <p className={effect.verified ? 'dsm-ok' : 'dsm-warn'}>
+                  {effect.verified ? t('verify.pass') : t('verify.fail')}
+                  {effect.backupDir !== undefined ? ` · ${effect.backupDir}` : ''}
+                </p>
+                {/* **只在需要重启时说话**（与同步页同一口径）：宿主自己接住时这里再说一句"无需重启"只是噪音，
+                    而两句话都用同一个颜色时反而分不出哪句是坏消息。 */}
+                {effect.takesEffect === 'restart-required' && <p className="dsm-warn">{t('effect.restart')}</p>}
+              </div>
+            )}
           </div>
-        )}
+        </div>
       </div>
 
       {/* 删除弹窗：清单与「确认」在同一块地方（见 ConfirmDialog.tsx 的说明）。 */}

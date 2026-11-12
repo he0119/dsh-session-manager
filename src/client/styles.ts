@@ -473,6 +473,8 @@ export const CSS = `
 /* 「会话」页那一行：勾选框、图形标记、标题与标签、项目、字节、时间（六列，与表头逐列对齐）。 */
 .dsm-rowManage { grid-template-columns: 24px 16px minmax(120px, 1.4fr) 168px 84px 120px; }
 .dsm-rowManage > .dsm-meta { text-align: right; }
+/* 「项目」那一格是文字，不跟着数字右对齐：它与表头一起从左边读。 */
+.dsm-rowManage > .dsm-owner { text-align: left; }
 /* 计划清单里那一行没有勾选框（清单不是勾选面），于是少一列，且它不可点。 */
 .dsm-rowPlan {
   grid-template-columns: 16px minmax(120px, 1.4fr) auto auto;
@@ -573,20 +575,95 @@ export const CSS = `
   .dsm-rowInspect { visibility: visible; }
 }
 .dsm-empty { padding: 14px; color: var(--dsw-alias-label-secondary, #646a73); }
-/* 项目选择器：值控件与目录字段同一枚，面板浮在下面（展开时不该把表格顶下去）。 */
-.dsm-projectField { position: relative; flex: none; max-width: 18rem; }
-.dsm-projectValue { flex: none; width: 15rem; height: 28px; padding: 0 8px; font-size: 12px; }
-.dsm-projectPicker {
-  position: absolute;
-  top: calc(100% + 6px);
-  left: 0;
-  z-index: 5;
-  width: 20rem;
-  max-width: min(20rem, 80vw);
-  background: var(--dsw-alias-bg-overlay, var(--dsw-alias-bg-layer-1, #fff));
-  box-shadow: 0 10px 28px color-mix(in srgb, var(--dsw-alias-label-primary, #1f2329) 18%, transparent);
+/*
+ * 「会话」页的工作台：左栏（项目与筛选）+ 列表。整块高度由分页给，两边各自滚。
+ *
+ * container-type: inline-size 让下面那条 @container 读的是**这一块自己的宽度**，不是窗口宽度：
+ * 宿主侧栏可以收起，同一个窗口下页面可用宽能差两百多像素，按窗口分档会在收起侧栏的一瞬间判错。
+ */
+.dsm-workbench {
+  position: relative;
+  display: flex;
+  gap: 16px;
+  flex: 1;
+  min-height: 0;
+  container-type: inline-size;
 }
-.dsm-projectPicker .dsm-candidateList { max-height: min(320px, 50vh); overflow: auto; }
+.dsm-workbenchMain { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
+/*
+ * 左栏是一张卡片：宽度固定 208px，里面分三段——头、项目清单（自己滚）、筛选。
+ * 不用边框竖线而用一张卡，是为了和右边那张列表卡同一套几何（圆角 / 描边 / 内边距）。
+ */
+.dsm-tree {
+  box-sizing: border-box;
+  width: 208px;
+  flex: none;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow: hidden;
+}
+.dsm-treeHead { flex: none; }
+.dsm-treeList {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0 -4px;
+  scrollbar-gutter: stable;
+}
+.dsm-treeRow { display: flex; align-items: center; gap: 6px; min-height: 30px; padding: 0 6px; border-radius: 8px; }
+.dsm-treeRow:hover { background: color-mix(in srgb, var(--dsw-alias-label-primary, #1f2329) 6%, transparent); }
+.dsm-treeRow[data-selected='true'] {
+  background: color-mix(in srgb, var(--dsw-alias-brand-primary, #3370ff) 12%, transparent);
+}
+/*
+ * 行上的整组勾选框：平时收起，悬停 / 键盘落在这一行时出现；已经勾了（含勾了一半）就一直显形——
+ * 否则"我勾了两条"这件事在静止状态下看不见。
+ */
+.dsm-treeCheck { flex: none; width: 14px; display: flex; align-items: center; opacity: 0; }
+.dsm-treeRow:hover .dsm-treeCheck, .dsm-treeRow:focus-within .dsm-treeCheck { opacity: 1; }
+.dsm-treeCheck:has(input:checked), .dsm-treeCheck:has(input:indeterminate) { opacity: 1; }
+/*
+ * 名字与条数是同一个按钮：点整行就是"只看这个项目"。勾选框是它的兄弟节点，不是它的子节点——
+ * 按钮里套 checkbox 是非法嵌套，点勾选框也会被读成"选了项目"。
+ */
+.dsm-treePick {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.dsm-treePick:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary, #3370ff); outline-offset: 1px; border-radius: 6px; }
+.dsm-treeIcon { flex: none; width: 14px; height: 14px; }
+.dsm-treeName { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.dsm-treeCount { flex: none; font-size: 11px; color: var(--dsw-alias-label-secondary, #646a73); font-variant-numeric: tabular-nums; }
+.dsm-treeRow[data-selected='true'] .dsm-treeName { color: var(--dsw-alias-label-primary, #1f2329); font-weight: 500; }
+.dsm-treeRow[data-selected='true'] .dsm-treeCount { color: var(--dsw-alias-brand-primary, #3370ff); }
+/* 筛选那一段钉在栏底：项目多的时候滚的是上面那份清单，筛选一直在。 */
+.dsm-treeFilters {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--dsw-alias-border-l1, rgba(0, 0, 0, 0.1));
+}
+.dsm-treeFilters .dsm-filters { padding: 0; }
+/* 宽屏上这枚开关与「关闭」都不出现：左栏一直摆着。 */
+.dsm-treeToggle, .dsm-treeClose { display: none; }
 .dsm-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .dsm-select, .dsm-file {
   border: 1px solid var(--dsw-alias-border-l2, rgba(0, 0, 0, 0.18));
@@ -1226,6 +1303,28 @@ export const CSS = `
   color: var(--dsw-alias-label-primary, #1f2329);
   max-height: 320px; overflow: auto;
 }
+/*
+ * 窄屏（这一块自己的宽度 ≤960px）：左栏收成从左边滑出的浮层。
+ *
+ * 960 是量出来的门槛：再窄下去，208px 的左栏 + 列表最少 532px + 16px 间距就装不下了（表会先横向滚）。
+ * 浮层与左栏是**同一份 DOM**：不渲染两套，项目选中态与筛选芯片就不会各说各话。
+ */
+@container (max-width: 960px) {
+  .dsm-tree {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 6;
+    width: 280px;
+    display: none;
+    border-radius: 0 20px 20px 0;
+    box-shadow: 10px 0 28px color-mix(in srgb, var(--dsw-alias-label-primary, #1f2329) 18%, transparent);
+  }
+  .dsm-tree.dsm-treeOpen { display: flex; }
+  .dsm-treeToggle, .dsm-treeClose { display: inline-flex; }
+}
+
 `
 
 /**

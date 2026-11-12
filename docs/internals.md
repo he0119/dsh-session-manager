@@ -198,7 +198,8 @@
 
 - [列整库的分页按目录分组](../.agents/notes/implemented/architecture/2026-09-27-group-by-directory-not-workspace.md)：
   分组键是 `cwd`，工作区名称只是路径的标签。今天还分组的是「传输」页与同步预演；「会话」页改成平铺
-  表格（项目是一列），见[全宽工作台那篇](../.agents/notes/implemented/architecture/2026-11-12-session-page-is-a-full-width-workbench.md)。
+  表格（项目是一列）+ 左侧项目树（项目与筛选、整组勾选），见
+  [全宽工作台那篇](../.agents/notes/implemented/architecture/2026-11-12-session-page-is-a-full-width-workbench.md)。
 - [「未分组」就是外壳那一组](../.agents/notes/implemented/bug-fix/2026-09-28-ungrouped-means-the-sidebar-group.md)：
   一个名字一个定义，三处读同一个结论。
 - [「认领」是宿主那份成员表](../.agents/notes/implemented/bug-fix/2026-10-04-accounted-means-the-hosts-membership.md)：

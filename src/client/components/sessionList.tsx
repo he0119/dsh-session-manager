@@ -246,7 +246,7 @@ export function SessionRow({
         )}
       </span>
       {owner !== undefined && (
-        <span className="dsm-meta" title={session.cwd ?? ''}>
+        <span className="dsm-meta dsm-owner" title={session.cwd ?? ''}>
           {owner}
         </span>
       )}
@@ -719,51 +719,70 @@ export interface SessionFilterBarProps {
 }
 
 /**
+ * 一排类别芯片：`筛选` + `全部` + 每类一枚（带条数）。
+ *
+ * 从 [SessionFilterBar] 拆出来，是因为它现在有两个落点：「会话」页在左侧项目树里，「传输」页仍在
+ * 列表上方那一行。拆的是**渲染**，状态仍由页面的 `useSessionFilter()` 持有——两处读同一份。
+ */
+export function SessionFilterChips({ keys, filter, t }: SessionFilterBarProps): React.ReactElement {
+  return (
+    <div className="dsm-filters">
+      <span className="dsm-hint">{t('list.filter.label')}</span>
+      <button
+        type="button"
+        className="dsm-filter"
+        aria-pressed={filter.filters.length === 0}
+        onClick={filter.clear}
+      >
+        {t('list.filter.all')}
+      </button>
+      {keys.map((key) => (
+        <button
+          key={key}
+          type="button"
+          className="dsm-filter"
+          aria-pressed={filter.filters.includes(key)}
+          title={t(CHIP_LABELS[key].tip)}
+          onClick={() => filter.toggle(key)}
+        >
+          {t(CHIP_LABELS[key].key)}
+          <span className="dsm-filterCount">{filter.counts[key]}</span>
+        </button>
+      ))}
+    </div>
+  )
+}
+
+/** 搜索框：占位符与无障碍名字都走字典；值来自同一个筛选状态。 */
+export function SessionSearch({ filter, t }: { filter: SessionFilter; t: Translate }): React.ReactElement {
+  return (
+    <input
+      className="dsm-search"
+      type="search"
+      value={filter.query}
+      placeholder={t('list.filter.search')}
+      aria-label={t('list.filter.search')}
+      onChange={(event) => filter.setQuery(event.target.value)}
+    />
+  )
+}
+
+/**
  * 筛选条：一排类别芯片，底下一行是搜索框与那句说明。
  *
  * 两行是刻意的：胶囊那一行只剩一百来 px 余量（窄 135px 就会换行），把那句说明或搜索框塞进去，容器
  * 一窄就整块换行、位置乱跳（见 styles.ts 的 .dsm-filters 注释）。搜索框单独一行则两边都固定。
+ *
+ * 「会话」页不用这条整条：它的芯片在左侧项目树里、搜索框在卡头，两处各取上面那一个组件。
  */
 export function SessionFilterBar({ keys, filter, t }: SessionFilterBarProps): React.ReactElement {
   const chips = keys.length > 0
   return (
     <>
-      {chips && (
-        <div className="dsm-filters">
-          <span className="dsm-hint">{t('list.filter.label')}</span>
-          <button
-            type="button"
-            className="dsm-filter"
-            aria-pressed={filter.filters.length === 0}
-            onClick={filter.clear}
-          >
-            {t('list.filter.all')}
-          </button>
-          {keys.map((key) => (
-            <button
-              key={key}
-              type="button"
-              className="dsm-filter"
-              aria-pressed={filter.filters.includes(key)}
-              title={t(CHIP_LABELS[key].tip)}
-              onClick={() => filter.toggle(key)}
-            >
-              {t(CHIP_LABELS[key].key)}
-              <span className="dsm-filterCount">{filter.counts[key]}</span>
-            </button>
-          ))}
-        </div>
-      )}
+      {chips && <SessionFilterChips keys={keys} filter={filter} t={t} />}
       <div className="dsm-filterSearch">
         {!chips && <span className="dsm-hint">{t('list.filter.label')}</span>}
-        <input
-          className="dsm-search"
-          type="search"
-          value={filter.query}
-          placeholder={t('list.filter.search')}
-          aria-label={t('list.filter.search')}
-          onChange={(event) => filter.setQuery(event.target.value)}
-        />
+        <SessionSearch filter={filter} t={t} />
         {chips && <span className="dsm-hint">{t('list.filter.hint')}</span>}
       </div>
     </>

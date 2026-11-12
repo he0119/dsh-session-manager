@@ -367,6 +367,22 @@ test('页头是一条工具条：16px/500 的标题、页签与页面级动作�
   assert.equal(ruleBody('.dsm-version'), null, '旧的页脚徽标样式不该还在（版本号进了状态栏）')
 })
 
+test('左栏项目树：208px 宽，窄到 960px 收成浮层', () => {
+  const tree = ruleBody('.dsm-tree')
+  assert.match(tree, /width:\s*208px/, '左栏是固定 208px，不跟着窗口拉长')
+  assert.match(tree, /box-sizing:\s*border-box/, '内边距要算在 208px 里（否则实测 238px）')
+  const at = css.indexOf('@container (max-width: 960px)')
+  assert.notEqual(at, -1, '窄屏分档读的是工作台自己的宽度（容器查询），不是窗口宽度')
+  const narrow = css.slice(at)
+  assert.match(narrow, /\.dsm-tree\s*\{[^}]*position:\s*absolute/, '窄屏左栏从文档流里出来，盖在列表上')
+  assert.match(narrow, /\.dsm-tree\.dsm-treeOpen\s*\{\s*display:\s*flex/, '点开才出现，收起时 display:none')
+  assert.match(
+    narrow,
+    /\.dsm-treeToggle,\s*\.dsm-treeClose\s*\{\s*display:\s*inline-flex/,
+    '卡头的开关与浮层里的关闭键只在窄屏出现',
+  )
+})
+
 test('平铺表的表头与行用同一套列宽', () => {
   // 表头与行是两条独立的 grid 声明（一条在 .dsm-tableHead、一条在 .dsm-rowManage），列宽写错一处
   // 不会报错，只会让"项目"与"时间"两列错开几个像素——真实 dev GUI 里看着像表格串了行。列宽是设计，

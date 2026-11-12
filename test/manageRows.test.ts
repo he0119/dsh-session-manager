@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { defaultDir, sessionsInProject, sortSessions } from '../src/client/logic/manageRows.ts'
+import { defaultDir, groupPickState, sessionsInProject, sortSessions } from '../src/client/logic/manageRows.ts'
 
 const rows = [
   { id: 'b', title: 'bravo', cwd: '/home/u/dev/beta', createdAt: 20, bytes: 300 },
@@ -61,4 +61,42 @@ test('按项目筛：null 全部；空串是没有 cwd 的那一组', () => {
     sessionsInProject(rows, '').map((row) => row.id),
     ['d'],
   )
+})
+
+test('项目行勾选框：全勾 / 勾一半 / 一条可勾的都没有', () => {
+  const group = [
+    { id: 'a', locked: false },
+    { id: 'b', locked: false },
+    { id: 'c', locked: true },
+  ]
+  const selectable = (row: { locked: boolean }) => !row.locked
+
+  assert.deepEqual(groupPickState(group, [], selectable), {
+    checked: false,
+    indeterminate: false,
+    available: true,
+  })
+  // 只勾了能单独勾的两条里的一条：横杠，不是"没动过"
+  assert.deepEqual(groupPickState(group, ['a'], selectable), {
+    checked: false,
+    indeterminate: true,
+    available: true,
+  })
+  // 可勾的都勾上就算整组勾上；跟着父会话走的那条（c）不算在内
+  assert.deepEqual(groupPickState(group, ['a', 'b'], selectable), {
+    checked: true,
+    indeterminate: false,
+    available: true,
+  })
+  // 一条可勾的都没有：不画勾选框（空组 / 整组都是子智能体）
+  assert.deepEqual(groupPickState([{ id: 'c', locked: true }], [], selectable), {
+    checked: false,
+    indeterminate: false,
+    available: false,
+  })
+  assert.deepEqual(groupPickState([], [], selectable), {
+    checked: false,
+    indeterminate: false,
+    available: false,
+  })
 })

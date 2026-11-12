@@ -1118,6 +1118,15 @@ test('客户端产物：清单还没到时，底部状态栏说库在哪与「�
   // 列表那一格同理：清单没到说"读取中…"，不说"这个会话库里还没有会话"（默认页就是「会话」）
   const empties = withMeta.recorded.filter((node) => String(node.props?.className) === 'dsm-empty')
   assert.deepEqual(strings(empties[0]), ['loading'], '空列表那一格说"读取中…"')
+  // 左栏同样不能把"还没读到"画成"0 个项目"：那一刻一个项目行、一枚筛选芯片都不该有
+  const tree = withMeta.recorded.find((node) => String(node.props?.className ?? '').split(/\s+/).includes('dsm-tree'))
+  assert.ok(strings(tree).includes('loading'), '项目栏在清单没到时说"读取中…"')
+  assert.equal(strings(tree).includes('list.project.all'), false, '不画"全部项目 0"')
+  assert.equal(
+    withMeta.recorded.filter((node) => String(node.props?.className) === 'dsm-treeFilters').length,
+    0,
+    '筛选芯片也不画（每类都是 0 会读成"这个库没有会话"）',
+  )
 
   // 两份都还没到（首帧）：整行只有一句"读取中…"，不是"会话库： · 0 个会话 · 0 个工作区"
   const bare = libOf(mount())
@@ -1260,10 +1269,11 @@ test('客户端产物：迁移并进了「会话」页——同一张列表，�
   )
   assert.equal(sortButtons.length, 3, '标题 / 大小 / 时间三列都能点着排')
   assert.ok(strings(tableHead).includes('list.project.column'), '表头里有一列叫「项目」')
-  // 项目选择器：平铺之后整组处理走"选一个项目 → 全选"，它代替了组头
-  const projectButton = fresh.mounted.recorded.find((el) => String(el.props?.className).includes('dsm-projectValue'))
-  assert.ok(projectButton, '卡头有项目选择器')
-  assert.ok(strings(projectButton).some((item) => item.includes('list.project.all')), '默认是「全部项目」')
+  // 项目树：平铺之后整组处理走"在左栏选一个项目 → 全选"，它代替了组头
+  const tree = fresh.mounted.recorded.find((el) => String(el.props?.className ?? '').split(/\s+/).includes('dsm-tree'))
+  assert.ok(tree, '左边有项目与筛选那一栏')
+  assert.ok(strings(tree).some((item) => item.includes('list.project.all')), '树上有「全部项目」')
+  assert.ok(strings(tree).some((item) => item.includes('list.filter.label')), '筛选芯片也在这一栏里')
 
   // 标签与「会话」页同一套：没被认领的那几条挂「未分组」，空白那条挂它自己的标签
   assert.ok(text.includes('list.ungrouped'), '「未分组」是行上的标签（不是第二种来源）')
@@ -1988,23 +1998,26 @@ test('客户端产物：「会话」页的筛选条把不匹配的行筛掉，�
   // 筛过之后头部报"显示了其中几条"，别让人以为库里的会话变少了
   assert.ok(text.includes('list.shown:{"shown":2,"total":5}'), '筛过之后报出 显示 N / M 条')
 
-  // 说明句「多选＝任一命中」必须**自己一行**（筛选条后面那个 <p>），不能挤在胶囊那一行里。
-  // 挤回去不会报错、不会崩，只会让它重新跟着容器右边缘跑：外层滚动条一进一出就让这条边的位置变
-  // （实测旧写法 9px；装了经典滚动条的环境是 15px），胶囊行余量也只剩三十来px、窄一点就整行换行。
+  // 说明句「多选＝任一命中」必须**自己一行**（筛选芯片后面那个 <p>），不能挤在胶囊那一行里。
+  // 挤进去不会报错、不会崩，只会让它跟着容器右边缘跑；胶囊行余量也只剩三十来px、窄一点就整行换行。
   // 位置这种东西没法在这里量，所以按结构核：它在不在 .dsm-filters 里面。
   const filterRow = recorded.find((node) => String(node.props?.className) === 'dsm-filters')
   assert.equal(strings(filterRow).includes('list.filter.hint'), false, '说明句不在胶囊那一行里')
-  const searchRow = recorded.find((node) => String(node.props?.className) === 'dsm-filterSearch')
-  assert.ok(strings(searchRow).includes('list.filter.hint'), '说明句与胶囊不在同一行（都在固定的左边界上）')
-  // 搜索框本身：值的来源是筛选状态，占位符与无障碍名字走字典（它们是 props，strings() 看不见）
+  const treeFilters = recorded.find((node) => String(node.props?.className) === 'dsm-treeFilters')
+  assert.ok(strings(treeFilters).includes('list.filter.hintAny'), '说明句在项目树的筛选段里、紧跟胶囊')
+  // 搜索框本身：值的来源是筛选状态，占位符与无障碍名字走字典（它们是 props，strings() 看不见）。
+  // 它现在在卡头（筛选芯片搬进左栏之后，卡头只留这一个列表工具）。
   const search = recorded.find((node) => String(node.props?.className) === 'dsm-search')
   assert.equal(search?.props?.type, 'search', '搜索框是原生 input[type=search]（自带清空按钮）')
   assert.equal(search?.props?.placeholder, 'list.filter.search', '占位符说明它搜什么')
   assert.equal(search?.props?.['aria-label'], 'list.filter.search', '搜索框要有无障碍名字')
+  const cardHead = recorded.find((node) => String(node.props?.className) === 'dsm-cardHead')
   assert.ok(
-    (Array.isArray(searchRow.props.children) ? searchRow.props.children : [searchRow.props.children]).includes(search),
-    '搜索框在搜索那一行里',
+    elementsOf(cardHead).some((node) => String(node.props?.className) === 'dsm-search'),
+    '搜索框在卡头里',
   )
+  // 卡头不再有项目选择器：项目与筛选都在左栏
+  assert.equal(recorded.some((node) => String(node.props?.className ?? '').includes('dsm-projectValue')), false, '卡头没有项目选择器')
 })
 
 test('客户端产物：「会话」页一条都没筛出来时，那个吃满高度的列表框还在（表头不跟着消失）', { skip }, () => {
@@ -3030,10 +3043,10 @@ test('客户端产物：一个组都没有时不摆折叠工具栏', { skip }, (
   )
 })
 
-test('客户端产物：「会话」页平铺——项目选择器代替组头，整组处理走「选项目 → 全选」', { skip }, () => {
-  // 平铺之后组头与折叠工具栏都不画了：组的边界由「项目」那一列与项目选择器表达，排序才能跨项目。
-  // "把这个旧项目的会话都归档"因此变成两步：选一个项目，再按那对「全选 / 清空」。选择器本身的行为在
-  // test/manageRows.test.ts 里按纯函数核（假钩子点不动它，点一下不会重新渲染）。
+test('客户端产物：「会话」页平铺——项目树代替组头，整组处理走「选项目 → 全选」', { skip }, () => {
+  // 平铺之后组头与折叠工具栏都不画了：组的边界由「项目」那一列与左侧项目树表达，排序才能跨项目。
+  // "把这个旧项目的会话都归档"因此变成两步：在树上点一个项目，再按那对「全选 / 清空」。树上的整组
+  // 勾选框是同一个动作的快捷入口（作用面同样是筛出来的那些）。点一下不会重新渲染，所以这里只核结构。
   const state = {
     sessionsRoot: '/home/u/.dsh/sessions',
     registryPath: '/home/u/.dsh/registry.json',
@@ -3063,14 +3076,41 @@ test('客户端产物：「会话」页平铺——项目选择器代替组头�
     '折叠工具栏也不在会话页上了（它仍然属于导出页）',
   )
 
-  // 项目选择器：一枚值控件，默认全部项目
-  const picker = recorded.find((node) => String(node.props?.className ?? '').includes('dsm-projectValue'))
-  assert.ok(picker, '卡头摆着项目选择器')
-  assert.ok(strings(picker).some((item) => item.includes('list.project.all')), '默认是「全部项目」')
+  // 左栏：全部项目 + 两个项目，各带条数；默认选中「全部项目」
+  const tree = recorded.find((node) => String(node.props?.className ?? '').split(/\s+/).includes('dsm-tree'))
+  assert.ok(tree, '左边有项目与筛选那一栏')
+  assert.equal(tree.props['aria-label'], 'list.tree.label')
+  assert.equal(tree.props.id, 'dsm-tree', '卡头那枚开关用 aria-controls 指着它')
+  const treeRows = recorded.filter((node) => String(node.props?.className) === 'dsm-treeRow')
+  assert.deepEqual(treeRows.map((node) => strings(node).join('|')), [
+    'list.project.all',
+    '工作区甲',
+    '/home/u/dev/beta',
+  ], '项目树按"全部 + 每个项目"排')
+  assert.deepEqual(
+    recorded
+      .filter((node) => String(node.props?.className) === 'dsm-treeCount')
+      .map((node) => String(node.props.children)),
+    ['4', '2', '2'],
+    '每一行右端的条数（全部 / 工作区甲 / 未登记目录）',
+  )
+  assert.equal(treeRows[0].props['data-selected'], 'true', '默认选中「全部项目」')
+  // 每个项目行都有一枚整组勾选框（全部项目那一行没有：全选由卡头那一对负责）
+  assert.equal(namedElements(recorded, 'GroupCheckbox').length, 2, '两个项目各一枚整组勾选框')
+  assert.ok(
+    namedElements(recorded, 'GroupCheckbox').every((node) => String(node.props.label).startsWith('list.selectGroup')),
+    '勾选框的无障碍名字点名这个项目',
+  )
+
   // 每一行的「项目」那一格：在册项目用工作区标题，没登记的目录用路径
   assert.ok(text.includes('工作区甲'), '在册项目那一格写工作区标题')
   assert.ok(text.includes('/home/u/dev/beta'), '没登记的目录那一格写路径')
   assert.ok(text.includes('list.shown:{"shown":2,"total":4}'), '筛过之后报"显示 2 / 4 条"')
+  // 卡头这枚开关只在窄屏出现（CSS 藏起来），它是项目栏收成浮层之后唯一的入口
+  const toggle = recorded.find((node) => String(node.props?.className) === 'dsm-treeToggle')
+  assert.ok(toggle, '卡头有项目栏的窄屏开关')
+  assert.equal(toggle.props['aria-expanded'], false, '默认收起')
+  assert.equal(toggle.props['aria-controls'], 'dsm-tree', '开关点名它展开的是哪一栏')
 })
 
 test('客户端产物：「说明」页把分类词条、每页做什么与边界条件摆出来', { skip }, () => {
