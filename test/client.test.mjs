@@ -1343,6 +1343,19 @@ test('客户端产物：导出列表按目录分组，组头就是"整组勾选"
   // 勾选的增删逻辑在 test/groups.test.ts，靠这里的假钩子点不出来。
   const text = strings(component(registration.inject()))
 
+  // 宽屏并排：导出与导入两张卡在同一个网格里，窄屏由 CSS 叠回去（容器查询，见 styles.test.mjs）。
+  const grid = recorded.find((element) => String(element.props?.className) === 'dsm-transferGrid')
+  assert.ok(grid, '传输页的两张卡要包在 dsm-transferGrid 里')
+  // 只数直接子元素：`elementsOf(grid)` 会把子组件再渲染一遍，组头的计数就不再是"一遍"了。
+  const gridKids = Array.isArray(grid.props.children) ? grid.props.children : [grid.props.children]
+  assert.equal(gridKids.length, 2, '网格里正好两张卡：导出与导入')
+  assert.ok(
+    gridKids.every((child) => String(child.props?.className ?? '').split(/\s+/).includes('dsm-card')),
+    '网格的直接子元素是两张卡',
+  )
+  assert.ok(text.some((item) => item.includes('transfer.export.title')), '网格里有导出卡')
+  assert.ok(text.some((item) => item.includes('transfer.import.title')), '网格里有导入卡')
+
   assert.ok(text.includes('工作区甲'), '已登记的工作区拿标题当组名')
   // 组头只摆名字：路径（以及认出来的项目身份）都在名字那一格的悬浮提示里，判定见下面那个用例。
   assert.ok(

@@ -379,6 +379,26 @@ test('右栏开头两轮：每格四行截断，整段用一列节奏', () => {
   assert.match(preview, /flex-direction:\s*column/, '竖排')
 })
 
+test('传输页宽屏并排：导出宽、导入窄，窄到 900 叠回去', () => {
+  // 为什么钉它：1600 下导入卡原来落在首屏之外，要滚过整张导出列表才看得到；并排之后两张卡
+  // 都在第一屏。列宽不是一比一：导出是清单，需要更宽。
+  const grid = ruleBody('.dsm-transferGrid')
+  assert.notEqual(grid, null, '找不到 .dsm-transferGrid 规则')
+  assert.match(grid, /display:\s*grid/, '两张卡走网格')
+  assert.match(grid, /grid-template-columns:\s*minmax\(0, 1\.3fr\) minmax\(320px, 0\.9fr\)/, '导出宽、导入窄，导入至少 320px')
+  assert.match(grid, /align-items:\s*start/, '两张卡各自按内容高度，不被拉成一样高')
+  const wrap = ruleBody('.dsm-transferWrap')
+  assert.notEqual(wrap, null, '找不到 .dsm-transferWrap 规则')
+  assert.match(wrap, /container-type:\s*inline-size/, '阈值读这一块自己的宽度')
+  const at = css.indexOf('@container (max-width: 900px)')
+  assert.notEqual(at, -1, '窄屏分档是容器查询')
+  assert.match(
+    css.slice(at),
+    /\.dsm-transferGrid\s*\{\s*grid-template-columns:\s*minmax\(0, 1fr\)/,
+    '窄到 900 以下叠回一列',
+  )
+})
+
 test('非会话分页限在可读宽度：1080px 居中；会话工作台不受限', () => {
   // 为什么钉它：1600 窗口下一段同步说明拉成一千二百多像素的长行，表单控件全挤在左边。
   // 「会话」是工作台，继续吃满；其余三页是表单与清单，限宽并居中。

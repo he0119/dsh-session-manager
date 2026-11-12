@@ -235,6 +235,10 @@ M" to report.
 
 **Transfer** — take sessions away, bring them back
 
+On wide screens Export and Import sit **side by side**: the export list (wide) on the left, the import
+fields (narrow, at least 320px) on the right; at 1600 the 1080 body splits 626 + 433, so import no longer
+falls below the fold. Below 900 they stack.
+
 - Rows show a session's **title**, with the full title and the id on hover: a uuid tells a human nothing,
   and people pick sessions by "the one where I asked about that"; a session with no title falls back to
   its id. Both the export list and the **Sessions** tab take the whole library, sidebar-hidden sessions

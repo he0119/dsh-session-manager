@@ -346,233 +346,237 @@ export function TransferPanel({ t, state, meta, reload, directory }: PanelShare)
         </p>
       ))}
 
-      <div className="dsm-card">
-        <div className="dsm-cardHead">
-          <span className="dsm-cardTitle">{t('transfer.export.title')}</span>
-          <span className="dsm-hint">{t('list.selected', { count: picked.length })}</span>
-          {filter.active && (
-            <span className="dsm-hint">{t('list.shown', { shown: listed.length, total: sessions.length })}</span>
-          )}
-          <span className="dsm-spacer" />
-          {/*
-            "全选"针对的是**眼下列出来的**那些：勾选面看到什么就选什么，已经勾上的不会因为切筛选而丢
-            （头部一直报着"已选几条"）；不能单独勾的那些不进来（子智能体跟着父会话走）。「清空」与它
-            并排常驻——一枚会变脸的按钮在"勾了一部分"时只剩「全选」可读，那时清不掉。
-          */}
-          <SessionPickTools
-            selectableCount={pickable.length}
-            pickedCount={picked.length}
-            onSelectAll={() => picking.selectAll(listed)}
-            onClear={picking.clear}
-            t={t}
-          />
-        </div>
-        <p className="dsm-hint">{t('transfer.export.hint')}</p>
+      <div className="dsm-transferWrap">
+        <div className="dsm-transferGrid">
+          <div className="dsm-card">
+            <div className="dsm-cardHead">
+              <span className="dsm-cardTitle">{t('transfer.export.title')}</span>
+              <span className="dsm-hint">{t('list.selected', { count: picked.length })}</span>
+              {filter.active && (
+                <span className="dsm-hint">{t('list.shown', { shown: listed.length, total: sessions.length })}</span>
+              )}
+              <span className="dsm-spacer" />
+              {/*
+                "全选"针对的是**眼下列出来的**那些：勾选面看到什么就选什么，已经勾上的不会因为切筛选而丢
+                （头部一直报着"已选几条"）；不能单独勾的那些不进来（子智能体跟着父会话走）。「清空」与它
+                并排常驻——一枚会变脸的按钮在"勾了一部分"时只剩「全选」可读，那时清不掉。
+              */}
+              <SessionPickTools
+                selectableCount={pickable.length}
+                pickedCount={picked.length}
+                onSelectAll={() => picking.selectAll(listed)}
+                onClear={picking.clear}
+                t={t}
+              />
+            </div>
+            <p className="dsm-hint">{t('transfer.export.hint')}</p>
 
-        {sessions.length > 0 && <SessionFilterBar keys={FILTER_KEYS} filter={filter} t={t} />}
-        {/* 一个组都没有（筛空了或库里是空的）时不摆这对按钮：没有可收起的东西。 */}
-        {groups.length > 0 && <SessionGroupTools collapse={collapse} t={t} />}
+            {sessions.length > 0 && <SessionFilterBar keys={FILTER_KEYS} filter={filter} t={t} />}
+            {/* 一个组都没有（筛空了或库里是空的）时不摆这对按钮：没有可收起的东西。 */}
+            {groups.length > 0 && <SessionGroupTools collapse={collapse} t={t} />}
 
-        <SessionListBox fixed>
-          {state === null ? (
-            // 清单还在读：说"读取中…"而不是"这个会话库里还没有会话"（见 ManagerPanel 的两份数据说明）。
-            <SessionListEmpty text={t('loading')} />
-          ) : sessions.length === 0 ? (
-            <SessionListEmpty text={t('list.empty')} />
-          ) : groups.length === 0 ? (
-            // 高度固定，空态画在框里（见 styles.ts 的 .dsm-listFixed）
-            <SessionListEmpty text={t('list.noMatch')} />
-          ) : (
-            groups.map(({ group, rows }) => {
-              const key = groupKey(group.path)
-              const groupPicked = rows.filter((row) => picked.includes(row.session.id)).length
-              const collapsed = collapse.isCollapsed(key)
-              return (
-                // key 与折叠状态同一个身份（`groupKey`），免得两处各写一遍哨兵。
-                <div key={key} className="dsm-group">
-                  <SessionGroupHead
-                    path={group.path}
-                    title={group.title}
-                    repo={state?.repos?.[group.path]}
-                    count={rows.length}
-                    picked={groupPicked}
-                    collapsed={collapsed}
-                    onToggle={() => picking.toggleGroup(rows.map((row) => row.session))}
-                    onToggleCollapse={() => collapse.toggle(key)}
-                    t={t}
-                  />
-                  {!collapsed &&
-                    rows.map((row) => (
-                      <SessionRow
-                        key={row.session.id}
-                        session={row.session}
-                        variant="export"
-                        checked={picked.includes(row.session.id)}
-                        onToggle={() => picking.toggle(row.session)}
-                        depth={row.depth}
-                        note={parentDirNote(row, t)}
-                        locked={picking.lockOf(row.session)}
+            <SessionListBox fixed>
+              {state === null ? (
+                // 清单还在读：说"读取中…"而不是"这个会话库里还没有会话"（见 ManagerPanel 的两份数据说明）。
+                <SessionListEmpty text={t('loading')} />
+              ) : sessions.length === 0 ? (
+                <SessionListEmpty text={t('list.empty')} />
+              ) : groups.length === 0 ? (
+                // 高度固定，空态画在框里（见 styles.ts 的 .dsm-listFixed）
+                <SessionListEmpty text={t('list.noMatch')} />
+              ) : (
+                groups.map(({ group, rows }) => {
+                  const key = groupKey(group.path)
+                  const groupPicked = rows.filter((row) => picked.includes(row.session.id)).length
+                  const collapsed = collapse.isCollapsed(key)
+                  return (
+                    // key 与折叠状态同一个身份（`groupKey`），免得两处各写一遍哨兵。
+                    <div key={key} className="dsm-group">
+                      <SessionGroupHead
+                        path={group.path}
+                        title={group.title}
+                        repo={state?.repos?.[group.path]}
+                        count={rows.length}
+                        picked={groupPicked}
+                        collapsed={collapsed}
+                        onToggle={() => picking.toggleGroup(rows.map((row) => row.session))}
+                        onToggleCollapse={() => collapse.toggle(key)}
                         t={t}
                       />
+                      {!collapsed &&
+                        rows.map((row) => (
+                          <SessionRow
+                            key={row.session.id}
+                            session={row.session}
+                            variant="export"
+                            checked={picked.includes(row.session.id)}
+                            onToggle={() => picking.toggle(row.session)}
+                            depth={row.depth}
+                            note={parentDirNote(row, t)}
+                            locked={picking.lockOf(row.session)}
+                            t={t}
+                          />
+                        ))}
+                    </div>
+                  )
+                })
+              )}
+            </SessionListBox>
+
+            {/* 卡片级的主动作放底部动作行（见文件头那条规矩）：头部只留"全选 / 清空"这枚选行工具。 */}
+            <div className="dsm-controls">
+              <Button variant="primary" size="sm" onClick={doExport} disabled={busy !== null || picked.length === 0}>
+                {busy === 'export' ? t('transfer.export.running') : t('transfer.export.action')}
+              </Button>
+            </div>
+          </div>
+
+          <div className="dsm-card">
+            <div className="dsm-cardHead">
+              <span className="dsm-cardTitle">{t('transfer.import.title')}</span>
+            </div>
+            <p className="dsm-hint">{t('transfer.import.hint')}</p>
+
+            {/* 与「迁移」页同一套字段摆法：一件输入一个字段（带标签），目录那一个是共用的值控件，卡片级的
+                主动作落在底部的动作行里（见文件头那条规矩）。 */}
+            <label className="dsm-field">
+              <span className="dsm-fieldLabel">{t('transfer.import.fileLabel')}</span>
+              {/* 后缀必须与宿主导出的文件名一致（`src/web.ts` 的 `fileName()`）。这里曾经写成
+                  `.dhsess`：刚导出的包在选择框的过滤器里被挡掉，用户以为导入坏了——一个错字把功能
+                  弄坏了，所以 test/client.test.mjs 里钉了一条。 */}
+              <input className="dsm-file" type="file" accept=".dshsess" onChange={pickFile} />
+            </label>
+
+            {/* 落地目录：与「迁移」页的目标目录是同一个组件、同一份候选（见 DirectoryField.tsx）。 */}
+            <DirectoryField
+              t={t}
+              controls={fields}
+              field="target"
+              label={t('transfer.import.targetLabel')}
+              placeholder={t('transfer.import.targetPlaceholder')}
+              rows={targetRows}
+              value={target}
+              onChange={(path) => {
+                setTarget(path)
+                setPending(null)
+              }}
+              pickerKind={pickerKind}
+              directory={directory}
+              onError={setError}
+            />
+
+            <div className="dsm-controls">
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={openImport}
+                disabled={busy !== null || file === null}
+              >
+                {t('transfer.import.action')}
+              </Button>
+            </div>
+
+            {/*
+              弹窗里的正文：计划只读、不改本机任何东西，所以「取消」不会留下半个动作（同 ConfirmDialog.tsx）。
+              列类名是给列宽用的：这张表是 table-layout: fixed，宽度写在样式里。
+              自动布局在长路径面前会把「跳过」标签挤成一列一个字。
+            */}
+            {pending !== null && (
+              <ConfirmDialog
+                t={t}
+                // 落地那一段标题也换掉：这时候已经不是"将要"了，正文里正跑着进度。
+                title={t(busy === 'apply' ? 'transfer.import.applying' : 'transfer.import.dialogTitle')}
+                confirmLabel={t('transfer.import.apply')}
+                busyLabel={t('transfer.import.applying')}
+                busy={busy === 'apply'}
+                planning={plan === null && pending.error === null}
+                // 预演那一段要逐条读包里的日志折标题（实测 250 条约 1.7 秒），把静态的「预演中…」换成进度。
+                planningDetail={progress === null ? undefined : <ProgressBlock t={t} progress={progress} />}
+                error={pending.error}
+                disabled={plan === null || !plan.ok || (createCount === 0 && attachmentAdds === 0)}
+                onConfirm={applyImport}
+                onCancel={() => setPending(null)}
+              >
+                {/* 落地：逐条写盘并改写首帧 cwd，正文换成进度（那张计划表说的是"将要"，这时候已经过期了）。 */}
+                {busy === 'apply' &&
+                  (progress === null ? (
+                    <p className="dsm-hint">{t('progress.waiting')}</p>
+                  ) : (
+                    <ProgressBlock t={t} progress={progress} note={t('transfer.import.progress.note')} />
+                  ))}
+                {busy !== 'apply' && plan !== null && (
+                  <>
+                    <p className={plan.ok ? 'dsm-ok' : 'dsm-warn'}>
+                      {t('transfer.import.planSummary', { create: createCount, skip: skipCount, bytes: formatBytes(plan.bytes) })}
+                      {plan.error !== undefined ? ` · ${plan.error}` : ''}
+                    </p>
+                    {/*
+                      附件对象那一段：会话日志之外还有多少字节、其中本机缺几个（会写下去）、有没有落不了的。
+                      这三种数字决定了"导完图能不能显示出来"，所以摆在计划表之前而不是表里——表是按会话列
+                      的，而对象不属于哪一条会话（同一个对象可能被好几条引用）。
+                    */}
+                    {planAttachments.length > 0 && (
+                      <p className={attachmentUnavailable > 0 ? 'dsm-warn' : 'dsm-hint'}>
+                        {t('transfer.import.planAttachments', {
+                          attachments: planAttachments.length,
+                          bytes: formatBytes(attachmentTotalBytes),
+                          adds: attachmentAdds,
+                        })}
+                        {attachmentUnavailable > 0
+                          ? ` ${t('transfer.import.planAttachmentsUnavailable', { count: attachmentUnavailable })}`
+                          : ''}
+                      </p>
+                    )}
+                    {plan.note !== undefined && <p className="dsm-hint">{plan.note}</p>}
+                    {(plan.problems ?? []).map((problem) => (
+                      <p key={problem} className="dsm-warn">
+                        {problem}
+                      </p>
                     ))}
-                </div>
-              )
-            })
-          )}
-        </SessionListBox>
-
-        {/* 卡片级的主动作放底部动作行（见文件头那条规矩）：头部只留"全选 / 清空"这枚选行工具。 */}
-        <div className="dsm-controls">
-          <Button variant="primary" size="sm" onClick={doExport} disabled={busy !== null || picked.length === 0}>
-            {busy === 'export' ? t('transfer.export.running') : t('transfer.export.action')}
-          </Button>
-        </div>
-      </div>
-
-      <div className="dsm-card">
-        <div className="dsm-cardHead">
-          <span className="dsm-cardTitle">{t('transfer.import.title')}</span>
-        </div>
-        <p className="dsm-hint">{t('transfer.import.hint')}</p>
-
-        {/* 与「迁移」页同一套字段摆法：一件输入一个字段（带标签），目录那一个是共用的值控件，卡片级的
-            主动作落在底部的动作行里（见文件头那条规矩）。 */}
-        <label className="dsm-field">
-          <span className="dsm-fieldLabel">{t('transfer.import.fileLabel')}</span>
-          {/* 后缀必须与宿主导出的文件名一致（`src/web.ts` 的 `fileName()`）。这里曾经写成
-              `.dhsess`：刚导出的包在选择框的过滤器里被挡掉，用户以为导入坏了——一个错字把功能
-              弄坏了，所以 test/client.test.mjs 里钉了一条。 */}
-          <input className="dsm-file" type="file" accept=".dshsess" onChange={pickFile} />
-        </label>
-
-        {/* 落地目录：与「迁移」页的目标目录是同一个组件、同一份候选（见 DirectoryField.tsx）。 */}
-        <DirectoryField
-          t={t}
-          controls={fields}
-          field="target"
-          label={t('transfer.import.targetLabel')}
-          placeholder={t('transfer.import.targetPlaceholder')}
-          rows={targetRows}
-          value={target}
-          onChange={(path) => {
-            setTarget(path)
-            setPending(null)
-          }}
-          pickerKind={pickerKind}
-          directory={directory}
-          onError={setError}
-        />
-
-        <div className="dsm-controls">
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={openImport}
-            disabled={busy !== null || file === null}
-          >
-            {t('transfer.import.action')}
-          </Button>
-        </div>
-
-        {/*
-          弹窗里的正文：计划只读、不改本机任何东西，所以「取消」不会留下半个动作（同 ConfirmDialog.tsx）。
-          列类名是给列宽用的：这张表是 table-layout: fixed，宽度写在样式里。
-          自动布局在长路径面前会把「跳过」标签挤成一列一个字。
-        */}
-        {pending !== null && (
-          <ConfirmDialog
-            t={t}
-            // 落地那一段标题也换掉：这时候已经不是"将要"了，正文里正跑着进度。
-            title={t(busy === 'apply' ? 'transfer.import.applying' : 'transfer.import.dialogTitle')}
-            confirmLabel={t('transfer.import.apply')}
-            busyLabel={t('transfer.import.applying')}
-            busy={busy === 'apply'}
-            planning={plan === null && pending.error === null}
-            // 预演那一段要逐条读包里的日志折标题（实测 250 条约 1.7 秒），把静态的「预演中…」换成进度。
-            planningDetail={progress === null ? undefined : <ProgressBlock t={t} progress={progress} />}
-            error={pending.error}
-            disabled={plan === null || !plan.ok || (createCount === 0 && attachmentAdds === 0)}
-            onConfirm={applyImport}
-            onCancel={() => setPending(null)}
-          >
-            {/* 落地：逐条写盘并改写首帧 cwd，正文换成进度（那张计划表说的是"将要"，这时候已经过期了）。 */}
-            {busy === 'apply' &&
-              (progress === null ? (
-                <p className="dsm-hint">{t('progress.waiting')}</p>
-              ) : (
-                <ProgressBlock t={t} progress={progress} note={t('transfer.import.progress.note')} />
-              ))}
-            {busy !== 'apply' && plan !== null && (
-              <>
-                <p className={plan.ok ? 'dsm-ok' : 'dsm-warn'}>
-                  {t('transfer.import.planSummary', { create: createCount, skip: skipCount, bytes: formatBytes(plan.bytes) })}
-                  {plan.error !== undefined ? ` · ${plan.error}` : ''}
-                </p>
-                {/*
-                  附件对象那一段：会话日志之外还有多少字节、其中本机缺几个（会写下去）、有没有落不了的。
-                  这三种数字决定了"导完图能不能显示出来"，所以摆在计划表之前而不是表里——表是按会话列
-                  的，而对象不属于哪一条会话（同一个对象可能被好几条引用）。
-                */}
-                {planAttachments.length > 0 && (
-                  <p className={attachmentUnavailable > 0 ? 'dsm-warn' : 'dsm-hint'}>
-                    {t('transfer.import.planAttachments', {
-                      attachments: planAttachments.length,
-                      bytes: formatBytes(attachmentTotalBytes),
-                      adds: attachmentAdds,
-                    })}
-                    {attachmentUnavailable > 0
-                      ? ` ${t('transfer.import.planAttachmentsUnavailable', { count: attachmentUnavailable })}`
-                      : ''}
-                  </p>
-                )}
-                {plan.note !== undefined && <p className="dsm-hint">{plan.note}</p>}
-                {(plan.problems ?? []).map((problem) => (
-                  <p key={problem} className="dsm-warn">
-                    {problem}
-                  </p>
-                ))}
-                <table className="dsm-table dsm-planTable">
-                  <thead>
-                    <tr>
-                      <th className="dsm-colAction">{t('table.action')}</th>
-                      <th className="dsm-colSession">{t('table.session')}</th>
-                      <th className="dsm-colCwd">{t('table.cwd')}</th>
-                      <th className="dsm-colBytes">{t('table.bytes')}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {plan.entries.map((entry) => {
-                      const label = sessionLabel(entry)
-                      return (
-                        <tr key={entry.id}>
-                          <td>
-                            {/*
-                              导入计划里的动作列：`create` 是"本机还没有、这条会新建"（`success`），
-                              `skip` 是"这条不动"（`quiet`）。两者都不带 title（原先那几个 span 也没有）。
-                              `dsm-tag` 挂在 Tag 自己身上：styles.ts 的 `.dsm-planTable .dsm-tag`
-                              那条负责"窄列里限宽截断、别顶到邻居那一列"。
-                            */}
-                            <Tag className="dsm-tag" tone={entry.action === 'create' ? 'success' : 'quiet'}>
-                              {entry.action === 'create' ? t('table.create') : t('table.skip')}
-                            </Tag>
-                          </td>
-                          <td>
-                            <span className={label.kind === 'title' ? 'dsm-rowTitle' : 'dsm-rowId'} title={label.tip}>
-                              {label.text}
-                            </span>
-                            {entry.reason !== undefined && <div className="dsm-hint">{entry.reason}</div>}
-                          </td>
-                          <td className="dsm-cwd">{cwdText(entry, t)}</td>
-                          <td className="dsm-meta">{formatBytes(totalBytes(entry.files))}</td>
+                    <table className="dsm-table dsm-planTable">
+                      <thead>
+                        <tr>
+                          <th className="dsm-colAction">{t('table.action')}</th>
+                          <th className="dsm-colSession">{t('table.session')}</th>
+                          <th className="dsm-colCwd">{t('table.cwd')}</th>
+                          <th className="dsm-colBytes">{t('table.bytes')}</th>
                         </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </>
+                      </thead>
+                      <tbody>
+                        {plan.entries.map((entry) => {
+                          const label = sessionLabel(entry)
+                          return (
+                            <tr key={entry.id}>
+                              <td>
+                                {/*
+                                  导入计划里的动作列：`create` 是"本机还没有、这条会新建"（`success`），
+                                  `skip` 是"这条不动"（`quiet`）。两者都不带 title（原先那几个 span 也没有）。
+                                  `dsm-tag` 挂在 Tag 自己身上：styles.ts 的 `.dsm-planTable .dsm-tag`
+                                  那条负责"窄列里限宽截断、别顶到邻居那一列"。
+                                */}
+                                <Tag className="dsm-tag" tone={entry.action === 'create' ? 'success' : 'quiet'}>
+                                  {entry.action === 'create' ? t('table.create') : t('table.skip')}
+                                </Tag>
+                              </td>
+                              <td>
+                                <span className={label.kind === 'title' ? 'dsm-rowTitle' : 'dsm-rowId'} title={label.tip}>
+                                  {label.text}
+                                </span>
+                                {entry.reason !== undefined && <div className="dsm-hint">{entry.reason}</div>}
+                              </td>
+                              <td className="dsm-cwd">{cwdText(entry, t)}</td>
+                              <td className="dsm-meta">{formatBytes(totalBytes(entry.files))}</td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </>
+                )}
+              </ConfirmDialog>
             )}
-          </ConfirmDialog>
-        )}
+          </div>
+        </div>
       </div>
     </>
   )

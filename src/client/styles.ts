@@ -155,6 +155,23 @@ export const CSS = `
   align-self: center;
 }
 /*
+ * 「传输」在宽屏并排：左边是导出清单（它要宽），右边是导入字段（至少 320px）。1600 窗口下 1080 的
+ * 正文分成 629 + 435，导入卡不再落到首屏之外；窄到 900 以下两栏叠回去。
+ *
+ * 阈值读的是这一块自己的宽度（wrapper 上的容器查询），不是窗口：宿主侧栏收起时同一个窗口下
+ * 正文能宽出两百多像素。
+ */
+.dsm-transferWrap { container-type: inline-size; }
+.dsm-transferGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(320px, 0.9fr);
+  gap: 16px;
+  align-items: start;
+}
+@container (max-width: 900px) {
+  .dsm-transferGrid { grid-template-columns: minmax(0, 1fr); }
+}
+/*
  * 卡片外壳照官方卡片（内建「插件」页那张 .card）量出来的规格：**圆角 20px**、**1px 描边**、底色是表面白。
  * 描边走 settings-card-stroke 而不是 border-l1：前者是官方给"设置卡片描边"这件事的专名 token，
  * 真实 dev GUI 里量到浅色 **rgba(0, 0, 0, 0.16)**、深色 **rgba(255, 255, 255, 0.2)**，与官方那张 .card
