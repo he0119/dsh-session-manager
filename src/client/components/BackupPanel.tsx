@@ -47,7 +47,14 @@ function backupKindLabel(
 }
 
 /** 「备份与回滚」弹窗。 */
-export function BackupPanel({ t, reload }: Pick<PanelShare, 't' | 'reload'>): React.ReactElement {
+export function BackupPanel({
+  t,
+  reload,
+  focus,
+}: Pick<PanelShare, 't' | 'reload'> & {
+  /** 从删除 / 迁移的「撤销」点进来时指着的那一份：开着时直接摆它的动作清单。 */
+  focus?: string
+}): React.ReactElement {
   const [backups, setBackups] = React.useState<BackupSummary[]>([])
   const [backupRoot, setBackupRoot] = React.useState('')
   const [error, setError] = React.useState<string | null>(null)
@@ -119,6 +126,24 @@ export function BackupPanel({ t, reload }: Pick<PanelShare, 't' | 'reload'>): Re
         setProgress(null)
       })
   }
+
+  /**
+   * 从「撤销」点进来时指着的那一份：清单读到之后直接把它的动作清单摆出来。
+   *
+   * 为什么不在打开时就把目标带的计划算出来：清单是这一面自己读的，读到之前还不知道那份备份还在不在
+   * （刚被清理掉、或者路径来自一条过期的提示）。读到之后按目录找一次，找到了才开——找不到时这一面
+   * 就是普通的清单，用户自己看。
+   *
+   * `opened` 记住已经为哪个目录开过：清单刷新（回滚落地之后又重读一遍）不该把弹窗重新顶出来。
+   */
+  const opened = React.useRef<string | undefined>(undefined)
+  React.useEffect(() => {
+    if (focus === undefined || opened.current === focus) return
+    const target = backups.find((backup) => backup.dir === focus)
+    if (target === undefined) return
+    opened.current = focus
+    open(target)
+  }, [focus, backups])
 
   /** 弹窗里按「确认回滚 / 确认恢复」：写盘并还原。 */
   const apply = (backup: BackupSummary): void => {

@@ -86,7 +86,7 @@ export interface ResolvedPaths {
 }
 
 /** DSH 家目录：`$DSH_HOME`，缺席时退到 `~/.dsh`。 */
-function dshHome(): string {
+export function dshHome(): string {
   return process.env['DSH_HOME'] ?? join(homedir(), '.dsh')
 }
 

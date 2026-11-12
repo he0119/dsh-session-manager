@@ -24,6 +24,7 @@ import {
   directoryPickerKind,
   liveSessionIds,
   registerTools,
+  dshHome,
   resolveAutoPushRuntime,
   resolvePaths,
   syncRuntime,
@@ -32,6 +33,7 @@ import {
   titleRefreshPort,
 } from './tools.ts'
 import type { AutoPushTimer } from './sync.ts'
+import { readSyncRun, writeSyncRun } from './sync-state.ts'
 import { API_PREFIX, registerWebRoutes, type WebServerLike } from './web.ts'
 
 // 配置 schema 必须从入口导出：Loader 拿它校验 profile 里那一节，设置接缝拿它在插件管理器里生成
@@ -155,10 +157,17 @@ export function apply(ctx: Context, config: PluginConfigInput = {}): () => void 
       info('dsh-session-manager：webServer 形状不认，界面端点未挂')
       return
     }
+    // 上一次手动同步的结论存在插件自己那一层目录里（见 src/sync-state.ts）：进程重启之后，页头那枚
+    // 同步状态还答得出"多久以前、成没成"。读写都在这里注入，web.ts 不去解析 $DSH_HOME。
+    const home = dshHome()
     const dispose = registerWebRoutes(webServer, {
       paths,
       decodeAll,
       pluginVersion: pluginVersion(),
+      syncRun: {
+        read: () => readSyncRun(home),
+        write: (run) => writeSyncRun(home, run),
+      },
       // 与 `/state` 共用一份"目录 → 项目身份"的 git 缓存（见上面 `repoLocations`）。
       repoLocations,
       // "迁移何时生效"要读宿主服务（workspaceRegistry、sessionPersistence），那件事只在这里做得了。

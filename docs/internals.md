@@ -284,6 +284,9 @@
   [版面不跟着滚动条动](../.agents/notes/implemented/architecture/2026-09-28-layout-does-not-move-with-the-scrollbar.md)：
   标题那一档仍是 16px/500/24px；正文与次要文字是内建那两档（14px/20px 与 12px/18px），行高不跟着
   字号放大。那篇里的"页头两行、刷新挂在标题那一行右端"只适用于设置弹窗里的一格。
+- [勾选是整页一份、导出栏直接用它](../.agents/notes/implemented/architecture/2026-11-12-one-selection-for-the-whole-page.md)：
+  `ManagerPanel` 持有 `useSessionPicking()`，列表与导出清单共用；"撤销"（删除 / 迁移之后）与状态栏的
+  备份份数也在同一篇里。
 - [弹窗正文层自己写字号](../.agents/notes/implemented/bug-fix/2026-10-12-dialog-body-declares-its-own-type.md)：
   官方 `Modal` portal 到 `document.body`，落在那套 `.dsm-root` 之外——弹窗正文层不写字号就继承文档根
   的 16px（会话内容视图的计数、事件卡脚注、错误句都掉在那儿）。

@@ -149,8 +149,9 @@ M" to report.
   file count and where the backup lands → confirm there. Deleting **backs the session directory up into this plugin's backup root
   first**, then removes it; the sidebar drops those rows once the host rescans. A session still live in
   host memory is refused — **restart DSH** so the host lets go, then delete it without opening it first
-  (the Web side has no per-session close; see Help). Changed your mind? Restore it from **Backups &
-  rollback** in the status bar;
+  (the Web side has no per-session close; see Help). Changed your mind? Press **Undo** on the success
+  notice (it opens the rollback confirm for that backup), or restore it from **Backups & rollback** in the
+  status bar;
 - **Subagents follow their parent session**: ticking a parent takes its subagent sessions (and any
   deeper descendants) with it — the dialog lists them row by row, marked as going with the parent, and
   one backup holds the whole family (once the parent's log is gone a subagent has no way back into the
@@ -428,8 +429,13 @@ namespace under `url` itself, so `url` may be a WebDAV server or account root. *
 WebDAV has no locking, so each machine writes only its own slot and reads every slot — nothing overwrites
 anything else.
 
-The sync state at the right of the header opens sync: **Sync** first computes a read-only plan in a dialog
-(it reads the remote and writes nothing), reporting "pull N / push M" in three tables (will pull / will push / on both sides, left alone), each
+The sync state at the right of the header opens sync. That button only reports what is known locally: this run
+is going, it just finished, or the last manual sync was N hours ago and whether it succeeded — that result is
+stored in `$DSH_HOME/dsh-session-manager/state.json`, so it survives a restart. It never goes online, so it does
+not report "N to pull".
+
+**Sync** first computes a read-only plan in a dialog (it reads the remote and writes nothing), reporting
+"pull N / push M" in three tables (will pull / will push / on both sides, left alone), each
 **grouped by project directory**: the group header carries the name of its group (the workspace title, or the
 project name when no workspace registers it), a small host tag when the identity is known, and the count, with
 the project identity and the local path in that name's tooltip, while a

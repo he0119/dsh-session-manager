@@ -918,6 +918,63 @@ test('客户端产物：页面上没有页签，四件事各是一处入口', { 
   assert.ok(text.includes('page.title'), '页面标题走同一份字典')
 })
 
+test('客户端产物：页头那枚同步状态说"多久以前、成没成"', { skip }, () => {
+  // 同步是这一页唯一不点也会自己跑的事：状态只说本地知道的事实——这一进程里刚跑完、或者磁盘上记着
+  // 上一次的结论。它**不联网**，所以"待拉几条"不在这枚按钮上。
+  const metaOf = (lastRun) => ({
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    sync: { url: 'https://dav.example/dsh', machineId: 'robot-a', mappings: 0, lastRun },
+  })
+  const hoursAgo = (hours) => new Date(Date.now() - hours * 3_600_000).toISOString()
+
+  const ok = mount({ meta: metaOf({ at: hoursAgo(3), ok: true, pulled: 2, pushed: 1 }) })
+  const okText = strings(ok.registrations[0].component(ok.registrations[0].registration.inject()))
+  assert.ok(okText.some((item) => String(item).startsWith('sync.chip.at')), '成功那一趟说的是"同步 · 多久以前"')
+  assert.ok(okText.some((item) => String(item).includes('time.hours')), '三小时前按小时说')
+
+  const failed = mount({ meta: metaOf({ at: hoursAgo(3), ok: false, pulled: 0, pushed: 0, error: '401' }) })
+  const failedText = strings(failed.registrations[0].component(failed.registrations[0].registration.inject()))
+  assert.ok(failedText.some((item) => String(item).startsWith('sync.chip.failedAt')), '失败那趟要明说失败')
+
+  // 从没同步过：退到"配没配"那一句，不编一个时间出来。
+  const never = mount({ meta: metaOf(undefined) })
+  const neverText = strings(never.registrations[0].component(never.registrations[0].registration.inject()))
+  assert.equal(neverText.some((item) => String(item).includes('sync.chip.at')), false, '没有记录就不说时间')
+})
+
+test('客户端产物：删除 / 迁移之后，提示里那枚「撤销」指向那份备份', { skip }, () => {
+  // 删除与迁移都先留一份字节级备份，所以提示行里给一枚「撤销」：点它开的是备份与回滚那面，并且直接
+  // 摆出这份备份的回滚确认（`openBackup`），用户不用在清单里按时间再找一遍。
+  const state = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    sessions: [],
+    workspaces: [],
+  }
+  const mounted = mount({
+    state,
+    panel: 'manage',
+    nulls: manageNulls({ notice: '已删除 2 条会话', undo: { dir: '/home/u/.dsh/dsm/backups/2026-11-12' } }),
+  })
+  strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
+  const labels = mounted.recorded.filter((node) => node.type === 'button').map((node) => node.props?.children)
+  assert.ok(labels.includes('undo.action'), '提示行里有「撤销」')
+  const undoButton = mounted.recorded.find((node) => node.type === 'button' && node.props?.children === 'undo.action')
+  assert.equal(undoButton?.props?.title, 'undo.tip', '悬浮提示说清它做什么')
+
+  // 没有撤销可给时（普通提示）不摆这一枚：一份备份只能撤刚做的那一件事。
+  const plain = mount({
+    state,
+    panel: 'manage',
+    nulls: manageNulls({ notice: '已归档 2 条会话' }),
+  })
+  strings(plain.registrations[0].component(plain.registrations[0].registration.inject()))
+  const plainLabels = plain.recorded.filter((node) => node.type === 'button').map((node) => node.props?.children)
+  assert.equal(plainLabels.includes('undo.action'), false, '归档这类不留备份的动作不摆撤销')
+})
+
 test('客户端产物：点哪个入口就开哪个宽弹窗，列表一直挂在后面', { skip }, () => {
   // 三件事各自是一个 1080 宽的弹窗（`.dsm-workDialog`），标题说的就是那件事。列表**不卸载**——
   // 勾选与滚动位置要跟着留下来；这里的夹具不往下渲染它（见 loadBundle 里那条说明），但元素还在。
@@ -939,7 +996,7 @@ test('客户端产物：点哪个入口就开哪个宽弹窗，列表一直挂�
   }
 })
 
-test('客户端产物：备份是独立分页，动作页上不再有那张清单', { skip }, () => {
+test('客户端产物：备份清单只在「备份与回滚」那一面里，动作页上没有它', { skip }, () => {
   // 这张清单里躺的不只是迁移留下的备份：删除与同步覆盖本机那份也各留一份（`kind` 三种）。它原先挂在
   // 「迁移」卡片下面时，界面得在三处替它引路（删除成功的横幅、同步的结果与进度说明、说明页的 FAQ）。
   const state = {
@@ -956,19 +1013,20 @@ test('客户端产物：备份是独立分页，动作页上不再有那张清�
   const sessions = pageText('manage')
   const backup = pageText('backup')
   for (const key of ['backup.title', 'backup.hint', 'backup.empty']) {
-    assert.ok(!sessions.includes(key), `动作页上不该再有备份清单的那部分（${key}）`)
-    assert.ok(backup.includes(key), `「备份」分页上要有清单的那部分（${key}）`)
+    assert.ok(!sessions.includes(key), `列表上没有备份清单的那部分（${key}）`)
+    assert.ok(backup.includes(key), `「备份与回滚」那一面里要有清单的那部分（${key}）`)
   }
-  // 「会话」页与「同步」页的成功文案都指向「备份」页，不再指向「迁移」页的某张卡：那句话只在弹窗
-  // 或流式进度里出现，渲染路径上取不到，所以按字典的值核（键一定在，值里不该再出现"迁移页"）。
+  // 列表与同步那几处的成功文案都指向「备份与回滚」，不再指向「迁移」页的某张卡、也不再指向一个
+  // 已经不存在的「备份」页：那句话只在弹窗或流式进度里出现，渲染路径上取不到，所以按字典的值核。
   const { zh } = mount().dictionaries[0].dicts
   for (const key of ['manage.delete.backupTo', 'sync.progress.note', 'sync.appliedReplaced', 'help.faq.backupA']) {
-    assert.ok(zh[key].includes('「备份」页'), `${key} 要把人指到「备份」页`)
+    assert.ok(zh[key].includes('「备份与回滚」'), `${key} 要把人指到「备份与回滚」`)
     assert.ok(!zh[key].includes('迁移」页'), `${key} 不该再指「迁移」页`)
+    assert.ok(!zh[key].includes('「备份」页'), `${key} 不该再指已经不存在的「备份」页`)
   }
   assert.ok(
-    zh['sync.progress.note'].includes('「备份」页'),
-    '同步的进度说明里那句"去哪恢复"要指到「备份」页',
+    zh['sync.progress.note'].includes('「备份与回滚」'),
+    '同步的进度说明里那句"去哪恢复"要指到「备份与回滚」',
   )
 })
 
@@ -1385,6 +1443,32 @@ test('客户端产物：迁移并进了「会话」页——同一张列表，�
     true,
     '勾中的那一行是勾上的',
   )
+})
+
+test('客户端产物：勾选是整页一份，导出栏里看到的就是列表里勾的那些', { skip }, () => {
+  // 去页签的核心收益：勾了 6 条再开「导出 / 导入」，导出那一栏里就是这 6 条，不用在弹窗里重勾一遍。
+  // 结构上只有一件事要保证——列表与导出清单拿到的是**同一个**勾选集对象。
+  const state = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    sessions: [
+      { id: 's-1', cwd: '/home/u/dev/alpha', createdAt: 1, dir: '/home/u/dev/alpha', bytes: 100, files: [] },
+    ],
+    workspaces: [],
+  }
+  const mounted = mount({ state, panel: 'transfer', arrays: [['s-1']] })
+  const text = strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
+  assert.ok(
+    text.some((item) => String(item) === 'list.selected:{"count":1}'),
+    '导出栏报的"已选"就是列表里勾上的那条',
+  )
+  const byName = (name) =>
+    mounted.recorded.find((node) => isComponentType(node.type) && typeNameOf(node.type) === name)
+  const manage = byName('ManagePanel')
+  const transfer = byName('TransferPanel')
+  assert.ok(manage !== undefined && transfer !== undefined, '列表与导出面都在树上')
+  assert.equal(manage.props.picking, transfer.props.picking, '两处拿到的是同一份勾选集（不是各自一份）')
 })
 
 test('客户端产物：导出列表按目录分组，组头就是"整组勾选"的入口', { skip }, () => {
@@ -2643,11 +2727,13 @@ const manageNulls = ({
   effect = null,
   fields = null,
   inspecting = null,
+  notice = null,
+  undo = null,
 } = {}) => [
   null, // 页面骨架自己的 error（它排在分页之前，分页的 `state` 由 mount 的 firstNull 种）
   busy,
   null, // error
-  null, // notice
+  notice, // 提示那一行（删除 / 迁移之后那句）
   null, // 删除弹窗
   progress,
   null, // retitle
@@ -2655,6 +2741,7 @@ const manageNulls = ({
   ...(fields ?? [null, null]), // 目标字段：候选面板 / 手输路径
   migrate, // 迁移弹窗
   effect, // 迁移结论
+  undo, // 提示里那枚「撤销」指着哪一份备份
 ]
 
 /**
@@ -4464,7 +4551,8 @@ test('客户端产物：备份清单认三种来源——迁移/删除/覆盖前
     sessions: [],
     workspaces: [],
   }
-  const mounted = mount({ state, panel: 'backup', arrays: [backups] })
+  // 第一个空数组状态是页面骨架的勾选集（列表常驻），备份清单是第二个。
+  const mounted = mount({ state, panel: 'backup', arrays: [[], backups] })
   const text = strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
   assert.ok(text.includes('backup.kind.migrate'), '迁移那份的标签照旧')
   assert.ok(text.includes('backup.kind.delete'), '删除那份的标签照旧')
@@ -4487,7 +4575,7 @@ test('客户端产物：备份清单认三种来源——迁移/删除/覆盖前
   const replacing = mount({
     state,
     panel: 'backup',
-    arrays: [backups],
+    arrays: [[], backups],
     nulls: [
       null, null, null, null,
       {

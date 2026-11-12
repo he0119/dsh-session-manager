@@ -98,7 +98,17 @@ interface MigrationEffect {
 }
 
 /** 会话列表（含迁移那一路）。 */
-export function ManagePanel({ t, state, meta, reload, patch, directory, openTransfer }: PanelShare): React.ReactElement {
+export function ManagePanel({
+  t,
+  state,
+  meta,
+  reload,
+  patch,
+  directory,
+  picking,
+  openTransfer,
+  openBackup,
+}: PanelShare): React.ReactElement {
   const sessions = state?.sessions ?? []
   // 归档能力位与清单无关（`/meta` 先给），所以它用 `state ?? meta`：清单还在读时也不会先把
   // "这个宿主没有 workspaceRegistry"画上去。
@@ -113,7 +123,6 @@ export function ManagePanel({ t, state, meta, reload, patch, directory, openTran
    * 逐字同形的 `toggle` / `toggleGroup` / `lockOf`）。判据见那里的 `useSessionPicking()`：
    * 能勾的集合就是"单独操作不会被拒的集合"（子智能体跟着父会话走）。
    */
-  const picking = useSessionPicking(sessions, t)
   const picked = picking.picked
   /** 筛选条：一枚芯片都不勾、关键词为空 = 全都列出来（见 sessionFilter.matchesFilters）。 */
   const filter = useSessionFilter(sessions)
@@ -179,6 +188,24 @@ export function ManagePanel({ t, state, meta, reload, patch, directory, openTran
   } | null>(null)
   /** 上一次迁移落地之后的结论（复核 / 备份 / 生效方式）：弹窗关了之后它还得在页面上留着。 */
   const [effect, setEffect] = React.useState<MigrationEffect | null>(null)
+  /**
+   * 刚做完的那件事留下了哪个备份目录（删除 / 迁移各一份），以及要不要在提示里给「撤销」。
+   *
+   * 声明在**最后一个 null 状态**的位置上：冒烟夹具按调用顺序把种子发给 null 状态（见
+   * test/client.test.mjs 的 `nulls`），插在中间会让后面那些整体错一格。
+   */
+  const [undoAt, setUndoAt] = React.useState<{ dir: string } | null>(null)
+
+  /**
+   * 换一条提示，并决定它带不带「撤销」。
+   *
+   * 任何一条新提示都先把上一枚撤销清掉：一份备份只能撤刚做的那一件事，提示换了还留着旧的那枚，
+   * 点下去会把用户带到一件早已过期的动作上。
+   */
+  const notify = (text: string | null, undo?: string): void => {
+    setNotice(text)
+    setUndoAt(text === null || undo === undefined ? null : { dir: undo })
+  }
   /**
    * 只看某一个项目（`null` = 全部）。
    *
@@ -378,7 +405,7 @@ export function ManagePanel({ t, state, meta, reload, patch, directory, openTran
   const openMigrate = (): void => {
     if (picked.length === 0) return
     setError(null)
-    setNotice(null)
+    notify(null)
     setEffect(null)
     setProgress(null)
     setMigratePending({ response: null, error: null })
@@ -409,7 +436,7 @@ export function ManagePanel({ t, state, meta, reload, patch, directory, openTran
           ...(response.backupDir === undefined ? {} : { backupDir: response.backupDir }),
           takesEffect: response.takesEffect,
         })
-        setNotice(
+        notify(
           t('migrate.done', {
             sessions: response.preview.sessions.length,
             rewritten: response.rewritten,
@@ -419,6 +446,7 @@ export function ManagePanel({ t, state, meta, reload, patch, directory, openTran
           }) +
             ' ' +
             (response.verified ? t('verify.pass') : t('verify.fail')),
+          response.backupDir,
         )
         // 搬走的那几条先在清单里换到目标目录（分组跟着换），整库快照随后到。
         patch?.((current) =>
@@ -442,7 +470,7 @@ export function ManagePanel({ t, state, meta, reload, patch, directory, openTran
   const doArchive = async (archived: boolean, ids: readonly string[] = picked): Promise<void> => {
     setBusy(archived ? 'archive' : 'unarchive')
     setError(null)
-    setNotice(null)
+    notify(null)
     setFailed([])
     setProgress(null)
     try {
@@ -450,7 +478,7 @@ export function ManagePanel({ t, state, meta, reload, patch, directory, openTran
       // 逐条失败照旧摆出来：一条因为"正在跑"被宿主拒了，不该把其余成功的说成失败。
       setFailed(response.failed)
       if (response.archived.length > 0) {
-        setNotice(
+        notify(
           t(archived ? 'manage.archive.done' : 'manage.archive.undone', { count: response.archived.length }) +
             ` ${t('manage.archive.immediate')}`,
         )
@@ -480,7 +508,7 @@ export function ManagePanel({ t, state, meta, reload, patch, directory, openTran
   const doRetitle = async (): Promise<void> => {
     setBusy('retitle')
     setError(null)
-    setNotice(null)
+    notify(null)
     setFailed([])
     setRetitle(null)
     setProgress(null)
@@ -512,7 +540,7 @@ export function ManagePanel({ t, state, meta, reload, patch, directory, openTran
   const openDelete = (): void => {
     if (picked.length === 0) return
     setError(null)
-    setNotice(null)
+    notify(null)
     setFailed([])
     setPending({ plan: null, error: null })
     setProgress(null)
@@ -548,7 +576,8 @@ export function ManagePanel({ t, state, meta, reload, patch, directory, openTran
         setBusy(null)
         setProgress(null)
         if (response.applied) {
-          setNotice(response.summary)
+          // 删除先留了一份备份：提示里给「撤销」，点它直接开那份的回滚确认。
+          notify(response.summary, response.backupDir)
           picking.clear()
           setPending(null)
           // 删掉的那些（含级联）先从清单里摘掉，不必等整库重扫；快照随后到，以快照为准。
@@ -627,7 +656,25 @@ export function ManagePanel({ t, state, meta, reload, patch, directory, openTran
         <p className="dsm-banner dsm-ok">
           <span>{notice}</span>
           <span className="dsm-spacer" />
-          <Button variant="outline" size="sm" onClick={() => setNotice(null)}>
+          {/*
+            刚删除 / 刚迁移都留下了一份字节级备份：这里给一枚「撤销」，开的是备份与回滚那面，并且直接
+            摆出这份备份的动作清单与确认框——用户不用在清单里按时间再找一遍。
+          */}
+          {undoAt !== null && (
+            <Button
+              variant="outline"
+              size="sm"
+              title={t('undo.tip')}
+              onClick={() => {
+                const dir = undoAt.dir
+                notify(null)
+                openBackup?.(dir)
+              }}
+            >
+              {t('undo.action')}
+            </Button>
+          )}
+          <Button variant="outline" size="sm" onClick={() => notify(null)}>
             {t('error.dismiss')}
           </Button>
         </p>

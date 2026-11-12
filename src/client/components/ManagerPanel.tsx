@@ -28,13 +28,14 @@ import * as React from 'react'
 
 import { Button, Modal, StateDot, type StateDotState } from '@deepseek-ai/dsh-client-ui-primitives'
 
-import type { MetaResponse, ProgressEvent, StateResponse } from '../api.ts'
+import { fetchBackups, type MetaResponse, type ProgressEvent, type StateResponse } from '../api.ts'
 import { panelEvents, type PanelSnapshot } from '../logic/panelEvents.ts'
 import { getNavigationApi } from '../navigation.ts'
 import { PLUGIN_COMMIT, PLUGIN_DIRTY, PLUGIN_VERSION } from '../build.ts'
 import type { DirectoryApi } from '../directory.ts'
 import type { Translate } from '../logic/locales.ts'
 import { syncJob, type SyncJobSnapshot } from '../logic/syncJob.ts'
+import { relativeLabel } from '../logic/relativeTime.ts'
 import { versionCommit, versionLabel, versionTag } from '../logic/version.ts'
 import { BackupPanel } from './BackupPanel.tsx'
 import { HelpPanel } from './HelpPanel.tsx'
@@ -42,6 +43,7 @@ import { ManagePanel } from './ManagePanel.tsx'
 import { ProgressBlock } from './ProgressBlock.tsx'
 import { SyncPanel } from './SyncPanel.tsx'
 import { TransferPanel } from './TransferPanel.tsx'
+import { useSessionPicking } from './sessionList.tsx'
 import { WorkDialog } from './WorkDialog.tsx'
 
 /**
@@ -90,8 +92,36 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
   const [loadProgress, setLoadProgress] = React.useState<ProgressEvent | undefined>(undefined)
   // 这一页一进来就是列表：它不再是"四个里选一个"的默认项，而是唯一常驻的那一面。
   const [surface, setSurface] = React.useState<Surface>('none')
-  /** 关掉正在开的那一面：等于回到列表。 */
-  const close = React.useCallback((): void => setSurface('none'), [])
+
+  /**
+   * 重数一遍备份份数（状态栏那枚入口上的数字）。
+   *
+   * 只读一次目录（`GET /backups` 与备份清单同一份来源）。三类写操作都会留一份备份，所以它在这些时刻
+   * 各读一次：页面挂上、手动刷新、以及任何一面关掉之后（那时刚做完的动作已经落盘）。
+   * 读失败就保持原样：那个数字只是入口上的一句提示，不该让页面报错。
+   */
+  const countBackups = React.useCallback((): void => {
+    void fetchBackups().then(
+      (response) => setBackupCount(response.backups.length),
+      () => undefined,
+    )
+  }, [])
+
+  React.useEffect(() => {
+    countBackups()
+  }, [countBackups])
+
+  /**
+   * 关掉正在开的那一面：等于回到列表。
+   *
+   * 顺带重数一遍备份份数：那一面里刚做完的动作（导入落地、回滚、同步）都会留下或还原一份备份，
+   * 入口上的数字得跟着变。
+   */
+  const close = React.useCallback((): void => {
+    setSurface('none')
+    setBackupFocus(undefined)
+    countBackups()
+  }, [countBackups])
   /**
    * 手动「刷新」按下去之后、新清单回来之前。
    *
@@ -101,6 +131,28 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
   const [busy, setBusy] = React.useState(false)
   /** 那条连接报的错（连不上、扫库失败），宿主原话；渲染时套进「刚才那件事没成：…」那一句。 */
   const [error, setError] = React.useState<string | null>(null)
+  /**
+   * 有几份备份（状态栏那枚入口上的数字）。
+   *
+   * `undefined` = 还没读到。它只决定那枚按钮要不要带数字，读失败就照旧只写名字——比画一个"0 份"诚实
+   * （一次目录列举，`/backups` 只读，与备份清单同一份来源）。用 `undefined` 而不是 `null` 起头：冒烟
+   * 夹具按顺序把种子发给 null 状态，这里插一个 null 会让「会话」页后面那些整体错一格。
+   */
+  const [backupCount, setBackupCount] = React.useState<number | undefined>(undefined)
+  /**
+   * 从「撤销」点进来时指着的那一份备份（删除 / 迁移刚留下的）。
+   *
+   * 交给备份弹窗：它开着时直接摆出那份的动作清单与确认框，用户不用在清单里再找一遍。关掉弹窗就清掉，
+   * 下次手点状态栏那枚入口是从清单开始。
+   */
+  const [backupFocus, setBackupFocus] = React.useState<string | undefined>(undefined)
+  /**
+   * 列表与导出清单共用的勾选集（见 types.ts 的 `picking`）。
+   *
+   * 放在页面这一级，是因为它比任何一面都活得久：勾了 6 条 → 开「导出 / 导入」→ 导出栏里就是这 6 条；
+   * 关掉弹窗回来，列表里还是这 6 条。原先两个页签各有一套，切过去要重勾一遍。
+   */
+  const picking = useSessionPicking(state?.sessions ?? [], t)
 
   /**
    * 后台那一趟同步跑到哪儿了（见 logic/syncJob.ts）。
@@ -147,8 +199,9 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
    */
   const load = React.useCallback((): Promise<void> => {
     setBusy(true)
+    countBackups()
     return panelEvents.reload().finally(() => setBusy(false))
-  }, [])
+  }, [countBackups])
 
   /**
    * 就地改清单（见 statePatch.ts）：动作落地之后先让那一行改对，不等整库快照。
@@ -238,16 +291,47 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
    * 面里看；宿主那侧目前也没记上一次同步的时间，所以这里不编一个出来。
    */
   const syncInfo = meta?.sync ?? null
-  const syncLabel =
-    meta === undefined
-      ? t('place.sync')
-      : syncInfo === null
-        ? t('sync.chip.off')
-        : syncInfo.autoPush !== undefined
-          ? t('sync.chip.auto')
-          : t('place.sync')
-  /** 状态点：跑着是转圈，有结论按结论，没结论是空心 idle。它是宿主那套状态说法，与横幅同源。 */
-  const syncDot: StateDotState = job.running ? 'ongoing' : job.done === null ? 'idle' : job.done.ok ? 'done' : 'error'
+  /** 「多久以前」那句话：档位由纯函数判（见 logic/relativeTime.ts），这里只把键交给字典。 */
+  const ago = (at: string): string => {
+    const label = relativeLabel(Date.parse(at), Date.now())
+    return label.key === 'time.justNow' ? t('time.justNow') : t(label.key, { count: label.count })
+  }
+  /**
+   * 那枚状态说哪一句，按"手里证据的新鲜程度"排：
+   *
+   * 1. 这一趟正跑着 / 这一进程里刚跑完 → 说这个（最准）；
+   * 2. 否则说磁盘上那条记录（进程重启之后还在）：多久以前、成没成；
+   * 3. 再没有就退到配置事实：开了自动推送 / 只说"同步"。
+   *
+   * "待拉几条"不在这里：那要联网算一份计划，一个页头按钮不该为了它去连远端。
+   */
+  const syncLabel = ((): string => {
+    if (meta === undefined) return t('place.sync')
+    if (syncInfo === null) return t('sync.chip.off')
+    if (job.running) return t('sync.chip.running')
+    if (job.done !== null) return job.done.ok ? t('sync.chip.justNow') : t('sync.chip.failedJustNow')
+    const lastRun = syncInfo.lastRun
+    if (lastRun !== undefined) {
+      return lastRun.ok
+        ? t('sync.chip.at', { when: ago(lastRun.at) })
+        : t('sync.chip.failedAt', { when: ago(lastRun.at) })
+    }
+    return syncInfo.autoPush !== undefined ? t('sync.chip.auto') : t('place.sync')
+  })()
+  /**
+   * 状态点：跑着是转圈，失败是红点，其余是空心 idle。
+   *
+   * 成功不点绿：一条"三天前同步成功"的绿点会被读成"现在刚刚同步过"。成没成由那枚按钮上的字说。
+   */
+  const syncDot: StateDotState = job.running
+    ? 'ongoing'
+    : job.done !== null
+      ? job.done.ok
+        ? 'idle'
+        : 'error'
+      : syncInfo?.lastRun !== undefined && !syncInfo.lastRun.ok
+        ? 'error'
+        : 'idle'
 
   return (
     <section className="dsm-root" data-plugin="dsh-session-manager">
@@ -380,7 +464,12 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
         reload={load}
         patch={patch}
         directory={directory}
+        picking={picking}
         openTransfer={() => setSurface('transfer')}
+        openBackup={(dir) => {
+          setBackupFocus(dir)
+          setSurface('backup')
+        }}
       />
 
       {/*
@@ -389,7 +478,7 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
       */}
       {surface === 'transfer' && (
         <WorkDialog t={t} title={t('transfer.dialogTitle')} onClose={close}>
-          <TransferPanel t={t} state={state} meta={meta} reload={load} directory={directory} />
+          <TransferPanel t={t} state={state} meta={meta} reload={load} directory={directory} picking={picking} />
         </WorkDialog>
       )}
       {surface === 'sync' && (
@@ -399,7 +488,7 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
       )}
       {surface === 'backup' && (
         <WorkDialog t={t} title={t('backup.title')} onClose={close}>
-          <BackupPanel t={t} reload={load} />
+          <BackupPanel t={t} reload={load} focus={backupFocus} />
         </WorkDialog>
       )}
 
@@ -418,7 +507,7 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
           contentClassName="dsm-dialogContent dsm-helpContent"
         >
           <div className="dsm-helpBody">
-            <HelpPanel t={t} state={state} meta={meta} reload={load} />
+            <HelpPanel t={t} state={state} meta={meta} />
           </div>
         </Modal>
       )}
@@ -447,7 +536,7 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
           aria-expanded={surface === 'backup'}
           onClick={() => setSurface('backup')}
         >
-          {t('place.backup')}
+          {backupCount !== undefined && backupCount > 0 ? t('backup.entry', { count: backupCount }) : t('place.backup')}
         </Button>
         <span className="dsm-statusVersion" title={versionTip}>
           {version}

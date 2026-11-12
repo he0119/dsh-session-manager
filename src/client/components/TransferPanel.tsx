@@ -74,7 +74,7 @@ function cwdText(entry: ImportEntry, t: Translate): string {
 }
 
 /** 传输页。 */
-export function TransferPanel({ t, state, meta, reload, directory }: PanelShare): React.ReactElement {
+export function TransferPanel({ t, state, meta, reload, directory, picking }: PanelShare): React.ReactElement {
   const [file, setFile] = React.useState<File | null>(null)
   const [payload, setPayload] = React.useState<ArrayBuffer | null>(null)
   const [target, setTarget] = React.useState('')
@@ -123,7 +123,6 @@ export function TransferPanel({ t, state, meta, reload, directory }: PanelShare)
    * 它排在这一页第一个**空数组状态**的位置上（老代码里 `selected` 就在这儿）：勾选集与筛选条的先后
    * 是冒烟用例种状态时的约定（见 test/client.test.mjs 的 arrays 参数）。
    */
-  const picking = useSessionPicking(sessions, t)
   const picked = picking.picked
   /** 筛选条：类别芯片 + 标题搜索。这一页列的是**整个库**（隐藏会话也在），所以五类芯片都有意义。 */
   const filter = useSessionFilter(sessions)

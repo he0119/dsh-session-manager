@@ -152,6 +152,23 @@ export interface SyncInfo {
    * 补那一句、要不要摆「立即推送一次」。
    */
   autoPush?: { enabled: boolean }
+  /**
+   * 上一次手动同步的结论（宿主存在 `<DSH_HOME>/dsh-session-manager/state.json` 里）。
+   *
+   * 缺席 = 从没在这里同步过（或那台宿主没记）。页头那枚状态据此说"多久以前、成没成"。
+   */
+  lastRun?: SyncRunRecord
+}
+
+/** 上一次手动同步落下的那条记录（与宿主 `src/sync-state.ts` 同一形状）。 */
+export interface SyncRunRecord {
+  /** 结束时刻（ISO 8601）。 */
+  at: string
+  ok: boolean
+  pulled: number
+  pushed: number
+  /** 失败原因（宿主或远端的原话）。 */
+  error?: string
 }
 
 /** 导入计划里的一条会话。 */

@@ -60,6 +60,7 @@ import {
   type SyncDecision,
 } from './sync.ts'
 import { type EffectMode, type PickerKind, type RegistryOps, type ResolvedPaths, type SyncInfo, type SyncRuntime } from './tools.ts'
+import type { SyncRunRecord } from './sync-state.ts'
 import {
   applyImport,
   buildBundle,
@@ -94,6 +95,15 @@ export interface WebServerLike {
 /** 依赖（都可注入，便于测试）。 */
 export interface ApiDeps {
   paths: ResolvedPaths
+  /**
+   * 上一次手动同步的记录（读 / 写）。由入口注入：文件位置属于 `$DSH_HOME`，本模块不解析家目录。
+   *
+   * 缺席 = 不记也不报（测试与纯工具前端就是这样），页头那枚同步状态于是只说"配没配"。
+   */
+  syncRun?: {
+    read: () => SyncRunRecord | undefined
+    write: (run: SyncRunRecord) => void
+  }
   decodeAll: DecodeAll
   /** 生成清单时间戳与文件名，便于测试注入。 */
   now?: () => Date
@@ -263,7 +273,13 @@ interface MetaFacts {
    * 会做的事不在会话计划里，光看"没有要同步的"会以为确认了也没意义。
    */
   attachments: boolean
-  sync: SyncInfo | null
+  /**
+   * 同步那一栏：没配置时是 null；配了的话带上 `lastRun`（上一次手动同步的结论，没有就不带）。
+   *
+   * 为什么把 `lastRun` 塞进这一栏而不是单开一栏：页头那枚状态读的正是它，两处分的越细，界面越要
+   * 记着"这几栏合起来才是同一个东西"。
+   */
+  sync: (SyncInfo & { lastRun?: SyncRunRecord }) | null
 }
 
 /** 界面要展示的一个工作区。 */
@@ -771,6 +787,12 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
    * 界面在它回来之前只能空着页头；而这两件事从 `paths` 与宿主服务上直接就有，没有理由跟着清单一起等。
    * 判据只有一处——`/state` 摊开的就是这一份。
    */
+  /** 把"上一次手动同步"拼进同步那一栏：没配置同步时那一栏仍是 null。 */
+  const withLastRun = (info: SyncInfo | undefined, lastRun: SyncRunRecord | undefined): MetaFacts['sync'] => {
+    if (info === undefined) return null
+    return lastRun === undefined ? { ...info } : { ...info, lastRun }
+  }
+
   const metaFacts = (): MetaFacts => ({
     sessionsRoot: paths.sessionsRoot,
     registryPath: paths.registryPath,
@@ -783,7 +805,8 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
     // 附件库服务：它决定"没有会话要搬"时那一句要不要提附件对象（见 MetaFacts.attachments）。
     attachments: attachmentPort() !== undefined,
     // 同步卡片：没有配置就是 null（界面据此说明"没配置 sync.url"，而不是画一个点了没反应的按钮）。
-    sync: deps.syncInfo?.() ?? null,
+    // 配了的话顺手带上上一次手动同步的结论——页头那枚状态据此说"多久以前、成没成"。
+    sync: withLastRun(deps.syncInfo?.(), deps.syncRun?.read()),
   })
 
   const meta = async (_req: IncomingMessage, res: ServerResponse): Promise<void> => {
@@ -1539,6 +1562,13 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
           pulled: outcome.pulled.length,
           pushed: outcome.pushed.length,
         }
+        // 同一份结论写进磁盘：进程重启之后页头那枚状态还答得出"上次同步在什么时候、拉了几条"。
+        deps.syncRun?.write({
+          at: (deps.now?.() ?? new Date()).toISOString(),
+          ok: true,
+          pulled: outcome.pulled.length,
+          pushed: outcome.pushed.length,
+        })
         applying = null
         panelEmit({ type: 'sync', applying: null, last: lastApply })
         // 拉取会把会话落到本机：别的页面（以及这个页面的清单）都得重读一次。
@@ -1551,6 +1581,13 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
         // 失败也留一条：刷新之后进来的页面要能说"刚才那一趟没成、原因是这个"，而不是一片空白。
         applying = null
         lastApply = { startedAt, finishedAt: Date.now(), ok: false, pulled: 0, pushed: 0, error: message }
+        deps.syncRun?.write({
+          at: (deps.now?.() ?? new Date()).toISOString(),
+          ok: false,
+          pulled: 0,
+          pushed: 0,
+          error: message,
+        })
         panelEmit({ type: 'sync', applying: null, last: lastApply })
       }
       sendEvent(res, { type: 'error', error: message })

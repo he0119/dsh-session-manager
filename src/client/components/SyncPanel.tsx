@@ -433,7 +433,7 @@ function describeSyncedAttachments(t: Translate, result: SyncResponse): string {
 /**
  * 同步页。
  */
-export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactElement {
+export function SyncPanel({ t, state, meta, reload }: Pick<PanelShare, 't' | 'state' | 'meta' | 'reload'>): React.ReactElement {
   /** 最近一次计划或结果：映射表的远端候选与弹窗正文都读它（关掉弹窗之后候选还得在）。 */
   const [sync, setSync] = React.useState<SyncResponse | null>(null)
   /**

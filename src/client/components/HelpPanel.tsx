@@ -81,7 +81,7 @@ function HelpSection({
 }
 
 /** 「说明」弹窗。 */
-export function HelpPanel({ t, state, meta }: PanelShare): React.ReactElement {
+export function HelpPanel({ t, state, meta }: Pick<PanelShare, 't' | 'state' | 'meta'>): React.ReactElement {
   // 两条路径来自 `/meta` 或 `/state`（同一份取值，见 ManagerPanel）：这一页只印它们，不自己推。
   const facts = state ?? meta
   return (

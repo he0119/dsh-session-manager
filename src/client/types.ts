@@ -7,9 +7,10 @@
  * @module dsh-session-manager/client/types
  */
 
-import type { MetaResponse, StateResponse } from './api.ts'
+import type { MetaResponse, SessionSummary, StateResponse } from './api.ts'
 import type { DirectoryApi } from './directory.ts'
 import type { Translate } from './logic/locales.ts'
+import type { SessionPicking } from './components/sessionList.tsx'
 
 /** 面板入参。 */
 export interface PanelShare {
@@ -33,6 +34,21 @@ export interface PanelShare {
    * 什么无关。所以它总是可点，进去之后导出那一栏才看得到勾中的那几条。
    */
   openTransfer?: () => void
+  /**
+   * 开「备份与回滚」，并直接指着某一份备份（删除 / 迁移之后那枚「撤销」走的这条）。
+   *
+   * 弹窗由页面骨架持有（见 [ManagerPanel.tsx](./components/ManagerPanel.tsx)）：动作页只报"刚留下
+   * 哪一份"，由它把那面打开并把那份备份交给备份清单——回滚的动作清单与确认框仍由那边摆。
+   */
+  openBackup?: (dir: string) => void
+  /**
+   * 这一页的勾选集。
+   *
+   * 由页面骨架持有、列表与导出清单共用同一份：勾了 6 条再开「导出 / 导入」，导出那一栏里就是这 6 条
+   * （原来两个页签各有一套，切过去要重勾一遍）。判据在 [sessionList.tsx](./components/sessionList.tsx)
+   * 的 `useSessionPicking()`。
+   */
+  picking: SessionPicking<SessionSummary>
   /**
    * 就地改清单里的那几条（见 [statePatch.ts](./logic/statePatch.ts)）。
    *
