@@ -10,7 +10,8 @@
  *     文档），逐字提交会让每次击键都变成一次文档写入，而用户根本没法预览自己写了什么；
  *   - **只提交改动过的字段**：没动过的字段不发编辑，否则用户层里会攒下一堆"等于默认值"的覆盖，
  *     界面上那些字段从此都顶着「已覆盖」徽标（判据见 syncForm.ts 的 draftOps）；
- *   - **密码直接输入、值不进配置**：那个框是官方控件库的只写控件（`SettingsSecretField`），保存时
+ *   - **密码直接输入、值不进配置**：那个框是 `type=password` 的官方 `Input`（旁边的状态标签说明配没
+ *     配），保存时
  *     把输入的密码写进宿主凭据库（`remote.credentials` 的 `set`），配置里只有引用名——与 DSH 自己
  *     的口径一致（配置携带引用，值归凭据提供方）。所以那个框永远从空白开始：没有任何一条读路径会把
  *     值送回来，界面只能报"配没配、能不能写"（`describe`）。留空 = 不动已存的那一个；
@@ -26,7 +27,7 @@
 
 import * as React from 'react'
 
-import { Button, Input, SettingsSecretField, Switch } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, Input, Switch, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
 
 import { testSync, type SyncTestResponse } from '../api.ts'
 import { getCredentialsApi, type CredentialInfo } from '../credentials.ts'
@@ -57,8 +58,14 @@ function problemText(problem: MappingProblem, t: Translate): string {
   }
 }
 
-/** 一行「标签 + 输入框」。 */
-function Field({
+/**
+ * 一行设置：左边是标签与它的说明，右边是输入框。
+ *
+ * 形状照 `dsh-context` 那张插件页配置卡（`.lc-settings-row`）：标签占满左侧、控件靠右，一行一件事；
+ * 说明压在标签下面（12px 灰字），不占右侧那一列。输入框本身仍是官方 `Input`——外观归控件库，这里只
+ * 决定它摆在哪、多宽。
+ */
+function SettingRow({
   label,
   hint,
   value,
@@ -72,16 +79,69 @@ function Field({
   placeholder?: string
 }): React.ReactElement {
   return (
-    <label className="dsm-field">
-      <span className="dsm-fieldLabel">{label}</span>
+    <label className="dsm-settingRow">
+      <span className="dsm-settingText">
+        <span className="dsm-settingLabel">{label}</span>
+        <span className="dsm-settingNote">{hint}</span>
+      </span>
       <Input
-        className="dsm-input"
+        className="dsm-settingInput"
         type="text"
         value={value}
         placeholder={placeholder ?? ''}
         onChange={(event) => onChange(event.target.value)}
       />
-      <span className="dsm-hint">{hint}</span>
+    </label>
+  )
+}
+
+/**
+ * 一行「密码」：形状与别的行一样（标签与说明在左、控件在右），控件是 `type=password` 的官方 `Input`，
+ * 标签旁边多一枚状态标签（已配置 / 未设置）。
+ *
+ * 为什么不用控件库的 `SettingsSecretField`：那个是一个**整块的字段**（自己画标签、徽标、输入框、说明
+ * 四层，竖着排），放进这张横排的卡里就是唯一一行长得不一样的东西——左列空着、控件占满整行。它的语义
+ * （只写、留空即保留、关掉自动填充）本页自己就有：值不进响应，留空时保存不写 `password`。
+ */
+function SecretRow({
+  id,
+  label,
+  hint,
+  text,
+  stateLabel,
+  configured,
+  disabled,
+  onEdit,
+}: {
+  id: string
+  label: string
+  hint: string
+  text: string
+  stateLabel: string
+  configured: boolean
+  disabled: boolean
+  onEdit: (text: string) => void
+}): React.ReactElement {
+  return (
+    <label className="dsm-settingRow" htmlFor={id}>
+      <span className="dsm-settingText">
+        <span className="dsm-settingLabelRow">
+          <span className="dsm-settingLabel">{label}</span>
+          <Tag className="dsm-tag" tone={configured ? 'neutral' : 'quiet'}>
+            {stateLabel}
+          </Tag>
+        </span>
+        <span className="dsm-settingNote">{hint}</span>
+      </span>
+      <Input
+        id={id}
+        className="dsm-settingInput"
+        type="password"
+        autoComplete="new-password"
+        value={text}
+        disabled={disabled}
+        onChange={(event) => onEdit(event.target.value)}
+      />
     </label>
   )
 }
@@ -284,31 +344,29 @@ export function SyncConfigForm({
 
   return (
     <div className="dsm-syncForm">
-      <Field
+      <SettingRow
         label={t('sync.field.url')}
         hint={t('sync.field.urlHint')}
         value={view.url}
         onChange={(url) => edit({ url })}
         placeholder="https://dav.example.com/dsh"
       />
-      <div className="dsm-syncRow">
-        <Field
-          label={t('sync.field.machine')}
-          hint={t('sync.field.machineHint')}
-          value={view.machineId}
-          onChange={(machineId) => edit({ machineId })}
-          // 留空时宿主用主机名顶上：把那个名字写成灰字，用户才知道"空着会叫什么"。
-          placeholder={machineDefault ?? ''}
-        />
-        <Field
-          label={t('sync.field.timeout')}
-          hint={t('sync.field.timeoutHint')}
-          value={view.timeoutMs}
-          onChange={(timeoutMs) => edit({ timeoutMs })}
-          placeholder="30000"
-        />
-      </div>
-      <Field
+      <SettingRow
+        label={t('sync.field.machine')}
+        hint={t('sync.field.machineHint')}
+        value={view.machineId}
+        onChange={(machineId) => edit({ machineId })}
+        // 留空时宿主用主机名顶上：把那个名字写成灰字，用户才知道"空着会叫什么"。
+        placeholder={machineDefault ?? ''}
+      />
+      <SettingRow
+        label={t('sync.field.timeout')}
+        hint={t('sync.field.timeoutHint')}
+        value={view.timeoutMs}
+        onChange={(timeoutMs) => edit({ timeoutMs })}
+        placeholder="30000"
+      />
+      <SettingRow
         label={t('sync.field.user')}
         hint={t('sync.field.userHint')}
         value={view.username}
@@ -316,7 +374,7 @@ export function SyncConfigForm({
       />
       {credentials === undefined && <p className="dsm-hint">{t('sync.password.unavailable')}</p>}
       {credentials !== undefined && (
-        <SettingsSecretField
+        <SecretRow
           id="dsm-dav-password"
           label={t('sync.field.password')}
           hint={credential.writable ? t('sync.field.passwordHint') : t('sync.password.shadowed')}
@@ -327,15 +385,18 @@ export function SyncConfigForm({
           onEdit={editPassword}
         />
       )}
-      <div className="dsm-field">
-        <span className="dsm-fieldLabel">{t('sync.field.mapping')}</span>
-        {view.mapping.length === 0 && <span className="dsm-hint">{t('sync.field.mappingEmpty')}</span>}
+      <div className="dsm-settingColumn">
+        <span className="dsm-settingText">
+          <span className="dsm-settingLabel">{t('sync.field.mapping')}</span>
+          <span className="dsm-settingNote">{t('sync.field.mappingHint')}</span>
+        </span>
+        {view.mapping.length === 0 && <span className="dsm-settingNote">{t('sync.field.mappingEmpty')}</span>}
         {view.mapping.length > 0 && (
           <div className="dsm-mapRows">
             {view.mapping.map((row, index) => (
               <div className="dsm-mapRow" key={index}>
                 <Input
-                  className="dsm-input"
+                  className="dsm-settingInput"
                   type="text"
                   list={remoteCwds.length > 0 ? 'dsm-mapRemoteCwds' : undefined}
                   aria-label={t('sync.map.remoteLabel', { line: index + 1 })}
@@ -347,7 +408,7 @@ export function SyncConfigForm({
                   →
                 </span>
                 <Input
-                  className="dsm-input"
+                  className="dsm-settingInput"
                   type="text"
                   aria-label={t('sync.map.localLabel', { line: index + 1 })}
                   placeholder="/opt/work/proj"
@@ -374,7 +435,6 @@ export function SyncConfigForm({
           <Button variant="outline" size="sm" onClick={addMapping}>
             {t('sync.map.add')}
           </Button>
-          <span className="dsm-hint">{t('sync.field.mappingHint')}</span>
         </div>
       </div>
 

@@ -453,15 +453,6 @@ function loadBundle({ firstNull, panel, arrays, strings, nulls, meta, fetch } = 
             'aria-label': props.label,
             onClick: () => props.onChange(!props.checked),
           }),
-        SettingsSecretField: (props) =>
-          react.createElement('input', {
-            type: 'password',
-            id: props.id,
-            value: props.text,
-            disabled: props.disabled,
-            'data-state': props.stateLabel,
-            'data-configured': props.configured,
-          }),
         // `Modal` 的替身：真那个会 createPortal 到 body、管 Escape 与焦点归还，这里没有渲染器也没有
         // DOM；用例只关心它的四处入参——`open`（回 null 的契约）、`title`、`children` 与 `footer`。
         Modal: (props) =>
@@ -526,7 +517,7 @@ test('客户端产物：导出面符合客户端插件契约', { skip }, () => {
 })
 
 /** 跑一次 apply，收下所有注册面（后面几个用例共用）。 */
-function mount({ translate, state, meta, panel, arrays, strings, nulls, configForms, credentials, fetch } = {}) {
+function mount({ translate, state, meta, panel, arrays, strings, nulls, configForms, credentials, pluginNavigation, fetch } = {}) {
   const { mod, nodes, recorded, sets } = loadBundle({ firstNull: state, panel, arrays, strings, nulls, meta, fetch })
   const registrations = []
   const dictionaries = []
@@ -567,6 +558,8 @@ function mount({ translate, state, meta, panel, arrays, strings, nulls, configFo
         ...(configForms === undefined ? {} : { configForms }),
         // 凭据服务同理：不给就等于宿主没装凭据提供方，密码框那一块要说明"只能走环境变量"。
         ...(credentials === undefined ? {} : { remote: { credentials } }),
+        // 插件页导航（`pluginNavigation`）：不给就等于宿主没装插件管理器，那一枚「同步设置」禁用。
+        ...(pluginNavigation === undefined ? {} : { pluginNavigation }),
         uiWorkspace: {
           async pickDirectory() {
             return '/tmp/picked'
@@ -621,28 +614,62 @@ function mount({ translate, state, meta, panel, arrays, strings, nulls, configFo
   }
 }
 
+/**
+ * 设置那一节（`settings.section`）渲染出来的那棵树。
+ *
+ * 「会话管理」现在有两个落点：侧栏那一页做事（`registrations[0]`，主栏），设置那一页只放同步配置。
+ * 配置表单的用例渲染的是后者——它不在页面里了。
+ *
+ * @param mounted `mount()` 的返回值。
+ * @returns 渲染结果（元素树）。
+ */
+function settingsEntry(mounted) {
+  const entry = mounted.registrations.find((item) => item.registration.name === 'plugins.bundle.config')
+  assert.ok(entry !== undefined, '要注册插件页那格配置')
+  return entry
+}
+
+/** 设置那一节的注册条目渲染出来的那棵树。 */
+function settingsOf(mounted) {
+  const entry = settingsEntry(mounted)
+  // `plugins.bundle.config` 的正文只在 `view: 'page'` 时画（契约里那一格只拿得到这个值）。
+  return entry.component({ view: 'page', ...entry.registration.inject() })
+}
+
 test('客户端产物：apply 把「会话管理」注册到设置里的一页，并带上字典与注入面', { skip }, async () => {
   const { nodes, registrations, dictionaries, effects, injectedSlots, injectedServices, bound, seat } = mount()
 
   // Slot 用 inject 等声明到位，而不是直接 register——声明可能晚于本插件 apply。
-  assert.deepEqual(injectedSlots, ['settings.section'])
-  assert.equal(registrations.length, 1)
-  const { registration, component } = registrations[0]
-  assert.equal(registration.name, 'settings.section')
-  assert.equal(registration.id, 'session-manager')
-  assert.equal(registration.locale, 'dsh-session-manager')
-  // 排官方那几页之后（账户 -10 / 通用 0 / 模型 10 / 插件 15 / Agent 预设 20），不插队。
-  assert.equal(registration.order, 30)
-  assert.equal(typeof registration.label(), 'string', 'label 必须是可投影的文案')
-  assert.equal(typeof component, 'function', '注册的必须是一个组件')
-  // bind 是惰性的（label 与 inject 都是 thunk），上面调用 label() 之后它才被绑过
-  assert.deepEqual(bound, ['dsh-session-manager'])
+  // 三条：设置里那一页、侧栏那一行、主栏那一页（后两条是同一个页面的第二个落点）。
+  assert.deepEqual(injectedSlots, ['main', 'sidebar.panellist', 'plugins.bundle.config'])
+  assert.equal(registrations.length, 3)
+  const byName = (slotName) => {
+    const hit = registrations.find((item) => item.registration.name === slotName)
+    assert.ok(hit !== undefined, `要注册 ${slotName}`)
+    return hit
+  }
+  // 配置那一格挂在**插件页**上（`plugins.bundle.config`），键是包名：设置页里不再有本包的一页。
+  const config = byName('plugins.bundle.config').registration
+  assert.equal(config.key, '@he0119/dsh-session-manager', '按包名作键')
+  assert.equal(config.locale, 'dsh-session-manager')
+  assert.equal(typeof byName('plugins.bundle.config').component, 'function', '注册的必须是一个组件')
+  // 配置表单不需要目录选择器：这一格的注入面里只有框架补进来的 `t`。
+  assert.deepEqual(Object.keys(config.inject()), ['t'])
+  // 主栏那一页与侧栏那一行用同一个 id 配对。
+  const page = byName('main').registration
+  assert.equal(page.key, 'session-manager')
+  assert.equal(typeof byName('main').component, 'function')
+  const sidebarEntry = byName('sidebar.panellist').registration
+  assert.equal(sidebarEntry.id, page.key)
+  assert.equal(typeof sidebarEntry.label(), 'string')
+  // bind 是惰性的（label 与 inject 都是 thunk）：侧栏那一行与设置那一行各投影一次，于是各绑过一次。
+  assert.ok(bound.length > 0 && bound.every((namespace) => namespace === 'dsh-session-manager'))
 
   // 翻译函数是**框架 props**，不是插件自己 inject 的：注册选项声明 `locale: NS`，框架据此把 `t`
   // 送进组件（本文件在 register 那里照同一条合成顺序补上）。插件自己 inject 的注入面里因此只剩
   // 目录选择器那一项——多 inject 一个 `t` 会把框架那一个盖掉，那正是这条断言要拦的事。
-  assert.deepEqual(Object.keys(registrations[0].injected() ?? {}), ['directory'])
-  assert.equal(registration.inject().t, seat)
+  assert.deepEqual(Object.keys(byName('main').injected() ?? {}), ['directory'])
+  assert.equal(page.inject().t, seat)
 
   // 目录选择器与凭据服务：都作为**可选**依赖收（由别的客户端插件提供，不写进顶层 inject），
   // 服务不在时整页照装——只是对应那一块要自己说明。凭据那两个名字都声明：命名空间服务挂在
@@ -650,11 +677,11 @@ test('客户端产物：apply 把「会话管理」注册到设置里的一页�
   // 跨 realm：产物在另一个 vm 里，它的数组原型与本文件的不是同一个，先摊成宿主数组再比。
   assert.deepEqual(
     injectedServices.map((entry) => [...entry.dependencies]),
-    [['configForms'], ['uiWorkspace'], ['remote', 'remote.credentials']],
+    [['configForms'], ['uiWorkspace'], ['remote', 'remote.credentials'], ['pluginNavigation']],
   )
   // 两个调用面都要接上：宿主只给其中一个（`native` 给 pick、`browse` 给 list），
   // 界面按 /state 里的 pickerKind 选一种用，所以这里两个都得能取到。
-  const picker = registration.inject().directory
+  const picker = page.inject().directory
   assert.equal(typeof picker, 'function', '界面要能取到宿主目录选择器')
   const api = picker()
   assert.equal(typeof api.pick, 'function', '界面要能取到宿主的系统对话框调用')
@@ -767,6 +794,35 @@ test('客户端产物：apply 把「会话管理」注册到设置里的一页�
   assert.ok(effects.some((label) => String(label).includes('stylesheet')))
 })
 
+test('客户端产物：侧栏里挂上了「会话管理」——同一个 id 连着主栏那一页，图标跟侧栏给的尺寸', { skip }, () => {
+  const mounted = mount()
+  const entry = mounted.registrations.find((item) => item.registration.name === 'sidebar.panellist')
+  const panel = mounted.registrations.find((item) => item.registration.name === 'main')
+  assert.ok(entry !== undefined, '侧栏那一条要注册')
+  assert.ok(panel !== undefined, '主栏那一页要注册')
+  // 宿主按 id 把两者配起来：`main` 的 key 与侧栏那一条的 id 必须是同一个值。
+  assert.equal(panel.registration.key, entry.registration.id)
+  assert.equal(entry.registration.id, 'session-manager')
+  assert.equal(entry.registration.locale, 'dsh-session-manager')
+  // 排在自动化任务（10）之后、上下文洞察（20）之前，不抢第一个。
+  assert.equal(entry.registration.order, 12)
+  assert.equal(typeof entry.registration.label(), 'string', '侧栏那行的名字要由 label 投影出来')
+
+  // 图标吃侧栏给的边长，颜色走 currentColor（不写死色值，选中/悬停/深浅主题都跟着那一行走）。
+  const icon = entry.component({ size: 18, active: true })
+  assert.equal(icon.props.width, 18)
+  assert.equal(icon.props.height, 18)
+  assert.equal(icon.props['aria-hidden'], 'true')
+
+  // 主栏那一页自己带滚动视口：宿主的 .mainPanel 是定高 flex 列 + overflow: hidden，不给就看不到下面。
+  const page = panel.component({ ...panel.registration.inject(), t: mounted.t })
+  assert.equal(page.props.className, 'dsm-globalPage')
+  const scroll = mounted.recorded.find((node) => node.props?.className === 'dsm-globalScroll')
+  assert.ok(scroll !== undefined, '要有滚动视口')
+  const content = mounted.recorded.find((node) => node.props?.className === 'dsm-globalContent')
+  assert.ok(content !== undefined, '内容列要限宽居中')
+})
+
 test('客户端产物：导航行的文案跟着语言走（同一个 thunk 每次投影重新取）', { skip }, () => {
   // 设置外壳投影导航行时走 resolveSlotLabel（是函数就调用），并且订阅了 locale 快照：
   // 因此这里必须能在不重新注册的前提下换一份文案，否则切语言后导航行会停在旧语言。
@@ -774,10 +830,13 @@ test('客户端产物：导航行的文案跟着语言走（同一个 thunk 每�
   const { registrations } = mount({
     translate: () => (active === 'zh' ? '会话管理' : 'Session management'),
   })
-  const { label } = registrations[0].registration
-  assert.equal(label(), '会话管理')
+  // 侧栏那一行有一份 label（插件页那一格挂在插件页自己的标题下，不带 label）。
+  const entry = registrations.find((item) => item.registration.name === 'sidebar.panellist')
+  assert.ok(entry !== undefined)
+  active = 'zh'
+  assert.equal(entry.registration.label(), '会话管理')
   active = 'en'
-  assert.equal(label(), 'Session management')
+  assert.equal(entry.registration.label(), 'Session management')
 })
 
 test('客户端产物：页面骨架带着三个动作页（会话 / 传输 / 同步）、备份与说明页', { skip }, () => {
@@ -1000,21 +1059,29 @@ test('客户端产物：页头是页面级标题（h2 + 说明行），不是卡
     strings(intro).some((text) => text.includes('page.library')),
     '说明行里带着会话库信息（路径与条数）',
   )
-  // 页头**只有**标题与说明行两行：页头里一枚按钮都没有，「刷新」在页签那一行的右端（见下一条）。
+  // 页头两行：标题那一行（标题 + 一枚「插件设置」）与说明行。「刷新」不在这里，它在页签那一行的右端
+  // （见下一条）——它是列表工具，而「插件设置」是**页面级**的入口：配置不在这一页，整页都该够得着。
+  //
   // 反例有两代：标题与「刷新」同排（标题那一行被按钮从 24px 撑到 30px，按钮还与设置外壳自己那枚
   // 「打开配置文件」在同一个右列里上下叠着）；说明行与「刷新」同排（说明行实测宽 497px，加上按钮
   // 与间距要 580px，而内容列只有 564px，它会被挤成两行）。
   const head = tree.find((node) => node.props?.className === 'dsm-head')
   assert.equal(head?.type, 'header', '页头是 header')
+  const headRow = tree.find((node) => node.props?.className === 'dsm-headRow')
+  assert.equal(headRow?.type, 'div', '标题与页面级动作同处一行')
   const headKids = Array.isArray(head?.props?.children) ? head.props.children : [head?.props?.children]
-  assert.ok(headKids.includes(heading), '标题是页头的直接子节点——没有别的控件与它同排')
+  assert.ok(headKids.includes(headRow), '标题那一行是页头的直接子节点')
   assert.ok(headKids.includes(intro), '说明行也是页头的直接子节点')
-  assert.equal(tree.some((node) => node.props?.className === 'dsm-titleRow'), false, '标题行那一层不该再出现')
-  assert.deepEqual(
-    elementsOf(head).filter((node) => node.type === 'button'),
-    [],
-    '页头里不该有按钮',
+  assert.equal(tree.some((node) => node.props?.className === 'dsm-titleRow'), false, '旧标题行那一层不该再出现')
+  const rowKids = Array.isArray(headRow?.props?.children) ? headRow.props.children : [headRow?.props?.children]
+  assert.ok(rowKids.includes(heading), '标题在这一行里')
+  // 页头里**只有**这一枚页面级动作：「刷新」仍然在页签那一行（列表工具与页面级入口不是一回事）。
+  const headButtons = elementsOf(head).filter((node) => node.type === 'button')
+  assert.ok(
+    headButtons.some((node) => node.props?.children === 'sync.settings.action'),
+    '页头那一枚是「插件设置」',
   )
+  assert.equal(headButtons.length, 1, '页头只放一枚页面级动作')
 
   // 「刷新」在页签那一行的右端：整页的状态（`/meta` + `/state`）不属于任何一个分页，只能挂在页面
   // 这一级；页签整排只占左边一段，右边量下来空着 142px。
@@ -3084,6 +3151,36 @@ test('客户端产物：「说明」页把分类词条、每页做什么与边�
   assert.ok(text.includes('help.hint'), '页首要有一句话说明这一页讲什么')
 })
 
+test('客户端产物：「同步设置」那枚按钮跳到插件页——宿主没装插件管理器时禁用', { skip }, () => {
+  /*
+   * 配置不在这一页了（它挂在插件页的 `plugins.bundle.config` 上），所以这一页要给一条跳过去的路：
+   * 宿主插件管理器的 `pluginNavigation.openBundle(包名)`。按钮与那条服务之间隔着一次 `ctx.inject`，
+   * 所以这一条同时钉住"注入到位"与"点了真的带着包名跳"。
+   */
+  const state = { sessionsRoot: '/home/u/.dsh/sessions', registryPath: '/home/u/.dsh/registry.json', problems: [], sync: null, sessions: [], workspaces: [] }
+  const calls = []
+  const mounted = mount({ state, panel: 'sync', pluginNavigation: { openBundle: (name) => calls.push(name) } })
+  const page = mounted.registrations[0]
+  strings(page.component(page.registration.inject()))
+  const button = mounted.recorded.find(
+    (node) => node.type === 'button' && node.props?.children === 'sync.settings.action',
+  )
+  assert.ok(button !== undefined, '同步那一页要有「同步设置」')
+  assert.equal(button.props.disabled, false)
+  button.props.onClick()
+  assert.deepEqual(calls, ['@he0119/dsh-session-manager'], '带着包名跳：插件页按包名定位这一包的页面')
+
+  // 服务不在（宿主没装插件管理器）：按钮禁用，而不是点了一下什么都不发生。
+  const bare = mount({ state, panel: 'sync' })
+  const barePage = bare.registrations[0]
+  strings(barePage.component(barePage.registration.inject()))
+  const bareButton = bare.recorded.find(
+    (node) => node.type === 'button' && node.props?.children === 'sync.settings.action',
+  )
+  assert.ok(bareButton !== undefined)
+  assert.equal(bareButton.props.disabled, true)
+})
+
 test('客户端产物：同步页的同步块——没配置只说明，配置了才摆按钮', { skip }, () => {
   const base = {
     sessionsRoot: '/home/u/.dsh/sessions',
@@ -3115,7 +3212,9 @@ test('客户端产物：同步页的同步块——没配置只说明，配置�
   // 主机名），与「超时」那一栏的 30000 同一个口径——留空不等于没有值。那一栏归表单那条用例钉。
   // 卡片头上两个入口：「同步」（主动作）与「整理远端」（只删本机那一格里多余的包，不拉不推）。
   // 弹窗里的「确认同步」只有开了弹窗才在树上。
+  // 「插件设置」在页头（先渲染），「同步」「整理远端」在同步卡的动作行里。
   assert.deepEqual(buttonTexts(on).filter((label) => label.startsWith('sync')), [
+    'sync.settings.action',
     'sync.action',
     'sync.tidy.action',
   ])
@@ -3159,8 +3258,9 @@ test('客户端产物：同步设置表单按 entry id 向设置接缝取控制�
     },
   }
   const mounted = mount({
-    state,
-    panel: 'sync',
+    // 机器名那一栏的灰字读的是宿主事实（`/meta`，不扫库）。假钩子不会等 Promise，所以这里直接把
+    // 那一份种进设置页唯一的 `useState(undefined)`（`meta`）——与浏览器里 `/meta` 回来的形状一致。
+    meta: { sessionsRoot: state.sessionsRoot, registryPath: state.registryPath, sync: state.sync },
     configForms: {
       get(namespace) {
         asked.push(namespace)
@@ -3169,7 +3269,7 @@ test('客户端产物：同步设置表单按 entry id 向设置接缝取控制�
     },
     credentials,
   })
-  const text = strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
+  const text = strings(settingsOf(mounted))
   assert.deepEqual(asked, ['session-manager'], '按 profile 里那个 insert 的 id 取控制器')
   assert.ok(text.includes('sync.field.mapping'), '映射字段在场')
   assert.ok(
@@ -3193,16 +3293,21 @@ test('客户端产物：同步设置表单按 entry id 向设置接缝取控制�
   assert.ok(!mounted.recorded.some((node) => node.type === 'textarea'), '映射表不再是一段文本')
   assert.ok(text.includes('sync.map.add'), '有「添加一行」')
 
-  // 密码：官方控件库那个**只写**控件（`SettingsSecretField`），不是本页手写的 dsm-input。
+  // 密码：与别的行同一个形状（标签 + 说明在左、控件在右），控件是 type=password 的官方 Input，
+  // 标签旁边那枚官方 Tag 说明"配没配"。不再用控件库的 `SettingsSecretField`——那是个整块的字段
+  // （标签 / 徽标 / 输入框 / 说明竖着四层），混进这张横排的卡里就是唯一一行长得不一样的东西。
+  //
   // 假钩子不跑 useEffect，所以这里量的是首帧：`describe` 的答案还没回来之前按"未配置"画，
   // 并且输入框从空白开始——没有任何读路径会把值送回来（`describe` 只回 {configured, writable}）。
-  const secret = mounted.recorded.find((node) => node.props?.id === 'dsm-dav-password')?.props
+  const secret = mounted.recorded.find((node) => node.type === 'input' && node.props?.id === 'dsm-dav-password')?.props
   assert.ok(secret !== undefined, '宿主给了凭据服务就摆出密码控件')
-  assert.equal(secret.label, 'sync.field.password')
-  assert.equal(secret.text, '', '只写控件从空白开始：值不会从宿主那边回来')
-  assert.equal(secret.stateLabel, 'sync.password.unset', '首帧按未配置画，describe 回来之后再改')
-  assert.equal(secret.configured, false)
+  assert.equal(secret.type, 'password')
+  assert.equal(secret.value, '', '只写控件从空白开始：值不会从宿主那边回来')
+  assert.equal(secret.autoComplete, 'new-password', '让浏览器别拿已存的登录密码来填')
   assert.equal(secret.disabled, false)
+  assert.ok(text.includes('sync.field.password'), '标签还在左边那一列')
+  assert.ok(text.includes('sync.field.passwordHint'), '说明压在标签下面')
+  assert.ok(text.includes('sync.password.unset'), '首帧按未配置画，describe 回来之后再改')
   assert.ok(!text.includes('sync.password.unavailable'), '有凭据服务时不摆那句"只能走环境变量"')
 
   // 引用名（`sync.passwordRef`）不在这张表单上：它是插件配置的事，卡片只问"密码是什么"。
@@ -3215,7 +3320,7 @@ test('客户端产物：同步设置表单按 entry id 向设置接缝取控制�
 
   // 宿主没提供设置接缝（例如只装了设置外壳）：这一块要自己说明，而不是画一张点了没用的表单
   const bare = mount({ state, panel: 'sync' })
-  const bareText = strings(bare.registrations[0].component(bare.registrations[0].registration.inject()))
+  const bareText = strings(settingsOf(bare))
   assert.ok(bareText.includes('sync.form.unavailable'), '没接缝时说清只能在配置里改')
   assert.ok(!bareText.includes('sync.map.add'), '没接缝时不画表单')
 
@@ -3223,10 +3328,9 @@ test('客户端产物：同步设置表单按 entry id 向设置接缝取控制�
   // 不摆一个按下去必然被拒的输入框。
   const noCredentials = mount({
     state,
-    panel: 'sync',
     configForms: { get: () => controller },
   })
-  const noCredentialsText = strings(noCredentials.registrations[0].component(noCredentials.registrations[0].registration.inject()))
+  const noCredentialsText = strings(settingsOf(noCredentials))
   assert.ok(noCredentialsText.includes('sync.password.unavailable'), '没凭据服务时说清密码只能走环境变量')
   assert.ok(!noCredentials.recorded.some((node) => node.props?.id === 'dsm-dav-password'), '也不摆那个控件')
   assert.ok(noCredentialsText.includes('sync.map.add'), '其余字段照旧能改')
@@ -3260,24 +3364,18 @@ test('客户端产物：同步设置里的「测试连接」——按钮、只�
     },
   }
   const render = (extra = {}) => {
-    const mounted = mount({ state, panel: 'sync', configForms: { get: () => controller }, credentials, ...extra })
-    return { mounted, text: strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject())) }
+    const mounted = mount({ configForms: { get: () => controller }, credentials, ...extra })
+    return { mounted, text: strings(settingsOf(mounted)) }
   }
   /*
    * 假钩子不会点按钮，所以"结论行"由 `nulls` 按顺序种进去。`nulls` 只发到**初始值是 null** 的那些
-   * 状态位（骨架的 `state` 已经被 `firstNull` 吃掉一个），按 ManagerPanel → SyncPanel →
-   * SyncConfigForm 的渲染顺序数：
+   * 状态位。设置页只渲染 `SettingsPanel` → `SyncConfigForm`，而这棵树上唯一一个 `useState(null)` 就是
+   * 表单的测试结论（`testResult`）——所以种子只有一条。
    *
-   *   1. 骨架的 `error`（`state` 在外）
-   *   2..7. 同步页的 sync / dialog / busy / error / notice / progress
-   *   8. 同步页自动推送那条进度（`autoProgress`）
-   *   9. 这张表单的测试结论（`testResult`）
-   *
-   * 所以种子是"八个 null + 结论"。**动这三个组件里 useState 的个数或先后就要改这一行**——种偏了
-   * 不会报错，只会让结论行读到一个别的状态值，然后在下一条断言上以"没测过"的样子失败。
+   * 页面（骨架 + 同步分页）那边也有一串 null 状态，但它们不在这一棵树上：这一条渲染的是设置页。
    */
   const outcomeOf = (outcome) =>
-    render({ nulls: [null, null, null, null, null, null, null, null, outcome] })
+    render({ nulls: [outcome] })
 
   const fresh = render()
   assert.ok(fresh.text.some((item) => item === 'sync.test.action'), '有「测试连接」按钮')
@@ -5439,8 +5537,8 @@ test('客户端产物：同步设置表单的字段顺序——自动推送排�
       return { ok: true, value: undefined }
     },
   }
-  const mounted = mount({ state, panel: 'sync', configForms: { get: () => controller }, credentials })
-  const text = strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
+  const mounted = mount({ state, configForms: { get: () => controller }, credentials })
+  const text = strings(settingsOf(mounted))
 
   const at = (key) => {
     const index = text.indexOf(key)
@@ -5513,13 +5611,12 @@ test('客户端产物：同步设置的「测试连接」——结论紧跟在�
     hasPassword: true,
   }
   const mounted = mount({
-    state,
-    panel: 'sync',
+    // 设置页不看整库清单：`state` 不再种进来（它会把表单里唯一那个 null 状态位顶掉）。
     configForms: { get: () => controller },
     credentials,
-    nulls: [null, null, null, null, null, null, null, null, outcome],
+    nulls: [outcome],
   })
-  const tree = mounted.registrations[0].component(mounted.registrations[0].registration.inject())
+  const tree = settingsOf(mounted)
 
   // 整页文本里结论确实渲染了（不然下面那条断言会空过）。
   const renderedText = strings(tree)
@@ -5584,8 +5681,8 @@ test('客户端产物：同步设置的「测试连接」挨着「保存」，�
       return { ok: true, value: undefined }
     },
   }
-  const mounted = mount({ state, panel: 'sync', configForms: { get: () => controller }, credentials })
-  const text = strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
+  const mounted = mount({ state, configForms: { get: () => controller }, credentials })
+  const text = strings(settingsOf(mounted))
 
   const test = text.indexOf('sync.test.action')
   const save = text.indexOf('save')
@@ -5645,10 +5742,10 @@ test('客户端产物：自动推送只有开关那一行，没有间隔那一�
         return { ok: true, value: undefined }
       },
     }
-    const mounted = mount({ state, panel: 'sync', configForms: { get: () => controller }, credentials })
-    const walk = mounted.registrations[0]
+    const mounted = mount({ state, configForms: { get: () => controller }, credentials })
+    const walk = settingsEntry(mounted)
     // 走一遍树才会把 `SyncConfigForm` 的元素记进 `recorded`（见上面那条用例里的说明）。
-    const text = strings(walk.component(walk.registration.inject()))
+    const text = strings(walk.component({ view: 'page', ...walk.registration.inject() }))
     return { mounted, text }
   }
 
@@ -5709,14 +5806,14 @@ test('客户端产物：自动推送是个官方 Switch（不是手写勾选框�
       return { ok: true, value: undefined }
     },
   }
-  const mounted = mount({ state, panel: 'sync', configForms: { get: () => controller }, credentials })
+  const mounted = mount({ state, configForms: { get: () => controller }, credentials })
   /*
    * **先走一遍树**：`SyncConfigForm` 是个函数组件，假 `createElement` 只在它被调用时才把它的元素记进
    * `recorded`；而调用它的是 `strings()` / `elements()` 这种走树的帮手。不走这一趟，`recorded` 里只有
    * 面板外壳，表单里什么都没记下来（这一条差点写成"永远找不到开关"的假绿）。
    */
-  const walk = mounted.registrations[0]
-  strings(walk.component(walk.registration.inject()))
+  const walk = settingsEntry(mounted)
+  strings(walk.component({ view: 'page', ...walk.registration.inject() }))
 
   // ① 是官方 `Switch`（桩给自己盖了 `data-switch`），不是本页手写的 checkbox。
   const switches = mounted.recorded.filter((node) => node.props?.['data-switch'] === 'true')

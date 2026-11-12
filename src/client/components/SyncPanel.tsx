@@ -65,7 +65,6 @@ import { syncJob, type SyncJobSnapshot } from '../logic/syncJob.ts'
 import { projectLabel, sessionLabel, type SessionLabel } from '../logic/planRows.ts'
 import { ProgressBlock } from './ProgressBlock.tsx'
 import { formatBytes, sessionTags, type TagCopy } from './sessionList.tsx'
-import { SyncConfigForm } from './SyncConfigForm.tsx'
 import { SyncDiffDialog, type SyncDiffTarget } from './SyncDiffDialog.tsx'
 import { groupSyncRows, syncProjectOf, syncPullTip, type SyncGroup, type SyncSide } from '../logic/syncGroups.ts'
 import type { PanelShare } from '../types.ts'
@@ -973,10 +972,10 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
          */}
         {syncInfo?.autoPush !== undefined && <p className="dsm-hint">{t('sync.autoPush.enabled')}</p>}
         {/* 主动作在卡片底部的动作行里（见 TransferPanel.tsx 的说明）。这一页没有把「同步」放进头部：
-            下面那张设置卡有十来行字段，按钮在头部就成了"页面第一件事"、在末尾又得翻过整张表单，
-            而它读的是**已保存**的配置——与那张表单没有阅读顺序上的先后。 */}
-        {syncInfo !== null && (
-          <div className="dsm-controls">
+            配置不在这一页（挂在插件页上），读完上面那一句就知道该去哪儿改。 */}
+        <div className="dsm-controls">
+          {syncInfo !== null && (
+            <>
             <Button variant="primary" size="sm" onClick={openSync} disabled={busy !== null || applying}>
               {t('sync.action')}
             </Button>
@@ -1000,24 +999,9 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
             <Button variant="outline" size="sm" onClick={openTidy} disabled={busy !== null || applying || tidyBusy}>
               {t('sync.tidy.action')}
             </Button>
-          </div>
-        )}
-      </div>
-
-      <div className="dsm-card">
-        <div className="dsm-cardHead">
-          <span className="dsm-cardTitle">{t('sync.form.title')}</span>
+            </>
+          )}
         </div>
-        {/* 配置改的是这条通道怎么走，与上面那次同步正交：改完 URL 立刻能同步一次。宿主没有设置接缝时
-            这一块自己说明。 */}
-        <SyncConfigForm
-          t={t}
-          onSaved={() => void reload()}
-          remoteCwds={remoteCwds}
-          // 机器名那一栏的灰字：宿主解析出来的缺省值（没配就是主机名）。摆在这儿比摆回标题上近——
-          // 要改的就在同一行，不必先回标题里认一遍这台机器叫什么。
-          machineDefault={syncInfo === null ? undefined : syncInfo.machineId}
-        />
       </div>
 
       {/* 同步弹窗：计划与「确认」同框（见 ConfirmDialog.tsx 的说明）。 */}

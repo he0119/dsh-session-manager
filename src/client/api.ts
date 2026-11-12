@@ -112,6 +112,20 @@ export interface MetaResponse {
   sync?: SyncInfo | null
 }
 
+/**
+ * 只读一份宿主事实（`GET /meta`）：库在哪、能力位、同步设置。
+ *
+ * 与 `/state` 分开：那一条要扫整库（冷的时候零点几秒到几秒），而设置页只想知道"这台机器叫什么、
+ * 同步配成什么样"，不问清单。
+ *
+ * @returns 宿主事实；连接层失败抛原话。
+ */
+export async function fetchMeta(): Promise<MetaResponse> {
+  const response = await fetch(`${API_PREFIX}/meta`, { headers: { accept: 'application/json' } })
+  if (!response.ok) throw new Error(`读宿主事实失败（HTTP ${response.status}）`)
+  return (await response.json()) as MetaResponse
+}
+
 /** `GET /state` 的响应：`/meta` 那几项 + 这次扫库扫出来的清单。 */
 export interface StateResponse extends MetaResponse {
   /**

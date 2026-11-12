@@ -13,6 +13,44 @@
  */
 
 /**
+ * 侧栏入口那枚图标：一张带三行字的纸（"一串会话"）。
+ *
+ * 尺寸由侧栏给（`size`，与它那一行别的图标同一边长），颜色走 `currentColor`——选中、悬停、深浅两套
+ * 主题都由侧栏那一行自己的文字色决定，这里不需要任何 token。
+ *
+ * @param props.size 侧栏要的方形边长（像素）。
+ */
+export function SessionManagerIcon({ size }: { size: number }) {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      width={size}
+      height={size}
+      aria-hidden="true"
+      focusable="false"
+    >
+      <rect
+        x="3"
+        y="2.5"
+        width="10"
+        height="11"
+        rx="2"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.4"
+      />
+      <path
+        d="M5.6 6.1h4.8M5.6 8.5h4.8M5.6 10.9h2.8"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+      />
+    </svg>
+  )
+}
+
+/**
  * 折叠标记：一个朝下的尖角，收起时在 CSS 里转成朝右（图形只有一份，状态用 `aria-expanded` 表达）。
  *
  * 画在组头右端、紧挨"这组几条"之后：组头左边那一串（勾选框、标记、名字、路径）是"这一组是什么"，
