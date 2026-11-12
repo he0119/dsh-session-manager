@@ -130,6 +130,17 @@ export const CSS = `
 .dsm-statusLib { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* 状态栏里那枚入口（备份与回滚）：官方 Button 的外观，这里只让它不参与收缩。 */
 .dsm-statusAction { flex: none; }
+/*
+ * 状态栏里那一格「同步中 3/7」：它是文字 + 手型，与旁边两枚描边按钮**不是一个样**——它说的是"这一阵的
+ * 动静"，不像「导入…」那样是一个要点的门。所以只给一处布局：不参与收缩、单行、不折行（39px 那一行里
+ * 一折就顶出去）。数字换成等宽数字，进度跳 9/10 → 10/10 时宽度不抖。
+ */
+.dsm-statusJob {
+  flex: none;
+  white-space: nowrap;
+  /* 进度跳 9/10 → 10/10 时宽度不抖：数字等宽。 */
+  font-variant-numeric: tabular-nums;
+}
 .dsm-statusVersion { flex: none; }
 /*
  * 「导入」那一面：一个 640 的窄弹窗，正文是两个字段加一对按钮，纵向排、16px 一道缝。

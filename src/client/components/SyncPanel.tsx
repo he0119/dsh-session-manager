@@ -433,7 +433,20 @@ function describeSyncedAttachments(t: Translate, result: SyncResponse): string {
 /**
  * 同步页。
  */
-export function SyncPanel({ t, state, meta, reload }: Pick<PanelShare, 't' | 'state' | 'meta' | 'reload'>): React.ReactElement {
+export function SyncPanel({
+  t,
+  state,
+  meta,
+  reload,
+  /**
+   * 「别处发起的那一趟」的结论（认领来的）：那个弹窗自己没有完整结果，所以由页面把这一句交过来。
+   *
+   * 有它时这一面顶上摆一句——失败原因、搬了几条原是页面横幅说的话，横幅搬进状态栏之后得有个地方说全。
+   */
+  backgroundLine,
+}: Pick<PanelShare, 't' | 'state' | 'meta' | 'reload'> & {
+  backgroundLine?: { ok: boolean; text: string }
+}): React.ReactElement {
   /** 最近一次计划或结果：映射表的远端候选与弹窗正文都读它（关掉弹窗之后候选还得在）。 */
   const [sync, setSync] = React.useState<SyncResponse | null>(null)
   /**
@@ -952,6 +965,10 @@ export function SyncPanel({ t, state, meta, reload }: Pick<PanelShare, 't' | 'st
         弹窗正文的最后一段——位置与观感都没变，少的是外面那圈边框与重复的标题。
       */}
       <>
+        {/* 别处发起的那一趟的结论：弹窗关着时它在状态栏那一格里只有一句短的，进来说全。 */}
+        {backgroundLine !== undefined && (
+          <p className={backgroundLine.ok ? 'dsm-hint' : 'dsm-error'}>{backgroundLine.text}</p>
+        )}
         {/* 没配置同步时只留一句话：摆一个点了没反应的按钮比不摆更糟（与「宿主没有归档能力」同一条口径）。 */}
         <p className="dsm-hint">
           {!syncKnown

@@ -595,6 +595,12 @@ export const zh = {
   'sync.field.autoPushHint':
     '本机空闲 5 分钟之后，它才把改过的会话推送出去；你一直在写，它就一直不动。只推送、绝不拉取，也不动本机的任何会话。',
   'sync.autoPush.enabled': '自动推送已开：本机空闲 5 分钟才推。',
+  // 状态栏那一格（39px 的单行）：只放得下一句短的，细节留在同步弹窗里。
+  'sync.bar.running': '同步中 {done}/{total}',
+  'sync.bar.runningUnknown': '同步中…',
+  'sync.bar.done': '同步完成 · {count} 条',
+  'sync.bar.donePlain': '同步完成',
+  'sync.bar.failed': '同步失败',
   'sync.autoPush.now': '立即推送一次',
   'sync.autoPush.running': '正在自动推送…',
   'sync.autoPush.done': '自动推送：已推送 {pushed} 条（上传 {bytesOut}）。',
@@ -1197,6 +1203,11 @@ export const en: LocaleDictOf<typeof NS> = {
   'sync.field.autoPushHint':
     'Once this machine has been idle for five minutes, it uploads the sessions you changed; while you keep writing, it stays put. It pushes only and never pulls, and it never touches any session on this machine.',
   'sync.autoPush.enabled': 'Automatic push is on: it uploads once the machine has been idle for five minutes.',
+  'sync.bar.running': 'Syncing {done}/{total}',
+  'sync.bar.runningUnknown': 'Syncing…',
+  'sync.bar.done': 'Synced · {count} sessions',
+  'sync.bar.donePlain': 'Sync finished',
+  'sync.bar.failed': 'Sync failed',
   'sync.autoPush.now': 'Push now',
   'sync.autoPush.running': 'Pushing automatically…',
   'sync.autoPush.done': 'Automatic push: pushed {pushed} ({bytesOut} uploaded).',

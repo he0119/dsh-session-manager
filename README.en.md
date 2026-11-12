@@ -394,9 +394,10 @@ keeps happening, nothing runs.
 **Whatever the remote has newer is never pulled down**: it only pushes, so another machine's edits
 land here only when you press **Sync** yourself and confirm in the dialog. The **Push now** button in
 the card's footer row (next to Sync, shown while the switch is on) runs one round on the spot; it is
-still push-only, so there is no confirm dialog and progress is drawn on the page banner. That banner
-also says whether the round ran and, if it did not, why (off / previous round still running /
-nothing to push), plus a line when it keeps failing.
+still push-only, so there is no confirm dialog and progress lands in the status bar ("Syncing 3/7", then
+"Synced · 2 sessions" or "Sync failed"; open it for the details). The sync panel says whether the
+round ran and, if it did not, why (off / previous round still running / nothing to push), plus a line
+when it keeps failing.
 
 **It cannot cover the cases the event never reaches**: what another machine pushed to the remote,
 sessions written while DSH was not running, and a round whose event was missed. None of those come

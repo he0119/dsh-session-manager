@@ -5287,6 +5287,24 @@ test('组件源码：一处 variant="ghost" 都不许有（官方缺省的那个
   assert.deepEqual(hits, [], `这些地方还在用官方缺省的 ghost（按钮看着像一段文字）：${hits.join('、')}`)
 })
 
+test('组件源码：同步的进度在状态栏那一格里说，列表上方不再摆横幅', () => {
+  // 进度那种横幅有 100px 高，压在列表顶上；而"这次同步跑到第几条"跟列表内容无关，位置该跟「导入…」
+  // 「备份与回滚」同一排（39px 的单行）。这一条钉的是接线：状态栏里有那一格、页面上没有那两块横幅。
+  // 一句短话说什么由 logic/syncJobLabel.ts 决定，那一份的四个分支在 test/sync-job-label.test.ts 里。
+  const manager = readFileSync(join(root, 'src/client/components/ManagerPanel.tsx'), 'utf8')
+  assert.match(manager, /dsm-statusJob/, '状态栏里那一格还在')
+  assert.match(manager, /barLabel = syncBarLabel\(job\)/, '那一格的话由纯函数判')
+  assert.equal(
+    manager.includes('dsm-progressBanner'),
+    false,
+    '列表上方那块进度横幅已经搬进状态栏，别再摆回来',
+  )
+  // 认领来的那趟结论要转给同步那一面（横幅没了，失败原因得有地方说）。
+  assert.match(manager, /backgroundLine/, '结论那一句转给同步那一面')
+  const sync = readFileSync(join(root, 'src/client/components/SyncPanel.tsx'), 'utf8')
+  assert.match(sync, /backgroundLine/, '同步那一面接得住这一句')
+})
+
 test('组件源码：同步那一面是窄弹窗、它的计划弹窗是宽的那一档（表要宽度，话不要）', () => {
   // 为什么扫源码：计划那个弹窗要靠真跑一趟同步才会出现，夹具里种不出 planId 那一套状态。而"谁该宽、
   // 谁该窄"正是那次返工里最容易再倒回去的一条——同步那一面正文只有几句话，铺到 1080 一句话要拉两行半；

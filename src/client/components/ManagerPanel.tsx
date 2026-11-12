@@ -37,6 +37,7 @@ import type { Translate } from '../logic/locales.ts'
 import { syncJob, type SyncJobSnapshot } from '../logic/syncJob.ts'
 import { chooseBundle } from '../logic/fileDrop.ts'
 import { relativeLabel } from '../logic/relativeTime.ts'
+import { syncBarLabel } from '../logic/syncJobLabel.ts'
 import { versionCommit, versionLabel, versionTag } from '../logic/version.ts'
 import { BackupPanel } from './BackupPanel.tsx'
 import { HelpPanel } from './HelpPanel.tsx'
@@ -233,7 +234,20 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
    * 那一行要不要摆：同步弹窗会自己说这一趟的结论（成功说细的那几句、失败说原因），由它说时这里就不
    * 重复；其余情况——弹窗没开，或者这一趟是别处发起、同步那一面拿不到结论——由这里说。
    */
-  const showJobLine = jobLine !== null && (surface !== 'sync' || job.done?.adopted !== undefined)
+  /** 状态栏那一格说什么（纯函数判，见 logic/syncJobLabel.ts）；`null` = 这一格不出现。 */
+  const barLabel = syncBarLabel(job)
+
+  /**
+   * 结论别在状态栏上留着不走：跑完 12 秒后自己收掉。
+   *
+   * 长的那几句（拉了几条、推了几条、失败原因）在悬浮提示与同步那一面里；这一格只负责"刚才那趟成没成"。
+   * 页头那枚同步状态另有一套常驻的说法（多久以前），所以收掉不丢东西。
+   */
+  React.useEffect(() => {
+    if (job.running || job.done === null) return
+    const timer = setTimeout(() => syncJob.dismiss(), 12000)
+    return () => clearTimeout(timer)
+  }, [job.done, job.running])
 
   /**
    * 手动「刷新」：重连一次要一份新清单（宿主会重新扫库，进度照旧画在同一个位置）。
@@ -474,36 +488,6 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
         后台同步：跑着的时候是进度条（关掉窗口、开别的弹窗都还在），跑完留一行结论直到用户关掉它。
         摆在列表**上面**是因为它不属于任何一面——与「读库的进度」同一个位置、同一条理由。
       */}
-      {job.running && (
-        <div className="dsm-banner dsm-progressBanner">
-          {/*
-            标题那一行：一枚 ongoing 的官方状态点 + 一句话。点是宿主对"还在跑"的统一说法（转圈、与别的
-            卡片同相），标题才说明这是**哪一趟**（后台同步）。adopted 那一路没有逐条进度可看，它那句话
-            落到下面去当说明——与"关掉窗口也会继续跑"同一位置，因为两件都是"这一趟怎么跑"的交代。
-          */}
-          <div className="dsm-progressHead">
-            <StateDot state="ongoing" />
-            <span className="dsm-progressTitle">{t('sync.background.running')}</span>
-          </div>
-          {job.progress === null ? null : <ProgressBlock t={t} progress={job.progress} />}
-          <p className="dsm-progressNote">
-            {t(job.adopted ? 'sync.background.adopted' : 'sync.background.hint')}
-          </p>
-        </div>
-      )}
-      {showJobLine && jobLine !== null && (
-        <p className={jobLine.ok ? 'dsm-banner dsm-ok' : 'dsm-banner dsm-error'}>
-          <span>{jobLine.text}</span>
-          <span className="dsm-spacer" />
-          <Button variant="outline" size="sm" onClick={() => setSurface('sync')}>
-            {t('sync.background.open')}
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => syncJob.dismiss()}>
-            {t('close')}
-          </Button>
-        </p>
-      )}
-
       {notice !== undefined && (
         <p className="dsm-banner dsm-ok">
           <span>{notice}</span>
@@ -577,7 +561,14 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
           size="narrow"
           onClose={close}
         >
-          <SyncPanel t={t} state={state} meta={meta} reload={load} />
+          <SyncPanel
+            t={t}
+            state={state}
+            meta={meta}
+            reload={load}
+            // 认领来的那趟结论（别处发起的）：那个弹窗自己没有完整结果，由这里把这一句交给它说。
+            {...(job.done?.adopted === undefined || jobLine === null ? {} : { backgroundLine: jobLine })}
+          />
         </WorkDialog>
       )}
       {surface === 'backup' && (
@@ -622,6 +613,29 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
           库这一级的两件事：导入（往库里放东西，与勾选无关）与备份回滚（三种写操作共同的后悔面，
           不属于其中任何一件）。它们都不跟着动作走，所以跟"库在哪"这一档信息一起待在状态栏。
         */}
+        {/*
+          同步那一趟在状态栏里说一句（39px 的单行）：跑着时是「同步中 3/7」，刚跑完是「同步完成 · 2 条」
+          或「同步失败」，点一下开同步那一面。字节、正在处理的那条会话、失败原因都在那一面里说。
+          为什么不是列表上方那条横幅：进度那一档有 100px 高，压的是列表；而这件事跟列表内容无关，
+          位置该跟「导入…」「备份与回滚」排在同一排。弹窗开着时不摆——那一面正显示着更细的进度。
+        */}
+        {barLabel !== null && surface !== 'sync' && (
+          /*
+            这枚也用官方 `Button`（outline/sm，与旁边那两枚同款）：本页的控制件一律走官方控件库，
+            裸 `<button>` 会带出浏览器自己那套灰边白底。它读起来是"这段的状态"，但点下去是动作（开同步
+            那一面），所以形状与邻居一致比"看起来不像按钮"更要紧。
+          */
+          <Button
+            className="dsm-statusAction dsm-statusJob"
+            variant="outline"
+            size="sm"
+            aria-haspopup="dialog"
+            title={jobLine === null ? undefined : jobLine.text}
+            onClick={() => setSurface('sync')}
+          >
+            {'params' in barLabel ? t(barLabel.key, barLabel.params) : t(barLabel.key)}
+          </Button>
+        )}
         <Button
           className="dsm-statusAction"
           variant="outline"
