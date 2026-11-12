@@ -15,7 +15,7 @@ import { projectKey } from '../src/project-key.ts'
 import { readRegistry, validateRegistry, writeRegistryAtomic } from '../src/registry.ts'
 import { createDavClient } from '../src/dav.ts'
 import type { AttachmentPort, AttachmentRef } from '../src/attachments.ts'
-import { SYNC_NAMESPACE_DIR } from '../src/sync.ts'
+import { SYNC_INDEX_FILE, SYNC_INDEX_UNIT, SYNC_INDEX_VERSION, SYNC_NAMESPACE_DIR } from '../src/sync.ts'
 import type { DavPort } from '../src/dav.ts'
 import type { SyncSettings } from '../src/sync.ts'
 import type { DecodeAll, ProgressEvent, SessionHeader, WorkspaceRegistryState } from '../src/types.ts'
@@ -890,6 +890,7 @@ test('POST /sync：带着预演给的 planId 回来，只重算计划、不再�
       return inner.get(path)
     },
     put: (path, bytes) => inner.put(path, bytes),
+    delete: (path) => inner.delete(path),
     ensure: (collection) => inner.ensure(collection),
     probe: (collection) => inner.probe(collection),
   }
@@ -919,6 +920,85 @@ test('POST /sync：带着预演给的 planId 回来，只重算计划、不再�
     assert.deepEqual(second['plan'], first['plan'], '同一组裁决算出来的计划不变')
   } finally {
     await fixture.close()
+    rmSync(sandbox.base, { recursive: true, force: true })
+  }
+})
+
+test('GET/POST /sync?mode=tidy：只整理自己那一格，预演不删、落地删一次', async () => {
+  const sandbox = makeSandbox('web-tidy')
+  /** 一格索引：一条会话、一份代次指纹。两格写得一模一样，才构成"重复"。 */
+  const cellIndex = (machineId: string): Buffer =>
+    Buffer.from(
+      JSON.stringify({
+        unit: SYNC_INDEX_UNIT,
+        version: SYNC_INDEX_VERSION,
+        machineId,
+        updatedAt: '2026-10-01T00:00:00.000Z',
+        entries: [{ id: 's1', createdAt: 1_700_000_000_000, files: [{ version: 4, bytes: 100, sha256: 'a'.repeat(64) }] }],
+      }),
+    )
+  // 本机这一格叫 robot-z：排序在 alpha 之后，所以"留哪一份"那条判据落到 alpha 上，本机这份可以删。
+  const store = new Map<string, Buffer>([
+    [`${SYNC_NAMESPACE_DIR}/robot-z/${SYNC_INDEX_FILE}`, cellIndex('robot-z')],
+    [`${SYNC_NAMESPACE_DIR}/alpha/${SYNC_INDEX_FILE}`, cellIndex('alpha')],
+  ])
+  const deleted: string[] = []
+  const notFound = (): never => {
+    throw Object.assign(new Error('404'), { status: 404 })
+  }
+  const dav: DavPort = {
+    baseUrl: 'https://dav.example.com/dsh',
+    list: async (collection) =>
+      collection === SYNC_NAMESPACE_DIR
+        ? [
+            { name: 'alpha', kind: 'collection' },
+            { name: 'robot-z', kind: 'collection' },
+          ]
+        : [...store.keys()]
+            .filter((path) => path.startsWith(`${collection}/`))
+            .map((path) => ({ name: path.slice(collection.length + 1), kind: 'file' as const, bytes: 10 })),
+    get: async (path) => store.get(path) ?? notFound(),
+    put: async (path, bytes) => {
+      store.set(path, bytes)
+    },
+    delete: async (path) => {
+      deleted.push(path)
+      store.delete(path)
+    },
+    ensure: async () => {},
+    probe: async () => notFound(),
+  }
+  const settings: SyncSettings = { url: 'https://dav.example.com/dsh', machineId: 'robot-z', mapping: {} }
+  const handlers = createApiHandlers(deps(sandbox, { sync: async () => ({ settings, dav }) }))
+  const call = async (method: 'GET' | 'POST'): Promise<Record<string, unknown>> => {
+    const { res, captured } = fakeRes()
+    await handlers['GET|POST /sync']!(fakeReq(method, `${API_PREFIX}/sync?mode=tidy`), res)
+    return payload(captured)
+  }
+  try {
+    // 预演：报一条（100 字节），一个字节都不删。
+    const plan = await call('GET')
+    assert.equal(plan['mode'], 'plan')
+    assert.deepEqual(plan['tidy'], { removed: 1, orphans: 0, bytes: 100 })
+    assert.deepEqual(plan['problems'], [])
+    assert.deepEqual(deleted, [], '预演不删任何东西')
+
+    // 落地：删掉本机那一格的包，并把它从索引里摘掉。
+    const applied = await call('POST')
+    assert.equal(applied['mode'], 'apply')
+    assert.equal(applied['applied'], true)
+    assert.deepEqual(applied['tidy'], { removed: 1, orphans: 0, bytes: 100 })
+    assert.deepEqual(deleted, [`${SYNC_NAMESPACE_DIR}/robot-z/s1.dshsess`])
+    const written = JSON.parse(String(store.get(`${SYNC_NAMESPACE_DIR}/robot-z/${SYNC_INDEX_FILE}`))) as {
+      entries: unknown[]
+    }
+    assert.deepEqual(written.entries, [])
+    // 别人的格子一个字节都不动。
+    assert.deepEqual(
+      (JSON.parse(String(store.get(`${SYNC_NAMESPACE_DIR}/alpha/${SYNC_INDEX_FILE}`))) as { entries: unknown[] }).entries.length,
+      1,
+    )
+  } finally {
     rmSync(sandbox.base, { recursive: true, force: true })
   }
 })

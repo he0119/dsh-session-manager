@@ -64,6 +64,9 @@ export function progressTextOf(t: Translate, progress: ProgressEvent): string {
       return t('progress.pull', { current, total })
     case 'push':
       return t('progress.push', { current, total })
+    // 整理远端那一段量的是"远端包"，不是会话：与 remove 分开说（见 types.ts 的 `tidy`）。
+    case 'tidy':
+      return t('progress.tidy', { current, total })
     case 'warm':
       return t('progress.warm', { current, total })
     // 这两段没有分母，文案里也就没有"第几条"。

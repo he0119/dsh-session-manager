@@ -48,8 +48,10 @@ import {
   readRemoteLibrary,
   remoteBundlePath,
   runSync,
+  runTidy,
   syncPrepared,
   testSyncConnection,
+  tidySummary,
   type AutoPushOutcome,
   type AutoPushTimer,
   type SyncOutcome,
@@ -1296,10 +1298,13 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
      */
     let planId: string | undefined
     let decisions: Map<string, SyncDecision> | undefined
+    /** 落地这次要不要顺手整理自己那一格（预演那次不算它——整理会删远端的东西）。 */
+    let tidy = false
     if (req.method === 'POST') {
       try {
-        const body = (await readJson(req)) as { planId?: unknown; decisions?: unknown } | null
+        const body = (await readJson(req)) as { planId?: unknown; decisions?: unknown; tidy?: unknown } | null
         if (typeof body?.planId === 'string' && body.planId !== '') planId = body.planId
+        if (body?.tidy === true) tidy = true
         // 裁决表：只认两种值，别的键/值当没写——界面与工具都可能把旧数据递回来。
         if (body?.decisions !== null && typeof body?.decisions === 'object' && !Array.isArray(body.decisions)) {
           const picked = new Map<string, SyncDecision>()
@@ -1394,6 +1399,32 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
      * 409/500）。
      */
     /*
+     * 只整理远端：`?mode=tidy`，GET 只算账（读远端、不写），POST 真删。
+     *
+     * 与落地分开是因为它不碰本机任何东西：不扫库、不拉不推、不写注册表。所以它既不需要预演缓存
+     * （没有 planId），也没有"要不要重启"那一套；只需要跟落地同一道闸——两边都写自己那一格的索引，
+     * 同时跑会互相踩。进度照旧走事件流：一次整理可能几百个包、几十秒。
+     */
+    if (mode === 'tidy') {
+      const tidyApply = req.method === 'POST'
+      if (tidyApply && applying !== null) {
+        sendJson(res, 409, {
+          error: `上一轮同步还在跑（${new Date(applying.startedAt).toLocaleTimeString('zh-CN')} 开始），等它结束再试`,
+        })
+        return
+      }
+      await streamResult(res, async (report) => {
+        const outcome = await runTidy(syncDeps, { apply: tidyApply, onProgress: report })
+        return {
+          mode: tidyApply ? 'apply' : 'plan',
+          remote: { url: runtime.settings.url, machineId: runtime.settings.machineId },
+          ...outcome,
+        }
+      })
+      return
+    }
+
+    /*
      * 一趟落地还没跑完就不再开第二趟。
      *
      * 这道闸挡的是"关掉窗口继续跑"带来的新情况：那趟现在比发起它的页面活得久，用户可能刷新之后、或者
@@ -1447,7 +1478,16 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
           id = `${previewSeq}-${Math.random().toString(36).slice(2, 8)}`
         }
         preview = { id, value: planned, decisionsKey: decisionsKeyOf(decisions) }
-        sendEvent(res, { type: 'result', result: { ...payloadOf(plannedOutcome(planned)), planId: id } })
+        sendEvent(res, {
+          type: 'result',
+          result: {
+            ...payloadOf(plannedOutcome(planned)),
+            planId: id,
+            // 预演里也报一次"整理能删多少"：界面据此决定那个勾选框摆不摆、写多少个包。它只是账目，
+            // 真删的条件与判据在落地那次由 `planTidy()` 按当时的远端索引重算一遍。
+            tidy: tidySummary(planned.remote, runtime.settings.machineId),
+          },
+        })
       } else {
         /*
          * 落地：体里带着预演给的 `planId` 时优先照着那份数据走（见 sync.ts 的 `syncPrepared()`——它会先
@@ -1464,10 +1504,16 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
             ? await syncPrepared(syncDeps, cached, {
                 onProgress,
                 ...(decisions === undefined ? {} : { decisions }),
+                ...(tidy ? { tidy: true } : {}),
               })
             : decisions !== undefined
               ? {
-                  ...(await runSync(syncDeps, { apply: true, onProgress, decisions })),
+                  ...(await runSync(syncDeps, {
+                    apply: true,
+                    onProgress,
+                    decisions,
+                    ...(tidy ? { tidy: true } : {}),
+                  })),
                   ...(planId === undefined
                     ? {}
                     : {
@@ -1478,9 +1524,9 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
                       }),
                 }
               : planId === undefined
-                ? await runSync(syncDeps, { apply: true, onProgress })
+                ? await runSync(syncDeps, { apply: true, onProgress, ...(tidy ? { tidy: true } : {}) })
                 : {
-                    ...(await runSync(syncDeps, { apply: true, onProgress })),
+                    ...(await runSync(syncDeps, { apply: true, onProgress, ...(tidy ? { tidy: true } : {}) })),
                     planSource: {
                       kind: 'recomputed',
                       reason: '预演那份已经不在宿主手里了（宿主重启过，或又一次预演把它换掉了）',

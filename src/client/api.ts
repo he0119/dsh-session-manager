@@ -524,6 +524,27 @@ export interface SyncResponse {
    */
   takesEffect: 'immediate' | 'restart-required'
   error?: string
+  /**
+   * 整理远端那一步的账目。
+   *
+   * 预演那次报"能删几个包"（`count`），落地那次报"实际删了几个"（`removed` + `orphans`）。缺席 = 这次
+   * 没有可整理的，或这台宿主/这一版不认这件事（旧宿主）。
+   */
+  tidy?: SyncTidy
+}
+
+/** 整理远端那一步的账目（见 `SyncResponse.tidy`）。 */
+export type SyncTidy = { count: number; bytes: number } | { removed: number; orphans: number; bytes: number }
+
+/** 只整理远端（`?mode=tidy`）的响应：预演只算账，落地真删。 */
+export interface TidyResponse {
+  mode: 'plan' | 'apply'
+  remote: { url: string; machineId: string }
+  /** 真删了没有（预演那次 false）。 */
+  applied: boolean
+  /** 账目：预演是"将要删的"，落地是"实际删掉的"。 */
+  tidy: { removed: number; orphans: number; bytes: number }
+  problems: string[]
 }
 
 /**
@@ -579,16 +600,39 @@ export async function applySync(
   planId?: string,
   onProgress?: (event: ProgressEvent) => void,
   decisions?: ReadonlyMap<string, SyncDecision>,
+  tidy?: boolean,
 ): Promise<SyncResponse> {
-  const body: { planId?: string; decisions?: Record<string, SyncDecision> } = {}
+  const body: { planId?: string; decisions?: Record<string, SyncDecision>; tidy?: boolean } = {}
   if (planId !== undefined && planId !== '') body.planId = planId
   if (decisions !== undefined && decisions.size > 0) body.decisions = Object.fromEntries(decisions)
+  if (tidy === true) body.tidy = true
   const response = await fetch(`${API_PREFIX}/sync?mode=apply`, {
     method: 'POST',
     headers: { accept: 'text/event-stream', 'content-type': 'application/json' },
     body: JSON.stringify(body),
   })
   return readEventStream<SyncResponse>(response, onProgress, '同步')
+}
+
+/**
+ * 只整理远端：删掉本机这一格里多余的包，不拉取、不推送、不动本机任何会话。
+ *
+ * 预演（GET）只读远端、算一遍账；落地（POST）先重写自己那格的索引，再逐个删包。两条都走 SSE：
+ * 一次整理可能几百个包、几十秒，进度得看得见（段名 `tidy`，一个包一条）。
+ *
+ * @param apply false = 只算账；true = 真删。
+ * @param onProgress 每收到一条进度事件调一次。
+ * @returns 账目与失败；单条失败在 `problems` 里，不是抛错。
+ */
+export async function tidyRemote(
+  apply: boolean,
+  onProgress?: (event: ProgressEvent) => void,
+): Promise<TidyResponse> {
+  const response = await fetch(`${API_PREFIX}/sync?mode=tidy`, {
+    method: apply ? 'POST' : 'GET',
+    headers: { accept: 'text/event-stream' },
+  })
+  return readEventStream<TidyResponse>(response, onProgress, apply ? '整理远端' : '整理远端预演')
 }
 
 /**

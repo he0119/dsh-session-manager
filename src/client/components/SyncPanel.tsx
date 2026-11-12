@@ -38,11 +38,12 @@
 
 import * as React from 'react'
 
-import { Button, StateDot, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, Checkbox, StateDot, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
 
 import {
   fetchSyncPlan,
   runAutoPushNow,
+  tidyRemote,
   type AutoPushLast,
   type AutoPushResponse,
   type AutoPushRoundStatus,
@@ -52,6 +53,7 @@ import {
   type SyncPullEntry,
   type SyncPushEntry,
   type SyncResponse,
+  type TidyResponse,
 } from '../api.ts'
 import { ConfirmDialog } from './ConfirmDialog.tsx'
 import { groupKey } from '../logic/groups.ts'
@@ -441,6 +443,13 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
   /** 最近一次计划或结果：映射表的远端候选与弹窗正文都读它（关掉弹窗之后候选还得在）。 */
   const [sync, setSync] = React.useState<SyncResponse | null>(null)
   /**
+   * 落地这次要不要顺手整理远端（勾选框）。
+   *
+   * 默认不勾：它会删远端的东西（虽然删的只是自己那一格里多余的副本）。挂在这一页而不在 store 里——
+   * 它属于"这一次落地"，弹窗一关就该回到默认。
+   */
+  const [tidy, setTidy] = React.useState(false)
+  /**
    * 同步弹窗开着吗（`plan` = 正在看 / 正在算计划、`apply` = 落地跑着、正文是进度）。
    *
    * `apply` 只是**这一扇窗口还开着**；关掉它不等于停——那一趟的生命周期在 `syncJob` 里（模块级），
@@ -551,6 +560,7 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
   /** 点「同步」：清掉上一轮的裁决，算一份全新的只读计划。 */
   const openSync = (): void => {
     setDecisions({})
+    setTidy(false)
     planWith({})
   }
 
@@ -579,6 +589,7 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
     const started = syncJob.start({
       ...(sync?.mode === 'plan' && sync.planId !== undefined ? { planId: sync.planId } : {}),
       decisions: picked,
+      ...(tidy ? { tidy: true } : {}),
     })
     if (!started) {
       // 已经有一趟在跑（可能就是刷新之前发起、这一页认领来的那一趟）：不再开第二趟，弹窗收起来，
@@ -614,6 +625,12 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
      * 那一趟动的是"早先拉坏了的那条会话"，一条会话都没进出，但那正是用户按下同步想看到的结果。
      */
     const attachments = describeSyncedAttachments(t, result)
+    // 整理远端那一步只在勾了、且真删到东西时才有话说（数字是落地那次实际删掉的）。
+    const tidied = result.tidy !== undefined && 'removed' in result.tidy ? result.tidy : null
+    const tidyLine =
+      tidied !== null && tidied.removed + tidied.orphans > 0
+        ? t('sync.tidy.done', { count: tidied.removed + tidied.orphans, size: formatBytes(tidied.bytes) })
+        : ''
     const sessionsMoved = result.pulled.length > 0 || result.pushed.length > 0
     if (sessionsMoved || attachments !== '') {
       setNotice(
@@ -630,6 +647,7 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
           // 覆盖本机原来那份是这次同步里唯一"本机内容被换掉"的部分，值得单独说一句（旧的进备份了）。
           (result.replaced.length === 0 ? '' : ` ${t('sync.appliedReplaced', { count: result.replaced.length })}`) +
           (attachments === '' ? '' : ` ${attachments}`) +
+          (tidyLine === '' ? '' : ` ${tidyLine}`) +
           // 计划是重算的就得说一句：不然"确认时看到的那几条"和"结果里这几条"对不上时没人解释。
           (result.planSource?.kind === 'recomputed' ? ` ${t('sync.replanned')}` : ''),
       )
@@ -641,6 +659,57 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
      * 之后才跑完的，只有页面这一级一定还在。
      */
   }, [job])
+
+  /**
+   * 点「整理远端」：先只算账（读远端索引、列自己那一格，什么都不写），把数字摆进弹窗，确认了才真删。
+   *
+   * 算账与真删是两次请求：`GET /sync?mode=tidy` 与 `POST` 同一个地址。中间远了会重新读一遍远端——那是
+   * 好事，真删的判据永远是"按下确认那一刻的远端"。
+   */
+  const openTidy = (): void => {
+    setTidyError(undefined)
+    setTidyPlan(undefined)
+    setTidyProgress(undefined)
+    setTidyDialog('plan')
+    setTidyBusy(true)
+    void tidyRemote(false, setTidyProgress).then(
+      (response) => {
+        setTidyPlan(response)
+        setTidyBusy(false)
+      },
+      (cause: unknown) => {
+        setTidyError(cause instanceof Error ? cause.message : String(cause))
+        setTidyBusy(false)
+      },
+    )
+  }
+
+  /** 弹窗里按「开始整理」：真删自己那一格里多余的包。 */
+  const doTidyApply = (): void => {
+    setTidyError(undefined)
+    setTidyProgress(undefined)
+    setTidyDialog('apply')
+    setTidyBusy(true)
+    void tidyRemote(true, setTidyProgress).then(
+      (response) => {
+        setTidyBusy(false)
+        setTidyDialog(undefined)
+        setTidyPlan(response)
+        const total = response.tidy.removed + response.tidy.orphans
+        setNotice(
+          total === 0
+            ? t('sync.tidy.empty')
+            : t('sync.tidy.done', { count: total, size: formatBytes(response.tidy.bytes) }),
+        )
+        setFailures(response.problems)
+      },
+      (cause: unknown) => {
+        // 失败就把弹窗留着：那一句原话要看得见，进度也停在断掉的地方。
+        setTidyError(cause instanceof Error ? cause.message : String(cause))
+        setTidyBusy(false)
+      },
+    )
+  }
 
   /**
    * 点「立即推送一次」：当场跑一轮自动推送（只推不拉）。
@@ -728,6 +797,11 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
     event.phase === 'pull' || event.phase === 'push' ? t('sync.progress.note') : undefined
 
   const syncPlan = sync?.plan ?? null
+  /**
+   * 预演报上来的"整理能删多少"（见 api.ts 的 `SyncTidy`）。缺席 = 没有可整理的，或旧宿主不认这件事——
+   * 那时这一个勾选框根本不摆。
+   */
+  const syncTidy = sync?.tidy !== undefined && 'count' in sync.tidy ? sync.tidy : null
   // 覆盖本机那份也摆在「会拉取」这张表里（它同样是往本机落内容），只是行上挂一颗不同的标签。
   /**
    * 要看差异的那一条（`undefined` = 没打开）。
@@ -736,6 +810,19 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
    * 数据（见 test/client.test.mjs 的 `nulls`），新加一个 null 状态会把后面那些的序号整体挤一位。
    */
   const [diffTarget, setDiffTarget] = React.useState<SyncDiffTarget | undefined>(undefined)
+  /*
+   * 「整理远端」那个弹窗的状态。初始值一律是 `undefined` 而不是 `null`：这一组状态与「同步」那个
+   * 弹窗（`dialog`）是两件事，种测试数据的假钩子按 `useState(null)` 的**出现顺序**喂种子，多几个
+   * null 状态会把别人那份数据挤后一格。写成 undefined 就不参与那套顺序。
+   *
+   * `plan` = 正在算账 / 等确认，`apply` = 正在删，`undefined` = 弹窗没开。
+   */
+  const [tidyDialog, setTidyDialog] = React.useState<'plan' | 'apply'>()
+  /** 预演算出来的账目（还没算出来就是 undefined）。 */
+  const [tidyPlan, setTidyPlan] = React.useState<TidyResponse>()
+  const [tidyBusy, setTidyBusy] = React.useState(false)
+  const [tidyProgress, setTidyProgress] = React.useState<ProgressEvent>()
+  const [tidyError, setTidyError] = React.useState<string>()
   const syncPulls = syncPlan?.pull.filter((entry) => entry.action !== 'skip') ?? []
   const syncPushes = syncPlan?.push.filter((entry) => entry.action !== 'skip') ?? []
   // 空白会话不进那三张表，只在正文里报一句：它们没有内容可同步，逐条列出来只是把表撑长。
@@ -906,6 +993,13 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
                 {autoPushing ? t('sync.autoPush.running') : t('sync.autoPush.now')}
               </Button>
             )}
+            {/*
+              「整理远端」：只删本机这一格里多余的包，不拉不推、不动本机任何会话。与「同步」里那个勾选框
+              是同一件事的两条路——勾选框顺着落地一起做，这一枚不必先跑一趟完整同步。
+            */}
+            <Button variant="outline" size="sm" onClick={openTidy} disabled={busy !== null || applying || tidyBusy}>
+              {t('sync.tidy.action')}
+            </Button>
           </div>
         )}
       </div>
@@ -971,6 +1065,19 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
             )}
             {/* 空白会话不进那三张表：它们的去处只有这一句（没有内容可同步，也没有"为什么不动"可讲）。 */}
             {syncBlank > 0 && <p className="dsm-hint">{t('sync.skippedBlank', { count: syncBlank })}</p>}
+            {/*
+              整理远端：只删本机这一格里多余的包（另一格有一模一样的、或更全的）。默认不勾——它会删
+              远端的东西；勾了之后落地那次才做，预演这一下只是把"能删几个"报出来。
+            */}
+            {syncTidy !== null && syncTidy.count > 0 && (
+              <div className="dsm-options">
+                <Checkbox
+                  checked={tidy}
+                  label={t('sync.tidy.check', { count: syncTidy.count, size: formatBytes(syncTidy.bytes) })}
+                  onChange={setTidy}
+                />
+              </div>
+            )}
             {liveBlocked > 0 && <p className="dsm-warn">{t('sync.liveHint', { count: liveBlocked })}</p>}
             {sync.problems.map((problem) => (
               <p key={problem} className="dsm-warn">
@@ -1120,6 +1227,47 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
             )}
           </div>
         )}
+        </ConfirmDialog>
+      )}
+      {/*
+        整理远端那个弹窗：正文只有一句账目（几个包、多少字节）与一句"只碰自己那一格"，进度在那一段
+        真删的时候才出现。与同步那个弹窗分开：这条路上没有计划表、没有裁决、也不需要 planId。
+      */}
+      {tidyDialog === undefined ? null : (
+        <ConfirmDialog
+          t={t}
+          title={t('sync.tidy.dialogTitle')}
+          confirmLabel={t('sync.tidy.confirm')}
+          busyLabel={t('sync.tidy.running')}
+          busy={tidyBusy && tidyDialog === 'apply'}
+          planning={tidyBusy && tidyDialog === 'plan'}
+          planningDetail={tidyProgress === undefined ? undefined : <ProgressBlock t={t} progress={tidyProgress} />}
+          error={tidyError ?? null}
+          onConfirm={doTidyApply}
+          onCancel={() => {
+            setTidyDialog(undefined)
+            setTidyBusy(false)
+          }}
+        >
+          {tidyDialog === 'apply' &&
+            (tidyProgress === undefined ? (
+              <p className="dsm-hint">{t('progress.waiting')}</p>
+            ) : (
+              <ProgressBlock t={t} progress={tidyProgress} />
+            ))}
+          {tidyDialog === 'plan' && tidyPlan !== undefined && (
+            <>
+              <p>
+                {tidyPlan.tidy.removed + tidyPlan.tidy.orphans === 0
+                  ? t('sync.tidy.empty')
+                  : t('sync.tidy.plan', {
+                      count: tidyPlan.tidy.removed + tidyPlan.tidy.orphans,
+                      size: formatBytes(tidyPlan.tidy.bytes),
+                    })}
+              </p>
+              <p className="dsm-hint">{t('sync.tidy.onlyOwnCell')}</p>
+            </>
+          )}
         </ConfirmDialog>
       )}
       {diffTarget === undefined ? null : (
