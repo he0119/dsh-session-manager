@@ -30,6 +30,7 @@ import { Button, Modal, StateDot, type StateDotState } from '@deepseek-ai/dsh-cl
 
 import { fetchBackups, type MetaResponse, type ProgressEvent, type StateResponse } from '../api.ts'
 import { panelEvents, type PanelSnapshot } from '../logic/panelEvents.ts'
+import { syncChipDot, syncChipNote } from '../logic/syncChipDot.ts'
 import { getNavigationApi } from '../navigation.ts'
 import { PLUGIN_COMMIT, PLUGIN_DIRTY, PLUGIN_VERSION } from '../build.ts'
 import type { DirectoryApi } from '../directory.ts'
@@ -378,19 +379,27 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
     return syncInfo.autoPush !== undefined ? t('sync.chip.auto') : t('place.sync')
   })()
   /**
-   * 状态点：跑着是转圈，失败是红点，其余是空心 idle。
+   * 那枚点该点哪一档：判据全在 `syncChipDot()` 里（纯函数，五种结果各自有测试）。
    *
-   * 成功不点绿：一条"三天前同步成功"的绿点会被读成"现在刚刚同步过"。成没成由那枚按钮上的字说。
+   * 一句话：跑着转圈、失败红点、"跑完了但有几条没做到 / 要重启"黄点、自动推送开着绿点、其余灰点。
    */
-  const syncDot: StateDotState = job.running
-    ? 'ongoing'
-    : job.done !== null
-      ? job.done.ok
-        ? 'idle'
-        : 'error'
-      : syncInfo?.lastRun !== undefined && !syncInfo.lastRun.ok
-        ? 'error'
-        : 'idle'
+  const dotFacts = {
+    running: job.running,
+    done: job.done,
+    lastRun: syncInfo?.lastRun ?? null,
+    autoPush: syncInfo?.autoPush !== undefined,
+  }
+  const syncDot: StateDotState = syncChipDot(dotFacts)
+  /** 这个颜色为什么是这个颜色：这句话挂在按钮的悬浮提示上（点本身是 aria-hidden，读屏读不到颜色）。 */
+  const dotNote = syncChipNote(dotFacts)
+  const chipReason =
+    dotNote !== null
+      ? 'params' in dotNote
+        ? t(dotNote.key, dotNote.params)
+        : t(dotNote.key)
+      : syncDot === 'done'
+        ? t('sync.chip.autoTip')
+        : null
 
   return (
     <section
@@ -434,7 +443,11 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
           variant="outline"
           size="sm"
           icon={<StateDot state={syncDot} />}
-          title={t('sync.chip.tip')}
+          /*
+            悬浮提示补一句"这个颜色是什么意思"：黄点说清几条没做到 / 要重启，绿点说清自动推送开着。
+            颜色读屏读不到、也常被一眼扫过，理由得有一句话接着。
+          */
+          title={[t('sync.chip.tip'), chipReason].filter((line) => line !== null).join(' · ')}
           aria-haspopup="dialog"
           aria-expanded={surface === 'sync'}
           onClick={() => setSurface('sync')}

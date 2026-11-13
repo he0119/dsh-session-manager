@@ -30,6 +30,47 @@ export interface SyncRunRecord {
   pushed: number
   /** 失败原因（宿主或远端的原话）。 */
   error?: string
+  /**
+   * 这一趟**没做到**的事（宿主 `SyncOutcome.problems` 的原话：某条缺映射、某条目标目录不存在……）。
+   *
+   * 失败那趟不写（那一整趟都没成，`error` 已经说了）。留着它是因为"跑完了、但有几条没做到"既不是成功
+   * 也不是失败：页头上那枚状态为它单独留了一档黄点（见 `lastRunView()` 与 `client/logic/syncChipDot.ts`）。
+   */
+  problems?: string[]
+  /**
+   * 这一趟拉进来的改动什么时候生效：`immediate` 立刻，`restart-required` 要重启 DSH。
+   *
+   * 存的是**宿主当时的判断**，不是"现在还算不算"——那要看这台宿主之后有没有重启过，由 `lastRunView()`
+   * 拿进程启动时刻比一次。
+   */
+  takesEffect?: 'immediate' | 'restart-required'
+}
+
+/** 一条记录摊给界面看的样子：原始记录 + 一条**现在**才成立的事实。 */
+export interface SyncRunView extends SyncRunRecord {
+  /**
+   * 这一趟的改动要重启才算数，而这台宿主从那一趟之后还没重启过。
+   *
+   * 为什么不在记录里存这个：记录是死的，重启之后它就过期了；"重启过没有"只有当前的进程知道。
+   */
+  pendingRestart: boolean
+}
+
+/**
+ * 把一条记录读成界面要的那份：补上"还要不要重启"这一条。
+ *
+ * 判据：`takesEffect` 是 restart-required，且那趟是在**这个进程里**跑的（`at` 不早于 `bootedAt`）。
+ * 反过来说，记录比进程还早 = 中间已经重启过，那一趟早就生效了。
+ *
+ * @param run 读回来的记录。
+ * @param bootedAt 这个宿主进程起来的时刻（毫秒）。
+ * @returns 记录本身 + `pendingRestart`。
+ */
+export function lastRunView(run: SyncRunRecord, bootedAt: number): SyncRunView {
+  const at = Date.parse(run.at)
+  const pendingRestart =
+    run.takesEffect === 'restart-required' && Number.isFinite(at) && at >= bootedAt
+  return { ...run, pendingRestart }
 }
 
 /** 这个插件在 `$DSH_HOME` 下那一层。 */
@@ -50,6 +91,12 @@ function isRecord(value: unknown): value is SyncRunRecord {
   if (typeof record['ok'] !== 'boolean') return false
   if (typeof record['pulled'] !== 'number' || typeof record['pushed'] !== 'number') return false
   if (record['error'] !== undefined && typeof record['error'] !== 'string') return false
+  const problems = record['problems']
+  if (problems !== undefined && (!Array.isArray(problems) || problems.some((item) => typeof item !== 'string'))) {
+    return false
+  }
+  const effect = record['takesEffect']
+  if (effect !== undefined && effect !== 'immediate' && effect !== 'restart-required') return false
   // 时间要能被 Date 认出来：界面要拿它算"多久以前"，一个解不出来的字符串只会变成 NaN。
   return Number.isFinite(Date.parse(record['at']))
 }

@@ -169,6 +169,16 @@ export interface SyncRunRecord {
   pushed: number
   /** 失败原因（宿主或远端的原话）。 */
   error?: string
+  /** 跑完了、但有几条没做到（宿主 `SyncOutcome.problems` 的原话）。 */
+  problems?: string[]
+  /** 那一趟的判断：改动立刻生效，还是要重启 DSH。 */
+  takesEffect?: 'immediate' | 'restart-required'
+  /**
+   * 那一趟要求的重启**还没发生**（宿主读记录时按进程启动时刻算好，不落盘）。
+   *
+   * 缺这一项 = 旧宿主没这个能力，按"不用重启"处理。
+   */
+  pendingRestart?: boolean
 }
 
 /** 导入计划里的一条会话。 */

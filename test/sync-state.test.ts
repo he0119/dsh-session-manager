@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 
-import { readSyncRun, syncStatePath, writeSyncRun } from '../src/sync-state.ts'
+import { lastRunView, readSyncRun, syncStatePath, writeSyncRun } from '../src/sync-state.ts'
 
 /**
  * 在一座临时 `$DSH_HOME` 下跑一段，跑完删干净。
@@ -70,4 +70,51 @@ test('写不进去不抛：同步本身不该因为记不下一句话而失败',
     writeFileSync(join(home, 'dsh-session-manager'), 'x')
     assert.doesNotThrow(() => writeSyncRun(home, { at: new Date().toISOString(), ok: true, pulled: 0, pushed: 0 }))
   })
+})
+
+test('跑完了但有几条没做到、以及要重启，这两项也要活过重启', () => {
+  withHome((home) => {
+    const run = {
+      at: '2026-11-12T12:00:00.000Z',
+      ok: true,
+      pulled: 1,
+      pushed: 0,
+      problems: ['缺映射：/home/u/dev/x', '目标目录不存在：/home/u/dev/y'],
+      takesEffect: 'restart-required' as const,
+    }
+    writeSyncRun(home, run)
+    assert.deepEqual(readSyncRun(home), run, '两项都读得回来')
+  })
+})
+
+test('这两项写坏了也当没有（旧的记录里本来就没有它们）', () => {
+  withHome((home) => {
+    mkdirSync(join(home, 'dsh-session-manager'), { recursive: true })
+    const base = { at: '2026-11-12T12:00:00.000Z', ok: true, pulled: 0, pushed: 0 }
+    writeFileSync(syncStatePath(home), JSON.stringify({ sync: { ...base, problems: 'not-an-array' } }))
+    assert.equal(readSyncRun(home), undefined, 'problems 形状不对')
+    writeFileSync(syncStatePath(home), JSON.stringify({ sync: { ...base, problems: [1, 2] } }))
+    assert.equal(readSyncRun(home), undefined, 'problems 里不是字符串')
+    writeFileSync(syncStatePath(home), JSON.stringify({ sync: { ...base, takesEffect: 'later' } }))
+    assert.equal(readSyncRun(home), undefined, 'takesEffect 不在那两个值里')
+    // 旧版本写的记录（没有这两项）照旧能读。
+    writeFileSync(syncStatePath(home), JSON.stringify({ sync: base }))
+    assert.deepEqual(readSyncRun(home), base, '旧记录不因为缺字段而失效')
+  })
+})
+
+test('「还要不要重启」按进程启动时刻算，不落盘', () => {
+  const at = '2026-11-12T12:00:00.000Z'
+  const run = { at, ok: true, pulled: 1, pushed: 0, takesEffect: 'restart-required' as const }
+  const ranAt = Date.parse(at)
+  // 那趟就在这个进程里跑的（进程起得更早）：重启还没发生。
+  assert.equal(lastRunView(run, ranAt - 60_000).pendingRestart, true)
+  // 记录比进程还早 = 中间已经重启过，那一趟早就生效了。
+  assert.equal(lastRunView(run, ranAt + 60_000).pendingRestart, false)
+  // 不需要重启的那趟，任何时候都不算"等重启"。
+  assert.equal(lastRunView({ ...run, takesEffect: 'immediate' }, ranAt - 60_000).pendingRestart, false)
+  // 旧记录没有这一项：按"不用重启"。
+  assert.equal(lastRunView({ at, ok: true, pulled: 0, pushed: 0 }, ranAt - 60_000).pendingRestart, false)
+  // 失败的记录同理（它连 takesEffect 都没有）。
+  assert.equal(lastRunView({ at, ok: false, pulled: 0, pushed: 0, error: 'x' }, ranAt - 60_000).pendingRestart, false)
 })

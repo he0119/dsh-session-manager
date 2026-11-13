@@ -279,6 +279,9 @@
   状态，后两件是 1080 宽的弹窗、导入是 640 的窄弹窗。它取代了上面那条的"页头里放页签"，也取代了
   [备份是独立分页](../.agents/notes/implemented/architecture/2026-10-07-backups-are-their-own-page.md)
   的落点（那份清单还在，位置换成状态栏那枚入口）。
+- [页头那枚同步状态点哪一档颜色](../.agents/notes/implemented/architecture/2026-11-13-sync-chip-dot-colors.md)：
+  五档（转圈 / 红 / 黄 / 绿 / 灰），次序即优先级；黄=跑完了但有几条没做到或要重启，绿=自动推送开着。
+  记录里新增 `problems` / `takesEffect` 两列，"还要不要重启"不落盘、按进程启动时刻算。
 - [同步的计划与落地并进同一个弹窗](../.agents/notes/implemented/architecture/2026-11-13-sync-plan-lives-in-the-same-dialog.md)：
   面板 → 计划 → 落地三段同处一枚弹窗（外壳归 `SyncPanel`），标题 / 宽度 / 底栏跟着段换；有表才是 1080，
   一句话的计划仍是 640。它取代了"同步面板上再叠一层确认框"那个形状。

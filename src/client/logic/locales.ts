@@ -416,6 +416,11 @@ export const zh = {
   'sync.chip.off': '同步未配置',
   'sync.chip.auto': '同步 · 自动推送',
   'sync.chip.tip': '打开同步：远端、计划、差异与确认',
+  // 黄点为什么是黄的：颜色读屏读不到，这两句挂在按钮的悬浮提示上（见 logic/syncChipDot.ts）。
+  'sync.chip.noteProblems': '上次同步有 {count} 条没做到',
+  'sync.chip.noteRestart': '上次同步的改动要重启 DSH 才生效',
+  // 绿点说的是"自动推送开着"（配置事实），这句把它讲明白——否则绿点只靠颜色传达。
+  'sync.chip.autoTip': '自动推送开着：本机空闲 5 分钟就推一次',
   // 页头那枚状态上的"多久以前"：档位由 logic/relativeTime.ts 判，这里只放话。
   'sync.chip.running': '同步中…',
   'sync.chip.justNow': '同步 · 刚刚',
@@ -1029,6 +1034,9 @@ export const en: LocaleDictOf<typeof NS> = {
   'sync.chip.off': 'Sync not configured',
   'sync.chip.auto': 'Sync · auto-push',
   'sync.chip.tip': 'Open sync: remote, plan, diff and confirm',
+  'sync.chip.noteProblems': 'Last sync left {count} item(s) undone',
+  'sync.chip.noteRestart': 'Last sync takes effect after a restart',
+  'sync.chip.autoTip': 'Auto-push is on: pushes once the machine has been idle for 5 minutes',
   'sync.chip.running': 'Syncing…',
   'sync.chip.justNow': 'Sync · just now',
   'sync.chip.failedJustNow': 'Sync · just failed',

@@ -60,7 +60,7 @@ import {
   type SyncDecision,
 } from './sync.ts'
 import { type EffectMode, type PickerKind, type RegistryOps, type ResolvedPaths, type SyncInfo, type SyncRuntime } from './tools.ts'
-import type { SyncRunRecord } from './sync-state.ts'
+import { lastRunView, type SyncRunRecord } from './sync-state.ts'
 import {
   applyImport,
   buildBundle,
@@ -787,10 +787,18 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
    * 界面在它回来之前只能空着页头；而这两件事从 `paths` 与宿主服务上直接就有，没有理由跟着清单一起等。
    * 判据只有一处——`/state` 摊开的就是这一份。
    */
+  /**
+   * 这个宿主进程起来的时刻：只用来判"上次那趟要求的重启有没有发生"（见 `lastRunView()`）。
+   *
+   * 放在这个工厂里而不是模块顶层：一个进程里可能造多份端点（测试就是），每份各记自己的起点，判据才
+   * 说得清"这一份之后有没有重启过"。
+   */
+  const bootedAt = Date.now()
   /** 把"上一次手动同步"拼进同步那一栏：没配置同步时那一栏仍是 null。 */
   const withLastRun = (info: SyncInfo | undefined, lastRun: SyncRunRecord | undefined): MetaFacts['sync'] => {
     if (info === undefined) return null
-    return lastRun === undefined ? { ...info } : { ...info, lastRun }
+    // 记录摊成"现在看到的"那份：多一条 `pendingRestart`，页头那枚黄点读的就是它。
+    return lastRun === undefined ? { ...info } : { ...info, lastRun: lastRunView(lastRun, bootedAt) }
   }
 
   const metaFacts = (): MetaFacts => ({
@@ -1568,6 +1576,9 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
           ok: true,
           pulled: outcome.pulled.length,
           pushed: outcome.pushed.length,
+          // 跑完了但有几条没做到、或者改动要重启才生效：这两种都不是"一切太平"，页头那枚点据此变黄。
+          problems: outcome.problems,
+          takesEffect: effectOf(outcome.effect, takesEffect()),
         })
         applying = null
         panelEmit({ type: 'sync', applying: null, last: lastApply })

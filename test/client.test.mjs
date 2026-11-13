@@ -420,6 +420,11 @@ function loadBundle({ firstNull, panel, arrays, strings, nulls, meta, fetch } = 
          * button 属性透传下去。这里照 props 造一个真的 `<button>`——用例要核的正是"主动作是不是
          * 落在这个容器里""它禁没禁用""文案对不对"，这些全在**入参**上。
          */
+        /*
+         * `StateDot` 的替身：真的那个按 `state` 挑颜色 / 转圈；这里造一个带 `data-state` 的 span——用例
+         * 要核的正是"页头那枚点该点哪一档"，那是**入参**。
+         */
+        StateDot: (props) => react.createElement('span', { 'data-state': props.state, 'aria-hidden': 'true' }),
         Button: (props) => {
           const { variant = 'ghost', size = 'md', icon, className, children, ...rest } = props
           return react.createElement(
@@ -5364,6 +5369,94 @@ test('组件源码：同步的进度在状态栏那一格里说，列表上方�
   assert.match(manager, /backgroundLine/, '结论那一句转给同步那一面')
   const sync = readFileSync(join(root, 'src/client/components/SyncPanel.tsx'), 'utf8')
   assert.match(sync, /backgroundLine/, '同步那一面接得住这一句')
+})
+
+test('客户端产物：页头那枚点按本地事实点颜色（自动推送开着是绿、上次失败是红、有遗留是黄）', { skip }, () => {
+  /*
+   * 四档都在页面上量：判据在 `logic/syncChipDot.ts`（纯函数，`test/sync-chip-dot.test.ts` 把矩阵摆开），
+   * 这条核的是"页面确实把它接上了"——读的是官方 `StateDot` 的 `state` 入参。
+   */
+  const state = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    sessions: [],
+    workspaces: [],
+  }
+  const sync = { url: 'https://dav.example.com/dsh', machineId: 'robot-a', mappings: 1 }
+  /** 种一份 `/meta` 与同步那一栏，读回页面点的那一档。 */
+  const dotOf = (patch) => {
+    const mounted = mount({
+      state,
+      meta: { sessionsRoot: state.sessionsRoot, registryPath: state.registryPath, sync: { ...sync, ...patch } },
+    })
+    strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
+    const dot = mounted.recorded.find((node) => node.type === 'span' && node.props?.['data-state'] !== undefined)
+    return dot?.props?.['data-state']
+  }
+
+  assert.equal(dotOf({}), 'idle', '配了、没跑过、没开自动推送：灰点')
+  assert.equal(dotOf({ autoPush: { enabled: true } }), 'done', '自动推送开着：绿点')
+  assert.equal(
+    dotOf({ lastRun: { at: '2026-11-12T12:00:00.000Z', ok: true, pulled: 0, pushed: 0 } }),
+    'idle',
+    '跑得干净、没开自动推送：灰点',
+  )
+  assert.equal(
+    dotOf({ lastRun: { at: '2026-11-12T12:00:00.000Z', ok: false, pulled: 0, pushed: 0, error: '401' } }),
+    'error',
+    '上次失败：红点（跨进程重启还在）',
+  )
+  assert.equal(
+    dotOf({ lastRun: { at: '2026-11-12T12:00:00.000Z', ok: true, pulled: 0, pushed: 0, problems: ['缺映射：x'] } }),
+    'warning',
+    '跑完了但有一条没做到：黄点',
+  )
+  assert.equal(
+    dotOf({ lastRun: { at: '2026-11-12T12:00:00.000Z', ok: true, pulled: 1, pushed: 0, pendingRestart: true } }),
+    'warning',
+    '改动要重启才生效：黄点',
+  )
+  assert.equal(
+    dotOf({ autoPush: { enabled: true }, lastRun: { at: '2026-11-12T12:00:00.000Z', ok: true, pulled: 0, pushed: 0, pendingRestart: true } }),
+    'warning',
+    '黄点压过绿点：有遗留就不算太平',
+  )
+})
+
+test('客户端产物：黄点的理由写在按钮的悬浮提示上（颜色本身读屏读不到）', { skip }, () => {
+  const state = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    sessions: [],
+    workspaces: [],
+  }
+  const sync = { url: 'https://dav.example.com/dsh', machineId: 'robot-a', mappings: 1 }
+  const chipTitle = (patch) => {
+    const mounted = mount({
+      state,
+      meta: { sessionsRoot: state.sessionsRoot, registryPath: state.registryPath, sync: { ...sync, ...patch } },
+    })
+    strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
+    return mounted.recorded.find((node) => String(node.props?.className ?? '').includes('dsm-headChip'))?.props?.title
+  }
+  assert.equal(chipTitle({}), 'sync.chip.tip', '没事时只有那一句"打开同步…"')
+  assert.equal(
+    chipTitle({ autoPush: { enabled: true } }),
+    'sync.chip.tip · sync.chip.autoTip',
+    '绿点也要说得清：自动推送开着',
+  )
+  assert.equal(
+    chipTitle({ lastRun: { at: '2026-11-12T12:00:00.000Z', ok: true, pulled: 0, pushed: 0, problems: ['a', 'b'] } }),
+    'sync.chip.tip · sync.chip.noteProblems:{"count":2}',
+    '没说到的条数报出来',
+  )
+  assert.equal(
+    chipTitle({ lastRun: { at: '2026-11-12T12:00:00.000Z', ok: true, pulled: 1, pushed: 0, pendingRestart: true } }),
+    'sync.chip.tip · sync.chip.noteRestart',
+    '要重启时说重启',
+  )
 })
 
 test('组件源码：同步那一面自己就是弹窗，宽度跟着那一段走（面板 640、计划 1080）', () => {
