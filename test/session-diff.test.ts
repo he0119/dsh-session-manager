@@ -152,3 +152,36 @@ test('比对：坏行的条数由调用方给（两边的解析问题各算各�
   assert.equal(diff.remote.problems, 2)
   assert.equal(diff.local.problems, 0)
 })
+
+// ---- 跟着会话根搬的路径：这种差异不算内容差异 ----
+
+const dirChange = (seq: number, cwd: string): string => ev(seq, 'working-directory/change', { cwd })
+
+test('比对：只差"跟着会话根搬的路径"时仍算同一份（不算两边各写过）', () => {
+  // 同一条会话：本机这份落地时把工作目录改成了本机路径，远端那份还是另一台机器的写法。
+  const local = [header('/home/me/repo'), ...shared, dirChange(3, '/home/me/repo/.agents/worktrees/fix/x'), user(4, '继续')]
+  const remote = [header('C:\\work\\repo'), ...shared, dirChange(3, 'C:\\work\\repo\\.agents\\worktrees\\fix\\x'), user(4, '继续')]
+  const diff = diffSessionLogs(local, remote, facts())
+  assert.equal(diff.relation, 'same', '只差这条路径时不是分叉')
+  assert.equal(diff.common, 5, '五条事件都算共同前缀')
+  assert.equal(diff.localTail.count, 0)
+  assert.equal(diff.remoteTail.count, 0)
+  // 预览照旧用原文：两个方向都没东西可预览，但 header 的差别照实报出来
+  assert.deepEqual(diff.header, [{ field: 'cwd', local: '/home/me/repo', remote: 'C:\\work\\repo' }])
+})
+
+test('比对：路径"归一后不同"（子路径不一样）仍然算差异', () => {
+  // 同一个会话根下的不同子目录：归一之后还是不一样，是真差异。
+  const local = [header('/home/me/repo'), dirChange(0, '/home/me/repo/.agents/a')]
+  const remote = [header('/home/me/repo'), dirChange(0, '/home/me/repo/.agents/b')]
+  const diff = diffSessionLogs(local, remote, facts())
+  assert.equal(diff.relation, 'forked')
+  assert.equal(diff.common, 0)
+})
+
+test('比对：归一化只对"本会话根底下"的值生效，别处的路径照旧逐字比', () => {
+  const local = [header('/home/me/repo'), dirChange(0, '/home/me/repo/x')]
+  const remote = [header('/home/me/repo'), dirChange(0, '/srv/other/x')]
+  const diff = diffSessionLogs(local, remote, facts())
+  assert.equal(diff.relation, 'forked')
+})

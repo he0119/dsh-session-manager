@@ -3,7 +3,7 @@
 // 其余测试都直接 import `src/*.ts`，因此"源码通过"并不等于"产物能装进宿主"。
 // 本文件加载 **lib/index.js**（`package.json` 的 main），补上这一环：
 //   1) 插件入口的自描述字段与 cordis.patch.yml / inject 一致
-//   2) 能注册出 5 个工具，且 parameters / output.render 形状符合宿主契约
+//   2) 能注册出 6 个工具，且 parameters / output.render 形状符合宿主契约
 //   3) apply 返回单个卸载函数（Cordis 契约），卸载后路由与工具都摘掉
 //   4) apply 那次写盘只有一件：把旧默认备份根搬进插件目录（其余动作都是只读）
 //
@@ -47,6 +47,7 @@ after(() => {
 const EXPECTED = [
   'migrate_sessions',
   'plan_session_migration',
+  'repair_session_paths',
   'rollback_session_migration',
   'sync_sessions',
   'verify_workspace_sessions',
@@ -133,7 +134,7 @@ test('产物冒烟：入口字段符合 cordis 契约', { skip }, async () => {
   assert.equal(typeof mod.apply, 'function', '必须导出 apply')
 })
 
-test('产物冒烟：在真实 Cordis fiber 里注册 5 个工具且 schema 已归一化', { skip }, async () => {
+test('产物冒烟：在真实 Cordis fiber 里注册 6 个工具且 schema 已归一化', { skip }, async () => {
   const { defs, dispose } = await loadPlugin()
 
   assert.deepEqual(
@@ -186,7 +187,7 @@ test('产物冒烟：宿主提供 webServer 时挂上十五条界面路由，卸
 test('产物冒烟：没有 webServer 的 profile 也能起来（只有工具）', { skip }, async () => {
   const { defs, routes, dispose } = await loadPlugin({ withWebServer: false })
 
-  assert.equal(defs.length, 5, '没有 webServer 时工具照旧注册')
+  assert.equal(defs.length, 6, '没有 webServer 时工具照旧注册')
   assert.deepEqual(routes, [], '没有 webServer 时不挂端点')
   await dispose()
 })
@@ -197,7 +198,7 @@ test('产物冒烟：webServer 晚到也能补挂端点（子 fiber 等它）', 
 
   await plugin.provideWebServer()
   assert.equal(plugin.routes.length, 15, 'webServer 到位后端点必须补挂上')
-  assert.equal(plugin.defs.length, 5, '补挂端点不该重复注册工具')
+  assert.equal(plugin.defs.length, 6, '补挂端点不该重复注册工具')
 
   await plugin.dispose()
   assert.equal(plugin.removed.length, 15, '卸载仍然摘干净')

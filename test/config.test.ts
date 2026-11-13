@@ -135,21 +135,22 @@ test('配置 schema：tools 是普通值，不是活引用（注册只在装配�
 })
 
 test('工具开关：缺席与 true 都算开，只有显式 false 算关', () => {
-  const allOn = { plan: true, migrate: true, rollback: true, verify: true, sync: true }
+  const allOn = { plan: true, migrate: true, rollback: true, verify: true, sync: true, repair: true }
   assert.deepEqual(toolsSection(undefined), allOn, '整节不写 = 全开（老配置升级上来行为不变）')
   assert.deepEqual(toolsSection({}), allOn)
   assert.deepEqual(toolsSection({ tools: {} }), allOn, '空的一节也别当成"全关"')
   assert.deepEqual(toolsSection({ tools: { sync: true } }), allOn, '只点了一个 true，其余仍按开算')
 
   const partial = toolsSection({ tools: { plan: false, sync: false } })
-  assert.deepEqual(partial, { plan: false, migrate: true, rollback: true, verify: true, sync: false })
+  assert.deepEqual(partial, { plan: false, migrate: true, rollback: true, verify: true, sync: false, repair: true })
 })
 
-test('工具开关：schema 的五个键与工具名对照表一一对上（加工具时不会漏一个开关）', () => {
+test('工具开关：schema 的六个键与工具名对照表一一对上（加工具时不会漏一个开关）', () => {
   assert.deepEqual(Object.keys(TOOL_BY_SWITCH).sort(), Object.keys(toolsSection(undefined)).sort())
   assert.deepEqual(Object.values(TOOL_BY_SWITCH).sort(), [
     'migrate_sessions',
     'plan_session_migration',
+    'repair_session_paths',
     'rollback_session_migration',
     'sync_sessions',
     'verify_workspace_sessions',

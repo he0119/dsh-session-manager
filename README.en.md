@@ -54,7 +54,7 @@ are `^0.2.0-rc.1`); moving to the 0.3 line means bumping those lines together.
 |---|---|
 | **Session management** in the sidebar | Everyday use: the whole library in one table. Tick sessions to archive, retitle, migrate, export or delete; import and backups sit in the bottom status bar, sync is the state button in the page header |
 | The **Sync** section on the plugin page | Configure WebDAV: remote URL, machine id, username and password, path mapping, auto sync (the page header's **Plugin settings** jumps straight there) |
-| 5 model tools | Just say "move this project's sessions to `~/dev/xxx`" and let the model preview first, apply second |
+| 6 model tools | Just say "move this project's sessions to `~/dev/xxx`" and let the model preview first, apply second |
 
 The page has three parts: the project rail on the left (click a project to see only it, hover a
 project row for a whole-group checkbox, with the filter chips at the bottom of the rail), the flat
@@ -149,7 +149,7 @@ sync:
 |---|---|
 | `sessionsRoot` / `registryPath` / `backupRoot` | Override the default session library, workspace registry and backup directory |
 | `sync.*` | WebDAV sync, see the previous section |
-| `tools.*` | Turn model tools off one by one: `plan` / `migrate` / `rollback` / `verify` / `sync`; only an explicit `false` turns one off |
+| `tools.*` | Turn model tools off one by one: `plan` / `migrate` / `rollback` / `verify` / `sync` / `repair`; only an explicit `false` turns one off |
 
 `sync` takes effect without a restart; `tools` needs a DSH restart, because tools are registered
 when the plugin loads.
@@ -162,6 +162,7 @@ when the plugin loads.
 | `migrate_sessions` | needs `apply:true` | Dry run by default; backs up before writing and verifies afterwards |
 | `rollback_session_migration` | yes | Byte-for-byte rollback from a backup directory |
 | `verify_workspace_sessions` | no | Check that logs and headers inside one project directory agree |
+| `repair_session_paths` | needs `apply:true` | Fix work-directory paths another machine left in a log (dry run by default) |
 | `sync_sessions` | needs `apply:true` | Sync with the remote, dry run by default |
 
 ## Good to know
@@ -171,6 +172,10 @@ when the plugin loads.
   delete and sync-overwrite backups offer **Restore**.
 - Migration rewrites only the header frame of each log and keeps every other byte as is. Session ids
   never change, and the sidebar's title and blank checks are filled in right after the move.
+- **A session imported from another machine (especially another OS)** also gets the paths in its
+  `working-directory/change` events moved onto the local root at landing time. Without that the host
+  cannot read it and the chat page reports a failed history load. Sessions already on disk are fixed
+  with the `repair_session_paths` tool (dry run by default, byte-level backup before it writes).
 - After a delete, the sidebar drops those rows once the host rescans the session library.
 - On a host without a UI (tools-only front end) the page does not appear; the tools still work.
 - The page's bottom right corner names the build: a release shows only the version, a local build

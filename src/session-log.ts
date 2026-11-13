@@ -2,6 +2,14 @@
 //
 // 核心不变式：只改写首行 header 的 cwd 值，其余字节在语义与字节两个层面都不变。
 // 会话正文里出现的旧路径属于**历史事实**（当时确实写在旧目录），保持原样。
+//
+// 唯一的例外是 `working-directory/change`：那一条的最后一个值就是宿主的「当前工作目录」，宿主拿它做
+// 绝对路径校验，另一台机器的写法（`C:\…` 之于 POSIX，`/home/…` 之于 Windows）会让**整条会话读不出来**。
+// 这类值由 [`relocateSessionPaths`] 跟着会话根一起搬；判据与取舍见 .agents/notes 里那篇
+// 「导入时把「当前工作目录」里的旧机器路径一起改写」。其余正文照旧一个字节都不动。
+import { isAbsolute } from 'node:path'
+
+import { rewriteSelfRootLine, SELF_ROOT_PATH_MARKERS } from './self-root-path.ts'
 import type { CompressFrame, DecodeAll, SessionHeader } from './types.ts'
 import { foldTitle } from './session-title.ts'
 import { encodeRawFrame, splitFirstFrame, splitFirstFrameFast, ZSTD_MAGIC } from './zstd-frame.ts'
@@ -503,4 +511,203 @@ function splitFrames(buf: Buffer): Array<{ start: number; end: number }> {
     if (end > start) frames.push({ start, end })
   }
   return frames
+}
+// ---- 跟着会话根一起搬的路径（事件里的「当前工作目录」） ----
+
+/** 改写过程里的一本账：改了什么、哪些改不了（调用方拿它写给用户的报告）。 */
+interface SelfRootLedger {
+  root: string
+  to: string
+  /** 只改"在这台机器上不是绝对路径"的取值。 */
+  foreignOnly: boolean
+  /** 原值 → 新值（按首次出现排序）。 */
+  mappings: Map<string, string>
+  /** 看起来是别的机器写的、但落在源根之外的取值（原样保留，按值去重）。 */
+  unmapped: Set<string>
+  /** 改写了多少条事件。 */
+  rewritten: number
+}
+
+/** 改一段**事件文本**（不含 header 行）里那些跟着会话根搬的路径。 */
+function rewriteSelfRootEvents(chunk: string, ledger: SelfRootLedger): string {
+  if (!SELF_ROOT_PATH_MARKERS.some((marker) => chunk.includes(marker))) return chunk
+  const lines = chunk.split('\n')
+  let changed = false
+  for (const [index, line] of lines.entries()) {
+    if (line === '') continue
+    const rewritten = rewriteSelfRootLine(line, {
+      root: ledger.root,
+      to: ledger.to,
+      // 本机就合法的路径属于历史事实，不动（那也正是 `relocateHeaderCwd` 一直以来的做法）。
+      accept: (value) => !ledger.foreignOnly || !isAbsolute(value),
+    })
+    for (const value of rewritten.unmapped) ledger.unmapped.add(value)
+    if (rewritten.changes.length === 0) continue
+    ledger.rewritten += 1
+    for (const change of rewritten.changes) ledger.mappings.set(change.before, change.after)
+    lines[index] = rewritten.line
+    changed = true
+  }
+  return changed ? lines.join('\n') : chunk
+}
+
+/** 路径改写（跟着会话根搬的那些）的选项。 */
+export interface SelfRootPathOptions {
+  /**
+   * 源会话根（这条会话在**写它的那台机器**上住在哪儿）。
+   *
+   * 缺省取 header 的 cwd：导入落地时 header 还是原样，正是这个用法；修已经落了地的日志时要显式给
+   * （那时 header 已经是这台机器的路径了）。
+   */
+  from?: string
+  /** 目标会话根（这台机器上的路径，也是改写后的 header cwd）。 */
+  to: string
+  /** 只改"在这台机器上不是绝对路径"的取值（缺省 true，见文件头那段取舍）。 */
+  foreignOnly?: boolean
+}
+
+/** 文本形态的路径改写结果。 */
+export interface SelfRootPathRewrite {
+  text: string
+  header: SessionHeader
+  nextHeader: SessionHeader
+  /** 改写了多少条事件。 */
+  rewritten: number
+  /** 实际用掉的映射（原值 → 新值，按首次出现排序）。 */
+  mappings: Array<{ from: string; to: string }>
+  /** 看起来是别的机器写的、但映射不上的取值（原样保留，按值去重）。 */
+  unmapped: string[]
+}
+
+/**
+ * 文本形态的路径改写：header 的 cwd 换成 `to`，事件里那些跟着会话根搬的路径跟着改。
+ *
+ * @throws header 不是合法 header、没有可用的源根、或事件那一行改完之后不属于同一个事件时抛错
+ *   （不产出半成品）。
+ */
+export function relocateSessionPathsText(text: string, options: SelfRootPathOptions): SelfRootPathRewrite {
+  const lines = text.split('\n')
+  const firstLine = lines[0]
+  if (!firstLine || !firstLine.includes('"type":"session"')) {
+    throw new Error('session log first line is not a session header')
+  }
+  let header: SessionHeader
+  try {
+    header = JSON.parse(firstLine) as SessionHeader
+  } catch (error) {
+    throw new Error(
+      `session log header is not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
+    )
+  }
+  const root = options.from ?? header.cwd
+  if (root === undefined) throw new Error(`session ${header.id}: nothing to use as the source root`)
+  if (
+    options.from !== undefined
+    && header.cwd !== undefined
+    && header.cwd !== options.to
+    && header.cwd !== options.from
+  ) {
+    throw new Error(`session ${header.id}: header cwd is ${header.cwd}, expected ${options.from} or ${options.to}`)
+  }
+
+  const ledger: SelfRootLedger = {
+    root,
+    to: options.to,
+    foreignOnly: options.foreignOnly !== false,
+    mappings: new Map(),
+    unmapped: new Set(),
+    rewritten: 0,
+  }
+  // header 那一行走既有那套（"只有 cwd 变"的不变式只留一份实现）。这里不传 `from`：修已经落了地的
+  // 日志时 header 本来就是目标值，而 `from` 在那种场景里指的是**事件**里的源根。
+  const head = relocateHeaderCwdText(firstLine, options.to)
+  const body = rewriteSelfRootEvents(lines.slice(1).join('\n'), ledger)
+  return {
+    text: `${head.text}\n${body}`,
+    header,
+    nextHeader: head.nextHeader,
+    rewritten: ledger.rewritten,
+    mappings: [...ledger.mappings].map(([from, to]) => ({ from, to })),
+    unmapped: [...ledger.unmapped],
+  }
+}
+
+/** 路径改写的选项（帧形态）。 */
+export interface RelocatePathsOptions extends SelfRootPathOptions {
+  decodeAll: DecodeAll
+  /** 帧压缩器；缺省用手写 raw-block 帧（无需依赖）。 */
+  compressFrame?: CompressFrame
+}
+
+/** 路径改写的帧形态结果。 */
+export interface RelocatePathsResult extends SelfRootPathRewrite {
+  /** 新日志字节（`unchanged` 为 true 时与原样相同）。 */
+  buffer: Buffer
+  /** 正文事件行数。 */
+  events: number
+  /** 重压了几帧（没改动的帧逐字节原样保留）。 */
+  frames: number
+  /** 什么都没改动。 */
+  unchanged?: boolean
+}
+
+/**
+ * 帧形态的路径改写：header 的 cwd 与事件里那些跟着会话根搬的路径一起换，产出新日志字节。
+ *
+ * 只重压**改动了的那几帧**，其余帧原样拼接；改完之后整份重新解码，必须逐字节等于"文本形态改写"的
+ * 结果，否则抛错不落盘。
+ *
+ * @throws 首帧不承载 header、任何一帧解不出来、或改写结果与文本形态对不上时抛错（不产出半成品）。
+ */
+export function relocateSessionPaths(buf: Buffer, options: RelocatePathsOptions): RelocatePathsResult {
+  const { decodeAll, compressFrame = encodeRawFrame } = options
+  const text = decodeAll(buf)
+  const events = text.split('\n').slice(1).filter((line) => line !== '').length
+  const whole = relocateSessionPathsText(text, options)
+  if (whole.text === text) {
+    return { ...whole, buffer: buf, events, frames: 0, unchanged: true }
+  }
+
+  const root = options.from ?? whole.header.cwd
+  if (root === undefined) throw new Error(`session ${whole.header.id}: nothing to use as the source root`)
+  const ledger: SelfRootLedger = {
+    root,
+    to: options.to,
+    foreignOnly: options.foreignOnly !== false,
+    mappings: new Map(),
+    unmapped: new Set(),
+    rewritten: 0,
+  }
+  const frames = splitFrames(buf)
+  if (frames.length === 0) throw new Error(`session ${whole.header.id}: no frames to rewrite`)
+  const parts: Buffer[] = []
+  let rewrittenFrames = 0
+  for (const [index, frame] of frames.entries()) {
+    const raw = buf.subarray(frame.start, frame.end)
+    let frameText: string
+    try {
+      frameText = decodeAll(raw)
+    } catch (error) {
+      throw new Error(
+        `session ${whole.header.id}: frame ${index} does not decode: ${error instanceof Error ? error.message : String(error)}`,
+      )
+    }
+    // 首帧只承载 header 一行（宿主自己的写法，也是 `relocateHeaderCwd` 的既有不变式）；其余帧逐行过。
+    // 帧与整份的边界不同，所以账本另开一份：`mappings`/`unmapped` 以整份那份为准，这里只要"这一帧怎么变"。
+    // 两处共用同一行级实现，改写末尾那次整份解码比对就是这条一致性的守卫。
+    const next = index === 0
+      ? relocateHeaderCwdText(frameText, options.to).text
+      : rewriteSelfRootEvents(frameText, ledger)
+    if (next === frameText) {
+      parts.push(raw)
+      continue
+    }
+    parts.push(compressFrame(next))
+    rewrittenFrames++
+  }
+  const buffer = Buffer.concat(parts)
+  if (decodeAll(buffer) !== whole.text) {
+    throw new Error(`session ${whole.header.id}: round-trip mismatch after path rewrite`)
+  }
+  return { ...whole, buffer, events, frames: rewrittenFrames }
 }

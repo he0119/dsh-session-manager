@@ -1,11 +1,11 @@
-# Agent Note: 5 个模型工具各自能在插件配置里关掉
+# Agent Note: 模型工具各自能在插件配置里关掉
 
 Status: implemented
 
 ## Problem
 
-这 5 个工具以前是**无条件注册**的：只要插件装上，模型那份工具清单里就一定有它们。可是"装上这个插件"
-不等于"我这儿 5 个都用得上"：
+这些工具以前是**无条件注册**的：只要插件装上，模型那份工具清单里就一定有它们。可是"装上这个插件"
+不等于"我这儿每个都用得上"：
 
 - 不用 WebDAV 的人，`sync_sessions` 永远只会回一句"没有配置"，却一直占着清单里的一格；
 - `migrate_sessions` / `rollback_session_migration` / `sync_sessions` 三个只要模型决定传
@@ -17,7 +17,7 @@ Status: implemented
 
 ## Decision
 
-插件配置多一节 `tools`，5 个布尔键，一个键对一个工具：
+插件配置多一节 `tools`，一个布尔键对一个工具：
 
 | 键 | 工具 |
 |---|---|
@@ -26,6 +26,7 @@ Status: implemented
 | `rollback` | `rollback_session_migration` |
 | `verify` | `verify_workspace_sessions` |
 | `sync` | `sync_sessions` |
+| `repair` | `repair_session_paths` |
 
 - **判据只有一条：显式写 `false` 才关。** 缺席、写 `true`、整节都不写、或者那一节里只点名了几个键，
   其余一律照旧注册（`toolsSection()` 里就是 `value.x !== false`）。这样手写的老配置升级上来行为不变，
@@ -48,7 +49,7 @@ Status: implemented
 **一个总开关（`tools: false`）。** 最省事，但没法只关有写盘风险的那三个、保留两个只读的——而"只关
 一部分"恰好是这个需求的主场景。
 
-**按风险分两档（只读 / 写盘各一个开关）。** 5 个工具里读 2 个、写 3 个，实际想关的往往是单个工具
+**按风险分两档（只读 / 写盘各一个开关）。** 这些工具里只读的与会写盘的混在一起，实际想关的往往是单个工具
 （比如没配远端就想关 `sync_sessions`），分组还得再解释一层"到底哪几个属于哪一档"，不如一个工具一个键
 直白。
 
@@ -67,8 +68,8 @@ Status: implemented
 - 配置文件多了一节不在设置页上的字段；改完要**重启 DSH** 才生效，README 与新的一节「关掉不用的工具」
   都写清了这一点。
 - `tools` 里写非布尔值（`migrate: 'no'`）在装配时当场抛，不会静默当成"开"混过去。
-- 5 个全关是合法配置：插件照常装配，只是模型那份清单为空；设置页与 HTTP 端点照旧。
-- 加第 6 个工具时，`TOOL_BY_SWITCH`、`ToolsConfigSchema`、`toolsSection()` 三处都要跟着加一个键，
+- 全关是合法配置：插件照常装配，只是模型那份清单为空；设置页与 HTTP 端点照旧。
+- 加新工具时，`TOOL_BY_SWITCH`、`ToolsConfigSchema`、`toolsSection()` 三处都要跟着加一个键，
   `test/config.test.ts` 里"键集与工具名对上"那条会拦住漏加。
 - 反事实（把被测行为改回去，测试必须变红）：把 `when()` 里的开关判断去掉（关掉也注册）、把
   `!== false` 改成 `=== true`（缺席当成关）、把 `tools` 从 `Config` 里摘掉（非布尔值不再当场抛）。

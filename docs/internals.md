@@ -101,7 +101,11 @@
 - [同步配置在页面里就地可改，只有 sync 是活字段](../.agents/notes/implemented/architecture/2026-10-01-sync-config-is-live-in-the-page.md)：
   表单读写 profile 那份配置文档，路径映射按行增删（远端 cwd 那一栏带上次预演见过的候选），三个路径
   字段刻意不做成活的。
-- [5 个模型工具各自能在插件配置里关掉](../.agents/notes/implemented/feature/2026-10-24-tool-switches-in-plugin-config.md)：
+- [落地时把「当前工作目录」里的旧机器路径一起改写](../.agents/notes/implemented/bug-fix/2026-11-13-imported-working-directory-paths.md)：
+  宿主拿 `working-directory/change` 的最后一个值当会话的当前工作目录，并要求它在本机是绝对路径——
+  别的机器（别的系统）的写法会让投影失败、整条会话读不出来。导入落地与 `repair_session_paths` 只改
+  那几行「本机不认」的值，比对时两边归一成占位符，于是"只差这条路径"的两份仍算同一份。
+- [模型工具各自能在插件配置里关掉](../.agents/notes/implemented/feature/2026-10-24-tool-switches-in-plugin-config.md)：
   `tools` 那一节一个键对一个工具，只有显式 `false` 算关；关掉是**不注册**，所以模型那份清单里看不到
   它。不是活字段，改完要重启宿主。
 - [跨机器的项目身份是 git remote](../.agents/notes/implemented/feature/2026-10-01-project-identity-is-the-git-remote.md)：

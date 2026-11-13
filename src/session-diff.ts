@@ -11,11 +11,14 @@
 //    "格式一样但字段顺序不同"这种噪音报成差异。解析只用在**要显示的那几条**上（见 `previewOf()`）。
 // 2. **header 单独算一类差异**。迁移与导入落地时会改写 header 里的 `cwd`（见 session-log.ts 的
 //    `relocateHeaderCwd()`），于是"同一份会话在另一台机器上"常常只有这一行不同——事件一条不差。
-//    这种情形的结论是"两份内容一样、保哪份都一样"，不该跟真分叉混在一起说。
+//    这种情形的结论是"两份内容一样、保哪份都一样"，不该跟真分叉混在一起说。同理，落地时还会把
+//    `working-directory/change` 里那些跟着会话根搬的值一起改（见 self-root-path.ts）：它们写的是
+//    "这条会话落在哪儿"，所以比对前两边都归一成占位符，不算内容差异。
 // 3. **尾巴的三种关系要说清**：一边的尾巴是另一边的逐字节前缀时，那不是分叉，是"同一条又往前写了
 //    几条"（`local-extends` / `remote-extends`）；只有互相都不是前缀才是真分叉（`forked`）。
 //    把前一种报成"分叉"会让人以为两边各写了不同的东西，实际上是同一个延续。
 
+import { rewriteSelfRootLine, SELF_ROOT_PLACEHOLDER } from './self-root-path.ts'
 import { readTranscript, type TranscriptItem, type TranscriptKind } from './transcript.ts'
 
 /** 尾巴上一条预览：够界面认出来"这是哪一条"就行，原文照旧按需另取。 */
@@ -130,10 +133,14 @@ export function diffSessionLogs(
 
   const local = body(localLines)
   const remote = body(remoteLines)
+  // 比的是"与这台机器的路径无关"的那一份（见文件头第 2 条）：`working-directory/change` 里跟着会话根
+  // 搬的值归一成占位符，于是"只差这条路径"的两份仍然算同一份，不会被报成两边各写过。
+  const localKey = selfRootAgnostic(local, headerFacts(localLines[0]).cwd)
+  const remoteKey = selfRootAgnostic(remote, headerFacts(remoteLines[0]).cwd)
 
   // 共同前缀：正文逐行比。header（第 0 行）不参与——它单独算一类差异，原因见文件头第 2 条。
   let common = 0
-  while (common < local.length && common < remote.length && local[common] === remote[common]) common += 1
+  while (common < localKey.length && common < remoteKey.length && localKey[common] === remoteKey[common]) common += 1
 
   const localTail = local.slice(common)
   const remoteTail = remote.slice(common)
@@ -168,6 +175,22 @@ export function diffSessionLogs(
     localHeader: localHeaderFacts,
     remoteHeader: remoteHeaderFacts,
   }
+}
+
+/**
+ * 把"落在本会话根底下的路径"归一成占位符 + 相对位置，只给比对用（尾巴的预览照旧用原文）。
+ *
+ * 认不出的行原样留下：比对读不懂某一行时，最坏结果是两边被判成不一样（保守那一侧），不该让整页挂掉。
+ */
+function selfRootAgnostic(lines: readonly string[], root: string | undefined): string[] {
+  if (root === undefined) return [...lines]
+  return lines.map((line) => {
+    try {
+      return rewriteSelfRootLine(line, { root, to: SELF_ROOT_PLACEHOLDER, accept: () => true }).line
+    } catch {
+      return line
+    }
+  })
 }
 
 /** 日志的正文（去掉 header 与空行）。空行不占事件位，与 `readTranscript()` 同一口径。 */
