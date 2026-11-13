@@ -47,8 +47,7 @@ import { canonicalDir } from './canonical-path.ts'
 import { encodeSegment, sessionDir } from './paths.ts'
 import { reHome, writeRegistryAtomic } from './registry.ts'
 import { foldTitleInFrames } from './session-title.ts'
-import { branchSessionLog } from './session-log.ts'
-import { relocateHeaderCwd, relocateHeaderCwdText } from './session-log.ts'
+import { branchSessionLog, relocateSessionPaths, relocateSessionPathsText } from './session-log.ts'
 import type { DecodeAll, ProgressReporter, RegistryChange, SessionLogFile, WorkspaceRegistryState } from './types.ts'
 
 /** `zlib.gunzip` 的 Promise 版：解压在线程池里，主线程不陪着。 */
@@ -794,10 +793,32 @@ export interface ImportOutcome {
   registryWritten: boolean
 }
 
-/** 按文件的压缩形态改写 header cwd：zstd 帧走保结构的帧改写，明文走同义的行改写。 */
-function rewriteCwd(buf: Buffer, compression: string | null, to: string, decodeAll: DecodeAll): Buffer {
-  if (compression === 'zstd') return relocateHeaderCwd(buf, { to, decodeAll }).buffer
-  return Buffer.from(relocateHeaderCwdText(buf.toString('utf8'), to).text, 'utf8')
+/**
+ * 落地时改写一条日志：header 的 cwd 换成这台机器上的路径，`working-directory/change` 里那些
+ * "在这台机器上不成立"的路径（别的机器/别的系统的写法）跟着会话根一起搬。
+ *
+ * 不搬会怎样：宿主拿那条事件的最后一个值当这条会话的当前工作目录，而它要求本机绝对路径——`C:\…`
+ * 在这台 Linux 上不是，投影因此失败，**整条会话都读不出来**（界面报"历史加载失败"）。
+ * 判据与取舍见 session-log.ts 的 `relocateSessionPaths`，以及 .agents/notes 里那篇同名笔记。
+ *
+ * @param buf 日志字节。
+ * @param compression 压缩形态（`zstd` 走保结构的帧改写，明文走同义的行改写）。
+ * @param entry 计划里的这一条（包里的原 cwd 与落地后的 cwd）。
+ * @param decodeAll 多帧感知解码器。
+ * @returns 改写后的字节；不需要改写时是原样的同一份字节。
+ */
+function rewriteCwd(
+  buf: Buffer,
+  compression: string | null,
+  entry: { fromCwd?: string; toCwd: string },
+  decodeAll: DecodeAll,
+): Buffer {
+  const options = {
+    ...(entry.fromCwd === undefined ? {} : { from: entry.fromCwd }),
+    to: entry.toCwd,
+  }
+  if (compression === 'zstd') return relocateSessionPaths(buf, { ...options, decodeAll }).buffer
+  return Buffer.from(relocateSessionPathsText(buf.toString('utf8'), options).text, 'utf8')
 }
 
 /**
@@ -879,7 +900,14 @@ export function applyImport(
     const rename = options.rename?.get(session.id)
     for (const [fileIndex, file] of session.files.entries()) {
       const raw = entryBytes(bundle, file)
-      let next = entry.toCwd === undefined ? raw : rewriteCwd(raw, file.compression, entry.toCwd, options.decodeAll)
+      let next = entry.toCwd === undefined
+        ? raw
+        : rewriteCwd(
+          raw,
+          file.compression,
+          { toCwd: entry.toCwd, ...(entry.fromCwd === undefined ? {} : { fromCwd: entry.fromCwd }) },
+          options.decodeAll,
+        )
       if (rename !== undefined) {
         // 标记标题只插**最新一代**（读标题只读最新一代）；其余代次只换 id。
         next = branchSessionLog(next, file.compression, {

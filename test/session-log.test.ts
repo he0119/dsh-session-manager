@@ -3,7 +3,14 @@ import test from 'node:test'
 
 import { decompress } from 'fzstd'
 
-import { branchSessionLog, readSessionLog, relocateHeaderCwd, relocateHeaderCwdShallow } from '../src/session-log.ts'
+import {
+  branchSessionLog,
+  readSessionLog,
+  relocateHeaderCwd,
+  relocateHeaderCwdShallow,
+  relocateSessionPaths,
+  relocateSessionPathsText,
+} from '../src/session-log.ts'
 import type { DecodeAll, SessionHeader } from '../src/types.ts'
 import { encodeRawFrame, splitFirstFrameFast } from '../src/zstd-frame.ts'
 
@@ -253,4 +260,135 @@ test('branchSessionLog：没有原标题时标记只留来源那半句', () => {
   assert.equal(marker.time, Date.parse('2026-10-12T21:00:00.000Z'))
   assert.deepEqual(marker.data?.messageSeqs, [], 'v4 的标题事件必须有 messageSeqs 数组')
   assert.deepEqual(marker.data?.source, { kind: 'user' }, '空 messageSeqs 的标题 source 是 user')
+})
+
+// ---- 跟着会话根一起搬的路径（working-directory/change 的 cwd） ----
+//
+// 这一组钉的是"为什么能修好打不开的会话"：别的系统的写法跟着会话根翻译成本机路径，其余字节不动。
+
+const WIN_ROOT = 'C:\\Users\\me\\Work\\repo'
+const POSIX_ROOT = '/home/uy_sun/dev/repo'
+
+/** 造一条"一条事件一帧"的日志，并留下每一帧的原始字节（用来核"没改的帧逐字节不变"）。 */
+function makeFramesLog(header: Partial<SessionHeader>, lines: string[]): { buffer: Buffer; frames: Buffer[] } {
+  const frames = [encodeRawFrame(JSON.stringify(header) + '\n'), ...lines.map((line) => encodeRawFrame(line + '\n'))]
+  return { buffer: Buffer.concat(frames), frames }
+}
+
+const workingDirEvents = [
+  JSON.stringify({ type: 'turn/start', seq: 0, time: 1, data: { turn: 1 } }),
+  JSON.stringify({
+    type: 'working-directory/change',
+    seq: 1,
+    time: 2,
+    data: { cwd: `${WIN_ROOT}\\.agents\\worktrees\\fix\\x` },
+  }),
+  JSON.stringify({ type: 'user/message', seq: 2, time: 3, data: { content: [{ type: 'text', text: `本来在 ${WIN_ROOT}` }] } }),
+  JSON.stringify({ type: 'working-directory/change', seq: 3, time: 4, data: { cwd: WIN_ROOT } }),
+  JSON.stringify({ type: 'turn/end', seq: 4, time: 5, data: { turn: 1, reason: { kind: 'completed' } } }),
+]
+
+test('relocateSessionPaths：working-directory/change 的 cwd 跟着会话根搬（含工作树子路径）', () => {
+  const { buffer, frames } = makeFramesLog({ ...header, cwd: WIN_ROOT }, workingDirEvents)
+  const r = relocateSessionPaths(buffer, { to: POSIX_ROOT, decodeAll })
+
+  assert.equal(r.unchanged, undefined)
+  assert.equal(r.nextHeader.cwd, POSIX_ROOT)
+  assert.equal(r.rewritten, 2, '两条 working-directory/change 各算一次')
+  assert.deepEqual(r.mappings, [
+    { from: `${WIN_ROOT}\\.agents\\worktrees\\fix\\x`, to: '/home/uy_sun/dev/repo/.agents/worktrees/fix/x' },
+    { from: WIN_ROOT, to: POSIX_ROOT },
+  ])
+  assert.deepEqual(r.unmapped, [])
+
+  const lines = decodeAll(r.buffer).split('\n')
+  assert.equal(lines[0] && JSON.parse(lines[0]).cwd, POSIX_ROOT)
+  const workingDirs = lines
+    .filter((line) => line.includes('working-directory/change'))
+    .map((line) => JSON.parse(line).data.cwd)
+  assert.deepEqual(workingDirs, ['/home/uy_sun/dev/repo/.agents/worktrees/fix/x', POSIX_ROOT])
+  // 事件条数与顺序都没变（改动只落在值上）
+  assert.equal(r.events, workingDirEvents.length)
+  // 没改的帧逐字节原样：turn/start、user/message、turn/end 三帧的原始字节在产出里找得到
+  for (const index of [1, 3, 5]) {
+    assert.ok(r.buffer.includes(frames[index] as Buffer), `第 ${index} 帧没有被改，字节必须原样保留`)
+  }
+  // 要重压的只有三帧：header 一帧 + 两条 working-directory/change 各一帧。
+  assert.equal(r.frames, 3)
+})
+
+test('relocateSessionPaths：正文里的旧路径是历史事实，一个字节都不动', () => {
+  const { buffer } = makeFramesLog({ ...header, cwd: WIN_ROOT }, workingDirEvents)
+  const r = relocateSessionPaths(buffer, { to: POSIX_ROOT, decodeAll })
+  const messageLine = decodeAll(r.buffer)
+    .split('\n')
+    .find((line) => line.includes('user/message'))
+  assert.ok(messageLine?.includes(JSON.stringify(WIN_ROOT).slice(1, -1)), '用户消息正文里的旧路径必须原样保留')
+})
+
+test('relocateSessionPaths：本机就合法的路径不动（那属于历史事实）', () => {
+  // 同一台机器上换目录（/home/me/old → /home/me/new）：旧路径在本机照样是绝对路径，宿主读得出来，
+  // 所以它是历史事实，跟着搬的只有"本机不认的"那些（另一台机器/另一种系统的写法）。
+  const events = [
+    JSON.stringify({ type: 'working-directory/change', seq: 0, time: 1, data: { cwd: '/home/me/old/.agents/x' } }),
+    JSON.stringify({ type: 'working-directory/change', seq: 1, time: 2, data: { cwd: '/home/me/old' } }),
+  ]
+  const { buffer } = makeFramesLog({ ...header, cwd: '/home/me/old' }, events)
+  const r = relocateSessionPaths(buffer, { to: '/home/me/new', decodeAll })
+  assert.equal(r.rewritten, 0, '本机合法的路径一条都不该改')
+  assert.equal(r.nextHeader.cwd, '/home/me/new', 'header 照旧换成本机路径')
+  assert.ok(decodeAll(r.buffer).includes('"/home/me/old/.agents/x"'), '事件里的旧路径原样保留')
+})
+
+test('relocateSessionPaths：foreignOnly:false 时连本机合法的路径也跟着搬（留给明确的调用方）', () => {
+  const events = [
+    JSON.stringify({ type: 'working-directory/change', seq: 0, time: 1, data: { cwd: '/home/me/old/.agents/x' } }),
+  ]
+  const { buffer } = makeFramesLog({ ...header, cwd: '/home/me/old' }, events)
+  const r = relocateSessionPaths(buffer, { to: '/home/me/new', decodeAll, foreignOnly: false })
+  assert.equal(r.rewritten, 1)
+  assert.ok(decodeAll(r.buffer).includes('"/home/me/new/.agents/x"'))
+})
+
+test('relocateSessionPaths：映射不上的值原样保留，并记进 unmapped', () => {
+  const events = [
+    JSON.stringify({ type: 'working-directory/change', seq: 0, time: 1, data: { cwd: 'D:\\elsewhere' } }),
+  ]
+  const { buffer } = makeFramesLog({ ...header, cwd: WIN_ROOT }, events)
+  const r = relocateSessionPaths(buffer, { to: POSIX_ROOT, decodeAll })
+  assert.deepEqual(r.unmapped, ['D:\\elsewhere'])
+  assert.equal(r.rewritten, 0)
+  assert.ok(decodeAll(r.buffer).includes('D:\\\\elsewhere'), '映射不上的值原样保留')
+  assert.equal(r.nextHeader.cwd, POSIX_ROOT, 'header 照旧换成目标根')
+})
+
+test('relocateSessionPaths：改完再改一遍是幂等的（unchanged）', () => {
+  const { buffer } = makeFramesLog({ ...header, cwd: WIN_ROOT }, workingDirEvents)
+  const once = relocateSessionPaths(buffer, { to: POSIX_ROOT, decodeAll })
+  const twice = relocateSessionPaths(once.buffer, { to: POSIX_ROOT, decodeAll })
+  assert.equal(twice.unchanged, true)
+  assert.deepEqual(twice.buffer, once.buffer)
+})
+
+test('relocateSessionPathsText：明文（v0）日志走同一条判据', () => {
+  const text = [JSON.stringify({ ...header, cwd: WIN_ROOT }), ...workingDirEvents].join('\n') + '\n'
+  const r = relocateSessionPathsText(text, { to: POSIX_ROOT })
+  assert.equal(r.nextHeader.cwd, POSIX_ROOT)
+  assert.equal(r.rewritten, 2)
+  assert.ok(r.text.includes(`"cwd":"/home/uy_sun/dev/repo"`))
+})
+
+test('relocateSessionPathsText：from 与 header 都对不上时当场抛（防误改）', () => {
+  const text = [JSON.stringify({ ...header, cwd: '/somewhere/else' }), ...workingDirEvents].join('\n') + '\n'
+  assert.throws(() => relocateSessionPathsText(text, { from: WIN_ROOT, to: POSIX_ROOT }), /expected/)
+})
+
+test('relocateSessionPathsText：修已落地的日志（header 已是本机路径）只要给 from 就能改事件', () => {
+  const text = [
+    JSON.stringify({ ...header, cwd: POSIX_ROOT }),
+    JSON.stringify({ type: 'working-directory/change', seq: 0, time: 1, data: { cwd: `${WIN_ROOT}\\.agents\\x` } }),
+  ].join('\n') + '\n'
+  const r = relocateSessionPathsText(text, { from: WIN_ROOT, to: POSIX_ROOT })
+  assert.equal(r.rewritten, 1)
+  assert.ok(r.text.includes('"/home/uy_sun/dev/repo/.agents/x"'))
 })

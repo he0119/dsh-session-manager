@@ -665,3 +665,42 @@ test('读包：v1 的老包（没有 attachments 那一节）照旧读得出来�
   assert.equal(outcome.attachmentWritten, 0)
 })
 
+
+test('导入：别的系统写下的 working-directory/change 跟着落地目录改（不改这条会话就读不出来）', () => {
+  const root = makeRoot('transfer-import-paths')
+  const source = writeSession(root, {
+    id: 'session-w',
+    cwd: FROM_CWD,
+    eventLines: [
+      JSON.stringify({ type: 'working-directory/change', seq: 0, time: 1, data: { cwd: `${FROM_CWD}\\.agents\\worktrees\\fix\\x` } }),
+      JSON.stringify({ type: 'working-directory/change', seq: 1, time: 2, data: { cwd: FROM_CWD } }),
+      JSON.stringify({ type: 'user/message', seq: 2, time: 3, data: { content: [{ type: 'text', text: `本来在 ${FROM_CWD}` }] } }),
+    ],
+  })
+  const bundle = readBundle(buildBundle([source]))
+
+  const targetRoot = makeRoot('transfer-import-paths-target')
+  const registry = emptyRegistry()
+  const plan = planImport(bundle, {
+    root: targetRoot,
+    targetCwd: TO_CWD,
+    registry,
+    now: '2026-09-27T00:00:00.000Z',
+    newId: 'ws-target',
+  })
+  assert.equal(plan.ok, true, plan.problems.join('; '))
+  applyImport(bundle, plan, { root: targetRoot, targetCwd: TO_CWD, registry, decodeAll })
+
+  const written = decodeAll(
+    readFileSync(join(sessionDir(targetRoot, TO_CWD, 'session-w'), 'session.v4.jsonl.zstd')),
+  )
+  const lines = written.split('\n')
+  assert.equal(JSON.parse(lines[0]!).cwd, TO_CWD)
+  // 两条 working-directory/change 都换成落地目录（子路径跟着走，分隔符跟着目标走）
+  assert.deepEqual(
+    lines.filter((line) => line.includes('working-directory/change')).map((line) => JSON.parse(line).data.cwd),
+    [`${TO_CWD}\\.agents\\worktrees\\fix\\x`, TO_CWD],
+  )
+  // 正文里的旧路径照旧是历史事实
+  assert.ok(written.includes(JSON.stringify(FROM_CWD).slice(1, -1)), '用户消息里提到的旧路径要原样保留')
+})

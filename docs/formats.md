@@ -30,7 +30,11 @@
 
 - **header**（首行）：`type: "session"`，带 `id`、`createdAt`、`cwd`，子智能体会话还有
   `origin: "subagent"` 与 `parentSession`。宿主加载时核「目录名 ↔ header 里的 id 与 cwd」，对不上
-  直接失败，所以搬会话改路径时只能改这一行的 `cwd`（正文里的旧路径属于历史事实，保持原样）。
+  直接失败，所以搬会话改路径时这一行的 `cwd` 必须跟着改。正文里的旧路径属于历史事实，保持原样——
+  **唯一的例外**是 `working-directory/change` 的 `data.cwd`：宿主拿它的最后一个值当这条会话的当前
+  工作目录，并要求在本机是绝对路径，别的机器（别的系统）的写法会让整条会话读不出来，所以导入落地与
+  「修日志路径」会把**本机不认的**那些值跟着会话根一起改（见
+  [决策](../.agents/notes/implemented/bug-fix/2026-11-13-imported-working-directory-paths.md)）。
 - **事件**（之后每行一条）：`type`、`seq`、`time`、`data`。常见的有 `user/message`、
   `assistant/message`、`turn/…`、`session/end-seed`。
 - **附件不在日志里**：只有一条内容寻址的引用（`{"attachmentId":"sha256:…"}`），字节在宿主的附件库

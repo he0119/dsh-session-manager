@@ -1,5 +1,5 @@
 // 工具层验证：用**真实的 @deepseek-ai/dsh-tools** 调 defineTool，
-// 确认 5 个工具的定义能通过宿主的参数/输出 schema 归一化，并且真的能跑通。
+// 确认 6 个工具的定义能通过宿主的参数/输出 schema 归一化，并且真的能跑通。
 //
 // defineTool 在注册前就会把 parameters / output.schema 转成 JSON Schema，
 // 形状不对即抛错；execute 又会先按 parameters 校验实参。
@@ -296,17 +296,18 @@ async function run(tool: CapturedTool, args: Record<string, unknown>): Promise<u
   return tool.execute(args, {})
 }
 
-test('工具注册：5 个工具，名称与归一化 schema 符合宿主契约', async () => {
+test('工具注册：6 个工具，名称与归一化 schema 符合宿主契约', async () => {
   const sb = makeSandbox('tools')
   const { defs } = await makeHost({ sessionsRoot: sb.root, registryPath: sb.registryPath, backupRoot: sb.backupRoot })
 
-  assert.equal(defs.length, 5)
+  assert.equal(defs.length, 6)
   const m = byName(defs)
   for (const n of [
     'plan_session_migration',
     'migrate_sessions',
     'rollback_session_migration',
     'verify_workspace_sessions',
+    'repair_session_paths',
     'sync_sessions',
   ]) {
     const d = m.get(n)
@@ -337,16 +338,16 @@ test('工具注册：5 个工具，名称与归一化 schema 符合宿主契约'
 test('工具开关：在配置里关掉一个就不注册它，别的照旧', async () => {
   const sb = makeSandbox('switches')
 
-  // 只关掉唯一会"真搬东西"的那个：其余四个照旧注册，名称一个不少。
+  // 只关掉唯一会"真搬东西"的那个：其余五个照旧注册，名称一个不少。
   const partial = await makeHost({
     sessionsRoot: sb.root,
     registryPath: sb.registryPath,
     backupRoot: sb.backupRoot,
     tools: { migrate: false },
   })
-  assert.equal(partial.defs.length, 4)
+  assert.equal(partial.defs.length, 5)
   assert.equal(byName(partial.defs).has('migrate_sessions'), false, '关掉的工具不该出现在宿主那份清单里')
-  for (const n of ['plan_session_migration', 'rollback_session_migration', 'verify_workspace_sessions', 'sync_sessions']) {
+  for (const n of ['plan_session_migration', 'rollback_session_migration', 'verify_workspace_sessions', 'repair_session_paths', 'sync_sessions']) {
     assert.ok(byName(partial.defs).has(n), `${n} 没被关掉，应当照旧注册`)
   }
 
@@ -355,16 +356,16 @@ test('工具开关：在配置里关掉一个就不注册它，别的照旧', as
     sessionsRoot: sb.root,
     registryPath: sb.registryPath,
     backupRoot: sb.backupRoot,
-    tools: { plan: true, migrate: true, rollback: true, verify: true, sync: true },
+    tools: { plan: true, migrate: true, rollback: true, verify: true, sync: true, repair: true },
   })
-  assert.equal(explicit.defs.length, 5)
+  assert.equal(explicit.defs.length, 6)
 
-  // 五个全关：一个都不注册（插件照常装配，只是没有工具）。
+  // 六个全关：一个都不注册（插件照常装配，只是没有工具）。
   const none = await makeHost({
     sessionsRoot: sb.root,
     registryPath: sb.registryPath,
     backupRoot: sb.backupRoot,
-    tools: { plan: false, migrate: false, rollback: false, verify: false, sync: false },
+    tools: { plan: false, migrate: false, rollback: false, verify: false, sync: false, repair: false },
   })
   assert.deepEqual(none.defs, [])
 
@@ -1518,4 +1519,110 @@ test('附件端口：文件引用要把名字交给宿主（缺名字算不出�
 
   // 宿主没有附件服务：端口整个缺席（调用方据此什么都不说）。
   assert.equal(attachmentPort({ get: () => undefined }), undefined)
+})
+
+// ---- repair_session_paths：别台机器留下的路径 ----
+//
+// 现场：会话已经落在本机（header 是本机路径），但 `working-directory/change` 里还是另一台机器的写法。
+// 夹具按真实库的形状摆：项目目录名 = projectKey(header.cwd)，日志按事件一帧。
+
+/** 造一条"事件里带着另一台机器路径"的会话，返回它的日志路径与原始字节。 */
+function writeForeignPathSession(sb: Sandbox, id: string, cwd: string, foreignRoot: string): { path: string; bytes: Buffer } {
+  const frames = [
+    encodeRawFrame(JSON.stringify({ type: 'session', version: 4, id, createdAt: 1234, cwd, isSeeded: false, delegationDepth: 0 }) + '\n'),
+    encodeRawFrame(
+      JSON.stringify({ type: 'working-directory/change', seq: 0, time: 2000, data: { cwd: `${foreignRoot}\\.agents\\worktrees\\fix\\x` } }) + '\n',
+    ),
+    encodeRawFrame(JSON.stringify({ type: 'working-directory/change', seq: 1, time: 2001, data: { cwd: foreignRoot } }) + '\n'),
+    encodeRawFrame(JSON.stringify({ type: 'user/message', seq: 2, time: 2002, data: { content: [{ type: 'text', text: `本来在 ${foreignRoot}` }] } }) + '\n'),
+  ]
+  const bytes = Buffer.concat(frames)
+  const dir = join(sb.root, projectKey(cwd), id)
+  mkdirSync(dir, { recursive: true })
+  const path = join(dir, 'session.v4.jsonl.zstd')
+  writeFileSync(path, bytes)
+  return { path, bytes }
+}
+
+const FOREIGN_ROOT = 'C:\\Users\\me\\Work\\repo'
+
+test('修日志路径：预演只读，落地把 working-directory 改成本机路径并留备份', async () => {
+  const sb = makeSandbox('repair')
+  const cwd = '/home/me/repo'
+  const written = writeForeignPathSession(sb, 'session-w', cwd, FOREIGN_ROOT)
+  const { defs } = await makeHost({ sessionsRoot: sb.root, registryPath: sb.registryPath, backupRoot: sb.backupRoot })
+  const tool = byName(defs).get('repair_session_paths')
+  assert.ok(tool, '修日志路径的工具要注册出来')
+
+  // 预演：认出来、说清从哪儿搬到哪儿、一个字节都不写
+  const preview = (await run(tool, {})) as {
+    applied: boolean
+    sessions: string[]
+    files: number
+    events: number
+    summary: string
+  }
+  assert.equal(preview.applied, false)
+  assert.deepEqual(preview.sessions, ['session-w'])
+  assert.equal(preview.files, 1)
+  assert.equal(preview.events, 2, '两条 working-directory/change')
+  assert.ok(preview.summary.includes(FOREIGN_ROOT), '要把推出来的源根写进说明')
+  assert.ok(preview.summary.includes(cwd))
+  assert.deepEqual(readFileSync(written.path), written.bytes, '预演不许写盘')
+
+  // 落地：改写 + 备份
+  const applied = (await run(tool, { apply: true })) as {
+    applied: boolean
+    sessions: string[]
+    files: number
+    events: number
+    backupDir?: string
+    problems: string[]
+  }
+  assert.equal(applied.applied, true)
+  assert.deepEqual(applied.sessions, ['session-w'])
+  assert.equal(applied.files, 1)
+  assert.equal(applied.events, 2)
+  assert.deepEqual(applied.problems, [])
+
+  const after = decodeAll(readFileSync(written.path)).split('\n')
+  assert.deepEqual(
+    after.filter((line) => line.includes('working-directory/change')).map((line) => JSON.parse(line).data.cwd),
+    [`${cwd}/.agents/worktrees/fix/x`, cwd],
+  )
+  assert.ok(after.some((line) => line.includes('user/message') && line.includes(JSON.stringify(FOREIGN_ROOT).slice(1, -1))), '正文里的旧路径原样保留')
+
+  // 备份是改写前的逐字节副本，恢复就是把那一份复制回去
+  assert.ok(applied.backupDir, '落地要留备份')
+  const backup = join(applied.backupDir!, 'sessions', projectKey(cwd), 'session-w', 'session.v4.jsonl.zstd')
+  assert.deepEqual(readFileSync(backup), written.bytes, '备份里必须是改写前的原字节')
+  assert.equal(existsSync(join(applied.backupDir!, 'repair.json')), true, '备份目录要说明这是哪一次修了什么')
+
+  rmSync(sb.base, { recursive: true, force: true })
+})
+
+test('修日志路径：宿主持在内存里的会话这次不动，并说明原因', async () => {
+  const sb = makeSandbox('repair-live')
+  const cwd = '/home/me/repo'
+  const written = writeForeignPathSession(sb, 'session-w', cwd, FOREIGN_ROOT)
+  const { defs } = await makeHost(
+    { sessionsRoot: sb.root, registryPath: sb.registryPath, backupRoot: sb.backupRoot },
+    { liveSessions: ['session-w'] },
+  )
+  const tool = byName(defs).get('repair_session_paths')!
+
+  const result = (await run(tool, { apply: true })) as {
+    applied: boolean
+    sessions: string[]
+    skipped: number
+    problems: string[]
+    summary: string
+  }
+  assert.equal(result.applied, false, '一条都不能改时 applied 是 false')
+  assert.deepEqual(result.sessions, [])
+  assert.equal(result.skipped, 1)
+  assert.ok(result.problems.some((problem) => problem.includes('宿主持在内存里')))
+  assert.deepEqual(readFileSync(written.path), written.bytes, '跳过时一个字节都不写')
+
+  rmSync(sb.base, { recursive: true, force: true })
 })

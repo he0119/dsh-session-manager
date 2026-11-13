@@ -96,6 +96,8 @@ export interface ToolsConfig {
   verify?: boolean
   /** `sync_sessions`：与 WebDAV 远端同步（要 `apply: true` 才写盘）。 */
   sync?: boolean
+  /** `repair_session_paths`：修日志里别的机器留下的路径（要 `apply: true` 才写盘）。 */
+  repair?: boolean
 }
 
 /**
@@ -108,6 +110,7 @@ export const TOOL_BY_SWITCH = {
   migrate: 'migrate_sessions',
   rollback: 'rollback_session_migration',
   verify: 'verify_workspace_sessions',
+  repair: 'repair_session_paths',
   sync: 'sync_sessions',
 } as const
 
@@ -269,7 +272,7 @@ export function autoPushSection(sync: SyncConfig | undefined): AutoConfig | unde
  * 这一节不是活字段（见 `ToolsConfigSchema`），宿主交来的就是普通值，所以这里不做 `.get()` 那一套
  *
  * @param config 插件配置（活引用或普通对象，也可以是 undefined）。
- * @returns 5 个开关的当前值；没配这一节就是全开。
+ * @returns 6 个开关的当前值；没配这一节就是全开。
  */
 export function toolsSection(config: PluginConfigInput | undefined): ToolSwitches {
   const raw = config?.tools
@@ -280,5 +283,6 @@ export function toolsSection(config: PluginConfigInput | undefined): ToolSwitche
     rollback: value.rollback !== false,
     verify: value.verify !== false,
     sync: value.sync !== false,
+    repair: value.repair !== false,
   }
 }
