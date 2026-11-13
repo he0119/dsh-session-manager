@@ -39,6 +39,7 @@ import {
   fetchSyncPlan,
   runAutoPushNow,
   tidyRemote,
+  type AutoMode,
   type AutoPushLast,
   type AutoPushResponse,
   type AutoPushRoundStatus,
@@ -371,6 +372,8 @@ function SessionCell({
 type AutoPushSentenceSource = Pick<AutoPushResponse, 'ran' | 'skip' | 'bytesOut' | 'attachmentOut'> & {
   pushed?: readonly unknown[]
   pushedCount?: number
+  pulled?: readonly unknown[]
+  pulledCount?: number
 }
 
 /**
@@ -381,17 +384,33 @@ type AutoPushSentenceSource = Pick<AutoPushResponse, 'ran' | 'skip' | 'bytesOut'
  * 「没跑」那一句，不编一个原因：界面比宿主旧时说的是"没跑，但宿主没说清为什么"，而不是猜一个。
  */
 
-function autoPushSentence(t: Translate, response: AutoPushSentenceSource): string {
+function autoPushSentence(t: Translate, response: AutoPushSentenceSource, mode: AutoMode = 'push'): string {
+  /*
+   * 句子按模式分两套：只推那一档说"推了几条"，双向那一档要说"拉了几条、推了几条"，还要说"没有要对齐
+   * 的"——同一句话套在两档上会有一半是假话（推送说"拉取 0 条"、双向说"只推送、绝不拉取"）。
+   */
+  const bidirectional = mode === 'sync'
   if (response.ran !== true) {
     // 认得出的码才挑句子；认不出的（宿主比界面新）整条退回"没说清原因"，不编一个。
     const known = (AUTO_PUSH_SKIP_CODES as readonly string[]).includes(response.skip ?? '')
+    const skipKey =
+      bidirectional && response.skip === 'idle' ? 'sync.autoPush.skip.idleSync' : `sync.autoPush.skip.${response.skip}`
     const reason = known && response.skip !== undefined
-      ? t(`sync.autoPush.skip.${response.skip}` as SessionManagerKey)
+      ? t(skipKey as SessionManagerKey)
       : t('sync.autoPush.noReason')
-    return t('sync.autoPush.skipped', { reason })
+    return t(bidirectional ? 'sync.autoSync.skipped' : 'sync.autoPush.skipped', { reason })
   }
   // 手点那一次给的是整份结果，长连接推来的上一轮只给计数（见 `AutoPushLast`）。
   const pushed = response.pushedCount ?? response.pushed?.length ?? 0
+  const pulled = response.pulledCount ?? response.pulled?.length ?? 0
+  if (bidirectional) {
+    if (pushed === 0 && pulled === 0) return t('sync.autoSync.nothing')
+    return t('sync.autoSync.done', {
+      pulled,
+      pushed,
+      bytesOut: formatBytes(response.bytesOut ?? 0),
+    })
+  }
   if (pushed === 0) return t('sync.autoPush.nothing')
   const uploaded = response.attachmentOut?.uploaded ?? 0
   return (
@@ -533,6 +552,8 @@ export function SyncPanel({
   const facts = state ?? meta
   const syncInfo = facts?.sync ?? null
   const syncKnown = facts !== undefined
+  /** 自动那一档：`off` / `push` / `sync`。句子、按钮名与那句"已开"都跟着它换。 */
+  const autoMode: AutoMode = syncInfo?.autoPush?.mode ?? 'off'
 
   /**
    * 点「同步」：开弹窗并算一份只读计划（`GET /sync` 只读远端，什么都不写）。
@@ -740,7 +761,7 @@ export function SyncPanel({
       (response) => {
         setAutoPushing(false)
         setAutoProgress(null)
-        setNotice(autoPushSentence(t, response))
+        setNotice(autoPushSentence(t, response, autoMode))
         setFailures(response.problems ?? [])
         /*
          * 宿主说"上一轮还在跑"（`skip: 'busy'`）：那一轮跑到哪不用这里去问——面板那条连接已经把它的
@@ -782,7 +803,7 @@ export function SyncPanel({
         setAutoProgress(null)
         // 只给"确实看着它跑完"的那一轮说结论：几分钟前跑过的那一轮不该在进页面时被重新念一遍。
         if (status.last === null || startedAt === null || (status.last.startedAt ?? 0) < startedAt) return
-        setNotice(autoPushSentence(t, status.last))
+        setNotice(autoPushSentence(t, status.last, autoMode))
         setFailures(status.last.problems)
         return
       }
@@ -1020,7 +1041,9 @@ export function SyncPanel({
           {/* 与「后台同步」那张同一个头：状态点 + 这是哪一趟（自动推送）。 */}
           <div className="dsm-progressHead">
             <StateDot state="ongoing" />
-            <span className="dsm-progressTitle">{t('sync.autoPush.running')}</span>
+            <span className="dsm-progressTitle">
+              {t(autoMode === 'sync' ? 'sync.autoSync.running' : 'sync.autoPush.running')}
+            </span>
           </div>
           {autoProgress === null ? null : <ProgressBlock t={t} progress={autoProgress} note={syncNote(autoProgress)} />}
         </div>
@@ -1046,7 +1069,9 @@ export function SyncPanel({
          * 判据取自宿主给的 `syncInfo.autoPush`（没有这个字段 = 没开），页面不自己从配置表单那个开关推：
          * 那张表单画的是**草稿**，而这一句要说的是**现在生效的**那份配置。
          */}
-        {syncInfo?.autoPush !== undefined && <p className="dsm-hint">{t('sync.autoPush.enabled')}</p>}
+        {syncInfo?.autoPush !== undefined && (
+          <p className="dsm-hint">{t(autoMode === 'sync' ? 'sync.autoSync.enabled' : 'sync.autoPush.enabled')}</p>
+        )}
         {/* 这里只有工具：主动作「同步」在**底栏**（与导入、删除、迁移同一处）。
             这一页没有把入口放进页头：配置不在这一页（挂在插件页上），读完上面那一句就知道该去哪儿改。 */}
         <div className="dsm-controls">
@@ -1062,7 +1087,9 @@ export function SyncPanel({
              */}
             {syncInfo.autoPush !== undefined && (
               <Button variant="outline" size="sm" onClick={doAutoPush} disabled={autoPushing}>
-                {autoPushing ? t('sync.autoPush.running') : t('sync.autoPush.now')}
+                {autoPushing
+                  ? t(autoMode === 'sync' ? 'sync.autoSync.running' : 'sync.autoPush.running')
+                  : t(autoMode === 'sync' ? 'sync.autoSync.now' : 'sync.autoPush.now')}
               </Button>
             )}
             {/*

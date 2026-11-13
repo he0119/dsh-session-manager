@@ -388,6 +388,7 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
     done: job.done,
     lastRun: syncInfo?.lastRun ?? null,
     autoPush: syncInfo?.autoPush !== undefined,
+    autoPushSync: syncInfo?.autoPush?.mode === 'sync',
   }
   const syncDot: StateDotState = syncChipDot(dotFacts)
   /** 这个颜色为什么是这个颜色：这句话挂在按钮的悬浮提示上（点本身是 aria-hidden，读屏读不到颜色）。 */
@@ -405,7 +406,7 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
         ? t(dotNote.key, dotNote.params)
         : t(dotNote.key)
       : syncDot === 'done'
-        ? t('sync.chip.autoTip')
+        ? t(dotFacts.autoPushSync === true ? 'sync.chip.autoSyncTip' : 'sync.chip.autoTip')
         : null
 
   return (

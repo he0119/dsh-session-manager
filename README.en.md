@@ -391,8 +391,21 @@ of seconds and uploads tens of megabytes, which is a visible stall if it lands b
 messages. It still does not run on a clock — there is no "look every so often": as long as something
 keeps happening, nothing runs.
 
-**Whatever the remote has newer is never pulled down**: it only pushes, so another machine's edits
-land here only when you press **Sync** yourself and confirm in the dialog. The **Push now** button in
+**Whatever the remote has newer is never pulled down** (in this mode): it only pushes, so another
+machine's edits land here only when you press **Sync** yourself and confirm in the dialog — or when you
+pick the two-way option in the **Automatic sync** row below.
+
+Those three are **one row with three choices** in the form (**Automatic sync**: off / push only / two-way),
+not two switches. Pick two-way and the background round becomes a full one: it pulls what is missing, pushes
+what is new, and tidies its own cell on the way out (only duplicate or superseded bundles; orphan bundles
+stay). One difference matters: **it may replace a local copy** — when the remote has a newer version, the
+local one is backed up first and then replaced, and the old copy sits in **Backups and rollback** where you
+can restore it. Sessions open on this machine are skipped.
+
+```yaml
+sync:
+  autoSync: true                            # two-way sync + tidy its own cell; off by default
+``` The **Push now** button in
 the card's footer row (next to Sync, shown while the switch is on) runs one round on the spot; it is
 still push-only, so there is no confirm dialog and progress lands in the status bar ("Syncing 3/7", then
 "Synced · 2 sessions" or "Sync failed"; open it for the details). The sync panel says whether the

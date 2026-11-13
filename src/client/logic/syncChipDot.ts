@@ -42,8 +42,10 @@ export interface SyncChipFacts {
       }
     | null
     | undefined
-  /** 自动推送开着（宿主给了那个字段就是开着）。 */
+  /** 自动开着（宿主给了那个字段就是开着）。 */
   autoPush: boolean
+  /** 开着的那一档是**双向**（`sync`），不是只推。缺省 = 只推。 */
+  autoPushSync?: boolean
 }
 
 /** 那一趟有没有留下要人看的东西。 */
@@ -89,6 +91,7 @@ export type SyncChipDotTitle =
   | { key: 'sync.chip.dot.problems'; params: { count: number } }
   | { key: 'sync.chip.dot.restart' }
   | { key: 'sync.chip.dot.auto' }
+  | { key: 'sync.chip.dot.autoSync' }
   | { key: 'sync.chip.dot.idle' }
 
 /**
@@ -119,7 +122,10 @@ export function syncChipDotTitle(facts: SyncChipFacts): SyncChipDotTitle {
     if (problems !== undefined && problems.length > 0) return { key: 'sync.chip.dot.problems', params: { count: problems.length } }
     return { key: 'sync.chip.dot.restart' }
   }
-  if (state === 'done') return { key: 'sync.chip.dot.auto' }
+  if (state === 'done') {
+    // 绿点说的"自动"有两档：只推、双向。两句不同——双向会动本机，用户该知道。
+    return facts.autoPushSync === true ? { key: 'sync.chip.dot.autoSync' } : { key: 'sync.chip.dot.auto' }
+  }
   return { key: 'sync.chip.dot.idle' }
 }
 

@@ -279,6 +279,9 @@
   状态，后两件是 1080 宽的弹窗、导入是 640 的窄弹窗。它取代了上面那条的"页头里放页签"，也取代了
   [备份是独立分页](../.agents/notes/implemented/architecture/2026-10-07-backups-are-their-own-page.md)
   的落点（那份清单还在，位置换成状态栏那枚入口）。
+- [后台那一轮可以跑双向](../.agents/notes/implemented/feature/2026-11-13-auto-sync-runs-both-ways.md)：
+  自动那一档从开 / 关变成三档（关 / 只推 / 双向 + 整理）；强的那档赢；双向允许覆盖本机（先备份、开着的
+  跳过），自动整理只删重复与被取代的包、孤儿包留着。它给「只推」那篇加了边界。
 - [页头那枚同步状态点哪一档颜色](../.agents/notes/implemented/architecture/2026-11-13-sync-chip-dot-colors.md)：
   五档（转圈 / 红 / 黄 / 绿 / 灰），次序即优先级；黄=跑完了但有几条没做到或要重启，绿=自动推送开着。
   记录里新增 `problems` / `takesEffect` 两列，"还要不要重启"不落盘、按进程启动时刻算。

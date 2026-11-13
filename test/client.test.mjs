@@ -910,8 +910,16 @@ test('客户端产物：页面上没有页签，四件事各是一处入口', { 
   const text = strings(tree)
   const tabs = elementsOf(tree).filter((node) => node.props?.role === 'tablist')
   assert.equal(tabs.length, 0, '页签整层删掉了：不再有 role=tablist，也没有 aria-selected 那一排')
-  // 来源是那份官方 `SegmentedControl`：产物里不该再 require 它。
-  assert.equal(code.includes('SegmentedControl'), false, '客户端产物不再引用官方分段控件')
+  /*
+   * 页签那一层用的是官方 `SegmentedControl`（`role="tablist"` + `aria-selected`），所以这里核的是
+   * **页面上**那套东西不见了。整份产物里不能完全不提它：设置表单里"自动那一档"的三选一正是同一个
+   * 原语，那是表单控件、不是页签——判据落在页面骨架那几个文件上。
+   */
+  const pageFiles = ['ManagerPanel.tsx', 'SyncPanel.tsx', 'ManagePanel.tsx']
+  for (const name of pageFiles) {
+    const source = readFileSync(join(root, 'src/client/components', name), 'utf8')
+    assert.equal(source.includes('SegmentedControl'), false, `${name} 里不该再出现分段控件`)
+  }
   // 四处入口：动作行上的导出、状态栏上的导入与备份、页头上的同步。
   assert.ok(text.includes('export.action'), '动作行里有「导出所选」')
   assert.ok(text.includes('import.entry'), '状态栏里有「导入…」')
@@ -5371,6 +5379,49 @@ test('组件源码：同步的进度在状态栏那一格里说，列表上方�
   assert.match(sync, /backgroundLine/, '同步那一面接得住这一句')
 })
 
+test('客户端产物：自动同步开着时，同步那一面与页头那枚点都改说"双向"', { skip }, () => {
+  /*
+   * 同一段代码按 `mode` 换句子：只推说"推了几条"，双向要说"拉几条、推几条"，那枚手动入口也从「立即
+   * 推送一次」变成「立即同步一次」——不然用户看到的是"按钮叫推送，跑的是双向"。
+   */
+  const state = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    sync: { url: 'https://dav.example.com/dsh', machineId: 'robot-a', mappings: 1 },
+    sessions: [],
+    workspaces: [],
+  }
+  const withMode = (mode) => {
+    // 两处都给：面板的 `syncInfo` 取的是 `state ?? meta`，只种 `meta` 会被 `state` 盖过去。
+    const sync = { ...state.sync, autoPush: { enabled: true, mode } }
+    const mounted = mount({
+      state: { ...state, sync },
+      meta: { sessionsRoot: state.sessionsRoot, registryPath: state.registryPath, sync },
+      panel: 'sync',
+    })
+    const text = strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
+    const labels = mounted.recorded.filter((node) => node.type === 'button').map((node) => node.props?.children)
+    const dot = mounted.recorded.find((node) => node.type === 'span' && node.props?.['data-state'] !== undefined)
+    const slot = mounted.recorded.find((node) => String(node.props?.className ?? '').includes('dsm-dotSlot'))
+    return { text, labels, dot, slot }
+  }
+
+  const push = withMode('push')
+  assert.ok(push.text.includes('sync.autoPush.enabled'), '只推那一档说"自动推送已开"')
+  assert.ok(push.labels.includes('sync.autoPush.now'), '那一枚叫「立即推送一次」')
+  assert.equal(push.dot?.props?.['data-state'], 'done', '开着就是绿点')
+  assert.equal(push.slot?.props?.title, 'sync.chip.dot.auto', '点说的是自动推送')
+
+  const both = withMode('sync')
+  assert.ok(both.text.includes('sync.autoSync.enabled'), '双向那一档说"自动同步已开"')
+  assert.equal(both.text.includes('sync.autoPush.enabled'), false, '两句话不并存')
+  assert.ok(both.labels.includes('sync.autoSync.now'), '那一枚改叫「立即同步一次」')
+  assert.equal(both.labels.includes('sync.autoPush.now'), false, '旧那名不再出现')
+  assert.equal(both.dot?.props?.['data-state'], 'done', '双向开着同样是绿点')
+  assert.equal(both.slot?.props?.title, 'sync.chip.dot.autoSync', '点说的是自动同步（它会动本机，用户该知道）')
+})
+
 test('客户端产物：页头那枚点按本地事实点颜色（自动推送开着是绿、上次失败是红、有遗留是黄）', { skip }, () => {
   /*
    * 四档都在页面上量：判据在 `logic/syncChipDot.ts`（纯函数，`test/sync-chip-dot.test.ts` 把矩阵摆开），
@@ -5630,16 +5681,16 @@ test('客户端产物：同步设置表单的字段顺序——自动推送排�
   const timeout = at('sync.field.timeout')
   const user = at('sync.field.user')
   const mapping = at('sync.field.mapping')
-  const autoPush = at('sync.field.autoPush')
+  const auto = at('sync.field.auto')
 
   // 前三组：怎么连 → 怎么认证 → 落地到哪。
   assert.ok(url < machine, 'URL 在最上面')
   assert.ok(machine < timeout, '机器标识与超时同一行，标识在前')
   assert.ok(timeout < user, '认证那一组在连接参数之后')
   assert.ok(user < mapping, '落地映射在认证之后')
-  // 自动推送在最后：它不属于上面任何一组，而且是个"存了才生效"的开关，靠近保存。
-  assert.ok(mapping < autoPush, '自动推送排在路径映射之后（曾经的错是夹在超时与用户名之间）')
-  assert.ok(timeout < autoPush && user < autoPush, '它不在"怎么连/怎么认证"那一组里')
+  // 自动那一档在最后：它不属于上面任何一组，而且是个"存了才生效"的选择，靠近保存。
+  assert.ok(mapping < auto, '自动那一档排在路径映射之后（曾经的错是夹在超时与用户名之间）')
+  assert.ok(timeout < auto && user < auto, '它不在"怎么连/怎么认证"那一组里')
 })
 
 test('客户端产物：同步设置的「测试连接」——结论紧跟在按钮下面，不在表单末尾', { skip }, async () => {
@@ -5785,32 +5836,25 @@ test('客户端产物：同步设置的「测试连接」挨着「保存」，�
   assert.ok(button !== undefined, '按钮是个真的 button')
 })
 
-test('客户端产物：自动推送只有开关那一行，没有间隔那一栏', { skip }, async () => {
+test('客户端产物：自动那一档是一行三选一（官方分段控件），没有间隔那一栏', { skip }, async () => {
   /*
-   * 兜底定时器删掉之后，那一页只剩一个开关——"隔多久跑一次"这个旋钮跟着一起没了。这一条钉住
-   * **两态都没有间隔那一栏**：关着时看不到（宿主不按它走），开着时同样看不到（那个字段已经不存在了）。
+   * 三档是同一件事的强弱，不是两个并列开关：一行「自动同步」+ 关闭 / 仅推送 / 双向。两个开关摆在一起
+   * 会多出"两个都开算哪个"的中间态，界面上还得为此加一句解释。
    *
-   * 反事实：把间隔那一栏（`sync.field.autoPushInterval` 那个 `Field`）加回表单，"开着也看不到"这一条
-   * 立刻红——这正是这次删改最容易被顺手带回来的东西。
+   * 这一条钉三件事：控件是官方 `SegmentedControl`（`role="tablist"` 那一套）且只有一枚；三段的名字与顺序
+   * 固定；说明跟着当前那一档换。反事实：把三档拆回两个 `Switch`，"这张表单里不该再有开关"那一条立刻红。
    */
-  const makeMounted = (autoPush) => {
-    const state = {
-      sessionsRoot: '/home/u/.dsh/sessions',
-      registryPath: '/home/u/.dsh/registry.json',
-      problems: [],
-      sync: { url: 'https://dav.example.com/dsh', machineId: 'robot-a', mappings: 0 },
-      sessions: [],
-      workspaces: [],
-    }
+  const state = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    sync: { url: 'https://dav.example.com/dsh', machineId: 'robot-a', mappings: 0 },
+    sessions: [],
+    workspaces: [],
+  }
+  const mountWith = (sync) => {
     const controller = {
-      getSnapshot: () => ({
-        status: 'ready',
-        writable: true,
-        revision: 4,
-        value: {
-          sync: { url: 'https://dav.example.com/dsh', machineId: 'robot-a', timeoutMs: 30000, autoPush },
-        },
-      }),
+      getSnapshot: () => ({ status: 'ready', writable: true, revision: 4, value: { sync } }),
       subscribe: () => () => {},
       mutate: async () => true,
     }
@@ -5824,108 +5868,42 @@ test('客户端产物：自动推送只有开关那一行，没有间隔那一�
     }
     const mounted = mount({ state, configForms: { get: () => controller }, credentials })
     const walk = settingsEntry(mounted)
-    // 走一遍树才会把 `SyncConfigForm` 的元素记进 `recorded`（见上面那条用例里的说明）。
     const text = strings(walk.component({ view: 'page', ...walk.registration.inject() }))
-    return { mounted, text }
+    const control = mounted.recorded.find((node) => node.props?.role === 'tablist')
+    return { mounted, text, control }
   }
 
-  for (const autoPush of [false, true]) {
-    const { mounted, text } = makeMounted(autoPush)
-    assert.ok(text.includes('sync.field.autoPush'), `autoPush=${String(autoPush)} 时开关那一行要在`)
-    assert.ok(text.includes('sync.field.autoPushHint'), `autoPush=${String(autoPush)} 时那一行的说明也要在`)
-    assert.ok(
-      !text.includes('sync.field.autoPushInterval'),
-      `autoPush=${String(autoPush)} 时不该有间隔那一栏，实际文本里有：${text
-        .filter((x) => String(x).includes('autoPushInterval'))
-        .join(' / ')}`,
-    )
-    assert.equal(
-      mounted.recorded.filter((n) => n.props?.['data-switch'] === 'true').length,
-      1,
-      `autoPush=${String(autoPush)} 时开关本身还在（两态都画，只是勾选态不同）`,
-    )
-  }
-})
-
-test('客户端产物：自动推送是个官方 Switch（不是手写勾选框），标题与说明在左、开关顶到右端', { skip }, async () => {
-  /*
-   * 两件事一起钉：
-   *   1. **控件是官方那个**——设置页上所有的开/关都是 `Switch` 这一套视觉，自己拿 `<input
-   *      type="checkbox">` 画一个（原先的 `dsm-check`）与页面上其它开关不是同一套。这一条核的是
-   *      "产物里用的是官方控件库导出的 `Switch`"，不是"有个长得像开关的东西"。
-   *   2. **摆法照内建设置页那一行**（`DeveloperToolsRow`）：左边一列是标题 + 说明、开关在右端，
-   *      所以标题/说明必须在 `dsm-toggleText` 那一列里，而不是与开关并列成一行。
-   *
-   * 反事实：把 `Switch` 换回 `<input type="checkbox">`，第 1 条红；把说明挪出 `dsm-toggleText`（摆成
-   * 与开关并列），第 2 条红。
-   */
-  const state = {
-    sessionsRoot: '/home/u/.dsh/sessions',
-    registryPath: '/home/u/.dsh/registry.json',
-    problems: [],
-    sync: { url: 'https://dav.example.com/dsh', machineId: 'robot-a', mappings: 0 },
-    sessions: [],
-    workspaces: [],
-  }
-  const controller = {
-    getSnapshot: () => ({
-      status: 'ready',
-      writable: true,
-      revision: 4,
-      // `autoPush` 打开：桩把 `checked` 记在 `data-checked` 上，取值才看得见开/关两态。
-      value: { sync: { url: 'https://dav.example.com/dsh', machineId: 'robot-a', timeoutMs: 30000, autoPush: true } },
-    }),
-    subscribe: () => () => {},
-    mutate: async () => true,
-  }
-  const credentials = {
-    async describe(refs) {
-      return { ok: true, value: Object.fromEntries(refs.map((ref) => [ref, { configured: false, writable: true }])) }
-    },
-    async set() {
-      return { ok: true, value: undefined }
-    },
-  }
-  const mounted = mount({ state, configForms: { get: () => controller }, credentials })
-  /*
-   * **先走一遍树**：`SyncConfigForm` 是个函数组件，假 `createElement` 只在它被调用时才把它的元素记进
-   * `recorded`；而调用它的是 `strings()` / `elements()` 这种走树的帮手。不走这一趟，`recorded` 里只有
-   * 面板外壳，表单里什么都没记下来（这一条差点写成"永远找不到开关"的假绿）。
-   */
-  const walk = settingsEntry(mounted)
-  strings(walk.component({ view: 'page', ...walk.registration.inject() }))
-
-  // ① 是官方 `Switch`（桩给自己盖了 `data-switch`），不是本页手写的 checkbox。
-  const switches = mounted.recorded.filter((node) => node.props?.['data-switch'] === 'true')
-  assert.equal(switches.length, 1, '自动推送用官方 Switch，且只有一个')
-  assert.equal(switches[0].props['data-checked'], true, '开关反映配置里的开态（这里配的是 true）')
+  const off = mountWith({ url: 'https://dav.example.com/dsh', machineId: 'robot-a', timeoutMs: 30000 })
+  assert.ok(off.text.includes('sync.field.auto'), '那一行的标题在')
+  assert.ok(off.text.includes('sync.field.auto.off'), '三段的名字都在（关闭）')
+  assert.ok(off.text.includes('sync.field.auto.push'), '仅推送')
+  assert.ok(off.text.includes('sync.field.auto.sync'), '双向')
+  assert.equal(off.text.includes('sync.field.autoHintOff'), true, '关着时说"什么时候同步由你按一下决定"')
+  assert.equal(off.control?.props?.['data-segment-values'], 'off push sync', '三段的取值与顺序固定')
+  assert.equal(off.control?.props?.['aria-label'], 'sync.field.auto', '无障碍名是那一行的标题')
   assert.equal(
-    switches[0].props['aria-label'],
-    'sync.field.autoPush',
-    '无障碍名走同一个键（官方那个 Switch 的 label 是必须的）',
+    off.mounted.recorded.filter((node) => node.props?.['data-switch'] === 'true').length,
+    0,
+    '这张表单里不该再有开关（三档都摆在一枚分段控件里）',
   )
-  const handRolled = mounted.recorded.filter(
-    (node) => node.type === 'input' && node.props?.type === 'checkbox',
+  assert.equal(
+    off.text.some((item) => String(item).includes('autoPushInterval')),
+    false,
+    '没有间隔那一栏',
   )
-  assert.equal(handRolled.length, 0, '这张表单里不该再有手写的勾选框')
 
-  // ② 摆法是"左边标题+说明、开关右端"：标题与说明同处 `dsm-toggleText`，开关在那一行里。
-  const toggleText = mounted.recorded.filter((node) => node.props?.className === 'dsm-toggleText')
-  assert.equal(toggleText.length, 1, '标题与说明同处一列（dsm-toggleText）')
-  const toggleTextStrings = strings(toggleText[0].props?.children)
-  assert.ok(toggleTextStrings.includes('sync.field.autoPush'), '标题在这一列里')
-  assert.ok(
-    toggleTextStrings.includes('sync.field.autoPushHint'),
-    `说明也在同一列里（它该在标题下面，而不是与开关并列），实际：${JSON.stringify(toggleTextStrings)}`,
+  // 说明跟着当前那一档换：同一行、同一枚控件，只有下面那段话变。
+  const push = mountWith({ url: 'https://dav.example.com/dsh', machineId: 'robot-a', timeoutMs: 30000, autoPush: true })
+  assert.equal(push.text.includes('sync.field.autoPushHint'), true, '仅推送那一档说"只推不拉"')
+  assert.equal(push.control?.props?.['data-segment-values'], 'off push sync', '控件本身不动')
+
+  const both = mountWith({ url: 'https://dav.example.com/dsh', machineId: 'robot-a', timeoutMs: 30000, autoSync: true })
+  assert.equal(both.text.includes('sync.field.autoSyncHint'), true, '双向那一档说"会顶掉本机旧副本"')
+  const selected = both.mounted.recorded.find(
+    (node) => node.props?.['role'] === 'tab' && node.props?.['aria-selected'] === true,
   )
-  const row = mounted.recorded.filter((node) => node.props?.className === 'dsm-toggleRow')
-  assert.equal(row.length, 1, '整行是 dsm-toggleRow')
-  assert.ok(
-    strings(row[0].props?.children).includes('sync.field.autoPushHint'),
-    '开关与标题+说明在同一行里',
-  )
+  assert.equal(selected?.props?.id, 'dsm-auto-mode-sync', '受控值是 sync（选中态 = 存着的那一档）')
 })
-
 
 test('客户端产物：「看差异」只给两边真有可比那两份的行，点下去带的是那一条', { skip }, () => {
   // 判据是"两边**真有可比的两份**"，不是"状态看着可疑"：`missing`（另一边没有）比出来是空的，给一枚

@@ -18,6 +18,7 @@
  * @module dsh-session-manager/client/syncForm
  */
 
+import type { AutoMode } from '../api.ts'
 import type { SessionManagerKey } from './locales.ts'
 
 /** 本插件在 profile 里的 entry id：设置接缝按它寻址（`cordis.patch.yml` 里那个 insert 的 id）。 */
@@ -40,8 +41,10 @@ export interface SyncSectionValue {
   passwordRef?: string
   mapping?: Record<string, string>
   timeoutMs?: number
-  /** 打开自动推送（缺省 = 没开）。 */
+  /** 打开自动推送（旧写法，只推；`autoSync` 开着时被它吸收）。 */
   autoPush?: boolean
+  /** 打开自动同步（双向 + 顺手整理自己那一格）。 */
+  autoSync?: boolean
 }
 
 /** 控制器快照的最小面（与宿主 `configForms.get()` 的快照同形）。 */
@@ -165,8 +168,13 @@ export interface SyncDraft {
   username: string
   mapping: MappingRow[]
   timeoutMs: string
-  /** 自动推送那一栏：原生复选框的勾选态（它是布尔，不像其它几栏那样有"空草稿"这个第三态）。 */
-  autoPush: boolean
+  /**
+   * 自动那一档：`off` / `push` / `sync`（表单上是一行三选一）。
+   *
+   * 配置里仍是两栏布尔（`autoPush` / `autoSync`），这一份草稿把它们折成一个值：界面上没有"两个都开"这种
+   * 中间态，编辑时按档转成最小的那几条（见 `draftOps()`）。
+   */
+  auto: AutoMode
 }
 
 /** 从快照里取出这一节的值。 */
@@ -212,7 +220,7 @@ export function draftFrom(value: SyncSectionValue): SyncDraft {
     username: value.username ?? '',
     mapping: mappingRows(value.mapping),
     timeoutMs: value.timeoutMs === undefined ? '' : String(value.timeoutMs),
-    autoPush: value.autoPush === true,
+    auto: value.autoSync === true ? 'sync' : value.autoPush === true ? 'push' : 'off',
   }
 }
 
@@ -247,12 +255,19 @@ export function draftOps(draft: SyncDraft, value: SyncSectionValue): SyncPathOp[
     ops.push(timeout === '' ? { op: 'unset', path: ['sync', 'timeoutMs'] } : { op: 'set', path: ['sync', 'timeoutMs'], value: Number(timeout) })
   }
 
-  // 自动推送：勾选态发布尔（缺省就是 false，所以取消勾选发 unset 而不是 set false——留一条"等于缺省"
-  // 的覆盖只会在配置文档里攒出一条谁也不需要的记录）；间隔与 `timeoutMs` 逐字同形（空 → unset）。
-  const autoPush = draft.autoPush === true
-  const beforeAutoPush = value.autoPush === true
-  if (autoPush !== beforeAutoPush) {
-    ops.push(autoPush ? { op: 'set', path: ['sync', 'autoPush'], value: true } : { op: 'unset', path: ['sync', 'autoPush'] })
+  /*
+   * 自动那一档（一行三选一）：只有**真的换了一档**才发编辑，而且发的是"让配置落成这一档"的最小那几条
+   * ——两栏布尔都要清干净，否则关掉之后 `autoSync: true` 还留着，下一次打开又回到双向，看着像没关掉。
+   * 取消（`off`）发 `unset` 而不是 `set false`：缺省就是关，留一条"等于缺省"的覆盖只会攒出噪音。
+   */
+  const beforeAuto: AutoMode = value.autoSync === true ? 'sync' : value.autoPush === true ? 'push' : 'off'
+  if (draft.auto !== beforeAuto) {
+    const hasPush = value.autoPush === true
+    const hasSync = value.autoSync === true
+    if (draft.auto !== 'push' && hasPush) ops.push({ op: 'unset', path: ['sync', 'autoPush'] })
+    if (draft.auto !== 'sync' && hasSync) ops.push({ op: 'unset', path: ['sync', 'autoSync'] })
+    if (draft.auto === 'push') ops.push({ op: 'set', path: ['sync', 'autoPush'], value: true })
+    if (draft.auto === 'sync') ops.push({ op: 'set', path: ['sync', 'autoSync'], value: true })
   }
   // 映射整表一次写：它是「一整套对应关系」，拆成逐条编辑反而会出现"删了又写回来"的中间态。
   // 有问题的行在场时不发编辑（保存本来就被 draftProblems 挡住了）。

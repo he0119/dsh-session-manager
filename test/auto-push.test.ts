@@ -12,7 +12,7 @@
 //   - 把 `touched()` 里的静默窗口改成立刻推 → "窗口没到之前不推"红；
 //   - 把 `runAutoPush()` 里 `idle` 那条早退去掉 → "没有可推的就不写索引"红。
 import assert from 'node:assert/strict'
-import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import test from 'node:test'
 
@@ -362,9 +362,9 @@ test('planSync(不带 pushOnly)：两个方向照旧，一个字节都没变', (
 
 // ── 编排这一层：跑一轮到底做了什么 ───────────────────────────────────────────
 
-/** 一份"这一轮该怎么算"。`enabled` 缺省 true。 */
+/** 一份"这一轮该怎么算"。缺省是"只推"那一档（老行为）。 */
 function autoSettings(machine: Machine, overrides: Partial<SyncSettings['autoPush']> = {}): SyncSettings {
-  return settings(machine, { autoPush: { enabled: true, ...overrides } })
+  return settings(machine, { autoPush: { enabled: true, mode: 'push', ...overrides } })
 }
 
 test('runAutoPush：没开自动推送就什么都不做', async () => {
@@ -373,7 +373,9 @@ test('runAutoPush：没开自动推送就什么都不做', async () => {
   try {
     writeSession(machine, 'only-local', 1000)
     const dav = createDavClient({ baseUrl: fixture.url })
-    const outcome = await runAutoPush(depsOf(machine, dav, settings(machine, { autoPush: { enabled: false } })))
+    const outcome = await runAutoPush(
+      depsOf(machine, dav, settings(machine, { autoPush: { enabled: false, mode: 'off' } })),
+    )
     assert.equal(outcome.ran, false)
     assert.equal(outcome.skip, 'disabled')
     assert.equal(outcome.failures, 0)
@@ -442,6 +444,121 @@ test('runAutoPush：只推不拉——远端独有的那条不被拉进来，本
     await fixture.close()
     rmSync(machine.base, { recursive: true, force: true })
     rmSync(other.base, { recursive: true, force: true })
+  }
+})
+
+test('runAutoPush：双向那一档把远端独有的拉进来，也把本机的推上去', async () => {
+  /*
+   * 双向（配置里 `autoSync: true`）与只推的分岔只有一处：`prepareSync` 不带 `pushOnly`。这条钉的是
+   * 那一处真的生效了——两个方向都动了，而只推那一档的用例（上一条）钉的是相反的一半。
+   */
+  const machine = makeMachine('sync-both')
+  const other = makeMachine('sync-both-other')
+  const fixture = await startDavFixture({ root: join(machine.base, 'dav') })
+  try {
+    writeSession(machine, 'mine', 1000, { title: '本机的' })
+    writeSession(other, 'theirs', 2000, { title: '别人的' })
+    const theirsDeps = depsOf(other, createDavClient({ baseUrl: fixture.url }), settings(other, { machineId: 'robot-b' }))
+    const theirsOutcome = await runSync(theirsDeps, { apply: true })
+    assert.deepEqual(theirsOutcome.pulled, [], '先确认那条是推上去的')
+
+    // 映射：远端那条的 cwd 是**别人**的路径，没这份映射它会被判成"缺映射"跳过（与手动那条路同一套）。
+    const deps = depsOf(
+      machine,
+      createDavClient({ baseUrl: fixture.url }),
+      settings(machine, { mapping: { [other.cwd]: machine.cwd }, autoPush: { enabled: true, mode: 'sync' } }),
+    )
+    const outcome = await runAutoPush(deps)
+    assert.equal(outcome.ran, true)
+    assert.deepEqual(outcome.outcome?.pulled, ['theirs'], '双向把远端独有那条拉进来')
+    assert.deepEqual(
+      outcome.outcome?.pushed.map((entry) => entry.id),
+      ['mine'],
+      '本机独有的照推（双向不是"只拉"）',
+    )
+    assert.equal(sessionThere(machine, 'theirs'), true, '拉下来的那条真落在本机库里')
+    assert.ok((outcome.outcome?.bytesIn ?? 0) > 0, '有入流量：这不是只推那条路')
+  } finally {
+    await fixture.close()
+    rmSync(machine.base, { recursive: true, force: true })
+    rmSync(other.base, { recursive: true, force: true })
+  }
+})
+
+test('runAutoPush：双向那一档会覆盖本机旧副本，旧的那份进备份', async () => {
+  /*
+   * 这是双向与只推最要紧的一处差别：后端没有人看着，却真的改了本机已有内容。安全垫是备份——覆盖走的是
+   * 手动那条路的同一段代码（`kind: 'replace'`），所以这条同时钉两件事：本机内容被换掉、备份目录里多了
+   * 一份可以回滚的。
+   */
+  const machine = makeMachine('sync-replace')
+  const other = makeMachine('sync-replace-other')
+  const fixture = await startDavFixture({ root: join(machine.base, 'dav') })
+  try {
+    writeSession(machine, 'shared', 1000, { title: '本来就是同一条' })
+    writeSession(other, 'shared', 1000, { title: '本来就是同一条' })
+    // 别人继续写：多一代日志，远端那份因此领先（结构性判据，不看时间）。
+    addGeneration(other, 'shared', 5)
+    const pushed = await runSync(
+      depsOf(other, createDavClient({ baseUrl: fixture.url }), settings(other, { machineId: 'robot-b' })),
+      { apply: true },
+    )
+    assert.deepEqual(pushed.pushed.map((entry) => entry.id), ['shared'], '远端那份先领先')
+
+    const before = sessionBytes(machine, 'shared')
+    const outcome = await runAutoPush(
+      depsOf(
+        machine,
+        createDavClient({ baseUrl: fixture.url }),
+        settings(machine, { mapping: { [other.cwd]: machine.cwd }, autoPush: { enabled: true, mode: 'sync' } }),
+      ),
+    )
+    assert.deepEqual(outcome.outcome?.replaced, ['shared'], '本机那份被远端更全的那份顶掉')
+    /*
+     * 会话目录里一代一个文件：被顶掉之后本机多了远端那份的 v5（v4 是同一份，字节本来就没变）。
+     * 所以判据是"多出来那一代"，不是"v4 变了"。
+     */
+    assert.ok(
+      existsSync(join(sessionDir(machine.sessionsRoot, machine.cwd, 'shared'), 'session.v5.jsonl.zstd')),
+      '远端那份更全的日志真的落进来了',
+    )
+    assert.equal(sessionBytes(machine, 'shared'), before, '同代次那份日志本机没被改写')
+    // 备份里留了那一份：文件名按会话 id + 时刻排，只要有一条同 id 的就说明旧副本在。
+    const backupFiles = readdirSync(join(machine.base, 'backups'), { recursive: true }).map(String)
+    assert.ok(
+      backupFiles.some((name) => name.includes('shared')),
+      `备份里要留一份旧副本（实际：${backupFiles.join(', ')}）`,
+    )
+  } finally {
+    await fixture.close()
+    rmSync(machine.base, { recursive: true, force: true })
+    rmSync(other.base, { recursive: true, force: true })
+  }
+})
+
+test('runAutoPush：双向那一档收尾整理自己那一格，但孤儿包一个都不删', async () => {
+  /*
+   * 整理有两半：重复 / 被取代的包（确定多余，删）与"索引里没有的孤儿包"（可能是索引坏过之后唯一的
+   * 副本，留着）。自动那一档只做前一半——这条把一个孤儿包摆进自己那一格，跑一轮双向，它得还在。
+   */
+  const machine = makeMachine('sync-tidy')
+  const fixture = await startDavFixture({ root: join(machine.base, 'dav') })
+  try {
+    writeSession(machine, 'mine', 1000, { title: '本机的' })
+    const dav = createDavClient({ baseUrl: fixture.url })
+    const cell = `${SYNC_NAMESPACE_DIR}/${encodeURIComponent('robot-a')}`
+    const orphan = `${cell}/orphan-0000.dshsess`
+    await dav.put(orphan, Buffer.from('not really a bundle'))
+
+    const outcome = await runAutoPush(depsOf(machine, dav, autoSettings(machine, { mode: 'sync' })))
+    assert.equal(outcome.ran, true)
+    assert.notEqual(outcome.outcome?.tidy, undefined, '这一轮真的走过整理（否则下面那条断言是空的）')
+    const listed = (await dav.list(cell)).map((entry) => entry.name)
+    assert.ok(listed.includes('orphan-0000.dshsess'), '孤儿包留着（索引万一坏过，它可能是唯一副本）')
+    assert.equal(outcome.outcome?.problems.length, 0, '这一轮没有报错')
+  } finally {
+    await fixture.close()
+    rmSync(machine.base, { recursive: true, force: true })
   }
 })
 
@@ -870,20 +987,26 @@ test('createAutoPushTimer：last() 报出当前设置与最近一次结论', asy
 })
 
 
-test('autoPushSection：只报开关，旧配置里那个间隔不再有人读', () => {
+test('autoPushSection：拍成三档，旧配置里那个间隔不再有人读', () => {
   /*
-   * 兜底定时器删掉之后，"多久一次"这个数没有消费者了，于是整项从配置里去掉。这一条钉两件事：
-   * 开关仍只认 `true`；以及**装过旧版的人配置里还留着 `autoPushIntervalMs` 时不该出事**——它既不该
-   * 让这一节解析失败，也不该凭空多出一个字段。
+   * 兜底定时器删掉之后，"多久一次"这个数没有消费者了，于是整项从配置里去掉。这一条钉三件事：
+   * 两栏怎么拍成三档（含"强的那一档赢"）；**装过旧版的人配置里还留着 `autoPushIntervalMs` 时不该
+   * 出事**；以及只有 `autoPush` 的老配置仍然只推。
    */
-  assert.deepEqual(autoPushSection({ url: 'x', autoPush: true }), { enabled: true })
-  assert.deepEqual(autoPushSection({ url: 'x', autoPush: false }), { enabled: false })
-  assert.deepEqual(autoPushSection({ url: 'x' }), { enabled: false }, '缺席 = 没开，不是"用默认值开"')
+  assert.deepEqual(autoPushSection({ url: 'x', autoPush: true }), { enabled: true, mode: 'push' }, '只推')
+  assert.deepEqual(autoPushSection({ url: 'x', autoSync: true }), { enabled: true, mode: 'sync' }, '双向')
+  assert.deepEqual(
+    autoPushSection({ url: 'x', autoPush: true, autoSync: true }),
+    { enabled: true, mode: 'sync' },
+    '两个都写着时按双向走：升级上来的配置里那一栏还在，降级成只推是最不会预期的行为',
+  )
+  assert.deepEqual(autoPushSection({ url: 'x', autoPush: false }), { enabled: false, mode: 'off' })
+  assert.deepEqual(autoPushSection({ url: 'x' }), { enabled: false, mode: 'off' }, '缺席 = 没开，不是"用默认值开"')
   assert.equal(autoPushSection(undefined), undefined, '连同步都没配就没有这一节')
 
   // 旧版本写下的那一项（本仓库 git 历史里确有）现在只是个没人读的多余字段。
   const legacy = { url: 'x', autoPush: true, autoPushIntervalMs: 300_000 } as never
-  assert.deepEqual(autoPushSection(legacy), { enabled: true }, '旧配置里那个数不影响这一节')
+  assert.deepEqual(autoPushSection(legacy), { enabled: true, mode: 'push' }, '旧配置里那个数不影响这一节')
 })
 
 

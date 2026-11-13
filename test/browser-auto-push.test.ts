@@ -17,9 +17,9 @@ import { draftFrom, draftOps, draftProblems } from '../src/client/logic/syncForm
 
 // ---- 表单数据面 ----
 
-test('自动推送表单：草稿如实读回，缺省是"没开"', () => {
+test('自动表单：草稿如实读回，缺省是"关"', () => {
   const empty = draftFrom({})
-  assert.equal(empty.autoPush, false, '没配过就是没开（开关不打开）')
+  assert.equal(empty.auto, 'off', '没配过就是关')
   // 空节 → 整份草稿，与已保存的那一节逐字段对得上。
   assert.deepEqual(empty, {
     url: '',
@@ -27,29 +27,51 @@ test('自动推送表单：草稿如实读回，缺省是"没开"', () => {
     username: '',
     mapping: [],
     timeoutMs: '',
-    autoPush: false,
+    auto: 'off',
   })
 
-  assert.equal(draftFrom({ autoPush: true }).autoPush, true, '配过就照实读回')
+  assert.equal(draftFrom({ autoPush: true }).auto, 'push', '老写法（只推）读成"仅推送"')
+  assert.equal(draftFrom({ autoSync: true }).auto, 'sync', '双向那一栏读成"双向"')
+  assert.equal(draftFrom({ autoPush: true, autoSync: true }).auto, 'sync', '两个都写着时按双向（强的那档赢）')
 })
 
-test('自动推送表单：只提交真的改过的那一格（取消勾选发 unset）', () => {
-  const value = { url: 'https://dav.example.com/dsh', autoPush: true }
-  const draft = draftFrom(value)
-  assert.deepEqual(draftOps(draft, value), [], '原样不动什么都不写')
-
-  assert.deepEqual(
-    draftOps({ ...draft, autoPush: false }, value),
-    [{ op: 'unset', path: ['sync', 'autoPush'] }],
-    '取消勾选发 unset（缺省就是没开，不必在用户层留一条 set false）',
-  )
-
-  // 没开的那份配置里勾上：发的是 `set true`。
+test('自动表单：换档时发最小的那几条编辑', () => {
+  /*
+   * 界面上是一行三选一，配置里是两栏布尔。换到哪一档，就要让配置**正好**落成那一档：
+   *   - 关：两栏都清（缺省就是关，发 unset 而不是 set false）；
+   *   - 仅推送：写 autoPush、清掉可能留着的 autoSync（留着的话下次打开又回到双向，像没关掉）；
+   *   - 双向：写 autoSync、清掉 autoPush（它被吸收）。
+   */
   const off = { url: 'https://dav.example.com/dsh' }
-  assert.deepEqual(draftOps(draftFrom(off), off), [])
-  assert.deepEqual(draftOps({ ...draftFrom(off), autoPush: true }, off), [
+  assert.deepEqual(draftOps(draftFrom(off), off), [], '原样不动什么都不写')
+  assert.deepEqual(draftOps({ ...draftFrom(off), auto: 'push' }, off), [
     { op: 'set', path: ['sync', 'autoPush'], value: true },
   ])
+  assert.deepEqual(draftOps({ ...draftFrom(off), auto: 'sync' }, off), [
+    { op: 'set', path: ['sync', 'autoSync'], value: true },
+  ])
+
+  // 从只推换到双向：写双向 + 清掉旧的那栏。
+  const push = { url: 'https://dav.example.com/dsh', autoPush: true }
+  assert.deepEqual(draftOps({ ...draftFrom(push), auto: 'sync' }, push), [
+    { op: 'unset', path: ['sync', 'autoPush'] },
+    { op: 'set', path: ['sync', 'autoSync'], value: true },
+  ])
+  // 从双向换到只推：反过来同样两条。
+  const both = { url: 'https://dav.example.com/dsh', autoSync: true }
+  assert.deepEqual(draftOps({ ...draftFrom(both), auto: 'push' }, both), [
+    { op: 'unset', path: ['sync', 'autoSync'] },
+    { op: 'set', path: ['sync', 'autoPush'], value: true },
+  ])
+  // 关掉全部：两栏都清干净。
+  assert.deepEqual(draftOps({ ...draftFrom(both), auto: 'off' }, both), [
+    { op: 'unset', path: ['sync', 'autoSync'] },
+  ])
+  assert.deepEqual(
+    draftOps({ ...draftFrom({ ...both, autoPush: true }) }, { ...both, autoPush: true }),
+    [],
+    '两栏都写着（双向赢）时不动就是不动',
+  )
 })
 
 test('自动推送表单：草稿只剩开关这一格，没有间隔可填', () => {
@@ -59,7 +81,8 @@ test('自动推送表单：草稿只剩开关这一格，没有间隔可填', ()
    */
   assert.deepEqual(
     Object.keys(draftFrom({ autoPush: true })).sort(),
-    ['autoPush', 'machineId', 'mapping', 'timeoutMs', 'url', 'username'],
+    // 自动只剩一个值（三选一），间隔那一栏早跟着兜底定时器一起删了。
+    ['auto', 'machineId', 'mapping', 'timeoutMs', 'url', 'username'],
   )
   // 超时那一栏的判据照旧（它跟自动推送无关，别被这次删改带走）。
   assert.deepEqual(draftProblems({ ...draftFrom({}), timeoutMs: '0' }), [{ code: 'timeoutNotPositive' }])
@@ -69,7 +92,11 @@ test('自动推送表单：草稿只剩开关这一格，没有间隔可填', ()
 
 test('自动推送字典：新增的键两种语言都在，占位符也一致', () => {
   const keys = [
-    'sync.field.autoPush',
+    'sync.field.auto',
+    'sync.field.auto.off',
+    'sync.field.auto.push',
+    'sync.field.auto.sync',
+    'sync.field.autoHintOff',
     'sync.field.autoPushHint',
     'sync.autoPush.enabled',
     'sync.autoPush.now',
@@ -83,6 +110,17 @@ test('自动推送字典：新增的键两种语言都在，占位符也一致',
     'sync.autoPush.skip.idle',
     'sync.autoPush.noReason',
     'sync.autoPush.problem',
+    // 双向那一档的几句（与上面同形，只是说"拉多少、推多少"）
+    'sync.field.autoSyncHint',
+    'sync.autoSync.enabled',
+    'sync.autoSync.now',
+    'sync.autoSync.running',
+    'sync.autoSync.done',
+    'sync.autoSync.nothing',
+    'sync.autoSync.skipped',
+    'sync.autoSync.failed',
+    'sync.autoSync.problem',
+    'sync.autoPush.skip.idleSync',
   ] as const
   for (const key of keys) {
     assert.ok(key in zh, `中文缺 ${key}`)
@@ -90,7 +128,17 @@ test('自动推送字典：新增的键两种语言都在，占位符也一致',
   }
   // 占位符要成对：句子里的 `{pushed}` 在两种语言里都得有，否则 `t()` 换出来的是一个原样的花括号。
   const placeholders = (text: string): string[] => [...text.matchAll(/\{(\w+)\}/g)].map((match) => match[1] ?? '').sort()
-  for (const key of ['sync.autoPush.enabled', 'sync.autoPush.done', 'sync.autoPush.skipped', 'sync.autoPush.failed', 'sync.autoPush.problem']) {
+  for (const key of [
+    'sync.autoPush.enabled',
+    'sync.autoPush.done',
+    'sync.autoPush.skipped',
+    'sync.autoPush.failed',
+    'sync.autoPush.problem',
+    'sync.autoSync.done',
+    'sync.autoSync.skipped',
+    'sync.autoSync.failed',
+    'sync.autoSync.problem',
+  ]) {
     assert.deepEqual(
       placeholders(zh[key as keyof typeof zh]),
       placeholders(en[key as keyof typeof en]),

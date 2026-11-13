@@ -3048,7 +3048,12 @@ test('GET /auto-push：当场跑一轮，结果摊平着回来', async () => {
   const handlers = createApiHandlers(
     deps(sandbox, {
       autoPush: async () => timer,
-      syncInfo: () => ({ url: 'https://dav.example/', machineId: 'robot-a', mappings: 0, autoPush: { enabled: true } }),
+      syncInfo: () => ({
+        url: 'https://dav.example/',
+        machineId: 'robot-a',
+        mappings: 0,
+        autoPush: { enabled: true, mode: 'push' },
+      }),
     }),
   )
   const { res, captured } = fakeRes()
