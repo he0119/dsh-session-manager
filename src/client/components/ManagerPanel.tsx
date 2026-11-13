@@ -30,7 +30,7 @@ import { Button, Modal, StateDot, type StateDotState } from '@deepseek-ai/dsh-cl
 
 import { fetchBackups, type MetaResponse, type ProgressEvent, type StateResponse } from '../api.ts'
 import { panelEvents, type PanelSnapshot } from '../logic/panelEvents.ts'
-import { syncChipDot, syncChipNote } from '../logic/syncChipDot.ts'
+import { syncChipDot, syncChipDotTitle, syncChipNote } from '../logic/syncChipDot.ts'
 import { getNavigationApi } from '../navigation.ts'
 import { PLUGIN_COMMIT, PLUGIN_DIRTY, PLUGIN_VERSION } from '../build.ts'
 import type { DirectoryApi } from '../directory.ts'
@@ -392,6 +392,13 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
   const syncDot: StateDotState = syncChipDot(dotFacts)
   /** 这个颜色为什么是这个颜色：这句话挂在按钮的悬浮提示上（点本身是 aria-hidden，读屏读不到颜色）。 */
   const dotNote = syncChipNote(dotFacts)
+  /**
+   * 点**自己**的悬浮提示：这一档是什么状态（鼠标落在那个 10px 的点上时回答"这个颜色什么意思"）。
+   *
+   * 挂在包着它的一层 span 上而不是点本身：官方 `StateDot` 只收 `state` / `size` / `className`，不透传
+   * `title`（与 `Tag` 同一条，见「每枚标签都必须带 .dsm-tag 挂钩」那条约束）。
+   */
+  const dotTitle = syncChipDotTitle(dotFacts)
   const chipReason =
     dotNote !== null
       ? 'params' in dotNote
@@ -442,7 +449,16 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
           className="dsm-headChip"
           variant="outline"
           size="sm"
-          icon={<StateDot state={syncDot} />}
+          icon={
+            <span
+              className="dsm-dotSlot"
+              title={
+                'params' in dotTitle ? t(dotTitle.key, dotTitle.params) : t(dotTitle.key)
+              }
+            >
+              <StateDot state={syncDot} />
+            </span>
+          }
           /*
             悬浮提示补一句"这个颜色是什么意思"：黄点说清几条没做到 / 要重启，绿点说清自动推送开着。
             颜色读屏读不到、也常被一眼扫过，理由得有一句话接着。

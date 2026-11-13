@@ -135,6 +135,11 @@ export const CSS = `
  * 动静"，不像「导入…」那样是一个要点的门。所以只给一处布局：不参与收缩、单行、不折行（39px 那一行里
  * 一折就顶出去）。数字换成等宽数字，进度跳 9/10 → 10/10 时宽度不抖。
  */
+/*
+ * 同步状态那枚点外面的一层：只为挂悬浮提示（官方 StateDot 不透传 title）。它得是 inline-flex 且不吃行高，
+ * 否则按钮里那 10px 的点会把 28px 的行高顶开。
+ */
+.dsm-dotSlot { display: inline-flex; align-items: center; }
 .dsm-statusJob {
   flex: none;
   white-space: nowrap;

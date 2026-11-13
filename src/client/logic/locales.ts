@@ -421,6 +421,14 @@ export const zh = {
   'sync.chip.noteRestart': '上次同步的改动要重启 DSH 才生效',
   // 绿点说的是"自动推送开着"（配置事实），这句把它讲明白——否则绿点只靠颜色传达。
   'sync.chip.autoTip': '自动推送开着：本机空闲 5 分钟就推一次',
+  // 那枚点自己的悬浮提示：鼠标落在点上时回答"这个颜色是什么意思"（见 logic/syncChipDot.ts）。
+  'sync.chip.dot.ongoing': '有一趟同步正在跑',
+  'sync.chip.dot.error': '上次同步没成：{reason}',
+  'sync.chip.dot.errorPlain': '上次同步没成（记录里没有原因）',
+  'sync.chip.dot.problems': '上次同步有 {count} 条没做到',
+  'sync.chip.dot.restart': '上次同步的改动要重启 DSH 才生效',
+  'sync.chip.dot.auto': '自动推送开着：本机空闲 5 分钟就推一次',
+  'sync.chip.dot.idle': '没有正在跑的同步，也没有遗留',
   // 页头那枚状态上的"多久以前"：档位由 logic/relativeTime.ts 判，这里只放话。
   'sync.chip.running': '同步中…',
   'sync.chip.justNow': '同步 · 刚刚',
@@ -1037,6 +1045,13 @@ export const en: LocaleDictOf<typeof NS> = {
   'sync.chip.noteProblems': 'Last sync left {count} item(s) undone',
   'sync.chip.noteRestart': 'Last sync takes effect after a restart',
   'sync.chip.autoTip': 'Auto-push is on: pushes once the machine has been idle for 5 minutes',
+  'sync.chip.dot.ongoing': 'A sync is running',
+  'sync.chip.dot.error': 'Last sync failed: {reason}',
+  'sync.chip.dot.errorPlain': 'Last sync failed (no reason recorded)',
+  'sync.chip.dot.problems': 'Last sync left {count} item(s) undone',
+  'sync.chip.dot.restart': 'Last sync takes effect after DSH restarts',
+  'sync.chip.dot.auto': 'Auto-push is on: pushes once the machine has been idle for 5 minutes',
+  'sync.chip.dot.idle': 'No sync running, nothing left over',
   'sync.chip.running': 'Syncing…',
   'sync.chip.justNow': 'Sync · just now',
   'sync.chip.failedJustNow': 'Sync · just failed',

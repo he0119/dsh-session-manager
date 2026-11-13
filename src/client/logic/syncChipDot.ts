@@ -28,9 +28,20 @@ export interface SyncChipFacts {
    *
    * 带着完整结果时判"有遗留"最准；认领来的那一趟没有 `result`（宿主只留了计数）。
    */
-  done?: { ok: boolean; result?: { problems?: readonly string[] } | undefined } | null | undefined
+  done?:
+    | { ok: boolean; error?: string | undefined; result?: { problems?: readonly string[] } | undefined }
+    | null
+    | undefined
   /** 磁盘上记着的上一次手动同步（跨进程重启还在）。 */
-  lastRun?: { ok: boolean; problems?: readonly string[] | undefined; pendingRestart?: boolean | undefined } | null | undefined
+  lastRun?:
+    | {
+        ok: boolean
+        error?: string | undefined
+        problems?: readonly string[] | undefined
+        pendingRestart?: boolean | undefined
+      }
+    | null
+    | undefined
   /** 自动推送开着（宿主给了那个字段就是开着）。 */
   autoPush: boolean
 }
@@ -63,6 +74,53 @@ export function syncChipDot(facts: SyncChipFacts): SyncChipDot {
   if (lastRun !== null && lastRun.ok && leftovers(lastRun.problems, lastRun.pendingRestart)) return 'warning'
   if (facts.autoPush) return 'done'
   return 'idle'
+}
+
+/**
+ * 那枚点**自己**的悬浮提示：这一档是什么状态。
+ *
+ * 与上一句（`syncChipNote`，挂在整枚按钮上）分开：鼠标落在那个 10px 的点上时，回答的是"这个颜色是什么意思"；
+ * 落在按钮其余部分时，回答的是"这个按钮干什么"。同一个按钮上两级提示，内层（点）压过外层（按钮）。
+ */
+export type SyncChipDotTitle =
+  | { key: 'sync.chip.dot.ongoing' }
+  | { key: 'sync.chip.dot.error'; params: { reason: string } }
+  | { key: 'sync.chip.dot.errorPlain' }
+  | { key: 'sync.chip.dot.problems'; params: { count: number } }
+  | { key: 'sync.chip.dot.restart' }
+  | { key: 'sync.chip.dot.auto' }
+  | { key: 'sync.chip.dot.idle' }
+
+/**
+ * 这一档要说的那句话。
+ *
+ * 失败那档带上宿主/远端的原话（「上次同步没成：401 Unauthorized」）——红点最常被问的就是"为什么红了"，
+ * 而那句话正躺在记录里（`error`）。其余几档各说一句自己的事。
+ *
+ * @param facts 与 {@link syncChipDot} 同一份事实。
+ * @returns 字典键与参数。
+ */
+export function syncChipDotTitle(facts: SyncChipFacts): SyncChipDotTitle {
+  const state = syncChipDot(facts)
+  const done = facts.done ?? null
+  const lastRun = facts.lastRun ?? null
+  if (state === 'ongoing') return { key: 'sync.chip.dot.ongoing' }
+  if (state === 'error') {
+    // 这一页刚跑的那趟优先（它的 `error` 最新）；否则读磁盘上那条记录里的原话。
+    const reason =
+      (done !== null && !done.ok ? done.error : undefined) ??
+      (lastRun !== null && !lastRun.ok ? lastRun.error : undefined)
+    return reason === undefined
+      ? { key: 'sync.chip.dot.errorPlain' }
+      : { key: 'sync.chip.dot.error', params: { reason } }
+  }
+  if (state === 'warning') {
+    const problems = done !== null && done.ok ? done.result?.problems : lastRun?.problems
+    if (problems !== undefined && problems.length > 0) return { key: 'sync.chip.dot.problems', params: { count: problems.length } }
+    return { key: 'sync.chip.dot.restart' }
+  }
+  if (state === 'done') return { key: 'sync.chip.dot.auto' }
+  return { key: 'sync.chip.dot.idle' }
 }
 
 /** 那枚点的悬浮提示要多说的那一句（没有就是 null，提示只有「打开同步…」那一句）。 */

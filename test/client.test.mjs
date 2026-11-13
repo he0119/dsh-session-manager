@@ -5441,6 +5441,27 @@ test('客户端产物：黄点的理由写在按钮的悬浮提示上（颜色�
     strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
     return mounted.recorded.find((node) => String(node.props?.className ?? '').includes('dsm-headChip'))?.props?.title
   }
+  /*
+   * 点自己也要有一句：鼠标落在那个 10px 的点上时，回答的是"这个颜色什么意思"。官方 `StateDot` 不透传
+   * `title`，所以外面包一层带提示的 span（与官方的 `Tag` 同一条约束）。
+   */
+  const dotTitle = (patch) => {
+    const mounted = mount({
+      state,
+      meta: { sessionsRoot: state.sessionsRoot, registryPath: state.registryPath, sync: { ...sync, ...patch } },
+    })
+    strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
+    const slot = mounted.recorded.find((node) => String(node.props?.className ?? '').includes('dsm-dotSlot'))
+    return slot?.props?.title
+  }
+  assert.equal(dotTitle({}), 'sync.chip.dot.idle', '灰点：没有在跑的、也没有遗留')
+  assert.equal(dotTitle({ autoPush: { enabled: true } }), 'sync.chip.dot.auto', '绿点：自动推送开着')
+  assert.equal(
+    dotTitle({ lastRun: { at: '2026-11-12T12:00:00.000Z', ok: false, pulled: 0, pushed: 0, error: '401 Unauthorized' } }),
+    'sync.chip.dot.error:{"reason":"401 Unauthorized"}',
+    '红点把原话带出来',
+  )
+
   assert.equal(chipTitle({}), 'sync.chip.tip', '没事时只有那一句"打开同步…"')
   assert.equal(
     chipTitle({ autoPush: { enabled: true } }),
