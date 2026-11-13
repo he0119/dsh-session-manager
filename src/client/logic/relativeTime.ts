@@ -10,6 +10,8 @@
  * @module dsh-session-manager/client/logic/relativeTime
  */
 
+import type { Translate } from './locales.ts'
+
 /** 一句话的档位：键 + 数量（"刚刚"没有数量）。 */
 export type RelativeLabel =
   | { key: 'time.justNow' }
@@ -34,4 +36,20 @@ export function relativeLabel(then: number, now: number): RelativeLabel {
   if (gap < HOUR) return { key: 'time.minutes', count: Math.floor(gap / MINUTE) }
   if (gap < DAY) return { key: 'time.hours', count: Math.floor(gap / HOUR) }
   return { key: 'time.days', count: Math.floor(gap / DAY) }
+}
+
+/**
+ * 把"多久以前"直接翻成一句话。
+ *
+ * 页头那枚同步状态与「上次同步」那张清单都要说同一件事，句子只该有一套拼法：档位仍由上面那个纯函数判，
+ * 这里只把键交给字典。
+ *
+ * @param t 翻译函数。
+ * @param at 那个时刻（ISO 8601；解不出来时按"刚刚"说，不编一个负数）。
+ * @param now 现在（毫秒，缺省取当下）。
+ * @returns 一句"3 小时前"。
+ */
+export function agoLabel(t: Translate, at: string, now = Date.now()): string {
+  const label = relativeLabel(Date.parse(at), now)
+  return label.key === 'time.justNow' ? t('time.justNow') : t(label.key, { count: label.count })
 }

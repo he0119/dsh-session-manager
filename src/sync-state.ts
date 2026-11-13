@@ -18,6 +18,8 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
+import type { SyncLeftover } from './sync.ts'
+
 /** 一条同步记录。`at` 是 ISO 时间戳，`error` 只在失败时有。 */
 export interface SyncRunRecord {
   /** 这一趟结束的时刻（ISO 8601，带时区）。 */
@@ -37,6 +39,13 @@ export interface SyncRunRecord {
    * 也不是失败：页头上那枚状态为它单独留了一档黄点（见 `lastRunView()` 与 `client/logic/syncChipDot.ts`）。
    */
   problems?: string[]
+  /**
+   * 这一趟「没做到」的条目（点名版，见 `sync.ts` 的 `collectLeftovers()`）。
+   *
+   * 与 `problems` 并存而不是取代它：`problems` 是几句汇总，页头那枚黄点靠它数条数；这一份带会话 id，
+   * 界面上那张「上次同步」的清单靠它给出「只看这一条」。旧记录里没有这一项，界面按"只有汇总"画。
+   */
+  leftovers?: SyncLeftover[]
   /**
    * 这一趟拉进来的改动什么时候生效：`immediate` 立刻，`restart-required` 要重启 DSH。
    *
@@ -95,6 +104,20 @@ function isRecord(value: unknown): value is SyncRunRecord {
   if (problems !== undefined && (!Array.isArray(problems) || problems.some((item) => typeof item !== 'string'))) {
     return false
   }
+  const leftovers = record['leftovers']
+  if (
+    leftovers !== undefined &&
+    (!Array.isArray(leftovers) ||
+      leftovers.some(
+        (item) =>
+          item === null ||
+          typeof item !== 'object' ||
+          typeof (item as { message?: unknown }).message !== 'string' ||
+          ((item as { sessionId?: unknown }).sessionId !== undefined &&
+            typeof (item as { sessionId?: unknown }).sessionId !== 'string'),
+      ))
+  )
+    return false
   const effect = record['takesEffect']
   if (effect !== undefined && effect !== 'immediate' && effect !== 'restart-required') return false
   // 时间要能被 Date 认出来：界面要拿它算"多久以前"，一个解不出来的字符串只会变成 NaN。

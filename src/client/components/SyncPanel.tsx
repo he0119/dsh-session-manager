@@ -59,6 +59,8 @@ import { WorkspaceIcon } from './icons.tsx'
 import type { SessionManagerKey, Translate } from '../logic/locales.ts'
 import { AUTO_PUSH_SKIP_CODES } from '../logic/autoPush.ts'
 import { syncJob, type SyncJobSnapshot } from '../logic/syncJob.ts'
+import { agoLabel } from '../logic/relativeTime.ts'
+import { leftoversOf } from '../logic/syncLeftovers.ts'
 import { projectLabel, sessionLabel, type SessionLabel } from '../logic/planRows.ts'
 import { ProgressBlock } from './ProgressBlock.tsx'
 import { formatBytes, sessionTags, type TagCopy } from './sessionList.tsx'
@@ -466,9 +468,16 @@ export function SyncPanel({
   backgroundLine,
   /** 关掉这一面（这一面自己就是那枚弹窗了，见文件末尾的说明）。 */
   onClose,
+  /**
+   * 「只看这一条」：把某条会话交给页面骨架（关掉这一面、在列表里筛到它）。
+   *
+   * 缺席时那几行只显示文字——旧宿主、或没有列表的调用方不该看到一个点了没反应的按钮。
+   */
+  onFocusSession,
 }: Pick<PanelShare, 't' | 'state' | 'meta' | 'reload'> & {
   backgroundLine?: { ok: boolean; text: string }
   onClose: () => void
+  onFocusSession?: (id: string) => void
 }): React.ReactElement {
   /** 最近一次计划或结果：映射表的远端候选与弹窗正文都读它（关掉弹窗之后候选还得在）。 */
   const [sync, setSync] = React.useState<SyncResponse | null>(null)
@@ -939,6 +948,21 @@ export function SyncPanel({
   const stage: 'idle' | 'plan' | 'apply' = dialog === null ? 'idle' : dialog
 
   /**
+   * 「上次同步」那张清单要说的话。
+   *
+   * 数据有两处来路，取**新的那一份**：这一页刚跑完的那趟（`job.done`，带完整结果），否则是磁盘上那条
+   * 记录（`state.json`，重启之后还在）。条目本身由 `leftoversOf()` 归一（点名版优先，旧记录退回汇总句）。
+   */
+  const lastRun = syncInfo?.lastRun ?? null
+  const lastItems = leftoversOf(job.done !== null && job.done.ok ? job.done.result : lastRun)
+  const lastFacts =
+    lastRun !== null
+      ? t('sync.last.facts', { when: agoLabel(t, lastRun.at), pulled: lastRun.pulled, pushed: lastRun.pushed })
+      : job.done !== null && job.done.ok
+        ? t('sync.last.justNow')
+        : null
+
+  /**
    * 这一面自己就是那枚弹窗（`WorkDialog`）：标题、说明、宽度与底栏都跟着 `stage` 变。
    *
    * 为什么不再"面板 + 叠一层确认框"：那是两枚弹窗，用户按「同步」之后看到的是一个新窗口盖在旧窗口上，
@@ -1053,6 +1077,54 @@ export function SyncPanel({
         {/* 别处发起的那一趟的结论：弹窗关着时它在状态栏那一格里只有一句短的，进来说全。 */}
         {backgroundLine !== undefined && (
           <p className={backgroundLine.ok ? 'dsm-hint' : 'dsm-error'}>{backgroundLine.text}</p>
+        )}
+        {/*
+          上次同步：多久以前、拉了几条、推了几条，以及**没做到的逐条**（点名版带「只看这一条」）。
+
+          为什么摆在这里：页头那枚黄点只说"有 1 条没做到"，窗口一关就只剩这一句；而"哪一条、为什么"
+          才是用户下一步要处理的东西。记录存在磁盘上（`state.json`），重启之后回来还看得到。
+        */}
+        {(lastFacts !== null || lastItems.length > 0) && (
+          /*
+            两块分开画（见 styles.ts 的 `.dsm-lastRun` 那一段）：干净那一趟只有一行标题 + 一行读数；
+            有遗留时才成"一块记录"——底色 + 左边一道告警色细线，与下面那几句说明分开。
+          */
+          <div
+            className="dsm-lastRun"
+            data-dsm-lastrun=""
+            {...(lastItems.length > 0 ? { 'data-dsm-leftover': 'true' } : {})}
+          >
+            <p className="dsm-lastRunHead">
+              <span className="dsm-lastRunTitle">{t('sync.last.title')}</span>
+              {lastFacts !== null && <span className="dsm-lastRunFacts">{lastFacts}</span>}
+            </p>
+            {lastRun !== null && !lastRun.ok && (
+              <p className="dsm-warn">{t('sync.last.failed', { reason: lastRun.error ?? '—' })}</p>
+            )}
+            {lastItems.length > 0 && (
+              <div className="dsm-leftovers">
+                <p className="dsm-leftoversTitle">{t('sync.leftovers.title', { count: lastItems.length })}</p>
+                <ul className="dsm-listPlain">
+                  {lastItems.map((item, index) => (
+                    <li key={`${index}-${item.message}`} className="dsm-leftoverRow">
+                      <span>{item.message}</span>
+                      {item.sessionId !== undefined && onFocusSession !== undefined && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            if (item.sessionId !== undefined) onFocusSession(item.sessionId)
+                          }}
+                        >
+                          {t('sync.leftovers.focus')}
+                        </Button>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
         )}
         {/* 没配置同步时只留一句话：摆一个点了没反应的按钮比不摆更糟（与「宿主没有归档能力」同一条口径）。 */}
         <p className="dsm-hint">

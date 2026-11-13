@@ -16,6 +16,9 @@
  * @module dsh-session-manager/client/logic/syncChipDot
  */
 
+import type { SyncLeftover } from '../api.ts'
+import { leftoversOf, type LeftoverSource } from './syncLeftovers.ts'
+
 /** 点哪一档（官方 `StateDotState` 的子集，见模块说明）。 */
 export type SyncChipDot = 'ongoing' | 'error' | 'warning' | 'done' | 'idle'
 
@@ -29,7 +32,11 @@ export interface SyncChipFacts {
    * 带着完整结果时判"有遗留"最准；认领来的那一趟没有 `result`（宿主只留了计数）。
    */
   done?:
-    | { ok: boolean; error?: string | undefined; result?: { problems?: readonly string[] } | undefined }
+    | {
+        ok: boolean
+        error?: string | undefined
+        result?: { problems?: readonly string[]; leftovers?: readonly SyncLeftover[] } | undefined
+      }
     | null
     | undefined
   /** 磁盘上记着的上一次手动同步（跨进程重启还在）。 */
@@ -38,6 +45,8 @@ export interface SyncChipFacts {
         ok: boolean
         error?: string | undefined
         problems?: readonly string[] | undefined
+        /** 点名版（见 `syncLeftovers.ts`）：有新宿主给这一项，条数按它算才对得上弹窗里那张清单。 */
+        leftovers?: readonly SyncLeftover[] | undefined
         pendingRestart?: boolean | undefined
       }
     | null
@@ -49,8 +58,8 @@ export interface SyncChipFacts {
 }
 
 /** 那一趟有没有留下要人看的东西。 */
-function leftovers(problems: readonly string[] | undefined, pendingRestart: boolean | undefined): boolean {
-  return (problems !== undefined && problems.length > 0) || pendingRestart === true
+function hasLeftover(source: LeftoverSource, pendingRestart: boolean | undefined): boolean {
+  return leftoversOf(source).length > 0 || pendingRestart === true
 }
 
 /**
@@ -69,11 +78,11 @@ export function syncChipDot(facts: SyncChipFacts): SyncChipDot {
   // 这一页刚跑完的那趟最准；它被关掉之后退回磁盘上那条记录——两处写的是同一份结论。
   if (done !== null) {
     if (!done.ok) return 'error'
-    if (leftovers(done.result?.problems, false)) return 'warning'
+    if (hasLeftover({ leftovers: done.result?.leftovers, problems: done.result?.problems }, false)) return 'warning'
   } else if (lastRun !== null && !lastRun.ok) {
     return 'error'
   }
-  if (lastRun !== null && lastRun.ok && leftovers(lastRun.problems, lastRun.pendingRestart)) return 'warning'
+  if (lastRun !== null && lastRun.ok && hasLeftover(lastRun, lastRun.pendingRestart)) return 'warning'
   if (facts.autoPush) return 'done'
   return 'idle'
 }
@@ -118,8 +127,9 @@ export function syncChipDotTitle(facts: SyncChipFacts): SyncChipDotTitle {
       : { key: 'sync.chip.dot.error', params: { reason } }
   }
   if (state === 'warning') {
-    const problems = done !== null && done.ok ? done.result?.problems : lastRun?.problems
-    if (problems !== undefined && problems.length > 0) return { key: 'sync.chip.dot.problems', params: { count: problems.length } }
+    const source = done !== null && done.ok ? { leftovers: done.result?.leftovers, problems: done.result?.problems } : lastRun
+    const count = leftoversOf(source).length
+    if (count > 0) return { key: 'sync.chip.dot.problems', params: { count } }
     return { key: 'sync.chip.dot.restart' }
   }
   if (state === 'done') {
@@ -146,8 +156,10 @@ export type SyncChipNote =
 export function syncChipNote(facts: SyncChipFacts): SyncChipNote | null {
   const done = facts.done ?? null
   const lastRun = facts.lastRun ?? null
-  const problems = done !== null && done.ok ? done.result?.problems : lastRun?.ok === true ? lastRun.problems : undefined
-  if (problems !== undefined && problems.length > 0) return { key: 'sync.chip.noteProblems', params: { count: problems.length } }
+  const source =
+    done !== null && done.ok ? { leftovers: done.result?.leftovers, problems: done.result?.problems } : lastRun?.ok === true ? lastRun : undefined
+  const count = leftoversOf(source).length
+  if (count > 0) return { key: 'sync.chip.noteProblems', params: { count } }
   if (lastRun !== null && lastRun.ok && lastRun.pendingRestart === true) return { key: 'sync.chip.noteRestart' }
   return null
 }

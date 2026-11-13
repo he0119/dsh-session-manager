@@ -1294,6 +1294,66 @@ export const CSS = `
 .dsm-listPlain li { overflow-wrap: anywhere; }
 .dsm-fields-label { color: var(--dsw-alias-label-primary, #1f2329); font-weight: 500; margin: 0; }
 .dsm-registry, .dsm-problems, .dsm-effect { display: flex; flex-direction: column; gap: 4px; }
+/* ── 「上次同步」那张清单（SyncPanel 的面板段） ──────────────────────────────
+   两件事分两档画，否则"多久以前""没做到几条""那几句原话"与下面两段说明会连成一条灰字河：
+
+   1. 干净那一趟：一行小标题 + 一行读数，不画框（对话框里不套卡片，见 design.md 那条）；
+   2. 有遗留：成"一块记录"——底色 + 左边一道告警色细线，把这件事与下面那几句说明分开。
+      它不是卡片：没有一圈框、没有重复的标题，只是一段被标出来的记录。 */
+.dsm-lastRun { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+/* 块里那几行不许带浏览器默认段距：<p> 的 1em 上下会让节奏在 6 / 12 / 18px 之间乱跳，
+   四行字看着一样松，谁也不挨着谁（这一条是这次重画的主要原因）。 */
+.dsm-lastRun p { margin: 0; }
+.dsm-lastRunHead { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 10px; }
+.dsm-lastRunTitle { color: var(--dsw-alias-label-primary, #1f2329); font-weight: 500; }
+/* 读数那半句：12/18 次要色、等宽数字（条数从 9 跳到 10 时不左右抖）。与标题同一行，标题说明"这是什么"，
+   它说明"什么时候、多少"。 */
+.dsm-lastRunFacts {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-secondary, #646a73);
+  font-variant-numeric: tabular-nums;
+}
+.dsm-lastRun[data-dsm-leftover='true'] {
+  padding: 10px 12px;
+  border-radius: 8px;
+  border-left: 3px solid var(--dsw-alias-state-warn-primary, #d97b00);
+  /* 底色不用"卡片那一层"：浅色主题里 bg-layer-2 就是对话框的白底，等于没染；这里取告警色的极淡
+     一层，深浅两套主题里都是"这一块被标出来了"，不会在浅色下凭空消失。 */
+  background: color-mix(in srgb, var(--dsw-alias-state-warn-primary, #d97b00) 7%, transparent);
+}
+.dsm-leftovers { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+/* 「没做到 N 条」是个小标签，不是正文：12/18、600、告警色。原来它与下面的原话同为 14px，谁主谁次看不出来。 */
+.dsm-leftoversTitle {
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: 600;
+  color: color-mix(in srgb, var(--dsw-alias-state-warn-primary, #d97b00) 55%, var(--dsw-alias-label-primary, #1f2329));
+}
+.dsm-leftovers .dsm-listPlain {
+  padding-left: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+/* 一条：原话（正文色——它是内容，不该比上面那枚小标签还暗）+ 可选的 sm 动作；多条之间一道发丝线。 */
+.dsm-leftoverRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 6px 0;
+  color: var(--dsw-alias-label-primary, #1f2329);
+}
+.dsm-leftoverRow:first-child { padding-top: 0; }
+.dsm-leftoverRow:last-child { padding-bottom: 0; }
+.dsm-leftoverRow + .dsm-leftoverRow {
+  border-top: 1px solid var(--dsw-alias-border-l1, rgba(0, 0, 0, 0.06));
+}
+.dsm-leftoverRow > span { min-width: 0; flex: 1 1 auto; }
+/* 那枚动作不许被挤窄：默认 flex 会把它压到内容宽度以下，五个字就折成两行（量到过 79px → 两行）。 */
+.dsm-leftoverRow > button { flex: none; }
+
 .dsm-backupRow {
   display: flex;
   align-items: center;

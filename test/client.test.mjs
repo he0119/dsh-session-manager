@@ -5521,14 +5521,106 @@ test('客户端产物：黄点的理由写在按钮的悬浮提示上（颜色�
   )
   assert.equal(
     chipTitle({ lastRun: { at: '2026-11-12T12:00:00.000Z', ok: true, pulled: 0, pushed: 0, problems: ['a', 'b'] } }),
-    'sync.chip.tip · sync.chip.noteProblems:{"count":2}',
-    '没说到的条数报出来',
+    'sync.chip.tip · sync.chip.noteProblems:{"count":2}\na\nb',
+    '没说到的条数与那几条的原话都报出来（只数条数等于把疑问留给用户）',
+  )
+  assert.equal(
+    chipTitle({
+      lastRun: {
+        at: '2026-11-12T12:00:00.000Z',
+        ok: true,
+        pulled: 0,
+        pushed: 0,
+        problems: ['a', 'b'],
+        leftovers: [
+          { message: '甲（session-1）：目标目录不存在：/x', sessionId: 'session-1' },
+          { message: '乙（session-2）：两边各自写过', sessionId: 'session-2' },
+          { message: '远端索引里有一条没有 id 的记录', sessionId: undefined },
+          { message: '第四句', sessionId: undefined },
+        ],
+      },
+    }),
+    'sync.chip.tip · sync.chip.noteProblems:{"count":4}\n' +
+      '甲（session-1）：目标目录不存在：/x\n乙（session-2）：两边各自写过\n远端索引里有一条没有 id 的记录\n' +
+      'sync.chip.moreLeftovers:{"count":1}',
+    '点名版优先：前三条原话 + "还有 1 条"',
   )
   assert.equal(
     chipTitle({ lastRun: { at: '2026-11-12T12:00:00.000Z', ok: true, pulled: 1, pushed: 0, pendingRestart: true } }),
     'sync.chip.tip · sync.chip.noteRestart',
     '要重启时说重启',
   )
+})
+
+test('客户端产物：同步弹窗说清"上次同步"与没做到的每一条，带 id 的给「只看这一条」', { skip }, () => {
+  /*
+   * 页头那枚黄点只说得出"有 2 条没做到"——窗口一关就只剩这一句，而"哪一条、为什么"才是要处理的东西。
+   * 这条用例盯的就是那一块：时间与条数一句话，然后逐条列出原话；带 sessionId 的那条多一枚按钮。
+   */
+  const at = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString()
+  const sync = {
+    url: 'https://dav.example.com/dsh',
+    machineId: 'robot-a',
+    mappings: 1,
+    lastRun: {
+      at,
+      ok: true,
+      pulled: 1,
+      pushed: 2,
+      problems: ['同步映射把 /a 指到了 /nope，但那不是一个存在的目录'],
+      leftovers: [
+        { message: '甲（session-1）：目标目录不存在：/nope', sessionId: 'session-1' },
+        { message: '同步映射把 /a 指到了 /nope，但那不是一个存在的目录' },
+      ],
+    },
+  }
+  // 页面读的是 `state ?? meta`，所以两份都要带 `sync`（真实宿主那两份都有）。
+  const state = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    sync,
+    sessions: [],
+    workspaces: [],
+  }
+  const meta = {
+    sessionsRoot: state.sessionsRoot,
+    registryPath: state.registryPath,
+    sync,
+  }
+  const mounted = mount({ state, meta, panel: 'sync' })
+  const tree = mounted.registrations[0].component(mounted.registrations[0].registration.inject())
+  const text = strings(tree)
+
+  assert.ok(text.includes('sync.last.title'), '有一块叫「上次同步」')
+  assert.ok(
+    text.includes('sync.last.facts:{"when":"time.hours:{\\"count\\":3}","pulled":1,"pushed":2}'),
+    '时间与"拉几条推几条"摆在一句里',
+  )
+  assert.ok(text.includes('sync.leftovers.title:{"count":2}'), '先报没做到几条')
+  assert.ok(text.includes('甲（session-1）：目标目录不存在：/nope'), '没做到的原话逐条列出来')
+  assert.ok(text.includes('同步映射把 /a 指到了 /nope，但那不是一个存在的目录'), '不属于哪条会话的那些也列出来')
+
+  /*
+   * 按钮从 `recorded` 里找而不是从 `tree` 走一遍：弹窗那一层（`WorkDialog`）把正文交给自己的子组件，
+   * `elementsOf()` 顺着 `props.children` 走时进不去；`recorded` 收的是**渲染过程中真正创建过**的元素。
+   */
+  const focusButtons = mounted.recorded.filter(
+    (el) => el.type === 'button' && strings(el).includes('sync.leftovers.focus'),
+  )
+  assert.equal(focusButtons.length, 1, '只有带 sessionId 的那条给「只看这一条」')
+  assert.equal(typeof focusButtons[0].props.onClick, 'function', '那枚按钮点了要能跳到列表')
+
+  // 旧记录（只有 problems、没有 leftovers）也要画得出来：按汇总句一条一句地列。
+  const legacySync = { ...sync, lastRun: { at, ok: true, pulled: 0, pushed: 0, problems: ['只有一句汇总'] } }
+  const legacy = mount({
+    state: { ...state, sync: legacySync },
+    meta: { ...meta, sync: legacySync },
+    panel: 'sync',
+  })
+  const legacyText = strings(legacy.registrations[0].component(legacy.registrations[0].registration.inject()))
+  assert.ok(legacyText.includes('只有一句汇总'), '旧记录退回按 problems 列')
+  assert.ok(legacyText.includes('sync.leftovers.title:{"count":1}'), '条数按那几句数')
 })
 
 test('组件源码：同步那一面自己就是弹窗，宽度跟着那一段走（面板 640、计划 1080）', () => {
