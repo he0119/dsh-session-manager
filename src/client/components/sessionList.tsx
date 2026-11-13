@@ -172,24 +172,14 @@ export interface SessionRowProps {
    */
   locked?: { tip: string }
   /**
-   * 这一行能点开看完整内容（只有会话页给）。
+   * 把这一条交给右栏（`SessionInspector`）。
    *
-   * 这枚按钮落在**行尾那一格**，与时刻叠在同一个格子里：悬停或键盘落在这一行时才出场，那时时刻让位
-   * （见 `.dsm-slot`）。摆在标题那一格（`.dsm-rowLabel`）会被读成"第二枚状态标签"——那里是标签的
-   * 领地，同一行里再放一枚同样大小的小块，用户分不出哪个是状态、哪个能点。
+   * 两个入口走同一个动作：**点整行**（标题、项目、空白都算，见 `openDetailOf()`），或者行尾那枚
+   * 「详情」。那枚按钮**只给键盘**：鼠标与触屏点整行就够了，所以它平时 `visibility: hidden`
+   * （见 styles.ts 的 `.dsm-slotActions`），Tab 落到这一行的勾选框时才出场——那时时刻让位，
+   * 行宽不动。它挡掉 `<label>` 的默认动作，点它不改变勾选。
    *
-   * 按钮落在 `<label>` 里面，所以点击时要 `preventDefault()`：标签的默认动作是把这次点击转给勾选框，
-   * 而"看内容"不该顺带改变勾选状态（用户可能已经挑好了一批，只是想先看一眼其中一条）。
-   */
-  onInspect?: () => void
-  /** 「内容」那枚按钮的文案与悬浮提示（都由调用方翻好）。 */
-  inspectLabel?: string
-  inspectTip?: string
-  /**
-   * 行尾第二枚动作：「详情」——把这一条交给右栏（`SessionInspector`），而不是打开完整时间线。
-   *
-   * 与「内容」并排出现：两个动作回答的是两件事（"快速看一眼"与"读完整日志"），挤成一枚会让人
-   * 以为右栏就是完整日志。两枚都挡掉 `<label>` 的默认动作，点它们不改变勾选。
+   * 完整时间线不在这行了：右栏里那枚「打开完整内容」才是它唯一的入口（见 SessionInspector）。
    */
   onOpenDetail?: () => void
   detailLabel?: string
@@ -197,6 +187,27 @@ export interface SessionRowProps {
   /** 这一行是不是右栏正开着的那一条：给行加一层底色，看右栏时知道它对应哪一行。 */
   opened?: boolean
   t: Translate
+}
+
+/**
+ * 点整行 = 看详情（只有给得出 `onOpenDetail` 的列表才有这一下，也就是「会话」页）。
+ *
+ * 为什么挡掉默认动作：这一行是个 `<label>`，勾选框的无障碍名字靠它，而 label 的默认动作是把落在
+ * 行上的点击转给勾选框——不挡的话，"点标题看详情"会顺带把这一条勾上。所以除了勾选框自己与行尾
+ * 那两枚动作，其余地方的点击都 `preventDefault()`，只做"把这一条交给右栏"这一件事。
+ *
+ * 键盘那条路仍是行尾那枚「详情」：行本身不是可聚焦元素，Tab 落到这一行的勾选框时
+ * `.dsm-slotActions` 才凭 `:focus-within` 出场（见 styles.ts 的 `.dsm-row` 规则）。
+ */
+function openDetailOf(onOpenDetail: () => void) {
+  return (event: React.MouseEvent<HTMLElement>) => {
+    const target = event.target as Element | null
+    const interactive =
+      target !== null && typeof target.closest === 'function' ? target.closest('button, input, a') : null
+    if (interactive !== null) return
+    event.preventDefault()
+    onOpenDetail()
+  }
 }
 
 /** 列表里的一行：勾选框、标记、标题（+标签）、可选的归属、字节、时间。 */
@@ -210,9 +221,6 @@ export function SessionRow({
   depth = 0,
   note,
   locked,
-  onInspect,
-  inspectLabel,
-  inspectTip,
   onOpenDetail,
   detailLabel,
   detailTip,
@@ -226,6 +234,7 @@ export function SessionRow({
     <label
       className={`${ROW_CLASS[variant]}${nestClass(depth)}`}
       {...(opened ? { 'data-opened': 'true' } : {})}
+      {...(onOpenDetail === undefined ? {} : { onClick: openDetailOf(onOpenDetail) })}
     >
       {/*
         勾选框走官方 `Checkbox`：`label` 给空串——这一行自己有标题（右侧那一格），可见文案再由
@@ -269,47 +278,29 @@ export function SessionRow({
         </span>
       )}
       <span className="dsm-meta">{formatBytes(session.bytes)}</span>
-      {onInspect === undefined && onOpenDetail === undefined ? (
+      {onOpenDetail === undefined ? (
         <span className="dsm-meta">{formatTime(session.createdAt)}</span>
       ) : (
         /*
-         * 行尾那一格：时刻与行上的动作叠在同一个格子里（见 `.dsm-slot` 的注释），只有给得出动作的
-         * 行才这么摆——别的页（导出 / 迁移挑选 / 计划清单）仍旧只有时刻一格。
-         *
-         * 动作装在一个 `.dsm-slotActions` 里：两枚按钮并排，整组一起出现在悬停时；各自再挡掉
-         * `<label>` 的默认动作（它会把点击转给里面的勾选框）。
+         * 行尾那一格：时刻与那枚「详情」叠在同一个格子里（见 `.dsm-slot` 的注释）。那枚按钮只给
+         * 键盘——鼠标与触屏点整行就是了——所以它平时藏着，Tab 落到这一行的勾选框时才顶掉时刻。
+         * 按钮自己挡掉 `<label>` 的默认动作（它会把点击转给里面的勾选框）。
          */
         <span className="dsm-meta dsm-slot">
           <span className="dsm-time">{formatTime(session.createdAt)}</span>
           <span className="dsm-slotActions">
-            {onOpenDetail !== undefined && (
-              <button
-                type="button"
-                className="dsm-rowDetail"
-                title={detailTip}
-                onClick={(event) => {
-                  event.preventDefault()
-                  event.stopPropagation()
-                  onOpenDetail()
-                }}
-              >
-                {detailLabel ?? t('manage.detail.open')}
-              </button>
-            )}
-            {onInspect !== undefined && (
-              <button
-                type="button"
-                className="dsm-rowInspect"
-                title={inspectTip}
-                onClick={(event) => {
-                  event.preventDefault()
-                  event.stopPropagation()
-                  onInspect()
-                }}
-              >
-                {inspectLabel ?? t('manage.transcript.open')}
-              </button>
-            )}
+            <button
+              type="button"
+              className="dsm-rowDetail"
+              title={detailTip}
+              onClick={(event) => {
+                event.preventDefault()
+                event.stopPropagation()
+                onOpenDetail()
+              }}
+            >
+              {detailLabel ?? t('manage.detail.open')}
+            </button>
           </span>
         </span>
       )}

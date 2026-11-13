@@ -58,8 +58,9 @@ are `^0.2.0-rc.1`); moving to the 0.3 line means bumping those lines together.
 
 The page has three parts: the project rail on the left (click a project to see only it, hover a
 project row for a whole-group checkbox, with the filter chips at the bottom of the rail), the flat
-library table in the middle (with a title / id search box above it), and the details of the selected
-session on the right. Import and backups sit in the bottom status bar; sync is the state button in
+library table in the middle (with a title / id search box above it; clicking a row hands it to the
+panel on the right, and ticking is done with the checkbox on the left), and the details of the
+selected session on the right. Import and backups sit in the bottom status bar; sync is the state button in
 the page header.
 
 The **?** in the page header (Help) explains every session category (visible / subagent / blank /

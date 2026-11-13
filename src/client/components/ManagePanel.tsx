@@ -868,9 +868,6 @@ export function ManagePanel({
                     owner={projectNameOf(session)}
                     note={parentElsewhereOf(session)}
                     locked={picking.lockOf(session)}
-                    onInspect={() => setInspecting(session)}
-                    inspectLabel={t('manage.transcript.open')}
-                    inspectTip={t('manage.transcript.openTip')}
                     onOpenDetail={() => setDetail({ id: session.id })}
                     detailLabel={t('manage.detail.open')}
                     detailTip={t('manage.detail.openTip')}
@@ -979,6 +976,22 @@ export function ManagePanel({
               </div>
             )}
           </div>
+          {/*
+            浮层外面那层空白：窄屏有浮层打开时（左栏的「项目与筛选」或右侧的「详情」），点它就收起，
+            不必先找到那一层里那枚「关闭」（见 styles.ts 的容器查询）。
+            它接住这一下点击，所以点到的那一行不会顺带被选中、右栏也不会顺带换一条——一次点击只做
+            一件事。它挂在主栏里（不是工作台那一层）：左栏在 960–1180 那一档还是常驻的一列，这一层
+            因此不会盖住它。
+            键盘那条路仍是浮层里那两枚「关闭」（这一层 `aria-hidden`、进不了 Tab 序）。
+          */}
+          <div
+            className="dsm-scrim"
+            aria-hidden="true"
+            onClick={() => {
+              setTreeOpen(false)
+              setDetail({ id: null })
+            }}
+          />
         </div>
 
         <SessionInspector

@@ -17,8 +17,10 @@ agent-browser open "$URL" >/dev/null 2>&1 || { echo "打不开 $URL（dev 实例
 sleep 3
 click_text '设置'; sleep 1.5
 click_text '会话管理'; sleep 1.5
-run "(() => { [...document.querySelectorAll('.dsm-row')][$ROW].querySelector('.dsm-rowInspect').click(); return 1; })()" >/dev/null
-sleep 3
+# 完整时间线的入口在右栏里：点这一行（整行 = 把这一条交给右栏），再点右栏那枚「打开完整内容」。
+run "(() => { [...document.querySelectorAll('.dsm-row')][$ROW].click(); return 1; })()" >/dev/null
+sleep 1.5
+click_text '打开完整内容'; sleep 3
 
 # 滚到底，直到不再长（内容视图一次 80 条自己往下接）
 last=-1

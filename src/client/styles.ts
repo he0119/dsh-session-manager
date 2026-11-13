@@ -511,29 +511,27 @@ export const CSS = `
 .dsm-rowLabel > .dsm-tag { flex: none; }
 .dsm-meta { color: var(--dsw-alias-label-secondary, #646a73); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /*
- * 行尾那一格：时刻与行上的动作（「内容」）叠在同一个格子里，悬停或键盘落在这一行时后者顶掉前者。
+ * 行尾那一格：时刻与那枚「详情」叠在同一个格子里，键盘落到这一行时后者顶掉前者。
  *
  * 叠格子而不是并排：格宽取两者的最大值（正好是时刻的宽度），于是切换时行宽不动、右边几列也不动；
- * 并排则要为平时不出现的动作白留一段宽度，改成 display: none 又会让标题那一格在悬停时被拉宽
- * （文字跟着跳）。宿主自己的会话列表也是这一套：悬停时动作顶掉时间那一格。
- *
- * 两样都摆出来是给触屏留的退路（没有悬停，动作否则永远见不到），见下面那条 @media。
+ * 并排则要为平时不出现的那枚按钮白留一段宽度，改成 display: none 又会让标题那一格在切换时被拉宽
+ * （文字跟着跳）。
  */
 .dsm-slot { display: grid; align-items: center; }
 .dsm-slot > * { grid-area: 1 / 1; justify-self: end; }
 /*
- * 行尾那组动作（「详情」「内容」）与时刻叠在同一格：整组平时 visibility: hidden（不进 tab 顺序；
- * 键盘落到这一行的勾选框时整行 :focus-within 再让它出场，那时 Tab 也够得着它们）。
+ * 行尾那枚「详情」与时刻叠在同一格：平时 visibility: hidden（不进 tab 顺序；键盘落到这一行的勾选框
+ * 时整行 :focus-within 再让它出场，那时 Tab 也够得着它）。
  *
- * 两枚按钮放在一个 flex 容器里、整组控制显隐：只给按钮自己写 visibility 时，悬停规则会各自打架，
- * 而且两枚都绝对定位在同一格里会互相盖住。
+ * 鼠标与触屏不靠它：点整行就打开右栏（见 sessionList.tsx 的 openDetailOf），所以悬停时这一格仍是
+ * 时刻，不再浮出一枚多余的动作。
  */
 .dsm-slotActions { display: flex; align-items: center; gap: 8px; visibility: hidden; }
 /*
  * 行上的动作是**动作**，不是标签——所以没有盒子（盒子是标签那套语法）、走 brand 色。
- * visibility 继承自 .dsm-slotActions：整组出现时两枚一起出现。
+ * visibility 继承自 .dsm-slotActions。
  */
-.dsm-rowInspect, .dsm-rowDetail {
+.dsm-rowDetail {
   border: none;
   background: transparent;
   padding: 0;
@@ -544,19 +542,13 @@ export const CSS = `
   cursor: pointer;
   visibility: inherit;
 }
-/* 悬停 / 键盘落在这一行：时刻让位，动作出场。 */
-.dsm-row:hover .dsm-time, .dsm-row:focus-within .dsm-time { visibility: hidden; }
-.dsm-row:hover .dsm-slotActions, .dsm-row:focus-within .dsm-slotActions { visibility: visible; }
-.dsm-rowInspect:hover, .dsm-rowDetail:hover { text-decoration: underline; }
-.dsm-rowInspect:focus-visible, .dsm-rowDetail:focus-visible {
+/* 键盘落在这一行：时刻让位，按钮出场。 */
+.dsm-row:focus-within .dsm-time { visibility: hidden; }
+.dsm-row:focus-within .dsm-slotActions { visibility: visible; }
+.dsm-rowDetail:hover { text-decoration: underline; }
+.dsm-rowDetail:focus-visible {
   outline: 2px solid var(--dsw-alias-brand-primary, #3370ff);
   outline-offset: 1px;
-}
-/* 触屏没有悬停：动作并排摆出来（那时不叠格子，否则它们会互相盖住）；时刻让位给两枚按钮。 */
-@media (hover: none) {
-  .dsm-slot { display: flex; gap: 8px; }
-  .dsm-slotActions { visibility: visible; }
-  .dsm-rowManage .dsm-time { display: none; }
 }
 .dsm-empty { padding: 14px; color: var(--dsw-alias-label-secondary, #646a73); }
 /*
@@ -573,7 +565,17 @@ export const CSS = `
   min-height: 0;
   container-type: inline-size;
 }
-.dsm-workbenchMain { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
+/*
+ * 主栏是浮层外面那层空白（.dsm-scrim）的定位参照：它铺的就是这张卡片这一块，不越到左栏去。
+ */
+.dsm-workbenchMain {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
 /*
  * 左栏是一张卡片：宽度固定 208px，里面分三段——头、项目清单（自己滚）、筛选。
  * 不用边框竖线而用一张卡，是为了和右边那张列表卡同一套几何（圆角 / 描边 / 内边距）。
@@ -648,6 +650,20 @@ export const CSS = `
 .dsm-treeFilters .dsm-filters { padding: 0; }
 /* 宽屏上这枚开关与「关闭」都不出现：左栏一直摆着。 */
 .dsm-treeToggle, .dsm-treeClose { display: none; }
+/*
+ * 浮层外面那层空白：窄屏有浮层打开时铺满列表这一块（左栏的「项目与筛选」与右侧「详情」之外那片），
+ * 点它就收起（见文末的两条容器查询）。
+ * 它不画任何东西——浮层已经靠宽度与右边那道阴影跟列表分开，再压一层底色只是把下面的列表染灰。
+ * 它挂在 .dsm-workbenchMain 里（见 ManagePanel）：左栏在 960–1180 那一档还是常驻的一列，这一层
+ * 因此不会盖住它。position / inset / z-index 那三行平时不起作用（display:none 不在布局里），
+ * 只有容器查询那一档把它打开时才用得上。
+ */
+.dsm-scrim {
+  display: none;
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+}
 /*
  * 「会话」页右栏：一条会话的详情。宽屏上一直摆着（没选时是一句提示），窄屏收成浮层（见文末的
  * 容器查询）。宽度 340 是量出来的：再宽，1600 窗口下列表的标题列就只剩一百多像素。
@@ -1479,11 +1495,30 @@ export const CSS = `
     left: 0;
     z-index: 6;
     width: 280px;
-    display: none;
+    display: flex;
+    /* 关着时挪到左边界之外。display 那样切是切不出过渡的，所以换成"一直摆着、看不见"：
+       visibility: hidden 让它不接点击、也不进无障碍树，滑出去 160ms 之后才真的隐藏。 */
+    visibility: hidden;
+    transform: translateX(-100%);
+    transition: transform 160ms ease-out, visibility 0s linear 160ms;
     border-radius: 0 20px 20px 0;
     box-shadow: 10px 0 28px color-mix(in srgb, var(--dsw-alias-label-primary, #1f2329) 18%, transparent);
   }
-  .dsm-tree.dsm-treeOpen { display: flex; }
+  .dsm-tree.dsm-treeOpen {
+    visibility: visible;
+    transform: none;
+    transition-delay: 0s;
+  }
+  /*
+   * 这一档左栏自己也成了浮层：它一打开，外面那层空白就显形（z-index 比浮层低一档，浮层里的项目行
+   * 与筛选芯片照旧可点）。选择器读的是浮层自己那个 dsm-treeOpen 类：状态只有一个出处，JS 里不必
+   * 再同步一份"要不要接点击"。空白跟着浮层进出：滑出去的那 160ms 里它还在，免得半路上点到下面的
+   * 列表。
+   */
+  .dsm-tree.dsm-treeOpen ~ .dsm-workbenchMain .dsm-scrim {
+    visibility: visible;
+    transition-delay: 0s;
+  }
   .dsm-treeToggle, .dsm-treeClose { display: inline-flex; }
 }
 /*
@@ -1500,11 +1535,42 @@ export const CSS = `
     bottom: 0;
     z-index: 7;
     width: 340px;
-    display: none;
+    display: flex;
+    /* 与左栏同一套：关着时挪到右边界之外、不可见但还在版上，滑出去之后才隐藏。 */
+    visibility: hidden;
+    transform: translateX(100%);
+    transition: transform 160ms ease-out, visibility 0s linear 160ms;
     border-radius: 20px 0 0 20px;
     box-shadow: -10px 0 28px color-mix(in srgb, var(--dsw-alias-label-primary, #1f2329) 18%, transparent);
   }
-  .dsm-inspector[data-empty='false'] { display: flex; }
+  .dsm-inspector[data-empty='false'] {
+    visibility: visible;
+    transform: none;
+    transition-delay: 0s;
+  }
+  /*
+   * 右栏成了浮层、而且真的摆着一条会话时，外面那层空白也显形：点它就收起（左栏这一档仍是常驻的
+   * 一列，那层空白挂在主栏里，所以点左栏照旧是"只看这个项目"）。右栏在 DOM 里排在主栏之后，
+   * 只能从工作台那一层问"右栏开着没有"——:has() 问的是同一个 data-empty。
+   */
+  .dsm-scrim {
+    display: block;
+    /* 空白自己不画东西，跟着浮层"晚 160ms 再消失"就够了：收起动画演完，它才让出点击。 */
+    visibility: hidden;
+    transition: visibility 0s linear 160ms;
+  }
+  .dsm-workbench:has(.dsm-inspector[data-empty='false']) .dsm-scrim {
+    visibility: visible;
+    transition-delay: 0s;
+  }
+}
+/* 少动一点：这一层不想要动画时，收起与滑出都当场完成（与轮次标题那条同一个口径）。 */
+@media (prefers-reduced-motion: reduce) {
+  .dsm-tree,
+  .dsm-inspector,
+  .dsm-scrim {
+    transition: none;
+  }
 }
 
 `

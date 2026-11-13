@@ -458,10 +458,17 @@ test('右栏详情：340px，窄到 1180px 收成浮层，没选会话时不出�
   assert.notEqual(at, -1, '窄屏分档读的是工作台自己的宽度（容器查询），不是窗口宽度')
   const narrow = css.slice(at)
   assert.match(narrow, /\.dsm-inspector\s*\{[^}]*position:\s*absolute/, '窄屏右栏从文档流里出来')
+  assert.match(narrow, /\.dsm-inspector\s*\{[^}]*visibility:\s*hidden/, '没选会话时整栏不可见')
+  assert.match(narrow, /\.dsm-inspector\s*\{[^}]*transform:\s*translateX\(100%\)/, '关着时挪到右边界之外')
   assert.match(
     narrow,
-    /\.dsm-inspector\[data-empty='false'\]\s*\{\s*display:\s*flex/,
-    '没选会话时整栏不出现；选了才滑出来',
+    /\.dsm-inspector\s*\{[^}]*transition:\s*transform 160ms/,
+    '滑进来 / 滑出去都有过渡（display 切不出来）',
+  )
+  assert.match(
+    narrow,
+    /\.dsm-inspector\[data-empty='false'\]\s*\{[^}]*visibility:\s*visible/,
+    '选了会话才滑出来',
   )
   // 右栏正开着的那一行：左缘一条品牌色细线（与底色一起，知道右栏说的是哪一条）
   assert.match(
@@ -479,11 +486,59 @@ test('左栏项目树：208px 宽，窄到 960px 收成浮层', () => {
   assert.notEqual(at, -1, '窄屏分档读的是工作台自己的宽度（容器查询），不是窗口宽度')
   const narrow = css.slice(at)
   assert.match(narrow, /\.dsm-tree\s*\{[^}]*position:\s*absolute/, '窄屏左栏从文档流里出来，盖在列表上')
-  assert.match(narrow, /\.dsm-tree\.dsm-treeOpen\s*\{\s*display:\s*flex/, '点开才出现，收起时 display:none')
+  // 进出要能演出来：display 那样切是切不出过渡的，所以关着时是"挪到边界之外 + 看不见"。
+  assert.match(narrow, /\.dsm-tree\s*\{[^}]*visibility:\s*hidden/, '关着时不接点击、也不进无障碍树')
+  assert.match(narrow, /\.dsm-tree\s*\{[^}]*transform:\s*translateX\(-100%\)/, '关着时挪到左边界之外')
+  assert.match(
+    narrow,
+    /\.dsm-tree\s*\{[^}]*transition:\s*transform 160ms/,
+    '滑进来 / 滑出去都有过渡（display 切不出来）',
+  )
+  assert.match(
+    narrow,
+    /\.dsm-tree\s*\{[^}]*visibility 0s linear 160ms/,
+    '滑完 160ms 才真的隐藏，否则收起那一半会先消失',
+  )
+  assert.match(narrow, /\.dsm-tree\.dsm-treeOpen\s*\{[^}]*visibility:\s*visible/, '打开时现形')
+  assert.match(narrow, /\.dsm-tree\.dsm-treeOpen\s*\{[^}]*transform:\s*none/, '打开时滑到终点')
   assert.match(
     narrow,
     /\.dsm-treeToggle,\s*\.dsm-treeClose\s*\{\s*display:\s*inline-flex/,
     '卡头的开关与浮层里的关闭键只在窄屏出现',
+  )
+  // 浮层外面那层空白：点它收起，不必先找到那一层里那枚「关闭」。它铺在主栏里（不是工作台那一层：
+  // 左栏在 960–1180 那一档还是常驻的一列），宽屏与没有浮层时不显示；两档各有一条"什么时候显形"。
+  const scrim = ruleBody('.dsm-scrim')
+  assert.notEqual(scrim, null, '找不到浮层外面那层空白')
+  assert.match(scrim, /display:\s*none/, '宽屏上没有这一层')
+  assert.match(scrim, /position:\s*absolute/, '显形时铺在主栏上，不占流')
+  assert.match(scrim, /inset:\s*0/, '四边贴住主栏：浮层之外那块空白全归它')
+  assert.match(scrim, /z-index:\s*5/, '比两层浮层都低一档（左栏 6、右栏 7）')
+  assert.match(ruleBody('.dsm-workbenchMain'), /position:\s*relative/, '主栏是它的定位参照')
+  assert.match(
+    narrow,
+    /\.dsm-tree\.dsm-treeOpen ~ \.dsm-workbenchMain \.dsm-scrim\s*\{\s*visibility:\s*visible/,
+    '左栏成了浮层（≤960）而且打开时，那层空白显形',
+  )
+  // 少动一点：这一层不想要动画时，滑出与收起都当场完成（与轮次标题那条同一个口径）。
+  assert.match(
+    css,
+    /@media \(prefers-reduced-motion: reduce\) \{\s*\.dsm-tree,\s*\.dsm-inspector,\s*\.dsm-scrim\s*\{\s*transition:\s*none/,
+    'prefers-reduced-motion 时不要过渡',
+  )
+  const wide = css.slice(css.indexOf('@container (max-width: 1180px)'))
+  assert.match(
+    wide,
+    /\.dsm-workbench:has\(\.dsm-inspector\[data-empty='false'\]\) \.dsm-scrim\s*\{\s*visibility:\s*visible/,
+    '右栏成了浮层（≤1180）而且真的摆着一条会话时，那层空白显形',
+  )
+  // 空白自己不画东西，但它要陪浮层演完收起那一段：晚 160ms 才让出点击。
+  assert.match(wide, /\.dsm-scrim\s*\{[^}]*display:\s*block/, '窄屏这一档它一直在版上')
+  assert.match(wide, /\.dsm-scrim\s*\{[^}]*visibility:\s*hidden/, '没有浮层时它不可见')
+  assert.match(
+    wide,
+    /\.dsm-scrim\s*\{[^}]*transition:\s*visibility 0s linear 160ms/,
+    '收起动画演完才隐藏',
   )
 })
 
@@ -654,14 +709,13 @@ test('会话内容视图的滚动区是官方正文那一层，列表自己不�
   assert.doesNotMatch(list, /max-height/, '列表不按视口算高度：那样会被卡片裁掉一截')
 })
 
-test('行上的动作等悬停：藏在行尾那一格，静止时行上只有标签', () => {
-  // 为什么钉它：原来「内容」是标题那一格（.dsm-rowLabel）里一枚有边框的小块，与「活动中」那枚标签
-  // 同字号、同内边距、同文字色（只差 2px 圆角与一档边框色），同一行里读成"第二枚状态标签"。现在动作
-  // 挪到行尾与时刻叠在同一个格子里，静止时不摆出来（宿主自己的会话列表也是这一套）。「详情」与
-  // 「内容」两枚装在同一个 .dsm-slotActions 里，整组一起显隐。
+test('行尾那枚「详情」只给键盘：鼠标悬停时行上只有时刻', () => {
+  // 为什么钉它：动作以前在悬停时浮出来（「详情」+「内容」）。点整行已经能打开右栏之后，悬停再浮出
+  // 一枚「详情」就是重复；「内容」那枚干脆删了（完整时间线在右栏里开）。现在只剩键盘这条路：
+  // Tab 落到这一行的勾选框，那枚按钮才顶掉时刻出场，鼠标划过时什么都不出现。
   const slot = ruleBody('.dsm-slot')
   assert.notEqual(slot, null, '找不到 .dsm-slot 规则')
-  assert.match(slot, /display:\s*grid/, '时刻与动作要叠在同一个格子里')
+  assert.match(slot, /display:\s*grid/, '时刻与按钮要叠在同一个格子里')
 
   const cell = ruleBody('.dsm-slot > *')
   assert.notEqual(cell, null, '叠格子靠的是给两个子元素同一个 grid-area')
@@ -669,30 +723,28 @@ test('行上的动作等悬停：藏在行尾那一格，静止时行上只有�
 
   const actions = ruleBody('.dsm-slotActions')
   assert.notEqual(actions, null, '找不到 .dsm-slotActions 规则')
-  assert.match(actions, /visibility:\s*hidden/, '静止时整组动作不摆出来')
+  assert.match(actions, /visibility:\s*hidden/, '平时不摆出来（也不进 tab 顺序）')
 
-  const button = /\.dsm-rowInspect,\s*\.dsm-rowDetail\s*\{([^}]*)\}/.exec(css)
-  assert.notEqual(button, null, '找不到两枚行上动作共用的规则')
-  assert.match(button[1], /border:\s*none/, '它没有盒子：盒子是标签那套语法，动作不该长成标签')
-  assert.match(button[1], /visibility:\s*inherit/, '显隐由 .dsm-slotActions 整组控制')
+  const button = ruleBody('.dsm-rowDetail')
+  assert.notEqual(button, null, '找不到那枚「详情」的规则')
+  assert.match(button, /border:\s*none/, '它没有盒子：盒子是标签那套语法，动作不该长成标签')
+  assert.match(button, /visibility:\s*inherit/, '显隐由 .dsm-slotActions 控制')
 
-  // 悬停 / 键盘落在这一行时：时刻让位、动作出场；触屏没有悬停，动作常显。
-  assert.match(css, /\.dsm-row:hover \.dsm-time[^{]*\{[^}]*visibility:\s*hidden/, '悬停时时刻要让位')
-  assert.match(
-    css,
-    /\.dsm-row:hover \.dsm-slotActions[^{]*\{[^}]*visibility:\s*visible/,
-    '悬停时动作要出场',
-  )
   assert.match(
     css,
     /\.dsm-row:focus-within \.dsm-slotActions[^{]*\{[^}]*visibility:\s*visible/,
-    '键盘落在这一行时同样出场（`visibility: hidden` 的东西本来不进 tab 顺序）',
+    '键盘落在这一行时出场（`visibility: hidden` 的东西本来不进 tab 顺序）',
   )
-  assert.match(
-    css,
-    /@media \(hover: none\)[\s\S]*?\.dsm-slotActions\s*\{[^}]*visibility:\s*visible/,
-    '触屏没有悬停，动作得常显（那时不叠格子，见 .dsm-slot）',
+  assert.match(css, /\.dsm-row:focus-within \.dsm-time[^{]*\{[^}]*visibility:\s*hidden/, '时刻让位给按钮')
+  // 鼠标那一路已经换成"点整行"，悬停时不该再浮出任何动作（含以前那条触屏常显的退路）。
+  assert.equal(
+    /\.dsm-row:hover \.dsm-slotActions/.test(css),
+    false,
+    '悬停不再浮出动作：点整行就够了',
   )
+  assert.equal(/\.dsm-row:hover \.dsm-time/.test(css), false, '悬停时时刻照旧摆着')
+  assert.equal(/@media \(hover: none\)/.test(css), false, '触屏那条退路（动作常显）随「内容」一起删了')
+  assert.equal(/\.dsm-rowInspect/.test(css), false, '「内容」那枚的样式不该还留着')
 })
 
 test('说明页 FAQ 的答案不被挤成零宽：那一栏是单列网格', () => {
