@@ -537,6 +537,15 @@ test('宽弹窗的正文层自带整页的块间距：横幅与卡片不能贴�
   assert.match(strip, /margin-block:\s*0/, '直接子元素的外边距收成 0，间距只由 gap 给')
 })
 
+test('计划表的大小那一列放得下「111.0 KB」：截断的数字比窄一列更难读', () => {
+  // 真机量到：「111.0 KB」需要 72px（含左右 padding），而 68px 的列把它截成「111.0…」——一个被截断的
+  // 数字没有意义，宁可让会话那一列少几个字。
+  const bytes = ruleBody('.dsm-planTable .dsm-colBytes')
+  assert.notEqual(bytes, null, '找不到大小那一列的宽度')
+  const width = Number((bytes.match(/width:\s*(\d+)px/) ?? [])[1])
+  assert.ok(width >= 76, `大小那一列至少 76px（现在是 ${width}px，会把「111.0 KB」截断）`)
+})
+
 test('弹窗正文层的字号自己写：官方 Modal 落在 .dsm-root 之外，不写就继承文档根的 16px', () => {
   // 真实缺陷（用户截图里量出来的）：「会话内容」弹窗的正文层原来没有字号声明，于是弹窗里凡是没有
   // 自己写字号的东西都继承文档根的 16px——筛选条右端那串「显示 25 / 已读 25 条」实测墨迹 29–32

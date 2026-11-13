@@ -887,7 +887,9 @@ export const CSS = `
 /* 「这次不动」那张表的第三列（远端机器）：宽度沿用原来那一列的 26%。分组之后这一列不再放路径
    （路径去组头了），只放机器名——机器名比路径短，多出来的宽度归中间的会话列。 */
 .dsm-planTable .dsm-colMachine { width: 26%; }
-.dsm-planTable .dsm-colBytes { width: 68px; }
+/* 大小那一列：68px 时「111.0 KB」（8 个字符 + 千分位）会被截成「111.0…」（真机量到 scrollWidth 72
+   > clientWidth 68），往上让到 80px——最长的「999.9 KB」也放得下。 */
+.dsm-planTable .dsm-colBytes { width: 80px; }
 /*
  * 计划表里的项目组头：一条横跨整行的横幅，一个项目底下挂着它那几行（会拉取 / 会推送 / 没动三张表同一套）。
  *
