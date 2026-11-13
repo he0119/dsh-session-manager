@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Session Manager",
-    "description": "Export and import session packages, move sessions and workspaces to a new directory, and sync sessions between machines — all from the settings page."
+    "description": "Move sessions to a new directory, export and import .dshsess packages, archive and delete them, and sync between machines over WebDAV — all from the Session management page in the sidebar."
   }
 }
