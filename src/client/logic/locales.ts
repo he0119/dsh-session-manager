@@ -611,12 +611,15 @@ export const zh = {
   'sync.map.duplicate': '第 {line} 行的远端路径重复：{from}',
 
   // 自动推送：本机安静下来之后在后台跑一轮**只推不拉**的同步（表单那一栏 + 卡片上那句话 + 当场跑一次的结论）
-  'sync.field.autoPush': '自动推送',
+  // 自动那一档：一行三选一（关闭 / 仅推送 / 双向）。说明只有一段，按当前那一档换。
+  'sync.field.auto': '自动同步',
+  'sync.field.auto.off': '关闭',
+  'sync.field.auto.push': '仅推送',
+  'sync.field.auto.sync': '双向',
+  'sync.field.autoHintOff': '不自动跑：什么时候同步由你按一下决定。',
   'sync.field.autoPushHint':
     '本机空闲 5 分钟之后，它才把改过的会话推送出去；你一直在写，它就一直不动。只推送、绝不拉取，也不动本机的任何会话。',
   // 自动同步：同一件事的强那一档（双向 + 收尾整理）。两栏都开着时按这一档走，上面那一栏在界面上置灰。
-  'sync.field.autoSync': '自动同步',
-  'sync.field.autoPushCovered': '已由「自动同步」包含：它连推送那一半一起做。',
   'sync.field.autoSyncHint':
     '写完一轮、安静 5 分钟之后自己跑一趟双向同步：该拉的拉、该推的推，收尾时顺手整理自己那一格（只删重复与被取代的包，孤儿包留着）。远端有一份更新的同一条会话时，本机那份会被顶掉——旧的那份进备份，可在「备份与回滚」里退回；正在本机开着的会话跳过。',
   'sync.autoPush.enabled': '自动推送已开：本机空闲 5 分钟才推。',
@@ -1249,11 +1252,13 @@ export const en: LocaleDictOf<typeof NS> = {
 
   // Automatic push: a push-only sync round once this machine goes quiet (the form switch,
   // the card's one-liner and the outcome of running one round right now).
-  'sync.field.autoPush': 'Automatic push',
+  'sync.field.auto': 'Automatic sync',
+  'sync.field.auto.off': 'Off',
+  'sync.field.auto.push': 'Push only',
+  'sync.field.auto.sync': 'Two-way',
+  'sync.field.autoHintOff': 'Does not run by itself: sync happens when you press the button.',
   'sync.field.autoPushHint':
     'Once this machine has been idle for five minutes, it uploads the sessions you changed; while you keep writing, it stays put. It pushes only and never pulls, and it never touches any session on this machine.',
-  'sync.field.autoSync': 'Automatic sync',
-  'sync.field.autoPushCovered': 'Covered by "Automatic sync", which also does the pushing half.',
   'sync.field.autoSyncHint':
     'Five minutes after a quiet turn it runs a two-way sync by itself: pulls what is missing, pushes what is new, and tidies its own cell on the way out (only duplicate and superseded bundles; orphan bundles stay). When the remote has a newer copy of the same session, the local one is replaced — the old copy goes to backups and can be restored from "Backups and rollback". Sessions open on this machine are skipped.',
   'sync.autoPush.enabled': 'Automatic push is on: it uploads once the machine has been idle for five minutes.',

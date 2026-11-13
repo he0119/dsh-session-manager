@@ -28,7 +28,7 @@
 
 import * as React from 'react'
 
-import { Button, Input, Switch, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, Input, SegmentedControl, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
 
 import { testSync, type SyncTestResponse } from '../api.ts'
 import { getCredentialsApi, type CredentialInfo } from '../credentials.ts'
@@ -234,6 +234,17 @@ export function SyncConfigForm({
 
   const view = draft ?? draftFrom(section)
   const problems = draftProblems(view)
+  /**
+   * 三档各自的说明：同一行里只换这一段（控件本身不动，用户按一下就知道这一档会做什么）。
+   *
+   * 「双向」那句最长，因为它是唯一会动本机的一档——覆盖、备份、跳过正在开着的，三件事必须说清。
+   */
+  const autoHint =
+    view.auto === 'off'
+      ? t('sync.field.autoHintOff')
+      : view.auto === 'push'
+        ? t('sync.field.autoPushHint')
+        : t('sync.field.autoSyncHint')
   /** 草稿一动，上一次的测试结论就过期了：它说的是当时那份已保存的配置。 */
   const clearTest = (): void => {
     setTestResult(null)
@@ -440,50 +451,43 @@ export function SyncConfigForm({
       </div>
 
       {/*
-       * 自动推送摆在**最后**：前三栏是"怎么连"（URL / 机器标识 / 超时），中间是"怎么认证"，再下面
-       * 是"落地到哪"（路径映射）——这三组说的是"这条通道是什么"。自动推送不一样，它说的是"连上之后
-       * 让它自己怎么跑"，是另一件事；夹在连接参数与认证之间会把那一组自然的分组切成两半。
+       * 自动那一档摆在**最后**：前三栏是"怎么连"（URL / 机器标识 / 超时），中间是"怎么认证"，再下面
+       * 是"落地到哪"（路径映射）——这三组说的是"这条通道是什么"。自动不一样，它说的是"连上之后让它自己
+       * 怎么跑"，是另一件事；夹在连接参数与认证之间会把那一组自然的分组切成两半。
        *
-       * 摆最后还有个位置上的好处：它紧挨着「保存」，而它是个**存了才生效**的开关（生效与否由宿主按
-       * 已保存的 `autoPush` 判，草稿里改了不勾选也没用）。
+       * 摆最后还有个位置上的好处：它紧挨着「保存」，而它是个**存了才生效**的选择（生效与否由宿主按已
+       * 保存的那两栏判，草稿里改了不保存也没用）。
        *
-       * 开关用官方控件库的 `Switch`，并照内建设置页那一行（`DeveloperToolsRow`）的规格摆：左边一列
-       * 是标题 + 说明，开关顶到右端。这一条是"设置页的开关长什么样"的唯一权威——自己拿一个勾选框画
-       * （`dsm-check`）与页面上其它开关不是一套视觉。
-       *
-       * 没有"间隔"那一栏了：什么时候推由安静窗口决定（本机停手 5 分钟），不是一个可调的周期，所以这一行
-       * 只有一个开关（见 [那篇决策](../../../.agents/notes/implemented/simplification/2026-10-21-auto-push-only-after-a-turn.md)
+       * 没有"间隔"那一栏：什么时候跑由安静窗口决定（本机停手 5 分钟），不是一个可调的周期（见
+       * [那篇决策](../../../.agents/notes/implemented/simplification/2026-10-21-auto-push-only-after-a-turn.md)
        * 与 [等安静之后再跑](../../../.agents/notes/implemented/bug-fix/2026-10-22-auto-push-waits-for-quiet.md)）。
+       */}
+      {/*
+       * 自动那一档：**一行、三选一**（关闭 / 仅推送 / 双向）。
+       *
+       * 为什么不是两个开关：它们不是并列的两件事，而是同一件事的强弱三档。两个开关摆在一起，用户得先
+       * 猜"两个都开算哪个"，界面上还得为此加一句"已由另一个包含"的说明——一个分段控件直接把三档摆出来
+       * 就没有这个中间态。写进配置的仍是那两栏（`autoPush` / `autoSync`），由 `logic/syncForm.ts` 按时
+       * 转成最小的编辑。
+       *
+       * 控件用官方 `SegmentedControl`（`role="tablist"` 那一套）：它是设置页里"三选一"的现成原语。
        */}
       <div className="dsm-toggleRow">
         <div className="dsm-toggleText">
-          <div className="dsm-toggleTitle">{t('sync.field.autoPush')}</div>
-          {/*
-            双向开着时这一栏置灰并换一句说明：两栏是同一件事的强弱两档，双向已经包含推送那一半。
-            值本身不动（`sync.autoPush` 留在配置里），关掉双向之后原来那档照旧回来——所以不是"勾选了
-            就清空另一栏"，那种做法会让用户的设置凭空消失。
-          */}
-          <div className="dsm-toggleDesc">
-            {view.autoSync ? t('sync.field.autoPushCovered') : t('sync.field.autoPushHint')}
-          </div>
+          <div className="dsm-toggleTitle">{t('sync.field.auto')}</div>
+          <div className="dsm-toggleDesc">{autoHint}</div>
         </div>
-        <Switch
-          checked={view.autoPush}
-          disabled={!snapshot.writable || view.autoSync}
-          label={t('sync.field.autoPush')}
-          onChange={(next) => edit({ autoPush: next })}
-        />
-      </div>
-      <div className="dsm-toggleRow">
-        <div className="dsm-toggleText">
-          <div className="dsm-toggleTitle">{t('sync.field.autoSync')}</div>
-          <div className="dsm-toggleDesc">{t('sync.field.autoSyncHint')}</div>
-        </div>
-        <Switch
-          checked={view.autoSync}
+        <SegmentedControl
+          id="dsm-auto-mode"
+          value={view.auto}
           disabled={!snapshot.writable}
-          label={t('sync.field.autoSync')}
-          onChange={(next) => edit({ autoSync: next })}
+          label={t('sync.field.auto')}
+          options={[
+            { value: 'off', label: t('sync.field.auto.off') },
+            { value: 'push', label: t('sync.field.auto.push') },
+            { value: 'sync', label: t('sync.field.auto.sync') },
+          ]}
+          onChange={(next) => edit({ auto: next as SyncDraft['auto'] })}
         />
       </div>
       {/*

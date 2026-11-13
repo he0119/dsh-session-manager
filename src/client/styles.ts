@@ -1036,6 +1036,8 @@ export const CSS = `
  * 本仓不给它加分割线：内建那一行上下都有 border-bottom，是因为通用设置页把若干行叠成一列；这里只有
  * 这一行，加线反而像把表单切开。
  */
+/* 自动那一档的三选一控件：与原来的开关同一摆法（顶到右端、不撑高那一行）。 */
+.dsm-toggleRow > [role='tablist'] { flex: none; }
 .dsm-toggleRow { display: flex; align-items: center; justify-content: space-between; gap: 24px; }
 .dsm-toggleText { min-width: 0; }
 .dsm-toggleTitle { font-size: 14px; line-height: 20px; }

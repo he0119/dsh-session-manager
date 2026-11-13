@@ -393,15 +393,14 @@ keeps happening, nothing runs.
 
 **Whatever the remote has newer is never pulled down** (in this mode): it only pushes, so another
 machine's edits land here only when you press **Sync** yourself and confirm in the dialog — or when you
-turn on the **Automatic sync** row right below.
+pick the two-way option in the **Automatic sync** row below.
 
-**Automatic sync — both ways, touches this machine**: the row below in the same form. With it on, the
-background round becomes a full one: it pulls what is missing, pushes what is new, and tidies its own cell
-on the way out (only duplicate or superseded bundles; orphan bundles stay). One difference matters: **it
-may replace a local copy** — when the remote has a newer version, the local one is backed up first and then
-replaced, and the old copy sits in **Backups and rollback** where you can restore it. Sessions open on this
-machine are skipped. When both rows are on, this one wins (it includes the pushing half), so you never need
-to touch **Automatic push** to get two-way sync.
+Those three are **one row with three choices** in the form (**Automatic sync**: off / push only / two-way),
+not two switches. Pick two-way and the background round becomes a full one: it pulls what is missing, pushes
+what is new, and tidies its own cell on the way out (only duplicate or superseded bundles; orphan bundles
+stay). One difference matters: **it may replace a local copy** — when the remote has a newer version, the
+local one is backed up first and then replaced, and the old copy sits in **Backups and rollback** where you
+can restore it. Sessions open on this machine are skipped.
 
 ```yaml
 sync:

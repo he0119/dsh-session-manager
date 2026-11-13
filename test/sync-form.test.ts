@@ -125,9 +125,8 @@ test('同步设置：接缝没给出值时不编造（空节 → 空草稿）', 
     username: '',
     mapping: [],
     timeoutMs: '',
-    // 自动那两栏也是"没给就不编"：按未勾选（"没开"，不是"用默认值开"）。
-    autoPush: false,
-    autoSync: false,
+    // 自动那一档也是"没给就不编"：按"关"（不是"用默认值开"）。
+    auto: 'off',
   })
 })
 
@@ -240,51 +239,60 @@ test('同步设置：测试连接的结论翻成哪一句（判定在宿主侧�
 
 // ── 自动推送那两栏（开关 + 间隔）────────────────────────────────────────────
 
-test('同步设置：打开自动推送发一条 set，关掉发 unset（与 timeoutMs 同一条规矩）', () => {
+test('同步设置：自动那一档换档时发最小的那几条编辑（与 timeoutMs 同一条规矩）', () => {
   /*
-   * 只提交**改动过**的字段：逐字提交会在用户层攒下一堆"等于默认值"的覆盖。所以两种方向各钉一遍：
-   * 从没开改到开 → 一条 `set true`；从开改到关 → 一条 `unset`（退回组合层，而不是写一个 `false`）。
+   * 界面上是一行三选一，配置里是两栏布尔（`autoPush` / `autoSync`）。换到哪一档，就要让配置**正好**落成
+   * 那一档：不写"等于缺省"的 `set false`，也不留下另一档的键——留着的话下次打开会回到旧那一档，看着像没关掉。
    */
-  const base = draftFrom({})
+  const off = draftFrom({})
+  assert.deepEqual(draftOps(off, {}), [], '什么都没改 → 一条编辑都不发')
 
-  const opened = draftOps({ ...base, autoPush: true }, {})
-  assert.deepEqual(opened, [{ op: 'set', path: ['sync', 'autoPush'], value: true }])
+  assert.deepEqual(draftOps({ ...off, auto: 'push' }, {}), [
+    { op: 'set', path: ['sync', 'autoPush'], value: true },
+  ])
+  assert.deepEqual(draftOps({ ...off, auto: 'sync' }, {}), [
+    { op: 'set', path: ['sync', 'autoSync'], value: true },
+  ])
 
-  const closed = draftOps({ ...base, autoPush: false }, { autoPush: true })
-  assert.deepEqual(closed, [{ op: 'unset', path: ['sync', 'autoPush'] }])
-
-  // 没动过就不发编辑：这是"别的字段不跟着被覆盖"的防线。
-  assert.deepEqual(draftOps(base, {}), [], '什么都没改 → 一条编辑都不发')
-  assert.deepEqual(draftOps({ ...base, autoPush: true }, { autoPush: true }), [], '开关本来就开着 → 不发')
-})
-
-test('同步设置：自动同步那一栏同样只发改动过的那一条', () => {
-  /*
-   * 两栏是同一件事的强弱两档，各自独立写：打开双向只写 `autoSync`，**不动** `autoPush`——用户原来
-   * 那一档留着，关掉双向之后它就回来（见 `src/config.ts` 的 `autoPushSection()`：强的那档赢）。
-   */
-  const base = draftFrom({})
-
-  assert.deepEqual(draftOps({ ...base, autoSync: true }, {}), [{ op: 'set', path: ['sync', 'autoSync'], value: true }])
-  assert.deepEqual(draftOps({ ...base, autoSync: false }, { autoSync: true }), [
+  // 只推 → 双向：写双向 + 清掉旧那栏。
+  const push = { autoPush: true }
+  assert.deepEqual(draftOps({ ...draftFrom(push), auto: 'sync' }, push), [
+    { op: 'unset', path: ['sync', 'autoPush'] },
+    { op: 'set', path: ['sync', 'autoSync'], value: true },
+  ])
+  // 双向 → 只推：反过来同样两条。
+  const both = { autoSync: true }
+  assert.deepEqual(draftOps({ ...draftFrom(both), auto: 'push' }, both), [
+    { op: 'unset', path: ['sync', 'autoSync'] },
+    { op: 'set', path: ['sync', 'autoPush'], value: true },
+  ])
+  // 关掉：把还留着的那一栏清掉（缺省就是关，不发 set false）。
+  assert.deepEqual(draftOps({ ...draftFrom(both), auto: 'off' }, both), [
     { op: 'unset', path: ['sync', 'autoSync'] },
   ])
   assert.deepEqual(
-    draftOps({ ...base, autoPush: true, autoSync: true }, { autoPush: true }),
-    [{ op: 'set', path: ['sync', 'autoSync'], value: true }],
-    '两栏一起打开时只发真的变了的那一条（autoPush 本来就在）',
+    draftOps({ ...draftFrom({ autoPush: true, autoSync: true }), auto: 'off' }, { autoPush: true, autoSync: true }),
+    [
+      { op: 'unset', path: ['sync', 'autoPush'] },
+      { op: 'unset', path: ['sync', 'autoSync'] },
+    ],
+    '两栏都写着时（双向赢）关掉要清两栏',
   )
-  assert.deepEqual(draftOps({ ...base, autoSync: true }, { autoSync: true }), [], '本来就开着 → 不发')
+  // 不动就不发：两栏都写着等于"双向"，草稿也读成双向。
+  assert.deepEqual(draftOps(draftFrom({ autoPush: true, autoSync: true }), { autoPush: true, autoSync: true }), [])
 })
-
-
 
 test('同步设置：自动推送的字典键两种语言都在', () => {
   // 界面那几处文案全走 `t()`；键写错时界面上会露出键名。这里核"开关 / 立即推送 / 跑完 / 没跑"
   // 这几组键真的存在——`LocaleDictOf` 已经在编译期核过键集一致，这一条核的是**用到的**那些。
   const keys = [
-    'sync.field.autoPush',
+    'sync.field.auto',
+    'sync.field.auto.off',
+    'sync.field.auto.push',
+    'sync.field.auto.sync',
+    'sync.field.autoHintOff',
     'sync.field.autoPushHint',
+    'sync.field.autoSyncHint',
     'sync.autoPush.now',
     'sync.autoPush.running',
     'sync.autoPush.done',
