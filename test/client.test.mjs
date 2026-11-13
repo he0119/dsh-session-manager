@@ -1154,9 +1154,9 @@ test('客户端产物：页面上凡是官方 Button 都带边框，没有裸着
   // 更像一段灰字）；旁边内建设置页那枚只读的「打开配置文件」反倒是带边框的 `outline`（量到
   // `border: rgba(0, 0, 0, 0.12) 1px`）。
   //
-  // 口径：这一页凡是用官方 `Button` 的地方都给边框——主动作 `primary`、其余 `outline`。两个**手写**的
-  // 文字动作仍在例外面：每行右端悬停才显形的「内容」与分组头那枚开合图标 ▾，它们按行内链接 / 图标画
-  // （`.dsm-rowInspect` / `.dsm-groupToggle`），本来就不是按钮外观。
+  // 口径：这一页凡是用官方 `Button` 的地方都给边框——主动作 `primary`、其余 `outline`。唯一一枚
+  // **手写**的文字动作在例外面：每行行尾那枚「详情」（`.dsm-rowDetail`，只在键盘落到这一行时出现），
+  // 它按行内链接画，本来就不是按钮外观。
   const state = {
     sessionsRoot: '/home/u/.dsh/sessions',
     registryPath: '/home/u/.dsh/registry.json',
@@ -5403,8 +5403,8 @@ test('组件源码：一处 variant="ghost" 都不许有（官方缺省的那个
   // ghost，渲染树那条断言仍然是绿的）。所以这一条直接扫源码——`ghost` 是官方 `Button` 的缺省变体，
   // 用上它就等于"无边框无底色、鼠标放上去才看得出是按钮"。
   //
-  // 两个**手写**的文字动作不在此列，它们不是官方 `Button`：每行右端悬停才显形的「内容」
-  // （`.dsm-rowInspect`）与分组头那枚开合图标 ▾（`.dsm-groupToggle`）。
+  // 唯一一枚**手写**的文字动作不在此列：每行行尾那枚「详情」（`.dsm-rowDetail`，只在键盘落到这一行
+  // 时出现），它不是官方 `Button`。
   const dir = join(root, 'src', 'client', 'components')
   const hits = []
   for (const name of readdirSync(dir).sort()) {
