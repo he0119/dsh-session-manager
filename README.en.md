@@ -31,7 +31,7 @@ still works.
 
 | Entry point | Good for |
 |---|---|
-| The **Session management** page in Settings | Everyday use: archive, retitle or delete single sessions on the **Sessions** tab, or tick the sessions to move (they may come from different directories, and a deleted source directory is no obstacle) and press **Migrate** on the action row to pick the target in the dialog; export / import on the **Transfer** tab; run a WebDAV sync on the **Sync** tab; roll back or restore on the **Backups** tab |
+| The **Session management** page in Settings | Everyday use: the page is the whole library's flat table; tick the sessions to handle (they may come from different directories, and a deleted source directory is no obstacle) and archive, retitle, migrate, export or delete them on the action row (import lives in the status bar); the sync state at the right of the header opens the plan and the run; **Backups & rollback** in the status bar opens roll back and restore |
 | 5 model tools | Just say "move this workspace's sessions to `~/dev/xxx`" and let the model preview first, apply second |
 
 Both share one migration implementation, so the count the dialog reports is the count you get.
@@ -149,8 +149,9 @@ M" to report.
   file count and where the backup lands → confirm there. Deleting **backs the session directory up into this plugin's backup root
   first**, then removes it; the sidebar drops those rows once the host rescans. A session still live in
   host memory is refused — **restart DSH** so the host lets go, then delete it without opening it first
-  (the Web side has no per-session close; see Help). Changed your mind? Restore it from the **Backups**
-  tab;
+  (the Web side has no per-session close; see Help). Changed your mind? Press **Undo** on the success
+  notice (it opens the rollback confirm for that backup), or restore it from **Backups & rollback** in the
+  status bar;
 - **Subagents follow their parent session**: ticking a parent takes its subagent sessions (and any
   deeper descendants) with it — the dialog lists them row by row, marked as going with the parent, and
   one backup holds the whole family (once the parent's log is gone a subagent has no way back into the
@@ -165,15 +166,15 @@ M" to report.
 
 **Migrate** — move the ticked sessions into one directory
 
-- **Migration lives on the Sessions tab's action row, and the source is whatever you tick — the ticks may
-  span directories**: the whole library is that page's list (same grouping by directory, same row tags,
-  same category chips and search box, same tick set), and there is **no separate Migrate tab**. So "the
+- **Migration lives on the list's action row, and the source is whatever you tick — the ticks may span
+  directories**: the whole library is that table on the page (same row tags, same category chips and
+  search box, same tick set), and there is **no separate Migrate page**. So "the
   project folder was deleted, the project was recreated elsewhere, move those sessions over" reads as:
   tick them in the list (they sit in the sidebar's Ungrouped group, which is just their label), press
   **Migrate** on the action row, pick the recreated directory in the dialog — one run instead of one run
   per directory;
 - **the target directory is picked in the dialog**: that field is the **same control with the same
-  candidates** as the import's landing directory on the **Transfer** tab (its value control opens the
+  candidates** as the import's landing directory in the **Import** dialog (its value control opens the
   candidate panel; you can also type a path or browse the file system). Each row carries two lines (the
   name on top, the local path below, the whole string in its tooltip) and the **filter box** above them
   narrows the list by path, workspace title or project identity — it only filters the candidates and
@@ -235,13 +236,23 @@ M" to report.
 
 **Transfer** — take sessions away, bring them back
 
-On wide screens Export and Import sit **side by side**: the export list (wide) on the left, the import
-fields (narrow, at least 320px) on the right; at 1600 the 1080 body splits 626 + 433, so import no longer
-falls below the fold. Below 900 they stack.
+Two doors, because the two halves relate to ticks differently:
+
+- **Export** follows the ticks: **Export selected** on the list's action row packs the bundle and downloads it,
+  with no dialog. It is greyed out with nothing ticked (it exports exactly the ticked sessions, cascaded
+  subagents included); the notice at the top of the page then reports the session count, the bytes and how
+  many attachment objects travelled.
+- **Import** has nothing to do with ticks (what a bundle carries is independent of the selection): the
+  **Import…** entry in the status bar opens a 640 dialog — pick a bundle, pick a target directory, press
+  Import to see a read-only plan and confirm. The target defaults to the project selected in the left tree
+  and can be changed or typed in by hand.
+- **Bundles can be dropped in**: drag a `.dshsess` onto the page and the import dialog opens with the bundle
+  already in hand (while dragging, the page shows a dashed frame and "Drop to import this bundle"); the same
+  works on the field inside the dialog. One bundle at a time, suffix only.
 
 - Rows show a session's **title**, with the full title and the id on hover: a uuid tells a human nothing,
   and people pick sessions by "the one where I asked about that"; a session with no title falls back to
-  its id. Both the export list and the **Sessions** tab take the whole library, sidebar-hidden sessions
+  its id. The list takes the whole library, sidebar-hidden sessions
   (subagent / blank / archived) included — whether a session is worth taking away or deleting is the
   user's call, and hiding one up front only turns "I know I have that session" into a mystery. Migration
   is the other way round (see below);
@@ -266,7 +277,7 @@ falls below the fold. Below 900 they stack.
   level deeper, under their parent session (the parent-child links here are the very tree that decides who
   a delete or a migration takes with it); sessions in the shell sidebar's Ungrouped group stay with their
   directory here and carry a small "Ungrouped" tag saying so.
-- **Filter**: the same set as the **Sessions** tab — a row of small chips (subagent / blank / archived /
+- **Filter**: the same set as the session list — a row of small chips (subagent / blank / archived /
   ungrouped / active, each with the count in the library, multiple = either, **All** clears them) plus a
   **title / id search box**; used together the two are ANDed (search foo, show blank only = blank sessions
   among foo). The header then reports "showing N / M", and **Select all picks what is listed right now**,
@@ -296,11 +307,11 @@ touched the registry.
 
 The **?** in the page header — the vocabulary and the costs in one dialog: the category dictionary (visible /
 subagent / blank / archived / active / Ungrouped, where Ungrouped is exactly the shell sidebar's Ungrouped
-group: nothing claims it and the sidebar shows it), what the four tabs do, which files the actions touch
+group: nothing claims it and the sidebar shows it), what lives where, which files the actions touch
 (backups, roll back vs restore, when the sidebar follows), where the data comes from (the library and the
 registry paths), and the common questions (which sessions count as Ungrouped, why a deleted session is still
-in the sidebar, when a migration asks for a restart, how to close a session tagged active). The four action
-tabs (Sessions / Transfer / Sync / Backups) keep only the decision at hand, so each explanation there stays
+in the sidebar, when a migration asks for a restart, how to close a session tagged active). The page and the
+three panels (list, sync, backups & rollback) keep only the decision at hand, so each explanation there stays
 within two lines.
 
 A host without the `webServer` service (tools-only front ends) still loads the plugin — the page simply
@@ -383,9 +394,10 @@ keeps happening, nothing runs.
 **Whatever the remote has newer is never pulled down**: it only pushes, so another machine's edits
 land here only when you press **Sync** yourself and confirm in the dialog. The **Push now** button in
 the card's footer row (next to Sync, shown while the switch is on) runs one round on the spot; it is
-still push-only, so there is no confirm dialog and progress is drawn on the page banner. That banner
-also says whether the round ran and, if it did not, why (off / previous round still running /
-nothing to push), plus a line when it keeps failing.
+still push-only, so there is no confirm dialog and progress lands in the status bar ("Syncing 3/7", then
+"Synced · 2 sessions" or "Sync failed"; open it for the details). The sync panel says whether the
+round ran and, if it did not, why (off / previous round still running / nothing to push), plus a line
+when it keeps failing.
 
 **It cannot cover the cases the event never reaches**: what another machine pushed to the remote,
 sessions written while DSH was not running, and a round whose event was missed. None of those come
@@ -424,8 +436,13 @@ namespace under `url` itself, so `url` may be a WebDAV server or account root. *
 WebDAV has no locking, so each machine writes only its own slot and reads every slot — nothing overwrites
 anything else.
 
-On the **Sync** tab, **Sync** first computes a read-only plan in a dialog (it reads the remote and writes
-nothing), reporting "pull N / push M" in three tables (will pull / will push / on both sides, left alone), each
+The sync state at the right of the header opens sync. That button only reports what is known locally: this run
+is going, it just finished, or the last manual sync was N hours ago and whether it succeeded — that result is
+stored in `$DSH_HOME/dsh-session-manager/state.json`, so it survives a restart. It never goes online, so it does
+not report "N to pull".
+
+**Sync** first computes a read-only plan in a dialog (it reads the remote and writes nothing), reporting
+"pull N / push M" in three tables (will pull / will push / on both sides, left alone), each
 **grouped by project directory**: the group header carries the name of its group (the workspace title, or the
 project name when no workspace registers it), a small host tag when the identity is known, and the count, with
 the project identity and the local path in that name's tooltip, while a
@@ -444,7 +461,7 @@ The rules and edges:
   identical contents (apart from the cwd) stay put; a local copy that really is a prefix of the
   remote one is re-uploaded to refresh the remote; a remote copy that is ahead (yours is its
   prefix) or a both-wrote case where the remote is later **backs your copy up and then replaces
-  it** (the old one can always be restored from the **Backups** tab); if either
+  it** (the old one can always be restored from **Backups & rollback**); if either
   side has no last-activity time (an older remote index, or a host without the projection cache)
   or both are equally new, neither copy is touched and the report says whether it is "remote is
   ahead" or "both sides wrote". That last-activity time is the **later** of two clocks the host

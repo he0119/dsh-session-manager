@@ -5,7 +5,7 @@
  * `sessionIds` 只是"登记在册"的那部分，同一个目录下完全可能有没登记的会话（迁移页的候选列表
  * 就是为此才按目录数、按目录列）；而注册表记的路径也可能与日志里的 `cwd` 不一致。用户嘴里的
  * "把这个工作区的会话带走"指的永远是**这个目录下的会话**，所以分组键只能是路径，工作区名称
- * 只是这个路径的**标签**（题外：迁移页按目录分组用的是同一套口径，两个分页对同一个库必须给出
+ * 只是这个路径的**标签**（题外：导出 / 导入弹窗按目录分组用的是同一套口径，同一个库的两处必须给出
  * 同一个心智模型）。
  *
  * 这个模块刻意不依赖 React、也不碰文件系统：分组规则是纯函数，才好在测试里把边界钉住
@@ -164,9 +164,6 @@ export function orderProjectPaths(paths: Iterable<string>, workspaces: readonly 
  * 与缩进无关。
  */
 
-/** 缩进最多画到第几级：真实库里只有"父 → 子"这一层，更深的链条按最后一级算（别把标题挤没）。 */
-export const MAX_NEST_DEPTH = 3
-
 /** 缩进只用到这几个字段（同 `GroupableSession`，刻意不绑 `/state` 的响应类型）。 */
 export interface NestableSession {
   readonly id: string
@@ -211,67 +208,3 @@ export function lockedParentOf<S extends NestableSession>(
   return library.get(parent)
 }
 
-/** 缩进后的一行。 */
-export interface NestedRow<S extends NestableSession = NestableSession> {
-  readonly session: S
-  /** 缩进级数：0 = 顶层（正常会话），1 = 挂在上面那张父行下面。 */
-  readonly depth: number
-  /** 父会话在**别的目录组**里时给出那个目录的路径（行上据此说明）；父就在本组或不在视图里时没有它。 */
-  readonly parentPath?: string
-}
-
-/**
- * 把一组（同一目录、已筛选、已按"新→旧"排好）的会话排成"父在前、子紧随其后"的顺序并标出缩进级数。
- *
- * @param visible - 这一组里当前要画的会话，顺序即"顶层行的顺序"（调用方给的是新→旧）。
- * @param library - **整个库**的会话（不筛）：用来判断父会话是"在别的组里"还是"不在视图里"。
- * @param visibleIds - 整个视图（跨组）当前画出来的 id 集合。
- * @returns 按显示顺序排好的行（与原集合一一对应，一条不多一条不少）。
- */
-export function nestSessions<S extends NestableSession>(
-  visible: readonly S[],
-  library: readonly NestableSession[],
-  visibleIds: ReadonlySet<string>,
-): NestedRow<S>[] {
-  const inGroup = new Map(visible.map((session) => [session.id, session]))
-  const pathById = new Map(library.map((session) => [session.id, session.cwd ?? '']))
-
-  /** 直接子们（只收子智能体）：边只在"父也在这一组里"时才算（跨组的父不在这里）。 */
-  const children = new Map<string, S[]>()
-  for (const session of visible) {
-    const parent = subagentParent(session)
-    if (parent === undefined || !inGroup.has(parent)) continue
-    const list = children.get(parent)
-    if (list === undefined) children.set(parent, [session])
-    else list.push(session)
-  }
-
-  const rows: NestedRow<S>[] = []
-  const drawn = new Set<string>()
-  const walk = (session: S, depth: number, parentPath?: string): void => {
-    if (drawn.has(session.id)) return
-    drawn.add(session.id)
-    rows.push({
-      session,
-      depth: Math.min(depth, MAX_NEST_DEPTH),
-      ...(parentPath === undefined || parentPath === '' ? {} : { parentPath }),
-    })
-    for (const child of children.get(session.id) ?? []) walk(child, depth + 1)
-  }
-
-  for (const session of visible) {
-    if (drawn.has(session.id)) continue
-    const parent = subagentParent(session)
-    // 父就在这一组里：这一行由父的子树负责画（跟着父走，而不是留在自己原来的位置）。
-    if (parent !== undefined && inGroup.has(parent)) continue
-    // 父在别的目录组里（还在视图里）：缩进一级并说明它在哪儿；父不在视图里就按普通行画。
-    if (parent !== undefined && visibleIds.has(parent)) {
-      walk(session, 1, pathById.get(parent))
-      continue
-    }
-    walk(session, 0)
-  }
-  // 兜底：环路（互为父子的坏数据）里没有一个节点是"根"，上面那一轮会一条都画不出来。
-  for (const session of visible) if (!drawn.has(session.id)) walk(session, 0)
-  return rows
-}

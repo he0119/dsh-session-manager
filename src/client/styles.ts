@@ -42,9 +42,10 @@ export const CSS = `
 /*
  * 主栏那一版（侧栏入口点开之后的落点）：宿主给的容器是定高的 flex 列，且 overflow 是 hidden。
  *
- * 这里的骨架从"一列限宽的内容"换成了"整页工作台"：内容列**占满**主栏，页面本身不滚；滚的是
- * .dsm-panel（其余分页）或卡片里的列表（「会话」页）。960px 上下限那一版是给设置弹窗里的格子用的，
- * 从侧栏进来整块主栏时，1920 的窗口两侧会各空出三百多像素。
+ * 这里的骨架从"一列限宽的内容"换成了"整页工作台"：内容列**占满**主栏，页面本身不滚；滚的是卡片
+ * 里的列表。960px 上下限那一版是给设置弹窗里的格子用的，从侧栏进来整块主栏时，1920 的窗口两侧会各
+ * 空出三百多像素。其余三件事搬进宽弹窗之后，这个上限在页面这一级只剩工作台一处，弹窗按自己的正文
+ * 形态定宽（见 .dsm-workDialog）。
  */
 /*
  * 插件页里这一包的那格配置（plugins.bundle.config）。形状照 dsh-context 那张配置卡：一组一个标题
@@ -101,15 +102,19 @@ export const CSS = `
   line-height: 20px;
 }
 /*
- * 页头是一条工具条：标题、页内分页、页面级动作同排。窄到放不下时换行（页签整排不拆），
- * 行距收回 8px——换行之后两行仍是一块头，不该按块间距 16px 拉开。
+ * 页头是一条工具条：标题、同步状态、页面级动作同排。窄到放不下时换行，行距收回 8px——换行之后
+ * 两行仍是一块头，不该按块间距 16px 拉开。
  */
 .dsm-head { display: flex; align-items: center; gap: 16px; row-gap: 8px; flex-wrap: wrap; flex: none; }
 .dsm-title { flex: none; margin: 0; font-size: 16px; font-weight: 500; line-height: 24px; }
-.dsm-tabs { flex: none; display: flex; min-width: 0; }
+/*
+ * 页头那枚同步状态：它是官方 Button，外观不在这里画，只保证文字不折行、不参与收缩——它旁边就是
+ * 三枚页面级动作，窄下去时先换行的是整条工具条，不该让"同步 · 自动推送"断成两截。
+ */
+.dsm-headChip { flex: none; white-space: nowrap; }
 .dsm-headAction { flex: none; }
 .dsm-spacer { flex: 1 1 auto; }
-/* 底部状态栏：库在哪、多少条、哪个构建。整页只此一行，不随分页切换。 */
+/* 底部状态栏：库在哪、多少条、备份与回滚在哪儿、哪个构建。整页只此一行，不随弹窗开关。 */
 .dsm-statusBar {
   flex: none;
   display: flex;
@@ -123,54 +128,76 @@ export const CSS = `
   line-height: 18px;
 }
 .dsm-statusLib { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 状态栏里那枚入口（备份与回滚）：官方 Button 的外观，这里只让它不参与收缩。 */
+.dsm-statusAction { flex: none; }
+/*
+ * 状态栏里那一格「同步中 3/7」：它是文字 + 手型，与旁边两枚描边按钮**不是一个样**——它说的是"这一阵的
+ * 动静"，不像「导入…」那样是一个要点的门。所以只给一处布局：不参与收缩、单行、不折行（39px 那一行里
+ * 一折就顶出去）。数字换成等宽数字，进度跳 9/10 → 10/10 时宽度不抖。
+ */
+/*
+ * 同步状态那枚点外面的一层：只为挂悬浮提示（官方 StateDot 不透传 title）。它得是 inline-flex 且不吃行高，
+ * 否则按钮里那 10px 的点会把 28px 的行高顶开。
+ */
+.dsm-dotSlot { display: inline-flex; align-items: center; }
+.dsm-statusJob {
+  flex: none;
+  white-space: nowrap;
+  /* 进度跳 9/10 → 10/10 时宽度不抖：数字等宽。 */
+  font-variant-numeric: tabular-nums;
+}
 .dsm-statusVersion { flex: none; }
 /*
- * 分页本体那一层。它是 .dsm-root 的直接子元素（拿到的是 .dsm-root 给兄弟之间那份 16px），可卡片
- * 都在它**里面**——不写这一条，相邻两张卡片就只有各自的 1px 描边分得开，真实 dev GUI 里量到相邻两张
- * 卡片的间距是 0px（「说明」那一页整页都是卡片，一眼就看出来贴在一起）。
+ * 「导入」那一面：一个 640 的窄弹窗，正文是两个字段加一对按钮，纵向排、16px 一道缝。
  *
- * 16px 是内建设置页量出来的节奏：那边行与行之间靠每一行自己的 padding: 16px 0，与 .dsm-root
- * 现在那一档同值，所以这里用同一个数、不再另起一档。
+ * 导出不再有弹窗——它按下去就打包下载（见 ManagePanel 的 doExport），所以原来那套"两栏并排 +
+ * 容器查询叠回一列"的布局没有对象了，跟它一起去掉。
  */
-.dsm-panel {
+.dsm-importBody { display: flex; flex-direction: column; gap: 16px; }
+/*
+ * 拖放：那一格既是「选择文件」的按钮，也是落点；整页在拖着文件时蒙一层虚线框。
+ *
+ * 虚线是"可以往这儿放"的通用说法，所以静止时就是虚线；悬停时描边转品牌色、底色兑一层淡的——只有一个
+ * 提示，没有再加文字按钮或图标。两层都不吃鼠标事件（pointer-events: none）：盖住的那一层要是能接住
+ * 指针，拖到页面上的 dragover 就会被它拦下，落点反而失效。
+ */
+.dsm-dropZone {
   display: flex;
-  flex-direction: column;
-  gap: 16px;
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-  scrollbar-gutter: stable;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 6px 10px;
+  border: 1px dashed var(--dsw-alias-border-l2, rgba(0, 0, 0, 0.18));
+  border-radius: 10px;
 }
-/* 「会话」页不整页滚：卡片吃满高度，滚的是里面的表格。 */
-.dsm-panel[data-panel="manage"] { overflow: hidden; }
-/*
- * 其余分页是表单与清单：内容限在可读宽度里居中（1080px），「会话」工作台仍然吃满。
- * 不这么做的话，1600 窗口下一段同步说明会拉成一千二百多像素长的一行，表单控件全挤在左边。
- */
-.dsm-panel[data-panel="transfer"],
-.dsm-panel[data-panel="sync"],
-.dsm-panel[data-panel="backup"] {
-  width: 100%;
-  max-width: 1080px;
-  align-self: center;
+.dsm-dropZone[data-over='true'] {
+  border-color: var(--dsw-alias-brand-primary, #4d6bfe);
+  background: color-mix(in srgb, var(--dsw-alias-brand-primary, #4d6bfe) 6%, transparent);
 }
-/*
- * 「传输」在宽屏并排：左边是导出清单（它要宽），右边是导入字段（至少 320px）。1600 窗口下 1080 的
- * 正文分成 629 + 435，导入卡不再落到首屏之外；窄到 900 以下两栏叠回去。
- *
- * 阈值读的是这一块自己的宽度（wrapper 上的容器查询），不是窗口：宿主侧栏收起时同一个窗口下
- * 正文能宽出两百多像素。
- */
-.dsm-transferWrap { container-type: inline-size; }
-.dsm-transferGrid {
-  display: grid;
-  grid-template-columns: minmax(0, 1.3fr) minmax(320px, 0.9fr);
-  gap: 16px;
-  align-items: start;
+.dsm-dropVeil {
+  position: fixed;
+  inset: 12px;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* 只画一圈虚线，不蒙白：蒙一层半透明的底会把整页洗淡，读起来像"又一个弹窗"，而不是"松手放到这儿"。 */
+  border: 2px dashed var(--dsw-alias-brand-primary, #4d6bfe);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--dsw-alias-brand-primary, #4d6bfe) 4%, transparent);
+  pointer-events: none;
 }
-@container (max-width: 900px) {
-  .dsm-transferGrid { grid-template-columns: minmax(0, 1fr); }
+/* 那句话自己带一块底：虚线框里直接写字会被下面的列表透过来干扰。 */
+.dsm-dropVeilPill {
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: var(--dsw-alias-bg-layer-1, #fff);
+  color: var(--dsw-alias-label-primary, #1f2329);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.16);
+  font-size: 14px;
+  line-height: 20px;
 }
+
 /*
  * 卡片外壳照官方卡片（内建「插件」页那张 .card）量出来的规格：**圆角 20px**、**1px 描边**、底色是表面白。
  * 描边走 settings-card-stroke 而不是 border-l1：前者是官方给"设置卡片描边"这件事的专名 token，
@@ -190,7 +217,7 @@ export const CSS = `
   flex-direction: column;
   gap: 10px;
 }
-/* 「会话」页那张卡片：吃满分页剩下的高度，头、筛选、动作行不动，中间的表自己滚。 */
+/* 列表那张卡片：吃满页面剩下的高度，头、筛选、动作行不动，中间的表自己滚。 */
 .dsm-cardFill { flex: 1; min-height: 0; overflow: hidden; }
 .dsm-cardHead { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .dsm-cardTitle { font-weight: 600; }
@@ -238,90 +265,8 @@ export const CSS = `
  */
 
 /*
- * 一条列表里的两级：**工作区**是组头，**会话**是组头下面缩进的那些行。
- * 区分手段叠了四层，任意一套主题、任意一种色觉下都读得出上下级：
- *   ① 底色——组头是一条实心横幅，会话行是卡片底色；
- *   ② 缩进 + 竖向导引线——会话行整行往里缩，并沿左缘挂一条线（"这几行属于上面那个组头"）；
- *   ③ 字号——组头 14px/600，会话行跟着页面的 13px/400；
- *   ④ 图形——组头是文件夹，会话行是对话气泡（见 [icons.tsx](./icons.tsx)）。
- * 为什么不靠"更深一点的底色"单独扛：浅色主题里 bg-layer-1/2/3 全是同一个白（见下面 .dsm-row:hover
- * 的注释），能用的只有"字色兑出来的薄雾"，而它对屏幕、亮度、色觉都敏感——层次不能只挂在它身上。
- */
-.dsm-group { display: block; }
-.dsm-group:first-child .dsm-groupHead { border-top: none; }
-/*
- * 组头是一条"带底色、随列表滚动粘住"的横幅：底色用字色薄雾兑在**卡片表面色**上，于是它既是不透明
- * 的（粘住时底下的行不会透出来），又在明暗两套主题里都是"比卡片略深/略浅一层"的区分色。
- * 前一条声明是给不认 color-mix 的浏览器留的退路：没有底色也还读得出来，只是少了横向的分组感。
- *
- * 12% 而不是更淡：组头的底色要一眼看出是"另一个层级"，不是"某一行被选中了"。
- */
-.dsm-groupHead {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  /*
-   * 一条组头永远只占一行：nowrap + 名字截断（见下面的 .dsm-groupTitle）+ 计数块 flex: none。
-   * 反面教材是本次改之前的写法：wrap + 机器字符串用内容宽度参与折行计算，于是它一长，右手的两个
-   * 计数就被挤到第二行——组头长成两行、数字跑到左边，看着像坏了（532px 宽的列表里真实发生过）。
-   * 换行是**最后**的手段，截断才是。
-   */
-  flex-wrap: nowrap;
-  /* 左边只留 4px：最前面那个折叠开关自己就是"这一组的左缘"，留 10px 会让它离边框太远。 */
-  padding: 8px 10px 8px 4px;
-  /* 组头自己不是点整组的地方（那一块是里面的 .dsm-groupPick），鼠标形状跟着那个 label 走。 */
-  cursor: default;
-  background: var(--dsw-alias-bg-layer-1, transparent);
-  background: color-mix(in srgb, var(--dsw-alias-label-primary, #1f2329) 12%, var(--dsw-alias-bg-layer-1, #fff));
-  border-top: 1px solid var(--dsw-alias-border-l2, rgba(0, 0, 0, 0.12));
-  border-bottom: 1px solid var(--dsw-alias-border-l2, rgba(0, 0, 0, 0.12));
-}
-/*
- * 组头里"点一下就是整组勾选／取消"的那一块：勾选框、图形标记、名字、可选的那枚标签，以及右端的计数。
- *
- * 它独占组头除折叠按钮以外的全部宽度（点击面因此仍是整行）；右端那两串数字靠自己的 margin-left: auto
- * 贴住右缘，名字与它之间那段空白就是这个 flex 行里剩下的地方。
- */
-.dsm-groupPick {
-  flex: 1 1 auto;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  cursor: pointer;
-}
-/*
- * 组头右端的折叠开关：一个 20px 的方形按钮（够得着、能聚焦），图形是 12px 的尖角。
- * 收起时把尖角转成朝右——图形只有一份，状态由 aria-expanded 表达（读屏与视觉同一个来源）。
- */
-.dsm-groupToggle {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  padding: 0;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--dsw-alias-label-secondary, #646a73);
-  cursor: pointer;
-}
-.dsm-groupToggle:hover { background: var(--dsw-alias-bg-layer-2, rgba(0, 0, 0, 0.06)); }
-.dsm-groupToggle[aria-expanded='false'] .dsm-chevron { transform: rotate(-90deg); }
-.dsm-chevron { display: block; }
-/*
- * 分组列表的工具栏（"按目录分组" ＋ 全部收起 / 全部展开）：自己占一行、靠左排。
- * 靠左是刻意的：挂到右边缘的东西会随容器宽度动，而卡片宽度会被外层滚动条一进一出改掉 15px。
- */
-.dsm-groupTools { display: flex; align-items: center; gap: 6px; }
-/*
- * 组头里的名字：它就是这一行**唯一**的字（项目身份与本机路径都在它的悬浮提示里，见
- * planRows.projectLabel()），不折行；实在挤不下时截断。
+ * 分组表头里的名字（同步弹窗那几张按项目分组的三张表，见 SyncPanel）：它就是那一行**唯一**的字
+ * （项目身份与本机路径都在它的悬浮提示里，见 planRows.projectLabel()），不折行；实在挤不下时截断。
  */
 .dsm-groupTitle {
   font-size: 14px;
@@ -615,7 +560,7 @@ export const CSS = `
 }
 .dsm-empty { padding: 14px; color: var(--dsw-alias-label-secondary, #646a73); }
 /*
- * 「会话」页的工作台：左栏（项目与筛选）+ 列表。整块高度由分页给，两边各自滚。
+ * 工作台：左栏（项目与筛选）+ 列表。整块高度由页面给（.dsm-root 的 flex 列），两边各自滚。
  *
  * container-type: inline-size 让下面那条 @container 读的是**这一块自己的宽度**，不是窗口宽度：
  * 宿主侧栏可以收起，同一个窗口下页面可用宽能差两百多像素，按窗口分档会在收起侧栏的一瞬间判错。
@@ -947,7 +892,9 @@ export const CSS = `
 /* 「这次不动」那张表的第三列（远端机器）：宽度沿用原来那一列的 26%。分组之后这一列不再放路径
    （路径去组头了），只放机器名——机器名比路径短，多出来的宽度归中间的会话列。 */
 .dsm-planTable .dsm-colMachine { width: 26%; }
-.dsm-planTable .dsm-colBytes { width: 68px; }
+/* 大小那一列：68px 时「111.0 KB」（8 个字符 + 千分位）会被截成「111.0…」（真机量到 scrollWidth 72
+   > clientWidth 68），往上让到 80px——最长的「999.9 KB」也放得下。 */
+.dsm-planTable .dsm-colBytes { width: 80px; }
 /*
  * 计划表里的项目组头：一条横跨整行的横幅，一个项目底下挂着它那几行（会拉取 / 会推送 / 没动三张表同一套）。
  *
@@ -1020,6 +967,21 @@ export const CSS = `
 .dsm-error { color: color-mix(in srgb, var(--dsw-alias-state-error-primary, #d83931) 55%, var(--dsw-alias-label-primary, #1f2329)); }
 .dsm-warn { color: color-mix(in srgb, var(--dsw-alias-state-warn-primary, #d97b00) 55%, var(--dsw-alias-label-primary, #1f2329)); }
 .dsm-ok { color: color-mix(in srgb, var(--dsw-alias-state-success-primary, #2ea121) 55%, var(--dsw-alias-label-primary, #1f2329)); }
+/*
+ * 计划那一段的结论：一句、加粗、按结论染色（只有"没有要同步的"才染绿）。数字与远端沉到下面那行脚注里，
+ * 明细是表。三层各有各的样子，读起来才分得开——原来三件事都在 14px 的同一句里。
+ */
+.dsm-planVerdict { font-weight: 600; }
+/*
+ * 计划那一段的正文自己拿节奏（12px）：结论、数字、脚注清单、段头、表都在这一层里，段距一致。
+ * 外边距归零的理由同上一节（.dsm-workBody 那条）——官方弹窗里的段落带 12px 上下外边距，叠在 gap
+ * 上就不齐了。
+ */
+.dsm-planBody { display: flex; flex-direction: column; gap: 12px; }
+.dsm-planBody > * { margin-block: 0; }
+.dsm-planFacts { font-variant-numeric: tabular-nums; }
+/* 脚注清单与上面那行数字同一档（12/18）：它们都是"表里没有、但会被碰到"的交代，不该比数字更响。 */
+.dsm-planNotes { font-size: 12px; line-height: 18px; }
 .dsm-banner {
   border: 1px solid currentColor;
   border-radius: 8px;
@@ -1036,11 +998,6 @@ export const CSS = `
  * 按钮 40px 宽、两行高）。让这一枚不收缩、把宽度留给句子换行——句子本来就该折行，按钮不该。
  */
 .dsm-banner > button { flex: none; }
-/*
- * 页签本体不在这里画：官方 SegmentedControl 自己带轨道、滑块指示器、三段间距、aria-selected
- * 配色与方向键走查（SegmentedControl.module.css）。本页原先手写的那套下划线式页签已经删掉；
- * 页头里那个 .dsm-tabs 只是"让分段控件不参与收缩"的布局壳，不画任何外观。
- */
 .dsm-fields { display: flex; flex-direction: column; gap: 8px; }
 .dsm-field { display: flex; flex-direction: column; gap: 4px; }
 .dsm-fieldLabel { color: var(--dsw-alias-label-secondary, #646a73); }
@@ -1160,8 +1117,29 @@ export const CSS = `
  * 的注释就是这么要求的：消费者用 max-height: 100% 限高，别自己算视口）。
  */
 .dsm-dialog.dsm-dialog { width: min(640px, 100%); max-height: 100%; }
-/* 说明弹窗比一般确认弹窗宽一档：四节词条，640 里「每页做什么」会挤成很窄的两列。 */
+/* 说明弹窗比一般确认弹窗宽一档：四节词条，640 里「哪里做什么」会挤成很窄的两列。 */
 .dsm-dialog.dsm-helpDialog { width: min(760px, 100%); }
+/*
+ * 做事的那三个弹窗（导出 / 导入、同步、备份与回滚）再宽一档：1080 是它们原来在页面上的可读宽度
+ * （见「非会话那三件限在可读宽度」那篇的由来），搬进弹窗之后清单与表单一个字都不用重排；再窄下去，
+ * 传输那两栏与同步的计划表都要折行。窄窗口靠 min(1080px, 100%) 自己收。
+ *
+ * 为什么不是把 640 那一档改宽：确认弹窗（删除、迁移、回滚）的正文是"一句话 + 清单"，拉宽只会让
+ * 一段说明变成很长的一行；这两种弹窗的宽度按正文形态分，不按"都是弹窗"合并。
+ */
+.dsm-dialog.dsm-workDialog { width: min(1080px, 100%); }
+/*
+ * 宽弹窗的正文层：原先这三页是 .dsm-panel，那次「相邻两张卡片贴在一起」的缺陷就出在"gap 不往里
+ * 继承"上（见 .dsm-root 那条注释）。搬进弹窗之后它们一样需要自己那一层 16px，否则横幅与卡片、
+ * 两张卡片之间都会贴住。
+ */
+.dsm-workBody { display: flex; flex-direction: column; gap: 16px; font-size: 14px; line-height: 20px; }
+/*
+ * 官方弹窗 portal 到 document.body，落在本页 .dsm-root 之外：那里面的段落带的是宿主正文默认的上下
+ * 外边距（12px），叠在 gap 上就成了 28——两块之间比设计的 16 宽出一截。本页的规矩是「间距只由 gap
+ * 给」，所以这一层直接把外边距收掉（只收直接子元素，表格、清单里的段落照旧）。
+ */
+.dsm-workBody > * { margin-block: 0; }
 .dsm-helpBody { display: flex; flex-direction: column; gap: 16px; }
 /* 弹窗自己已经是卡片：说明里那四节不再各套一圈卡片壳，留标题与正文的节奏。 */
 .dsm-helpDialog .dsm-card { border: none; background: transparent; padding: 0; }

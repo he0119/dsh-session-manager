@@ -9,8 +9,8 @@
  * 都得先翻过十来个字段的配置卡，改配置又得先滚到底。官方的 `dsh-context` 也是这么分的（设置里只有
  * 偏好项，数据在侧栏那一页）。
  *
- * 页面主体在 [ManagerPanel.tsx](./ManagerPanel.tsx)（页内分「会话」「迁移」「传输」「同步」「说明」
- * 五个分页），侧栏那一版外面多一层 [SessionManagerPage.tsx](./components/SessionManagerPage.tsx)
+ * 页面主体在 [ManagerPanel.tsx](./ManagerPanel.tsx)（页面就是会话列表，导出 / 导入、同步、备份与回滚
+ * 各是一处入口 + 一个宽弹窗），侧栏那一版外面多一层 [SessionManagerPage.tsx](./components/SessionManagerPage.tsx)
  * （主栏要自己带滚动视口），文案在 [locales.ts](./locales.ts)，端点调用在 [api.ts](./api.ts)，
  * 样式在 [styles.ts](./styles.ts)——这里只做组装。
  *

@@ -1,23 +1,18 @@
 /**
- * 「同步」分页：按 WebDAV 配置在多台机器之间拉取与推送（点「同步」先在弹窗里看只读计划，确认才落盘）。
+ * 「同步」弹窗：按 WebDAV 配置在多台机器之间拉取与推送（点「同步」先在弹窗里看只读计划，确认才落盘）。
  *
- * 为什么单独一页，而不是挂在「传输」底下：两者正交——「传输」是一次性的带走/带回来（选包、选目标、
- * 导出下载），同步是一条**常设**通道：远端地址、机器名、映射表与那个确认弹窗都只属于它。挤在一页时
- * 同步那块只能排在导出列表与导入计划表之后，越用越长；而这一页的第一件事（看一眼远端配没配对、
- * 改一下映射）与「传输」的第一件事（勾哪些会话）也没有先后关系。
+ * 它为什么不再占一个页签：同步是一条**常设**通道，用户不会天天打开它，可它会自己在后台跑。所以页面
+ * 那一级只留一枚状态（配没配、自动推送开没开、这一趟跑完没有，见
+ * [ManagerPanel.tsx](./ManagerPanel.tsx)），点开才是这一面——远端通到哪、要不要走一趟、计划与差异。
+ * 配置也不在这一面，在插件页那张卡里（`plugins.bundle.config`）。
  *
- * 分页顺序是「会话 → 迁移 → 传输 → 同步 → 备份 → 说明」：同步排在传输之后，是因为它落地走的是导入
- * 那条编排（见 README 的「同步」一节），紧挨着读更顺。
- *
- * 这一页拆成两张卡：上面那张是"这条通道现在通到哪、要不要走一趟"（一句话 + 主动作），下面是设置表单。
- * 拆开是为了让主动作有个自己的动作行（见
- * [决策](../../../.agents/notes/implemented/architecture/2026-10-07-card-actions-live-in-a-footer-row.md)）：
- * 表单十几行，按钮放卡头就成了"页面第一件事"、放卡尾又得翻过整张表，而它读的是**已保存**的配置，
- * 与那张表单没有阅读顺序上的先后。
+ * 这一面**自己就是那枚弹窗**（`WorkDialog`），分三段：面板（一句话说清这条通道通到哪 + 一排工具）→
+ * 计划 → 落地。主动作（「同步」/「确认同步」/「同步中…」）在**底栏**，与导入、删除、迁移同一处；正文
+ * 那行只放工具（「立即推送一次」「整理远端」），"决定"与"工具"不混在一排。
  *
  * 这一层只做三件事：调宿主端点、记本地草稿、把结果摆出来。所有判定都在宿主侧
  * （`src/web.ts` + `src/sync.ts`）：计划返回的就是将要发生的事，页面不自己推算。会话库数据由页面
- * 骨架（[ManagerPanel.tsx](./ManagerPanel.tsx)）拉好传进来，切分页不各拉一份。
+ * 骨架（[ManagerPanel.tsx](./ManagerPanel.tsx)）拉好传进来，开关弹窗不各拉一份。
  *
  * 落地那一次是**流式**的：宿主按条推事件，正文换成进度条与"正在推送 12 / 84"（见
  * [api.ts](./api.ts) 的 `applySync` 与 [ProgressBlock.tsx](./ProgressBlock.tsx)）。同步是这一页里
@@ -56,6 +51,7 @@ import {
   type TidyResponse,
 } from '../api.ts'
 import { ConfirmDialog } from './ConfirmDialog.tsx'
+import { WorkDialog } from './WorkDialog.tsx'
 import { groupKey } from '../logic/groups.ts'
 import { panelEvents, type PanelSnapshot } from '../logic/panelEvents.ts'
 import { WorkspaceIcon } from './icons.tsx'
@@ -438,7 +434,23 @@ function describeSyncedAttachments(t: Translate, result: SyncResponse): string {
 /**
  * 同步页。
  */
-export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactElement {
+export function SyncPanel({
+  t,
+  state,
+  meta,
+  reload,
+  /**
+   * 「别处发起的那一趟」的结论（认领来的）：那个弹窗自己没有完整结果，所以由页面把这一句交过来。
+   *
+   * 有它时这一面顶上摆一句——失败原因、搬了几条原是页面横幅说的话，横幅搬进状态栏之后得有个地方说全。
+   */
+  backgroundLine,
+  /** 关掉这一面（这一面自己就是那枚弹窗了，见文件末尾的说明）。 */
+  onClose,
+}: Pick<PanelShare, 't' | 'state' | 'meta' | 'reload'> & {
+  backgroundLine?: { ok: boolean; text: string }
+  onClose: () => void
+}): React.ReactElement {
   /** 最近一次计划或结果：映射表的远端候选与弹窗正文都读它（关掉弹窗之后候选还得在）。 */
   const [sync, setSync] = React.useState<SyncResponse | null>(null)
   /**
@@ -654,7 +666,7 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
     /*
      * 拉取的落到本机库里了：列表与工作区归属都要重读（推的那一侧不改本机任何东西）。
      *
-     * 这一下由**页面骨架**做（见 ManagerPanel）：那一趟可能是在用户已经切到别的分页、甚至关掉设置
+     * 这一下由**页面骨架**做（见 ManagerPanel）：那一趟可能是在用户已经开别的弹窗、甚至关掉设置
      * 之后才跑完的，只有页面这一级一定还在。
      */
   }, [job])
@@ -899,8 +911,74 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
   const restartWarn =
     sync !== null && sync.mode === 'apply' && sync.pulled.length > 0 && sync.takesEffect === 'restart-required'
 
+  /** 计划那一段里有没有表（决定那一档要不要 1080）。 */
+  const hasPlanTables = syncPlan !== null && (syncPulls.length > 0 || syncPushes.length > 0 || syncKept.length > 0)
+
+  /** 这一段说哪件事：面板（填表单 / 说状态）→ 计划 → 落地。三段同处一个弹窗（与导入那一面同一个形状）。 */
+  const stage: 'idle' | 'plan' | 'apply' = dialog === null ? 'idle' : dialog
+
+  /**
+   * 这一面自己就是那枚弹窗（`WorkDialog`）：标题、说明、宽度与底栏都跟着 `stage` 变。
+   *
+   * 为什么不再"面板 + 叠一层确认框"：那是两枚弹窗，用户按「同步」之后看到的是一个新窗口盖在旧窗口上，
+   * 而它们说的是同一件事的两段。导入那一面先改成了同一个弹窗里的三段，这里跟它对齐。
+   * 宽度跟着段走：面板段 640（几句话），计划段 1080（三张表）。
+   */
   return (
     <>
+      <WorkDialog
+        t={t}
+        title={t(stage === 'idle' ? 'sync.title' : stage === 'apply' ? 'sync.running' : 'sync.dialogTitle')}
+        {...(stage === 'idle' && syncInfo !== null ? { description: t('sync.where', { url: syncInfo.url }) } : {})}
+        /*
+          宽度跟着**里面摆什么**走：面板段与"两边一样、没有要同步的"那种计划段都只有几句话，640 正好；
+          有计划表时才要 1080（三张表在 640 里会把动作列挤成一个字）。没有表却撑到 1080，右边会空一大块。
+        */
+        size={stage === 'apply' || (stage === 'plan' && hasPlanTables) ? 'wide' : 'narrow'}
+        onClose={onClose}
+        // 没配置同步时底栏整块不摆：一枚点了没反应的「同步」比没有更糟（与正文那句说明同一条口径）。
+        footer={
+          stage === 'idle' && syncInfo === null ? undefined : stage === 'idle' ? (
+            <>
+              <Button variant="outline" data-modal-autofocus="" onClick={onClose}>
+                {t('cancel')}
+              </Button>
+              <Button
+                variant="primary"
+                onClick={openSync}
+                disabled={syncInfo === null || busy !== null || applying}
+              >
+                {t('sync.action')}
+              </Button>
+            </>
+          ) : stage === 'plan' ? (
+            <>
+              {/* 计划这一段「取消」是**回面板**：包与目标都还在，改一改再算一次比关掉重来省事。 */}
+              <Button variant="outline" onClick={() => setDialog(null)}>
+                {t('sync.back')}
+              </Button>
+              <Button
+                variant="primary"
+                onClick={doSyncApply}
+                disabled={planning || sync === null || syncPlan === null}
+              >
+                {t('sync.applyAction')}
+              </Button>
+            </>
+          ) : (
+            <>
+              {/* 落地跑着的时候，「取消」换成「转到后台」：窗口收起来，那一趟照跑。这是用户要的那个动作——
+                  落地可能几分钟，不该因为"我关掉了窗口"就没法看它跑到哪。 */}
+              <Button variant="outline" onClick={onClose}>
+                {t('sync.background')}
+              </Button>
+              <Button variant="primary" disabled>
+                {t('sync.busy')}
+              </Button>
+            </>
+          )
+        }
+      >
       {error !== null && (
         <p className="dsm-banner dsm-error">
           <span>{error}</span>
@@ -948,13 +1026,11 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
         </div>
       )}
 
-      <div className="dsm-card">
-        <div className="dsm-cardHead">
-          <span className="dsm-cardTitle">{t('sync.title')}</span>
-          {syncInfo !== null && (
-            <span className="dsm-hint">{t('sync.where', { url: syncInfo.url })}</span>
-          )}
-        </div>
+        {stage === 'idle' &&       <>
+        {/* 别处发起的那一趟的结论：弹窗关着时它在状态栏那一格里只有一句短的，进来说全。 */}
+        {backgroundLine !== undefined && (
+          <p className={backgroundLine.ok ? 'dsm-hint' : 'dsm-error'}>{backgroundLine.text}</p>
+        )}
         {/* 没配置同步时只留一句话：摆一个点了没反应的按钮比不摆更糟（与「宿主没有归档能力」同一条口径）。 */}
         <p className="dsm-hint">
           {!syncKnown
@@ -971,14 +1047,11 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
          * 那张表单画的是**草稿**，而这一句要说的是**现在生效的**那份配置。
          */}
         {syncInfo?.autoPush !== undefined && <p className="dsm-hint">{t('sync.autoPush.enabled')}</p>}
-        {/* 主动作在卡片底部的动作行里（见 TransferPanel.tsx 的说明）。这一页没有把「同步」放进头部：
-            配置不在这一页（挂在插件页上），读完上面那一句就知道该去哪儿改。 */}
+        {/* 这里只有工具：主动作「同步」在**底栏**（与导入、删除、迁移同一处）。
+            这一页没有把入口放进页头：配置不在这一页（挂在插件页上），读完上面那一句就知道该去哪儿改。 */}
         <div className="dsm-controls">
           {syncInfo !== null && (
             <>
-            <Button variant="primary" size="sm" onClick={openSync} disabled={busy !== null || applying}>
-              {t('sync.action')}
-            </Button>
             {/*
              * 「立即推送一次」是同一行里那枚**非 primary** 的动作：主动作仍然只有「同步」一枚（结构与
              * `test/client.test.mjs` 的 `primaryPlacements()` 钉着这一条）。
@@ -1002,53 +1075,50 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
             </>
           )}
         </div>
-      </div>
+      </>
 
-      {/* 同步弹窗：计划与「确认」同框（见 ConfirmDialog.tsx 的说明）。 */}
-      {dialog !== null && (
-        <ConfirmDialog
-          t={t}
-          // 落地那一段标题也换掉：这时候已经不是"将要"了，正文里正跑着进度。
-          title={t(applying ? 'sync.running' : 'sync.dialogTitle')}
-          confirmLabel={t('sync.applyAction')}
-          busyLabel={t('sync.busy')}
-          busy={applying}
-          // 落地跑着的时候，「取消」换成「转到后台」：窗口收起来，那一趟照跑。这是用户要的那个动作——
-          // 落地可能几分钟，不该因为"我关掉了窗口"就没法看它跑到哪。
-          {...(applying ? { backgroundLabel: t('sync.background') } : {})}
-          planning={planning}
-          // 预演那几秒不是在空等：先扫本机、再读远端索引、最后逐条比对内容。算到哪一步摆哪一步的进度
-          // （还没有事件时退回 ConfirmDialog 那句「预演中…」）。
-          planningDetail={progress === null ? undefined : <ProgressBlock t={t} progress={progress} note={syncNote(progress)} />}
-          error={null}
-          onConfirm={doSyncApply}
-          onCancel={() => setDialog(null)}
-        >
-        {/* 落地：前面三个阶段（算计划）与后面两段（拉取 / 推送）报的是同一套事件，画法也一样。 */}
-        {applying &&
-          (liveProgress === null ? (
-            <p className="dsm-hint">{t('progress.waiting')}</p>
-          ) : (
-            <ProgressBlock t={t} progress={liveProgress} note={syncNote(liveProgress)} />
-          ))}
-        {!applying && !planning && sync !== null && syncPlan !== null && (
-          <div>
-            <p className={syncPlan.ok && sync.problems.length === 0 ? 'dsm-ok' : 'dsm-warn'}>
-              {t('sync.summary', {
-                pull: syncPlan.pullIds.length,
-                push: syncPlan.pushIds.length,
-                local: syncPlan.localCount,
-                remote: syncPlan.remoteCount,
-              })}
-              {syncPlan.machines.length > 0 ? ` · ${t('sync.machines', { machines: syncPlan.machines.join('、') })}` : ''}
+}
+        {stage === 'plan' && (
+          <>
+            {planning &&
+              (progress === null ? (
+                <p className="dsm-hint">{t('dialog.previewing')}</p>
+              ) : (
+                <ProgressBlock t={t} progress={progress} note={syncNote(progress)} />
+              ))}
+                    {/* 落地：前面三个阶段（算计划）与后面两段（拉取 / 推送）报的是同一套事件，画法也一样。 */}
+        {!planning && sync !== null && syncPlan !== null && (
+          <div className="dsm-planBody">
+            {/*
+              结论先行：这一趟要不要做、成没成，一句话、加粗、带色。
+              数字与远端机器往下沉成脚注（12px）——原来三件事挤在同一句 14px 里、还一起染成"成功"色，
+              四行字看着一个样，读不出哪句是结论（用户截图里说的"区分度不高"）。
+              绿色从此只表示"没有要同步的"；有活干或者有问题时那一行不染成功色。
+            */}
+            <p
+              className={
+                syncClean
+                  ? 'dsm-planVerdict dsm-ok'
+                  : syncPlan.ok && sync.problems.length === 0
+                    ? 'dsm-planVerdict'
+                    : 'dsm-planVerdict dsm-warn'
+              }
+            >
+              {syncClean
+                ? t('sync.nothing')
+                : t('sync.planWork', { pull: syncPlan.pullIds.length, push: syncPlan.pushIds.length })}
+            </p>
+            <p className="dsm-hint dsm-planFacts">
+              {t('sync.planFacts', { local: syncPlan.localCount, remote: syncPlan.remoteCount })}
+              {syncPlan.machines.length > 0
+                ? ` · ${t('sync.machines', { machines: syncPlan.machines.join('、') })}`
+                : ''}
             </p>
             {/* 事前提醒：这次落地之后要不要重启，得在按「确认同步」**之前**说出来（见 `effect.plannedRestart`）。
                 纯推送不改本机任何东西，所以只在真有会话要落到本机、且宿主那头需要重启时才摆这一句。 */}
             {syncPulls.length > 0 && sync.takesEffect === 'restart-required' && (
               <p className="dsm-warn">{t('effect.plannedRestart')}</p>
             )}
-            {/* 空白会话不进那三张表：它们的去处只有这一句（没有内容可同步，也没有"为什么不动"可讲）。 */}
-            {syncBlank > 0 && <p className="dsm-hint">{t('sync.skippedBlank', { count: syncBlank })}</p>}
             {/*
               整理远端：只删本机这一格里多余的包（另一格有一模一样的、或更全的）。默认不勾——它会删
               远端的东西；勾了之后落地那次才做，预演这一下只是把"能删几个"报出来。
@@ -1068,11 +1138,15 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
                 {problem}
               </p>
             ))}
-            {syncClean && <p className="dsm-ok">{t('sync.nothing')}</p>}
-            {/* 会话计划里没有的事，在这一趟真会做的时候说出来：确认之后附件对象仍会对一遍（本机缺的取回、
-                远端缺的补上），它不进那三张表（扫一遍是整库尺度的事，见 repairAttachments()）。 */}
-            {syncClean && facts?.attachments === true && (
-              <p className="dsm-hint">{t('sync.nothingAttachments')}</p>
+            {/*
+              脚注清单：空白会话的去处、附件对象还要对一遍——两件事都是"表里没有、但这一趟会碰到"的交代。
+              原来它们是两行同款的 12px 灰字，混在正文里；收成一条清单之后与结论、数字分得开。
+            */}
+            {(syncBlank > 0 || (syncClean && facts?.attachments === true)) && (
+              <ul className="dsm-listPlain dsm-planNotes">
+                {syncBlank > 0 && <li>{t('sync.skippedBlank', { count: syncBlank })}</li>}
+                {syncClean && facts?.attachments === true && <li>{t('sync.nothingAttachments')}</li>}
+              </ul>
             )}
 
             {syncPulls.length > 0 && (
@@ -1211,8 +1285,16 @@ export function SyncPanel({ t, state, meta, reload }: PanelShare): React.ReactEl
             )}
           </div>
         )}
-        </ConfirmDialog>
-      )}
+          </>
+        )}
+        {stage === 'apply' && <>        {/* 落地：前面三个阶段（算计划）与后面两段（拉取 / 推送）报的是同一套事件，画法也一样。 */}
+        {liveProgress === null ? (
+          <p className="dsm-hint">{t('progress.waiting')}</p>
+        ) : (
+          <ProgressBlock t={t} progress={liveProgress} note={syncNote(liveProgress)} />
+        )}</>}
+      </WorkDialog>
+
       {/*
         整理远端那个弹窗：正文只有一句账目（几个包、多少字节）与一句"只碰自己那一格"，进度在那一段
         真删的时候才出现。与同步那个弹窗分开：这条路上没有计划表、没有裁决、也不需要 planId。

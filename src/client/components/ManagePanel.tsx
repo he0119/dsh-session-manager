@@ -1,5 +1,6 @@
 /**
- * 「会话」分页：对着整个会话库逐条管理——归档 / 取消归档、重新生成名称、删除，以及**迁移**。
+ * 会话列表：这一页唯一常驻的那一面，对着整个会话库逐条管理——归档 / 取消归档、重新生成名称、
+ * 删除，以及**迁移**（导出 / 导入在同一行上打开一个弹窗，见 TransferPanel）。
  *
  * 与「传输」页的分工：传输页是"把会话带走 / 带回来"，这一页是"这条会话我不要了 / 先收起来 / 换个
  * 目录"。两页共用同一份 `/state`（页面骨架只拉一次）与同一套列表骨架
@@ -41,6 +42,8 @@ import { Button, Checkbox, Input } from '@deepseek-ai/dsh-client-ui-primitives'
 import {
   archiveSessions,
   deleteSessions,
+  download,
+  exportSessions,
   migrate,
   retitleSessions,
   type DeleteResponse,
@@ -82,6 +85,7 @@ import {
   SessionSearch,
   SessionStaticRow,
   formatBytes,
+  totalBytes,
   useSessionFilter,
   useSessionPicking,
   type RowSession,
@@ -96,8 +100,19 @@ interface MigrationEffect {
   takesEffect: MigrationResponse['takesEffect']
 }
 
-/** 「会话」分页（含迁移那一路）。 */
-export function ManagePanel({ t, state, meta, reload, patch, directory }: PanelShare): React.ReactElement {
+/** 会话列表（含迁移那一路）。 */
+export function ManagePanel({
+  t,
+  state,
+  meta,
+  reload,
+  patch,
+  directory,
+  picking,
+  project,
+  setProject,
+  openBackup,
+}: PanelShare): React.ReactElement {
   const sessions = state?.sessions ?? []
   // 归档能力位与清单无关（`/meta` 先给），所以它用 `state ?? meta`：清单还在读时也不会先把
   // "这个宿主没有 workspaceRegistry"画上去。
@@ -112,11 +127,10 @@ export function ManagePanel({ t, state, meta, reload, patch, directory }: PanelS
    * 逐字同形的 `toggle` / `toggleGroup` / `lockOf`）。判据见那里的 `useSessionPicking()`：
    * 能勾的集合就是"单独操作不会被拒的集合"（子智能体跟着父会话走）。
    */
-  const picking = useSessionPicking(sessions, t)
   const picked = picking.picked
   /** 筛选条：一枚芯片都不勾、关键词为空 = 全都列出来（见 sessionFilter.matchesFilters）。 */
   const filter = useSessionFilter(sessions)
-  const [busy, setBusy] = React.useState<'archive' | 'unarchive' | 'apply' | 'retitle' | 'migrate' | null>(null)
+  const [busy, setBusy] = React.useState<'archive' | 'unarchive' | 'apply' | 'retitle' | 'migrate' | 'export' | null>(null)
   const [error, setError] = React.useState<string | null>(null)
   const [notice, setNotice] = React.useState<string | null>(null)
   /**
@@ -179,13 +193,32 @@ export function ManagePanel({ t, state, meta, reload, patch, directory }: PanelS
   /** 上一次迁移落地之后的结论（复核 / 备份 / 生效方式）：弹窗关了之后它还得在页面上留着。 */
   const [effect, setEffect] = React.useState<MigrationEffect | null>(null)
   /**
+   * 刚做完的那件事留下了哪个备份目录（删除 / 迁移各一份），以及要不要在提示里给「撤销」。
+   *
+   * 声明在**最后一个 null 状态**的位置上：冒烟夹具按调用顺序把种子发给 null 状态（见
+   * test/client.test.mjs 的 `nulls`），插在中间会让后面那些整体错一格。
+   */
+  const [undoAt, setUndoAt] = React.useState<{ dir: string } | null>(null)
+
+  /**
+   * 换一条提示，并决定它带不带「撤销」。
+   *
+   * 任何一条新提示都先把上一枚撤销清掉：一份备份只能撤刚做的那一件事，提示换了还留着旧的那枚，
+   * 点下去会把用户带到一件早已过期的动作上。
+   */
+  const notify = (text: string | null, undo?: string): void => {
+    setNotice(text)
+    setUndoAt(text === null || undo === undefined ? null : { dir: undo })
+  }
+  /**
    * 只看某一个项目（`null` = 全部）。
    *
    * 平铺之后没有组头了，「整组处理」这件事改成"先按项目筛，再全选"：选中一个项目，清单就只剩它，
    * 卡头那对「全选 / 清空」的作用面跟着变成这一批。取一个对象而不是一个字符串，是因为冒烟用例按
    * 位置往空串状态里种值（见 test/client.test.mjs 的 mount），多一个字符串会让后面那些种子整体错一格。
    */
-  const [project, setProject] = React.useState<{ path: string | null }>({ path: null })
+  // 「项目」这一格由页面骨架持有（导入要拿它当目标目录的初值，见 ManagerPanel 的说明），这里只读写它。
+  const projectPath = project?.path ?? null
   /**
    * 表头那一列的排序：点一下换列，再点一下换方向。
    *
@@ -243,8 +276,8 @@ export function ManagePanel({ t, state, meta, reload, patch, directory }: PanelS
   )
   /** 当前列出来的那些：项目与筛选都过一遍，再按表头那一列排（两件事都是纯函数，见 manageRows.ts）。 */
   const listed = React.useMemo(
-    () => sortSessions(sessionsInProject(sessions, project.path).filter(filter.matches), sort),
-    [sessions, project.path, filter.matches, sort],
+    () => sortSessions(sessionsInProject(sessions, projectPath).filter(filter.matches), sort),
+    [sessions, projectPath, filter.matches, sort],
   )
   /**
    * 子智能体的父会话在**别的项目**里时的那枚备注（原先写在组内缩进那一行上）。
@@ -374,10 +407,53 @@ export function ManagePanel({ t, state, meta, reload, patch, directory }: PanelS
    *
    * 计划回来时弹窗可能已经被取消掉了：`current === null` 时原地作废（同删除弹窗）。
    */
+  /**
+   * 导出：把勾中的那些打成 `.dshsess`，交给浏览器下载。
+   *
+   * 为什么这一枚不问一句：它只把已有字节打成包，不改本机任何东西（写作的那一面是导入，它要看清计划）。
+   * 包里的条数、字节与附件对象以**宿主回报的**为准：勾一条父会话时它的子智能体跟着进包，比勾选数多；
+   * 附件对象也照实报——缺的那几个不会凭空出现，用户得在导出这一侧就知道，而不是到另一台机器上看到
+   * "图片加载失败"。
+   */
+  const doExport = async (): Promise<void> => {
+    if (picked.length === 0) return
+    setBusy('export')
+    setError(null)
+    notify(null)
+    try {
+      const result = await exportSessions(picked)
+      download(result)
+      const chosen = sessions.filter((session) => picked.includes(session.id))
+      notify(
+        [
+          t('export.done', {
+            count: result.count ?? chosen.length,
+            bytes: formatBytes(result.bytes ?? totalBytes(chosen)),
+          }),
+          (result.attachments ?? 0) > 0
+            ? t('export.attachments', {
+                attachments: result.attachments ?? 0,
+                bytes: formatBytes(result.attachmentBytes ?? 0),
+              })
+            : null,
+          (result.attachmentsMissing ?? 0) > 0
+            ? t('export.attachmentsMissing', { count: result.attachmentsMissing ?? 0 })
+            : null,
+        ]
+          .filter((line): line is string => line !== null)
+          .join(' '),
+      )
+    } catch (cause) {
+      setError(t('error.failed', { reason: cause instanceof Error ? cause.message : String(cause) }))
+    } finally {
+      setBusy(null)
+    }
+  }
+
   const openMigrate = (): void => {
     if (picked.length === 0) return
     setError(null)
-    setNotice(null)
+    notify(null)
     setEffect(null)
     setProgress(null)
     setMigratePending({ response: null, error: null })
@@ -408,7 +484,7 @@ export function ManagePanel({ t, state, meta, reload, patch, directory }: PanelS
           ...(response.backupDir === undefined ? {} : { backupDir: response.backupDir }),
           takesEffect: response.takesEffect,
         })
-        setNotice(
+        notify(
           t('migrate.done', {
             sessions: response.preview.sessions.length,
             rewritten: response.rewritten,
@@ -418,6 +494,7 @@ export function ManagePanel({ t, state, meta, reload, patch, directory }: PanelS
           }) +
             ' ' +
             (response.verified ? t('verify.pass') : t('verify.fail')),
+          response.backupDir,
         )
         // 搬走的那几条先在清单里换到目标目录（分组跟着换），整库快照随后到。
         patch?.((current) =>
@@ -441,7 +518,7 @@ export function ManagePanel({ t, state, meta, reload, patch, directory }: PanelS
   const doArchive = async (archived: boolean, ids: readonly string[] = picked): Promise<void> => {
     setBusy(archived ? 'archive' : 'unarchive')
     setError(null)
-    setNotice(null)
+    notify(null)
     setFailed([])
     setProgress(null)
     try {
@@ -449,7 +526,7 @@ export function ManagePanel({ t, state, meta, reload, patch, directory }: PanelS
       // 逐条失败照旧摆出来：一条因为"正在跑"被宿主拒了，不该把其余成功的说成失败。
       setFailed(response.failed)
       if (response.archived.length > 0) {
-        setNotice(
+        notify(
           t(archived ? 'manage.archive.done' : 'manage.archive.undone', { count: response.archived.length }) +
             ` ${t('manage.archive.immediate')}`,
         )
@@ -479,7 +556,7 @@ export function ManagePanel({ t, state, meta, reload, patch, directory }: PanelS
   const doRetitle = async (): Promise<void> => {
     setBusy('retitle')
     setError(null)
-    setNotice(null)
+    notify(null)
     setFailed([])
     setRetitle(null)
     setProgress(null)
@@ -511,7 +588,7 @@ export function ManagePanel({ t, state, meta, reload, patch, directory }: PanelS
   const openDelete = (): void => {
     if (picked.length === 0) return
     setError(null)
-    setNotice(null)
+    notify(null)
     setFailed([])
     setPending({ plan: null, error: null })
     setProgress(null)
@@ -547,7 +624,8 @@ export function ManagePanel({ t, state, meta, reload, patch, directory }: PanelS
         setBusy(null)
         setProgress(null)
         if (response.applied) {
-          setNotice(response.summary)
+          // 删除先留了一份备份：提示里给「撤销」，点它直接开那份的回滚确认。
+          notify(response.summary, response.backupDir)
           picking.clear()
           setPending(null)
           // 删掉的那些（含级联）先从清单里摘掉，不必等整库重扫；快照随后到，以快照为准。
@@ -626,7 +704,25 @@ export function ManagePanel({ t, state, meta, reload, patch, directory }: PanelS
         <p className="dsm-banner dsm-ok">
           <span>{notice}</span>
           <span className="dsm-spacer" />
-          <Button variant="outline" size="sm" onClick={() => setNotice(null)}>
+          {/*
+            刚删除 / 刚迁移都留下了一份字节级备份：这里给一枚「撤销」，开的是备份与回滚那面，并且直接
+            摆出这份备份的动作清单与确认框——用户不用在清单里按时间再找一遍。
+          */}
+          {undoAt !== null && (
+            <Button
+              variant="outline"
+              size="sm"
+              title={t('undo.tip')}
+              onClick={() => {
+                const dir = undoAt.dir
+                notify(null)
+                openBackup?.(dir)
+              }}
+            >
+              {t('undo.action')}
+            </Button>
+          )}
+          <Button variant="outline" size="sm" onClick={() => notify(null)}>
             {t('error.dismiss')}
           </Button>
         </p>
@@ -662,8 +758,8 @@ export function ManagePanel({ t, state, meta, reload, patch, directory }: PanelS
           t={t}
           total={sessions.length}
           options={projectOptions}
-          value={project.path}
-          onPick={(path) => setProject({ path })}
+          value={projectPath}
+          onPick={(path) => setProject?.({ path })}
           filter={filter}
           pickState={treePickState}
           onToggleGroup={toggleProject}
@@ -691,7 +787,7 @@ export function ManagePanel({ t, state, meta, reload, patch, directory }: PanelS
               </Button>
               <SessionSearch filter={filter} t={t} />
               <span className="dsm-spacer" />
-              {(filter.active || project.path !== null) && (
+              {(filter.active || projectPath !== null) && (
                 <span className="dsm-hint">{t('list.shown', { shown: listed.length, total: sessions.length })}</span>
               )}
               <span className="dsm-hint">{t('list.selected', { count: picked.length })}</span>
@@ -821,6 +917,20 @@ export function ManagePanel({ t, state, meta, reload, patch, directory }: PanelS
                 disabled={busy !== null || picked.length === 0}
               >
                 {t('migrate.action')}
+              </Button>
+              {/*
+                导出**不问**：它只把已有字节打成包给浏览器下载，不改本机任何东西。所以这一枚按下去就做，
+                完成之后那一条提示报出包里有几条、多少字节、带走了几个附件对象。包里带什么就是列表里
+                勾的那几个（父子会话跟着走的那几条也在），列表上「已选 N」与之一致。
+                导入不在这条行上：它跟勾选无关，在底部状态栏（见 ManagerPanel）。
+              */}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void doExport()}
+                disabled={busy !== null || picked.length === 0}
+              >
+                {busy === 'export' ? t('export.running') : t('export.action')}
               </Button>
               <span className="dsm-spacer" />
               <Button

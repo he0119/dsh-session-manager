@@ -1,43 +1,54 @@
 /**
- * 「会话管理」页的骨架：一条标题行 + 页内分页，把三件事收在同一页里。
+ * 「会话管理」页的骨架：一条工具条 + 工作台 + 一条状态栏。页面只做一件事——看这个库、对勾选的这批
+ * 做事；其余三件事各自是一处入口 + 一个宽弹窗（[WorkDialog.tsx](./WorkDialog.tsx)）。
  *
- * 为什么是页内分页而不是几个设置分节：导出/导入、逐条管理与迁移都是"对着同一个会话库做一件事"，
- * 共用一份库状态（`/state` 只拉一次）、共用一句"库在哪、有多少条"的说明，分开成几页反而每次都要
- * 重新认一遍上下文。页面本体分别是 [ManagePanel.tsx](./ManagePanel.tsx)（逐条管理，**含迁移**）、
- * [TransferPanel.tsx](./TransferPanel.tsx) 与 [BackupPanel.tsx](./BackupPanel.tsx)（后者是三个写
- * 操作共同的后悔面，不属于其中任何一个动作页）。
+ * 为什么去掉页签：页签让"你在哪一页"顶替了"你要对哪些会话做什么"。勾选原先只在「会话」页有效，
+ * 切到「传输」再想导出得在那里重新勾一遍；而「迁移」早已因为同一个理由并进了勾选动作行（见
+ * [ManagePanel.tsx](./ManagePanel.tsx) 的模块说明）。这一版把剩下两件也搬过去——导出进动作行、
+ * 导入进同一个弹窗的另一栏——于是勾选成了全页唯一的输入。三个入口分别是：
  *
- * 迁移原先单独占一个分页：它的源改成"你勾中的那些会话"之后，那一页就只剩一张与「会话」页逐字同形的
- * 列表 + 一枚按钮 + 一个弹窗，于是并进了那一页的动作行（见 ManagePanel 的模块说明）。
+ * - 导出 / 导入：工作台卡片底部那条动作行（`manage.transfer.action`），开 1080 宽的传输弹窗；
+ * - 同步：页头那枚状态（官方 `Button` + `StateDot`），平时只说配没配、这一趟跑完没有，点开才是
+ *   远端、计划、差异与确认；
+ * - 备份与回滚：底部状态栏那枚入口，三种写操作共同的后悔面。
+ *
+ * 「说明」照旧从页头那枚「?」开弹窗，不占入口。
  *
  * 数据分两份到：`/meta`（库在哪、宿主有哪些能力位，不扫库）与 `/state`（扫完整库的清单）。页头读
- * `state ?? meta`，所以"位置与能力位"不必等那遍扫描；清单没到的分页说「读取中…」，而不是先把
+ * `state ?? meta`，所以"位置与能力位"不必等那遍扫描；清单没到的面板说「读取中…」，而不是先把
  * "还没有会话""这个宿主没有这个能力"这类**结论**画上去再改。
  *
- * 分页切换会**卸载**另一个分页：本地草稿（勾选、弹窗里那份计划）随之清掉。这是有意的——一份计划
- * 不该在切走再切回来之后还留着，让人以为它还是刚刚算出来的那份。
+ * 弹窗打开 / 关闭等于挂载 / 卸载：本地草稿（勾选、弹窗里那份计划、导入选的文件）随之清掉。这是
+ * 有意的——一份计划不该在关掉再打开之后还留着，让人以为它还是刚刚算出来的那份。
  *
  * @module dsh-session-manager/client/ManagerPanel
  */
 
 import * as React from 'react'
 
-import { Button, Modal, SegmentedControl, StateDot } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, Modal, StateDot, type StateDotState } from '@deepseek-ai/dsh-client-ui-primitives'
 
-import type { MetaResponse, ProgressEvent, StateResponse } from '../api.ts'
+import { fetchBackups, type MetaResponse, type ProgressEvent, type StateResponse } from '../api.ts'
 import { panelEvents, type PanelSnapshot } from '../logic/panelEvents.ts'
+import { syncChipDot, syncChipDotTitle, syncChipNote } from '../logic/syncChipDot.ts'
 import { getNavigationApi } from '../navigation.ts'
 import { PLUGIN_COMMIT, PLUGIN_DIRTY, PLUGIN_VERSION } from '../build.ts'
 import type { DirectoryApi } from '../directory.ts'
 import type { Translate } from '../logic/locales.ts'
 import { syncJob, type SyncJobSnapshot } from '../logic/syncJob.ts'
+import { chooseBundle } from '../logic/fileDrop.ts'
+import { relativeLabel } from '../logic/relativeTime.ts'
+import { syncBarLabel } from '../logic/syncJobLabel.ts'
 import { versionCommit, versionLabel, versionTag } from '../logic/version.ts'
 import { BackupPanel } from './BackupPanel.tsx'
 import { HelpPanel } from './HelpPanel.tsx'
 import { ManagePanel } from './ManagePanel.tsx'
 import { ProgressBlock } from './ProgressBlock.tsx'
 import { SyncPanel } from './SyncPanel.tsx'
-import { TransferPanel } from './TransferPanel.tsx'
+import { ImportPanel } from './ImportPanel.tsx'
+import { useFileDrop } from './useFileDrop.ts'
+import { useSessionPicking } from './sessionList.tsx'
+import { WorkDialog } from './WorkDialog.tsx'
 
 /**
  * 页面获得的注入面：`t` 是**框架 props**（注册时带 `locale: NS` 换来的那一个），`directory` 由
@@ -51,8 +62,13 @@ export interface ManagerPanelProps {
   directory?: () => DirectoryApi | undefined
 }
 
-/** 页内分页。 */
-type PanelKey = 'transfer' | 'sync' | 'manage' | 'backup' | 'help'
+/**
+ * 页面上那几块"做事的面"。
+ *
+ * `none` 是列表本身（这一页常驻的那一面）；其余四个各是一个弹窗。原来它们是一个 `PanelKey` 的
+ * 页签值，`manage` 那一档随页签一起去掉了——列表不再是"四个里选一个"，而是这一页唯一的样子。
+ */
+type Surface = 'none' | 'import' | 'sync' | 'backup' | 'help'
 
 /** 会话管理页。 */
 export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactElement {
@@ -78,12 +94,74 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
    * 不画条——还不知道分母。
    */
   const [loadProgress, setLoadProgress] = React.useState<ProgressEvent | undefined>(undefined)
-  // 默认停在第一个页签（「会话」）：它是这一页的日常视图，另外两页是偶发动作。
-  const [panel, setPanel] = React.useState<PanelKey>('manage')
-  /** 「说明」不再是页签：页头那枚 `?` 把它开成弹窗。 */
-  const [helpOpen, setHelpOpen] = React.useState(false)
-  /** `panel === 'help'` 只为冒烟夹具保留（那条测试直接以说明页挂载）；生产只有 `helpOpen`。 */
-  const showHelp = helpOpen || panel === 'help'
+  /**
+   * 这一页自己那条"做完了"的提示（目前只有导入用它）。
+   *
+   * 为什么放在页面这一级：导入成功之后弹窗就关掉了，写入的条数与字节总得有个地方说；列表顶部那条
+   * 横幅正是删除、迁移、归档那几件事共用的位置。用 `undefined` 起头而不是 `null`：冒烟夹具按顺序把
+   * 种子发给 null 状态（见 test/client.test.mjs 的 `nulls`），这里插一个 null 会让后面整体错一格。
+   */
+  const [notice, setNotice] = React.useState<string | undefined>(undefined)
+  /**
+   * 从页面上拖进来的那个包（松手之后交给导入那一面）。
+   *
+   * 它只活到弹窗打开那一刻：`ImportPanel` 在新挂载的那一帧把它读成"已经选好的文件"，之后改由它自己持有。
+   * 用 `undefined` 起头，不去抢 null 状态那颗种子（同上面 `notice`）。
+   */
+  const [droppedFile, setDroppedFile] = React.useState<File | undefined>(undefined)
+  // 这一页一进来就是列表：它不再是"四个里选一个"的默认项，而是唯一常驻的那一面。
+  const [surface, setSurface] = React.useState<Surface>('none')
+
+  /**
+   * 重数一遍备份份数（状态栏那枚入口上的数字）。
+   *
+   * 只读一次目录（`GET /backups` 与备份清单同一份来源）。三类写操作都会留一份备份，所以它在这些时刻
+   * 各读一次：页面挂上、手动刷新、以及任何一面关掉之后（那时刚做完的动作已经落盘）。
+   * 读失败就保持原样：那个数字只是入口上的一句提示，不该让页面报错。
+   */
+  const countBackups = React.useCallback((): void => {
+    void fetchBackups().then(
+      (response) => setBackupCount(response.backups.length),
+      () => undefined,
+    )
+  }, [])
+
+  React.useEffect(() => {
+    countBackups()
+  }, [countBackups])
+
+  /**
+   * 页面这一层也是落点：把 `.dshsess` 拖到列表上，松手就开导入那一面，并且包已经拿在手里。
+   *
+   * 为什么页面也要接：用户手上多半没有"打开导入弹窗"这个前置动作——拖进来正是最省事的那一步。弹窗自己
+   * 也接（见 ImportPanel），两条路都落到同一处 `acceptFile()`。
+   *
+   * 后缀不对时只在页面上说一句，不打开空弹窗：那不是"要导的东西"，不必拉用户进去。
+   */
+  const pageDrop = useFileDrop((files) => {
+    const choice = chooseBundle(files)
+    if (choice.kind === 'empty') return
+    if (choice.kind === 'unknownSuffix') {
+      setNotice(t('import.needBundle'))
+      return
+    }
+    setDroppedFile(choice.file)
+    setSurface('import')
+  })
+
+  /**
+   * 关掉正在开的那一面：等于回到列表。
+   *
+   * 顺带重数一遍备份份数：那一面里刚做完的动作（导入落地、回滚、同步）都会留下或还原一份备份，
+   * 入口上的数字得跟着变。
+   */
+  const close = React.useCallback((): void => {
+    setSurface('none')
+    setBackupFocus(undefined)
+    // 拖进来的包只属于"这一次打开"：关掉之后再开不该又冒出上次那个文件。
+    setDroppedFile(undefined)
+    countBackups()
+  }, [countBackups])
   /**
    * 手动「刷新」按下去之后、新清单回来之前。
    *
@@ -93,13 +171,42 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
   const [busy, setBusy] = React.useState(false)
   /** 那条连接报的错（连不上、扫库失败），宿主原话；渲染时套进「刚才那件事没成：…」那一句。 */
   const [error, setError] = React.useState<string | null>(null)
+  /**
+   * 有几份备份（状态栏那枚入口上的数字）。
+   *
+   * `undefined` = 还没读到。它只决定那枚按钮要不要带数字，读失败就照旧只写名字——比画一个"0 份"诚实
+   * （一次目录列举，`/backups` 只读，与备份清单同一份来源）。用 `undefined` 而不是 `null` 起头：冒烟
+   * 夹具按顺序把种子发给 null 状态，这里插一个 null 会让「会话」页后面那些整体错一格。
+   */
+  const [backupCount, setBackupCount] = React.useState<number | undefined>(undefined)
+  /**
+   * 从「撤销」点进来时指着的那一份备份（删除 / 迁移刚留下的）。
+   *
+   * 交给备份弹窗：它开着时直接摆出那份的动作清单与确认框，用户不用在清单里再找一遍。关掉弹窗就清掉，
+   * 下次手点状态栏那枚入口是从清单开始。
+   */
+  const [backupFocus, setBackupFocus] = React.useState<string | undefined>(undefined)
+  /**
+   * 左栏「项目」筛着的那个（`null` = 全部项目）。
+   *
+   * 它原先在列表那一层，这里上移一格是为了导入：导入要回答"落到哪个项目"，而用户在看这一页时已经用
+   * 左栏说过一次了——弹窗里的目标目录默认就填它，不用再问第二遍。
+   */
+  const [project, setProject] = React.useState<{ path: string | null }>({ path: null })
+  /**
+   * 列表与导出清单共用的勾选集（见 types.ts 的 `picking`）。
+   *
+   * 放在页面这一级，是因为它比任何一面都活得久：勾了 6 条 → 开「导出 / 导入」→ 导出栏里就是这 6 条；
+   * 关掉弹窗回来，列表里还是这 6 条。原先两个页签各有一套，切过去要重勾一遍。
+   */
+  const picking = useSessionPicking(state?.sessions ?? [], t)
 
   /**
    * 后台那一趟同步跑到哪儿了（见 logic/syncJob.ts）。
    *
-   * 为什么放在**页面**这一级而不是同步分页里：那一趟的生命周期比任何一页都长——用户可能切到别的分页、
-   * 或者把整个设置窗口关掉，回来时默认停在「会话」那一页。状态挂在模块级，这里只是读它并把横幅画在
-   * 页签上面，所以"关掉再回来还看得见"是它天然的样子，不是特例。
+   * 为什么放在**页面**这一级而不是同步弹窗里：那一趟的生命周期比任何一面都长——用户可能开着别的
+   * 弹窗、或者把整个窗口关掉，回来看到的是列表。状态挂在模块级，这里只是读它并把横幅画在列表上面，
+   * 所以"关掉再回来还看得见"是它天然的样子，不是特例。
    */
   const [job, setJob] = React.useState<SyncJobSnapshot>(syncJob.snapshot())
   React.useEffect(() => syncJob.subscribe(setJob), [])
@@ -125,22 +232,36 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
     return { ok: true, text: counts === null ? t('sync.background.donePlain') : t('sync.background.done', counts) }
   })()
   /**
-   * 那一行要不要摆：同步分页会自己说这一趟的结论（成功说细的那几句、失败说原因），由它说时这里就不
-   * 重复；其余情况——用户在别的分页，或者这一趟是别处发起、同步分页拿不到结论——由这里说。
+   * 那一行要不要摆：同步弹窗会自己说这一趟的结论（成功说细的那几句、失败说原因），由它说时这里就不
+   * 重复；其余情况——弹窗没开，或者这一趟是别处发起、同步那一面拿不到结论——由这里说。
    */
-  const showJobLine = jobLine !== null && (panel !== 'sync' || job.done?.adopted !== undefined)
+  /** 状态栏那一格说什么（纯函数判，见 logic/syncJobLabel.ts）；`null` = 这一格不出现。 */
+  const barLabel = syncBarLabel(job)
+
+  /**
+   * 结论别在状态栏上留着不走：跑完 12 秒后自己收掉。
+   *
+   * 长的那几句（拉了几条、推了几条、失败原因）在悬浮提示与同步那一面里；这一格只负责"刚才那趟成没成"。
+   * 页头那枚同步状态另有一套常驻的说法（多久以前），所以收掉不丢东西。
+   */
+  React.useEffect(() => {
+    if (job.running || job.done === null) return
+    const timer = setTimeout(() => syncJob.dismiss(), 12000)
+    return () => clearTimeout(timer)
+  }, [job.done, job.running])
 
   /**
    * 手动「刷新」：重连一次要一份新清单（宿主会重新扫库，进度照旧画在同一个位置）。
    *
    * 别处（面板流上那条 `stale`）走的也是它——读清单只有这一条路。
    *
-   * @returns 新清单落地（或 30 秒之后）resolve：各分页的 `await reload()` 之后要接着读新清单。
+   * @returns 新清单落地（或 30 秒之后）resolve：各弹窗的 `await reload()` 之后要接着读新清单。
    */
   const load = React.useCallback((): Promise<void> => {
     setBusy(true)
+    countBackups()
     return panelEvents.reload().finally(() => setBusy(false))
-  }, [])
+  }, [countBackups])
 
   /**
    * 就地改清单（见 statePatch.ts）：动作落地之后先让那一行改对，不等整库快照。
@@ -223,43 +344,135 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
           commit: versionCommit(PLUGIN_COMMIT, PLUGIN_DIRTY),
         })
 
+  /**
+   * 页头那枚同步状态说哪一句：只报**本地知道**的事（配没配、自动推送开没开、这一趟跑完没有）。
+   *
+   * "上次同步几点、待拉几条"要跑一趟计划（联网），这一枚不能为了它去联网——那一趟在点开之后的计划
+   * 面里看；宿主那侧目前也没记上一次同步的时间，所以这里不编一个出来。
+   */
+  const syncInfo = (meta ?? state)?.sync ?? null
+  /** 「多久以前」那句话：档位由纯函数判（见 logic/relativeTime.ts），这里只把键交给字典。 */
+  const ago = (at: string): string => {
+    const label = relativeLabel(Date.parse(at), Date.now())
+    return label.key === 'time.justNow' ? t('time.justNow') : t(label.key, { count: label.count })
+  }
+  /**
+   * 那枚状态说哪一句，按"手里证据的新鲜程度"排：
+   *
+   * 1. 这一趟正跑着 / 这一进程里刚跑完 → 说这个（最准）；
+   * 2. 否则说磁盘上那条记录（进程重启之后还在）：多久以前、成没成；
+   * 3. 再没有就退到配置事实：开了自动推送 / 只说"同步"。
+   *
+   * "待拉几条"不在这里：那要联网算一份计划，一个页头按钮不该为了它去连远端。
+   */
+  const syncLabel = ((): string => {
+    if (meta === undefined) return t('place.sync')
+    if (syncInfo === null) return t('sync.chip.off')
+    if (job.running) return t('sync.chip.running')
+    if (job.done !== null) return job.done.ok ? t('sync.chip.justNow') : t('sync.chip.failedJustNow')
+    const lastRun = syncInfo.lastRun
+    if (lastRun !== undefined) {
+      return lastRun.ok
+        ? t('sync.chip.at', { when: ago(lastRun.at) })
+        : t('sync.chip.failedAt', { when: ago(lastRun.at) })
+    }
+    return syncInfo.autoPush !== undefined ? t('sync.chip.auto') : t('place.sync')
+  })()
+  /**
+   * 那枚点该点哪一档：判据全在 `syncChipDot()` 里（纯函数，五种结果各自有测试）。
+   *
+   * 一句话：跑着转圈、失败红点、"跑完了但有几条没做到 / 要重启"黄点、自动推送开着绿点、其余灰点。
+   */
+  const dotFacts = {
+    running: job.running,
+    done: job.done,
+    lastRun: syncInfo?.lastRun ?? null,
+    autoPush: syncInfo?.autoPush !== undefined,
+  }
+  const syncDot: StateDotState = syncChipDot(dotFacts)
+  /** 这个颜色为什么是这个颜色：这句话挂在按钮的悬浮提示上（点本身是 aria-hidden，读屏读不到颜色）。 */
+  const dotNote = syncChipNote(dotFacts)
+  /**
+   * 点**自己**的悬浮提示：这一档是什么状态（鼠标落在那个 10px 的点上时回答"这个颜色什么意思"）。
+   *
+   * 挂在包着它的一层 span 上而不是点本身：官方 `StateDot` 只收 `state` / `size` / `className`，不透传
+   * `title`（与 `Tag` 同一条，见「每枚标签都必须带 .dsm-tag 挂钩」那条约束）。
+   */
+  const dotTitle = syncChipDotTitle(dotFacts)
+  const chipReason =
+    dotNote !== null
+      ? 'params' in dotNote
+        ? t(dotNote.key, dotNote.params)
+        : t(dotNote.key)
+      : syncDot === 'done'
+        ? t('sync.chip.autoTip')
+        : null
+
   return (
-    <section className="dsm-root" data-plugin="dsh-session-manager" data-panel={panel}>
+    <section
+      className="dsm-root"
+      data-plugin="dsh-session-manager"
+      /*
+        整页都是落点：拖一个 .dshsess 上来，松手就开导入那一面（见 `pageDrop`）。弹窗开着的时候
+        遮罩挡在前面，拖到弹窗里的那一层由 ImportPanel 自己接。
+      */
+      {...(surface === 'none' ? pageDrop.handlers : {})}
+      data-drop-over={pageDrop.over && surface === 'none' ? 'true' : undefined}
+    >
       {/*
-        页头是一条**工具条**：标题、页内分页、页面级动作排在同一行。
+        拖到页面上时的提示：一层不挡事件的虚线框，写的正是"松手会发生什么"。
+        它只在这一页同时满足"没有开着别的面 + 正拖着文件"时存在。
+      */}
+      {pageDrop.over && surface === 'none' && (
+        <div className="dsm-dropVeil">
+          <span className="dsm-dropVeilPill">{t('import.dropVeil')}</span>
+        </div>
+      )}
+      {/*
+        页头是一条**工具条**：标题、同步状态、页面级动作排在同一行。
 
         为什么不再用「标题一行 + 说明一行」那种设置页的形状：这一页现在从侧栏进来，占的是整块主栏，
         不是设置弹窗里的一格。宽屏上那两行会把列表往下推 60px，而库路径与条数每天都在看、却要占掉
         一行；挪到底部状态栏之后，视线从列表移到底部才看它，正好。
 
+        标题右边那枚是所有入口里**唯一会自己变**的东西：同步配没配、这一趟跑完没有。原来它藏在页签
+        里，跑完关掉窗口再回来默认停在「会话」，不点进去就不知道昨晚那趟成没成。它**不看"配没配"**：
+        恰恰是没配的时候最需要它（点开那面会说要填什么、去哪儿填）。
+
         「插件设置」仍在标题这一行：配置挂在**插件页**上（`plugins.bundle.config`，见 PluginConfigCard），
-        不在这一页。「刷新」也搬到这里——它重读整页的状态（`/meta` + `/state`），不属于任何一个分页。
-
-        分页顺序按日常程度排：会话 → 传输 → 同步 → 备份 → 说明。「备份」是那三个写操作共同的后悔面，
-        「说明」是一次性读的参考，两者都不该挤在动作页前面。
-
-        它**不看"配没配同步"**：恰恰是没配的时候最需要它。宿主没装插件管理器时禁用（点了没反应比
-        禁用更糟）。
+        不在这一页。「刷新」也搬到这里——它重读整页的状态（`/meta` + `/state`），不属于任何一面。
+        宿主没装插件管理器时禁用（点了没反应比禁用更糟）。
       */}
       <header className="dsm-head">
         <h2 className="dsm-title">{t('page.title')}</h2>
-        <div className="dsm-tabs">
-          <SegmentedControl
-            id="dsm-panel"
-            value={panel === 'help' ? 'manage' : panel}
-            label={t('page.title')}
-            onChange={setPanel}
-            options={[
-              { value: 'manage', label: t('page.tab.manage') },
-              { value: 'transfer', label: t('page.tab.transfer') },
-              { value: 'sync', label: t('page.tab.sync') },
-              { value: 'backup', label: t('page.tab.backup') },
-            ]}
-          />
-        </div>
+        <Button
+          className="dsm-headChip"
+          variant="outline"
+          size="sm"
+          icon={
+            <span
+              className="dsm-dotSlot"
+              title={
+                'params' in dotTitle ? t(dotTitle.key, dotTitle.params) : t(dotTitle.key)
+              }
+            >
+              <StateDot state={syncDot} />
+            </span>
+          }
+          /*
+            悬浮提示补一句"这个颜色是什么意思"：黄点说清几条没做到 / 要重启，绿点说清自动推送开着。
+            颜色读屏读不到、也常被一眼扫过，理由得有一句话接着。
+          */
+          title={[t('sync.chip.tip'), chipReason].filter((line) => line !== null).join(' · ')}
+          aria-haspopup="dialog"
+          aria-expanded={surface === 'sync'}
+          onClick={() => setSurface('sync')}
+        >
+          {syncLabel}
+        </Button>
         <span className="dsm-spacer" />
         {/*
-          说明是一次性读的参考，不再占一枚页签：页头这枚 `?` 把它开成弹窗，关掉就回到原来的分页。
+          说明是一次性读的参考，不占入口：页头这枚 `?` 把它开成弹窗，关掉就回到列表。
           按钮只有「?」一个字，悬浮提示与无障碍名字走字典。
         */}
         <Button
@@ -269,8 +482,8 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
           aria-label={t('page.help.open')}
           title={t('page.help.open')}
           aria-haspopup="dialog"
-          aria-expanded={showHelp}
-          onClick={() => setHelpOpen(true)}
+          aria-expanded={surface === 'help'}
+          onClick={() => setSurface('help')}
         >
           ?
         </Button>
@@ -296,40 +509,20 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
 
       {/*
         读库的进度：整库要逐条读 header、折标题（更大或更慢的库上是几秒），这一段原来只有页头那句
-        「读取中…」。摆在页头下面、页签上面——它是这一页自己的事，不属于任何一个分页。
+        「读取中…」。摆在页头下面、列表上面——它是这一页自己的事，不属于任何一面。
       */}
       {loadProgress !== undefined && <ProgressBlock t={t} progress={loadProgress} />}
 
       {/*
-        后台同步：跑着的时候是进度条（关掉窗口、切分页都还在），跑完留一行结论直到用户关掉它。
-        摆在页签**上面**是因为它不属于任何一个分页——与「读库的进度」同一个位置、同一条理由。
+        后台同步：跑着的时候是进度条（关掉窗口、开别的弹窗都还在），跑完留一行结论直到用户关掉它。
+        摆在列表**上面**是因为它不属于任何一面——与「读库的进度」同一个位置、同一条理由。
       */}
-      {job.running && (
-        <div className="dsm-banner dsm-progressBanner">
-          {/*
-            标题那一行：一枚 ongoing 的官方状态点 + 一句话。点是宿主对"还在跑"的统一说法（转圈、与别的
-            卡片同相），标题才说明这是**哪一趟**（后台同步）。adopted 那一路没有逐条进度可看，它那句话
-            落到下面去当说明——与"关掉窗口也会继续跑"同一位置，因为两件都是"这一趟怎么跑"的交代。
-          */}
-          <div className="dsm-progressHead">
-            <StateDot state="ongoing" />
-            <span className="dsm-progressTitle">{t('sync.background.running')}</span>
-          </div>
-          {job.progress === null ? null : <ProgressBlock t={t} progress={job.progress} />}
-          <p className="dsm-progressNote">
-            {t(job.adopted ? 'sync.background.adopted' : 'sync.background.hint')}
-          </p>
-        </div>
-      )}
-      {showJobLine && jobLine !== null && (
-        <p className={jobLine.ok ? 'dsm-banner dsm-ok' : 'dsm-banner dsm-error'}>
-          <span>{jobLine.text}</span>
+      {notice !== undefined && (
+        <p className="dsm-banner dsm-ok">
+          <span>{notice}</span>
           <span className="dsm-spacer" />
-          <Button variant="outline" size="sm" onClick={() => setPanel('sync')}>
-            {t('sync.background.open')}
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => syncJob.dismiss()}>
-            {t('close')}
+          <Button variant="outline" size="sm" onClick={() => setNotice(undefined)}>
+            {t('error.dismiss')}
           </Button>
         </p>
       )}
@@ -347,48 +540,93 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
       )}
 
       {/*
-        分页本体外面这一层带上 `id`，与上面 `SegmentedControl` 给每段写的 `aria-controls`
-        （`<id>-<value>-panel`）接上：官方原语按这个约定生成引用，不接上就是一个指向空气的
-        `aria-controls`。`role="tabpanel"` 也在这一层。
+        列表就是这一页：它不再是"四个里选一个"的默认项，而是唯一常驻的那一面。所以这一层不再有
+        `role="tabpanel"`，也没有 `aria-controls` 要接——页签没了，那个引用也就没有对象。
       */}
-      <div id={`dsm-panel-${panel}-panel`} role="tabpanel" className="dsm-panel" data-panel={panel}>
-        {panel === 'manage' && (
-          <ManagePanel t={t} state={state} meta={meta} reload={load} patch={patch} directory={directory} />
-        )}
-        {panel === 'transfer' && <TransferPanel t={t} state={state} meta={meta} reload={load} directory={directory} />}
-        {panel === 'sync' && <SyncPanel t={t} state={state} meta={meta} reload={load} />}
-        {panel === 'backup' && <BackupPanel t={t} reload={load} />}
-      </div>
+      <ManagePanel
+        t={t}
+        state={state}
+        meta={meta}
+        reload={load}
+        patch={patch}
+        directory={directory}
+        picking={picking}
+        project={project}
+        setProject={setProject}
+        openBackup={(dir) => {
+          setBackupFocus(dir)
+          setSurface('backup')
+        }}
+      />
 
       {/*
-        说明弹窗：四张卡片（分类 / 每页做什么 / 数据从哪来 / 常见疑问）原样搬进来，换的是外面那层
+        同步与备份各是一个宽弹窗（见 WorkDialog.tsx 的说明），导入是一个 640 的窄弹窗（见
+        ImportPanel.tsx：它只有两个字段，没有清单要摆）。开哪个由 `surface` 决定；关掉就是卸载，本地
+        草稿随之清掉。它们与列表共用同一份 `/state`：同一个库不会出现两套数字。
+      */}
+      {surface === 'import' && (
+        <ImportPanel
+          t={t}
+          state={state}
+          meta={meta}
+          reload={load}
+          directory={directory}
+          defaultTarget={project.path ?? ''}
+          initialFile={droppedFile}
+          onClose={close}
+          onDone={(text) => {
+            // 成功就关掉它：写入的条数与字节正是页面顶部那条提示该报的，列表也已经重读过了。
+            close()
+            setNotice(text)
+          }}
+        />
+      )}
+      {surface === 'sync' && (
+        /*
+          这一面**自己就是弹窗**（`SyncPanel` 里那枚 `WorkDialog`）：它的标题、说明、宽度与底栏都跟着
+          "面板 / 计划 / 落地"那三段变，页面这一级只管把 onClose 与认领来的结论交过去。
+        */
+        <SyncPanel
+          t={t}
+          state={state}
+          meta={meta}
+          reload={load}
+          onClose={close}
+          // 认领来的那趟结论（别处发起的）：那个弹窗自己没有完整结果，由这里把这一句交给它说。
+          {...(job.done?.adopted === undefined || jobLine === null ? {} : { backgroundLine: jobLine })}
+        />
+      )}
+      {surface === 'backup' && (
+        <WorkDialog t={t} title={t('backup.title')} onClose={close}>
+          <BackupPanel t={t} reload={load} focus={backupFocus} />
+        </WorkDialog>
+      )}
+
+      {/*
+        说明弹窗：四张卡片（分类 / 哪里做什么 / 数据从哪来 / 常见疑问）原样搬进来，换的是外面那层
         卡片壳——弹窗已经是容器，再套四张卡片只会多四圈描边。正文层自己滚（官方 Modal 的正文层
         就是唯一滚动区，见 styles.ts 的 .dsm-dialogContent）。
       */}
-      {showHelp && (
+      {surface === 'help' && (
         <Modal
           open
-          onClose={() => {
-            setHelpOpen(false)
-            // 夹具那条 `panel: 'help'` 的挂载也要能关：关掉之后回到「会话」，不留一个空的页签。
-            if (panel === 'help') setPanel('manage')
-          }}
-          title={t('page.tab.help')}
+          onClose={close}
+          title={t('page.help.title')}
           closeLabel={t('close')}
           className="dsm-dialog dsm-helpDialog"
           contentClassName="dsm-dialogContent dsm-helpContent"
         >
           <div className="dsm-helpBody">
-            <HelpPanel t={t} state={state} meta={meta} reload={load} />
+            <HelpPanel t={t} state={state} meta={meta} />
           </div>
         </Modal>
       )}
       {/*
-        底部状态栏：库在哪、有多少条、这一页是哪个构建。
+        底部状态栏：库在哪、有多少条、备份与回滚在哪儿、这一页是哪个构建。
 
-        这三样原来在页头那行说明与页脚各占一处，现在收进这一行，理由与页头合成工具条是同一个：
-        从侧栏进来占的是整块主栏，纵向空间该留给列表。状态栏**不随分页切换消失**——"库在哪 / 多少条"
-        是整页的上下文，不是某一个分页的。版本号的悬浮提示把"发布版还是直接 build 的"说全（判据见
+        这几样原来在页头那行说明与页脚各占一处，现在收进这一行，理由与页头合成工具条是同一个：
+        从侧栏进来占的是整块主栏，纵向空间该留给列表。状态栏**不随弹窗开关消失**——"库在哪 / 多少条 /
+        有哪些备份"是整页的上下文。版本号的悬浮提示把"发布版还是直接 build 的"说全（判据见
         build.ts 与 scripts/build-identity.ts）；一句话里的数字来自构建期常量，渲染路径上没有任何 IO。
       */}
       <footer className="dsm-statusBar">
@@ -396,6 +634,53 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
           {t('page.library')}：{libraryLine}
         </span>
         <span className="dsm-spacer" />
+        {/*
+          库这一级的两件事：导入（往库里放东西，与勾选无关）与备份回滚（三种写操作共同的后悔面，
+          不属于其中任何一件）。它们都不跟着动作走，所以跟"库在哪"这一档信息一起待在状态栏。
+        */}
+        {/*
+          同步那一趟在状态栏里说一句（39px 的单行）：跑着时是「同步中 3/7」，刚跑完是「同步完成 · 2 条」
+          或「同步失败」，点一下开同步那一面。字节、正在处理的那条会话、失败原因都在那一面里说。
+          为什么不是列表上方那条横幅：进度那一档有 100px 高，压的是列表；而这件事跟列表内容无关，
+          位置该跟「导入…」「备份与回滚」排在同一排。弹窗开着时不摆——那一面正显示着更细的进度。
+        */}
+        {barLabel !== null && surface !== 'sync' && (
+          /*
+            这枚也用官方 `Button`（outline/sm，与旁边那两枚同款）：本页的控制件一律走官方控件库，
+            裸 `<button>` 会带出浏览器自己那套灰边白底。它读起来是"这段的状态"，但点下去是动作（开同步
+            那一面），所以形状与邻居一致比"看起来不像按钮"更要紧。
+          */
+          <Button
+            className="dsm-statusAction dsm-statusJob"
+            variant="outline"
+            size="sm"
+            aria-haspopup="dialog"
+            title={jobLine === null ? undefined : jobLine.text}
+            onClick={() => setSurface('sync')}
+          >
+            {'params' in barLabel ? t(barLabel.key, barLabel.params) : t(barLabel.key)}
+          </Button>
+        )}
+        <Button
+          className="dsm-statusAction"
+          variant="outline"
+          size="sm"
+          aria-haspopup="dialog"
+          aria-expanded={surface === 'import'}
+          onClick={() => setSurface('import')}
+        >
+          {t('import.entry')}
+        </Button>
+        <Button
+          className="dsm-statusAction"
+          variant="outline"
+          size="sm"
+          aria-haspopup="dialog"
+          aria-expanded={surface === 'backup'}
+          onClick={() => setSurface('backup')}
+        >
+          {backupCount !== undefined && backupCount > 0 ? t('backup.entry', { count: backupCount }) : t('place.backup')}
+        </Button>
         <span className="dsm-statusVersion" title={versionTip}>
           {version}
         </span>

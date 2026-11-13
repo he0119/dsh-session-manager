@@ -59,9 +59,9 @@
 - [进度块四行归位：计数在条上面，条目退出主色](../.agents/notes/implemented/bug-fix/2026-11-10-progress-block-rhythm.md)：
   四行由容器的 `gap: 6px` 定节奏（`<p>` 外边距归零，否则间距由浏览器默认 1em 决定、忽松忽紧）；进度
   横幅头部补状态点 + 一句标题，描边与留白照卡片那一档。
-- [页内分页那一层自己要留块间距](../.agents/notes/implemented/bug-fix/2026-10-16-inner-blocks-need-their-own-gap.md)：
-  `.dsm-root` 那份 16px 只作用于直接子元素，分页本体现在自己带 `gap`——不写这一条相邻两张卡片实测
-  间距 0px。
+- [正文那一层自己要留块间距](../.agents/notes/implemented/bug-fix/2026-10-16-inner-blocks-need-their-own-gap.md)：
+  `.dsm-root` 那份 16px 只作用于直接子元素；宽弹窗换成了 `.dsm-workBody`、自己带同一档 `gap`——不写
+  这一条相邻两张卡片实测间距 0px。
 - [动作行里的动作带边框](../.agents/notes/implemented/bug-fix/2026-10-16-actions-carry-their-frame.md)：
   变体按角色分：会动数据的动作走 `outline`（卡片动作行）/ `primary`（这一页的主动作），不动数据的工具
   保持缺省的 `ghost`——原来按"写不写盘"分，一条动作行看着就是一段灰字。
@@ -118,7 +118,7 @@
   本机的代次文件、投影缓存那两件事、要覆盖的那几条是否还活着、远端索引有一处对不上就从零重算。
 - [同步关掉窗口之后接着跑，回来还看得见](../.agents/notes/implemented/feature/2026-10-21-sync-keeps-running-when-the-window-closes.md)：
   落地那一趟的状态搬到模块级（`src/client/logic/syncJob.ts`）：忙碌时弹窗那枚「取消」换成「转到后台」，
-  进度与结束结论搬到页面顶上的横幅（切页签、关设置再回来都还在）；刷新之后从面板那条唯一的长连接
+  进度与结束结论搬到页面顶上的横幅（开别的弹窗、关掉窗口再回来都还在）；刷新之后从面板那条唯一的长连接
   （`GET /panel/events`）上认领还在跑的那一趟。宿主那边同一时间只允许一趟落地（第二趟 409）。自动推送
   那一轮同理：调度器记下"正跑着的那一轮"（`AutoPushTimer.status()`）并把之后的每条进度推给订阅者
   （`subscribe()`），面板连接把每一条都转给页面——后台那一轮不管是自己跑的还是手点发起的，横幅与
@@ -205,14 +205,14 @@
 - [「认领」是宿主那份成员表](../.agents/notes/implemented/bug-fix/2026-10-04-accounted-means-the-hosts-membership.md)：
   注册表里的**登记**不算数，cwd 归一到记录 `path` 才算——判据只在 `src/accounting.ts` 写一遍。
 - [迁移的源就是你勾的那些会话](../.agents/notes/implemented/architecture/2026-10-13-source-is-what-you-tick.md)：
-  勾选就是源（可以跨目录），目标目录在弹窗里选一次，**没有独立的迁移分页**（那枚「迁移」挂在「会话」
-  页的动作行上）；`from` 参数与 `includeUnowned` 开关一并删掉。
+  勾选就是源（可以跨目录），目标目录在弹窗里选一次，**没有独立的迁移页**（那枚「迁移」挂在列表的
+  动作行上）；`from` 参数与 `includeUnowned` 开关一并删掉。
   它取代的两条留在否决记录里：[源永远是一个目录](../.agents/notes/rejected/simplification/2026-10-13-ungrouped-is-only-a-label.md)、
   [「未分组」当独立来源](../.agents/notes/rejected/architecture/2026-09-27-unowned-is-a-migration-source.md)。
 - [迁移排除侧边栏不显示的会话](../.agents/notes/implemented/architecture/2026-09-28-migration-excludes-what-the-sidebar-hides.md)：
   三条隐藏理由的输入来源、界面上"能勾"与"搬得走"分开管，与「读不到就按会显示处理」。
 - [列整库的分页共用一份列表实现](../.agents/notes/implemented/simplification/2026-09-28-one-list-for-the-whole-library.md)：
-  共用边界划在一行的解剖结构与列表的框上；今天接这条线的是「会话」与「传输」两个分页。
+  共用边界划在一行的解剖结构与列表的框上；今天接这条线的是页面上的列表与导出清单。
 - [筛选按「它是什么」判](../.agents/notes/implemented/architecture/2026-09-28-filters-read-facts-not-labels.md)：
   读原始事实，不读 `hidden`；「未分组」是唯一例外。
 - [折叠只改「画不画」](../.agents/notes/implemented/architecture/2026-09-28-collapsing-changes-only-the-drawing.md)：
@@ -271,14 +271,35 @@
   CSS 只留"这一页怎么摆它"的布局挂钩；官方 `Tag` 不转发 `title`，悬浮提示挂包着它的那层 `span`，
   `dsm-tag` 这个挂钩挂在两层中的一层，漏挂只会让布局规格静默失效。
 - [会话管理页从设置区块变成全宽工作台](../.agents/notes/implemented/architecture/2026-11-12-session-page-is-a-full-width-workbench.md)：
-  从侧栏进来之后内容列占满主栏、页面本身不滚；页头是一条工具条（标题 / 页签 / 刷新 / 插件设置），
-  库路径与版本收进底部状态栏；「会话」页平铺、表头吸顶、动作行钉底。它取代了下面那条在设置弹窗里
-  成立的两行页头。
+  从侧栏进来之后内容列占满主栏、页面本身不滚；页头是一条工具条，库路径与版本收进底部状态栏；列表
+  平铺、表头吸顶、动作行钉底。它取代了下面那条在设置弹窗里成立的两行页头。它自己的"页头里放页签"
+  那一半已被 [去掉页签那篇](../.agents/notes/implemented/architecture/2026-11-12-no-page-tabs.md) 取代。
+- [去掉页签：四件事各是一处入口 + 一个宽弹窗](../.agents/notes/implemented/architecture/2026-11-12-no-page-tabs.md)：
+  页面只剩列表，勾选成了唯一的输入；导出进动作行（按下去就下载）、导入与备份进状态栏、同步变页头
+  状态，后两件是 1080 宽的弹窗、导入是 640 的窄弹窗。它取代了上面那条的"页头里放页签"，也取代了
+  [备份是独立分页](../.agents/notes/implemented/architecture/2026-10-07-backups-are-their-own-page.md)
+  的落点（那份清单还在，位置换成状态栏那枚入口）。
+- [页头那枚同步状态点哪一档颜色](../.agents/notes/implemented/architecture/2026-11-13-sync-chip-dot-colors.md)：
+  五档（转圈 / 红 / 黄 / 绿 / 灰），次序即优先级；黄=跑完了但有几条没做到或要重启，绿=自动推送开着。
+  记录里新增 `problems` / `takesEffect` 两列，"还要不要重启"不落盘、按进程启动时刻算。
+- [同步的计划与落地并进同一个弹窗](../.agents/notes/implemented/architecture/2026-11-13-sync-plan-lives-in-the-same-dialog.md)：
+  面板 → 计划 → 落地三段同处一枚弹窗（外壳归 `SyncPanel`），标题 / 宽度 / 底栏跟着段换；有表才是 1080，
+  一句话的计划仍是 640。它取代了"同步面板上再叠一层确认框"那个形状。
+- [同步的进度在状态栏那一格](../.agents/notes/implemented/architecture/2026-11-12-sync-progress-lives-in-the-status-bar.md)：
+  列表上方那条 100px 的进度横幅删掉——它压的是列表，而"跑到第几条"跟勾了什么无关。状态栏多一格说一句
+  （跑着「同步中 3/7」，跑完十几秒的结论），细节留在同步那一面；页头那枚同步状态仍然是常驻的状态。
+- [导出与导入是两处入口](../.agents/notes/implemented/architecture/2026-11-12-export-and-import-are-two-doors.md)：
+  导出跟着勾选走（动作行里按下去就打包下载，不弹窗），导入跟勾选无关（状态栏那枚，640 的窄弹窗，
+  目标目录默认填左栏选中的项目）。原来那一面把列表又画了一遍（筛选条、分组、勾选框），删掉之后
+  组头 / 折叠 / 整组勾选那一套也一起没了。
 - [页头照内建设置页的规格](../.agents/notes/implemented/architecture/2026-09-28-page-header-matches-the-builtin-settings.md)（已被上一条取代）
   与 [正文与次要文字照内建设置页的两档](../.agents/notes/implemented/architecture/2026-10-07-body-type-matches-the-builtin-settings.md)、
   [版面不跟着滚动条动](../.agents/notes/implemented/architecture/2026-09-28-layout-does-not-move-with-the-scrollbar.md)：
   标题那一档仍是 16px/500/24px；正文与次要文字是内建那两档（14px/20px 与 12px/18px），行高不跟着
-  字号放大。那篇里的"页头两行、刷新挂页签行右端"只适用于设置弹窗里的一格。
+  字号放大。那篇里的"页头两行、刷新挂在标题那一行右端"只适用于设置弹窗里的一格。
+- [勾选是整页一份、导出栏直接用它](../.agents/notes/implemented/architecture/2026-11-12-one-selection-for-the-whole-page.md)：
+  `ManagerPanel` 持有 `useSessionPicking()`，列表与导出清单共用；"撤销"（删除 / 迁移之后）与状态栏的
+  备份份数也在同一篇里。
 - [弹窗正文层自己写字号](../.agents/notes/implemented/bug-fix/2026-10-12-dialog-body-declares-its-own-type.md)：
   官方 `Modal` portal 到 `document.body`，落在那套 `.dsm-root` 之外——弹窗正文层不写字号就继承文档根
   的 16px（会话内容视图的计数、事件卡脚注、错误句都掉在那儿）。

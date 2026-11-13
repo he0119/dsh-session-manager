@@ -230,10 +230,10 @@ test('.dsm-tag 只剩布局挂钩：几何与配色都归官方 Tag 原语', () 
   assert.doesNotMatch(body, /--dsw-alias-/, '.dsm-tag 不该再引用任何配色 token')
 })
 
-test('组头里的标签与名字一样高：行高压到 18px（12px 的字 + 2px 边框 = 名字那一行 20px）', () => {
-  // 为什么钉它：标签默认行高 20px，加上下各 1px 边框就是 22px，于是挂了标签的组头比没挂的高 2px
-  // （真实 dev GUI 里量到 39 vs 38px），同一列组头的下沿参差。列表与弹窗两处选择器不同、值同一个。
-  for (const selector of ['.dsm-groupPick > .dsm-tag', '.dsm-planGroupHead .dsm-tag']) {
+test('分组表头里的标签与名字一样高：行高压到 18px（12px 的字 + 2px 边框 = 名字那一行 20px）', () => {
+  // 为什么钉它：标签默认行高 20px，加上下各 1px 边框就是 22px，于是挂了标签的表头比没挂的高 2px
+  // （真实 dev GUI 里量到 39 vs 38px），同一列表头的下沿参差。
+  for (const selector of ['.dsm-planGroupHead .dsm-tag']) {
     const body = ruleBody(selector)
     assert.notEqual(body, null, `找不到 ${selector} 规则`)
     assert.match(body, /line-height:\s*18px/, `${selector} 的行高要与名字那一行（20px）对得上`)
@@ -364,6 +364,7 @@ test('页头是一条工具条：16px/500 的标题、页签与页面级动作�
   // 旧的两行页头与页签行那套样式删干净：留着就会有人照着它改回去。
   assert.equal(ruleBody('.dsm-intro'), null, '旧的 .dsm-intro 不该还在')
   assert.equal(ruleBody('.dsm-tabsRow'), null, '旧的 .dsm-tabsRow 不该还在')
+  assert.equal(ruleBody('.dsm-tabs'), null, '页签的布局壳随页签一起删掉')
   assert.equal(ruleBody('.dsm-version'), null, '旧的页脚徽标样式不该还在（版本号进了状态栏）')
 })
 
@@ -379,36 +380,31 @@ test('右栏开头两轮：每格四行截断，整段用一列节奏', () => {
   assert.match(preview, /flex-direction:\s*column/, '竖排')
 })
 
-test('传输页宽屏并排：导出宽、导入窄，窄到 900 叠回去', () => {
-  // 为什么钉它：1600 下导入卡原来落在首屏之外，要滚过整张导出列表才看得到；并排之后两张卡
-  // 都在第一屏。列宽不是一比一：导出是清单，需要更宽。
-  const grid = ruleBody('.dsm-transferGrid')
-  assert.notEqual(grid, null, '找不到 .dsm-transferGrid 规则')
-  assert.match(grid, /display:\s*grid/, '两张卡走网格')
-  assert.match(grid, /grid-template-columns:\s*minmax\(0, 1\.3fr\) minmax\(320px, 0\.9fr\)/, '导出宽、导入窄，导入至少 320px')
-  assert.match(grid, /align-items:\s*start/, '两张卡各自按内容高度，不被拉成一样高')
-  const wrap = ruleBody('.dsm-transferWrap')
-  assert.notEqual(wrap, null, '找不到 .dsm-transferWrap 规则')
-  assert.match(wrap, /container-type:\s*inline-size/, '阈值读这一块自己的宽度')
-  const at = css.indexOf('@container (max-width: 900px)')
-  assert.notEqual(at, -1, '窄屏分档是容器查询')
-  assert.match(
-    css.slice(at),
-    /\.dsm-transferGrid\s*\{\s*grid-template-columns:\s*minmax\(0, 1fr\)/,
-    '窄到 900 以下叠回一列',
-  )
+test('导入那一面是 640 的窄弹窗，正文自己带 16px 的块间距', () => {
+  // 为什么钉它：导出与导入拆成两处入口之后，导入只剩两个字段（包 / 目标目录）与一对按钮，没有清单要摆；
+  // 原来那条"两栏并排 + 容器查询叠回一列"的布局跟着导出清单一起没了，别让它以别的名字回来。
+  assert.equal(ruleBody('.dsm-transferGrid'), null, '两栏网格跟着导出清单一起去掉')
+  assert.equal(ruleBody('.dsm-transferWrap'), null, '容器查询那一层也不需要了')
+  const body = ruleBody('.dsm-importBody')
+  assert.notEqual(body, null, '找不到 .dsm-importBody 规则')
+  assert.match(body, /display:\s*flex/, '字段与按钮纵向排')
+  assert.match(body, /flex-direction:\s*column/)
+  assert.match(body, /gap:\s*16px/, '16px 一道缝：弹窗正文层的节奏与别处一致')
 })
 
-test('非会话分页限在可读宽度：1080px 居中；会话工作台不受限', () => {
-  // 为什么钉它：1600 窗口下一段同步说明拉成一千二百多像素的长行，表单控件全挤在左边。
-  // 「会话」是工作台，继续吃满；其余三页是表单与清单，限宽并居中。
-  const group = /\.dsm-panel\[data-panel="transfer"\],[\s\S]*?\.dsm-panel\[data-panel="backup"\]\s*\{([^}]*)\}/.exec(css)
-  assert.notEqual(group, null, '找不到传输 / 同步 / 备份三页共用的限宽规则')
-  assert.match(group[1], /max-width:\s*1080px/, '可读宽度是 1080px')
-  assert.match(group[1], /align-self:\s*center/, '限宽之后要居中，不能贴着左边')
-  const manage = ruleBody('.dsm-panel[data-panel="manage"]')
-  assert.notEqual(manage, null)
-  assert.doesNotMatch(manage, /max-width/, '「会话」不跟着限宽：它要占满主栏')
+test('同步与备份是 1080 宽的弹窗，导入与确认弹窗仍是 640', () => {
+  // 为什么钉它：同步与备份与回滚原来各占一页，正文限在 1080px 居中；搬进弹窗之后宽度不变，靠的是
+  // 这一档（窄下去同步那几张计划表要折行）。导入只有两个字段，不需要宽的那一档——它跟确认弹窗一起
+  // 停在 640。
+  const work = ruleBody('.dsm-dialog.dsm-workDialog')
+  assert.notEqual(work, null, '找不到宽弹窗的宽度规则')
+  assert.match(work, /width:\s*min\(1080px, 100%\)/, '同步与备份共用 1080 这一档，窄窗口自己收')
+  // 确认弹窗不跟着变宽：它的正文是"一句话 + 清单"，拉宽只会把说明拉成很长的一行。
+  const confirm = ruleBody('.dsm-dialog.dsm-dialog')
+  assert.notEqual(confirm, null, '找不到确认弹窗的宽度规则')
+  assert.match(confirm, /width:\s*min\(640px, 100%\)/, '确认弹窗仍是 640')
+  // 页面这一级不再有限宽那一层：页签删掉之后页面只剩工作台，它要占满主栏。
+  assert.equal(ruleBody('.dsm-panel'), null, '.dsm-panel 那层限宽随页签一起删掉了')
 })
 
 test('说明弹窗：760px，四节不再各套一圈卡片壳', () => {
@@ -519,17 +515,35 @@ test('正文与次要文字是内建那两档：正文 14px/20px、说明句 12p
   assert.match(hint, /line-height:\s*18px/, '行高 18px，与内建卡片描述同值')
 })
 
-test('页内分页那一层自带整页的块间距：相邻两张卡片不能贴在一起', () => {
-  // 现象：「说明」那一页整页都是卡片，卡与卡之间一点缝都没有，只剩各自的 1px 描边分得开——真实 dev GUI
-  // 里量到相邻两张卡片的间距是 **0px**。原因是卡片都长在分页本体那一层里，而 `.dsm-root` 那份 16px 的
-  // gap 只作用于它的**直接**子元素（也就是分页那一层自己），再往里就不传了。
+test('宽弹窗的正文层自带整页的块间距：横幅与卡片不能贴在一起', () => {
+  // 现象（同一条缺陷换了地方）：卡片长在正文那一层里，而 `.dsm-root` 那份 16px 的 gap 只作用于它的
+  // **直接**子元素。弹窗正文里的横幅与卡片之间、两张卡片之间，都得由这一层自己给节奏，否则只剩各自
+  // 的 1px 描边分得开（真实 dev GUI 里量到相邻两张卡片的间距是 0px）。
   //
   // 16px 与 `.dsm-root` 同值：内建设置页行与行之间的节奏就是每一行自己的 `padding: 16px 0`。
-  const panel = ruleBody('.dsm-panel')
-  assert.notEqual(panel, null, '找不到 .dsm-panel 规则')
-  assert.match(panel, /display:\s*flex/, '竖排得先是 flex 容器，gap 才生效')
-  assert.match(panel, /flex-direction:\s*column/, '卡片是竖着排的')
-  assert.match(panel, /gap:\s*16px/, '与 .dsm-root 同一档（内建设置页每一行的纵向留白就是 16px）')
+  const body = ruleBody('.dsm-workBody')
+  assert.notEqual(body, null, '找不到 .dsm-workBody 规则')
+  assert.match(body, /display:\s*flex/, '竖排得先是 flex 容器，gap 才生效')
+  // 字号必须自己写：官方 Modal portal 到 document.body，落在那套 .dsm-root（14px）之外，不写就继承
+  // 文档根的 16px（实测同步计划那一段的结论是 16px，而别处弹窗正文是 14px）。
+  assert.match(body, /font-size:\s*14px/, '正文那一档要自己写（16px 会与别的弹窗差一档）')
+  assert.match(body, /line-height:\s*20px/, '行高与 .dsm-dialogBody 同值')
+  assert.match(body, /flex-direction:\s*column/, '块是竖着排的')
+  assert.match(body, /gap:\s*16px/, '与 .dsm-root 同一档')
+  // 那 16px 得真的落在相邻两块之间：官方的段落带 12px 上下外边距（弹窗 portal 到 body，落在这页的
+  // 重置之外），不收掉的话实测间隔是 28px。
+  const strip = ruleBody('.dsm-workBody > *')
+  assert.notEqual(strip, null, '找不到 .dsm-workBody > * 规则（弹窗里段落的外边距没收掉）')
+  assert.match(strip, /margin-block:\s*0/, '直接子元素的外边距收成 0，间距只由 gap 给')
+})
+
+test('计划表的大小那一列放得下「111.0 KB」：截断的数字比窄一列更难读', () => {
+  // 真机量到：「111.0 KB」需要 72px（含左右 padding），而 68px 的列把它截成「111.0…」——一个被截断的
+  // 数字没有意义，宁可让会话那一列少几个字。
+  const bytes = ruleBody('.dsm-planTable .dsm-colBytes')
+  assert.notEqual(bytes, null, '找不到大小那一列的宽度')
+  const width = Number((bytes.match(/width:\s*(\d+)px/) ?? [])[1])
+  assert.ok(width >= 76, `大小那一列至少 76px（现在是 ${width}px，会把「111.0 KB」截断）`)
 })
 
 test('弹窗正文层的字号自己写：官方 Modal 落在 .dsm-root 之外，不写就继承文档根的 16px', () => {
@@ -667,36 +681,12 @@ test('说明页 FAQ 的答案不被挤成零宽：那一栏是单列网格', () 
   )
 })
 
-test('组内行的缩进由组头那几个尺寸推出来：组头的勾选框恒在行勾选框左边 16px', () => {
-  // 为什么钉它：折叠开关从组头右端挪到**最前**之后，组头的内容整体右移了一个开关的宽度，组内那些行
-  // 的缩进必须跟着加同样多。少加了会怎样：组头的勾选框跑到组内行的**右边**去，"这些行挂在这个组头
-  // 下面"当场读反（这条是量出来的：改回 26px 时组头勾选框 x=504、行勾选框 x=498）。
-  // 几何值本身是量着调的，所以这里钉的不是某一个 px 数，而是**它们之间的关系**。
-  const head = ruleBody('.dsm-groupHead')
-  const toggle = ruleBody('.dsm-groupToggle')
-  const row = ruleBody('.dsm-group > .dsm-row')
-  assert.notEqual(head, null, '找不到 .dsm-groupHead 规则')
-  assert.notEqual(toggle, null, '找不到 .dsm-groupToggle 规则')
-  assert.notEqual(row, null, '找不到 .dsm-group > .dsm-row 规则')
-
-  const px = (body, pattern, what) => {
-    const match = pattern.exec(body)
-    assert.notEqual(match, null, `读不到${what}`)
-    return Number(match[1])
+test('分组列表那一套（组头、折叠开关、组内缩进）跟着导出清单一起去掉了', () => {
+  // 为什么钉它：去掉页签之后导出清单是一张自己的列表（组头、折叠、组内缩进都各有一份），而那一层
+  // 正是第二处勾选框。导出改成"按下去就打包"之后它没有消费者了，别让这些规则以别的名字回来。
+  for (const selector of ['.dsm-groupHead', '.dsm-groupToggle', '.dsm-groupTools', '.dsm-groupPick']) {
+    assert.equal(ruleBody(selector), null, `${selector} 该删掉：列表不分组，导出清单也不在了`)
   }
-  // 四值 padding 的第四个是左边（上 右 下 左）
-  const padLeft = px(head, /padding:\s*[\d.]+px\s+[\d.]+px\s+[\d.]+px\s+([\d.]+)px/, '组头的左内边距')
-  const gap = px(head, /gap:\s*([\d.]+)px/, '组头的间距')
-  const toggleWidth = px(toggle, /width:\s*([\d.]+)px/, '折叠开关的宽度')
-  const rowPad = px(row, /padding-left:\s*([\d.]+)px/, '组内行的左内边距')
-
-  // 16px 就是这个层级差（本来是 26px 与组头 10px 内边距凑出来的，见 styles.ts 的注释）
-  assert.equal(
-    rowPad,
-    padLeft + toggleWidth + gap + 16,
-    '组内行的缩进要等于"组头内容左缘 + 16px"，否则组头的勾选框会跑到行勾选框右边',
-  )
-  assert.ok(padLeft <= 6, '组头左内边距要小：最前面那个折叠开关自己就是这一组的左缘')
 })
 
 test('折起来的轮次整段收掉：不能只靠浏览器对 details 的默认行为', () => {

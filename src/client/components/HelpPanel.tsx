@@ -1,5 +1,5 @@
 /**
- * 「说明」分页：把这一页会遇到的词与代价一次讲清。
+ * 「说明」弹窗（页头那枚「?」）：把这一页会遇到的词与代价一次讲清。
  *
  * 为什么单独开一页，而不是把话都写在动作页上：动作页上那些段子混着两类内容——"当下要做的决定"
  * （点下去会开一个确认弹窗、会先备份）与"查词典"（子智能体 / 空白 / 已归档各是什么意思、谁判的、删完
@@ -34,12 +34,19 @@ const CATEGORIES = [
   ['list.ungrouped', 'list.ungroupedTip'],
 ] as const
 
-/** 四个分页各管什么：与页签同一个顺序（会话 → 传输 → 同步 → 备份）。 */
-const TAB_LINES = [
-  ['page.tab.manage', 'help.tabs.manage'],
-  ['page.tab.transfer', 'help.tabs.transfer'],
-  ['page.tab.sync', 'help.tabs.sync'],
-  ['page.tab.backup', 'help.tabs.backup'],
+/**
+ * 四件事各在哪儿做：顺序按"从最常看到的最不常看到的"排（列表 → 导出导入 → 同步 → 备份与回滚）。
+ *
+ * 页签去掉之后这一节的回答从「哪一页」变成「哪儿」：前一件是页面本身，后几件各是一处入口
+ * （动作行 / 状态栏 / 页头状态），词条就是那几处入口按钮上的字（`place.*`）。
+ */
+const ENTRY_LINES = [
+  ['place.sessions', 'help.entry.sessions'],
+  // 导出与导入是两处入口：导出跟着勾选走（动作行），导入跟勾选无关（状态栏）。
+  ['place.export', 'help.entry.export'],
+  ['place.import', 'help.entry.import'],
+  ['place.sync', 'help.entry.sync'],
+  ['place.backup', 'help.entry.backup'],
 ] as const
 
 /** 常见疑问：问答同上一条同一个形状（dt 问、dd 答）。会碰什么盘的独有内容收在这里。 */
@@ -75,8 +82,8 @@ function HelpSection({
   )
 }
 
-/** 「说明」分页。 */
-export function HelpPanel({ t, state, meta }: PanelShare): React.ReactElement {
+/** 「说明」弹窗。 */
+export function HelpPanel({ t, state, meta }: Pick<PanelShare, 't' | 'state' | 'meta'>): React.ReactElement {
   // 两条路径来自 `/meta` 或 `/state`（同一份取值，见 ManagerPanel）：这一页只印它们，不自己推。
   const facts = state ?? meta
   return (
@@ -95,9 +102,9 @@ export function HelpPanel({ t, state, meta }: PanelShare): React.ReactElement {
         <p className="dsm-hint">{t('help.categories.note')}</p>
       </HelpSection>
 
-      <HelpSection title={t('help.tabs.title')}>
+      <HelpSection title={t('help.entry.title')}>
         <dl className="dsm-defs">
-          {TAB_LINES.map(([tab, line]) => (
+          {ENTRY_LINES.map(([tab, line]) => (
             <React.Fragment key={tab}>
               <dt>{t(tab)}</dt>
               <dd>{t(line)}</dd>

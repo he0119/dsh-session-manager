@@ -1,5 +1,6 @@
 /**
- * 「备份」分页：那几件会写盘的操作共同的后悔面。
+ * 「备份与回滚」弹窗：那几件会写盘的操作共同的后悔面。入口在页面底部状态栏（不是页签：它不属于
+ * 其中任何一件动作），见 [ManagerPanel.tsx](./ManagerPanel.tsx)。
  *
  * 为什么单独一页、而不是留在「迁移」页底部：这张清单里躺的不只是迁移留下的备份——删除（`delete`）
  * 与同步覆盖本机那份（`replace`）也各留一份（来源写在 `kind` 上，见 `src/journal.ts`）。它挂在迁移
@@ -45,8 +46,15 @@ function backupKindLabel(
   return 'backup.kind.migrate'
 }
 
-/** 「备份」分页。 */
-export function BackupPanel({ t, reload }: Pick<PanelShare, 't' | 'reload'>): React.ReactElement {
+/** 「备份与回滚」弹窗。 */
+export function BackupPanel({
+  t,
+  reload,
+  focus,
+}: Pick<PanelShare, 't' | 'reload'> & {
+  /** 从删除 / 迁移的「撤销」点进来时指着的那一份：开着时直接摆它的动作清单。 */
+  focus?: string
+}): React.ReactElement {
   const [backups, setBackups] = React.useState<BackupSummary[]>([])
   const [backupRoot, setBackupRoot] = React.useState('')
   const [error, setError] = React.useState<string | null>(null)
@@ -82,7 +90,7 @@ export function BackupPanel({ t, reload }: Pick<PanelShare, 't' | 'reload'>): Re
     }
   }, [])
 
-  // 只跑一次：分页切换会卸载这一页，下次进来重新读一遍清单（这正是"刚做完迁移/删除/同步，切过来
+  // 只跑一次：关掉弹窗会卸载它，下次打开重新读一遍清单（这正是"刚做完迁移/删除/同步，点进来
   // 就能看见它留下的那一份"的实现方式——那份备份不必由做动作的那一页去通知这里刷新）。
   const loaded = React.useRef(false)
   React.useEffect(() => {
@@ -118,6 +126,24 @@ export function BackupPanel({ t, reload }: Pick<PanelShare, 't' | 'reload'>): Re
         setProgress(null)
       })
   }
+
+  /**
+   * 从「撤销」点进来时指着的那一份：清单读到之后直接把它的动作清单摆出来。
+   *
+   * 为什么不在打开时就把目标带的计划算出来：清单是这一面自己读的，读到之前还不知道那份备份还在不在
+   * （刚被清理掉、或者路径来自一条过期的提示）。读到之后按目录找一次，找到了才开——找不到时这一面
+   * 就是普通的清单，用户自己看。
+   *
+   * `opened` 记住已经为哪个目录开过：清单刷新（回滚落地之后又重读一遍）不该把弹窗重新顶出来。
+   */
+  const opened = React.useRef<string | undefined>(undefined)
+  React.useEffect(() => {
+    if (focus === undefined || opened.current === focus) return
+    const target = backups.find((backup) => backup.dir === focus)
+    if (target === undefined) return
+    opened.current = focus
+    open(target)
+  }, [focus, backups])
 
   /** 弹窗里按「确认回滚 / 确认恢复」：写盘并还原。 */
   const apply = (backup: BackupSummary): void => {
@@ -172,16 +198,20 @@ export function BackupPanel({ t, reload }: Pick<PanelShare, 't' | 'reload'>): Re
         </p>
       )}
 
-      <div className="dsm-card">
-        <div className="dsm-cardHead">
-          <span className="dsm-cardTitle">{t('backup.title')}</span>
+      {/*
+        这一面**不套卡片**（与同步那一面同一条理由）：弹窗本身已经是容器，卡片只会在对话框里再画一圈
+        边框，而它的标题与弹窗标题一字不差——同屏两遍。清单从正文直接开始，"重新读一遍"那枚工具与
+        说明排在同一行。
+      */}
+      <>
+        <div className="dsm-controls">
+          <p className="dsm-hint">{t('backup.hint')}</p>
           <span className="dsm-spacer" />
-          {/* 头部只放这枚"重新读一遍清单"的工具：它不动任何数据，与卡片级的写操作不是一类。 */}
+          {/* 这一行只放"重新读一遍清单"这枚工具：它不动任何数据，与行上的恢复 / 回滚不是一类。 */}
           <Button variant="outline" size="sm" onClick={() => void load()} disabled={busy !== null}>
             {t('page.refresh')}
           </Button>
         </div>
-        <p className="dsm-hint">{t('backup.hint')}</p>
         {backupRoot !== '' && (
           <p className="dsm-hint">
             {t('backup.rootLabel')}：{backupRoot}
@@ -220,7 +250,7 @@ export function BackupPanel({ t, reload }: Pick<PanelShare, 't' | 'reload'>): Re
             ))}
           </div>
         )}
-      </div>
+      </>
 
       {/* 回滚 / 恢复弹窗：动作清单与「确认」同框（见 ConfirmDialog.tsx 的说明）。 */}
       {dialog !== null && (

@@ -1,17 +1,18 @@
 /**
- * 页内两个分页共用的入参。
+ * 列表与那三个弹窗共用的入参。
  *
- * 数据只取一次：`/state` 由页面骨架（[ManagerPanel.tsx](./ManagerPanel.tsx)）拉，分页只管渲染
- * 与自己的动作。这样切分页不会各拉一份，也避免"两个分页对同一个库给出不同数字"。
+ * 数据只取一次：`/state` 由页面骨架（[ManagerPanel.tsx](./ManagerPanel.tsx)）拉，面板只管渲染
+ * 与自己的动作。这样开关弹窗不会各拉一份，也避免"两处对同一个库给出不同数字"。
  *
  * @module dsh-session-manager/client/types
  */
 
-import type { MetaResponse, StateResponse } from './api.ts'
+import type { MetaResponse, SessionSummary, StateResponse } from './api.ts'
 import type { DirectoryApi } from './directory.ts'
 import type { Translate } from './logic/locales.ts'
+import type { SessionPicking } from './components/sessionList.tsx'
 
-/** 分页入参。 */
+/** 面板入参。 */
 export interface PanelShare {
   /** 注入面带来的翻译函数。 */
   t: Translate
@@ -26,6 +27,30 @@ export interface PanelShare {
   meta: MetaResponse | undefined
   /** 重新拉 `/meta` 与 `/state`（写入成功后调用，让列表与注册表归属跟上）。 */
   reload: () => Promise<void>
+  /**
+   * 开「备份与回滚」，并直接指着某一份备份（删除 / 迁移之后那枚「撤销」走的这条）。
+   *
+   * 弹窗由页面骨架持有（见 [ManagerPanel.tsx](./components/ManagerPanel.tsx)）：动作页只报"刚留下
+   * 哪一份"，由它把那面打开并把那份备份交给备份清单——回滚的动作清单与确认框仍由那边摆。
+   */
+  openBackup?: (dir: string) => void
+  /**
+   * 左栏「项目」筛着的那个（`null` = 全部项目）。
+   *
+   * 它由页面骨架持有：列表拿它筛，导入那一面拿它当目标目录的初值（"落到哪个项目"这件事，用户在左栏
+   * 已经说过一次了）。
+   */
+  project?: { path: string | null }
+  /** 换一个项目（左栏那一列点一下）。 */
+  setProject?: (next: { path: string | null }) => void
+  /**
+   * 这一页的勾选集。
+   *
+   * 由页面骨架持有、列表与导出清单共用同一份：勾了 6 条再开「导出 / 导入」，导出那一栏里就是这 6 条
+   * （原来两个页签各有一套，切过去要重勾一遍）。判据在 [sessionList.tsx](./components/sessionList.tsx)
+   * 的 `useSessionPicking()`。
+   */
+  picking: SessionPicking<SessionSummary>
   /**
    * 就地改清单里的那几条（见 [statePatch.ts](./logic/statePatch.ts)）。
    *
