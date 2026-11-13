@@ -1155,8 +1155,8 @@ test('客户端产物：页面上凡是官方 Button 都带边框，没有裸着
   // `border: rgba(0, 0, 0, 0.12) 1px`）。
   //
   // 口径：这一页凡是用官方 `Button` 的地方都给边框——主动作 `primary`、其余 `outline`。唯一一枚
-  // **手写**的文字动作在例外面：每行行尾那枚「详情」（`.dsm-rowDetail`，只在键盘落到这一行时出现），
-  // 它按行内链接画，本来就不是按钮外观。
+  // **手写**的文字按钮在例外面：每行标题那一格（`.dsm-rowOpen`）——它是整行的主动作，外观必须跟
+  // 旁边那段字一样，所以颜色、字号、盒子都归本页 CSS 管。
   const state = {
     sessionsRoot: '/home/u/.dsh/sessions',
     registryPath: '/home/u/.dsh/registry.json',
@@ -1432,7 +1432,7 @@ test('客户端产物：迁移并进了「会话」页——同一张列表，�
   // 这一页没有勾不动的行（锁只给子智能体，这一份里没有）：隐藏的那条也能勾——归档 / 删除要它，
   // 迁移那一侧不许它，靠"不进计划 + 弹窗里说明"表达。
   const labels = fresh.mounted.recorded.filter(
-    (el) => el.type === 'label' && String(el.props?.className).includes('dsm-rowManage'),
+    (el) => String(el.props?.className).includes('dsm-rowManage'),
   )
   assert.equal(
     labels.filter((label) => elementsOf(label).find((el) => el.type === 'input')?.props?.disabled === true).length,
@@ -1468,7 +1468,7 @@ test('客户端产物：迁移并进了「会话」页——同一张列表，�
   assert.equal(pickedAction.props.disabled, false, '勾了一条就能按「迁移」')
   assert.ok(pickedText.includes('list.selected:{"count":1}'), '卡头报出勾了几条')
   const pickedRow = picked.mounted.recorded
-    .filter((el) => el.type === 'label' && String(el.props?.className).includes('dsm-rowManage'))
+    .filter((el) => String(el.props?.className).includes('dsm-rowManage'))
     .find((label) => rowParts(label).label === 's-2')
   assert.equal(
     elementsOf(pickedRow).find((el) => el.type === 'input')?.props?.checked,
@@ -1546,7 +1546,7 @@ test('客户端产物：「会话」页把侧边栏看不见的那三类标出�
   assert.ok(text.includes('工作区甲'), '在册项目的那一格写工作区标题')
   assert.ok(text.includes('/home/u/dev/beta'), '没登记的项目写着路径')
   const manageRows = recorded.filter(
-    (node) => node.type === 'label' && String(node.props?.className).includes('dsm-rowManage'),
+    (node) => String(node.props?.className).includes('dsm-rowManage'),
   )
   // 六个格子：勾选框 / 标记 / 标题 / 项目 / 字节 / 时间。
   // 数的是**元素**：JSX 里条件为假时会留一个 false 在 children 里。
@@ -1651,7 +1651,7 @@ test('客户端产物：「会话」页平铺——不缩进，子智能体靠�
   strings(component(registration.inject()))
 
   const rows = mounted.recorded
-    .filter((node) => node.type === 'label' && String(node.props?.className).includes('dsm-rowManage'))
+    .filter((node) => String(node.props?.className).includes('dsm-rowManage'))
     .map((row) => ({
       label: rowParts(row).label,
       tags: rowParts(row).tags,
@@ -1699,7 +1699,7 @@ test('客户端产物：子智能体行的勾选框禁用（跟着父会话走�
 
   const first = render(mount({ state, panel: 'manage' }))
   const rows = first.recorded.filter(
-    (node) => node.type === 'label' && String(node.props?.className).includes('dsm-rowManage'),
+    (node) => String(node.props?.className).includes('dsm-rowManage'),
   )
   const inputOf = (label) => {
     const row = rows.find((node) => rowParts(node).label === label)
@@ -1821,7 +1821,7 @@ test('客户端产物：列表头上是一对常驻的「全选 / 清空」，�
   const pickedView = mount({ state, panel: 'manage', arrays: [['s-alpha']] })
   strings(pickedView.registrations[0].component(pickedView.registrations[0].registration.inject()))
   const pickedRows = pickedView.recorded.filter(
-    (node) => node.type === 'label' && String(node.props?.className).includes('dsm-rowManage'),
+    (node) => String(node.props?.className).includes('dsm-rowManage'),
   )
   assert.equal(pickedRows.length, 2, '两条会话都画出来了')
   assert.deepEqual(
@@ -1905,9 +1905,12 @@ test('客户端产物：「会话」页的筛选条把不匹配的行筛掉，�
 
   // 列表：只剩空白那两条（筛选＝任一命中），其余三类不在树上
   const rows = recorded.filter(
-    (node) => node.type === 'label' && String(node.props?.className).includes('dsm-rowManage'),
+    (node) => String(node.props?.className).includes('dsm-rowManage'),
   )
-  const listed = rows.map((row) => strings(row)[0])
+  // 每行开头那串字现在是勾选框的无障碍名字（manage.rowPick），id 在 `.dsm-rowId` 那一格
+  const listed = rows.map(
+    (row) => elementsOf(row).find((node) => String(node.props?.className).includes('dsm-rowId'))?.props?.children,
+  )
   assert.deepEqual(listed, ['s-blank', 's-both'])
   assert.ok(!text.includes('s-owned') && !text.includes('s-sub') && !text.includes('s-live'), '不匹配的行不在树上')
   // "空白 + 已归档"那条要挂两枚标签：只挂宿主先判的那一枚，筛选就没法自证了。
@@ -2745,10 +2748,9 @@ test('客户端产物：「会话」页的搜索框按标题或 id 筛，筛空�
   )
 })
 
-test('客户端产物：会话页的行——点整行看详情，行尾只留一枚给键盘的「详情」', { skip }, () => {
-  // 与 styles.test.mjs 的「行尾那枚「详情」只给键盘」那条配对：结构上它与时刻共用一个格子（CSS 靠
-  // 叠格子把它换出来），且**不在** `.dsm-rowLabel` 里——那里是标签的领地，摆在那儿会被读成第二枚
-  // 状态标签。「内容」那枚已经删了：完整时间线只在右栏里开。
+test('客户端产物：会话页的行——点哪儿都看详情，标题是按得开的按钮', { skip }, () => {
+  // 与 styles.test.mjs 的「行这一格是按钮，不是第二枚动作」那条配对：整行的主动作落在标题那一格，
+  // 键盘 Tab 到它、回车就打开右栏；行尾没有动作，最后一格仍是时刻（时刻与按钮叠格子那一套已经删了）。
   const state = {
     sessionsRoot: '/home/u/.dsh/sessions',
     registryPath: '/home/u/.dsh/registry.json',
@@ -2769,38 +2771,46 @@ test('客户端产物：会话页的行——点整行看详情，行尾只留�
   for (const row of rows) {
     const parts = elementsOf(row)
     const pick = (name) => parts.filter((node) => classesOf(node).includes(name))
-    assert.equal(pick('dsm-rowInspect').length, 0, '「内容」那枚不再画在行上')
-    assert.equal(pick('dsm-rowDetail').length, 1, '行尾留一枚「详情」（键盘那条路）')
-    assert.equal(
-      strings(row).includes('manage.transcript.open'),
-      false,
-      '行上不再出现「内容」这个文案，完整时间线只在右栏里开',
-    )
-    const label = pick('dsm-rowLabel')
-    assert.equal(label.length, 1, '标题与标签同占一格')
-    assert.equal(
-      elementsOf(label[0]).some((node) => classesOf(node).includes('dsm-rowDetail')),
-      false,
-      '「详情」不摆在标题那一格里',
-    )
-    const slot = pick('dsm-slot')
-    assert.equal(slot.length, 1, '行尾那一格是时刻与「详情」共用的')
+    assert.equal(row.type, 'div', '这一行是 div：点的落点是"看详情"，不是"勾选"')
+    assert.equal(pick('dsm-rowInspect').length, 0, '「内容」不再画在行上')
+    assert.equal(pick('dsm-rowDetail').length, 0, '行尾不再有「详情」')
+    assert.equal(pick('dsm-slot').length, 0, '叠格子那一套跟着一起删了')
+
+    // 标题那一格是按钮：外观靠 .dsm-rowOpen，名字就是标题本身
+    const title = pick('dsm-rowLabel') 
+    assert.equal(title.length, 1, '标题与标签同占一格')
+    assert.equal(title[0].type, 'button', '标题那一格是按钮')
+    assert.ok(classesOf(title[0]).includes('dsm-rowOpen'), '按钮挂 .dsm-rowOpen（去掉盒子与默认字号）')
+    assert.equal(title[0].props.type, 'button', 'type=button：回车 / 空格才按按钮算')
+    // 名字从行里现取：列表按时间排，不要假设哪一行在前
+    const name = strings(pick('dsm-rowTitle')[0])[0]
+    assert.ok(title[0].props.title.startsWith(name), '悬浮提示跟着标题走（标题 + id 两行）')
+    assert.ok(strings(title[0]).includes(name), '按钮里就是那个标题')
+
+    // 勾选框有自己的 label 与一句只给读屏软件的名字
+    const cell = pick('dsm-rowPick')
+    assert.equal(cell.length, 1, '勾选框外面套着自己的一层 label')
     assert.ok(
-      elementsOf(slot[0]).some((node) => classesOf(node).includes('dsm-time')),
-      '同一个格子里有时刻',
+      elementsOf(cell[0]).some((node) => classesOf(node).includes('dsm-srOnly')),
+      '那层 label 里有给读屏软件的名字（行不再是 label，名字得自己给）',
     )
-    assert.ok(
-      elementsOf(slot[0]).some((node) => classesOf(node).includes('dsm-rowDetail')),
-      '「详情」与时刻同格：键盘落到这一行时靠叠格子互相顶替，行宽不动',
+    assert.equal(
+      strings(cell[0]).some((item) => String(item).includes('manage.rowPick')),
+      true,
+      '名字走 manage.rowPick 这个键',
     )
+
+    // 行尾最后一格只有时刻
+    const metas = pick('dsm-meta')
+    assert.ok(metas.length >= 2, '字节与时刻各一格')
+    assert.equal(pick('dsm-time').length, 0, '时刻不再与按钮叠格子，就是一格普通的元信息')
   }
 
   /*
-   * 点整行 = 看详情。这一行是个 <label>，默认动作是把点击转给勾选框，所以这里核三件事：整行挂上了
-   * 点击；点在勾选框 / 行上那枚按钮上时不接（它们各自处理）；点在别处时挡掉 label 的默认动作、
-   * 只写一处状态——把这一条交给右栏。
+   * 点整行 = 看详情：整行挂上了点击；点在勾选框 / 标题按钮那一类控件上时让出去（它们各自处理）；
+   * 点在别处只写一处状态——把这一条交给右栏。行已经是 div，不再需要挡 label 的默认动作。
    */
-  const first = rows[0]
+  const first = rows.find((row) => strings(row).includes('重构迁移编排'))
   assert.equal(typeof first.props.onClick, 'function', '整行要能点开详情')
   let prevented = 0
   const clickOn = (target) => ({
@@ -2811,14 +2821,25 @@ test('客户端产物：会话页的行——点整行看详情，行尾只留�
   })
   mounted.sets.length = 0
   first.props.onClick(clickOn({ closest: () => ({}) }))
-  assert.equal(prevented, 0, '点在勾选框或行上那枚按钮上时，这一下归它们')
+  assert.equal(prevented, 0, '点在勾选框或标题按钮上时，这一下归它们')
   assert.equal(mounted.sets.length, 0, '也不该顺手打开详情')
   first.props.onClick(clickOn({ closest: () => null }))
-  assert.equal(prevented, 1, '挡掉 label 的默认动作：否则这一下还会顺带勾上这条会话')
   assert.deepEqual(
     mounted.sets.map((entry) => entry.value?.id),
     ['s-1'],
     '点整行只写一处状态：把这一条交给右栏',
+  )
+
+  // 标题那枚按钮自己也能开：它 stopPropagation，行上的点击不会再跑一遍
+  mounted.sets.length = 0
+  const onTitle = elementsOf(first).find((node) => classesOf(node).includes('dsm-rowOpen'))
+  let stopped = 0
+  onTitle.props.onClick({ stopPropagation: () => { stopped += 1 } })
+  assert.equal(stopped, 1, '标题按钮要挡掉冒泡，免得同一行再算一次点击')
+  assert.deepEqual(
+    mounted.sets.map((entry) => entry.value?.id),
+    ['s-1'],
+    '标题按钮也把这一条交给右栏',
   )
 })
 
@@ -2946,7 +2967,7 @@ test('客户端产物：「会话」页平铺——项目树代替组头，整�
   assert.equal(fromScrim[1].value?.id, null, '右栏清成"没选会话"')
   assert.notEqual(fromScrim[1].slot, fromScrim[0].slot, '两处各写各的状态位')
 
-  // 右栏详情：宽屏一直摆着，没选会话时是一句提示；行尾多一枚「详情」，它才是右栏的入口
+  // 右栏详情：宽屏一直摆着，没选会话时是一句提示；每行标题那一格是右栏的入口（按钮）
   const inspector = recorded.find((node) =>
     String(node.props?.className ?? '').split(/\s+/).includes('dsm-inspector'),
   )
@@ -2955,9 +2976,9 @@ test('客户端产物：「会话」页平铺——项目树代替组头，整�
   assert.equal(inspector.props['data-empty'], 'true', '默认没选会话')
   assert.ok(strings(inspector).includes('manage.detail.empty.title'), '没选时给一句"选一条会话"')
   assert.equal(
-    recorded.filter((node) => String(node.props?.className) === 'dsm-rowDetail').length,
+    recorded.filter((node) => String(node.props?.className ?? '').split(/\s+/).includes('dsm-rowOpen')).length,
     rowIds.length,
-    '每一行都有一枚「详情」',
+    '每一行的标题都是一枚能打开右栏的按钮（行尾不再有「详情」）',
   )
 })
 
@@ -5403,8 +5424,7 @@ test('组件源码：一处 variant="ghost" 都不许有（官方缺省的那个
   // ghost，渲染树那条断言仍然是绿的）。所以这一条直接扫源码——`ghost` 是官方 `Button` 的缺省变体，
   // 用上它就等于"无边框无底色、鼠标放上去才看得出是按钮"。
   //
-  // 唯一一枚**手写**的文字动作不在此列：每行行尾那枚「详情」（`.dsm-rowDetail`，只在键盘落到这一行
-  // 时出现），它不是官方 `Button`。
+  // 唯一一枚**手写**的文字按钮不在此列：每行标题那一格（`.dsm-rowOpen`），它不是官方 `Button`。
   const dir = join(root, 'src', 'client', 'components')
   const hits = []
   for (const name of readdirSync(dir).sort()) {

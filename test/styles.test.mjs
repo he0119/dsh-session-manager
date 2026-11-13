@@ -709,42 +709,36 @@ test('会话内容视图的滚动区是官方正文那一层，列表自己不�
   assert.doesNotMatch(list, /max-height/, '列表不按视口算高度：那样会被卡片裁掉一截')
 })
 
-test('行尾那枚「详情」只给键盘：鼠标悬停时行上只有时刻', () => {
-  // 为什么钉它：动作以前在悬停时浮出来（「详情」+「内容」）。点整行已经能打开右栏之后，悬停再浮出
-  // 一枚「详情」就是重复；「内容」那枚干脆删了（完整时间线在右栏里开）。现在只剩键盘这条路：
-  // Tab 落到这一行的勾选框，那枚按钮才顶掉时刻出场，鼠标划过时什么都不出现。
-  const slot = ruleBody('.dsm-slot')
-  assert.notEqual(slot, null, '找不到 .dsm-slot 规则')
-  assert.match(slot, /display:\s*grid/, '时刻与按钮要叠在同一个格子里')
+test('行这一格的按钮不带盒子：标题照旧是一段字，点击落在它身上', () => {
+  // 为什么钉它：整行的主动作落在标题那一格（键盘 Tab 到它、回车就打开右栏）。它是真的 <button>，
+  // 所以必须把浏览器给按钮的默认外观（边框、底色、字号、居中）全部摘掉，否则一行里会多出一枚
+  // "看起来像按钮"的块；焦点环则要自己给，`focus-visible` 之外不加。
+  const open = ruleBody('.dsm-rowOpen')
+  assert.notEqual(open, null, '找不到 .dsm-rowOpen 规则')
+  for (const decl of [/border:\s*0/, /background:\s*transparent/, /font:\s*inherit/, /text-align:\s*left/]) {
+    assert.match(open, decl, '按钮那一格要摘掉浏览器默认外观，外观跟旁边那段字一样')
+  }
+  assert.match(open, /padding:\s*0/, '默认内边距也要摘掉，否则标题会往里缩')
+  assert.match(open, /cursor:\s*pointer/, '鼠标停在标题上要能看出这一行能点')
 
-  const cell = ruleBody('.dsm-slot > *')
-  assert.notEqual(cell, null, '叠格子靠的是给两个子元素同一个 grid-area')
-  assert.match(cell, /grid-area:\s*1\s*\/\s*1/, '两者要占同一格，否则并排摆会把行宽撑开')
+  const ring = ruleBody('.dsm-rowOpen:focus-visible')
+  assert.notEqual(ring, null, '键盘落到它身上要有焦点环')
+  assert.match(ring, /outline:\s*2px solid var\(--dsw-alias-brand-primary/, '焦点环走 brand 色，与别的文字动作同一套')
 
-  const actions = ruleBody('.dsm-slotActions')
-  assert.notEqual(actions, null, '找不到 .dsm-slotActions 规则')
-  assert.match(actions, /visibility:\s*hidden/, '平时不摆出来（也不进 tab 顺序）')
+  // 勾选框自己那层 label 与只念给读屏软件的一句名字
+  const pick = ruleBody('.dsm-rowPick')
+  assert.notEqual(pick, null, '找不到 .dsm-rowPick 规则')
+  assert.match(pick, /display:\s*inline-flex/, '它只是包一下勾选框，不该把那一格撑开')
+  const srOnly = ruleBody('.dsm-srOnly')
+  assert.notEqual(srOnly, null, '行不再是 label，勾选框的名字得自己给：要有 .dsm-srOnly')
+  assert.match(srOnly, /position:\s*absolute/, '名字不参与布局')
+  assert.match(srOnly, /clip-path:\s*inset\(50%\)/, '视觉上收成 0，但仍留在无障碍树里')
 
-  const button = ruleBody('.dsm-rowDetail')
-  assert.notEqual(button, null, '找不到那枚「详情」的规则')
-  assert.match(button, /border:\s*none/, '它没有盒子：盒子是标签那套语法，动作不该长成标签')
-  assert.match(button, /visibility:\s*inherit/, '显隐由 .dsm-slotActions 控制')
-
-  assert.match(
-    css,
-    /\.dsm-row:focus-within \.dsm-slotActions[^{]*\{[^}]*visibility:\s*visible/,
-    '键盘落在这一行时出场（`visibility: hidden` 的东西本来不进 tab 顺序）',
-  )
-  assert.match(css, /\.dsm-row:focus-within \.dsm-time[^{]*\{[^}]*visibility:\s*hidden/, '时刻让位给按钮')
-  // 鼠标那一路已经换成"点整行"，悬停时不该再浮出任何动作（含以前那条触屏常显的退路）。
-  assert.equal(
-    /\.dsm-row:hover \.dsm-slotActions/.test(css),
-    false,
-    '悬停不再浮出动作：点整行就够了',
-  )
-  assert.equal(/\.dsm-row:hover \.dsm-time/.test(css), false, '悬停时时刻照旧摆着')
-  assert.equal(/@media \(hover: none\)/.test(css), false, '触屏那条退路（动作常显）随「内容」一起删了')
-  assert.equal(/\.dsm-rowInspect/.test(css), false, '「内容」那枚的样式不该还留着')
+  // 时刻与按钮叠格子那一套已经删干净了
+  for (const gone of ['.dsm-slot', '.dsm-slotActions', '.dsm-rowDetail']) {
+    assert.equal(ruleBody(gone), null, `${gone} 该删掉：行尾不再有动作`)
+  }
+  assert.equal(/\.dsm-row:focus-within/.test(css), false, '键盘落到这一行不再把什么东西换出来')
 })
 
 test('说明页 FAQ 的答案不被挤成零宽：那一栏是单列网格', () => {

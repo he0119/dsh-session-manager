@@ -869,8 +869,6 @@ export function ManagePanel({
                     note={parentElsewhereOf(session)}
                     locked={picking.lockOf(session)}
                     onOpenDetail={() => setDetail({ id: session.id })}
-                    detailLabel={t('manage.detail.open')}
-                    detailTip={t('manage.detail.openTip')}
                     opened={detail.id === session.id}
                     t={t}
                   />

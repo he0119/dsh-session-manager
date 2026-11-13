@@ -184,18 +184,19 @@
 - 会话页没有组头与折叠：分组这件事由左栏的项目树承担（选一个项目 = 整组处理）。导出清单曾经是唯一按
   目录分组的地方（`SessionGroupHead` / 折叠 / 整组勾选），它的消费者随导出清单一起没了，所以那一套也
   删掉了。
-- **点整行 = 看详情**：这一行是个 `<label>`（勾选框的无障碍名字靠它），所以点标题、项目、字节、
-  空白都挡掉 label 的默认动作，只做"把这一条交给右栏"这一件事——勾选状态不变。勾选框自己照旧只管
-  勾选，行尾那两枚动作也各自处理自己的点击。
-- 行尾只有一枚「详情」：它把这一条交给右栏，**只给键盘**——平时 `visibility: hidden`，Tab 落到
-  这一行的勾选框时它才顶掉时刻出场；鼠标与触屏点整行就够了，悬停时那一格照旧只有时刻。完整时间线
-  不在行上：右栏里那枚「打开完整内容」是它唯一的入口。右栏正开着的那一行左缘有一条品牌色细线。
+- **点整行 = 看详情**：这一行是个 `<div>`（不是 `<label>`，点它不是勾选），点项目、字节、时间、
+  空白都只做"把这一条交给右栏"这一件事。**标题那一格是这一行的主动作**：它是个真的按钮
+  （`.dsm-rowOpen`，外观跟旁边那段字一样、没有盒子），键盘 Tab 到它、回车就打开右栏——行里没有
+  第二枚动作。勾选框自己收拾成一层 `<label>`（那份"勾选《标题》"只念给读屏软件），点它只改勾选。
+- 完整时间线不在行上：右栏里那枚「打开完整内容」是它唯一的入口。右栏正开着的那一行左缘有一条
+  品牌色细线。
 - 空态、加载态不编造结论：清单没到之前说「读取中…」，不把"0 个会话"画上去。空态画在列表框**里面**，
   表头不能因为"这一筛没命中"而消失。
 - 依据：[全宽工作台那篇](../.agents/notes/implemented/architecture/2026-11-12-session-page-is-a-full-width-workbench.md)、
   [项目身份与组头](../.agents/notes/implemented/feature/2026-10-04-workspace-shows-project-identity.md)、
   [行上动作](../.agents/notes/implemented/architecture/2026-10-12-row-action-waits-for-hover.md)、
   [点整行看详情](../.agents/notes/implemented/architecture/2026-11-13-row-click-shows-the-detail.md)、
+  [主动作落在标题上](../.agents/notes/implemented/architecture/2026-11-13-the-row-title-is-the-action.md)、
   [两阶段加载](../.agents/notes/implemented/architecture/2026-10-07-page-loads-in-two-phases.md)。
 
 ### 2.4 弹窗
@@ -359,7 +360,8 @@ pnpm typecheck && pnpm build && pnpm test && pnpm check:package
 | 卡片动作行 | [2026-10-07](../.agents/notes/implemented/architecture/2026-10-07-card-actions-live-in-a-footer-row.md) |
 | 一对选行工具 | [2026-10-08](../.agents/notes/implemented/bug-fix/2026-10-08-one-pair-of-pick-tools.md) |
 | 行上动作等悬停（已被取代） | [2026-10-12](../.agents/notes/implemented/architecture/2026-10-12-row-action-waits-for-hover.md) |
-| 行尾只留一枚给键盘的「详情」 | [2026-11-13](../.agents/notes/implemented/simplification/2026-11-13-row-actions-leave-the-hover-slot.md) |
+| 行尾只留一枚给键盘的「详情」（已被取代） | [2026-11-13](../.agents/notes/implemented/simplification/2026-11-13-row-actions-leave-the-hover-slot.md) |
+| 行这一格的主动作落在标题上 | [2026-11-13](../.agents/notes/implemented/architecture/2026-11-13-the-row-title-is-the-action.md) |
 | 页签去掉、改成入口 + 宽弹窗 | [2026-11-12](../.agents/notes/implemented/architecture/2026-11-12-no-page-tabs.md) |
 | 分页块间距（换成宽弹窗正文层） | [2026-10-16](../.agents/notes/implemented/bug-fix/2026-10-16-inner-blocks-need-their-own-gap.md) |
 | 弹窗正文字号 | [2026-10-12](../.agents/notes/implemented/bug-fix/2026-10-12-dialog-body-declares-its-own-type.md) |
