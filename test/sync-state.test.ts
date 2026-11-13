@@ -118,3 +118,38 @@ test('「还要不要重启」按进程启动时刻算，不落盘', () => {
   // 失败的记录同理（它连 takesEffect 都没有）。
   assert.equal(lastRunView({ at, ok: false, pulled: 0, pushed: 0, error: 'x' }, ranAt - 60_000).pendingRestart, false)
 })
+
+test('「没做到的条目」原样落盘、也读得回来（点名版要跨重启还认得出是哪条会话）', () => {
+  withHome((home) => {
+    const run = {
+      at: '2026-11-13T09:00:00.000Z',
+      ok: true,
+      pulled: 0,
+      pushed: 1,
+      problems: ['同步映射把 /home/u/dev/x 指到了 /nope，但那不是一个存在的目录'],
+      leftovers: [
+        { message: '甲（session-1）：目标目录不存在：/nope', sessionId: 'session-1' },
+        { message: '同步映射把 /home/u/dev/x 指到了 /nope，但那不是一个存在的目录' },
+      ],
+      takesEffect: 'immediate' as const,
+    }
+    writeSyncRun(home, run)
+    assert.deepEqual(readSyncRun(home), run, '带 id 的与不带 id 的都读得回来')
+  })
+})
+
+test('「没做到的条目」形状不对也当没有（宁可只少一张清单，不让页面读库失败）', () => {
+  withHome((home) => {
+    mkdirSync(join(home, 'dsh-session-manager'), { recursive: true })
+    const base = { at: '2026-11-13T09:00:00.000Z', ok: true, pulled: 0, pushed: 0 }
+    writeFileSync(syncStatePath(home), JSON.stringify({ sync: { ...base, leftovers: 'nope' } }))
+    assert.equal(readSyncRun(home), undefined, '不是数组')
+    writeFileSync(syncStatePath(home), JSON.stringify({ sync: { ...base, leftovers: [{ sessionId: 'x' }] } }))
+    assert.equal(readSyncRun(home), undefined, '缺 message')
+    writeFileSync(syncStatePath(home), JSON.stringify({ sync: { ...base, leftovers: [{ message: 'x', sessionId: 7 }] } }))
+    assert.equal(readSyncRun(home), undefined, 'sessionId 不是字符串')
+    // 不带 id 的那种是合法条目（映射、远端索引那几步没有会话可指）。
+    writeFileSync(syncStatePath(home), JSON.stringify({ sync: { ...base, leftovers: [{ message: 'x' }] } }))
+    assert.deepEqual(readSyncRun(home), { ...base, leftovers: [{ message: 'x' }] }, '只有 message 也行')
+  })
+})

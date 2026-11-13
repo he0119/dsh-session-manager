@@ -25,6 +25,7 @@ import {
   fileFingerprint,
   normalizeMapping,
   parseIndex,
+  collectLeftovers,
   planSync,
   planTidy,
   prepareSync,
@@ -3230,4 +3231,43 @@ test('sync：只整理远端——预演只算账、落地才删，索引重写�
     await fixture.close()
     rmSync(SANDBOX, { recursive: true, force: true })
   }
+})
+
+/*
+ * 「没做到的条目」：页头那枚黄点只报得出"有 1 条没做到"，同步弹窗里那张清单要说清是哪一条。
+ *
+ * 三件事各自有判据：哪些行算没做到（`identical` 不算，那是"本来就没事"）、句子怎么点名（有标题就
+ * 标题 + id，没有就用 id）、以及不属于任何一条会话的那些问题（映射、远端索引）原样排在后面。
+ */
+test('sync：没做到的条目点名到会话，「本来就没事」的那些不算', () => {
+  const outcome = {
+    plan: {
+      pull: [
+        { id: 'session-a', title: '甲', action: 'skip', code: 'missing-target', reason: '目标目录不存在：/nope' },
+        { id: 'session-b', action: 'skip', code: 'no-mapping', reason: '没有 /x → 本机的同步映射' },
+        { id: 'session-c', title: '丙', action: 'create', code: 'missing' },
+      ],
+      push: [
+        { id: 'session-d', title: '丁', action: 'skip', code: 'identical', reason: '远端已经有这一份' },
+        { id: 'session-e', title: '戊', action: 'skip', code: 'diverged', reason: '两边各自写过，这次不动' },
+        { id: 'session-f', title: '己', action: 'upload', code: 'missing' },
+      ],
+      problems: ['同步映射里有一条空的来源路径（远端 cwd）'],
+    },
+    problems: ['读远端 machine-x/index.json 失败：404'],
+  }
+  const leftovers = collectLeftovers(outcome as never)
+  assert.deepEqual(leftovers, [
+    { message: '甲（session-a）：目标目录不存在：/nope', sessionId: 'session-a' },
+    { message: 'session-b：没有 /x → 本机的同步映射', sessionId: 'session-b' },
+    { message: '戊（session-e）：两边各自写过，这次不动', sessionId: 'session-e' },
+    { message: '同步映射里有一条空的来源路径（远端 cwd）' },
+    { message: '读远端 machine-x/index.json 失败：404' },
+  ])
+})
+
+test('sync：完全一样的两句只留一条（计划与落地两段可能算出同一句）', () => {
+  const same = '同步映射把 /a 指到了 /b，但那不是一个存在的目录'
+  const outcome = { plan: { pull: [], push: [], problems: [same] }, problems: [same] }
+  assert.deepEqual(collectLeftovers(outcome as never), [{ message: same }])
 })

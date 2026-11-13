@@ -112,7 +112,14 @@ export function ManagePanel({
   project,
   setProject,
   openBackup,
-}: PanelShare): React.ReactElement {
+  /**
+   * 从别处"定位"过来的那条会话（同步弹窗里那几枚「只看这一条」交给页面骨架，骨架再交下来）。
+   *
+   * 它一变就把筛选条重置成"只看这一条"：芯片清空、搜索框填上这个 id。用 id 而不是标题——标题可能重名，
+   * 而搜索框本来就按"名称或 ID"匹配（见 `list.filter.search`）。
+   */
+  focusId,
+}: PanelShare & { focusId?: string | undefined }): React.ReactElement {
   const sessions = state?.sessions ?? []
   // 归档能力位与清单无关（`/meta` 先给），所以它用 `state ?? meta`：清单还在读时也不会先把
   // "这个宿主没有 workspaceRegistry"画上去。
@@ -130,6 +137,16 @@ export function ManagePanel({
   const picked = picking.picked
   /** 筛选条：一枚芯片都不勾、关键词为空 = 全都列出来（见 sessionFilter.matchesFilters）。 */
   const filter = useSessionFilter(sessions)
+  /*
+    别处点「只看这一条」之后落到这里：先把芯片清空（否则它可能被"空白""已归档"那些挡在外面），再把
+    搜索词换成这个 id。依赖只看 `focusId`——`filter` 每次渲染都是新对象，带上它会让这段每次渲染都跑。
+  */
+  React.useEffect(() => {
+    if (focusId === undefined || focusId === '') return
+    filter.clear()
+    filter.setQuery(focusId)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusId])
   const [busy, setBusy] = React.useState<'archive' | 'unarchive' | 'apply' | 'retitle' | 'migrate' | 'export' | null>(null)
   const [error, setError] = React.useState<string | null>(null)
   const [notice, setNotice] = React.useState<string | null>(null)

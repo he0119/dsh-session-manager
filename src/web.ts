@@ -42,6 +42,7 @@ import { runRemoval, type RemoveDeps, type RemovalRun } from './remove.ts'
 import type { RepoLocationLookup } from './repo.ts'
 import { createTitleResolver, type TitleQuery } from './session-title.ts'
 import {
+  collectLeftovers,
   plannedOutcome,
   prepareSync,
   replanPrepared,
@@ -54,6 +55,7 @@ import {
   tidySummary,
   type AutoPushOutcome,
   type AutoPushTimer,
+  type SyncLeftover,
   type SyncOutcome,
   type SyncPrepared,
   type SyncProgress,
@@ -751,6 +753,8 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
     pulled: number
     pushed: number
     error?: string
+    /** 这一趟没做到的条目（点名版，见 `sync.ts` 的 `collectLeftovers()`）：页面据此说清"哪一条"。 */
+    leftovers?: SyncLeftover[]
   } | null = null
 
   /**
@@ -1426,6 +1430,7 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
       remote: { url: runtime.settings.url, machineId: runtime.settings.machineId },
       ...outcome,
       problems: [...outcome.plan.problems, ...outcome.problems],
+      leftovers: collectLeftovers(outcome),
       takesEffect: syncEffect(outcome),
     })
 
@@ -1579,6 +1584,7 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
           ok: true,
           pulled: outcome.pulled.length,
           pushed: outcome.pushed.length,
+          leftovers: collectLeftovers(outcome),
         }
         // 同一份结论写进磁盘：进程重启之后页头那枚状态还答得出"上次同步在什么时候、拉了几条"。
         deps.syncRun?.write({
@@ -1588,6 +1594,8 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
           pushed: outcome.pushed.length,
           // 跑完了但有几条没做到、或者改动要重启才生效：这两种都不是"一切太平"，页头那枚点据此变黄。
           problems: outcome.problems,
+          // 点名版：哪条会话、为什么（见 `collectLeftovers()`）。窗口关掉之后，"上次同步"那张清单靠它。
+          leftovers: collectLeftovers(outcome),
           takesEffect: effectOf(outcome.effect, takesEffect()),
         })
         applying = null

@@ -419,6 +419,15 @@ export const zh = {
   // 黄点为什么是黄的：颜色读屏读不到，这两句挂在按钮的悬浮提示上（见 logic/syncChipDot.ts）。
   'sync.chip.noteProblems': '上次同步有 {count} 条没做到',
   'sync.chip.noteRestart': '上次同步的改动要重启 DSH 才生效',
+  // 悬浮提示里那几条之后：前 3 条列完，剩下的只报个数（点开弹窗看全）。
+  'sync.chip.moreLeftovers': '还有 {count} 条（点开看全）',
+  // 弹窗里那张「上次同步」：窗口关掉、重启之后还答得出"上次哪几条没做到、为什么"。
+  'sync.last.title': '上次同步',
+  'sync.last.facts': '{when} · 拉取 {pulled} 条、推送 {pushed} 条',
+  'sync.last.failed': '上次同步没成：{reason}',
+  'sync.last.justNow': '刚刚这一趟',
+  'sync.leftovers.title': '没做到 {count} 条',
+  'sync.leftovers.focus': '只看这一条',
   // 绿点说的是"自动推送开着"（配置事实），这句把它讲明白——否则绿点只靠颜色传达。
   'sync.chip.autoTip': '自动推送开着：本机空闲 5 分钟就推一次',
   'sync.chip.autoSyncTip': '自动同步开着：写完一轮、安静 5 分钟之后双向对齐，并顺手整理自己那一格',
@@ -1063,6 +1072,13 @@ export const en: LocaleDictOf<typeof NS> = {
   'sync.chip.tip': 'Open sync: remote, plan, diff and confirm',
   'sync.chip.noteProblems': 'Last sync left {count} item(s) undone',
   'sync.chip.noteRestart': 'Last sync takes effect after a restart',
+  'sync.chip.moreLeftovers': '{count} more (open the dialog to see them all)',
+  'sync.last.title': 'Last sync',
+  'sync.last.facts': '{when} · pulled {pulled}, pushed {pushed}',
+  'sync.last.failed': 'Last sync failed: {reason}',
+  'sync.last.justNow': 'The run that just finished',
+  'sync.leftovers.title': '{count} item(s) left undone',
+  'sync.leftovers.focus': 'Show only this one',
   'sync.chip.autoTip': 'Auto-push is on: pushes once the machine has been idle for 5 minutes',
   'sync.chip.autoSyncTip': 'Auto-sync is on: after a quiet turn it aligns both sides and tidies its own cell',
   'sync.chip.dot.ongoing': 'A sync is running',

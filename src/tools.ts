@@ -41,6 +41,7 @@ import { createProjectionReader } from './projection-cache.ts'
 import { describeWarm, warmCheckpoints } from './checkpoint-warm.ts'
 import { describeEffect, describePlannedEffect, effectOf } from './take-effect.ts'
 import {
+  collectLeftovers,
   createAutoPushTimer,
   runAutoPush,
   runSync,
@@ -48,6 +49,7 @@ import {
   type AutoPushTimer,
   type SyncAttachmentIn,
   type SyncAttachmentOut,
+  type SyncLeftover,
   type SyncPlan,
   type SyncDeps,
   type SyncSettings,
@@ -479,6 +481,19 @@ function describeSync(
   const overwrote =
     replaced.length === 0 ? '' : `，其中 ${replaced.length} 条覆盖了本机原来那份（旧的那份已进备份）`
   return `${head}。实际落地：拉取 ${pulled.length} 条、推送 ${pushed.length} 条${overwrote}${describeSyncObjects(attachments)}`
+}
+
+/**
+ * 「没做到」的那几条：一句一条，多的折成"还有 N 条"。
+ *
+ * 界面上那张「上次同步」的清单是同一份数据（见 `src/sync.ts` 的 `collectLeftovers()`）；工具这边只说
+ * 前几条，剩下的说个数——模型不需要读完整张清单，它要的是"有没有事没做完、是哪条"。
+ */
+function describeLeftovers(leftovers: readonly SyncLeftover[], limit = 5): string | undefined {
+  if (leftovers.length === 0) return undefined
+  const lines = leftovers.slice(0, limit).map((item) => `- ${item.message}`)
+  if (leftovers.length > limit) lines.push(`- 还有 ${leftovers.length - limit} 条没列出来`)
+  return `没做到 ${leftovers.length} 条：\n${lines.join('\n')}`
 }
 
 /**
@@ -1660,6 +1675,7 @@ export function registerTools(ctx: Context, config: PluginConfigInput = {}): Arr
                 out: outcome.attachmentOut,
               }),
               describeWarm(outcome.warm),
+              describeLeftovers(collectLeftovers(outcome)),
               // 预演也要把"执行后会怎样"说出来，否则调用方要到落地之后才知道要重启（与迁移工具同一条）。
               outcome.applied || outcome.plan.pullIds.length === 0 ? undefined : describePlannedEffect(mode()),
             ]

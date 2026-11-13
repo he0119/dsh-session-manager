@@ -1752,6 +1752,55 @@ export interface SyncOutcome {
 }
 
 /**
+ * 一趟同步「没做到」的一条：一句点名的话，能定位到某条会话时带上它的 id。
+ *
+ * 为什么单独有这一份：`problems` 是几句汇总（"映射指到了不存在的目录""有 3 个附件对象补不上"），
+ * 数得出条数、看不出是哪条会话。同步跑完之后窗口一关，用户手上只剩页头那句"上次同步有 1 条没做到"，
+ * 到底哪一条、为什么，`problems` 答不上来（它连会话 id 都没有）。这一份是点名版：每条会话一条，
+ * 带上 id，界面据此给出「只看这一条」。
+ */
+export interface SyncLeftover {
+  /** 一句话，已经点名（会话名 + 原因，或 `problems` 里的原话）。 */
+  message: string
+  /** 能定位到某条会话时带上 id；映射、远端索引、整理那几步的问题没有这一项。 */
+  sessionId?: string
+}
+
+/**
+ * 把一次同步的结论摊成"没做到的条目"。
+ *
+ * 两段来路，顺序就是用户该看的顺序：
+ *
+ * 1. **逐条会话**：计划里那些 `skip`（`identical` 不算——那本来就"不用做"，不是没做到）。它们带着标题
+ *    与 id，所以点得出名字、跳得回列表。
+ * 2. **其它问题**：`plan.problems` 与 `outcome.problems` 的原话（映射指错、远端索引读不动、整理失败
+ *    这几类），它们不属于某一条会话，原样列出。
+ *
+ * 完全一样的句子只留一条（计划与落地两段可能算出同一句）。
+ *
+ * @param outcome 一次同步（预演或落地）的结论。
+ * @returns 点名与否的条目；一件事都没有时是空数组。
+ */
+export function collectLeftovers(outcome: SyncOutcome): SyncLeftover[] {
+  const leftovers: SyncLeftover[] = []
+  const seen = new Set<string>()
+  const push = (leftover: SyncLeftover): void => {
+    if (seen.has(leftover.message)) return
+    seen.add(leftover.message)
+    leftovers.push(leftover)
+  }
+  for (const row of [...outcome.plan.pull, ...outcome.plan.push]) {
+    if (row.action !== 'skip' || row.code === 'identical') continue
+    const reason = 'reason' in row && typeof row.reason === 'string' ? row.reason : row.code
+    const title = 'title' in row ? row.title : undefined
+    const name = title === undefined || title === '' ? row.id : `${title}（${row.id}）`
+    push({ message: `${name}：${reason}`, sessionId: row.id })
+  }
+  for (const problem of [...outcome.plan.problems, ...outcome.problems]) push({ message: problem })
+  return leftovers
+}
+
+/**
  * 落地走的是哪条路（见 `SyncOutcome.planSource`）。
  *
  * - `reused`：预演之后本机与远端一个字节都没变，**照着预演那份计划落地**——不再扫库、不再比对内容、

@@ -163,6 +163,17 @@ export interface SyncInfo {
   lastRun?: SyncRunRecord
 }
 
+/**
+ * 一趟同步「没做到」的一条（与宿主 `src/sync.ts` 的 `SyncLeftover` 同一形状）。
+ *
+ * `sessionId` 有值 = 这一条点得出名字、也跳得回列表（界面上那枚「只看这一条」）；映射、远端索引、
+ * 整理那几步的问题没有会话可指，只有一句话。
+ */
+export interface SyncLeftover {
+  message: string
+  sessionId?: string
+}
+
 /** 上一次手动同步落下的那条记录（与宿主 `src/sync-state.ts` 同一形状）。 */
 export interface SyncRunRecord {
   /** 结束时刻（ISO 8601）。 */
@@ -174,6 +185,12 @@ export interface SyncRunRecord {
   error?: string
   /** 跑完了、但有几条没做到（宿主 `SyncOutcome.problems` 的原话）。 */
   problems?: string[]
+  /**
+   * 同一件事的点名版：哪条会话、为什么（带 id 的那些能跳回列表）。
+   *
+   * 旧记录里没有这一项，界面按"只有汇总"画。
+   */
+  leftovers?: SyncLeftover[]
   /** 那一趟的判断：改动立刻生效，还是要重启 DSH。 */
   takesEffect?: 'immediate' | 'restart-required'
   /**
@@ -553,6 +570,12 @@ export interface SyncResponse {
   registryWritten: boolean
   indexWritten: boolean
   problems: string[]
+  /**
+   * 没做到的条目（点名版）：预演与落地都给，界面在「上次同步」那张清单里逐条列（带 id 的可跳回列表）。
+   *
+   * 旧宿主没有这一项，界面退回按 `problems` 画。
+   */
+  leftovers?: SyncLeftover[]
   /**
    * 这次落地走的哪条路（只有"先预演、后确认"那条路会给）。
    *

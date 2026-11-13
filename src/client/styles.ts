@@ -1294,6 +1294,14 @@ export const CSS = `
 .dsm-listPlain li { overflow-wrap: anywhere; }
 .dsm-fields-label { color: var(--dsw-alias-label-primary, #1f2329); font-weight: 500; margin: 0; }
 .dsm-registry, .dsm-problems, .dsm-effect { display: flex; flex-direction: column; gap: 4px; }
+/* ── 「上次同步」那张清单（SyncPanel 的面板段） ──────────────────────────────
+   一句"多久以前、拉了几条"接一张"没做到"的清单：每条一行（原话 + 那枚「只看这一条」）。
+   清单本身用 .dsm-listPlain（与导入、迁移那几处同一套），这里只补这一段的节奏与行内对齐。 */
+.dsm-lastRun { display: flex; flex-direction: column; gap: 6px; }
+.dsm-lastRun .dsm-listPlain { padding-left: 0; list-style: none; }
+.dsm-leftoverRow { display: flex; align-items: flex-start; gap: 10px; }
+.dsm-leftoverRow > span { min-width: 0; flex: 1 1 auto; }
+
 .dsm-backupRow {
   display: flex;
   align-items: center;

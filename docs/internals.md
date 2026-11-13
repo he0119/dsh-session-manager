@@ -105,6 +105,10 @@
   宿主拿 `working-directory/change` 的最后一个值当会话的当前工作目录，并要求它在本机是绝对路径——
   别的机器（别的系统）的写法会让投影失败、整条会话读不出来。导入落地与 `repair_session_paths` 只改
   那几行「本机不认」的值，比对时两边归一成占位符，于是"只差这条路径"的两份仍算同一份。
+- [同步没做到的那几条要点得出名字](../.agents/notes/implemented/bug-fix/2026-11-13-sync-leftovers-are-pointed.md)：
+  `problems` 只是几句汇总，界面从来没渲染过它们——状态变黄之后用户拿不到"哪条、为什么"。现在宿主由
+  计划里的 `skip` 行衍生一份点名版（带会话 id）落进 `state.json`，页头提示列前三条、弹窗里那张
+  「上次同步」列全，带 id 的能一键把列表筛到它。
 - [模型工具各自能在插件配置里关掉](../.agents/notes/implemented/feature/2026-10-24-tool-switches-in-plugin-config.md)：
   `tools` 那一节一个键对一个工具，只有显式 `false` 算关；关掉是**不注册**，所以模型那份清单里看不到
   它。不是活字段，改完要重启宿主。

@@ -135,6 +135,10 @@ sync:
   pull, how many to push, which ones both sides have), then confirm. When the remote copy is newer,
   this machine's copy is backed up first and then replaced; the old one can be restored from
   **Backups & rollback**.
+- **See which item was left undone**: when the header chip turns amber, hovering it lists the first
+  few items (which session, and why), and the "Last sync" block at the top of the dialog shows them
+  all. Items tied to a session carry a "Show only this one" button that filters the list down to it.
+  The record lives in `$DSH_HOME/dsh-session-manager/state.json`, so it survives a restart.
 - **Auto sync** has three modes, one row in the form: off / push only / two-way. The background run
   waits until this machine has been idle for 5 minutes, so it never interrupts you while you write;
   "push only" pulls nothing — use manual sync or the two-way mode to pick up other machines'

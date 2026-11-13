@@ -37,7 +37,8 @@ import type { DirectoryApi } from '../directory.ts'
 import type { Translate } from '../logic/locales.ts'
 import { syncJob, type SyncJobSnapshot } from '../logic/syncJob.ts'
 import { chooseBundle } from '../logic/fileDrop.ts'
-import { relativeLabel } from '../logic/relativeTime.ts'
+import { agoLabel } from '../logic/relativeTime.ts'
+import { leftoversOf } from '../logic/syncLeftovers.ts'
 import { syncBarLabel } from '../logic/syncJobLabel.ts'
 import { versionCommit, versionLabel, versionTag } from '../logic/version.ts'
 import { BackupPanel } from './BackupPanel.tsx'
@@ -111,6 +112,13 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
   const [droppedFile, setDroppedFile] = React.useState<File | undefined>(undefined)
   // 这一页一进来就是列表：它不再是"四个里选一个"的默认项，而是唯一常驻的那一面。
   const [surface, setSurface] = React.useState<Surface>('none')
+  /**
+   * 从别处"定位"过来的那条会话（同步弹窗里那几枚「只看这一条」）。
+   *
+   * 用 `undefined` 起头而不是 `null`：冒烟夹具按位置往 null 状态里种值（见 test/client.test.mjs），
+   * 这里插一个 null 会让后面那些种子整体错一格（与 `notice` / `droppedFile` 同一条理由）。
+   */
+  const [focusId, setFocusId] = React.useState<string | undefined>(undefined)
 
   /**
    * 重数一遍备份份数（状态栏那枚入口上的数字）。
@@ -351,11 +359,8 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
    * 面里看；宿主那侧目前也没记上一次同步的时间，所以这里不编一个出来。
    */
   const syncInfo = (meta ?? state)?.sync ?? null
-  /** 「多久以前」那句话：档位由纯函数判（见 logic/relativeTime.ts），这里只把键交给字典。 */
-  const ago = (at: string): string => {
-    const label = relativeLabel(Date.parse(at), Date.now())
-    return label.key === 'time.justNow' ? t('time.justNow') : t(label.key, { count: label.count })
-  }
+  /** 「多久以前」那句话：拼法与同步弹窗里那张清单共用一份（见 logic/relativeTime.ts 的 `agoLabel()`）。 */
+  const ago = (at: string): string => agoLabel(t, at)
   /**
    * 那枚状态说哪一句，按"手里证据的新鲜程度"排：
    *
@@ -400,6 +405,13 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
    * `title`（与 `Tag` 同一条，见「每枚标签都必须带 .dsm-tag 挂钩」那条约束）。
    */
   const dotTitle = syncChipDotTitle(dotFacts)
+  /*
+    这一趟「没做到」的条目（点名版优先，旧记录退回汇总句）：悬浮提示里列前 3 条，弹窗里那张
+    「上次同步」的清单列全（见 `SyncPanel`）。判据只有一份——`logic/syncLeftovers.ts`。
+  */
+  const leftoverItems = leftoversOf(job.done !== null && job.done.ok ? job.done.result : (syncInfo?.lastRun ?? null))
+  const leftoverHead = leftoverItems.slice(0, 3).map((item) => item.message)
+  const leftoverMore = Math.max(0, leftoverItems.length - leftoverHead.length)
   const chipReason =
     dotNote !== null
       ? 'params' in dotNote
@@ -464,7 +476,17 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
             悬浮提示补一句"这个颜色是什么意思"：黄点说清几条没做到 / 要重启，绿点说清自动推送开着。
             颜色读屏读不到、也常被一眼扫过，理由得有一句话接着。
           */
-          title={[t('sync.chip.tip'), chipReason].filter((line) => line !== null).join(' · ')}
+          /*
+            提示从一行变成几行：先说这个按钮干什么、再说为什么是这个颜色，最后把那几条没做到的原话
+            摆出来（前 3 条 + "还有 N 条"）。只报"1 条没做到"而不说哪一条，等于把疑问留给用户。
+          */
+          title={[
+            [t('sync.chip.tip'), chipReason].filter((line) => line !== null).join(' · '),
+            ...leftoverHead,
+            leftoverMore > 0 ? t('sync.chip.moreLeftovers', { count: leftoverMore }) : null,
+          ]
+            .filter((line) => line !== null)
+            .join('\n')}
           aria-haspopup="dialog"
           aria-expanded={surface === 'sync'}
           onClick={() => setSurface('sync')}
@@ -554,6 +576,7 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
         picking={picking}
         project={project}
         setProject={setProject}
+        focusId={focusId}
         openBackup={(dir) => {
           setBackupFocus(dir)
           setSurface('backup')
@@ -593,6 +616,15 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
           meta={meta}
           reload={load}
           onClose={close}
+          /*
+            点「只看这一条」：关掉这一面、把左栏的项目切回「全部项目」，再让列表只列这一条。
+            不勾选它——用户要的是"看是哪条"，下一步做什么由他自己决定（勾了会连带出现一排动作）。
+          */
+          onFocusSession={(id) => {
+            close()
+            setProject({ path: null })
+            setFocusId(id)
+          }}
           // 认领来的那趟结论（别处发起的）：那个弹窗自己没有完整结果，由这里把这一句交给它说。
           {...(job.done?.adopted === undefined || jobLine === null ? {} : { backgroundLine: jobLine })}
         />
