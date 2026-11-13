@@ -3403,7 +3403,7 @@ test('客户端产物：同步预演三张表的状态列只放短标签，整�
   const waitingText = strings(waiting.registrations[0].component(waiting.registrations[0].registration.inject()))
   assert.ok(waitingText.includes('dialog.previewing'), '计划在路上时正文是"预演中…"')
   assert.equal(
-    waitingText.some((item) => String(item).startsWith('sync.summary')),
+    waitingText.some((item) => String(item).startsWith('sync.planWork')),
     false,
     '计划路上的那一段不摆旧计划（上次那份的表会被当成这次的）',
   )
@@ -3507,9 +3507,32 @@ test('客户端产物：会拉取那张表分得清「拉一条新的」与「�
     '覆盖不是推送：段头药丸里推表只有分叉重推那一条',
   )
 
-  // 空白会话：只在正文里报一句，id 一个都不许冒出来（那三张表里也不许有它们）。
+  /*
+   * 三层各有各的样子（用户截图里说的"区分度不高"就是这三件事原来挤在同一句 14px 里）：
+   * 结论一句、加粗；数字与远端是下面那行 12px 脚注；明细是表。
+   */
+  const verdict = mounted.recorded.find(
+    (node) => String(node.props?.className ?? '').startsWith('dsm-planVerdict'),
+  )
+  assert.ok(verdict !== undefined, '结论单独一行、带 dsm-planVerdict 钩子')
+  assert.equal(
+    String(verdict.props.children).startsWith('sync.planWork'),
+    true,
+    '有活干时结论说的是"会拉取 N 条、会推送 M 条"',
+  )
+  assert.equal(verdict.props.className.includes('dsm-ok'), false, '有活干不染"成功"色')
+  const facts = mounted.recorded.find((node) => node.props?.className === 'dsm-hint dsm-planFacts')
+  assert.ok(facts !== undefined, '数字与远端另起一行脚注')
+  assert.equal(
+    String(facts.props.children?.[0] ?? facts.props.children).startsWith('sync.planFacts'),
+    true,
+    '脚注说的是"本机 N 条 · 远端 M 条"',
+  )
+
+  // 空白会话：只在正文那句脚注里报，id 一个都不许冒出来（那三张表里也不许有它们）。
+  // 脚注现在是一条清单（`<li>`）：与结论、数字分得开，不再混成一行同款的灰字。
   const blankLine = mounted.recorded.find(
-    (node) => node.type === 'p' && node.props?.children === 'sync.skippedBlank:{"count":2}',
+    (node) => node.type === 'li' && node.props?.children === 'sync.skippedBlank:{"count":2}',
   )
   assert.ok(blankLine !== undefined, '正文里那句"跳过 N 条空白会话"在')
   assert.equal(

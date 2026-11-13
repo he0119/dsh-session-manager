@@ -960,6 +960,21 @@ export const CSS = `
 .dsm-error { color: color-mix(in srgb, var(--dsw-alias-state-error-primary, #d83931) 55%, var(--dsw-alias-label-primary, #1f2329)); }
 .dsm-warn { color: color-mix(in srgb, var(--dsw-alias-state-warn-primary, #d97b00) 55%, var(--dsw-alias-label-primary, #1f2329)); }
 .dsm-ok { color: color-mix(in srgb, var(--dsw-alias-state-success-primary, #2ea121) 55%, var(--dsw-alias-label-primary, #1f2329)); }
+/*
+ * 计划那一段的结论：一句、加粗、按结论染色（只有"没有要同步的"才染绿）。数字与远端沉到下面那行脚注里，
+ * 明细是表。三层各有各的样子，读起来才分得开——原来三件事都在 14px 的同一句里。
+ */
+.dsm-planVerdict { font-weight: 600; }
+/*
+ * 计划那一段的正文自己拿节奏（12px）：结论、数字、脚注清单、段头、表都在这一层里，段距一致。
+ * 外边距归零的理由同上一节（.dsm-workBody 那条）——官方弹窗里的段落带 12px 上下外边距，叠在 gap
+ * 上就不齐了。
+ */
+.dsm-planBody { display: flex; flex-direction: column; gap: 12px; }
+.dsm-planBody > * { margin-block: 0; }
+.dsm-planFacts { font-variant-numeric: tabular-nums; }
+/* 脚注清单与上面那行数字同一档（12/18）：它们都是"表里没有、但会被碰到"的交代，不该比数字更响。 */
+.dsm-planNotes { font-size: 12px; line-height: 18px; }
 .dsm-banner {
   border: 1px solid currentColor;
   border-radius: 8px;
@@ -1111,7 +1126,7 @@ export const CSS = `
  * 继承"上（见 .dsm-root 那条注释）。搬进弹窗之后它们一样需要自己那一层 16px，否则横幅与卡片、
  * 两张卡片之间都会贴住。
  */
-.dsm-workBody { display: flex; flex-direction: column; gap: 16px; }
+.dsm-workBody { display: flex; flex-direction: column; gap: 16px; font-size: 14px; line-height: 20px; }
 /*
  * 官方弹窗 portal 到 document.body，落在本页 .dsm-root 之外：那里面的段落带的是宿主正文默认的上下
  * 外边距（12px），叠在 gap 上就成了 28——两块之间比设计的 16 宽出一截。本页的规矩是「间距只由 gap

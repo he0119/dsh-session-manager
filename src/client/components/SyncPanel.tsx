@@ -1088,23 +1088,37 @@ export function SyncPanel({
               ))}
                     {/* 落地：前面三个阶段（算计划）与后面两段（拉取 / 推送）报的是同一套事件，画法也一样。 */}
         {!planning && sync !== null && syncPlan !== null && (
-          <div>
-            <p className={syncPlan.ok && sync.problems.length === 0 ? 'dsm-ok' : 'dsm-warn'}>
-              {t('sync.summary', {
-                pull: syncPlan.pullIds.length,
-                push: syncPlan.pushIds.length,
-                local: syncPlan.localCount,
-                remote: syncPlan.remoteCount,
-              })}
-              {syncPlan.machines.length > 0 ? ` · ${t('sync.machines', { machines: syncPlan.machines.join('、') })}` : ''}
+          <div className="dsm-planBody">
+            {/*
+              结论先行：这一趟要不要做、成没成，一句话、加粗、带色。
+              数字与远端机器往下沉成脚注（12px）——原来三件事挤在同一句 14px 里、还一起染成"成功"色，
+              四行字看着一个样，读不出哪句是结论（用户截图里说的"区分度不高"）。
+              绿色从此只表示"没有要同步的"；有活干或者有问题时那一行不染成功色。
+            */}
+            <p
+              className={
+                syncClean
+                  ? 'dsm-planVerdict dsm-ok'
+                  : syncPlan.ok && sync.problems.length === 0
+                    ? 'dsm-planVerdict'
+                    : 'dsm-planVerdict dsm-warn'
+              }
+            >
+              {syncClean
+                ? t('sync.nothing')
+                : t('sync.planWork', { pull: syncPlan.pullIds.length, push: syncPlan.pushIds.length })}
+            </p>
+            <p className="dsm-hint dsm-planFacts">
+              {t('sync.planFacts', { local: syncPlan.localCount, remote: syncPlan.remoteCount })}
+              {syncPlan.machines.length > 0
+                ? ` · ${t('sync.machines', { machines: syncPlan.machines.join('、') })}`
+                : ''}
             </p>
             {/* 事前提醒：这次落地之后要不要重启，得在按「确认同步」**之前**说出来（见 `effect.plannedRestart`）。
                 纯推送不改本机任何东西，所以只在真有会话要落到本机、且宿主那头需要重启时才摆这一句。 */}
             {syncPulls.length > 0 && sync.takesEffect === 'restart-required' && (
               <p className="dsm-warn">{t('effect.plannedRestart')}</p>
             )}
-            {/* 空白会话不进那三张表：它们的去处只有这一句（没有内容可同步，也没有"为什么不动"可讲）。 */}
-            {syncBlank > 0 && <p className="dsm-hint">{t('sync.skippedBlank', { count: syncBlank })}</p>}
             {/*
               整理远端：只删本机这一格里多余的包（另一格有一模一样的、或更全的）。默认不勾——它会删
               远端的东西；勾了之后落地那次才做，预演这一下只是把"能删几个"报出来。
@@ -1124,11 +1138,15 @@ export function SyncPanel({
                 {problem}
               </p>
             ))}
-            {syncClean && <p className="dsm-ok">{t('sync.nothing')}</p>}
-            {/* 会话计划里没有的事，在这一趟真会做的时候说出来：确认之后附件对象仍会对一遍（本机缺的取回、
-                远端缺的补上），它不进那三张表（扫一遍是整库尺度的事，见 repairAttachments()）。 */}
-            {syncClean && facts?.attachments === true && (
-              <p className="dsm-hint">{t('sync.nothingAttachments')}</p>
+            {/*
+              脚注清单：空白会话的去处、附件对象还要对一遍——两件事都是"表里没有、但这一趟会碰到"的交代。
+              原来它们是两行同款的 12px 灰字，混在正文里；收成一条清单之后与结论、数字分得开。
+            */}
+            {(syncBlank > 0 || (syncClean && facts?.attachments === true)) && (
+              <ul className="dsm-listPlain dsm-planNotes">
+                {syncBlank > 0 && <li>{t('sync.skippedBlank', { count: syncBlank })}</li>}
+                {syncClean && facts?.attachments === true && <li>{t('sync.nothingAttachments')}</li>}
+              </ul>
             )}
 
             {syncPulls.length > 0 && (

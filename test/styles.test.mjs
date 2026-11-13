@@ -524,6 +524,10 @@ test('宽弹窗的正文层自带整页的块间距：横幅与卡片不能贴�
   const body = ruleBody('.dsm-workBody')
   assert.notEqual(body, null, '找不到 .dsm-workBody 规则')
   assert.match(body, /display:\s*flex/, '竖排得先是 flex 容器，gap 才生效')
+  // 字号必须自己写：官方 Modal portal 到 document.body，落在那套 .dsm-root（14px）之外，不写就继承
+  // 文档根的 16px（实测同步计划那一段的结论是 16px，而别处弹窗正文是 14px）。
+  assert.match(body, /font-size:\s*14px/, '正文那一档要自己写（16px 会与别的弹窗差一档）')
+  assert.match(body, /line-height:\s*20px/, '行高与 .dsm-dialogBody 同值')
   assert.match(body, /flex-direction:\s*column/, '块是竖着排的')
   assert.match(body, /gap:\s*16px/, '与 .dsm-root 同一档')
   // 那 16px 得真的落在相邻两块之间：官方的段落带 12px 上下外边距（弹窗 portal 到 body，落在这页的
