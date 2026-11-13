@@ -14,7 +14,8 @@ import {
   autoPushSection,
   syncSection,
   toolsSection,
-  type AutoPushConfig,
+  type AutoConfig,
+  type AutoMode,
   type PluginConfig,
   type PluginConfigInput,
   type SyncConfig,
@@ -70,12 +71,13 @@ export interface SyncInfo {
   /** 映射条数；映射表本身在配置里，界面只报条数。 */
   mappings: number
   /**
-   * 自动推送开着没有；**没开就是缺席**（不是 `enabled: false`）。
+   * 自动那一档：开着才有这一项，**没开就是缺席**（不是 `enabled: false`）。
    *
-   * 界面靠它在卡片里补一句"自动推送已开：安静 5 分钟后才推"。只有这一个字段：什么时候推由安静窗口决定，
-   * 没有"隔多久"这个旋钮了。
+   * `mode` 是"只推"还是"双向"：界面靠它说"自动推送已开：只往远端推"还是"自动同步已开：双向，写完
+   * 一轮就对齐"，并决定那枚手动入口叫「立即推送一次」还是「立即同步一次」。什么时候跑由安静窗口决定，
+   * 没有"隔多久"这个旋钮。
    */
-  autoPush?: { enabled: boolean }
+  autoPush?: { enabled: boolean; mode: AutoMode }
 }
 
 /** 解析后的默认路径。 */
@@ -179,9 +181,9 @@ export function describeSyncConfig(config: PluginConfigInput = {}): SyncInfo | u
     url: sync.url.trim(),
     machineId: machineIdOf(sync),
     mappings: Object.keys(sync.mapping ?? {}).length,
-    // 只有真的开着才报：界面靠这一项决定"自动推送已开"那句话摆不摆，报一个 `enabled: false` 会让
-    // 每个没开自动推送的人都多读一个字段。
-    ...(auto === undefined || !auto.enabled ? {} : { autoPush: { enabled: true } }),
+    // 只有真的开着才报：界面靠这一项决定"自动已开"那句话摆不摆、以及说"只推"还是"双向"，报一个
+    // `enabled: false` 会让每个没开自动的人都多读一个字段。
+    ...(auto === undefined || !auto.enabled ? {} : { autoPush: { enabled: true, mode: auto.mode } }),
   }
 }
 
@@ -318,7 +320,7 @@ export async function resolveAutoPushRuntime(
    */
   let failures = 0
   /** 每个宿主只造一个调度器，所以配置这个读法每次现读（`sync` 是活引用，改完立即生效）。 */
-  const auto = (): AutoPushConfig | undefined => autoPushSection(syncSection(config))
+  const auto = (): AutoConfig | undefined => autoPushSection(syncSection(config))
   const timer = createAutoPushTimer({
     clock: { enabled: () => auto()?.enabled === true },
     run: async (options) => {

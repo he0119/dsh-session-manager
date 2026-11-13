@@ -20,6 +20,7 @@ import { draftFrom, draftOps, draftProblems } from '../src/client/logic/syncForm
 test('自动推送表单：草稿如实读回，缺省是"没开"', () => {
   const empty = draftFrom({})
   assert.equal(empty.autoPush, false, '没配过就是没开（开关不打开）')
+  assert.equal(empty.autoSync, false, '自动同步那一栏同样缺省没开')
   // 空节 → 整份草稿，与已保存的那一节逐字段对得上。
   assert.deepEqual(empty, {
     url: '',
@@ -28,9 +29,11 @@ test('自动推送表单：草稿如实读回，缺省是"没开"', () => {
     mapping: [],
     timeoutMs: '',
     autoPush: false,
+    autoSync: false,
   })
 
   assert.equal(draftFrom({ autoPush: true }).autoPush, true, '配过就照实读回')
+  assert.equal(draftFrom({ autoSync: true }).autoSync, true, '双向那一栏也照实读回')
 })
 
 test('自动推送表单：只提交真的改过的那一格（取消勾选发 unset）', () => {
@@ -59,7 +62,8 @@ test('自动推送表单：草稿只剩开关这一格，没有间隔可填', ()
    */
   assert.deepEqual(
     Object.keys(draftFrom({ autoPush: true })).sort(),
-    ['autoPush', 'machineId', 'mapping', 'timeoutMs', 'url', 'username'],
+    // 自动只剩两栏：只推（`autoPush`）与双向（`autoSync`）。间隔那一栏早跟着兜底定时器一起删了。
+    ['autoPush', 'autoSync', 'machineId', 'mapping', 'timeoutMs', 'url', 'username'],
   )
   // 超时那一栏的判据照旧（它跟自动推送无关，别被这次删改带走）。
   assert.deepEqual(draftProblems({ ...draftFrom({}), timeoutMs: '0' }), [{ code: 'timeoutNotPositive' }])
@@ -83,6 +87,19 @@ test('自动推送字典：新增的键两种语言都在，占位符也一致',
     'sync.autoPush.skip.idle',
     'sync.autoPush.noReason',
     'sync.autoPush.problem',
+    // 双向那一档的几句（与上面同形，只是说"拉多少、推多少"）
+    'sync.field.autoSync',
+    'sync.field.autoPushCovered',
+    'sync.field.autoSyncHint',
+    'sync.autoSync.enabled',
+    'sync.autoSync.now',
+    'sync.autoSync.running',
+    'sync.autoSync.done',
+    'sync.autoSync.nothing',
+    'sync.autoSync.skipped',
+    'sync.autoSync.failed',
+    'sync.autoSync.problem',
+    'sync.autoPush.skip.idleSync',
   ] as const
   for (const key of keys) {
     assert.ok(key in zh, `中文缺 ${key}`)
@@ -90,7 +107,17 @@ test('自动推送字典：新增的键两种语言都在，占位符也一致',
   }
   // 占位符要成对：句子里的 `{pushed}` 在两种语言里都得有，否则 `t()` 换出来的是一个原样的花括号。
   const placeholders = (text: string): string[] => [...text.matchAll(/\{(\w+)\}/g)].map((match) => match[1] ?? '').sort()
-  for (const key of ['sync.autoPush.enabled', 'sync.autoPush.done', 'sync.autoPush.skipped', 'sync.autoPush.failed', 'sync.autoPush.problem']) {
+  for (const key of [
+    'sync.autoPush.enabled',
+    'sync.autoPush.done',
+    'sync.autoPush.skipped',
+    'sync.autoPush.failed',
+    'sync.autoPush.problem',
+    'sync.autoSync.done',
+    'sync.autoSync.skipped',
+    'sync.autoSync.failed',
+    'sync.autoSync.problem',
+  ]) {
     assert.deepEqual(
       placeholders(zh[key as keyof typeof zh]),
       placeholders(en[key as keyof typeof en]),

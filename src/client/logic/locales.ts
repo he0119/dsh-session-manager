@@ -421,6 +421,7 @@ export const zh = {
   'sync.chip.noteRestart': '上次同步的改动要重启 DSH 才生效',
   // 绿点说的是"自动推送开着"（配置事实），这句把它讲明白——否则绿点只靠颜色传达。
   'sync.chip.autoTip': '自动推送开着：本机空闲 5 分钟就推一次',
+  'sync.chip.autoSyncTip': '自动同步开着：写完一轮、安静 5 分钟之后双向对齐，并顺手整理自己那一格',
   // 那枚点自己的悬浮提示：鼠标落在点上时回答"这个颜色是什么意思"（见 logic/syncChipDot.ts）。
   'sync.chip.dot.ongoing': '有一趟同步正在跑',
   'sync.chip.dot.error': '上次同步没成：{reason}',
@@ -428,6 +429,7 @@ export const zh = {
   'sync.chip.dot.problems': '上次同步有 {count} 条没做到',
   'sync.chip.dot.restart': '上次同步的改动要重启 DSH 才生效',
   'sync.chip.dot.auto': '自动推送开着：本机空闲 5 分钟就推一次',
+  'sync.chip.dot.autoSync': '自动同步开着：写完一轮、安静 5 分钟之后双向对齐',
   'sync.chip.dot.idle': '没有正在跑的同步，也没有遗留',
   // 页头那枚状态上的"多久以前"：档位由 logic/relativeTime.ts 判，这里只放话。
   'sync.chip.running': '同步中…',
@@ -612,7 +614,21 @@ export const zh = {
   'sync.field.autoPush': '自动推送',
   'sync.field.autoPushHint':
     '本机空闲 5 分钟之后，它才把改过的会话推送出去；你一直在写，它就一直不动。只推送、绝不拉取，也不动本机的任何会话。',
+  // 自动同步：同一件事的强那一档（双向 + 收尾整理）。两栏都开着时按这一档走，上面那一栏在界面上置灰。
+  'sync.field.autoSync': '自动同步',
+  'sync.field.autoPushCovered': '已由「自动同步」包含：它连推送那一半一起做。',
+  'sync.field.autoSyncHint':
+    '写完一轮、安静 5 分钟之后自己跑一趟双向同步：该拉的拉、该推的推，收尾时顺手整理自己那一格（只删重复与被取代的包，孤儿包留着）。远端有一份更新的同一条会话时，本机那份会被顶掉——旧的那份进备份，可在「备份与回滚」里退回；正在本机开着的会话跳过。',
   'sync.autoPush.enabled': '自动推送已开：本机空闲 5 分钟才推。',
+  'sync.autoSync.enabled': '自动同步已开：写完一轮、安静 5 分钟之后双向对齐，并整理自己那一格。',
+  'sync.autoSync.now': '立即同步一次',
+  'sync.autoSync.running': '正在自动同步…',
+  'sync.autoSync.done': '自动同步：拉取 {pulled} 条、推送 {pushed} 条（上传 {bytesOut}）。',
+  'sync.autoSync.nothing': '自动同步：两边一样，没有要对齐的。',
+  'sync.autoSync.skipped': '自动同步这次没跑：{reason}。',
+  'sync.autoSync.failed': '自动同步连续失败 {count} 次。',
+  'sync.autoSync.problem': '自动同步最近一次的问题：{problem}',
+  'sync.autoPush.skip.idleSync': '没有要对齐的会话',
   // 状态栏那一格（39px 的单行）：只放得下一句短的，细节留在同步弹窗里。
   'sync.bar.running': '同步中 {done}/{total}',
   'sync.bar.runningUnknown': '同步中…',
@@ -1045,12 +1061,14 @@ export const en: LocaleDictOf<typeof NS> = {
   'sync.chip.noteProblems': 'Last sync left {count} item(s) undone',
   'sync.chip.noteRestart': 'Last sync takes effect after a restart',
   'sync.chip.autoTip': 'Auto-push is on: pushes once the machine has been idle for 5 minutes',
+  'sync.chip.autoSyncTip': 'Auto-sync is on: after a quiet turn it aligns both sides and tidies its own cell',
   'sync.chip.dot.ongoing': 'A sync is running',
   'sync.chip.dot.error': 'Last sync failed: {reason}',
   'sync.chip.dot.errorPlain': 'Last sync failed (no reason recorded)',
   'sync.chip.dot.problems': 'Last sync left {count} item(s) undone',
   'sync.chip.dot.restart': 'Last sync takes effect after DSH restarts',
   'sync.chip.dot.auto': 'Auto-push is on: pushes once the machine has been idle for 5 minutes',
+  'sync.chip.dot.autoSync': 'Auto-sync is on: after a quiet turn it aligns both sides',
   'sync.chip.dot.idle': 'No sync running, nothing left over',
   'sync.chip.running': 'Syncing…',
   'sync.chip.justNow': 'Sync · just now',
@@ -1234,7 +1252,20 @@ export const en: LocaleDictOf<typeof NS> = {
   'sync.field.autoPush': 'Automatic push',
   'sync.field.autoPushHint':
     'Once this machine has been idle for five minutes, it uploads the sessions you changed; while you keep writing, it stays put. It pushes only and never pulls, and it never touches any session on this machine.',
+  'sync.field.autoSync': 'Automatic sync',
+  'sync.field.autoPushCovered': 'Covered by "Automatic sync", which also does the pushing half.',
+  'sync.field.autoSyncHint':
+    'Five minutes after a quiet turn it runs a two-way sync by itself: pulls what is missing, pushes what is new, and tidies its own cell on the way out (only duplicate and superseded bundles; orphan bundles stay). When the remote has a newer copy of the same session, the local one is replaced — the old copy goes to backups and can be restored from "Backups and rollback". Sessions open on this machine are skipped.',
   'sync.autoPush.enabled': 'Automatic push is on: it uploads once the machine has been idle for five minutes.',
+  'sync.autoSync.enabled': 'Automatic sync is on: after a quiet turn it aligns both sides and tidies its own cell.',
+  'sync.autoSync.now': 'Sync now',
+  'sync.autoSync.running': 'Syncing automatically…',
+  'sync.autoSync.done': 'Automatic sync: pulled {pulled}, pushed {pushed} (uploaded {bytesOut}).',
+  'sync.autoSync.nothing': 'Automatic sync: both sides already match.',
+  'sync.autoSync.skipped': 'Automatic sync did not run this time: {reason}.',
+  'sync.autoSync.failed': 'Automatic sync has failed {count} time(s) in a row.',
+  'sync.autoSync.problem': 'Latest automatic sync problem: {problem}',
+  'sync.autoPush.skip.idleSync': 'Nothing to align',
   'sync.bar.running': 'Syncing {done}/{total}',
   'sync.bar.runningUnknown': 'Syncing…',
   'sync.bar.done': 'Synced · {count} sessions',

@@ -66,6 +66,17 @@ export interface SyncConfig {
    * 刷新，本机这边一个字节都不改，所以它可以无人值守地反复跑。
    */
   autoPush?: boolean
+  /**
+   * 打开**自动同步**：本机写完一轮之后，插件自己在后台跑一轮**双向**同步（该拉的拉、该推的推），
+   * 收尾时顺手整理自己那一格（只删重复与被取代的包，孤儿包留着）。
+   *
+   * 与 `autoPush` 的分工：两者是同一件事的强弱两档，`autoSync` 开着时 `autoPush` 被它吸收（它包含
+   * 推送那一半）。两个都没开 = 不自动跑。
+   *
+   * 允许它动本机：远端更新时先备份、再顶掉本机那份（与手动按「确认同步」同一段代码），正在本机开着
+   * 的会话仍会被跳过。代价是"后台会改我的库"——后悔面是「备份与回滚」里那几份（`kind: 'replace'`）。
+   */
+  autoSync?: boolean
 }
 
 /**
@@ -127,11 +138,6 @@ export interface PluginConfig {
  */
 export const DEFAULT_PASSWORD_REF = 'DSH_DAV_PASSWORD'
 
-/** 自动推送那一节拍平之后的样子（界面与核心层都用这一份形状）。 */
-export interface AutoPushConfig {
-  enabled: boolean
-}
-
 /**
  * 同步那一节的 schema。
  *
@@ -149,6 +155,7 @@ export const SyncConfigSchema = z
     mapping: z.dict(z.string()),
     timeoutMs: z.number().step(1).min(1),
     autoPush: z.boolean(),
+    autoSync: z.boolean(),
   })
   .volatile() as unknown as ConfigSchema
 
@@ -220,20 +227,37 @@ export function syncSection(config: PluginConfigInput | undefined): SyncConfig |
   return raw as SyncConfig
 }
 
+/** 自动那一档：关 / 只推 / 双向（双向含推送，并顺手整理自己那一格）。 */
+export type AutoMode = 'off' | 'push' | 'sync'
+
+/** 把自动那两栏拍平之后的设置。 */
+export interface AutoConfig {
+  /** 开着没有（`mode !== 'off'`）。调度器只看这一条。 */
+  enabled: boolean
+  /** 哪一档：`push` 只推不动本机，`sync` 双向并整理。 */
+  mode: AutoMode
+}
+
 /**
- * 把自动推送那一节拍平：只剩开关。
+ * 把自动那两栏拍平成一档。
  *
- * 判据只有一条：`autoPush === true` 才算开。`false` 与缺席是同一件事——"没开"，不是"用默认值开"。
+ * 判据：`autoSync === true` 是双向；否则 `autoPush === true` 是只推；否则关。**强的那一档赢**——两个都
+ * 写着时按双向走，不会因为留着旧的 `autoPush: true` 就把双向降级成只推（升级上来的配置里那一栏还
+ * 在，而降级是用户最不会预期的行为）。
+ *
+ * 名字里的 push 是历史：它是这条后台通道的名字（配置键、路由 `/auto-push`、事件 `auto-push`），双向
+ * 打开之后它跑的是完整的一轮，见 [那篇决策](../.agents/notes/implemented/feature/2026-11-13-auto-sync-runs-both-ways.md)。
  *
  * 原来这里还要算"隔多久跑一次"（缺省 5 分钟、低于下限抬上来）。兜底定时器删掉之后那个数没有消费者
- * 了，于是整项一起去掉：现在什么时候推由"本机写完一轮"这件事决定，不按时间走。
+ * 了，于是整项一起去掉：现在什么时候跑由"本机写完一轮"这件事决定，不按时间走。
  *
  * @param sync 同步那一节（`syncSection()` 的返回值）。
  * @returns 拍平后的设置；连同步都没配时是缺席。
  */
-export function autoPushSection(sync: SyncConfig | undefined): AutoPushConfig | undefined {
+export function autoPushSection(sync: SyncConfig | undefined): AutoConfig | undefined {
   if (sync === undefined) return undefined
-  return { enabled: sync.autoPush === true }
+  const mode: AutoMode = sync.autoSync === true ? 'sync' : sync.autoPush === true ? 'push' : 'off'
+  return { enabled: mode !== 'off', mode }
 }
 
 /**

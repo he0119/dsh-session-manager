@@ -612,7 +612,12 @@ function fileName(count: number, at: Date): string {
  * @param info 同步配置里的非敏感字段（远端地址与机器名）；界面拿来在横幅上说"推到哪儿了"。
  * @returns 响应体。
  */
-function autoPushPayload(outcome: AutoPushOutcome, info: SyncInfo | undefined): Record<string, unknown> {
+function autoPushPayload(
+  outcome: AutoPushOutcome,
+  info: SyncInfo | undefined,
+  /** 这一轮可能改本机（双向那一档）时，宿主接不接得住注册表改动；只推那一档根本不问。 */
+  fallbackEffect: EffectMode,
+): Record<string, unknown> {
   const base = {
     mode: 'auto-push' as const,
     remote: { url: info?.url ?? '', machineId: info?.machineId ?? '' },
@@ -638,11 +643,12 @@ function autoPushPayload(outcome: AutoPushOutcome, info: SyncInfo | undefined): 
     problems: applied.problems,
     ...(applied.planSource === undefined ? {} : { planSource: applied.planSource }),
     /*
-     * 只推不拉这条路上**永远不会**需要重启：它不改本机任何会话，注册表一个字节都没动。写死 `immediate`
-     * 而不是走 `effectOf()`——那个探测问的是"宿主能不能接住这次的注册表改动"，而这次根本没有那种改动，
-     * 探出来的结果只会是一句假警告（与迁移那篇决策同一条口径：只在坏消息时说话）。
+     * 只推那一档**永远不会**需要重启：它不改本机任何会话，注册表一个字节都没动——所以调用方传进来的
+     * `fallbackEffect` 在那条路上是 `immediate`（写死它而不是问宿主：那个探测问的是"宿主能不能接住
+     * 这次的注册表改动"，而这次根本没有那种改动，探出来的只会是一句假警告）。双向那一档真的会写注册
+     * 表，于是由 `effectOf()` 按这次的结论说话。
      */
-    takesEffect: 'immediate' as const,
+    takesEffect: effectOf(applied.effect, fallbackEffect),
   }
 }
 
@@ -664,7 +670,11 @@ function autoPushLastPayload(outcome: AutoPushOutcome | undefined): Record<strin
     ...(outcome.problem === undefined ? {} : { problem: outcome.problem }),
     ...(outcome.startedAt === undefined ? {} : { startedAt: outcome.startedAt }),
     ...(outcome.finishedAt === undefined ? {} : { finishedAt: outcome.finishedAt }),
-    pushedCount: outcome.outcome?.pushed.length ?? 0,
+    // 两个计数都容错：这一份是"上一轮的账"，宿主与界面的形状对不上时宁可少说一句，也不该让整条
+    // 长连接因为一个空数组字段崩掉（认领来的那一轮只有计数，没有完整结果）。
+    pushedCount: outcome.outcome?.pushed?.length ?? 0,
+    // 双向那一档才有拉取：横幅上那句"拉取 N 条、推送 M 条"读的就是这两个计数。
+    pulledCount: outcome.outcome?.pulled?.length ?? 0,
     bytesOut: outcome.outcome?.bytesOut ?? 0,
     ...(outcome.outcome?.attachmentOut === undefined ? {} : { attachmentOut: outcome.outcome.attachmentOut }),
     problems: outcome.outcome?.problems ?? [],
@@ -1631,7 +1641,15 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
     try {
       const onProgress = (progress: SyncProgress): void => sendEvent(res, { type: 'progress', progress })
       const outcome = await timer.tick({ onProgress })
-      sendEvent(res, { type: 'result', result: autoPushPayload(outcome, deps.syncInfo?.()) })
+      sendEvent(res, {
+        type: 'result',
+        result: autoPushPayload(
+          outcome,
+          deps.syncInfo?.(),
+          // 只推那一档不会动本机，因此不吃"要不要重启"那一问；双向那一档按宿主能力说话。
+          deps.syncInfo?.()?.autoPush?.mode === 'sync' ? takesEffect() : 'immediate',
+        ),
+      })
     } catch (error) {
       sendEvent(res, { type: 'error', error: error instanceof Error ? error.message : String(error) })
     }

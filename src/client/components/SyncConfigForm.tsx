@@ -458,13 +458,32 @@ export function SyncConfigForm({
       <div className="dsm-toggleRow">
         <div className="dsm-toggleText">
           <div className="dsm-toggleTitle">{t('sync.field.autoPush')}</div>
-          <div className="dsm-toggleDesc">{t('sync.field.autoPushHint')}</div>
+          {/*
+            双向开着时这一栏置灰并换一句说明：两栏是同一件事的强弱两档，双向已经包含推送那一半。
+            值本身不动（`sync.autoPush` 留在配置里），关掉双向之后原来那档照旧回来——所以不是"勾选了
+            就清空另一栏"，那种做法会让用户的设置凭空消失。
+          */}
+          <div className="dsm-toggleDesc">
+            {view.autoSync ? t('sync.field.autoPushCovered') : t('sync.field.autoPushHint')}
+          </div>
         </div>
         <Switch
           checked={view.autoPush}
-          disabled={!snapshot.writable}
+          disabled={!snapshot.writable || view.autoSync}
           label={t('sync.field.autoPush')}
           onChange={(next) => edit({ autoPush: next })}
+        />
+      </div>
+      <div className="dsm-toggleRow">
+        <div className="dsm-toggleText">
+          <div className="dsm-toggleTitle">{t('sync.field.autoSync')}</div>
+          <div className="dsm-toggleDesc">{t('sync.field.autoSyncHint')}</div>
+        </div>
+        <Switch
+          checked={view.autoSync}
+          disabled={!snapshot.writable}
+          label={t('sync.field.autoSync')}
+          onChange={(next) => edit({ autoSync: next })}
         />
       </div>
       {/*

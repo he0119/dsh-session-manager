@@ -1,6 +1,10 @@
-# Agent Note: 自动同步只推送，拉取永远要人看着
+# Agent Note: 自动推送只推送，拉取永远要人看着
 
 Status: implemented
+
+> 这条只管**只推**那一档（`sync.autoPush`）。设置里还有一档「自动同步」（`sync.autoSync`）：双向 +
+> 整理自己那一格，覆盖本机前先备份。两档的分工与边界见
+> [后台那一轮可以跑双向](2026-11-13-auto-sync-runs-both-ways.md)。
 
 ## Problem
 

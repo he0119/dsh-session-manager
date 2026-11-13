@@ -141,6 +141,9 @@ export interface StateResponse extends MetaResponse {
   workspaces: WorkspaceSummary[]
 }
 
+/** 自动那一档：关 / 只推 / 双向（双向含推送，并顺手整理自己那一格）。 */
+export type AutoMode = 'off' | 'push' | 'sync'
+
 /** 同步往哪儿去、这台机器叫什么（宿主 `SyncInfo`，不含任何凭据）。 */
 export interface SyncInfo {
   url: string
@@ -151,7 +154,7 @@ export interface SyncInfo {
    * 自动推送开着没有（宿主把 `sync.autoPush` 拍平的结果）；**没开就是 undefined**，界面据此决定要不要
    * 补那一句、要不要摆「立即推送一次」。
    */
-  autoPush?: { enabled: boolean }
+  autoPush?: { enabled: boolean; mode: AutoMode }
   /**
    * 上一次手动同步的结论（宿主存在 `<DSH_HOME>/dsh-session-manager/state.json` 里）。
    *

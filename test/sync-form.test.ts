@@ -125,8 +125,9 @@ test('同步设置：接缝没给出值时不编造（空节 → 空草稿）', 
     username: '',
     mapping: [],
     timeoutMs: '',
-    // 自动推送那一栏也是"没给就不编"：按未勾选（"没开"，不是"用默认值开"）。
+    // 自动那两栏也是"没给就不编"：按未勾选（"没开"，不是"用默认值开"）。
     autoPush: false,
+    autoSync: false,
   })
 })
 
@@ -255,6 +256,25 @@ test('同步设置：打开自动推送发一条 set，关掉发 unset（与 tim
   // 没动过就不发编辑：这是"别的字段不跟着被覆盖"的防线。
   assert.deepEqual(draftOps(base, {}), [], '什么都没改 → 一条编辑都不发')
   assert.deepEqual(draftOps({ ...base, autoPush: true }, { autoPush: true }), [], '开关本来就开着 → 不发')
+})
+
+test('同步设置：自动同步那一栏同样只发改动过的那一条', () => {
+  /*
+   * 两栏是同一件事的强弱两档，各自独立写：打开双向只写 `autoSync`，**不动** `autoPush`——用户原来
+   * 那一档留着，关掉双向之后它就回来（见 `src/config.ts` 的 `autoPushSection()`：强的那档赢）。
+   */
+  const base = draftFrom({})
+
+  assert.deepEqual(draftOps({ ...base, autoSync: true }, {}), [{ op: 'set', path: ['sync', 'autoSync'], value: true }])
+  assert.deepEqual(draftOps({ ...base, autoSync: false }, { autoSync: true }), [
+    { op: 'unset', path: ['sync', 'autoSync'] },
+  ])
+  assert.deepEqual(
+    draftOps({ ...base, autoPush: true, autoSync: true }, { autoPush: true }),
+    [{ op: 'set', path: ['sync', 'autoSync'], value: true }],
+    '两栏一起打开时只发真的变了的那一条（autoPush 本来就在）',
+  )
+  assert.deepEqual(draftOps({ ...base, autoSync: true }, { autoSync: true }), [], '本来就开着 → 不发')
 })
 
 

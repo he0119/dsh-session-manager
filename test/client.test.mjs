@@ -5371,6 +5371,49 @@ test('组件源码：同步的进度在状态栏那一格里说，列表上方�
   assert.match(sync, /backgroundLine/, '同步那一面接得住这一句')
 })
 
+test('客户端产物：自动同步开着时，同步那一面与页头那枚点都改说"双向"', { skip }, () => {
+  /*
+   * 同一段代码按 `mode` 换句子：只推说"推了几条"，双向要说"拉几条、推几条"，那枚手动入口也从「立即
+   * 推送一次」变成「立即同步一次」——不然用户看到的是"按钮叫推送，跑的是双向"。
+   */
+  const state = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    sync: { url: 'https://dav.example.com/dsh', machineId: 'robot-a', mappings: 1 },
+    sessions: [],
+    workspaces: [],
+  }
+  const withMode = (mode) => {
+    // 两处都给：面板的 `syncInfo` 取的是 `state ?? meta`，只种 `meta` 会被 `state` 盖过去。
+    const sync = { ...state.sync, autoPush: { enabled: true, mode } }
+    const mounted = mount({
+      state: { ...state, sync },
+      meta: { sessionsRoot: state.sessionsRoot, registryPath: state.registryPath, sync },
+      panel: 'sync',
+    })
+    const text = strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
+    const labels = mounted.recorded.filter((node) => node.type === 'button').map((node) => node.props?.children)
+    const dot = mounted.recorded.find((node) => node.type === 'span' && node.props?.['data-state'] !== undefined)
+    const slot = mounted.recorded.find((node) => String(node.props?.className ?? '').includes('dsm-dotSlot'))
+    return { text, labels, dot, slot }
+  }
+
+  const push = withMode('push')
+  assert.ok(push.text.includes('sync.autoPush.enabled'), '只推那一档说"自动推送已开"')
+  assert.ok(push.labels.includes('sync.autoPush.now'), '那一枚叫「立即推送一次」')
+  assert.equal(push.dot?.props?.['data-state'], 'done', '开着就是绿点')
+  assert.equal(push.slot?.props?.title, 'sync.chip.dot.auto', '点说的是自动推送')
+
+  const both = withMode('sync')
+  assert.ok(both.text.includes('sync.autoSync.enabled'), '双向那一档说"自动同步已开"')
+  assert.equal(both.text.includes('sync.autoPush.enabled'), false, '两句话不并存')
+  assert.ok(both.labels.includes('sync.autoSync.now'), '那一枚改叫「立即同步一次」')
+  assert.equal(both.labels.includes('sync.autoPush.now'), false, '旧那名不再出现')
+  assert.equal(both.dot?.props?.['data-state'], 'done', '双向开着同样是绿点')
+  assert.equal(both.slot?.props?.title, 'sync.chip.dot.autoSync', '点说的是自动同步（它会动本机，用户该知道）')
+})
+
 test('客户端产物：页头那枚点按本地事实点颜色（自动推送开着是绿、上次失败是红、有遗留是黄）', { skip }, () => {
   /*
    * 四档都在页面上量：判据在 `logic/syncChipDot.ts`（纯函数，`test/sync-chip-dot.test.ts` 把矩阵摆开），
@@ -5839,10 +5882,12 @@ test('客户端产物：自动推送只有开关那一行，没有间隔那一�
         .filter((x) => String(x).includes('autoPushInterval'))
         .join(' / ')}`,
     )
+    // 自动那一档有两行：只推（这一条）与双向（下一条用例）。多出来的就是多画了一栏。
+    assert.ok(text.includes('sync.field.autoSync'), '双向那一行也在')
     assert.equal(
       mounted.recorded.filter((n) => n.props?.['data-switch'] === 'true').length,
-      1,
-      `autoPush=${String(autoPush)} 时开关本身还在（两态都画，只是勾选态不同）`,
+      2,
+      `autoPush=${String(autoPush)} 时两枚开关都在（两态都画，只是勾选态不同）`,
     )
   }
 })
@@ -5897,12 +5942,14 @@ test('客户端产物：自动推送是个官方 Switch（不是手写勾选框�
 
   // ① 是官方 `Switch`（桩给自己盖了 `data-switch`），不是本页手写的 checkbox。
   const switches = mounted.recorded.filter((node) => node.props?.['data-switch'] === 'true')
-  assert.equal(switches.length, 1, '自动推送用官方 Switch，且只有一个')
-  assert.equal(switches[0].props['data-checked'], true, '开关反映配置里的开态（这里配的是 true）')
+  assert.equal(switches.length, 2, '自动那两栏都用官方 Switch（只推 / 双向），没有第三枚')
+  const pushSwitch = switches.find((node) => node.props?.['aria-label'] === 'sync.field.autoPush')
+  assert.ok(pushSwitch, '只推那一枚的无障碍名走字典键（官方 Switch 的 label 是必须的）')
+  assert.equal(pushSwitch.props['data-checked'], true, '开关反映配置里的开态（这里配的是 true）')
   assert.equal(
-    switches[0].props['aria-label'],
-    'sync.field.autoPush',
-    '无障碍名走同一个键（官方那个 Switch 的 label 是必须的）',
+    switches.filter((node) => node.props?.['aria-label'] === 'sync.field.autoSync').length,
+    1,
+    '双向那一枚也在，无障碍名同样走字典',
   )
   const handRolled = mounted.recorded.filter(
     (node) => node.type === 'input' && node.props?.type === 'checkbox',
@@ -5911,7 +5958,7 @@ test('客户端产物：自动推送是个官方 Switch（不是手写勾选框�
 
   // ② 摆法是"左边标题+说明、开关右端"：标题与说明同处 `dsm-toggleText`，开关在那一行里。
   const toggleText = mounted.recorded.filter((node) => node.props?.className === 'dsm-toggleText')
-  assert.equal(toggleText.length, 1, '标题与说明同处一列（dsm-toggleText）')
+  assert.equal(toggleText.length, 2, '两行各有一列（标题与说明同处 dsm-toggleText）')
   const toggleTextStrings = strings(toggleText[0].props?.children)
   assert.ok(toggleTextStrings.includes('sync.field.autoPush'), '标题在这一列里')
   assert.ok(
@@ -5919,7 +5966,7 @@ test('客户端产物：自动推送是个官方 Switch（不是手写勾选框�
     `说明也在同一列里（它该在标题下面，而不是与开关并列），实际：${JSON.stringify(toggleTextStrings)}`,
   )
   const row = mounted.recorded.filter((node) => node.props?.className === 'dsm-toggleRow')
-  assert.equal(row.length, 1, '整行是 dsm-toggleRow')
+  assert.equal(row.length, 2, '两行都是 dsm-toggleRow')
   assert.ok(
     strings(row[0].props?.children).includes('sync.field.autoPushHint'),
     '开关与标题+说明在同一行里',

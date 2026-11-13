@@ -57,7 +57,7 @@ import { join } from 'node:path'
 import { canonicalDir, type DirCanonicalizer } from './canonical-path.ts'
 import { commitAttachmentObject, decodeLogText, scanAttachmentRefs, type AttachmentPort, type AttachmentRef } from './attachments.ts'
 import { warmCheckpoints, type WarmDeps } from './checkpoint-warm.ts'
-import type { AutoPushConfig } from './config.ts'
+import type { AutoConfig } from './config.ts'
 import type { DavPort } from './dav.ts'
 import { scanAll, type DiscoveredSession } from './discovery.ts'
 import { createBackup } from './journal.ts'
@@ -112,12 +112,13 @@ export interface SyncSettings {
   password?: string
   timeoutMs?: number
   /**
-   * 自动推送那一节（`autoPush` 开关 + 抬到下限之后的间隔）。
+   * 自动那一档（关 / 只推 / 双向）。
    *
    * 拍平在 `src/config.ts` 的 `autoPushSection()` 一处，这里是它的解析形态；缺席 = 这个宿主没开
-   * （`runAutoPush()` 据此直接报 `skip: 'disabled'`）。**开关**在这一份里，调度器因此不必自己去读配置。
+   * （`runAutoPush()` 据此直接报 `skip: 'disabled'`）。**开关与模式**都在这一份里，调度器因此不必自己
+   * 去读配置。
    */
-  autoPush?: AutoPushConfig
+  autoPush?: AutoConfig
 }
 
 /** 一条会话里某个代次日志的指纹。 */
@@ -2651,7 +2652,11 @@ async function repairAttachments(
 export async function applyPreparedSync(
   deps: SyncDeps,
   prepared: SyncPrepared,
-  options: { onProgress?: ProgressReporter; tidy?: boolean } = {},
+  /**
+   * `tidy`：收尾时整理自己那一格；`tidyOrphans`：连"索引里没有的孤儿包"一起删（缺省 true，与手动那
+   * 一枚按钮一致）。自动同步那一档传 false——索引万一坏过，孤儿包可能是唯一副本（见 `runAutoPush()`）。
+   */
+  options: { onProgress?: ProgressReporter; tidy?: boolean; tidyOrphans?: boolean } = {},
 ): Promise<SyncOutcome> {
   const problems: string[] = []
   const { plan, local, remote } = prepared
@@ -3101,14 +3106,20 @@ export async function applyPreparedSync(
   if (tidyPlan !== undefined && indexWritten) {
     // 孤儿包先列出来：两段合成一个分母，界面那一条进度条才走得完（一次整理只画一条）。
     let orphans: Array<{ name: string; bytes: number }> = []
-    try {
-      /*
-       * 已知的包 = 索引里留下的 + 这一次正要删的。少了后一半，刚删掉的那些会在列目录时又被当成"没有
-       * 索引条目的孤儿"再删一遍（404 不算错，但账上会多出一笔孤儿）。
-       */
-      orphans = await orphanBundles(deps.dav, deps.settings.machineId, new Set([...ownEntries.keys(), ...tidyIds]))
-    } catch (error) {
-      problems.push(`整理远端：列自己那一格失败：${error instanceof Error ? error.message : String(error)}`)
+    /*
+     * 自动同步那一档只清**确定多余**的（重复 / 被取代），孤儿包一个不动：索引万一坏过，那些"没有索引
+     * 条目的包"可能是某条会话在远端的唯一副本。手动那枚「整理远端」照旧连孤儿一起清（人看着）。
+     */
+    if (options.tidyOrphans !== false) {
+      try {
+        /*
+         * 已知的包 = 索引里留下的 + 这一次正要删的。少了后一半，刚删掉的那些会在列目录时又被当成"没有
+         * 索引条目的孤儿"再删一遍（404 不算错，但账上会多出一笔孤儿）。
+         */
+        orphans = await orphanBundles(deps.dav, deps.settings.machineId, new Set([...ownEntries.keys(), ...tidyIds]))
+      } catch (error) {
+        problems.push(`整理远端：列自己那一格失败：${error instanceof Error ? error.message : String(error)}`)
+      }
     }
     const total = tidyPlan.entries.length + orphans.length
     let done = 0
@@ -3718,6 +3729,15 @@ export async function runAutoPush(
   const failures = options.failures ?? 0
   const config = deps.settings.autoPush
   if (config === undefined || !config.enabled) return { ran: false, skip: 'disabled', failures }
+  /*
+   * 两档在这一处分岔，其余完全相同（同一个 quiet 窗口、同一套进度、同一份 `AutoPushOutcome`）：
+   *
+   * - `push`：只推。`pushOnly` 让计划里没有拉取那半，于是这一轮**永远不改本机任何会话**；
+   * - `sync`：双向 + 收尾整理自己那一格（只删重复与被取代的包，孤儿包留着）。这一档会动本机：远端
+   *   更新时先备份、再顶掉本机那份，正在本机开着的会话仍被跳过——所以它要求用户在设置里明确选了
+   *   "双向"才可能发生（见 [那篇决策](../.agents/notes/implemented/feature/2026-11-13-auto-sync-runs-both-ways.md)）。
+   */
+  const mode = config.mode
   const startedAt = now()
   /*
    * 三个条件都成立才是"真的没事干"（`idle`），此时连落地都不走：索引里要写的东西与远端那份逐字节
@@ -3730,24 +3750,33 @@ export async function runAutoPush(
    *      留在索引里，别的机器就会照着它去取一个不存在的包。
    */
   try {
-    const pushDeps: SyncDeps = { ...deps, pushOnly: true, progressWhat: deps.progressWhat ?? 'auto-push' }
-    const prepared = await prepareSync(pushDeps, {
+    const roundDeps: SyncDeps =
+      mode === 'push'
+        ? { ...deps, pushOnly: true, progressWhat: deps.progressWhat ?? 'auto-push' }
+        : { ...deps, progressWhat: deps.progressWhat ?? 'auto-push' }
+    const prepared = await prepareSync(roundDeps, {
       ...(options.onProgress === undefined ? {} : { onProgress: options.onProgress }),
-      pushOnly: true,
+      ...(mode === 'push' ? { pushOnly: true } : {}),
     })
+    /*
+     * "真的没事干"要连**整理**一起算：双向那一档即使一条都不用搬，自己那一格里可能躺着几份重复的包，
+     * 那一趟仍然值得跑（否则那些包永远没人清）。只推那一档没有整理，条件与原来一样。
+     */
+    const tidyPlan = mode === 'sync' ? planTidy(prepared.remote, deps.settings.machineId) : undefined
     const idle =
       prepared.plan.pushIds.length === 0 &&
       prepared.plan.blank.length === 0 &&
-      !indexNeedsSettling(prepared, deps.settings.machineId)
+      (mode === 'push' || prepared.plan.pullIds.length === 0) &&
+      !indexNeedsSettling(prepared, deps.settings.machineId) &&
+      (tidyPlan === undefined || tidyPlan.entries.length === 0)
     if (idle) {
       const finishedAt = now()
       return { ran: true, skip: 'idle', startedAt, finishedAt, failures }
     }
-    const outcome = await applyPreparedSync(
-      pushDeps,
-      prepared,
-      options.onProgress === undefined ? {} : { onProgress: options.onProgress },
-    )
+    const outcome = await applyPreparedSync(roundDeps, prepared, {
+      ...(options.onProgress === undefined ? {} : { onProgress: options.onProgress }),
+      ...(mode === 'sync' ? { tidy: true, tidyOrphans: false } : {}),
+    })
     const finishedAt = now()
     const failed = outcome.problems.length > 0
     return {
