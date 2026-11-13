@@ -553,23 +553,19 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
         />
       )}
       {surface === 'sync' && (
-        <WorkDialog
+        /*
+          这一面**自己就是弹窗**（`SyncPanel` 里那枚 `WorkDialog`）：它的标题、说明、宽度与底栏都跟着
+          "面板 / 计划 / 落地"那三段变，页面这一级只管把 onClose 与认领来的结论交过去。
+        */
+        <SyncPanel
           t={t}
-          title={t('sync.title')}
-          // 远端地址属于"在跟谁说话"，放标题下面那一行；没配置时没有可说的，就不带。
-          description={syncInfo === null ? undefined : t('sync.where', { url: syncInfo.url })}
-          size="narrow"
+          state={state}
+          meta={meta}
+          reload={load}
           onClose={close}
-        >
-          <SyncPanel
-            t={t}
-            state={state}
-            meta={meta}
-            reload={load}
-            // 认领来的那趟结论（别处发起的）：那个弹窗自己没有完整结果，由这里把这一句交给它说。
-            {...(job.done?.adopted === undefined || jobLine === null ? {} : { backgroundLine: jobLine })}
-          />
-        </WorkDialog>
+          // 认领来的那趟结论（别处发起的）：那个弹窗自己没有完整结果，由这里把这一句交给它说。
+          {...(job.done?.adopted === undefined || jobLine === null ? {} : { backgroundLine: jobLine })}
+        />
       )}
       {surface === 'backup' && (
         <WorkDialog t={t} title={t('backup.title')} onClose={close}>

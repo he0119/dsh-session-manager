@@ -40,6 +40,12 @@ export interface WorkDialogProps {
    *   读起来比窄的费劲。
    */
   size?: 'wide' | 'narrow'
+  /**
+   * 底部那一对按钮（官方 `footer`）。
+   *
+   * 给"表单 / 确认"类的那一段用：`取消` + 这一面的落地动作。面板状态下不给（关掉就是关掉）。
+   */
+  footer?: React.ReactNode
   /** 关掉它：清掉这一件事的本地草稿，回到列表。 */
   onClose: () => void
   children: React.ReactNode
@@ -51,6 +57,7 @@ export function WorkDialog({
   title,
   description,
   size = 'wide',
+  footer,
   onClose,
   children,
 }: WorkDialogProps): React.ReactElement {
@@ -64,6 +71,7 @@ export function WorkDialog({
       // 窄的那一档就是确认弹窗那枚宽度（640）：两边都用同一个类，别为"窄一点的宽弹窗"再造一档。
       className={size === 'wide' ? 'dsm-dialog dsm-workDialog' : 'dsm-dialog'}
       contentClassName="dsm-dialogContent"
+      {...(footer === undefined ? {} : { footer })}
     >
       {/*
         块间距挂在**正文自己那一层**上，而不是 `contentClassName` 上：那个类落在官方弹窗最外面那层，

@@ -1125,7 +1125,8 @@ test('客户端产物：卡片级的主动作长在卡片底部的动作行里�
   const expected = {
     manage: [],
     import: ['dialogFooter'],
-    sync: ['controls'],
+    // 同步那一面自己就是弹窗（计划与落地都并进去了），主动作与导入一样在底栏。
+    sync: ['dialogFooter'],
   }
   for (const [panel, places] of Object.entries(expected)) {
     const mounted = mount({ state, panel })
@@ -2988,13 +2989,13 @@ test('客户端产物：同步页的同步块——没配置只说明，配置�
   assert.ok(onText.includes('sync.hint:{"mappings":2}'), '要报出映射条数')
   // 机器名不再重复印在标题上：它挪到了机器名那一栏的**灰字**里（宿主解析出来的缺省值，没配就是
   // 主机名），与「超时」那一栏的 30000 同一个口径——留空不等于没有值。那一栏归表单那条用例钉。
-  // 卡片头上两个入口：「同步」（主动作）与「整理远端」（只删本机那一格里多余的包，不拉不推）。
-  // 弹窗里的「确认同步」只有开了弹窗才在树上。
-  // 「插件设置」在页头（先渲染），「同步」「整理远端」在同步卡的动作行里。
+  // 三个入口：「插件设置」在页头；「整理远端」（只删本机那一格里多余的包，不拉不推）在正文那行工具里；
+  // 「同步」是这一面的主动作，与导入一样在**底栏**（footer 渲染在正文之后，所以它排在最后）。
+  // 「确认同步」只有进了计划那一段才在树上。
   assert.deepEqual(buttonTexts(on).filter((label) => label.startsWith('sync')), [
     'sync.settings.action',
-    'sync.action',
     'sync.tidy.action',
+    'sync.action',
   ])
 })
 
@@ -4428,7 +4429,7 @@ test('客户端产物：落地时弹窗正文换成进度条（第几条 / 共�
    * 变成「转到后台」并且**可以按**（原来这里禁用，用户只能干看着）。关掉之后进度搬到页面顶上的横幅，
    * 回到这一页还在（见 logic/syncJob.ts 与 ManagerPanel 的说明）。
    */
-  assert.equal(cancelOf(recorded).props.disabled, false, '落地时这一枚可以按：它只是把窗口收起来')
+  assert.notEqual(cancelOf(recorded).props.disabled, true, '落地时这一枚可以按：它只是把窗口收起来')
   assert.equal(cancelOf(recorded).props.children, 'sync.background', '忙碌时它说的是「转到后台」，不是「取消」')
 
   // 拉取那一段用另一句：两段分母不同，文案得跟着 phase 走。
@@ -4854,7 +4855,8 @@ test('客户端产物：确认同步打的是落地端点，读的是一条事�
   const mounted = mount({
     state,
     panel: 'sync',
-    nulls: [null, null, 'apply'],
+    // 弹窗种成"计划"那一段：合并之后「确认同步」在计划段的底栏里（'apply' 那一段底栏只有「转到后台」）。
+    nulls: [null, null, 'plan'],
     fetch: async (url, init) => {
       calls.push({ url: String(url), method: init?.method, accept: init?.headers?.accept })
       return {
@@ -4962,7 +4964,7 @@ test('客户端产物：确认同步带着预演给的号码（宿主据此不�
     state,
     panel: 'sync',
     // 位置约定同上一条：`nulls[1]` 是 sync（这里种成刚预演完的那份）、`nulls[2]` 是弹窗开着。
-    nulls: [null, planned, 'apply'],
+    nulls: [null, planned, 'plan'],
     fetch: async (url, init) => {
       calls.push({ url: String(url), method: init?.method, body: init?.body })
       return {
@@ -4981,6 +4983,13 @@ test('客户端产物：确认同步带着预演给的号码（宿主据此不�
   })
 
   strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
+  /*
+   * 计划与落地同处**一枚**弹窗（不再是"面板上再叠一层确认框"）：种着计划那一段时，树上只该有一枚
+   * `role="dialog"`，标题也换成「将要同步」。
+   */
+  const dialogs = dialogsOf(mounted.recorded)
+  assert.equal(dialogs.length, 1, '计划那一段只有一枚弹窗')
+  assert.equal(dialogs[0].props['aria-label'], 'sync.dialogTitle', '标题换成「将要同步」')
   primaryOf(mounted.recorded).props.onClick()
   for (let tries = 0; tries < 50 && index < chunks.length; tries += 1) {
     await new Promise((resolve) => setImmediate(resolve))
@@ -5334,18 +5343,28 @@ test('组件源码：同步的进度在状态栏那一格里说，列表上方�
   assert.match(sync, /backgroundLine/, '同步那一面接得住这一句')
 })
 
-test('组件源码：同步那一面是窄弹窗、它的计划弹窗是宽的那一档（表要宽度，话不要）', () => {
-  // 为什么扫源码：计划那个弹窗要靠真跑一趟同步才会出现，夹具里种不出 planId 那一套状态。而"谁该宽、
-  // 谁该窄"正是那次返工里最容易再倒回去的一条——同步那一面正文只有几句话，铺到 1080 一句话要拉两行半；
-  // 计划那三张表在 640 下会被挤成一个字。
-  const manager = readFileSync(join(root, 'src/client/components/ManagerPanel.tsx'), 'utf8')
-  const panel = manager.slice(manager.indexOf("surface === 'sync'"))
-  const workDialog = panel.slice(0, panel.indexOf('</WorkDialog>'))
-  assert.match(workDialog, /size="narrow"/, '同步那一面走 640（WorkDialog 的 narrow）')
+test('组件源码：同步那一面自己就是弹窗，宽度跟着那一段走（面板 640、计划 1080）', () => {
+  // 为什么扫源码：计划那一段要靠真跑一趟同步才会出现，夹具里种不出 planId 那一套状态。而"谁该宽、谁该窄"
+  // 是那次返工里最容易再倒回去的一条——面板段只有几句话，铺到 1080 一句话要拉两行半；计划那三张表在
+  // 640 下会被挤成一个字。
   const sync = readFileSync(join(root, 'src/client/components/SyncPanel.tsx'), 'utf8')
-  const at = sync.indexOf('wide')
-  assert.notEqual(at, -1, '同步的计划弹窗要传 wide')
-  assert.match(sync.slice(at - 200, at + 20), /<ConfirmDialog[\s\S]*wide/, 'wide 传在计划那枚 ConfirmDialog 上')
+  assert.match(
+    sync,
+    /size=\{stage === 'apply' \|\| \(stage === 'plan' && hasPlanTables\) \? 'wide' : 'narrow'\}/,
+    '宽度跟着里面摆什么走：面板段与没有表的计划段都窄，有计划表 / 落地才宽',
+  )
+  // 计划不再是另一枚弹窗：这一段里不许再出现确认弹窗外壳。
+  const planSection = sync.slice(sync.indexOf("stage === 'plan'"), sync.indexOf("stage === 'apply'"))
+  assert.equal(
+    /<ConfirmDialog[\s\S]*?planId/.test(planSection) && planSection.includes('<ConfirmDialog'),
+    false,
+    '计划并进同一个弹窗，不再套一层 ConfirmDialog',
+  )
+  // 页面那一级不再替同步包外壳：外壳在 SyncPanel 里。
+  const manager = readFileSync(join(root, 'src/client/components/ManagerPanel.tsx'), 'utf8')
+  const at = manager.indexOf("surface === 'sync'")
+  const block = manager.slice(at, manager.indexOf('{surface ===', at + 10))
+  assert.equal(block.includes('<WorkDialog'), false, '同步那一面的外壳归 SyncPanel 自己')
 })
 
 test('客户端产物：轮次标题的偏移量来自视图量出来的那一行高度', { skip }, () => {

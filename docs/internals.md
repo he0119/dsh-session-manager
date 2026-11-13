@@ -279,6 +279,9 @@
   状态，后两件是 1080 宽的弹窗、导入是 640 的窄弹窗。它取代了上面那条的"页头里放页签"，也取代了
   [备份是独立分页](../.agents/notes/implemented/architecture/2026-10-07-backups-are-their-own-page.md)
   的落点（那份清单还在，位置换成状态栏那枚入口）。
+- [同步的计划与落地并进同一个弹窗](../.agents/notes/implemented/architecture/2026-11-13-sync-plan-lives-in-the-same-dialog.md)：
+  面板 → 计划 → 落地三段同处一枚弹窗（外壳归 `SyncPanel`），标题 / 宽度 / 底栏跟着段换；有表才是 1080，
+  一句话的计划仍是 640。它取代了"同步面板上再叠一层确认框"那个形状。
 - [同步的进度在状态栏那一格](../.agents/notes/implemented/architecture/2026-11-12-sync-progress-lives-in-the-status-bar.md)：
   列表上方那条 100px 的进度横幅删掉——它压的是列表，而"跑到第几条"跟勾了什么无关。状态栏多一格说一句
   （跑着「同步中 3/7」，跑完十几秒的结论），细节留在同步那一面；页头那枚同步状态仍然是常驻的状态。

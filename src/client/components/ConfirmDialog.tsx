@@ -61,11 +61,6 @@ export interface ConfirmDialogProps {
    * 用户要看到清单与问题清单，而不是一句"失败了"。
    */
   disabled?: boolean
-  /**
-   * 正文里是**表**时用宽的那一档（1080，`.dsm-workDialog`）：同步的计划有三张表，640 会把列挤成一列
-   * 一个字。一句话加清单的确认框（删除 / 迁移 / 回滚 / 整理远端）仍旧 640。
-   */
-  wide?: boolean
   onConfirm: () => void
   onCancel: () => void
   children?: React.ReactNode
@@ -92,7 +87,6 @@ export function ConfirmDialog({
   planningDetail,
   error = null,
   disabled = false,
-  wide = false,
   onConfirm,
   onCancel,
   children,
@@ -103,7 +97,7 @@ export function ConfirmDialog({
       onClose={onCancel}
       title={title}
       closeLabel={t('close')}
-      className={wide ? 'dsm-dialog dsm-workDialog' : 'dsm-dialog'}
+      className="dsm-dialog"
       contentClassName="dsm-dialogContent"
       footer={
         <>

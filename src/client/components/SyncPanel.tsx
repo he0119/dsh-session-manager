@@ -6,9 +6,9 @@
  * [ManagerPanel.tsx](./ManagerPanel.tsx)），点开才是这一面——远端通到哪、要不要走一趟、计划与差异。
  * 配置也不在这一面，在插件页那张卡里（`plugins.bundle.config`）。
  *
- * 这一面只有一张卡与一条动作行：一句话说清这条通道现在通到哪，「同步」「立即推送一次」「整理远端」
- * 在卡片底部的动作行里（见
- * [决策](../../../.agents/notes/implemented/architecture/2026-10-07-card-actions-live-in-a-footer-row.md)）。
+ * 这一面**自己就是那枚弹窗**（`WorkDialog`），分三段：面板（一句话说清这条通道通到哪 + 一排工具）→
+ * 计划 → 落地。主动作（「同步」/「确认同步」/「同步中…」）在**底栏**，与导入、删除、迁移同一处；正文
+ * 那行只放工具（「立即推送一次」「整理远端」），"决定"与"工具"不混在一排。
  *
  * 这一层只做三件事：调宿主端点、记本地草稿、把结果摆出来。所有判定都在宿主侧
  * （`src/web.ts` + `src/sync.ts`）：计划返回的就是将要发生的事，页面不自己推算。会话库数据由页面
@@ -51,6 +51,7 @@ import {
   type TidyResponse,
 } from '../api.ts'
 import { ConfirmDialog } from './ConfirmDialog.tsx'
+import { WorkDialog } from './WorkDialog.tsx'
 import { groupKey } from '../logic/groups.ts'
 import { panelEvents, type PanelSnapshot } from '../logic/panelEvents.ts'
 import { WorkspaceIcon } from './icons.tsx'
@@ -444,8 +445,11 @@ export function SyncPanel({
    * 有它时这一面顶上摆一句——失败原因、搬了几条原是页面横幅说的话，横幅搬进状态栏之后得有个地方说全。
    */
   backgroundLine,
+  /** 关掉这一面（这一面自己就是那枚弹窗了，见文件末尾的说明）。 */
+  onClose,
 }: Pick<PanelShare, 't' | 'state' | 'meta' | 'reload'> & {
   backgroundLine?: { ok: boolean; text: string }
+  onClose: () => void
 }): React.ReactElement {
   /** 最近一次计划或结果：映射表的远端候选与弹窗正文都读它（关掉弹窗之后候选还得在）。 */
   const [sync, setSync] = React.useState<SyncResponse | null>(null)
@@ -907,8 +911,74 @@ export function SyncPanel({
   const restartWarn =
     sync !== null && sync.mode === 'apply' && sync.pulled.length > 0 && sync.takesEffect === 'restart-required'
 
+  /** 计划那一段里有没有表（决定那一档要不要 1080）。 */
+  const hasPlanTables = syncPlan !== null && (syncPulls.length > 0 || syncPushes.length > 0 || syncKept.length > 0)
+
+  /** 这一段说哪件事：面板（填表单 / 说状态）→ 计划 → 落地。三段同处一个弹窗（与导入那一面同一个形状）。 */
+  const stage: 'idle' | 'plan' | 'apply' = dialog === null ? 'idle' : dialog
+
+  /**
+   * 这一面自己就是那枚弹窗（`WorkDialog`）：标题、说明、宽度与底栏都跟着 `stage` 变。
+   *
+   * 为什么不再"面板 + 叠一层确认框"：那是两枚弹窗，用户按「同步」之后看到的是一个新窗口盖在旧窗口上，
+   * 而它们说的是同一件事的两段。导入那一面先改成了同一个弹窗里的三段，这里跟它对齐。
+   * 宽度跟着段走：面板段 640（几句话），计划段 1080（三张表）。
+   */
   return (
     <>
+      <WorkDialog
+        t={t}
+        title={t(stage === 'idle' ? 'sync.title' : stage === 'apply' ? 'sync.running' : 'sync.dialogTitle')}
+        {...(stage === 'idle' && syncInfo !== null ? { description: t('sync.where', { url: syncInfo.url }) } : {})}
+        /*
+          宽度跟着**里面摆什么**走：面板段与"两边一样、没有要同步的"那种计划段都只有几句话，640 正好；
+          有计划表时才要 1080（三张表在 640 里会把动作列挤成一个字）。没有表却撑到 1080，右边会空一大块。
+        */
+        size={stage === 'apply' || (stage === 'plan' && hasPlanTables) ? 'wide' : 'narrow'}
+        onClose={onClose}
+        // 没配置同步时底栏整块不摆：一枚点了没反应的「同步」比没有更糟（与正文那句说明同一条口径）。
+        footer={
+          stage === 'idle' && syncInfo === null ? undefined : stage === 'idle' ? (
+            <>
+              <Button variant="outline" data-modal-autofocus="" onClick={onClose}>
+                {t('cancel')}
+              </Button>
+              <Button
+                variant="primary"
+                onClick={openSync}
+                disabled={syncInfo === null || busy !== null || applying}
+              >
+                {t('sync.action')}
+              </Button>
+            </>
+          ) : stage === 'plan' ? (
+            <>
+              {/* 计划这一段「取消」是**回面板**：包与目标都还在，改一改再算一次比关掉重来省事。 */}
+              <Button variant="outline" onClick={() => setDialog(null)}>
+                {t('sync.back')}
+              </Button>
+              <Button
+                variant="primary"
+                onClick={doSyncApply}
+                disabled={planning || sync === null || syncPlan === null}
+              >
+                {t('sync.applyAction')}
+              </Button>
+            </>
+          ) : (
+            <>
+              {/* 落地跑着的时候，「取消」换成「转到后台」：窗口收起来，那一趟照跑。这是用户要的那个动作——
+                  落地可能几分钟，不该因为"我关掉了窗口"就没法看它跑到哪。 */}
+              <Button variant="outline" onClick={onClose}>
+                {t('sync.background')}
+              </Button>
+              <Button variant="primary" disabled>
+                {t('sync.busy')}
+              </Button>
+            </>
+          )
+        }
+      >
       {error !== null && (
         <p className="dsm-banner dsm-error">
           <span>{error}</span>
@@ -956,15 +1026,7 @@ export function SyncPanel({
         </div>
       )}
 
-      {/*
-        这一面**不再套一张卡片**：弹窗本身已经是容器，卡片只会在对话框里再画一圈边框，而它的标题与弹窗标题
-        一字不差（都是「WebDAV 同步」）——同屏两遍，读起来像套了两层。远端地址改由弹窗那一行说明（
-        `description`）承担，正文从"按一下会发生什么"开始。
-
-        卡片底部那条动作行留在原处：卡片级的主动作放卡片底部是那一页的规矩，而这里没有卡片了，这一行就是
-        弹窗正文的最后一段——位置与观感都没变，少的是外面那圈边框与重复的标题。
-      */}
-      <>
+        {stage === 'idle' &&       <>
         {/* 别处发起的那一趟的结论：弹窗关着时它在状态栏那一格里只有一句短的，进来说全。 */}
         {backgroundLine !== undefined && (
           <p className={backgroundLine.ok ? 'dsm-hint' : 'dsm-error'}>{backgroundLine.text}</p>
@@ -985,14 +1047,11 @@ export function SyncPanel({
          * 那张表单画的是**草稿**，而这一句要说的是**现在生效的**那份配置。
          */}
         {syncInfo?.autoPush !== undefined && <p className="dsm-hint">{t('sync.autoPush.enabled')}</p>}
-        {/* 主动作在卡片底部的动作行里（见 TransferPanel.tsx 的说明）。这一页没有把「同步」放进头部：
-            配置不在这一页（挂在插件页上），读完上面那一句就知道该去哪儿改。 */}
+        {/* 这里只有工具：主动作「同步」在**底栏**（与导入、删除、迁移同一处）。
+            这一页没有把入口放进页头：配置不在这一页（挂在插件页上），读完上面那一句就知道该去哪儿改。 */}
         <div className="dsm-controls">
           {syncInfo !== null && (
             <>
-            <Button variant="primary" size="sm" onClick={openSync} disabled={busy !== null || applying}>
-              {t('sync.action')}
-            </Button>
             {/*
              * 「立即推送一次」是同一行里那枚**非 primary** 的动作：主动作仍然只有「同步」一枚（结构与
              * `test/client.test.mjs` 的 `primaryPlacements()` 钉着这一条）。
@@ -1018,36 +1077,17 @@ export function SyncPanel({
         </div>
       </>
 
-      {/* 同步弹窗：计划与「确认」同框（见 ConfirmDialog.tsx 的说明）。 */}
-      {dialog !== null && (
-        <ConfirmDialog
-          t={t}
-          // 正文是三张表（会拉取 / 会推送 / 本机独有的那些），640 会把动作列挤成一个字，所以走宽那一档。
-          wide
-          // 落地那一段标题也换掉：这时候已经不是"将要"了，正文里正跑着进度。
-          title={t(applying ? 'sync.running' : 'sync.dialogTitle')}
-          confirmLabel={t('sync.applyAction')}
-          busyLabel={t('sync.busy')}
-          busy={applying}
-          // 落地跑着的时候，「取消」换成「转到后台」：窗口收起来，那一趟照跑。这是用户要的那个动作——
-          // 落地可能几分钟，不该因为"我关掉了窗口"就没法看它跑到哪。
-          {...(applying ? { backgroundLabel: t('sync.background') } : {})}
-          planning={planning}
-          // 预演那几秒不是在空等：先扫本机、再读远端索引、最后逐条比对内容。算到哪一步摆哪一步的进度
-          // （还没有事件时退回 ConfirmDialog 那句「预演中…」）。
-          planningDetail={progress === null ? undefined : <ProgressBlock t={t} progress={progress} note={syncNote(progress)} />}
-          error={null}
-          onConfirm={doSyncApply}
-          onCancel={() => setDialog(null)}
-        >
-        {/* 落地：前面三个阶段（算计划）与后面两段（拉取 / 推送）报的是同一套事件，画法也一样。 */}
-        {applying &&
-          (liveProgress === null ? (
-            <p className="dsm-hint">{t('progress.waiting')}</p>
-          ) : (
-            <ProgressBlock t={t} progress={liveProgress} note={syncNote(liveProgress)} />
-          ))}
-        {!applying && !planning && sync !== null && syncPlan !== null && (
+}
+        {stage === 'plan' && (
+          <>
+            {planning &&
+              (progress === null ? (
+                <p className="dsm-hint">{t('dialog.previewing')}</p>
+              ) : (
+                <ProgressBlock t={t} progress={progress} note={syncNote(progress)} />
+              ))}
+                    {/* 落地：前面三个阶段（算计划）与后面两段（拉取 / 推送）报的是同一套事件，画法也一样。 */}
+        {!planning && sync !== null && syncPlan !== null && (
           <div>
             <p className={syncPlan.ok && sync.problems.length === 0 ? 'dsm-ok' : 'dsm-warn'}>
               {t('sync.summary', {
@@ -1227,8 +1267,16 @@ export function SyncPanel({
             )}
           </div>
         )}
-        </ConfirmDialog>
-      )}
+          </>
+        )}
+        {stage === 'apply' && <>        {/* 落地：前面三个阶段（算计划）与后面两段（拉取 / 推送）报的是同一套事件，画法也一样。 */}
+        {liveProgress === null ? (
+          <p className="dsm-hint">{t('progress.waiting')}</p>
+        ) : (
+          <ProgressBlock t={t} progress={liveProgress} note={syncNote(liveProgress)} />
+        )}</>}
+      </WorkDialog>
+
       {/*
         整理远端那个弹窗：正文只有一句账目（几个包、多少字节）与一句"只碰自己那一格"，进度在那一段
         真删的时候才出现。与同步那个弹窗分开：这条路上没有计划表、没有裁决、也不需要 planId。
