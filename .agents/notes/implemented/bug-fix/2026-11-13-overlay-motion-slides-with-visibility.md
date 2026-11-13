@@ -1,10 +1,10 @@
-# Agent Note: 浮层进出用滑动，不用 display 一步切换
+# Agent Note: 浮动面板进出用滑动，不用 display 一步切换
 
 Status: implemented
 
 ## Problem
 
-两层浮层（左栏的「项目与筛选」、右侧的「详情」）在窄屏是"说有就有、说没就没"：`display: none` 与
+两层浮动面板（左栏的「项目与筛选」、右侧的「详情」）在窄屏是"说有就有、说没就没"：`display: none` 与
 `display: flex` 一步切换。用户看不出它从哪一边来、往哪一边去，点开与收起都像东西突然蹦出来 /
 突然消失——原话是"打开和关闭都好生硬"。
 
@@ -14,7 +14,7 @@ Status: implemented
 
 - 关着时 `transform: translateX(±100%)` 加 `visibility: hidden`（不接点击、不进无障碍树），配
   `transition: transform 160ms ease-out, visibility 0s linear 160ms`——滑出去那 160ms 里它还看得见，
-  滑完才真的隐藏；打开那一下把浮层类换掉，`transition-delay: 0s` 让它当场开始滑。
+  滑完才真的隐藏；打开那一下把浮动面板类换掉，`transition-delay: 0s` 让它当场开始滑。
 - 方向按位置来：左栏从左边滑出、右栏从右边滑出，位移正好是它自己的宽度（280px / 340px）。
 - 外面那层空白陪着演完：同样用 `visibility` 的 160ms 延迟让出点击，免得收起那半截动画里点到下面的
   列表行。
@@ -41,7 +41,7 @@ Status: implemented
 
 ## Consequences
 
-- 两层浮层在窄屏一直占着 DOM（关着时 `visibility: hidden`），点不到也读不到；宽屏完全不受影响——
+- 两层浮动面板在窄屏一直占着 DOM（关着时 `visibility: hidden`），点不到也读不到；宽屏完全不受影响——
   那几条规则只在容器查询那一档。
 - 收起后要等 160ms 才真的隐藏，这段时间里它仍接点击。这是刻意的：动画演完之前不该把底下那块列表
   放出来。

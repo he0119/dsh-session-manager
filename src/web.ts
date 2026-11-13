@@ -482,7 +482,7 @@ function withSubagents(all: readonly DiscoveredSession[], ids: readonly string[]
  * 把发现结果与注册表对起来，得到界面要的行。
  *
  * `ungrouped` = 这条会话在外壳侧边栏里落在「未分组」那一组里（判据与理由见 visibility.ts 的
- * `isUngrouped()`）。行上的标签、会话页那枚筛选芯片、迁移页那个来源都读它——**不再**发"有没有工作区
+ * `isUngrouped()`）。行上的标签、会话页那枚筛选标签、迁移页那个来源都读它——**不再**发"有没有工作区
  * 认领"这个中间事实：以前那三处各自拿它去推「未分组」，于是子智能体/空白/已归档这些侧边栏根本不放进
  * 那一组的会话也被标成了「未分组」。
  *

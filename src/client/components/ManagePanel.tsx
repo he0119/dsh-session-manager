@@ -115,7 +115,7 @@ export function ManagePanel({
   /**
    * 从别处"定位"过来的那条会话（同步弹窗里那几枚「只看这一条」交给页面骨架，骨架再交下来）。
    *
-   * 它一变就把筛选条重置成"只看这一条"：芯片清空、搜索框填上这个 id。用 id 而不是标题——标题可能重名，
+   * 它一变就把筛选条重置成"只看这一条"：筛选标签清空、搜索框填上这个 id。用 id 而不是标题——标题可能重名，
    * 而搜索框本来就按"名称或 ID"匹配（见 `list.filter.search`）。
    */
   focusId,
@@ -135,10 +135,10 @@ export function ManagePanel({
    * 能勾的集合就是"单独操作不会被拒的集合"（子智能体跟着父会话走）。
    */
   const picked = picking.picked
-  /** 筛选条：一枚芯片都不勾、关键词为空 = 全都列出来（见 sessionFilter.matchesFilters）。 */
+  /** 筛选条：一枚筛选标签都不勾、关键词为空 = 全都列出来（见 sessionFilter.matchesFilters）。 */
   const filter = useSessionFilter(sessions)
   /*
-    别处点「只看这一条」之后落到这里：先把芯片清空（否则它可能被"空白""已归档"那些挡在外面），再把
+    别处点「只看这一条」之后落到这里：先把筛选标签清空（否则它可能被"空白""已归档"那些挡在外面），再把
     搜索词换成这个 id。依赖只看 `focusId`——`filter` 每次渲染都是新对象，带上它会让这段每次渲染都跑。
   */
   React.useEffect(() => {
@@ -244,7 +244,7 @@ export function ManagePanel({
    */
   const [sort, setSort] = React.useState<{ key: SessionSortKey; dir: 'asc' | 'desc' }>({ key: 'time', dir: 'desc' })
   /**
-   * 窄屏（页面可用宽 ≤960px）下项目树是否展开成浮层。
+   * 窄屏（页面可用宽 ≤960px）下项目树是否展开成浮动面板。
    *
    * 宽屏上这一栏一直摆着，这个值不起作用；CSS 只在容器查询那一档读 `.dsm-treeOpen`。
    */
@@ -789,7 +789,7 @@ export function ManagePanel({
             <div className="dsm-cardHead">
               <span className="dsm-cardTitle">{t('manage.title')}</span>
               {/*
-                窄屏（工作台可用宽 ≤960px）才出现：那一条项目栏收成浮层，用这枚按钮打开。宽屏上项目栏
+                窄屏（工作台可用宽 ≤960px）才出现：那一条项目栏收成浮动面板，用这枚按钮打开。宽屏上项目栏
                 一直摆着，CSS 把这枚按钮藏起来（见 styles.ts 的容器查询）。
               */}
               <Button
@@ -977,12 +977,12 @@ export function ManagePanel({
             )}
           </div>
           {/*
-            浮层外面那层空白：窄屏有浮层打开时（左栏的「项目与筛选」或右侧的「详情」），点它就收起，
+            浮动面板外面那层空白：窄屏有浮动面板打开时（左栏的「项目与筛选」或右侧的「详情」），点它就收起，
             不必先找到那一层里那枚「关闭」（见 styles.ts 的容器查询）。
             它接住这一下点击，所以点到的那一行不会顺带被选中、右栏也不会顺带换一条——一次点击只做
             一件事。它挂在主栏里（不是工作台那一层）：左栏在 960–1180 那一档还是常驻的一列，这一层
             因此不会盖住它。
-            键盘那条路仍是浮层里那两枚「关闭」（这一层 `aria-hidden`、进不了 Tab 序）。
+            键盘那条路仍是浮动面板里那两枚「关闭」（这一层 `aria-hidden`、进不了 Tab 序）。
           */}
           <div
             className="dsm-scrim"

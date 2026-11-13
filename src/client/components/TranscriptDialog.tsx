@@ -61,7 +61,7 @@ export const KIND_KEY: Record<TranscriptKind, SessionManagerKey> = {
   event: 'manage.transcript.kind.event',
 }
 
-/** 筛选条上那几枚芯片的顺序与文案键。 */
+/** 筛选条上那几枚筛选标签的顺序与文案键。 */
 const FILTERS: Array<{ key: TranscriptFilterKey; label: SessionManagerKey }> = [
   { key: 'all', label: 'manage.transcript.filter.all' },
   { key: 'human', label: 'manage.transcript.filter.human' },
@@ -223,7 +223,7 @@ export function TranscriptDialog({ session, onClose, t }: TranscriptDialogProps)
   )
 
   // 筛选那一行贴在正文那一层的顶上，轮次标题要停在它下面——它多高由视图量出来交给 CSS：窄窗口里
-  // 芯片会折成两行，那一行就变高，写死一个数会让标题被它压住。缩放会改字号，所以 resize 也跟一次。
+  // 筛选标签会折成两行，那一行就变高，写死一个数会让标题被它压住。缩放会改字号，所以 resize 也跟一次。
   React.useEffect(() => {
     const element = filters.current
     const scrollerElement = scroller()

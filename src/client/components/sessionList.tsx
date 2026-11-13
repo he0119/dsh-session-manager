@@ -110,7 +110,7 @@ export function totalBytes(sessions: readonly { bytes: number }[]): number {
 /**
  * 一枚行内标签的两句字典键：`key` 是标签本身、`tip` 是"这条会话为什么是这样"的说明。
  *
- * 两处都收窄成字典键集而不是 `string`：芯片、行标签、筛选框三处共用同一批键，写成 `string` 时
+ * 两处都收窄成字典键集而不是 `string`：筛选标签、行标签、筛选框三处共用同一批键，写成 `string` 时
  * 打错一个键不会报错，只会在界面上露出键名。
  */
 export type TagCopy = { key: SessionManagerKey; tip: SessionManagerKey }
@@ -124,7 +124,7 @@ export const ATTRIBUTE_TAGS: Record<AttributeKey, TagCopy> = {
 }
 
 /**
- * 「未分组」那枚标签 / 那枚芯片。
+ * 「未分组」那枚标签 / 那枚筛选标签。
  *
  * 一个事实一个名字：外壳侧边栏里那个组、迁移页那个来源、这里这枚标签，说的都是**侧边栏那一组**
  * （"谁都没认领它，而且默认视图下它会显示"），所以三处都叫「未分组」，判据也共用
@@ -545,7 +545,7 @@ export function SessionListEmpty({ text }: { text: string }): React.ReactElement
 }
 
 /**
- * 一个列表的筛选状态：类别芯片（多选＝任一命中）、关键词，以及每一类各有多少条。
+ * 一个列表的筛选状态：类别筛选标签（多选＝任一命中）、关键词，以及每一类各有多少条。
  *
  * 计数是对**传进来的这一批**数的，不随当前筛选或关键词跳（会跳的计数没人信得过）。
  */
@@ -553,7 +553,7 @@ export interface SessionFilter {
   readonly filters: readonly FilterKey[]
   readonly query: string
   readonly counts: Record<FilterKey, number>
-  /** 有芯片或关键词在起作用（界面据此报"显示 N / M 条"）。 */
+  /** 有筛选标签或关键词在起作用（界面据此报"显示 N / M 条"）。 */
   readonly active: boolean
   readonly matches: (session: SessionFacts) => boolean
   readonly toggle: (key: FilterKey) => void
@@ -585,7 +585,7 @@ export function useSessionFilter(sessions: readonly SessionFacts[]): SessionFilt
   }
 }
 
-/** 芯片上的文案：四类属性与行上标签同一份，「未分组」与外壳那一组同名。 */
+/** 筛选标签上的文案：四类属性与行上标签同一份，「未分组」与外壳那一组同名。 */
 const CHIP_LABELS: Record<FilterKey, TagCopy> = {
   subagent: ATTRIBUTE_TAGS.subagent,
   blank: ATTRIBUTE_TAGS.blank,
@@ -596,10 +596,10 @@ const CHIP_LABELS: Record<FilterKey, TagCopy> = {
 
 export interface SessionFilterBarProps {
   /**
-   * 列哪几枚类别芯片。
+   * 列哪几枚类别筛选标签。
    *
    * 空数组 = 这一页只给搜索框，例如迁移页：它的列表**本来就是候选**（侧边栏看不见的会话按设计不进
-   * 候选），健康的那几类芯片在那页永远是 0，摆出来只会让人以为筛选坏了。
+   * 候选），健康的那几类筛选标签在那页永远是 0，摆出来只会让人以为筛选坏了。
    */
   keys: readonly FilterKey[]
   filter: SessionFilter
@@ -607,7 +607,7 @@ export interface SessionFilterBarProps {
 }
 
 /**
- * 一排类别芯片：`筛选` + `全部` + 每类一枚（带条数）。
+ * 一排类别筛选标签：`筛选` + `全部` + 每类一枚（带条数）。
  *
  * 从 [SessionFilterBar] 拆出来，是因为它现在有两个落点：「会话」页在左侧项目树里，「传输」页仍在
  * 列表上方那一行。拆的是**渲染**，状态仍由页面的 `useSessionFilter()` 持有——两处读同一份。
@@ -656,12 +656,12 @@ export function SessionSearch({ filter, t }: { filter: SessionFilter; t: Transla
 }
 
 /**
- * 筛选条：一排类别芯片，底下一行是搜索框与那句说明。
+ * 筛选条：一排类别筛选标签，底下一行是搜索框与那句说明。
  *
  * 两行是刻意的：胶囊那一行只剩一百来 px 余量（窄 135px 就会换行），把那句说明或搜索框塞进去，容器
  * 一窄就整块换行、位置乱跳（见 styles.ts 的 .dsm-filters 注释）。搜索框单独一行则两边都固定。
  *
- * 「会话」页不用这条整条：它的芯片在左侧项目树里、搜索框在卡头，两处各取上面那一个组件。
+ * 「会话」页不用这条整条：它的筛选标签在左侧项目树里、搜索框在卡头，两处各取上面那一个组件。
  */
 export function SessionFilterBar({ keys, filter, t }: SessionFilterBarProps): React.ReactElement {
   const chips = keys.length > 0
