@@ -212,6 +212,34 @@ test('进度块的四行由容器 gap 定节奏，不靠 <p> 的默认外边距'
   assert.match(children ?? '', /margin:\s*0/, '行自己的外边距必须归零，否则节奏由浏览器默认值决定')
 })
 
+test('「上次同步」那块：一次记录，不是四段连在一起的灰字', () => {
+  /*
+   * 为什么钉它：这块一开始只有 6px 的 gap，没管 <p> 自带的 1em 外边距——量出来块里四行的间距是
+   * 6 / 12 / 18px 混着，四行字一样大一样灰，读起来是四段互不相干的说明，而不是"上次同步发生了什么"
+   * 那一条记录（真实 dev GUI 里就是这个观感）。所以：块里段落归零、有遗留时才成一块（底色 + 左边一道
+   * 告警色细线）、条数那句缩成小标签、每条之间一道发丝线、行内那枚动作不许被挤窄。
+   *
+   * 反事实：去掉 `.dsm-lastRun p { margin: 0 }` 间距立刻回到浏览器默认值；去掉
+   * `.dsm-leftoverRow > button { flex: none }` 那枚按钮在窄布局里折成两行（量到过 79px → 两行）。
+   */
+  const block = ruleBody('.dsm-lastRun') ?? ''
+  assert.match(block, /display:\s*flex/, '块里是竖排')
+  assert.match(block, /gap:\s*6px/, '块内节奏 6px')
+  assert.match(ruleBody('.dsm-lastRun p') ?? '', /margin:\s*0/, '块里的段落不许带浏览器默认段距')
+  // 有遗留时才成"一块"：底色 + 左边一道告警色细线（对话框里不套卡片，所以不是一圈边框）。
+  const boxed = ruleBody(".dsm-lastRun[data-dsm-leftover='true']") ?? ''
+  assert.match(boxed, /border-left:/, '有遗留时左边一道细线')
+  assert.match(boxed, /background:/, '有遗留时带一层底色')
+  assert.equal(ruleBody(".dsm-lastRun[data-dsm-leftover='false']"), null, '没有遗留时不画这块底色')
+  // 条数那句是小标签：12px/600，不该与下面的原话同为 14px。
+  const label = ruleBody('.dsm-leftoversTitle') ?? ''
+  assert.match(label, /font-size:\s*12px/, '条数那句是小标签')
+  assert.match(label, /font-weight:\s*600/, '小标签靠字重再分一层')
+  // 多条之间一道发丝线；行内那枚动作不收缩。
+  assert.match(ruleBody('.dsm-leftoverRow + .dsm-leftoverRow') ?? '', /border-top:/, '多条之间有线')
+  assert.match(ruleBody('.dsm-leftoverRow > button') ?? '', /flex:\s*none/, '行内动作不许被挤窄')
+})
+
 test('.dsm-tag 只剩布局挂钩：几何与配色都归官方 Tag 原语', () => {
   // 为什么钉它：标签的圆角/内边距/字号/配色是"标签长什么样"，官方 `Tag.module.css` 已经定死了
   // （999px 胶囊、padding 1px 8px、11px/17px、字重 500，tone 决定配色）。本页再写一遍就会与官方那份

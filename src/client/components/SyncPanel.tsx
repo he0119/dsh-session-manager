@@ -1085,15 +1085,25 @@ export function SyncPanel({
           才是用户下一步要处理的东西。记录存在磁盘上（`state.json`），重启之后回来还看得到。
         */}
         {(lastFacts !== null || lastItems.length > 0) && (
-          <div className="dsm-lastRun" data-dsm-lastrun="">
-            <p className="dsm-fields-label">{t('sync.last.title')}</p>
-            {lastFacts !== null && <p className="dsm-hint">{lastFacts}</p>}
+          /*
+            两块分开画（见 styles.ts 的 `.dsm-lastRun` 那一段）：干净那一趟只有一行标题 + 一行读数；
+            有遗留时才成"一块记录"——底色 + 左边一道告警色细线，与下面那几句说明分开。
+          */
+          <div
+            className="dsm-lastRun"
+            data-dsm-lastrun=""
+            {...(lastItems.length > 0 ? { 'data-dsm-leftover': 'true' } : {})}
+          >
+            <p className="dsm-lastRunHead">
+              <span className="dsm-lastRunTitle">{t('sync.last.title')}</span>
+              {lastFacts !== null && <span className="dsm-lastRunFacts">{lastFacts}</span>}
+            </p>
             {lastRun !== null && !lastRun.ok && (
               <p className="dsm-warn">{t('sync.last.failed', { reason: lastRun.error ?? '—' })}</p>
             )}
             {lastItems.length > 0 && (
-              <>
-                <p className="dsm-warn">{t('sync.leftovers.title', { count: lastItems.length })}</p>
+              <div className="dsm-leftovers">
+                <p className="dsm-leftoversTitle">{t('sync.leftovers.title', { count: lastItems.length })}</p>
                 <ul className="dsm-listPlain">
                   {lastItems.map((item, index) => (
                     <li key={`${index}-${item.message}`} className="dsm-leftoverRow">
@@ -1112,7 +1122,7 @@ export function SyncPanel({
                     </li>
                   ))}
                 </ul>
-              </>
+              </div>
             )}
           </div>
         )}
