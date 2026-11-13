@@ -328,9 +328,11 @@
   仍是 0px，得在自己的 `.dsm-diffBody` 上给节奏。
 - [卡片级的主动作放卡片底部的动作行](../.agents/notes/implemented/architecture/2026-10-07-card-actions-live-in-a-footer-row.md)：
   动作跟着它的输入走；卡头只留不动数据的工具（刷新、全选 / 清空、收起 / 展开），清单行上的动作不挪位。
-- [行尾只留一枚给键盘的「详情」](../.agents/notes/implemented/simplification/2026-11-13-row-actions-leave-the-hover-slot.md)：
-  点整行已经能看详情，悬停再浮出动作就是重复；「内容」整枚删掉（完整时间线在右栏里开）。剩下那枚
-  「详情」与时刻叠在同一格（`grid-area: 1 / 1`），只在键盘落到这一行时出场。它取代了
+- [行这一格的主动作落在标题上](../.agents/notes/implemented/architecture/2026-11-13-the-row-title-is-the-action.md)：
+  行从 `<label>` 换成 `<div>`（点它不是勾选），标题那一格是 `<button>`（外观跟一段字一样，键盘走它），
+  行尾只剩时刻；勾选框自己带一层 label 与一句只念给读屏软件的名字。它取代了
+  [行尾只留一枚给键盘的「详情」](../.agents/notes/implemented/simplification/2026-11-13-row-actions-leave-the-hover-slot.md)
+  的「留一枚只给键盘」那一半，后者又取代了
   [行上的动作等悬停](../.agents/notes/implemented/architecture/2026-10-12-row-action-waits-for-hover.md)
   的「悬停出场」那一半。
 - [选行工具全站只有一对](../.agents/notes/implemented/bug-fix/2026-10-08-one-pair-of-pick-tools.md)：

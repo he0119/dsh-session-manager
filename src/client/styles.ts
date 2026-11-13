@@ -511,44 +511,31 @@ export const CSS = `
 .dsm-rowLabel > .dsm-tag { flex: none; }
 .dsm-meta { color: var(--dsw-alias-label-secondary, #646a73); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /*
- * 行尾那一格：时刻与那枚「详情」叠在同一个格子里，键盘落到这一行时后者顶掉前者。
- *
- * 叠格子而不是并排：格宽取两者的最大值（正好是时刻的宽度），于是切换时行宽不动、右边几列也不动；
- * 并排则要为平时不出现的那枚按钮白留一段宽度，改成 display: none 又会让标题那一格在切换时被拉宽
- * （文字跟着跳）。
+ * 行首那枚勾选框自己的 label：它只干一件事——给勾选框一个无障碍名字（那句"勾选《标题》"）。名字
+ * 平时看不见（见 .dsm-srOnly）；格宽仍是勾选框那一列（24px），不许把名字撑出来。
  */
-.dsm-slot { display: grid; align-items: center; }
-.dsm-slot > * { grid-area: 1 / 1; justify-self: end; }
-/*
- * 行尾那枚「详情」与时刻叠在同一格：平时 visibility: hidden（不进 tab 顺序；键盘落到这一行的勾选框
- * 时整行 :focus-within 再让它出场，那时 Tab 也够得着它）。
- *
- * 鼠标与触屏不靠它：点整行就打开右栏（见 sessionList.tsx 的 openDetailOf），所以悬停时这一格仍是
- * 时刻，不再浮出一枚多余的动作。
- */
-.dsm-slotActions { display: flex; align-items: center; gap: 8px; visibility: hidden; }
-/*
- * 行上的动作是**动作**，不是标签——所以没有盒子（盒子是标签那套语法）、走 brand 色。
- * visibility 继承自 .dsm-slotActions。
- */
-.dsm-rowDetail {
-  border: none;
-  background: transparent;
+.dsm-rowPick { display: inline-flex; align-items: center; min-width: 0; }
+/* 只念给读屏软件的一句话：留在无障碍树里，视觉上占 1px 并且不参与布局。 */
+.dsm-srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
   padding: 0;
-  font-family: inherit;
-  font-size: 12px;
-  line-height: 18px;
-  color: var(--dsw-alias-brand-primary, #3370ff);
-  cursor: pointer;
-  visibility: inherit;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
 }
-/* 键盘落在这一行：时刻让位，按钮出场。 */
-.dsm-row:focus-within .dsm-time { visibility: hidden; }
-.dsm-row:focus-within .dsm-slotActions { visibility: visible; }
-.dsm-rowDetail:hover { text-decoration: underline; }
-.dsm-rowDetail:focus-visible {
+/*
+ * 标题那一格在会话页是个按钮：整行的主动作（看详情）就落在它身上，键盘 Tab 到它、回车即开。外观
+ * 跟旁边那段文字一模一样——没有盒子、不换字号、不换颜色，否则一行里会多出一枚"看起来像按钮"的块。
+ */
+.dsm-rowOpen { border: 0; background: transparent; padding: 0; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+.dsm-rowOpen:focus-visible {
   outline: 2px solid var(--dsw-alias-brand-primary, #3370ff);
-  outline-offset: 1px;
+  outline-offset: 2px;
+  border-radius: 2px;
 }
 .dsm-empty { padding: 14px; color: var(--dsw-alias-label-secondary, #646a73); }
 /*

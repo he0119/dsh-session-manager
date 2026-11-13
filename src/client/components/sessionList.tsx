@@ -172,18 +172,15 @@ export interface SessionRowProps {
    */
   locked?: { tip: string }
   /**
-   * 把这一条交给右栏（`SessionInspector`）。
+   * 把这一条交给右栏（`SessionInspector`）。给了它，这一行就变成"点哪儿都看详情"的行。
    *
-   * 两个入口走同一个动作：**点整行**（标题、项目、空白都算，见 `openDetailOf()`），或者行尾那枚
-   * 「详情」。那枚按钮**只给键盘**：鼠标与触屏点整行就够了，所以它平时 `visibility: hidden`
-   * （见 styles.ts 的 `.dsm-slotActions`），Tab 落到这一行的勾选框时才出场——那时时刻让位，
-   * 行宽不动。它挡掉 `<label>` 的默认动作，点它不改变勾选。
+   * 两个入口走同一个动作：**点整行**（项目、字节、时间、空白都算，见 `openDetailOf()`），或者
+   * **标题那一格**——那里是个真的按钮，键盘 Tab 到它、回车就打开（名字就是标题本身）。行尾没有
+   * 别的动作，最后一格仍是时刻。
    *
    * 完整时间线不在这行了：右栏里那枚「打开完整内容」才是它唯一的入口（见 SessionInspector）。
    */
   onOpenDetail?: () => void
-  detailLabel?: string
-  detailTip?: string
   /** 这一行是不是右栏正开着的那一条：给行加一层底色，看右栏时知道它对应哪一行。 */
   opened?: boolean
   t: Translate
@@ -192,20 +189,16 @@ export interface SessionRowProps {
 /**
  * 点整行 = 看详情（只有给得出 `onOpenDetail` 的列表才有这一下，也就是「会话」页）。
  *
- * 为什么挡掉默认动作：这一行是个 `<label>`，勾选框的无障碍名字靠它，而 label 的默认动作是把落在
- * 行上的点击转给勾选框——不挡的话，"点标题看详情"会顺带把这一条勾上。所以除了勾选框自己与行尾
- * 那两枚动作，其余地方的点击都 `preventDefault()`，只做"把这一条交给右栏"这一件事。
- *
- * 键盘那条路仍是行尾那枚「详情」：行本身不是可聚焦元素，Tab 落到这一行的勾选框时
- * `.dsm-slotActions` 才凭 `:focus-within` 出场（见 styles.ts 的 `.dsm-row` 规则）。
+ * 这一行是 `<div>`，不是 `<label>`：点的落点是"看详情"，不是"勾选"（勾选归最左边那枚勾选框，
+ * 它有自己的一层 label 给无障碍名字，见下面的 `.dsm-rowPick`）。所以这里只需把落在勾选框或标题
+ * 那枚按钮上的点击让出去，别的地方一律交给右栏。
  */
 function openDetailOf(onOpenDetail: () => void) {
   return (event: React.MouseEvent<HTMLElement>) => {
     const target = event.target as Element | null
     const interactive =
-      target !== null && typeof target.closest === 'function' ? target.closest('button, input, a') : null
+      target !== null && typeof target.closest === 'function' ? target.closest('button, input, a, label') : null
     if (interactive !== null) return
-    event.preventDefault()
     onOpenDetail()
   }
 }
@@ -222,89 +215,97 @@ export function SessionRow({
   note,
   locked,
   onOpenDetail,
-  detailLabel,
-  detailTip,
   opened = false,
   t,
 }: SessionRowProps): React.ReactElement {
   // 行上显示标题、id 退到悬浮提示（见 planRows.sessionLabel）。
   const label = sessionLabel(session)
   const tags = sessionTags(session, { ungrouped: ungroupedTag })
+  // 给了 onOpenDetail 的行是"点哪儿都看详情"：这一行因此必须是 <div>（<label> 的默认动作是把点击
+  // 转给勾选框）。别的页（导出 / 迁移挑选）仍旧是 <label>：那里点哪儿都是勾选。
+  const interactive = onOpenDetail !== undefined
+  const Row = interactive ? 'div' : 'label'
+  const checkbox = (
+    <Checkbox
+      checked={checked}
+      disabled={locked !== undefined}
+      label=""
+      {...(locked === undefined ? {} : { title: locked.tip })}
+      onChange={onToggle}
+    />
+  )
+  /*
+   * 标题那一格里的东西：名字 + 分类标记（子智能体 / 空白 / 已归档 / 未分组）。
+   *
+   * 官方 `Tag` 不收 `title`（只有 tone / className / children），悬浮提示由外面那一层 span 给。
+   * `dsm-tag` 挂在**包着它的那层 span** 上：styles.ts 里那几条是"这一页怎么摆它"的布局挂钩
+   * （`flex: none` 不许被压扁、窄列里 nowrap、计划表里限宽截断），`>` 选中的就是这一层；
+   * 官方 Tag 自己的几何与配色不归本页管，别在它上面再写一遍。
+   */
+  const title = (
+    <>
+      <span className={label.kind === 'title' ? 'dsm-rowTitle' : 'dsm-rowId'} title={label.tip}>
+        {label.text}
+      </span>
+      {tags.map((tag) => (
+        <span key={tag.key} className="dsm-tag" title={t(tag.tip)}>
+          <Tag tone="neutral">{t(tag.key)}</Tag>
+        </span>
+      ))}
+      {note !== undefined && (
+        <span className="dsm-tag" title={note.tip}>
+          <Tag tone="neutral">{note.text}</Tag>
+        </span>
+      )}
+    </>
+  )
   return (
-    <label
+    <Row
       className={`${ROW_CLASS[variant]}${nestClass(depth)}`}
       {...(opened ? { 'data-opened': 'true' } : {})}
-      {...(onOpenDetail === undefined ? {} : { onClick: openDetailOf(onOpenDetail) })}
+      {...(interactive ? { onClick: openDetailOf(onOpenDetail) } : {})}
     >
       {/*
-        勾选框走官方 `Checkbox`：`label` 给空串——这一行自己有标题（右侧那一格），可见文案再由
-        Checkbox 画一遍就是重复；无障碍名字因此靠外面的 `<label className="dsm-row...">` 兜底
-        （整行仍是可点的那个 label）。`title` 照旧传锁定原因。
+        勾选框：`label` 给空串——这一行自己有标题，可见文案再由 Checkbox 画一遍就是重复。
+        无障碍名字分两种：这一行是 `<label>` 时由整行兜底；是 `<div>` 时由外面这层 `.dsm-rowPick`
+        给，它里面那句"勾选《标题》"平时看不见（`.dsm-srOnly`），只念给读屏软件。
       */}
-      <Checkbox
-        checked={checked}
-        disabled={locked !== undefined}
-        label=""
-        {...(locked === undefined ? {} : { title: locked.tip })}
-        onChange={onToggle}
-      />
+      {interactive ? (
+        <label className="dsm-rowPick">
+          {checkbox}
+          <span className="dsm-srOnly">{t('manage.rowPick', { title: label.text })}</span>
+        </label>
+      ) : (
+        checkbox
+      )}
       <SessionIcon />
-      {/* 标题与标签同占一格：标签跟着名字走，名字自己负责省略（见 .dsm-rowLabel）。 */}
-      <span className="dsm-rowLabel">
-        <span className={label.kind === 'title' ? 'dsm-rowTitle' : 'dsm-rowId'} title={label.tip}>
-          {label.text}
-        </span>
-        {/*
-          分类标记（子智能体 / 空白 / 已归档 / 未分组）：中性事实，无健康度含义——官方 Tag 的 neutral。
-          官方 `Tag` 不收 `title`（只有 tone / className / children），悬浮提示由外面这一层 span 给。
-          `dsm-tag` 挂在**包着它的那层 span** 上：styles.ts 里那几条是"这一页怎么摆它"的布局挂钩
-          （`flex: none` 不许被压扁、窄列里 nowrap、计划表里限宽截断），`>` 选中的就是这一层；
-          官方 Tag 自己的几何与配色不归本页管，别在它上面再写一遍。
-        */}
-        {tags.map((tag) => (
-          <span key={tag.key} className="dsm-tag" title={t(tag.tip)}>
-            <Tag tone="neutral">{t(tag.key)}</Tag>
-          </span>
-        ))}
-        {note !== undefined && (
-          <span className="dsm-tag" title={note.tip}>
-            <Tag tone="neutral">{note.text}</Tag>
-          </span>
-        )}
-      </span>
+      {/*
+        标题那一格：会话页里它是个按钮（那才是这一行的主动作，键盘也走它），外观跟一段文字一样
+        （没有盒子、不换字号，见 `.dsm-rowOpen`）；别的页仍旧是一段文字。
+      */}
+      {interactive ? (
+        <button
+          type="button"
+          className="dsm-rowLabel dsm-rowOpen"
+          title={label.tip}
+          onClick={(event) => {
+            event.stopPropagation()
+            onOpenDetail()
+          }}
+        >
+          {title}
+        </button>
+      ) : (
+        <span className="dsm-rowLabel">{title}</span>
+      )}
       {owner !== undefined && (
         <span className="dsm-meta dsm-owner" title={session.cwd ?? ''}>
           {owner}
         </span>
       )}
       <span className="dsm-meta">{formatBytes(session.bytes)}</span>
-      {onOpenDetail === undefined ? (
-        <span className="dsm-meta">{formatTime(session.createdAt)}</span>
-      ) : (
-        /*
-         * 行尾那一格：时刻与那枚「详情」叠在同一个格子里（见 `.dsm-slot` 的注释）。那枚按钮只给
-         * 键盘——鼠标与触屏点整行就是了——所以它平时藏着，Tab 落到这一行的勾选框时才顶掉时刻。
-         * 按钮自己挡掉 `<label>` 的默认动作（它会把点击转给里面的勾选框）。
-         */
-        <span className="dsm-meta dsm-slot">
-          <span className="dsm-time">{formatTime(session.createdAt)}</span>
-          <span className="dsm-slotActions">
-            <button
-              type="button"
-              className="dsm-rowDetail"
-              title={detailTip}
-              onClick={(event) => {
-                event.preventDefault()
-                event.stopPropagation()
-                onOpenDetail()
-              }}
-            >
-              {detailLabel ?? t('manage.detail.open')}
-            </button>
-          </span>
-        </span>
-      )}
-    </label>
+      <span className="dsm-meta">{formatTime(session.createdAt)}</span>
+    </Row>
   )
 }
 

@@ -32,7 +32,7 @@ border-width: 0px
 
 两个**手写**的文字动作仍在例外，它们按行内链接 / 图标画、外观由本页 CSS 给（官方原语不管行内链接）：
 
-- 每行右端那枚「详情」（`.dsm-rowDetail`）：只在键盘落到这一行时显形，hover 有下划线；
+- 每行标题那一格（`.dsm-rowOpen`）：整行的主动作，外观必须跟旁边那段字一样，没有盒子；
 - 分组头那枚开合图标 ▾（`.dsm-groupToggle`）：20×20 的图标钮，hover 有底色。
 
 ## Alternatives considered
