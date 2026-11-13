@@ -291,6 +291,15 @@
   - `outline`：会动数据的卡片动作、工具、确认弹窗里的次要动作；行内动作用 `size="sm"`；
   - 破坏性动作放动作行右端，由 `dsm-spacer` 顶开；行上的动作不挪到卡片底部。
 - 每枚官方 `Tag` 都挂 `dsm-tag` 布局挂钩；有悬浮提示时外层 `<span className="dsm-tag" title={…}>`。
+- **自己画的控件**（官方没有对应原语的那几枚：搜索框、目录字段的值控件、面包屑、筛选标签）跟着官方那
+  两档走，不许各自漂：
+  - 值控件与它并排的官方 `Button size="sm"` 同高（28px、13px 字）；搜索框走官方 `Input`（那层壳自己
+    是 34px：24px 内部输入 + 上下 8px 内边距），本页只给它宽度——**不覆盖官方控件的几何**，那一行里
+    输入框比旁边两枚 `size="sm"` 高 6px 是官方那枚本来的高度；
+  - 筛选标签（左栏底部那一排、内容视图顶部那一排）是同一套皮：20px 高、6px 圆角、`0 8px` 内边距、
+    `border-l2` 边框，不做胶囊；
+  - 凡是能点的自己画的控件都要 `:focus-visible` 环：品牌色 2px（`outline-offset` 1–2px）。没有这一条
+    就会露出浏览器默认那圈蓝环，与别处不一样。
 - 依据：[控制件原语](../.agents/notes/implemented/architecture/2026-10-15-controls-come-from-the-official-primitives.md)、
   [动作带边框](../.agents/notes/implemented/bug-fix/2026-10-16-actions-carry-their-frame.md)。
 

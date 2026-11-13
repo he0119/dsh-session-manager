@@ -741,6 +741,40 @@ test('行这一格的按钮不带盒子：标题照旧是一段字，点击落�
   assert.equal(/\.dsm-row:focus-within/.test(css), false, '键盘落到这一行不再把什么东西换出来')
 })
 
+test('手绘控件同一套皮：尺寸跟着官方那两档，焦点环一个不漏', () => {
+  // 为什么钉它：这些控件（搜索框、值控件、筛选、面包屑）都是自己画的，官方没有对应原语，尺寸与
+  // 焦点环全靠本页 CSS。它们一度各自漂：搜索框 22px（裸 input）与 36px（官方 Input 那层壳又被我们
+  // 叠了一层边框）、值控件 30px、内容视图那排筛选是胶囊（999px）而左栏那排是 6px 方块，三个手绘
+  // 控件连焦点环都没有，键盘走到那里露出来的是浏览器默认那圈蓝环。
+  const search = ruleBody('.dsm-search')
+  assert.notEqual(search, null, '找不到 .dsm-search 规则')
+  assert.match(search, /width:\s*180px/, '它只管宽度')
+  assert.equal(/border:/.test(search), false, '框归官方 Input，这里再画一遍就是叠成 36px 高那一档')
+
+  // .dsm-select 与 .dsm-file 共一条规则
+  const field = ruleBody('.dsm-select, .dsm-file')
+  assert.notEqual(field, null, '找不到 .dsm-select 规则')
+  assert.match(field, /height:\s*28px/, '字段与官方那两档（sm 28px）同高')
+  assert.match(field, /font-size:\s*13px/, '字段字号跟官方输入框一档')
+
+  const chip = ruleBody('.dsm-chip')
+  const filter = ruleBody('.dsm-filter')
+  assert.notEqual(chip, null, '找不到 .dsm-chip 规则')
+  assert.notEqual(filter, null, '找不到 .dsm-filter 规则')
+  assert.match(chip, /border-radius:\s*6px/, '筛选用同一套形状，不做胶囊')
+  assert.match(chip, /padding:\s*0\s*8px/, '内边距与左栏那排一致，20px 高才对得上')
+  assert.match(chip, /border:\s*1px solid var\(--dsw-alias-border-l2/, '边框也走同一个 token')
+
+  const tree = ruleBody('.dsm-treePick')
+  assert.match(tree, /cursor:\s*pointer/, '项目树那一行整块可点，光标得说出来')
+
+  for (const selector of ['.dsm-chip:focus-visible', '.dsm-crumb:focus-visible', '.dsm-pathValue:focus-visible']) {
+    const ring = ruleBody(selector)
+    assert.notEqual(ring, null, `${selector} 缺焦点环：键盘走到这里会露出浏览器默认那圈`)
+    assert.match(ring, /outline:\s*2px solid var\(--dsw-alias-brand-primary/, '焦点环与别的手绘控件同一套')
+  }
+})
+
 test('说明页 FAQ 的答案不被挤成零宽：那一栏是单列网格', () => {
   // 真实缺陷（英文界面里一眼能看出来）：`.dsm-defs` 的列是 minmax(0, auto) minmax(0, 1fr)，FAQ 的
   // 问题是一整句话，max-content 把第一列吃满（量到 522px），答案那一列拿到 0px——每个答案一行只放得

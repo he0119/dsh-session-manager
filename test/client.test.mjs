@@ -1930,7 +1930,16 @@ test('客户端产物：「会话」页的筛选条把不匹配的行筛掉，�
   // 搜索框本身：值的来源是筛选状态，占位符与无障碍名字走字典（它们是 props，strings() 看不见）。
   // 它现在在卡头（筛选芯片搬进左栏之后，卡头只留这一个列表工具）。
   const search = recorded.find((node) => String(node.props?.className) === 'dsm-search')
-  assert.equal(search?.props?.type, 'search', '搜索框是原生 input[type=search]（自带清空按钮）')
+  assert.equal(search?.props?.type, 'search', '搜索框是 input[type=search]（自带清空按钮）')
+  // 走的是官方 `Input`：`recorded` 里那个元素是组件本身（不是字符串 'input'），官方那层壳渲染出来的
+  // 内部 input 带 data-primitive-input。裸 `<input className="dsm-search">` 会让这两个判据同时不成立。
+  assert.equal(typeof search?.type, 'function', '搜索框走官方 Input，不是裸 input')
+  assert.ok(
+    recorded.some(
+      (node) => node.props?.['data-primitive-input'] === 'true' && node.props?.className === 'dsm-search',
+    ),
+    '官方那层壳渲染出来的内部 input 还在（同一个类名，两处一个控件）',
+  )
   assert.equal(search?.props?.placeholder, 'list.filter.search', '占位符说明它搜什么')
   assert.equal(search?.props?.['aria-label'], 'list.filter.search', '搜索框要有无障碍名字')
   const cardHead = recorded.find((node) => String(node.props?.className) === 'dsm-cardHead')
