@@ -6,7 +6,7 @@ Status: implemented
 
 同一个名字在三处各答各的：
 
-- 「会话」页 / 传输页行上那枚「未分组」小标签与筛选条里的芯片，只看 `SessionSummary.workspaceId`
+- 「会话」页 / 传输页行上那枚「未分组」小标签与筛选条里的筛选标签，只看 `SessionSummary.workspaceId`
   缺省（「注册表没认领」）；
 - 迁移页的「未分组」来源（`unownedSessions()`）还要叠一层隐藏过滤。
 
@@ -36,7 +36,7 @@ Status: implemented
 
 ## Consequences
 
-- 三处读同一个结论：「会话」页 / 传输页的标签与筛选芯片、迁移页的来源。
+- 三处读同一个结论：「会话」页 / 传输页的标签与筛选标签、迁移页的来源。
 - 迁移页那个来源另外要求有 `cwd`（它要改写 header，`relocateHeaderCwd()` 拒绝没有 `cwd` 的 header）——
   那是来源自己的**能力**限制，不是定义的一部分。
 - 外壳不显示的那三类各自挂自己的标签（子智能体 / 空白 / 已归档），不挂「未分组」；

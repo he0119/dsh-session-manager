@@ -27,7 +27,7 @@ Status: rejected — 源改成"点名的那些会话"之后，源不再被限制
   **不要求那个目录还在盘上**——项目文件夹删掉之后，会话日志与 header 里的 `cwd` 都还在，于是这条目录
   照旧在候选里；把项目重建到别处，选这条旧目录当源、目标指到新目录就迁过去了。真正必须存在的是
   **源项目目录**（会话日志那一层，`projectDirOf(root, from)`），计划层照旧检查它。
-- **「未分组」退回它本来的位置**：行上的一枚标签（`list.ungrouped`）与会话页筛选条上的一枚芯片。
+- **「未分组」退回它本来的位置**：行上的一枚标签（`list.ungrouped`）与会话页筛选条上的一枚筛选标签。
   判据没有变，仍是 `src/visibility.ts` 的 `isUngrouped()`（谁都没认领 **且** 侧边栏会显示它），
   见 [「未分组」就是外壳那一组](../../implemented/bug-fix/2026-09-28-ungrouped-means-the-sidebar-group.md)。
 - **`unowned` 参数从三处删掉**：计划层（`BuildPlanOptions`）、编排层（`MigrateRequest` /

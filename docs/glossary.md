@@ -28,6 +28,12 @@
 | 崩了之后接着写的那一层 | **检查点**（flush 检查点） | 存档点、恢复点 | 官方文档 [持久化](https://deepseek-harness.github.io/deepseek-harness/reference/subsystems/persistence)：「flush 检查点」 |
 | 智能体的本体 | **智能体**（英文 agent；官方界面里「Agent 预设」保留英文） | AI、机器人 | 官方文档：「Session 是一份由类型化 SessionEvent 组成的仅追加日志，是 agent（智能体）…」 |
 | 设置页两侧的配对方式 | **Host 半侧 / 浏览器半侧** + 命名空间 | 前后端 | 官方文档 [新增设置卡片](https://deepseek-harness.github.io/deepseek-harness/reference/cookbook/adding-a-settings-card) |
+| 页面两侧挂着的那块（左侧、右侧） | **面板**（右侧面板、面板全屏） | 浮层、抽屉、弹出层 | 官方界面：`dsh-client-ui-sidebar-right` 的「请先聚焦右侧面板」「面板全屏」 |
+| 屏幕窄时从侧边滑出来、盖在列表上的那块面板 | **浮动面板** | 浮层、抽屉、弹出层、遮罩 | 官方界面：`dsh-client-ui-sidebar-right` 的「请先展开右侧栏」「浮动面板不支持此操作」；本仓库 2026-11-13 之前把它叫「浮动面板」 |
+| 一块一块的内容（列表卡、详情卡、计划卡） | **卡片** | 块、区块、面板 | 官方界面：`dsh-client-ui-action-cards` 的「操作卡片」 |
+| 并排切换的那几个 | **标签页** | 页签 | 官方界面：`dsh-client-ui-sidebar-right` 的「关闭其他标签页」「新标签页」；「页签」在官方 88 个 client 产物里只出现 2 次（旧笔记里的「页签」不回头改） |
+| 浮在上面那层（我们自己的模态框） | **弹窗** | 对话框、模态框 | 官方界面：`dsh-client-ui-shortcuts` 的「关闭菜单或顶层弹窗」；「对话框」官方用来指系统那种（`dsh-client-ui-sidebar-browser` 的「模态对话框」） |
+| 多选筛选那排带计数的小按钮 | **筛选标签**（本仓库说法；官方没有同一个控件，菜单里的同类东西叫「筛选选项」） | 芯片、胶囊 | 官方界面：`dsh-client-ui-commands` 的「筛选选项」；代码里的 `chip` 是实现名，文档里不写 |
 
 ## 加新词的时候
 

@@ -566,7 +566,7 @@ export const CSS = `
   container-type: inline-size;
 }
 /*
- * 主栏是浮层外面那层空白（.dsm-scrim）的定位参照：它铺的就是这张卡片这一块，不越到左栏去。
+ * 主栏是浮动面板外面那层空白（.dsm-scrim）的定位参照：它铺的就是这张卡片这一块，不越到左栏去。
  */
 .dsm-workbenchMain {
   position: relative;
@@ -651,9 +651,9 @@ export const CSS = `
 /* 宽屏上这枚开关与「关闭」都不出现：左栏一直摆着。 */
 .dsm-treeToggle, .dsm-treeClose { display: none; }
 /*
- * 浮层外面那层空白：窄屏有浮层打开时铺满列表这一块（左栏的「项目与筛选」与右侧「详情」之外那片），
+ * 浮动面板外面那层空白：窄屏有浮动面板打开时铺满列表这一块（左栏的「项目与筛选」与右侧「详情」之外那片），
  * 点它就收起（见文末的两条容器查询）。
- * 它不画任何东西——浮层已经靠宽度与右边那道阴影跟列表分开，再压一层底色只是把下面的列表染灰。
+ * 它不画任何东西——浮动面板已经靠宽度与右边那道阴影跟列表分开，再压一层底色只是把下面的列表染灰。
  * 它挂在 .dsm-workbenchMain 里（见 ManagePanel）：左栏在 960–1180 那一档还是常驻的一列，这一层
  * 因此不会盖住它。position / inset / z-index 那三行平时不起作用（display:none 不在布局里），
  * 只有容器查询那一档把它打开时才用得上。
@@ -665,7 +665,7 @@ export const CSS = `
   z-index: 5;
 }
 /*
- * 「会话」页右栏：一条会话的详情。宽屏上一直摆着（没选时是一句提示），窄屏收成浮层（见文末的
+ * 「会话」页右栏：一条会话的详情。宽屏上一直摆着（没选时是一句提示），窄屏收成浮动面板（见文末的
  * 容器查询）。宽度 340 是量出来的：再宽，1600 窗口下列表的标题列就只剩一百多像素。
  */
 .dsm-inspector {
@@ -1387,7 +1387,7 @@ export const CSS = `
   /* 正文那一档：字号**必须自己写**，理由同 .dsm-dialogBody——官方 Modal portal 到 document.body，
      弹窗落在那套 .dsm-root（14px）之外，不写就继承文档根的 16px。真实缺陷（用户截图里量出来的）：
      不写时筛选条右端那串「显示 25 / 已读 25 条」按 16px 渲染（墨迹 29–32 device px），与紧挨着
-     的芯片（12px，23px）同占一行，一行里两个字号。 */
+     的筛选标签（12px，23px）同占一行，一行里两个字号。 */
   font-size: 14px;
   line-height: 20px;
 }
@@ -1405,7 +1405,7 @@ export const CSS = `
   border-bottom: 1px solid var(--dsw-alias-border-l1, rgba(0, 0, 0, 0.06));
   padding: 6px 0;
 }
-/* 右端那串计数与芯片同档（12px/18px）：它是这一行的补充说明，不是正文那一档。 */
+/* 右端那串计数与筛选标签同档（12px/18px）：它是这一行的补充说明，不是正文那一档。 */
 .dsm-transcriptFilters .dsm-meta { font-size: 12px; line-height: 18px; }
 .dsm-chip {
   border: 1px solid var(--dsw-alias-border-l1, rgba(0, 0, 0, 0.12));
@@ -1430,7 +1430,7 @@ export const CSS = `
  * 会横出一条比卡片更黑的色带——它看着就像一块贴上去的黑条，而不是这一节的标题。
  */
 .dsm-turnHead {
-  /* 停在筛选那一行下面：那个偏移量由视图量出来写进 --dsm-turn-top（窄窗口里芯片会折成两行，那一行
+  /* 停在筛选那一行下面：那个偏移量由视图量出来写进 --dsm-turn-top（窄窗口里筛选标签会折成两行，那一行
      会变高），没有它时退到 640px 宽下量到的 37px。 */
   position: sticky; top: var(--dsm-turn-top, 37px); z-index: 1;
   display: flex; align-items: center; gap: 6px;
@@ -1482,10 +1482,10 @@ export const CSS = `
   max-height: 320px; overflow: auto;
 }
 /*
- * 窄屏（这一块自己的宽度 ≤960px）：左栏收成从左边滑出的浮层。
+ * 窄屏（这一块自己的宽度 ≤960px）：左栏收成从左边滑出的浮动面板。
  *
  * 960 是量出来的门槛：再窄下去，208px 的左栏 + 列表最少 532px + 16px 间距就装不下了（表会先横向滚）。
- * 浮层与左栏是**同一份 DOM**：不渲染两套，项目选中态与筛选芯片就不会各说各话。
+ * 浮动面板与左栏是**同一份 DOM**：不渲染两套，项目选中态与筛选标签就不会各说各话。
  */
 @container (max-width: 960px) {
   .dsm-tree {
@@ -1510,9 +1510,9 @@ export const CSS = `
     transition-delay: 0s;
   }
   /*
-   * 这一档左栏自己也成了浮层：它一打开，外面那层空白就显形（z-index 比浮层低一档，浮层里的项目行
-   * 与筛选芯片照旧可点）。选择器读的是浮层自己那个 dsm-treeOpen 类：状态只有一个出处，JS 里不必
-   * 再同步一份"要不要接点击"。空白跟着浮层进出：滑出去的那 160ms 里它还在，免得半路上点到下面的
+   * 这一档左栏自己也成了浮动面板：它一打开，外面那层空白就显形（z-index 比浮动面板低一档，浮动面板里的项目行
+   * 与筛选标签照旧可点）。选择器读的是浮动面板自己那个 dsm-treeOpen 类：状态只有一个出处，JS 里不必
+   * 再同步一份"要不要接点击"。空白跟着浮动面板进出：滑出去的那 160ms 里它还在，免得半路上点到下面的
    * 列表。
    */
   .dsm-tree.dsm-treeOpen ~ .dsm-workbenchMain .dsm-scrim {
@@ -1549,13 +1549,13 @@ export const CSS = `
     transition-delay: 0s;
   }
   /*
-   * 右栏成了浮层、而且真的摆着一条会话时，外面那层空白也显形：点它就收起（左栏这一档仍是常驻的
+   * 右栏成了浮动面板、而且真的摆着一条会话时，外面那层空白也显形：点它就收起（左栏这一档仍是常驻的
    * 一列，那层空白挂在主栏里，所以点左栏照旧是"只看这个项目"）。右栏在 DOM 里排在主栏之后，
    * 只能从工作台那一层问"右栏开着没有"——:has() 问的是同一个 data-empty。
    */
   .dsm-scrim {
     display: block;
-    /* 空白自己不画东西，跟着浮层"晚 160ms 再消失"就够了：收起动画演完，它才让出点击。 */
+    /* 空白自己不画东西，跟着浮动面板"晚 160ms 再消失"就够了：收起动画演完，它才让出点击。 */
     visibility: hidden;
     transition: visibility 0s linear 160ms;
   }

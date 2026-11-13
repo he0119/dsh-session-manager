@@ -8,7 +8,7 @@
  * 列表不跳走；完整时间线仍留在弹窗里，由右栏那枚「打开完整内容」打开——两件事分开之后，"快速看
  * 一眼"不再要把整份日志读进弹窗。
  *
- * 窄屏（工作台可用宽 ≤1180px）右栏收成从右边滑出的浮层，没选会话时整栏不出现；宽窄是同一份 DOM。
+ * 窄屏（工作台可用宽 ≤1180px）右栏收成从右边滑出的浮动面板，没选会话时整栏不出现；宽窄是同一份 DOM。
  *
  * @module dsh-session-manager/client/SessionInspector
  */
@@ -65,7 +65,7 @@ export interface SessionInspectorProps {
  * 右栏本体。
  *
  * @param props 当前会话、归属与三枚动作。
- * @returns 卡片（宽屏是右栏，窄屏是浮层）。
+ * @returns 卡片（宽屏是右栏，窄屏是浮动面板）。
  */
 export function SessionInspector({
   t,

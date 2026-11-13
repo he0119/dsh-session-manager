@@ -5,7 +5,8 @@ Status: implemented
 ## Problem
 
 「会话内容」弹窗的筛选条那一行里出现了两个字号：右端的「显示 25 / 已读 25 条」实测墨迹 29–32
-device px（16px 的字），紧挨着的五枚芯片（「全部 / 我 / 模型 / 工具 / 其它」）是 23px（12px 的字）。
+device px（16px 的字），紧挨着的五枚筛选标签（「全部 / 我 / 模型 / 工具 / 其它」）是 23px（12px
+  的字）。
 
 根子不在这一行，而在正文层：官方 `Modal` 是 portal 到 `document.body` 的，弹窗落在那套 `.dsm-root`
 （14px/20px）之外，于是弹窗里**凡是没有自己写字号的东西都继承文档根的 16px**。另一只弹窗
@@ -30,7 +31,8 @@ device px（16px 的字），紧挨着的五枚芯片（「全部 / 我 / 模型
 | `.dsm-item` / 脚注 | 16px/normal | 12px/18px |
 | `.dsm-transcriptFactsGrid` | 12px/22px，盒高 94 | 12px/18px，盒高 78 |
 
-两套主题下这四行的值一致；同一只弹窗里原来就对的地方（标题 16px/24px、会话名 14px/20px、芯片 12px、
+两套主题下这四行的值一致；同一只弹窗里原来就对的地方（标题 16px/24px、会话名 14px/20px、筛选标签
+  12px、
 `pre` 12px/18px）没有动。
 
 ## Alternatives considered

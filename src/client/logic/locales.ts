@@ -461,7 +461,7 @@ export const zh = {
   // 那一行结论，用的就是下面这几句。
   'sync.background': '转到后台',
   'sync.background.running': '正在同步（后台）',
-  'sync.background.adopted': '这一趟是在别处发起的（刷新之前，或者另一个页签里）：这一页看不到逐条进度，跑完会补上条数。',
+  'sync.background.adopted': '这一趟是在别处发起的（刷新之前，或者另一个标签页里）：这一页看不到逐条进度，跑完会补上条数。',
   'sync.background.hint': '关掉窗口、开别的弹窗都会继续跑；回到列表还能看到它跑到哪。',
   'sync.background.done': '后台同步结束：拉取 {pulled} 条、推送 {pushed} 条。',
   // 宿主那边连"搬了几条"都没留下（进程重启过）：只说结束，不编数字。

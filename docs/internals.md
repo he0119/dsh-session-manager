@@ -287,13 +287,13 @@
   状态，后两件是 1080 宽的弹窗、导入是 640 的窄弹窗。它取代了上面那条的"页头里放页签"，也取代了
   [备份是独立分页](../.agents/notes/implemented/architecture/2026-10-07-backups-are-their-own-page.md)
   的落点（那份清单还在，位置换成状态栏那枚入口）。
-- [窄屏浮层点外面就收起](../.agents/notes/implemented/bug-fix/2026-11-13-overlay-closes-on-outside-click.md)：
-  左栏与右栏两层浮层共用一层空白：它接住点击、只做"收起"这一件事（不穿透到列表行），挂在主栏里
+- [窄屏浮动面板点外面就收起](../.agents/notes/implemented/bug-fix/2026-11-13-overlay-closes-on-outside-click.md)：
+  左栏与右栏两层浮动面板共用一层空白：它接住点击、只做"收起"这一件事（不穿透到列表行），挂在主栏里
   所以 960–1180 那一档常驻的左栏照旧点得动；显不显示由 CSS 读两层各自的状态，宽屏不受影响。
 - [点整行看详情](../.agents/notes/implemented/architecture/2026-11-13-row-click-shows-the-detail.md)：
   一行会话的主诉求是"看这一条"，所以点整行就把右栏交给它（挡掉 `<label>` 转给勾选框的默认动作）；
   勾选框只管勾选，行尾那枚「详情」留给键盘。
-- [浮层进出用滑动](../.agents/notes/implemented/bug-fix/2026-11-13-overlay-motion-slides-with-visibility.md)：
+- [浮动面板进出用滑动](../.agents/notes/implemented/bug-fix/2026-11-13-overlay-motion-slides-with-visibility.md)：
   display 一步切换既演不出方向、也接不上过渡；改成"一直在版上 + transform 滑 + visibility 延后
   隐藏"，160ms ease-out，少动一点的系统设置下不做过渡。
 - [后台那一轮可以跑双向](../.agents/notes/implemented/feature/2026-11-13-auto-sync-runs-both-ways.md)：

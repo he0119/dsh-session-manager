@@ -43,7 +43,8 @@ Status: implemented
 - **点整行不再勾选这一条**：勾选只剩勾选框（它一直在第一列、悬停也显形）。挑一批会话是"点勾选框"，
   看一条是"点这一行"——两件事各归各的控件。
 - 窄屏下点一行 = 右栏滑进来 + 外面那层空白上岗（见
-  [浮层进出用滑动](../bug-fix/2026-11-13-overlay-motion-slides-with-visibility.md)），点空白收起。
+  [浮动面板进出用滑动](../bug-fix/2026-11-13-overlay-motion-slides-with-visibility.md)），
+  点空白收起。
 - 结构由 `test/client.test.mjs` 钉住：整行挂着点击；点在勾选框 / 行上动作上时不接；点在别处时
   `preventDefault()` 被叫过一次，且只写一处状态（`detail` 换成这一条的 id）。
 - 真实 dev GUI 里走过：工作台 1272px 点第三行 → 右栏换成「AI助手能做什么」、该行 `data-opened`
