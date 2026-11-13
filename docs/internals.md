@@ -251,7 +251,7 @@
   路由出去的事件序号对不上写句柄的游标。
 - [会话内容视图：在插件里把日志解析出来](../.agents/notes/implemented/feature/2026-10-12-transcript-view-parses-the-log-itself.md)：
   一条事件一条条目、工具调用只算一次、上限与分页都在解析层（`src/transcript.ts` + `GET /transcript` +
-  会话页那枚「内容」）；不走宿主，所以侧边栏看不见的会话也能读。
+  会话页右栏那枚「打开完整内容」）；不走宿主，所以侧边栏看不见的会话也能读。
 
 ## 删除与归档
 
@@ -287,6 +287,15 @@
   状态，后两件是 1080 宽的弹窗、导入是 640 的窄弹窗。它取代了上面那条的"页头里放页签"，也取代了
   [备份是独立分页](../.agents/notes/implemented/architecture/2026-10-07-backups-are-their-own-page.md)
   的落点（那份清单还在，位置换成状态栏那枚入口）。
+- [窄屏浮层点外面就收起](../.agents/notes/implemented/bug-fix/2026-11-13-overlay-closes-on-outside-click.md)：
+  左栏与右栏两层浮层共用一层空白：它接住点击、只做"收起"这一件事（不穿透到列表行），挂在主栏里
+  所以 960–1180 那一档常驻的左栏照旧点得动；显不显示由 CSS 读两层各自的状态，宽屏不受影响。
+- [点整行看详情](../.agents/notes/implemented/architecture/2026-11-13-row-click-shows-the-detail.md)：
+  一行会话的主诉求是"看这一条"，所以点整行就把右栏交给它（挡掉 `<label>` 转给勾选框的默认动作）；
+  勾选框只管勾选，行尾那枚「详情」留给键盘。
+- [浮层进出用滑动](../.agents/notes/implemented/bug-fix/2026-11-13-overlay-motion-slides-with-visibility.md)：
+  display 一步切换既演不出方向、也接不上过渡；改成"一直在版上 + transform 滑 + visibility 延后
+  隐藏"，160ms ease-out，少动一点的系统设置下不做过渡。
 - [后台那一轮可以跑双向](../.agents/notes/implemented/feature/2026-11-13-auto-sync-runs-both-ways.md)：
   自动那一档从开 / 关变成三档（关 / 只推 / 双向 + 整理）；强的那档赢；双向允许覆盖本机（先备份、开着的
   跳过），自动整理只删重复与被取代的包、孤儿包留着。它给「只推」那篇加了边界。
@@ -319,9 +328,11 @@
   仍是 0px，得在自己的 `.dsm-diffBody` 上给节奏。
 - [卡片级的主动作放卡片底部的动作行](../.agents/notes/implemented/architecture/2026-10-07-card-actions-live-in-a-footer-row.md)：
   动作跟着它的输入走；卡头只留不动数据的工具（刷新、全选 / 清空、收起 / 展开），清单行上的动作不挪位。
-- [行上的动作等悬停](../.agents/notes/implemented/architecture/2026-10-12-row-action-waits-for-hover.md)：
-  会话页那枚「内容」在行尾那一格里与时刻叠着（`grid-area: 1 / 1`），悬停或键盘落在这一行时出场；
-  无盒子、走 `brand-primary`——它不该长成标签那样的小块。
+- [行尾只留一枚给键盘的「详情」](../.agents/notes/implemented/simplification/2026-11-13-row-actions-leave-the-hover-slot.md)：
+  点整行已经能看详情，悬停再浮出动作就是重复；「内容」整枚删掉（完整时间线在右栏里开）。剩下那枚
+  「详情」与时刻叠在同一格（`grid-area: 1 / 1`），只在键盘落到这一行时出场。它取代了
+  [行上的动作等悬停](../.agents/notes/implemented/architecture/2026-10-12-row-action-waits-for-hover.md)
+  的「悬停出场」那一半。
 - [选行工具全站只有一对](../.agents/notes/implemented/bug-fix/2026-10-08-one-pair-of-pick-tools.md)：
   两张带勾选的清单共用一对常驻的「全选 / 清空」（同一套作用面与禁用判据），位置是清单之上那一行的
   右端；清单就是整张卡时在卡头，清单是卡片里的一段时在它上方那一行。

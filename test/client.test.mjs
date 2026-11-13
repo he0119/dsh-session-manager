@@ -2745,9 +2745,10 @@ test('客户端产物：「会话」页的搜索框按标题或 id 筛，筛空�
   )
 })
 
-test('客户端产物：行上的「内容」落在行尾那一格，不在标题那一格', { skip }, () => {
-  // 与 styles.test.mjs 的「行上的动作等悬停」那条配对：结构上它必须与时刻共用一个格子（CSS 靠叠格子
-  // 把动作换出来），且**不在** `.dsm-rowLabel` 里——那里是标签的领地，摆在那儿会被读成第二枚状态标签。
+test('客户端产物：会话页的行——点整行看详情，行尾只留一枚给键盘的「详情」', { skip }, () => {
+  // 与 styles.test.mjs 的「行尾那枚「详情」只给键盘」那条配对：结构上它与时刻共用一个格子（CSS 靠
+  // 叠格子把它换出来），且**不在** `.dsm-rowLabel` 里——那里是标签的领地，摆在那儿会被读成第二枚
+  // 状态标签。「内容」那枚已经删了：完整时间线只在右栏里开。
   const state = {
     sessionsRoot: '/home/u/.dsh/sessions',
     registryPath: '/home/u/.dsh/registry.json',
@@ -2768,30 +2769,57 @@ test('客户端产物：行上的「内容」落在行尾那一格，不在标�
   for (const row of rows) {
     const parts = elementsOf(row)
     const pick = (name) => parts.filter((node) => classesOf(node).includes(name))
-    assert.equal(pick('dsm-rowInspect').length, 1, '一行一枚「内容」')
-    assert.equal(pick('dsm-rowDetail').length, 1, '一行一枚「详情」')
+    assert.equal(pick('dsm-rowInspect').length, 0, '「内容」那枚不再画在行上')
+    assert.equal(pick('dsm-rowDetail').length, 1, '行尾留一枚「详情」（键盘那条路）')
+    assert.equal(
+      strings(row).includes('manage.transcript.open'),
+      false,
+      '行上不再出现「内容」这个文案，完整时间线只在右栏里开',
+    )
     const label = pick('dsm-rowLabel')
     assert.equal(label.length, 1, '标题与标签同占一格')
     assert.equal(
-      elementsOf(label[0]).some((node) => classesOf(node).includes('dsm-rowInspect')),
+      elementsOf(label[0]).some((node) => classesOf(node).includes('dsm-rowDetail')),
       false,
-      '"内容"不再摆在标题那一格里',
+      '「详情」不摆在标题那一格里',
     )
     const slot = pick('dsm-slot')
-    assert.equal(slot.length, 1, '行尾那一格是时刻与动作共用的')
+    assert.equal(slot.length, 1, '行尾那一格是时刻与「详情」共用的')
     assert.ok(
       elementsOf(slot[0]).some((node) => classesOf(node).includes('dsm-time')),
       '同一个格子里有时刻',
     )
     assert.ok(
-      elementsOf(slot[0]).some((node) => classesOf(node).includes('dsm-rowInspect')),
-      '「内容」与时刻同格：悬停时靠叠格子互相顶替，行宽不动',
-    )
-    assert.ok(
       elementsOf(slot[0]).some((node) => classesOf(node).includes('dsm-rowDetail')),
-      '「详情」也在同一格的动作组里',
+      '「详情」与时刻同格：键盘落到这一行时靠叠格子互相顶替，行宽不动',
     )
   }
+
+  /*
+   * 点整行 = 看详情。这一行是个 <label>，默认动作是把点击转给勾选框，所以这里核三件事：整行挂上了
+   * 点击；点在勾选框 / 行上那枚按钮上时不接（它们各自处理）；点在别处时挡掉 label 的默认动作、
+   * 只写一处状态——把这一条交给右栏。
+   */
+  const first = rows[0]
+  assert.equal(typeof first.props.onClick, 'function', '整行要能点开详情')
+  let prevented = 0
+  const clickOn = (target) => ({
+    target,
+    preventDefault: () => {
+      prevented += 1
+    },
+  })
+  mounted.sets.length = 0
+  first.props.onClick(clickOn({ closest: () => ({}) }))
+  assert.equal(prevented, 0, '点在勾选框或行上那枚按钮上时，这一下归它们')
+  assert.equal(mounted.sets.length, 0, '也不该顺手打开详情')
+  first.props.onClick(clickOn({ closest: () => null }))
+  assert.equal(prevented, 1, '挡掉 label 的默认动作：否则这一下还会顺带勾上这条会话')
+  assert.deepEqual(
+    mounted.sets.map((entry) => entry.value?.id),
+    ['s-1'],
+    '点整行只写一处状态：把这一条交给右栏',
+  )
 })
 
 test('客户端产物：「会话」页平铺——项目树代替组头，整组处理走「选项目 → 全选」', { skip }, () => {
@@ -2811,7 +2839,7 @@ test('客户端产物：「会话」页平铺——项目树代替组头，整�
     ],
     workspaces: [{ id: 'w1', path: '/home/u/dev/alpha', title: '工作区甲', sessionIds: ['a-1'] }],
   }
-  const { registrations, recorded } = mount({ state, panel: 'manage', arrays: [[], ['blank']] })
+  const { registrations, recorded, sets } = mount({ state, panel: 'manage', arrays: [[], ['blank']] })
   const text = strings(registrations[0].component(registrations[0].registration.inject()))
 
   const rowIds = namedElements(recorded, 'SessionRow').map((node) => node.props.session.id)
@@ -2862,6 +2890,61 @@ test('客户端产物：「会话」页平铺——项目树代替组头，整�
   assert.ok(toggle, '卡头有项目栏的窄屏开关')
   assert.equal(toggle.props['aria-expanded'], false, '默认收起')
   assert.equal(toggle.props['aria-controls'], 'dsm-tree', '开关点名它展开的是哪一栏')
+
+  /*
+   * 浮层外面那层空白：窄屏有浮层打开时（左栏的项目与筛选 / 右侧的详情），点它就收起，不必先找到
+   * 那一层里那枚「关闭」。
+   *
+   * 它一直挂在页面上（显不显示由 CSS 读浮层自己的状态，见 test/styles.test.mjs），这里核的是位置与
+   * 那一下点击：它挂在**主栏**里、不占工作台那一层——左栏在 960–1180 那一档还是常驻的一列，
+   * 挂在工作台上就会把左栏一起盖住。
+   */
+  const scrim = recorded.find((node) =>
+    String(node.props?.className ?? '').split(/\s+/).includes('dsm-scrim'),
+  )
+  assert.ok(scrim, '主栏里要有一层接住"浮层外面"的点击')
+  assert.equal(scrim.props['aria-hidden'], 'true', '它只是接点击的那层空白，不进无障碍树')
+  const workbench = recorded.find((node) =>
+    String(node.props?.className ?? '').split(/\s+/).includes('dsm-workbench'),
+  )
+  assert.ok(workbench, '工作台那一层要在')
+  const main = recorded.find((node) =>
+    String(node.props?.className ?? '').split(/\s+/).includes('dsm-workbenchMain'),
+  )
+  assert.ok(main, '工作台主栏要在')
+  // `recorded` 是按"谁先被造出来"排的，浮层那一棵要等走树时才渲染，照数组下标核会读到一版与 DOM
+  // 无关的顺序；所以这里读工作台自己的 children，与浏览器里那份 DOM 同序。
+  const kidsOf = (node) =>
+    (Array.isArray(node.props?.children) ? node.props.children : [node.props?.children]).filter(
+      (child) => child !== null && child !== undefined,
+    )
+  assert.equal(
+    kidsOf(workbench).indexOf(scrim),
+    -1,
+    '不占工作台那一层：左栏在 960–1180 是常驻的一列，挂在那里会把左栏一起盖住',
+  )
+  assert.ok(kidsOf(main).includes(scrim), '挂在主栏里（它铺的就是列表这块）')
+
+  // 点空白 = 点「关闭」：左栏写下与那枚「关闭」相同的状态位与值，右栏同时清成"没选会话"。
+  const closeButton = elementsOf(tree).find(
+    (node) => node.type === 'button' && node.props?.children === 'close',
+  )
+  assert.ok(closeButton, '浮层里要有那枚「关闭」')
+  sets.length = 0
+  closeButton.props.onClick()
+  const fromClose = sets.splice(0)
+  assert.deepEqual(
+    fromClose.map((entry) => entry.value),
+    [false],
+    '「关闭」写的是"收起"',
+  )
+  scrim.props.onClick()
+  const fromScrim = sets.splice(0)
+  assert.equal(fromScrim.length, 2, '点一下收两层：左栏与右栏')
+  assert.deepEqual(fromScrim[0], fromClose[0], '左栏那一下与「关闭」写的是同一处状态、同一个值')
+  // 只核 id 那一格：产物跑在另一个 vm 上下文里，那边造出来的对象换了原型，deepEqual 会栽在原型上。
+  assert.equal(fromScrim[1].value?.id, null, '右栏清成"没选会话"')
+  assert.notEqual(fromScrim[1].slot, fromScrim[0].slot, '两处各写各的状态位')
 
   // 右栏详情：宽屏一直摆着，没选会话时是一句提示；行尾多一枚「详情」，它才是右栏的入口
   const inspector = recorded.find((node) =>

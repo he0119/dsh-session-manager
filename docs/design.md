@@ -90,11 +90,21 @@
 - 「会话」页是**工作台**：左栏（208px，项目与筛选）+ 列表卡片。左栏自己滚，筛选段钉在栏底；窄到
   工作台可用宽 ≤960px 时左栏收成 280px 的浮层，卡头出现「项目与筛选」。两种形态是同一份 DOM，
   靠容器查询换位置（阈值读工作台自己的宽度，不是窗口宽度）。
+- **两层浮层的收起方式一样**：浮层里那枚「关闭」与**浮层外面那块空白**都能收起它。后者是一个不画
+  东西的收集层（`.dsm-scrim`），挂在主栏（`.dsm-workbenchMain`）里，一次点击把左栏与右栏都收掉；
+  它接住这一下点击，所以点到的列表行不会被顺带选中或打开（一次点击只做一件事）。显不显示看两层
+  各自的浮层状态（左栏 ≤960 且 `dsm-treeOpen`；右栏 ≤1180 且 `dsm-inspector[data-empty='false']`），
+  宽屏与没有浮层时它不显示、也接不到点击。挂在主栏而不是工作台上，是为了让 960–1180 那一档常驻的
+  左栏照旧点得动（选项目不被那一层吞掉）。
+- **两层浮层的进出是滑动**：左栏从左边滑出、右栏从右边滑出，各 160ms `ease-out`。关着时它们挪到
+  边界之外并 `visibility: hidden`（不接点击、不进无障碍树），滑完 160ms 才真的隐藏；外面那层空白
+  陪着演完再让出点击。`prefers-reduced-motion: reduce` 时不做过渡，当场开合。
 - 右栏是**详情**（340px）：**开头两轮**（每轮一条人的消息 + 一条回答，各最多四行；选中一条才读
   `/transcript` 的第一页，读到的按会话缓存在组件里）、标题、分类标签、项目 / 目录 / 创建时间 / 大小 /
   文件数 / 会话 id，以及打开完整内容、归档 / 取消归档、勾选 / 取消勾选三枚动作。开头不是完整时间线：
   思考块、工具入参与结果不进来，全部在「打开完整内容」里。宽屏一直摆着（没选时是一句提示）；工作台
-  可用宽 ≤1180px 时收成从右边滑出的浮层，没选时整栏不出现，点「关闭」收起。宽窄同样是同一份 DOM。
+  可用宽 ≤1180px 时收成从右边滑出的浮层，没选时整栏不出现，点「关闭」或点外面那块空白收起。宽窄
+  同样是同一份 DOM。
 - 页头是**一条工具条**：`h2` **16px / 行高 24px / 500**、同步状态、右端的「?」「刷新」「插件设置」
   同排；窄到放不下时整排换行（`flex-wrap: wrap`，行距 8px）。状态那一枚不参与收缩、文字不折行
   （`.dsm-headChip`）。
@@ -172,14 +182,18 @@
 - 会话页没有组头与折叠：分组这件事由左栏的项目树承担（选一个项目 = 整组处理）。导出清单曾经是唯一按
   目录分组的地方（`SessionGroupHead` / 折叠 / 整组勾选），它的消费者随导出清单一起没了，所以那一套也
   删掉了。
-- 行尾有两枚动作：「详情」把这一条交给右栏（不打开弹窗，也不改变勾选），「内容」直接打开完整
-  时间线。两枚都藏在行尾，悬停或键盘落在这一行时出场；静止时行上只有标签与时刻。右栏正开着的那一行
-  左缘有一条品牌色细线；窄屏（触屏）没有悬停，动作顶替时刻那一格常显。
+- **点整行 = 看详情**：这一行是个 `<label>`（勾选框的无障碍名字靠它），所以点标题、项目、字节、
+  空白都挡掉 label 的默认动作，只做"把这一条交给右栏"这一件事——勾选状态不变。勾选框自己照旧只管
+  勾选，行尾那两枚动作也各自处理自己的点击。
+- 行尾只有一枚「详情」：它把这一条交给右栏，**只给键盘**——平时 `visibility: hidden`，Tab 落到
+  这一行的勾选框时它才顶掉时刻出场；鼠标与触屏点整行就够了，悬停时那一格照旧只有时刻。完整时间线
+  不在行上：右栏里那枚「打开完整内容」是它唯一的入口。右栏正开着的那一行左缘有一条品牌色细线。
 - 空态、加载态不编造结论：清单没到之前说「读取中…」，不把"0 个会话"画上去。空态画在列表框**里面**，
   表头不能因为"这一筛没命中"而消失。
 - 依据：[全宽工作台那篇](../.agents/notes/implemented/architecture/2026-11-12-session-page-is-a-full-width-workbench.md)、
   [项目身份与组头](../.agents/notes/implemented/feature/2026-10-04-workspace-shows-project-identity.md)、
   [行上动作](../.agents/notes/implemented/architecture/2026-10-12-row-action-waits-for-hover.md)、
+  [点整行看详情](../.agents/notes/implemented/architecture/2026-11-13-row-click-shows-the-detail.md)、
   [两阶段加载](../.agents/notes/implemented/architecture/2026-10-07-page-loads-in-two-phases.md)。
 
 ### 2.4 弹窗
@@ -342,10 +356,13 @@ pnpm typecheck && pnpm build && pnpm test && pnpm check:package
 | 控制件用官方原语 | [2026-10-15](../.agents/notes/implemented/architecture/2026-10-15-controls-come-from-the-official-primitives.md) |
 | 卡片动作行 | [2026-10-07](../.agents/notes/implemented/architecture/2026-10-07-card-actions-live-in-a-footer-row.md) |
 | 一对选行工具 | [2026-10-08](../.agents/notes/implemented/bug-fix/2026-10-08-one-pair-of-pick-tools.md) |
-| 行上动作等悬停 | [2026-10-12](../.agents/notes/implemented/architecture/2026-10-12-row-action-waits-for-hover.md) |
+| 行上动作等悬停（已被取代） | [2026-10-12](../.agents/notes/implemented/architecture/2026-10-12-row-action-waits-for-hover.md) |
+| 行尾只留一枚给键盘的「详情」 | [2026-11-13](../.agents/notes/implemented/simplification/2026-11-13-row-actions-leave-the-hover-slot.md) |
 | 页签去掉、改成入口 + 宽弹窗 | [2026-11-12](../.agents/notes/implemented/architecture/2026-11-12-no-page-tabs.md) |
 | 分页块间距（换成宽弹窗正文层） | [2026-10-16](../.agents/notes/implemented/bug-fix/2026-10-16-inner-blocks-need-their-own-gap.md) |
 | 弹窗正文字号 | [2026-10-12](../.agents/notes/implemented/bug-fix/2026-10-12-dialog-body-declares-its-own-type.md) |
 | 弹窗正文块间距 | [2026-10-18](../.agents/notes/implemented/bug-fix/2026-10-18-dialog-body-needs-its-own-gap.md) |
 | 颜色只走 token | [2026-09-27](../.agents/notes/implemented/bug-fix/2026-09-27-token-only-colors.md) |
 | 动作带边框 | [2026-10-16](../.agents/notes/implemented/bug-fix/2026-10-16-actions-carry-their-frame.md) |
+| 窄屏浮层点外面收起 | [2026-11-13](../.agents/notes/implemented/bug-fix/2026-11-13-overlay-closes-on-outside-click.md) |
+| 点整行看详情 | [2026-11-13](../.agents/notes/implemented/architecture/2026-11-13-row-click-shows-the-detail.md) |
