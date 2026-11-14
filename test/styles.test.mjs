@@ -775,6 +775,17 @@ test('手绘控件同一套皮：尺寸跟着官方那两档，焦点环一个�
   }
 })
 
+test('危险动作底栏那两枚按钮的最小宽度照官方 RiskConfirmation', () => {
+  // 官方 `RiskConfirmation.module.css` 给底栏两枚按钮钉了最小宽度（取消 72px、确认 136px）：五个动作
+  // 的文案长短不一（「取消」/「转到后台」、「确认删除」/「开始整理」），不钉的话底栏宽度跟着字跳。
+  const cancel = ruleBody('.dsm-dialogAction')
+  const confirm = ruleBody('.dsm-dialogConfirm')
+  assert.notEqual(cancel, null, '找不到 .dsm-dialogAction 规则')
+  assert.notEqual(confirm, null, '找不到 .dsm-dialogConfirm 规则')
+  assert.match(cancel, /min-width:\s*72px/, '取消那一枚 72px')
+  assert.match(confirm, /min-width:\s*136px/, '确认那一枚 136px')
+})
+
 test('说明页 FAQ 的答案不被挤成零宽：那一栏是单列网格', () => {
   // 真实缺陷（英文界面里一眼能看出来）：`.dsm-defs` 的列是 minmax(0, auto) minmax(0, 1fr)，FAQ 的
   // 问题是一整句话，max-content 把第一列吃满（量到 522px），答案那一列拿到 0px——每个答案一行只放得

@@ -21,7 +21,7 @@
 
 import * as React from 'react'
 
-import { Button, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, Checkbox, IconWarningOutlineRegular, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 
 import type { Translate } from '../logic/locales.ts'
 
@@ -31,6 +31,14 @@ export interface ConfirmDialogProps {
   title: string
   /** 主按钮文案。 */
   confirmLabel: string
+  /**
+   * 风险那一句：摆在清单下面、勾选框上面（带官方那枚警告图标）。
+   *
+   * 这一句加下面那枚「我明白」勾选框，就是官方 `RiskConfirmation` 那套确认方式：主按钮先禁用，
+   * 勾上才按得动。官方那枚原语本身只收一句话（`description` 是字符串，没有放清单的位置），而这几个
+   * 动作的正文正是"将要发生什么"的清单，所以照着它的排法做在本组件里，清单留下来。
+   */
+  acknowledge: string
   /** 正在做的时候主按钮显示的那句话（「删除中…」）。 */
   busyLabel: string
   /** 动作正在执行：主按钮换成 `busyLabel`，两个按钮都禁用。 */
@@ -80,6 +88,7 @@ export function ConfirmDialog({
   t,
   title,
   confirmLabel,
+  acknowledge,
   busyLabel,
   busy,
   backgroundLabel,
@@ -91,6 +100,7 @@ export function ConfirmDialog({
   onCancel,
   children,
 }: ConfirmDialogProps): React.ReactElement {
+  const [acknowledged, setAcknowledged] = React.useState(false)
   return (
     <Modal
       open
@@ -107,6 +117,8 @@ export function ConfirmDialog({
             与 `--dsw-alias-label-primary-foreground`，本页原先手写填充按钮拼的那条回落链不再需要；
             缺省尺寸是 36px / 14px，也不再用 `size="sm"`（28px / 12px 在弹窗里比官方那对轻一档）。
             `data-modal-autofocus` 是官方 `Modal` 认的初始焦点标记，留在「取消」这一枚上。
+            两枚的最小宽度（72 / 136）也照官方 `RiskConfirmation` 给：五个动作的文案长短不一，
+            不给的话底栏宽度跟着字跳。
           */}
           {/*
             忙碌时有两种口径：给了 `backgroundLabel` 的（同步）把这一枚变成「转到后台」——窗口关掉、
@@ -114,6 +126,7 @@ export function ConfirmDialog({
           */}
           <Button
             variant="outline"
+            className="dsm-dialogAction"
             data-modal-autofocus=""
             onClick={onCancel}
             disabled={busy && backgroundLabel === undefined}
@@ -122,8 +135,9 @@ export function ConfirmDialog({
           </Button>
           <Button
             variant="primary"
+            className="dsm-dialogConfirm"
             onClick={onConfirm}
-            disabled={busy || planning || error !== null || disabled}
+            disabled={busy || planning || error !== null || disabled || !acknowledged}
           >
             {busy ? busyLabel : confirmLabel}
           </Button>
@@ -135,6 +149,24 @@ export function ConfirmDialog({
         {planning && (planningDetail ?? <p className="dsm-hint">{t('dialog.previewing')}</p>)}
         {error !== null && <p className="dsm-error">{error}</p>}
         {children}
+        {/*
+          风险那一块照官方 RiskConfirmation 的排法：警告图标 + 一句话，下面是「我明白」那枚勾选，
+          主按钮勾上才按得动。忙起来（正在做）就撤掉这两样——那一步已经没有可确认的东西了。
+        */}
+        {!busy && (
+          <>
+            <div className="dsm-risk">
+              <IconWarningOutlineRegular size={18} className="dsm-riskIcon" />
+              <p>{acknowledge}</p>
+            </div>
+            <Checkbox
+              className="dsm-acknowledge"
+              checked={acknowledged}
+              label={t('dialog.acknowledge')}
+              onChange={setAcknowledged}
+            />
+          </>
+        )}
       </div>
     </Modal>
   )

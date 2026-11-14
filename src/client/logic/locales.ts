@@ -96,6 +96,7 @@ export const zh = {
   'import.targetLabel': '目标目录',
   // 与迁移页的目标目录同一个字段（值控件 + 候选面板 + 手输路径），空着时值控件上显示这一句。
   'import.targetPlaceholder': '选择目标目录…',
+  'dialog.acknowledge': '我明白',
   'dialog.previewing': '预演中…',
   'import.action': '导入',
   'import.dialogTitle': '导入会话包',
@@ -166,6 +167,8 @@ export const zh = {
     '勾中的会话都侧边栏不显示（已归档 / 空白 / 子智能体），这次没有可迁移的会话：先在列表里单独处理' +
     '（已归档的取消归档、空白的删掉、子智能体连着它的父会话一起迁），或者改勾父会话。',
   'migrate.action': '迁移',
+  'migrate.acknowledge':
+    '迁移会改写这些会话记录的工作目录，写盘之后要回退只能走「备份与回滚」。',
   'migrate.dialogTitle': '将要迁移',
   'migrate.apply': '确认迁移',
   'migrate.running': '迁移中…',
@@ -222,6 +225,8 @@ export const zh = {
   'backup.kind.delete': '删除',
   'backup.kind.replace': '覆盖前',
   'backup.rollback.action': '回滚',
+  'backup.rollback.acknowledge':
+    '回滚会拿这份备份覆盖现在的库：之后新产生的会话与改动都会丢。',
   'backup.rollback.dialogTitle': '将要回滚',
   'backup.rollback.confirm': '确认回滚',
   'backup.rollback.running': '回滚中…',
@@ -229,6 +234,8 @@ export const zh = {
   'backup.rollback.actions': '以下是回滚会做的 {count} 个动作（还没有写盘）：',
   'backup.rollback.done': '已回滚 {sessions} 条会话、还原 {files} 个文件并恢复注册表。',
   'backup.restore.action': '恢复',
+  'backup.restore.acknowledge':
+    '恢复会把这份备份里的会话与文件写回库：同名的会被覆盖成备份里那一份。',
   'backup.restore.dialogTitle': '将要恢复',
   'backup.restore.confirm': '确认恢复',
   'backup.restore.running': '恢复中…',
@@ -325,6 +332,8 @@ export const zh = {
   'manage.delete.running': '删除中…',
   'manage.delete.progress.note': '删除先备份再删；中断的话这份备份就在「备份与回滚」里，恢复即可。',
   'manage.delete.backupTo': '备份落在：{dir}（点成功后那句里的「撤销」，或去「备份与回滚」里恢复）',
+  'manage.delete.acknowledge':
+    '删掉之后这些会话的日志就没了；备份留在上面那个目录里，需要时去「备份与回滚」恢复。',
   'manage.delete.hint':
     '删除先把整个会话目录备份到本插件的备份根，再删掉它；还活在宿主内存里的会话删不掉，做法见「说明」。',
   'manage.delete.via': '随父删',
@@ -479,6 +488,7 @@ export const zh = {
   'sync.tidy.action': '整理远端',
   'sync.settings.action': '插件设置',
   'sync.config.title': '同步',
+  'sync.tidy.acknowledge': '整理会删掉远端多出来的那些包，删了以后不能再从远端取回。',
   'sync.tidy.dialogTitle': '整理远端',
   'sync.tidy.confirm': '开始整理',
   'sync.tidy.running': '整理中…',
@@ -752,6 +762,7 @@ export const en: LocaleDictOf<typeof NS> = {
   'import.dropVeil': 'Drop to import this bundle',
   'import.targetLabel': 'Target directory',
   'import.targetPlaceholder': 'Choose a target directory…',
+  'dialog.acknowledge': 'I understand',
   'dialog.previewing': 'Previewing…',
   'import.action': 'Import',
   'import.dialogTitle': 'Import a session bundle',
@@ -824,6 +835,8 @@ export const en: LocaleDictOf<typeof NS> = {
     'Every ticked session is hidden from the sidebar (archived / blank / subagent), so there is nothing to migrate: ' +
     'handle them in the list first (unarchive, delete, or migrate a subagent with its parent), or tick the parent session.',
   'migrate.action': 'Migrate',
+  'migrate.acknowledge':
+    'Migration rewrites the working directory recorded in these sessions; once written, undoing it means Backups & rollback.',
   'migrate.dialogTitle': 'About to migrate',
   'migrate.apply': 'Migrate now',
   'migrate.running': 'Migrating…',
@@ -876,6 +889,8 @@ export const en: LocaleDictOf<typeof NS> = {
   'backup.kind.delete': 'delete',
   'backup.kind.replace': 'before overwrite',
   'backup.rollback.action': 'Roll back',
+  'backup.rollback.acknowledge':
+    'Rollback replaces the current library with this backup: sessions and changes made since then are lost.',
   'backup.rollback.dialogTitle': 'About to roll back',
   'backup.rollback.confirm': 'Confirm rollback',
   'backup.rollback.running': 'Rolling back…',
@@ -883,6 +898,8 @@ export const en: LocaleDictOf<typeof NS> = {
   'backup.rollback.actions': '{count} steps this rollback would take (nothing written yet):',
   'backup.rollback.done': 'Rolled back {sessions} sessions, restored {files} files and the workspace registry.',
   'backup.restore.action': 'Restore',
+  'backup.restore.acknowledge':
+    'Restoring writes the sessions and files from this backup back into the library; same-named ones are overwritten.',
   'backup.restore.dialogTitle': 'About to restore',
   'backup.restore.confirm': 'Confirm restore',
   'backup.restore.running': 'Restoring…',
@@ -978,6 +995,8 @@ export const en: LocaleDictOf<typeof NS> = {
   'manage.delete.running': 'Deleting…',
   'manage.delete.progress.note': 'Delete backs up first and only then removes; if it stops, restore that backup from Backups & rollback.',
   'manage.delete.backupTo': 'Backup lands in: {dir} (press Undo on the success notice, or restore it from Backups & rollback)',
+  'manage.delete.acknowledge':
+    'After this their logs are gone. The backup stays in the folder above; restore it from Backups & rollback if needed.',
   'manage.delete.hint': 'Deleting backs the session directory up into this plugin’s backup root first; a live session cannot be deleted — see Help.',
   'manage.delete.via': 'with parent',
   'manage.delete.viaTip':
@@ -1120,6 +1139,7 @@ export const en: LocaleDictOf<typeof NS> = {
   'sync.tidy.action': 'Tidy remote',
   'sync.settings.action': 'Plugin settings',
   'sync.config.title': 'Sync',
+  'sync.tidy.acknowledge': 'Tidying deletes the extra packages on the remote; once deleted they cannot be fetched back.',
   'sync.tidy.dialogTitle': 'Tidy the remote',
   'sync.tidy.confirm': 'Start tidying',
   'sync.tidy.running': 'Tidying…',

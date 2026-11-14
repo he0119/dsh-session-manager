@@ -1022,6 +1022,7 @@ export function ManagePanel({
           // 落地那一段标题也换掉：这时候已经不是"将要"了，正文里正跑着进度。
           title={t(busy === 'apply' ? 'manage.delete.running' : 'manage.delete.dialogTitle')}
           confirmLabel={t('manage.delete.apply')}
+          acknowledge={t('manage.delete.acknowledge')}
           busyLabel={t('manage.delete.running')}
           busy={busy === 'apply'}
           planning={pending.plan === null && pending.error === null}
@@ -1080,6 +1081,7 @@ export function ManagePanel({
           // 落地那一段标题也换掉：这时候已经不是"将要"了，正文里正跑着进度。
           title={t(busy === 'migrate' ? 'migrate.running' : 'migrate.dialogTitle')}
           confirmLabel={t('migrate.apply')}
+          acknowledge={t('migrate.acknowledge')}
           busyLabel={t('migrate.running')}
           busy={busy === 'migrate'}
           // 目标为空时不算"预演中"：那时正文是一句"先选目标目录"，不是一句等待；一条都搬不走时同理

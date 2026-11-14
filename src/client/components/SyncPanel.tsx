@@ -1403,6 +1403,7 @@ export function SyncPanel({
           t={t}
           title={t('sync.tidy.dialogTitle')}
           confirmLabel={t('sync.tidy.confirm')}
+          acknowledge={t('sync.tidy.acknowledge')}
           busyLabel={t('sync.tidy.running')}
           busy={tidyBusy && tidyDialog === 'apply'}
           planning={tidyBusy && tidyDialog === 'plan'}
