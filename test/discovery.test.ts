@@ -84,6 +84,21 @@ test('scanAll：整库扫描照旧报每条会话的字节数合计（只读前�
   assert.ok(statSync(a).size > 200 * 1024)
 })
 
+test('scanAll：日志改写后立刻再扫，读到的必须是新的（缓存的判据是 size + mtime）', () => {
+  const root = resetSandbox()
+  const dir = join(root, '--tmp-project--', 'session-a')
+  const path = writeLog(dir, headerOf('session-a', { cwd: '/tmp/aaa' }))
+  assert.equal(scanAll(root, decodeAll)[0]?.cwd, '/tmp/aaa')
+
+  // 同一秒里改写（清空再写）：大小可能一样，只有 mtime 变——缓存必须认出来。
+  writeLog(dir, headerOf('session-a', { cwd: '/tmp/bbb' }))
+  assert.equal(scanAll(root, decodeAll)[0]?.cwd, '/tmp/bbb')
+
+  // 追加 eventos：header 没变，但报出去的字节数必须跟着文件走。
+  writeLog(dir, headerOf('session-a', { cwd: '/tmp/bbb' }), [JSON.stringify({ type: 'user/message', seq: 0 })])
+  assert.equal(scanAll(root, decodeAll)[0]?.files[0]?.bytes, statSync(path).size)
+})
+
 // 按 id 直接定位：内容视图每翻一页都要定位一次，所以它不能是"扫一遍整库再筛"。
 // 这组用例同时钉住兜底：目录名不是 id 的编码时仍要能找到，找不到才算真的没有。
 test('locateSession：只读这一条，不为其它会话折标题（整库扫一遍会为每条都调一次）', () => {

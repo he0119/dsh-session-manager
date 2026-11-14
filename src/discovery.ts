@@ -139,6 +139,45 @@ export function readLogHeader(path: string, decodeAll: DecodeAll): { header: Ses
   return { header: readHeaderQuick(buf, decodeAll).header, bytes }
 }
 
+/**
+ * 扫库时记住每个日志首帧解出来的 header。
+ *
+ * 扫一遍整库要为 1475 个文件各开一次、读 64 KB、解首帧（实测 0.33～0.58 秒），而其中绝大多数文件
+ * 上次扫的时候就长这样：整库只在用户真正发消息时才追加一条日志，其余时间一动不动。缓存按
+ * `size:mtimeMs` 认文件，另加一条 git 式的 racy 规则：**记录不到 1 秒的条目不信任**——同一秒里
+ * 又被改写、大小还一样时时间戳分不出来（那时重读一次，成本只落在刚动过的那些文件上）。
+ *
+ * 只给扫描用（`readSessionDir()`）；要写盘的路径（迁移落盘复验、复核）一律走 `readLogHeader()`
+ * 现读，不经过这里。
+ */
+const scanHeaderCache = new Map<string, { stamp: string; at: number; header: SessionHeader; bytes: number }>()
+const SCAN_HEADER_CACHE_MAX = 8192
+
+function readLogHeaderForScan(path: string, decodeAll: DecodeAll): { header: SessionHeader; bytes: number } {
+  let stamp: string
+  try {
+    const info = statSync(path)
+    stamp = `${info.size}:${info.mtimeMs}`
+  } catch {
+    // 文件在扫描途中被删了：把错原样交给 readLogHeader 抛，调用方照旧跳过这个目录。
+    return readLogHeader(path, decodeAll)
+  }
+  const hit = scanHeaderCache.get(path)
+  if (hit !== undefined && hit.stamp === stamp && Date.now() - hit.at > 1000) {
+    // 挪到队尾：Map 的插入顺序就是淘汰顺序。
+    scanHeaderCache.delete(path)
+    scanHeaderCache.set(path, hit)
+    return { header: hit.header, bytes: hit.bytes }
+  }
+  const fresh = readLogHeader(path, decodeAll)
+  scanHeaderCache.set(path, { stamp, at: Date.now(), header: fresh.header, bytes: fresh.bytes })
+  if (scanHeaderCache.size > SCAN_HEADER_CACHE_MAX) {
+    const oldest = scanHeaderCache.keys().next().value
+    if (oldest !== undefined) scanHeaderCache.delete(oldest)
+  }
+  return fresh
+}
+
 /** 一个项目目录下发现的会话。 */
 export interface DiscoveredSession {
   /** 目录名（应等于 encodeSegment(header.id)）。 */
@@ -222,7 +261,7 @@ function readSessionDir(
     const parsed = parseSessionLogName(name)
     if (!parsed) continue
     const path = join(dir, name)
-    const { header: h, bytes } = readLogHeader(path, decodeAll)
+    const { header: h, bytes } = readLogHeaderForScan(path, decodeAll)
     if (header && h.id !== header.id) throw new Error(`inconsistent header ids inside ${dir}`)
     if (header && h.cwd !== header.cwd) throw new Error(`inconsistent header cwd inside ${dir}`)
     header = h
