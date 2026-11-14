@@ -71,6 +71,7 @@ import {
 } from '../logic/planRows.ts'
 import {
   defaultDir,
+  foldSubagents,
   groupPickState,
   sessionsInProject,
   sortSessions,
@@ -251,6 +252,12 @@ export function ManagePanel({
    */
   const [treeOpen, setTreeOpen] = React.useState(false)
   /**
+   * 展开了子智能体的那几条父会话（默认全收）。
+   *
+   * 只记 id：整库更新之后父行可能已经不在，多留一个 id 没有后果。
+   */
+  const [expandedIds, setExpandedIds] = React.useState<string[]>([])
+  /**
    * 右栏正开着的那一条会话。
    *
    * 只记 id、不记整条会话：整库更新（归档 / 改名 / 删除 / 同步）之后，右栏要从**新清单**里重新取，
@@ -268,6 +275,17 @@ export function ManagePanel({
     () => groupSessions(sessions, state?.workspaces ?? []),
     [sessions, state],
   )
+  /**
+   * 每个项目右端那个条数：数的是**顶层会话**（子智能体折在父会话下面，不进去）。
+   *
+   * 与清单里看到的一致：点进这个项目，列出来的就是这么多行。父在别的项目、或父不在这份清单里的
+   * 子智能体自己当顶层，照旧算一条——否则点了项目却一条都数不出来。
+   */
+  const projectRowCounts = React.useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const group of projectGroups) counts.set(group.path, foldSubagents(group.sessions).roots.length)
+    return counts
+  }, [projectGroups])
   const projectOptions = React.useMemo(
     () =>
       projectGroups.map((group) => {
@@ -275,9 +293,14 @@ export function ManagePanel({
           { path: group.path, title: group.title, repo: state?.repos?.[group.path] },
           t,
         )
-        return { path: group.path, name: label.name, count: group.sessions.length, tip: label.tip }
+        return {
+          path: group.path,
+          name: label.name,
+          count: projectRowCounts.get(group.path) ?? group.sessions.length,
+          tip: label.tip,
+        }
       }),
-    [projectGroups, state, t],
+    [projectGroups, projectRowCounts, state, t],
   )
   /** 一行属于哪个项目：组头的称呼规则（项目身份优先、没有身份用标题、再没有用路径）。 */
   const projectNameOf = React.useCallback(
@@ -311,8 +334,66 @@ export function ManagePanel({
     },
     [sessions, t],
   )
+  /**
+   * 子智能体折到父会话下面：列表里只留顶层那一份，子行按需展开（见 `foldSubagents`）。
+   *
+   * 计数也按这一份走——「显示 X / Y 条」说的是"顶层会话"，子智能体单独报一条数（它们是跟着父会话
+   * 走的东西，不该撑大总数）。
+   */
+  const folded = React.useMemo(() => foldSubagents(listed), [listed])
+  /** 这一页手里的行类型（筛、排、折都从 `listed` 的元素类型来，不另写一份）。 */
+  type SessionRowItem = (typeof listed)[number]
+  /**
+   * 会话库里顶层会话的条数（子智能体折在父会话下面，不进去）：`显示 X / Y` 的那个 Y，也是左栏
+   * 「全部项目」右端那个数。与某一行的计数同一套判据——两处数出来的必须一样。
+   */
+  const topLevelTotal = React.useMemo(() => foldSubagents(sessions).roots.length, [sessions])
+  /** 眼下这一份全是子智能体（筛「子智能体」时就是这样）：那时不该拿顶层总数当分母。 */
+  const onlySubagents = listed.length > 0 && folded.roots.every((session) => session.origin === 'subagent')
+  /** 展开／收起一条父会话下面的子智能体。 */
+  const toggleExpanded = (id: string): void =>
+    setExpandedIds((prev) => (prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]))
   /** 眼下列出来的那些里能单独勾的（「全选」的作用面与禁用判据）。 */
-  const pickable = picking.selectableOf(listed)
+  const pickable = picking.selectableOf(folded.roots)
+  /**
+   * 把顶层行画出来，展开的那几条下面接上它们的子智能体（再往下递归：子智能体也可能有自己的子）。
+   *
+   * @param rows 这一层要画的行。
+   * @param depth 缩进级数：0 是顶层，子行 +1（样式按级数给左边距）。
+   */
+  const renderRows = (rows: readonly SessionRowItem[], depth: number): React.ReactNode[] =>
+    rows.flatMap((session) => {
+      const children = folded.childrenOf.get(session.id) ?? []
+      const open = children.length > 0 && expandedIds.includes(session.id)
+      const rendered: React.ReactNode[] = [
+        <SessionRow
+          key={session.id}
+          session={session}
+          variant="manage"
+          checked={picked.includes(session.id)}
+          onToggle={() => picking.toggle(session)}
+          owner={projectNameOf(session)}
+          note={parentElsewhereOf(session)}
+          locked={picking.lockOf(session)}
+          depth={depth}
+          {...(children.length === 0
+            ? {}
+            : {
+                disclosure: {
+                  expanded: open,
+                  count: children.length,
+                  label: t(open ? 'list.collapseSubagents' : 'list.expandSubagents', { count: children.length }),
+                  onToggle: () => toggleExpanded(session.id),
+                },
+              })}
+          onOpenDetail={() => setDetail({ id: session.id })}
+          opened={detail.id === session.id}
+          t={t}
+        />,
+      ]
+      if (open) rendered.push(...renderRows(children, depth + 1))
+      return rendered
+    })
   /**
    * 项目树上某个项目的勾选状态：只看"筛出来的、而且能单独勾的"那些，与卡头「全选」同一个作用面。
    *
@@ -775,7 +856,7 @@ export function ManagePanel({
       <div className="dsm-workbench">
         <SessionTree
           t={t}
-          total={sessions.length}
+          total={topLevelTotal}
           options={projectOptions}
           value={projectPath}
           onPick={(path) => setProject?.({ path })}
@@ -807,7 +888,11 @@ export function ManagePanel({
               <SessionSearch filter={filter} t={t} />
               <span className="dsm-spacer" />
               {(filter.active || projectPath !== null) && (
-                <span className="dsm-hint">{t('list.shown', { shown: listed.length, total: sessions.length })}</span>
+                <span className="dsm-hint">
+                  {onlySubagents
+                    ? t('list.shownSubagents', { shown: folded.roots.length })
+                    : t('list.shown', { shown: folded.roots.length, total: topLevelTotal })}
+                </span>
               )}
               <span className="dsm-hint">{t('list.selected', { count: picked.length })}</span>
               {/*
@@ -838,6 +923,8 @@ export function ManagePanel({
               <div className="dsm-tableHead">
                 <span />
                 <span />
+                {/* 折叠标记那一列：表头这里空着，但它必须在，否则标题那一格会与行错位。 */}
+                <span />
                 <Hint text={t('list.sort.tip')} side="top">
                   <button type="button" className="dsm-sort" onClick={() => toggleSort('title')}>
                     {t('list.sort.title')}
@@ -866,21 +953,7 @@ export function ManagePanel({
               ) : listed.length === 0 ? (
                 <SessionListEmpty text={t('list.noMatch')} />
               ) : (
-                listed.map((session) => (
-                  <SessionRow
-                    key={session.id}
-                    session={session}
-                    variant="manage"
-                    checked={picked.includes(session.id)}
-                    onToggle={() => picking.toggle(session)}
-                    owner={projectNameOf(session)}
-                    note={parentElsewhereOf(session)}
-                    locked={picking.lockOf(session)}
-                    onOpenDetail={() => setDetail({ id: session.id })}
-                    opened={detail.id === session.id}
-                    t={t}
-                  />
-                ))
+                renderRows(folded.roots, 0)
               )}
             </SessionListBox>
 

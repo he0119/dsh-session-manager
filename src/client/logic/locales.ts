@@ -346,6 +346,10 @@ export const zh = {
     '这条子智能体的父会话在 {path}，不在这个目录组里：子智能体的日志落在它自己的 cwd 下，父会话被单独迁走过一次就会长成这样。',
   'list.selectAll': '全选',
   'list.shown': '显示 {shown} / {total} 条',
+  // 子智能体跟着父会话走，撑大总数没有意义：这一份全是子智能体时（筛「子智能体」）只报个数。
+  'list.shownSubagents': '显示 {shown} 条子智能体',
+  'list.expandSubagents': '展开 {count} 条子智能体',
+  'list.collapseSubagents': '收起 {count} 条子智能体',
   'list.noMatch': '没有符合筛选条件的会话。',
   'list.filter.label': '筛选',
   'list.filter.all': '全部',
@@ -1001,6 +1005,10 @@ export const en: LocaleDictOf<typeof NS> = {
     'This subagent’s parent session lives in {path}, outside this directory group: a subagent log sits under its own working directory, which is what happens once the parent was migrated on its own.',
   'list.selectAll': 'Select all',
   'list.shown': 'showing {shown} / {total}',
+  // Subagent sessions hang off their parent, so they are not part of the top-level totals.
+  'list.shownSubagents': 'showing {shown} subagent sessions',
+  'list.expandSubagents': 'Expand {count} subagent sessions',
+  'list.collapseSubagents': 'Collapse {count} subagent sessions',
   'list.noMatch': 'No session matches the filter.',
   'list.filter.label': 'Filter',
   'list.filter.all': 'All',

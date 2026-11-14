@@ -552,7 +552,9 @@ test('平铺表的表头与行用同一套列宽', () => {
   }
   const head = columns(ruleBody('.dsm-tableHead'))
   const row = columns(ruleBody('.dsm-rowManage'))
-  assert.equal(head, '24px 16px minmax(120px, 1.4fr) 168px 84px 120px')
+  // 七个值：勾选框 / 图形标记 / 折叠标记 / 标题 / 项目 / 字节 / 时间。折叠标记那一列是给子智能体折叠
+  // 用的（没有子智能体的行里是空的），它在表头里是一个空占位——少了它父行的标题会比别的行右移一截。
+  assert.equal(head, '24px 16px 24px minmax(120px, 1.4fr) 168px 84px 120px')
   assert.equal(row, head, '表头与行的列宽必须逐字相同（两处改一处就会错位）')
 })
 

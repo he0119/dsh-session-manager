@@ -46,6 +46,7 @@ import { Hint } from './Hint.tsx'
 import { ManagePanel } from './ManagePanel.tsx'
 import { ProgressBlock } from './ProgressBlock.tsx'
 import { SyncPanel } from './SyncPanel.tsx'
+import { foldSubagents } from '../logic/manageRows.ts'
 import { ImportPanel } from './ImportPanel.tsx'
 import { useFileDrop } from './useFileDrop.ts'
 import { useSessionPicking } from './sessionList.tsx'
@@ -328,7 +329,11 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
   }, [job])
 
 
-  const sessions = state?.sessions.length ?? 0
+  /**
+   * 状态栏那个「N 个会话」数的是**顶层会话**：子智能体折在父会话下面，本来也不能单独操作
+   * （勾不动、删不掉、迁不动），把它们算进"库里有几条"只会让这个数对不上能操作的东西。
+   */
+  const sessions = state === null ? 0 : foldSubagents(state.sessions).roots.length
   const workspaces = state?.workspaces.length ?? 0
   /**
    * 页头那行读的那些事实：`/state` 到了以它为准（它是超集），没到就用先回来的 `/meta`。

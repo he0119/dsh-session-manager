@@ -405,7 +405,7 @@ export const CSS = `
   top: 0;
   z-index: 1;
   display: grid;
-  grid-template-columns: 24px 16px minmax(120px, 1.4fr) 168px 84px 120px;
+  grid-template-columns: 24px 16px 24px minmax(120px, 1.4fr) 168px 84px 120px;
   align-items: center;
   gap: 8px;
   padding: 6px 10px;
@@ -444,7 +444,7 @@ export const CSS = `
 }
 .dsm-row:last-child { border-bottom: none; }
 /* 「会话」页那一行：勾选框、图形标记、标题与标签、项目、字节、时间（六列，与表头逐列对齐）。 */
-.dsm-rowManage { grid-template-columns: 24px 16px minmax(120px, 1.4fr) 168px 84px 120px; }
+.dsm-rowManage { grid-template-columns: 24px 16px 24px minmax(120px, 1.4fr) 168px 84px 120px; }
 .dsm-rowManage > .dsm-meta { text-align: right; }
 /* 「项目」那一格是文字，不跟着数字右对齐：它与表头一起从左边读。 */
 .dsm-rowManage > .dsm-owner { text-align: left; }
@@ -509,6 +509,62 @@ export const CSS = `
 .dsm-rowLabel > .dsm-rowTitle, .dsm-rowLabel > .dsm-rowId { flex: 1 1 auto; }
 .dsm-rowLabel > .dsm-rowId { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dsm-rowLabel > .dsm-tag { flex: none; }
+/*
+ * 标题那一整格：折叠标记（父会话才有）与名字并排。
+ *
+ * 折叠标记不能塞进名字那枚按钮里——那是按钮套按钮，点尖角会连带打开详情。它自己是一枚
+ * role=button，两者在格子里是兄弟。
+ */
+/*
+ * 折叠标记自己占一列（勾选框、图形标记之后的第三列）：有了它这一列，父行与普通行的标题才落在同一个
+ * 左缘上，表头「标题」那一枚也才对得齐。没有子智能体的行里面是空的。
+ */
+.dsm-treeCell { display: flex; align-items: center; min-width: 0; }
+.dsm-rowTitleCell { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.dsm-rowTitleCell > .dsm-rowLabel { flex: 1 1 auto; }
+/*
+ * 子行缩进：挂在父行下面的子智能体让出一格，父行的标记与名字仍在原位。
+ *
+ * 缩进挂在这一格上（而不是整行），各行那几列才不会跟着往右跑；左边那道 1px 竖线把"它属于上面
+ * 那一条"画出来——只靠 16px 的位移，窄屏或长标题下很容易看不出来。
+ */
+.dsm-rowTitleCellChild {
+  align-self: stretch;
+  padding-left: 16px;
+  border-left: 1px solid var(--dsw-alias-border-l2, rgba(0, 0, 0, 0.16));
+}
+/*
+ * 折叠标记：一枚 22×18 的小方块，尖角 + 挂在这一行下面的子智能体条数。
+ *
+ * 状态只有一份真相：aria-expanded。收起时尖角在 CSS 里转成朝右（同内容视图的轮次折叠）；
+ * 条数用等宽数字，展开 / 收起时那一位不会左右跳。
+ */
+.dsm-rowDisclosure {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  box-sizing: border-box;
+  min-width: 24px;
+  height: 18px;
+  padding: 0 2px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 10px;
+  line-height: 14px;
+  font-variant-numeric: tabular-nums;
+  color: var(--dsw-alias-label-secondary, #646a73);
+}
+.dsm-rowDisclosure:hover {
+  background-color: color-mix(in srgb, var(--dsw-alias-label-primary, #1f2329) 10%, transparent);
+  color: var(--dsw-alias-label-primary, #1f2329);
+}
+.dsm-rowDisclosure:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary, #3370ff); outline-offset: 1px; }
+.dsm-rowDisclosure .dsm-chevron { transition: transform 120ms linear; }
+.dsm-rowDisclosure[aria-expanded='false'] .dsm-chevron { transform: rotate(-90deg); }
+@media (prefers-reduced-motion: reduce) {
+  .dsm-rowDisclosure .dsm-chevron { transition: none; }
+}
 .dsm-meta { color: var(--dsw-alias-label-secondary, #646a73); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /*
  * 行首那枚勾选框自己的 label：它只干一件事——给勾选框一个无障碍名字（那句"勾选《标题》"）。名字

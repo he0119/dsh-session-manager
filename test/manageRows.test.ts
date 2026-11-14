@@ -5,7 +5,13 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { defaultDir, groupPickState, sessionsInProject, sortSessions } from '../src/client/logic/manageRows.ts'
+import {
+  defaultDir,
+  foldSubagents,
+  groupPickState,
+  sessionsInProject,
+  sortSessions,
+} from '../src/client/logic/manageRows.ts'
 
 const rows = [
   { id: 'b', title: 'bravo', cwd: '/home/u/dev/beta', createdAt: 20, bytes: 300 },
@@ -99,4 +105,35 @@ test('项目行勾选框：全勾 / 勾一半 / 一条可勾的都没有', () =>
     indeterminate: false,
     available: false,
   })
+})
+
+test('折叠：子智能体挂到父会话下面，父不在这一份里就自己当顶层', () => {
+  const list = [
+    { id: 'p', cwd: '/home/u/dev/alpha' },
+    { id: 'c1', cwd: '/home/u/dev/alpha', origin: 'subagent', parentSession: 'p' },
+    { id: 'c2', cwd: '/home/u/dev/alpha', origin: 'subagent', parentSession: 'p' },
+    { id: 'lone', cwd: '/home/u/dev/alpha' },
+    // 父在别的项目里：折过去会让子行看着像长在那个项目里，于是它自己当顶层
+    { id: 'x', cwd: '/home/u/dev/beta', origin: 'subagent', parentSession: 'p' },
+    // 父这一份里压根没有（被筛掉、被搜掉、或父已经没了）
+    { id: 'o', cwd: '/home/u/dev/alpha', origin: 'subagent', parentSession: 'gone' },
+    // 分叉：有父指针但没有 origin，是自洽的普通会话，不折
+    { id: 'f', cwd: '/home/u/dev/alpha', parentSession: 'p' },
+  ]
+  const tree = foldSubagents(list)
+  assert.deepEqual(tree.roots.map((row) => row.id), ['p', 'lone', 'x', 'o', 'f'], '顶层行保持原来的顺序')
+  assert.deepEqual((tree.childrenOf.get('p') ?? []).map((row) => row.id), ['c1', 'c2'], '子行也保持顺序')
+  assert.equal(tree.childrenOf.has('c1'), false, '没挂子行的那几条不进表')
+})
+
+test('折叠：孙辈挂在子会话下面，一层只挂直接子会话', () => {
+  const list = [
+    { id: 'p', cwd: '/home/u/dev/alpha' },
+    { id: 'c', cwd: '/home/u/dev/alpha', origin: 'subagent', parentSession: 'p' },
+    { id: 'g', cwd: '/home/u/dev/alpha', origin: 'subagent', parentSession: 'c' },
+  ]
+  const tree = foldSubagents(list)
+  assert.deepEqual(tree.roots.map((row) => row.id), ['p'])
+  assert.deepEqual((tree.childrenOf.get('p') ?? []).map((row) => row.id), ['c'], '直接子会话只有 c')
+  assert.deepEqual((tree.childrenOf.get('c') ?? []).map((row) => row.id), ['g'], 'g 挂在 c 下面')
 })
