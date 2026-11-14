@@ -5088,6 +5088,8 @@ test('客户端产物：进度块的段名是一份共用词汇，认不出来�
     pack: 'progress.pack:{"current":5,"total":9}',
     // 附件对象那一段（往包里收 / 往库里落）量的是对象数，与会话那几段分开说。
     attach: 'progress.attach:{"current":5,"total":9}',
+    // 核对附件引用那一段量的是会话数（逐条扫日志），与搬对象那条分开说。
+    attachScan: 'progress.attachScan:{"current":5,"total":9}',
     backup: 'progress.backup:{"current":5,"total":9}',
     rewrite: 'progress.rewrite:{"current":5,"total":9}',
     move: 'progress.move:{"current":5,"total":9}',

@@ -55,7 +55,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import { canonicalDir, type DirCanonicalizer } from './canonical-path.ts'
-import { commitAttachmentObject, decodeLogText, scanAttachmentRefs, type AttachmentPort, type AttachmentRef } from './attachments.ts'
+import { commitAttachmentObject, scanAttachmentRefs, type AttachmentPort, type AttachmentRef } from './attachments.ts'
 import { warmCheckpoints, type WarmDeps } from './checkpoint-warm.ts'
 import type { AutoConfig } from './config.ts'
 import type { DavPort } from './dav.ts'
@@ -128,6 +128,19 @@ export interface FileFingerprint {
   sha256: string
 }
 
+/**
+ * 索引里记下的一条附件引用：只记身份，不记字节数（取本机路径与远端对象名都用不到它）。
+ *
+ * 为什么记进索引：补对象那一步要知道"这条会话引用过哪些对象"，而唯一能算出来的办法是把日志解压一遍。
+ * 整库解压 1.2 GB 实测 144 秒，把这句结论跟着索引带上，别的机器读索引就够了，一个字节的日志都不用解。
+ */
+export interface IndexedAttachment {
+  kind: 'image' | 'file'
+  id: string
+  /** 文件对象在日志里带的名字（图片没有）：算本机路径的最后一段要用它。 */
+  name?: string
+}
+
 /** 远端索引里的一条会话。 */
 export interface RemoteSessionEntry {
   id: string
@@ -139,6 +152,14 @@ export interface RemoteSessionEntry {
   repoPath?: string
   createdAt: number
   files: FileFingerprint[]
+  /**
+   * 这条会话的日志引用过哪些附件对象（由推送它的那台机器算好写进来）。
+   *
+   * 缺席 = 还没算过（老版本写的索引，或者推送它的机器没有附件服务）：补对象时退回"本地解一遍日志"，
+   * 算完顺手补进自己那一格的索引。有它（哪怕是空数组）就不必解日志——这正是把整库 144 秒的扫描变成
+   * 毫秒级的那一项；空数组说的是"查过，一个都没有"，与"没查过"必须分得开。
+   */
+  attachments?: IndexedAttachment[]
   /**
    * 这台机器上这条会话的最后活动时间（毫秒时间戳，宿主两枚钟里晚的那枚，见 `activeAt()`）。
    *
@@ -254,6 +275,16 @@ function attachmentHex(ref: AttachmentRef): string {
   return ref.id.slice('sha256:'.length)
 }
 
+/** 索引里那一项 ↔ 内存里的引用（`bytes` 不往返：索引里不存它）。 */
+function indexedAttachmentOf(ref: AttachmentRef): IndexedAttachment {
+  return { kind: ref.kind, id: ref.id, ...(ref.name === undefined ? {} : { name: ref.name }) }
+}
+
+/** 索引里那一项读回内存里的引用（清单里没有 `bytes`，判"本机在不在"时退回看文件）。 */
+function attachmentRefOfIndexed(item: IndexedAttachment): AttachmentRef {
+  return { kind: item.kind, id: item.id, ...(item.name === undefined ? {} : { name: item.name }) }
+}
+
 /** 对象在远端共享库里的路径（相对资源根）。 */
 export function remoteAttachmentPath(ref: AttachmentRef): string {
   return `${remoteAttachmentDir(ref)}/${attachmentHex(ref)}`
@@ -332,6 +363,62 @@ export function contentFingerprint(
   return { version, bytes: bytes.length, sha256: createHash('sha256').update(content).digest('hex') }
 }
 
+/**
+ * 与 {@link contentFingerprint} 同一份判据，只是**分块哈希、块间让出事件循环**。
+ *
+ * 为什么需要它：算一次整库计划要为两边都有的每条会话的每个日志算指纹，本机 1.2 GB 的库一次 3.1 秒。
+ * sha256 本身没法切得更细，但可以每 8 MB 让出一轮宏任务，别的请求就轮得上——与 `decodeLogTextChunked()`
+ * 同一条做法（那里按 128 KB 解压块让出，因为解压更慢、单块停顿更明显）。
+ *
+ * 分块大小按"一次哈希 8 MB 约 15 毫秒"量：再小收益不明显，再大会把单次停顿推到 100 毫秒以上。
+ *
+ * @param path 日志文件路径。
+ * @param version 代次。
+ * @param compression 压缩形态。
+ * @param decodeAll 多帧感知解码器（指纹要折掉首帧的 cwd）。
+ * @returns 与 `contentFingerprint()` 逐字段相同的指纹。
+ */
+export async function contentFingerprintChunked(
+  path: string,
+  version: number,
+  compression: string | null,
+  decodeAll: DecodeAll,
+): Promise<FileFingerprint> {
+  const bytes = readFileSync(path)
+  const content = contentBytes(bytes, compression, decodeAll)
+  const hash = createHash('sha256')
+  /** 一次哈希多少字节；见上面的说明。 */
+  const CHUNK = 8 * 1024 * 1024
+  for (let offset = 0; offset < content.length; offset += CHUNK) {
+    hash.update(content.subarray(offset, offset + CHUNK))
+    if (offset + CHUNK < content.length) await new Promise<void>((resolve) => setImmediate(resolve))
+  }
+  return { version, bytes: bytes.length, sha256: hash.digest('hex') }
+}
+
+/** 带缓存的异步指纹（键与失效判据同 {@link fingerprintCached}）。 */
+async function fingerprintChunkedCached(
+  cache: Map<string, { stamp: string; value: FileFingerprint }>,
+  decodeAll: DecodeAll,
+  path: string,
+  version: number,
+  compression: string | null,
+): Promise<FileFingerprint> {
+  let stamp: string
+  try {
+    const info = statSync(path)
+    stamp = `${String(info.size)}:${String(info.mtimeMs)}`
+  } catch {
+    return contentFingerprintChunked(path, version, compression, decodeAll)
+  }
+  const hit = cache.get(path)
+  if (hit !== undefined && hit.stamp === stamp) return hit.value
+  const value = await contentFingerprintChunked(path, version, compression, decodeAll)
+  if (cache.size >= FINGERPRINT_CACHE_MAX && !cache.has(path)) cache.clear()
+  cache.set(path, { stamp, value })
+  return value
+}
+
 /** 算一条文件的内容指纹（见 `createFingerprintCache()` 与 `contentFingerprint()`）。 */
 export type FingerprintOf = (path: string, version: number, compression: string | null) => FileFingerprint
 
@@ -392,6 +479,28 @@ const contentRelationCache = new Map<string, ContentRelation>()
 
 /** 缓存最多记多少对（超了就丢最早记进来的那一对）。 */
 const CONTENT_RELATION_CACHE_MAX = 512
+
+/**
+ * 一条日志文件扫出来的附件引用（键：路径；失效判据：`size + mtimeMs`）。
+ *
+ * 为什么要有它：补对象那一步要为整库每条会话扫一遍日志，而"扫出哪些附件"只取决于文件内容；日志只在
+ * 会话被写时才变。没有缓存时每点一次「同步」都把 1.2 GB 日志整份解压（实测 144 秒），有缓存之后同一份
+ * 文件只解一次——第二次同步、自动推送之后的补扫都直接命中。
+ *
+ * 上限按文件数（与指纹缓存同一量级）；超了整份丢掉重来，不做 LRU：这里的键只是路径，丢了最多再解一遍。
+ */
+const attachmentRefCache = new Map<string, { stamp: string; refs: AttachmentRef[] }>()
+
+/** 附件引用缓存最多记多少个文件。 */
+const ATTACHMENT_REF_CACHE_MAX = 4096
+
+/** 附件引用缓存的形状（测试要 "每一轮互不影响" 时注入一份新的）。 */
+export type AttachmentRefCache = Map<string, { stamp: string; refs: AttachmentRef[] }>
+
+/** 新建一份附件引用缓存（测试用；生产用进程里那一份）。 */
+export function createAttachmentRefCache(): AttachmentRefCache {
+  return new Map()
+}
 
 /**
  * 一对会话的缓存键：两边所有代次的 `代次:哈希:字节` 按代次排序拼起来。
@@ -1206,10 +1315,22 @@ export function parseIndex(text: string, machine: string, problems: string[]): R
       problems.push(`${machine} 的索引里 ${entry.id} 没有任何代次记录，已跳过`)
       continue
     }
+    const attachments: IndexedAttachment[] = []
+    for (const raw of Array.isArray(entry.attachments) ? entry.attachments : []) {
+      const item = raw as Partial<IndexedAttachment>
+      if (item?.kind !== 'image' && item?.kind !== 'file') continue
+      if (typeof item.id !== 'string' || item.id === '') continue
+      attachments.push({
+        kind: item.kind,
+        id: item.id,
+        ...(typeof item.name === 'string' && item.name !== '' ? { name: item.name } : {}),
+      })
+    }
     entries.push({
       id: entry.id,
       ...(typeof entry.cwd === 'string' && entry.cwd !== '' ? { cwd: entry.cwd } : {}),
       ...(typeof entry.title === 'string' && entry.title !== '' ? { title: entry.title } : {}),
+      ...(Array.isArray(entry.attachments) ? { attachments } : {}),
       ...(typeof entry.repo === 'string' && entry.repo !== '' ? { repo: entry.repo } : {}),
       ...(typeof entry.repoPath === 'string' && entry.repoPath !== '' ? { repoPath: entry.repoPath } : {}),
       createdAt: typeof entry.createdAt === 'number' ? entry.createdAt : 0,
@@ -2181,6 +2302,33 @@ export async function prepareSync(
     return fingerprint
   }
   /*
+   * 比对段先把指纹算完：**分块哈希、块间让出**（`contentFingerprintChunked()`）。
+   *
+   * 原来这一步藏在 `planSync()` 的同步循环里：整库第一次要读 1.2 GB、哈希 3.1 秒，这段时间主线程一次都
+   * 不让出，宿主连一个请求都接不了。计划本身是纯计算（指望指纹已经就绪），所以把"算"提前到这里，
+   * `planHash()` 只做查表——它仍然保留同步回退（测试注入了自定义 `fingerprint` 时走老路）。
+   */
+  if (deps.fingerprint === undefined) {
+    for (const session of local) {
+      if (!remote.entries.has(session.id)) continue
+      for (const file of session.files) {
+        if (fingerprints.has(file.path)) continue
+        emit?.({ phase: 'compare', done: compared, total: compareTotal })
+        fingerprints.set(
+          file.path,
+          await fingerprintChunkedCached(
+            sharedFingerprintCache,
+            deps.decodeAll,
+            file.path,
+            file.version,
+            file.compression,
+          ),
+        )
+        compared += 1
+      }
+    }
+  }
+  /*
    * 投影缓存那两件事（空白、最后活动时间）按会话读一次就够：算计划要它、写回索引时还要它、落地前
    * 验"有没有变"也要它。宿主没给这个口子（工具层在没挂投影缓存的宿主上就是这样）时什么都不读，
    * 两件事都按"不知道"处理。
@@ -2398,19 +2546,53 @@ export function plannedOutcome(prepared: SyncPrepared): SyncOutcome {
 // ── 附件对象：远端共享库那一侧（见 `SYNC_ATTACHMENTS_DIR`）────────────────────
 
 /**
- * 一条会话在磁盘上的日志引用了哪些对象（推送那一侧要传的那些）。
+ * 一条会话在磁盘上的日志引用了哪些对象（推送与补对象两处都要的那些）。
  *
  * 与导出那条路共用同一套扫描（`scanAttachmentRefs()`：整篇字符串预筛、命中才逐行解析，按 `kind:id`
  * 去重）：包不带对象，所以这份引用只用来决定"远端共享库里还缺哪些"。
+ *
+ * **分块解压**（`decodeLogTextChunked()`：128 KB 一块、块间让出事件循环）：本机最大的一份日志压缩后
+ * 16.8 MB、解开 48 MB，整份一次解会把宿主按住两秒多——而这个函数要为整库每条会话的每个代次调用一次。
+ *
+ * **结果按文件缓存**（`size + mtimeMs`）：同一份文件在这次进程里只解一次。没有缓存时每点一次同步都要
+ * 把整库解压一遍（本机 1.2 GB、144 秒），缓存之后第二次同步接近 0。
+ *
+ * @param files 这条会话的代次文件。
+ * @param cache 缓存；缺省是进程里那一份（键：路径）。
+ * @returns 去重后的引用。
  */
-function attachmentRefsOfFiles(files: readonly SessionLogFile[], decodeAll: DecodeAll): AttachmentRef[] {
+export async function attachmentRefsOfFiles(
+  files: readonly SessionLogFile[],
+  cache: AttachmentRefCache = attachmentRefCache,
+): Promise<AttachmentRef[]> {
   const found = new Map<string, AttachmentRef>()
   for (const file of files) {
-    for (const ref of scanAttachmentRefs(decodeLogText(readFileSync(file.path), file.compression, decodeAll))) {
+    for (const ref of await attachmentRefsOfFile(file, cache)) {
       found.set(`${ref.kind}:${ref.id}`, ref)
     }
   }
   return [...found.values()]
+}
+
+/** 一个文件里扫出来的引用；命中缓存就直接给。 */
+async function attachmentRefsOfFile(file: SessionLogFile, cache: AttachmentRefCache): Promise<AttachmentRef[]> {
+  let stamp: string | undefined
+  try {
+    const info = statSync(file.path)
+    stamp = `${String(info.size)}:${String(info.mtimeMs)}`
+  } catch {
+    // 读不到戳（文件刚被删 / 换掉）：直接解一遍，不往缓存里写一个来历不清的答案。
+  }
+  const hit = stamp === undefined ? undefined : cache.get(file.path)
+  if (hit !== undefined && hit.stamp === stamp) return hit.refs
+  const bytes = readFileSync(file.path)
+  const text = await decodeLogTextChunked(bytes, file.compression)
+  const refs = scanAttachmentRefs(text)
+  if (stamp !== undefined) {
+    if (cache.size >= ATTACHMENT_REF_CACHE_MAX && !cache.has(file.path)) cache.clear()
+    cache.set(file.path, { stamp, refs })
+  }
+  return refs
 }
 
 /**
@@ -2422,12 +2604,12 @@ function attachmentRefsOfFiles(files: readonly SessionLogFile[], decodeAll: Deco
  * 包自己带来的对象（v2 的包：旧版本推送的，或别人手工放进来的）从这份名单里摘掉——它们由导入那条
  * 路随包落地，共享库里没有它们，去那儿取只会白跑一趟并报一串假问题。
  */
-function attachmentRefsOfBundle(bundle: SessionBundle, decodeAll: DecodeAll): AttachmentRef[] {
+async function attachmentRefsOfBundle(bundle: SessionBundle): Promise<AttachmentRef[]> {
   const packed = new Set(bundle.attachments.map((entry) => `${entry.kind}:${entry.id}`))
   const found = new Map<string, AttachmentRef>()
   for (const session of bundle.sessions) {
     for (const file of session.files) {
-      const text = decodeLogText(entryBytes(bundle, file), file.compression, decodeAll)
+      const text = await decodeLogTextChunked(entryBytes(bundle, file), file.compression)
       for (const ref of scanAttachmentRefs(text)) {
         const key = `${ref.kind}:${ref.id}`
         if (!packed.has(key)) found.set(key, ref)
@@ -2642,23 +2824,53 @@ async function repairAttachments(
   port: AttachmentPort,
   local: readonly DiscoveredSession[],
   handled: ReadonlySet<string>,
-  known: ReadonlySet<string>,
+  remote: RemoteLibrary,
+  /** 这一趟判成"两边一样"的会话：只有它们能用远端条目里记的附件清单。 */
+  identical: ReadonlySet<string>,
+  /** 自己那一格的条目（补记附件清单时写回）。 */
+  ownedEntries: Map<string, RemoteIndex['entries'][number]>,
+  ownDirName: string,
   listed: Map<string, Set<string>>,
   incoming: SyncAttachmentIn,
   outgoing: SyncAttachmentOut,
   problems: string[],
   absent: Set<string>,
+  onScan?: (done: number, total: number, id: string, label?: string) => void,
   report?: AttachmentReporter,
-): Promise<void> {
+): Promise<boolean> {
   /** 本机缺的那些（远端有就取回来）。 */
   const wanted = new Map<string, AttachmentRef>()
   /** 本机有、远端索引里也认得这条会话的对象（远端缺就传上去）。 */
   const extra = new Map<string, AttachmentRef>()
-  for (const session of local) {
-    // 这次拉取 / 覆盖 / 推送过的那些已经处理过了（那两条路自己搬过它们的对象）。
-    if (handled.has(session.id)) continue
-    const remoteKnows = known.has(session.id)
-    for (const ref of attachmentRefsOfFiles(session.files, deps.decodeAll)) {
+  /** 这一趟补记进自己索引的条目数（收尾时据此决定要不要再写一次索引）。 */
+  let learned = 0
+  const candidates = local.filter((session) => !handled.has(session.id))
+  for (const [index, session] of candidates.entries()) {
+    onScan?.(index, candidates.length, session.id, session.title)
+    const entry = remote.entries.get(session.id)
+    /*
+     * 索引里已经记着附件清单、而且这条本机副本与那条记录逐字节一致时，直接用它——这是这件事从
+     * "整库解压 144 秒"变成"毫秒"的那一步。不一致就不能用：那条清单描述的是另一份内容。
+     */
+    const fromIndex =
+      entry !== undefined && entry.attachments !== undefined && identical.has(session.id) ? entry.attachments : undefined
+    const refs =
+      fromIndex === undefined
+        ? await attachmentRefsOfFiles(session.files)
+        : fromIndex.map((item) => attachmentRefOfIndexed(item))
+    // 自己那一格的老条目还没有这一项：算过就补上，下一次（重启之后）不必再解一遍。
+    if (fromIndex === undefined && entry !== undefined && entry.machine === ownDirName && identical.has(session.id)) {
+      const current = ownedEntries.get(entry.id)
+      if (current !== undefined) {
+        ownedEntries.set(entry.id, {
+          ...current,
+          attachments: refs.map((ref) => indexedAttachmentOf(ref)),
+        })
+        learned += 1
+      }
+    }
+    const remoteKnows = remote.entries.has(session.id)
+    for (const ref of refs) {
       const key = `${ref.kind}:${ref.id}`
       // 两个集合按"本机有没有"分开，互不重叠：同一个对象不该既算"没取回来"又算"没传上去"。
       if (attachmentActionOf(port, ref) === 'create') wanted.set(key, ref)
@@ -2686,6 +2898,7 @@ async function repairAttachments(
   if (extra.size > 0) {
     await pushAttachments(deps, port, [...extra.values()], listed, outgoing, problems, report)
   }
+  return learned > 0
 }
 
 /**
@@ -2898,7 +3111,7 @@ export async function applyPreparedSync(
         await pullAttachments(
           deps,
           port,
-          attachmentRefsOfBundle(bundle, deps.decodeAll),
+          await attachmentRefsOfBundle(bundle),
           attachmentIn,
           problems,
           absentObjects,
@@ -2988,7 +3201,7 @@ export async function applyPreparedSync(
           await pullAttachments(
             deps,
             port,
-            attachmentRefsOfBundle(bundle, deps.decodeAll),
+            await attachmentRefsOfBundle(bundle),
             attachmentIn,
             problems,
             absentObjects,
@@ -3093,11 +3306,17 @@ export async function applyPreparedSync(
        * 那一侧才不会出现"会话在、图是挂的"）。中途失败只记问题，包照旧推——一个对象传不上去不该把
        * 整条会话挡在同步之外（与导入那条路同一个口径）。
        */
+      /*
+       * 这条会话引用过哪些对象：推送要传的那一份，同时记进自己那一格的索引——别的机器补对象时读索引
+       * 就够了，不必再把自己的整库日志解压一遍（那一步实测 144 秒，见 `repairAttachments()`）。
+       */
+      let refs: AttachmentRef[] = []
       if (port !== undefined) {
+        refs = await attachmentRefsOfFiles(session.files)
         await pushAttachments(
           deps,
           port,
-          attachmentRefsOfFiles(session.files, deps.decodeAll),
+          refs,
           remoteObjectNames,
           attachmentOut,
           problems,
@@ -3125,6 +3344,7 @@ export async function applyPreparedSync(
         createdAt: session.createdAt,
         ...(active === undefined ? {} : { lastActiveAt: active }),
         files: fingerprints(session, contentHash),
+        ...(port === undefined ? {} : { attachments: refs.map((ref) => indexedAttachmentOf(ref)) }),
       })
       // 到这里只剩 upload / update 两种（上面筛过），写成三元的形状让类型也跟着收窄。
       pushed.push({ id: entry.id, action: entry.action === 'update' ? 'update' : 'upload' })
@@ -3218,19 +3438,45 @@ export async function applyPreparedSync(
    */
   if (port !== undefined && deps.pushOnly !== true) {
     const handled = new Set<string>([...pulled, ...replaced, ...pushed.map((entry) => entry.id)])
-    await repairAttachments(
+    /*
+     * 这一趟判成"两边一样"的会话：只有它们的本机副本与远端记录描述同一份内容，远端条目里那份附件
+     * 清单才可以直接拿来用（见 `repairAttachments()`）。
+     */
+    const identical = new Set(
+      plan.push.filter((item) => item.action === 'skip' && item.code === 'identical').map((item) => item.id),
+    )
+    const learned = await repairAttachments(
       deps,
       port,
       local,
       handled,
-      new Set(remote.entries.keys()),
+      remote,
+      identical,
+      ownEntries,
+      ownDirName,
       remoteObjectNames,
       attachmentIn,
       attachmentOut,
       problems,
       absentObjects,
+      (done, total, id, label) =>
+        emit({ phase: 'attachScan', done, total, id, ...(label === undefined ? {} : { label }) }),
       reportAttachments(),
     )
+    // 补记了附件清单：把索引再写一次（只发生在"老条目第一次碰到"的那一趟）。
+    if (learned && indexWritten) {
+      try {
+        await deps.dav.put(
+          remoteIndexPath(deps.settings.machineId),
+          indexPayload(
+            deps,
+            [...ownEntries.values()].filter((entry) => !tidyIds.has(entry.id)),
+          ),
+        )
+      } catch (error) {
+        problems.push(`写远端索引失败（补记附件清单）：${error instanceof Error ? error.message : String(error)}`)
+      }
+    }
   }
 
   // 一轮一句话：本机要、远端也没有的那些对象（两边都是同一种状态，处置也是同一件事）。

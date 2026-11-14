@@ -18,6 +18,7 @@ import {
   BUNDLE_MAGIC,
   BUNDLE_MIN_FORMAT_VERSION,
   applyImport,
+  attachmentActionOf,
   attachmentBytes,
   buildBundle,
   entryBytes,
@@ -333,6 +334,21 @@ test('导出/导入：一个包装多条会话（含无 cwd 的那条）时各�
 })
 
 // ── 附件对象（v2 包里跟着日志一起走的那一段） ─────────────────────────────────
+
+test('attachmentActionOf：引用没记字节数时也先看文件在不在', () => {
+  // 同步索引里那份清单不存 `bytes`（只记身份）：判"本机有没有"必须退回看文件，而不是直接当"在"。
+  const store = makeAttachmentStore('action-store')
+  try {
+    const image = Buffer.from('判在不在用的那张图')
+    const ref: AttachmentRef = { id: attachmentIdOf(image), kind: 'image' }
+    assert.equal(attachmentActionOf(store.port, ref), 'create', '文件不在：要取')
+    store.put(ref, image)
+    assert.equal(attachmentActionOf(store.port, ref), 'present', '文件在、引用没字节数：算在')
+    assert.equal(attachmentActionOf(store.port, { ...ref, bytes: image.length + 1 }), 'create', '字节数对不上：重取')
+  } finally {
+    rmSync(store.root, { recursive: true, force: true })
+  }
+})
 
 test('导出：日志里引用的附件对象进包（两条会话引用同一个只进一份），字节与对象文件一致', () => {
   const root = makeRoot('transfer-attach-pack')
