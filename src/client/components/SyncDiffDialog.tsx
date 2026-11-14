@@ -23,6 +23,8 @@ import * as React from 'react'
 
 import { Button, Modal, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
 
+import { Hint } from './Hint.tsx'
+
 import { fetchSyncDiff, type SyncDiffResponse } from '../api.ts'
 import { KIND_KEY } from './TranscriptDialog.tsx'
 import { formatBytes, formatTime } from './sessionList.tsx'
@@ -74,7 +76,9 @@ function TailBlock({
             <Tag className="dsm-tag" tone={KIND_TONE[item.kind]}>
               {t(KIND_KEY[item.kind])}
             </Tag>
-            <span title={item.brief}>{item.brief}</span>
+            <Hint text={item.brief}>
+              <span>{item.brief}</span>
+            </Hint>
             {item.time === undefined ? null : <span className="dsm-meta">{formatTime(item.time)}</span>}
           </div>
         </div>
@@ -176,9 +180,9 @@ export function SyncDiffDialog({
     >
       <div className="dsm-diffBody">
       <div className="dsm-diffHead">
-        <div className="dsm-transcriptName" title={target.id}>
-          {target.title ?? target.id}
-        </div>
+        <Hint text={target.id}>
+          <div className="dsm-transcriptName">{target.title ?? target.id}</div>
+        </Hint>
         {data === undefined || diff === undefined ? null : (
           // 来源与大小并成一行元信息：两行小字挨在一起会跟名字糊成一块。
           <div className="dsm-hint">
@@ -240,9 +244,11 @@ export function SyncDiffDialog({
                       <td className="dsm-diffField">
                         <span className="dsm-diffFieldName">{field.field}</span>
                         {field.field === 'cwd' ? (
-                          <span className="dsm-tag" title={t('sync.diff.headerExpectedNote')}>
-                            <Tag tone="quiet">{t('sync.diff.headerExpected')}</Tag>
-                          </span>
+                          <Hint text={t('sync.diff.headerExpectedNote')}>
+                            <span className="dsm-tag">
+                              <Tag tone="quiet">{t('sync.diff.headerExpected')}</Tag>
+                            </span>
+                          </Hint>
                         ) : null}
                       </td>
                       <td className="dsm-path">{field.local ?? '—'}</td>

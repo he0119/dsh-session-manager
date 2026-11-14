@@ -56,6 +56,7 @@ import { ConfirmDialog } from './ConfirmDialog.tsx'
 import { DirectoryField, useDirectoryFields } from './DirectoryField.tsx'
 import { ProgressBlock } from './ProgressBlock.tsx'
 import { SessionInspector } from './SessionInspector.tsx'
+import { Hint } from './Hint.tsx'
 import { SessionTree } from './SessionTree.tsx'
 import { TranscriptDialog } from './TranscriptDialog.tsx'
 import { groupSessions } from '../logic/groups.ts'
@@ -726,18 +727,19 @@ export function ManagePanel({
             摆出这份备份的动作清单与确认框——用户不用在清单里按时间再找一遍。
           */}
           {undoAt !== null && (
-            <Button
-              variant="outline"
-              size="sm"
-              title={t('undo.tip')}
-              onClick={() => {
+            <Hint text={t('undo.tip')}>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
                 const dir = undoAt.dir
                 notify(null)
-                openBackup?.(dir)
-              }}
-            >
-              {t('undo.action')}
-            </Button>
+                  openBackup?.(dir)
+                }}
+              >
+                {t('undo.action')}
+              </Button>
+            </Hint>
           )}
           <Button variant="outline" size="sm" onClick={() => notify(null)}>
             {t('error.dismiss')}
@@ -836,19 +838,25 @@ export function ManagePanel({
               <div className="dsm-tableHead">
                 <span />
                 <span />
-                <button type="button" className="dsm-sort" onClick={() => toggleSort('title')} title={t('list.sort.tip')}>
-                  {t('list.sort.title')}
-                  {sortArrow('title')}
-                </button>
+                <Hint text={t('list.sort.tip')} side="top">
+                  <button type="button" className="dsm-sort" onClick={() => toggleSort('title')}>
+                    {t('list.sort.title')}
+                    {sortArrow('title')}
+                  </button>
+                </Hint>
                 <span className="dsm-sortStatic">{t('list.project.column')}</span>
-                <button type="button" className="dsm-sort dsm-sortNum" onClick={() => toggleSort('size')} title={t('list.sort.tip')}>
-                  {t('list.sort.size')}
-                  {sortArrow('size')}
-                </button>
-                <button type="button" className="dsm-sort dsm-sortNum" onClick={() => toggleSort('time')} title={t('list.sort.tip')}>
-                  {t('list.sort.time')}
-                  {sortArrow('time')}
-                </button>
+                <Hint text={t('list.sort.tip')} side="top">
+                  <button type="button" className="dsm-sort dsm-sortNum" onClick={() => toggleSort('size')}>
+                    {t('list.sort.size')}
+                    {sortArrow('size')}
+                  </button>
+                </Hint>
+                <Hint text={t('list.sort.tip')} side="top">
+                  <button type="button" className="dsm-sort dsm-sortNum" onClick={() => toggleSort('time')}>
+                    {t('list.sort.time')}
+                    {sortArrow('time')}
+                  </button>
+                </Hint>
               </div>
               {state === null ? (
                 // 清单还在读：这一格说"读取中…"而不是"这个会话库里还没有会话"——后者是个结论。

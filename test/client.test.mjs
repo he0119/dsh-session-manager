@@ -230,14 +230,43 @@ function recordedTagPairs(recorded) {
   const out = []
   for (const node of recorded) {
     if (node === null || typeof node !== 'object') continue
-    if (node.type !== 'span' || node.props?.title === undefined) continue
-    const children = Array.isArray(node.props.children) ? node.props.children : [node.props.children]
-    const tag = children.find((child) => isComponentType(child?.type) && typeNameOf(child.type) === 'Tag')
-    if (tag !== undefined) {
-      out.push({ title: node.props.title, text: tag.props?.children, tone: tag.props?.tone })
-    }
+    const pair = tagPairOf(node)
+    if (pair !== undefined) out.push(pair)
   }
   return out
+}
+
+/**
+ * 一枚标签的「提示 + 文字 + 色调」：提示在包着它的 `Tooltip`（组件元素）上，文字与 tone 在 `Tag` 上。
+ *
+ * 官方 `Tag` 不转发 `title`，本页的提示改走官方 `Tooltip`（锚点是外面那层 `dsm-tag` 的 span）。
+ * 用例读的是这个三元组，不是 DOM 属性——替身把 `Tooltip` 原样返回，DOM 与线上一致。
+ */
+function tagPairOf(node) {
+  if (node === null || typeof node !== 'object') return undefined
+  const tagOf = (element) => {
+    if (element === null || typeof element !== 'object') return undefined
+    const inner = Array.isArray(element.props?.children) ? element.props.children : [element.props?.children]
+    return inner.find((child) => isComponentType(child?.type) && typeNameOf(child.type) === 'Tag')
+  }
+  // 本页的提示都包在 `Hint`（它再交给官方 `Tooltip`）这一层；用例只看元素树，所以读 `Hint` 的 `text`
+  if (isComponentType(node.type) && typeNameOf(node.type) === 'Hint') {
+    const label = node.props?.text
+    const kids = Array.isArray(node.props?.children) ? node.props.children : [node.props?.children]
+    const span = kids.find(
+      (kid) => typeof kid?.type === 'string' && String(kid.props?.className ?? '').includes('dsm-tag'),
+    )
+    const tag = tagOf(span)
+    return tag === undefined ? undefined : { title: label, text: tag.props?.children, tone: tag.props?.tone }
+  }
+  // 还没搬的那一半：提示仍挂在 span 的 title 上
+  if (node.type === 'span' && node.props?.title !== undefined) {
+    const tag = tagOf(node)
+    return tag === undefined
+      ? undefined
+      : { title: node.props.title, text: tag.props?.children, tone: tag.props?.tone }
+  }
+  return undefined
 }
 
 /**
@@ -252,13 +281,37 @@ function tagPairsIn(node, out = []) {
     return out
   }
   if (node === null || typeof node !== 'object') return out
-  if (isComponentType(node.type)) return out
-  const children = Array.isArray(node.props?.children) ? node.props.children : [node.props?.children]
-  const tag = children.find((child) => isComponentType(child?.type) && typeNameOf(child.type) === 'Tag')
-  if (node.type === 'span' && tag !== undefined) {
-    out.push({ title: node.props?.title, text: tag.props?.children, tone: tag.props?.tone })
+  const pair = tagPairOf(node)
+  if (pair !== undefined) {
+    out.push(pair)
+    return out
   }
+  if (isComponentType(node.type)) return out
   return tagPairsIn(node.props?.children, out)
+}
+
+/**
+ * 某枚元素外面那层 `Tooltip` 的提示文字；没有就返回 `undefined`。
+ *
+ * 替身把 `Tooltip` 原样返回（DOM 与线上一致），所以"提示挂在哪一枚元素上"要这样配对读。
+ */
+function hintAround(recorded, matches) {
+  for (const node of recorded) {
+    if (node === null || typeof node !== 'object') continue
+    if (!isComponentType(node.type)) continue
+    const name = typeNameOf(node.type)
+    if (name !== 'Hint' && name !== 'Tooltip') continue
+    const kids = Array.isArray(node.props?.children) ? node.props.children : [node.props?.children]
+    if (!kids.some((kid) => matches(kid))) continue
+    const label = name === 'Hint' ? node.props?.text : node.props?.label
+    return typeof label === 'function' ? label() : label
+  }
+  return undefined
+}
+
+/** 按类名找那枚锚点外面挂的提示文字（`Hint` 的锚点是它的子元素）。 */
+function hintOfClass(recorded, className) {
+  return hintAround(recorded, (kid) => String(kid?.props?.className ?? '').split(/\s+/).includes(className))
 }
 
 /**
@@ -451,6 +504,12 @@ function loadBundle({ firstNull, panel, arrays, strings, nulls, meta, fetch } = 
           // 本页没用到带 icon 的输入框）；这里只把原生属性与 className 透传下去。
           return react.createElement('input', { ...rest, 'data-primitive-input': 'true', className })
         },
+        /*
+         * `Tooltip` 的替身：真的那枚把提示画成气泡（`portal` 到 body），并给锚点挂
+         * `aria-describedby` 与一串鼠标 / 焦点处理器，DOM 里锚点本身不套壳。所以替身也原样返回锚点：
+         * 用例要核"这条提示写的是什么"，去 `recorded` 里找 `Tooltip` 这个组件元素读 `label`。
+         */
+        Tooltip: (props) => props.children,
         /*
          * `Checkbox` 的替身：真的那个是 `<label>` 包 `<input type=checkbox>` 与可见 label。用例核的是
          * 勾选态、禁用态与无障碍名字（`label` 传空串时名字由外面的行 label 兜底）。
@@ -982,7 +1041,11 @@ test('客户端产物：删除 / 迁移之后，提示里那枚「撤销」指�
   const labels = mounted.recorded.filter((node) => node.type === 'button').map((node) => node.props?.children)
   assert.ok(labels.includes('undo.action'), '提示行里有「撤销」')
   const undoButton = mounted.recorded.find((node) => node.type === 'button' && node.props?.children === 'undo.action')
-  assert.equal(undoButton?.props?.title, 'undo.tip', '悬浮提示说清它做什么')
+  assert.equal(
+    hintAround(mounted.recorded, (kid) => strings(kid).includes('undo.action')),
+    'undo.tip',
+    '悬浮提示说清它做什么',
+  )
 
   // 没有撤销可给时（普通提示）不摆这一枚：一份备份只能撤刚做的那一件事。
   const plain = mount({
@@ -1321,7 +1384,8 @@ test('客户端产物：底部状态栏那枚版本徽标说得出这是哪个�
   // `define` 在编译期写进产物，判据在 scripts/build-identity.ts；没注入的话源码里那三个标识符是
   // ReferenceError，页面当场崩成占位——所以这一条同时是"注入链真的通了"的证据。
   const identity = readBuildIdentity(root)
-  const { registrations } = mount()
+  const mounted = mount()
+  const { registrations } = mounted
   const { component, registration } = registrations[0]
   const tree = elements(component(registration.inject()))
 
@@ -1345,7 +1409,7 @@ test('客户端产物：底部状态栏那枚版本徽标说得出这是哪个�
 
   // 悬浮提示说清是发布版还是直接 build 的（`v0.3.1` / 本地构建 git 3c9f1ab）：两个键都在字典里，
   // 由上面那条"页面问到的键不在字典里"的断言兜住；这里核的是**问的是哪一个**。
-  const tip = String(badge?.props?.title ?? '')
+  const tip = String(hintOfClass(mounted.recorded, 'dsm-statusVersion') ?? '')
   const buildKey = 'page.version.tipBuild'
   assert.ok(
     tip.startsWith(identity.commit === undefined ? 'page.version.tip' : buildKey),
@@ -1899,9 +1963,9 @@ test('客户端产物：「会话」页的筛选条把不匹配的行筛掉，�
   assert.equal(chip('list.filter.all')?.props?.['aria-pressed'], false, '筛着的时候「全部」不是选中态')
   assert.equal(chip('tag.blank')?.props?.['aria-pressed'], true, '种进去的那一类要显示成选中')
   assert.equal(chip('tag.subagent')?.props?.['aria-pressed'], false, '没勾的那几类不是选中态')
-  // 每一类的说明走悬浮提示（与行上的标签同一份文案）
-  assert.equal(chip('tag.blank')?.props?.title, 'tag.blankTip')
-  assert.equal(chip('list.ungrouped')?.props?.title, 'list.ungroupedTip')
+  // 每一类的说明走悬浮提示（与行上的标签同一份文案）——提示挂在筛选项外面那层官方 Tooltip 上
+  assert.equal(hintAround(recorded, (kid) => kid === chip('tag.blank')), 'tag.blankTip')
+  assert.equal(hintAround(recorded, (kid) => kid === chip('list.ungrouped')), 'list.ungroupedTip')
 
   // 列表：只剩空白那两条（筛选＝任一命中），其余三类不在树上
   const rows = recorded.filter(
@@ -2522,7 +2586,11 @@ test('客户端产物：迁移弹窗里的目标目录是那枚值控件，点�
   const value = valueControl(mounted.recorded)
   assert.ok(value, '值控件是一枚按钮')
   assert.equal(value.props['aria-expanded'], true, '面板开着时它是 expanded')
-  assert.equal(value.props.title, '/home/u/dev/alpha', '完整值在悬浮提示里（框里放不下会截断）')
+  assert.equal(
+    hintOfClass(mounted.recorded, 'dsm-pathValue'),
+    '/home/u/dev/alpha',
+    '完整值在悬浮提示里（框里放不下会截断）',
+  )
   assert.equal(
     value.props['aria-label'],
     'migrate.to.label：工作区甲 — /home/u/dev/alpha',
@@ -2576,7 +2644,12 @@ test('客户端产物：候选里盘上已经没有的目录挂一枚标签，�
   assert.equal(rows[1].props.disabled, true, '盘上没有了的那条点不动')
   assert.ok(strings(rows[1]).includes('pathField.missing'), '它挂着那枚标签')
   assert.equal(strings(rows[0]).includes('pathField.missing'), false, '别的那条没有这枚标签')
-  assert.ok(String(rows[1].props.title).includes('pathField.missingTip'), '悬浮提示说清为什么点不动')
+  assert.ok(
+    String(hintAround(mounted.recorded, (kid) => strings(kid).includes('pathField.missing')) ?? '').includes(
+      'pathField.missingTip',
+    ),
+    '悬浮提示说清为什么点不动',
+  )
 })
 
 test('客户端产物：候选面板的筛选只收窄自己那份列表，没命中时给一句说法', { skip }, () => {
@@ -2757,6 +2830,34 @@ test('客户端产物：「会话」页的搜索框按标题或 id 筛，筛空�
   )
 })
 
+test('客户端产物：悬浮提示一律走官方 Tooltip，不再出现原生 title', { skip }, () => {
+  /*
+   * 原生 `title` 是浏览器画的：延迟两三秒、字体与配色不受控、长提示被窗口边裁掉、触屏上出不来。
+   * 所以提示统一走 `Hint`（官方 `Tooltip`）。剩下还能写 `title` 的只有**组件的标题属性**——弹窗的
+   * 标题、说明页的分节标题、计划表的分节头——它们不是悬浮提示，别混进来。
+   */
+  const allowed = ['Modal', 'WorkDialog', 'HelpSection', 'PlanSectionHead', 'ConfirmDialog']
+  const offenders = []
+  for (const name of readdirSync(join(root, 'src/client/components'))) {
+    if (!name.endsWith('.tsx')) continue
+    const source = readFileSync(join(root, 'src/client/components', name), 'utf8')
+    const lines = source.split('\n')
+    lines.forEach((line, index) => {
+      if (!line.includes('title={')) return
+      // 往上找最近的组件开标签：`<Modal` 那几行的 `title` 常常单独占一行
+      let owner = null
+      for (let up = index; up >= Math.max(0, index - 8) && owner === null; up -= 1) {
+        const match = /<([A-Z][A-Za-z0-9]*)/.exec(lines[up])
+        if (match !== null) owner = match[1]
+      }
+      if (owner === null || !allowed.includes(owner)) {
+        offenders.push(`${name}:${index + 1} ${owner ?? '?'} ${line.trim()}`)
+      }
+    })
+  }
+  assert.deepEqual(offenders, [], '悬浮提示要走 Hint（官方 Tooltip），原生 title 只留给组件的标题属性')
+})
+
 test('客户端产物：会话页的行——点哪儿都看详情，标题是按得开的按钮', { skip }, () => {
   // 与 styles.test.mjs 的「行这一格是按钮，不是第二枚动作」那条配对：整行的主动作落在标题那一格，
   // 键盘 Tab 到它、回车就打开右栏；行尾没有动作，最后一格仍是时刻（时刻与按钮叠格子那一套已经删了）。
@@ -2793,7 +2894,10 @@ test('客户端产物：会话页的行——点哪儿都看详情，标题是�
     assert.equal(title[0].props.type, 'button', 'type=button：回车 / 空格才按按钮算')
     // 名字从行里现取：列表按时间排，不要假设哪一行在前
     const name = strings(pick('dsm-rowTitle')[0])[0]
-    assert.ok(title[0].props.title.startsWith(name), '悬浮提示跟着标题走（标题 + id 两行）')
+    assert.ok(
+      String(hintAround(mounted.recorded, (kid) => kid === title[0])).startsWith(name),
+      '悬浮提示跟着标题走（标题 + id 两行）',
+    )
     assert.ok(strings(title[0]).includes(name), '按钮里就是那个标题')
 
     // 勾选框有自己的 label 与一句只给读屏软件的名字
@@ -3880,10 +3984,13 @@ test('客户端产物：同步预演三张表按项目分组，路径只在组�
     ['测试项目'],
     '有项目身份的工作区：组头只有标题，身份不进可见文字',
   )
+  const groupTips = () =>
+    mounted.recorded
+      .filter((node) => isComponentType(node.type) && typeNameOf(node.type) === 'Hint')
+      .map((node) => node.props?.text)
+      .filter((text) => typeof text === 'string')
   assert.ok(
-    mounted.recorded.some(
-      (node) => String(node.props?.className) === 'dsm-groupTitle' && node.props?.title === 'github.com/he0119/beta\n/home/u/dev/beta',
-    ),
+    groupTips().includes('github.com/he0119/beta\n/home/u/dev/beta'),
     '身份与本机路径都在那一格的悬浮提示里（同一个仓库的两个克隆靠路径区分）',
   )
   assert.ok(
@@ -3895,12 +4002,7 @@ test('客户端产物：同步预演三张表按项目分组，路径只在组�
     ['会话管理'],
     '没有身份的目录也只剩标题——路径同样退到悬浮提示里',
   )
-  assert.ok(
-    mounted.recorded.some(
-      (node) => String(node.props?.className) === 'dsm-groupTitle' && node.props?.title === '/home/u/dev/alpha',
-    ),
-    '没有身份时悬浮提示给的就是本机路径',
-  )
+  assert.ok(groupTips().includes('/home/u/dev/alpha'), '没有身份时悬浮提示给的就是本机路径')
   assert.ok(headOf(2).includes('list.noCwdGroup'), '没有 cwd 的那一组照旧自成一组建在最后')
   assert.ok(
     text.includes('list.sessionsInDir:{"count":2}'),
@@ -3920,8 +4022,12 @@ test('客户端产物：同步预演三张表按项目分组，路径只在组�
   // 路径只在组头：拉取行的来源路径不许再当可见文字，它退到那一行的悬浮提示里（只有真的改写过才补）。
   assert.equal(text.includes('/home/b/dev/x'), false, '来源路径不再逐行印一遍')
   const tips = mounted.recorded
-    .filter((node) => String(node.props?.className) === 'dsm-rowId')
-    .map((node) => String(node.props?.title))
+    .filter((node) => isComponentType(node.type) && typeNameOf(node.type) === 'Hint')
+    .map((node) => {
+      const kid = Array.isArray(node.props?.children) ? node.props.children[0] : node.props?.children
+      return String(kid?.props?.className ?? '').includes('dsm-rowId') ? String(node.props?.text) : null
+    })
+    .filter((text) => text !== null)
   assert.equal(
     tips[0],
     'session-5\ncwd.rewritten:{"from":"/home/b/dev/x","to":"/home/u/dev/beta"}',
@@ -4592,8 +4698,7 @@ test('客户端产物：落地时弹窗正文换成进度条（第几条 / 共�
   const barAt = kids.findIndex((child) => child?.props?.total === 84)
   assert.equal(kids[textAt]?.props?.children, 'progress.push:{"current":13,"total":84}', '计数那行单独一块')
   assert.ok(textAt >= 0 && barAt >= 0 && textAt < barAt, '先读"第几条"，再读那条进度条')
-  const item = recorded.find((node) => String(node.props?.className) === 'dsm-progressItem')
-  assert.equal(item?.props?.title, '会话九', '条目那行的悬浮提示是完整名字')
+  assert.equal(hintOfClass(recorded, 'dsm-progressItem'), '会话九', '条目那行的悬浮提示是完整名字')
   assert.ok(text.includes('会话九'), '当前那一条的标题也在（一条几 MB 的包会在这停一会儿）')
   assert.ok(text.includes('sync.progress.note'), '并说明为什么这里没有「取消」')
   assert.equal(recorded.some((node) => node.type === 'table'), false, '落地时不再画计划表（那张表说的是"将要"）')
@@ -5542,14 +5647,14 @@ test('客户端产物：自动同步开着时，同步那一面与页头那枚�
     const labels = mounted.recorded.filter((node) => node.type === 'button').map((node) => node.props?.children)
     const dot = mounted.recorded.find((node) => node.type === 'span' && node.props?.['data-state'] !== undefined)
     const slot = mounted.recorded.find((node) => String(node.props?.className ?? '').includes('dsm-dotSlot'))
-    return { text, labels, dot, slot }
+    return { text, labels, dot, slot, recorded: mounted.recorded }
   }
 
   const push = withMode('push')
   assert.ok(push.text.includes('sync.autoPush.enabled'), '只推那一档说"自动推送已开"')
   assert.ok(push.labels.includes('sync.autoPush.now'), '那一枚叫「立即推送一次」')
   assert.equal(push.dot?.props?.['data-state'], 'done', '开着就是绿点')
-  assert.equal(push.slot?.props?.title, 'sync.chip.dot.auto', '点说的是自动推送')
+  assert.equal(hintOfClass(push.recorded, 'dsm-dotSlot'), 'sync.chip.dot.auto', '点说的是自动推送')
 
   const both = withMode('sync')
   assert.ok(both.text.includes('sync.autoSync.enabled'), '双向那一档说"自动同步已开"')
@@ -5557,7 +5662,11 @@ test('客户端产物：自动同步开着时，同步那一面与页头那枚�
   assert.ok(both.labels.includes('sync.autoSync.now'), '那一枚改叫「立即同步一次」')
   assert.equal(both.labels.includes('sync.autoPush.now'), false, '旧那名不再出现')
   assert.equal(both.dot?.props?.['data-state'], 'done', '双向开着同样是绿点')
-  assert.equal(both.slot?.props?.title, 'sync.chip.dot.autoSync', '点说的是自动同步（它会动本机，用户该知道）')
+  assert.equal(
+    hintOfClass(both.recorded, 'dsm-dotSlot'),
+    'sync.chip.dot.autoSync',
+    '点说的是自动同步（它会动本机，用户该知道）',
+  )
 })
 
 test('客户端产物：页头那枚点按本地事实点颜色（自动推送开着是绿、上次失败是红、有遗留是黄）', { skip }, () => {
@@ -5628,11 +5737,11 @@ test('客户端产物：黄点的理由写在按钮的悬浮提示上（颜色�
       meta: { sessionsRoot: state.sessionsRoot, registryPath: state.registryPath, sync: { ...sync, ...patch } },
     })
     strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
-    return mounted.recorded.find((node) => String(node.props?.className ?? '').includes('dsm-headChip'))?.props?.title
+    return hintOfClass(mounted.recorded, 'dsm-headChip')
   }
   /*
    * 点自己也要有一句：鼠标落在那个 10px 的点上时，回答的是"这个颜色什么意思"。官方 `StateDot` 不透传
-   * `title`，所以外面包一层带提示的 span（与官方的 `Tag` 同一条约束）。
+   * `title`，所以外面包一层带提示的 span，提示走官方 `Tooltip`（与行上的标签同一条做法）。
    */
   const dotTitle = (patch) => {
     const mounted = mount({
@@ -5640,8 +5749,7 @@ test('客户端产物：黄点的理由写在按钮的悬浮提示上（颜色�
       meta: { sessionsRoot: state.sessionsRoot, registryPath: state.registryPath, sync: { ...sync, ...patch } },
     })
     strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
-    const slot = mounted.recorded.find((node) => String(node.props?.className ?? '').includes('dsm-dotSlot'))
-    return slot?.props?.title
+    return hintOfClass(mounted.recorded, 'dsm-dotSlot')
   }
   assert.equal(dotTitle({}), 'sync.chip.dot.idle', '灰点：没有在跑的、也没有遗留')
   assert.equal(dotTitle({ autoPush: { enabled: true } }), 'sync.chip.dot.auto', '绿点：自动推送开着')

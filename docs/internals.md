@@ -328,6 +328,8 @@
   仍是 0px，得在自己的 `.dsm-diffBody` 上给节奏。
 - [卡片级的主动作放卡片底部的动作行](../.agents/notes/implemented/architecture/2026-10-07-card-actions-live-in-a-footer-row.md)：
   动作跟着它的输入走；卡头只留不动数据的工具（刷新、全选 / 清空、收起 / 展开），清单行上的动作不挪位。
+- [悬浮提示统一走官方 Tooltip](../.agents/notes/implemented/architecture/2026-11-14-hints-go-through-the-official-tooltip.md)：
+  原生 `title` 换成官方 `Tooltip`（本页 `Hint` 包一层、默认 `portal`），`title` 只留给组件的标题属性。
 - [危险动作的确认加一道「我明白」](../.agents/notes/implemented/architecture/2026-11-14-risk-confirmation-asks-for-acknowledgement.md)：
   清单之后跟一行警告与一枚勾选，没勾之前主按钮按不动——照官方 `RiskConfirmation` 那套排法，但没用
   那枚原语本身（它只收一句话，放不下清单）。

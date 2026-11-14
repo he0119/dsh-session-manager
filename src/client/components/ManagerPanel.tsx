@@ -43,6 +43,7 @@ import { syncBarLabel } from '../logic/syncJobLabel.ts'
 import { versionCommit, versionLabel, versionTag } from '../logic/version.ts'
 import { BackupPanel } from './BackupPanel.tsx'
 import { HelpPanel } from './HelpPanel.tsx'
+import { Hint } from './Hint.tsx'
 import { ManagePanel } from './ManagePanel.tsx'
 import { ProgressBlock } from './ProgressBlock.tsx'
 import { SyncPanel } from './SyncPanel.tsx'
@@ -458,58 +459,62 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
       */}
       <header className="dsm-head">
         <h2 className="dsm-title">{t('page.title')}</h2>
-        <Button
-          className="dsm-headChip"
-          variant="outline"
-          size="sm"
-          icon={
-            <span
-              className="dsm-dotSlot"
-              title={
-                'params' in dotTitle ? t(dotTitle.key, dotTitle.params) : t(dotTitle.key)
-              }
-            >
-              <StateDot state={syncDot} />
-            </span>
-          }
-          /*
-            悬浮提示补一句"这个颜色是什么意思"：黄点说清几条没做到 / 要重启，绿点说清自动推送开着。
-            颜色读屏读不到、也常被一眼扫过，理由得有一句话接着。
-          */
-          /*
-            提示从一行变成几行：先说这个按钮干什么、再说为什么是这个颜色，最后把那几条没做到的原话
-            摆出来（前 3 条 + "还有 N 条"）。只报"1 条没做到"而不说哪一条，等于把疑问留给用户。
-          */
-          title={[
+        /*
+          悬浮提示补一句"这个颜色是什么意思"：黄点说清几条没做到 / 要重启，绿点说清自动推送开着。
+          颜色读屏读不到、也常被一眼扫过，理由得有一句话接着。
+        */
+        /*
+          提示从一行变成几行：先说这个按钮干什么、再说为什么是这个颜色，最后把那几条没做到的原话
+          摆出来（前 3 条 + "还有 N 条"）。只报"1 条没做到"而不说哪一条，等于把疑问留给用户。
+        */
+        <Hint
+          text={[
             [t('sync.chip.tip'), chipReason].filter((line) => line !== null).join(' · '),
             ...leftoverHead,
             leftoverMore > 0 ? t('sync.chip.moreLeftovers', { count: leftoverMore }) : null,
           ]
             .filter((line) => line !== null)
             .join('\n')}
-          aria-haspopup="dialog"
-          aria-expanded={surface === 'sync'}
-          onClick={() => setSurface('sync')}
         >
-          {syncLabel}
-        </Button>
+          <Button
+            className="dsm-headChip"
+            variant="outline"
+            size="sm"
+            icon={
+              <Hint
+                text={'params' in dotTitle ? t(dotTitle.key, dotTitle.params) : t(dotTitle.key)}
+                side="right"
+              >
+                <span className="dsm-dotSlot">
+                  <StateDot state={syncDot} />
+                </span>
+              </Hint>
+            }
+            aria-haspopup="dialog"
+            aria-expanded={surface === 'sync'}
+            onClick={() => setSurface('sync')}
+          >
+            {syncLabel}
+          </Button>
+        </Hint>
         <span className="dsm-spacer" />
         {/*
           说明是一次性读的参考，不占入口：页头这枚 `?` 把它开成弹窗，关掉就回到列表。
           按钮只有「?」一个字，悬浮提示与无障碍名字走字典。
         */}
-        <Button
-          className="dsm-headAction"
-          variant="outline"
-          size="sm"
-          aria-label={t('page.help.open')}
-          title={t('page.help.open')}
-          aria-haspopup="dialog"
-          aria-expanded={surface === 'help'}
-          onClick={() => setSurface('help')}
-        >
-          ?
-        </Button>
+        <Hint text={t('page.help.open')} side="bottom">
+          <Button
+            className="dsm-headAction"
+            variant="outline"
+            size="sm"
+            aria-label={t('page.help.open')}
+            aria-haspopup="dialog"
+            aria-expanded={surface === 'help'}
+            onClick={() => setSurface('help')}
+          >
+            ?
+          </Button>
+        </Hint>
         <Button
           className="dsm-headAction"
           variant="outline"
@@ -663,9 +668,11 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
         build.ts 与 scripts/build-identity.ts）；一句话里的数字来自构建期常量，渲染路径上没有任何 IO。
       */}
       <footer className="dsm-statusBar">
-        <span className="dsm-statusLib" title={facts?.sessionsRoot ?? ''}>
-          {t('page.library')}：{libraryLine}
-        </span>
+        <Hint text={facts?.sessionsRoot ?? ''} side="top">
+          <span className="dsm-statusLib">
+            {t('page.library')}：{libraryLine}
+          </span>
+        </Hint>
         <span className="dsm-spacer" />
         {/*
           库这一级的两件事：导入（往库里放东西，与勾选无关）与备份回滚（三种写操作共同的后悔面，
@@ -683,16 +690,17 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
             裸 `<button>` 会带出浏览器自己那套灰边白底。它读起来是"这段的状态"，但点下去是动作（开同步
             那一面），所以形状与邻居一致比"看起来不像按钮"更要紧。
           */
-          <Button
-            className="dsm-statusAction dsm-statusJob"
-            variant="outline"
-            size="sm"
-            aria-haspopup="dialog"
-            title={jobLine === null ? undefined : jobLine.text}
-            onClick={() => setSurface('sync')}
-          >
-            {'params' in barLabel ? t(barLabel.key, barLabel.params) : t(barLabel.key)}
-          </Button>
+          <Hint text={jobLine === null ? undefined : jobLine.text} side="top">
+            <Button
+              className="dsm-statusAction dsm-statusJob"
+              variant="outline"
+              size="sm"
+              aria-haspopup="dialog"
+              onClick={() => setSurface('sync')}
+            >
+              {'params' in barLabel ? t(barLabel.key, barLabel.params) : t(barLabel.key)}
+            </Button>
+          </Hint>
         )}
         <Button
           className="dsm-statusAction"
@@ -714,9 +722,9 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
         >
           {backupCount !== undefined && backupCount > 0 ? t('backup.entry', { count: backupCount }) : t('place.backup')}
         </Button>
-        <span className="dsm-statusVersion" title={versionTip}>
-          {version}
-        </span>
+        <Hint text={versionTip} side="top">
+          <span className="dsm-statusVersion">{version}</span>
+        </Hint>
       </footer>
     </section>
   )

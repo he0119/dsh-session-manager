@@ -17,6 +17,7 @@
 
 import * as React from 'react'
 
+import { Hint } from './Hint.tsx'
 import { Button } from '@deepseek-ai/dsh-client-ui-primitives'
 
 import type { Translate } from '../logic/locales.ts'
@@ -139,16 +140,13 @@ export function SessionTree({
                       />
                     )}
                   </span>
-                  <button
-                    type="button"
-                    className="dsm-treePick"
-                    title={option.tip}
-                    onClick={() => onPick(option.path)}
-                  >
-                    <WorkspaceIcon />
-                    <span className="dsm-treeName">{option.name}</span>
-                    <span className="dsm-treeCount">{option.count}</span>
-                  </button>
+                  <Hint text={option.tip} side="right">
+                    <button type="button" className="dsm-treePick" onClick={() => onPick(option.path)}>
+                      <WorkspaceIcon />
+                      <span className="dsm-treeName">{option.name}</span>
+                      <span className="dsm-treeCount">{option.count}</span>
+                    </button>
+                  </Hint>
                 </div>
               )
             })}

@@ -24,6 +24,7 @@ import * as React from 'react'
 import { Button, Checkbox, Input, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
 
 import { ChevronIcon, SessionIcon, WorkspaceIcon } from './icons.tsx'
+import { Hint } from './Hint.tsx'
 import { lockedParentOf, type NestableSession } from '../logic/groups.ts'
 import { projectLabel, sessionLabel } from '../logic/planRows.ts'
 import {
@@ -244,18 +245,22 @@ export function SessionRow({
    */
   const title = (
     <>
-      <span className={label.kind === 'title' ? 'dsm-rowTitle' : 'dsm-rowId'} title={label.tip}>
-        {label.text}
-      </span>
+      <Hint text={label.tip}>
+        <span className={label.kind === 'title' ? 'dsm-rowTitle' : 'dsm-rowId'}>{label.text}</span>
+      </Hint>
       {tags.map((tag) => (
-        <span key={tag.key} className="dsm-tag" title={t(tag.tip)}>
-          <Tag tone="neutral">{t(tag.key)}</Tag>
-        </span>
+        <Hint key={tag.key} text={t(tag.tip)}>
+          <span className="dsm-tag">
+            <Tag tone="neutral">{t(tag.key)}</Tag>
+          </span>
+        </Hint>
       ))}
       {note !== undefined && (
-        <span className="dsm-tag" title={note.tip}>
-          <Tag tone="neutral">{note.text}</Tag>
-        </span>
+        <Hint text={note.tip}>
+          <span className="dsm-tag">
+            <Tag tone="neutral">{note.text}</Tag>
+          </span>
+        </Hint>
       )}
     </>
   )
@@ -284,24 +289,25 @@ export function SessionRow({
         （没有盒子、不换字号，见 `.dsm-rowOpen`）；别的页仍旧是一段文字。
       */}
       {interactive ? (
-        <button
-          type="button"
-          className="dsm-rowLabel dsm-rowOpen"
-          title={label.tip}
-          onClick={(event) => {
-            event.stopPropagation()
-            onOpenDetail()
-          }}
-        >
-          {title}
-        </button>
+        <Hint text={label.tip}>
+          <button
+            type="button"
+            className="dsm-rowLabel dsm-rowOpen"
+            onClick={(event) => {
+              event.stopPropagation()
+              onOpenDetail()
+            }}
+          >
+            {title}
+          </button>
+        </Hint>
       ) : (
         <span className="dsm-rowLabel">{title}</span>
       )}
       {owner !== undefined && (
-        <span className="dsm-meta dsm-owner" title={session.cwd ?? ''}>
-          {owner}
-        </span>
+        <Hint text={session.cwd ?? ''}>
+          <span className="dsm-meta dsm-owner">{owner}</span>
+        </Hint>
       )}
       <span className="dsm-meta">{formatBytes(session.bytes)}</span>
       <span className="dsm-meta">{formatTime(session.createdAt)}</span>
@@ -336,18 +342,20 @@ export function SessionStaticRow({
     <div className={`${className}${nestClass(depth)}`}>
       <SessionIcon />
       <span className="dsm-rowLabel">
-        <span className={label.kind === 'title' ? 'dsm-rowTitle' : 'dsm-rowId'} title={label.tip}>
-          {label.text}
-        </span>
+        <Hint text={label.tip}>
+          <span className={label.kind === 'title' ? 'dsm-rowTitle' : 'dsm-rowId'}>{label.text}</span>
+        </Hint>
         {note !== undefined && (
-          <span className="dsm-tag" title={note.tip}>
-            <Tag tone="neutral">{note.text}</Tag>
-          </span>
+          <Hint text={note.tip}>
+            <span className="dsm-tag">
+              <Tag tone="neutral">{note.text}</Tag>
+            </span>
+          </Hint>
         )}
       </span>
-      <span className="dsm-meta" title={metaTitle}>
-        {formatBytes(session.bytes)}
-      </span>
+      <Hint text={metaTitle}>
+        <span className="dsm-meta">{formatBytes(session.bytes)}</span>
+      </Hint>
       <span className="dsm-meta">{formatTime(session.createdAt)}</span>
     </div>
   )
@@ -380,7 +388,9 @@ export function GroupCheckbox({
     if (ref.current !== null) ref.current.indeterminate = indeterminate
   }, [indeterminate, checked])
   return (
-    <input ref={ref} type="checkbox" checked={checked} aria-label={label} title={label} onChange={onToggle} />
+    <Hint text={label}>
+      <input ref={ref} type="checkbox" checked={checked} aria-label={label} onChange={onToggle} />
+    </Hint>
   )
 }
 
@@ -626,17 +636,17 @@ export function SessionFilterChips({ keys, filter, t }: SessionFilterBarProps): 
         {t('list.filter.all')}
       </button>
       {keys.map((key) => (
-        <button
-          key={key}
-          type="button"
-          className="dsm-filter"
-          aria-pressed={filter.filters.includes(key)}
-          title={t(CHIP_LABELS[key].tip)}
-          onClick={() => filter.toggle(key)}
-        >
-          {t(CHIP_LABELS[key].key)}
-          <span className="dsm-filterCount">{filter.counts[key]}</span>
-        </button>
+        <Hint key={key} text={t(CHIP_LABELS[key].tip)}>
+          <button
+            type="button"
+            className="dsm-filter"
+            aria-pressed={filter.filters.includes(key)}
+            onClick={() => filter.toggle(key)}
+          >
+            {t(CHIP_LABELS[key].key)}
+            <span className="dsm-filterCount">{filter.counts[key]}</span>
+          </button>
+        </Hint>
       ))}
     </div>
   )

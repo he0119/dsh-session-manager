@@ -12,6 +12,8 @@
 
 import * as React from 'react'
 
+import { Hint } from './Hint.tsx'
+
 import { ProgressBar } from './ProgressBar.tsx'
 import type { ProgressEvent } from '../logic/eventStream.ts'
 import type { Translate } from '../logic/locales.ts'
@@ -112,9 +114,9 @@ export function ProgressBlock({
       {/* 分母是 0 的那几段没有"第几条"：只摆那句话，不摆条（画一条 1/1 的会让人以为已经做完了）。 */}
       {progress.total > 0 && <ProgressBar current={progress.done + 1} total={progress.total} label={text} />}
       {progress.label === undefined ? null : (
-        <p className="dsm-progressItem" title={progress.label}>
-          {progress.label}
-        </p>
+        <Hint text={progress.label}>
+          <p className="dsm-progressItem">{progress.label}</p>
+        </Hint>
       )}
       {note === undefined ? null : <p className="dsm-progressNote">{note}</p>}
     </div>

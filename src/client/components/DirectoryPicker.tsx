@@ -19,6 +19,8 @@ import * as React from 'react'
 
 import { Button } from '@deepseek-ai/dsh-client-ui-primitives'
 
+import { Hint } from './Hint.tsx'
+
 import { normalizePickedPath, type DirectoryApi, type DirectoryListing } from '../directory.ts'
 import type { Translate } from '../logic/locales.ts'
 
@@ -110,23 +112,23 @@ export function DirectoryPicker({
       {crumbs.length > 0 && (
         <div className="dsm-crumbs">
           {crumbs.map((crumb) => (
-            <button
-              key={crumb.path}
-              type="button"
-              className="dsm-crumb"
-              onClick={() => void open(crumb.path)}
-              disabled={busy}
-              title={crumb.path}
-            >
-              {crumb.name === '' ? '/' : crumb.name}
-            </button>
+            <Hint key={crumb.path} text={crumb.path} side="top">
+              <button
+                type="button"
+                className="dsm-crumb"
+                onClick={() => void open(crumb.path)}
+                disabled={busy}
+              >
+                {crumb.name === '' ? '/' : crumb.name}
+              </button>
+            </Hint>
           ))}
         </div>
       )}
 
-      <p className="dsm-hint dsm-browserPath" title={listing?.path ?? startPath}>
-        {listing?.path ?? startPath}
-      </p>
+      <Hint text={listing?.path ?? startPath} side="top">
+        <p className="dsm-hint dsm-browserPath">{listing?.path ?? startPath}</p>
+      </Hint>
 
       {error !== null && <p className="dsm-banner dsm-error">{t('error.failed', { reason: error })}</p>}
 
@@ -139,15 +141,15 @@ export function DirectoryPicker({
           ) : (
             <div className="dsm-list dsm-dirList">
               {listing.entries.map((entry) => (
-                <button
-                  key={entry.path}
-                  type="button"
-                  className={entry.hidden ? 'dsm-dirEntry dsm-dirHidden' : 'dsm-dirEntry'}
-                  onClick={() => void open(entry.path)}
-                  title={entry.path}
-                >
-                  {entry.name}
-                </button>
+                <Hint key={entry.path} text={entry.path}>
+                  <button
+                    type="button"
+                    className={entry.hidden ? 'dsm-dirEntry dsm-dirHidden' : 'dsm-dirEntry'}
+                    onClick={() => void open(entry.path)}
+                  >
+                    {entry.name}
+                  </button>
+                </Hint>
               ))}
             </div>
           )}

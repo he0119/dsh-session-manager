@@ -21,6 +21,8 @@ import * as React from 'react'
 
 import { Button, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
 
+import { Hint } from './Hint.tsx'
+
 import { fetchBackups, rollbackBackup, type BackupSummary, type ProgressEvent, type RollbackResponse } from '../api.ts'
 import { ConfirmDialog } from './ConfirmDialog.tsx'
 import { ProgressBlock } from './ProgressBlock.tsx'
@@ -236,11 +238,13 @@ export function BackupPanel({
                   </span>
                   <span className="dsm-hint">{t('backup.row', { sessions: backup.sessions, artifacts: backup.artifacts })}</span>
                   {(backup.from !== undefined || backup.to !== undefined) && (
-                    <span className="dsm-meta" title={backup.dir}>
-                      {/* 勾选跨目录的那次迁移没有单一来源：报来源目录的条数，别只写一个「—」。 */}
-                      {backup.from ?? (backup.sourceDirs === undefined ? '—' : t('backup.sources', { count: backup.sourceDirs }))}{' '}
-                      → {backup.to ?? '—'}
-                    </span>
+                    <Hint text={backup.dir}>
+                      <span className="dsm-meta">
+                        {/* 勾选跨目录的那次迁移没有单一来源：报来源目录的条数，别只写一个「—」。 */}
+                        {backup.from ?? (backup.sourceDirs === undefined ? '—' : t('backup.sources', { count: backup.sourceDirs }))}{' '}
+                        → {backup.to ?? '—'}
+                      </span>
+                    </Hint>
                   )}
                 </div>
                 <Button variant="outline" size="sm" onClick={() => open(backup)} disabled={busy !== null}>
