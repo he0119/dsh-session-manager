@@ -21,7 +21,7 @@
 
 import * as React from 'react'
 
-import { Button, Checkbox, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, Checkbox, Input, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
 
 import { ChevronIcon, SessionIcon, WorkspaceIcon } from './icons.tsx'
 import { lockedParentOf, type NestableSession } from '../logic/groups.ts'
@@ -642,10 +642,16 @@ export function SessionFilterChips({ keys, filter, t }: SessionFilterBarProps): 
   )
 }
 
-/** 搜索框：占位符与无障碍名字都走字典；值来自同一个筛选状态。 */
+/**
+ * 搜索框：占位符与无障碍名字都走字典；值来自同一个筛选状态。
+ *
+ * 走官方 `Input`（不是裸 `<input>`）：候选面板那个筛选框一直是官方的，同一个 `.dsm-search` 挂在一个
+ * 裸 input 上时高度是 22px、挂在官方那层壳上是 36px（我们的边框与内边距叠在官方那层壳外面），两处
+ * 一个类名两种控件。现在两处都走官方，`.dsm-search` 只负责宽度。
+ */
 export function SessionSearch({ filter, t }: { filter: SessionFilter; t: Translate }): React.ReactElement {
   return (
-    <input
+    <Input
       className="dsm-search"
       type="search"
       value={filter.query}

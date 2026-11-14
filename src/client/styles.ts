@@ -617,6 +617,8 @@ export const CSS = `
   font: inherit;
   color: inherit;
   text-align: left;
+  /* 它整块都是可点的（选中这个项目），光标得说出来；悬停底色在它外面那层行上。 */
+  cursor: pointer;
   cursor: pointer;
 }
 .dsm-treePick:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary, #3370ff); outline-offset: 1px; border-radius: 6px; }
@@ -735,8 +737,12 @@ export const CSS = `
   background: var(--dsw-alias-bg-layer-2, transparent);
   color: inherit;
   border-radius: 8px;
-  padding: 4px 8px;
   font: inherit;
+  /* 28px 是这一页控件的统一高度（官方 Button 的 sm 也是 28px，旁边的输入框也是 28px）。 */
+  height: 28px;
+  padding: 0 8px;
+  font-size: 13px;
+  line-height: 18px;
   max-width: 100%;
 }
 .dsm-file { padding: 3px; }
@@ -751,6 +757,7 @@ export const CSS = `
   text-align: left;
   cursor: pointer;
 }
+.dsm-pathValue:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary, #3370ff); outline-offset: 1px; }
 .dsm-pathValueText {
   flex: 1 1 auto;
   min-width: 0;
@@ -800,6 +807,7 @@ export const CSS = `
   background: color-mix(in srgb, var(--dsw-alias-label-primary, #1f2329) 8%, transparent);
 }
 .dsm-crumb:disabled { color: var(--dsw-alias-label-secondary, #646a73); cursor: default; }
+.dsm-crumb:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary, #3370ff); outline-offset: 1px; }
 /* 一层子目录：等宽两列铺开，比竖排一行一览得多。 */
 .dsm-dirList {
   display: grid;
@@ -1064,19 +1072,11 @@ export const CSS = `
 .dsm-filterSearch { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 /* 搜索框：与 .dsm-select / .dsm-file 同一套皮（边框、底色、圆角都走 token）。字号 13px 是内建输入框
    那一档（内建那几页的输入框就是 13px / 行高 18px），比正文小一号。 */
-.dsm-search {
-  appearance: none;
-  border: 1px solid var(--dsw-alias-border-l2, rgba(0, 0, 0, 0.18));
-  background: var(--dsw-alias-bg-layer-2, transparent);
-  color: inherit;
-  font: inherit;
-  font-size: 13px;
-  line-height: 18px;
-  border-radius: 8px;
-  padding: 1px 8px;
-  width: 180px;
-}
-.dsm-search::placeholder { color: var(--dsw-alias-label-secondary, #646a73); }
+/*
+ * 搜索框只写宽度：边框、底色、字号、内边距都归官方 Input（那层壳自己带 28px 高、8px 圆角、13px 字）。
+ * 这里再画一遍就会叠成 36px 高——同一个类名在两个地方一个 22px 一个 36px，就是这么来的。
+ */
+.dsm-search { width: 180px; }
 /* 候选面板里的筛选框：它是面板的主控件，撑满一行（180px 那个宽度是给列表工具栏那一行用的）。改宽属于
    改 .dsm-search 自己，所以挨着它写——上面的候选面板那一段只管那个列表长什么样。 */
 .dsm-candidateFilter { width: 100%; }
@@ -1394,12 +1394,14 @@ export const CSS = `
 }
 /* 右端那串计数与筛选标签同档（12px/18px）：它是这一行的补充说明，不是正文那一档。 */
 .dsm-transcriptFilters .dsm-meta { font-size: 12px; line-height: 18px; }
+/* 这一排筛选与左栏那一排是同一类东西（点一下筛一档），所以同一套皮：20px 高、6px 圆角、边框走 l2。 */
 .dsm-chip {
-  border: 1px solid var(--dsw-alias-border-l1, rgba(0, 0, 0, 0.12));
-  background: transparent; color: var(--dsw-alias-label-secondary, #646a73);
-  border-radius: 999px; padding: 2px 10px; font-size: 12px; cursor: pointer;
+  border: 1px solid var(--dsw-alias-border-l2, rgba(0, 0, 0, 0.18));
+  background: none; color: var(--dsw-alias-label-secondary, #646a73);
+  border-radius: 6px; padding: 0 8px; font-size: 12px; line-height: 18px; cursor: pointer;
 }
 .dsm-chip:hover { border-color: var(--dsw-alias-brand-primary, #3370ff); }
+.dsm-chip:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary, #3370ff); outline-offset: 1px; }
 .dsm-chipOn {
   border-color: var(--dsw-alias-brand-primary, #3370ff);
   color: var(--dsw-alias-brand-primary, #3370ff);
