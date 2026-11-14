@@ -108,7 +108,8 @@
 - [同步没做到的那几条要点得出名字](../.agents/notes/implemented/bug-fix/2026-11-13-sync-leftovers-are-pointed.md)：
   `problems` 只是几句汇总，界面从来没渲染过它们——状态变黄之后用户拿不到"哪条、为什么"。现在宿主由
   计划里的 `skip` 行（`identical` 与"缺映射"除外）衍生一份点名版（带会话 id）落进 `state.json`，
-  页头提示列前三条、弹窗里那张「上次同步」列全，带 id 的能一键把列表筛到它。
+  弹窗里那张「上次同步」列全，带 id 的能一键把列表筛到它；页头那枚只报条数（见
+  [提示缩成两行那篇](../.agents/notes/implemented/simplification/2026-11-14-sync-chip-tooltip-one-line.md)）。
 - [同步跑着时点状态栏那格，看到的是进度](../.agents/notes/implemented/bug-fix/2026-11-14-sync-panel-opens-at-progress.md)：
   那格点开的弹窗原来停在面板段（只有「上次同步」和一枚按不动的「同步」），看不出这一趟在做什么。
   现在按"这一页走到哪 + 宿主那边跑没跑"决定段落（`logic/syncStage.ts`）：跑着时直接是落地段（进度块），

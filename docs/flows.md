@@ -72,7 +72,7 @@ flowchart TD
 
 跑完之后那份结论落在 `<DSH_HOME>/dsh-session-manager/state.json`：时间、拉推条数、以及**没做到的
 条目**——每条会话一句（名字 + id + 原因），不属于哪条会话的（映射、远端索引、整理那几步）是原话。
-页头那枚状态的悬浮提示列前三条，弹窗里的「上次同步」列全，带 id 的那几条能一键把列表筛到它
+页头那枚状态的悬浮提示只报条数，弹窗里的「上次同步」列全，带 id 的那几条能一键把列表筛到它
 （见 [sync-leftovers 那篇](../.agents/notes/implemented/bug-fix/2026-11-13-sync-leftovers-are-pointed.md)）。
 
 它也能单独跑（不必先跑一趟完整同步）：`GET /sync?mode=tidy` 只读远端、算账，`POST` 同一个地址才删

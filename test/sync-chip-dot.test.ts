@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { syncChipDot, syncChipDotTitle, syncChipNote } from '../src/client/logic/syncChipDot.ts'
+import { syncChipDot, syncChipNote } from '../src/client/logic/syncChipDot.ts'
 
 /** 没有任何事实的那一份（没跑、没记录、没开自动推送）。 */
 const idle = { running: false, done: null, lastRun: null, autoPush: false }
@@ -71,11 +71,27 @@ test('自动推送开着：绿点', () => {
   assert.equal(syncChipDot({ ...idle, autoPush: true, lastRun: { ok: true } }), 'done', '跑得干净、自动推送开着')
 })
 
-test('黄点要说清为什么', () => {
+test('按钮上的那句提示：每档一句短话', () => {
+  assert.deepEqual(syncChipNote({ ...idle, running: true }), { key: 'sync.chip.noteRunning' }, '跑着')
+  assert.deepEqual(
+    syncChipNote({ ...idle, lastRun: { ok: false, error: '401 Unauthorized' } }),
+    { key: 'sync.chip.noteFailed', params: { reason: '401 Unauthorized' } },
+    '红了就把宿主/远端的原话带出来——"为什么红了"是这一档最常被问的',
+  )
+  assert.deepEqual(
+    syncChipNote({ ...idle, lastRun: { ok: false } }),
+    { key: 'sync.chip.noteFailedPlain' },
+    '没有原话时退到一句不带原因的',
+  )
+  assert.deepEqual(
+    syncChipNote({ ...idle, done: { ok: false, error: '连接被重置' }, lastRun: { ok: false, error: '旧的那条' } }),
+    { key: 'sync.chip.noteFailed', params: { reason: '连接被重置' } },
+    '这一页刚跑的那趟优先（它的原话最新）',
+  )
   assert.deepEqual(
     syncChipNote({ ...idle, lastRun: { ok: true, problems: ['a', 'b'] } }),
     { key: 'sync.chip.noteProblems', params: { count: 2 } },
-    '报出没做到的条数',
+    '报出没做到的条数（哪几条在弹窗里）',
   )
   assert.deepEqual(
     syncChipNote({ ...idle, lastRun: { ok: true, pendingRestart: true } }),
@@ -83,46 +99,15 @@ test('黄点要说清为什么', () => {
     '说明要重启',
   )
   assert.equal(syncChipNote(idle), null, '没事时不多说一句')
-  assert.equal(syncChipNote({ ...idle, autoPush: true }), null, '绿点不需要解释')
-  assert.equal(syncChipNote({ ...idle, lastRun: { ok: false } }), null, '失败那档由按钮文字自己说（…失败（3 分钟前））')
+  assert.deepEqual(syncChipNote({ ...idle, autoPush: true }), { key: 'sync.chip.noteAuto' }, '绿点：自动推送开着')
+  assert.deepEqual(
+    syncChipNote({ ...idle, autoPush: true, autoPushSync: true }),
+    { key: 'sync.chip.noteAutoSync' },
+    '双向那一档说的是自动同步（它会动本机）',
+  )
   assert.deepEqual(
     syncChipNote({ ...idle, lastRun: { ok: true, problems: ['a'], pendingRestart: true } }),
     { key: 'sync.chip.noteProblems', params: { count: 1 } },
     '两件都有时先说没做到的条数',
   )
-})
-
-test('点自己的提示：每档都说清自己是什么状态', () => {
-  assert.deepEqual(
-    syncChipDotTitle({ ...idle, running: true }),
-    { key: 'sync.chip.dot.ongoing' },
-    '跑着',
-  )
-  assert.deepEqual(
-    syncChipDotTitle({ ...idle, lastRun: { ok: false, error: '401 Unauthorized' } }),
-    { key: 'sync.chip.dot.error', params: { reason: '401 Unauthorized' } },
-    '红了就把宿主/远端的原话带出来——"为什么红了"是这一档最常被问的',
-  )
-  assert.deepEqual(
-    syncChipDotTitle({ ...idle, lastRun: { ok: false } }),
-    { key: 'sync.chip.dot.errorPlain' },
-    '没有原话时退到一句不带原因的',
-  )
-  assert.deepEqual(
-    syncChipDotTitle({ ...idle, done: { ok: false, error: '连接被重置' }, lastRun: { ok: false, error: '旧的那条' } }),
-    { key: 'sync.chip.dot.error', params: { reason: '连接被重置' } },
-    '这一页刚跑的那趟优先（它的原话最新）',
-  )
-  assert.deepEqual(
-    syncChipDotTitle({ ...idle, lastRun: { ok: true, problems: ['a', 'b', 'c'] } }),
-    { key: 'sync.chip.dot.problems', params: { count: 3 } },
-    '黄点说清几条没做到',
-  )
-  assert.deepEqual(
-    syncChipDotTitle({ ...idle, lastRun: { ok: true, pendingRestart: true } }),
-    { key: 'sync.chip.dot.restart' },
-    '黄点说清要重启',
-  )
-  assert.deepEqual(syncChipDotTitle({ ...idle, autoPush: true }), { key: 'sync.chip.dot.auto' }, '绿点说清自动推送开着')
-  assert.deepEqual(syncChipDotTitle(idle), { key: 'sync.chip.dot.idle' }, '灰点说清没有在跑的、也没有遗留')
 })
