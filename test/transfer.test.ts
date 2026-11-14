@@ -190,7 +190,7 @@ test('包校验：sha256、截断、magic、formatVersion 任何一项不对都�
   assert.throws(() => readBundle(Buffer.from('这不是一个包')), /gzip/i)
 })
 
-test('导入：预演不写字节，落地后 cwd 被改写成目标工作区且除 cwd 外正文不变', () => {
+test('导入：预演不写字节，落地后 cwd 被改写成目标工作区且除 cwd 外正文不变', async () => {
   const root = makeRoot('transfer-import')
   const source = writeSession(root, { id: 'session-a', cwd: FROM_CWD, events: 3 })
   const original = decodeAll(readFileSync(source.files[0]!.path))
@@ -210,7 +210,7 @@ test('导入：预演不写字节，落地后 cwd 被改写成目标工作区且
   assert.equal(existsSync(plan.entries[0]!.dir), false)
 
   const registryPath = join(targetRoot, '..', 'workspace.json')
-  const outcome = applyImport(bundle, plan, { root: targetRoot, targetCwd: TO_CWD, registry, registryPath, decodeAll })
+  const outcome = await applyImport(bundle, plan, { root: targetRoot, targetCwd: TO_CWD, registry, registryPath, decodeAll })
   assert.deepEqual(outcome.written, ['session-a'])
   assert.equal(outcome.registryWritten, true)
 
@@ -234,7 +234,7 @@ test('导入：预演不写字节，落地后 cwd 被改写成目标工作区且
   assert.equal(writtenRegistry.tables.workspaces['ws-target']?.path, TO_CWD)
 })
 
-test('导入：目标 cwd 与日志原有 cwd 相同时逐字节不改写', () => {
+test('导入：目标 cwd 与日志原有 cwd 相同时逐字节不改写', async () => {
   const root = makeRoot('transfer-noop')
   const source = writeSession(root, { id: 'session-same', cwd: FROM_CWD })
   const onDisk = readFileSync(source.files[0]!.path)
@@ -242,14 +242,14 @@ test('导入：目标 cwd 与日志原有 cwd 相同时逐字节不改写', () =
 
   const targetRoot = makeRoot('transfer-noop-target')
   const plan = planImport(bundle, { root: targetRoot, targetCwd: FROM_CWD })
-  const outcome = applyImport(bundle, plan, { root: targetRoot, targetCwd: FROM_CWD, decodeAll })
+  const outcome = await applyImport(bundle, plan, { root: targetRoot, targetCwd: FROM_CWD, decodeAll })
 
   assert.deepEqual(outcome.written, ['session-same'])
   const written = join(sessionDir(targetRoot, FROM_CWD, 'session-same'), 'session.v4.jsonl.zstd')
   assert.deepEqual(readFileSync(written), onDisk)
 })
 
-test('导入：库里已有同 id 的会话时只跳过、绝不覆盖，且预演 ok=false', () => {
+test('导入：库里已有同 id 的会话时只跳过、绝不覆盖，且预演 ok=false', async () => {
   const root = makeRoot('transfer-conflict')
   const source = writeSession(root, { id: 'session-a', cwd: FROM_CWD })
   const bundle = readBundle(buildBundle([source]))
@@ -261,11 +261,11 @@ test('导入：库里已有同 id 的会话时只跳过、绝不覆盖，且预�
   assert.match(plan.entries[0]!.reason ?? '', /已经有同 id 的会话/)
   assert.match(plan.entries[0]!.reason ?? '', new RegExp(projectKey(FROM_CWD)))
 
-  const outcome = applyImport(bundle, plan, { root, targetCwd: TO_CWD, decodeAll })
+  const outcome = await applyImport(bundle, plan, { root, targetCwd: TO_CWD, decodeAll })
   assert.deepEqual(outcome.written, [])
 })
 
-test('导入：没有 cwd 的会话落 _no-cwd 项目目录、不改写、也不动注册表', () => {
+test('导入：没有 cwd 的会话落 _no-cwd 项目目录、不改写、也不动注册表', async () => {
   const root = makeRoot('transfer-nocwd')
   const source = writeSession(root, { id: 'session-blank', cwd: undefined, events: 1 })
   const bundle = readBundle(buildBundle([source]))
@@ -280,12 +280,12 @@ test('导入：没有 cwd 的会话落 _no-cwd 项目目录、不改写、也不
   assert.equal(plan.nextRegistry, null, '没有可重挂的会话时不该产生注册表变更')
   assert.match(plan.entries[0]!.dir, new RegExp(`_no-cwd`))
 
-  const outcome = applyImport(bundle, plan, { root: targetRoot, targetCwd: TO_CWD, registry, decodeAll })
+  const outcome = await applyImport(bundle, plan, { root: targetRoot, targetCwd: TO_CWD, registry, decodeAll })
   assert.deepEqual(outcome.written, ['session-blank'])
   assert.equal(outcome.registryWritten, false)
 })
 
-test('导入：明文 v0 日志（无 zstd 外壳）走文本改写，同样只动 cwd', () => {
+test('导入：明文 v0 日志（无 zstd 外壳）走文本改写，同样只动 cwd', async () => {
   const root = makeRoot('transfer-plain')
   const source = writeSession(root, { id: 'session-v0', cwd: FROM_CWD, version: 0, compression: null })
   const original = readFileSync(source.files[0]!.path, 'utf8')
@@ -293,7 +293,7 @@ test('导入：明文 v0 日志（无 zstd 外壳）走文本改写，同样只�
 
   const targetRoot = makeRoot('transfer-plain-target')
   const plan = planImport(bundle, { root: targetRoot, targetCwd: TO_CWD })
-  applyImport(bundle, plan, { root: targetRoot, targetCwd: TO_CWD, decodeAll })
+  await applyImport(bundle, plan, { root: targetRoot, targetCwd: TO_CWD, decodeAll })
 
   const name = bundle.sessions[0]!.files[0]!.name
   assert.equal(name, 'session.v0.jsonl')
@@ -306,7 +306,7 @@ test('导入：明文 v0 日志（无 zstd 外壳）走文本改写，同样只�
   assert.equal(existsSync(sessionDir(targetRoot, TO_CWD, 'session-v0')), true)
 })
 
-test('导入：目标目录的另一种拼写先归一（header 的 cwd 与注册表那条记录是同一个字符串）', () => {
+test('导入：目标目录的另一种拼写先归一（header 的 cwd 与注册表那条记录是同一个字符串）', async () => {
   const root = makeRoot('transfer-canonical')
   const source = writeSession(root, { id: 'session-a', cwd: FROM_CWD })
   const bundle = readBundle(buildBundle([source]))
@@ -325,13 +325,13 @@ test('导入：目标目录的另一种拼写先归一（header 的 cwd 与注�
   assert.equal(plan.nextRegistry?.tables.workspaces['ws-target']?.path, to, '注册表那条记录的 path 也是它')
 
   const registryPath = join(targetRoot, '..', 'workspace.json')
-  applyImport(bundle, plan, { root: targetRoot, targetCwd: spelled, registry, registryPath, decodeAll })
+  await applyImport(bundle, plan, { root: targetRoot, targetCwd: spelled, registry, registryPath, decodeAll })
   const written = join(sessionDir(targetRoot, to, 'session-a'), 'session.v4.jsonl.zstd')
   const header = JSON.parse(decodeAll(readFileSync(written)).split('\n')[0]!) as { cwd: string }
   assert.equal(header.cwd, to, '改写进 header 的同样是它')
 })
 
-test('导出/导入：一个包装多条会话（含无 cwd 的那条）时各自走各自的分支', () => {
+test('导出/导入：一个包装多条会话（含无 cwd 的那条）时各自走各自的分支', async () => {
   const root = makeRoot('transfer-multi')
   const withCwd = writeSession(root, { id: 'session-a', cwd: FROM_CWD })
   const withoutCwd = writeSession(root, { id: 'session-b', cwd: undefined, events: 1 })
@@ -344,7 +344,7 @@ test('导出/导入：一个包装多条会话（含无 cwd 的那条）时各�
   assert.deepEqual(plan.created, ['session-a', 'session-b'])
   assert.deepEqual(plan.rehomed, ['session-a'])
 
-  const outcome = applyImport(bundle, plan, { root: targetRoot, targetCwd: TO_CWD, registry, decodeAll })
+  const outcome = await applyImport(bundle, plan, { root: targetRoot, targetCwd: TO_CWD, registry, decodeAll })
   assert.deepEqual(outcome.written, ['session-a', 'session-b'])
   assert.ok(outcome.bytes > 0)
 })
@@ -476,7 +476,7 @@ test('导出：给了端口但引用的对象本机就没有时，包退回 v1 �
   assert.equal('attachments' in manifestOf(bundle), false)
 })
 
-test('导入：包里的对象按库落进目标附件库（内容一致、只读权限），两次导入第二次是 present', () => {
+test('导入：包里的对象按库落进目标附件库（内容一致、只读权限），两次导入第二次是 present', async () => {
   const root = makeRoot('transfer-attach-import')
   const store = makeAttachmentStore('transfer-attach-import-store')
   const image = Buffer.from('要跟着会话搬过去的图片字节')
@@ -506,7 +506,7 @@ test('导入：包里的对象按库落进目标附件库（内容一致、只�
   )
   assert.equal(plan.ok, true)
 
-  const outcome = applyImport(bundle, plan, {
+  const outcome = await applyImport(bundle, plan, {
     root: targetRoot,
     targetCwd: TO_CWD,
     decodeAll,
@@ -543,7 +543,7 @@ test('导入：包里的对象按库落进目标附件库（内容一致、只�
     ['present', 'present'],
   )
   assert.equal(again.attachmentAdds, 0)
-  const second = applyImport(bundle, again, {
+  const second = await applyImport(bundle, again, {
     root: targetRoot,
     targetCwd: TO_CWD,
     decodeAll,
@@ -554,7 +554,7 @@ test('导入：包里的对象按库落进目标附件库（内容一致、只�
   assert.equal(second.attachmentPresent, 2)
 })
 
-test('导入：日志早就在库里、只缺对象时照旧补对象，一条日志都不覆盖（这就是"图挂了"的修复路径）', () => {
+test('导入：日志早就在库里、只缺对象时照旧补对象，一条日志都不覆盖（这就是"图挂了"的修复路径）', async () => {
   const root = makeRoot('transfer-attach-repair')
   const store = makeAttachmentStore('transfer-attach-repair-store')
   const image = Buffer.from('修复路径用的图片字节')
@@ -578,7 +578,7 @@ test('导入：日志早就在库里、只缺对象时照旧补对象，一条�
   assert.equal(plan.attachmentAdds, 1, '但缺的那个对象要补上')
   assert.equal(plan.ok, true, '只有附件要补时，计划也是"有可落地内容"')
 
-  const outcome = applyImport(bundle, plan, {
+  const outcome = await applyImport(bundle, plan, {
     root: targetRoot,
     targetCwd: FROM_CWD,
     decodeAll,
@@ -590,7 +590,7 @@ test('导入：日志早就在库里、只缺对象时照旧补对象，一条�
   assert.deepEqual(readFileSync(join(dir, logName)), before, '日志逐字节不动（导入永不覆盖）')
 })
 
-test('导入：宿主没有附件服务时对象一条都不落，计划里如实报 unavailable', () => {
+test('导入：宿主没有附件服务时对象一条都不落，计划里如实报 unavailable', async () => {
   const root = makeRoot('transfer-attach-noport')
   const store = makeAttachmentStore('transfer-attach-noport-store')
   const image = Buffer.from('没有附件服务时带不过去的字节')
@@ -608,7 +608,7 @@ test('导入：宿主没有附件服务时对象一条都不落，计划里如�
   assert.equal(plan.attachmentAdds, 0)
   assert.equal(plan.ok, true, '会话照旧能导：附件落不了不影响日志')
 
-  const outcome = applyImport(bundle, plan, { root: targetRoot, targetCwd: TO_CWD, decodeAll })
+  const outcome = await applyImport(bundle, plan, { root: targetRoot, targetCwd: TO_CWD, decodeAll })
   assert.deepEqual(outcome.written, ['session-a'])
   assert.equal(outcome.attachmentWritten, 0)
   assert.match(outcome.attachmentProblems.join('\n'), /没有附件服务/)
@@ -673,7 +673,7 @@ test('包校验：文件条目缺名字时拒掉整包（名字决定它落在�
   )
 })
 
-test('读包：v1 的老包（没有 attachments 那一节）照旧读得出来、也照旧导得进去', () => {
+test('读包：v1 的老包（没有 attachments 那一节）照旧读得出来、也照旧导得进去', async () => {
   const root = makeRoot('transfer-v1')
   const store = makeAttachmentStore('transfer-v1-store')
   const image = Buffer.from('v1 时代的包当然没有这段字节')
@@ -692,13 +692,13 @@ test('读包：v1 的老包（没有 attachments 那一节）照旧读得出来�
   const targetRoot = makeRoot('transfer-v1-target')
   const plan = planImport(parsed, { root: targetRoot, targetCwd: FROM_CWD })
   assert.deepEqual(plan.created, ['session-a'])
-  const outcome = applyImport(parsed, plan, { root: targetRoot, targetCwd: FROM_CWD, decodeAll })
+  const outcome = await applyImport(parsed, plan, { root: targetRoot, targetCwd: FROM_CWD, decodeAll })
   assert.deepEqual(outcome.written, ['session-a'])
   assert.equal(outcome.attachmentWritten, 0)
 })
 
 
-test('导入：别的系统写下的 working-directory/change 跟着落地目录改（不改这条会话就读不出来）', () => {
+test('导入：别的系统写下的 working-directory/change 跟着落地目录改（不改这条会话就读不出来）', async () => {
   const root = makeRoot('transfer-import-paths')
   const source = writeSession(root, {
     id: 'session-w',
@@ -721,7 +721,7 @@ test('导入：别的系统写下的 working-directory/change 跟着落地目录
     newId: 'ws-target',
   })
   assert.equal(plan.ok, true, plan.problems.join('; '))
-  applyImport(bundle, plan, { root: targetRoot, targetCwd: TO_CWD, registry, decodeAll })
+  await applyImport(bundle, plan, { root: targetRoot, targetCwd: TO_CWD, registry, decodeAll })
 
   const written = decodeAll(
     readFileSync(join(sessionDir(targetRoot, TO_CWD, 'session-w'), 'session.v4.jsonl.zstd')),
