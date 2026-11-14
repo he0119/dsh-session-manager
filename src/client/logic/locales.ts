@@ -411,7 +411,7 @@ export const zh = {
   'help.faq.exportA':
     '会话日志本身（包括改写目录时留下的历史日志），以及日志里引用到的图片 / 文件对象——它们平时放在本机的附件库里（$DSH_HOME/attachments/），不带上的话，包在另一台机器上打开时图片是空的；不含这条会话创建过的普通工作文件。',
   'help.faq.forkQ': '同一条会话在两台机器上都聊过，怎么办？',
-  'help.faq.forkA': '以更新的那一份为准：同步按会话 id 认，两边都写过就比「最后活动时间」。远端更晚，先把本机那份备份再换成远端那份（旧的能从备份里恢复）；本机更晚，就重新推送自己这一格。想彻底避免，约定一条会话只在一台机器上继续。',
+  'help.faq.forkA': '以更新的那一份为准：同步按会话 id 认，两边都写过就比「最后活动时间」。远端更晚，先把本机那份备份再换成远端那份（旧的能从备份里恢复）；本机更晚，就重新推送自己这一格。差异页里也能自己挑：只保留本机、只保留远端（另一份不再落到本机，本机那份被顶掉前先备份），或者两份都保留——那一档按最后活动时间定谁占原来的 id，另一份落成一条新会话。想彻底避免，约定一条会话只在一台机器上继续。',
   'help.faq.passwordQ': '同步的密码存在哪？',
   'help.faq.passwordA': '不在配置文件里：点「保存」存进 DSH 的凭据（$DSH_HOME/.credentials.yaml），配置里只留一个引用名。密码框是只写的，留空＝不改；要清掉得去凭据文件里删那一条。',
 
@@ -524,8 +524,9 @@ export const zh = {
   'sync.tag.remoteAhead': '远端更新',
   'sync.tag.noMapping': '缺映射',
   'sync.tag.missingTarget': '目标缺失',
-  'sync.tag.keepLocal': '以本机为准',
-  'sync.tag.keepRemote': '以远端为准',
+  'sync.tag.keepLocal': '保留本机',
+  'sync.tag.keepRemote': '保留远端',
+  'sync.tag.keepBoth': '保留两份',
   // 「看差异」那一页（只读）：列头、按钮、以及三类关系各一句话——"两边各自写过"时人要做的决定
   // 全靠这一页，所以关系那三句要说得像人话，不能只报数字。
   'sync.diff.column': '差异',
@@ -539,9 +540,12 @@ export const zh = {
   'sync.diff.localExtends': '远端那份是本机这部分的前缀：本机在同一个延续上又写了 {count} 条。',
   'sync.diff.remoteExtends': '本机那份是远端这部分的前缀：远端在同一个延续上又写了 {count} 条。',
   'sync.diff.forked': '两边各写各的：共同到第 {common} 条为止，之后本机 {localCount} 条、远端 {remoteCount} 条。',
-  'sync.diff.keepLocal': '以本机这份为准',
-  'sync.diff.keepRemote': '以远端这份为准',
-  'sync.diff.choose': '选一份当正本：另一份会落成新会话，不删；选完回到确认弹窗再同步。',
+  'sync.diff.keepLocal': '保留本机',
+  'sync.diff.keepRemote': '保留远端',
+  'sync.diff.keepBoth': '保留两份',
+  'sync.diff.choose':
+    '选单边就只留那一份：远端那份不落到本机，本机那份先备份再被顶掉。' +
+    '选两份则按最后活动时间定谁占原来的 id，另一份落成一条新会话。选完回确认弹窗同步。',
   'sync.diff.live': '这条会话正开着，现在不能选正本；先切到别的会话或重启宿主再同步。',
   'sync.diff.tail.local': '本机独有 {count} 条',
   'sync.diff.tail.remote': '远端独有 {count} 条',
@@ -1065,7 +1069,7 @@ export const en: LocaleDictOf<typeof NS> = {
   'help.faq.exportA':
     'The session logs themselves (including the older logs left behind by an earlier directory rewrite), plus the image/file objects those logs reference — normally kept in this machine’s attachment store ($DSH_HOME/attachments/); without them the images are blank when the bundle is opened on another machine. Not the ordinary workspace files the session created.',
   'help.faq.forkQ': 'The same session was continued on two machines. Now what?',
-  'help.faq.forkA': 'The newer copy wins: sync matches sessions by id, and when both sides wrote it compares the last-activity time. If the remote is later, this machine’s copy is backed up and then replaced by the remote one (the old copy can be restored from the backup); if this machine is later, its own cell is re-pushed. To avoid it altogether, agree that one session is continued on one machine only.',
+  'help.faq.forkA': 'The newer copy wins: sync matches sessions by id, and when both sides wrote it compares the last-activity time. If the remote is later, this machine’s copy is backed up and then replaced by the remote one (the old copy can be restored from the backup); if this machine is later, its own cell is re-pushed. The diff page also lets you choose: keep this machine’s copy only, keep the remote copy only (the other is not pulled here, and this machine’s copy is backed up before it is replaced), or keep both — that one gives the original id to the more recently active copy and turns the other into a new session. To avoid it altogether, agree that one session is continued on one machine only.',
   'help.faq.passwordQ': 'Where is the sync password kept?',
   'help.faq.passwordA': 'Not in the configuration file: Save stores it in the DSH credentials ($DSH_HOME/.credentials.yaml), and the configuration keeps only a reference name. The field is write-only: blank keeps the stored one, and removing it means deleting that entry in the credential file.',
 
@@ -1170,8 +1174,9 @@ export const en: LocaleDictOf<typeof NS> = {
   'sync.tag.remoteAhead': 'Remote ahead',
   'sync.tag.noMapping': 'No map',
   'sync.tag.missingTarget': 'No dir',
-  'sync.tag.keepLocal': 'Keep local',
-  'sync.tag.keepRemote': 'Keep remote',
+  'sync.tag.keepLocal': 'Local only',
+  'sync.tag.keepRemote': 'Remote only',
+  'sync.tag.keepBoth': 'Keep both',
   // The "compare the two copies" page (read-only): column head, button, and one sentence per relation —
   // that page carries the whole decision when both sides wrote, so the three sentences have to read like
   // prose rather than just report numbers.
@@ -1186,9 +1191,13 @@ export const en: LocaleDictOf<typeof NS> = {
   'sync.diff.localExtends': "The remote copy is a prefix of this machine's: both continued the same thread, this machine wrote {count} more.",
   'sync.diff.remoteExtends': "This machine's copy is a prefix of the remote's: both continued the same thread, the remote wrote {count} more.",
   'sync.diff.forked': 'Both sides wrote their own: they agree up to event {common}, then this machine has {localCount} more and the remote {remoteCount}.',
-  'sync.diff.keepLocal': 'Keep this machine\'s copy',
-  'sync.diff.keepRemote': 'Keep the remote copy',
-  'sync.diff.choose': 'Pick one as the master copy: the other becomes a new session, not deleted. Then go back to the confirm dialog to sync.',
+  'sync.diff.keepLocal': 'Keep local',
+  'sync.diff.keepRemote': 'Keep remote',
+  'sync.diff.keepBoth': 'Keep both',
+  'sync.diff.choose':
+    'Keep one side and only that copy stays: the remote copy is not pulled here, and this machine\'s copy is ' +
+    'backed up before it is replaced. Keep both and the original id goes to the more recently active copy, ' +
+    'the other becomes a new session. Then go back to the confirm dialog to sync.',
   'sync.diff.live': 'This session is open, so you cannot pick a master copy. Switch sessions or restart the host, then sync again.',
   'sync.diff.tail.local': '{count} only on this machine',
   'sync.diff.tail.remote': '{count} only on the remote',
