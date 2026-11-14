@@ -681,6 +681,8 @@ export function relocateSessionPaths(buf: Buffer, options: RelocatePathsOptions)
   const frames = splitFrames(buf)
   if (frames.length === 0) throw new Error(`session ${whole.header.id}: no frames to rewrite`)
   const parts: Buffer[] = []
+  /** 每一帧改写后的文本：拼起来必须等于整份改写的结果（见末尾那条守卫）。 */
+  const texts: string[] = []
   let rewrittenFrames = 0
   for (const [index, frame] of frames.entries()) {
     const raw = buf.subarray(frame.start, frame.end)
@@ -694,20 +696,32 @@ export function relocateSessionPaths(buf: Buffer, options: RelocatePathsOptions)
     }
     // 首帧只承载 header 一行（宿主自己的写法，也是 `relocateHeaderCwd` 的既有不变式）；其余帧逐行过。
     // 帧与整份的边界不同，所以账本另开一份：`mappings`/`unmapped` 以整份那份为准，这里只要"这一帧怎么变"。
-    // 两处共用同一行级实现，改写末尾那次整份解码比对就是这条一致性的守卫。
+    // 两处共用同一行级实现，改写末尾那次"逐帧文本拼起来 == 整份改写结果"的比对就是这条一致性的守卫。
     const next = index === 0
       ? relocateHeaderCwdText(frameText, options.to).text
       : rewriteSelfRootEvents(frameText, ledger)
     if (next === frameText) {
       parts.push(raw)
+      texts.push(frameText)
       continue
     }
-    parts.push(compressFrame(next))
+    // 改过的那一帧要当场自校验（只解这一帧，不整份解）：重压之后必须解回同一段文本。
+    const compressed = compressFrame(next)
+    if (decodeAll(compressed) !== next) {
+      throw new Error(`session ${whole.header.id}: frame ${index} round-trip mismatch after path rewrite`)
+    }
+    parts.push(compressed)
+    texts.push(next)
     rewrittenFrames++
   }
-  const buffer = Buffer.concat(parts)
-  if (decodeAll(buffer) !== whole.text) {
+  /*
+   * 原来这里是 `decodeAll(buffer) !== whole.text`：把新拼出来的整份缓冲再解一遍（16 MB 压缩、48 MB
+   * 文本，实测 1.8 秒）。现在改成比文本：每一帧都自校验过，拼起来的文本与整份改写结果逐字符相同，
+   * 等价于整份解码一致——守卫的判据没变，只是不再重复解一次。
+   */
+  if (texts.join('') !== whole.text) {
     throw new Error(`session ${whole.header.id}: round-trip mismatch after path rewrite`)
   }
+  const buffer = Buffer.concat(parts)
   return { ...whole, buffer, events, frames: rewrittenFrames }
 }

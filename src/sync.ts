@@ -70,7 +70,7 @@ import { readRegistry, validateRegistry } from './registry.ts'
 import { takeEffectOnHostAll, type EffectDeps } from './take-effect.ts'
 import { relocateHeaderCwdShallow, relocateHeaderCwdText } from './session-log.ts'
 import type { TitleQuery } from './session-title.ts'
-import { applyImport, attachmentActionOf, buildBundle, entryBytes, planImport, readBundle, readBundleAsync, type ExportSource, type ImportOptions, type ImportOutcome, type SessionBundle } from './transfer.ts'
+import { applyImport, attachmentActionOf, buildBundleAsync, entryBytes, planImport, readBundle, readBundleAsync, type ExportSource, type ImportOptions, type ImportOutcome, type SessionBundle } from './transfer.ts'
 import type {
   DecodeAll,
   EffectOutcome,
@@ -3116,7 +3116,7 @@ export async function applyPreparedSync(
     try {
       // 附件对象不必随包搬：落选那份的日志引用还是那几个 sha，本机对象库里已经有它们。
       const bundle = readBundle(
-        buildBundle(
+        await buildBundleAsync(
           [{ id: session.id, cwd: session.cwd, createdAt: session.createdAt, dir: session.dir, files: session.files }],
           { now: new Date().toISOString() },
         ),
@@ -3426,7 +3426,7 @@ export async function applyPreparedSync(
           reportAttachments(session.title ?? entry.title ?? entry.id),
         )
       }
-      const bundle = buildBundle([source], {
+      const bundle = await buildBundleAsync([source], {
         now: (deps.now?.() ?? new Date()).toISOString(),
         source: {
           sessionsRoot: deps.sessionsRoot,

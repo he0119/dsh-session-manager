@@ -91,7 +91,7 @@ flowchart TD
   B --> B1["目标项目目录 / 注册表怎么变 / 级联的子会话 / 活会话跳过"]
   B1 --> C["确认"]
   C --> D["createBackup()：会话目录 + registry.json + 清单"]
-  D --> E["applyPlan()：改写日志 header 的 cwd、搬目录、搬产物"]
+  D --> E["applyPlan()：只解首帧改写 header 的 cwd、搬目录、搬产物"]
   E --> F["verifyAppliedPlan()：逐条复核磁盘"]
   F --> G["takeEffectOnHost()：把注册表终态交给宿主"]
   G --> H["warmCheckpoints()：改过 cwd 的检查点重折一遍"]

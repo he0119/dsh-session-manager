@@ -29,9 +29,10 @@
 //   - 会话目录名必须等于 encodeSegment(id)——宿主启动时会校验目录名与 header id 一致，
 //     不满足的包要在这里拒掉，而不是让它去污染会话库。
 import { createHash } from 'node:crypto'
+import { readFile } from 'node:fs/promises'
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { gunzip, gunzipSync, gzipSync } from 'node:zlib'
+import { gunzip, gunzipSync, gzip, gzipSync } from 'node:zlib'
 import { promisify } from 'node:util'
 
 import {
@@ -44,6 +45,7 @@ import {
   type AttachmentRef,
 } from './attachments.ts'
 import { canonicalDir } from './canonical-path.ts'
+import { decodeLogTextChunked } from './log-decode.ts'
 import { encodeSegment, sessionDir } from './paths.ts'
 import { reHome, writeRegistryAtomic } from './registry.ts'
 import { foldTitleInFrames } from './session-title.ts'
@@ -52,6 +54,8 @@ import type { DecodeAll, ProgressReporter, RegistryChange, SessionLogFile, Works
 
 /** `zlib.gunzip` 的 Promise 版：解压在线程池里，主线程不陪着。 */
 const gunzipAsync = promisify(gunzip)
+/** `zlib.gzip` 的 Promise 版：压缩在线程池里，主线程不陪着。 */
+const gzipAsync = promisify(gzip)
 
 /** 容器 magic。换代时改这一串，而不是悄悄改变字段含义。 */
 export const BUNDLE_MAGIC = 'DSHSESS1\n'
@@ -270,11 +274,22 @@ export function buildBundle(
     onReport?.({ packed: attachments.length, bytes: attachmentBytes, missing })
   }
 
-  /*
-   * 格式号按"这个包到底多带了什么"来定，而不是按"这份代码是哪一版"：一个对象都没有（没给端口、
-   * 日志里没有引用、或者引用的对象本机就没有）时写 v1——清单里连 `attachments` 那一节都不出现，
-   * 与升级前逐字节同形，装旧版的宿主照旧读得了。真要带对象才升 v2，因为那时老宿主确实读不了。
-   */
+  return gzipSync(bundleBytes(sessions, attachments, parts, options))
+}
+
+/**
+ * 把收集好的各段拼成未压缩的包字节（magic + 清单 + 载荷）。
+ *
+ * 格式号按"这个包到底多带了什么"来定，而不是按"这份代码是哪一版"：一个对象都没有（没给端口、
+ * 日志里没有引用、或者引用的对象本机就没有）时写 v1——清单里连 `attachments` 那一节都不出现，
+ * 与升级前逐字节同形，装旧版的宿主照旧读得了。真要带对象才升 v2，因为那时老宿主确实读不了。
+ */
+function bundleBytes(
+  sessions: BundleSession[],
+  attachments: BundleAttachmentEntry[],
+  parts: Buffer[],
+  options: { now?: string; source?: BundleSourceInfo },
+): Buffer {
   const formatVersion = attachments.length > 0 ? BUNDLE_FORMAT_VERSION : BUNDLE_MIN_FORMAT_VERSION
   const manifest = JSON.stringify({
     formatVersion,
@@ -287,8 +302,108 @@ export function buildBundle(
   const header = Buffer.alloc(BUNDLE_MAGIC.length + 4)
   header.write(BUNDLE_MAGIC, 0, 'utf8')
   header.writeUInt32LE(manifestBytes.length, BUNDLE_MAGIC.length)
+  return Buffer.concat([header, manifestBytes, ...parts])
+}
 
-  return gzipSync(Buffer.concat([header, manifestBytes, ...parts]))
+/**
+ * 与 {@link buildBundle} 同一个产物，只是**每一步都不把主线程按住**：
+ *
+ * - 读日志与对象走 `fs/promises.readFile`（线程池），不再 `readFileSync`；
+ * - 扫附件引用走 `decodeLogTextChunked()`（128 KB 一块、块间让出）——整库导出时这一步以前会把每条
+ *   16 MB 的日志整份解一遍（单条 1.8 秒）；
+ * - 最后那次 gzip 走异步 `zlib.gzip`（线程池）：52 MB 的包实测压缩 1.2 秒，同步版本会把宿主按死。
+ *
+ * 导出端点与同步推送用这一份；`buildBundle()` 留给需要同步结果的测试与小包。两份的产物必须逐字节
+ * 相同（清单字段顺序与 gzip 参数一致），`test/transfer.test.ts` 有一条等价断言钉着。
+ */
+export async function buildBundleAsync(
+  sources: readonly ExportSource[],
+  options: {
+    now?: string
+    source?: BundleSourceInfo
+    onProgress?: ProgressReporter
+    attachments?: AttachmentPackOptions
+  } = {},
+): Promise<Buffer> {
+  const parts: Buffer[] = []
+  const sessions: BundleSession[] = []
+  let offset = 0
+  const wanted = new Map<string, AttachmentRef>()
+
+  for (const [index, source] of sources.entries()) {
+    options.onProgress?.({
+      phase: 'pack',
+      total: sources.length,
+      done: index,
+      id: source.id,
+      label: source.id,
+    })
+    if (!source.files.length) throw new Error(`session ${source.id} has no log files to export`)
+    const files: BundleFileEntry[] = []
+    for (const file of source.files) {
+      const buf = await readFile(file.path)
+      files.push({
+        name: file.name,
+        version: file.version,
+        compression: file.compression,
+        bytes: buf.length,
+        offset,
+        sha256: sha256(buf),
+      })
+      parts.push(buf)
+      offset += buf.length
+      if (options.attachments !== undefined) {
+        for (const ref of scanAttachmentRefs(
+          await decodeLogTextChunked(buf, file.compression),
+        )) {
+          wanted.set(`${ref.kind}:${ref.id}`, ref)
+        }
+      }
+    }
+    sessions.push({
+      id: source.id,
+      cwd: source.cwd,
+      createdAt: source.createdAt,
+      dirName: encodeSegment(source.id),
+      files,
+    })
+  }
+
+  const attachments: BundleAttachmentEntry[] = []
+  const missing: AttachmentRef[] = []
+  let attachmentBytes = 0
+  if (options.attachments !== undefined) {
+    const { port, onReport } = options.attachments
+    const list = [...wanted.values()]
+    for (const [index, ref] of list.entries()) {
+      options.onProgress?.({ phase: 'attach', total: list.length, done: index, id: ref.id })
+      const path = port.pathOf(ref)
+      if (path === undefined) {
+        missing.push(ref)
+        continue
+      }
+      let buf: Buffer
+      try {
+        buf = await readFile(path)
+      } catch {
+        missing.push(ref)
+        continue
+      }
+      attachments.push({
+        id: ref.id,
+        kind: ref.kind,
+        ...(ref.name === undefined ? {} : { name: ref.name }),
+        bytes: buf.length,
+        offset,
+      })
+      parts.push(buf)
+      offset += buf.length
+      attachmentBytes += buf.length
+    }
+    onReport?.({ packed: attachments.length, bytes: attachmentBytes, missing })
+  }
+
+  return gzipAsync(bundleBytes(sessions, attachments, parts, options))
 }
 
 /**

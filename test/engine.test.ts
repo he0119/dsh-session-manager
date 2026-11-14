@@ -132,6 +132,34 @@ const opts = (sb: Sandbox, extra: Record<string, unknown> = {}) => ({
   ...extra,
 })
 
+test('迁移只解首帧：整份日志不进解码器（改写与复核都不）', () => {
+  /*
+   * 判据是"送进 decodeAll 的最大一段"。改写只需要 header 一行，复核也只需要 header——本机最大的一份
+   * 日志压缩后 16.8 MB，整份解一次要 7 秒，迁移十条就把宿主按住一分多钟。这里造一份约 5 MB 的日志：
+   * 整份解压的实现在这条断言下会直接把 5 MB 递进去。
+   */
+  const sb = makeSandbox('migrate-shallow')
+  const big = makeLog('session-a', sb.fromDir, 8000)
+  writeFileSync(join(sb.root, sb.sourceProjectDirName, 'session-a', 'session.v4.jsonl.zstd'), big)
+  assert.ok(big.length > 1024 * 1024, `夹具得够大（现在是 ${big.length} 字节）`)
+
+  let maxBytes = 0
+  const counting: DecodeAll = (buf) => {
+    maxBytes = Math.max(maxBytes, buf.length)
+    return decodeAll(buf)
+  }
+  const plan = buildRelocationPlan(opts(sb))
+  assert.equal(plan.ok, true, plan.problems.join('; '))
+
+  applyPlan(plan, { registryPath: sb.registryPath, decodeAll: counting, backupRoot: sb.backupRoot })
+  assert.ok(maxBytes < 64 * 1024, `apply 阶段送进解码器的最大一段是 ${maxBytes} 字节（应当只有首帧）`)
+
+  maxBytes = 0
+  const verified = verifyAppliedPlan(plan, { decodeAll: counting })
+  assert.equal(verified.ok, true, verified.problems.join('; '))
+  assert.ok(maxBytes < 64 * 1024, `verify 阶段送进解码器的最大一段是 ${maxBytes} 字节（应当只有首帧）`)
+})
+
 test('端到端：plan → apply → verify → rollback 全链路', () => {
   const sb = makeSandbox('e2e')
   const srcA = join(sb.root, sb.sourceProjectDirName, 'session-a', 'session.v4.jsonl.zstd')

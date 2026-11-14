@@ -21,6 +21,7 @@ import {
   attachmentActionOf,
   attachmentBytes,
   buildBundle,
+  buildBundleAsync,
   entryBytes,
   planImport,
   readBundle,
@@ -155,6 +156,21 @@ test('导出/导入：字节往返，包里的载荷与磁盘上的日志逐字�
   assert.equal(parsed.sessions[0]!.id, 'session-a')
   assert.equal(parsed.sessions[0]!.cwd, FROM_CWD)
   assert.deepEqual(entryBytes(parsed, parsed.sessions[0]!.files[0]!), onDisk)
+})
+
+test('buildBundleAsync：与同步版本逐字节相同（异步不换格式）', async () => {
+  const root = makeRoot('bundle-async')
+  try {
+    const source = writeSession(root, { id: 'session-async', cwd: '/home/u/dev/async' })
+    const now = '2026-09-27T00:00:00.000Z'
+    assert.deepEqual(
+      await buildBundleAsync([source], { now }),
+      buildBundle([source], { now }),
+      'gzip 前后、读写异步与否都不改字节',
+    )
+  } finally {
+    rmSync(dirname(root), { recursive: true, force: true })
+  }
 })
 
 test('包校验：sha256、截断、magic、formatVersion 任何一项不对都拒绝', () => {
