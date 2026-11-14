@@ -15,7 +15,8 @@ import { applyArtifactMoves } from './artifacts.ts'
 import { createBackup } from './journal.ts'
 import { projectKey } from './project-key.ts'
 import { validateRegistry, writeRegistryAtomic } from './registry.ts'
-import { relocateHeaderCwd } from './session-log.ts'
+import { readLogHeader } from './discovery.ts'
+import { relocateHeaderCwdShallow } from './session-log.ts'
 import type { CompressFrame, DecodeAll, ProgressReporter, RelocationPlan } from './types.ts'
 import { encodeRawFrame } from './zstd-frame.ts'
 
@@ -92,21 +93,28 @@ export function applyPlan(plan: RelocationPlan, options: ApplyOptions): ApplyRes
     // 改写是"逐文件"的活：一条会话可能有几代日志，各是几 MB——分母用文件数，进度条才走得匀。
     onProgress?.({ phase: 'rewrite', total: rewrites.length, done: index, id: s.id, label: s.title ?? s.id })
     const buf = readFileSync(f.path)
-    const r = relocateHeaderCwd(buf, { from: s.from, to: s.to, decodeAll, compressFrame })
+    /*
+     * **只解首帧**（`relocateHeaderCwdShallow()`）：要改的只有 header 那一行，正文逐字节原样拼回。
+     *
+     * 原来走的是整份改写（`relocateHeaderCwd()`）：解整份日志、按行重排、再把结果整份解一遍自校验。
+     * 本机最大的一份压缩后 16.8 MB，一次要 7 秒——迁移十条这样的会话，宿主就僵住一分多钟，而这件
+     * 事只改一行。逐字节原样要求由"首帧之外不动"这个实现本身保证，落盘前的复验也只读 header。
+     */
+    const r = relocateHeaderCwdShallow(buf, { from: s.from, to: s.to, decodeAll, compressFrame })
     if (r.unchanged) {
       say(`unchanged ${f.name} (${s.id})`)
       continue
     }
     const tmp = `${f.path}.dsh-session-manager.tmp`
     writeFileSync(tmp, r.buffer)
-    // 落盘前复验：临时文件必须能解出期望文本
-    const expectedHeader = decodeAll(r.buffer).split('\n')[0]
-    if (decodeAll(readFileSync(tmp)).split('\n')[0] !== expectedHeader) {
+    // 落盘前复验：临时文件的 header 必须是目标 cwd、id 不变（只读首帧，不整份解压）。
+    const check = readLogHeader(tmp, decodeAll).header
+    if (check.cwd !== s.to || check.id !== s.id) {
       throw new Error(`temp verification failed for ${f.path}`)
     }
     renameSync(tmp, f.path)
     rewritten++
-    say(`rewrote ${basename(f.path)} (${s.id}) events=${r.events} firstFrame=${r.firstFrameBytes}B`)
+    say(`rewrote ${basename(f.path)} (${s.id}) firstFrame=${r.boundary}B`)
   }
 
   // 3) 移动会话目录
@@ -193,10 +201,8 @@ export function verifyAppliedPlan(
         problems.push(`session ${s.id}: log missing ${f.name}`)
         continue
       }
-      const header = JSON.parse(decodeAll(readFileSync(path)).split('\n')[0] ?? '{}') as {
-        id?: string
-        cwd?: string
-      }
+      // 复核只读 header（首帧），不整份解压：这一步以前对每个文件解一整份日志，是迁移收尾的大头。
+      const header = readLogHeader(path, decodeAll).header
       if (header.cwd !== s.to) problems.push(`session ${s.id}/${f.name}: header cwd ${header.cwd} != ${s.to}`)
       if (header.id !== s.id) problems.push(`session ${s.id}/${f.name}: header id ${header.id}`)
       // 宿主的 corrupt 判据：日志文件所在**项目目录**必须等于 projectKey(header.cwd)。

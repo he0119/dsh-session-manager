@@ -11,6 +11,8 @@
 // 与 webServer 服务解耦：本模块只要求一个 `{ register(route) }`，测试里用假 req/res 直接打
 // handler，不必起 HTTP 服务。路由路径固定在本插件命名空间下，`(kind, path)` 与别的插件不会撞。
 import { readFileSync, statSync } from 'node:fs'
+
+import { decodeLogTextChunked } from './log-decode.ts'
 import { basename, join } from 'node:path'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 
@@ -65,7 +67,7 @@ import { type EffectMode, type PickerKind, type RegistryOps, type ResolvedPaths,
 import { lastRunView, type SyncRunRecord } from './sync-state.ts'
 import {
   applyImport,
-  buildBundle,
+  buildBundleAsync,
   entryBytes,
   planImport,
   readBundle,
@@ -1034,7 +1036,7 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
      */
     const port = attachmentPort()
     let packed: { packed: number; bytes: number; missing: number } = { packed: 0, bytes: 0, missing: 0 }
-    const bundle = buildBundle(sources, {
+    const bundle = await buildBundleAsync(sources, {
       now: at.toISOString(),
       source,
       ...(port === undefined
@@ -1941,7 +1943,8 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
         return
       }
       const bytes = entryBytes(bundle, remoteFile)
-      remoteLines = decodeAll(bytes).split('\n')
+      // 分块解压、块间让出：这条会话可能几十 MB，整份解会把宿主按住一两秒（差异页是点一下就要等的地方）。
+      remoteLines = (await decodeLogTextChunked(bytes, remoteFile.compression)).split('\n')
       remoteLogBytes = bytes.byteLength
     } catch (error) {
       sendJson(res, 422, { error: `远端那份读不出来：${error instanceof Error ? error.message : String(error)}` })
@@ -1949,7 +1952,7 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
     }
     let localLines: string[]
     try {
-      localLines = decodeAll(readFileSync(file.path)).split('\n')
+      localLines = (await decodeLogTextChunked(readFileSync(file.path), file.compression)).split('\n')
     } catch (error) {
       sendJson(res, 422, { error: `本机那份读不出来：${error instanceof Error ? error.message : String(error)}` })
       return
