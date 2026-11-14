@@ -1350,11 +1350,11 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
         const body = (await readJson(req)) as { planId?: unknown; decisions?: unknown; tidy?: unknown } | null
         if (typeof body?.planId === 'string' && body.planId !== '') planId = body.planId
         if (body?.tidy === true) tidy = true
-        // 裁决表：只认两种值，别的键/值当没写——界面与工具都可能把旧数据递回来。
+        // 裁决表：只认这三种值，别的键/值当没写——界面与工具都可能把旧数据递回来。
         if (body?.decisions !== null && typeof body?.decisions === 'object' && !Array.isArray(body.decisions)) {
           const picked = new Map<string, SyncDecision>()
           for (const [id, value] of Object.entries(body.decisions)) {
-            if (value === 'keep-local' || value === 'keep-remote') picked.set(id, value)
+            if (value === 'keep-local' || value === 'keep-remote' || value === 'keep-both') picked.set(id, value)
           }
           if (picked.size > 0) decisions = picked
         }

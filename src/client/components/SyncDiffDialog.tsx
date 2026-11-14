@@ -25,7 +25,7 @@ import { Button, Modal, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
 
 import { Hint } from './Hint.tsx'
 
-import { fetchSyncDiff, type SyncDiffResponse } from '../api.ts'
+import { fetchSyncDiff, type SyncDecision, type SyncDiffResponse } from '../api.ts'
 import { KIND_KEY } from './TranscriptDialog.tsx'
 import { formatBytes, formatTime } from './sessionList.tsx'
 import { sideBlocks, STAT_KEY, statCells, tailEmptyKey } from '../logic/diffStats.ts'
@@ -119,10 +119,10 @@ export function SyncDiffDialog({
   t,
 }: {
   target: SyncDiffTarget
-  /** 这条会话已经选过的正本；再打开时让对应那枚按钮显出选中态。 */
-  decision?: 'keep-local' | 'keep-remote'
-  /** 只有真分叉才给：选一份当正本，另一份由落地那一步落成新会话。 */
-  onDecide?: (decision: 'keep-local' | 'keep-remote') => void
+  /** 这条会话已经选过的留法；再打开时让对应那枚按钮显出选中态。 */
+  decision?: SyncDecision
+  /** 只有真分叉才给：选留哪一份，落地那一步按它办。 */
+  onDecide?: (decision: SyncDecision) => void
   /** 宿主手里还有写句柄：不给选择，只说明原因（裁决会被落地那一步拦下）。 */
   live?: boolean
   onClose: () => void
@@ -157,11 +157,17 @@ export function SyncDiffDialog({
       className="dsm-dialog dsm-diffDialog"
       contentClassName="dsm-dialogContent dsm-diffContent"
       footer={
-        // 续写 / 一致这两类本来就不用选；只有真分叉才摆这两枚。都不预选：哪一份当正本由人定，
-        // 默认高亮一枚会替用户做半个决定。活会话不给按钮：宿主还会接着写，落地那一步必拦，
-        // 摆出来只会让人以为选了就能同步。原因在正文顶部那条 banner 里，底栏不再塞一段字。
+        // 续写 / 一致这两类本来就不用选；只有真分叉才摆这三枚。都不预选：留哪一份由人定，默认高亮一枚
+        // 会替用户做半个决定。活会话不给按钮：宿主还会接着写，落地那一步必拦，摆出来只会让人以为选了
+        // 就能同步。原因在正文顶部那条 banner 里，底栏不再塞一段字。
         diff?.relation === 'forked' && onDecide !== undefined && live !== true ? (
           <>
+            <Button
+              variant={decision === 'keep-local' ? 'primary' : 'outline'}
+              onClick={() => onDecide('keep-local')}
+            >
+              {t('sync.diff.keepLocal')}
+            </Button>
             <Button
               variant={decision === 'keep-remote' ? 'primary' : 'outline'}
               onClick={() => onDecide('keep-remote')}
@@ -169,10 +175,10 @@ export function SyncDiffDialog({
               {t('sync.diff.keepRemote')}
             </Button>
             <Button
-              variant={decision === 'keep-local' ? 'primary' : 'outline'}
-              onClick={() => onDecide('keep-local')}
+              variant={decision === 'keep-both' ? 'primary' : 'outline'}
+              onClick={() => onDecide('keep-both')}
             >
-              {t('sync.diff.keepLocal')}
+              {t('sync.diff.keepBoth')}
             </Button>
           </>
         ) : undefined

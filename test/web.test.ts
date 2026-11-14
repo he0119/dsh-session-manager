@@ -2188,7 +2188,7 @@ test('POST /sync?mode=apply：预演不落地，apply 走事件流拉取远端�
   }
 })
 
-test('POST /sync：裁决随预演与落地一起走，keep-remote 落选的那份落成新会话', async () => {
+test('POST /sync：裁决随预演与落地一起走，keep-remote 只留远端那份', async () => {
   const sandbox = makeSandbox('web-sync-decisions')
   writeSession(sandbox.sessionsRoot, 'session-split', CWD_A, 1000, {
     eventLines: ['{"type":"user/message","seq":1,"data":{"text":"A-tail"}}'],
@@ -2250,14 +2250,11 @@ test('POST /sync：裁决随预演与落地一起走，keep-remote 落选的那�
     assert.deepEqual(outcome['planSource'], { kind: 'reused' }, '同一组裁决能复用预演那份')
     assert.deepEqual(outcome['replaced'], ['session-split'])
     const pulled = outcome['pulled'] as string[]
-    assert.equal(pulled.length, 2, '落选的本机那份 + 拉回来的正本')
-    const branchId = pulled.find((id) => id !== 'session-split')
-    assert.ok(branchId !== undefined && branchId.startsWith('session-'))
+    assert.deepEqual(pulled, ['session-split'], '只留远端那份：本机这份不另存一条')
     const textOf = (id: string): string =>
       decodeAll(readFileSync(join(sessionDir(sandbox.sessionsRoot, CWD_A, id), 'session.v4.jsonl.zstd')))
     assert.match(textOf('session-split'), /B-tail/)
-    assert.match(textOf(branchId), /A-tail/, '本机那份没有丢')
-    assert.doesNotMatch(textOf(branchId), /B-tail/)
+    assert.doesNotMatch(textOf('session-split'), /A-tail/, '本机那份被顶掉了（备份里有）')
   } finally {
     await fixture.close()
     rmSync(sandbox.base, { recursive: true, force: true })

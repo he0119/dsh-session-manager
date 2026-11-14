@@ -511,12 +511,69 @@ test('sync：计划——裁决把真分叉改写成 keep-local / keep-remote，
   assert.equal(local.pushIds.length, 1)
   assert.equal(local.push[0]?.code, 'keep-local')
   assert.equal(local.push[0]?.action, 'update')
+  assert.equal(local.push[0]?.keepLoser, undefined, '选单边不留另一份')
+  assert.match(local.push[0]?.reason ?? '', /只保留本机这份/)
 
   const remote = planSync({ ...input, decisions: new Map([['fork', 'keep-remote']]) })
   assert.deepEqual(remote.pushIds, [])
   assert.deepEqual(remote.pullIds, ['fork'])
   assert.equal(remote.pull[0]?.code, 'keep-remote')
   assert.equal(remote.pull[0]?.action, 'replace')
+  assert.equal(remote.pull[0]?.keepLoser, undefined, '选单边不留另一份')
+  assert.match(remote.pull[0]?.reason ?? '', /只保留 robot-b 那份/)
+})
+
+test('sync：计划——keep-both 按最后活动时间定谁占原 id，判不出或远端落不了地时归本机', () => {
+  const fakeHash = (path: string, version: number): FileFingerprint => ({
+    version,
+    bytes: 1,
+    sha256: path.split('@')[0] ?? '',
+  })
+  const input = {
+    local: [fakeSession('fork', [['a', 0], ['mine', 1]])],
+    remote: remoteOf([
+      {
+        machine: 'robot-b',
+        id: 'fork',
+        cwd: '/home/b/proj',
+        lastActiveAt: 2000,
+        files: [fp(0, 'a'), fp(1, 'theirs')],
+      },
+    ]),
+    mapping: new Map<string, string>(),
+    hashFile: fakeHash,
+  }
+  const decided = (meta?: { lastPromptAt?: number }, live = false) =>
+    planSync({
+      ...input,
+      decisions: new Map([['fork', 'keep-both']]),
+      ...(meta === undefined ? {} : { sessionMeta: () => meta }),
+      ...(live ? { isLive: () => true } : {}),
+    })
+
+  // 本机更晚：本机占原 id，远端那份落成新会话。
+  const localNewer = decided({ lastPromptAt: 5000 })
+  assert.equal(localNewer.push[0]?.code, 'keep-local')
+  assert.equal(localNewer.push[0]?.keepLoser, true)
+  assert.match(localNewer.push[0]?.reason ?? '', /两份都保留：本机这份更晚/)
+
+  // 远端更晚、这次落得下来：远端占原 id，本机那份落成新会话。
+  const remoteNewer = decided({ lastPromptAt: 1000 })
+  assert.equal(remoteNewer.pull[0]?.code, 'keep-remote')
+  assert.equal(remoteNewer.pull[0]?.keepLoser, true)
+  assert.match(remoteNewer.pull[0]?.reason ?? '', /两份都保留：robot-b 那份更晚/)
+
+  // 判不出谁更晚（两边都没有那枚钟）：由本机占。
+  const unknown = decided()
+  assert.equal(unknown.push[0]?.code, 'keep-local')
+  assert.equal(unknown.push[0]?.keepLoser, true)
+  assert.match(unknown.push[0]?.reason ?? '', /比不出哪份更晚/)
+
+  // 远端更晚但它正开着（落不了地）：改由本机占，并说清为什么。
+  const blocked = decided({ lastPromptAt: 1000 }, true)
+  assert.equal(blocked.push[0]?.code, 'keep-local')
+  assert.equal(blocked.push[0]?.keepLoser, true)
+  assert.match(blocked.push[0]?.reason ?? '', /落不了地/)
 })
 
 test('sync：计划——两边各自写过时比最后活动时间；空白会话不上传', () => {
@@ -1774,7 +1831,7 @@ test('同步：从别的机器拉回来、续写一条再推上去，下一轮�
   }
 })
 
-test('sync：裁决 keep-remote——本机那份先落成新会话，原 id 由远端那份占住', async () => {
+test('sync：裁决 keep-remote——只留远端那份，本机这份先备份再被顶掉（不另存一条）', async () => {
   rmSync(SANDBOX, { recursive: true, force: true })
   mkdirSync(SANDBOX, { recursive: true })
   const fixture = await startDavFixture({ root: join(SANDBOX, 'dav') })
@@ -1816,23 +1873,19 @@ test('sync：裁决 keep-remote——本机那份先落成新会话，原 id 由
     )
     assert.deepEqual(outcome.problems, [])
     assert.deepEqual(outcome.replaced, ['s1'])
-    assert.equal(outcome.pulled.length, 2, '落选的本机那份 + 拉回来的正本')
-    assert.ok(outcome.pulled.includes('s1'))
+    assert.deepEqual(outcome.pulled, ['s1'], '只留远端那份：本机这份不另存一条')
     const sessions = scanAll(a.sessionsRoot, decodeAll)
-    assert.equal(sessions.length, 2)
-    const original = sessions.find((session) => session.id === 's1')
-    const branch = sessions.find((session) => session.id !== 's1')
-    assert.ok(original !== undefined && branch !== undefined)
-    assert.match(branch.id, /^session-/)
+    assert.equal(sessions.length, 1, '选单边就只留一份')
+    const original = sessions[0]
+    assert.ok(original !== undefined)
+    assert.equal(original.id, 's1', '原 id 由远端那份占住')
     const textOf = (session: DiscoveredSession): string =>
       [...session.files]
         .sort((left, right) => right.version - left.version)
         .map((file) => decodeAll(readFileSync(file.path)))
         .join('\n')
     assert.match(textOf(original), /B-tail/, '原 id 现在是远端那份')
-    assert.doesNotMatch(textOf(original), /A-tail/, '本机那份没有被拼进去')
-    assert.match(textOf(branch), /A-tail/, '本机那份落成了新会话')
-    assert.doesNotMatch(textOf(branch), /B-tail/)
+    assert.doesNotMatch(textOf(original), /A-tail/, '本机那份被顶掉了（不拼接）')
     assert.ok(readdirSync(join(a.base, 'backups')).length > 0, '覆盖前留了备份')
   } finally {
     await fixture.close()
@@ -1909,7 +1962,7 @@ test('sync：改一次裁决只重算计划那一层——不再读远端包，�
   }
 })
 
-test('sync：裁决 keep-local——本机正本留下，远端那份落成新会话并重推原 id', async () => {
+test('sync：裁决 keep-local——只留本机这份，远端那份不落到本机，原 id 仍推上去', async () => {
   rmSync(SANDBOX, { recursive: true, force: true })
   mkdirSync(SANDBOX, { recursive: true })
   const fixture = await startDavFixture({ root: join(SANDBOX, 'dav') })
@@ -1946,10 +1999,68 @@ test('sync：裁决 keep-local——本机正本留下，远端那份落成新�
     })
     assert.deepEqual(outcome.problems, [])
     assert.deepEqual(outcome.pushed, [{ id: 's1', action: 'update' }])
-    assert.equal(outcome.pulled.length, 1, '落选的远端那份落成了一条新会话')
-    assert.ok(!outcome.pulled.includes('s1'), '正本仍占原 id，不是从远端拉回来')
+    assert.deepEqual(outcome.pulled, [], '只留本机这份：远端那份不落到本机')
     const sessions = scanAll(a.sessionsRoot, decodeAll)
-    assert.equal(sessions.length, 2)
+    assert.equal(sessions.length, 1, '选单边就只留一份')
+    const original = sessions[0]
+    assert.ok(original !== undefined)
+    assert.equal(original.id, 's1', '本机这份占住原 id')
+    const textOf = (session: DiscoveredSession): string =>
+      [...session.files]
+        .sort((left, right) => right.version - left.version)
+        .map((file) => decodeAll(readFileSync(file.path)))
+        .join('\n')
+    assert.match(textOf(original), /A-tail/)
+    assert.doesNotMatch(textOf(original), /B-tail/)
+    const remote = await readRemoteLibrary(dav, settings(a, { machineId: 'robot-a' }))
+    assert.equal(remote.entries.get('s1')?.machine, 'robot-a', '原 id 在远端被本机这份刷新')
+  } finally {
+    await fixture.close()
+    rmSync(SANDBOX, { recursive: true, force: true })
+  }
+})
+
+test('sync：裁决 keep-both——两份都留，更晚的本机这份占原 id，远端那份落成新会话', async () => {
+  rmSync(SANDBOX, { recursive: true, force: true })
+  mkdirSync(SANDBOX, { recursive: true })
+  const fixture = await startDavFixture({ root: join(SANDBOX, 'dav') })
+  const dav = createDavClient({ baseUrl: fixture.url })
+  const a = makeMachine('robot-a')
+  const b = makeMachine('robot-b')
+  const gitNone: GitRunner = async () => {
+    throw new Error('没有身份可用')
+  }
+  try {
+    writeSession(a, 's1', 1000)
+    await syncMachine(a, dav, settings(a, { machineId: 'robot-a' }), {
+      apply: true,
+      git: gitNone,
+      sessionMeta: () => ({ lastPromptAt: 1000 }),
+    })
+    await syncMachine(b, dav, settings(b, { machineId: 'robot-b', mapping: { [a.cwd]: b.cwd } }), {
+      apply: true,
+      git: gitNone,
+    })
+    appendToLatest(a, 's1', '{"type":"user/message","seq":1,"data":{"text":"A-tail"}}')
+    appendToLatest(b, 's1', '{"type":"user/message","seq":1,"data":{"text":"B-tail"}}')
+    await syncMachine(b, dav, settings(b, { machineId: 'robot-b' }), {
+      apply: true,
+      git: gitNone,
+      sessionMeta: () => ({ lastPromptAt: 2000 }),
+    })
+
+    const outcome = await syncMachine(a, dav, settings(a, { machineId: 'robot-a' }), {
+      apply: true,
+      git: gitNone,
+      sessionMeta: () => ({ lastPromptAt: 3000 }),
+      decisions: new Map([['s1', 'keep-both']]),
+    })
+    assert.deepEqual(outcome.problems, [])
+    assert.deepEqual(outcome.pushed, [{ id: 's1', action: 'update' }], '更晚的本机这份占原 id')
+    assert.equal(outcome.pulled.length, 1, '远端那份落成了一条新会话')
+    assert.ok(!outcome.pulled.includes('s1'), '原 id 仍是本机这份，不是从远端拉回来')
+    const sessions = scanAll(a.sessionsRoot, decodeAll)
+    assert.equal(sessions.length, 2, '两份都在')
     const original = sessions.find((session) => session.id === 's1')
     const branch = sessions.find((session) => session.id !== 's1')
     assert.ok(original !== undefined && branch !== undefined)
@@ -1965,6 +2076,139 @@ test('sync：裁决 keep-local——本机正本留下，远端那份落成新�
     assert.doesNotMatch(textOf(branch), /A-tail/)
     const remote = await readRemoteLibrary(dav, settings(a, { machineId: 'robot-a' }))
     assert.equal(remote.entries.get('s1')?.machine, 'robot-a', '原 id 在远端被本机这份刷新')
+  } finally {
+    await fixture.close()
+    rmSync(SANDBOX, { recursive: true, force: true })
+  }
+})
+
+test('sync：裁决 keep-both 而远端更晚——远端那份占原 id，本机这份落成新会话', async () => {
+  rmSync(SANDBOX, { recursive: true, force: true })
+  mkdirSync(SANDBOX, { recursive: true })
+  const fixture = await startDavFixture({ root: join(SANDBOX, 'dav') })
+  const dav = createDavClient({ baseUrl: fixture.url })
+  const a = makeMachine('robot-a')
+  const b = makeMachine('robot-b')
+  const gitNone: GitRunner = async () => {
+    throw new Error('没有身份可用')
+  }
+  try {
+    writeSession(a, 's1', 1000)
+    await syncMachine(a, dav, settings(a, { machineId: 'robot-a' }), {
+      apply: true,
+      git: gitNone,
+      sessionMeta: () => ({ lastPromptAt: 1000 }),
+    })
+    await syncMachine(b, dav, settings(b, { machineId: 'robot-b', mapping: { [a.cwd]: b.cwd } }), {
+      apply: true,
+      git: gitNone,
+    })
+    appendToLatest(a, 's1', '{"type":"user/message","seq":1,"data":{"text":"A-tail"}}')
+    appendToLatest(b, 's1', '{"type":"user/message","seq":1,"data":{"text":"B-tail"}}')
+    await syncMachine(b, dav, settings(b, { machineId: 'robot-b' }), {
+      apply: true,
+      git: gitNone,
+      sessionMeta: () => ({ lastPromptAt: 4000 }),
+    })
+
+    const outcome = await syncMachine(
+      a,
+      dav,
+      settings(a, { machineId: 'robot-a', mapping: { [b.cwd]: a.cwd } }),
+      {
+        apply: true,
+        git: gitNone,
+        // 本机这份停在 3000，远端那格记的是 4000：更晚的是远端那份。
+        sessionMeta: () => ({ lastPromptAt: 3000 }),
+        decisions: new Map([['s1', 'keep-both']]),
+      },
+    )
+    assert.deepEqual(outcome.problems, [])
+    assert.deepEqual(outcome.replaced, ['s1'], '原 id 由远端那份占住')
+    assert.equal(outcome.pulled.length, 2, '落选的本机那份 + 拉回来的正本')
+    const sessions = scanAll(a.sessionsRoot, decodeAll)
+    assert.equal(sessions.length, 2, '两份都在')
+    const original = sessions.find((session) => session.id === 's1')
+    const branch = sessions.find((session) => session.id !== 's1')
+    assert.ok(original !== undefined && branch !== undefined)
+    assert.match(branch.id, /^session-/)
+    const textOf = (session: DiscoveredSession): string =>
+      [...session.files]
+        .sort((left, right) => right.version - left.version)
+        .map((file) => decodeAll(readFileSync(file.path)))
+        .join('\n')
+    assert.match(textOf(original), /B-tail/)
+    assert.doesNotMatch(textOf(original), /A-tail/)
+    assert.match(textOf(branch), /A-tail/, '本机那份落成了新会话')
+    assert.doesNotMatch(textOf(branch), /B-tail/)
+  } finally {
+    await fixture.close()
+    rmSync(SANDBOX, { recursive: true, force: true })
+  }
+})
+
+test('sync：裁决 keep-both 时落选那份没能落成新会话，这一条就一条都不推', async () => {
+  rmSync(SANDBOX, { recursive: true, force: true })
+  mkdirSync(SANDBOX, { recursive: true })
+  const fixture = await startDavFixture({ root: join(SANDBOX, 'dav') })
+  const dav = createDavClient({ baseUrl: fixture.url })
+  const a = makeMachine('robot-a')
+  const b = makeMachine('robot-b')
+  const gitNone: GitRunner = async () => {
+    throw new Error('没有身份可用')
+  }
+  try {
+    writeSession(a, 's1', 1000)
+    await syncMachine(a, dav, settings(a, { machineId: 'robot-a' }), {
+      apply: true,
+      git: gitNone,
+      sessionMeta: () => ({ lastPromptAt: 1000 }),
+    })
+    await syncMachine(b, dav, settings(b, { machineId: 'robot-b', mapping: { [a.cwd]: b.cwd } }), {
+      apply: true,
+      git: gitNone,
+    })
+    appendToLatest(a, 's1', '{"type":"user/message","seq":1,"data":{"text":"A-tail"}}')
+    appendToLatest(b, 's1', '{"type":"user/message","seq":1,"data":{"text":"B-tail"}}')
+    await syncMachine(b, dav, settings(b, { machineId: 'robot-b' }), {
+      apply: true,
+      git: gitNone,
+      sessionMeta: () => ({ lastPromptAt: 2000 }),
+    })
+
+    // 远端那一包读不出来：落选那份落不成新会话，这一条就不该推（推了会把远端那份盖掉）。
+    const flaky: DavPort = {
+      baseUrl: dav.baseUrl,
+      list: (collection) => dav.list(collection),
+      get: async (path) => {
+        if (path.endsWith('s1.dshsess')) throw new Error('远端那一包取不到')
+        return dav.get(path)
+      },
+      put: (path, bytes) => dav.put(path, bytes),
+      delete: (path) => dav.delete(path),
+      ensure: (collection) => dav.ensure(collection),
+      probe: (collection) => dav.probe(collection),
+    }
+    const outcome = await syncMachine(a, flaky, settings(a, { machineId: 'robot-a' }), {
+      apply: true,
+      git: gitNone,
+      sessionMeta: () => ({ lastPromptAt: 3000 }),
+      decisions: new Map([['s1', 'keep-both']]),
+    })
+    assert.deepEqual(outcome.pushed, [], '另一份还没落到本机，这一条不推')
+    assert.ok(
+      outcome.problems.some((problem) => problem.includes('落成新会话失败')),
+      `失败要说出来（实际 ${JSON.stringify(outcome.problems)}）`,
+    )
+    assert.equal(scanAll(a.sessionsRoot, decodeAll).length, 1, '没多出一条只落地一半的副本')
+    const textOf = (session: DiscoveredSession): string =>
+      [...session.files]
+        .sort((left, right) => right.version - left.version)
+        .map((file) => decodeAll(readFileSync(file.path)))
+        .join('\n')
+    const only = scanAll(a.sessionsRoot, decodeAll)[0]
+    assert.ok(only !== undefined)
+    assert.match(textOf(only), /A-tail/, '本机这份原样没动')
   } finally {
     await fixture.close()
     rmSync(SANDBOX, { recursive: true, force: true })
