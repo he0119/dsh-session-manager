@@ -14,6 +14,8 @@ Status: implemented
   官方 `Checkbox`「我明白」；没勾上之前主按钮按不动（`disabled` 多一项 `!acknowledged`）。
 - 忙碌起来（正在做）就把警告与勾选撤掉：那一步已经没有可确认的东西。
 - 每个动作一句自己的警告话（删除 / 迁移 / 回滚 / 恢复 / 整理远端各一条），勾选框那句共用「我明白」。
+- 底栏两枚按钮的最小宽度照官方 `RiskConfirmation`（取消 72px、确认 136px）：五个动作的按钮文案长短
+  不一，不钉住的话底栏宽度跟着字跳。
 
 **为什么不直接用官方那枚原语**：`RiskConfirmation` 的正文只有 `description`（字符串）与勾选框，没有
 放任意内容的槽；而这五个动作的正文正是"将要发生什么"的清单（哪几条会话、哪些动作、备份落在哪）。
@@ -40,4 +42,5 @@ Status: implemented
 - 由 `test/client.test.mjs`（删除弹窗里没勾之前主按钮禁用、"我明白"那枚默认没勾、勾上写回的受控值
   是 `true`、警告句在正文里）钉住；文案键 `dialog.acknowledge` 与五个动作各自的 `*.acknowledge`。
 - 真实 dev GUI 里量到的（删除那条，计划 ok 时）：勾选前 `确认删除` 的 `disabled` 是 `true`，勾上之后
-  变 `false`；警告行带 `.dsm-riskIcon`（图标 18px），勾选框是官方 `Checkbox`（label 即「我明白」）。
+  变 `false`；警告行带 `.dsm-riskIcon`（图标 18px），勾选框是官方 `Checkbox`（label 即「我明白」）；
+  底栏两枚实宽 72px 与 136px（与官方那两枚的最小宽度一致）。

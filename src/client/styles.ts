@@ -1233,6 +1233,13 @@ export const CSS = `
 }
 .dsm-acknowledge { margin-top: 12px; }
 /*
+ * 底栏那两枚的最小宽度照官方 RiskConfirmation（.modalAction 72px / .confirmAction 136px）：
+ * 五个危险动作的按钮文案长短不一（「取消」/「转到后台」、「确认删除」/「开始整理」），不钉住的话
+ * 底栏宽度会跟着字跳，两枚按钮的主次也跟着晃。
+ */
+.dsm-dialogAction { min-width: 72px; }
+.dsm-dialogConfirm { min-width: 136px; }
+/*
  * 底部那对按钮不再需要本页写字号：它们是官方 Button 的缺省尺寸（36px / 14px），而官方按钮在
  * Button.module.css 里把 font-size 写在 md 那一档上，不靠继承——原先那条
  * .dsm-dialog .dsm-button { font-size: 14px } 是给手写按钮补继承的（footer 在我们那层 body 之外，

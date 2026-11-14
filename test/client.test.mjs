@@ -4110,6 +4110,15 @@ test('客户端产物：删除弹窗摆出清单与备份位置，计划不 ok �
   ack.props.onChange()
   assert.equal(good.sets.at(-1)?.value, true, '勾上之后写的是"我明白"（受控状态就这么交出去）')
   assert.ok(strings(cancelOf(good.recorded)).includes('cancel'), '旁边是「取消」')
+  // 最小宽度照官方 RiskConfirmation：底栏两枚各挂一个类，尺寸由 styles.ts 钉
+  assert.ok(
+    String(cancelOf(good.recorded).props.className).includes('dsm-dialogAction'),
+    '「取消」挂 .dsm-dialogAction（72px）',
+  )
+  assert.ok(
+    String(primaryOf(good.recorded).props.className).includes('dsm-dialogConfirm'),
+    '确认那一枚挂 .dsm-dialogConfirm（136px）',
+  )
   assert.ok(
     good.text.some((item) => String(item).startsWith('manage.delete.backupTo') && String(item).includes('dsh-session-manager/backups')),
     '备份落在哪要写在弹窗里（要恢复时知道去哪找）',

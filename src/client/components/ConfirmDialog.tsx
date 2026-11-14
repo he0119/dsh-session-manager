@@ -117,6 +117,8 @@ export function ConfirmDialog({
             与 `--dsw-alias-label-primary-foreground`，本页原先手写填充按钮拼的那条回落链不再需要；
             缺省尺寸是 36px / 14px，也不再用 `size="sm"`（28px / 12px 在弹窗里比官方那对轻一档）。
             `data-modal-autofocus` 是官方 `Modal` 认的初始焦点标记，留在「取消」这一枚上。
+            两枚的最小宽度（72 / 136）也照官方 `RiskConfirmation` 给：五个动作的文案长短不一，
+            不给的话底栏宽度跟着字跳。
           */}
           {/*
             忙碌时有两种口径：给了 `backgroundLabel` 的（同步）把这一枚变成「转到后台」——窗口关掉、
@@ -124,6 +126,7 @@ export function ConfirmDialog({
           */}
           <Button
             variant="outline"
+            className="dsm-dialogAction"
             data-modal-autofocus=""
             onClick={onCancel}
             disabled={busy && backgroundLabel === undefined}
@@ -132,6 +135,7 @@ export function ConfirmDialog({
           </Button>
           <Button
             variant="primary"
+            className="dsm-dialogConfirm"
             onClick={onConfirm}
             disabled={busy || planning || error !== null || disabled || !acknowledged}
           >
