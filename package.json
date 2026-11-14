@@ -1,6 +1,6 @@
 {
   "name": "@he0119/dsh-session-manager",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "DSH 的会话管理插件：在侧栏的「会话管理」页里把会话迁到新目录、导出/导入 .dshsess 包、归档与删除，并用 WebDAV 在多台机器之间同步。",
   "type": "module",
   "packageManager": "pnpm@11.7.0",
