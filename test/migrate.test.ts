@@ -253,7 +253,7 @@ test('覆盖前那份备份：目录像删除那样搬回，注册表像迁移�
   const sb = makeSandbox('migrate-replace')
   const dir = sessionDir(sb.deps.sessionsRoot, FROM, sb.sessionId)
   const session = scanAll(sb.deps.sessionsRoot, decodeAll).find((item) => item.id === sb.sessionId)!
-  const backup = createBackup({
+  const backup = await createBackup({
     backupRoot: sb.deps.backupRoot,
     registryPath: sb.deps.registryPath,
     kind: 'replace',

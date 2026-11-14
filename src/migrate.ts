@@ -337,7 +337,7 @@ export async function runMigration(
     }
   }
 
-  const result = applyPlan(plan, {
+  const result = await applyPlan(plan, {
     registryPath: deps.registryPath,
     decodeAll: deps.decodeAll,
     backupRoot: deps.backupRoot,
@@ -444,7 +444,7 @@ export async function rollbackMigration(
   request: { backupDir: string; dryRun?: boolean; onProgress?: ProgressReporter },
 ): Promise<RollbackOutcome> {
   const { dir, manifest } = readBackup(deps, request.backupDir)
-  const result = rollback(manifest, {
+  const result = await rollback(manifest, {
     backupDir: dir,
     dryRun: request.dryRun === true,
     ...(request.onProgress === undefined ? {} : { onProgress: request.onProgress }),

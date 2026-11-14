@@ -54,7 +54,7 @@ export interface ApplyResult {
  * 执行计划。
  * @throws 计划的 `ok` 不为 true，或中途校验失败时抛错（不产出半成品状态）。
  */
-export function applyPlan(plan: RelocationPlan, options: ApplyOptions): ApplyResult {
+export async function applyPlan(plan: RelocationPlan, options: ApplyOptions): Promise<ApplyResult> {
   const { registryPath, decodeAll, backupRoot, compressFrame = encodeRawFrame, now = new Date(), onProgress } = options
   if (!plan.ok) throw new Error(`refusing to apply a plan with problems: ${plan.problems.join('; ')}`)
   if (!plan.nextRegistry) throw new Error('plan has no computed registry change')
@@ -73,7 +73,7 @@ export function applyPlan(plan: RelocationPlan, options: ApplyOptions): ApplyRes
    * `sourceDir`（会话日志那一层）。
    */
   const sourceDirs = new Set(plan.sessions.map((session) => session.from))
-  const backup = createBackup({
+  const backup = await createBackup({
     backupRoot,
     registryPath,
     sessions: plan.sessions,

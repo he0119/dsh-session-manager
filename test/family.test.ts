@@ -294,12 +294,12 @@ test('迁移：点名一条未分组的会话照旧能迁，它顺手被目标�
   assert.deepEqual(stray.registryChange?.removedSources, [])
 })
 
-test('迁移：整族搬过去（各自改写 cwd、清掉两个空项目目录），回滚把整族按清单搬回来', () => {
+test('迁移：整族搬过去（各自改写 cwd、清掉两个空项目目录），回滚把整族按清单搬回来', async () => {
   const sb = makeSandbox('family-migrate-apply')
   const plan = buildRelocationPlan(opts(sb))
   assert.equal(plan.ok, true, plan.problems.join('; '))
 
-  const result = applyPlan(plan, { registryPath: sb.registryPath, decodeAll, backupRoot: sb.backupRoot })
+  const result = await applyPlan(plan, { registryPath: sb.registryPath, decodeAll, backupRoot: sb.backupRoot })
   assert.equal(result.rewritten, 4)
   assert.equal(result.moved, 4)
   const verified = verifyAppliedPlan(plan, { decodeAll })
@@ -344,7 +344,7 @@ test('迁移：整族搬过去（各自改写 cwd、清掉两个空项目目录�
   assert.equal(registry.tables.workspaces['ws-a'], undefined, '摘空之后源工作区记录不再存在')
 
   // 回滚：整族按清单回到各自的源项目目录，字节一模一样
-  const rolled = rollback(manifest, { backupDir: result.backupDir })
+  const rolled = await rollback(manifest, { backupDir: result.backupDir })
   assert.equal(rolled.restoredFiles, 4)
   for (const id of ['session-parent', 'session-child', 'session-grand', 'session-far']) {
     const dir = sb.dirOf(id)
@@ -356,7 +356,7 @@ test('迁移：整族搬过去（各自改写 cwd、清掉两个空项目目录�
   assert.deepEqual(after.tables.workspaces['ws-a']?.sessionIds, ['session-parent'])
 })
 
-test('迁移：后代本来就住在目标目录里（cwd == 目标）：不搬目录、不改写，回滚也不去搬它', () => {
+test('迁移：后代本来就住在目标目录里（cwd == 目标）：不搬目录、不改写，回滚也不去搬它', async () => {
   const sb = makeSandbox('family-migrate-at-target', { atTargetChild: true })
   const plan = buildRelocationPlan(opts(sb))
   assert.equal(plan.ok, true, plan.problems.join('; '))
@@ -369,7 +369,7 @@ test('迁移：后代本来就住在目标目录里（cwd == 目标）：不搬�
   assert.equal(home.sourceDir, home.targetDir, '目标就是它现在的位置')
   assert.equal(home.registered, false, '子智能体本来就不在册')
 
-  const result = applyPlan(plan, { registryPath: sb.registryPath, decodeAll, backupRoot: sb.backupRoot })
+  const result = await applyPlan(plan, { registryPath: sb.registryPath, decodeAll, backupRoot: sb.backupRoot })
   // 整族 5 条：只有真的换了项目目录的那 4 条搬了、也改了首帧；住在目标里的那条一个字节都没动。
   assert.equal(result.moved, 4)
   assert.equal(result.rewritten, 4)
@@ -379,10 +379,10 @@ test('迁移：后代本来就住在目标目录里（cwd == 目标）：不搬�
 
   // 回滚：那条必须一条动作都没有——"先删掉自己、再把自己改名到自己"丢的是唯一一份会话目录。
   const { manifest } = readManifest(result.backupDir)
-  const dry = rollback(manifest, { backupDir: result.backupDir, dryRun: true })
+  const dry = await rollback(manifest, { backupDir: result.backupDir, dryRun: true })
   const moves = dry.actions.filter((action) => action.startsWith('move back:') && action.includes('session-home'))
   assert.deepEqual(moves, [], '它不在任何搬回动作里（同目录那一步会被跳过）')
-  const rolled = rollback(manifest, { backupDir: result.backupDir })
+  const rolled = await rollback(manifest, { backupDir: result.backupDir })
   assert.equal(rolled.restoredFiles, 5)
   assert.deepEqual(readFileSync(join(homeDir, 'session.v4.jsonl.zstd')), sb.logs['session-home']!)
   assert.equal(existsSync(homeDir), true, '唯一一份会话目录必须还在')

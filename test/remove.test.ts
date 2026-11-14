@@ -110,11 +110,11 @@ function deps(sandbox: Sandbox, extra: Partial<RemoveDeps> = {}): RemoveDeps {
   }
 }
 
-test('预演：列清会删什么，一个字节都不写', () => {
+test('预演：列清会删什么，一个字节都不写', async () => {
   const sandbox = makeSandbox('remove-plan')
   const dir = writeSession(sandbox, 'session-doomed', 1000, { title: '不要了的会话' })
 
-  const run = runRemoval(deps(sandbox), { sessionIds: ['session-doomed'] }, { apply: false })
+  const run = await runRemoval(deps(sandbox), { sessionIds: ['session-doomed'] }, { apply: false })
   assert.equal(run.applied, false)
   assert.equal(run.plan.ok, true, run.plan.problems.join('; '))
   assert.deepEqual(run.plan.entries.map((e) => e.id), ['session-doomed'])
@@ -124,12 +124,12 @@ test('预演：列清会删什么，一个字节都不写', () => {
   assert.equal(existsSync(sandbox.backupRoot), false, '预演不许建备份目录')
 })
 
-test('执行：先备份（整份会话目录）再删，复核通过；空掉的项目目录顺手清掉', () => {
+test('执行：先备份（整份会话目录）再删，复核通过；空掉的项目目录顺手清掉', async () => {
   const sandbox = makeSandbox('remove-apply')
   const dir = writeSession(sandbox, 'session-doomed', 1000)
   const before = readFileSync(join(dir, 'session.v4.jsonl.zstd'))
 
-  const run = runRemoval(deps(sandbox), { sessionIds: ['session-doomed'] }, { apply: true })
+  const run = await runRemoval(deps(sandbox), { sessionIds: ['session-doomed'] }, { apply: true })
   assert.equal(run.applied, true)
   assert.equal(run.verified, true, run.problems.join('; '))
   assert.equal(existsSync(dir), false, '会话目录该没了')
@@ -152,7 +152,7 @@ test('恢复：从备份把整个会话目录搬回原位（含 session.lock）�
   const before = readFileSync(join(dir, 'session.v4.jsonl.zstd'))
   const registryBefore = readFileSync(sandbox.registryPath, 'utf8')
 
-  const run = runRemoval(deps(sandbox), { sessionIds: ['session-doomed'] }, { apply: true })
+  const run = await runRemoval(deps(sandbox), { sessionIds: ['session-doomed'] }, { apply: true })
   assert.equal(run.verified, true, run.problems.join('; '))
   // 删完顺手把注册表改坏一点，用来证明"恢复不还原注册表"（删除本来就没碰过它）
   const registry = readRegistry(sandbox.registryPath)
@@ -195,7 +195,7 @@ test('预演：标题优先取扫描那一趟读到的投影记录，一条会�
   assert.deepEqual(reads, ['session-doomed'], '一条会话只问一次记录')
 })
 
-test('宿主内存里活着的会话拒删：进 problems，不进待删条目（预演与执行都拦住）', () => {
+test('宿主内存里活着的会话拒删：进 problems，不进待删条目（预演与执行都拦住）', async () => {
   const sandbox = makeSandbox('remove-live')
   writeSession(sandbox, 'session-doomed', 1000)
   const withLive = deps(sandbox, { liveSessionIds: () => new Set(['session-doomed']) })
@@ -206,34 +206,34 @@ test('宿主内存里活着的会话拒删：进 problems，不进待删条目�
   assert.match(plan.problems.join('\n'), /还在宿主内存里活着/)
   // 拒绝的那句话必须给出出路：Web 端没有单条关闭的动作，"先关掉它"是做不到的。
   assert.match(plan.problems.join('\n'), /重启 DSH 让宿主放手，之后别先点开它再删/)
-  const run = runRemoval(withLive, { sessionIds: ['session-doomed'] }, { apply: true })
+  const run = await runRemoval(withLive, { sessionIds: ['session-doomed'] }, { apply: true })
   assert.equal(run.applied, false)
   assert.equal(existsSync(sessionDir(sandbox.sessionsRoot, sandbox.cwdA, 'session-doomed')), true)
 })
 
-test('不在库里的 id 与空选择各自给出可读的拒绝，别的会话不受影响', () => {
+test('不在库里的 id 与空选择各自给出可读的拒绝，别的会话不受影响', async () => {
   const sandbox = makeSandbox('remove-unknown')
   writeSession(sandbox, 'session-doomed', 1000)
 
-  const empty = runRemoval(deps(sandbox), { sessionIds: [] }, { apply: true })
+  const empty = await runRemoval(deps(sandbox), { sessionIds: [] }, { apply: true })
   assert.equal(empty.applied, false)
   assert.deepEqual(empty.plan.problems, ['缺少要删除的会话（sessionIds）'])
 
-  const unknown = runRemoval(deps(sandbox), { sessionIds: ['session-doomed', 'session-ghost'] }, { apply: false })
+  const unknown = await runRemoval(deps(sandbox), { sessionIds: ['session-doomed', 'session-ghost'] }, { apply: false })
   assert.equal(unknown.plan.ok, false)
   assert.deepEqual(unknown.plan.problems, ['session session-ghost 不在库里（可能已经被删掉了）'])
   // 计划不 ok 时执行阶段整体拒绝，连那条存在的也不删
-  const apply = runRemoval(deps(sandbox), { sessionIds: ['session-doomed', 'session-ghost'] }, { apply: true })
+  const apply = await runRemoval(deps(sandbox), { sessionIds: ['session-doomed', 'session-ghost'] }, { apply: true })
   assert.equal(apply.applied, false)
   assert.equal(existsSync(sessionDir(sandbox.sessionsRoot, sandbox.cwdA, 'session-doomed')), true)
 })
 
-test('删两条同目录的会话：项目目录要等两条都删完才空，随后被清掉', () => {
+test('删两条同目录的会话：项目目录要等两条都删完才空，随后被清掉', async () => {
   const sandbox = makeSandbox('remove-two')
   const first = writeSession(sandbox, 'session-one', 1000)
   const second = writeSession(sandbox, 'session-two', 2000)
 
-  const run = runRemoval(deps(sandbox), { sessionIds: ['session-one', 'session-two'] }, { apply: true })
+  const run = await runRemoval(deps(sandbox), { sessionIds: ['session-one', 'session-two'] }, { apply: true })
   assert.equal(run.verified, true, run.problems.join('; '))
   assert.equal(run.dirsRemoved, 2)
   assert.equal(existsSync(first), false)
@@ -249,7 +249,7 @@ test('删两条同目录的会话：项目目录要等两条都删完才空，�
 // 子会话在外壳侧边栏里只挂在父会话的 `subagentCatalog` 下（父日志里的 catalog 事件），父日志一没，
 // 它就再没有别的入口。所以"删父"必须把整族带走，否则盘上会留下"本插件看得见、侧边栏看不见"的残留。
 
-test('级联：点名父会话 → 全部后代一起进计划（多级、跨项目目录），并标出是谁把它带进来的', () => {
+test('级联：点名父会话 → 全部后代一起进计划（多级、跨项目目录），并标出是谁把它带进来的', async () => {
   const sandbox = makeSandbox('remove-family')
   const otherCwd = join(sandbox.base, 'dir-b')
   writeSession(sandbox, 'session-parent', 1000, { title: '父会话' })
@@ -277,18 +277,18 @@ test('级联：点名父会话 → 全部后代一起进计划（多级、跨项
     assert.equal(entry.origin, 'subagent')
   }
   // 预演摘要要把多出来的条数说出来，否则用户只会看到"我只勾了一条、它要删四条"
-  const run = runRemoval(deps(sandbox), { sessionIds: ['session-parent'] }, { apply: false })
+  const run = await runRemoval(deps(sandbox), { sessionIds: ['session-parent'] }, { apply: false })
   assert.match(run.summary, /将删除 4 个会话/)
   assert.match(run.summary, /其中 3 条是子智能体会话/)
 })
 
-test('级联：多级同族一起删时，执行把整族装进同一份备份、目录一并清掉', () => {
+test('级联：多级同族一起删时，执行把整族装进同一份备份、目录一并清掉', async () => {
   const sandbox = makeSandbox('remove-family-apply')
   const parentDir = writeSession(sandbox, 'session-parent', 1000)
   const childDir = writeSubagent(sandbox, 'session-child', 'session-parent', 2000)
   const grandDir = writeSubagent(sandbox, 'session-grand', 'session-child', 3000)
 
-  const run = runRemoval(deps(sandbox), { sessionIds: ['session-parent'] }, { apply: true })
+  const run = await runRemoval(deps(sandbox), { sessionIds: ['session-parent'] }, { apply: true })
   assert.equal(run.applied, true)
   assert.equal(run.verified, true, run.problems.join('; '))
   assert.equal(run.dirsRemoved, 3)
@@ -361,7 +361,7 @@ test('坏数据里的环（A 的父是 B、B 的父是 A）不会让展开转不
   assert.equal(plan.cascaded, 1)
 })
 
-test('活着的后代挡住整族：计划不 ok、执行一条都不删，问题里说明它是跟着谁来的', () => {
+test('活着的后代挡住整族：计划不 ok、执行一条都不删，问题里说明它是跟着谁来的', async () => {
   const sandbox = makeSandbox('remove-family-live')
   const parentDir = writeSession(sandbox, 'session-parent', 1000, { title: '父会话' })
   const childDir = writeSubagent(sandbox, 'session-child', 'session-parent', 2000)
@@ -374,7 +374,7 @@ test('活着的后代挡住整族：计划不 ok、执行一条都不删，问�
   assert.match(plan.problems.join('\n'), /session session-child 还在宿主内存里活着/)
   assert.match(plan.problems.join('\n'), /子智能体，跟着 父会话 一起删/)
 
-  const run = runRemoval(withLive, { sessionIds: ['session-parent'] }, { apply: true })
+  const run = await runRemoval(withLive, { sessionIds: ['session-parent'] }, { apply: true })
   assert.equal(run.applied, false)
   assert.equal(existsSync(parentDir), true)
   assert.equal(existsSync(childDir), true)

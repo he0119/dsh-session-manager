@@ -1699,8 +1699,8 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
     const apply = fields['mode'] === 'apply'
     // 删除落地要**先按字节备份整份会话目录**再删，整库删除同样是几十秒的活（与迁移同量级），
     // 所以它也走事件流：`scan`（重算计划）、`backup`、`remove`、`verify`。
-    await streamResult(res, (report) => {
-      const run: RemovalRun = runRemoval(
+    await streamResult(res, async (report) => {
+      const run: RemovalRun = await runRemoval(
         removeDeps,
         { sessionIds: ids.map((id) => String(id)) },
         { apply, onProgress: report },

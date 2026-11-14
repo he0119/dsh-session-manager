@@ -17,7 +17,8 @@
 // 因为子会话在外壳侧边栏里只挂在父会话的 `subagentCatalog` 下——父的日志一没了，子会话就再没有别的
 // 入口，留在盘上只会变成"本插件看得见、侧边栏看不见"的隐形残留。反向（只删子、留着父）不拦，只在
 // 预演里点明父会话下面会留一个点不开的条目：孤儿要收拾，而"这条子智能体我就是要删掉"也是正当需求。
-import { existsSync, readdirSync, rmSync, rmdirSync, statSync } from 'node:fs'
+import { existsSync, readdirSync, rmdirSync, statSync } from 'node:fs'
+import { rm } from 'node:fs/promises'
 import { dirname } from 'node:path'
 
 import { scanAll, type DiscoveredSession } from './discovery.ts'
@@ -238,11 +239,11 @@ export function planRemoval(
  *   删目录）、`verify`（复核删掉了、备份里那份还在）。
  * @returns 执行结果；计划不 ok 时 `applied` 为 false 且原样带回 `problems`。
  */
-export function runRemoval(
+export async function runRemoval(
   deps: RemoveDeps,
   request: RemoveRequest,
   options: { apply: boolean; onProgress?: ProgressReporter },
-): RemovalRun {
+): Promise<RemovalRun> {
   const onProgress = options.onProgress
   const plan = planRemoval(deps, request, { ...(onProgress === undefined ? {} : { onProgress }) })
   const empty = { plan, problems: plan.problems, verified: false, dirsRemoved: 0, removedProjectDirs: [] }
@@ -260,7 +261,7 @@ export function runRemoval(
   }
 
   // 1) 备份（整份会话目录 + 注册表快照）。备份是唯一一份可以恢复的副本，删之前必须成功。
-  const backup = createBackup({
+  const backup = await createBackup({
     backupRoot: deps.backupRoot,
     registryPath: deps.registryPath,
     // 删除没有"目标目录"：清单里每条会话的 targetDir 由 createBackup 填成备份内那份副本。
@@ -279,7 +280,7 @@ export function runRemoval(
       id: entry.id,
       label: entry.title ?? entry.id,
     })
-    rmSync(entry.dir, { recursive: true, force: true })
+    await rm(entry.dir, { recursive: true, force: true })
   }
 
   // 3) 顺手清掉空掉的项目目录（迁移那条路也这么做）。只删**确认为空**的目录：同一项目目录下

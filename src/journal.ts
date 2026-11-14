@@ -3,7 +3,8 @@
 // 备份是**执行前**的快照，也是回滚的唯一依据：manifest 记录每个会话的原目录、
 // 目标目录与日志文件，回滚 = 目录搬回 + 文件字节还原 + 注册表还原。
 // 因为备份发生在改写之前，所以它同时是"原状"与"回滚源"，无需第二份副本。
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { cp, mkdir, rename, rmdir, rm, writeFile } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 
 import type { ProgressReporter, SessionMove } from './types.ts'
@@ -99,25 +100,26 @@ export interface CreateBackupOptions {
 /**
  * 为一次执行建立备份。
  */
-export function createBackup(options: CreateBackupOptions): {
+export async function createBackup(options: CreateBackupOptions): Promise<{
   dir: string
   manifestPath: string
   manifest: BackupManifest
-} {
+}> {
   const { backupRoot, registryPath, sessions, artifacts = [], kind = 'migrate', from, to, now = new Date() } = options
   const dir = join(backupRoot, stampName(now))
-  mkdirSync(join(dir, 'sessions'), { recursive: true })
+  await mkdir(join(dir, 'sessions'), { recursive: true })
 
   const registryBackup = join(dir, 'registry.json')
-  cpSync(registryPath, registryBackup)
+  await cp(registryPath, registryBackup)
 
   const entries: BackupSessionEntry[] = []
   for (const [index, s] of sessions.entries()) {
     options.onProgress?.({ phase: 'backup', total: sessions.length, done: index, id: s.id, label: s.title ?? s.id })
     const projectDirName = basename(dirname(s.sourceDir))
     const dest = join(dir, 'sessions', projectDirName, basename(s.sourceDir))
-    mkdirSync(dirname(dest), { recursive: true })
-    cpSync(s.sourceDir, dest, { recursive: true })
+    await mkdir(dirname(dest), { recursive: true })
+    // 整份会话目录按字节复制：走 `fs.promises.cp`（线程池），1.2 GB 的库不会把主线程按住。
+    await cp(s.sourceDir, dest, { recursive: true })
     entries.push({
       id: s.id,
       dirName: basename(s.sourceDir),
@@ -134,8 +136,8 @@ export function createBackup(options: CreateBackupOptions): {
     const a = artifacts[i]
     if (!a) continue
     const backupPath = join(dir, 'artifacts', String(i), basename(a.sourcePath))
-    mkdirSync(dirname(backupPath), { recursive: true })
-    if (existsSync(a.sourcePath)) cpSync(a.sourcePath, backupPath, { recursive: true })
+    await mkdir(dirname(backupPath), { recursive: true })
+    if (existsSync(a.sourcePath)) await cp(a.sourcePath, backupPath, { recursive: true })
     artifactEntries.push({ sourcePath: a.sourcePath, targetPath: a.targetPath, isDir: !!a.isDir, backupPath })
   }
 
@@ -151,7 +153,7 @@ export function createBackup(options: CreateBackupOptions): {
     artifacts: artifactEntries,
   }
   const manifestPath = join(dir, MANIFEST)
-  writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n')
+  await writeFile(manifestPath, JSON.stringify(manifest, null, 2) + '\n')
   return { dir, manifestPath, manifest }
 }
 
@@ -184,10 +186,10 @@ export interface RollbackResult {
  * 已经不在了（刚被第 1 步搬走）。注册表那一步两者不同：删除从头到尾没碰过它，覆盖碰过（导入会把会话
  * 重挂到目标工作区），所以只有删除跳过。
  */
-export function rollback(
+export async function rollback(
   manifest: BackupManifest,
   options: { backupDir: string; dryRun?: boolean; onProgress?: ProgressReporter },
-): RollbackResult {
+): Promise<RollbackResult> {
   const { backupDir, dryRun = false } = options
   if (!backupDir) throw new Error('rollback requires backupDir')
   const actions: string[] = []
@@ -205,11 +207,11 @@ export function rollback(
     // 字节还原照做（内容相同，等于一次无害的复写）。
     if (existsSync(s.targetDir) && s.targetDir !== s.sourceDir) {
       const sourceProjectDir = dirname(s.sourceDir)
-      if (!dryRun) mkdirSync(sourceProjectDir, { recursive: true })
+      if (!dryRun) await mkdir(sourceProjectDir, { recursive: true })
       actions.push(`move back: ${s.targetDir} -> ${s.sourceDir}`)
       if (!dryRun) {
-        if (existsSync(s.sourceDir)) rmSync(s.sourceDir, { recursive: true, force: true })
-        renameSync(s.targetDir, s.sourceDir)
+        if (existsSync(s.sourceDir)) await rm(s.sourceDir, { recursive: true, force: true })
+        await rename(s.targetDir, s.sourceDir)
       }
     }
     // 2) 字节还原
@@ -229,7 +231,7 @@ export function rollback(
         throw new Error(`backup file missing: ${from}`)
       }
       actions.push(`restore bytes: ${to}`)
-      if (!dryRun) cpSync(from, to)
+      if (!dryRun) await cp(from, to)
       restoredFiles++
     }
   }
@@ -240,16 +242,16 @@ export function rollback(
     if (existsSync(a.targetPath)) {
       actions.push(`move artifact back: ${a.targetPath} -> ${a.sourcePath}`)
       if (!dryRun) {
-        mkdirSync(dirname(a.sourcePath), { recursive: true })
-        if (existsSync(a.sourcePath)) rmSync(a.sourcePath, { recursive: true, force: true })
-        renameSync(a.targetPath, a.sourcePath)
+        await mkdir(dirname(a.sourcePath), { recursive: true })
+        if (existsSync(a.sourcePath)) await rm(a.sourcePath, { recursive: true, force: true })
+        await rename(a.targetPath, a.sourcePath)
       }
       restoredArtifacts++
     } else if (a.backupPath && existsSync(a.backupPath)) {
       actions.push(`restore artifact from backup: ${a.sourcePath}`)
       if (!dryRun) {
-        mkdirSync(dirname(a.sourcePath), { recursive: true })
-        cpSync(a.backupPath, a.sourcePath, { recursive: true })
+        await mkdir(dirname(a.sourcePath), { recursive: true })
+        await cp(a.backupPath, a.sourcePath, { recursive: true })
       }
       restoredArtifacts++
     }
@@ -266,7 +268,7 @@ export function rollback(
       continue
     }
     actions.push(`remove empty project directory: ${projectDir}`)
-    if (!dryRun) rmdirSync(projectDir)
+    if (!dryRun) await rmdir(projectDir)
   }
 
   // 4) 注册表
@@ -279,7 +281,7 @@ export function rollback(
   } else if (manifest.registryBackup && existsSync(manifest.registryBackup)) {
     actions.push(`restore registry: ${manifest.registryPath}`)
     options.onProgress?.({ phase: 'registry', total: 0, done: 0 })
-    if (!dryRun) cpSync(manifest.registryBackup, manifest.registryPath)
+    if (!dryRun) await cp(manifest.registryBackup, manifest.registryPath)
     registryRestored = true
   }
 
