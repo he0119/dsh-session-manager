@@ -17,6 +17,8 @@ import * as React from 'react'
 
 import { Button, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
 
+import { Hint } from './Hint.tsx'
+
 import { fetchTranscript } from '../api.ts'
 import type { Translate } from '../logic/locales.ts'
 import { sessionLabel } from '../logic/planRows.ts'
@@ -150,15 +152,17 @@ export function SessionInspector({
         </div>
       ) : (
         <div className="dsm-inspectorBody">
-          <h3 className="dsm-inspectorName" title={label.tip}>
-            {label.text}
-          </h3>
+          <Hint text={label.tip}>
+            <h3 className="dsm-inspectorName">{label.text}</h3>
+          </Hint>
           {tags.length > 0 && (
             <div className="dsm-inspectorTags">
               {tags.map((tag) => (
-                <span key={tag.key} className="dsm-tag" title={t(tag.tip)}>
-                  <Tag tone="neutral">{t(tag.key)}</Tag>
-                </span>
+                <Hint key={tag.key} text={t(tag.tip)}>
+                  <span className="dsm-tag">
+                    <Tag tone="neutral">{t(tag.key)}</Tag>
+                  </span>
+                </Hint>
               ))}
             </div>
           )}
@@ -201,9 +205,13 @@ export function SessionInspector({
 
           <dl className="dsm-facts">
             <dt>{t('manage.detail.project')}</dt>
-            <dd title={session.cwd ?? ''}>{projectName}</dd>
+            <Hint text={session.cwd ?? ''}>
+              <dd>{projectName}</dd>
+            </Hint>
             <dt>{t('manage.detail.dir')}</dt>
-            <dd title={session.cwd ?? ''}>{session.cwd === undefined || session.cwd === '' ? '—' : session.cwd}</dd>
+            <Hint text={session.cwd ?? ''}>
+              <dd>{session.cwd === undefined || session.cwd === '' ? '—' : session.cwd}</dd>
+            </Hint>
             <dt>{t('manage.detail.created')}</dt>
             <dd>{formatTime(session.createdAt)}</dd>
             <dt>{t('manage.detail.size')}</dt>
@@ -216,7 +224,9 @@ export function SessionInspector({
             {session.parentSession !== undefined && (
               <>
                 <dt>{t('manage.detail.parent')}</dt>
-                <dd title={parentTitle ?? session.parentSession}>{parentTitle ?? session.parentSession}</dd>
+                <Hint text={parentTitle ?? session.parentSession}>
+                  <dd>{parentTitle ?? session.parentSession}</dd>
+                </Hint>
               </>
             )}
           </dl>
@@ -225,14 +235,11 @@ export function SessionInspector({
 
       {session !== null && label !== null && (
         <div className="dsm-inspectorActions">
-          <Button
-            variant="primary"
-            size="sm"
-            title={t('manage.detail.transcriptTip')}
-            onClick={onTranscript}
-          >
-            {t('manage.detail.transcript')}
-          </Button>
+          <Hint text={t('manage.detail.transcriptTip')}>
+            <Button variant="primary" size="sm" onClick={onTranscript}>
+              {t('manage.detail.transcript')}
+            </Button>
+          </Hint>
           <Button
             variant="outline"
             size="sm"
@@ -241,15 +248,11 @@ export function SessionInspector({
           >
             {session.archived === true ? t('manage.detail.unarchive') : t('manage.detail.archive')}
           </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={lockedTip !== undefined}
-            title={lockedTip}
-            onClick={onPick}
-          >
-            {checked ? t('manage.detail.unpick') : t('manage.detail.pick')}
-          </Button>
+          <Hint text={lockedTip}>
+            <Button variant="outline" size="sm" disabled={lockedTip !== undefined} onClick={onPick}>
+              {checked ? t('manage.detail.unpick') : t('manage.detail.pick')}
+            </Button>
+          </Hint>
         </div>
       )}
     </aside>

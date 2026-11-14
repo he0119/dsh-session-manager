@@ -35,6 +35,8 @@ import * as React from 'react'
 
 import { Button, Checkbox, StateDot, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
 
+import { Hint } from './Hint.tsx'
+
 import {
   fetchSyncPlan,
   runAutoPushNow,
@@ -291,15 +293,17 @@ function PlanGroupHead({
       <th className="dsm-planGroupHead" colSpan={columns} scope="colgroup">
         <span className="dsm-planGroupInner">
           <WorkspaceIcon />
-          <span className="dsm-groupTitle" title={label.tip}>
-            {label.name}
-          </span>
+          <Hint text={label.tip}>
+            <span className="dsm-groupTitle">{label.name}</span>
+          </Hint>
           {/* 与列表那边同一枚标签：有项目身份的目录挂主机名，悬浮提示里给全整条身份。
               `dsm-tag` 挂在包着它的那层 span 上（弹窗里的组头与列表里的组头同一条行高规格）。 */}
           {label.host !== undefined && (
-            <span className="dsm-tag" title={repo}>
-              <Tag tone="neutral">{label.host}</Tag>
-            </span>
+            <Hint text={repo}>
+              <span className="dsm-tag">
+                <Tag tone="neutral">{label.host}</Tag>
+              </span>
+            </Hint>
           )}
           <span className="dsm-groupCounts">
             <span className="dsm-hint">{t('list.sessionsInDir', { count: group.rows.length })}</span>
@@ -352,13 +356,15 @@ function SessionCell({
   return (
     <td>
       <span className="dsm-rowLabel">
-        <span className={label.kind === 'title' ? 'dsm-rowTitle' : 'dsm-rowId'} title={tip}>
-          {label.text}
-        </span>
+        <Hint text={tip}>
+          <span className={label.kind === 'title' ? 'dsm-rowTitle' : 'dsm-rowId'}>{label.text}</span>
+        </Hint>
         {tags.map((tag) => (
-          <span key={tag.key} className="dsm-tag" title={t(tag.tip)}>
-            <Tag tone="neutral">{t(tag.key)}</Tag>
-          </span>
+          <Hint key={tag.key} text={t(tag.tip)}>
+            <span className="dsm-tag">
+              <Tag tone="neutral">{t(tag.key)}</Tag>
+            </span>
+          </Hint>
         ))}
       </span>
     </td>
@@ -1281,11 +1287,13 @@ export function SyncPanel({
                                 `dsm-tag` 挂在包着它的那层 span 上：styles.ts 的 `.dsm-planTable .dsm-tag`
                                 那条负责"状态列装不下时限宽截断、别顶到会话名那一列"。
                               */}
-                              <span className="dsm-tag" title={t(replace ? replaceCodeKey(entry.code) : 'sync.why.missingPull')}>
-                                <Tag tone={replace ? 'quiet' : 'success'}>
-                                  {t(replace ? 'sync.tag.replace' : 'sync.tag.pull')}
-                                </Tag>
-                              </span>
+                              <Hint text={t(replace ? replaceCodeKey(entry.code) : 'sync.why.missingPull')}>
+                                <span className="dsm-tag">
+                                  <Tag tone={replace ? 'quiet' : 'success'}>
+                                    {t(replace ? 'sync.tag.replace' : 'sync.tag.pull')}
+                                  </Tag>
+                                </span>
+                              </Hint>
                             </td>
                             <SessionCell
                               label={label}
@@ -1326,9 +1334,11 @@ export function SyncPanel({
                           <tr key={entry.id}>
                             <td>
                               {/* 同上一张表：`repush` 是"重推一遍、远端已有"，`quiet`；否则是本机新增，`success`。 */}
-                              <span className="dsm-tag" title={tag.title}>
-                                <Tag tone={tag.repush ? 'quiet' : 'success'}>{tag.label}</Tag>
-                              </span>
+                              <Hint text={tag.title}>
+                                <span className="dsm-tag">
+                                  <Tag tone={tag.repush ? 'quiet' : 'success'}>{tag.label}</Tag>
+                                </span>
+                              </Hint>
                             </td>
                             <SessionCell label={label} tip={label.tip} tags={typeTagsOf(sessionsById.get(entry.id))} t={t} />
                             <td className="dsm-meta">{formatBytes(entry.bytes)}</td>
@@ -1367,9 +1377,11 @@ export function SyncPanel({
                           <tr key={entry.id}>
                             <td>
                               {/* "这条不动"：中性事实，不表示健康也不表示新增——`quiet`，与原 `.dsm-tagSkip` 同形。 */}
-                              <span className="dsm-tag" title={syncWhy(entry, t)}>
-                                <Tag tone="quiet">{syncTag(entry, t)}</Tag>
-                              </span>
+                              <Hint text={syncWhy(entry, t)}>
+                                <span className="dsm-tag">
+                                  <Tag tone="quiet">{syncTag(entry, t)}</Tag>
+                                </span>
+                              </Hint>
                             </td>
                             <SessionCell label={label} tip={label.tip} tags={typeTagsOf(sessionsById.get(entry.id))} t={t} />
                             <td className="dsm-cwd">{entry.machine ?? ''}</td>

@@ -108,8 +108,11 @@ pnpm typecheck && pnpm build && pnpm test && pnpm check:package
   外置，其余内联。**控制件一律用官方控件库**，本页 CSS 只写布局挂钩、不画控件外观；要引非基线模块
   必须在 `dsh.client.external` 里点名。依据见
   [控制件用官方原语](.agents/notes/implemented/architecture/2026-10-15-controls-come-from-the-official-primitives.md)。
-- 官方 `Tag` **不转发 `title`**：悬浮提示挂外层 `<span className="dsm-tag" title={…}>`，每枚标签都必须
-  带上这个挂钩，否则 `flex: none`、限宽截断、行高对齐那几条会**静默失效**。
+- 官方 `Tag` **不转发 `title`**：每枚标签都挂外层 `<span className="dsm-tag">`，提示由 `Hint` 给出
+  （见下一条），否则 `flex: none`、限宽截断、行高对齐那几条会**静默失效**。
+- **悬浮提示一律走 `Hint`（官方 `Tooltip`），不写原生 `title`**：原生那枚是浏览器画的——延迟两三秒、
+  字体配色不受控、被窗口边裁掉、触屏出不来。`title` 只留给组件的标题属性（弹窗标题、说明页分节标题、
+  计划表分节头）。`test/client.test.mjs` 里有一条守卫按这个规则扫 `src/client/components`。
 - 颜色只用宿主 Theme 检查面列出的 `--dsw-alias-*`，每条声明都带中性回落值；检查面没有的例外只登记在
   `test/styles.test.mjs`，别处不再列第二份。
 - **布局：`gap` 只对直接拥有这些子元素的那一层生效。** 页内分页、弹窗正文都要各自包一层拿节奏；

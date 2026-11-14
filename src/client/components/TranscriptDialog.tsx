@@ -26,6 +26,8 @@ import * as React from 'react'
 
 import { Button, Modal, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
 
+import { Hint } from './Hint.tsx'
+
 import { fetchTranscript, type TranscriptFacts, type TranscriptResponse } from '../api.ts'
 // 会话行的时刻格式与这里必须是同一份（同一套 "YYYY-MM-DD HH:mm"），所以复用列表那个导出。
 import { formatTime } from './sessionList.tsx'
@@ -337,9 +339,9 @@ export function TranscriptDialog({ session, onClose, t }: TranscriptDialogProps)
       contentClassName="dsm-dialogContent dsm-transcriptContent"
     >
       <div className="dsm-transcriptFacts">
-        <div className="dsm-transcriptName" title={session.id}>
-          {facts?.title ?? session.title ?? session.id}
-        </div>
+        <Hint text={session.id}>
+          <div className="dsm-transcriptName">{facts?.title ?? session.title ?? session.id}</div>
+        </Hint>
         <div className="dsm-defs dsm-transcriptFactsGrid">
           <dt>{t('manage.transcript.fact.session')}</dt>
           <dd className="dsm-path">{session.id}</dd>

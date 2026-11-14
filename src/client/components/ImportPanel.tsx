@@ -20,6 +20,8 @@ import * as React from 'react'
 
 import { Button, Modal, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
 
+import { Hint } from './Hint.tsx'
+
 import { importBundle, type ImportResponse, type ProgressEvent } from '../api.ts'
 import type { ImportEntry } from '../api.ts'
 import { ConfirmDialog } from './ConfirmDialog.tsx'
@@ -333,9 +335,9 @@ export function ImportPanel({
                 <Button variant="outline" size="sm" onClick={() => filePicker.current?.click()}>
                   {t('import.pickFile')}
                 </Button>
-                <span className="dsm-hint" title={file === null ? undefined : file.name}>
-                  {file === null ? t('import.dropHere') : file.name}
-                </span>
+                <Hint text={file === null ? undefined : file.name}>
+                  <span className="dsm-hint">{file === null ? t('import.dropHere') : file.name}</span>
+                </Hint>
               </div>
               <input ref={filePicker} type="file" accept=".dshsess" hidden onChange={pickFile} />
             </div>
@@ -421,9 +423,11 @@ export function ImportPanel({
                             </Tag>
                           </td>
                           <td>
-                            <span className={label.kind === 'title' ? 'dsm-rowTitle' : 'dsm-rowId'} title={label.tip}>
-                              {label.text}
-                            </span>
+                            <Hint text={label.tip}>
+                              <span className={label.kind === 'title' ? 'dsm-rowTitle' : 'dsm-rowId'}>
+                                {label.text}
+                              </span>
+                            </Hint>
                             {entry.reason !== undefined && <div className="dsm-hint">{entry.reason}</div>}
                           </td>
                           <td className="dsm-cwd">{cwdText(entry, t)}</td>

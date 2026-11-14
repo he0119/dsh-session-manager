@@ -19,6 +19,8 @@ import * as React from 'react'
 
 import { Button, Input, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
 
+import { Hint } from './Hint.tsx'
+
 import { candidateRow, filterPathRows, type PathRow } from '../logic/planRows.ts'
 import type { Translate } from '../logic/locales.ts'
 
@@ -89,29 +91,29 @@ export function CandidatePanel({
           {listed.map((row) => {
             const copy = candidateRow(row, t)
             return (
-              <button
-                key={row.path}
-                type="button"
-                className="dsm-dirEntry dsm-candidate"
-                title={copy.tip}
-                aria-current={row.path === value ? 'true' : undefined}
-                // 盘上已经没有的目录点不动（标签与悬浮提示说清为什么）：选中它只会在落地那一步撞上
-                // 宿主那句「目标工作区目录不存在」。它照旧列在这里，是因为它是用户登记过的工作区。
-                disabled={copy.missing !== undefined}
-                onClick={() => onPick(row.path)}
-              >
-                <span className="dsm-candidateHead">
-                  <span className="dsm-candidateName">{copy.name}</span>
-                  {/*
-                    这个目录盘上已经没有了。它是"这条候选不可用"的说明，不是失败态横幅——走官方
-                    `Tag` 的 `quiet`（只有文字、没有底色），对应原先的 `.dsm-tagSkip`。
-                    `dsm-tag` 是给 styles.ts 那条 `flex: none` 用的布局挂钩，挂在官方 Tag 自己身上
-                    （这一处没有悬浮提示，所以没有外层 span）。
-                  */}
-                  {copy.missing !== undefined && <Tag className="dsm-tag" tone="quiet">{copy.missing}</Tag>}
-                </span>
-                {copy.meta !== undefined && <span className="dsm-hint dsm-candidateMeta">{copy.meta}</span>}
-              </button>
+              <Hint key={row.path} text={copy.tip}>
+                  <button
+                  type="button"
+                  className="dsm-dirEntry dsm-candidate"
+                  aria-current={row.path === value ? 'true' : undefined}
+                  // 盘上已经没有的目录点不动（标签与悬浮提示说清为什么）：选中它只会在落地那一步撞上
+                  // 宿主那句「目标工作区目录不存在」。它照旧列在这里，是因为它是用户登记过的工作区。
+                  disabled={copy.missing !== undefined}
+                  onClick={() => onPick(row.path)}
+                >
+                  <span className="dsm-candidateHead">
+                    <span className="dsm-candidateName">{copy.name}</span>
+                    {/*
+                      这个目录盘上已经没有了。它是"这条候选不可用"的说明，不是失败态横幅——走官方
+                      `Tag` 的 `quiet`（只有文字、没有底色），对应原先的 `.dsm-tagSkip`。
+                      `dsm-tag` 是给 styles.ts 那条 `flex: none` 用的布局挂钩，挂在官方 Tag 自己身上
+                      （这一处没有悬浮提示，所以没有外层 span）。
+                    */}
+                    {copy.missing !== undefined && <Tag className="dsm-tag" tone="quiet">{copy.missing}</Tag>}
+                  </span>
+                  {copy.meta !== undefined && <span className="dsm-hint dsm-candidateMeta">{copy.meta}</span>}
+                </button>
+              </Hint>
             )
           })}
         </div>

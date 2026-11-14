@@ -28,6 +28,8 @@ import * as React from 'react'
 
 import { Button, Input } from '@deepseek-ai/dsh-client-ui-primitives'
 
+import { Hint } from './Hint.tsx'
+
 import { normalizePickedPath, type DirectoryApi } from '../directory.ts'
 import type { Translate } from '../logic/locales.ts'
 import { pathLabel, type PathRow } from '../logic/planRows.ts'
@@ -177,19 +179,20 @@ export function DirectoryField<K extends string>({
     <div className="dsm-field">
       <span className="dsm-fieldLabel">{label}</span>
       <div className="dsm-controls">
-        <button
-          type="button"
-          className="dsm-select dsm-selectPath dsm-pathValue"
-          // 无障碍名字带上"现在是什么值"：按钮的可见文本会被 aria-label 顶掉，只报字段名的话屏幕阅读器
-          // 与语音控制都听不到当前值（原生下拉框是自己会报值的，这枚按钮不会）。
-          aria-label={`${label}：${text}`}
-          aria-expanded={chooserOpen}
-          title={value === '' ? undefined : value}
-          onClick={() => controls.toggle(field, 'candidates')}
-        >
-          <span className="dsm-pathValueText">{text}</span>
-          <ChevronIcon />
-        </button>
+        <Hint text={value === '' ? undefined : value}>
+          <button
+            type="button"
+            className="dsm-select dsm-selectPath dsm-pathValue"
+            // 无障碍名字带上"现在是什么值"：按钮的可见文本会被 aria-label 顶掉，只报字段名的话屏幕阅读器
+            // 与语音控制都听不到当前值（原生下拉框是自己会报值的，这枚按钮不会）。
+            aria-label={`${label}：${text}`}
+            aria-expanded={chooserOpen}
+            onClick={() => controls.toggle(field, 'candidates')}
+          >
+            <span className="dsm-pathValueText">{text}</span>
+            <ChevronIcon />
+          </button>
+        </Hint>
         {/* 展开 / 收起手输框。 */}
         <Button variant="outline" size="sm" aria-expanded={manualOpen} onClick={() => controls.toggleManual(field)}>
           {manualOpen ? t('pathField.collapse') : t('pathField.type')}
