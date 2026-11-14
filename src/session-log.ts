@@ -9,6 +9,8 @@
 // 「导入时把「当前工作目录」里的旧机器路径一起改写」。其余正文照旧一个字节都不动。
 import { isAbsolute } from 'node:path'
 
+import { decodeAllChunked } from './log-decode.ts'
+
 import { rewriteSelfRootLine, SELF_ROOT_PATH_MARKERS } from './self-root-path.ts'
 import type { CompressFrame, DecodeAll, SessionHeader } from './types.ts'
 import { foldTitle } from './session-title.ts'
@@ -195,6 +197,78 @@ export function relocateHeaderCwd(buf: Buffer, options: RelocateOptions): Reloca
     firstFrameBytes: compressed.length,
     events,
   }
+}
+
+/** 让出一轮事件循环（与 `log-decode.ts` 同一套做法）。 */
+const yieldToLoop = (): Promise<void> => new Promise((resolve) => setImmediate(resolve))
+
+/**
+ * 与 {@link relocateSessionPaths} 同一个结果，只是**每一步都不把主线程按住**：整份文本用
+ * `decodeAllChunked()`（128 KB 一块、块间让出）解出来，帧与帧之间也各让一轮。
+ *
+ * 给导入落地那条路用：拉一条 16.8 MB 的会话，同步版本要 3.1 秒不能接请求；这里总耗时相近，但最长
+ * 一次停顿只有百毫秒级。判据与同步版本完全相同（整份改写结果是真源，逐帧拼起来必须与它逐字符相同）。
+ */
+export async function relocateSessionPathsChunked(
+  buf: Buffer,
+  options: RelocatePathsOptions,
+): Promise<RelocatePathsResult> {
+  const { decodeAll, compressFrame = encodeRawFrame } = options
+  const text = await decodeAllChunked(buf)
+  const events = text.split('\n').slice(1).filter((line) => line !== '').length
+  const whole = relocateSessionPathsText(text, options)
+  if (whole.text === text) {
+    return { ...whole, buffer: buf, events, frames: 0, unchanged: true }
+  }
+
+  const root = options.from ?? whole.header.cwd
+  if (root === undefined) throw new Error(`session ${whole.header.id}: nothing to use as the source root`)
+  const ledger: SelfRootLedger = {
+    root,
+    to: options.to,
+    foreignOnly: options.foreignOnly !== false,
+    mappings: new Map(),
+    unmapped: new Set(),
+    rewritten: 0,
+  }
+  const frames = splitFrames(buf)
+  if (frames.length === 0) throw new Error(`session ${whole.header.id}: no frames to rewrite`)
+  const parts: Buffer[] = []
+  const texts: string[] = []
+  let rewrittenFrames = 0
+  for (const [index, frame] of frames.entries()) {
+    const raw = buf.subarray(frame.start, frame.end)
+    let frameText: string
+    try {
+      frameText = decodeAll(raw)
+    } catch (error) {
+      throw new Error(
+        `session ${whole.header.id}: frame ${index} does not decode: ${error instanceof Error ? error.message : String(error)}`,
+      )
+    }
+    const next = index === 0
+      ? relocateHeaderCwdText(frameText, options.to).text
+      : rewriteSelfRootEvents(frameText, ledger)
+    if (next === frameText) {
+      parts.push(raw)
+      texts.push(frameText)
+    } else {
+      const compressed = compressFrame(next)
+      if (decodeAll(compressed) !== next) {
+        throw new Error(`session ${whole.header.id}: frame ${index} round-trip mismatch after path rewrite`)
+      }
+      parts.push(compressed)
+      texts.push(next)
+      rewrittenFrames++
+    }
+    // 一帧一让：帧通常只有几十到几百 KB，让出去的代价远小于整份按住的代价。
+    await yieldToLoop()
+  }
+  if (texts.join('') !== whole.text) {
+    throw new Error(`session ${whole.header.id}: round-trip mismatch after path rewrite`)
+  }
+  const buffer = Buffer.concat(parts)
+  return { ...whole, buffer, events, frames: rewrittenFrames }
 }
 
 /** 浅改写（只解首帧）的结果。 */

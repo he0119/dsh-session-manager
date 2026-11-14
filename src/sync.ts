@@ -3135,7 +3135,7 @@ export async function applyPreparedSync(
       const importPlan = planImport(bundle, importOptions)
       if (importPlan.nextRegistry !== null) registry = importPlan.nextRegistry
       if (importPlan.registryChange !== null) registryChanges.push(importPlan.registryChange)
-      const outcome = applyImport(bundle, importPlan, importOptions)
+      const outcome = await applyImport(bundle, importPlan, importOptions)
       if (outcome.registryWritten) registryWritten = true
       countPackedAttachments(outcome, attachmentIn)
       pulled.push(...outcome.written)
@@ -3168,7 +3168,7 @@ export async function applyPreparedSync(
       const importPlan = planImport(bundle, importOptions)
       if (importPlan.nextRegistry !== null) registry = importPlan.nextRegistry
       if (importPlan.registryChange !== null) registryChanges.push(importPlan.registryChange)
-      const outcome = applyImport(bundle, importPlan, importOptions)
+      const outcome = await applyImport(bundle, importPlan, importOptions)
       if (outcome.registryWritten) registryWritten = true
       countPackedAttachments(outcome, attachmentIn)
       pulled.push(...outcome.written)
@@ -3221,7 +3221,7 @@ export async function applyPreparedSync(
       const importPlan = planImport(bundle, importOptions)
       if (importPlan.nextRegistry !== null) registry = importPlan.nextRegistry
       if (importPlan.registryChange !== null) registryChanges.push(importPlan.registryChange)
-      const outcome = applyImport(bundle, importPlan, importOptions)
+      const outcome = await applyImport(bundle, importPlan, importOptions)
       if (outcome.registryWritten) registryWritten = true
       countPackedAttachments(outcome, attachmentIn)
       pulled.push(...outcome.written)
@@ -3312,7 +3312,7 @@ export async function applyPreparedSync(
         const importPlan = planImport(bundle, importOptions)
         if (importPlan.nextRegistry !== null) registry = importPlan.nextRegistry
         if (importPlan.registryChange !== null) registryChanges.push(importPlan.registryChange)
-        const outcome = applyImport(bundle, importPlan, importOptions)
+        const outcome = await applyImport(bundle, importPlan, importOptions)
         if (outcome.registryWritten) registryWritten = true
         countPackedAttachments(outcome, attachmentIn)
         pulled.push(...outcome.written)

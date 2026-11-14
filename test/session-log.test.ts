@@ -9,6 +9,7 @@ import {
   relocateHeaderCwd,
   relocateHeaderCwdShallow,
   relocateSessionPaths,
+  relocateSessionPathsChunked,
   relocateSessionPathsText,
 } from '../src/session-log.ts'
 import type { DecodeAll, SessionHeader } from '../src/types.ts'
@@ -315,6 +316,23 @@ test('relocateSessionPaths：working-directory/change 的 cwd 跟着会话根搬
   }
   // 要重压的只有三帧：header 一帧 + 两条 working-directory/change 各一帧。
   assert.equal(r.frames, 3)
+})
+
+test('relocateSessionPathsChunked：与同步版本逐字节相同（分块与让出不换结果）', async () => {
+  const { buffer } = makeFramesLog({ ...header, cwd: WIN_ROOT }, workingDirEvents)
+  const sync = relocateSessionPaths(buffer, { to: POSIX_ROOT, decodeAll })
+  const chunked = await relocateSessionPathsChunked(buffer, { to: POSIX_ROOT, decodeAll })
+  assert.deepEqual(chunked.buffer, sync.buffer)
+  assert.deepEqual(chunked.mappings, sync.mappings)
+  assert.deepEqual(chunked.unmapped, sync.unmapped)
+  assert.equal(chunked.frames, sync.frames)
+  assert.equal(chunked.rewritten, sync.rewritten)
+  assert.equal(chunked.events, sync.events)
+
+  // 不需要改写的那条路（cwd 已经是目标）：原字节返回，帧数 0。
+  const same = await relocateSessionPathsChunked(buffer, { to: WIN_ROOT, decodeAll })
+  assert.equal(same.unchanged, true)
+  assert.equal(same.frames, 0)
 })
 
 test('relocateSessionPaths：正文里的旧路径是历史事实，一个字节都不动', () => {

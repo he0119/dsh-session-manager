@@ -49,7 +49,7 @@ import { decodeLogTextChunked } from './log-decode.ts'
 import { encodeSegment, sessionDir } from './paths.ts'
 import { reHome, writeRegistryAtomic } from './registry.ts'
 import { foldTitleInFrames } from './session-title.ts'
-import { branchSessionLog, relocateSessionPaths, relocateSessionPathsText } from './session-log.ts'
+import { branchSessionLog, relocateSessionPathsChunked, relocateSessionPathsText } from './session-log.ts'
 import type { DecodeAll, ProgressReporter, RegistryChange, SessionLogFile, WorkspaceRegistryState } from './types.ts'
 
 /** `zlib.gunzip` 的 Promise 版：解压在线程池里，主线程不陪着。 */
@@ -924,17 +924,18 @@ export interface ImportOutcome {
  * @param decodeAll 多帧感知解码器。
  * @returns 改写后的字节；不需要改写时是原样的同一份字节。
  */
-function rewriteCwd(
+async function rewriteCwd(
   buf: Buffer,
   compression: string | null,
   entry: { fromCwd?: string; toCwd: string },
   decodeAll: DecodeAll,
-): Buffer {
+): Promise<Buffer> {
   const options = {
     ...(entry.fromCwd === undefined ? {} : { from: entry.fromCwd }),
     to: entry.toCwd,
   }
-  if (compression === 'zstd') return relocateSessionPaths(buf, { ...options, decodeAll }).buffer
+  // zstd 走分块那一版：16.8 MB 的会话同步改写要 3.1 秒，这里让出主线程。
+  if (compression === 'zstd') return (await relocateSessionPathsChunked(buf, { ...options, decodeAll })).buffer
   return Buffer.from(relocateSessionPathsText(buf.toString('utf8'), options).text, 'utf8')
 }
 
@@ -955,11 +956,11 @@ function rewriteCwd(
  *
  * @throws 任一日志文件写失败时抛错；已写完的会话保留，本函数不做跨会话回滚（由报告交代清楚）。
  */
-export function applyImport(
+export async function applyImport(
   bundle: SessionBundle,
   plan: ImportPlan,
   options: ImportOptions & { decodeAll: DecodeAll; writeRegistry?: boolean },
-): ImportOutcome {
+): Promise<ImportOutcome> {
   // 换过 id 的会话按**新 id** 认领（计划里的条目写的就是它）。
   const byId = new Map(bundle.sessions.map((session) => [options.rename?.get(session.id)?.newId ?? session.id, session]))
   const written: string[] = []
@@ -1019,7 +1020,7 @@ export function applyImport(
       const raw = entryBytes(bundle, file)
       let next = entry.toCwd === undefined
         ? raw
-        : rewriteCwd(
+        : await rewriteCwd(
           raw,
           file.compression,
           { toCwd: entry.toCwd, ...(entry.fromCwd === undefined ? {} : { fromCwd: entry.fromCwd }) },

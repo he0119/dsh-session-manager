@@ -1142,7 +1142,7 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
       }
 
       try {
-        const outcome = applyImport(bundle, plan, { ...options, decodeAll, onProgress: report })
+        const outcome = await applyImport(bundle, plan, { ...options, decodeAll, onProgress: report })
         // 导入会改注册表（把会话挂进目标工作区），与迁移是同一条语义：改完就把活儿交给宿主自己做，
         // 而不是把"重启 DSH 最稳妥"留给用户。注册表这次没动时（没有要挂的 / 读不到注册表）没有这一步。
         // 注册表终态一并交过去：宿主没接住时它会用内存副本盖掉这次写盘，那时得靠这份终态写回来
