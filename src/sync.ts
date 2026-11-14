@@ -1771,8 +1771,8 @@ export interface SyncLeftover {
  *
  * 两段来路，顺序就是用户该看的顺序：
  *
- * 1. **逐条会话**：计划里那些 `skip`（`identical` 不算——那本来就"不用做"，不是没做到）。它们带着标题
- *    与 id，所以点得出名字、跳得回列表。
+ * 1. **逐条会话**：计划里那些 `skip`（`identical` 不算——那本来就"不用做"；`no-mapping` 也不算——
+ *    这台机器没有那个项目，见下面那条注释）。它们带着标题与 id，所以点得出名字、跳得回列表。
  * 2. **其它问题**：`plan.problems` 与 `outcome.problems` 的原话（映射指错、远端索引读不动、整理失败
  *    这几类），它们不属于某一条会话，原样列出。
  *
@@ -1791,6 +1791,12 @@ export function collectLeftovers(outcome: SyncOutcome): SyncLeftover[] {
   }
   for (const row of [...outcome.plan.pull, ...outcome.plan.push]) {
     if (row.action !== 'skip' || row.code === 'identical') continue
+    /*
+     * 缺映射不算「没做到」：那是"这台机器没有这个项目"，这一条本来就不该落到这里（计划里「这次不动」
+     * 那张表已经写清原因）。把它算进来时，从另一台机器同步过来会挂着一串「没有 C:\… → 本机的同步
+     * 映射」——实测一台机器上 201 条，状态栏那格于是永远黄着，真正要人看的失败反而被埋掉。
+     */
+    if (row.code === 'no-mapping') continue
     const reason = 'reason' in row && typeof row.reason === 'string' ? row.reason : row.code
     const title = 'title' in row ? row.title : undefined
     const name = title === undefined || title === '' ? row.id : `${title}（${row.id}）`
