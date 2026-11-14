@@ -5676,15 +5676,13 @@ test('客户端产物：自动同步开着时，同步那一面与页头那枚�
     const text = strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
     const labels = mounted.recorded.filter((node) => node.type === 'button').map((node) => node.props?.children)
     const dot = mounted.recorded.find((node) => node.type === 'span' && node.props?.['data-state'] !== undefined)
-    const slot = mounted.recorded.find((node) => String(node.props?.className ?? '').includes('dsm-dotSlot'))
-    return { text, labels, dot, slot, recorded: mounted.recorded }
+    return { text, labels, dot, recorded: mounted.recorded }
   }
 
   const push = withMode('push')
   assert.ok(push.text.includes('sync.autoPush.enabled'), '只推那一档说"自动推送已开"')
   assert.ok(push.labels.includes('sync.autoPush.now'), '那一枚叫「立即推送一次」')
   assert.equal(push.dot?.props?.['data-state'], 'done', '开着就是绿点')
-  assert.equal(hintOfClass(push.recorded, 'dsm-dotSlot'), 'sync.chip.dot.auto', '点说的是自动推送')
 
   const both = withMode('sync')
   assert.ok(both.text.includes('sync.autoSync.enabled'), '双向那一档说"自动同步已开"')
@@ -5692,11 +5690,6 @@ test('客户端产物：自动同步开着时，同步那一面与页头那枚�
   assert.ok(both.labels.includes('sync.autoSync.now'), '那一枚改叫「立即同步一次」')
   assert.equal(both.labels.includes('sync.autoPush.now'), false, '旧那名不再出现')
   assert.equal(both.dot?.props?.['data-state'], 'done', '双向开着同样是绿点')
-  assert.equal(
-    hintOfClass(both.recorded, 'dsm-dotSlot'),
-    'sync.chip.dot.autoSync',
-    '点说的是自动同步（它会动本机，用户该知道）',
-  )
 })
 
 test('客户端产物：页头那枚点按本地事实点颜色（自动推送开着是绿、上次失败是红、有遗留是黄）', { skip }, () => {
@@ -5752,7 +5745,7 @@ test('客户端产物：页头那枚点按本地事实点颜色（自动推送�
   )
 })
 
-test('客户端产物：黄点的理由写在按钮的悬浮提示上（颜色本身读屏读不到）', { skip }, () => {
+test('客户端产物：按钮的悬浮提示只说这一档一句话（明细在弹窗里）', { skip }, () => {
   const state = {
     sessionsRoot: '/home/u/.dsh/sessions',
     registryPath: '/home/u/.dsh/registry.json',
@@ -5761,44 +5754,38 @@ test('客户端产物：黄点的理由写在按钮的悬浮提示上（颜色�
     workspaces: [],
   }
   const sync = { url: 'https://dav.example.com/dsh', machineId: 'robot-a', mappings: 1 }
-  const chipTitle = (patch) => {
+  const chipTitle = (patch, syncOverride) => {
     const mounted = mount({
       state,
-      meta: { sessionsRoot: state.sessionsRoot, registryPath: state.registryPath, sync: { ...sync, ...patch } },
+      meta: {
+        sessionsRoot: state.sessionsRoot,
+        registryPath: state.registryPath,
+        sync: syncOverride === undefined ? { ...sync, ...patch } : syncOverride,
+      },
     })
     strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
     return hintOfClass(mounted.recorded, 'dsm-headChip')
   }
-  /*
-   * 点自己也要有一句：鼠标落在那个 10px 的点上时，回答的是"这个颜色什么意思"。官方 `StateDot` 不透传
-   * `title`，所以外面包一层带提示的 span，提示走官方 `Tooltip`（与行上的标签同一条做法）。
-   */
-  const dotTitle = (patch) => {
-    const mounted = mount({
-      state,
-      meta: { sessionsRoot: state.sessionsRoot, registryPath: state.registryPath, sync: { ...sync, ...patch } },
-    })
-    strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
-    return hintOfClass(mounted.recorded, 'dsm-dotSlot')
-  }
-  assert.equal(dotTitle({}), 'sync.chip.dot.idle', '灰点：没有在跑的、也没有遗留')
-  assert.equal(dotTitle({ autoPush: { enabled: true } }), 'sync.chip.dot.auto', '绿点：自动推送开着')
-  assert.equal(
-    dotTitle({ lastRun: { at: '2026-11-12T12:00:00.000Z', ok: false, pulled: 0, pushed: 0, error: '401 Unauthorized' } }),
-    'sync.chip.dot.error:{"reason":"401 Unauthorized"}',
-    '红点把原话带出来',
-  )
-
-  assert.equal(chipTitle({}), 'sync.chip.tip', '没事时只有那一句"打开同步…"')
+  assert.equal(chipTitle({}), undefined, '干净、没跑过：不出提示（按钮文字自己说得清）')
   assert.equal(
     chipTitle({ autoPush: { enabled: true } }),
-    'sync.chip.tip · sync.chip.autoTip',
-    '绿点也要说得清：自动推送开着',
+    'sync.chip.noteAuto',
+    '绿点只说"自动推送已开"（5 分钟那条规则在弹窗里）',
+  )
+  assert.equal(
+    chipTitle({ autoPush: { enabled: true, mode: 'sync' } }),
+    'sync.chip.noteAutoSync',
+    '双向那一档说的是自动同步',
+  )
+  assert.equal(
+    chipTitle({ lastRun: { at: '2026-11-12T12:00:00.000Z', ok: false, pulled: 0, pushed: 0, error: '401 Unauthorized' } }),
+    'sync.chip.noteFailed:{"reason":"401 Unauthorized"}',
+    '红点把原话带在按钮上（不用去找那个 10px 的点）',
   )
   assert.equal(
     chipTitle({ lastRun: { at: '2026-11-12T12:00:00.000Z', ok: true, pulled: 0, pushed: 0, problems: ['a', 'b'] } }),
-    'sync.chip.tip · sync.chip.noteProblems:{"count":2}\na\nb',
-    '没说到的条数与那几条的原话都报出来（只数条数等于把疑问留给用户）',
+    'sync.chip.noteProblems:{"count":2}',
+    '黄点只报条数：哪几条在「上次同步」里列全',
   )
   assert.equal(
     chipTitle({
@@ -5807,25 +5794,21 @@ test('客户端产物：黄点的理由写在按钮的悬浮提示上（颜色�
         ok: true,
         pulled: 0,
         pushed: 0,
-        problems: ['a', 'b'],
         leftovers: [
           { message: '甲（session-1）：目标目录不存在：/x', sessionId: 'session-1' },
           { message: '乙（session-2）：两边各自写过', sessionId: 'session-2' },
-          { message: '远端索引里有一条没有 id 的记录', sessionId: undefined },
-          { message: '第四句', sessionId: undefined },
         ],
       },
     }),
-    'sync.chip.tip · sync.chip.noteProblems:{"count":4}\n' +
-      '甲（session-1）：目标目录不存在：/x\n乙（session-2）：两边各自写过\n远端索引里有一条没有 id 的记录\n' +
-      'sync.chip.moreLeftovers:{"count":1}',
-    '点名版优先：前三条原话 + "还有 1 条"',
+    'sync.chip.noteProblems:{"count":2}',
+    '点名版也只报条数，不在悬浮里铺开会话名',
   )
   assert.equal(
     chipTitle({ lastRun: { at: '2026-11-12T12:00:00.000Z', ok: true, pulled: 1, pushed: 0, pendingRestart: true } }),
-    'sync.chip.tip · sync.chip.noteRestart',
+    'sync.chip.noteRestart',
     '要重启时说重启',
   )
+  assert.equal(chipTitle({}, null), 'sync.chip.noteOff', '没配置时说"还没配置远端"')
 })
 
 test('客户端产物：同步弹窗说清"上次同步"与没做到的每一条，带 id 的给「只看这一条」', { skip }, () => {

@@ -87,79 +87,52 @@ export function syncChipDot(facts: SyncChipFacts): SyncChipDot {
   return 'idle'
 }
 
-/**
- * 那枚点**自己**的悬浮提示：这一档是什么状态。
- *
- * 与上一句（`syncChipNote`，挂在整枚按钮上）分开：鼠标落在那个 10px 的点上时，回答的是"这个颜色是什么意思"；
- * 落在按钮其余部分时，回答的是"这个按钮干什么"。同一个按钮上两级提示，内层（点）压过外层（按钮）。
- */
-export type SyncChipDotTitle =
-  | { key: 'sync.chip.dot.ongoing' }
-  | { key: 'sync.chip.dot.error'; params: { reason: string } }
-  | { key: 'sync.chip.dot.errorPlain' }
-  | { key: 'sync.chip.dot.problems'; params: { count: number } }
-  | { key: 'sync.chip.dot.restart' }
-  | { key: 'sync.chip.dot.auto' }
-  | { key: 'sync.chip.dot.autoSync' }
-  | { key: 'sync.chip.dot.idle' }
+/** 那枚按钮的悬浮提示：这一档是什么状态（没有就是 null，那枚按钮整个不出提示）。 */
+export type SyncChipNote =
+  | { key: 'sync.chip.noteRunning' }
+  | { key: 'sync.chip.noteFailed'; params: { reason: string } }
+  | { key: 'sync.chip.noteFailedPlain' }
+  | { key: 'sync.chip.noteProblems'; params: { count: number } }
+  | { key: 'sync.chip.noteRestart' }
+  | { key: 'sync.chip.noteAuto' }
+  | { key: 'sync.chip.noteAutoSync' }
 
 /**
- * 这一档要说的那句话。
+ * 那枚按钮的悬浮提示：这一档用一句短话说清。
  *
- * 失败那档带上宿主/远端的原话（「上次同步没成：401 Unauthorized」）——红点最常被问的就是"为什么红了"，
- * 而那句话正躺在记录里（`error`）。其余几档各说一句自己的事。
+ * 颜色本身读屏读不到、也常被一眼扫过，所以按钮上必须有一句理由。原来这条理由分成两级（点上一句、
+ * 按钮上一句）再加"没做到的原话最多三条"，一个按钮最多摊成五行；现在合成一句短的，明细（哪条会话、
+ * 为什么）留在点开后的「上次同步」里。
  *
  * @param facts 与 {@link syncChipDot} 同一份事实。
- * @returns 字典键与参数。
+ * @returns 要补的那一句；这一档没什么可说时 null（干净、还没跑过）。
  */
-export function syncChipDotTitle(facts: SyncChipFacts): SyncChipDotTitle {
+export function syncChipNote(facts: SyncChipFacts): SyncChipNote | null {
   const state = syncChipDot(facts)
   const done = facts.done ?? null
   const lastRun = facts.lastRun ?? null
-  if (state === 'ongoing') return { key: 'sync.chip.dot.ongoing' }
+  if (state === 'ongoing') return { key: 'sync.chip.noteRunning' }
   if (state === 'error') {
     // 这一页刚跑的那趟优先（它的 `error` 最新）；否则读磁盘上那条记录里的原话。
     const reason =
       (done !== null && !done.ok ? done.error : undefined) ??
       (lastRun !== null && !lastRun.ok ? lastRun.error : undefined)
     return reason === undefined
-      ? { key: 'sync.chip.dot.errorPlain' }
-      : { key: 'sync.chip.dot.error', params: { reason } }
+      ? { key: 'sync.chip.noteFailedPlain' }
+      : { key: 'sync.chip.noteFailed', params: { reason } }
   }
   if (state === 'warning') {
-    const source = done !== null && done.ok ? { leftovers: done.result?.leftovers, problems: done.result?.problems } : lastRun
+    const source =
+      done !== null && done.ok
+        ? { leftovers: done.result?.leftovers, problems: done.result?.problems }
+        : lastRun
     const count = leftoversOf(source).length
-    if (count > 0) return { key: 'sync.chip.dot.problems', params: { count } }
-    return { key: 'sync.chip.dot.restart' }
+    if (count > 0) return { key: 'sync.chip.noteProblems', params: { count } }
+    return { key: 'sync.chip.noteRestart' }
   }
   if (state === 'done') {
     // 绿点说的"自动"有两档：只推、双向。两句不同——双向会动本机，用户该知道。
-    return facts.autoPushSync === true ? { key: 'sync.chip.dot.autoSync' } : { key: 'sync.chip.dot.auto' }
+    return { key: facts.autoPushSync === true ? 'sync.chip.noteAutoSync' : 'sync.chip.noteAuto' }
   }
-  return { key: 'sync.chip.dot.idle' }
-}
-
-/** 那枚点的悬浮提示要多说的那一句（没有就是 null，提示只有「打开同步…」那一句）。 */
-export type SyncChipNote =
-  | { key: 'sync.chip.noteProblems'; params: { count: number } }
-  | { key: 'sync.chip.noteRestart' }
-
-/**
- * 黄点要解释自己在说什么。
- *
- * 颜色不是所有人都读得懂、读屏软件也读不到（那枚点是 `aria-hidden`），所以"为什么是黄的"必须有一句话
- * 挂在这枚按钮的悬浮提示上：几条没做到、或者要重启。
- *
- * @param facts 与 {@link syncChipDot} 同一份事实。
- * @returns 要补的那一句；不需要补时 null。
- */
-export function syncChipNote(facts: SyncChipFacts): SyncChipNote | null {
-  const done = facts.done ?? null
-  const lastRun = facts.lastRun ?? null
-  const source =
-    done !== null && done.ok ? { leftovers: done.result?.leftovers, problems: done.result?.problems } : lastRun?.ok === true ? lastRun : undefined
-  const count = leftoversOf(source).length
-  if (count > 0) return { key: 'sync.chip.noteProblems', params: { count } }
-  if (lastRun !== null && lastRun.ok && lastRun.pendingRestart === true) return { key: 'sync.chip.noteRestart' }
   return null
 }

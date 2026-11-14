@@ -30,7 +30,7 @@ import { Button, Modal, StateDot, type StateDotState } from '@deepseek-ai/dsh-cl
 
 import { fetchBackups, type MetaResponse, type ProgressEvent, type StateResponse } from '../api.ts'
 import { panelEvents, type PanelSnapshot } from '../logic/panelEvents.ts'
-import { syncChipDot, syncChipDotTitle, syncChipNote } from '../logic/syncChipDot.ts'
+import { syncChipDot, syncChipNote } from '../logic/syncChipDot.ts'
 import { getNavigationApi } from '../navigation.ts'
 import { PLUGIN_COMMIT, PLUGIN_DIRTY, PLUGIN_VERSION } from '../build.ts'
 import type { DirectoryApi } from '../directory.ts'
@@ -38,7 +38,6 @@ import type { Translate } from '../logic/locales.ts'
 import { syncJob, type SyncJobSnapshot } from '../logic/syncJob.ts'
 import { chooseBundle } from '../logic/fileDrop.ts'
 import { agoLabel } from '../logic/relativeTime.ts'
-import { leftoversOf } from '../logic/syncLeftovers.ts'
 import { syncBarLabel } from '../logic/syncJobLabel.ts'
 import { versionCommit, versionLabel, versionTag } from '../logic/version.ts'
 import { BackupPanel } from './BackupPanel.tsx'
@@ -397,30 +396,22 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
     autoPushSync: syncInfo?.autoPush?.mode === 'sync',
   }
   const syncDot: StateDotState = syncChipDot(dotFacts)
-  /** 这个颜色为什么是这个颜色：这句话挂在按钮的悬浮提示上（点本身是 aria-hidden，读屏读不到颜色）。 */
-  const dotNote = syncChipNote(dotFacts)
   /**
-   * 点**自己**的悬浮提示：这一档是什么状态（鼠标落在那个 10px 的点上时回答"这个颜色什么意思"）。
+   * 悬浮提示的第二行：这一档是什么状态。
    *
-   * 挂在包着它的一层 span 上而不是点本身：官方 `StateDot` 只收 `state` / `size` / `className`，不透传
-   * `title`（与 `Tag` 同一条，见「每枚标签都必须带 .dsm-tag 挂钩」那条约束）。
+   * 只有一句，短的：原来这件事分成两级（点上一句、按钮上一句），按钮那一条还要再列前三条「没做到」的
+   * 原话，最多摊成五行（实测那句「自动同步开着：写完一轮、安静 5 分钟之后双向对齐，并顺手整理自己那一格」
+   * 自己就有 37 个字）。明细留在点开后的「上次同步」里：那里列全，还带「只看这一条」。
    */
-  const dotTitle = syncChipDotTitle(dotFacts)
-  /*
-    这一趟「没做到」的条目（点名版优先，旧记录退回汇总句）：悬浮提示里列前 3 条，弹窗里那张
-    「上次同步」的清单列全（见 `SyncPanel`）。判据只有一份——`logic/syncLeftovers.ts`。
-  */
-  const leftoverItems = leftoversOf(job.done !== null && job.done.ok ? job.done.result : (syncInfo?.lastRun ?? null))
-  const leftoverHead = leftoverItems.slice(0, 3).map((item) => item.message)
-  const leftoverMore = Math.max(0, leftoverItems.length - leftoverHead.length)
+  const chipNote = syncInfo === null && meta !== undefined ? ({ key: 'sync.chip.noteOff' } as const) : syncChipNote(dotFacts)
+  /**
+   * 那枚按钮的悬浮提示：只放这一档的一句话。
+   *
+   * 不再加"打开同步……"那种交代按钮干什么的句子：那枚按钮的文字（「同步 · 3 小时前」）与位置（页头、
+   * 挨着标题）已经说明它是什么，点开也只是一步。干净、没跑过的档没有什么要说，提示整个不出现。
+   */
   const chipReason =
-    dotNote !== null
-      ? 'params' in dotNote
-        ? t(dotNote.key, dotNote.params)
-        : t(dotNote.key)
-      : syncDot === 'done'
-        ? t(dotFacts.autoPushSync === true ? 'sync.chip.autoSyncTip' : 'sync.chip.autoTip')
-        : null
+    chipNote === null ? null : 'params' in chipNote ? t(chipNote.key, chipNote.params) : t(chipNote.key)
 
   return (
     <section
@@ -467,28 +458,15 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
           提示从一行变成几行：先说这个按钮干什么、再说为什么是这个颜色，最后把那几条没做到的原话
           摆出来（前 3 条 + "还有 N 条"）。只报"1 条没做到"而不说哪一条，等于把疑问留给用户。
         */}
-        <Hint
-          text={[
-            [t('sync.chip.tip'), chipReason].filter((line) => line !== null).join(' · '),
-            ...leftoverHead,
-            leftoverMore > 0 ? t('sync.chip.moreLeftovers', { count: leftoverMore }) : null,
-          ]
-            .filter((line) => line !== null)
-            .join('\n')}
-        >
+        <Hint text={chipReason ?? undefined}>
           <Button
             className="dsm-headChip"
             variant="outline"
             size="sm"
             icon={
-              <Hint
-                text={'params' in dotTitle ? t(dotTitle.key, dotTitle.params) : t(dotTitle.key)}
-                side="right"
-              >
-                <span className="dsm-dotSlot">
-                  <StateDot state={syncDot} />
-                </span>
-              </Hint>
+              <span className="dsm-dotSlot">
+                <StateDot state={syncDot} />
+              </span>
             }
             aria-haspopup="dialog"
             aria-expanded={surface === 'sync'}
