@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { mkdtempSync, utimesSync } from 'node:fs'
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join, sep } from 'node:path'
 import { tmpdir } from 'node:os'
 import test from 'node:test'
@@ -19,7 +19,10 @@ import { readRegistry, writeRegistryAtomic } from '../src/registry.ts'
 import {
   SYNC_INDEX_FILE,
   machineDirName,
+  attachmentRefsOfFiles,
   contentFingerprint,
+  contentFingerprintChunked,
+  createAttachmentRefCache,
   createFingerprintCache,
   SYNC_NAMESPACE_DIR,
   fileFingerprint,
@@ -2370,6 +2373,11 @@ test('同步推送：引用的对象进远端共享库，包本身照旧只有�
     // 共享库那一层与机器格同级，列机器格时跳过它（不然远端会多出一台叫 attachments 的"机器"）。
     const remote = await readRemoteLibrary(dav, settings(a, { machineId: 'robot-a' }))
     assert.deepEqual(remote.machines, ['robot-a'])
+    assert.deepEqual(
+      remote.entries.get('s1')?.attachments,
+      [{ kind: 'image', id: ref.id, name: 'image.png' }],
+      '附件清单跟着索引一起上去：别的机器补对象时读它就够，不必再解一遍本机日志',
+    )
   } finally {
     await fixture.close()
     rmSync(SANDBOX, { recursive: true, force: true })
@@ -2868,6 +2876,155 @@ test('同步补对象：后台那条只推不拉的路不跑它（整库扫一�
   } finally {
     await fixture.close()
     rmSync(SANDBOX, { recursive: true, force: true })
+  }
+})
+
+test('同步补对象：索引里记着附件清单时不再解本机日志（老条目才扫一次）', { skip: process.platform === 'win32' }, async () => {
+  /*
+   * 判据是"本机这条日志读不动了也照样能补"。先把日志的读权限收掉（`0o000`），再走"预演 → 落地"：
+   * 预演那一步还读得动（先算指纹、扫描会话头），落地这一步只有补对象会去读日志——它要是去读了，
+   * 这里会直接 EACCES 把同步炸掉；实际补上了，就说明它用的是索引里那份清单。
+   */
+  rmSync(SANDBOX, { recursive: true, force: true })
+  mkdirSync(SANDBOX, { recursive: true })
+  const fixture = await startDavFixture({ root: join(SANDBOX, 'dav-attach-index') })
+  const dav = createDavClient({ baseUrl: fixture.url })
+  const a = makeMachine('attach-index-a')
+  const b = makeMachine('attach-index-b')
+  const storeA = makeAttachmentStore('attach-index-store-a')
+  const storeB = makeAttachmentStore('attach-index-store-b')
+  const image = Buffer.from('索引里记过的那张图')
+  const ref: AttachmentRef = { id: attachmentIdOf(image), kind: 'image' }
+  try {
+    storeA.put(ref, image)
+    writeSession(a, 's1', 1000, { eventLines: [attachmentEvent(ref, image.length)] })
+    await syncMachine(a, dav, settings(a, { machineId: 'robot-a' }), {
+      apply: true,
+      attachments: () => storeA.port,
+    })
+
+    // B 先把日志拉下来，但那时没有附件服务：对象一个都没来。
+    const config = settings(b, { machineId: 'robot-b', mapping: { [a.cwd]: b.cwd } })
+    await syncMachine(b, dav, config, { apply: true })
+    assert.equal(existsSync(storeB.pathOf(ref)), false)
+
+    const deps = syncDepsOf(b, dav, config, { attachments: () => storeB.port })
+    const prepared = await prepareSync(deps)
+    const file = prepared.local.find((session) => session.id === 's1')?.files[0]
+    assert.ok(file !== undefined)
+    chmodSync(file.path, 0o000)
+    const events: SyncProgress[] = []
+    try {
+      const outcome = await syncPrepared(deps, prepared, { onProgress: (event) => events.push(event) })
+      assert.deepEqual(outcome.attachmentIn, { written: 1, present: 0, bytes: image.length }, '读不动日志也把对象补了回来')
+      assert.deepEqual(readFileSync(storeB.pathOf(ref)), image)
+      assert.ok(
+        events.some((event) => event.phase === 'attachScan' && event.total === 1),
+        '补对象之前逐条核对，报 attachScan（整库扫描也要有进度）',
+      )
+    } finally {
+      chmodSync(file.path, 0o644)
+    }
+  } finally {
+    await fixture.close()
+    rmSync(SANDBOX, { recursive: true, force: true })
+  }
+})
+
+test('同步补对象：老索引没有附件清单时，扫一次顺手补进自己那一格', async () => {
+  rmSync(SANDBOX, { recursive: true, force: true })
+  mkdirSync(SANDBOX, { recursive: true })
+  const fixture = await startDavFixture({ root: join(SANDBOX, 'dav-attach-learn') })
+  const dav = createDavClient({ baseUrl: fixture.url })
+  const a = makeMachine('attach-learn-a')
+  const store = makeAttachmentStore('attach-learn-store')
+  const image = Buffer.from('补进索引的那张图')
+  const ref: AttachmentRef = { id: attachmentIdOf(image), kind: 'image' }
+  const config = settings(a, { machineId: 'robot-a' })
+  const indexPath = join(fixture.root, remoteIndexPath('robot-a'))
+  try {
+    store.put(ref, image)
+    writeSession(a, 's1', 1000, { eventLines: [attachmentEvent(ref, image.length)] })
+    writeSession(a, 's2', 2000)
+    await syncMachine(a, dav, config, { apply: true, attachments: () => store.port })
+
+    // 把两份清单都抹掉，装成"升级前写下的老条目"：这一趟没有任何会话要推，补对象那一步只能自己扫。
+    const index = JSON.parse(readFileSync(indexPath, 'utf8')) as { entries: Array<{ id: string; attachments?: unknown }> }
+    for (const entry of index.entries) delete entry.attachments
+    writeFileSync(indexPath, JSON.stringify(index, null, 2) + '\n')
+
+    const again = await syncMachine(a, dav, config, { apply: true, attachments: () => store.port })
+    assert.deepEqual(again.pushed, [], '日志没变，一条都不推')
+    const after = JSON.parse(readFileSync(indexPath, 'utf8')) as {
+      entries: Array<{ id: string; attachments?: unknown }>
+    }
+    assert.deepEqual(
+      after.entries.find((entry) => entry.id === 's1')?.attachments,
+      [{ kind: 'image', id: ref.id, name: 'image.png' }],
+      '扫过之后补进自己那一格：下一次（重启之后）不必再解一遍',
+    )
+    assert.deepEqual(
+      after.entries.find((entry) => entry.id === 's2')?.attachments,
+      [],
+      '一个都没引用的也要记成空数组：空数组是"查过、没有"，与"没查过"分得开',
+    )
+  } finally {
+    await fixture.close()
+    rmSync(SANDBOX, { recursive: true, force: true })
+  }
+})
+
+test('附件引用按文件缓存：戳没变就复用，改写之后重算', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dshsm-attach-cache-'))
+  try {
+    const machine = { sessionsRoot: dir, cwd: '/home/u/dev/cache', registryPath: join(dir, 'registry.json') } as Machine
+    const image = Buffer.from('缓存用的那张图')
+    const ref: AttachmentRef = { id: attachmentIdOf(image), kind: 'image' }
+    writeSession(machine, 's1', 1000, { eventLines: [attachmentEvent(ref, image.length)] })
+    const cache = createAttachmentRefCache()
+    const files = (): ReturnType<typeof scanAll>[number]['files'] => scanAll(dir, decodeAll)[0]?.files ?? []
+    const first = await attachmentRefsOfFiles(files(), cache)
+    assert.equal(first.length, 1)
+    assert.equal(cache.size, 1, '一个文件只占一项')
+    assert.deepEqual(await attachmentRefsOfFiles(files(), cache), first, '戳没变就给同一份结论')
+
+    // 改写同一份文件（追加一条新引用）：戳变了，缓存必须跟着重算。
+    const file = files()[0]
+    assert.ok(file !== undefined)
+    const second = Buffer.from('第二张图')
+    const refTwo: AttachmentRef = { id: attachmentIdOf(second), kind: 'image' }
+    writeFileSync(file.path, Buffer.concat([readFileSync(file.path), encodeRawFrame(`${attachmentEvent(refTwo, second.length)}\n`)]))
+    const updated = await attachmentRefsOfFiles(files(), cache)
+    assert.equal(updated.length, 2, '新引用扫得出来')
+    assert.equal(cache.size, 1, '同一个路径还是只占一项（换掉旧的那份）')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('contentFingerprintChunked：与整份哈希逐字段相同（分块不换口径）', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dshsm-fp-chunked-'))
+  try {
+    const header: SessionHeader = {
+      type: 'session',
+      version: 4,
+      id: 'session-chunk',
+      createdAt: 1,
+      cwd: '/home/u/dev/chunk',
+      isSeeded: false,
+      delegationDepth: 0,
+    }
+    const path = join(dir, 'session.v4.jsonl.zstd')
+    const body = Array.from({ length: 40 }, (_, index) => `{"type":"event","seq":${String(index)}}\n`).join('')
+    writeFileSync(
+      path,
+      Buffer.concat([encodeRawFrame(JSON.stringify(header) + '\n'), ...body.split('\n').filter(Boolean).map((line) => encodeRawFrame(line + '\n'))]),
+    )
+    const whole = contentFingerprint(path, 4, 'zstd', decodeAll)
+    const chunked = await contentFingerprintChunked(path, 4, 'zstd', decodeAll)
+    assert.deepEqual(chunked, whole, '分块哈希与整份哈希给出同一个 sha256 与 bytes')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
   }
 })
 

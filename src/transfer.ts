@@ -29,7 +29,7 @@
 //   - 会话目录名必须等于 encodeSegment(id)——宿主启动时会校验目录名与 header id 一致，
 //     不满足的包要在这里拒掉，而不是让它去污染会话库。
 import { createHash } from 'node:crypto'
-import { mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { gunzip, gunzipSync, gzipSync } from 'node:zlib'
 import { promisify } from 'node:util'
@@ -758,6 +758,8 @@ export function attachmentActionOf(
 ): ImportAttachmentEntry['action'] {
   const path = port?.pathOf({ id: ref.id, kind: ref.kind, ...(ref.name === undefined ? {} : { name: ref.name }) })
   if (path === undefined) return 'unavailable'
+  // 本机有没有这个对象，先看文件在不在；`bytes` 只在"在"的时候用来判它是不是同一份（老日志没这一项）。
+  if (!existsSync(path)) return 'create'
   try {
     return ref.bytes === undefined || statSync(path).size === ref.bytes ? 'present' : 'create'
   } catch {
