@@ -74,13 +74,13 @@ test('推源根：目录名对不上就推不出来（让人用 from 指定，�
   assert.equal(deriveSourceRoot([], '/home/me/repo'), undefined)
 })
 
-test('算计划：只挑"本机不认的工作目录路径"，写清从哪个根搬到哪个根', () => {
+test('算计划：只挑"本机不认的工作目录路径"，写清从哪个根搬到哪个根', async () => {
   const root = makeRoot('path-repair-plan')
   const cwd = '/home/me/repo'
   const session = writeSession(root, 'session-w', cwd, [`${FOREIGN_ROOT}\\.agents\\worktrees\\fix\\x`, FOREIGN_ROOT])
   const clean = writeSession(root, 'session-clean', cwd, [cwd, '/home/me/other'])
 
-  const plan = planPathRepair([session, clean], { decodeAll })
+  const plan = await planPathRepair([session, clean], { decodeAll })
   assert.equal(plan.scanned.sessions, 2)
   assert.equal(plan.scanned.files, 2)
   assert.equal(plan.sessions.length, 1, '本机就合法的路径不该进计划')
@@ -96,12 +96,12 @@ test('算计划：只挑"本机不认的工作目录路径"，写清从哪个根
   rmSync(join(import.meta.dirname, '.sandbox', 'path-repair-plan'), { recursive: true, force: true })
 })
 
-test('算计划：有取值映射不上就整条不修，并把原因写出来', () => {
+test('算计划：有取值映射不上就整条不修，并把原因写出来', async () => {
   const root = makeRoot('path-repair-unmapped')
   const cwd = '/home/me/repo'
   const session = writeSession(root, 'session-w', cwd, [FOREIGN_ROOT, 'D:\\elsewhere\\y'])
 
-  const plan = planPathRepair([session], { decodeAll })
+  const plan = await planPathRepair([session], { decodeAll })
   const entry = plan.sessions[0]!
   assert.ok(entry.problem, '映射不上时这条不该直接修')
   assert.ok(entry.problem!.includes('D:\\elsewhere\\y'), '原因里要点出改不了的那个值')
@@ -109,13 +109,13 @@ test('算计划：有取值映射不上就整条不修，并把原因写出来',
   rmSync(join(import.meta.dirname, '.sandbox', 'path-repair-unmapped'), { recursive: true, force: true })
 })
 
-test('算计划：给 from 就不推，按给的根算', () => {
+test('算计划：给 from 就不推，按给的根算', async () => {
   const root = makeRoot('path-repair-from')
   const cwd = '/home/me/repo'
   const session = writeSession(root, 'session-w', cwd, ['D:\\somewhere\\other\\x'])
 
-  assert.equal(planPathRepair([session], { decodeAll }).sessions[0]!.problem === undefined, false, '推不出来时不修')
-  const plan = planPathRepair([session], { decodeAll, from: 'D:\\somewhere\\other' })
+  assert.equal((await planPathRepair([session], { decodeAll })).sessions[0]!.problem === undefined, false, '推不出来时不修')
+  const plan = await planPathRepair([session], { decodeAll, from: 'D:\\somewhere\\other' })
   const entry = plan.sessions[0]!
   assert.equal(entry.problem, undefined)
   assert.deepEqual(entry.files[0]!.mappings, [{ from: 'D:\\somewhere\\other\\x', to: `${cwd}/x` }])
@@ -123,7 +123,7 @@ test('算计划：给 from 就不推，按给的根算', () => {
   rmSync(join(import.meta.dirname, '.sandbox', 'path-repair-from'), { recursive: true, force: true })
 })
 
-test('落地：备份原字节、原子替换、复验通过；再算一遍计划是空的', () => {
+test('落地：备份原字节、原子替换、复验通过；再算一遍计划是空的', async () => {
   const base = join(import.meta.dirname, '.sandbox', 'path-repair-apply')
   const root = join(base, 'sessions')
   rmSync(base, { recursive: true, force: true })
@@ -132,8 +132,8 @@ test('落地：备份原字节、原子替换、复验通过；再算一遍计�
   const session = writeSession(root, 'session-w', cwd, [`${FOREIGN_ROOT}\\.agents\\worktrees\\fix\\x`, FOREIGN_ROOT])
   const original = readFileSync(session.files[0]!.path)
 
-  const plan = planPathRepair([session], { decodeAll })
-  const outcome = applyPathRepair(plan.sessions, { decodeAll, backupRoot: join(base, 'backups'), now: new Date('2026-11-13T00:00:00Z') })
+  const plan = await planPathRepair([session], { decodeAll })
+  const outcome = await applyPathRepair(plan.sessions, { decodeAll, backupRoot: join(base, 'backups'), now: new Date('2026-11-13T00:00:00Z') })
   assert.equal(outcome.files, 1)
   assert.equal(outcome.events, 2)
   assert.deepEqual(outcome.problems, [])
@@ -149,12 +149,12 @@ test('落地：备份原字节、原子替换、复验通过；再算一遍计�
     after.split('\n').filter((line) => line.includes('working-directory/change')).map((line) => JSON.parse(line).data.cwd),
     [`${cwd}/.agents/worktrees/fix/x`, cwd],
   )
-  assert.deepEqual(planPathRepair([session], { decodeAll }).sessions, [], '修完再算一遍计划必须空')
+  assert.deepEqual((await planPathRepair([session], { decodeAll })).sessions, [], '修完再算一遍计划必须空')
 
   rmSync(base, { recursive: true, force: true })
 })
 
-test('落地：写盘前复验不过就抛，原文件一个字节都不动（不留半成品）', () => {
+test('落地：写盘前复验不过就抛，原文件一个字节都不动（不留半成品）', async () => {
   const base = join(import.meta.dirname, '.sandbox', 'path-repair-guard')
   const root = join(base, 'sessions')
   rmSync(base, { recursive: true, force: true })
@@ -162,13 +162,13 @@ test('落地：写盘前复验不过就抛，原文件一个字节都不动（�
   const cwd = '/home/me/repo'
   const session = writeSession(root, 'session-w', cwd, [FOREIGN_ROOT])
   const original = readFileSync(session.files[0]!.path)
-  const plan = planPathRepair([session], { decodeAll })
+  const plan = await planPathRepair([session], { decodeAll })
   assert.equal(plan.sessions[0]!.problem, undefined)
 
   // 故意换一个"写坏的压缩器"：帧里的内容被截短，落盘前那一份就不对了。
   const broken = (text: string): Buffer => encodeRawFrame(text.slice(0, Math.max(text.length - 3, 0)))
-  assert.throws(
-    () => applyPathRepair(plan.sessions, { decodeAll, compressFrame: broken }),
+  await assert.rejects(
+    async () => applyPathRepair(plan.sessions, { decodeAll, compressFrame: broken }),
     /mismatch|verification/,
     '改写结果对不上时必须抛错',
   )

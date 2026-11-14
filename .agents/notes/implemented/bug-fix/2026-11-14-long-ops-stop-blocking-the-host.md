@@ -39,6 +39,9 @@ Status: implemented
 - **备份 / 删除 / 回滚的复制走异步**：`createBackup()` / `rollback()` 换 `fs.promises.cp` / `rm`，
   `applyPlan()` 与 `runRemoval()` 跟着返回 Promise。整库 1.2 GB 备份：原来 0.78 秒一次按住 →
   3.9 秒但最长停顿 **12 毫秒**（`fs.promises.cp` 在线程池里逐文件拷）。
+- **路径修复工具走分块**：`planPathRepair()` / `applyPathRepair()` 改成异步分块读日志、异步写临时文件，
+  备份复制走 `fs.promises.cp`。16.8 MB 会话的预演：1.8 秒一次按住 → 1.8 秒总耗时、最长一次停顿
+  **122 毫秒**；落地里的改写与复验也走同一套分块。
 - **扫库记住首帧**：`readLogHeaderForScan()` 按 `size:mtimeMs` 缓存每个日志首帧解出来的 header，
   只给扫描用（写盘路径仍走 `readLogHeader()` 现读）。另加 git 式 racy 规则：记录不足 1 秒的条目不
   信任。整库 1475 个文件：冷扫 0.8 秒 → 库没大改时 **40 毫秒**。
