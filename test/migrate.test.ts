@@ -96,11 +96,11 @@ function makeSandbox(name: string, ids: readonly string[] = ['session-migrate-1'
   }
 }
 
-test('预演：把源项目目录的会话与注册表变更算出来，一个字节都不写', () => {
+test('预演：把源项目目录的会话与注册表变更算出来，一个字节都不写', async () => {
   const sb = makeSandbox('migrate-preview')
   const before = readFileSync(join(sb.deps.registryPath), 'utf8')
 
-  const preview = previewMigration(sb.deps, req(sb))
+  const preview = await previewMigration(sb.deps, req(sb))
   assert.equal(preview.ok, true, `预演应当可用：${preview.problems.join('; ')}`)
   assert.equal(preview.sessions.length, 1)
   assert.equal(preview.sessions[0]?.registered, true)
@@ -117,10 +117,10 @@ test('预演：把源项目目录的会话与注册表变更算出来，一个�
   rmSync(sb.base, { recursive: true, force: true })
 })
 
-test('预演：目标的另一种拼写先归一（同一个目录不会凭写法多出一条工作区记录）', () => {
+test('预演：目标的另一种拼写先归一（同一个目录不会凭写法多出一条工作区记录）', async () => {
   const sb = makeSandbox('migrate-canonical-to')
   // 结尾分隔符是"另一种拼写"里最朴素的一种；Windows 上还有 git 给的正斜杠（见 canonical-path.test.ts）
-  const preview = previewMigration(sb.deps, req(sb, { to: `${TO}${sep}` }))
+  const preview = await previewMigration(sb.deps, req(sb, { to: `${TO}${sep}` }))
 
   assert.equal(preview.ok, true, `另一种拼写应当照常可用：${preview.problems.join('; ')}`)
   assert.equal(preview.to, TO, '落地用的是归一之后的那个字符串')
@@ -128,9 +128,9 @@ test('预演：目标的另一种拼写先归一（同一个目录不会凭写�
   rmSync(sb.base, { recursive: true, force: true })
 })
 
-test('预演：目标就是这几条会话现在住的那个目录（换种拼写也一样）→ 没东西可搬', () => {
+test('预演：目标就是这几条会话现在住的那个目录（换种拼写也一样）→ 没东西可搬', async () => {
   const sb = makeSandbox('migrate-same-directory')
-  const preview = previewMigration(sb.deps, req(sb, { to: `${FROM}${sep}` }))
+  const preview = await previewMigration(sb.deps, req(sb, { to: `${FROM}${sep}` }))
 
   assert.equal(preview.ok, false)
   assert.ok(
@@ -208,9 +208,9 @@ test('子集：只搬点名的会话，源工作区没被搬空就留在注册�
   rmSync(sb.base, { recursive: true, force: true })
 })
 
-test('子集：点名的会话不在源项目目录里 → 预演就报问题，而不是静默少搬', () => {
+test('子集：点名的会话不在源项目目录里 → 预演就报问题，而不是静默少搬', async () => {
   const sb = makeSandbox('migrate-subset-unknown', ['session-a'])
-  const preview = previewMigration(sb.deps, { to: TO, sessionIds: ['session-a', 'session-ghost'] })
+  const preview = await previewMigration(sb.deps, { to: TO, sessionIds: ['session-a', 'session-ghost'] })
 
   assert.equal(preview.ok, false)
   assert.match(preview.problems.join('; '), /session-ghost not found/)

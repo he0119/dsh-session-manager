@@ -241,9 +241,9 @@ const opts = (sb: Sandbox, extra: Record<string, unknown> = {}) => ({
   ...extra,
 })
 
-test('迁移：点名父会话 → 全部后代一起进计划（多级、跨项目目录），并标出是谁把它带进来的', () => {
+test('迁移：点名父会话 → 全部后代一起进计划（多级、跨项目目录），并标出是谁把它带进来的', async () => {
   const sb = makeSandbox('family-migrate-plan')
-  const plan = buildRelocationPlan(opts(sb))
+  const plan = await buildRelocationPlan(opts(sb))
 
   assert.equal(plan.ok, true, plan.problems.join('; '))
   assert.equal(plan.sessions[0]?.id, 'session-parent', '点名的排在最前')
@@ -281,10 +281,10 @@ test('迁移：点名父会话 → 全部后代一起进计划（多级、跨项
 
 // 「未分组」只是一枚标签（没人认领的那几条在侧边栏里落在那一组）：点名它照旧能迁，没有"连不连带
 // 未分组"这个开关——勾了就是用户的决定。子智能体那类本来就没在册，它跟着父走从来不需要开关。
-test('迁移：点名一条未分组的会话照旧能迁，它顺手被目标工作区收编', () => {
+test('迁移：点名一条未分组的会话照旧能迁，它顺手被目标工作区收编', async () => {
   const sb = makeSandbox('family-migrate-unowned')
 
-  const stray = buildRelocationPlan(opts(sb, { sessionIds: ['session-stray'] }))
+  const stray = await buildRelocationPlan(opts(sb, { sessionIds: ['session-stray'] }))
   assert.equal(stray.ok, true, stray.problems.join('; '))
   assert.deepEqual(stray.sessions.map((s) => s.id), ['session-stray'])
   assert.equal(stray.sessions[0]?.registered, false, '没人认领它：注册表里本来没有它这条归属')
@@ -296,7 +296,7 @@ test('迁移：点名一条未分组的会话照旧能迁，它顺手被目标�
 
 test('迁移：整族搬过去（各自改写 cwd、清掉两个空项目目录），回滚把整族按清单搬回来', async () => {
   const sb = makeSandbox('family-migrate-apply')
-  const plan = buildRelocationPlan(opts(sb))
+  const plan = await buildRelocationPlan(opts(sb))
   assert.equal(plan.ok, true, plan.problems.join('; '))
 
   const result = await applyPlan(plan, { registryPath: sb.registryPath, decodeAll, backupRoot: sb.backupRoot })
@@ -358,7 +358,7 @@ test('迁移：整族搬过去（各自改写 cwd、清掉两个空项目目录�
 
 test('迁移：后代本来就住在目标目录里（cwd == 目标）：不搬目录、不改写，回滚也不去搬它', async () => {
   const sb = makeSandbox('family-migrate-at-target', { atTargetChild: true })
-  const plan = buildRelocationPlan(opts(sb))
+  const plan = await buildRelocationPlan(opts(sb))
   assert.equal(plan.ok, true, plan.problems.join('; '))
 
   const home = plan.sessions.find((s) => s.id === 'session-home')

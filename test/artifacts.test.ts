@@ -216,7 +216,7 @@ function makeSandbox(name: string): Sandbox {
 
 test('集成：includeArtifacts 时产物随会话一起搬，并可字节级回滚', async () => {
   const sb = makeSandbox('artifacts')
-  const plan = buildRelocationPlan({
+  const plan = await buildRelocationPlan({
     root: sb.root,
     registry: sb.registry,
     sessionIds: ['session-a'],
@@ -259,7 +259,7 @@ test('集成：includeArtifacts 时产物随会话一起搬，并可字节级回
 
 test('集成：不传 includeArtifacts 时不动任何产物', async () => {
   const sb = makeSandbox('no-artifacts')
-  const plan = buildRelocationPlan({
+  const plan = await buildRelocationPlan({
     root: sb.root,
     registry: sb.registry,
     sessionIds: ['session-a'],
@@ -320,7 +320,7 @@ test('集成：勾选跨目录时，每条会话的产物按它自己的来源�
   }
   writeFileSync(registryPath, JSON.stringify(registry, null, 2) + '\n')
 
-  const plan = buildRelocationPlan({
+  const plan = await buildRelocationPlan({
     root,
     registry,
     sessionIds: ['session-a', 'session-b'],

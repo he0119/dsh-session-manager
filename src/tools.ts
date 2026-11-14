@@ -1194,7 +1194,7 @@ export function registerTools(ctx: Context, config: PluginConfigInput = {}): Arr
           ],
         },
         async execute(args): Promise<PlanToolResult> {
-          const preview = previewMigration(deps, {
+          const preview = await previewMigration(deps, {
             to: args.to,
             sessionIds: args.sessionIds,
           })

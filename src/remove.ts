@@ -21,7 +21,7 @@ import { existsSync, readdirSync, rmdirSync, statSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
 import { dirname } from 'node:path'
 
-import { scanAll, type DiscoveredSession } from './discovery.ts'
+import { scanAllAsync, type DiscoveredSession } from './discovery.ts'
 import type { ProjectionCacheReader } from './projection-cache.ts'
 import { familyOf, loneSubagents } from './family.ts'
 import { createBackup } from './journal.ts'
@@ -129,11 +129,11 @@ function indexById(sessions: readonly DiscoveredSession[]): Map<string, Discover
  * @param options.onProgress 发现阶段的进度（`scan`：扫整库找这些会话与它们的后代）。
  * @returns 计划；`problems` 非空时 `ok` 为 false，执行阶段会拒绝。
  */
-export function planRemoval(
+export async function planRemoval(
   deps: RemoveDeps,
   request: RemoveRequest,
   options: { onProgress?: ProgressReporter } = {},
-): RemovalPlan {
+): Promise<RemovalPlan> {
   const problems: string[] = []
   const ids = [...new Set((request.sessionIds ?? []).map((id) => String(id)))]
   if (ids.length === 0) problems.push('缺少要删除的会话（sessionIds）')
@@ -141,7 +141,7 @@ export function planRemoval(
   const live = deps.liveSessionIds?.() ?? new Set<string>()
   let discovered: DiscoveredSession[] = []
   try {
-    discovered = scanAll(deps.sessionsRoot, deps.decodeAll, {
+    discovered = await scanAllAsync(deps.sessionsRoot, deps.decodeAll, {
       ...(deps.resolveTitle === undefined ? {} : { resolveTitle: deps.resolveTitle }),
       ...(deps.projection === undefined ? {} : { projection: deps.projection }),
       ...(options.onProgress === undefined
@@ -245,7 +245,7 @@ export async function runRemoval(
   options: { apply: boolean; onProgress?: ProgressReporter },
 ): Promise<RemovalRun> {
   const onProgress = options.onProgress
-  const plan = planRemoval(deps, request, { ...(onProgress === undefined ? {} : { onProgress }) })
+  const plan = await planRemoval(deps, request, { ...(onProgress === undefined ? {} : { onProgress }) })
   const empty = { plan, problems: plan.problems, verified: false, dirsRemoved: 0, removedProjectDirs: [] }
   if (!plan.ok) return { applied: false, ...empty, summary: `未执行：${plan.problems.join('；')}` }
   /** 整族一起删时把"多出来的那几条"说清楚，否则预演清单里会冒出用户没勾过的会话。 */

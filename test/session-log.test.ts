@@ -211,8 +211,8 @@ function titlesOf(text: string): string[] {
   return titles
 }
 
-test('branchSessionLog（zstd）：换 id、最后一条标题带来源、正文一字不动', () => {
-  const out = branchSessionLog(makeLog(header, branchEvents), 'zstd', {
+test('branchSessionLog（zstd）：换 id、最后一条标题带来源、正文一字不动', async () => {
+  const out = await branchSessionLog(makeLog(header, branchEvents), 'zstd', {
     newId: 'session-branched',
     machine: 'robot-test',
     time: '2026-10-12T21:00:00.000Z',
@@ -230,9 +230,9 @@ test('branchSessionLog（zstd）：换 id、最后一条标题带来源、正文
   assert.equal(marker.time, '2026-10-12T04:02:00.000Z', '标题事件的时刻不动')
 })
 
-test('branchSessionLog（明文）：同一套语义', () => {
+test('branchSessionLog（明文）：同一套语义', async () => {
   const text = [JSON.stringify(header), ...branchEvents.map((e) => JSON.stringify(e))].join('\n') + '\n'
-  const out = branchSessionLog(Buffer.from(text, 'utf8'), null, {
+  const out = await branchSessionLog(Buffer.from(text, 'utf8'), null, {
     newId: 'session-branched',
     machine: 'robot-test',
     time: '2026-10-12T21:00:00.000Z',
@@ -243,9 +243,9 @@ test('branchSessionLog（明文）：同一套语义', () => {
   assert.deepEqual(titlesOf(out.toString('utf8')), ['原标题', MARKED], '明文同义：只改最后一条标题')
 })
 
-test('branchSessionLog：没有原标题时标记只留来源那半句', () => {
+test('branchSessionLog：没有原标题时标记只留来源那半句', async () => {
   const only = { ...(branchEvents[1] as Record<string, unknown>), seq: 0 }
-  const out = branchSessionLog(makeLog(header, [only]), 'zstd', {
+  const out = await branchSessionLog(makeLog(header, [only]), 'zstd', {
     newId: 'session-branched',
     machine: 'robot-test',
     time: '2026-10-12T21:00:00.000Z',
