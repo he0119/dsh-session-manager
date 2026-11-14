@@ -96,6 +96,8 @@ interface SyncRow {
   machine?: string
   fromCwd?: string
   toCwd?: string
+  /** 落选那一份也留着（「两份都保留」那一档）。 */
+  keepLoser?: true
 }
 
 /**
@@ -195,9 +197,9 @@ function syncTag(entry: SyncRow, t: Translate): string {
     case 'missing-target':
       return t('sync.tag.missingTarget')
     case 'keep-local':
-      return t('sync.tag.keepLocal')
+      return entry.keepLoser === true ? t('sync.tag.keepBoth') : t('sync.tag.keepLocal')
     case 'keep-remote':
-      return t('sync.tag.keepRemote')
+      return entry.keepLoser === true ? t('sync.tag.keepBoth') : t('sync.tag.keepRemote')
     default:
       return syncWhy(entry, t)
   }
@@ -224,6 +226,17 @@ function replaceCodeKey(code: SyncPullEntry['code']): SessionManagerKey {
 }
 
 /**
+ * 覆盖行那句悬浮提示。
+ *
+ * 裁决「留远端这份」的那一类带着计划里的原话——它写明另一份是留着（「两份都保留」）还是不留，界面再拼
+ * 一句只会和宿主说的对不上；其余几种照旧走固定的那几句。
+ */
+function replaceHint(entry: SyncPullEntry, t: Translate): string {
+  if (entry.code === 'keep-remote' && entry.reason !== undefined) return entry.reason
+  return t(replaceCodeKey(entry.code))
+}
+
+/**
  * 「会推送」那张表里一行挂哪颗标签、整句是什么。
  *
  * 三件事共用这张表：本机独有（推一条新的）、本机领先（重推刷新远端）、两边各自写过而本机更晚（分叉
@@ -237,6 +250,16 @@ function pushTag(entry: SyncPushEntry, t: Translate): { label: string; title: st
       return { label: t('sync.tag.repush'), title: t('sync.why.localAhead'), repush: true }
     case 'local-newer':
       return { label: t('sync.tag.localNewer'), title: t('sync.why.localNewer'), repush: true }
+    /*
+     * 裁决「留本机这份」（或「两份都保留」而本机更晚）：动作是把自己这一格刷成最新，所以与上面两类同
+     * 一档（重推、quiet）；整句用计划给的原话——它写着另一份去哪了，界面再拼一句只会和宿主对不上。
+     */
+    case 'keep-local':
+      return {
+        label: entry.keepLoser === true ? t('sync.tag.keepBoth') : t('sync.tag.keepLocal'),
+        title: entry.reason ?? t('sync.tag.keepLocal'),
+        repush: true,
+      }
     default:
       return { label: t('sync.tag.push'), title: t('sync.why.missingPush'), repush: false }
   }
@@ -1294,7 +1317,7 @@ export function SyncPanel({
                                 `dsm-tag` 挂在包着它的那层 span 上：styles.ts 的 `.dsm-planTable .dsm-tag`
                                 那条负责"状态列装不下时限宽截断、别顶到会话名那一列"。
                               */}
-                              <Hint text={t(replace ? replaceCodeKey(entry.code) : 'sync.why.missingPull')}>
+                              <Hint text={replace ? replaceHint(entry, t) : t('sync.why.missingPull')}>
                                 <span className="dsm-tag">
                                   <Tag tone={replace ? 'quiet' : 'success'}>
                                     {t(replace ? 'sync.tag.replace' : 'sync.tag.pull')}

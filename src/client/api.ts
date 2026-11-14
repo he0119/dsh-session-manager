@@ -503,6 +503,8 @@ export interface SyncPullEntry {
     | 'no-mapping'
     | 'missing-target'
     | 'keep-remote'
+  /** 落选的本机那份也要留（「两份都保留」那一档）：落地时落成一条新会话。 */
+  keepLoser?: true
   reason?: string
 }
 
@@ -517,12 +519,17 @@ export interface SyncPushEntry {
   code: 'missing' | 'local-ahead' | 'local-newer' | 'identical' | 'remote-ahead' | 'diverged' | 'keep-local'
   /** 远端那份由哪台机器贡献（"远端领先 / 两边各自写过"要指名道姓）。 */
   machine?: string
+  /** 落选的远端那份也要留（「两份都保留」那一档）：落地时落成一条新会话。 */
+  keepLoser?: true
   reason?: string
 }
 
 
-/** 两边各自写过时用户挑的正本：`keep-local` 以本机这份为准、`keep-remote` 以远端那份为准。 */
-export type SyncDecision = 'keep-local' | 'keep-remote'
+/**
+ * 两边各自写过时留哪一份：`keep-local` 只留本机这份、`keep-remote` 只留远端那份、`keep-both` 两份都留
+ * （占原 id 的那份按最后活动时间定，另一份落成一条新会话）。
+ */
+export type SyncDecision = 'keep-local' | 'keep-remote' | 'keep-both'
 
 /** 同步计划（宿主 `SyncPlan`）。 */
 export interface SyncPlan {

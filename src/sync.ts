@@ -733,6 +733,34 @@ export function newerSide(mine: number | undefined, theirs: number | undefined):
   return 'unknown'
 }
 
+/**
+ * 「两份都保留」时谁占原来的 id，以及为什么。
+ *
+ * 只有 `remote-newer` 是"远端那份占 id"：比不出来（旧索引没有那枚钟、或者两边一样）、以及更晚的是
+ * 远端那份但它这次落不了地，都由本机这份占。
+ */
+type BothKeeper = 'local-newer' | 'remote-newer' | 'remote-blocked' | 'unknown'
+
+/**
+ * 「两份都保留」那一行计划里的说明：谁占了原来的 id、为什么是它、另一份去了哪。
+ *
+ * 写在计划里（宿主侧）、界面原样当悬浮提示：理由的判据在这里，界面不该再按码猜一遍。
+ * @param why 占 id 的判据（见 `BothKeeper`）。
+ * @param machine 远端那份来自哪台机器。
+ */
+function bothNote(why: BothKeeper, machine: string): string {
+  switch (why) {
+    case 'local-newer':
+      return `两份都保留：本机这份更晚，占住原来的 id（${machine} 那份落成一条新会话）`
+    case 'remote-newer':
+      return `两份都保留：${machine} 那份更晚，占住原来的 id（本机那份落成一条新会话）`
+    case 'remote-blocked':
+      return `两份都保留：${machine} 那份更晚，但它这次落不了地（缺映射、目标目录不存在或会话正开着），改由本机这份占住原来的 id（${machine} 那份落成一条新会话）`
+    case 'unknown':
+      return `两份都保留：比不出哪份更晚，由本机这份占住原来的 id（${machine} 那份落成一条新会话）`
+  }
+}
+
 /** 拉取方向的一条。 */
 export interface SyncPullEntry {
   id: string
@@ -752,6 +780,11 @@ export interface SyncPullEntry {
   action: 'create' | 'replace' | 'skip'
   /** 机器可读的分类（界面按它挑文案与过滤，不去解析 `reason`）。 */
   code: 'missing' | 'remote-ahead' | 'remote-newer' | 'blank-local' | 'no-mapping' | 'missing-target' | 'keep-remote'
+  /**
+   * 落选的本机那份也要留（只有「两份都保留」的裁决才置它）：落地时落成一条新会话，原 id 让给远端那份。
+   * 缺席 = 只留远端那份，本机这份先备份再被顶掉。
+   */
+  keepLoser?: true
   reason?: string
 }
 
@@ -767,6 +800,11 @@ export interface SyncPushEntry {
   code: 'missing' | 'local-ahead' | 'local-newer' | 'identical' | 'remote-ahead' | 'diverged' | 'keep-local'
   /** 远端那一份由哪台机器贡献（"远端领先 / 两边各自写过"要指名道姓）。 */
   machine?: string
+  /**
+   * 落选的远端那份也要留（只有「两份都保留」的裁决才置它）：落地时把远端那份落成一条新会话，
+   * 原 id 仍由本机这份占着。缺席 = 只留本机这份，远端那份不落到本机。
+   */
+  keepLoser?: true
   reason?: string
 }
 
@@ -799,8 +837,13 @@ export interface SyncPlan {
 }
 
 /** `planSync()` 的入参。 */
-/** 两边各自写过时用户挑的正本：`keep-local` 以本机这份为准、`keep-remote` 以远端那份为准。 */
-export type SyncDecision = 'keep-local' | 'keep-remote'
+/**
+ * 两边各自写过时留哪一份：`keep-local` 只留本机这份、`keep-remote` 只留远端那份、`keep-both` 两份都留。
+ *
+ * 前两种是"只有一份留在这个库里"，另一种那份不再落到本机（远端那份留在原来那台机器上，本机那份被
+ * 顶掉之前先备份）；`keep-both` 才把另一份落成一条新会话，占原 id 的那份按最后活动时间定。
+ */
+export type SyncDecision = 'keep-local' | 'keep-remote' | 'keep-both'
 
 export interface SyncPlanInput {
   /**
@@ -811,11 +854,12 @@ export interface SyncPlanInput {
    */
   contentRelations?: ReadonlyMap<string, ContentRelation>
   /**
-   * 两边各自写过时的裁决（会话 id → 挑哪份当正本）。
+   * 两边各自写过时的裁决（会话 id → 留哪一份）。
    *
-   * 裁决**不是**"删掉另一份"：落选那份先落成一条**新会话**（新 id，标题带「原标题 · 来自 <机器>
-   * <时刻>」的来源标记，见 `branchSessionLog()`），正本再占住原来的 id。所以两条内容都在库里。
-   * 缺席 = 这条没有裁决，照旧两条都不动（`diverged`）。
+   * 三种口径见 `SyncDecision`：选单边时另一份不留（本机那份先备份再被顶掉；远端那份不落到本机）；
+   * 选「两份都保留」时另一份落成一条**新会话**（新 id，标题带「原标题 · 来自 <机器> <时刻>」的来源
+   * 标记，见 `branchSessionLog()`），占原 id 的那份按最后活动时间定。缺席 = 这条没有裁决，照旧两条
+   * 都不动（`diverged`）。
    */
   decisions?: ReadonlyMap<string, SyncDecision>
   /** 本机整库（`scanAll()` 的结果）。 */
@@ -1037,19 +1081,54 @@ export function planSync(input: SyncPlanInput): SyncPlan {
      * 分高下，而空白那份不用比分——它没有内容可保。
      */
     /*
-     * 裁决优先于"比谁新"：两边各自写过时用户已经挑好正本，按它走；另一份由落地那一步落成新会话
-     * （不丢）。空白那份与结构性的"远端领先"不在此列——前者没有内容可保，后者本来就不是分叉。
+     * 裁决优先于"比谁新"：两边各自写过时用户已经挑好留哪一份。三种口径：
+     *   - `keep-local`：只留本机这份——远端那份不落到本机（它还在原来那台机器上）；
+     *   - `keep-remote`：只留远端那份——本机这份先备份再被顶掉；
+     *   - `keep-both`：两份都留——最后活动时间更晚的那份占原来的 id，另一份落成一条新会话。
+     * 空白那份与结构性的"远端领先"不在此列：前者没有内容可保，后者本来就不是分叉。
      */
-    const decision = isBlank || kind === 'remote-ahead' ? undefined : input.decisions?.get(session.id)
-    /** 落地那一步要用的目录（裁决"以远端为准"要它；与"覆盖本机那份"同一把尺子）。 */
+    const asked = isBlank || kind === 'remote-ahead' ? undefined : input.decisions?.get(session.id)
+    /** 落地那一步要用的目录（裁决"留远端那份"要它；与"覆盖本机那份"同一把尺子）。 */
     const target = resolveLandedCwd(input, session, remote)
+    /** 远端那份这次真落得下来吗：缺映射、映射指到的目录不存在、会话正开着都算落不下来。 */
+    const remoteLands = (): boolean => {
+      if (target === undefined && remote.cwd !== undefined) return false
+      if (target !== undefined && session.cwd === undefined && !isDirectory(target)) return false
+      return input.isLive?.(session.id) !== true
+    }
+    /**
+     * 「两份都保留」为什么由这一方占原 id：比最后活动时间（与"谁更新"同一个值）。
+     *
+     * 三种退化都归到"本机占"：比不出来（旧索引没记这枚钟、或者两边一样）、以及更晚的是远端那份但它
+     * 这次落不了地。后者不能就这么把行降成"不动"——那等于按了按钮什么也没发生；本机占 id 那份总能
+     * 推上去，两份内容也都还在。
+     */
+    let both: BothKeeper | undefined
+    if (asked === 'keep-both') {
+      const side = newerSide(mineActiveAt, theirActiveAt)
+      both =
+        side === 'unknown'
+          ? 'unknown'
+          : side === 'local'
+            ? 'local-newer'
+            : remoteLands()
+              ? 'remote-newer'
+              : 'remote-blocked'
+    }
+    const decision: SyncDecision | undefined =
+      both === undefined ? asked : both === 'remote-newer' ? 'keep-remote' : 'keep-local'
     if (decision === 'keep-local') {
       push.push({
         ...common,
         action: 'update',
         code: 'keep-local',
+        ...(both === undefined ? {} : { keepLoser: true }),
         machine: remote.machine,
-        reason: forkText(content, remote.machine) + '，以本机这份为准（对方那份落成一条新会话，不丢）——把自己这一格刷成最新',
+        reason:
+          forkText(content, remote.machine) +
+          (both === undefined
+            ? `，只保留本机这份（${remote.machine} 那份不落到本机，它还在那台机器上）——把自己这一格刷成最新`
+            : `，${bothNote(both, remote.machine)}——把自己这一格刷成最新`),
       })
       pushIds.push(session.id)
       bytesOut += bytes
@@ -1088,8 +1167,13 @@ export function planSync(input: SyncPlanInput): SyncPlan {
         ...(target === undefined ? {} : { toCwd: target }),
         action: 'replace',
         code: 'keep-remote',
+        ...(both === undefined ? {} : { keepLoser: true }),
         machine: remote.machine,
-        reason: forkText(content, remote.machine) + `，以 ${remote.machine} 那份为准（本机那份落成一条新会话，不丢）——先备份本机这份再换成它`,
+        reason:
+          forkText(content, remote.machine) +
+          (both === undefined
+            ? `，只保留 ${remote.machine} 那份（本机这份先备份再被顶掉）`
+            : `，${bothNote(both, remote.machine)}——先备份本机这份再换成它`),
       })
       pullIds.push(session.id)
       bytesIn += bytes
@@ -2976,6 +3060,13 @@ export async function applyPreparedSync(
   const pulled: string[] = []
   const replaced: string[] = []
   const pushed: Array<{ id: string; action: 'upload' | 'update' }> = []
+  /**
+   * 「两份都保留」但落选那一份没能落成新会话的会话 id。
+   *
+   * 这些条目**这一步都不动**：另一份还没落到本机，这会儿推上去 / 覆盖掉就把那一份盖掉了——而这条裁决
+   * 的全部意义就是"两份都留"。失败照旧逐条进 `problems`。
+   */
+  const failedBranches = new Set<string>()
   let bytesIn = 0
   let bytesOut = 0
   let registryWritten = false
@@ -3011,12 +3102,15 @@ export async function applyPreparedSync(
   const replaceJobs = plan.pull.filter((entry) => entry.action === 'replace')
   /*
    * 裁决里落选那一份先安个新家：落成一条**新会话**（新 id，标题带「原标题 · 来自 <机器> <时刻>」的
-   * 来源标记），再让正本占住原来的 id。顺序反过来就会先把落选那份覆盖掉——那正是"另一份不丢"要防
-   * 的事。走的是导入那条路（`planImport`/`applyImport`），所以包自校验、改写 header、附件对象与
-   * 注册表都与导入同一条不变式。
+   * 来源标记），再让正本占住原来的 id。顺序反过来就会先把落选那份覆盖掉——那正是"两份都保留"要防的
+   * 事。走的是导入那条路（`planImport`/`applyImport`），所以包自校验、改写 header、附件对象与注册表
+   * 都与导入同一条不变式。
+   *
+   * **只有「两份都保留」那一档才走这里**（`entry.keepLoser`）：选单边时另一份不留——本机这份由下面的
+   * 覆盖那一步先备份再顶掉，远端那份压根不取回（它还留在原来那台机器上）。
    */
   for (const entry of plan.pull) {
-    if (entry.code !== 'keep-remote') continue
+    if (entry.code !== 'keep-remote' || entry.keepLoser !== true) continue
     const session = byId.get(entry.id)
     if (session === undefined) continue
     try {
@@ -3046,11 +3140,14 @@ export async function applyPreparedSync(
       countPackedAttachments(outcome, attachmentIn)
       pulled.push(...outcome.written)
     } catch (error) {
-      problems.push(`把落选的本机那份落成新会话失败：${error instanceof Error ? error.message : String(error)}`)
+      failedBranches.add(entry.id)
+      problems.push(
+        `把落选的本机那份落成新会话失败，这一条这次没动（动了会把本机那份盖掉）：${error instanceof Error ? error.message : String(error)}`,
+      )
     }
   }
   for (const entry of plan.push) {
-    if (entry.code !== 'keep-local') continue
+    if (entry.code !== 'keep-local' || entry.keepLoser !== true) continue
     const session = byId.get(entry.id)
     const machine = entry.machine
     if (session === undefined || machine === undefined) continue
@@ -3076,7 +3173,10 @@ export async function applyPreparedSync(
       countPackedAttachments(outcome, attachmentIn)
       pulled.push(...outcome.written)
     } catch (error) {
-      problems.push(`把落选的 ${machine} 那份落成新会话失败：${error instanceof Error ? error.message : String(error)}`)
+      failedBranches.add(entry.id)
+      problems.push(
+        `把落选的 ${machine} 那份落成新会话失败，这一条这次没推（推了会把远端那份盖掉）：${error instanceof Error ? error.message : String(error)}`,
+      )
     }
   }
   const pullTotal = pullJobs.length + replaceJobs.length
@@ -3152,7 +3252,8 @@ export async function applyPreparedSync(
         )
       }
     }
-    const ready = replaceJobs.filter((entry) => fetched.has(entry.id))
+    // 落选那份没落成新会话的那些不覆盖：本机这份还没被保住（见 `failedBranches`）。
+    const ready = replaceJobs.filter((entry) => fetched.has(entry.id) && !failedBranches.has(entry.id))
     let backedUp = false
     if (ready.length > 0) {
       try {
@@ -3278,7 +3379,9 @@ export async function applyPreparedSync(
     const { lastPromptAt: _dropped, ...rest } = current
     ownEntries.set(entry.id, { ...rest, lastActiveAt: active })
   }
-  const pushJobs = plan.push.filter((entry) => entry.action === 'upload' || entry.action === 'update')
+  const pushJobs = plan.push.filter(
+    (entry) => (entry.action === 'upload' || entry.action === 'update') && !failedBranches.has(entry.id),
+  )
   for (let index = 0; index < pushJobs.length; index += 1) {
     const entry = pushJobs[index] as SyncPushEntry
     const session = byId.get(entry.id)

@@ -88,8 +88,11 @@
   `diverged` 与那几个"一份会顶掉另一份"的结论各带一枚「看差异」：`GET /sync-diff` 取回远端那一个包、
   逐行比原始日志，header 单独比，结论分成 same / 续写 / 真分叉三类；一个字节都不写。
 - [两边各自写过时挑一份当正本，另一份落成新会话](../.agents/notes/implemented/feature/2026-10-16-adjudication-keeps-one-branches-the-other.md)：
-  差异页真分叉时给「以本机为准」「以远端为准」两枚，选择随 `decisions` 进预演并触发重算；落地先把
-  落选那份落成新会话（新 id，标题带来源），正本再占原 id。看差异仍然只读。
+  落成新会话怎么落：新 id、最新一条标题带「原标题 · 来自 <机器> <时刻>」的来源标记（改最后一条标题，
+  不插事件）；走的是导入那条编排。现在只有「两份都保留」那一档会走它，三档见下一条。
+- [裁决分三种：选单边只留一份，两份都留才落新会话](../.agents/notes/implemented/feature/2026-11-14-single-side-drops-the-other.md)：
+  差异页改成三枚（只保留本机 / 只保留远端 / 两份都保留）；`keepLoser` 只在第三档置位，原 id 归最后
+  活动时间更晚的那份，判不出或远端落不了地时归本机。
 - [落成新会话的标记标题不能打乱事件 seq](../.agents/notes/implemented/bug-fix/2026-10-18-branch-title-keeps-seq-dense.md)：
   标记不能插在最后一条标题之后（后面的 `seq` 会错位，宿主读成 torn JSONL）；改最后一条标题的
   `data.title`，没有标题时才追加到末尾，并校验事件 `seq` 与位置一一对应、标题事件满足 v4 形状。
