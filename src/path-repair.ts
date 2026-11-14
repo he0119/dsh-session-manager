@@ -9,12 +9,14 @@
 // 先算计划（只读，改哪几条、从哪个根搬到哪个根、哪些搬不了），再落地（备份、逐文件原子替换、修完复验）。
 //
 // 与迁移的区别：迁移搬目录 + 改 header；这里**不动任何目录**，只改那几行事件里的路径值。
-import { cpSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
+import { cp, mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join } from 'node:path'
 
 import type { DiscoveredSession } from './discovery.ts'
 import { SELF_ROOT_PATH_FIELDS, SELF_ROOT_PATH_MARKERS } from './self-root-path.ts'
-import { relocateSessionPaths, relocateSessionPathsText } from './session-log.ts'
+import { decodeLogTextChunked } from './log-decode.ts'
+import { relocateSessionPaths, relocateSessionPathsChunked, relocateSessionPathsText } from './session-log.ts'
 import { stampName } from './journal.ts'
 import type { CompressFrame, DecodeAll, ProgressReporter } from './types.ts'
 
@@ -135,10 +137,10 @@ export function deriveSourceRoot(values: readonly string[], target: string): str
  * @param options 解码器、可选的源根与要看的会话。
  * @returns 计划（只含需要动的会话）与这一趟扫了多少。
  */
-export function planPathRepair(
+export async function planPathRepair(
   sessions: readonly DiscoveredSession[],
   options: PathRepairOptions,
-): PathRepairPlanResult {
+): Promise<PathRepairPlanResult> {
   const { decodeAll } = options
   const wanted = options.ids === undefined ? undefined : new Set(options.ids)
   const plans: PathRepairSessionPlan[] = []
@@ -160,7 +162,8 @@ export function planPathRepair(
       scannedFiles++
       let text: string
       try {
-        text = decodeAll(readFileSync(file.path))
+        // 分块解压：这一步要整份读日志找路径，最大的会话几十 MB，整份解会把主线程按住一两秒。
+        text = await decodeLogTextChunked(await readFile(file.path), file.compression)
       } catch (error) {
         fileProblems.push(`${file.name} 读不出来：${error instanceof Error ? error.message : String(error)}`)
         continue
@@ -239,10 +242,10 @@ export interface PathRepairOutcome {
  * @returns 改了几份日志、几条事件，以及逐条问题。
  * @throws 备份之后任何一份日志改写失败时抛错（此前已改完的文件保留，问题在 `problems` 里交代）。
  */
-export function applyPathRepair(
+export async function applyPathRepair(
   plans: readonly PathRepairSessionPlan[],
   options: PathRepairApplyOptions,
-): PathRepairOutcome {
+): Promise<PathRepairOutcome> {
   const { decodeAll, compressFrame, now = new Date(), backupRoot, onProgress } = options
   const affected = plans.filter((plan) => plan.problem === undefined && plan.files.length > 0)
   const problems: string[] = []
@@ -251,10 +254,10 @@ export function applyPathRepair(
     backupDir = join(backupRoot, `path-repair-${stampName(now)}`)
     for (const plan of affected) {
       const destination = join(backupDir, 'sessions', basename(dirname(plan.dir)), basename(plan.dir))
-      mkdirSync(dirname(destination), { recursive: true })
-      cpSync(plan.dir, destination, { recursive: true })
+      await mkdir(dirname(destination), { recursive: true })
+      await cp(plan.dir, destination, { recursive: true })
     }
-    writeFileSync(
+    await writeFile(
       join(backupDir, 'repair.json'),
       JSON.stringify(
         {
@@ -281,23 +284,27 @@ export function applyPathRepair(
     for (const file of plan.files) {
       onProgress?.({ phase: 'rewrite', total, done, id: plan.id, label: plan.title ?? plan.id })
       done++
-      const buf = readFileSync(file.path)
-      const result = relocateSessionPaths(buf, {
+      const buf = await readFile(file.path)
+      const optionsForFile = {
         from: file.from,
         to: file.to,
         decodeAll,
         ...(compressFrame === undefined ? {} : { compressFrame }),
-      })
+      }
+      // zstd 走分块让出的那一版；明文日志很小，走同步版（它没有帧可切）。
+      const result = file.compression === 'zstd'
+        ? await relocateSessionPathsChunked(buf, optionsForFile)
+        : relocateSessionPaths(buf, optionsForFile)
       if (result.unchanged) continue
       const tmp = `${file.path}.dsh-session-manager.tmp`
-      writeFileSync(tmp, result.buffer)
+      await writeFile(tmp, result.buffer)
       // 复验：落盘前那一份必须能解出来，且再规划一遍一条都不用改。
-      const written = decodeAll(readFileSync(tmp))
+      const written = await decodeLogTextChunked(await readFile(tmp), file.compression)
       const again = relocateSessionPathsText(written, { from: file.from, to: file.to })
       if (again.rewritten !== 0 || again.unmapped.length > 0 || again.nextHeader.cwd !== file.to) {
         throw new Error(`repair verification failed for ${file.path}: still needs ${again.rewritten} rewrite(s)`)
       }
-      renameSync(tmp, file.path)
+      await rename(tmp, file.path)
       files++
       events += result.rewritten
     }

@@ -27,7 +27,7 @@ import { dirname, join } from 'node:path'
 
 import { createDavClient, type DavPort } from './dav.ts'
 import type { AttachmentPort } from './attachments.ts'
-import { readHeaderQuick, scanAll } from './discovery.ts'
+import { readHeaderQuick, scanAllAsync } from './discovery.ts'
 import { applyPathRepair, planPathRepair, type PathRepairPlanResult } from './path-repair.ts'
 import {
   previewMigration,
@@ -1476,8 +1476,8 @@ export function registerTools(ctx: Context, config: PluginConfigInput = {}): Arr
           ],
         },
         async execute(args): Promise<PathRepairToolResult> {
-          const sessions = scanAll(paths.sessionsRoot, decodeAll)
-          const plan = planPathRepair(sessions, {
+          const sessions = await scanAllAsync(paths.sessionsRoot, decodeAll)
+          const plan = await planPathRepair(sessions, {
             decodeAll,
             ...(args.from === undefined ? {} : { from: args.from }),
             ...(args.sessionIds === undefined ? {} : { ids: args.sessionIds }),
@@ -1517,7 +1517,7 @@ export function registerTools(ctx: Context, config: PluginConfigInput = {}): Arr
               problems: [...plan.problems, ...plan.sessions.flatMap((entry) => (entry.problem === undefined ? [] : [`${entry.id}：${entry.problem}`]))],
             }
           }
-          const outcome = applyPathRepair(plan.sessions, { decodeAll, backupRoot: paths.backupRoot })
+          const outcome = await applyPathRepair(plan.sessions, { decodeAll, backupRoot: paths.backupRoot })
           const warm = await warmCheckpoints(
             changing.map((entry) => entry.id),
             { ...(deps.hostCheckpoints === undefined ? {} : { hostCheckpoints: deps.hostCheckpoints }) },
