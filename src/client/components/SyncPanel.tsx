@@ -61,6 +61,7 @@ import { WorkspaceIcon } from './icons.tsx'
 import type { SessionManagerKey, Translate } from '../logic/locales.ts'
 import { AUTO_PUSH_SKIP_CODES } from '../logic/autoPush.ts'
 import { syncJob, type SyncJobSnapshot } from '../logic/syncJob.ts'
+import { syncStage, type SyncStage } from '../logic/syncStage.ts'
 import { agoLabel } from '../logic/relativeTime.ts'
 import { leftoversOf } from '../logic/syncLeftovers.ts'
 import { projectLabel, sessionLabel, type SessionLabel } from '../logic/planRows.ts'
@@ -950,8 +951,14 @@ export function SyncPanel({
   /** 计划那一段里有没有表（决定那一档要不要 1080）。 */
   const hasPlanTables = syncPlan !== null && (syncPulls.length > 0 || syncPushes.length > 0 || syncKept.length > 0)
 
-  /** 这一段说哪件事：面板（填表单 / 说状态）→ 计划 → 落地。三段同处一个弹窗（与导入那一面同一个形状）。 */
-  const stage: 'idle' | 'plan' | 'apply' = dialog === null ? 'idle' : dialog
+  /**
+   * 这一段说哪件事：面板（填表单 / 说状态）→ 计划 → 落地。三段同处一个弹窗（与导入那一面同一个形状）。
+   *
+   * 判据不只看这一页自己的 `dialog`：状态栏那枚「同步中 3/7」点开时，这一页并没有"走到"落地段
+   * （`dialog` 还是 `null`），可那一趟正在跑——只看 `dialog` 就会摆成面板段，进度一条字都没有。
+   * 规则在 [syncStage](../logic/syncStage.ts) 那一份里，`test/sync-stage.test.ts` 逐支钉着。
+   */
+  const stage: SyncStage = syncStage(dialog, job.running)
 
   /**
    * 「上次同步」那张清单要说的话。
@@ -1398,12 +1405,22 @@ export function SyncPanel({
         )}
           </>
         )}
-        {stage === 'apply' && <>        {/* 落地：前面三个阶段（算计划）与后面两段（拉取 / 推送）报的是同一套事件，画法也一样。 */}
-        {liveProgress === null ? (
-          <p className="dsm-hint">{t('progress.waiting')}</p>
-        ) : (
-          <ProgressBlock t={t} progress={liveProgress} note={syncNote(liveProgress)} />
-        )}</>}
+        {stage === 'apply' && (
+          <>
+            {/* 落地：前面三个阶段（算计划）与后面两段（拉取 / 推送）报的是同一套事件，画法也一样。 */}
+            {liveProgress === null ? (
+              job.adopted ? null : <p className="dsm-hint">{t('progress.waiting')}</p>
+            ) : (
+              <ProgressBlock t={t} progress={liveProgress} note={syncNote(liveProgress)} />
+            )}
+            {/*
+              认领来的那一趟（刷新页面、或者从另一个标签页发起）宿主只留下"跑没跑、搬了几条"，
+              没有逐条事件。这时先把话说清：这一页看不到逐条进度，跑完会补上条数——不摆一条不会动的
+              进度条，也不拿一句"正在准备…"替它。
+            */}
+            {job.adopted && <p className="dsm-hint">{t('sync.background.adopted')}</p>}
+          </>
+        )}
       </WorkDialog>
 
       {/*
