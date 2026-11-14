@@ -1612,12 +1612,16 @@ test('客户端产物：「会话」页把侧边栏看不见的那三类标出�
   const manageRows = recorded.filter(
     (node) => String(node.props?.className).includes('dsm-rowManage'),
   )
-  // 六个格子：勾选框 / 标记 / 标题 / 项目 / 字节 / 时间。
+  // 七个格子：勾选框 / 标记 / 折叠标记 / 标题 / 项目 / 字节 / 时间。
   // 数的是**元素**：JSX 里条件为假时会留一个 false 在 children 里。
   const cells = (Array.isArray(manageRows[0].props.children) ? manageRows[0].props.children : []).filter(
     (child) => child !== null && typeof child === 'object',
   )
-  assert.equal(cells.length, 6, '行里六个格子（勾选框 / 标记 / 标题 / 项目 / 字节 / 时间）')
+  assert.equal(
+    cells.length,
+    7,
+    '行里七个格子（勾选框 / 标记 / 折叠标记 / 标题 / 项目 / 字节 / 时间）：折叠标记那一列留着，父行与普通行的标题才落在同一个左缘上',
+  )
   // 子智能体**不是**「未分组」：它确实没在册，但侧边栏把它嵌在父会话下面，从来不放进那一组。
   // 这条以前是反的（判据只看"有没有认领"），所以两行都钉住。
   assert.deepEqual(
@@ -1689,10 +1693,11 @@ test('客户端产物：每一枚官方 Tag 都挂上本页的布局挂钩类（
   )
 })
 
-test('客户端产物：「会话」页平铺——不缩进，子智能体靠标签与「父在别处」的备注区分', { skip }, () => {
-  // 平铺之后没有组内的父子缩进了（排序跨项目，缩进会把人骗了）。父子关系仍然要看得见：子智能体挂标签；
-  // 父会话在**别的项目**里时再挂一枚「父在别处」——它回答"删了这条会带走谁"，这条信息不能一起丢。
-  // 分叉（`sessions.fork()`：有父指针、没有 origin）是自洽的普通会话，不挂标签也不挂备注。
+test('客户端产物：「会话」页把子智能体折在父会话下面，父行带枚折叠标记（默认收起）', { skip }, () => {
+  // 子智能体不该在列表里跟主会话平起平坐：它折在父会话下面，父行挂一枚"展开 N 条"的标记，默认收起。
+  // 父会话在**别的项目**里时折不过去（父不在这份清单里），它自己当顶层，并挂一枚「父在别处」——
+  // 它回答"删了这条会带走谁"，这条信息不能丢。分叉（`sessions.fork()`：有父指针、没有 origin）
+  // 是自洽的普通会话，不挂标签也不挂备注。
   const sessions = [
     { id: 'p1', cwd: '/home/u/dev/alpha', createdAt: 5, dir: '/home/u/dev/alpha', bytes: 100, files: [], archived: true },
     { id: 'c1', cwd: '/home/u/dev/alpha', createdAt: 4, dir: '/home/u/dev/alpha', bytes: 200, files: [], origin: 'subagent', hidden: 'subagent', parentSession: 'p1' },
@@ -1712,7 +1717,7 @@ test('客户端产物：「会话」页平铺——不缩进，子智能体靠�
   }
   const mounted = mount({ state, panel: 'manage' })
   const { component, registration } = mounted.registrations[0]
-  strings(component(registration.inject()))
+  const body = strings(component(registration.inject()))
 
   const rows = mounted.recorded
     .filter((node) => String(node.props?.className).includes('dsm-rowManage'))
@@ -1722,15 +1727,42 @@ test('客户端产物：「会话」页平铺——不缩进，子智能体靠�
       nest: (String(row.props.className).match(/dsm-rowNest(\d)/) ?? [])[1] ?? '0',
     }))
 
-  // 默认按时间从新到旧，与所在的组无关（x1 与 f1 同一毫秒，再按 id 定序）
+  // 默认按时间从新到旧：c1 / c2 折在 p1 下面收着，x1 的父不在这一份里，自己当顶层
   assert.deepEqual(rows, [
     { label: 'p1', tags: ['tag.archived'], nest: '0' },
-    { label: 'c1', tags: ['tag.subagent'], nest: '0' },
-    { label: 'c2', tags: ['tag.subagent'], nest: '0' },
     { label: 'lone', tags: [], nest: '0' },
     { label: 'f1', tags: [], nest: '0' },
     { label: 'x1', tags: ['tag.subagent', 'manage.tag.parentElsewhere'], nest: '0' },
   ])
+  // 父行上那枚折叠标记：说得出有几条挂在它下面，且默认是收起的（子行不在树上）
+  const parent = mounted.recorded.find(
+    (node) => String(node.props?.className).includes('dsm-rowManage') && strings(node).includes('p1'),
+  )
+  const disclosure = elementsOf(parent).find(
+    (node) => String(node.props?.className) === 'dsm-rowDisclosure',
+  )
+  assert.ok(disclosure !== undefined, 'p1 下面挂着两条子智能体，父行要有折叠标记')
+  assert.equal(disclosure.props['aria-expanded'], false, '默认收起')
+  // p1 的直接子只有 c1（c2 挂在 c1 下面，展开 c1 之后才轮到它）
+  assert.equal(disclosure.props['aria-label'], 'list.expandSubagents:{"count":1}', '标记上写着展开几条')
+  assert.ok(!strings(disclosure).includes('c1'), '收起的子行不在树上')
+  // 卡头不为此多写一句：条数少一条就少一条，折起来的那几条挂在父行上，不靠一句说明去解释
+  assert.ok(!body.includes('list.foldedSubagents'), '卡头不为折叠单独写说明')
+  // 左栏的项目条数也按顶层会话数：alpha 里 c1 / c2 折在 p1 下面（3 行），beta 只有 x1（它的父在
+  // 另一个项目，自己当顶层，算一条），「全部项目」是两张清单加起来的那 4 行。
+  assert.deepEqual(
+    mounted.recorded
+      .filter((node) => String(node.props?.className) === 'dsm-treeCount')
+      .map((node) => String(node.props.children)),
+    ['4', '3', '1'],
+    '项目树上的条数不含折起来的子智能体',
+  )
+  // 状态栏那句「N 个会话」同理：子智能体不能单独操作，不算进"库里有几条"
+  const statusLine = mounted.recorded.find((node) => String(node.props?.className) === 'dsm-statusLib')
+  assert.ok(
+    strings(statusLine).some((text) => text.includes('page.count.sessions:{"count":4}')),
+    '状态栏数的是顶层会话（p1 / lone / f1 / x1 四条），不是六条',
+  )
   // 平铺之后没有组头
   assert.equal(
     mounted.recorded.filter((node) => String(node.props?.className) === 'dsm-groupHead').length,
@@ -1761,7 +1793,9 @@ test('客户端产物：子智能体行的勾选框禁用（跟着父会话走�
     return { recorded: mounted.recorded, text: strings(component(registration.inject())) }
   }
 
-  const first = render(mount({ state, panel: 'manage' }))
+  // 空数组状态按调用顺序种：勾选集、筛选条、失败清单、「展开了哪几条父会话」。最后一格种上 p1，
+  // c1 才会出现在树上（默认它折在父会话下面）。
+  const first = render(mount({ state, panel: 'manage', arrays: [[], [], [], ['p1']] }))
   const rows = first.recorded.filter(
     (node) => String(node.props?.className).includes('dsm-rowManage'),
   )
@@ -1982,7 +2016,8 @@ test('客户端产物：「会话」页的筛选条把不匹配的行筛掉，�
   const both = rows.find((row) => strings(row).includes('s-both'))
   assert.deepEqual(rowParts(both).tags, ['tag.blank', 'tag.archived'], '既是空白又已归档的那条挂两枚，且都不是「未分组」')
   // 筛过之后头部报"显示了其中几条"，别让人以为库里的会话变少了
-  assert.ok(text.includes('list.shown:{"shown":2,"total":5}'), '筛过之后报出 显示 N / M 条')
+  // 分母是"顶层会话"：这里 5 条都算（s-sub 虽然是子智能体，但它没有父会话，谁也折不了，自己占一行）
+  assert.ok(text.includes('list.shown:{"shown":2,"total":5}'), '筛过之后报出 显示 N / M 条（顶层会话）')
 
   // 说明句「多选＝任一命中」必须**自己一行**（筛选芯片后面那个 <p>），不能挤在胶囊那一行里。
   // 挤进去不会报错、不会崩，只会让它跟着容器右边缘跑；胶囊行余量也只剩三十来px、窄一点就整行换行。
@@ -5934,8 +5969,9 @@ test('客户端产物：一轮一节折得起来，标题自己画折叠标记',
     { index: 3, kind: 'assistant', type: 'assistant/message', text: 'yo', time: 2 },
     { index: 4, kind: 'event', type: 'turn/end', turn: 1, text: 'ends' },
   ]
-  // `nulls` 与 `arrays` 的种子顺序同上面那条用例：会话页里排在前面的那几个保持默认，最后两个种给
-  // `inspecting` 与内容视图的 `page`，第 5 个数组状态种给内容视图的 `items`。
+  // `nulls` 与 `arrays` 的种子顺序同上面那条用例：会话页里排在前面的那几个保持默认（勾选集、筛选条、
+  // 失败清单、展开了哪几条父会话），最后两个种给 `inspecting` 与内容视图的 `page`，第 5 个数组状态
+  // 种给内容视图的 `items`。
   const mounted = mount({
     state,
     panel: 'manage',
@@ -5944,7 +5980,7 @@ test('客户端产物：一轮一节折得起来，标题自己画折叠标记',
       { id: 's-1', title: 'T' },
       { totalEvents: 5, cursor: 0, problems: [], problemCount: 0 },
     ],
-    arrays: [...Array(3).fill([]), items],
+    arrays: [...Array(4).fill([]), items],
   })
   // 种子在**第一遍**走树时被消费（假钩子是一次性的），所以下面只看这一遍记下来的元素，
   // 不再走第二遍——第二遍里 `inspecting` 已经拿不到种子，弹窗根本不会出现。

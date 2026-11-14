@@ -212,7 +212,9 @@
 - [子智能体不能被单独操作](../.agents/notes/implemented/architecture/2026-09-30-subagents-cannot-be-operated-alone.md)：
   单独点名一律拒并指名父会话，孤儿除外。
 - [子智能体缩进到父会话的下一级](../.agents/notes/implemented/architecture/2026-09-30-subagents-indent-under-their-parent.md)：
-  缩进只改画法，四条边界各有确定的画法。
+  旧版按组缩进（「会话」页平铺之后不再适用），今天只在删除 / 迁移的预演清单里还这么画。
+- [子智能体折在父会话下面](../.agents/notes/implemented/feature/2026-11-14-subagents-fold-under-their-parent.md)：
+  默认收起、父行挂折叠标记，条数只数顶层会话。
 
 ## 列表、筛选与分组
 

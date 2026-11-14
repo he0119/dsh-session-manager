@@ -161,8 +161,14 @@ export interface SessionRowProps {
   owner?: string
   /** 「未分组」那枚标签在这一页有没有信息量（见 sessionTags）。 */
   ungroupedTag?: boolean
-  /** 缩进级数：这条会话是子智能体、挂在上面那张父行下面时 > 0（见 groups.nestSessions）。 */
+  /** 缩进级数：这条会话是子智能体、挂在上面那张父行下面时 > 0。 */
   depth?: number
+  /**
+   * 行首那枚折叠标记：只有"有子智能体挂在它下面"的父行才有。
+   *
+   * 带上条数与文案（文案由调用方按展开状态翻好）：图形只有一份，状态走 `aria-expanded`。
+   */
+  disclosure?: { expanded: boolean; count: number; label: string; onToggle: () => void }
   /** 名字后面跟一枚小标签（父会话在别的目录组里时用它说明父在哪儿）；文案由调用方翻好。 */
   note?: { text: string; tip: string }
   /**
@@ -204,6 +210,49 @@ function openDetailOf(onOpenDetail: () => void) {
   }
 }
 
+/**
+ * 行首那枚折叠标记：尖角 + 挂在这一行下面的子智能体条数。
+ *
+ * 点击只改展开状态，不触发"点整行看详情"（`stopPropagation`）；无障碍名字由调用方给（展开 / 收起，
+ * 带条数），可见的只有尖角与数字。
+ */
+function Disclosure({
+  expanded,
+  count,
+  label,
+  onToggle,
+}: {
+  expanded: boolean
+  count: number
+  label: string
+  onToggle: () => void
+}): React.ReactElement {
+  return (
+    <Hint text={label}>
+      <span
+        className="dsm-rowDisclosure"
+        role="button"
+        tabIndex={0}
+        aria-expanded={expanded}
+        aria-label={label}
+        onClick={(event) => {
+          event.stopPropagation()
+          onToggle()
+        }}
+        onKeyDown={(event) => {
+          if (event.key !== 'Enter' && event.key !== ' ') return
+          event.preventDefault()
+          event.stopPropagation()
+          onToggle()
+        }}
+      >
+        <ChevronIcon />
+        <span className="dsm-rowDisclosureCount">{count}</span>
+      </span>
+    </Hint>
+  )
+}
+
 /** 列表里的一行：勾选框、标记、标题（+标签）、可选的归属、字节、时间。 */
 export function SessionRow({
   session,
@@ -213,6 +262,7 @@ export function SessionRow({
   owner,
   ungroupedTag = true,
   depth = 0,
+  disclosure,
   note,
   locked,
   onOpenDetail,
@@ -288,22 +338,25 @@ export function SessionRow({
         标题那一格：会话页里它是个按钮（那才是这一行的主动作，键盘也走它），外观跟一段文字一样
         （没有盒子、不换字号，见 `.dsm-rowOpen`）；别的页仍旧是一段文字。
       */}
-      {interactive ? (
-        <Hint text={label.tip}>
-          <button
-            type="button"
-            className="dsm-rowLabel dsm-rowOpen"
-            onClick={(event) => {
-              event.stopPropagation()
-              onOpenDetail()
-            }}
-          >
-            {title}
-          </button>
-        </Hint>
-      ) : (
-        <span className="dsm-rowLabel">{title}</span>
-      )}
+      <span className="dsm-treeCell">{disclosure === undefined ? null : <Disclosure {...disclosure} />}</span>
+      <span className={`dsm-rowTitleCell${depth > 0 ? ' dsm-rowTitleCellChild' : ''}`}>
+        {interactive ? (
+          <Hint text={label.tip}>
+            <button
+              type="button"
+              className="dsm-rowLabel dsm-rowOpen"
+              onClick={(event) => {
+                event.stopPropagation()
+                onOpenDetail()
+              }}
+            >
+              {title}
+            </button>
+          </Hint>
+        ) : (
+          <span className="dsm-rowLabel">{title}</span>
+        )}
+      </span>
       {owner !== undefined && (
         <Hint text={session.cwd ?? ''}>
           <span className="dsm-meta dsm-owner">{owner}</span>

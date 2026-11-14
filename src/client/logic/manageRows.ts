@@ -97,3 +97,38 @@ export function groupPickState<T extends { id: string }>(
     available: choices.length > 0,
   }
 }
+
+/**
+ * 把子智能体折到父会话下面：列表里只留"顶层"那些行，子智能体挂在父行上按需展开。
+ *
+ * 判据只有 header 里的两条：`origin === "subagent"` 是子智能体，`parentSession` 是它的父。父**不在
+ * 这一份里**（被筛掉、被搜索排掉、在别的项目里）时，子智能体自己就是顶层——折起来就等于让它消失，
+ * 而这一页恰恰是唯一能收拾它的地方。
+ *
+ * 展开状态不在这里：这一层只回答"谁挂谁下面"，展开与否由界面拿着（默认全收）。
+ *
+ * @param rows 已经筛过、排过的那一份。
+ * @returns `roots`（顶层行，保持原顺序）、`childrenOf`（父 id → 直接子行，保持原顺序）。
+ */
+export function foldSubagents<
+  T extends { id: string; origin?: string; parentSession?: string; cwd?: string },
+>(rows: readonly T[]): { roots: T[]; childrenOf: Map<string, T[]> } {
+  const byParent = new Map(rows.map((row) => [row.id, row]))
+  const childrenOf = new Map<string, T[]>()
+  const foldedIds = new Set<string>()
+  for (const row of rows) {
+    if (row.origin !== 'subagent') continue
+    const parentId = row.parentSession
+    if (parentId === undefined || parentId === '') continue
+    const parent = byParent.get(parentId)
+    // 父不在这份清单里（被筛掉、被搜掉）就自己当顶层；父在**别的项目**里也别折过去——折过去子行
+    // 会跑到父那一行底下，看着像长在那个项目里。那两条挂在「父在别处」的备注上（见 ManagePanel）。
+    if (parent === undefined) continue
+    if ((parent.cwd ?? '') !== (row.cwd ?? '')) continue
+    const siblings = childrenOf.get(parentId)
+    if (siblings === undefined) childrenOf.set(parentId, [row])
+    else siblings.push(row)
+    foldedIds.add(row.id)
+  }
+  return { roots: rows.filter((row) => !foldedIds.has(row.id)), childrenOf }
+}
