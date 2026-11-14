@@ -104,6 +104,17 @@ test('库没变：第二次直接用上一次的结果，不再读每条会话�
   assert.notEqual(second, first)
 })
 
+test('scanAsync：与同步入口同一份结果，也复用同一份缓存', async () => {
+  const sandbox = resetSandbox('async')
+  writeSession(sandbox.root, 'session-a')
+  writeSession(sandbox.root, 'session-b')
+  const scans = createScanCache()
+  const sync = scans.scan(sandbox.root, decodeAll, { projectionDir: sandbox.projectionDir })
+  const asyncSessions = await scans.scanAsync(sandbox.root, decodeAll, { projectionDir: sandbox.projectionDir })
+  assert.deepEqual(asyncSessions.map((s) => s.id), sync.map((s) => s.id))
+  assert.deepEqual(asyncSessions.map((s) => s.files[0]?.bytes), sync.map((s) => s.files[0]?.bytes))
+})
+
 test('新增一条会话：指纹里的目录清单变了，必须重扫', () => {
   const sandbox = resetSandbox('added')
   writeSession(sandbox.root, 'session-a')

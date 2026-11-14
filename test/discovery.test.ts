@@ -11,7 +11,7 @@ import test from 'node:test'
 
 import { decompress } from 'fzstd'
 
-import { locateSession, readLogHeader, scanAll } from '../src/discovery.ts'
+import { locateSession, readLogHeader, scanAll, scanAllAsync } from '../src/discovery.ts'
 import type { DecodeAll, SessionHeader } from '../src/types.ts'
 import { encodeRawFrame } from '../src/zstd-frame.ts'
 
@@ -97,6 +97,17 @@ test('scanAll：日志改写后立刻再扫，读到的必须是新的（缓存�
   // 追加 eventos：header 没变，但报出去的字节数必须跟着文件走。
   writeLog(dir, headerOf('session-a', { cwd: '/tmp/bbb' }), [JSON.stringify({ type: 'user/message', seq: 0 })])
   assert.equal(scanAll(root, decodeAll)[0]?.files[0]?.bytes, statSync(path).size)
+})
+
+test('scanAllAsync：与同步 scanAll 同一份结果（分目录让出不换内容）', async () => {
+  const root = resetSandbox()
+  writeLog(join(root, '--proj-a--', 'session-a'), headerOf('session-a', { createdAt: 3000 }))
+  writeLog(join(root, '--proj-b--', 'session-b'), headerOf('session-b', { createdAt: 2000 }))
+  writeLog(join(root, '--proj-b--', 'session-c'), headerOf('session-c', { createdAt: 1000 }))
+
+  const sync = scanAll(root, decodeAll)
+  const asyncSessions = await scanAllAsync(root, decodeAll)
+  assert.deepEqual(asyncSessions, sync)
 })
 
 // 按 id 直接定位：内容视图每翻一页都要定位一次，所以它不能是"扫一遍整库再筛"。

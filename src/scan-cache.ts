@@ -26,7 +26,7 @@
 import { readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { scanAll, type DiscoveredSession, type ScanOptions } from './discovery.ts'
+import { scanAll, scanAllAsync, type DiscoveredSession, type ScanOptions } from './discovery.ts'
 import { parseSessionLogName } from './paths.ts'
 import type { DecodeAll } from './types.ts'
 
@@ -75,6 +75,8 @@ export interface ScanCache {
    *   副本数组——调用方别改里面的会话（改了会污染下一份结果）。
    */
   scan(root: string, decodeAll: DecodeAll, options?: ScanCacheOptions): DiscoveredSession[]
+  /** 与 {@link scan} 同一份结果，扫描时每个项目目录之间让出事件循环（页面打开走这一条）。 */
+  scanAsync(root: string, decodeAll: DecodeAll, options?: ScanCacheOptions): Promise<DiscoveredSession[]>
 }
 
 /** 目录读不动就当它不存在（与 `scanAll()` 同一个口径：坏目录不该让整页打不开）。 */
@@ -167,20 +169,44 @@ function collectProjections(dir: string | undefined, observedAt: number | undefi
  */
 export function createScanCache(): ScanCache {
   let entry: Entry | undefined
+
+  /**
+   * 算这一次的指纹，并判断能不能直接复用上一次的结果。
+   *
+   * 抽出来是因为同步入口与异步入口要**同一套判据**：判据分叉的表现是"一个入口看到新库、另一个看到旧库"，
+   * 那种错查起来很费劲。
+   */
+  const probe = (root: string, options: ScanCacheOptions, previous: Entry | undefined, observedAt: number) => {
+    const key = `${root}\u0000${options.projectionDir ?? ''}`
+    const stamps: string[] = []
+    // 两段都要走完：`|` 不能短路，否则投影缓存那段的时间戳就白算了。
+    const racyLibrary = collectLibrary(root, previous?.observedAt, stamps)
+    const racyProjections = collectProjections(options.projectionDir, previous?.observedAt, stamps)
+    return { key, fingerprint: stamps.join('\n'), racy: racyLibrary || racyProjections }
+  }
+
   return {
     scan(root, decodeAll, options = {}) {
       const key = `${root}\u0000${options.projectionDir ?? ''}`
       const previous = entry !== undefined && entry.key === key ? entry : undefined
       const observedAt = Date.now()
-      const stamps: string[] = []
-      // 两段都要走完：`|` 不能短路，否则投影缓存那段的时间戳就白算了。
-      const racyLibrary = collectLibrary(root, previous?.observedAt, stamps)
-      const racyProjections = collectProjections(options.projectionDir, previous?.observedAt, stamps)
-      const fingerprint = stamps.join('\n')
-      if (previous !== undefined && previous.fingerprint === fingerprint && !racyLibrary && !racyProjections) {
+      const { fingerprint, racy } = probe(root, options, previous, observedAt)
+      if (previous !== undefined && previous.fingerprint === fingerprint && !racy) {
         return [...previous.sessions]
       }
       const sessions = scanAll(root, decodeAll, options)
+      entry = { key, fingerprint, observedAt, sessions }
+      return sessions
+    },
+    async scanAsync(root, decodeAll, options = {}) {
+      const key = `${root}\u0000${options.projectionDir ?? ''}`
+      const previous = entry !== undefined && entry.key === key ? entry : undefined
+      const observedAt = Date.now()
+      const { fingerprint, racy } = probe(root, options, previous, observedAt)
+      if (previous !== undefined && previous.fingerprint === fingerprint && !racy) {
+        return [...previous.sessions]
+      }
+      const sessions = await scanAllAsync(root, decodeAll, options)
       entry = { key, fingerprint, observedAt, sessions }
       return sessions
     },

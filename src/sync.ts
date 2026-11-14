@@ -59,7 +59,7 @@ import { commitAttachmentObject, scanAttachmentRefs, type AttachmentPort, type A
 import { warmCheckpoints, type WarmDeps } from './checkpoint-warm.ts'
 import type { AutoConfig } from './config.ts'
 import type { DavPort } from './dav.ts'
-import { scanAll, type DiscoveredSession } from './discovery.ts'
+import { scanAll, scanAllAsync, type DiscoveredSession } from './discovery.ts'
 import { createBackup } from './journal.ts'
 import { encodeSegment, parseSessionLogName } from './paths.ts'
 import { decodeLogTextChunked } from './log-decode.ts'
@@ -2317,7 +2317,7 @@ export async function prepareSync(
     report(deps.progressWhat === undefined ? event : { ...event, what: deps.progressWhat })
   }
   // 第一段：扫本机。冷启动时这一段是大头（每条会话要读头、折标题），所以它值得一条进度。
-  const local = scanAll(deps.sessionsRoot, deps.decodeAll, {
+  const local = await scanAllAsync(deps.sessionsRoot, deps.decodeAll, {
     ...(deps.resolveTitle === undefined ? {} : { resolveTitle: deps.resolveTitle }),
     // 每条会话的投影记录在这里读一次：标题、空白、两枚活动时间共用它（见 projection-cache.ts）。
     ...(deps.projection === undefined ? {} : { projection: deps.projection }),
