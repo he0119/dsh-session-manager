@@ -860,7 +860,7 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
    */
   const readState = async (report: ProgressReporter): Promise<Record<string, unknown>> => {
     const { registry, problems } = loadRegistry(paths.registryPath)
-    const sessions = scans.scan(paths.sessionsRoot, decodeAll, {
+    const sessions = await scans.scanAsync(paths.sessionsRoot, decodeAll, {
       resolveTitle,
       projection,
       // 标题与空白都从这些文件里读，它们变了结果就得重算。

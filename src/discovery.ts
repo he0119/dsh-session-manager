@@ -434,3 +434,60 @@ export function scanAll(root: string, decodeAll: DecodeAll, options: ScanOptions
   out.sort((a, b) => b.createdAt - a.createdAt)
   return out
 }
+
+/**
+ * 与 {@link scanAll} 同一份结果，只是**每个项目目录之间让出一轮事件循环**。
+ *
+ * 整库 1477 个文件冷扫一次要 1.2～1.3 秒，这期间页面请求与长连接都排着队。页面打开走这一条；
+ * 单个项目目录内部仍然是同步的（一个目录通常几条会话，最多几十毫秒），让出的粒度按目录走就够。
+ */
+export async function scanAllAsync(
+  root: string,
+  decodeAll: DecodeAll,
+  options: ScanOptions = {},
+): Promise<DiscoveredSession[]> {
+  const out: DiscoveredSession[] = []
+  let projectDirNames: string[]
+  try {
+    projectDirNames = readdirSync(root)
+  } catch {
+    return out
+  }
+  const projectDirs: Array<{ path: string; entries: number }> = []
+  for (const projectDirName of projectDirNames) {
+    const projectDirPath = join(root, projectDirName)
+    try {
+      if (!statSync(projectDirPath).isDirectory()) continue
+    } catch {
+      continue
+    }
+    let entries = 0
+    try {
+      entries = readdirSync(projectDirPath).length
+    } catch {
+      // 同 scanAll：读不动就按 0 计。
+    }
+    projectDirs.push({ path: projectDirPath, entries })
+  }
+  const total = projectDirs.reduce((sum, dir) => sum + dir.entries, 0)
+  let scanned = 0
+  for (const projectDir of projectDirs) {
+    const base = scanned
+    scanned += projectDir.entries
+    try {
+      out.push(
+        ...scanProjectDir(projectDir.path, decodeAll, {
+          ...options,
+          ...(options.onProgress === undefined
+            ? {}
+            : { onProgress: (done: number) => options.onProgress?.(base + done, total) }),
+        }),
+      )
+    } catch {
+      continue
+    }
+    await new Promise<void>((resolve) => setImmediate(resolve))
+  }
+  out.sort((a, b) => b.createdAt - a.createdAt)
+  return out
+}
