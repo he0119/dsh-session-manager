@@ -18,9 +18,10 @@ Status: implemented
 「没做到」在宿主那侧摊成**点名版**，界面上两处把它说出来。
 
 - **点名版长这样**（`src/sync.ts`）：`SyncLeftover { message, sessionId? }`，
-  由 `collectLeftovers(outcome)` 从两处来路拼：计划里那些 `action: 'skip'` 且不 `identical` 的行
-  （它们本来就有标题与 id，句子是 `名字（id）：原因`），加上 `plan.problems` 与 `outcome.problems`
-  的原话（映射、远端索引、整理那几步不属于任何一条会话）。`identical` 不算——那是"本来就没事"。
+  由 `collectLeftovers(outcome)` 从两处来路拼：计划里那些 `action: 'skip'`、又不是 `identical` 也
+  不是 `no-mapping` 的行（它们本来就有标题与 id，句子是 `名字（id）：原因`），加上 `plan.problems`
+  与 `outcome.problems` 的原话（映射、远端索引、整理那几步不属于任何一条会话）。`identical` 不算——
+  那是"本来就没事"；`no-mapping` 不算——那是**这台机器没有那个项目**，不是这一趟没做到（见下）。
 - **落盘**：`state.json` 的记录多一项 `leftovers`（读的时候形状不对就当没有，与那一层其余字段同一
   口径）；`/sync` 的响应也带同一份，所以"刚跑完"和"重启之后回来"看到的是同一张清单。
 - **界面**（`src/client/`）：
@@ -29,6 +30,11 @@ Status: implemented
     带 `sessionId` 的那条多一枚「只看这一条」——关掉弹窗、把左栏切回「全部项目」、搜索框填上这个 id，
     列表因此只剩它。
   - 旧记录（只有 `problems`、没有 `leftovers`）退回按汇总句一条一句地列，不会空着。
+
+「没做到」只收**这一趟没做成**的事。缺映射的跳过不在里面：那一条会话属于另一台机器上的一个项目，
+本机没有它的目录，计划里本来就写着"这次不动"，跟这一趟成没成无关。把它算进来的代价是量出来的——
+一台机器上 201 条 `没有 C:\… → 本机的同步映射`，状态栏那格黄着、悬浮提示列前三条再折一句"还有
+198 条"，真正要人看的失败（补对象没补上、远端索引读不动）反而被埋在这 201 条底下。
 
 ## 为什么不直接改 `problems` 的形状
 

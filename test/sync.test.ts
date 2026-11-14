@@ -3236,8 +3236,9 @@ test('sync：只整理远端——预演只算账、落地才删，索引重写�
 /*
  * 「没做到的条目」：页头那枚黄点只报得出"有 1 条没做到"，同步弹窗里那张清单要说清是哪一条。
  *
- * 三件事各自有判据：哪些行算没做到（`identical` 不算，那是"本来就没事"）、句子怎么点名（有标题就
- * 标题 + id，没有就用 id）、以及不属于任何一条会话的那些问题（映射、远端索引）原样排在后面。
+ * 三件事各自有判据：哪些行算没做到（`identical` 与 `no-mapping` 不算——前者本来就没事，后者是
+ * 这台机器没有那个项目）、句子怎么点名（有标题就标题 + id，没有就用 id）、以及不属于任何一条会话的
+ * 那些问题（映射、远端索引）原样排在后面。
  */
 test('sync：没做到的条目点名到会话，「本来就没事」的那些不算', () => {
   const outcome = {
@@ -3259,11 +3260,25 @@ test('sync：没做到的条目点名到会话，「本来就没事」的那些�
   const leftovers = collectLeftovers(outcome as never)
   assert.deepEqual(leftovers, [
     { message: '甲（session-a）：目标目录不存在：/nope', sessionId: 'session-a' },
-    { message: 'session-b：没有 /x → 本机的同步映射', sessionId: 'session-b' },
     { message: '戊（session-e）：两边各自写过，这次不动', sessionId: 'session-e' },
     { message: '同步映射里有一条空的来源路径（远端 cwd）' },
     { message: '读远端 machine-x/index.json 失败：404' },
   ])
+})
+
+test('sync：缺映射的跳过不算没做到——那是这台机器没有那个项目，不是这一趟失败', () => {
+  const outcome = {
+    plan: {
+      pull: [
+        { id: 'session-a', title: '甲', action: 'skip', code: 'no-mapping', reason: '没有 C:\\Users\\a\\Temp → 本机的同步映射，先补映射再同步' },
+        { id: 'session-b', title: '乙', action: 'skip', code: 'no-mapping', reason: '没有 C:\\Users\\a\\Works → 本机的同步映射，先补映射再同步；也没在本机找到仓库 git.example/a/works' },
+      ],
+      push: [],
+      problems: [],
+    },
+    problems: [],
+  }
+  assert.deepEqual(collectLeftovers(outcome as never), [])
 })
 
 test('sync：完全一样的两句只留一条（计划与落地两段可能算出同一句）', () => {
