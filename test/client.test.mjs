@@ -2830,6 +2830,36 @@ test('客户端产物：「会话」页的搜索框按标题或 id 筛，筛空�
   )
 })
 
+test('客户端产物：JSX 里的注释都包在花括号里，别把注释当文字画到页面上', { skip }, () => {
+  /*
+   * 真实事故：给页头那枚同步按钮加注释时写成了 `/* … *\/`（没有外面那对花括号），React 就把它当成
+   * 一段文字画在页面上——首屏标题下面多出两行注释。类型检查、构建、既有断言全绿，只有眼睛能发现。
+   *
+   * 判据：`src/client/components` 里凡是单独一行的 `/* … *\/`，其下最近的一行以 `<` 开头，就是在
+   * JSX 子节点位置裸写注释（JS 里的注释后面跟的是语句，不会紧跟一个标签）。
+   */
+  const offenders = []
+  for (const name of readdirSync(join(root, 'src/client/components'))) {
+    if (!name.endsWith('.tsx')) continue
+    const lines = readFileSync(join(root, 'src/client/components', name), 'utf8').split('\n')
+    lines.forEach((line, index) => {
+      if (line.trim() !== '/*') return
+      // 上一行以 `(` 收尾时这里是表达式位置（`{cond && ( … )}`），`/* … */` 本来就是 JS 注释
+      let before = index - 1
+      while (before >= 0 && lines[before].trim() === '') before -= 1
+      if (before >= 0 && lines[before].trim().endsWith('(')) return
+      let close = index + 1
+      while (close < lines.length && lines[close].trim() !== '*/') close += 1
+      let after = close + 1
+      while (after < lines.length && lines[after].trim() === '') after += 1
+      if (after < lines.length && lines[after].trim().startsWith('<')) {
+        offenders.push(`${name}:${index + 1}`)
+      }
+    })
+  }
+  assert.deepEqual(offenders, [], '这一段注释前面少了一对花括号，它会被当成文字画在页面上')
+})
+
 test('客户端产物：悬浮提示一律走官方 Tooltip，不再出现原生 title', { skip }, () => {
   /*
    * 原生 `title` 是浏览器画的：延迟两三秒、字体与配色不受控、长提示被窗口边裁掉、触屏上出不来。

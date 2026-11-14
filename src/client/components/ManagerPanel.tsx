@@ -459,14 +459,14 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
       */}
       <header className="dsm-head">
         <h2 className="dsm-title">{t('page.title')}</h2>
-        /*
+        {/*
           悬浮提示补一句"这个颜色是什么意思"：黄点说清几条没做到 / 要重启，绿点说清自动推送开着。
           颜色读屏读不到、也常被一眼扫过，理由得有一句话接着。
-        */
-        /*
+        */}
+        {/*
           提示从一行变成几行：先说这个按钮干什么、再说为什么是这个颜色，最后把那几条没做到的原话
           摆出来（前 3 条 + "还有 N 条"）。只报"1 条没做到"而不说哪一条，等于把疑问留给用户。
-        */
+        */}
         <Hint
           text={[
             [t('sync.chip.tip'), chipReason].filter((line) => line !== null).join(' · '),
