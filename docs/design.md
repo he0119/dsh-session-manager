@@ -153,6 +153,10 @@
   - **面板类**（备份与回滚）：正文里一行 28px 的工具（「刷新」），清单上的动作（恢复 / 回滚）走行内
     `sm`。面板没有"取消"这种语义，关掉就是关掉。
   - 同步那一面原来算面板类，合并计划之后成了三段：面板段与计划段各有一对底栏按钮（见上一条）。
+- **危险动作的确认照官方 `RiskConfirmation` 那套**：清单下面一行警告（官方警告图标 18px + 一句话，
+  字色 secondary），再一枚「我明白」的勾选；没勾上之前主按钮按不动。官方那枚原语只收一句话
+  （`description` 是字符串、没有放清单的位置），所以清单留在我们这枚对话框的正文里，警告与勾选
+  照它的排法做。
 - 依据：[全宽工作台那篇](../.agents/notes/implemented/architecture/2026-11-12-session-page-is-a-full-width-workbench.md)、
   [去掉页签那篇](../.agents/notes/implemented/architecture/2026-11-12-no-page-tabs.md)、
   [分页间距那篇](../.agents/notes/implemented/bug-fix/2026-10-16-inner-blocks-need-their-own-gap.md)。
@@ -370,6 +374,7 @@ pnpm typecheck && pnpm build && pnpm test && pnpm check:package
 | 一对选行工具 | [2026-10-08](../.agents/notes/implemented/bug-fix/2026-10-08-one-pair-of-pick-tools.md) |
 | 行上动作等悬停（已被取代） | [2026-10-12](../.agents/notes/implemented/architecture/2026-10-12-row-action-waits-for-hover.md) |
 | 行尾只留一枚给键盘的「详情」（已被取代） | [2026-11-13](../.agents/notes/implemented/simplification/2026-11-13-row-actions-leave-the-hover-slot.md) |
+| 危险动作的确认加一道「我明白」 | [2026-11-14](../.agents/notes/implemented/architecture/2026-11-14-risk-confirmation-asks-for-acknowledgement.md) |
 | 行这一格的主动作落在标题上 | [2026-11-13](../.agents/notes/implemented/architecture/2026-11-13-the-row-title-is-the-action.md) |
 | 页签去掉、改成入口 + 宽弹窗 | [2026-11-12](../.agents/notes/implemented/architecture/2026-11-12-no-page-tabs.md) |
 | 分页块间距（换成宽弹窗正文层） | [2026-10-16](../.agents/notes/implemented/bug-fix/2026-10-16-inner-blocks-need-their-own-gap.md) |

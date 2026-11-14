@@ -1207,6 +1207,32 @@ export const CSS = `
  */
 .dsm-dialogBody { display: flex; flex-direction: column; gap: 8px; font-size: 14px; line-height: 20px; }
 /*
+ * 风险确认那一块：警告图标 + 一句话，下面一排「我明白」的勾选。
+ *
+ * 排法照官方 RiskConfirmation：图标 18px 走 state-error-primary、那句话走 secondary 14/22，勾选与它
+ * 隔 12px。本页只写这几条布局与颜色归属，勾选框本身仍是官方 Checkbox。
+ */
+.dsm-risk {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  color: var(--dsw-alias-label-secondary, #646a73);
+  font-size: 14px;
+  line-height: 22px;
+}
+.dsm-risk > p { margin: 0; }
+/* 图标是图形不是正文，但按本页那条"state 色不当裸文字色"的规矩照样先兑一道：两套主题里都看得清。 */
+.dsm-riskIcon {
+  flex: none;
+  margin-top: 2px;
+  color: color-mix(
+    in srgb,
+    var(--dsw-alias-state-error-primary, #d92c2c) 70%,
+    var(--dsw-alias-label-primary, #1f2329)
+  );
+}
+.dsm-acknowledge { margin-top: 12px; }
+/*
  * 底部那对按钮不再需要本页写字号：它们是官方 Button 的缺省尺寸（36px / 14px），而官方按钮在
  * Button.module.css 里把 font-size 写在 md 那一档上，不靠继承——原先那条
  * .dsm-dialog .dsm-button { font-size: 14px } 是给手写按钮补继承的（footer 在我们那层 body 之外，

@@ -328,6 +328,9 @@
   仍是 0px，得在自己的 `.dsm-diffBody` 上给节奏。
 - [卡片级的主动作放卡片底部的动作行](../.agents/notes/implemented/architecture/2026-10-07-card-actions-live-in-a-footer-row.md)：
   动作跟着它的输入走；卡头只留不动数据的工具（刷新、全选 / 清空、收起 / 展开），清单行上的动作不挪位。
+- [危险动作的确认加一道「我明白」](../.agents/notes/implemented/architecture/2026-11-14-risk-confirmation-asks-for-acknowledgement.md)：
+  清单之后跟一行警告与一枚勾选，没勾之前主按钮按不动——照官方 `RiskConfirmation` 那套排法，但没用
+  那枚原语本身（它只收一句话，放不下清单）。
 - [行这一格的主动作落在标题上](../.agents/notes/implemented/architecture/2026-11-13-the-row-title-is-the-action.md)：
   行从 `<label>` 换成 `<div>`（点它不是勾选），标题那一格是 `<button>`（外观跟一段字一样，键盘走它），
   行尾只剩时刻；勾选框自己带一层 label 与一句只念给读屏软件的名字。它取代了

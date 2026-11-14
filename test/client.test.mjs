@@ -4078,7 +4078,11 @@ test('客户端产物：删除弹窗摆出清单与备份位置，计划不 ok �
     mount({ state, panel: 'manage', arrays: [['s-1']], nulls: [null, null, null, null, { plan: planOf(ok), error: null }] })
   const render = (ok) => {
     const item = mounted(ok)
-    return { recorded: item.recorded, text: strings(item.registrations[0].component(item.registrations[0].registration.inject())) }
+    return {
+      recorded: item.recorded,
+      sets: item.sets,
+      text: strings(item.registrations[0].component(item.registrations[0].registration.inject())),
+    }
   }
 
   const good = render(true)
@@ -4091,7 +4095,20 @@ test('客户端产物：删除弹窗摆出清单与备份位置，计划不 ok �
   )
   assert.deepEqual(rows.map((row) => rowParts(row).label), ['s-1', 's-9'], '清单逐条列出会被删的会话')
   assert.deepEqual(rowParts(rows[1]).tags, ['manage.delete.via'], '级联进来的挂「随父删」')
-  assert.equal(primaryOf(good.recorded).props.disabled, false, '计划 ok 时确认可用')
+  // 风险确认：主按钮先禁用，勾上「我明白」才按得动（照官方 RiskConfirmation 那套）
+  assert.equal(primaryOf(good.recorded).props.disabled, true, '没勾「我明白」之前，确认按钮按不动')
+  assert.ok(
+    good.text.some((item) => String(item) === 'manage.delete.acknowledge'),
+    '弹窗里要写明这一下会发生什么',
+  )
+  const ack = good.recorded.find(
+    (node) => typeof node.type === 'string' && String(node.props?.className).includes('dsm-acknowledge'),
+  )
+  assert.ok(ack, '那枚「我明白」要画出来（官方 Checkbox）')
+  assert.equal(ack.props.checked, false, '默认没勾')
+  good.sets.length = 0
+  ack.props.onChange()
+  assert.equal(good.sets.at(-1)?.value, true, '勾上之后写的是"我明白"（受控状态就这么交出去）')
   assert.ok(strings(cancelOf(good.recorded)).includes('cancel'), '旁边是「取消」')
   assert.ok(
     good.text.some((item) => String(item).startsWith('manage.delete.backupTo') && String(item).includes('dsh-session-manager/backups')),

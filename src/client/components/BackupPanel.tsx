@@ -267,6 +267,9 @@ export function BackupPanel({
                 : 'backup.rollback.dialogTitle',
           )}
           confirmLabel={t(isRestore(dialog.backup) ? 'backup.restore.confirm' : 'backup.rollback.confirm')}
+          acknowledge={t(
+            isRestore(dialog.backup) ? 'backup.restore.acknowledge' : 'backup.rollback.acknowledge',
+          )}
           busyLabel={t(isRestore(dialog.backup) ? 'backup.restore.running' : 'backup.rollback.running')}
           busy={running}
           planning={dialog.plan === null && dialog.error === null}
