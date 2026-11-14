@@ -180,7 +180,7 @@ test('恢复：从备份把整个会话目录搬回原位（含 session.lock）�
   assert.notEqual(readFileSync(sandbox.registryPath, 'utf8'), registryBefore)
 })
 
-test('预演：标题优先取扫描那一趟读到的投影记录，一条会话只问一次', () => {
+test('预演：标题优先取扫描那一趟读到的投影记录，一条会话只问一次', async () => {
   const sandbox = makeSandbox('remove-projection')
   writeSession(sandbox, 'session-doomed', 1000, { title: '日志里的名字' })
   const reads: string[] = []
@@ -190,7 +190,7 @@ test('预演：标题优先取扫描那一趟读到的投影记录，一条会�
     return record
   }
   // resolveTitle 走的是真读取器：记录里有标题就不去日志里找（见 session-title.ts）。
-  const plan = planRemoval(deps(sandbox, { projection }), { sessionIds: ['session-doomed'] })
+  const plan = await planRemoval(deps(sandbox, { projection }), { sessionIds: ['session-doomed'] })
   assert.equal(plan.entries[0]?.title, '投影里的名字', '标题从扫描读到的记录里取，不再读一遍日志')
   assert.deepEqual(reads, ['session-doomed'], '一条会话只问一次记录')
 })
@@ -200,7 +200,7 @@ test('宿主内存里活着的会话拒删：进 problems，不进待删条目�
   writeSession(sandbox, 'session-doomed', 1000)
   const withLive = deps(sandbox, { liveSessionIds: () => new Set(['session-doomed']) })
 
-  const plan = planRemoval(withLive, { sessionIds: ['session-doomed'] })
+  const plan = await planRemoval(withLive, { sessionIds: ['session-doomed'] })
   assert.equal(plan.ok, false)
   assert.deepEqual(plan.entries, [])
   assert.match(plan.problems.join('\n'), /还在宿主内存里活着/)
@@ -261,7 +261,7 @@ test('级联：点名父会话 → 全部后代一起进计划（多级、跨项
   // 与这次删除无关的一条，验证"没被牵连"
   writeSession(sandbox, 'session-bystander', 5000)
 
-  const plan = planRemoval(deps(sandbox), { sessionIds: ['session-parent'] })
+  const plan = await planRemoval(deps(sandbox), { sessionIds: ['session-parent'] })
   assert.equal(plan.ok, true, plan.problems.join('; '))
   assert.equal(plan.cascaded, 3, '三条后代是级联进来的')
   assert.deepEqual(
@@ -298,23 +298,23 @@ test('级联：多级同族一起删时，执行把整族装进同一份备份�
   assert.deepEqual(manifest.sessions.map((s) => s.id).sort(), ['session-child', 'session-grand', 'session-parent'])
 })
 
-test('只删一条子智能体：父会话还在库里 → 拒绝，并告诉用户该点名谁', () => {
+test('只删一条子智能体：父会话还在库里 → 拒绝，并告诉用户该点名谁', async () => {
   const sandbox = makeSandbox('remove-child-only')
   writeSession(sandbox, 'session-parent', 1000, { title: '父会话' })
   writeSubagent(sandbox, 'session-child', 'session-parent', 2000, { title: '子智能体' })
 
-  const plan = planRemoval(deps(sandbox), { sessionIds: ['session-child'] })
+  const plan = await planRemoval(deps(sandbox), { sessionIds: ['session-child'] })
   assert.equal(plan.ok, false, '子智能体不能被单独操作')
   assert.equal(plan.entries.length, 0, '拒绝的计划里不该有要删的条目')
   assert.match(plan.problems.join('; '), /session-child 是子智能体会话（它跟着父会话走）：请改点名它的父会话 父会话（session-parent）/)
 
   // 点了父会话就不一样了：子智能体跟着它一起走
-  const withParent = planRemoval(deps(sandbox), { sessionIds: ['session-parent'] })
+  const withParent = await planRemoval(deps(sandbox), { sessionIds: ['session-parent'] })
   assert.equal(withParent.ok, true, withParent.problems.join('; '))
   assert.deepEqual(withParent.entries.map((entry) => entry.id), ['session-parent', 'session-child'])
 })
 
-test('嵌套的单独子智能体：拒掉外层之后，里层的父也一起退出计划，于是同样被拒', () => {
+test('嵌套的单独子智能体：拒掉外层之后，里层的父也一起退出计划，于是同样被拒', async () => {
   const sandbox = makeSandbox('remove-lone-nested')
   writeSession(sandbox, 'session-p', 1000)
   writeSubagent(sandbox, 'session-r', 'session-p', 2000)
@@ -322,7 +322,7 @@ test('嵌套的单独子智能体：拒掉外层之后，里层的父也一起�
   writeSubagent(sandbox, 'session-x', 'session-m', 4000)
 
   // 点名 session-r（父 session-p 没点名）与它子树里的 session-x：两条都算"单独"，整个计划一条都不该列
-  const plan = planRemoval(deps(sandbox), { sessionIds: ['session-r', 'session-x'] })
+  const plan = await planRemoval(deps(sandbox), { sessionIds: ['session-r', 'session-x'] })
   assert.equal(plan.ok, false)
   assert.deepEqual(plan.entries, [], '被拒的那些不该出现在"要删的东西"里')
   assert.equal(plan.problems.length, 2, plan.problems.join('; '))
@@ -330,32 +330,32 @@ test('嵌套的单独子智能体：拒掉外层之后，里层的父也一起�
   assert.match(plan.problems.join('; '), /session-x 是子智能体会话/)
 })
 
-test('孤儿（父会话已经不在库里）：没有可跟随的会话，允许单独收拾', () => {
+test('孤儿（父会话已经不在库里）：没有可跟随的会话，允许单独收拾', async () => {
   const sandbox = makeSandbox('remove-orphan')
   writeSubagent(sandbox, 'session-orphan', 'session-gone', 1000)
 
-  const plan = planRemoval(deps(sandbox), { sessionIds: ['session-orphan'] })
+  const plan = await planRemoval(deps(sandbox), { sessionIds: ['session-orphan'] })
   assert.equal(plan.ok, true, plan.problems.join('; '))
   assert.equal(plan.entries.length, 1)
 })
 
-test('父子都被点名：两条都算"点名"，谁也不是顺带进来的', () => {
+test('父子都被点名：两条都算"点名"，谁也不是顺带进来的', async () => {
   const sandbox = makeSandbox('remove-both-named')
   writeSession(sandbox, 'session-parent', 1000)
   writeSubagent(sandbox, 'session-child', 'session-parent', 2000)
 
-  const plan = planRemoval(deps(sandbox), { sessionIds: ['session-parent', 'session-child'] })
+  const plan = await planRemoval(deps(sandbox), { sessionIds: ['session-parent', 'session-child'] })
   assert.equal(plan.cascaded, 0)
   assert.deepEqual(plan.entries.map((entry) => entry.id), ['session-parent', 'session-child'])
   assert.equal(plan.entries[1]!.via, undefined, '自己点名的条目不说"跟着谁"')
 })
 
-test('坏数据里的环（A 的父是 B、B 的父是 A）不会让展开转不出来', () => {
+test('坏数据里的环（A 的父是 B、B 的父是 A）不会让展开转不出来', async () => {
   const sandbox = makeSandbox('remove-cycle')
   writeSubagent(sandbox, 'session-a', 'session-b', 1000)
   writeSubagent(sandbox, 'session-b', 'session-a', 2000)
 
-  const plan = planRemoval(deps(sandbox), { sessionIds: ['session-a'] })
+  const plan = await planRemoval(deps(sandbox), { sessionIds: ['session-a'] })
   assert.equal(plan.ok, true, plan.problems.join('; '))
   assert.deepEqual(plan.entries.map((entry) => entry.id).sort(), ['session-a', 'session-b'])
   assert.equal(plan.cascaded, 1)
@@ -367,7 +367,7 @@ test('活着的后代挡住整族：计划不 ok、执行一条都不删，问�
   const childDir = writeSubagent(sandbox, 'session-child', 'session-parent', 2000)
   const withLive = deps(sandbox, { liveSessionIds: () => new Set(['session-child']) })
 
-  const plan = planRemoval(withLive, { sessionIds: ['session-parent'] })
+  const plan = await planRemoval(withLive, { sessionIds: ['session-parent'] })
   assert.equal(plan.ok, false)
   // 活着的后代不进条目（界面不该把它列成待删项），但它的存在挡住整个计划
   assert.deepEqual(plan.entries.map((entry) => entry.id), ['session-parent'])

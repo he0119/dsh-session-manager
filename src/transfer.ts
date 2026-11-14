@@ -32,7 +32,7 @@ import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { gunzip, gunzipSync, gzip, gzipSync } from 'node:zlib'
+import { createGzip, gunzip, gunzipSync, gzipSync } from 'node:zlib'
 import { promisify } from 'node:util'
 
 import {
@@ -54,8 +54,6 @@ import type { DecodeAll, ProgressReporter, RegistryChange, SessionLogFile, Works
 
 /** `zlib.gunzip` 的 Promise 版：解压在线程池里，主线程不陪着。 */
 const gunzipAsync = promisify(gunzip)
-/** `zlib.gzip` 的 Promise 版：压缩在线程池里，主线程不陪着。 */
-const gzipAsync = promisify(gzip)
 
 /** 容器 magic。换代时改这一串，而不是悄悄改变字段含义。 */
 export const BUNDLE_MAGIC = 'DSHSESS1\n'
@@ -284,12 +282,11 @@ export function buildBundle(
  * 日志里没有引用、或者引用的对象本机就没有）时写 v1——清单里连 `attachments` 那一节都不出现，
  * 与升级前逐字节同形，装旧版的宿主照旧读得了。真要带对象才升 v2，因为那时老宿主确实读不了。
  */
-function bundleBytes(
+function bundleHeader(
   sessions: BundleSession[],
   attachments: BundleAttachmentEntry[],
-  parts: Buffer[],
   options: { now?: string; source?: BundleSourceInfo },
-): Buffer {
+): { header: Buffer; manifestBytes: Buffer } {
   const formatVersion = attachments.length > 0 ? BUNDLE_FORMAT_VERSION : BUNDLE_MIN_FORMAT_VERSION
   const manifest = JSON.stringify({
     formatVersion,
@@ -302,7 +299,41 @@ function bundleBytes(
   const header = Buffer.alloc(BUNDLE_MAGIC.length + 4)
   header.write(BUNDLE_MAGIC, 0, 'utf8')
   header.writeUInt32LE(manifestBytes.length, BUNDLE_MAGIC.length)
+  return { header, manifestBytes }
+}
+
+function bundleBytes(
+  sessions: BundleSession[],
+  attachments: BundleAttachmentEntry[],
+  parts: Buffer[],
+  options: { now?: string; source?: BundleSourceInfo },
+): Buffer {
+  const { header, manifestBytes } = bundleHeader(sessions, attachments, options)
   return Buffer.concat([header, manifestBytes, ...parts])
+}
+
+/**
+ * 把各段直接写进 gzip 流，**不先拼成一整块**。
+ *
+ * `Buffer.concat([...parts])` 会把 1.2 GB 的整库再拷一份（实测 372 MB 的包拼一次 153 毫秒），
+ * 拼完才交给 zlib。这里改成逐段 `write()`（压缩在线程池里），最后只拼压缩后的输出（约为原始体积的
+ * 三分之一）。产物与一次性 gzip 逐字节相同（zlib 不在段间 flush）。
+ */
+async function gzipParts(parts: readonly Buffer[]): Promise<Buffer> {
+  const gzip = createGzip()
+  const chunks: Buffer[] = []
+  gzip.on('data', (chunk: Buffer) => chunks.push(chunk))
+  const failed = new Promise<never>((_, reject) => gzip.once('error', reject))
+  const finished = new Promise<void>((resolve) => gzip.once('end', resolve))
+  for (const part of parts) {
+    if (part.length === 0) continue
+    if (!gzip.write(part)) {
+      await Promise.race([new Promise<void>((resolve) => gzip.once('drain', resolve)), failed])
+    }
+  }
+  gzip.end()
+  await Promise.race([finished, failed])
+  return Buffer.concat(chunks)
 }
 
 /**
@@ -403,7 +434,8 @@ export async function buildBundleAsync(
     onReport?.({ packed: attachments.length, bytes: attachmentBytes, missing })
   }
 
-  return gzipAsync(bundleBytes(sessions, attachments, parts, options))
+  const { header, manifestBytes } = bundleHeader(sessions, attachments, options)
+  return gzipParts([header, manifestBytes, ...parts])
 }
 
 /**
@@ -1028,7 +1060,7 @@ export async function applyImport(
         )
       if (rename !== undefined) {
         // 标记标题只插**最新一代**（读标题只读最新一代）；其余代次只换 id。
-        next = branchSessionLog(next, file.compression, {
+        next = await branchSessionLog(next, file.compression, {
           newId: rename.newId,
           ...(fileIndex === session.files.length - 1 ? { machine: rename.machine } : {}),
           ...(rename.time === undefined ? {} : { time: rename.time }),

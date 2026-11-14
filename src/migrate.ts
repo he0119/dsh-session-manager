@@ -260,7 +260,11 @@ function previewOf(plan: RelocationPlan): MigrationPreview {
   }
 }
 
-function buildPlan(deps: MigrateDeps, request: MigrateRequest, onProgress?: ProgressReporter): RelocationPlan {
+async function buildPlan(
+  deps: MigrateDeps,
+  request: MigrateRequest,
+  onProgress?: ProgressReporter,
+): Promise<RelocationPlan> {
   // 空白判据：扫描那一趟就把记录读出来（每条会话一次），界面与工具层因此走同一套候选口径。
   const projection = deps.projection ?? createProjectionReader(projectionCacheDir(deps.registryPath))
   return buildRelocationPlan({
@@ -284,12 +288,12 @@ function buildPlan(deps: MigrateDeps, request: MigrateRequest, onProgress?: Prog
  *
  * @param options.onProgress 发现阶段的进度（`scan`：扫源目录或整库）。
  */
-export function previewMigration(
+export async function previewMigration(
   deps: MigrateDeps,
   request: MigrateRequest,
   options: { onProgress?: ProgressReporter } = {},
-): MigrationPreview {
-  return previewOf(buildPlan(deps, request, options.onProgress))
+): Promise<MigrationPreview> {
+  return previewOf(await buildPlan(deps, request, options.onProgress))
 }
 
 /**
@@ -310,7 +314,7 @@ export async function runMigration(
   options: { apply: boolean; onProgress?: ProgressReporter },
 ): Promise<MigrationRun> {
   const onProgress = options.onProgress
-  const plan = buildPlan(deps, request, onProgress)
+  const plan = await buildPlan(deps, request, onProgress)
   const preview = previewOf(plan)
   if (!plan.ok) {
     return {

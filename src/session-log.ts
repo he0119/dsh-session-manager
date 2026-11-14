@@ -338,12 +338,12 @@ export function relocateHeaderCwdShallow(buf: Buffer, options: RelocateOptions):
  *
  * @throws 首帧没有完整 header、事件 `seq` 不连续、或自校验不过时抛错（不产出半成品）。
  */
-export function branchSessionLog(
+export async function branchSessionLog(
   buf: Buffer,
   compression: string | null,
   /** `machine` 缺席 = 只换 id 不写标记（多代次里只有最新一代带标记标题）。 */
   options: { newId: string; machine?: string; time?: string; decodeAll: DecodeAll; compressFrame?: CompressFrame },
-): Buffer {
+): Promise<Buffer> {
   const { newId, decodeAll } = options
   const machine = options.machine
   const now = options.time ?? new Date().toISOString()
@@ -359,42 +359,62 @@ export function branchSessionLog(
       } catch (error) {
         throw new Error(`branchSessionLog: frame ${index} does not decode: ${String(error)}`)
       }
+      // 一帧一让：改名的会话可能几十 MB，整段解压会把主线程按住一两秒。
+      await yieldToLoop()
     }
     const last = lastEventInFrames(texts)
     const title = lastTitleInFrames(texts)
     if (machine === undefined) {
+      const head = rewriteHeaderId(texts[0] as string, newId)
+      const headFrame = compressFrame(head)
+      if (decodeAll(headFrame) !== head) throw new Error('branchSessionLog: header frame round-trip mismatch')
       const out = Buffer.concat([
-        compressFrame(rewriteHeaderId(texts[0] as string, newId)),
+        headFrame,
         ...frames.slice(1).map((frame) => buf.subarray(frame.start, frame.end)),
       ])
-      assertBranched(decodeAll(out), newId, undefined)
+      await assertBranchedChunked([head, ...texts.slice(1)].join(''), newId, undefined)
       return out
     }
     if (title === undefined) {
       const marked = markedTitle('', machine, last ?? { seq: -1, time: now })
       const marker = markerLine(marked, (last?.seq ?? -1) + 1, now)
+      const head = rewriteHeaderId(texts[0] as string, newId)
+      const headFrame = compressFrame(head)
+      if (decodeAll(headFrame) !== head) throw new Error('branchSessionLog: header frame round-trip mismatch')
+      const markerFrame = compressFrame(marker)
+      if (decodeAll(markerFrame) !== marker) throw new Error('branchSessionLog: marker frame round-trip mismatch')
       const out = Buffer.concat([
-        compressFrame(rewriteHeaderId(texts[0] as string, newId)),
+        headFrame,
         ...frames.slice(1).map((frame) => buf.subarray(frame.start, frame.end)),
-        compressFrame(marker),
+        markerFrame,
       ])
-      assertBranched(decodeAll(out), newId, marked)
+      await assertBranchedChunked([head, ...texts.slice(1), marker].join(''), newId, marked)
       return out
     }
     const marked = markedTitle(title.title, machine, last ?? title)
     const replaced = markTitleInFrame(texts[title.frame] as string, title.line, marked)
+    const head = rewriteHeaderId(texts[0] as string, newId)
+    const expected: string[] = []
     const out: Buffer[] = []
     for (const [index, frame] of frames.entries()) {
       if (index === title.frame) {
-        out.push(compressFrame(index === 0 ? rewriteHeaderId(replaced, newId) : replaced))
+        const next = index === 0 ? rewriteHeaderId(replaced, newId) : replaced
+        const compressed = compressFrame(next)
+        if (decodeAll(compressed) !== next) throw new Error(`branchSessionLog: frame ${index} round-trip mismatch`)
+        out.push(compressed)
+        expected.push(next)
       } else if (index === 0) {
-        out.push(compressFrame(rewriteHeaderId(texts[0] as string, newId)))
+        const compressed = compressFrame(head)
+        if (decodeAll(compressed) !== head) throw new Error('branchSessionLog: header frame round-trip mismatch')
+        out.push(compressed)
+        expected.push(head)
       } else {
         out.push(buf.subarray(frame.start, frame.end))
+        expected.push(texts[index] as string)
       }
     }
     const buffer = Buffer.concat(out)
-    assertBranched(decodeAll(buffer), newId, marked)
+    await assertBranchedChunked(expected.join(''), newId, marked)
     return buffer
   }
 
@@ -561,6 +581,40 @@ function assertBranched(text: string, newId: string, marker: string | undefined)
   const count = seen.filter((title) => title === marker).length
   if (count !== 1 || last !== marker) {
     throw new Error(`branchSessionLog: marker must be the newest title, got ${JSON.stringify(seen)}`)
+  }
+}
+
+/**
+ * 与 {@link assertBranched} 同一套判据，只是**按行分块**推进：改名的日志可能几十 MB，
+ * 整段 `JSON.parse` 每行会把主线程按住一两秒。
+ */
+async function assertBranchedChunked(text: string, newId: string, marker: string | undefined): Promise<void> {
+  const lines = text.split('\n')
+  let rows = 0
+  let id = ''
+  let markerCount = 0
+  let lastTitle: string | undefined
+  for (const [index, line] of lines.entries()) {
+    if (line === '') continue
+    const parsed = JSON.parse(line) as { id?: unknown; seq?: unknown }
+    if (rows === 0) {
+      id = typeof parsed.id === 'string' ? parsed.id : ''
+    } else if (parsed.seq !== rows - 1) {
+      throw new Error(`branchSessionLog: event seq ${String(parsed.seq)} at row ${rows} is not dense`)
+    }
+    rows += 1
+    const folded = foldTitle(line)
+    if (folded !== undefined) {
+      lastTitle = folded
+      if (folded === marker) markerCount += 1
+    }
+    if (index % 512 === 511) await yieldToLoop()
+  }
+  if (id !== newId) throw new Error(`branchSessionLog: header id is ${id}, expected ${newId}`)
+  if (marker === undefined) return
+  const count = markerCount
+  if (count !== 1 || lastTitle !== marker) {
+    throw new Error(`branchSessionLog: marker must be the newest title, got ${JSON.stringify(lastTitle)}`)
   }
 }
 

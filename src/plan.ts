@@ -2,14 +2,16 @@
 //
 // 计划是一等产物：apply 只接受一个 plan 对象，rollback 只依赖备份清单。
 // 这样 dry-run 与真实执行走的是同一段代码，避免"预览和实做不一致"。
-import { existsSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, statSync } from 'node:fs'
+import { readFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 
 import { accountedOwners } from './accounting.ts'
 import { planArtifactMoves } from './artifacts.ts'
 import { canonicalDir } from './canonical-path.ts'
-import { projectDirOf, scanAll, type DiscoveredSession } from './discovery.ts'
+import { projectDirOf, scanAllAsync, type DiscoveredSession } from './discovery.ts'
 import { familyOf } from './family.ts'
+import { decodeLogTextChunked } from './log-decode.ts'
 import { projectKey } from './project-key.ts'
 import { reHome, validateRegistry } from './registry.ts'
 import type { TitleQuery } from './session-title.ts'
@@ -96,7 +98,7 @@ export interface BuildPlanOptions {
  *
  * `problems` 非空时 `ok` 为 false，且不得执行。
  */
-export function buildRelocationPlan(options: BuildPlanOptions): RelocationPlan {
+export async function buildRelocationPlan(options: BuildPlanOptions): Promise<RelocationPlan> {
   const {
     root,
     registry,
@@ -208,7 +210,7 @@ export function buildRelocationPlan(options: BuildPlanOptions): RelocationPlan {
    * 同一份上算——不再有"源目录那一遍 + 为查族扫的第二遍"。这一遍不带标题的话就是纯 header 扫描，
    * 带标题时与 `/state` 同一份开销（见 web.ts 的说明）。
    */
-  const library = scanAll(root, decodeAll, scanOptions)
+  const library = await scanAllAsync(root, decodeAll, scanOptions)
   const discovered = splitLive(splitHidden(library))
   const byId = new Map(library.map((session) => [session.id, session]))
 
@@ -340,10 +342,16 @@ export function buildRelocationPlan(options: BuildPlanOptions): RelocationPlan {
     for (const [index, s] of sessions.entries()) {
       // 产物定位要**全量解码**每份日志（多帧全解），比发现阶段贵得多：这一段同样值得一条进度。
       onProgress?.({ phase: 'read', total: sessions.length, done: index, id: s.id, label: s.title ?? s.id })
+      // 分块解压、逐文件让出：单条会话可能几十 MB，整份解会把主线程按住一两秒。
+      const parts: string[] = []
+      for (const f of s.files) {
+        parts.push(await decodeLogTextChunked(await readFile(f.path), f.compression))
+        await new Promise<void>((resolve) => setImmediate(resolve))
+      }
       texts.push({
         id: s.id,
         // 多代次（v3 + v4）按代次顺序拼接，与宿主读取口径一致
-        text: s.files.map((f) => decodeAll(readFileSync(f.path))).join(''),
+        text: parts.join(''),
       })
     }
     const byFromDir = new Map<string, Array<{ id: string; text: string }>>()

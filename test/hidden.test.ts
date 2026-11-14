@@ -146,9 +146,9 @@ const req = (sandbox: Sandbox, extra: Record<string, unknown> = {}): MigrateRequ
   ...extra,
 })
 
-test('只搬点名的那些：子智能体跟着父会话走，没点名的（含空白 / 已归档）一个都不进计划', () => {
+test('只搬点名的那些：子智能体跟着父会话走，没点名的（含空白 / 已归档）一个都不进计划', async () => {
   const sandbox = makeSandbox('hidden-dir-source')
-  const preview = previewMigration(deps(sandbox), req(sandbox, { sessionIds: ['session-visible'] }))
+  const preview = await previewMigration(deps(sandbox), req(sandbox, { sessionIds: ['session-visible'] }))
   assert.equal(preview.ok, true, preview.problems.join('; '))
   assert.deepEqual(preview.sessionIds, ['session-visible'])
   // 计划里多出一条：`session-subagent` 是 `session-visible` 的子智能体，**跟着父会话一起搬**——
@@ -161,9 +161,9 @@ test('只搬点名的那些：子智能体跟着父会话走，没点名的（�
   assert.notEqual(projectKey(sandbox.source), projectKey(sandbox.target))
 })
 
-test('点名叫一条侧边栏不显示的会话：报的是"它被隐藏了"，不是含糊的"找不到"', () => {
+test('点名叫一条侧边栏不显示的会话：报的是"它被隐藏了"，不是含糊的"找不到"', async () => {
   const sandbox = makeSandbox('hidden-named')
-  const preview = previewMigration(deps(sandbox), req(sandbox, { sessionIds: ['session-subagent'] }))
+  const preview = await previewMigration(deps(sandbox), req(sandbox, { sessionIds: ['session-subagent'] }))
   assert.equal(preview.ok, false)
   // 子智能体那类给的是**下一步**而不是"我不搬它"：点名它自己不会把它搬走（那是向上的牵连），
   // 该点名的是它的父会话——所以这句话里带着父会话的 id。
@@ -172,30 +172,30 @@ test('点名叫一条侧边栏不显示的会话：报的是"它被隐藏了"，
   ])
 
   // 已归档的那条给的是归档这条理由（同一条判据的另一支）
-  const archived = previewMigration(deps(sandbox), req(sandbox, { sessionIds: ['session-archived'] }))
+  const archived = await previewMigration(deps(sandbox), req(sandbox, { sessionIds: ['session-archived'] }))
   assert.deepEqual(archived.problems, [
     'session session-archived is hidden from the host sidebar (archived) — migration does not take it',
   ])
 
   // 空白那条的理由来自投影缓存（不是 header），同样报得出来
-  const blank = previewMigration(deps(sandbox), req(sandbox, { sessionIds: ['session-blank'] }))
+  const blank = await previewMigration(deps(sandbox), req(sandbox, { sessionIds: ['session-blank'] }))
   assert.deepEqual(blank.problems, [
     'session session-blank is hidden from the host sidebar (blank) — migration does not take it',
   ])
 })
 
-test('投影缓存缺席（没挂那个域的老宿主）：不凭空判空白，点名那条照旧能迁', () => {
+test('投影缓存缺席（没挂那个域的老宿主）：不凭空判空白，点名那条照旧能迁', async () => {
   const sandbox = makeSandbox('hidden-no-cache')
   // 把缓存目录整个搬走：`resolveBlank` 读不到记录 → 按"会显示"处理，与宿主自己的冷会话口径一致
   // （`summarizeCold()` 用 `metadata?.blank ?? false`）。反过来假设它空白，就会把用户点得动的会话
   // 当成"隐藏"，还没迁就先报错。
   rmSync(join(sandbox.base, 'storages', 'session_projcache'), { recursive: true, force: true })
-  const preview = previewMigration(deps(sandbox), req(sandbox, { sessionIds: ['session-blank', 'session-visible'] }))
+  const preview = await previewMigration(deps(sandbox), req(sandbox, { sessionIds: ['session-blank', 'session-visible'] }))
   // 空白那条不再被判空白（可以与 `session-visible` 一起点名）；`session-subagent` 照旧跟着父会话走。
   assert.equal(preview.ok, true, preview.problems.join('; '))
   assert.deepEqual(preview.sessions.map((s) => s.id).sort(), ['session-blank', 'session-subagent', 'session-visible'])
   // 已归档那条仍然搬不走：归档是注册表里的事实，与投影缓存无关。
-  const archived = previewMigration(deps(sandbox), req(sandbox, { sessionIds: ['session-archived'] }))
+  const archived = await previewMigration(deps(sandbox), req(sandbox, { sessionIds: ['session-archived'] }))
   assert.equal(archived.ok, false)
   assert.deepEqual(archived.problems, [
     'session session-archived is hidden from the host sidebar (archived) — migration does not take it',
