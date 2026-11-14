@@ -3257,7 +3257,7 @@ export async function applyPreparedSync(
     let backedUp = false
     if (ready.length > 0) {
       try {
-        createBackup({
+        await createBackup({
           backupRoot: deps.backupRoot,
           registryPath: deps.registryPath,
           sessions: ready.flatMap((entry) => {

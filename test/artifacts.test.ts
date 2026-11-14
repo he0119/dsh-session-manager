@@ -214,7 +214,7 @@ function makeSandbox(name: string): Sandbox {
   return { base, root, registryPath, registry, fromDir, toDir, projectDirName, backupRoot: join(base, 'backups') }
 }
 
-test('集成：includeArtifacts 时产物随会话一起搬，并可字节级回滚', () => {
+test('集成：includeArtifacts 时产物随会话一起搬，并可字节级回滚', async () => {
   const sb = makeSandbox('artifacts')
   const plan = buildRelocationPlan({
     root: sb.root,
@@ -229,7 +229,7 @@ test('集成：includeArtifacts 时产物随会话一起搬，并可字节级回
   assert.deepEqual(plan.artifacts?.moves.map((m) => m.relative).sort(), ['loose.md', 'proj'])
   assert.match(plan.artifacts?.skipped.map((s) => s.reason).join(';') ?? '', /no longer on disk/)
 
-  const applied = applyPlan(plan, {
+  const applied = await applyPlan(plan, {
     registryPath: sb.registryPath,
     decodeAll,
     backupRoot: sb.backupRoot,
@@ -247,7 +247,7 @@ test('集成：includeArtifacts 时产物随会话一起搬，并可字节级回
   // 回滚：产物也要回到原位
   const { manifest } = readManifest(applied.backupDir)
   assert.equal(manifest.artifacts.length, 2)
-  const rb = rollback(manifest, { backupDir: applied.backupDir })
+  const rb = await rollback(manifest, { backupDir: applied.backupDir })
   assert.equal(rb.restoredArtifacts, 2)
   assert.ok(existsSync(join(sb.fromDir, 'proj', 'lib', 'x.mjs')))
   assert.equal(readFileSync(join(sb.fromDir, 'loose.md'), 'utf8'), 'loose\n')
@@ -257,7 +257,7 @@ test('集成：includeArtifacts 时产物随会话一起搬，并可字节级回
   rmSync(sb.base, { recursive: true, force: true })
 })
 
-test('集成：不传 includeArtifacts 时不动任何产物', () => {
+test('集成：不传 includeArtifacts 时不动任何产物', async () => {
   const sb = makeSandbox('no-artifacts')
   const plan = buildRelocationPlan({
     root: sb.root,
@@ -268,13 +268,13 @@ test('集成：不传 includeArtifacts 时不动任何产物', () => {
   })
   assert.equal(plan.ok, true, plan.problems.join('; '))
   assert.equal(plan.artifacts, null)
-  applyPlan(plan, { registryPath: sb.registryPath, decodeAll, backupRoot: sb.backupRoot, now: new Date('2026-09-27T00:00:00Z') })
+  await applyPlan(plan, { registryPath: sb.registryPath, decodeAll, backupRoot: sb.backupRoot, now: new Date('2026-09-27T00:00:00Z') })
   assert.ok(existsSync(join(sb.fromDir, 'proj', 'lib', 'x.mjs')), '未要求时产物必须原地不动')
   assert.ok(existsSync(join(sb.fromDir, 'loose.md')))
   rmSync(sb.base, { recursive: true, force: true })
 })
 
-test('集成：勾选跨目录时，每条会话的产物按它自己的来源目录定位', () => {
+test('集成：勾选跨目录时，每条会话的产物按它自己的来源目录定位', async () => {
   // 产物在日志里是**相对会话自己的 cwd** 记的（见 artifacts.ts 的 `resolveIn(cwd, …)`），而勾选可以跨
   // 目录：两个来源目录各有一条会话、各写了一个相对路径的文件，两条都得搬走。拿其中一个目录当唯一基准的
   // 话，另一条会按错的 cwd 解释——那句"盘上已经没有这个文件了"就是这里要修掉的。
@@ -337,7 +337,7 @@ test('集成：勾选跨目录时，每条会话的产物按它自己的来源�
   )
   assert.deepEqual(plan.artifacts?.skipped, [], '没有一条被判成"盘上已经没有了"')
 
-  const applied = applyPlan(plan, {
+  const applied = await applyPlan(plan, {
     registryPath,
     decodeAll,
     backupRoot: join(base, 'backups'),

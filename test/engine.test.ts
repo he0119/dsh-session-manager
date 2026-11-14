@@ -132,7 +132,7 @@ const opts = (sb: Sandbox, extra: Record<string, unknown> = {}) => ({
   ...extra,
 })
 
-test('迁移只解首帧：整份日志不进解码器（改写与复核都不）', () => {
+test('迁移只解首帧：整份日志不进解码器（改写与复核都不）', async () => {
   /*
    * 判据是"送进 decodeAll 的最大一段"。改写只需要 header 一行，复核也只需要 header——本机最大的一份
    * 日志压缩后 16.8 MB，整份解一次要 7 秒，迁移十条就把宿主按住一分多钟。这里造一份约 5 MB 的日志：
@@ -151,7 +151,7 @@ test('迁移只解首帧：整份日志不进解码器（改写与复核都不�
   const plan = buildRelocationPlan(opts(sb))
   assert.equal(plan.ok, true, plan.problems.join('; '))
 
-  applyPlan(plan, { registryPath: sb.registryPath, decodeAll: counting, backupRoot: sb.backupRoot })
+  await applyPlan(plan, { registryPath: sb.registryPath, decodeAll: counting, backupRoot: sb.backupRoot })
   assert.ok(maxBytes < 64 * 1024, `apply 阶段送进解码器的最大一段是 ${maxBytes} 字节（应当只有首帧）`)
 
   maxBytes = 0
@@ -160,7 +160,7 @@ test('迁移只解首帧：整份日志不进解码器（改写与复核都不�
   assert.ok(maxBytes < 64 * 1024, `verify 阶段送进解码器的最大一段是 ${maxBytes} 字节（应当只有首帧）`)
 })
 
-test('端到端：plan → apply → verify → rollback 全链路', () => {
+test('端到端：plan → apply → verify → rollback 全链路', async () => {
   const sb = makeSandbox('e2e')
   const srcA = join(sb.root, sb.sourceProjectDirName, 'session-a', 'session.v4.jsonl.zstd')
 
@@ -176,7 +176,7 @@ test('端到端：plan → apply → verify → rollback 全链路', () => {
   assert.deepEqual(readFileSync(srcA), sb.logs['a'], 'dry-run 不得改日志')
 
   // ---- apply ----
-  const applied = applyPlan(plan, {
+  const applied = await applyPlan(plan, {
     registryPath: sb.registryPath,
     decodeAll,
     backupRoot: sb.backupRoot,
@@ -212,7 +212,7 @@ test('端到端：plan → apply → verify → rollback 全链路', () => {
 
   // ---- rollback ----
   const { manifest } = readManifest(applied.backupDir)
-  const rolled = rollback(manifest, { backupDir: applied.backupDir })
+  const rolled = await rollback(manifest, { backupDir: applied.backupDir })
   assert.ok(rolled.restoredFiles >= 2)
   assert.equal(rolled.registryRestored, true)
 
@@ -246,7 +246,7 @@ test('未分组的会话：勾上就一起迁（它本来没登记在任何工�
 // 用户那条路：清理文件夹时把项目文件夹删掉，会话就落到外壳侧边栏的「未分组」里（那是标签，不是来源）。
 // 把项目重建到别处之后，勾上那几条照旧能迁：来源取自每条会话 header 里的 cwd（**不要求那个目录还在
 // 盘上**），真正必须存在的是来源项目目录（会话日志那一层）。
-test('来源目录已经不在盘上（项目文件夹删了）：勾上那几条照旧迁到重建后的目录', () => {
+test('来源目录已经不在盘上（项目文件夹删了）：勾上那几条照旧迁到重建后的目录', async () => {
   const sb = makeSandbox('deleted-source')
   rmSync(sb.fromDir, { recursive: true, force: true })
 
@@ -262,7 +262,7 @@ test('来源目录已经不在盘上（项目文件夹删了）：勾上那几�
   assert.deepEqual(plan.registryChange?.removedSources.map((source) => source.workspaceId), ['ws-downloads'])
   assert.deepEqual(plan.registryChange?.added.sort(), ['session-a', 'session-b'])
 
-  const result = applyPlan(plan, { registryPath: sb.registryPath, decodeAll, backupRoot: sb.backupRoot })
+  const result = await applyPlan(plan, { registryPath: sb.registryPath, decodeAll, backupRoot: sb.backupRoot })
   assert.equal(result.moved, 2)
   assert.equal(result.rewritten, 2)
   const verified = verifyAppliedPlan(plan, { decodeAll })
@@ -283,7 +283,7 @@ test('来源目录已经不在盘上（项目文件夹删了）：勾上那几�
   // 备份清单里的 from 就是那个（已经不在盘上的）源路径：回滚只认清单，不看目录在不在
   const { manifest } = readManifest(result.backupDir)
   assert.equal(manifest.from, sb.fromDir)
-  const rolled = rollback(manifest, { backupDir: result.backupDir })
+  const rolled = await rollback(manifest, { backupDir: result.backupDir })
   assert.equal(rolled.restoredFiles, 2)
   for (const [name, id] of [['a', 'session-a'], ['b', 'session-b']] as const) {
     assert.deepEqual(readFileSync(join(sb.root, sb.sourceProjectDirName, id, 'session.v4.jsonl.zstd')), sb.logs[name])
@@ -361,17 +361,17 @@ test('计划层拒绝：目标不存在 / 目标就是来源自己（没东西�
   rmSync(collideDir, { recursive: true, force: true })
 })
 
-test('applyPlan 拒绝执行有问题的计划；搬完之后再拿同一批 id 计划会如实说"已经在目标里了"', () => {
+test('applyPlan 拒绝执行有问题的计划；搬完之后再拿同一批 id 计划会如实说"已经在目标里了"', async () => {
   const sb = makeSandbox('refuse')
   const bad = buildRelocationPlan(opts(sb, { to: sb.fromDir }))
   assert.equal(bad.ok, false)
-  assert.throws(
-    () => applyPlan(bad, { registryPath: sb.registryPath, decodeAll, backupRoot: sb.backupRoot }),
+  await assert.rejects(
+    async () => applyPlan(bad, { registryPath: sb.registryPath, decodeAll, backupRoot: sb.backupRoot }),
     /refusing to apply/,
   )
 
   const plan = buildRelocationPlan(opts(sb))
-  applyPlan(plan, { registryPath: sb.registryPath, decodeAll, backupRoot: sb.backupRoot, now: new Date('2026-09-27T00:00:00Z') })
+  await applyPlan(plan, { registryPath: sb.registryPath, decodeAll, backupRoot: sb.backupRoot, now: new Date('2026-09-27T00:00:00Z') })
   // 同一批 id 再计划一次：它们已经被扫到目标项目目录里了（cwd 就是目标），这一次没东西可搬。
   const again = buildRelocationPlan(opts(sb))
   assert.equal(again.ok, false)
