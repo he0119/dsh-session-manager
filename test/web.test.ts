@@ -3505,3 +3505,78 @@ test('GET /sync-diff：指名的那台机器与远端索引记的不是同一台
     await fixture.close()
   }
 })
+
+test('POST /delete：勾了 alsoRemote 就删掉自己那格的包并留下墓碑；没勾远端一个字节都不动', async () => {
+  const sandbox = makeSandbox('web-delete-remote')
+  writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000, { title: '连远端一起删' })
+  const fixture = await startDavFixture({ root: join(sandbox.base, 'dav') })
+  const dav = createDavClient({ baseUrl: fixture.url })
+  try {
+    // 先把这条推到远端（自己那一格里因此有一个包与一条索引记录）。
+    const syncHandlers = createApiHandlers(
+      deps(sandbox, {
+        sync: async () => ({ settings: { url: fixture.url, machineId: 'robot-a', mapping: {} }, dav }),
+      }),
+    )
+    const pushed = fakeRes()
+    await syncHandlers['GET|POST /sync']!(
+      fakeReq('POST', `${API_PREFIX}/sync?mode=apply`, Buffer.from(JSON.stringify({ apply: true }))),
+      pushed.res,
+    )
+    assert.equal(pushed.captured.status, 200)
+    const bundlePath = 'dsh-session-manager/robot-a/session-a.dshsess'
+    assert.ok((await dav.get(bundlePath)).length > 0, '推送之后远端有这个包')
+
+    const handlers = createApiHandlers(
+      deps(sandbox, {
+        sync: async () => ({ settings: { url: fixture.url, machineId: 'robot-a', mapping: {} }, dav }),
+      }),
+    )
+    const post = async (body: unknown): Promise<Captured> => {
+      const { res, captured } = fakeRes()
+      await handlers['POST /delete']!(fakeReq('POST', `${API_PREFIX}/delete`, Buffer.from(JSON.stringify(body))), res)
+      return captured
+    }
+
+    const applied = await post({ sessionIds: ['session-a'], mode: 'apply', alsoRemote: true })
+    assert.equal(applied.status, 200)
+    const body = payload(applied)
+    const remote = body['remote'] as Record<string, unknown>
+    assert.equal(remote['removed'], 1, '从自己那一格删掉了一个包')
+    assert.ok(Number(remote['bytes']) > 0)
+    assert.deepEqual(remote['others'], [], '这次只有一台机器有它')
+    assert.match(String(body['summary']), /下次同步不会再把它拉回来/)
+    await assert.rejects(async () => dav.get(bundlePath), '远端那个包没了')
+    const index = JSON.parse((await dav.get('dsh-session-manager/robot-a/index.json')).toString('utf8')) as {
+      entries: Array<{ id: string }>
+      deleted?: Array<{ id: string }>
+    }
+    assert.deepEqual(index.entries, [], '索引里不再有这条')
+    assert.deepEqual((index.deleted ?? []).map((item) => item.id), ['session-a'], '留下一条删除记录')
+
+    // 没勾的那一次：远端一个字节都不动（这里换一条新会话，免得撞上刚删的那条）。
+    writeSession(sandbox.sessionsRoot, 'session-b', CWD_A, 2000)
+    const syncAgain = createApiHandlers(
+      deps(sandbox, {
+        sync: async () => ({ settings: { url: fixture.url, machineId: 'robot-a', mapping: {} }, dav }),
+      }),
+    )
+    const pushedB = fakeRes()
+    await syncAgain['GET|POST /sync']!(
+      fakeReq('POST', `${API_PREFIX}/sync?mode=apply`, Buffer.from(JSON.stringify({ apply: true }))),
+      pushedB.res,
+    )
+    const before = readFileSync(join(fixture.root, 'dsh-session-manager', 'robot-a', 'session-b.dshsess'))
+    const plain = await post({ sessionIds: ['session-b'], mode: 'apply' })
+    assert.equal(plain.status, 200)
+    assert.equal(payload(plain)['remote'], undefined, '没勾就没有远端那一项')
+    assert.deepEqual(
+      readFileSync(join(fixture.root, 'dsh-session-manager', 'robot-a', 'session-b.dshsess')),
+      before,
+      '没勾时远端那个包原样留着',
+    )
+  } finally {
+    await fixture.close()
+    rmSync(sandbox.base, { recursive: true, force: true })
+  }
+})

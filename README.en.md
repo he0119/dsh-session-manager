@@ -105,7 +105,11 @@ With sessions ticked, the action row does any of these in one click:
 - **Regenerate names**: recomputes titles from the whole conversation. Sessions you renamed by hand,
   subagent sessions, sessions with no user message yet and sessions with no model request at all are
   skipped; the result is reported as changed / unchanged / skipped / failed.
-- **Delete**: backs up the whole session directory, then deletes it. Changed your mind? Click
+- **Delete**: backs up the whole session directory, then deletes it. With sync configured, the
+  dialog's **Delete from the remote too** box is ticked by default: the bundle in this machine's
+  remote slot goes away as well and a deletion record is left behind, so the next sync will not
+  pull it back; copies on other machines are deleted when those machines next sync (the remote
+  copy has no backup). Changed your mind? Click
   **Undo** in the success message, or restore it from **Backups & rollback** in the status bar. A
   session the host still holds in memory needs a DSH restart first.
 

@@ -51,7 +51,7 @@ import { createHash, randomUUID } from 'node:crypto'
 
 import { diffSessionLogs, type DiffRelation } from './session-diff.ts'
 import { existsSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
-import { readFile } from 'node:fs/promises'
+import { readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import { canonicalDir, type DirCanonicalizer } from './canonical-path.ts'
@@ -175,12 +175,55 @@ export interface RemoteSessionEntry {
   machine: string
 }
 
+/**
+ * 一条"这台机器把它删了"的记录（墓碑）。
+ *
+ * 为什么需要它：删除只删本机，远端各机器格子里那份还好端端躺着，下一次同步就把它当"远端有、本机
+ * 没有"重新拉回来（见 [删除跟着墓碑走](../.agents/notes/implemented/feature/2026-11-15-deletion-travels-with-the-tombstone.md)）。
+ * 墓碑说的是"我在 `at` 这一刻删掉了它，谁的那份比这旧就别再当它还在"。
+ *
+ * 存在**删它的那台机器自己那份索引**里：每台机器只写自己那一格（同步的既有边界），不会出现两台机器
+ * 同时改同一份索引。
+ */
+export interface IndexedDeletion {
+  id: string
+  /** 删除时刻（毫秒时间戳）。 */
+  at: number
+}
+
 /** 一台机器写下的索引（`index.json` 的解析结果）。 */
 export interface RemoteIndex {
   machineId: string
   updatedAt?: string
   pluginVersion?: string
   entries: Array<Omit<RemoteSessionEntry, 'machine'>>
+  /** 删过并要求别再拉回来的那些会话（见 `IndexedDeletion`）；老索引没有这一项。 */
+  deleted?: readonly IndexedDeletion[]
+}
+
+/** 一条生效的墓碑：谁删的、什么时候。 */
+export interface Tombstone extends IndexedDeletion {
+  /** 删它的是哪台机器（报告里指名）。 */
+  machine: string
+}
+
+/**
+ * 把所有机器索引里的删除记录合成一份（同一个 id 取最晚的那次删除）。
+ *
+ * 为什么取最晚：两台机器各删过一次时，"更晚的那次"才是要拿来跟副本活动时间比的那把尺子。
+ *
+ * @param remote 读回来的远端库。
+ * @returns 会话 id → 墓碑。
+ */
+export function tombstonesOf(remote: RemoteLibrary): Map<string, Tombstone> {
+  const found = new Map<string, Tombstone>()
+  for (const [machine, index] of remote.indexes) {
+    for (const item of index.deleted ?? []) {
+      const current = found.get(item.id)
+      if (current === undefined || item.at > current.at) found.set(item.id, { id: item.id, at: item.at, machine })
+    }
+  }
+  return found
 }
 
 /** 远端读回来的东西。 */
@@ -845,7 +888,16 @@ export interface SyncPullEntry {
    */
   action: 'create' | 'replace' | 'skip'
   /** 机器可读的分类（界面按它挑文案与过滤，不去解析 `reason`）。 */
-  code: 'missing' | 'remote-ahead' | 'remote-newer' | 'blank-local' | 'no-mapping' | 'missing-target' | 'keep-remote'
+  code:
+    | 'missing'
+    | 'remote-ahead'
+    | 'remote-newer'
+    | 'blank-local'
+    | 'no-mapping'
+    | 'missing-target'
+    | 'keep-remote'
+    /** 别处删过了、远端这份比那次删除更旧：不拉回来（见 `SyncDeletedEntry`）。 */
+    | 'deleted'
   /**
    * 落选的本机那份也要留（只有「两份都保留」的裁决才置它）：落地时落成一条新会话，原 id 让给远端那份。
    * 缺席 = 只留远端那份，本机这份先备份再被顶掉。
@@ -874,6 +926,46 @@ export interface SyncPushEntry {
   reason?: string
 }
 
+/**
+ * 别处删过、本机这份更旧的一条会话：这次跟着删（先进备份，再删本机目录与这台机器那一格里的包）。
+ *
+ * 为什么跟着删而不是留着：留着就会在下一次同步里被当成"本机有、远端没有"重新推上去，删除等于没发生。
+ * 判据只有一条：本机这份的最后活动时间不晚于那次删除（见 `Tombstone`）。
+ */
+export interface SyncDeletedEntry {
+  id: string
+  title?: string
+  /** 谁删的（机器 id）。 */
+  by: string
+  /** 那次删除的时刻（毫秒时间戳）。 */
+  at: number
+  /** 本机这份的字节数。 */
+  bytes: number
+  cwd?: string
+}
+
+/**
+ * 写索引与清远端要的那几样（同步与"删除时清远端"两处共用；`SyncDeps` 天然满足）。
+ */
+export type RemoteCopiesPort = {
+  dav: DavPort
+  settings: SyncSettings
+  now?: () => Date
+  pluginVersion?: string
+}
+
+/** 删除时清远端的结果（见 `removeRemoteCopies()`）。 */
+export interface RemoteRemoval {
+  /** 从这台机器那一格里真删掉的包数。 */
+  removed: number
+  /** 删掉的那些包在索引里记的字节数。 */
+  bytes: number
+  /** 别的机器格子里还留着副本的那些机器（它们下次同步会跟着删）。 */
+  others: string[]
+  /** 没做成的那几步（远端读不到、包删不掉、索引写不进去）。 */
+  problems: string[]
+}
+
 /** 一次同步的计划（纯计算，不碰网络也不写盘）。 */
 export interface SyncPlan {
   /** 没有阻塞问题（映射配错、目标目录不存在等）。 */
@@ -885,6 +977,10 @@ export interface SyncPlan {
   pullIds: string[]
   /** 会被推送的会话 id（`upload` 与 `update` 都在里面）。 */
   pushIds: string[]
+  /** 别处删过、本机这份更旧的那些：这次跟着删（见 `SyncDeletedEntry`）。 */
+  deleted: SyncDeletedEntry[]
+  /** 会被跟着删掉的会话 id。 */
+  deletedIds: string[]
   /** 本机判为空白、这次不参与同步的会话 id（按发现顺序；它们不在上面两张表里）。 */
   blank: string[]
   /**
@@ -1032,6 +1128,11 @@ export function planSync(input: SyncPlanInput): SyncPlan {
   /** 筛不动、要内容判据的那些对（本机与远端都有、非空白）。 */
   const needsContent: string[] = []
   const blank: string[] = []
+  /** 别处删过、本机这份更旧的那些：这次跟着删（见 `SyncDeletedEntry`）。 */
+  const deleted: SyncDeletedEntry[] = []
+  const deletedIds: string[] = []
+  /** 所有机器索引里的删除记录（同一个 id 取最晚那次删除）。 */
+  const tombstones = tombstonesOf(input.remote)
   let bytesIn = 0
   let bytesOut = 0
 
@@ -1045,6 +1146,15 @@ export function planSync(input: SyncPlanInput): SyncPlan {
       ...(entry.cwd === undefined ? {} : { fromCwd: entry.cwd }),
       machine: entry.machine,
       bytes,
+    }
+    /*
+     * 别处删过了：远端这份要是比那次删除更旧（或旧索根本没记活动时间），它就是一份没人要的残留——
+     * 拉回来等于把删除抹掉。这份包等它那台机器下次同步时自己清掉（各自只管自己那一格）。
+     */
+    const grave = tombstones.get(id)
+    if (grave !== undefined && (entry.lastActiveAt ?? 0) <= grave.at) {
+      pull.push({ ...base, action: 'skip', code: 'deleted', reason: `已在 ${grave.machine} 上删除，不再拉回来` })
+      continue
     }
     if (entry.cwd === undefined) {
       // 没有 cwd 的会话不硬塞一个：照着包里的样子落 `_no-cwd`，也不进注册表（与导入同一条口径）。
@@ -1096,6 +1206,24 @@ export function planSync(input: SyncPlanInput): SyncPlan {
       ...(session.title === undefined ? {} : { title: session.title }),
       ...(session.cwd === undefined ? {} : { cwd: session.cwd }),
       bytes,
+    }
+    /*
+     * 这条在别处被删过：本机这份不比那次删除新，就跟着删（否则下一次同步会把它当"本机有、远端没有"
+     * 重新推上去，删除等于没发生）。本机这份更新时保留——那条会话在删除之后还在这台机器上写过，
+     * 按"谁更新谁赢"是它赢，墓碑在这台机器上作废。
+     */
+    const grave = tombstones.get(session.id)
+    if (grave !== undefined && (mineActiveAt === undefined || mineActiveAt <= grave.at)) {
+      deleted.push({
+        id: session.id,
+        ...(session.title === undefined ? {} : { title: session.title }),
+        ...(session.cwd === undefined ? {} : { cwd: session.cwd }),
+        by: grave.machine,
+        at: grave.at,
+        bytes,
+      })
+      deletedIds.push(session.id)
+      continue
     }
     if (remote === undefined) {
       if (isBlank) {
@@ -1339,6 +1467,12 @@ export function planSync(input: SyncPlanInput): SyncPlan {
     narrowToPushOnly({ problems, pull, pullIds, push, pushIds })
     // 没有拉取就没有入流量：这一项是"这次往本机写了多少"的报告值，跟着那张表一起归零。
     bytesIn = 0
+    /*
+     * 只推不拉那一路（后台自动推送）不做删除：跟着删一条会话要先进备份再删目录，那是"用户按下同步、
+     * 看过计划"才做的事，不该在后台悄悄发生。
+     */
+    deleted.length = 0
+    deletedIds.length = 0
   }
 
   return {
@@ -1348,6 +1482,8 @@ export function planSync(input: SyncPlanInput): SyncPlan {
     push,
     pullIds,
     pushIds,
+    deleted,
+    deletedIds,
     blank,
     needsContent,
     bytesIn,
@@ -1446,7 +1582,7 @@ export function parseIndex(text: string, machine: string, problems: string[]): R
     problems.push(`${machine} 的 ${SYNC_INDEX_FILE} 不是一个对象`)
     return undefined
   }
-  const value = parsed as { entries?: unknown; updatedAt?: unknown; pluginVersion?: unknown }
+  const value = parsed as { entries?: unknown; deleted?: unknown; updatedAt?: unknown; pluginVersion?: unknown }
   const entries: RemoteIndex['entries'] = []
   for (const raw of Array.isArray(value.entries) ? value.entries : []) {
     const entry = raw as Partial<RemoteSessionEntry>
@@ -1493,11 +1629,25 @@ export function parseIndex(text: string, machine: string, problems: string[]): R
       files,
     })
   }
+  /*
+   * 删除记录（墓碑）：读不出来的跳过并说一句，不编一个时间——一个来历不明的时间要么让一条还活着的
+   * 会话被删掉，要么让一条该删的复活，两种都比"这条记录没读到"更糟。
+   */
+  const deleted: IndexedDeletion[] = []
+  for (const raw of Array.isArray(value.deleted) ? value.deleted : []) {
+    const item = raw as Partial<IndexedDeletion>
+    if (typeof item?.id !== 'string' || item.id === '' || typeof item.at !== 'number' || !Number.isFinite(item.at)) {
+      problems.push(`${machine} 的索引里有一条读不出来的删除记录，已跳过`)
+      continue
+    }
+    deleted.push({ id: item.id, at: item.at })
+  }
   return {
     machineId: machine,
     ...(typeof value.updatedAt === 'string' ? { updatedAt: value.updatedAt } : {}),
     ...(typeof value.pluginVersion === 'string' ? { pluginVersion: value.pluginVersion } : {}),
     entries,
+    ...(deleted.length === 0 ? {} : { deleted }),
   }
 }
 
@@ -1676,7 +1826,11 @@ export async function readRemoteLibrary(dav: DavPort, settings: SyncSettings): P
  * 推送、整理两处都写这一份东西，形状必须一致（`parseIndex()` 只认这一种）：谁写都经过这里，免得一边
  * 加了字段、另一边漏掉，远端出现两份长得不一样的索引。
  */
-function indexPayload(deps: SyncDeps, entries: RemoteIndex['entries']): Buffer {
+function indexPayload(
+  deps: RemoteCopiesPort,
+  entries: RemoteIndex['entries'],
+  deleted: readonly IndexedDeletion[] = [],
+): Buffer {
   return Buffer.from(
     JSON.stringify(
       {
@@ -1686,6 +1840,8 @@ function indexPayload(deps: SyncDeps, entries: RemoteIndex['entries']): Buffer {
         updatedAt: (deps.now?.() ?? new Date()).toISOString(),
         ...(deps.pluginVersion === undefined ? {} : { pluginVersion: deps.pluginVersion }),
         entries,
+        // 墓碑只在有东西时才写：没有删过任何会话的机器，索引形状与这一天之前逐字节相同。
+        ...(deleted.length === 0 ? {} : { deleted }),
       },
       null,
       2,
@@ -1848,6 +2004,7 @@ export async function runTidy(
         indexPayload(
           deps,
           own.entries.filter((entry) => !drop.has(entry.id)),
+          own.deleted ?? [],
         ),
       )
     } catch (error) {
@@ -2017,6 +2174,12 @@ export interface SyncOutcome {
    * 数、这一项报人。
    */
   absentAttachments?: AbsentAttachmentSession[]
+  /**
+   * 这次**跟着删掉**的会话（别台机器删过、本机这份更旧，见 `SyncDeletedEntry`）。
+   *
+   * 缺席 = 这一趟没有要跟着删的。删之前先备份，所以界面给的提示里能带着「撤销」那条路（与删除同一套）。
+   */
+  deleted?: { ids: string[]; bytes: number }
   registryWritten: boolean
   indexWritten: boolean
   /**
@@ -2082,7 +2245,8 @@ export function collectLeftovers(outcome: SyncOutcome): SyncLeftover[] {
     leftovers.push(leftover)
   }
   for (const row of [...outcome.plan.pull, ...outcome.plan.push]) {
-    if (row.action !== 'skip' || row.code === 'identical') continue
+    // `identical` 是"本来就没事"；`deleted` 是"别处删过了，这次不拉它"——两者都不是没做到。
+    if (row.action !== 'skip' || row.code === 'identical' || row.code === 'deleted') continue
     /*
      * 缺映射不算「没做到」：那是"这台机器没有这个项目"，这一条本来就不该落到这里（计划里「这次不动」
      * 那张表已经写清原因）。把它算进来时，从另一台机器同步过来会挂着一串「没有 C:\… → 本机的同步
@@ -2958,6 +3122,77 @@ async function pullAttachments(
 }
 
 /**
+ * 删除时清远端：把自己那一格里的包删掉，并在自己那份索引里留一条删除记录（墓碑）。
+ *
+ * 为什么墓碑必须留下：包没了、索引条目也没了，别的机器下一次同步就会把"远端没有、本机有"那份重新
+ * 推上去——包括刚被删的这条会话在**第三台**机器上的副本。墓碑说的是"我在这一刻删了它"，同步据此
+ * 不再把它拉回来，也不再让别的机器把它推回来（见 `tombstonesOf()`）。
+ *
+ * 只动自己那一格：别的机器那格的包与索引归它自己（同步的既有边界，见 `planTidy()` 的注释）。它下次
+ * 同步看到墓碑时会把自己那份（比墓碑旧的）删掉；在那之前那份留着，但没人会再拉它。
+ *
+ * @param deps 远端与设置。
+ * @param ids 这次删掉的会话 id。
+ * @returns 真删掉几处、多少字节，别的机器上还留着副本的是哪几台，以及没做成的那几步。
+ */
+export async function removeRemoteCopies(deps: RemoteCopiesPort, ids: readonly string[]): Promise<RemoteRemoval> {
+  const problems: string[] = []
+  const others = new Set<string>()
+  const result: RemoteRemoval = { removed: 0, bytes: 0, others: [], problems }
+  if (ids.length === 0) return result
+  const remote = await readRemoteLibrary(deps.dav, deps.settings)
+  problems.push(...remote.problems)
+  const mine = machineDirName(deps.settings.machineId)
+  const own = remote.indexes.get(mine)
+  const byId = new Map((own?.entries ?? []).map((entry) => [entry.id, entry]))
+  /** 包真删掉了的那些（索引条目跟着消失；删失败的留着条目，下一次推送还会重写它）。 */
+  const gone = new Set<string>()
+  for (const id of ids) {
+    const entry = byId.get(id)
+    if (entry !== undefined) {
+      try {
+        await deps.dav.delete(remoteBundlePath(deps.settings.machineId, id))
+        result.removed += 1
+        result.bytes += entry.files.reduce((sum, file) => sum + file.bytes, 0)
+        gone.add(id)
+      } catch (error) {
+        problems.push(`删远端 ${id} 的包失败：${error instanceof Error ? error.message : String(error)}`)
+      }
+    }
+    for (const [machine, index] of remote.indexes) {
+      if (machine === mine) continue
+      if (index.entries.some((item) => item.id === id)) others.add(machine)
+    }
+  }
+  /*
+   * 墓碑跟着这次删除写进自己那份索引。写失败要大声说：删除记录没留下，下一次同步就会把它当
+   * "远端有、本机没有"重新拉回来——那正是这条路要防的事。
+   */
+  const deleted = new Map<string, number>()
+  for (const item of own?.deleted ?? []) deleted.set(item.id, item.at)
+  const at = (deps.now?.() ?? new Date()).getTime()
+  for (const id of ids) deleted.set(id, at)
+  try {
+    await deps.dav.put(
+      remoteIndexPath(deps.settings.machineId),
+      indexPayload(
+        deps,
+        (own?.entries ?? []).filter((entry) => !gone.has(entry.id)),
+        [...deleted].map(([id, when]) => ({ id, at: when })),
+      ),
+    )
+  } catch (error) {
+    problems.push(
+      `写远端索引失败，这次删除记录没留下（下次同步可能把这些会话又拉回来）：${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    )
+  }
+  result.others = [...others].sort()
+  return result
+}
+
+/**
  * 把导入那条路落下的**随包对象**记进这次同步的对象账。
  *
  * 这一版推送的包只有日志（对象走共享库），但远端那份包可能是 v2 的（旧版本推的、别人手工放上去的）：
@@ -3195,6 +3430,68 @@ export async function applyPreparedSync(
   const tidyPlan = options.tidy === true ? planTidy(remote, deps.settings.machineId) : undefined
   const tidyIds = new Set((tidyPlan?.entries ?? []).map((entry) => entry.id))
   const byId = new Map(local.map((session) => [session.id, session]))
+  /** 这台机器的格子名（删除、写索引与整理都要用，先算好）。 */
+  const ownDirName = machineDirName(deps.settings.machineId)
+  /*
+   * ── 跟着删：别处删过、本机这份更旧的那些（见 `SyncDeletedEntry`）────────────────────
+   *
+   * 顺序照删除那条路：**先备份，备份不成功就一条都不删**（备份是唯一一份能恢复的副本），再删目录，
+   * 最后把这台机器那一格里的包删掉。注册表不动：宿主把"登记了但日志不在"当正常状态（与 remove.ts
+   * 同一条口径）。
+   */
+  const deletedIds = new Set(plan.deletedIds)
+  const deletedNow: string[] = []
+  let deletedBytes = 0
+  if (deletedIds.size > 0) {
+    const doomed = plan.deleted
+      .map((item) => byId.get(item.id))
+      .filter((session): session is DiscoveredSession => session !== undefined)
+    let backedUp = true
+    try {
+      await createBackup({
+        backupRoot: deps.backupRoot,
+        registryPath: deps.registryPath,
+        sessions: doomed.map((session) => ({
+          id: session.id,
+          sourceDir: session.dir,
+          files: session.files,
+          ...(session.title === undefined ? {} : { title: session.title }),
+        })),
+        kind: 'delete',
+        ...(deps.now === undefined ? {} : { now: deps.now() }),
+      })
+    } catch (error) {
+      backedUp = false
+      deletedIds.clear()
+      problems.push(
+        `跟着删的备份没成功，这几条这次一条都没删：${error instanceof Error ? error.message : String(error)}`,
+      )
+    }
+    if (backedUp) {
+      for (const session of doomed) {
+        try {
+          await rm(session.dir, { recursive: true, force: true })
+          deletedNow.push(session.id)
+          deletedBytes += session.files.reduce((sum, file) => sum + file.bytes, 0)
+        } catch (error) {
+          problems.push(`跟着删 ${session.id} 失败：${error instanceof Error ? error.message : String(error)}`)
+        }
+      }
+      /*
+       * 这台机器那一格里的包也删掉（各机器只管自己那一格：别人的格子在它下次同步时自己清）。
+       * 索引条目在写索引那一步一起消失（`ownEntries` 建的时候就把这些 id 摘掉了）。
+       */
+      const ownHad = new Set((remote.indexes.get(ownDirName)?.entries ?? []).map((entry) => entry.id))
+      for (const id of deletedNow) {
+        if (!ownHad.has(id)) continue
+        try {
+          await deps.dav.delete(remoteBundlePath(deps.settings.machineId, id))
+        } catch (error) {
+          problems.push(`删远端 ${id} 的包失败：${error instanceof Error ? error.message : String(error)}`)
+        }
+      }
+    }
+  }
   /**
    * 上报一条写盘阶段的事件。
    *
@@ -3520,13 +3817,23 @@ export async function applyPreparedSync(
   const warm = await warmCheckpoints(pulled, deps)
 
   // ── 推送：整包 PUT，然后重写自己那一格的索引 ────────────────────────────────
-  const ownDirName = machineDirName(deps.settings.machineId)
   const own = remote.indexes.get(ownDirName)
   const ownEntries = new Map<string, RemoteIndex['entries'][number]>()
   for (const entry of own?.entries ?? []) {
     // 索引只描述"我这台机器现在还拿得出的会话"：本机删掉的下一次推送就从索引里消失
     // （远端那份包不主动删；别的机器自己那份记录照旧）。
-    if (byId.has(entry.id)) ownEntries.set(entry.id, entry)
+    if (byId.has(entry.id) && !deletedIds.has(entry.id)) ownEntries.set(entry.id, entry)
+  }
+  /*
+   * 自己那份索引里的删除记录（墓碑）：这条会话又在本机出现了（拉回来、或本机那份更新所以留着），
+   * 那次删除就作废，把记录摘掉——不摘的话下一次同步又会拿它去删别人的那份。
+   * 别的机器记的墓碑不归这里管，只能由那台机器自己摘。
+   */
+  const ownDeleted = new Map<string, number>()
+  for (const item of own?.deleted ?? []) ownDeleted.set(item.id, item.at)
+  for (const id of [...ownDeleted.keys()]) {
+    const alive = (byId.has(id) && !deletedIds.has(id)) || pulled.includes(id)
+    if (alive) ownDeleted.delete(id)
   }
   /*
    * 两类要主动从自己这格撤下来：
@@ -3644,6 +3951,7 @@ export async function applyPreparedSync(
       indexPayload(
         deps,
         [...ownEntries.values()].filter((entry) => !tidyIds.has(entry.id)),
+        [...ownDeleted].map(([id, at]) => ({ id, at })),
       ),
     )
     indexWritten = true
@@ -3753,6 +4061,7 @@ export async function applyPreparedSync(
           indexPayload(
             deps,
             [...ownEntries.values()].filter((entry) => !tidyIds.has(entry.id)),
+            [...ownDeleted].map(([id, at]) => ({ id, at })),
           ),
         )
       } catch (error) {
@@ -3794,6 +4103,7 @@ export async function applyPreparedSync(
     // 没勾整理、或索引没写成功时都缺席：界面据此什么都不说。
     ...(tidy === undefined ? {} : { tidy }),
     ...(absent.sessions.length === 0 ? {} : { absentAttachments: absent.sessions }),
+    ...(deletedNow.length === 0 ? {} : { deleted: { ids: deletedNow, bytes: deletedBytes } }),
     problems,
   }
 }

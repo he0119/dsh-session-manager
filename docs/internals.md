@@ -115,6 +115,11 @@
   [提示缩成一句那篇](../.agents/notes/implemented/simplification/2026-11-14-sync-chip-tooltip-one-line.md)）。
   附件对象那一头（本机与远端共享库里都没有的那些）走同一条路：数留在汇总那句里（`: 涉及 N 条会话`），
   逐条会话各占清单一行。
+- [删除跟着墓碑走](../.agents/notes/implemented/feature/2026-11-15-deletion-travels-with-the-tombstone.md)：
+  删除原来只删本机，远端各机器格子里那份还在，下一次同步就把它当「远端有、本机没有」重新拉回来。
+  现在删除可以连远端一起删（删自己那一格的包），并在自己那份索引里留一条删除记录（`deleted`）；
+  同步据此不拉比它旧的副本，让别的机器把自己那份（比它旧的）跟着删掉，而比它更新的那份保留并重推
+  （谁更新谁赢，同时把那条墓碑摘掉）。
 - [会话在远端哪几处，界面一次刷新读一次](../.agents/notes/implemented/architecture/2026-11-15-remote-placement-read-once-per-refresh.md)：
   右栏多一格「远端」：`GET /remote` 一遍读齐每台机器 `index.json` 里的位置（机器、包路径、字节、最后
   活动时间），界面一次刷新读一次、整份留在页面这一层，右栏只是查表；某台机器没读到时不说"远端没有"。

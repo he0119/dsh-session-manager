@@ -561,6 +561,8 @@ export interface SyncPullEntry {
     | 'no-mapping'
     | 'missing-target'
     | 'keep-remote'
+    /** 别处删过了、远端这份比那次删除更旧：不拉回来（见 `SyncDeletedEntry`）。 */
+    | 'deleted'
   /** 落选的本机那份也要留（「两份都保留」那一档）：落地时落成一条新会话。 */
   keepLoser?: true
   reason?: string
@@ -590,6 +592,20 @@ export interface SyncPushEntry {
 export type SyncDecision = 'keep-local' | 'keep-remote' | 'keep-both'
 
 /** 同步计划（宿主 `SyncPlan`）。 */
+/**
+ * 别处删过、本机这份更旧的一条会话：这次跟着删（先进备份，见宿主 `SyncDeletedEntry`）。
+ */
+export interface SyncDeletedEntry {
+  id: string
+  title?: string
+  /** 谁删的（机器 id）。 */
+  by: string
+  /** 那次删除的时刻（毫秒时间戳）。 */
+  at: number
+  bytes: number
+  cwd?: string
+}
+
 export interface SyncPlan {
   ok: boolean
   problems: string[]
@@ -597,6 +613,10 @@ export interface SyncPlan {
   push: SyncPushEntry[]
   pullIds: string[]
   pushIds: string[]
+  /** 别处删过、本机这份更旧的那些：这次跟着删。老宿主没有这一项。 */
+  deleted?: SyncDeletedEntry[]
+  /** 会被跟着删掉的会话 id（老宿主没有这一项）。 */
+  deletedIds?: string[]
   /** 本机判为空白、这次不参与同步的会话 id（界面只拿它说一句"跳过 N 条"）。 */
   blank: string[]
   bytesIn: number
@@ -632,6 +652,10 @@ export interface SyncResponse {
    */
   attachmentIn?: { written: number; present: number; bytes: number }
   attachmentOut?: { uploaded: number; skipped: number; bytes: number; missing: number }
+  /**
+   * 这次跟着删掉的会话（别处删过、本机这份更旧，见 `SyncDeletedEntry`）。缺席 = 没有跟着删的。
+   */
+  deleted?: { ids: string[]; bytes: number }
   registryWritten: boolean
   indexWritten: boolean
   problems: string[]
@@ -1245,6 +1269,19 @@ export interface DeleteResponse {
   removedProjectDirs: string[]
   verified: boolean
   backupDir?: string
+  /**
+   * 删远端那一步的结论（勾了「同时删除远端」、且这个宿主能删远端时才有）。
+   *
+   * 缺席 = 这次没勾，或这个宿主没配同步。
+   */
+  remote?: {
+    /** 从这台机器那一格里真删掉的包数。 */
+    removed: number
+    bytes: number
+    /** 别的机器格子里还留着副本的那些机器（它们下次同步会跟着删）。 */
+    others: string[]
+    problems: string[]
+  }
   problems: string[]
   summary: string
   error?: string
@@ -1261,11 +1298,18 @@ export async function deleteSessions(
   sessionIds: readonly string[],
   mode: 'plan' | 'apply',
   onProgress?: (event: ProgressEvent) => void,
+  /**
+   * 同时删远端（缺省 false）：真删那一步会把自己那一格里的包删掉，并留下一条删除记录。
+   *
+   * 不删远端会怎样：下一次同步把这条会话当"远端有、本机没有"重新拉回来。别的机器上的副本由它们各自
+   * 在下次同步时跟着删。
+   */
+  alsoRemote = false,
 ): Promise<DeleteResponse> {
   const response = await fetch(`${API_PREFIX}/delete`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', accept: 'text/event-stream' },
-    body: JSON.stringify({ sessionIds, mode }),
+    body: JSON.stringify({ sessionIds, mode, ...(alsoRemote ? { alsoRemote: true } : {}) }),
   })
   const parsed = await readEventStream<DeleteResponse>(response, onProgress, '删除')
   // 事件流那条路上正文一定带 plan（宿主把"计划有问题"也当结果回）；缺了说明对面不是本插件的宿主。

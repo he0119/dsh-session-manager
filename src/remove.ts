@@ -26,6 +26,7 @@ import type { ProjectionCacheReader } from './projection-cache.ts'
 import { familyOf, loneSubagents } from './family.ts'
 import { createBackup } from './journal.ts'
 import type { TitleQuery } from './session-title.ts'
+import type { RemoteRemoval } from './sync.ts'
 import type { DecodeAll, ProgressReporter, SessionLogFile } from './types.ts'
 
 /** 删除用到的路径、解码器与探测口（与 `MigrateDeps` 同形，本模块同样不认识 tools.ts）。 */
@@ -55,12 +56,27 @@ export interface RemoveDeps {
   liveSessionIds?: () => ReadonlySet<string>
   /** 注入时间，便于测试。 */
   now?: Date
+  /**
+   * 删远端那一步（可选，由宿主按"配没配同步"注入，见 `src/sync.ts` 的 `removeRemoteCopies()`）。
+   *
+   * 给了它、请求又要求同时删远端时，删除会在删完本机之后清自己那一格里的包、留下一条删除记录；
+   * 本机那份该不该留由用户勾，这里只负责"勾了就真的删干净"。缺席 = 这个宿主删不了远端
+   * （没配同步，或那条同步服务还没到）。
+   */
+  remoteRemove?: (ids: readonly string[]) => Promise<RemoteRemoval>
 }
 
 /** 一次删除（或预演）的请求。 */
 export interface RemoveRequest {
   /** 要删的会话 id（非空）。 */
   sessionIds: readonly string[]
+  /**
+   * 同时删远端（缺省 false）：删完本机之后，把这台机器那一格里的包删掉、留下一条删除记录。
+   *
+   * 不删远端会怎样：下一次同步把这条会话当"远端有、本机没有"重新拉回来（见 `src/sync.ts` 的
+   * `tombstonesOf()`）。别的机器上的那份由它们各自在下次同步时跟着删。
+   */
+  alsoRemote?: boolean
 }
 
 /** 预演里的一条会话。 */
@@ -109,6 +125,8 @@ export interface RemovalRun {
   dirsRemoved: number
   /** 被顺手清掉的空项目目录。 */
   removedProjectDirs: string[]
+  /** 删远端那一步的结论（没勾、或这个宿主删不了远端时缺席）。 */
+  remote?: RemoteRemoval
   summary: string
 }
 
@@ -299,7 +317,19 @@ export async function runRemoval(
     removedProjectDirs.push(projectDir)
   }
 
-  // 4) 独立复核：删掉的东西真的不在了、备份里那份真的在。
+  /*
+   * 4) 同时删远端（勾了、且宿主给了这条口子）：删掉自己那一格里的包，并留下一条删除记录。
+   *
+   * 远端那份**没有备份**——它只是这台机器推上去的副本，别的机器上可能还留着（它们下次同步会跟着删）。
+   * 失败不拦本地删除（本机已经删了、也备份了），但问题清单里要写清后果：删除记录没留下时，
+   * 下一次同步会把这条会话当"远端有、本机没有"重新拉回来。
+   */
+  const remote =
+    request.alsoRemote === true && deps.remoteRemove !== undefined
+      ? await deps.remoteRemove(plan.entries.map((entry) => entry.id))
+      : undefined
+
+  // 5) 独立复核：删掉的东西真的不在了、备份里那份真的在。
   const problems: string[] = []
   for (const [index, entry] of plan.entries.entries()) {
     onProgress?.({
@@ -315,7 +345,12 @@ export async function runRemoval(
       problems.push(`session ${entry.id}: 备份里没有这一份（${backed?.targetDir ?? backup.dir}）`)
     }
   }
+  /*
+   * 复核只看**本机删得干不干净**：远端那一步失败不该被念成"删除后的复核未通过"（那是另一件事，而且
+   * 本机这份确实删干净了）。它的原话照样进问题清单，界面上看得见。
+   */
   const verified = problems.length === 0
+  if (remote !== undefined) problems.push(...remote.problems)
   return {
     applied: true,
     plan,
@@ -324,8 +359,27 @@ export async function runRemoval(
     backupDir: backup.dir,
     dirsRemoved: plan.entries.length,
     removedProjectDirs,
+    ...(remote === undefined ? {} : { remote }),
     summary:
       `已删除 ${plan.entries.length} 个会话（${plan.files} 个日志文件、${plan.bytes} 字节）。${cascadeNote}\n` +
-      `复核：${verified ? '通过' : '失败'}。备份：${backup.dir}（可在「备份与回滚」里恢复）`,
+      `复核：${verified ? '通过' : '失败'}。备份：${backup.dir}（可在「备份与回滚」里恢复）` +
+      (remote === undefined ? '' : `\n${remoteNote(remote)}`),
   }
+}
+
+/**
+ * 远端那一步的结论，折成一句人话。
+ *
+ * @param remote 删远端的结果。
+ * @returns 一句话（带字节数，以及别的机器上还留着副本的情况）。
+ */
+function remoteNote(remote: RemoteRemoval): string {
+  const kept =
+    remote.others.length === 0
+      ? '别的机器上没有副本。'
+      : `${remote.others.join('、')} 的格子里还留着副本，那台机器下次同步时会跟着删掉。`
+  return (
+    `远端：这台机器的格子里删掉 ${remote.removed} 个包（${remote.bytes} 字节），` +
+    `并留下删除记录（下次同步不会再把它拉回来）。${kept}`
+  )
 }

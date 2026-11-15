@@ -4266,6 +4266,12 @@ test('客户端产物：删除弹窗摆出清单与备份位置，计划不 ok �
   )
   assert.deepEqual(rows.map((row) => rowParts(row).label), ['s-1', 's-9'], '清单逐条列出会被删的会话')
   assert.deepEqual(rowParts(rows[1]).tags, ['manage.delete.via'], '级联进来的挂「随父删」')
+  // 没配同步就不摆「同时删除远端」：这个宿主没有远端可删，摆一个勾不动的选项只是噪音。
+  assert.equal(
+    good.recorded.some((node) => node.props?.['aria-label'] === 'manage.delete.remote'),
+    false,
+    '没配同步时没有那枚勾选',
+  )
   // 风险确认：主按钮先禁用，勾上「我明白」才按得动（照官方 RiskConfirmation 那套）
   assert.equal(primaryOf(good.recorded).props.disabled, true, '没勾「我明白」之前，确认按钮按不动')
   assert.ok(
@@ -4311,6 +4317,51 @@ test('客户端产物：删除弹窗摆出清单与备份位置，计划不 ok �
   const waitingText = strings(waiting.registrations[0].component(waiting.registrations[0].registration.inject()))
   assert.ok(waitingText.includes('dialog.previewing'), '计划在路上时正文是"预演中…"')
   assert.equal(primaryOf(waitingRecorded).props.disabled, true, '计划没到手时确认按钮禁用')
+})
+
+test('客户端产物：配了同步时删除弹窗多一枚「同时删除远端」，默认勾上', { skip }, () => {
+  const state = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    archiveAvailable: true,
+    // 配了同步：那枚勾选才有意义（没有远端可删时它整枚不出现，见上一条用例）。
+    sync: { url: 'https://dav.example/dav', machineId: 'robot-a', mapping: {} },
+    sessions: [{ id: 's-1', cwd: '/home/u/dev/alpha', createdAt: 5, dir: '/home/u/dev/alpha', bytes: 2048, files: [] }],
+    workspaces: [{ id: 'w1', path: '/home/u/dev/alpha', title: '工作区甲', sessionIds: ['s-1'] }],
+  }
+  const plan = {
+    mode: 'plan',
+    ok: true,
+    preview: {
+      ok: true,
+      problems: [],
+      entries: [{ id: 's-1', createdAt: 5, dir: '/home/u/.dsh/sessions/alpha/s-1', files: [], bytes: 2048, live: false }],
+      files: 0,
+      bytes: 2048,
+      backupRoot: '/home/u/.dsh/dsh-session-manager/backups',
+    },
+    applied: false,
+    dirsRemoved: 0,
+    removedProjectDirs: [],
+    verified: false,
+    problems: [],
+    summary: '将删除 1 条会话',
+  }
+  const item = mount({
+    state,
+    panel: 'manage',
+    arrays: [['s-1']],
+    nulls: [null, null, null, null, { plan, error: null }],
+  })
+  const text = strings(item.registrations[0].component(item.registrations[0].registration.inject()))
+  const box = item.recorded.find((node) => node.props?.['aria-label'] === 'manage.delete.remote')
+  assert.ok(box, '那枚勾选要画出来（官方 Checkbox）')
+  assert.equal(box.props.checked, true, '默认勾上：只删本机会让下一次同步把它拉回来')
+  assert.ok(text.some((entry) => String(entry) === 'manage.delete.remoteHint'), '勾着时那句说明也在')
+  item.sets.length = 0
+  box.props.onChange()
+  assert.equal(item.sets.at(-1)?.value, false, '取消勾选写的是 false（受控状态就这么交出去）')
 })
 
 test('客户端产物：会话包能拖进来——弹窗那一格与整页都是落点', { skip }, () => {

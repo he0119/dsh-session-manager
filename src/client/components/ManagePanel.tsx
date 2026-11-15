@@ -129,6 +129,15 @@ export function ManagePanel({
   const facts = state ?? meta
   const archiveAvailable = facts?.archiveAvailable === true
   const retitleAvailable = facts?.retitleAvailable === true
+  /**
+   * 删除时要不要**连远端一起删**（配了同步时默认勾上，见 `openDelete`）。
+   *
+   * 为什么默认勾：只删本机的话，下一次同步会把这条会话当"远端有、本机没有"重新拉回来——那正是这个
+   * 选项存在的原因（见 `src/sync.ts` 的 `tombstonesOf()`）。
+   */
+  const [deleteRemote, setDeleteRemote] = React.useState(true)
+  /** 这个宿主配没配 WebDAV 同步：没配就不摆那枚勾选框（没有远端可删）。 */
+  const syncConfigured = facts?.sync !== null && facts?.sync !== undefined
 
   /**
    * 远端各机器格子里有什么（右栏那一行「远端」查它）。
@@ -707,6 +716,8 @@ export function ManagePanel({
     setFailed([])
     setPending({ plan: null, error: null })
     setProgress(null)
+    // 每次打开都回到"一起删"：这是绝大多数人的意图（只删本机等于下次同步又拉回来）。
+    setDeleteRemote(true)
     void deleteSessions(picked, 'plan', setProgress).then(
       (response) => {
         setProgress(null)
@@ -734,7 +745,7 @@ export function ManagePanel({
     setBusy('apply')
     setError(null)
     setProgress(null)
-    void deleteSessions(picked, 'apply', setProgress).then(
+    void deleteSessions(picked, 'apply', setProgress, deleteRemote).then(
       (response) => {
         setBusy(null)
         setProgress(null)
@@ -1148,6 +1159,16 @@ export function ManagePanel({
                       {problem}
                     </p>
                   ))}
+                </div>
+              )}
+              {syncConfigured && (
+                <div className="dsm-options">
+                  <Checkbox
+                    checked={deleteRemote}
+                    label={t('manage.delete.remote')}
+                    onChange={setDeleteRemote}
+                  />
+                  {deleteRemote && <p className="dsm-hint">{t('manage.delete.remoteHint')}</p>}
                 </div>
               )}
               <p className="dsm-hint">

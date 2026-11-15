@@ -18,6 +18,8 @@ import { projectKey } from '../src/project-key.ts'
 import { readRegistry, writeRegistryAtomic } from '../src/registry.ts'
 import {
   SYNC_INDEX_FILE,
+  SYNC_INDEX_UNIT,
+  SYNC_INDEX_VERSION,
   machineDirName,
   attachmentRefsOfFiles,
   contentFingerprint,
@@ -40,6 +42,7 @@ import {
   remoteBundlePath,
   remoteIndexPath,
   remotePlacements,
+  removeRemoteCopies,
   runSync,
   runTidy,
   syncPrepared,
@@ -693,6 +696,23 @@ test('sync：索引解析宽容——坏 JSON / 缺 id / 没有代次都不炸�
   )
   assert.match(problems.join('\n'), /没有 id/)
   assert.match(problems.join('\n'), /没有任何代次记录/)
+
+  // 删除记录（墓碑）：读得出来的留着，读不出来的跳过并说一句——不编一个时间（编出来的要么让活着的
+  // 会话被删掉，要么让该删的复活）。
+  const withTombstones = parseIndex(
+    JSON.stringify({
+      entries: [],
+      deleted: [
+        { id: 'gone-1', at: 1700000000000 },
+        { id: 'bad-no-time' },
+        { at: 1 },
+      ],
+    }),
+    'robot-b',
+    problems,
+  )
+  assert.deepEqual(withTombstones?.deleted, [{ id: 'gone-1', at: 1700000000000 }])
+  assert.match(problems.join('\n'), /读不出来的删除记录/)
 })
 
 // ── 落地（真服务） ────────────────────────────────────────────────────────
@@ -3784,4 +3804,169 @@ test('远端位置：每台机器的格子都列全（不是只留"领先的那�
   const onlyA = map.sessions['session-only-a']![0]!
   assert.equal(onlyA.machine, 'robot-a')
   assert.equal('lastActiveAt' in onlyA, false, '老索引没记活动时间时这一项缺席，而不是编一个 0')
+})
+
+// ── 删除跟着墓碑走：删掉的会话不再被同步拉回来 ─────────────────────────────────
+//
+// 三条判据各自钉住：远端那份比墓碑旧 → 不拉；本机那份比墓碑旧 → 跟着删（先进备份，再删本机目录与
+// 自己那一格里的包）；本机那份更新 → 留着并重新推上去（"谁更新谁赢"）。
+
+/** 往某台机器的索引里塞一条删除记录（墓碑）。索引不存在就先造一份空的。 */
+async function addTombstone(
+  dav: ReturnType<typeof createDavClient>,
+  machineId: string,
+  id: string,
+  at: number,
+): Promise<void> {
+  let index: { entries: unknown[]; deleted?: Array<{ id: string; at: number }> } = { entries: [] }
+  try {
+    index = JSON.parse((await dav.get(remoteIndexPath(machineId))).toString('utf8'))
+  } catch {
+    // 这台机器还没推送过内容：从空的开始。
+  }
+  index.deleted = [...(index.deleted ?? []).filter((item) => item.id !== id), { id, at }]
+  await dav.put(
+    remoteIndexPath(machineId),
+    Buffer.from(
+      JSON.stringify({
+        unit: SYNC_INDEX_UNIT,
+        version: SYNC_INDEX_VERSION,
+        machineId,
+        updatedAt: '2026-10-01T00:00:00.000Z',
+        entries: index.entries,
+        deleted: index.deleted,
+      }),
+    ),
+  )
+}
+
+/** 读某台机器的索引（测试里看墓碑与条目）。 */
+async function readIndex(dav: ReturnType<typeof createDavClient>, machineId: string): Promise<Record<string, unknown>> {
+  return JSON.parse((await dav.get(remoteIndexPath(machineId))).toString('utf8')) as Record<string, unknown>
+}
+
+test('同步：别处删过的那份（比墓碑旧）不再拉回来，计划里说一句"已在某台机器上删除"', async () => {
+  rmSync(SANDBOX, { recursive: true, force: true })
+  mkdirSync(SANDBOX, { recursive: true })
+  const fixture = await startDavFixture({ root: join(SANDBOX, 'dav-tombstone-pull') })
+  const dav = createDavClient({ baseUrl: fixture.url })
+  const a = makeMachine('tombstone-pull-a')
+  const b = makeMachine('tombstone-pull-b')
+  try {
+    writeSession(b, 's1', 1000, { title: '已经被删掉的那条' })
+    await syncMachine(b, dav, settings(b, { machineId: 'robot-b' }), { apply: true })
+    // b 删了它：索引里留一条墓碑（时间比那份副本新）。
+    await addTombstone(dav, 'robot-b', 's1', 4_000_000_000_000)
+
+    const outcome = await syncMachine(
+      a,
+      dav,
+      settings(a, { machineId: 'robot-a', mapping: { [b.cwd]: a.cwd } }),
+      { apply: false },
+    )
+    assert.deepEqual(outcome.plan.pullIds, [], '不再拉回来')
+    assert.deepEqual(outcome.plan.deletedIds, [], '本机没有这条，谈不上跟着删')
+    const row = outcome.plan.pull.find((entry) => entry.id === 's1')
+    assert.equal(row?.action, 'skip')
+    assert.equal(row?.code, 'deleted')
+    assert.match(row?.reason ?? '', /已在 robot-b 上删除/)
+  } finally {
+    await fixture.close()
+    rmSync(SANDBOX, { recursive: true, force: true })
+  }
+})
+
+test('同步：本机这份比删除旧 → 跟着删（进备份、删目录、删自己那格的包，远端也不再留它）', async () => {
+  rmSync(SANDBOX, { recursive: true, force: true })
+  mkdirSync(SANDBOX, { recursive: true })
+  const fixture = await startDavFixture({ root: join(SANDBOX, 'dav-tombstone-follow') })
+  const dav = createDavClient({ baseUrl: fixture.url })
+  const a = makeMachine('tombstone-follow-a')
+  try {
+    writeSession(a, 's1', 1000, { title: '本机这条也要删' })
+    const config = settings(a, { machineId: 'robot-a' })
+    await syncMachine(a, dav, config, { apply: true })
+    // 别处（robot-b）删过同一条：墓碑时间比本机这份的活动时间新。
+    await addTombstone(dav, 'robot-b', 's1', 4_000_000_000_000)
+
+    const outcome = await syncMachine(a, dav, config, { apply: true })
+    assert.deepEqual(outcome.plan.deletedIds, ['s1'])
+    assert.deepEqual(outcome.deleted?.ids, ['s1'], '结果里报出跟着删了哪条')
+    assert.equal(existsSync(sessionDir(a.sessionsRoot, a.cwd, 's1')), false, '本机目录没了')
+    // 备份里有一份（与删除那条路同一个备份根）。
+    const backups = readdirSync(join(a.base, 'backups'))
+    assert.equal(backups.length, 1, '删之前先备份')
+    // 自己那一格里的包也删了，索引里不再有这条。
+    await assert.rejects(async () => dav.get(remoteBundlePath('robot-a', 's1')))
+    const index = await readIndex(dav, 'robot-a')
+    assert.deepEqual(index['entries'], [], '自己那一格的索引条目没了')
+  } finally {
+    await fixture.close()
+    rmSync(SANDBOX, { recursive: true, force: true })
+  }
+})
+
+test('同步：本机这份比删除新 → 留着并重新推上去，自己那份墓碑同时作废', async () => {
+  rmSync(SANDBOX, { recursive: true, force: true })
+  mkdirSync(SANDBOX, { recursive: true })
+  const fixture = await startDavFixture({ root: join(SANDBOX, 'dav-tombstone-newer') })
+  const dav = createDavClient({ baseUrl: fixture.url })
+  const a = makeMachine('tombstone-newer-a')
+  try {
+    writeSession(a, 's1', 1000, { title: '删了之后又写过' })
+    const config = settings(a, { machineId: 'robot-a' })
+    await syncMachine(a, dav, config, { apply: true })
+    // 本机这条最后动在 4_000_000_000_000 之后，删除发生在很久以前。
+    await addTombstone(dav, 'robot-b', 's1', 1000)
+    await addTombstone(dav, 'robot-a', 's1', 1000)
+
+    const outcome = await syncMachine(a, dav, config, {
+      apply: true,
+      sessionMeta: () => ({ lastMessageAt: 5_000_000_000_000 }),
+    })
+    assert.deepEqual(outcome.plan.deletedIds, [], '本机这份更新，不该删')
+    assert.deepEqual(
+      outcome.plan.push.map((entry) => entry.code),
+      ['identical'],
+      '本机这份照常参与比对（远端那份与它一模一样，所以这次不用重传）',
+    )
+    assert.equal(existsSync(sessionDir(a.sessionsRoot, a.cwd, 's1')), true)
+    const index = await readIndex(dav, 'robot-a')
+    assert.deepEqual(index['deleted'] ?? [], [], '自己那份墓碑在这台机器上作废')
+  } finally {
+    await fixture.close()
+    rmSync(SANDBOX, { recursive: true, force: true })
+  }
+})
+
+test('删除时同时删远端：删掉自己那格的包、留下墓碑，下一次同步不会再把它拉回来', async () => {
+  rmSync(SANDBOX, { recursive: true, force: true })
+  mkdirSync(SANDBOX, { recursive: true })
+  const fixture = await startDavFixture({ root: join(SANDBOX, 'dav-delete-remote') })
+  const dav = createDavClient({ baseUrl: fixture.url })
+  const a = makeMachine('delete-remote-a')
+  try {
+    writeSession(a, 's1', 1000, { title: '删完不该回来' })
+    const config = settings(a, { machineId: 'robot-a' })
+    await syncMachine(a, dav, config, { apply: true })
+
+    const removal = await removeRemoteCopies({ dav, settings: config }, ['s1'])
+    assert.equal(removal.removed, 1, '自己那格的包删掉了')
+    assert.ok(removal.bytes > 0)
+    assert.deepEqual(removal.problems, [])
+    await assert.rejects(async () => dav.get(remoteBundlePath('robot-a', 's1')))
+    const index = await readIndex(dav, 'robot-a')
+    const tombstones = index['deleted'] as Array<{ id: string; at: number }>
+    assert.deepEqual(tombstones.map((item) => item.id), ['s1'], '墓碑记下了这条')
+    assert.equal(typeof tombstones[0]!.at, 'number', '墓碑带删除时刻')
+
+    // 本机也删掉（删除编排里是这一步之前发生的），再同步：不该被拉回来。
+    rmSync(sessionDir(a.sessionsRoot, a.cwd, 's1'), { recursive: true, force: true })
+    const after = await syncMachine(a, dav, config, { apply: true })
+    assert.deepEqual(after.plan.pullIds, [], '远端那份不在了，也没有可拉的东西')
+    assert.equal(existsSync(sessionDir(a.sessionsRoot, a.cwd, 's1')), false, '删掉的会话没有被同步带回来')
+  } finally {
+    await fixture.close()
+    rmSync(SANDBOX, { recursive: true, force: true })
+  }
 })

@@ -67,7 +67,7 @@ import { leftoversOf } from '../logic/syncLeftovers.ts'
 import { remoteLibrary } from '../logic/remoteLibrary.ts'
 import { projectLabel, sessionLabel, type SessionLabel } from '../logic/planRows.ts'
 import { ProgressBlock } from './ProgressBlock.tsx'
-import { formatBytes, sessionTags, type TagCopy } from './sessionList.tsx'
+import { formatBytes, formatTime, sessionTags, type TagCopy } from './sessionList.tsx'
 import { SyncDiffDialog, type SyncDiffTarget } from './SyncDiffDialog.tsx'
 import { groupSyncRows, syncProjectOf, syncPullTip, type SyncGroup, type SyncSide } from '../logic/syncGroups.ts'
 import type { PanelShare } from '../types.ts'
@@ -709,7 +709,8 @@ export function SyncPanel({
         ? t('sync.tidy.done', { count: tidied.removed + tidied.orphans, size: formatBytes(tidied.bytes) })
         : ''
     const sessionsMoved = result.pulled.length > 0 || result.pushed.length > 0
-    if (sessionsMoved || attachments !== '') {
+    const deletedAny = (result.deleted?.ids.length ?? 0) > 0
+    if (sessionsMoved || attachments !== '' || deletedAny) {
       setNotice(
         // 一条会话都没搬、只搬了对象时换一句引子：那句"已拉取 0 条、已推送 0 条（落地 0 B，上传 0 B）"
         // 在"补对象"这一趟里全是零，说出来只是噪音。
@@ -723,6 +724,10 @@ export function SyncPanel({
           : t('sync.appliedObjectsOnly')) +
           // 覆盖本机原来那份是这次同步里唯一"本机内容被换掉"的部分，值得单独说一句（旧的进备份了）。
           (result.replaced.length === 0 ? '' : ` ${t('sync.appliedReplaced', { count: result.replaced.length })}`) +
+          // 跟着删掉的那些（别处删过、本机这份更旧）也要说一句：本机内容真的少了，旧的那份在备份里。
+          (result.deleted === undefined || result.deleted.ids.length === 0
+            ? ''
+            : ` ${t('sync.appliedDeleted', { count: result.deleted.ids.length })}`) +
           (attachments === '' ? '' : ` ${attachments}`) +
           (tidyLine === '' ? '' : ` ${tidyLine}`) +
           // 计划是重算的就得说一句：不然"确认时看到的那几条"和"结果里这几条"对不上时没人解释。
@@ -904,6 +909,8 @@ export function SyncPanel({
   const syncPushes = syncPlan?.push.filter((entry) => entry.action !== 'skip') ?? []
   // 空白会话不进那三张表，只在正文里报一句：它们没有内容可同步，逐条列出来只是把表撑长。
   const syncBlank = syncPlan?.blank?.length ?? 0
+  /** 别处删过、本机这份更旧的那些：这次跟着删（先进备份，见 `SyncDeletedEntry`）。 */
+  const syncDeleted = syncPlan?.deleted ?? []
   // 只留"有信息量"的没动项：`identical` 是"远端已经有这一份"，整库同步时它是最多也最没用的一类。
   const syncKept: SyncKeptRow[] =
     syncPlan === null
@@ -916,7 +923,12 @@ export function SyncPanel({
             .filter((entry) => entry.action === 'skip' && entry.code !== 'identical')
             .map((entry): SyncKeptRow => ({ side: 'push', entry })),
         ]
-  const syncClean = syncPlan !== null && syncPulls.length === 0 && syncPushes.length === 0 && syncKept.length === 0
+  const syncClean =
+    syncPlan !== null &&
+    syncPulls.length === 0 &&
+    syncPushes.length === 0 &&
+    syncKept.length === 0 &&
+    syncDeleted.length === 0
   /**
    * 三张表各自按**项目目录**分组（见 [syncGroups.ts](./syncGroups.ts)）：拉取行按落地后的本机目录、
    * 推送行按本机目录、「没动」按它自己那一边的目录。工作区名称从 `/state` 来（同一个路径在别处显示
@@ -1247,7 +1259,13 @@ export function SyncPanel({
             >
               {syncClean
                 ? t('sync.nothing')
-                : t('sync.planWork', { pull: syncPlan.pullIds.length, push: syncPlan.pushIds.length })}
+                : syncDeleted.length === 0
+                  ? t('sync.planWork', { pull: syncPlan.pullIds.length, push: syncPlan.pushIds.length })
+                  : t('sync.planWorkDeleted', {
+                      pull: syncPlan.pullIds.length,
+                      push: syncPlan.pushIds.length,
+                      deleted: syncDeleted.length,
+                    })}
             </p>
             <p className="dsm-hint dsm-planFacts">
               {t('sync.planFacts', { local: syncPlan.localCount, remote: syncPlan.remoteCount })}
@@ -1384,6 +1402,43 @@ export function SyncPanel({
                       })}
                     </tbody>
                   ))}
+                </table>
+              </>
+            )}
+
+            {syncDeleted.length > 0 && (
+              <>
+                <PlanSectionHead title={t('sync.deletedHead')} count={syncDeleted.length} t={t} />
+                {/* 这张表说的是**要动手**的事（跟着删），所以排在「没动」之前；删除前先备份，
+                    与删除那条路同一个备份根（界面在提示里给「撤销」）。 */}
+                <table className="dsm-table dsm-planTable dsm-syncPlanTable">
+                  <thead>
+                    <tr>
+                      <th className="dsm-colAction">{t('table.conclusion')}</th>
+                      <th className="dsm-colSession">{t('table.session')}</th>
+                      <th className="dsm-colMachine">{t('table.deletedAt')}</th>
+                      <th className="dsm-colBytes">{t('table.bytes')}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {syncDeleted.map((entry) => {
+                      const label = sessionLabel(entry)
+                      return (
+                        <tr key={entry.id}>
+                          <td>
+                            <Hint text={entry.title ?? entry.id}>
+                              <span className="dsm-tag">
+                                <Tag tone="warning">{t('sync.tag.deleted')}</Tag>
+                              </span>
+                            </Hint>
+                          </td>
+                          <SessionCell label={label} tip={label.tip} tags={typeTagsOf(sessionsById.get(entry.id))} t={t} />
+                          <td className="dsm-cwd">{`${entry.by} · ${formatTime(entry.at)}`}</td>
+                          <td className="dsm-colBytes dsm-num">{formatBytes(entry.bytes)}</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
                 </table>
               </>
             )}

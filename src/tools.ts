@@ -474,13 +474,23 @@ function describeSync(
   pushed: readonly string[],
   applied: boolean,
   attachments?: { in?: SyncAttachmentIn; out?: SyncAttachmentOut },
+  deleted?: { ids: readonly string[]; bytes: number },
 ): string {
   const head = `${applied ? '已同步' : '预演'}：拉取 ${plan.pullIds.length} 条、推送 ${plan.pushIds.length} 条（本机 ${plan.localCount} 条，远端 ${plan.remoteCount} 条，来自 ${plan.machines.join('、') || '还没有机器'}）`
-  if (!applied) return head
+  if (!applied) {
+    // 预演时把"跟着删"的条数也报出来：确认那一下之后它会真的删（先进备份）。
+    return plan.deleted.length === 0
+      ? head
+      : `${head}。其中 ${plan.deleted.length} 条已在别处删除，确认后会跟着删（先进备份）`
+  }
   // 拉取里有多少条是"换掉本机原来那份"值得单独报：旧的进备份了，用户可能想恢复回去。
   const overwrote =
     replaced.length === 0 ? '' : `，其中 ${replaced.length} 条覆盖了本机原来那份（旧的那份已进备份）`
-  return `${head}。实际落地：拉取 ${pulled.length} 条、推送 ${pushed.length} 条${overwrote}${describeSyncObjects(attachments)}`
+  const followed =
+    deleted === undefined || deleted.ids.length === 0
+      ? ''
+      : `，跟着删掉 ${deleted.ids.length} 条已在别处删除的会话（旧的那份已进备份）`
+  return `${head}。实际落地：拉取 ${pulled.length} 条、推送 ${pushed.length} 条${overwrote}${followed}${describeSyncObjects(attachments)}`
 }
 
 /**
@@ -1670,10 +1680,15 @@ export function registerTools(ctx: Context, config: PluginConfigInput = {}): Arr
                 ? 'immediate'
                 : mode(),
             summary: [
-              describeSync(outcome.plan, outcome.pulled, outcome.replaced, pushedIds, outcome.applied, {
-                in: outcome.attachmentIn,
-                out: outcome.attachmentOut,
-              }),
+              describeSync(
+                outcome.plan,
+                outcome.pulled,
+                outcome.replaced,
+                pushedIds,
+                outcome.applied,
+                { in: outcome.attachmentIn, out: outcome.attachmentOut },
+                outcome.deleted,
+              ),
               describeWarm(outcome.warm),
               describeLeftovers(collectLeftovers(outcome)),
               // 预演也要把"执行后会怎样"说出来，否则调用方要到落地之后才知道要重启（与迁移工具同一条）。
