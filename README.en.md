@@ -12,8 +12,10 @@
 
 A session manager for DSH: one **Session management** page in the sidebar to move sessions to
 another directory, export / import them as `.dshsess` bundles, archive and delete them, plus
-**WebDAV sync** across machines. Every action that writes to disk shows you a plan first, writes
-only after you confirm, and leaves a backup you can roll back.
+**WebDAV sync** across machines. Every action that writes to disk shows you a plan first and writes
+only after you confirm; from there one window reports progress (you can send it to the background,
+where progress moves to the status bar), turns into the result with an **Undo**, and closes on
+**Done**. Anything it changed leaves a backup you can roll back.
 
 [中文](README.md) | English
 
@@ -110,8 +112,9 @@ With sessions ticked, the action row does any of these in one click:
   remote slot goes away as well and a deletion record is left behind, so the next sync will not
   pull it back; copies on other machines are deleted when those machines next sync (the remote
   copy has no backup). Changed your mind? Click
-  **Undo** in the success message, or restore it from **Backups & rollback** in the status bar. A
-  session the host still holds in memory needs a DSH restart first.
+  **Undo** on the result page (it opens **Backups & rollback** focused on the backup that was just
+  made), or go there yourself from the status bar. A session the host still holds in memory needs a
+  DSH restart first.
 
 ## Sync across machines
 
@@ -139,7 +142,9 @@ sync:
 - **Manual sync**: click the sync state in the page header to get a read-only plan (how many to
   pull, how many to push, which ones both sides have), then confirm. When the remote copy is newer,
   this machine's copy is backed up first and then replaced; the old one can be restored from
-  **Backups & rollback**.
+  **Backups & rollback**. When the run finishes, the same window becomes the result page (one line,
+  the items left undone, **Undo**) and closes on **Done**. For a long run, **Run in background**
+  moves progress and the result to the status bar; click that chip to come back to the same window.
 - **See which item was left undone**: when the header chip turns amber, hovering it lists the first
   few items (which session, and why), and the "Last sync" block at the top of the dialog shows them
   all. Items tied to a session carry a "Show only this one" button that filters the list down to it.

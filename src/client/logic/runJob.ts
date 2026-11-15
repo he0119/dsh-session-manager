@@ -114,7 +114,8 @@ export function startRun<T>(
     options.onChange?.(done)
   }
   void work((progress) => {
-    if (current === null || current.kind !== kind) return
+    // 只认还在跑的那一趟：请求那边已经给了结论之后，迟到的进度不该把界面改回"在跑"（与 syncJob 同一个口径）。
+    if (current === null || current.kind !== kind || !current.running) return
     current = { ...current, progress }
     emit()
   }).then(

@@ -477,11 +477,12 @@ export function SyncPanel({
   meta,
   reload,
   /**
-   * 「别处发起的那一趟」的结论（认领来的）：那个弹窗自己没有完整结果，所以由页面把这一句交过来。
+   * 打开「备份与回滚」那一面（结果页上那枚「撤销」）。
    *
-   * 有它时这一面顶上摆一句——失败原因、搬了几条原是页面横幅说的话，横幅搬进状态栏之后得有个地方说全。
+   * 同步改过本机内容时，旧的那份就在备份里（覆盖本机、跟着删都先备份）；那枚按钮把用户送过去自己挑。
+   * 缺席时（没有备份这一面的调用方）就不摆它——点了没反应的按钮比不摆更糟。
    */
-  backgroundLine,
+  onOpenBackups,
   /** 关掉这一面（这一面自己就是那枚弹窗了，见文件末尾的说明）。 */
   onClose,
   /**
@@ -491,7 +492,7 @@ export function SyncPanel({
    */
   onFocusSession,
 }: Pick<PanelShare, 't' | 'state' | 'meta' | 'reload'> & {
-  backgroundLine?: { ok: boolean; text: string }
+  onOpenBackups?: () => void
   onClose: () => void
   onFocusSession?: (id: string) => void
 }): React.ReactElement {
@@ -508,12 +509,17 @@ export function SyncPanel({
    * 同步弹窗开着吗（`plan` = 正在看 / 正在算计划、`apply` = 落地跑着、正文是进度）。
    *
    * `apply` 只是**这一扇窗口还开着**；关掉它不等于停——那一趟的生命周期在 `syncJob` 里（模块级），
-   * 关掉之后进度搬到页面顶上的横幅，回来还在（见 logic/syncJob.ts 的说明）。
+   * 关掉之后状态栏那一格接着报进度，点它回到这一面（见 logic/syncJob.ts 的说明）。
    */
   const [dialog, setDialog] = React.useState<'plan' | 'apply' | null>(null)
   /** 预演（只读算计划）在跑：这一段仍然挂在这个组件上，切走就丢——它几秒就完，没有"后台"的必要。 */
   const [busy, setBusy] = React.useState<'plan' | null>(null)
   const [error, setError] = React.useState<string | null>(null)
+  /**
+   * 「立即推送一次」那一条路跑完之后的结论（它没有结果页：这条路不写本机，也不开确认弹窗）。
+   *
+   * 落地那一趟的结论不在这里：它在结果段（`stage === 'done'`）里说，见 `doneLine()`。
+   */
   const [notice, setNotice] = React.useState<string | null>(null)
   /** 落地时逐条失败的原因（宿主只把成功的那些算进 pulled/pushed，失败的在这里）。 */
   const [failures, setFailures] = React.useState<readonly string[]>([])
@@ -658,38 +664,48 @@ export function SyncPanel({
   }
 
   /**
-   * 这一趟跑完之后的结论：详细的那几句（覆盖了几条、附件对象搬了几个、计划是不是重算的）。
+   * 这一趟跑完之后要跟着做的几件事：把结果记成"最近一次"、清掉裁决、重读右栏的远端位置。
    *
-   * 为什么要等一份结论、而不是在发起的地方 `.then`：发起之后组件随时可能已经卸载（用户关掉窗口、
-   * 切了页签），而那一趟还在跑。结论留在 store 里，谁挂载谁取走——只有取走的那一方负责说，所以
-   * 不会两个入口各说一遍。
+   * 为什么不在发起的地方 `.then`：发起之后组件随时可能已经卸载（用户点了「转到后台」、切了页签），
+   * 而那一趟还在跑。状态留在 store 里（`job.done`），谁挂载谁读——结果页就是拿它画的（见 `syncStage`）。
+   *
+   * 这里**不取走**那份结论：结果页还开着、用户还没按「完成」，取走会让那一段当场退回面板段。
+   * 认领来的那一趟（别处发起）也没有完整结果可记，只有几条计数，所以不在这条路上。
    */
+  const freshResult = React.useRef<SyncJobSnapshot['done']>(null)
   React.useEffect(() => {
-    const done = syncJob.takeResult()
-    if (done === null) return
-    setDialog(null)
-    if (!done.ok) {
-      setError(t('error.failed', { reason: done.error ?? '' }))
-      return
-    }
+    const done = job.done
+    if (done === null || done.adopted !== undefined || !done.ok) return
+    if (freshResult.current === done) return
+    freshResult.current = done
     const result = done.result
     if (result === undefined) return
     setSync(result)
     setDecisions({})
-    setFailures(result.problems)
     /*
      * 这一趟改过远端（推上去的包、补上去的对象）：右栏那行「远端」要重新读一次，不然它还停在落地之前
      * 的样子。落空的那些（只拉取）读一次也无害——清单本来就可能在另一台机器上被改过。
      */
     void remoteLibrary.load()
-    /*
-     * 附件对象走的是另一条路（远端共享库），先算出来：**只有对象动了**的时候也得说一句——补对象
-     * 那一趟动的是"早先拉坏了的那条会话"，一条会话都没进出，但那正是用户按下同步想看到的结果。
-     */
-    /*
-     * 提示条只说结果（见 logic/syncNotice.ts）：每项单说一句时，一次什么都碰上的同步能长到一百八十多
-     * 字，读的人只想知道"拉了几条、推了几条"。细节在同步面板那张「上次同步」里。
-     */
+  }, [job.done])
+
+  /**
+   * 结果页上那句结论：与提示条同一套折法（见 logic/syncNotice.ts），只是这次摆在结果页正文里。
+   *
+   * 没有完整结果（认领来的那一趟）时只能说条数；一条会话都没搬、也没补对象时退回"两边一样"那一句，
+   * 而不是报一串 0。
+   */
+  const doneLine = (done: NonNullable<SyncJobSnapshot['done']>): { ok: boolean; text: string } => {
+    if (!done.ok) return { ok: false, text: t('run.error', { reason: done.error ?? '' }) }
+    const result = done.result
+    if (result === undefined) {
+      const pulled = done.adopted?.pulled ?? 0
+      const pushed = done.adopted?.pushed ?? 0
+      return {
+        ok: true,
+        text: pulled === 0 && pushed === 0 ? t('sync.background.donePlain') : t('sync.background.done', { pulled, pushed }),
+      }
+    }
     const tidied = result.tidy !== undefined && 'removed' in result.tidy ? result.tidy : null
     const notice = describeSyncNotice(
       {
@@ -705,14 +721,21 @@ export function SyncPanel({
       },
       t,
     )
-    if (notice !== undefined) setNotice(notice)
-    /*
-     * 拉取的落到本机库里了：列表与工作区归属都要重读（推的那一侧不改本机任何东西）。
-     *
-     * 这一下由**页面骨架**做（见 ManagerPanel）：那一趟可能是在用户已经开别的弹窗、甚至关掉设置
-     * 之后才跑完的，只有页面这一级一定还在。
-     */
-  }, [job])
+    return { ok: true, text: notice ?? t('sync.nothing') }
+  }
+
+  /**
+   * 结果页上要不要给「撤销」：这次动过本机的内容（覆盖本机的那几份、跟着删的那几条），旧的那份就在
+   * 备份里；认领来的那一趟只知道"拉了几条"，同样说得上。
+   *
+   * 备份页由页面骨架打开（与删除 / 迁移结果页上那枚同一个去处）。
+   */
+  const undoable = (done: NonNullable<SyncJobSnapshot['done']>): boolean => {
+    if (onOpenBackups === undefined) return false
+    const result = done.result
+    if (result === undefined) return (done.adopted?.pulled ?? 0) > 0
+    return result.replaced.length > 0 || (result.deleted?.ids.length ?? 0) > 0
+  }
 
   /**
    * 点「整理远端」：先只算账（读远端索引、列自己那一格，什么都不写），把数字摆进弹窗，确认了才真删。
@@ -978,13 +1001,19 @@ export function SyncPanel({
   const hasPlanTables = syncPlan !== null && (syncPulls.length > 0 || syncPushes.length > 0 || syncKept.length > 0)
 
   /**
-   * 这一段说哪件事：面板（填表单 / 说状态）→ 计划 → 落地。三段同处一个弹窗（与导入那一面同一个形状）。
+   * 这一段说哪件事：面板（填表单 / 说状态）→ 计划 → 落地 → 结果。四段同处一个弹窗（与导入那一面同一个
+   * 形状，见 design.md 的「执行与结果」那一节）。
    *
    * 判据不只看这一页自己的 `dialog`：状态栏那枚「同步中 3/7」点开时，这一页并没有"走到"落地段
    * （`dialog` 还是 `null`），可那一趟正在跑——只看 `dialog` 就会摆成面板段，进度一条字都没有。
+   * 跑完也不回面板段：结论、没做到的清单与「撤销」都在结果页上，按「完成」才收掉。
    * 规则在 [syncStage](../logic/syncStage.ts) 那一份里，`test/sync-stage.test.ts` 逐支钉着。
    */
-  const stage: SyncStage = syncStage(dialog, job.running)
+  const stage: SyncStage = syncStage(dialog, job.running, job.done !== null)
+  /** 结果页那一条结论（跑完了才有；`stage === 'done'` 时才用）。 */
+  const done = job.done
+  /** 结果页上那句话：成没成、搬了几条、另有几项。 */
+  const doneVerdict = stage === 'done' && done !== null ? doneLine(done) : null
 
   /**
    * 「上次同步」那张清单要说的话。
@@ -1012,11 +1041,22 @@ export function SyncPanel({
     <>
       <WorkDialog
         t={t}
-        title={t(stage === 'idle' ? 'sync.title' : stage === 'apply' ? 'sync.running' : 'sync.dialogTitle')}
+        title={t(
+          stage === 'idle'
+            ? 'sync.title'
+            : stage === 'apply'
+              ? 'sync.running'
+              : stage === 'done'
+                ? job.done?.ok === true
+                  ? 'sync.done.title'
+                  : 'run.failed'
+                : 'sync.dialogTitle',
+        )}
         {...(stage === 'idle' && syncInfo !== null ? { description: t('sync.where', { url: syncInfo.url }) } : {})}
         /*
-          宽度跟着**里面摆什么**走：面板段与"两边一样、没有要同步的"那种计划段都只有几句话，640 正好；
-          有计划表时才要 1080（三张表在 640 里会把动作列挤成一个字）。没有表却撑到 1080，右边会空一大块。
+          宽度跟着**里面摆什么**走：面板段、结果段与"两边一样、没有要同步的"那种计划段都只有几句话，
+          640 正好；有计划表时才要 1080（三张表在 640 里会把动作列挤成一个字）。没有表却撑到 1080，
+          右边会空一大块。
         */
         size={stage === 'apply' || (stage === 'plan' && hasPlanTables) ? 'wide' : 'narrow'}
         onClose={onClose}
@@ -1049,6 +1089,21 @@ export function SyncPanel({
                 {t('sync.applyAction')}
               </Button>
             </>
+          ) : stage === 'done' ? (
+            /*
+              结果页上底栏只剩一枚「完成」：它把这扇窗关掉，同时收掉那份结论（下一趟回来是面板段）。
+              与删除 / 迁移那些结果页同一个动作、同一个词。
+            */
+            <Button
+              variant="primary"
+              data-modal-autofocus=""
+              onClick={() => {
+                syncJob.dismiss()
+                onClose()
+              }}
+            >
+              {t('run.finish')}
+            </Button>
           ) : (
             <>
               {/* 落地跑着的时候，「取消」换成「转到后台」：窗口收起来，那一趟照跑。这是用户要的那个动作——
@@ -1082,7 +1137,7 @@ export function SyncPanel({
         </p>
       )}
 
-      {restartWarn && (
+      {restartWarn && stage !== 'done' && (
         // 不定 dismiss：它不是这次操作的错，而是"这次落地还没被宿主承认"这个事实，下一次同步开始
         // （`sync` 换成新的计划）时它自己就没了。
         <p className="dsm-banner dsm-warn">{t('effect.restart')}</p>
@@ -1113,10 +1168,6 @@ export function SyncPanel({
       )}
 
         {stage === 'idle' &&       <>
-        {/* 别处发起的那一趟的结论：弹窗关着时它在状态栏那一格里只有一句短的，进来说全。 */}
-        {backgroundLine !== undefined && (
-          <p className={backgroundLine.ok ? 'dsm-hint' : 'dsm-error'}>{backgroundLine.text}</p>
-        )}
         {/*
           上次同步：多久以前、拉了几条、推了几条，以及**没做到的逐条**（点名版带「只看这一条」）。
 
@@ -1473,6 +1524,35 @@ export function SyncPanel({
           </div>
         )}
           </>
+        )}
+        {/*
+          结果段：做完就在这一页上说完——一句结论、没做到的那些逐条、要不要重启、以及「撤销」。
+          它替换的是原来"回到面板段、结论塞在面板顶上一条绿色横幅里"的做法：那条横幅说的与这里同一件事，
+          而用户看到它的时候窗口已经换回表单了，读完还得自己找下一步。
+        */}
+        {stage === 'done' && done !== null && doneVerdict !== null && (
+          <div className="dsm-planBody">
+            <div className={doneVerdict.ok ? 'dsm-ok' : 'dsm-error'}>{doneVerdict.text}</div>
+            {done.result === undefined ? null : <ProblemsBlock t={t} problems={done.result.problems} />}
+            {done.result !== undefined &&
+              done.result.pulled.length > 0 &&
+              done.result.takesEffect === 'restart-required' && <p className="dsm-warn">{t('effect.restart')}</p>}
+            {undoable(done) && (
+              <div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    // 先收掉结果页，再打开「备份与回滚」：两扇窗口不该叠在一起。
+                    syncJob.dismiss()
+                    onOpenBackups?.()
+                  }}
+                >
+                  {t('undo.action')}
+                </Button>
+              </div>
+            )}
+          </div>
         )}
         {stage === 'apply' && (
           <>

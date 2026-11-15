@@ -17,36 +17,20 @@ import { Button, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 
 import type { SessionManagerKey, Translate } from '../logic/locales.ts'
 import { backgroundRun, dismissRun, getRun, openRunDialog, subscribeRun } from '../logic/runJob.ts'
+import { RUN_TITLES, runChipLabel, runTitle } from '../logic/runLabel.ts'
 import { ProgressBlock } from './ProgressBlock.tsx'
 
-/** 每一件事的标题怎么说（跑着 / 跑完 / 没做成）。 */
-const TITLES: Readonly<Record<string, { running: SessionManagerKey; done: SessionManagerKey }>> = {
-  delete: { running: 'run.delete.running', done: 'run.delete.done' },
-  migrate: { running: 'run.migrate.running', done: 'run.migrate.done' },
-  import: { running: 'run.import.running', done: 'run.import.done' },
-  rollback: { running: 'run.rollback.running', done: 'run.rollback.done' },
-  tidy: { running: 'run.tidy.running', done: 'run.tidy.done' },
-  retitle: { running: 'run.retitle.running', done: 'run.retitle.done' },
-}
-
 /**
- * 状态栏那一格的短标签：跑着说"正在做什么 + 到第几条"，跑完说"做完了 / 没做成"。
+ * 跑着的时候进度块下面补的那句话：这件事写到一半被打断会怎样、后悔面在哪。
  *
- * 与弹窗标题同一套词：状态栏那一格是这扇窗的入口，两处说法不一致时用户会以为是两件事。
- *
- * @param run 当下这一趟。
- * @param t 翻译函数。
- * @returns 那一格的文案。
+ * 同一份说明原先挂在确认弹窗的进度块上（那时确认弹窗兼做进度窗）；现在进度窗是这一扇，说明跟着搬过来。
+ * 「整理远端」「重算名称」没有写本机的库，也就没有这句话要说。
  */
-export function runChipLabel(run: NonNullable<ReturnType<typeof getRun>>, t: Translate): string {
-  const titles = TITLES[run.kind] ?? TITLES['delete']!
-  if (run.running) {
-    const progress = run.progress
-    const total = progress?.total ?? 0
-    const done = progress?.done ?? 0
-    return total > 0 ? t('run.chip.running', { done, total }) : t(titles.running)
-  }
-  return t(run.done?.ok === true ? titles.done : 'run.chip.failed')
+const NOTES: Readonly<Record<string, SessionManagerKey>> = {
+  delete: 'manage.delete.progress.note',
+  migrate: 'migrate.progress.note',
+  import: 'import.progress.note',
+  rollback: 'backup.progress.note',
 }
 
 /**
@@ -60,9 +44,9 @@ export function RunDialog({ t }: { t: Translate }): React.ReactElement | null {
   React.useEffect(() => subscribeRun(() => setRun(getRun())), [])
   if (run === null || !run.dialog) return null
 
-  const titles = TITLES[run.kind] ?? TITLES['delete']!
+  const titles = RUN_TITLES[run.kind]
   const done = run.done
-  const title = done === null ? t(titles.running) : done.ok ? t(titles.done) : t('run.failed')
+  const title = runTitle(run, t)
 
   return (
     <Modal
@@ -97,7 +81,11 @@ export function RunDialog({ t }: { t: Translate }): React.ReactElement | null {
           run.progress === null ? (
             <p className="dsm-hint">{t('run.preparing')}</p>
           ) : (
-            <ProgressBlock t={t} progress={run.progress} />
+            <ProgressBlock
+              t={t}
+              progress={run.progress}
+              {...(NOTES[run.kind] === undefined ? {} : { note: t(NOTES[run.kind]) })}
+            />
           )
         ) : (
           run.render(done)

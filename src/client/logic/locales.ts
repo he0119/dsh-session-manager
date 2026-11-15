@@ -489,9 +489,11 @@ export const zh = {
   'sync.action': '同步',
   'sync.dialogTitle': '将要同步',
   'sync.running': '正在同步',
+  // 落地跑完那一页的标题：四段里的最后一段（见 design.md 的「执行与结果」）。
+  'sync.done.title': '同步完成',
   'sync.busy': '同步中…',
-  // 关掉窗口之后那一趟还在跑（见 logic/syncJob.ts）：弹窗里那枚按钮、页面顶上的横幅、以及跑完之后
-  // 那一行结论，用的就是下面这几句。
+  // 关掉窗口之后那一趟还在跑（见 logic/syncJob.ts）：弹窗里那枚按钮、状态栏那一格、以及结果页上
+  // 「认领来的那一趟搬了几条」那句，用的就是下面这几句。
   'sync.background': '转到后台',
   'sync.background.running': '正在同步（后台）',
   'sync.background.adopted': '这一趟是在别处发起的（刷新之前，或者另一个标签页里）：这一页看不到逐条进度，跑完会补上条数。',
@@ -1179,6 +1181,7 @@ export const en: LocaleDictOf<typeof NS> = {
   'sync.action': 'Sync',
   'sync.dialogTitle': 'About to sync',
   'sync.running': 'Syncing',
+  'sync.done.title': 'Sync finished',
   'sync.busy': 'Syncing…',
   'sync.background': 'Run in background',
   'sync.background.running': 'Syncing (in background)',

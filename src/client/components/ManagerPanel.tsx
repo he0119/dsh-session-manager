@@ -256,9 +256,11 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
    */
   React.useEffect(() => {
     if (job.running || job.done === null) return
+    // 同步那一面开着时不收：那里的结果段正拿着这份结论，12 秒后收掉等于用户读到一半被抽走。
+    if (surface === 'sync') return
     const timer = setTimeout(() => syncJob.dismiss(), 12000)
     return () => clearTimeout(timer)
-  }, [job.done, job.running])
+  }, [job.done, job.running, surface])
 
   /**
    * 手动「刷新」：重连一次要一份新清单（宿主会重新扫库，进度照旧画在同一个位置）。
@@ -616,8 +618,14 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
             setProject({ path: null })
             setFocusId(id)
           }}
-          // 认领来的那趟结论（别处发起的）：那个弹窗自己没有完整结果，由这里把这一句交给它说。
-          {...(job.done?.adopted === undefined || jobLine === null ? {} : { backgroundLine: jobLine })}
+          /*
+            结果页上那枚「撤销」：同步改过本机内容时旧的那份在备份里，送去「备份与回滚」自己挑。
+            `close()` 先把同步这一面关掉——两扇窗口不该叠在一起。
+          */
+          onOpenBackups={() => {
+            close()
+            setSurface('backup')
+          }}
         />
       )}
       {surface === 'backup' && (
