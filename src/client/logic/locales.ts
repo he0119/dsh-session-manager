@@ -340,6 +340,27 @@ export const zh = {
   'manage.delete.remoteHint':
     '远端这一格一起删掉，别的机器上的副本会在它下次同步时跟着删。远端没有备份。',
   'manage.delete.problemsTitle': '没做到 {count} 条',
+  // ── 执行与结果（同一个状态窗，六个动作共用）──────────────────────────────
+  'run.delete.running': '正在删除',
+  'run.delete.done': '删除完成',
+  'run.migrate.running': '正在迁移',
+  'run.migrate.done': '迁移完成',
+  'run.import.running': '正在导入',
+  'run.import.done': '导入完成',
+  'run.rollback.running': '正在恢复',
+  'run.rollback.done': '恢复完成',
+  'run.tidy.running': '正在整理远端',
+  'run.tidy.done': '整理完成',
+  'run.retitle.running': '正在重算名称',
+  'run.retitle.done': '重算完成',
+  'run.failed': '没做成',
+  'run.preparing': '正在准备…',
+  'run.background': '转到后台',
+  'run.finish': '完成',
+  'run.chip.running': '{done}/{total} 条',
+  'run.chip.failed': '没做成',
+  'run.problemsTitle': '没做到 {count} 条',
+  'run.error': '没做成：{reason}',
   'manage.delete.acknowledge':
     '删掉之后这些会话的日志就没了；需要时去「备份与回滚」恢复。',
   'manage.delete.hint':
@@ -468,9 +489,11 @@ export const zh = {
   'sync.action': '同步',
   'sync.dialogTitle': '将要同步',
   'sync.running': '正在同步',
+  // 落地跑完那一页的标题：四段里的最后一段（见 design.md 的「执行与结果」）。
+  'sync.done.title': '同步完成',
   'sync.busy': '同步中…',
-  // 关掉窗口之后那一趟还在跑（见 logic/syncJob.ts）：弹窗里那枚按钮、页面顶上的横幅、以及跑完之后
-  // 那一行结论，用的就是下面这几句。
+  // 关掉窗口之后那一趟还在跑（见 logic/syncJob.ts）：弹窗里那枚按钮、状态栏那一格、以及结果页上
+  // 「认领来的那一趟搬了几条」那句，用的就是下面这几句。
   'sync.background': '转到后台',
   'sync.background.running': '正在同步（后台）',
   'sync.background.adopted': '这一趟是在别处发起的（刷新之前，或者另一个标签页里）：这一页看不到逐条进度，跑完会补上条数。',
@@ -1016,6 +1039,27 @@ export const en: LocaleDictOf<typeof NS> = {
   'manage.delete.remoteHint':
     'Also deletes this machine\'s remote bundle; copies on other machines go when those machines next sync. The remote copy has no backup.',
   'manage.delete.problemsTitle': '{count} could not be done',
+  // ── Running and result (one dialog shared by six actions) ────────────────
+  'run.delete.running': 'Deleting',
+  'run.delete.done': 'Deleted',
+  'run.migrate.running': 'Migrating',
+  'run.migrate.done': 'Migrated',
+  'run.import.running': 'Importing',
+  'run.import.done': 'Imported',
+  'run.rollback.running': 'Restoring',
+  'run.rollback.done': 'Restored',
+  'run.tidy.running': 'Tidying the remote',
+  'run.tidy.done': 'Remote tidied',
+  'run.retitle.running': 'Regenerating titles',
+  'run.retitle.done': 'Titles regenerated',
+  'run.failed': 'Did not finish',
+  'run.preparing': 'Getting ready…',
+  'run.background': 'Run in background',
+  'run.finish': 'Done',
+  'run.chip.running': '{done}/{total}',
+  'run.chip.failed': 'Did not finish',
+  'run.problemsTitle': '{count} could not be done',
+  'run.error': 'Did not finish: {reason}',
   'manage.delete.acknowledge':
     'The session logs are gone after this; restore them from Backups & rollback if needed.',
   'manage.delete.hint': 'Deleting backs the session directory up into this plugin’s backup root first; a live session cannot be deleted — see Help.',
@@ -1137,6 +1181,7 @@ export const en: LocaleDictOf<typeof NS> = {
   'sync.action': 'Sync',
   'sync.dialogTitle': 'About to sync',
   'sync.running': 'Syncing',
+  'sync.done.title': 'Sync finished',
   'sync.busy': 'Syncing…',
   'sync.background': 'Run in background',
   'sync.background.running': 'Syncing (in background)',

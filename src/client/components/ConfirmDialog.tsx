@@ -39,10 +39,15 @@ export interface ConfirmDialogProps {
    * 动作的正文正是"将要发生什么"的清单，所以照着它的排法做在本组件里，清单留下来。
    */
   acknowledge: string
-  /** 正在做的时候主按钮显示的那句话（「删除中…」）。 */
-  busyLabel: string
-  /** 动作正在执行：主按钮换成 `busyLabel`，两个按钮都禁用。 */
-  busy: boolean
+  /**
+   * 正在做的时候主按钮显示的那句话（「删除中…」）。
+   *
+   * 现在只有**同步**那一面还给（它的落地段就在自己那扇窗里跑）；其余动作确认之后会换成一扇状态窗
+   * （见 [RunDialog.tsx](./RunDialog.tsx)），确认弹窗在那一刻就关掉了，没有"忙碌"这一档。
+   */
+  busyLabel?: string
+  /** 动作正在执行：主按钮换成 `busyLabel`，两个按钮都禁用（同上：现在只有同步给）。 */
+  busy?: boolean
   /**
    * 忙碌时「取消」那一枚换成的动作：窗口收起来，活儿继续在后台跑。
    *
@@ -90,7 +95,7 @@ export function ConfirmDialog({
   confirmLabel,
   acknowledge,
   busyLabel,
-  busy,
+  busy = false,
   backgroundLabel,
   planning = false,
   planningDetail,

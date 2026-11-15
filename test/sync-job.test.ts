@@ -98,11 +98,10 @@ test('开一趟：跑着的时候看得到进度，结束后结论留着等界�
   assert.equal(job.snapshot().done?.ok, true)
   assert.equal(job.snapshot().done?.result?.pulled.length, 3)
 
-  const taken = job.takeResult()
-  assert.equal(taken?.ok, true, '界面取走结论')
-  assert.equal(taken?.result?.pushed.length, 4)
-  assert.equal(job.snapshot().done, null, '取走即清空：第二个入口不能再把同一件事说一遍')
-  assert.equal(job.takeResult(), null)
+  // 结论留在 `done` 里直到用户按「完成」（结果页就是拿它画的，见 syncStage.ts）。
+  assert.equal(job.snapshot().done?.result?.pushed.length, 4)
+  job.dismiss()
+  assert.equal(job.snapshot().done, null, '按「完成」之后才清空：结果页关掉，下一趟回来是面板段')
 })
 
 test('已经有一趟在跑时不再开第二趟（两趟落地会互相踩）', async () => {
@@ -175,7 +174,7 @@ test('刷新之后认领别处发起的那一趟：跑着就显示，跑完补�
   host.push({ applying: null, last: { startedAt: 1000, finishedAt: 2000, ok: true, pulled: 5, pushed: 2 } })
   assert.equal(job.snapshot().running, false, '宿主说跑完了就收尾')
   assert.deepEqual(job.snapshot().done?.adopted, { pulled: 5, pushed: 2 }, '补上条数')
-  assert.equal(job.takeResult(), null, '认领来的结论不在这条路上（它没有完整结果）')
+  assert.equal(job.snapshot().done?.result, undefined, '认领来的那一趟没有完整结果，只有几条计数')
 
   job.dismiss()
   assert.equal(job.snapshot().done, null, '横幅上那枚「关闭」把它清掉')

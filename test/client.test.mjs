@@ -100,6 +100,14 @@ function fakeReact(recorded = [], firstNull = undefined, panel = undefined, arra
       // 假钩子**不改**状态（每次渲染都还是种子那个值），但把"谁被 set 成了什么"记下来：面板把
       // `onProgress` 接没接到 api 上、落地之后有没有清掉进度，只有这一条路能看见（见下面「迁移落地
       // 的进度真的进了界面状态」那条用例）。
+      /*
+       * 页面级那两个"执行状态窗"（`RunDialog` / `RunChip`）各自持有一个 `useState(null)`，值来自模块级
+       * 状态（`logic/runJob.ts`：起跑、进度、转到后台）——冒烟夹具推不动它，所以它也不该从种子表里拿
+       * 一个值：给了就是「删除 / 迁移 / 同步」那几面后面的状态整体挤后一位，症状是"期望的那块界面根本
+       * 不是那个样子"。这里让它对种子表完全透明（不占序号、不记 set），与它挂进来之前一样。
+       */
+      const owner = ownerStack[ownerStack.length - 1]
+      if (owner === 'RunDialog' || owner === 'RunChip') return [value, () => {}]
       const mine = slot
       slot += 1
       const set = (next) => {
@@ -1022,9 +1030,140 @@ test('客户端产物：页头那枚同步状态说"多久以前、成没成"', 
   assert.equal(neverText.some((item) => String(item).includes('sync.chip.at')), false, '没有记录就不说时间')
 })
 
-test('客户端产物：删除 / 迁移之后，提示里那枚「撤销」指向那份备份', { skip }, () => {
-  // 删除与迁移都先留一份字节级备份，所以提示行里给一枚「撤销」：点它开的是备份与回滚那面，并且直接
-  // 摆出这份备份的回滚确认（`openBackup`），用户不用在清单里按时间再找一遍。
+test('客户端产物：同步落地之后不回面板，换成结果页（一句结论、没做到的清单、撤销、完成）', { skip }, async () => {
+  /*
+   * 这条照着用户的动作走一遍：计划那一段按「确认同步」→ 宿主推一条进度、再推收尾 → 界面换成结果页。
+   * 为什么不能像别的用例那样把结果"种"进状态里：这一趟的结论在 `logic/syncJob.ts` 的模块级 store 里
+   * （跑到哪、完了没有都得等事件流），冒烟夹具没有种它的口子；换成点击 + 假 `fetch` 才真的走那条线。
+   */
+  const state = {
+    sessionsRoot: '/home/u/.dsh/sessions',
+    registryPath: '/home/u/.dsh/registry.json',
+    problems: [],
+    sync: { url: 'https://dav.example.com/dsh', machineId: 'robot-a', mappings: 0 },
+    sessions: [],
+    workspaces: [],
+  }
+  // 收尾那条给一份完整结果，并且故意集齐"结果页要说的四件事"：搬了、覆盖了、跟着删了、还有没做到的。
+  const result = {
+    mode: 'apply',
+    remote: { url: 'https://dav.example.com/dsh', machineId: 'robot-a' },
+    plan: {
+      ok: true,
+      problems: [],
+      pull: [],
+      push: [],
+      pullIds: [],
+      pushIds: [],
+      bytesIn: 0,
+      bytesOut: 0,
+      localCount: 0,
+      remoteCount: 0,
+      machines: [],
+    },
+    applied: true,
+    pulled: ['s-1'],
+    replaced: ['s-2'],
+    pushed: [{ id: 's-1', action: 'upload' }],
+    bytesIn: 10,
+    bytesOut: 20,
+    deleted: { ids: ['s-3'], bytes: 5 },
+    registryWritten: false,
+    indexWritten: true,
+    problems: ['s-4：远端那份读不出来'],
+    takesEffect: 'restart-required',
+  }
+  const pending = []
+  let ended = 0
+  const mounted = mount({
+    state,
+    panel: 'sync',
+    // 弹窗种成"计划"那一段（`busy='plan'`）：那一截底栏里才是「确认同步」。
+    nulls: [null, null, 'plan'],
+    fetch: async () => ({
+      ok: true,
+      status: 200,
+      headers: { get: () => 'text/event-stream; charset=utf-8' },
+      body: { getReader: () => ({ read: () => new Promise((resolve) => pending.push(resolve)) }) },
+      text: async () => '',
+    }),
+  })
+  const flush = async () => {
+    for (let i = 0; i < 6; i += 1) await new Promise((resolve) => setImmediate(resolve))
+  }
+  /**
+   * 重新画**同步那一面**（不是整页）。
+   *
+   * 为什么要单独挑出这一面：假钩子不改状态，整页重画时"开的是哪一面"会退回默认的列表（那一个
+   * `useState('none')` 的种子只在第一次渲染时生效），同步那一面就不在树上了。这一面自己的状态位
+   * 同样只剩初始值——可结果页根本不靠它们：`syncStage()` 看的是模块级的 `syncJob`（跑没跑、完了没有），
+   * 所以这里刚好顺带钉住"跑完就摆结果段，不看这一页手上还记着什么"。
+   */
+  const renderPage = () => {
+    const start = mounted.recorded.length
+    const text = strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
+    return { text, el: mounted.recorded.slice(start) }
+  }
+  const renderPanel = () => {
+    const start = mounted.recorded.length
+    const panel = mounted.recorded.find((node) => isComponentType(node.type) && typeNameOf(node.type) === 'SyncPanel')
+    const text = strings(renderType(panel.type, panel.props))
+    return { text, el: mounted.recorded.slice(start) }
+  }
+  const push = (chunk) => pending.shift()({ done: false, value: new TextEncoder().encode(chunk) })
+  const end = () => {
+    ended += 1
+    pending.shift()({ done: true })
+  }
+
+  const planned = renderPage()
+  assert.equal(dialogsOf(planned.el)[0].props['aria-label'], 'sync.dialogTitle', '先是计划那一段')
+  primaryOf(planned.el).props.onClick()
+  await flush()
+
+  // 跑着：标题「正在同步」，正文是进度块。
+  push('data: {"type":"progress","progress":{"phase":"push","total":2,"done":0,"id":"s-1","label":"一"}}\n\n')
+  await flush()
+  const running = renderPanel()
+  assert.equal(dialogsOf(running.el)[0].props['aria-label'], 'sync.running', '跑着时标题是「正在同步」')
+  assert.ok(running.text.includes('progress.push:{"current":1,"total":2}'), '进度块画出宿主报的那一条')
+
+  // 跑完：同一扇窗换成结果页。
+  push(`data: {"type":"result","result":${JSON.stringify(result)}}\n\n`)
+  await flush()
+  end()
+  await flush()
+  const done = renderPanel()
+  assert.equal(dialogsOf(done.el)[0].props['aria-label'], 'sync.done.title', '标题换成「同步完成」')
+  assert.ok(
+    done.text.some((item) => String(item).includes('sync.applied:{"pulled":1,"pushed":1}')),
+    '一句结论：拉了几条、推了几条',
+  )
+  assert.ok(
+    done.text.some((item) => String(item).includes('sync.appliedReplaced:{"count":1}')),
+    '覆盖本机那份折进"另有：…"那一句',
+  )
+  assert.ok(done.text.includes('run.problemsTitle:{"count":1}'), '没做到的逐条列出来')
+  assert.ok(done.text.includes('s-4：远端那份读不出来'), '原话照搬，不吞掉是哪一条')
+  assert.ok(done.text.includes('effect.restart'), '要重启才生效时在结果页上说')
+  assert.equal(primaryOf(done.el).props.children, 'run.finish', '底栏只剩「完成」')
+  assert.equal(cancelOf(done.el), undefined, '结果页上没有第二枚按钮')
+  // 结论只说这一处：原先面板顶上还有一条绿色横幅（带一枚「知道了」），和结果页说的是同一件事。
+  assert.equal(done.text.includes('error.dismiss'), false, '面板顶上不再摆那条绿色提示（没有「知道了」）')
+
+  // 「撤销」：先收掉结果页，再开「备份与回滚」（两扇窗不叠）。
+  const undo = done.el.find((node) => node.type === 'button' && node.props?.children === 'undo.action')
+  assert.ok(undo !== undefined, '覆盖过本机内容，就给「撤销」')
+  undo.props.onClick()
+  const setValues = mounted.sets.map((entry) => entry.value)
+  assert.ok(setValues.includes('backup'), '点它打开的是「备份与回滚」')
+  assert.ok(ended >= 1, '事件流读到收尾才停（不是读一块就收手）')
+})
+
+test('客户端产物：提示行只说结果，不再挂「撤销」（撤销在结果窗里）', { skip }, () => {
+  // 旧做法：删除 / 迁移之后，页面那条提示行里挂一枚「撤销」，点它开备份与回滚。
+  // 现在结论、没做到的清单与那枚「撤销」都在状态窗的结果页上（见 RunDialog.tsx 与 logic/runJob.ts），
+  // 提示行只管"按下去就做完"的动作（归档、导出）——同一个动作的后悔面只在一处，用户不用猜哪枚才算数。
   const state = {
     sessionsRoot: '/home/u/.dsh/sessions',
     registryPath: '/home/u/.dsh/registry.json',
@@ -1032,30 +1171,11 @@ test('客户端产物：删除 / 迁移之后，提示里那枚「撤销」指�
     sessions: [],
     workspaces: [],
   }
-  const mounted = mount({
-    state,
-    panel: 'manage',
-    nulls: manageNulls({ notice: '已删除 2 条会话', undo: { dir: '/home/u/.dsh/dsm/backups/2026-11-12' } }),
-  })
-  strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
+  const mounted = mount({ state, panel: 'manage', nulls: manageNulls({ notice: '已归档 2 条会话' }) })
+  const text = strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
+  assert.ok(text.includes('已归档 2 条会话'), '提示那一句还在（它是"刚做完什么"）')
   const labels = mounted.recorded.filter((node) => node.type === 'button').map((node) => node.props?.children)
-  assert.ok(labels.includes('undo.action'), '提示行里有「撤销」')
-  const undoButton = mounted.recorded.find((node) => node.type === 'button' && node.props?.children === 'undo.action')
-  assert.equal(
-    hintAround(mounted.recorded, (kid) => strings(kid).includes('undo.action')),
-    'undo.tip',
-    '悬浮提示说清它做什么',
-  )
-
-  // 没有撤销可给时（普通提示）不摆这一枚：一份备份只能撤刚做的那一件事。
-  const plain = mount({
-    state,
-    panel: 'manage',
-    nulls: manageNulls({ notice: '已归档 2 条会话' }),
-  })
-  strings(plain.registrations[0].component(plain.registrations[0].registration.inject()))
-  const plainLabels = plain.recorded.filter((node) => node.type === 'button').map((node) => node.props?.children)
-  assert.equal(plainLabels.includes('undo.action'), false, '归档这类不留备份的动作不摆撤销')
+  assert.equal(labels.includes('undo.action'), false, '提示行里不再有「撤销」：那枚跟着结果页走')
 })
 
 test('客户端产物：点哪个入口就开哪一面，列表一直挂在后面', { skip }, () => {
@@ -1064,8 +1184,8 @@ test('客户端产物：点哪个入口就开哪一面，列表一直挂在后�
   // 但元素还在。
   for (const [surface, title, wide] of [
     ['import', 'import.dialogTitle', false],
-    // 同步那一面正文只有几句话与一排按钮，铺到 1080 一句话两行半；它走 640，表在计划那个弹窗里。
-    ['sync', 'sync.title', false],
+    // 同步那一面从头到尾 1080（计划段那三张表要这个宽度，面板段与结果段跟着它，不在中途忽宽忽窄）。
+    ['sync', 'sync.title', true],
     ['backup', 'backup.title', true],
   ]) {
     const { registrations, recorded } = mount({ panel: surface })
@@ -2415,31 +2535,12 @@ test('客户端产物：迁移的「要不要重启」——确认前先说一�
     '摘掉 2 条悬空登记要在清单里说一句',
   )
 
-  // 落地之后的结论块：需要重启时多一句警告；不需要时那句"无需重启"已经删掉（它和"复核通过"挤在同一个
-  // 块里、又是同一种颜色，读不出哪句是坏消息）。
-  const effectBlock = (takesEffect) => {
-    const mounted = mount({
-      state,
-      panel: 'manage',
-      nulls: manageNulls({
-        effect: { verified: true, backupDir: '/home/u/.dsh/dsh-session-manager/backups/2026-10-06T00-00-00', takesEffect },
-      }),
-    })
-    const tree = mounted.registrations[0].component(mounted.registrations[0].registration.inject())
-    return { mounted, text: strings(tree) }
-  }
-  const restarting = effectBlock('restart-required')
-  assert.ok(
-    restarting.mounted.recorded.some(
-      (node) => node.props?.children === 'effect.restart' && node.props?.className === 'dsm-warn',
-    ),
-    '需要重启时留一句警告（复核那条绿色结论还在，但不再替它说话）',
-  )
-  assert.ok(restarting.text.includes('verify.pass'), '复核结论照旧')
-  assert.ok(restarting.text.includes('effect.restart'), '警告的文案在页面上')
-  const applied = effectBlock('immediate')
-  assert.equal(applied.text.includes('effect.restart'), false, '不需要重启时一句都不摆')
-  assert.ok(applied.text.includes('verify.pass'), '复核结论照旧')
+  /*
+   * 落地之后那一句（需要重启才生效）不在这条里：它跟着结果页走，见上面
+   * 「迁移落地之后进度在状态窗里，跑完换成结果页」那条——那里点完「确认迁移」再看结果页。
+   * 原先这里核的是页面上一份 `effect` 状态（复核通过 + 那句警告），那份状态已经没有了：结论、复核、
+   * 「要不要重启」与「撤销」都在同一扇结果窗里说。
+   */
 })
 
 test('客户端产物：「会话」页的筛选条含类别芯片（列表就是整库，迁移也在这一页上）', { skip }, () => {
@@ -2531,24 +2632,19 @@ const manageNulls = ({
   busy = null,
   progress = null,
   migrate = null,
-  effect = null,
   fields = null,
   inspecting = null,
   notice = null,
-  undo = null,
 } = {}) => [
   null, // 页面骨架自己的 error（它排在分页之前，分页的 `state` 由 mount 的 firstNull 种）
   busy,
   null, // error
-  notice, // 提示那一行（删除 / 迁移之后那句）
+  notice, // 提示那一行（归档 / 导出之后那句）
   null, // 删除弹窗
   progress,
-  null, // retitle
   inspecting,
   ...(fields ?? [null, null]), // 目标字段：候选面板 / 手输路径
   migrate, // 迁移弹窗
-  effect, // 迁移结论
-  undo, // 提示里那枚「撤销」指着哪一份备份
 ]
 
 /**
@@ -4913,241 +5009,176 @@ test('客户端产物：落地时弹窗正文换成进度条（第几条 / 共�
 
 // ---- 其它长动作的进度 ----
 //
-// 进度块原先只有同步有（见上面那两条）。现在迁移 / 删除 / 回滚 / 导入 / 归档 / 扫库共用同一套地基：
-// 宿主那一侧一个 `streamResult()`（见 src/web.ts），界面这一侧一个 `ProgressBlock`（见
-// ProgressBlock.tsx）。下面几条钉住三件事：每个动作的弹窗正文里真的接上了它、分母为 0 的段不画条、
-// "还没有事件"与"认不出来的段名"各有兜底。
+// 进度块原先只有同步有（见上面那两条）。现在迁移 / 删除 / 回滚 / 导入 / 整理远端 / 重算名称 / 归档 /
+// 扫库共用同一套地基：宿主那一侧一个 `streamResult()`（见 src/web.ts），界面这一侧一个
+// `ProgressBlock`（见 ProgressBlock.tsx），写盘的六个动作把它画在状态窗里（`RunDialog`）。
+// 下面几条钉住三件事：宿主报的进度真的走到了界面上（照着点击走一遍事件流）、进度块的段名是一份共用
+// 词汇、分母为 0 的段不画条、认不出来的段名有兜底。
 
 /** 一条进度事件（形状见 src/types.ts 的 `ProgressEvent`）。 */
 const progressOf = (phase, done, total, label) => ({ phase, done, total, id: 's-1', ...(label === undefined ? {} : { label }) })
 
-test('客户端产物：迁移落地时弹窗正文换成进度块（计划表说的是"将要"，这时候已经过期了）', { skip }, () => {
+/**
+ * 走一遍「确认迁移 → 宿主报进度 → 跑完」，每一步都能看当时的树。
+ *
+ * 为什么必须真点一下按钮：迁移落地之后，进度与结果画在**状态窗**里（`RunDialog`；状态在模块级
+ * `logic/runJob.ts`，结果页由发起它的面板当场给的 `render(done)` 拼出来）。冒烟夹具没有口子把一份结论
+ * 种进那个状态——只能照着用户的动作走：点「确认迁移」→ 喂一条进度 → 喂结果。
+ *
+ * 事件流由用例推着走（`push()` 一条分帧、`end()` 收尾），所以中途可以随时 `render()` 看那一刻的界面。
+ * `render()` 返回的 `el` 是**这一次**渲染新造出来的元素（`recorded` 会累积，不切一段会把前后几次混在
+ * 一起数）。
+ *
+ * @returns 渲染、推帧与点按钮要用的那几样。
+ */
+function migrationRun({ restart = false, sessions, picked = ['s-1'], applied: overrides = {} } = {}) {
+  const pending = []
+  const calls = []
   const state = {
     sessionsRoot: '/home/u/.dsh/sessions',
     registryPath: '/home/u/.dsh/registry.json',
     problems: [],
-    sessions: [],
-    workspaces: [],
+    sessions: sessions ?? [
+      { id: 's-1', cwd: '/home/u/dev/alpha', createdAt: 5, dir: '/home/u/dev/alpha', bytes: 2048, files: [] },
+    ],
+    workspaces: [{ id: 'w1', path: '/home/u/dev/alpha', title: '工作区甲', sessionIds: ['s-1'] }],
   }
-  const response = {
+  const preview = {
+    ok: true,
+    problems: [],
+    sessionIds: ['s-1'],
+    to: '/home/u/dev/beta',
+    sourceProjectDirs: ['/home/u/.dsh/sessions/alpha'],
+    targetProjectDir: '/home/u/.dsh/sessions/beta',
+    sessions: [{ id: 's-1', createdAt: 5, registered: true, alreadyAtTarget: false, sourceDir: '/x', targetDir: '/y', files: 1, bytes: 10 }],
+    cascaded: 0,
+    liveSkipped: [],
+    strandedSources: [],
+    files: 1,
+    bytes: 10,
+    artifacts: null,
+    registryChange: null,
+    summary: 'plan summary',
+  }
+  const plan = { mode: 'plan', ok: true, preview, applied: false, rewritten: 0, moved: 0, artifactsMoved: 0, verified: false, problems: [], summary: 'plan summary', takesEffect: 'immediate' }
+  const applied = {
     mode: 'apply',
     ok: true,
-    preview: {
-      ok: true,
-      problems: [],
-      sessionIds: ['s-1'],
-      sourceProjectDirs: ['/home/u/.dsh/sessions/alpha'],
-      to: '/home/u/dev/beta',
-      targetProjectDir: '/home/u/.dsh/sessions/beta',
-      sessions: [{ id: 's-1', createdAt: 5, registered: true, alreadyAtTarget: false, sourceDir: '/x', targetDir: '/y', files: 1, bytes: 10 }],
-      cascaded: 0,
-      liveSkipped: [],
-      strandedSources: [],
-      files: 1,
-      bytes: 10,
-      artifacts: null,
-      registryChange: null,
-      summary: 'plan summary',
-    },
+    preview,
     applied: true,
     rewritten: 1,
     moved: 1,
     artifactsMoved: 0,
     verified: true,
-    problems: [],
-    summary: 'done',
-    takesEffect: 'immediate',
+    problems: ['s-2：这条还在跑，没搬'],
+    summary: '已迁移 1 条会话。',
+    backupDir: '/home/u/.dsh/dsh-session-manager/backups/2026-11-15T00-00-00',
+    takesEffect: restart ? 'restart-required' : 'immediate',
+    ...overrides,
   }
-  /*
-   * null 顺序由 `manageNulls` 给：**busy**（种成 'migrate'：假钩子不会点按钮，落地那一段只能这样
-   * 走进去）与 **progress**（这一页的进度槽是新的那一个，声明在 `progress` 那个位置）各按名字挑，
-   * 迁移弹窗那一格种成落地完成的那份响应。
-   */
   const mounted = mount({
     state,
     panel: 'manage',
     strings: manageStrings({ to: '/home/u/dev/beta' }),
-    nulls: manageNulls({
-      busy: 'migrate',
-      progress: progressOf('rewrite', 7, 253, '会话九'),
-      migrate: { response, error: null },
-    }),
-  })
-  const recorded = mounted.recorded
-  const text = strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
-
-  const bar = recorded.find((node) => String(node.props?.className) === 'dsm-progress')
-  assert.ok(bar !== undefined, '落地时弹窗正文里有一条进度条')
-  assert.equal(bar.props['aria-valuenow'], 8, '正在改第 8 份日志（done 是**已经做完**的条数）')
-  assert.equal(bar.props['aria-valuemax'], 253, '分母是这一步真实的工作单位（这里是日志文件数）')
-  assert.ok(text.includes('progress.rewrite:{"current":8,"total":253}'), '正文里写清在改日志')
-  assert.ok(text.includes('会话九'), '当前那一条也在')
-  assert.ok(text.includes('migrate.progress.note'), '并说明中断之后能在「备份」页回退')
-  assert.equal(text.includes('plan summary'), false, '落地时不再摆那份计划摘要（它说的是"将要"）')
-  assert.equal(dialogsOf(recorded)[0].props['aria-label'], 'migrate.running', '标题从「将要迁移」换成「迁移中…」')
-  assert.equal(primaryOf(recorded).props.children, 'migrate.running', '确认按钮变成"迁移中…"')
-  assert.equal(primaryOf(recorded).props.disabled, true, '落地时确认按钮禁用（不能按第二下）')
-  assert.equal(cancelOf(recorded).props.disabled, true, '取消也禁用：中途撒手会在库里留下中间状态')
-
-  // 还没有收到第一条事件（按下确认之后的一瞬）：只有一句"正在准备…"，不画条。
-  const preparing = mount({
-    state,
-    panel: 'manage',
-    strings: manageStrings({ to: '/home/u/dev/beta' }),
-    nulls: manageNulls({ busy: 'migrate', migrate: { response, error: null } }),
-  })
-  const preparingText = strings(preparing.registrations[0].component(preparing.registrations[0].registration.inject()))
-  assert.ok(preparingText.includes('progress.waiting'), '那一段说"正在准备…"')
-  assert.equal(
-    preparing.recorded.some((node) => String(node.props?.className) === 'dsm-progress'),
-    false,
-    '还不知道总数就不画条',
-  )
-})
-
-test('客户端产物：删除与回滚的弹窗正文同样换成进度块', { skip }, () => {
-  const deleteState = {
-    sessionsRoot: '/home/u/.dsh/sessions',
-    registryPath: '/home/u/.dsh/registry.json',
-    problems: [],
-    archiveAvailable: true,
-    sessions: [{ id: 's-1', cwd: '/home/u/dev/alpha', createdAt: 5, dir: '/home/u/dev/alpha', bytes: 2048, files: [] }],
-    workspaces: [{ id: 'w1', path: '/home/u/dev/alpha', title: '工作区甲', sessionIds: ['s-1'] }],
-  }
-  const deletePlan = {
-    mode: 'apply',
-    ok: true,
-    preview: {
-      ok: true,
-      problems: [],
-      entries: [{ id: 's-1', createdAt: 5, dir: '/home/u/.dsh/sessions/alpha/s-1', files: [], bytes: 2048, live: false }],
-      files: 0,
-      bytes: 2048,
-      backupRoot: '/home/u/.dsh/dsh-session-manager/backups',
-    },
-    applied: true,
-    dirsRemoved: 1,
-    removedProjectDirs: [],
-    verified: true,
-    backupDir: '/home/u/.dsh/dsh-session-manager/backups/2026-10-08T00-00-00',
-    problems: [],
-    summary: '已删除 1 个会话',
-    takesEffect: 'restart-required',
-  }
-  // null 顺序：骨架的 error / 会话页的 busy / error / notice / pending / **progress**（勾选集由 arrays 种）。
-  const deleting = mount({
-    state: deleteState,
-    panel: 'manage',
-    arrays: [['s-1']],
-    nulls: [null, 'apply', null, null, { plan: deletePlan, error: null }, progressOf('remove', 0, 1, '会话甲')],
-  })
-  const deletingText = strings(deleting.registrations[0].component(deleting.registrations[0].registration.inject()))
-  assert.ok(deletingText.includes('progress.remove:{"current":1,"total":1}'), '删除那一段说"正在删除"')
-  assert.ok(deletingText.includes('manage.delete.progress.note'), '并说明删除前先备份、中断了能恢复')
-  assert.equal(
-    dialogsOf(deleting.recorded)[0].props['aria-label'],
-    'manage.delete.running',
-    '标题从「将要删除」换成「删除中…」',
-  )
-
-  // 归档：没有弹窗，进度块摆在动作行下面（逐条走宿主能力，勾一整页时这一段是可感知的）。
-  const archiving = mount({
-    state: deleteState,
-    panel: 'manage',
-    arrays: [['s-1']],
-    nulls: [null, 'archive', null, null, null, progressOf('archive', 0, 3, undefined)],
-  })
-  const archivingText = strings(archiving.registrations[0].component(archiving.registrations[0].registration.inject()))
-  assert.ok(archivingText.includes('progress.archive:{"current":1,"total":3}'), '归档那一段说"正在更新归档状态"')
-
-  const backup = {
-    dir: '/home/u/.dsh/dsh-session-manager/backups/2026-10-03T08-00-00',
-    createdAt: '2026-10-03T08:00:00.000Z',
-    sessions: 2,
-    artifacts: 0,
-    kind: 'migrate',
-    from: '/home/u/dev/alpha',
-    to: '/home/u/dev/beta',
-  }
-  // null 顺序：骨架的 error / 备份页的 error / notice / busy / dialog / **progress**。
-  const rolling = mount({
-    state: { sessionsRoot: '/home/u/.dsh/sessions', registryPath: '/home/u/.dsh/registry.json', problems: [], sessions: [], workspaces: [] },
-    panel: 'backup',
-    arrays: [[backup]],
-    nulls: [
-      null,
-      null,
-      null,
-      backup.dir,
-      {
-        backup,
-        plan: {
-          mode: 'apply',
-          dryRun: false,
-          actions: ['把 s-1 搬回 /home/u/dev/alpha'],
-          restoredFiles: 1,
-          restoredArtifacts: 0,
-          registryRestored: true,
-          backupDir: backup.dir,
-          createdAt: backup.createdAt,
-          sessions: 2,
-          artifacts: 0,
-          takesEffect: 'immediate',
+    arrays: [picked],
+    nulls: manageNulls({ migrate: { response: plan, error: null } }),
+    /*
+      请求长什么样也归这条核：URL、方法、要不要事件流、请求体（侧边栏看不见的那条不该被送进去）。
+      所以假 fetch 边收边记，用例事后按端点翻。
+    */
+    fetch: async (url, init) => {
+      calls.push({ url: String(url), method: init?.method, accept: init?.headers?.accept, body: init?.body })
+      return {
+        ok: true,
+        status: 200,
+        headers: { get: (name) => (name === 'content-type' ? 'text/event-stream; charset=utf-8' : null) },
+        body: { getReader: () => ({ read: () => new Promise((resolve) => pending.push(resolve)) }) },
+        text: async () => {
+          throw new Error('落地走的是事件流，不该读一次性 text()')
         },
-        error: null,
-      },
-      progressOf('restore', 1, 2, '会话乙'),
-    ],
+      }
+    },
   })
-  const rollingText = strings(rolling.registrations[0].component(rolling.registrations[0].registration.inject()))
-  assert.ok(rollingText.includes('progress.restore:{"current":2,"total":2}'), '回滚那一段说"正在还原"')
-  assert.ok(rollingText.includes('backup.progress.note'), '并说明中断了再点一次这份备份即可')
-  assert.equal(topDialog(rolling.recorded).props['aria-label'], 'backup.rollback.running', '标题换成「回滚中…」')
+  /** 等几轮微任务 / 事件循环：让 fetch、读流、`startRun` 的 `.then` 依次落地。 */
+  const flush = async () => {
+    for (let i = 0; i < 6; i += 1) await new Promise((resolve) => setImmediate(resolve))
+  }
+  const render = () => {
+    const start = mounted.recorded.length
+    const text = strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
+    return { text, el: mounted.recorded.slice(start) }
+  }
+  return {
+    mounted,
+    render,
+    flush,
+    calls,
+    push: (chunk) => pending.shift()({ done: false, value: new TextEncoder().encode(chunk) }),
+    end: () => pending.shift()({ done: true }),
+    applied,
+  }
+}
+
+test('客户端产物：迁移落地之后进度在状态窗里，跑完换成结果页，按「完成」收掉', { skip }, async () => {
+  const run = migrationRun({ restart: true })
+  // 第一段：计划弹窗。点 footer 里那枚主动作（确认迁移）——用户就是这么走的。
+  const planned = run.render()
+  primaryOf(planned.el).props.onClick()
+  await run.flush()
+
+  // 第二段：状态窗跑着。进度块在正文里，底栏是「转到后台」+ 一枚按不动的动作键。
+  run.push('data: {"type":"progress","progress":{"phase":"rewrite","total":253,"done":7,"id":"s-1","label":"会话九"}}\n\n')
+  await run.flush()
+  const running = run.render()
+  assert.equal(dialogsOf(running.el)[0].props['aria-label'], 'run.migrate.running', '标题是「迁移中…」')
+  assert.ok(running.text.includes('progress.rewrite:{"current":8,"total":253}'), '正文里写清正在改第几份日志')
+  assert.ok(running.text.includes('会话九'), '当前那一条也在')
+  assert.ok(running.text.includes('migrate.progress.note'), '并说明中断之后能在「备份」页回退')
+  assert.equal(running.text.includes('plan summary'), false, '跑着时不再摆那份计划摘要（它说的是"将要"）')
+  const bar = running.el.find((node) => String(node.props?.className) === 'dsm-progress')
+  assert.equal(bar.props['aria-valuenow'], 8, '正在改第 8 份日志（done 是**已经做完**的条数）')
+  assert.equal(cancelOf(running.el).props.children, 'run.background', '底栏那一枚是「转到后台」')
+  assert.equal(primaryOf(running.el).props.disabled, true, '跑着时动作键按不动（不能按第二下）')
+
+  // 第三段：跑完换成结果页——一句话结论、没做到的逐条、要重启才生效那句，底栏只剩「完成」。
+  run.push(`data: {"type":"result","result":${JSON.stringify(run.applied)}}\n\n`)
+  await run.flush()
+  run.end()
+  await run.flush()
+  const done = run.render()
+  assert.equal(dialogsOf(done.el)[0].props['aria-label'], 'run.migrate.done', '标题换成「迁移完成」')
+  assert.ok(done.text.includes('已迁移 1 条会话。'), '结论那一句在正文里')
+  assert.ok(done.text.includes('run.problemsTitle:{"count":1}'), '没做到的那些逐条列（1 条）')
+  assert.ok(done.text.includes('s-2：这条还在跑，没搬'), '原话照搬，不吞掉是哪一条')
+  assert.ok(done.text.includes('effect.restart'), '要重启才生效时在结果页上说')
+  assert.equal(done.text.includes('run.error'), false, '成了就不摆那句"没做成"')
+  assert.equal(primaryOf(done.el).props.children, 'run.finish', '底栏只剩「完成」')
+  assert.equal(cancelOf(done.el), undefined, '结果页上没有第二枚按钮（没有「取消」，也没有「转到后台」）')
+
+  // 按「完成」：结论收走，窗口关掉（下一次进来是面板段，不是这页结果）。
+  primaryOf(done.el).props.onClick()
+  const after = run.render()
+  assert.deepEqual(dialogsOf(after.el), [], '按「完成」之后这一扇窗不在了')
 })
 
-test('客户端产物：导入落地时弹窗正文换成进度块', { skip }, () => {
-  const state = {
-    sessionsRoot: '/home/u/.dsh/sessions',
-    registryPath: '/home/u/.dsh/registry.json',
-    problems: [],
-    sessions: [{ id: 's-1', cwd: '/home/u/dev/alpha', createdAt: 5, dir: '/home/u/dev/alpha', bytes: 10, files: [] }],
-    workspaces: [{ id: 'w1', path: '/home/u/dev/alpha', title: '工作区甲', sessionIds: ['s-1'] }],
-  }
-  const plan = {
-    mode: 'apply',
-    bundle: { createdAt: '2026-10-01T00:00:00.000Z', source: {}, sessions: 2 },
-    problems: [],
-    entries: [
-      { id: 's-1', action: 'create', dir: '/home/u/.dsh/sessions/alpha/s-1', files: [{ name: 'session.v4.jsonl.zstd', bytes: 10 }], toCwd: '/home/u/dev/alpha' },
-      { id: 's-2', action: 'skip', reason: '库里已有', dir: '/home/u/.dsh/sessions/alpha/s-2', files: [], fromCwd: '/home/u/dev/alpha' },
-    ],
-    created: ['s-1'],
-    rehomed: ['s-1'],
-    bytes: 10,
-    registryChange: null,
-    ok: true,
-    written: ['s-1'],
-    writtenBytes: 10,
-    registryWritten: true,
-    takesEffect: 'immediate',
-    note: '会话已落盘',
-  }
-  // null 顺序：骨架的 error / 导入面的 file / payload / **pending** / **busy**（'apply'：假钩子不会点
-  // 按钮，落地那一段只能这样走进去）/ error / **progress** / 目录字段的面板 / 手输路径。
-  const mounted = mount({
-    state,
-    panel: 'import',
-    nulls: [null, null, null, { plan, error: null }, 'apply', null, progressOf('write', 0, 1, '会话甲')],
-  })
-  const text = strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
-  assert.ok(text.includes('progress.write:{"current":1,"total":1}'), '落地那一段说"正在写入"')
-  assert.ok(text.includes('import.progress.note'), '并说明导入只增不覆盖、中断了再导一次')
-  assert.equal(
-    topDialog(mounted.recorded).props['aria-label'],
-    'import.applying',
-    '标题从「将要写入」换成「导入中…」',
-  )
-  assert.equal(text.includes('table.create'), false, '落地时不再摆那张计划表（它说的是"将要"）')
+test('客户端产物：结果页上那枚「撤销」把用户送到「备份与回滚」', { skip }, async () => {
+  // 迁移改过本机的内容，旧的那份在备份里：结果页给的后悔面就是那枚「撤销」，点它先收窗、再开备份那一面。
+  const run = migrationRun()
+  run.render()
+  primaryOf(run.mounted.recorded).props.onClick()
+  await run.flush()
+  run.push(`data: {"type":"result","result":${JSON.stringify(run.applied)}}\n\n`)
+  await run.flush()
+  run.end()
+  await run.flush()
+  const done = run.render()
+  const undo = done.el.find((node) => node.type === 'button' && node.props?.children === 'undo.action')
+  assert.ok(undo !== undefined, '结果页上有「撤销」')
+  undo.props.onClick()
+  // 假钩子不改状态，只把"谁被 set 成了什么"记下来：备份那一面（`backup`）与指着的那份备份各收到一次。
+  const setValues = run.mounted.sets.map((entry) => entry.value)
+  assert.ok(setValues.includes('backup'), '点它之后打开的是「备份与回滚」')
+  assert.ok(setValues.includes(run.applied.backupDir), '并且直接指着刚留下的那份备份')
 })
 
 test('客户端产物：进度块的段名是一份共用词汇，认不出来的段名退到一句通用的话', { skip }, () => {
@@ -5159,33 +5190,15 @@ test('客户端产物：进度块的段名是一份共用词汇，认不出来�
     sessions: [{ id: 's-1', cwd: '/home/u/dev/alpha', createdAt: 5, dir: '/home/u/dev/alpha', bytes: 2048, files: [] }],
     workspaces: [{ id: 'w1', path: '/home/u/dev/alpha', title: '工作区甲', sessionIds: ['s-1'] }],
   }
-  const plan = {
-    mode: 'apply',
-    ok: true,
-    preview: {
-      ok: true,
-      problems: [],
-      entries: [{ id: 's-1', createdAt: 5, dir: '/home/u/.dsh/sessions/alpha/s-1', files: [], bytes: 2048, live: false }],
-      files: 0,
-      bytes: 2048,
-      backupRoot: '/home/u/.dsh/dsh-session-manager/backups',
-    },
-    applied: true,
-    dirsRemoved: 1,
-    removedProjectDirs: [],
-    verified: true,
-    problems: [],
-    summary: '已删除 1 个会话',
-    takesEffect: 'immediate',
-  }
-  /** 种一条进度事件，把弹窗正文摊成文字与元素。 */
+  /**
+   * 种一条进度事件，把进度块摊成文字与元素。
+   *
+   * 走的是**归档**那一路（`busy === 'archive'`）：它是这一页上唯一"进度直接画在页面上"的动作，不需要
+   * 点按钮就能进那一段。其余几个写盘动作的进度画在状态窗里（`RunDialog`），那一路由上面
+   * 「迁移落地之后进度在状态窗里」那条照着点击走一遍。
+   */
   const render = (progress) => {
-    const mounted = mount({
-      state,
-      panel: 'manage',
-      arrays: [['s-1']],
-      nulls: [null, 'apply', null, null, { plan, error: null }, progress],
-    })
+    const mounted = mount({ state, panel: 'manage', arrays: [['s-1']], nulls: manageNulls({ busy: 'archive', progress }) })
     return {
       mounted,
       text: strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject())),
@@ -5521,122 +5534,59 @@ test('客户端产物：同步预演读的也是一条事件流（不是等一�
   assert.ok(reads >= chunks.length + 1, '一直读到 done（不是读一块就收手）')
 })
 
-test('客户端产物：迁移落地时宿主报的每条进度都进了界面状态（事件流 → 面板的回调）', { skip }, async () => {
+test('客户端产物：迁移落地时宿主报的每条进度都到了状态窗里（事件流 → 界面）', { skip }, async () => {
   /*
-   * 上面那几条「弹窗正文换成进度块」是把一份进度**种**进状态里看它怎么画——它们证明不了
-   * "宿主报的进度真的会走到界面上"。这一条从另一头钉：给一个假 `fetch`，让它按 SSE 分帧吐出
-   * 一条进度 + 一条收尾，然后核**面板传给 api 的那个回调真的被调到了**（`sets` 是假钩子记下的
-   * "谁被 set 成了什么"，见 fakeReact）。
-   *
-   * 少了这一条，`migrate(request, setProgress)` 里那个参数掉了也不会红：种进去的进度照样画得出来。
+   * 上面那条「迁移落地之后进度在状态窗里」是把一条进度喂进去看它怎么画。这一条从另一头补两件事：
+   *   1) 请求长什么样——勾中的两条里侧边栏看不见的那条**不该**被送进落地请求（宿主对点名的隐藏会话
+   *      一律拒，送进去整次落地就失败），而弹窗里要点名说少带了它；
+   *   2) 宿主那条事件流真的接到了界面上：喂进去的进度与结果都出现在状态窗里（同一个假 fetch 边收边记）。
    */
-  const state = {
-    sessionsRoot: '/home/u/.dsh/sessions',
-    registryPath: '/home/u/.dsh/registry.json',
-    problems: [],
+  const run = migrationRun({
     sessions: [
       { id: 's-1', cwd: '/home/u/dev/alpha', createdAt: 5, dir: '/home/u/dev/alpha', bytes: 2048, files: [] },
       // 侧边栏看不见的那条：这一页照样能勾（归档 / 删除要它），但迁移那一侧只送看得见的那些。
       { id: 's-2', cwd: '/home/u/dev/alpha', createdAt: 4, dir: '/home/u/dev/alpha', bytes: 1024, files: [], hidden: 'blank' },
     ],
-    workspaces: [{ id: 'w1', path: '/home/u/dev/alpha', title: '工作区甲', sessionIds: ['s-1'] }],
-  }
-  const preview = {
-    ok: true,
-    problems: [],
-    sessionIds: ['s-1'],
-    to: '/home/u/dev/beta',
-    sourceProjectDirs: ['/home/u/.dsh/sessions/alpha'],
-    targetProjectDir: '/home/u/.dsh/sessions/beta',
-    sessions: [
-      { id: 's-1', createdAt: 5, registered: true, alreadyAtTarget: false, sourceDir: '/x', targetDir: '/y', files: 1, bytes: 10 },
-    ],
-    cascaded: 0,
-    liveSkipped: [],
-    strandedSources: [],
-    files: 1,
-    bytes: 10,
-    artifacts: null,
-    registryChange: null,
-    summary: 'plan summary',
-  }
-  const plan = { mode: 'plan', ok: true, preview, applied: false, rewritten: 0, moved: 0, artifactsMoved: 0, verified: false, problems: [], summary: 'plan summary', takesEffect: 'immediate' }
-  const applied = { mode: 'apply', ok: true, preview, applied: true, rewritten: 1, moved: 1, artifactsMoved: 0, verified: true, problems: [], summary: 'done', takesEffect: 'immediate' }
-  const chunks = [
-    'data: {"type":"progress","progress":{"phase":"rewrite","total":253,"done":6,"id":"s-1","label":"会话甲"}}\n\n',
-    `data: {"type":"result","result":${JSON.stringify(applied)}}\n\n`,
-  ]
-  let index = 0
-  const calls = []
-  const mounted = mount({
-    state,
-    panel: 'manage',
-    strings: manageStrings({ to: '/home/u/dev/beta' }),
-    // 勾选集（第一个空数组状态）里种上两条：一条看得见、一条侧边栏看不见——落地那次请求只该带前者。
-    arrays: [['s-1', 's-2']],
-    nulls: manageNulls({ migrate: { response: plan, error: null } }),
-    fetch: async (url, init) => {
-      calls.push({ url: String(url), method: init?.method, accept: init?.headers?.accept, body: init?.body })
-      return {
-        ok: true,
-        status: 200,
-        headers: { get: (name) => (name === 'content-type' ? 'text/event-stream; charset=utf-8' : null) },
-        body: {
-          getReader: () => ({
-            read: async () =>
-              index < chunks.length
-                ? { done: false, value: new TextEncoder().encode(chunks[index++]) }
-                : { done: true },
-          }),
-        },
-        // 一次性那条路必须没被走到：走错的话这里会被调用，用例当场红。
-        text: async () => {
-          throw new Error('落地走的是事件流，不该读一次性 text()')
-        },
-      }
-    },
+    picked: ['s-1', 's-2'],
+    applied: { problems: [] },
   })
-
-  // 假钩子不会点按钮：先把树摊开，再点弹窗底部那枚主动作（确认迁移）。
-  const dialogText = strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
-  // 勾了两条、其中一条侧边栏看不见：弹窗里说明少带了 1 条（不然就是"勾了 2 条、搬走 1 条"没人解释）。
+  const planned = run.render()
   assert.ok(
-    dialogText.some((item) => String(item) === 'migrate.hiddenSkipped:{"count":1}'),
+    planned.text.some((item) => String(item) === 'migrate.hiddenSkipped:{"count":1}'),
     '勾中的隐藏会话要在弹窗里点名（它不进计划）',
   )
-  primaryOf(mounted.recorded).props.onClick()
-  for (let tries = 0; tries < 50 && index < chunks.length; tries += 1) await new Promise((resolve) => setImmediate(resolve))
+  primaryOf(planned.el).props.onClick()
+  await run.flush()
+
+  run.push('data: {"type":"progress","progress":{"phase":"rewrite","total":253,"done":6,"id":"s-1","label":"会话甲"}}\n\n')
+  await run.flush()
+  const running = run.render()
+  assert.ok(
+    running.text.includes('progress.rewrite:{"current":7,"total":253}'),
+    '宿主报的那条进度原样画在状态窗里（事件流真的接到了界面上）',
+  )
+  assert.equal(dialogsOf(running.el)[0].props['aria-label'], 'run.migrate.running', '这时候摆的是状态窗')
+
+  run.push(`data: {"type":"result","result":${JSON.stringify(run.applied)}}\n\n`)
+  await run.flush()
+  run.end()
+  await run.flush()
+  const done = run.render()
+  assert.equal(dialogsOf(done.el)[0].props['aria-label'], 'run.migrate.done', '收尾那条把它换成结果页')
+  assert.ok(done.text.includes('已迁移 1 条会话。'), '结果就是宿主回的那份')
 
   // `/meta` 与 `/state` 是骨架首屏那两条（假钩子把 effect 直接跑了），这里只认落地那一条。
-  const landing = calls.filter((call) => call.url === '/dsh-session-manager/api/migrate')
+  const landing = run.calls.filter((call) => call.url === '/dsh-session-manager/api/migrate')
   assert.equal(landing.length, 1, '落地只打一次')
   assert.equal(landing[0].method, 'POST')
   assert.equal(landing[0].accept, 'text/event-stream', '界面明说自己要事件流')
-  // 源是"勾中且**搬得走**"的那些：s-2 侧边栏看不见（hidden），请求体里不该有它——宿主对点名的隐藏
-  // 会话一律拒，送进去只会让整次落地失败。
+  // 源是"勾中且**搬得走**"的那些：s-2 侧边栏看不见（hidden），请求体里不该有它。
   assert.deepEqual(JSON.parse(landing[0].body), {
     mode: 'apply',
     sessionIds: ['s-1'],
     to: '/home/u/dev/beta',
     includeArtifacts: false,
   })
-
-  // 跨 realm：产物在另一个 vm 里，把那条进度摊成宿主这边的普通对象再比。
-  const progressSets = mounted.sets.filter(
-    (entry) => entry.value !== null && typeof entry.value === 'object' && 'phase' in entry.value,
-  )
-  assert.deepEqual(
-    progressSets.map((entry) => ({ ...entry.value })),
-    [{ phase: 'rewrite', total: 253, done: 6, id: 's-1', label: '会话甲' }],
-    '宿主报的那条进度原样进了界面状态（面板真的把 onProgress 接上了）',
-  )
-  // 收尾那条要把进度清掉（不然下一次打开弹窗会先闪一条上一轮的进度）：**同一个状态位**先收到进度、
-  // 之后被置回 null（只看"后面还有没有 null"是不够的——同一段里 setBusy(null) 也会满足它）。
-  const landed = mounted.sets.findIndex((entry) => entry.value !== null && typeof entry.value === 'object' && 'phase' in entry.value)
-  const cleared = mounted.sets.findIndex(
-    (entry, index) => index > landed && entry.slot === mounted.sets[landed].slot && entry.value === null,
-  )
-  assert.ok(cleared > landed, '落地收尾时那条进度被清掉（同一个状态位置回 null）')
 })
 
 test('客户端产物：内容视图没有底部那一行，页头写着正中那一条的位次与总数', { skip }, () => {
@@ -5653,16 +5603,13 @@ test('客户端产物：内容视图没有底部那一行，页头写着正中�
   // 保持默认。顺序要是变了，这条会在下面第一句上失败，不会静默过（与 `arrays` / `strings` 的种子是
   // 同一套约定）。
   //
-  // `inspecting` 用 `manageNulls({ inspecting })` 种；排在它后面的四个是**迁移那一路**（目标字段的
-  // 面板 / 手输路径 / 迁移弹窗 / 迁移结论——它们声明在 `inspecting` 之后，见 ManagePanel.tsx），最后
-  // 那个种给内容视图自己的 `page`：有它页头那行"已读 / 共"才画得出来（假钩子不跑 effect，页不会自己到）。
+  // `inspecting` 用 `manageNulls({ inspecting })` 种；排在它后面的是**迁移那一路**（目标字段的面板 /
+  // 手输路径 / 迁移弹窗——它们声明在 `inspecting` 之后，见 ManagePanel.tsx）。再往下一个 null 状态就是
+  // 内容视图自己的 `page`：有它页头那行"已读 / 共"才画得出来（假钩子不跑 effect，页不会自己到）。
   const mounted = mount({
     state,
     panel: 'manage',
-    nulls: [
-      ...manageNulls({ inspecting: { id: 's-1', title: 'T' } }),
-      { totalEvents: 25, cursor: 0, problems: [], problemCount: 0 },
-    ],
+    nulls: [...manageNulls({ inspecting: { id: 's-1', title: 'T' } }), { totalEvents: 25, cursor: 0, problems: [], problemCount: 0 }],
   })
   const tree = mounted.registrations[0].component(mounted.registrations[0].registration.inject())
   const text = strings(tree)
@@ -5760,10 +5707,22 @@ test('组件源码：同步的进度在状态栏那一格里说，列表上方�
     false,
     '列表上方那块进度横幅已经搬进状态栏，别再摆回来',
   )
-  // 认领来的那趟结论要转给同步那一面（横幅没了，失败原因得有地方说）。
-  assert.match(manager, /backgroundLine/, '结论那一句转给同步那一面')
+  /*
+   * 结论与「撤销」都在同步那一面的**结果段**里（`stage === 'done'`）：跑完不回面板段，也不往页面顶上
+   * 再塞一句「后台同步结束：…」。两处都说同一件事时，用户还得自己判断哪一处算数。
+   */
   const sync = readFileSync(join(root, 'src/client/components/SyncPanel.tsx'), 'utf8')
-  assert.match(sync, /backgroundLine/, '同步那一面接得住这一句')
+  assert.match(sync, /syncStage\(dialog, job\.running, job\.done !== null\)/, '跑完了摆结果段（不看这一页手上还记着什么）')
+  assert.match(sync, /stage === 'done'/, '结果段有自己的一段正文')
+  assert.match(sync, /sync\.done\.title/, '那一段的标题是「同步完成」')
+  assert.match(sync, /onOpenBackups/, '结果段上那枚「撤销」接在备份那一面')
+  assert.equal(manager.includes('backgroundLine'), false, '那句「后台同步结束：…」不再转给同步那一面')
+  assert.equal(sync.includes('backgroundLine'), false, '同步那一面不再从外面收这句话')
+  /*
+   * 结论别在状态栏上留着不走：跑完 12 秒后状态栏那一格自己收掉。但同步那一面开着时不收——那里的结果段
+   * 正拿着这份结论，收掉等于用户读到一半被抽走。
+   */
+  assert.match(manager, /surface === 'sync'\) return/, '同步那一面开着时状态栏不许把结论收走')
 })
 
 test('客户端产物：自动同步开着时，同步那一面与页头那枚点都改说"双向"', { skip }, () => {
@@ -5996,15 +5955,16 @@ test('客户端产物：同步弹窗说清"上次同步"与没做到的每一条
   assert.ok(legacyText.includes('sync.leftovers.title:{"count":1}'), '条数按那几句数')
 })
 
-test('组件源码：同步那一面自己就是弹窗，宽度跟着那一段走（面板 640、计划 1080）', () => {
-  // 为什么扫源码：计划那一段要靠真跑一趟同步才会出现，夹具里种不出 planId 那一套状态。而"谁该宽、谁该窄"
-  // 是那次返工里最容易再倒回去的一条——面板段只有几句话，铺到 1080 一句话要拉两行半；计划那三张表在
-  // 640 下会被挤成一个字。
+test('组件源码：同步那一面自己就是弹窗，而且整条流程一个宽度（1080）', () => {
+  // 为什么扫源码：计划那一段要靠真跑一趟同步才会出现，夹具里种不出 planId 那一套状态。而"宽度"这条
+  // 是返工两次的地方：先按"这一段摆什么"分档（面板 640、计划 1080、结果 640），于是在同一条流程里
+  // 窗口先宽后窄；现在按"这一扇窗最宽的那一段"定死——同步每一步都是 1080（见 design.md 的「执行与结果」）。
   const sync = readFileSync(join(root, 'src/client/components/SyncPanel.tsx'), 'utf8')
-  assert.match(
-    sync,
-    /size=\{stage === 'apply' \|\| \(stage === 'plan' && hasPlanTables\) \? 'wide' : 'narrow'\}/,
-    '宽度跟着里面摆什么走：面板段与没有表的计划段都窄，有计划表 / 落地才宽',
+  assert.match(sync, /size="wide"/, '同步这一面从头到尾一个宽度（1080）')
+  assert.equal(
+    /size=\{[^}]*\? 'wide' : 'narrow'/.test(sync),
+    false,
+    '不再按段切换宽度：那会让同一条流程里窗口忽宽忽窄',
   )
   // 计划不再是另一枚弹窗：这一段里不许再出现确认弹窗外壳。
   const planSection = sync.slice(sync.indexOf("stage === 'plan'"), sync.indexOf("stage === 'apply'"))
@@ -6053,7 +6013,7 @@ test('客户端产物：一轮一节折得起来，标题自己画折叠标记',
     state,
     panel: 'manage',
     nulls: [
-      ...Array(7).fill(null),
+      ...Array(6).fill(null),
       { id: 's-1', title: 'T' },
       { totalEvents: 5, cursor: 0, problems: [], problemCount: 0 },
     ],

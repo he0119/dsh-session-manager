@@ -25,7 +25,9 @@ import { Hint } from './Hint.tsx'
 
 import { fetchBackups, rollbackBackup, type BackupSummary, type ProgressEvent, type RollbackResponse } from '../api.ts'
 import { ConfirmDialog } from './ConfirmDialog.tsx'
+import { startRun } from '../logic/runJob.ts'
 import { ProgressBlock } from './ProgressBlock.tsx'
+import { ProblemsBlock } from './ProblemsBlock.tsx'
 import { formatStamp } from './sessionList.tsx'
 import type { PanelShare } from '../types.ts'
 
@@ -147,30 +149,44 @@ export function BackupPanel({
     open(target)
   }, [focus, backups])
 
-  /** 弹窗里按「确认回滚 / 确认恢复」：写盘并还原。 */
+  /**
+   * 弹窗里按「确认回滚 / 确认恢复」：写盘并还原。
+   *
+   * 确认到此为止，接下来交给状态窗（进度 → 结果 → 「完成」）：原来这一趟的进度画在确认弹窗里，做完
+   * 弹窗关掉、结论跑到页面横幅上，用户两头都看不到完整的。
+   */
   const apply = (backup: BackupSummary): void => {
-    setBusy(backup.dir)
+    const dir = backup.dir
+    const restore = isRestore(backup)
+    setDialog(null)
     setError(null)
     setProgress(null)
-    void rollbackBackup(backup.dir, false, setProgress).then(
-      (response) => {
-        setBusy(null)
-        setProgress(null)
-        setDialog(null)
-        setNotice(
-          t(isRestore(backup) ? 'backup.restore.done' : 'backup.rollback.done', {
-            sessions: response.sessions,
-            files: response.restoredFiles,
-          }),
+    startRun(
+      'rollback',
+      (report) => rollbackBackup(dir, false, report),
+      (done) => {
+        if (!done.ok) return <p className="dsm-error">{t('run.error', { reason: done.error ?? '' })}</p>
+        const response = done.result as { sessions: number; restoredFiles: number; problems?: string[] }
+        return (
+          <div className="dsm-planBody">
+            <div className="dsm-ok">
+              {t(restore ? 'backup.restore.done' : 'backup.rollback.done', {
+                sessions: response.sessions,
+                files: response.restoredFiles,
+              })}
+            </div>
+            <ProblemsBlock t={t} problems={response.problems ?? []} />
+          </div>
         )
-        // 还原之后注册表也可能被改回去（回滚会），所以清单与会话库都重读一遍。
-        void reload().then(() => load())
       },
-      (cause) => {
-        setBusy(null)
-        setProgress(null)
-        setDialog(null)
-        setError(reasonOf(cause))
+      {
+        onChange: (done) => {
+          if (!done.ok) return
+          // 还原之后注册表也可能被改回去（回滚会），所以清单与会话库都重读一遍。
+          void reload().then(() => load())
+        },
+        // 「备份与回滚」这一面是 1080，状态窗与结果页跟着它。
+        wide: true,
       },
     )
   }

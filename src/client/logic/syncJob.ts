@@ -9,10 +9,14 @@
  * 所以把状态搬到**模块级**：组件挂不挂载都不影响它，谁渲染谁读。三件事：
  *
  * 1. 这一页发起的那一趟：走事件流，进度最细；
- * 2. 关掉弹窗 / 切页签 / 关掉整个设置窗口：都不影响它，回到这一页横幅上照样是它；
+ * 2. 关掉弹窗（「转到后台」）/ 切页签 / 关掉整个设置窗口：都不影响它，回来时状态栏那一格报进度，
+ *    点它回到同步那一面接着看；
  * 3. 刷新了整个页面（或者从另一个页签发起）：那一趟还在宿主里跑，但这一份内存已经没了——于是从
- *    **面板事件流**（`GET /panel/events` 上 `sync` 那一条）认领：宿主一有变化就推过来，横幅说"还在跑"，
+ *    **面板事件流**（`GET /panel/events` 上 `sync` 那一条）认领：宿主一有变化就推过来，这一页说"还在跑"，
  *    跑完把"搬了几条"补上。
+ *
+ * 跑完之后结论留在 `done` 里，同步那一面据此摆**结果页**（见 [syncStage.ts](./syncStage.ts)）；用户按
+ * 「完成」才把它收掉（`dismiss()`）。
  *
  * 边界写在明处：**认领来的那一趟没有逐条进度，也没有完整结果**（宿主那边只留"跑没跑、搬了几条"），
  * 细节要以发起它的那个页面为准。
@@ -96,14 +100,10 @@ export interface SyncJob {
    */
   start(input: { planId?: string; decisions?: ReadonlyMap<string, SyncDecision>; tidy?: boolean }): boolean
   /**
-   * 取走**这一页发起的**那一趟的结论（取走即清空，免得两个入口各说一遍）。
+   * 收掉结束结论（结果页上那枚「完成」，或者状态栏那一格自己超时收走）。正在跑的那一趟不受影响。
    *
-   * 认领来的结论不在这条路上：它没有完整结果，由页面级横幅自己说、自己关（见 `dismiss()`）。
-   *
-   * @returns 结论；没有（或者只有认领来的那一条）就是 `null`。
+   * 界面读的是 `snapshot().done`：结果页开着的时候它就在那儿，收掉之后才没有（见 `syncStage`）。
    */
-  takeResult(): SyncJobDone | null
-  /** 关掉结束结论（横幅上那枚「关闭」）。正在跑的那一趟不受影响。 */
   dismiss(): void
   /**
    * 接上宿主那一路状态（页面打开时调一次；重复调没有副作用）。
@@ -209,12 +209,6 @@ export function createSyncJob(deps: SyncJobDeps): SyncJob {
         },
       )
       return true
-    },
-    takeResult() {
-      const done = current.done
-      if (done === null || done.adopted !== undefined) return null
-      emit({ done: null })
-      return done
     },
     dismiss() {
       emit({ done: null })
