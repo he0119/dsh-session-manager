@@ -185,6 +185,8 @@ export function BackupPanel({
           // 还原之后注册表也可能被改回去（回滚会），所以清单与会话库都重读一遍。
           void reload().then(() => load())
         },
+        // 「备份与回滚」这一面是 1080，状态窗与结果页跟着它。
+        wide: true,
       },
     )
   }

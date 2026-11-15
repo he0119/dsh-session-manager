@@ -52,6 +52,14 @@ export interface RunState {
   done: RunDone | null
   /** 结果页怎么画（各动作在发起时给的，闭包里带着那个面板要用的回调）。 */
   render: (done: RunDone) => React.ReactNode
+  /**
+   * 宽的那一档（1080）。
+   *
+   * 一条流程从头到尾一个宽度：从「做事那一面」（导入面、备份与回滚、同步面，都是 1080）发起的动作，
+   * 状态窗与结果页也停在 1080；从确认弹窗（640）发起的就停在 640。否则同一条流程里窗口会先宽后窄，
+   * 看着像换了一件事（口径见 design.md 的「执行与结果」）。
+   */
+  wide: boolean
 }
 
 let current: RunState | null = null
@@ -97,10 +105,10 @@ export function startRun<T>(
   kind: RunKind,
   work: (report: (event: ProgressEvent) => void) => Promise<T>,
   render: (done: RunDone) => React.ReactNode,
-  options: { onChange?: (done: RunDone) => void } = {},
+  options: { onChange?: (done: RunDone) => void; wide?: boolean } = {},
 ): boolean {
   if (current?.running === true) return false
-  current = { kind, running: true, progress: null, dialog: true, done: null, render }
+  current = { kind, running: true, progress: null, dialog: true, done: null, render, wide: options.wide === true }
   emit()
   /**
    * 收尾：把结论挂上去，让状态窗换成结果页。

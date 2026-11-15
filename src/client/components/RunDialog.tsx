@@ -55,7 +55,8 @@ export function RunDialog({ t }: { t: Translate }): React.ReactElement | null {
       onClose={done === null ? backgroundRun : dismissRun}
       title={title}
       closeLabel={t('close')}
-      className="dsm-dialog"
+      // 宽度跟着发起它的那一面走（见 runJob.RunState.wide）：一条流程一个宽度，中途不换。
+      className={run.wide ? 'dsm-dialog dsm-workDialog' : 'dsm-dialog'}
       contentClassName="dsm-dialogContent"
       footer={
         <>
@@ -76,7 +77,7 @@ export function RunDialog({ t }: { t: Translate }): React.ReactElement | null {
         </>
       }
     >
-      <div className="dsm-dialogBody">
+      <div className={run.wide ? 'dsm-workBody' : 'dsm-dialogBody'}>
         {done === null ? (
           run.progress === null ? (
             <p className="dsm-hint">{t('run.preparing')}</p>

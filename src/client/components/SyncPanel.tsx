@@ -797,6 +797,8 @@ export function SyncPanel({
           setTidyPlan(response)
           setFailures(response.problems)
         },
+        // 同步面是 1080，整理远端的进度与结果也停在那一档。
+        wide: true,
       },
     )
   }
@@ -1058,7 +1060,9 @@ export function SyncPanel({
           640 正好；有计划表时才要 1080（三张表在 640 里会把动作列挤成一个字）。没有表却撑到 1080，
           右边会空一大块。
         */
-        size={stage === 'apply' || (stage === 'plan' && hasPlanTables) ? 'wide' : 'narrow'}
+        // 一扇窗从头到尾一个宽度：同步这一面每一步都按计划段那三张表的宽度（1080）来，不再
+        // 「面板 640 → 计划 1080 → 结果 640」来回跳（口径见 design.md 的「执行与结果」）。
+        size="wide"
         onClose={onClose}
         // 没配置同步时底栏整块不摆：一枚点了没反应的「同步」比没有更糟（与正文那句说明同一条口径）。
         footer={

@@ -1184,8 +1184,8 @@ test('客户端产物：点哪个入口就开哪一面，列表一直挂在后�
   // 但元素还在。
   for (const [surface, title, wide] of [
     ['import', 'import.dialogTitle', false],
-    // 同步那一面正文只有几句话与一排按钮，铺到 1080 一句话两行半；它走 640，表在计划那个弹窗里。
-    ['sync', 'sync.title', false],
+    // 同步那一面从头到尾 1080（计划段那三张表要这个宽度，面板段与结果段跟着它，不在中途忽宽忽窄）。
+    ['sync', 'sync.title', true],
     ['backup', 'backup.title', true],
   ]) {
     const { registrations, recorded } = mount({ panel: surface })
@@ -5955,15 +5955,16 @@ test('客户端产物：同步弹窗说清"上次同步"与没做到的每一条
   assert.ok(legacyText.includes('sync.leftovers.title:{"count":1}'), '条数按那几句数')
 })
 
-test('组件源码：同步那一面自己就是弹窗，宽度跟着那一段走（面板 640、计划 1080）', () => {
-  // 为什么扫源码：计划那一段要靠真跑一趟同步才会出现，夹具里种不出 planId 那一套状态。而"谁该宽、谁该窄"
-  // 是那次返工里最容易再倒回去的一条——面板段只有几句话，铺到 1080 一句话要拉两行半；计划那三张表在
-  // 640 下会被挤成一个字。
+test('组件源码：同步那一面自己就是弹窗，而且整条流程一个宽度（1080）', () => {
+  // 为什么扫源码：计划那一段要靠真跑一趟同步才会出现，夹具里种不出 planId 那一套状态。而"宽度"这条
+  // 是返工两次的地方：先按"这一段摆什么"分档（面板 640、计划 1080、结果 640），于是在同一条流程里
+  // 窗口先宽后窄；现在按"这一扇窗最宽的那一段"定死——同步每一步都是 1080（见 design.md 的「执行与结果」）。
   const sync = readFileSync(join(root, 'src/client/components/SyncPanel.tsx'), 'utf8')
-  assert.match(
-    sync,
-    /size=\{stage === 'apply' \|\| \(stage === 'plan' && hasPlanTables\) \? 'wide' : 'narrow'\}/,
-    '宽度跟着里面摆什么走：面板段与没有表的计划段都窄，有计划表 / 落地才宽',
+  assert.match(sync, /size="wide"/, '同步这一面从头到尾一个宽度（1080）')
+  assert.equal(
+    /size=\{[^}]*\? 'wide' : 'narrow'/.test(sync),
+    false,
+    '不再按段切换宽度：那会让同一条流程里窗口忽宽忽窄',
   )
   // 计划不再是另一枚弹窗：这一段里不许再出现确认弹窗外壳。
   const planSection = sync.slice(sync.indexOf("stage === 'plan'"), sync.indexOf("stage === 'apply'"))
