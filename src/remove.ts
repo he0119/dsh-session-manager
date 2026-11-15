@@ -274,7 +274,7 @@ export async function runRemoval(
       applied: false,
       ...empty,
       problems: [],
-      summary: `将删除 ${plan.entries.length} 个会话（${plan.files} 个日志文件、${plan.bytes} 字节），先备份再删。${cascadeNote}`,
+      summary: `将删除 ${plan.entries.length} 个会话，先备份再删。${cascadeNote}`,
     }
   }
 
@@ -360,10 +360,14 @@ export async function runRemoval(
     dirsRemoved: plan.entries.length,
     removedProjectDirs,
     ...(remote === undefined ? {} : { remote }),
+    /*
+     * 提示条只留结果：日志文件数、字节数是收据，「复核通过」与备份目录对成功的那一次没有信息量——备份
+     * 就在提示条右边那枚「撤销」里，也在状态栏的「备份与回滚」里。失败才说，而且只说该做什么。
+     */
     summary:
-      `已删除 ${plan.entries.length} 个会话（${plan.files} 个日志文件、${plan.bytes} 字节）。${cascadeNote}\n` +
-      `复核：${verified ? '通过' : '失败'}。备份：${backup.dir}（可在「备份与回滚」里恢复）` +
-      (remote === undefined ? '' : `\n${remoteNote(remote)}`),
+      `已删除 ${plan.entries.length} 个会话。${cascadeNote}` +
+      (remote === undefined ? '' : remoteNote(remote)) +
+      (verified ? '' : ' 复核没通过：有文件没删掉。'),
   }
 }
 
@@ -374,12 +378,19 @@ export async function runRemoval(
  * @returns 一句话（带字节数，以及别的机器上还留着副本的情况）。
  */
 function remoteNote(remote: RemoteRemoval): string {
-  const kept =
+  /*
+   * 一个包都没删、别的机器上也没有副本时整句不出现：这台机器根本没推过这条会话，说「删掉 0 个包
+   * （0 字节）」只是噪音。
+   */
+  if (remote.removed === 0 && remote.others.length === 0) return ''
+  const head =
+    remote.removed === 0
+      ? ''
+      : ` 远端这一格也清掉了（${remote.removed} 个包）`
+  const tail =
     remote.others.length === 0
-      ? '别的机器上没有副本。'
-      : `${remote.others.join('、')} 的格子里还留着副本，那台机器下次同步时会跟着删掉。`
-  return (
-    `远端：这台机器的格子里删掉 ${remote.removed} 个包（${remote.bytes} 字节），` +
-    `并留下删除记录（下次同步不会再把它拉回来）。${kept}`
-  )
+      ? '，下次同步不会再把它拉回来。'
+      : `，${remote.others.join('、')} 上的副本会在它下次同步时删掉。`
+  if (head === '') return ` 远端的副本：${remote.others.join('、')} 上那份会在它下次同步时删掉。`
+  return `${head}${tail}`
 }

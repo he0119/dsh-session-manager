@@ -1108,7 +1108,7 @@ test('客户端产物：备份清单只在「备份与回滚」那一面里，�
   // 列表与同步那几处的成功文案都指向「备份与回滚」，不再指向「迁移」页的某张卡、也不再指向一个
   // 已经不存在的「备份」页：那句话只在弹窗或流式进度里出现，渲染路径上取不到，所以按字典的值核。
   const { zh } = mount().dictionaries[0].dicts
-  for (const key of ['manage.delete.backupTo', 'sync.progress.note', 'sync.appliedReplaced', 'help.faq.backupA']) {
+  for (const key of ['manage.delete.backupTo', 'sync.progress.note', 'sync.appliedRestoreHint', 'help.faq.backupA']) {
     assert.ok(zh[key].includes('「备份与回滚」'), `${key} 要把人指到「备份与回滚」`)
     assert.ok(!zh[key].includes('迁移」页'), `${key} 不该再指「迁移」页`)
     assert.ok(!zh[key].includes('「备份」页'), `${key} 不该再指已经不存在的「备份」页`)
@@ -4296,9 +4296,16 @@ test('客户端产物：删除弹窗摆出清单与备份位置，计划不 ok �
     String(primaryOf(good.recorded).props.className).includes('dsm-dialogConfirm'),
     '确认那一枚挂 .dsm-dialogConfirm（136px）',
   )
+  // 备份在哪：弹窗里只说"先备份再删、删错了去哪恢复"，不再摆备份目录的绝对路径（那行原来占掉小半屏，
+  // 而「撤销」与状态栏的「备份与回滚」都能到同一份）。
   assert.ok(
-    good.text.some((item) => String(item).startsWith('manage.delete.backupTo') && String(item).includes('dsh-session-manager/backups')),
-    '备份落在哪要写在弹窗里（要恢复时知道去哪找）',
+    good.text.some((item) => String(item) === 'manage.delete.backupTo'),
+    '弹窗里要说清删之前会备份',
+  )
+  assert.equal(
+    good.text.some((item) => String(item).includes('dsh-session-manager/backups')),
+    false,
+    '不再摆备份目录的绝对路径',
   )
 
   const bad = render(false)

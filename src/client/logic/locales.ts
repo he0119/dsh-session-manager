@@ -79,9 +79,9 @@ export const zh = {
   'export.running': '打包中…',
   'export.done': '已导出 {count} 条会话（{bytes}）。',
   // 附件对象跟着包走（.dshsess v2）：带走几个、多少字节，以及本机库里缺的那几个（缺的这次带不走）。
-  'export.attachments': '另带附件对象 {attachments} 个（{bytes}）。',
+  'export.attachments': '附件对象 {attachments} 个（{bytes}）。',
   'export.attachmentsMissing':
-    '有 {count} 个附件对象在本机附件库里找不到，这次没能带走——它们在别的机器上会显示「图片加载失败」。',
+    '另有 {count} 个对象本机没有，没带上。',
   'list.empty': '这个会话库里还没有会话。',
 
   // 列表动作行上那枚入口：它开的就是上面那个弹窗（导出要用勾选，导入不用，所以它不受勾选限制）。
@@ -125,8 +125,8 @@ export const zh = {
   'cwd.skipped': '跳过，不改写',
   'import.done': '已写入 {count} 条会话（{bytes}）。',
   // 只补附件的那种落地（日志早就在库里、图是挂的）：会话那一条是 0，得有一句说清这次写的是什么。
-  'import.doneAttachments': '另写入附件对象 {count} 个（{bytes}）。',
-  'import.attachmentProblems': '有 {count} 个附件对象没能落地，它们对应的图片/文件会加载失败。',
+  'import.doneAttachments': '附件对象 {count} 个（{bytes}）。',
+  'import.attachmentProblems': '另有 {count} 个对象没落地。',
   'import.needFile': '请先选择要导入的 .dshsess 包。',
   'import.needTarget': '请先选择目标目录。',
 
@@ -198,8 +198,7 @@ export const zh = {
   'registry.unchanged': '注册表无需变更',
   'artifacts.planned': '计划搬迁 {count} 项产物',
   'artifacts.skipped': '跳过 {count} 项产物',
-  'migrate.done': '已迁移 {sessions} 条会话：改写 {rewritten} 个日志、移动 {moved} 个目录{artifacts}。',
-  'migrate.doneArtifacts': '、搬迁 {count} 项产物',
+  'migrate.done': '已迁移 {sessions} 条会话。',
   'verify.pass': '复核通过',
   'verify.fail': '复核未通过',
   // 生效方式只留短句：「为什么会这样」的长解释在说明页的 FAQ（`help.faq.restart*`），这里不复述。
@@ -247,11 +246,10 @@ export const zh = {
   'manage.title': '会话库',
   'manage.hint': '整个会话库都在这里，侧边栏点不到的那些也在。勾选后归档、重算名称、迁移或删除，细节见「说明」。',
   'manage.archive.unavailable':
-    '这个宿主没有 workspaceRegistry 服务（归档是它的能力，只有 Web profile 才有），所以归档按钮不可用；删除不受影响。',
+    '这个宿主没有归档能力（只有 Web profile 才有），删除不受影响。',
   'manage.archive.action': '归档所选',
   'manage.archive.undo': '取消归档',
   'manage.archive.running': '处理中…',
-  'manage.archive.immediate': '宿主即时生效，侧边栏马上跟着变。',
   'manage.archive.done': '已归档 {count} 条会话。',
   'manage.archive.undone': '已取消归档 {count} 条会话。',
   'manage.archive.failed': '有 {count} 条没能改（原因见下）：',
@@ -337,10 +335,10 @@ export const zh = {
   'manage.delete.apply': '确认删除',
   'manage.delete.running': '删除中…',
   'manage.delete.progress.note': '删除先备份再删；中断的话这份备份就在「备份与回滚」里，恢复即可。',
-  'manage.delete.backupTo': '备份落在：{dir}（点成功后那句里的「撤销」，或去「备份与回滚」里恢复）',
+  'manage.delete.backupTo': '先备份再删，删错了在「备份与回滚」里恢复。',
   'manage.delete.remote': '同时删除远端',
   'manage.delete.remoteHint':
-    '这台机器的远端格子里那份包会一起删掉，并留下一条删除记录：下次同步不会再把它拉回来。别的机器上的副本会在那台机器下次同步时跟着删。远端那份没有备份。',
+    '远端这一格一起删掉，别的机器上的副本会在它下次同步时跟着删。远端没有备份。',
   'manage.delete.acknowledge':
     '删掉之后这些会话的日志就没了；备份留在上面那个目录里，需要时去「备份与回滚」恢复。',
   'manage.delete.hint':
@@ -463,7 +461,7 @@ export const zh = {
   'sync.form.title': '同步设置',
   'sync.where': '远端 {url}',
   'sync.hint':
-    '按插件配置里的映射同步：把别处推送来的会话拉取到本机，把本机独有的推送到远端。同一个 id 两边都有时按内容与最后活动时间判谁更新，远端更新会先备份再换掉本机那份。两边各自写过的这次不动，预演里可以看差异再定。映射 {mappings} 条。',
+    '按映射双向同步：该拉的拉、该推的推；同一条两边都有时按最后活动时间定谁更新，覆盖前先备份。映射 {mappings} 条。',
   'sync.offHint':
     '没配置同步：去 设置 →「会话管理」里填远端地址（WebDAV 集合）与路径映射，保存后回这里就能同步。',
   'sync.action': '同步',
@@ -481,7 +479,7 @@ export const zh = {
   'sync.background.donePlain': '后台同步结束。',
   'sync.background.failed': '后台同步没成：{reason}',
   'sync.background.open': '查看',
-  'sync.progress.note': '中断了再点一次「同步」会接着补齐，所以这里没有「取消」；要覆盖本机那份之前会先备份（在「备份与回滚」里恢复）。',
+  'sync.progress.note': '中断了再点一次会接着补齐；覆盖本机那份之前会先备份，可在「备份与回滚」里恢复。',
   'sync.applyAction': '确认同步',
   'sync.back': '返回',
   // 计划那一段分三层：结论（一句、加粗）/ 数字（脚注）/ 明细（表）。数字不再挤进结论那句。
@@ -489,8 +487,8 @@ export const zh = {
   'sync.planWorkDeleted': '会拉取 {pull} 条、会推送 {push} 条、会跟着删 {deleted} 条',
   'sync.planFacts': '本机 {local} 条 · 远端 {remote} 条',
   'sync.machines': '远端机器：{machines}',
-  'sync.applied': '已拉取 {pulled} 条、已推送 {pushed} 条（落地 {bytesIn}，上传 {bytesOut}）。',
-  'sync.appliedDeleted': '另跟着删掉 {count} 条已在别处删除的会话（旧的那份已进备份）。',
+  'sync.applied': '已拉取 {pulled} 条、推送 {pushed} 条。',
+  'sync.appliedDeleted': '跟着删 {count} 条',
   'sync.deletedHead': '已在别处删除，这次跟着删',
   'sync.tag.deleted': '已删除',
   'sync.tidy.check': '顺手整理远端：删掉本机这一格里多余的 {count} 个包（约 {size}）',
@@ -504,13 +502,15 @@ export const zh = {
   'sync.tidy.plan': '本机这一格里有 {count} 个多余的包（约 {size}）：另一格已经有一样或更全的一份。',
   'sync.tidy.empty': '本机这一格里没有多余的包，不用整理。',
   'sync.tidy.onlyOwnCell': '只删本机这一格里多余的包；不动本机任何会话，也不拉取、不推送。',
-  'sync.tidy.done': '整理远端：删掉 {count} 个多余的包（约 {size}）。',
-  'sync.appliedReplaced': '其中 {count} 条覆盖了本机原来那份（旧的那份已进备份，可在「备份与回滚」里恢复）。',
-  'sync.appliedAttachmentsIn': '取回附件对象 {written} 个（{bytes}）。',
-  'sync.appliedAttachmentsOut': '上传附件对象 {uploaded} 个（{bytes}）。',
-  'sync.appliedAttachmentsMissing': '本机缺 {missing} 个附件对象，这次没带上。',
+  'sync.tidy.done': '删掉 {count} 个多余的包（约 {size}）。',
+  'sync.appliedTidy': '整理远端 {count} 个包',
+  'sync.appliedRestoreHint': '旧的那份在「备份与回滚」里。',
+  'sync.appliedReplaced': '覆盖本机 {count} 条',
+  'sync.appliedAttachmentsIn': '取回附件 {written} 个',
+  'sync.appliedAttachmentsOut': '上传附件 {uploaded} 个',
+  'sync.appliedAttachmentsMissing': '本机缺 {missing} 个附件对象',
   'sync.appliedObjectsOnly': '这次没有会话要搬。',
-  'sync.replanned': '预演之后本机或远端又有变化，这次重新算了一遍计划。',
+  'sync.replanned': '计划重算过',
   'sync.nothing': '两边一样，没有要同步的。',
   // 计划里只有会话，附件对象那一趟在确认之后才扫（整库尺度，见 repairAttachments()）：计划为空也要
   // 让用户知道确认仍有意义。
@@ -560,9 +560,7 @@ export const zh = {
   'sync.diff.keepLocal': '保留本机',
   'sync.diff.keepRemote': '保留远端',
   'sync.diff.keepBoth': '保留两份',
-  'sync.diff.choose':
-    '选单边就只留那一份：远端那份不落到本机，本机那份先备份再被顶掉。' +
-    '选两份则按最后活动时间定谁占原来的 id，另一份落成一条新会话。选完回确认弹窗同步。',
+  'sync.diff.choose': '选单边只留那一份（本机那份先备份）；选两份则按最后活动时间定谁占原来的 id，另一份落成新会话。',
   'sync.diff.live': '这条会话正开着，现在不能选正本；先切到别的会话或重启宿主再同步。',
   'sync.diff.tail.local': '本机独有 {count} 条',
   'sync.diff.tail.remote': '远端独有 {count} 条',
@@ -649,12 +647,12 @@ export const zh = {
     '本机空闲 5 分钟之后，它才把改过的会话推送出去；你一直在写，它就一直不动。只推送、绝不拉取，也不动本机的任何会话。',
   // 自动同步：同一件事的强那一档（双向 + 收尾整理）。两栏都开着时按这一档走，上面那一栏在界面上置灰。
   'sync.field.autoSyncHint':
-    '写完一轮、安静 5 分钟之后自己跑一趟双向同步：该拉的拉、该推的推，收尾时顺手整理自己那一格（只删重复与被取代的包，孤儿包留着）。远端有一份更新的同一条会话时，本机那份会被顶掉——旧的那份进备份，可在「备份与回滚」里退回；正在本机开着的会话跳过。',
+    '写完一轮、安静 5 分钟就自己跑一趟双向同步，收尾顺手整理自己那一格（只删重复与被取代的包）。',
   'sync.autoPush.enabled': '自动推送已开：本机空闲 5 分钟才推。',
   'sync.autoSync.enabled': '自动同步已开：写完一轮、安静 5 分钟之后双向对齐，并整理自己那一格。',
   'sync.autoSync.now': '立即同步一次',
   'sync.autoSync.running': '正在自动同步…',
-  'sync.autoSync.done': '自动同步：拉取 {pulled} 条、推送 {pushed} 条（上传 {bytesOut}）。',
+  'sync.autoSync.done': '自动同步：拉取 {pulled} 条、推送 {pushed} 条。',
   'sync.autoSync.nothing': '自动同步：两边一样，没有要对齐的。',
   'sync.autoSync.skipped': '自动同步这次没跑：{reason}。',
   'sync.autoSync.failed': '自动同步连续失败 {count} 次。',
@@ -668,8 +666,8 @@ export const zh = {
   'sync.bar.failed': '同步失败',
   'sync.autoPush.now': '立即推送一次',
   'sync.autoPush.running': '正在自动推送…',
-  'sync.autoPush.done': '自动推送：已推送 {pushed} 条（上传 {bytesOut}）。',
-  'sync.autoPush.attachments': '另上传附件对象 {uploaded} 个（{bytes}）。',
+  'sync.autoPush.done': '自动推送 {pushed} 条（上传 {bytesOut}）。',
+  'sync.autoPush.attachments': '另有附件对象 {uploaded} 个。',
   'sync.autoPush.nothing': '自动推送：没有要推的。',
   'sync.autoPush.skipped': '自动推送这次没跑：{reason}。',
   'sync.autoPush.failed': '自动推送连续失败 {count} 次。',
@@ -762,9 +760,9 @@ export const en: LocaleDictOf<typeof NS> = {
   'import.entry': 'Import…',
   'export.running': 'Packing…',
   'export.done': 'Exported {count} sessions ({bytes}).',
-  'export.attachments': 'Carried {attachments} attachment objects as well ({bytes}).',
+  'export.attachments': 'Plus {attachments} attachment objects ({bytes}).',
   'export.attachmentsMissing':
-    '{count} attachment objects are missing from this machine’s attachment store and were not carried — they will show “Image failed to load” on another machine.',
+    '{count} are not on this machine and were left behind.',
   'list.empty': 'This library has no sessions yet.',
 
   'import.hint': 'Pick a bundle and a target directory; Import computes a read-only plan that lists every write before you confirm.',
@@ -804,9 +802,9 @@ export const en: LocaleDictOf<typeof NS> = {
   // A skipped row has **no** toCwd, but that is not "no cwd": nothing will be written at all.
   'cwd.skipped': 'skipped, unchanged',
   'import.done': 'Wrote {count} sessions ({bytes}).',
-  'import.doneAttachments': 'Wrote {count} attachment objects as well ({bytes}).',
+  'import.doneAttachments': 'Plus {count} attachment objects ({bytes}).',
   'import.attachmentProblems':
-    '{count} attachment objects could not be written; the images or files they belong to will fail to load.',
+    '{count} could not be written.',
   'import.needFile': 'Choose a .dshsess bundle first.',
   'import.needTarget': 'Choose a target directory first.',
 
@@ -883,8 +881,7 @@ export const en: LocaleDictOf<typeof NS> = {
   'registry.unchanged': 'No registry change needed',
   'artifacts.planned': '{count} artifacts to move',
   'artifacts.skipped': '{count} artifacts skipped',
-  'migrate.done': 'Migrated {sessions} sessions: {rewritten} logs rewritten, {moved} directories moved{artifacts}.',
-  'migrate.doneArtifacts': ', {count} artifacts moved',
+  'migrate.done': 'Migrated {sessions} sessions.',
   'verify.pass': 'verification passed',
   'verify.fail': 'verification FAILED',
   'effect.restart': 'Restart DSH for this to take effect; until then, do not change any workspace.',
@@ -924,11 +921,10 @@ export const en: LocaleDictOf<typeof NS> = {
   'manage.title': 'Session library',
   'manage.hint': 'The whole library is here, including what the sidebar cannot reach. Tick rows to archive, retitle, migrate or delete; see Help.',
   'manage.archive.unavailable':
-    'This host has no workspaceRegistry service (archiving is its capability, Web profiles only), so the archive buttons are disabled; deleting still works.',
+    'This host cannot archive (Web profile only); deleting still works.',
   'manage.archive.action': 'Archive selected',
   'manage.archive.undo': 'Unarchive',
   'manage.archive.running': 'Working…',
-  'manage.archive.immediate': 'The host applies it immediately, so the sidebar follows right away.',
   'manage.archive.done': 'Archived {count} sessions.',
   'manage.archive.undone': 'Unarchived {count} sessions.',
   'manage.archive.failed': '{count} could not be changed (reasons below):',
@@ -1014,10 +1010,10 @@ export const en: LocaleDictOf<typeof NS> = {
   'manage.delete.apply': 'Delete now',
   'manage.delete.running': 'Deleting…',
   'manage.delete.progress.note': 'Delete backs up first and only then removes; if it stops, restore that backup from Backups & rollback.',
-  'manage.delete.backupTo': 'Backup lands in: {dir} (press Undo on the success notice, or restore it from Backups & rollback)',
+  'manage.delete.backupTo': 'Backed up before deleting; restore it from Backups & rollback.',
   'manage.delete.remote': 'Delete from the remote too',
   'manage.delete.remoteHint':
-    'The bundle in this machine\'s remote slot is deleted and a deletion record is left behind, so the next sync will not pull it back. Copies on other machines are deleted when those machines next sync. The remote copy has no backup.',
+    'Also deletes this machine\'s remote bundle; copies on other machines go when those machines next sync. The remote copy has no backup.',
   'manage.delete.acknowledge':
     'After this their logs are gone. The backup stays in the folder above; restore it from Backups & rollback if needed.',
   'manage.delete.hint': 'Deleting backs the session directory up into this plugin’s backup root first; a live session cannot be deleted — see Help.',
@@ -1133,7 +1129,7 @@ export const en: LocaleDictOf<typeof NS> = {
   'sync.form.title': 'Sync settings',
   'sync.where': 'Remote {url}',
   'sync.hint':
-    'Syncs through the mapping in the plugin configuration: pulls what other machines pushed, pushes what only this machine has. When both sides hold the same session, contents and the last-activity time decide who is newer, and a newer remote backs up the local copy before replacing it. {mappings} mapping(s).',
+    'Two-way sync through the mapping: pull what is missing, push what is new; when both sides hold a session the later activity wins, and anything being replaced is backed up first. {mappings} mapping(s).',
   'sync.offHint':
     'Sync is not configured: fill in the remote URL (the WebDAV collection) and the path mapping under Settings → “Session management”, then come back here.',
   'sync.action': 'Sync',
@@ -1149,15 +1145,15 @@ export const en: LocaleDictOf<typeof NS> = {
   'sync.background.donePlain': 'Background sync finished.',
   'sync.background.failed': 'Background sync failed: {reason}',
   'sync.background.open': 'View',
-  'sync.progress.note': 'If it stops, sync again and it carries on where it left off — that is why there is no Cancel here. A copy about to be overwritten is backed up first (restore it from Backups & rollback).',
+  'sync.progress.note': 'If it stops, sync again to carry on; anything being replaced is backed up first (restore it from Backups & rollback).',
   'sync.applyAction': 'Sync now',
   'sync.back': 'Back',
   'sync.planWork': 'Pull {pull}, push {push}',
   'sync.planWorkDeleted': 'Pull {pull}, push {push}, delete {deleted} followed sessions',
   'sync.planFacts': '{local} here · {remote} on the remote',
   'sync.machines': 'Remote machines: {machines}',
-  'sync.applied': 'Pulled {pulled}, pushed {pushed} ({bytesIn} written, {bytesOut} uploaded).',
-  'sync.appliedDeleted': 'Also deleted {count} sessions that were deleted elsewhere (the old copies went to backup).',
+  'sync.applied': 'Pulled {pulled}, pushed {pushed}.',
+  'sync.appliedDeleted': 'deleted {count} deleted elsewhere',
   'sync.deletedHead': 'Deleted elsewhere; deleting them here too',
   'sync.tag.deleted': 'Deleted',
   'sync.tidy.check': 'Also tidy the remote: delete {count} redundant bundles in this machine’s cell (~{size})',
@@ -1171,13 +1167,15 @@ export const en: LocaleDictOf<typeof NS> = {
   'sync.tidy.plan': 'This machine’s cell holds {count} redundant bundles (~{size}): another cell already has an identical or fuller copy.',
   'sync.tidy.empty': 'Nothing redundant in this machine’s cell.',
   'sync.tidy.onlyOwnCell': 'Only removes redundant bundles from this machine’s cell; no session is touched and nothing is pulled or pushed.',
-  'sync.tidy.done': 'Remote tidied: deleted {count} redundant bundles (~{size}).',
-  'sync.appliedReplaced': '{count} of them replaced this machine’s copy (the old one is backed up; restore it from Backups & rollback).',
-  'sync.appliedAttachmentsIn': 'Fetched {written} attachment object(s) ({bytes}).',
-  'sync.appliedAttachmentsOut': 'Uploaded {uploaded} attachment object(s) ({bytes}).',
-  'sync.appliedAttachmentsMissing': '{missing} attachment object(s) are missing on this machine and were not carried over.',
+  'sync.tidy.done': 'Deleted {count} redundant bundles (~{size}).',
+  'sync.appliedTidy': 'tidied {count} remote bundles',
+  'sync.appliedRestoreHint': 'The old copies are in Backups & rollback.',
+  'sync.appliedReplaced': 'replaced {count} local copies',
+  'sync.appliedAttachmentsIn': 'fetched {written} attachment objects',
+  'sync.appliedAttachmentsOut': 'uploaded {uploaded} attachment objects',
+  'sync.appliedAttachmentsMissing': '{missing} attachment objects missing here',
   'sync.appliedObjectsOnly': 'No session needed to move.',
-  'sync.replanned': 'This machine or the remote changed after the preview, so the plan was recomputed.',
+  'sync.replanned': 'the plan was recomputed',
   'sync.nothing': 'Both sides are in sync.',
   'sync.nothingAttachments':
     'Confirming also reconciles attachment objects: missing ones are fetched from the shared remote store, and ones the remote lacks are uploaded.',
@@ -1229,9 +1227,7 @@ export const en: LocaleDictOf<typeof NS> = {
   'sync.diff.keepRemote': 'Keep remote',
   'sync.diff.keepBoth': 'Keep both',
   'sync.diff.choose':
-    'Keep one side and only that copy stays: the remote copy is not pulled here, and this machine\'s copy is ' +
-    'backed up before it is replaced. Keep both and the original id goes to the more recently active copy, ' +
-    'the other becomes a new session. Then go back to the confirm dialog to sync.',
+    'Keep one side and only that copy stays (this machine\'s copy is backed up first); keep both and the later copy keeps the id, the other becomes a new session.',
   'sync.diff.live': 'This session is open, so you cannot pick a master copy. Switch sessions or restart the host, then sync again.',
   'sync.diff.tail.local': '{count} only on this machine',
   'sync.diff.tail.remote': '{count} only on the remote',
@@ -1318,12 +1314,12 @@ export const en: LocaleDictOf<typeof NS> = {
   'sync.field.autoPushHint':
     'Once this machine has been idle for five minutes, it uploads the sessions you changed; while you keep writing, it stays put. It pushes only and never pulls, and it never touches any session on this machine.',
   'sync.field.autoSyncHint':
-    'Five minutes after a quiet turn it runs a two-way sync by itself: pulls what is missing, pushes what is new, and tidies its own cell on the way out (only duplicate and superseded bundles; orphan bundles stay). When the remote has a newer copy of the same session, the local one is replaced — the old copy goes to backups and can be restored from "Backups and rollback". Sessions open on this machine are skipped.',
+    'Five quiet minutes after a turn it runs a two-way sync and tidies its own cell on the way out (only duplicate and superseded bundles).',
   'sync.autoPush.enabled': 'Automatic push is on: it uploads once the machine has been idle for five minutes.',
   'sync.autoSync.enabled': 'Automatic sync is on: after a quiet turn it aligns both sides and tidies its own cell.',
   'sync.autoSync.now': 'Sync now',
   'sync.autoSync.running': 'Syncing automatically…',
-  'sync.autoSync.done': 'Automatic sync: pulled {pulled}, pushed {pushed} (uploaded {bytesOut}).',
+  'sync.autoSync.done': 'Auto-sync: pulled {pulled}, pushed {pushed}.',
   'sync.autoSync.nothing': 'Automatic sync: both sides already match.',
   'sync.autoSync.skipped': 'Automatic sync did not run this time: {reason}.',
   'sync.autoSync.failed': 'Automatic sync has failed {count} time(s) in a row.',
@@ -1336,8 +1332,8 @@ export const en: LocaleDictOf<typeof NS> = {
   'sync.bar.failed': 'Sync failed',
   'sync.autoPush.now': 'Push now',
   'sync.autoPush.running': 'Pushing automatically…',
-  'sync.autoPush.done': 'Automatic push: pushed {pushed} ({bytesOut} uploaded).',
-  'sync.autoPush.attachments': 'Uploaded {uploaded} attachment object(s) ({bytes}).',
+  'sync.autoPush.done': 'Auto-push: pushed {pushed} ({bytesOut}).',
+  'sync.autoPush.attachments': 'Plus {uploaded} attachment objects.',
   'sync.autoPush.nothing': 'Automatic push: nothing to push.',
   'sync.autoPush.skipped': 'Automatic push did not run this time: {reason}.',
   'sync.autoPush.failed': 'Automatic push has failed {count} time(s) in a row.',

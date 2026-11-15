@@ -396,9 +396,33 @@ test('删除勾了「同时删除远端」：把那几条交给远端那一步�
   )
   assert.deepEqual(calls, [['session-doomed']], '交给远端那一步的就是这次删掉的会话')
   assert.deepEqual(run.remote, { removed: 1, bytes: 4096, others: ['robot-b'], problems: [] })
-  assert.match(run.summary, /远端：这台机器的格子里删掉 1 个包（4096 字节）/)
-  assert.match(run.summary, /robot-b 的格子里还留着副本/, '别的机器那份要说清什么时候删')
+  assert.match(run.summary, /远端这一格也清掉了（1 个包）/)
+  assert.match(run.summary, /robot-b 上的副本会在它下次同步时删掉/, '别的机器那份要说清什么时候删')
+  assert.doesNotMatch(run.summary, /复核：通过/, '成功的那一次不说复核（失败才说）')
+  assert.doesNotMatch(run.summary, /个日志文件/, '日志文件数是收据，不进提示条')
+  assert.doesNotMatch(run.summary, /backups\//, '备份目录不进提示条（「撤销」与「备份与回滚」都能到）')
   assert.equal(run.verified, true, run.problems.join('; '))
+})
+
+test('远端一个包都没删、别处也没有副本时，提示条里不提远端（那句"删掉 0 个包"是噪音）', async () => {
+  const sandbox = makeSandbox('remove-remote-nothing')
+  writeSession(sandbox, 'session-doomed', 1000)
+  const run = await runRemoval(
+    deps(sandbox, {
+      remoteRemove: async () => ({ removed: 0, bytes: 0, others: [], problems: [] }),
+    }),
+    { sessionIds: ['session-doomed'], alsoRemote: true },
+    { apply: true },
+  )
+  assert.equal(run.summary, '已删除 1 个会话。', '结果 + 收据都不进来')
+  assert.equal(run.remote?.removed, 0, '远端那一步照旧跑过（结论还在结果里，只是不写进提示）')
+})
+
+test('删除的预演那句也不再报文件数与字节数', async () => {
+  const sandbox = makeSandbox('remove-plan-short')
+  writeSession(sandbox, 'session-doomed', 1000)
+  const run = await runRemoval(deps(sandbox), { sessionIds: ['session-doomed'] }, { apply: false })
+  assert.equal(run.summary, '将删除 1 个会话，先备份再删。')
 })
 
 test('没勾「同时删除远端」时不碰远端（那一步一次都不调）', async () => {

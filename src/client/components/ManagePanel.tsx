@@ -609,15 +609,9 @@ export function ManagePanel({
           takesEffect: response.takesEffect,
         })
         notify(
-          t('migrate.done', {
-            sessions: response.preview.sessions.length,
-            rewritten: response.rewritten,
-            moved: response.moved,
-            artifacts:
-              response.artifactsMoved > 0 ? t('migrate.doneArtifacts', { count: response.artifactsMoved }) : '',
-          }) +
-            ' ' +
-            (response.verified ? t('verify.pass') : t('verify.fail')),
+          // 一句结果就够了：改写几个日志、移动几个目录是收据，复核通过也不必说（失败才说）。
+          t('migrate.done', { sessions: response.preview.sessions.length }) +
+            (response.verified ? '' : ` ${t('verify.fail')}`),
           response.backupDir,
         )
         // 搬走的那几条先在清单里换到目标目录（分组跟着换），整库快照随后到。
@@ -650,10 +644,7 @@ export function ManagePanel({
       // 逐条失败照旧摆出来：一条因为"正在跑"被宿主拒了，不该把其余成功的说成失败。
       setFailed(response.failed)
       if (response.archived.length > 0) {
-        notify(
-          t(archived ? 'manage.archive.done' : 'manage.archive.undone', { count: response.archived.length }) +
-            ` ${t('manage.archive.immediate')}`,
-        )
+        notify(t(archived ? 'manage.archive.done' : 'manage.archive.undone', { count: response.archived.length }))
         // 先改这几行（含级联带上的子智能体），整库快照随后在后台取回来覆盖它。
         patch?.((current) => patchArchived(current, response.archived, archived))
       }
@@ -1162,18 +1153,19 @@ export function ManagePanel({
                 </div>
               )}
               {syncConfigured && (
-                <div className="dsm-options">
-                  <Checkbox
-                    checked={deleteRemote}
-                    label={t('manage.delete.remote')}
-                    onChange={setDeleteRemote}
-                  />
+                <>
+                  <div className="dsm-options">
+                    <Checkbox
+                      checked={deleteRemote}
+                      label={t('manage.delete.remote')}
+                      onChange={setDeleteRemote}
+                    />
+                  </div>
+                  {/* 说明另起一行：与勾选框同一行时它会被挤成一小段贴着标签，读起来像标签的一部分。 */}
                   {deleteRemote && <p className="dsm-hint">{t('manage.delete.remoteHint')}</p>}
-                </div>
+                </>
               )}
-              <p className="dsm-hint">
-                {t('manage.delete.backupTo', { dir: pending.plan.backupDir ?? pending.plan.preview.backupRoot })}
-              </p>
+              <p className="dsm-hint">{t('manage.delete.backupTo')}</p>
               <SessionListBox>
                 {pending.plan.preview.entries.map((entry) => (
                   <SessionStaticRow
