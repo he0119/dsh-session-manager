@@ -39,6 +39,7 @@ import {
   remoteAttachmentPath,
   remoteBundlePath,
   remoteIndexPath,
+  remotePlacements,
   runSync,
   runTidy,
   syncPrepared,
@@ -3726,4 +3727,61 @@ test('sync：完全一样的两句只留一条（计划与落地两段可能算�
   const same = '同步映射把 /a 指到了 /b，但那不是一个存在的目录'
   const outcome = { plan: { pull: [], push: [], problems: [same] }, problems: [same] }
   assert.deepEqual(collectLeftovers(outcome as never), [{ message: same }])
+})
+
+test('远端位置：每台机器的格子都列全（不是只留"领先的那一份"），按最后活动时间从新到旧', () => {
+  const remote: RemoteLibrary = {
+    machines: ['robot-a', 'robot-b'],
+    // `entries`（每个 id 只留赢的那一份）在这里**故意空着**：这份地图不看它，它回答的是"哪几处有"。
+    entries: new Map(),
+    indexes: new Map([
+      [
+        'robot-a',
+        {
+          machineId: 'robot-a',
+          entries: [
+            {
+              id: 'session-shared',
+              createdAt: 1000,
+              lastActiveAt: 2000,
+              // 两代日志：字节数是各代之和（那条会话在远端占多少）。
+              files: [
+                { version: 3, bytes: 10, sha256: 'a' },
+                { version: 4, bytes: 5, sha256: 'b' },
+              ],
+            },
+            // 老索引没记活动时间：这一项缺席，不是 0。
+            { id: 'session-only-a', createdAt: 1000, files: [{ version: 4, bytes: 7, sha256: 'c' }] },
+          ],
+        },
+      ],
+      [
+        'robot-b',
+        {
+          machineId: 'robot-b',
+          entries: [
+            { id: 'session-shared', createdAt: 1000, lastActiveAt: 3000, files: [{ version: 4, bytes: 9, sha256: 'd' }] },
+          ],
+        },
+      ],
+    ]),
+    problems: ['读远端 robot-c/index.json 失败：404'],
+  }
+  const map = remotePlacements(remote, 424242)
+  assert.equal(map.at, 424242, '这份是读出来的时刻')
+  assert.deepEqual(map.machines, ['robot-a', 'robot-b'])
+  assert.deepEqual(map.problems, ['读远端 robot-c/index.json 失败：404'], '读索引时的问题原样带出去')
+  assert.deepEqual(Object.keys(map.sessions).sort(), ['session-only-a', 'session-shared'])
+  // 同一个 id 两台机器都有：两处都列，最近动过的那份在前（不按格子名排）。
+  assert.deepEqual(
+    map.sessions['session-shared']!.map((place) => place.machine),
+    ['robot-b', 'robot-a'],
+  )
+  const a = map.sessions['session-shared']!.find((place) => place.machine === 'robot-a')!
+  assert.equal(a.path, `${SYNC_NAMESPACE_DIR}/robot-a/session-shared.dshsess`)
+  assert.equal(a.bytes, 15, '那份日志的总字节数（各代次之和）')
+  assert.equal(a.lastActiveAt, 2000)
+  const onlyA = map.sessions['session-only-a']![0]!
+  assert.equal(onlyA.machine, 'robot-a')
+  assert.equal('lastActiveAt' in onlyA, false, '老索引没记活动时间时这一项缺席，而不是编一个 0')
 })

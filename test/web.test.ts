@@ -1003,7 +1003,7 @@ test('GET/POST /sync?mode=tidy：只整理自己那一格，预演不删、落�
   }
 })
 
-test('registerWebRoutes：注册十五条精确路由，方法不对回 405', async () => {
+test('registerWebRoutes：注册十六条精确路由，方法不对回 405', async () => {
   const sandbox = makeSandbox('web-routes')
   const routes: WebRouteLike[] = []
   const dispose = registerWebRoutes(
@@ -1019,6 +1019,8 @@ test('registerWebRoutes：注册十五条精确路由，方法不对回 405', as
       `exact ${API_PREFIX}/panel/events`,
       `exact ${API_PREFIX}/transcript`,
       `exact ${API_PREFIX}/sync-diff`,
+      // 远端各机器格子里的位置（右栏那行「远端」）：一次刷新读一次，整份缓存在页面那一层。
+      `exact ${API_PREFIX}/remote`,
       `exact ${API_PREFIX}/export`,
       `exact ${API_PREFIX}/import`,
       // `/sync` 两种方法共用一条（宿主的 register 对重复 path 会抛错）
@@ -3403,6 +3405,64 @@ test('GET /sync-diff：没配同步时明确说没配（不是"远端没有这�
     assert.match(String(payload(called.captured)['error']), /没有配置 WebDAV 同步/)
   } finally {
     rmSync(join(sandbox.base), { recursive: true, force: true })
+  }
+})
+
+test('GET /remote：远端每台机器格子里的位置一次给全（右栏那行「远端」读它）', async () => {
+  const sandbox = makeSandbox('web-remote')
+  const fixture = await startDavFixture({ root: join(sandbox.base, 'dav') })
+  const dav = createDavClient({ baseUrl: fixture.url })
+  const foreignRoot = join(sandbox.base, 'foreign-sessions')
+  const foreign = join(sandbox.base, 'foreign-cwd')
+  mkdirSync(foreign, { recursive: true })
+  try {
+    // 本机独有的一条不该出现在这份地图里：它问的是"远端有哪些"，不是"本机有哪些"。
+    writeLog(sandbox.sessionsRoot, 'session-local', CWD_A, [message(0, '本机这一条')])
+    const sharedPath = writeLog(foreignRoot, 'session-shared', CWD_B, [message(0, '两边都有')])
+    await putRemoteSession(dav, 'robot-b', {
+      id: 'session-shared',
+      cwd: foreign,
+      createdAt: 1500,
+      title: '两边都有',
+      logPath: sharedPath,
+      logName: 'session.v4.jsonl.zstd',
+      logVersion: 4,
+    })
+    const handlers = createApiHandlers(
+      deps(sandbox, {
+        sync: async () => ({ settings: { url: fixture.url, machineId: 'robot-a', mapping: {} }, dav }),
+      }),
+    )
+    const called = fakeRes()
+    await handlers['GET /remote']!(fakeReq('GET', `${API_PREFIX}/remote`), called.res)
+    assert.equal(called.captured.status, 200)
+    const body = payload(called.captured)
+    assert.equal(typeof body['at'], 'number', '这份是读出来的时刻')
+    assert.deepEqual(body['machines'], ['robot-b'], '读到索引的机器')
+    assert.deepEqual(body['problems'], [])
+    const sessions = body['sessions'] as Record<string, Array<Record<string, unknown>>>
+    assert.deepEqual(Object.keys(sessions), ['session-shared'], '只列远端有的那几条')
+    const place = sessions['session-shared']![0]!
+    assert.equal(place['machine'], 'robot-b')
+    assert.equal(place['path'], 'dsh-session-manager/robot-b/session-shared.dshsess', '包在远端资源根下的路径')
+    assert.ok(Number(place['bytes']) > 0, '那份日志的字节数')
+    assert.equal('lastActiveAt' in place, false, '老索引没记活动时间时这一项缺席，而不是编一个 0')
+  } finally {
+    await fixture.close()
+    rmSync(sandbox.base, { recursive: true, force: true })
+  }
+})
+
+test('GET /remote：没配同步时说没配（不是"远端空着"）', async () => {
+  const sandbox = makeSandbox('web-remote-off')
+  try {
+    const handlers = createApiHandlers(deps(sandbox))
+    const called = fakeRes()
+    await handlers['GET /remote']!(fakeReq('GET', `${API_PREFIX}/remote`), called.res)
+    assert.equal(called.captured.status, 409)
+    assert.match(String(payload(called.captured)['error']), /没有配置 WebDAV 同步/)
+  } finally {
+    rmSync(sandbox.base, { recursive: true, force: true })
   }
 })
 

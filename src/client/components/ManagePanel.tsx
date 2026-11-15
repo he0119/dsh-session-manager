@@ -92,6 +92,7 @@ import {
   useSessionPicking,
   type RowSession,
 } from './sessionList.tsx'
+import { remoteLibrary, type RemoteLibraryState } from '../logic/remoteLibrary.ts'
 import { patchArchived, patchMoved, patchRemoved, patchTitles } from '../logic/statePatch.ts'
 import type { PanelShare } from '../types.ts'
 
@@ -128,6 +129,21 @@ export function ManagePanel({
   const facts = state ?? meta
   const archiveAvailable = facts?.archiveAvailable === true
   const retitleAvailable = facts?.retitleAvailable === true
+
+  /**
+   * 远端各机器格子里有什么（右栏那一行「远端」查它）。
+   *
+   * **一次刷新读一次**：这份清单换了对象（`state` 的身份变了）就去读一次远端，读到的那份留在
+   * `remoteLibrary` 里（模块级，切页签不丢），右栏翻来翻去只是查表。为什么不等右栏关掉了再省着读：
+   * 用户点哪一条会话不可预测，按选中现问会让每次点选都等一次 NAS（见 `logic/remoteLibrary.ts`）。
+   */
+  const [remote, setRemote] = React.useState<RemoteLibraryState>(() => remoteLibrary.snapshot())
+  React.useEffect(() => remoteLibrary.subscribe(setRemote), [])
+  React.useEffect(() => {
+    // 清单还没到（`null`）时不读：页面刚打开那一下会先渲染一次，那一次读出来的位置也没人看。
+    if (state === null) return
+    void remoteLibrary.load()
+  }, [state])
 
   /**
    * 勾选：行勾选、整组勾选、全选、清空，以及"这一行为什么不能单独勾"。
@@ -1079,6 +1095,7 @@ export function ManagePanel({
           projectName={inspectedProject}
           parentTitle={inspectedParentTitle}
           fileCount={inspected === null ? undefined : inspected.files.length}
+          remote={remote}
           checked={inspected !== null && picked.includes(inspected.id)}
           archiveAvailable={archiveAvailable}
           busy={busy !== null}

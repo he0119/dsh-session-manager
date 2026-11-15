@@ -64,6 +64,7 @@ import { syncJob, type SyncJobSnapshot } from '../logic/syncJob.ts'
 import { syncStage, type SyncStage } from '../logic/syncStage.ts'
 import { agoLabel } from '../logic/relativeTime.ts'
 import { leftoversOf } from '../logic/syncLeftovers.ts'
+import { remoteLibrary } from '../logic/remoteLibrary.ts'
 import { projectLabel, sessionLabel, type SessionLabel } from '../logic/planRows.ts'
 import { ProgressBlock } from './ProgressBlock.tsx'
 import { formatBytes, sessionTags, type TagCopy } from './sessionList.tsx'
@@ -691,6 +692,11 @@ export function SyncPanel({
     setSync(result)
     setDecisions({})
     setFailures(result.problems)
+    /*
+     * 这一趟改过远端（推上去的包、补上去的对象）：右栏那行「远端」要重新读一次，不然它还停在落地之前
+     * 的样子。落空的那些（只拉取）读一次也无害——清单本来就可能在另一台机器上被改过。
+     */
+    void remoteLibrary.load()
     /*
      * 附件对象走的是另一条路（远端共享库），先算出来：**只有对象动了**的时候也得说一句——补对象
      * 那一趟动的是"早先拉坏了的那条会话"，一条会话都没进出，但那正是用户按下同步想看到的结果。
