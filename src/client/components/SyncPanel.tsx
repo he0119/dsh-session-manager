@@ -63,6 +63,7 @@ import { AUTO_PUSH_SKIP_CODES } from '../logic/autoPush.ts'
 import { syncJob, type SyncJobSnapshot } from '../logic/syncJob.ts'
 import { syncStage, type SyncStage } from '../logic/syncStage.ts'
 import { agoLabel } from '../logic/relativeTime.ts'
+import { describeSyncNotice } from '../logic/syncNotice.ts'
 import { leftoversOf } from '../logic/syncLeftovers.ts'
 import { remoteLibrary } from '../logic/remoteLibrary.ts'
 import { projectLabel, sessionLabel, type SessionLabel } from '../logic/planRows.ts'
@@ -464,24 +465,6 @@ function autoPushSentence(t: Translate, response: AutoPushSentenceSource, mode: 
  * 搬了就说（拉取、推送各一句），一个都没动就一个字都不说；宿主没有附件服务时响应里根本没有那两项
  * （不是 0），所以这里也一个字都不说——与"宿主没有附件服务就静默降级"同一条口径。
  */
-function describeSyncedAttachments(t: Translate, result: SyncResponse): string {
-  const written = result.attachmentIn?.written ?? 0
-  const uploaded = result.attachmentOut?.uploaded ?? 0
-  const missing = result.attachmentOut?.missing ?? 0
-  const lines: string[] = []
-  if (written > 0) {
-    lines.push(
-      t('sync.appliedAttachmentsIn', { written, bytes: formatBytes(result.attachmentIn?.bytes ?? 0) }),
-    )
-  }
-  if (uploaded > 0) {
-    lines.push(
-      t('sync.appliedAttachmentsOut', { uploaded, bytes: formatBytes(result.attachmentOut?.bytes ?? 0) }),
-    )
-  }
-  if (missing > 0) lines.push(t('sync.appliedAttachmentsMissing', { missing }))
-  return lines.join(' ')
-}
 
 /**
  * 同步页。
@@ -701,39 +684,26 @@ export function SyncPanel({
      * 附件对象走的是另一条路（远端共享库），先算出来：**只有对象动了**的时候也得说一句——补对象
      * 那一趟动的是"早先拉坏了的那条会话"，一条会话都没进出，但那正是用户按下同步想看到的结果。
      */
-    const attachments = describeSyncedAttachments(t, result)
-    // 整理远端那一步只在勾了、且真删到东西时才有话说（数字是落地那次实际删掉的）。
+    /*
+     * 提示条只说结果（见 logic/syncNotice.ts）：每项单说一句时，一次什么都碰上的同步能长到一百八十多
+     * 字，读的人只想知道"拉了几条、推了几条"。细节在同步面板那张「上次同步」里。
+     */
     const tidied = result.tidy !== undefined && 'removed' in result.tidy ? result.tidy : null
-    const tidyLine =
-      tidied !== null && tidied.removed + tidied.orphans > 0
-        ? t('sync.tidy.done', { count: tidied.removed + tidied.orphans, size: formatBytes(tidied.bytes) })
-        : ''
-    const sessionsMoved = result.pulled.length > 0 || result.pushed.length > 0
-    const deletedAny = (result.deleted?.ids.length ?? 0) > 0
-    if (sessionsMoved || attachments !== '' || deletedAny) {
-      setNotice(
-        // 一条会话都没搬、只搬了对象时换一句引子：那句"已拉取 0 条、已推送 0 条（落地 0 B，上传 0 B）"
-        // 在"补对象"这一趟里全是零，说出来只是噪音。
-        (sessionsMoved
-          ? t('sync.applied', {
-              pulled: result.pulled.length,
-              pushed: result.pushed.length,
-              bytesIn: formatBytes(result.bytesIn),
-              bytesOut: formatBytes(result.bytesOut),
-            })
-          : t('sync.appliedObjectsOnly')) +
-          // 覆盖本机原来那份是这次同步里唯一"本机内容被换掉"的部分，值得单独说一句（旧的进备份了）。
-          (result.replaced.length === 0 ? '' : ` ${t('sync.appliedReplaced', { count: result.replaced.length })}`) +
-          // 跟着删掉的那些（别处删过、本机这份更旧）也要说一句：本机内容真的少了，旧的那份在备份里。
-          (result.deleted === undefined || result.deleted.ids.length === 0
-            ? ''
-            : ` ${t('sync.appliedDeleted', { count: result.deleted.ids.length })}`) +
-          (attachments === '' ? '' : ` ${attachments}`) +
-          (tidyLine === '' ? '' : ` ${tidyLine}`) +
-          // 计划是重算的就得说一句：不然"确认时看到的那几条"和"结果里这几条"对不上时没人解释。
-          (result.planSource?.kind === 'recomputed' ? ` ${t('sync.replanned')}` : ''),
-      )
-    }
+    const notice = describeSyncNotice(
+      {
+        pulled: result.pulled.length,
+        pushed: result.pushed.length,
+        replaced: result.replaced.length,
+        deleted: result.deleted?.ids.length ?? 0,
+        attachmentsIn: result.attachmentIn?.written ?? 0,
+        attachmentsOut: result.attachmentOut?.uploaded ?? 0,
+        attachmentsMissing: result.attachmentOut?.missing ?? 0,
+        tidied: tidied === null ? 0 : tidied.removed + tidied.orphans,
+        replanned: result.planSource?.kind === 'recomputed',
+      },
+      t,
+    )
+    if (notice !== undefined) setNotice(notice)
     /*
      * 拉取的落到本机库里了：列表与工作区归属都要重读（推的那一侧不改本机任何东西）。
      *

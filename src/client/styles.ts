@@ -1111,6 +1111,8 @@ export const CSS = `
 .dsm-toggleTitle { font-size: 14px; line-height: 20px; }
 .dsm-toggleDesc { margin-top: 4px; color: var(--dsw-alias-label-secondary, #646a73); font-size: 12px; line-height: 18px; }
 .dsm-options { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+/* 一枚勾选 + 它自己那句说明：块内 6px（说明属于这枚勾），块与块之间照旧由对话框正文那 20px 管。 */
+.dsm-fieldGroup { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 /*
  * 「会话」页的筛选条：与行上的小标签同一套视觉（一排小胶囊），选中的那一枚用品牌色描边 + 淡填充。
  * 描边与填充都走 token：brand-primary 在深浅两套主题里都是能读出来的强调色，而"选中"这件事同时
@@ -1407,12 +1409,15 @@ export const CSS = `
   color: var(--dsw-alias-label-secondary, #646a73);
   font-variant-numeric: tabular-nums;
 }
+/* 一块"被标出来"的记录：淡告警底 + 左边一道细线。同一个 App 里"这件事没做成"只有一种长相——「上次
+   同步」那块与删除弹窗里那块共用这一个类，改一处就是两处一起改。
+   底色不用"卡片那一层"：浅色主题里 bg-layer-2 就是对话框的白底，等于没染；这里取告警色的极淡一层，
+   深浅两套主题里都是"这一块被标出来了"，不会在浅色下凭空消失。 */
+.dsm-warnBlock,
 .dsm-lastRun[data-dsm-leftover='true'] {
   padding: 10px 12px;
   border-radius: 8px;
   border-left: 3px solid var(--dsw-alias-state-warn-primary, #d97b00);
-  /* 底色不用"卡片那一层"：浅色主题里 bg-layer-2 就是对话框的白底，等于没染；这里取告警色的极淡
-     一层，深浅两套主题里都是"这一块被标出来了"，不会在浅色下凭空消失。 */
   background: color-mix(in srgb, var(--dsw-alias-state-warn-primary, #d97b00) 7%, transparent);
 }
 .dsm-leftovers { display: flex; flex-direction: column; gap: 6px; min-width: 0; }

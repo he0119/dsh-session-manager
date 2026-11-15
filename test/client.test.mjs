@@ -1108,7 +1108,7 @@ test('客户端产物：备份清单只在「备份与回滚」那一面里，�
   // 列表与同步那几处的成功文案都指向「备份与回滚」，不再指向「迁移」页的某张卡、也不再指向一个
   // 已经不存在的「备份」页：那句话只在弹窗或流式进度里出现，渲染路径上取不到，所以按字典的值核。
   const { zh } = mount().dictionaries[0].dicts
-  for (const key of ['manage.delete.backupTo', 'sync.progress.note', 'sync.appliedReplaced', 'help.faq.backupA']) {
+  for (const key of ['manage.delete.backupTo', 'sync.progress.note', 'sync.appliedRestoreHint', 'help.faq.backupA']) {
     assert.ok(zh[key].includes('「备份与回滚」'), `${key} 要把人指到「备份与回滚」`)
     assert.ok(!zh[key].includes('迁移」页'), `${key} 不该再指「迁移」页`)
     assert.ok(!zh[key].includes('「备份」页'), `${key} 不该再指已经不存在的「备份」页`)
@@ -4296,13 +4296,39 @@ test('客户端产物：删除弹窗摆出清单与备份位置，计划不 ok �
     String(primaryOf(good.recorded).props.className).includes('dsm-dialogConfirm'),
     '确认那一枚挂 .dsm-dialogConfirm（136px）',
   )
+  // 备份在哪：弹窗里只说"先备份再删、删错了去哪恢复"，不再摆备份目录的绝对路径（那行原来占掉小半屏，
+  // 而「撤销」与状态栏的「备份与回滚」都能到同一份）。
   assert.ok(
-    good.text.some((item) => String(item).startsWith('manage.delete.backupTo') && String(item).includes('dsh-session-manager/backups')),
-    '备份落在哪要写在弹窗里（要恢复时知道去哪找）',
+    good.text.some((item) => String(item) === 'manage.delete.backupTo'),
+    '弹窗里要说清删之前会备份',
+  )
+  assert.equal(
+    good.text.some((item) => String(item).includes('dsh-session-manager/backups')),
+    false,
+    '不再摆备份目录的绝对路径',
   )
 
   const bad = render(false)
   assert.ok(bad.text.some((item) => String(item) === 's-9 还活在宿主内存里'), '计划里的问题清单照旧摆出来')
+  // 区分度：结论一句 + 一块"被标出来"的清单（淡告警底 + 左边细线），每条一行、标题带条数。
+  // 原来是一串同色的橙色大段（`.dsm-problems` + 每条 `.dsm-warn`），结论、清单、说明长得一模一样。
+  assert.ok(
+    bad.recorded.some((node) => String(node.props?.className) === 'dsm-warnBlock'),
+    '问题清单要画成一块（与「上次同步」那块同一个类）',
+  )
+  assert.ok(
+    bad.recorded.some((node) => String(node.props?.className) === 'dsm-leftoverRow'),
+    '每条问题各占一行（发丝线分隔）',
+  )
+  assert.equal(
+    bad.recorded.some((node) => String(node.props?.className) === 'dsm-problems'),
+    false,
+    '不再用那串同色的段落',
+  )
+  assert.ok(
+    bad.text.some((item) => String(item) === 'manage.delete.problemsTitle:{"count":1}'),
+    '块标题说清有几条',
+  )
   assert.equal(primaryOf(bad.recorded).props.disabled, true, '计划不 ok 时确认按钮禁用（不能一边报问题一边让删）')
 
   // 计划还没回来那一段（弹窗已经被点开、宿主还没答）：正文是"预演中…"，确认同样禁用——这一格不能

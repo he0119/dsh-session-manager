@@ -609,15 +609,9 @@ export function ManagePanel({
           takesEffect: response.takesEffect,
         })
         notify(
-          t('migrate.done', {
-            sessions: response.preview.sessions.length,
-            rewritten: response.rewritten,
-            moved: response.moved,
-            artifacts:
-              response.artifactsMoved > 0 ? t('migrate.doneArtifacts', { count: response.artifactsMoved }) : '',
-          }) +
-            ' ' +
-            (response.verified ? t('verify.pass') : t('verify.fail')),
+          // 一句结果就够了：改写几个日志、移动几个目录是收据，复核通过也不必说（失败才说）。
+          t('migrate.done', { sessions: response.preview.sessions.length }) +
+            (response.verified ? '' : ` ${t('verify.fail')}`),
           response.backupDir,
         )
         // 搬走的那几条先在清单里换到目标目录（分组跟着换），整库快照随后到。
@@ -650,10 +644,7 @@ export function ManagePanel({
       // 逐条失败照旧摆出来：一条因为"正在跑"被宿主拒了，不该把其余成功的说成失败。
       setFailed(response.failed)
       if (response.archived.length > 0) {
-        notify(
-          t(archived ? 'manage.archive.done' : 'manage.archive.undone', { count: response.archived.length }) +
-            ` ${t('manage.archive.immediate')}`,
-        )
+        notify(t(archived ? 'manage.archive.done' : 'manage.archive.undone', { count: response.archived.length }))
         // 先改这几行（含级联带上的子智能体），整库快照随后在后台取回来覆盖它。
         patch?.((current) => patchArchived(current, response.archived, archived))
       }
@@ -1150,30 +1141,52 @@ export function ManagePanel({
               <ProgressBlock t={t} progress={progress} note={t('manage.delete.progress.note')} />
             ))}
           {busy !== 'apply' && pending.plan !== null && (
-            <>
-              <p className={pending.plan.preview.ok ? 'dsm-ok' : 'dsm-warn'}>{pending.plan.summary}</p>
+            /* 块间 12px（`.dsm-planBody`，与同步计划那一段同一套节奏）、块内 4–6px；正文层那 8px
+               只留给"这一整块"与弹窗其它部分之间。 */
+            <div className="dsm-planBody">
+              {/*
+                结论、清单、说明各占一块，块与块之间靠对话框正文那 20px 的节奏；用 <div> 而不是 <p>——
+                <p> 自带 1em 的上下边距，会和那 20px 叠成 32px，四行字看着一样松、谁也不挨着谁。
+              */}
+              <div className={`dsm-planVerdict ${pending.plan.preview.ok ? 'dsm-ok' : 'dsm-warn'}`}>
+                {pending.plan.summary}
+              </div>
+              {/*
+                没做到的那几条：与「上次同步」那张卡里那块同一种画法（淡告警底 + 左边一道细线，标题是个
+                小标签，逐条原话用正文色、发丝线分隔）。原来它们是一串同色的橙色大段——结论、清单、说明
+                三件事看上去一样，读不出哪句是"不能删"，也读不出有几条。
+              */}
               {pending.plan.problems.length > 0 && (
-                <div className="dsm-problems">
-                  {pending.plan.problems.map((problem) => (
-                    <p key={problem} className="dsm-warn">
-                      {problem}
+                <div className="dsm-warnBlock">
+                  <div className="dsm-leftovers">
+                    <p className="dsm-leftoversTitle">
+                      {t('manage.delete.problemsTitle', { count: pending.plan.problems.length })}
                     </p>
-                  ))}
+                    <ul className="dsm-listPlain">
+                      {pending.plan.problems.map((problem) => (
+                        <li key={problem} className="dsm-leftoverRow">
+                          <span>{problem}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
                 </div>
               )}
               {syncConfigured && (
-                <div className="dsm-options">
-                  <Checkbox
-                    checked={deleteRemote}
-                    label={t('manage.delete.remote')}
-                    onChange={setDeleteRemote}
-                  />
-                  {deleteRemote && <p className="dsm-hint">{t('manage.delete.remoteHint')}</p>}
+                <div className="dsm-fieldGroup">
+                  <div className="dsm-options">
+                    <Checkbox
+                      checked={deleteRemote}
+                      label={t('manage.delete.remote')}
+                      onChange={setDeleteRemote}
+                    />
+                  </div>
+                  {/* 说明另起一行、紧贴这一枚勾（6px）：与勾选框同一行时它会被挤成贴着标签的一小段，
+                      读起来像标签的一部分；离得太远又会被读成另一件事。 */}
+                  {deleteRemote && <div className="dsm-hint">{t('manage.delete.remoteHint')}</div>}
                 </div>
               )}
-              <p className="dsm-hint">
-                {t('manage.delete.backupTo', { dir: pending.plan.backupDir ?? pending.plan.preview.backupRoot })}
-              </p>
+              <div className="dsm-hint">{t('manage.delete.backupTo')}</div>
               <SessionListBox>
                 {pending.plan.preview.entries.map((entry) => (
                   <SessionStaticRow
@@ -1189,7 +1202,7 @@ export function ManagePanel({
                   />
                 ))}
               </SessionListBox>
-            </>
+            </div>
           )}
         </ConfirmDialog>
       )}

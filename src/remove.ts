@@ -130,6 +130,13 @@ export interface RemovalRun {
   summary: string
 }
 
+/*
+ * 问题里怎么称呼一条会话：**就用 id**。别在它前面再写一个 "session"——会话 id 本身就长成
+ * `session-…`，拼出"session session-a2b1…"读起来像两个词；也别换成标题，标题在下面那张清单里，
+ * 而这里要的是"哪一条"（id 能直接拿去筛）。句末不再补一长串建议：清单逐条重复同一句话只会把
+ * 真正的原因埋掉。
+ */
+
 /** 把发现出来的会话按 id 建索引。 */
 function indexById(sessions: readonly DiscoveredSession[]): Map<string, DiscoveredSession> {
   const byId = new Map<string, DiscoveredSession>()
@@ -176,7 +183,7 @@ export async function planRemoval(
   let roots: DiscoveredSession[] = []
   for (const id of ids) {
     const session = byId.get(id)
-    if (session === undefined) problems.push(`session ${id} 不在库里（可能已经被删掉了）`)
+    if (session === undefined) problems.push(`${id} 不在库里：可能已经删掉了。`)
     else if (!roots.some((root) => root.id === id)) roots.push(session)
   }
 
@@ -199,7 +206,7 @@ export async function planRemoval(
     if (parentId === undefined) continue
     const parent = byId.get(parentId)
     const owner = parent?.title === undefined ? parentId : `${parent.title}（${parentId}）`
-    problems.push(`session ${id} 是子智能体会话（它跟着父会话走）：请改点名它的父会话 ${owner}`)
+    problems.push(`${id} 是子智能体，跟着父会话走：请改点名它的父会话 ${owner}。`)
   }
 
   const entries: RemoveEntry[] = []
@@ -215,13 +222,12 @@ export async function planRemoval(
       // 只报问题、不进条目：活着的会话不该出现在"要删的东西"里，否则界面会把它列成一个待删项。
       // 后代的"活着"同样挡下整个计划——它是这次要删的整族的一部分，宿主还在往里写。
       problems.push(
-        `session ${id} 还在宿主内存里活着（运行中或已打开），删不了：` +
-          `重启 DSH 让宿主放手，之后别先点开它再删${owner}`,
+        `${id} 还开着（宿主把它留在内存里）：重启 DSH 之后再删${owner}。`,
       )
       continue
     }
     if (!existsSync(session.dir)) {
-      problems.push(`session ${id} 的目录已经不在了：${session.dir}${owner}`)
+      problems.push(`${id} 的目录已经不在了：${session.dir}${owner}`)
       continue
     }
     entries.push({
@@ -265,7 +271,11 @@ export async function runRemoval(
   const onProgress = options.onProgress
   const plan = await planRemoval(deps, request, { ...(onProgress === undefined ? {} : { onProgress }) })
   const empty = { plan, problems: plan.problems, verified: false, dirsRemoved: 0, removedProjectDirs: [] }
-  if (!plan.ok) return { applied: false, ...empty, summary: `未执行：${plan.problems.join('；')}` }
+  /*
+   * 计划不 ok 时只给一句结论：原因由界面那块清单逐条摆（拼在一句话里既读不出条数，也会与清单重复
+   * 一遍——同一个弹窗里同一句话出现两次，用户截图里就是那个样子）。
+   */
+  if (!plan.ok) return { applied: false, ...empty, summary: '这次一条都没删。' }
   /** 整族一起删时把"多出来的那几条"说清楚，否则预演清单里会冒出用户没勾过的会话。 */
   const cascadeNote =
     plan.cascaded === 0 ? '' : ` 其中 ${plan.cascaded} 条是子智能体会话，跟着点名的会话一起删。`
@@ -274,7 +284,7 @@ export async function runRemoval(
       applied: false,
       ...empty,
       problems: [],
-      summary: `将删除 ${plan.entries.length} 个会话（${plan.files} 个日志文件、${plan.bytes} 字节），先备份再删。${cascadeNote}`,
+      summary: `将删除 ${plan.entries.length} 个会话，先备份再删。${cascadeNote}`,
     }
   }
 
@@ -339,10 +349,10 @@ export async function runRemoval(
       id: entry.id,
       label: entry.title ?? entry.id,
     })
-    if (existsSync(entry.dir)) problems.push(`session ${entry.id}: 目录还在 ${entry.dir}`)
+    if (existsSync(entry.dir)) problems.push(`${entry.id}：目录还在 ${entry.dir}`)
     const backed = backup.manifest.sessions.find((s) => s.id === entry.id)
     if (backed === undefined || !existsSync(backed.targetDir)) {
-      problems.push(`session ${entry.id}: 备份里没有这一份（${backed?.targetDir ?? backup.dir}）`)
+      problems.push(`${entry.id}：备份里没有这一份（${backed?.targetDir ?? backup.dir}）`)
     }
   }
   /*
@@ -360,10 +370,14 @@ export async function runRemoval(
     dirsRemoved: plan.entries.length,
     removedProjectDirs,
     ...(remote === undefined ? {} : { remote }),
+    /*
+     * 提示条只留结果：日志文件数、字节数是收据，「复核通过」与备份目录对成功的那一次没有信息量——备份
+     * 就在提示条右边那枚「撤销」里，也在状态栏的「备份与回滚」里。失败才说，而且只说该做什么。
+     */
     summary:
-      `已删除 ${plan.entries.length} 个会话（${plan.files} 个日志文件、${plan.bytes} 字节）。${cascadeNote}\n` +
-      `复核：${verified ? '通过' : '失败'}。备份：${backup.dir}（可在「备份与回滚」里恢复）` +
-      (remote === undefined ? '' : `\n${remoteNote(remote)}`),
+      `已删除 ${plan.entries.length} 个会话。${cascadeNote}` +
+      (remote === undefined ? '' : remoteNote(remote)) +
+      (verified ? '' : ' 复核没通过：有文件没删掉。'),
   }
 }
 
@@ -374,12 +388,19 @@ export async function runRemoval(
  * @returns 一句话（带字节数，以及别的机器上还留着副本的情况）。
  */
 function remoteNote(remote: RemoteRemoval): string {
-  const kept =
+  /*
+   * 一个包都没删、别的机器上也没有副本时整句不出现：这台机器根本没推过这条会话，说「删掉 0 个包
+   * （0 字节）」只是噪音。
+   */
+  if (remote.removed === 0 && remote.others.length === 0) return ''
+  const head =
+    remote.removed === 0
+      ? ''
+      : ` 远端这一格也清掉了（${remote.removed} 个包）`
+  const tail =
     remote.others.length === 0
-      ? '别的机器上没有副本。'
-      : `${remote.others.join('、')} 的格子里还留着副本，那台机器下次同步时会跟着删掉。`
-  return (
-    `远端：这台机器的格子里删掉 ${remote.removed} 个包（${remote.bytes} 字节），` +
-    `并留下删除记录（下次同步不会再把它拉回来）。${kept}`
-  )
+      ? '，下次同步不会再把它拉回来。'
+      : `，${remote.others.join('、')} 上的副本会在它下次同步时删掉。`
+  if (head === '') return ` 远端的副本：${remote.others.join('、')} 上那份会在它下次同步时删掉。`
+  return `${head}${tail}`
 }
