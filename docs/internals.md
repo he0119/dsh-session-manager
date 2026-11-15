@@ -113,6 +113,8 @@
   计划里的 `skip` 行（`identical` 与"缺映射"除外）衍生一份点名版（带会话 id）落进 `state.json`，
   弹窗里那张「上次同步」列全，带 id 的能一键把列表筛到它；页头那枚只报条数（见
   [提示缩成一句那篇](../.agents/notes/implemented/simplification/2026-11-14-sync-chip-tooltip-one-line.md)）。
+  附件对象那一头（本机与远端共享库里都没有的那些）走同一条路：数留在汇总那句里（`: 涉及 N 条会话`），
+  逐条会话各占清单一行。
 - [补附件对象不再整库解压日志](../.agents/notes/implemented/bug-fix/2026-11-14-sync-attachment-scan-blocks-the-host.md)：
   补对象那一步原来每次手动同步都把本机日志整库解开扫一遍（1.2 GB 实测 144 秒、主线程不让出，DSH
   整个卡住）。现在索引条目里带着附件清单（`attachments`），只有缺席的老条目才扫一遍并补写；扫描分块

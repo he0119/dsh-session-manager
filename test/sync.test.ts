@@ -2790,11 +2790,13 @@ test('同步拉取：远端共享库里没有这个对象时只记问题，会�
     assert.deepEqual(outcome.attachmentIn, { written: 0, present: 0, bytes: 0 })
     assert.equal(existsSync(storeB.pathOf(ref)), false)
     // 整轮汇总成一句，且**不点名**单个对象：这是"持有这些对象的机器还没推送它们"这一种状态，
-    // 一个会话引用几十张图时逐条报会把问题清单淹掉。
+    // 一个会话引用几十张图时逐条报会把问题清单淹掉。数报在那句里，是哪条会话由 `absentAttachments`
+    // 说（界面据此逐条点名、给出「只看这一条」）。
     assert.deepEqual(
       outcome.problems,
-      ['本机有 1 个附件对象在远端共享库里也没有，这次补不上（持有这些对象的机器还没推送它们）'],
+      ['本机有 1 个附件对象在远端共享库里也没有，这次补不上（持有这些对象的机器还没推送它们）：涉及 1 条会话'],
     )
+    assert.deepEqual(outcome.absentAttachments, [{ sessionId: 's1', count: 1 }], '说得出是哪条会话')
   } finally {
     await fixture.close()
     rmSync(SANDBOX, { recursive: true, force: true })
@@ -2902,7 +2904,17 @@ test('同步拉取：两条会话各缺一个对象时也只汇总一句（数�
     assert.deepEqual(
       outcome.problems,
       // 两条会话引用同一个对象：按**对象**算 2 个（去重），不是按引用次数算 3 个。
-      ['本机有 2 个附件对象在远端共享库里也没有，这次补不上（持有这些对象的机器还没推送它们）'],
+      ['本机有 2 个附件对象在远端共享库里也没有，这次补不上（持有这些对象的机器还没推送它们）：涉及 3 条会话'],
+    )
+    // 按会话折：三条各缺一个（前两条共用同一个对象，但那仍然只有一个是它们引用的）。
+    assert.deepEqual(
+      [...(outcome.absentAttachments ?? [])].sort((left, right) => (left.sessionId < right.sessionId ? -1 : 1)),
+      [
+        { sessionId: 's1', count: 1 },
+        { sessionId: 's2', count: 1 },
+        { sessionId: 's3', count: 1 },
+      ],
+      '每一条引用过这些对象的会话都点名，不按对象去重',
     )
   } finally {
     await fixture.close()
@@ -2975,8 +2987,13 @@ test('同步补对象：远端共享库里也没有时汇总成一句，不逐�
     assert.deepEqual(repair.attachmentIn, { written: 0, present: 0, bytes: 0 })
     assert.deepEqual(
       repair.problems.filter((line) => line.includes('在远端共享库里也没有')),
-      ['本机有 2 个附件对象在远端共享库里也没有，这次补不上（持有这些对象的机器还没推送它们）'],
+      ['本机有 2 个附件对象在远端共享库里也没有，这次补不上（持有这些对象的机器还没推送它们）：涉及 1 条会话'],
       '缺两个也只说一句，而且把数说清楚',
+    )
+    assert.deepEqual(
+      repair.absentAttachments,
+      [{ sessionId: 's1', count: 2 }],
+      '补对象这一路同样点名：这条会话的两个对象两边都没有',
     )
   } finally {
     await fixture.close()
@@ -3664,6 +3681,29 @@ test('sync：没做到的条目点名到会话，「本来就没事」的那些�
     { message: '戊（session-e）：两边各自写过，这次不动', sessionId: 'session-e' },
     { message: '同步映射里有一条空的来源路径（远端 cwd）' },
     { message: '读远端 machine-x/index.json 失败：404' },
+  ])
+})
+
+test('sync：附件对象两边都没有时，按会话点名（带 id 就能「只看这一条」），数留在那句汇总里', () => {
+  const outcome = {
+    plan: { pull: [], push: [], problems: [] },
+    absentAttachments: [
+      { sessionId: 'session-a', title: '甲', count: 3 },
+      { sessionId: 'session-b', count: 1 },
+    ],
+    problems: ['本机有 4 个附件对象在远端共享库里也没有，这次补不上（持有这些对象的机器还没推送它们）：涉及 2 条会话'],
+  }
+  assert.deepEqual(collectLeftovers(outcome as never), [
+    {
+      message: '甲（session-a）：这条会话引用的 3 个附件对象本机没有、远端共享库里也没有（持有这些对象的机器还没推送它们）',
+      sessionId: 'session-a',
+    },
+    {
+      message:
+        'session-b：这条会话引用的 1 个附件对象本机没有、远端共享库里也没有（持有这些对象的机器还没推送它们）',
+      sessionId: 'session-b',
+    },
+    { message: '本机有 4 个附件对象在远端共享库里也没有，这次补不上（持有这些对象的机器还没推送它们）：涉及 2 条会话' },
   ])
 })
 
