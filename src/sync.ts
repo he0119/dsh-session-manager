@@ -194,6 +194,72 @@ export interface RemoteLibrary {
   problems: string[]
 }
 
+/**
+ * 一条会话在远端某台机器格子里的位置（`GET /remote` 的响应里的一项）。
+ *
+ * 远端是"一条会话一个包、一台机器一个格子"：同一条会话可能同时躺在几台机器的格子里（各自推过一次），
+ * 所以界面上问"这条会话在远端哪儿"的答案是一份清单，不是一处。
+ */
+export interface RemotePlacement {
+  /** 贡献这一份的机器（格子名，也就是那台机器的 `machineId`）。 */
+  machine: string
+  /** 包在远端资源根下的路径（`dsh-session-manager/<机器>/<id>.dshsess`）。 */
+  path: string
+  /** 那份日志的总字节数（未压缩；索引里各代次 `bytes` 之和）。 */
+  bytes: number
+  /** 那份在这台机器上的最后活动时间（毫秒时间戳；老索引没记时缺席）。 */
+  lastActiveAt?: number
+}
+
+/**
+ * `GET /remote` 的响应：远端每一台机器的格子里都有哪几条会话、各在什么路径。
+ *
+ * 为什么整份给：界面（右栏）选中一条会话就要看到它的位置，按会话现问一次网络会让每次点选都等一次
+ * NAS；而读的只是每台机器那份 `index.json`（不是包本身），一次读齐很小。
+ */
+export interface RemotePlacementMap {
+  /** 这份是读出来的时刻（毫秒时间戳）。 */
+  at: number
+  /** 读到索引的机器（按格子名排序）。 */
+  machines: string[]
+  /** 会话 id → 它在各格子里的位置（同一 id 多台时按最后活动时间从新到旧）。 */
+  sessions: Record<string, RemotePlacement[]>
+  /** 读索引时遇到的问题（某一台机器的索引读不到之类）：界面据此说"这里可能不全"。 */
+  problems: string[]
+}
+
+/**
+ * 把读回来的远端库摊成"会话 id → 位置清单"。
+ *
+ * 与 `RemoteLibrary.entries`（每个 id 只留**赢的那一份**）刻意不同：那里判"该拿哪一份"，这里回答
+ * "这一条在远端哪些格子里有"，所以按机器逐份列全，一台机器都不漏。
+ *
+ * @param remote 读回来的远端库。
+ * @param now 这次读的时刻（毫秒）。
+ * @returns 会话 id → 位置清单。
+ */
+export function remotePlacements(remote: RemoteLibrary, now: number): RemotePlacementMap {
+  const sessions: Record<string, RemotePlacement[]> = {}
+  for (const [machine, index] of remote.indexes) {
+    for (const entry of index.entries) {
+      const list = (sessions[entry.id] ??= [])
+      list.push({
+        machine,
+        path: remoteBundlePath(machine, entry.id),
+        bytes: entry.files.reduce((sum, file) => sum + file.bytes, 0),
+        ...(entry.lastActiveAt === undefined ? {} : { lastActiveAt: entry.lastActiveAt }),
+      })
+    }
+  }
+  for (const list of Object.values(sessions)) {
+    // 同一 id 多台机器都有：最近动过的那份排前面（时间是跨机器比"谁更新"用的同一枚钟）。
+    list.sort(
+      (left, right) => (right.lastActiveAt ?? 0) - (left.lastActiveAt ?? 0) || (left.machine < right.machine ? -1 : 1),
+    )
+  }
+  return { at: now, machines: [...remote.machines], sessions, problems: [...remote.problems] }
+}
+
 /** 映射表归一化结果。 */
 export interface NormalizedMapping {
   mapping: Map<string, string>

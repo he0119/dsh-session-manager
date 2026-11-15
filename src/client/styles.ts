@@ -775,6 +775,7 @@ export const CSS = `
 .dsm-facts dt { color: var(--dsw-alias-label-secondary, #646a73); }
 .dsm-facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 .dsm-inspectorId { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
+.dsm-inspectorPath { display: block; }
 .dsm-inspectorActions {
   display: flex;
   flex-wrap: wrap;

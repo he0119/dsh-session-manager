@@ -115,6 +115,9 @@
   [提示缩成一句那篇](../.agents/notes/implemented/simplification/2026-11-14-sync-chip-tooltip-one-line.md)）。
   附件对象那一头（本机与远端共享库里都没有的那些）走同一条路：数留在汇总那句里（`: 涉及 N 条会话`），
   逐条会话各占清单一行。
+- [会话在远端哪几处，界面一次刷新读一次](../.agents/notes/implemented/architecture/2026-11-15-remote-placement-read-once-per-refresh.md)：
+  右栏多一格「远端」：`GET /remote` 一遍读齐每台机器 `index.json` 里的位置（机器、包路径、字节、最后
+  活动时间），界面一次刷新读一次、整份留在页面这一层，右栏只是查表；某台机器没读到时不说"远端没有"。
 - [补附件对象不再整库解压日志](../.agents/notes/implemented/bug-fix/2026-11-14-sync-attachment-scan-blocks-the-host.md)：
   补对象那一步原来每次手动同步都把本机日志整库解开扫一遍（1.2 GB 实测 144 秒、主线程不让出，DSH
   整个卡住）。现在索引条目里带着附件清单（`attachments`），只有缺席的老条目才扫一遍并补写；扫描分块

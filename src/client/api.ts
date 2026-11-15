@@ -298,6 +298,64 @@ export async function fetchSyncDiff(
 }
 
 /**
+ * 一条会话在远端某一台机器格子里的位置（与宿主 `src/sync.ts` 的 `RemotePlacement` 同一形状）。
+ *
+ * 远端是"一条会话一个包、一台机器一个格子"：同一条会话可能同时躺在几台机器的格子里，所以"它在远端
+ * 哪儿"的答案是一份清单。
+ */
+export interface RemotePlacement {
+  /** 贡献这一份的机器（格子名）。 */
+  machine: string
+  /** 包在远端资源根下的路径（`dsh-session-manager/<机器>/<id>.dshsess`）。 */
+  path: string
+  /** 那份日志的总字节数（未压缩）。 */
+  bytes: number
+  /** 那份在这台机器上的最后活动时间（毫秒时间戳；老索引没记时缺席）。 */
+  lastActiveAt?: number
+}
+
+/** `GET /remote` 的响应：远端各机器格子里每条会话的位置（见宿主 `remotePlacements()`）。 */
+export interface RemoteLibraryResponse {
+  /** 这份是读出来的时刻（毫秒时间戳）。 */
+  at: number
+  /** 读到索引的机器（按格子名排序）。 */
+  machines: string[]
+  /** 会话 id → 它在各格子里的位置（按最后活动时间从新到旧）。 */
+  sessions: Record<string, RemotePlacement[]>
+  /** 读索引时遇到的问题：有它，这份可能不全（界面据此不说"远端没有"）。 */
+  problems: string[]
+}
+
+/** 读一次远端各机器格子里有什么。三种结果分开：没配同步不是错误。 */
+export type RemoteLibraryResult =
+  | { kind: 'ready'; data: RemoteLibraryResponse }
+  | { kind: 'off' }
+  | { kind: 'failed'; error: string }
+
+/**
+ * 读一次远端各机器格子里的会话位置。
+ *
+ * 界面对它的用法是"一次刷新读一次，读到就整份缓存"（见 `logic/remoteLibrary.ts`）：按会话现问会让
+ * 右栏每点一条都等一次网络，而读的只是每台机器那份 `index.json`，一次给全部并不贵。
+ *
+ * @param signal 取消（换页 / 关掉页面时把这一次丢掉）。
+ * @returns 读到的、没配同步、读失败三种结果；网络层直接失败仍然抛出去。
+ */
+export async function fetchRemoteLibrary(signal?: AbortSignal): Promise<RemoteLibraryResult> {
+  const response = await fetch(`${API_PREFIX}/remote`, {
+    headers: { accept: 'application/json' },
+    ...(signal === undefined ? {} : { signal }),
+  })
+  // 409 = 这个宿主压根没配 WebDAV 同步：右栏那一行整行不出现，不是"读远端失败"。
+  if (response.status === 409) return { kind: 'off' }
+  try {
+    return { kind: 'ready', data: await asJson<RemoteLibraryResponse>(response) }
+  } catch (error) {
+    return { kind: 'failed', error: error instanceof Error ? error.message : String(error) }
+  }
+}
+
+/**
  * 一次性响应：流还没开始就被挡下（参数不对、没配同步、方法不对、内部错误）时宿主回的是普通 JSON，
  * 带状态码。这里保持与其它端点同一套口径——把宿主给的原话抛出去。
  */

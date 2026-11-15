@@ -23,6 +23,8 @@ import { fetchTranscript } from '../api.ts'
 import type { Translate } from '../logic/locales.ts'
 import { sessionLabel } from '../logic/planRows.ts'
 import { previewTurns, type PreviewTurn } from '../logic/preview.ts'
+import type { RemoteLibraryState } from '../logic/remoteLibrary.ts'
+import { remoteRowsOf, type RemoteNote } from '../logic/remoteRows.ts'
 import { formatBytes, formatTime, sessionTags, type RowSession } from './sessionList.tsx'
 
 /** 右栏开头那一段的取数状态。`id` 与当前会话不同时说明还在等新的那一条。 */
@@ -51,6 +53,13 @@ export interface SessionInspectorProps {
   parentTitle?: string
   /** 这条会话日志目录里有几个文件（`/state` 给的那份）。 */
   fileCount?: number
+  /**
+   * 远端各机器格子里的位置（见 `logic/remoteLibrary.ts`）。
+   *
+   * 这里是**查表**，不是现读：那份地图一次刷新只读一次，翻来翻去零成本。`off`（这个宿主没配同步）时
+   * 右栏那一行整行不出现。
+   */
+  remote: RemoteLibraryState
   /** 这一条是否已勾选（决定第三枚动作的文案）。 */
   checked: boolean
   archiveAvailable: boolean
@@ -61,6 +70,48 @@ export interface SessionInspectorProps {
   onTranscript: () => void
   onArchive: () => void
   onPick: () => void
+}
+
+/**
+ * 「远端」那一格：这条会话在远端哪几台机器的格子里、各在什么路径。
+ *
+ * 远端是"一条会话一个包、一台机器一个格子"，所以同一条会话可能在几处都有；每处给机器名、字节与最后
+ * 活动时间，路径单独一行（等宽字、悬停看全文——路径长，不换行会把这一列撑歪）。
+ *
+ * 怎么摆全由 `remoteRowsOf()` 决定（读着 / 读不到 / 远端没有 / 可能不全），这里只管画。
+ *
+ * @param props 那份远端地图、这条会话的 id 与翻译函数。
+ * @returns 一个或多个 `<dd>`（`<dl>` 里一个 `<dt>` 可以有多个 `<dd>`）。
+ */
+function RemotePlaces({
+  remote,
+  sessionId,
+  t,
+}: {
+  remote: RemoteLibraryState
+  sessionId: string
+  t: Translate
+}): React.ReactElement {
+  const rows = remoteRowsOf(remote, sessionId)
+  const note = (item: RemoteNote): string =>
+    item.vars === undefined ? t(item.key) : t(item.key, item.vars)
+  return (
+    <>
+      {rows.places.map((place) => (
+        <dd key={`${place.machine}\u0000${place.path}`} className="dsm-inspectorPlace">
+          <span>
+            {[place.machine, formatBytes(place.bytes), place.lastActiveAt === undefined ? null : formatTime(place.lastActiveAt)]
+              .filter((part) => part !== null)
+              .join(' · ')}
+          </span>
+          <Hint text={place.path}>
+            <span className="dsm-inspectorId dsm-inspectorPath">{place.path}</span>
+          </Hint>
+        </dd>
+      ))}
+      {rows.note !== undefined && <dd className="dsm-hint">{note(rows.note)}</dd>}
+    </>
+  )
 }
 
 /**
@@ -75,6 +126,7 @@ export function SessionInspector({
   projectName,
   parentTitle,
   fileCount,
+  remote,
   checked,
   archiveAvailable,
   busy,
@@ -219,6 +271,12 @@ export function SessionInspector({
               {formatBytes(session.bytes)}
               {fileCount === undefined ? '' : ` · ${t('manage.detail.files', { count: fileCount })}`}
             </dd>
+            {remote.status !== 'off' && (
+              <>
+                <dt>{t('manage.detail.remote')}</dt>
+                <RemotePlaces remote={remote} sessionId={session.id} t={t} />
+              </>
+            )}
             <dt>{t('manage.detail.id')}</dt>
             <dd className="dsm-inspectorId">{session.id}</dd>
             {session.parentSession !== undefined && (

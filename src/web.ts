@@ -50,6 +50,7 @@ import {
   replanPrepared,
   readRemoteLibrary,
   remoteBundlePath,
+  remotePlacements,
   runSync,
   runTidy,
   syncPrepared,
@@ -1985,6 +1986,32 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
     }
   }
 
+  /**
+   * 「这些会话在远端哪儿」：一遍读齐所有机器格子里的位置，界面一次刷新只问这一回。
+   *
+   * 为什么不并进 `/state`：那一份是"扫本机"的结果，页头与清单都等它；远端是另一台机器上的东西，
+   * 读不到（NAS 关着、密码过期）时不该把本机的清单一起拖住。所以另开一条，界面拿到新清单之后顺手问
+   * 一次，读到就整份缓存在页面这一层（见 `src/client/logic/remoteLibrary.ts`）。
+   *
+   * 一次给全部而不是按会话问：右栏选中一条会话时要立刻有答案，按会话现问会让每次点选都等一次网络。
+   * 便宜是因为读的只是每台机器那份 `index.json`，不是包本身。
+   */
+  const remoteLibrary = async (_req: IncomingMessage, res: ServerResponse): Promise<void> => {
+    const runtime = await deps.sync?.()
+    if (runtime === undefined) {
+      sendJson(res, 409, { error: '这个宿主没有配置 WebDAV 同步（插件配置里的 sync.url 是空的）' })
+      return
+    }
+    let remote: Awaited<ReturnType<typeof readRemoteLibrary>>
+    try {
+      remote = await readRemoteLibrary(runtime.dav, runtime.settings)
+    } catch (error) {
+      sendJson(res, 502, { error: `读远端索引失败：${error instanceof Error ? error.message : String(error)}` })
+      return
+    }
+    sendJson(res, 200, remotePlacements(remote, (deps.now?.() ?? new Date()).getTime()))
+  }
+
   const retitleSessions = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     let body: unknown
     try {
@@ -2036,6 +2063,8 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
     // 一条会话的完整内容（分页；只读，不动宿主内存）：会话页点一行看的就是它。
     'GET /transcript': transcript,
     'GET /sync-diff': syncDiff,
+    // 远端各机器格子里每条会话的位置（右栏那一行「远端」读它）：一次刷新读一次，读到的整份缓存。
+    'GET /remote': remoteLibrary,
     'POST /export': exportSessions,
     'POST /import': importSessions,
     // 一个资源两种方法写一条：宿主的 `register()` 对重复的 (kind, path) 直接抛错。
