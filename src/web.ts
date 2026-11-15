@@ -45,6 +45,7 @@ import type { RepoLocationLookup } from './repo.ts'
 import { createTitleResolver, type TitleQuery } from './session-title.ts'
 import {
   collectLeftovers,
+  removeRemoteCopies,
   plannedOutcome,
   prepareSync,
   replanPrepared,
@@ -1675,6 +1676,24 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
     resolveTitle,
     projection,
     liveSessionIds,
+    // 勾了「同时删除远端」时走这条：删自己那一格里的包、留下删除记录（见 sync.ts 的
+    // `removeRemoteCopies()`）。没配同步时这口子也照着给，那句"这次删不了远端"由 `deps.sync?.()` 缺席
+    // 时原样报出来——比"静默只删本机"诚实。
+    remoteRemove: async (ids) => {
+      const runtime = await deps.sync?.()
+      if (runtime === undefined) {
+        return {
+          removed: 0,
+          bytes: 0,
+          others: [],
+          problems: ['这个宿主没有配置 WebDAV 同步，远端什么都没删（下次同步可能又拉回来）'],
+        }
+      }
+      return removeRemoteCopies(
+        { dav: runtime.dav, settings: runtime.settings, ...(deps.now === undefined ? {} : { now: deps.now }) },
+        ids,
+      )
+    },
   }
 
   /**
@@ -1698,12 +1717,14 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
       return
     }
     const apply = fields['mode'] === 'apply'
+    /** 同时删远端（缺省 false；界面在配了同步时默认勾上）。只在真删那一步才动远端。 */
+    const alsoRemote = fields['alsoRemote'] === true
     // 删除落地要**先按字节备份整份会话目录**再删，整库删除同样是几十秒的活（与迁移同量级），
-    // 所以它也走事件流：`scan`（重算计划）、`backup`、`remove`、`verify`。
+    // 所以它也走事件流：`scan`（重算计划）、`backup`、`remove`、`verify`（勾了也走 `remote` 那一步）。
     await streamResult(res, async (report) => {
       const run: RemovalRun = await runRemoval(
         removeDeps,
-        { sessionIds: ids.map((id) => String(id)) },
+        { sessionIds: ids.map((id) => String(id)), ...(alsoRemote ? { alsoRemote: true } : {}) },
         { apply, onProgress: report },
       )
       return {
@@ -1716,6 +1737,7 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
         removedProjectDirs: run.removedProjectDirs,
         verified: run.verified,
         ...(run.backupDir === undefined ? {} : { backupDir: run.backupDir }),
+        ...(run.remote === undefined ? {} : { remote: run.remote }),
         problems: run.plan.ok ? run.problems : run.plan.problems,
         summary: run.summary,
         // 复核没过时那句话与原来 500 那次的正文一致（计划不 ok 时 `applied` 本来就是 false，

@@ -379,3 +379,63 @@ test('活着的后代挡住整族：计划不 ok、执行一条都不删，问�
   assert.equal(existsSync(parentDir), true)
   assert.equal(existsSync(childDir), true)
 })
+
+test('删除勾了「同时删除远端」：把那几条交给远端那一步，结论写进结果与那句提示', async () => {
+  const sandbox = makeSandbox('remove-remote')
+  writeSession(sandbox, 'session-doomed', 1000, { title: '连远端一起删' })
+  const calls: string[][] = []
+  const run = await runRemoval(
+    deps(sandbox, {
+      remoteRemove: async (ids) => {
+        calls.push([...ids])
+        return { removed: 1, bytes: 4096, others: ['robot-b'], problems: [] }
+      },
+    }),
+    { sessionIds: ['session-doomed'], alsoRemote: true },
+    { apply: true },
+  )
+  assert.deepEqual(calls, [['session-doomed']], '交给远端那一步的就是这次删掉的会话')
+  assert.deepEqual(run.remote, { removed: 1, bytes: 4096, others: ['robot-b'], problems: [] })
+  assert.match(run.summary, /远端：这台机器的格子里删掉 1 个包（4096 字节）/)
+  assert.match(run.summary, /robot-b 的格子里还留着副本/, '别的机器那份要说清什么时候删')
+  assert.equal(run.verified, true, run.problems.join('; '))
+})
+
+test('没勾「同时删除远端」时不碰远端（那一步一次都不调）', async () => {
+  const sandbox = makeSandbox('remove-local-only')
+  writeSession(sandbox, 'session-doomed', 1000)
+  let called = 0
+  const run = await runRemoval(
+    deps(sandbox, {
+      remoteRemove: async () => {
+        called += 1
+        return { removed: 0, bytes: 0, others: [], problems: [] }
+      },
+    }),
+    { sessionIds: ['session-doomed'] },
+    { apply: true },
+  )
+  assert.equal(called, 0)
+  assert.equal(run.remote, undefined, '没删远端就没有那一项')
+  assert.doesNotMatch(run.summary, /远端：/)
+})
+
+test('远端那一步失败：本地删除照旧完成，问题清单里说清后果', async () => {
+  const sandbox = makeSandbox('remove-remote-fail')
+  writeSession(sandbox, 'session-doomed', 1000)
+  const run = await runRemoval(
+    deps(sandbox, {
+      remoteRemove: async () => ({
+        removed: 0,
+        bytes: 0,
+        others: [],
+        problems: ['写远端索引失败，这次删除记录没留下（下次同步可能把这些会话又拉回来）：502'],
+      }),
+    }),
+    { sessionIds: ['session-doomed'], alsoRemote: true },
+    { apply: true },
+  )
+  assert.equal(run.applied, true, '本机那份已经删了（也备份了），远端失败不该把它吞掉')
+  assert.equal(run.verified, true, '本机这份删干净了：复核只判本机那一步')
+  assert.match(run.problems.join('; '), /下次同步可能把这些会话又拉回来/, '远端那一步的原话进问题清单')
+})

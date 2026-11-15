@@ -116,6 +116,7 @@ export const zh = {
   'table.cwd': '工作目录',
   'table.bytes': '大小',
   'table.machine': '远端机器',
+  'table.deletedAt': '删除于',
   'table.create': '创建',
   'table.skip': '跳过',
   'cwd.rewritten': '{from} → {to}',
@@ -337,6 +338,9 @@ export const zh = {
   'manage.delete.running': '删除中…',
   'manage.delete.progress.note': '删除先备份再删；中断的话这份备份就在「备份与回滚」里，恢复即可。',
   'manage.delete.backupTo': '备份落在：{dir}（点成功后那句里的「撤销」，或去「备份与回滚」里恢复）',
+  'manage.delete.remote': '同时删除远端',
+  'manage.delete.remoteHint':
+    '这台机器的远端格子里那份包会一起删掉，并留下一条删除记录：下次同步不会再把它拉回来。别的机器上的副本会在那台机器下次同步时跟着删。远端那份没有备份。',
   'manage.delete.acknowledge':
     '删掉之后这些会话的日志就没了；备份留在上面那个目录里，需要时去「备份与回滚」恢复。',
   'manage.delete.hint':
@@ -482,9 +486,13 @@ export const zh = {
   'sync.back': '返回',
   // 计划那一段分三层：结论（一句、加粗）/ 数字（脚注）/ 明细（表）。数字不再挤进结论那句。
   'sync.planWork': '会拉取 {pull} 条、会推送 {push} 条',
+  'sync.planWorkDeleted': '会拉取 {pull} 条、会推送 {push} 条、会跟着删 {deleted} 条',
   'sync.planFacts': '本机 {local} 条 · 远端 {remote} 条',
   'sync.machines': '远端机器：{machines}',
   'sync.applied': '已拉取 {pulled} 条、已推送 {pushed} 条（落地 {bytesIn}，上传 {bytesOut}）。',
+  'sync.appliedDeleted': '另跟着删掉 {count} 条已在别处删除的会话（旧的那份已进备份）。',
+  'sync.deletedHead': '已在别处删除，这次跟着删',
+  'sync.tag.deleted': '已删除',
   'sync.tidy.check': '顺手整理远端：删掉本机这一格里多余的 {count} 个包（约 {size}）',
   'sync.tidy.action': '整理远端',
   'sync.settings.action': '插件设置',
@@ -788,6 +796,7 @@ export const en: LocaleDictOf<typeof NS> = {
   'table.cwd': 'Working dir',
   'table.bytes': 'Size',
   'table.machine': 'Remote machine',
+  'table.deletedAt': 'Deleted at',
   'table.create': 'create',
   'table.skip': 'skip',
   'cwd.rewritten': '{from} → {to}',
@@ -1006,6 +1015,9 @@ export const en: LocaleDictOf<typeof NS> = {
   'manage.delete.running': 'Deleting…',
   'manage.delete.progress.note': 'Delete backs up first and only then removes; if it stops, restore that backup from Backups & rollback.',
   'manage.delete.backupTo': 'Backup lands in: {dir} (press Undo on the success notice, or restore it from Backups & rollback)',
+  'manage.delete.remote': 'Delete from the remote too',
+  'manage.delete.remoteHint':
+    'The bundle in this machine\'s remote slot is deleted and a deletion record is left behind, so the next sync will not pull it back. Copies on other machines are deleted when those machines next sync. The remote copy has no backup.',
   'manage.delete.acknowledge':
     'After this their logs are gone. The backup stays in the folder above; restore it from Backups & rollback if needed.',
   'manage.delete.hint': 'Deleting backs the session directory up into this plugin’s backup root first; a live session cannot be deleted — see Help.',
@@ -1141,9 +1153,13 @@ export const en: LocaleDictOf<typeof NS> = {
   'sync.applyAction': 'Sync now',
   'sync.back': 'Back',
   'sync.planWork': 'Pull {pull}, push {push}',
+  'sync.planWorkDeleted': 'Pull {pull}, push {push}, delete {deleted} followed sessions',
   'sync.planFacts': '{local} here · {remote} on the remote',
   'sync.machines': 'Remote machines: {machines}',
   'sync.applied': 'Pulled {pulled}, pushed {pushed} ({bytesIn} written, {bytesOut} uploaded).',
+  'sync.appliedDeleted': 'Also deleted {count} sessions that were deleted elsewhere (the old copies went to backup).',
+  'sync.deletedHead': 'Deleted elsewhere; deleting them here too',
+  'sync.tag.deleted': 'Deleted',
   'sync.tidy.check': 'Also tidy the remote: delete {count} redundant bundles in this machine’s cell (~{size})',
   'sync.tidy.action': 'Tidy remote',
   'sync.settings.action': 'Plugin settings',
