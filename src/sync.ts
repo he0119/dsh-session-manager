@@ -1891,6 +1891,20 @@ export interface SyncAttachmentIn {
   bytes: number
 }
 
+/**
+ * 引用了"本机与远端共享库都没有"的对象的一条会话。
+ *
+ * 那一句汇总只说得出"少了 N 个对象"，说不出是哪条会话——而用户下一步要做的正是"去持有这些对象的
+ * 那台机器上把这几条推上来"。所以收尾时按会话折一份，界面（与工具）逐条点名，带「只看这一条」。
+ */
+export interface AbsentAttachmentSession {
+  sessionId: string
+  /** 会话标题（读得到时带上；读不到就只报 id）。 */
+  title?: string
+  /** 这条会话引用的、本机与远端都没有的对象个数（按对象去重）。 */
+  count: number
+}
+
 /** 这次补进远端共享库的对象。 */
 export interface SyncAttachmentOut {
   uploaded: number
@@ -1930,6 +1944,13 @@ export interface SyncOutcome {
    */
   attachmentIn?: SyncAttachmentIn
   attachmentOut?: SyncAttachmentOut
+  /**
+   * 引用了"本机与远端都没有"的对象的那几条会话（见 `AbsentAttachmentSession`）。
+   *
+   * 缺席 = 这一轮没有这种对象（或宿主没有附件服务）。它与 `problems` 里那句汇总说同一件事：那句报
+   * 数、这一项报人。
+   */
+  absentAttachments?: AbsentAttachmentSession[]
   registryWritten: boolean
   indexWritten: boolean
   /**
@@ -2006,6 +2027,17 @@ export function collectLeftovers(outcome: SyncOutcome): SyncLeftover[] {
     const title = 'title' in row ? row.title : undefined
     const name = title === undefined || title === '' ? row.id : `${title}（${row.id}）`
     push({ message: `${name}：${reason}`, sessionId: row.id })
+  }
+  /*
+   * 附件对象那一头的"没做到"：对象本机没有、远端共享库里也没有（持有它们的机器还没推）。一句汇总只
+   * 说得出数，处置却要落到**某一条会话**上，所以这里逐条点名、带上 id（与上面那些跳过同一个形状）。
+   */
+  for (const item of outcome.absentAttachments ?? []) {
+    const name = item.title === undefined || item.title === '' ? item.sessionId : `${item.title}（${item.sessionId}）`
+    push({
+      message: `${name}：这条会话引用的 ${item.count} 个附件对象本机没有、远端共享库里也没有（持有这些对象的机器还没推送它们）`,
+      sessionId: item.sessionId,
+    })
   }
   for (const problem of [...outcome.plan.problems, ...outcome.problems]) push({ message: problem })
   return leftovers
@@ -2731,6 +2763,66 @@ async function remoteObjectNamesIn(
 }
 
 /**
+ * 引用某个对象的那几条会话（会话 id → 标题）。
+ *
+ * "本机与远端都没有"这件事要报两样东西：少了几个对象（数），以及是哪几条会话在用它们（谁）。对象是
+ * 内容寻址的、一张图常被几条会话共用，所以最后要按会话折一次——见 `summarizeAbsent()`。
+ */
+export type AttachmentOwners = Map<string, string | undefined>
+
+/**
+ * 本机要、远端共享库里也没有的那些对象（键 `kind:id`），每个记着引用它的会话。
+ *
+ * 为什么不是一个纯 id 集合：那句汇总说得清"几个对象"，说不清"哪条会话"，而用户要处置的正是后者
+ * （去持有这些对象的机器上把这几条推上来）。
+ */
+export type AbsentObjects = Map<string, AttachmentOwners>
+
+/** 记一个"两边都没有"的对象；同一个对象被几条会话引用时把会话并进来。 */
+function noteAbsent(absent: AbsentObjects, ref: AttachmentRef, owners: AttachmentOwners): void {
+  const key = `${ref.kind}:${ref.id}`
+  const found = absent.get(key)
+  if (found === undefined) {
+    absent.set(key, new Map(owners))
+    return
+  }
+  for (const [id, title] of owners) {
+    if (found.get(id) === undefined) found.set(id, title)
+  }
+}
+
+/**
+ * 把"两边都没有"的那些对象折成一句汇总要用的两个数：对象数与会话清单（按缺的个数从多到少）。
+ *
+ * @param absent 这一轮攒下来的对象。
+ * @returns 对象数与逐条会话（`count` 是这条会话引用的、去重后的对象个数）。
+ */
+export function summarizeAbsent(absent: AbsentObjects): {
+  objects: number
+  sessions: AbsentAttachmentSession[]
+} {
+  const per = new Map<string, { title?: string; count: number }>()
+  for (const owners of absent.values()) {
+    for (const [id, title] of owners) {
+      const found = per.get(id)
+      if (found === undefined) {
+        per.set(id, { ...(title === undefined ? {} : { title }), count: 1 })
+        continue
+      }
+      found.count += 1
+      if (found.title === undefined && title !== undefined) found.title = title
+    }
+  }
+  const sessions: AbsentAttachmentSession[] = [...per].map(([sessionId, item]) => ({
+    sessionId,
+    ...(item.title === undefined ? {} : { title: item.title }),
+    count: item.count,
+  }))
+  sessions.sort((left, right) => right.count - left.count || (left.sessionId < right.sessionId ? -1 : 1))
+  return { objects: absent.size, sessions }
+}
+
+/**
  * 从共享库取一个对象落地（调用方已经确认远端有它）。
  *
  * 字节照导入那条路的规格落地：`commitAttachmentObject()` 先写 `.part` 再 rename、`0o400`；本机已经有了
@@ -2743,7 +2835,8 @@ async function fetchAttachment(
   ref: AttachmentRef,
   counters: SyncAttachmentIn,
   problems: string[],
-  absent: Set<string>,
+  absent: AbsentObjects,
+  owners: AttachmentOwners,
 ): Promise<void> {
   const path = port.pathOf(ref)
   if (path === undefined) {
@@ -2759,9 +2852,9 @@ async function fetchAttachment(
     }
   } catch (error) {
     if ((error as { status?: number } | null)?.status === 404) {
-      // 「远端也没有」不是错误，是"持有这些对象的机器还没推送它们"这一种状态：**整轮汇总成一句**
-      // （一个会话引用几十张图时，逐条报会把问题清单淹掉，而它们要的处置是同一件事）。
-      absent.add(ref.id)
+      // 「远端也没有」不是错误，是"持有这些对象的机器还没推送它们"这一种状态：按**会话**记一笔，
+      // 收尾汇总成一句（一个会话引用几十张图时，逐条对象报会把问题清单淹掉，而它们要的处置是同一件事）。
+      noteAbsent(absent, ref, owners)
       return
     }
     problems.push(`取附件 ${ref.id} 失败：${error instanceof Error ? error.message : String(error)}`)
@@ -2773,6 +2866,8 @@ async function fetchAttachment(
  *
  * 本机已有的（`attachmentActionOf()` 说 `present`）一个字节都不取——这是这条路存在的意义之一：换台
  * 机器拉同一批会话时，两台机器共用的那张图只传一次。
+ *
+ * @param owners 这些对象属于哪条会话（远端也没有的那些按它点名，见 `noteAbsent()`）。
  */
 async function pullAttachments(
   deps: SyncDeps,
@@ -2780,7 +2875,8 @@ async function pullAttachments(
   refs: readonly AttachmentRef[],
   counters: SyncAttachmentIn,
   problems: string[],
-  absent: Set<string>,
+  absent: AbsentObjects,
+  owners: AttachmentOwners,
   report?: AttachmentReporter,
 ): Promise<void> {
   // 本机已经有的那些只记个数、不进分母（同上：不花时间的条数不进分母）。
@@ -2791,7 +2887,7 @@ async function pullAttachments(
   }
   for (const [index, ref] of pending.entries()) {
     report?.(index, pending.length, ref)
-    await fetchAttachment(deps, port, ref, counters, problems, absent)
+    await fetchAttachment(deps, port, ref, counters, problems, absent, owners)
   }
 }
 
@@ -2918,12 +3014,14 @@ async function repairAttachments(
   incoming: SyncAttachmentIn,
   outgoing: SyncAttachmentOut,
   problems: string[],
-  absent: Set<string>,
+  absent: AbsentObjects,
   onScan?: (done: number, total: number, id: string, label?: string) => void,
   report?: AttachmentReporter,
 ): Promise<boolean> {
   /** 本机缺的那些（远端有就取回来）。 */
   const wanted = new Map<string, AttachmentRef>()
+  /** 每个"本机缺"的对象被哪几条会话引用（远端也没有时按它点名，见 `noteAbsent()`）。 */
+  const wantedOwners = new Map<string, AttachmentOwners>()
   /** 本机有、远端索引里也认得这条会话的对象（远端缺就传上去）。 */
   const extra = new Map<string, AttachmentRef>()
   /** 这一趟补记进自己索引的条目数（收尾时据此决定要不要再写一次索引）。 */
@@ -2957,8 +3055,12 @@ async function repairAttachments(
     for (const ref of refs) {
       const key = `${ref.kind}:${ref.id}`
       // 两个集合按"本机有没有"分开，互不重叠：同一个对象不该既算"没取回来"又算"没传上去"。
-      if (attachmentActionOf(port, ref) === 'create') wanted.set(key, ref)
-      else if (remoteKnows) extra.set(key, ref)
+      if (attachmentActionOf(port, ref) === 'create') {
+        wanted.set(key, ref)
+        const owners = wantedOwners.get(key) ?? new Map<string, string | undefined>()
+        owners.set(session.id, session.title)
+        wantedOwners.set(key, owners)
+      } else if (remoteKnows) extra.set(key, ref)
     }
   }
   if (wanted.size > 0) {
@@ -2968,14 +3070,22 @@ async function repairAttachments(
       const names = await remoteObjectNamesIn(deps, listed, ref, problems)
       if (names === undefined) continue
       if (!names.has(attachmentHex(ref))) {
-        absent.add(ref.id)
+        noteAbsent(absent, ref, wantedOwners.get(`${ref.kind}:${ref.id}`) ?? new Map())
         continue
       }
       toFetch.push(ref)
     }
     for (const [index, ref] of toFetch.entries()) {
       report?.(index, toFetch.length, ref)
-      await fetchAttachment(deps, port, ref, incoming, problems, absent)
+      await fetchAttachment(
+        deps,
+        port,
+        ref,
+        incoming,
+        problems,
+        absent,
+        wantedOwners.get(`${ref.kind}:${ref.id}`) ?? new Map(),
+      )
     }
   }
   // 远端缺的那些交给推送那一段：它自己按前缀列一次、只传远端真没有的（两个方向共用同一份缓存）。
@@ -3084,10 +3194,11 @@ export async function applyPreparedSync(
   /** 一次同步里每个前缀目录只列一次（`list()` 已经把那一层全部对象名给回来了）。 */
   const remoteObjectNames = new Map<string, Set<string>>()
   /**
-   * 本机要、远端也没有的那些对象（去重后的 id）。**整轮收尾时汇总成一句**：拉取那条路与补对象那条路
-   * 撞上的是同一种状态（持有这些对象的机器还没推送它们），逐条报会把问题清单淹掉。
+   * 本机要、远端也没有的那些对象（按对象去重），每个记着引用它的会话。**整轮收尾时汇总成一句**：拉取
+   * 那条路与补对象那条路撞上的是同一种状态（持有这些对象的机器还没推送它们），逐条对象报会把问题清单
+   * 淹掉——所以数报在那一句里，具体是哪几条会话由 `SyncOutcome.absentAttachments` 逐条点名。
    */
-  const absentObjects = new Set<string>()
+  const absentObjects: AbsentObjects = new Map()
 
   // ── 拉取：取包 → 自校验 → 走导入那条编排 ────────────────────────────────────
   const loose = readRegistryLoose(deps.registryPath)
@@ -3215,6 +3326,7 @@ export async function applyPreparedSync(
           attachmentIn,
           problems,
           absentObjects,
+          new Map([[entry.id, entry.title]]),
           reportAttachments(entry.title ?? entry.id),
         )
       }
@@ -3306,6 +3418,7 @@ export async function applyPreparedSync(
             attachmentIn,
             problems,
             absentObjects,
+            new Map([[entry.id, entry.title ?? session.title]]),
             reportAttachments(entry.title ?? session.title ?? entry.id),
           )
         }
@@ -3582,10 +3695,18 @@ export async function applyPreparedSync(
     }
   }
 
-  // 一轮一句话：本机要、远端也没有的那些对象（两边都是同一种状态，处置也是同一件事）。
-  if (absentObjects.size > 0) {
+  /*
+   * 一轮一句话：本机要、远端也没有的那些对象（两边都是同一种状态，处置也是同一件事）。
+   *
+   * 数报在这一句里，**具体是哪几条会话**放在 `absentAttachments`：那句话单独看只知道"少了 54 个"，
+   * 不知道去持有对象的机器上推哪一条——会话名单由 `collectLeftovers()` 逐条点名（界面据此给出
+   * 「只看这一条」）。
+   */
+  const absent = summarizeAbsent(absentObjects)
+  if (absent.objects > 0) {
     problems.push(
-      `本机有 ${absentObjects.size} 个附件对象在远端共享库里也没有，这次补不上（持有这些对象的机器还没推送它们）`,
+      `本机有 ${absent.objects} 个附件对象在远端共享库里也没有，这次补不上（持有这些对象的机器还没推送它们）` +
+        (absent.sessions.length === 0 ? '' : `：涉及 ${absent.sessions.length} 条会话`),
     )
   }
 
@@ -3606,6 +3727,7 @@ export async function applyPreparedSync(
     ...(pulled.length === 0 ? {} : { warm }),
     // 没勾整理、或索引没写成功时都缺席：界面据此什么都不说。
     ...(tidy === undefined ? {} : { tidy }),
+    ...(absent.sessions.length === 0 ? {} : { absentAttachments: absent.sessions }),
     problems,
   }
 }
