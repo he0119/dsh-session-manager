@@ -44,6 +44,7 @@ import { BackupPanel } from './BackupPanel.tsx'
 import { HelpPanel } from './HelpPanel.tsx'
 import { Hint } from './Hint.tsx'
 import { ManagePanel } from './ManagePanel.tsx'
+import { RunDialog, RunChip } from './RunDialog.tsx'
 import { ProgressBlock } from './ProgressBlock.tsx'
 import { SyncPanel } from './SyncPanel.tsx'
 import { foldSubagents } from '../logic/manageRows.ts'
@@ -429,6 +430,8 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
       {...(surface === 'none' ? pageDrop.handlers : {})}
       data-drop-over={pageDrop.over && surface === 'none' ? 'true' : undefined}
     >
+      {/* 「正在做 → 做完了」那一扇窗：六个动作共用，挂在页面这一级（各面板只管发起）。 */}
+      <RunDialog t={t} />
       {/*
         拖到页面上时的提示：一层不挡事件的虚线框，写的正是"松手会发生什么"。
         它只在这一页同时满足"没有开着别的面 + 正拖着文件"时存在。
@@ -667,6 +670,8 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
           为什么不是列表上方那条横幅：进度那一档有 100px 高，压的是列表；而这件事跟列表内容无关，
           位置该跟「导入…」「备份与回滚」排在同一排。弹窗开着时不摆——那一面正显示着更细的进度。
         */}
+        {/* 这一页的长动作（删除、迁移、导入、恢复、整理远端、重算名称）在状态栏里也占一格，见 RunChip。 */}
+        <RunChip t={t} />
         {barLabel !== null && surface !== 'sync' && (
           /*
             这枚也用官方 `Button`（outline/sm，与旁边那两枚同款）：本页的控制件一律走官方控件库，

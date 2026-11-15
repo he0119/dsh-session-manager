@@ -60,6 +60,7 @@ import { panelEvents, type PanelSnapshot } from '../logic/panelEvents.ts'
 import { WorkspaceIcon } from './icons.tsx'
 import type { SessionManagerKey, Translate } from '../logic/locales.ts'
 import { AUTO_PUSH_SKIP_CODES } from '../logic/autoPush.ts'
+import { startRun } from '../logic/runJob.ts'
 import { syncJob, type SyncJobSnapshot } from '../logic/syncJob.ts'
 import { syncStage, type SyncStage } from '../logic/syncStage.ts'
 import { agoLabel } from '../logic/relativeTime.ts'
@@ -68,6 +69,7 @@ import { leftoversOf } from '../logic/syncLeftovers.ts'
 import { remoteLibrary } from '../logic/remoteLibrary.ts'
 import { projectLabel, sessionLabel, type SessionLabel } from '../logic/planRows.ts'
 import { ProgressBlock } from './ProgressBlock.tsx'
+import { ProblemsBlock } from './ProblemsBlock.tsx'
 import { formatBytes, formatTime, sessionTags, type TagCopy } from './sessionList.tsx'
 import { SyncDiffDialog, type SyncDiffTarget } from './SyncDiffDialog.tsx'
 import { groupSyncRows, syncProjectOf, syncPullTip, type SyncGroup, type SyncSide } from '../logic/syncGroups.ts'
@@ -736,29 +738,42 @@ export function SyncPanel({
     )
   }
 
-  /** 弹窗里按「开始整理」：真删自己那一格里多余的包。 */
+  /**
+   * 弹窗里按「开始整理」：真删自己那一格里多余的包。
+   *
+   * 与其它写操作同一条：确认之后交给状态窗（进度 → 结果 → 「完成」），不再让这枚确认弹窗兼做进度窗。
+   */
   const doTidyApply = (): void => {
     setTidyError(undefined)
     setTidyProgress(undefined)
-    setTidyDialog('apply')
+    setTidyDialog(undefined)
     setTidyBusy(true)
-    void tidyRemote(true, setTidyProgress).then(
-      (response) => {
-        setTidyBusy(false)
-        setTidyDialog(undefined)
-        setTidyPlan(response)
+    startRun(
+      'tidy',
+      (report) => tidyRemote(true, report),
+      (done) => {
+        if (!done.ok) return <p className="dsm-error">{t('run.error', { reason: done.error ?? '' })}</p>
+        const response = done.result as TidyResponse
         const total = response.tidy.removed + response.tidy.orphans
-        setNotice(
-          total === 0
-            ? t('sync.tidy.empty')
-            : t('sync.tidy.done', { count: total, size: formatBytes(response.tidy.bytes) }),
+        return (
+          <div className="dsm-planBody">
+            <div className="dsm-ok">
+              {total === 0
+                ? t('sync.tidy.empty')
+                : t('sync.tidy.done', { count: total, size: formatBytes(response.tidy.bytes) })}
+            </div>
+            <ProblemsBlock t={t} problems={response.problems} />
+          </div>
         )
-        setFailures(response.problems)
       },
-      (cause: unknown) => {
-        // 失败就把弹窗留着：那一句原话要看得见，进度也停在断掉的地方。
-        setTidyError(cause instanceof Error ? cause.message : String(cause))
-        setTidyBusy(false)
+      {
+        onChange: (done) => {
+          setTidyBusy(false)
+          if (!done.ok) return
+          const response = done.result as TidyResponse
+          setTidyPlan(response)
+          setFailures(response.problems)
+        },
       },
     )
   }

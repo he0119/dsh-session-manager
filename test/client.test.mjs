@@ -2531,24 +2531,19 @@ const manageNulls = ({
   busy = null,
   progress = null,
   migrate = null,
-  effect = null,
   fields = null,
   inspecting = null,
   notice = null,
-  undo = null,
 } = {}) => [
   null, // 页面骨架自己的 error（它排在分页之前，分页的 `state` 由 mount 的 firstNull 种）
   busy,
   null, // error
-  notice, // 提示那一行（删除 / 迁移之后那句）
+  notice, // 提示那一行（归档 / 导出之后那句）
   null, // 删除弹窗
   progress,
-  null, // retitle
   inspecting,
   ...(fields ?? [null, null]), // 目标字段：候选面板 / 手输路径
   migrate, // 迁移弹窗
-  effect, // 迁移结论
-  undo, // 提示里那枚「撤销」指着哪一份备份
 ]
 
 /**
@@ -5661,6 +5656,8 @@ test('客户端产物：内容视图没有底部那一行，页头写着正中�
     panel: 'manage',
     nulls: [
       ...manageNulls({ inspecting: { id: 's-1', title: 'T' } }),
+      // 内容视图自己那个 `page` 之前还有一个 null 状态（筛选栏那一份），所以这里先补一位。
+      null,
       { totalEvents: 25, cursor: 0, problems: [], problemCount: 0 },
     ],
   })
@@ -6053,7 +6050,7 @@ test('客户端产物：一轮一节折得起来，标题自己画折叠标记',
     state,
     panel: 'manage',
     nulls: [
-      ...Array(7).fill(null),
+      ...Array(6).fill(null),
       { id: 's-1', title: 'T' },
       { totalEvents: 5, cursor: 0, problems: [], problemCount: 0 },
     ],

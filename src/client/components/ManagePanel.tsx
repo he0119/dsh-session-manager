@@ -53,6 +53,7 @@ import {
   type RetitleResponse,
 } from '../api.ts'
 import { ConfirmDialog } from './ConfirmDialog.tsx'
+import { ProblemsBlock } from './ProblemsBlock.tsx'
 import { DirectoryField, useDirectoryFields } from './DirectoryField.tsx'
 import { ProgressBlock } from './ProgressBlock.tsx'
 import { SessionInspector } from './SessionInspector.tsx'
@@ -79,6 +80,7 @@ import {
   type SessionSortKey,
 } from '../logic/manageRows.ts'
 import { describeRetitle, type RetitleNotes } from '../logic/retitleNotes.ts'
+import { dismissRun, startRun } from '../logic/runJob.ts'
 import {
   SessionListBox,
   SessionListEmpty,
@@ -174,7 +176,13 @@ export function ManagePanel({
     filter.setQuery(focusId)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusId])
-  const [busy, setBusy] = React.useState<'archive' | 'unarchive' | 'apply' | 'retitle' | 'migrate' | 'export' | null>(null)
+  /**
+   * 页面上那几件"按下去就做完"的事情（归档、导出）进行中的那一件。
+   *
+   * 删除 / 迁移 / 重算名称不在这份状态里：它们确认之后会交给状态窗（`logic/runJob.ts`），自己那扇窗
+   * 报进度、报结果，不必让本页再记一份。
+   */
+  const [busy, setBusy] = React.useState<'archive' | 'unarchive' | 'export' | null>(null)
   const [error, setError] = React.useState<string | null>(null)
   const [notice, setNotice] = React.useState<string | null>(null)
   /**
@@ -200,7 +208,6 @@ export function ManagePanel({
    * 单独一份状态而不是复用 `failed`：那个动作的结果有三类（改了 / 没变 / 跳过），跳过还要按原因分类
    * 摆出来——"这条你改过名，我没动它"与"这条算的时候报错了"是两件完全不同的事，混在一个横幅里就分不清。
    */
-  const [retitle, setRetitle] = React.useState<RetitleResponse | null>(null)
   /** 正在看内容的那条会话（点行上的「内容」时设它，看完关掉）。 */
   const [inspecting, setInspecting] = React.useState<RowSession | null>(null)
 
@@ -235,14 +242,12 @@ export function ManagePanel({
     error: string | null
   } | null>(null)
   /** 上一次迁移落地之后的结论（复核 / 备份 / 生效方式）：弹窗关了之后它还得在页面上留着。 */
-  const [effect, setEffect] = React.useState<MigrationEffect | null>(null)
   /**
    * 刚做完的那件事留下了哪个备份目录（删除 / 迁移各一份），以及要不要在提示里给「撤销」。
    *
    * 声明在**最后一个 null 状态**的位置上：冒烟夹具按调用顺序把种子发给 null 状态（见
    * test/client.test.mjs 的 `nulls`），插在中间会让后面那些整体错一格。
    */
-  const [undoAt, setUndoAt] = React.useState<{ dir: string } | null>(null)
 
   /**
    * 换一条提示，并决定它带不带「撤销」。
@@ -250,9 +255,14 @@ export function ManagePanel({
    * 任何一条新提示都先把上一枚撤销清掉：一份备份只能撤刚做的那一件事，提示换了还留着旧的那枚，
    * 点下去会把用户带到一件早已过期的动作上。
    */
-  const notify = (text: string | null, undo?: string): void => {
+  /**
+   * 页面上那一条提示（只给"按下去就做完"的动作：归档、导出）。
+   *
+   * 删除 / 迁移 / 导入 / 恢复 / 整理远端 / 重算名称的结论不在这里：它们走状态窗（`logic/runJob.ts`），
+   * 结果与「撤销」都在那扇窗里，按「完成」收掉。
+   */
+  const notify = (text: string | null): void => {
     setNotice(text)
-    setUndoAt(text === null || undo === undefined ? null : { dir: undo })
   }
   /**
    * 只看某一个项目（`null` = 全部）。
@@ -578,7 +588,6 @@ export function ManagePanel({
     if (picked.length === 0) return
     setError(null)
     notify(null)
-    setEffect(null)
     setProgress(null)
     setMigratePending({ response: null, error: null })
     runPreview(to, includeArtifacts)
@@ -591,44 +600,64 @@ export function ManagePanel({
    * 新的问题清单就该出现在同一个位置；请求本身没走通（网络、参数被拒）才抛给页面横幅并关掉弹窗。
    */
   const applyMigration = (): void => {
-    setBusy('migrate')
+    const target = to.trim()
+    const withArtifacts = includeArtifacts
+    const body = request('apply', target, withArtifacts)
+    // 确认到此为止：接下来是状态窗（进度 → 结果 → 「完成」）。
+    setMigratePending(null)
     setError(null)
     setProgress(null)
-    void migrate(request('apply', to.trim(), includeArtifacts), setProgress).then(
-      (response) => {
-        setBusy(null)
-        setProgress(null)
-        if (!response.applied) {
-          setMigratePending((current) => (current === null ? current : { ...current, response }))
-          return
-        }
-        setMigratePending(null)
-        setEffect({
-          verified: response.verified,
-          ...(response.backupDir === undefined ? {} : { backupDir: response.backupDir }),
-          takesEffect: response.takesEffect,
-        })
-        notify(
-          // 一句结果就够了：改写几个日志、移动几个目录是收据，复核通过也不必说（失败才说）。
-          t('migrate.done', { sessions: response.preview.sessions.length }) +
-            (response.verified ? '' : ` ${t('verify.fail')}`),
-          response.backupDir,
+    startRun(
+      'migrate',
+      (report) => migrate(body, report),
+      (done) => {
+        if (!done.ok) return <p className="dsm-error">{t('run.error', { reason: done.error ?? '' })}</p>
+        const response = done.result as MigrationResponse
+        return (
+          <div className="dsm-planBody">
+            <div className={response.applied && response.verified ? 'dsm-ok' : 'dsm-warn'}>{response.summary}</div>
+            <ProblemsBlock t={t} problems={response.problems} />
+            {/*
+              需要重启才被宿主承认时，这一句跟着结果一起说（原来它单独挂在页面上）。宿主自己接住的
+              情况这里一个字都不说——"无需重启"在那时只是噪音。
+            */}
+            {response.applied && response.takesEffect === 'restart-required' && (
+              <p className="dsm-warn">{t('effect.restart')}</p>
+            )}
+            {response.applied && response.backupDir !== undefined && openBackup !== undefined && (
+              <div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    const dir = response.backupDir
+                    if (dir === undefined) return
+                    dismissRun()
+                    openBackup(dir)
+                  }}
+                >
+                  {t('undo.action')}
+                </Button>
+              </div>
+            )}
+          </div>
         )
-        // 搬走的那几条先在清单里换到目标目录（分组跟着换），整库快照随后到。
-        patch?.((current) =>
-          patchMoved(
-            current,
-            response.preview.sessions.map((session) => ({ id: session.id, dir: session.targetDir })),
-            response.preview.to,
-          ),
-        )
-        void reload()
       },
-      (cause) => {
-        setBusy(null)
-        setProgress(null)
-        setMigratePending(null)
-        setError(t('error.failed', { reason: cause instanceof Error ? cause.message : String(cause) }))
+      {
+        onChange: (done) => {
+          if (!done.ok) return
+          const response = done.result as MigrationResponse
+          if (!response.applied) return
+          // 搬走的那几条先在清单里换到目标目录（分组跟着换），整库快照随后到。
+          patch?.((current) =>
+            patchMoved(
+              current,
+              response.preview.sessions.map((session) => ({ id: session.id, dir: session.targetDir })),
+              response.preview.to,
+            ),
+          )
+          void reload()
+        },
       },
     )
   }
@@ -668,27 +697,45 @@ export function ManagePanel({
    * 失败照旧逐条摆出来，不问其余成功的算不算数：一条模型超时不该把另一条刚算好的标题说成没算。
    * 逐条失败的那几条**不清勾选**——用户多半要重试它们。
    */
-  const doRetitle = async (): Promise<void> => {
-    setBusy('retitle')
+  const doRetitle = (): void => {
+    const ids = [...picked]
     setError(null)
-    notify(null)
     setFailed([])
-    setRetitle(null)
     setProgress(null)
-    try {
-      const response = await retitleSessions(picked, setProgress)
-      setFailed(response.failed)
-      setRetitle(response)
-      if (response.failed.length === 0) picking.clear()
-      // 列表上的标题是这次动作改的：先按结果改这几行，整库快照随后在后台取回来（`/state` 每次重折标题）。
-      patch?.((current) => patchTitles(current, response.retitled))
-      void reload()
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause))
-    } finally {
-      setBusy(null)
-      setProgress(null)
-    }
+    startRun(
+      'retitle',
+      (report) => retitleSessions(ids, report),
+      (done) => {
+        if (!done.ok) return <p className="dsm-error">{t('run.error', { reason: done.error ?? '' })}</p>
+        const response = done.result as RetitleResponse
+        const notes = describeRetitle(response, t)
+        return (
+          <div className="dsm-planBody">
+            {notes.notice === undefined ? null : <div className="dsm-ok">{notes.notice}</div>}
+            {notes.skipped.map((line) => (
+              <div key={line} className="dsm-hint">
+                {line}
+              </div>
+            ))}
+            <ProblemsBlock
+              t={t}
+              problems={response.failed.map((item) => `${item.id}：${item.error}`)}
+            />
+          </div>
+        )
+      },
+      {
+        onChange: (done) => {
+          if (!done.ok) return
+          const response = done.result as RetitleResponse
+          setFailed(response.failed)
+          if (response.failed.length === 0) picking.clear()
+          // 列表上的标题是这次动作改的：先按结果改这几行，整库快照随后在后台取回来（`/state` 每次重折标题）。
+          patch?.((current) => patchTitles(current, response.retitled))
+          void reload()
+        },
+      },
+    )
   }
 
   /**
@@ -733,30 +780,53 @@ export function ManagePanel({
    *     只剩下"取消"的弹窗里没有意义。
    */
   const applyDelete = (): void => {
-    setBusy('apply')
+    const ids = [...picked]
+    const remote = deleteRemote
+    // 确认到此为止：接下来是状态窗（进度 → 结果 → 「完成」），不再让确认弹窗兼做进度窗。
+    setPending(null)
     setError(null)
     setProgress(null)
-    void deleteSessions(picked, 'apply', setProgress, deleteRemote).then(
-      (response) => {
-        setBusy(null)
-        setProgress(null)
-        if (response.applied) {
-          // 删除先留了一份备份：提示里给「撤销」，点它直接开那份的回滚确认。
-          notify(response.summary, response.backupDir)
-          picking.clear()
-          setPending(null)
-          // 删掉的那些（含级联）先从清单里摘掉，不必等整库重扫；快照随后到，以快照为准。
-          patch?.((current) => patchRemoved(current, response.preview.entries.map((entry) => entry.id)))
-          void reload()
-          return
-        }
-        setPending((current) => (current === null ? current : { ...current, plan: response }))
+    startRun(
+      'delete',
+      (report) => deleteSessions(ids, 'apply', report, remote),
+      (done) => {
+        if (!done.ok) return <p className="dsm-error">{t('run.error', { reason: done.error ?? '' })}</p>
+        const result = done.result as DeleteResponse
+        return (
+          <div className="dsm-planBody">
+            {/* 结论那句由宿主给（"已删除 1 条会话。"）；失败它会说"复核没通过"。 */}
+            <div className={result.verified ? 'dsm-ok' : 'dsm-warn'}>{result.summary}</div>
+            <ProblemsBlock t={t} problems={result.problems} />
+            {result.backupDir !== undefined && openBackup !== undefined && (
+              <div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    const dir = result.backupDir
+                    if (dir === undefined) return
+                    // 先收起结果页，再打开那份备份的回滚确认：两扇窗口不该叠在一起。
+                    dismissRun()
+                    openBackup(dir)
+                  }}
+                >
+                  {t('undo.action')}
+                </Button>
+              </div>
+            )}
+          </div>
+        )
       },
-      (cause) => {
-        setBusy(null)
-        setProgress(null)
-        setPending(null)
-        setError(cause instanceof Error ? cause.message : String(cause))
+      {
+        onChange: (done) => {
+          if (!done.ok) return
+          const result = done.result as DeleteResponse
+          if (!result.applied) return
+          picking.clear()
+          // 删掉的那些（含级联）先从清单里摘掉，不必等整库重扫；快照随后到，以快照为准。
+          patch?.((current) => patchRemoved(current, result.preview.entries.map((entry) => entry.id)))
+          void reload()
+        },
       },
     )
   }
@@ -766,10 +836,6 @@ export function ManagePanel({
    *
    * 在渲染期算而不是塞进状态：它是结果的**纯函数**，多存一份只会多一个可能与 `retitle` 不一致的地方。
    */
-  const retitleNotes: RetitleNotes = React.useMemo(
-    () => (retitle === null ? { skipped: [] } : describeRetitle(retitle, t)),
-    [retitle, t],
-  )
 
   // 迁移弹窗正文里那些从计划派生出来的东西（同原先的 MigrationPanel）。
   const preview = migratePending?.response?.preview ?? null
@@ -821,25 +887,6 @@ export function ManagePanel({
         <p className="dsm-banner dsm-ok">
           <span>{notice}</span>
           <span className="dsm-spacer" />
-          {/*
-            刚删除 / 刚迁移都留下了一份字节级备份：这里给一枚「撤销」，开的是备份与回滚那面，并且直接
-            摆出这份备份的动作清单与确认框——用户不用在清单里按时间再找一遍。
-          */}
-          {undoAt !== null && (
-            <Hint text={t('undo.tip')}>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                const dir = undoAt.dir
-                notify(null)
-                  openBackup?.(dir)
-                }}
-              >
-                {t('undo.action')}
-              </Button>
-            </Hint>
-          )}
           <Button variant="outline" size="sm" onClick={() => notify(null)}>
             {t('error.dismiss')}
           </Button>
@@ -853,21 +900,6 @@ export function ManagePanel({
       {failed.map((item) => (
         <p key={item.id} className="dsm-warn">
           {item.id}：{item.error}
-        </p>
-      ))}
-      {retitleNotes.notice !== undefined && (
-        <p className="dsm-banner dsm-ok">
-          <span>{retitleNotes.notice}</span>
-          <span className="dsm-spacer" />
-          <Button variant="outline" size="sm" onClick={() => setRetitle(null)}>
-            {t('error.dismiss')}
-          </Button>
-        </p>
-      )}
-      {/* 跳过的那几条单独说：它们不是失败，但用户得知道"我勾了 8 条，为什么只有 3 条换了名字"。 */}
-      {retitleNotes.skipped.map((line) => (
-        <p key={line} className="dsm-hint">
-          {line}
         </p>
       ))}
 
@@ -1015,7 +1047,7 @@ export function ManagePanel({
                 onClick={() => void doRetitle()}
                 disabled={busy !== null || picked.length === 0 || !retitleAvailable}
               >
-                {busy === 'retitle' ? t('manage.retitle.running') : t('manage.retitle.action')}
+                {t('manage.retitle.action')}
               </Button>
               {/*
                 「迁移」也在这条动作行上：它与归档 / 改名 / 删除是同一句话——"对勾中的这些做一件事"。
@@ -1060,18 +1092,6 @@ export function ManagePanel({
               ) : (
                 <ProgressBlock t={t} progress={progress} />
               ))}
-            {/* 迁移落地之后的结论：弹窗关了，这三件事（复核 / 备份位置 / 生效方式）还得留在页面上。 */}
-            {effect !== null && (
-              <div className="dsm-effect">
-                <p className={effect.verified ? 'dsm-ok' : 'dsm-warn'}>
-                  {effect.verified ? t('verify.pass') : t('verify.fail')}
-                  {effect.backupDir !== undefined ? ` · ${effect.backupDir}` : ''}
-                </p>
-                {/* **只在需要重启时说话**（与同步页同一口径）：宿主自己接住时这里再说一句"无需重启"只是噪音，
-                    而两句话都用同一个颜色时反而分不出哪句是坏消息。 */}
-                {effect.takesEffect === 'restart-required' && <p className="dsm-warn">{t('effect.restart')}</p>}
-              </div>
-            )}
           </div>
           {/*
             浮动面板外面那层空白：窄屏有浮动面板打开时（左栏的「项目与筛选」或右侧的「详情」），点它就收起，
@@ -1120,11 +1140,9 @@ export function ManagePanel({
         <ConfirmDialog
           t={t}
           // 落地那一段标题也换掉：这时候已经不是"将要"了，正文里正跑着进度。
-          title={t(busy === 'apply' ? 'manage.delete.running' : 'manage.delete.dialogTitle')}
+          title={t('manage.delete.dialogTitle')}
           confirmLabel={t('manage.delete.apply')}
           acknowledge={t('manage.delete.acknowledge')}
-          busyLabel={t('manage.delete.running')}
-          busy={busy === 'apply'}
           planning={pending.plan === null && pending.error === null}
           // 预演要扫整库（找这些会话与它们的后代），那几秒里把静态的「预演中…」换成进度。
           planningDetail={progress === null ? undefined : <ProgressBlock t={t} progress={progress} />}
@@ -1133,14 +1151,7 @@ export function ManagePanel({
           onConfirm={applyDelete}
           onCancel={() => setPending(null)}
         >
-          {/* 落地：先备份整份会话目录再删，正文换成进度（清单说的是"将要"，这时候已经过期了）。 */}
-          {busy === 'apply' &&
-            (progress === null ? (
-              <p className="dsm-hint">{t('progress.waiting')}</p>
-            ) : (
-              <ProgressBlock t={t} progress={progress} note={t('manage.delete.progress.note')} />
-            ))}
-          {busy !== 'apply' && pending.plan !== null && (
+          {pending.plan !== null && (
             /* 块间 12px（`.dsm-planBody`，与同步计划那一段同一套节奏）、块内 4–6px；正文层那 8px
                只留给"这一整块"与弹窗其它部分之间。 */
             <div className="dsm-planBody">
@@ -1211,11 +1222,9 @@ export function ManagePanel({
         <ConfirmDialog
           t={t}
           // 落地那一段标题也换掉：这时候已经不是"将要"了，正文里正跑着进度。
-          title={t(busy === 'migrate' ? 'migrate.running' : 'migrate.dialogTitle')}
+          title={t('migrate.dialogTitle')}
           confirmLabel={t('migrate.apply')}
           acknowledge={t('migrate.acknowledge')}
-          busyLabel={t('migrate.running')}
-          busy={busy === 'migrate'}
           // 目标为空时不算"预演中"：那时正文是一句"先选目标目录"，不是一句等待；一条都搬不走时同理
           //（那一份计划根本不会去取，等下去等不到）。
           planning={
@@ -1232,14 +1241,7 @@ export function ManagePanel({
           onConfirm={applyMigration}
           onCancel={() => setMigratePending(null)}
         >
-          {/* 落地：正文换成进度，那份计划表说的是"将要"，这时候已经过期了。 */}
-          {busy === 'migrate' &&
-            (progress === null ? (
-              <p className="dsm-hint">{t('progress.waiting')}</p>
-            ) : (
-              <ProgressBlock t={t} progress={progress} note={t('migrate.progress.note')} />
-            ))}
-          {busy !== 'migrate' && (
+          {(
             <>
               {/*
                 目标目录是这一弹窗的第一步。`title` 与产物开关跟着它：三者都是"这次怎么落地"的参数，
@@ -1256,8 +1258,7 @@ export function ManagePanel({
                 onChange={(value) => {
                   setTo(value)
                   // 目标一变，旧计划说的就不再是"将要发生的"：清掉结论，并（目标非空时）立刻取新的一份。
-                  setEffect(null)
-                  runPreview(value, includeArtifacts)
+                                runPreview(value, includeArtifacts)
                 }}
                 pickerKind={pickerKind}
                 directory={directory}

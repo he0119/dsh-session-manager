@@ -25,12 +25,14 @@ import { Hint } from './Hint.tsx'
 import { importBundle, type ImportResponse, type ProgressEvent } from '../api.ts'
 import type { ImportEntry } from '../api.ts'
 import { ConfirmDialog } from './ConfirmDialog.tsx'
+import { ProblemsBlock } from './ProblemsBlock.tsx'
 import { DirectoryField, useDirectoryFields } from './DirectoryField.tsx'
 import { ProgressBlock } from './ProgressBlock.tsx'
 import { useFileDrop } from './useFileDrop.ts'
 import { formatBytes, totalBytes } from './sessionList.tsx'
 import { chooseBundle } from '../logic/fileDrop.ts'
 import { describeCwd, directoryTargetRows, sessionLabel } from '../logic/planRows.ts'
+import { startRun } from '../logic/runJob.ts'
 import type { Translate } from '../logic/locales.ts'
 import type { PanelShare } from '../types.ts'
 
@@ -212,42 +214,66 @@ export function ImportPanel({
    */
   const applyImport = (): void => {
     if (payload === null || target === '') return
-    setBusy('apply')
+    const body = payload
+    const dir = target
+    const planned = pending?.plan ?? null
+    // 确认到此为止：导入这一面收掉，接下来是状态窗（进度 → 结果 → 「完成」）。
+    setPending(null)
     setError(null)
     setProgress(null)
-    void importBundle(payload, target, 'apply', setProgress).then(
-      (result) => {
-        setBusy(null)
-        setProgress(null)
-        const wrote = result.written?.length ?? 0
+    onClose()
+    startRun(
+      'import',
+      (report) => importBundle(body, dir, 'apply', report),
+      (done) => {
+        if (!done.ok) return <p className="dsm-error">{t('run.error', { reason: done.error ?? '' })}</p>
+        const result = done.result as ImportResponse
+        const wrote = result.created.length
         const objects = result.attachmentWritten ?? 0
         /*
          * 落地算成功有两种：写了会话，或**只补了附件对象**（日志早就在库里、图是挂的——重导一次同一个包
-         * 正是那条修复路径）。两种都要把弹窗收掉并刷新，否则第二种会被当成"什么都没发生"。
+         * 正是那条修复路径）。两种都在结果页里说清；一条都没写进去时，把计划里那些问题摆出来。
          */
         if (wrote > 0 || objects > 0) {
           const failed = result.attachmentProblems?.length ?? 0
-          onDone(
-            [
-              t('import.done', { count: wrote, bytes: formatBytes(result.bytes) }),
-              objects > 0
-                ? t('import.doneAttachments', { count: objects, bytes: formatBytes(result.attachmentWrittenBytes ?? 0) })
-                : null,
-              // 落地失败的那几个对象不静默：界面上那句"图片加载失败"正是它们，而用户在这里才知道是为什么。
-              failed > 0 ? t('import.attachmentProblems', { count: failed }) : null,
-            ]
-              .filter((line): line is string => line !== null)
-              .join(' '),
+          return (
+            <div className="dsm-planBody">
+              <div className="dsm-ok">{t('import.done', { count: wrote, bytes: formatBytes(result.bytes) })}</div>
+              {objects > 0 && (
+                <div className="dsm-ok">
+                  {t('import.doneAttachments', {
+                    count: objects,
+                    bytes: formatBytes(result.attachmentWrittenBytes ?? 0),
+                  })}
+                </div>
+              )}
+              {/* 落地失败的那几个对象不静默：界面上那句"图片加载失败"正是它们，而用户在这里才知道是为什么。 */}
+              {failed > 0 && <p className="dsm-warn">{t('import.attachmentProblems', { count: failed })}</p>}
+              <ProblemsBlock t={t} problems={result.problems} />
+            </div>
           )
-          void reload()
-          return
         }
-        setPending((current) => (current === null ? current : { ...current, plan: result }))
+        return (
+          <div className="dsm-planBody">
+            <div className="dsm-warn">
+              {planned === null
+                ? result.error ?? ''
+                : t('import.planSummary', {
+                    create: planned.entries.filter((entry) => entry.action === 'create').length,
+                    skip: planned.entries.filter((entry) => entry.action === 'skip').length,
+                    bytes: formatBytes(planned.bytes),
+                  })}
+            </div>
+            <ProblemsBlock t={t} problems={result.problems} />
+          </div>
+        )
       },
-      (cause) => {
-        setBusy(null)
-        setProgress(null)
-        setPending((current) => (current === null ? current : { ...current, error: cause instanceof Error ? cause.message : String(cause) }))
+      {
+        onChange: (done) => {
+          if (!done.ok) return
+          const result = done.result as ImportResponse
+          if (result.created.length > 0 || (result.attachmentWritten ?? 0) > 0) void reload()
+        },
       },
     )
   }
@@ -264,15 +290,20 @@ export function ImportPanel({
   /** 这个宿主落不了的（没有附件服务、认不出引用）：要如实说出来，不能让用户以为图也导进来了。 */
   const attachmentUnavailable = planAttachments.filter((item) => item.action === 'unavailable').length
 
-  /** 弹窗处在哪一段：填表单 → 看计划 → 正在写盘。三段同处一个弹窗（与删除、迁移、回滚同一套形状）。 */
-  const phase: 'form' | 'plan' | 'apply' = pending === null ? 'form' : busy === 'apply' ? 'apply' : 'plan'
+  /**
+   * 弹窗处在哪一段：填表单 → 看计划。
+   *
+   * 原来还有第三段"正在写盘"：确认之后这枚弹窗自己变成进度窗，做完再消失。现在那一段交给状态窗
+   * （见 [RunDialog.tsx](./RunDialog.tsx)），这里只管"选包 + 看计划"。
+   */
+  const phase: 'form' | 'plan' = pending === null ? 'form' : 'plan'
 
   return (
     <Modal
       open
       onClose={onClose}
       // 标题跟着那一段走：填表单时是"导入会话包"，看计划时是"将要写入"，写盘时是"导入中…"。
-      title={t(phase === 'form' ? 'import.dialogTitle' : phase === 'apply' ? 'import.applying' : 'import.confirmTitle')}
+      title={t(phase === 'form' ? 'import.dialogTitle' : 'import.confirmTitle')}
       closeLabel={t('close')}
       className="dsm-dialog"
       contentClassName="dsm-dialogContent"
@@ -302,15 +333,15 @@ export function ImportPanel({
               「取消」在这一段是**回表单**（不是关窗）：包与目标目录还在，改一改再算一次比重选一遍省事。
               写盘那一趟里它照旧禁用——那几个动作关掉窗口只是把进度藏起来，结果照样会丢。
             */}
-            <Button variant="outline" onClick={() => setPending(null)} disabled={busy === 'apply'}>
-              {phase === 'apply' ? t('cancel') : t('import.back')}
+            <Button variant="outline" onClick={() => setPending(null)}>
+              {t('import.back')}
             </Button>
             <Button
               variant="primary"
               onClick={applyImport}
-              disabled={busy === 'apply' || plan === null || !plan.ok || (createCount === 0 && attachmentAdds === 0)}
+              disabled={plan === null || !plan.ok || (createCount === 0 && attachmentAdds === 0)}
             >
-              {busy === 'apply' ? t('import.applying') : t('import.apply')}
+              {t('import.apply')}
             </Button>
           </>
         )
@@ -364,13 +395,6 @@ export function ImportPanel({
 
         {phase !== 'form' && (
           <>
-            {/* 写盘那一段：正文换成进度（上面那张计划表说的是"将要"，这时候已经过期了）。 */}
-            {phase === 'apply' &&
-              (progress === null ? (
-                <p className="dsm-hint">{t('progress.waiting')}</p>
-              ) : (
-                <ProgressBlock t={t} progress={progress} note={t('import.progress.note')} />
-              ))}
             {phase === 'plan' && plan === null && (
               <>
                 <p className="dsm-hint">{t('dialog.previewing')}</p>
