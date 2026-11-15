@@ -4310,6 +4310,25 @@ test('客户端产物：删除弹窗摆出清单与备份位置，计划不 ok �
 
   const bad = render(false)
   assert.ok(bad.text.some((item) => String(item) === 's-9 还活在宿主内存里'), '计划里的问题清单照旧摆出来')
+  // 区分度：结论一句 + 一块"被标出来"的清单（淡告警底 + 左边细线），每条一行、标题带条数。
+  // 原来是一串同色的橙色大段（`.dsm-problems` + 每条 `.dsm-warn`），结论、清单、说明长得一模一样。
+  assert.ok(
+    bad.recorded.some((node) => String(node.props?.className) === 'dsm-warnBlock'),
+    '问题清单要画成一块（与「上次同步」那块同一个类）',
+  )
+  assert.ok(
+    bad.recorded.some((node) => String(node.props?.className) === 'dsm-leftoverRow'),
+    '每条问题各占一行（发丝线分隔）',
+  )
+  assert.equal(
+    bad.recorded.some((node) => String(node.props?.className) === 'dsm-problems'),
+    false,
+    '不再用那串同色的段落',
+  )
+  assert.ok(
+    bad.text.some((item) => String(item) === 'manage.delete.problemsTitle:{"count":1}'),
+    '块标题说清有几条',
+  )
   assert.equal(primaryOf(bad.recorded).props.disabled, true, '计划不 ok 时确认按钮禁用（不能一边报问题一边让删）')
 
   // 计划还没回来那一段（弹窗已经被点开、宿主还没答）：正文是"预演中…"，确认同样禁用——这一格不能

@@ -1141,19 +1141,39 @@ export function ManagePanel({
               <ProgressBlock t={t} progress={progress} note={t('manage.delete.progress.note')} />
             ))}
           {busy !== 'apply' && pending.plan !== null && (
-            <>
-              <p className={pending.plan.preview.ok ? 'dsm-ok' : 'dsm-warn'}>{pending.plan.summary}</p>
+            /* 块间 12px（`.dsm-planBody`，与同步计划那一段同一套节奏）、块内 4–6px；正文层那 8px
+               只留给"这一整块"与弹窗其它部分之间。 */
+            <div className="dsm-planBody">
+              {/*
+                结论、清单、说明各占一块，块与块之间靠对话框正文那 20px 的节奏；用 <div> 而不是 <p>——
+                <p> 自带 1em 的上下边距，会和那 20px 叠成 32px，四行字看着一样松、谁也不挨着谁。
+              */}
+              <div className={`dsm-planVerdict ${pending.plan.preview.ok ? 'dsm-ok' : 'dsm-warn'}`}>
+                {pending.plan.summary}
+              </div>
+              {/*
+                没做到的那几条：与「上次同步」那张卡里那块同一种画法（淡告警底 + 左边一道细线，标题是个
+                小标签，逐条原话用正文色、发丝线分隔）。原来它们是一串同色的橙色大段——结论、清单、说明
+                三件事看上去一样，读不出哪句是"不能删"，也读不出有几条。
+              */}
               {pending.plan.problems.length > 0 && (
-                <div className="dsm-problems">
-                  {pending.plan.problems.map((problem) => (
-                    <p key={problem} className="dsm-warn">
-                      {problem}
+                <div className="dsm-warnBlock">
+                  <div className="dsm-leftovers">
+                    <p className="dsm-leftoversTitle">
+                      {t('manage.delete.problemsTitle', { count: pending.plan.problems.length })}
                     </p>
-                  ))}
+                    <ul className="dsm-listPlain">
+                      {pending.plan.problems.map((problem) => (
+                        <li key={problem} className="dsm-leftoverRow">
+                          <span>{problem}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
                 </div>
               )}
               {syncConfigured && (
-                <>
+                <div className="dsm-fieldGroup">
                   <div className="dsm-options">
                     <Checkbox
                       checked={deleteRemote}
@@ -1161,11 +1181,12 @@ export function ManagePanel({
                       onChange={setDeleteRemote}
                     />
                   </div>
-                  {/* 说明另起一行：与勾选框同一行时它会被挤成一小段贴着标签，读起来像标签的一部分。 */}
-                  {deleteRemote && <p className="dsm-hint">{t('manage.delete.remoteHint')}</p>}
-                </>
+                  {/* 说明另起一行、紧贴这一枚勾（6px）：与勾选框同一行时它会被挤成贴着标签的一小段，
+                      读起来像标签的一部分；离得太远又会被读成另一件事。 */}
+                  {deleteRemote && <div className="dsm-hint">{t('manage.delete.remoteHint')}</div>}
+                </div>
               )}
-              <p className="dsm-hint">{t('manage.delete.backupTo')}</p>
+              <div className="dsm-hint">{t('manage.delete.backupTo')}</div>
               <SessionListBox>
                 {pending.plan.preview.entries.map((entry) => (
                   <SessionStaticRow
@@ -1181,7 +1202,7 @@ export function ManagePanel({
                   />
                 ))}
               </SessionListBox>
-            </>
+            </div>
           )}
         </ConfirmDialog>
       )}

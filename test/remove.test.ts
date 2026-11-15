@@ -203,9 +203,9 @@ test('宿主内存里活着的会话拒删：进 problems，不进待删条目�
   const plan = await planRemoval(withLive, { sessionIds: ['session-doomed'] })
   assert.equal(plan.ok, false)
   assert.deepEqual(plan.entries, [])
-  assert.match(plan.problems.join('\n'), /还在宿主内存里活着/)
+  assert.match(plan.problems.join('\n'), /session-doomed 还开着（宿主把它留在内存里）/)
   // 拒绝的那句话必须给出出路：Web 端没有单条关闭的动作，"先关掉它"是做不到的。
-  assert.match(plan.problems.join('\n'), /重启 DSH 让宿主放手，之后别先点开它再删/)
+  assert.match(plan.problems.join('\n'), /重启 DSH 之后再删/)
   const run = await runRemoval(withLive, { sessionIds: ['session-doomed'] }, { apply: true })
   assert.equal(run.applied, false)
   assert.equal(existsSync(sessionDir(sandbox.sessionsRoot, sandbox.cwdA, 'session-doomed')), true)
@@ -221,7 +221,10 @@ test('不在库里的 id 与空选择各自给出可读的拒绝，别的会话�
 
   const unknown = await runRemoval(deps(sandbox), { sessionIds: ['session-doomed', 'session-ghost'] }, { apply: false })
   assert.equal(unknown.plan.ok, false)
-  assert.deepEqual(unknown.plan.problems, ['session session-ghost 不在库里（可能已经被删掉了）'])
+  assert.deepEqual(unknown.plan.problems, ['session-ghost 不在库里：可能已经删掉了。'])
+  // 结论那句话不再把问题拼进来：拼进去之后弹窗里同一句话会出现两次（结论一次、清单一次）。
+  assert.equal(unknown.summary, '这次一条都没删。')
+  assert.equal(unknown.summary.includes('不在库里'), false, '原因只在清单里说一遍')
   // 计划不 ok 时执行阶段整体拒绝，连那条存在的也不删
   const apply = await runRemoval(deps(sandbox), { sessionIds: ['session-doomed', 'session-ghost'] }, { apply: true })
   assert.equal(apply.applied, false)
@@ -306,7 +309,10 @@ test('只删一条子智能体：父会话还在库里 → 拒绝，并告诉用
   const plan = await planRemoval(deps(sandbox), { sessionIds: ['session-child'] })
   assert.equal(plan.ok, false, '子智能体不能被单独操作')
   assert.equal(plan.entries.length, 0, '拒绝的计划里不该有要删的条目')
-  assert.match(plan.problems.join('; '), /session-child 是子智能体会话（它跟着父会话走）：请改点名它的父会话 父会话（session-parent）/)
+  assert.match(
+    plan.problems.join('; '),
+    /session-child 是子智能体，跟着父会话走：请改点名它的父会话 父会话（session-parent）。/,
+  )
 
   // 点了父会话就不一样了：子智能体跟着它一起走
   const withParent = await planRemoval(deps(sandbox), { sessionIds: ['session-parent'] })
@@ -326,8 +332,8 @@ test('嵌套的单独子智能体：拒掉外层之后，里层的父也一起�
   assert.equal(plan.ok, false)
   assert.deepEqual(plan.entries, [], '被拒的那些不该出现在"要删的东西"里')
   assert.equal(plan.problems.length, 2, plan.problems.join('; '))
-  assert.match(plan.problems.join('; '), /session-r 是子智能体会话/)
-  assert.match(plan.problems.join('; '), /session-x 是子智能体会话/)
+  assert.match(plan.problems.join('; '), /session-r 是子智能体/)
+  assert.match(plan.problems.join('; '), /session-x 是子智能体/)
 })
 
 test('孤儿（父会话已经不在库里）：没有可跟随的会话，允许单独收拾', async () => {
@@ -371,7 +377,7 @@ test('活着的后代挡住整族：计划不 ok、执行一条都不删，问�
   assert.equal(plan.ok, false)
   // 活着的后代不进条目（界面不该把它列成待删项），但它的存在挡住整个计划
   assert.deepEqual(plan.entries.map((entry) => entry.id), ['session-parent'])
-  assert.match(plan.problems.join('\n'), /session session-child 还在宿主内存里活着/)
+  assert.match(plan.problems.join('\n'), /session-child 还开着（宿主把它留在内存里）/)
   assert.match(plan.problems.join('\n'), /子智能体，跟着 父会话 一起删/)
 
   const run = await runRemoval(withLive, { sessionIds: ['session-parent'] }, { apply: true })

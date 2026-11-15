@@ -339,8 +339,9 @@ export const zh = {
   'manage.delete.remote': '同时删除远端',
   'manage.delete.remoteHint':
     '远端这一格一起删掉，别的机器上的副本会在它下次同步时跟着删。远端没有备份。',
+  'manage.delete.problemsTitle': '没做到 {count} 条',
   'manage.delete.acknowledge':
-    '删掉之后这些会话的日志就没了；备份留在上面那个目录里，需要时去「备份与回滚」恢复。',
+    '删掉之后这些会话的日志就没了；需要时去「备份与回滚」恢复。',
   'manage.delete.hint':
     '删除先把整个会话目录备份到本插件的备份根，再删掉它；还活在宿主内存里的会话删不掉，做法见「说明」。',
   'manage.delete.via': '随父删',
@@ -1014,8 +1015,9 @@ export const en: LocaleDictOf<typeof NS> = {
   'manage.delete.remote': 'Delete from the remote too',
   'manage.delete.remoteHint':
     'Also deletes this machine\'s remote bundle; copies on other machines go when those machines next sync. The remote copy has no backup.',
+  'manage.delete.problemsTitle': '{count} could not be done',
   'manage.delete.acknowledge':
-    'After this their logs are gone. The backup stays in the folder above; restore it from Backups & rollback if needed.',
+    'The session logs are gone after this; restore them from Backups & rollback if needed.',
   'manage.delete.hint': 'Deleting backs the session directory up into this plugin’s backup root first; a live session cannot be deleted — see Help.',
   'manage.delete.via': 'with parent',
   'manage.delete.viaTip':
