@@ -1838,26 +1838,43 @@ export async function readRemoteLibrary(dav: DavPort, settings: SyncSettings): P
     problems.push(`列远端 ${SYNC_NAMESPACE_DIR}/ 失败：${error instanceof Error ? error.message : String(error)}`)
     return { machines, entries, indexes, problems }
   }
-  for (const dirName of machines) {
-    let text: string
-    try {
-      const bytes = await dav.get(`${SYNC_NAMESPACE_DIR}/${dirName}/${SYNC_INDEX_FILE}`, {
-        maxBytes: MAX_INDEX_TEXT_BYTES,
-      })
-      if (bytes.length > MAX_INDEX_TEXT_BYTES) {
-        problems.push(
-          `读远端 ${dirName}/${SYNC_INDEX_FILE} 失败：索引 ${bytes.length} 字节，超过上限 ${MAX_INDEX_TEXT_BYTES}`,
-        )
-        continue
+  /*
+   * 先把所有格子的 `index.json` 一起读出去。每台机器的格子是独立对象，读一份的往返（跨公网时几百毫秒）
+   * 不该叠在下一份前面；一台机器的格子通常不到十份，一次性发出去不会把远端压垮。
+   *
+   * 读回来之后仍按 `machines` 的顺序合并：同一 id 在多格出现时，"谁领先"的判据（代次关系、字节数、
+   * 活动时间、格子名兜底）依赖固定的遍历顺序，并发只省等待，不改结果。
+   */
+  type IndexRead = { dirName: string; text: string } | { dirName: string; error: unknown }
+  const reads = await Promise.all(
+    machines.map(async (dirName): Promise<IndexRead> => {
+      try {
+        const bytes = await dav.get(`${SYNC_NAMESPACE_DIR}/${dirName}/${SYNC_INDEX_FILE}`, {
+          maxBytes: MAX_INDEX_TEXT_BYTES,
+        })
+        if (bytes.length > MAX_INDEX_TEXT_BYTES) {
+          return {
+            dirName,
+            error: new Error(`索引 ${bytes.length} 字节，超过上限 ${MAX_INDEX_TEXT_BYTES}`),
+          }
+        }
+        return { dirName, text: bytes.toString('utf8') }
+      } catch (error) {
+        return { dirName, error }
       }
-      text = bytes.toString('utf8')
-    } catch (error) {
+    }),
+  )
+  for (const read of reads) {
+    const { dirName } = read
+    if ('error' in read) {
       // 404 = 这台机器还没推送过内容（或推送了一半）：不算问题，它这次不贡献任何会话。
-      if ((error as { status?: number } | null)?.status === 404) continue
-      problems.push(`读远端 ${dirName}/${SYNC_INDEX_FILE} 失败：${error instanceof Error ? error.message : String(error)}`)
+      if ((read.error as { status?: number } | null)?.status === 404) continue
+      problems.push(
+        `读远端 ${dirName}/${SYNC_INDEX_FILE} 失败：${read.error instanceof Error ? read.error.message : String(read.error)}`,
+      )
       continue
     }
-    const index = parseIndex(text, dirName, problems)
+    const index = parseIndex(read.text, dirName, problems)
     if (index === undefined) continue
     indexes.set(dirName, index)
     for (const entry of index.entries) {
