@@ -149,7 +149,7 @@ tsconfig.client.json Web Client 自己的类型工程（DOM + JSX；Host 那份�
 | `src/path-repair.ts` | 修**已经落地**的日志：从日志里推源根（末段与本机会话根同名的最长前缀，推不出就让调用方用 `from` 给）、算只读计划（有取值映射不上就整条不修）、落地（备份 → 逐文件原子替换 → 修完再规划一遍必须为空）；工具 `repair_session_paths` 的编排在这一层 | 无 |
 | `src/registry.ts` | 注册表启动不变式校验、`reHome()`、原子落盘 | 无 |
 | `src/discovery.ts` | 项目目录扫描 + 只解首帧读 header（发现阶段快，只读文件开头 64 KB，解不出来再退回整份），可注入标题读取器与投影记录读取器；`locateSession()` 按 id 直接找一条会话（目录名就是 `encodeSegment(id)`，找不到才退回整库扫描），内容视图与日志对比走它 | 无 |
-| `src/scan-cache.ts` | 库没变时复用上一次的扫描结果：指纹 = 目录清单 + 每个日志与投影缓存文件的 `size`/`mtimeMs`，加上粗粒度时间戳的 racy 窗口；只给 `GET /state` 用 | 无 |
+| `src/scan-cache.ts` | 库没变时复用上一次的扫描结果：指纹 = 目录清单 + 每个日志与投影缓存文件的 `size`/`mtimeMs`，加上粗粒度时间戳的 racy 窗口；页面打开与导出 / 归档 / 重算名称的发现阶段用它 | 无 |
 | `src/projection-cache.ts` | 读宿主投影缓存的单条记录（标题、`blank` 等列表元数据）；`createProjectionReader()` 按 `size + mtimeMs + 身份` 记住解析结果，重扫时只重解变了的那些 | 无 |
 | `src/session-title.ts` | 会话名称：宿主投影缓存优先，缺席时有界地解日志开头 | 无 |
 | `src/visibility.ts` | 侧边栏可见性与「未分组」判据：子智能体 / 空白 / 已归档三条理由（候选与界面共用一份）、`isUngrouped()`＝没认领（`accounting.ts`）**且** 会显示 | 无 |

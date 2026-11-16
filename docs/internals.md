@@ -262,7 +262,8 @@
   与同步的两枚活动时间都从这一份取。
 - [库没变时复用上一次的扫描结果](../.agents/notes/implemented/architecture/2026-10-19-reuse-scan-results-between-refreshes.md)：
   指纹是目录清单加每个日志与投影缓存文件的 `size`/`mtimeMs`；粗粒度时间戳下的漏判由 racy 窗口兜住，
-  基准取"上一次取指纹的时刻"。只给 `GET /state` 用，不参与写盘判断。
+  基准取"上一次取指纹的时刻"。页面打开（`GET /state`）与导出 / 归档 / 重算名称的发现阶段用它；
+  迁移与同步落地前仍重扫，不参与写盘判断。
 - [投影记录解析一次就记住](../.agents/notes/implemented/architecture/2026-11-10-projection-record-parsed-once.md)：
   按 `size + mtimeMs + 身份` 记住解析过的那四个字段，重扫时只有刚被改写的那些重新解析：同一份库再扫一遍
   1159～1203 ms → 395～421 ms。

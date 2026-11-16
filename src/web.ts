@@ -727,6 +727,23 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
    */
   const scans = createScanCache()
   /*
+   * 导出、归档、重算名称这三处都要"按整库判断"（展开子智能体族、查同名、按标题认人），但它们原先直接
+   * 调同步的 `scanAll()`：整库 1400 多条冷扫要 1 秒以上，这期间 SSE 长连接与别的请求都排着队，而且
+   * 每次动作都重扫一遍。这里统一走缓存扫描（库没变就直接交上一次那份）与 `scanAsync()`（每个项目目录
+   * 之间让出事件循环）。
+   *
+   * `titles` 只给重算名称开：它按标题认人；导出与归档只在拒绝一条孤立子智能体时才去读父会话标题，
+   * 不值得为整库先折一遍。两组选项各自缓存，库变了都会重扫。
+   */
+  const scanForAction = (options: { titles?: boolean } = {}): Promise<DiscoveredSession[]> =>
+    scans.scanAsync(
+      paths.sessionsRoot,
+      decodeAll,
+      options.titles === true
+        ? { resolveTitle, projection, projectionDir: projectionCacheDir(paths.registryPath) }
+        : {},
+    )
+  /*
    * 同一条会话的日志被连着读好几页时只解压一次（见 log-text-cache.ts）。
    *
    * 与 `scans` 一样按 handler 实例活：内容视图一页 80 条事件，翻页与「查看全文」都走同一个文件；留一份
@@ -1029,7 +1046,7 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
       return
     }
 
-    const all = scanLibrary(paths.sessionsRoot, decodeAll)
+    const all = await scanForAction()
     const byId = new Map(all.map((session) => [session.id, session]))
     const named: string[] = ids.map((id) => String(id))
     const missing = named.filter((id) => !byId.has(id))
@@ -1832,7 +1849,7 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
     }
     const archived = fields['archived'] !== false
     // 子智能体不单独动：勾父会话时它跟着一起归档 / 取消归档（族是一个单位，见 family.ts）。
-    const all = scanLibrary(paths.sessionsRoot, decodeAll)
+    const all = await scanForAction()
     const lone = loneSubagentError(all, ids, resolveTitle)
     if (lone !== undefined) {
       sendJson(res, 400, { error: lone })
@@ -2114,7 +2131,7 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
       sendJson(res, 409, { error: '这个宿主没有会话名称服务（重新生成名称是它的能力），算不了标题' })
       return
     }
-    const all = scanLibrary(paths.sessionsRoot, decodeAll, { resolveTitle, projection })
+    const all = await scanForAction({ titles: true })
     // `includePinned`：连 `user` 源（用户改过名，或者那条标题本来是脚本 / 导入写下的）也一起重算。
     // 界面**不传**这个字段（默认语义就是"别动用户的名字"），它给一次性清理用——只有显式 `true` 才算。
     const includePinned = fields['includePinned'] === true

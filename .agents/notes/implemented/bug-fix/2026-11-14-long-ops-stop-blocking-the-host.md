@@ -51,6 +51,10 @@ Status: implemented
 - **扫库记住首帧**：`readLogHeaderForScan()` 按 `size:mtimeMs` 缓存每个日志首帧解出来的 header，
   只给扫描用（写盘路径仍走 `readLogHeader()` 现读）。另加 git 式 racy 规则：记录不足 1 秒的条目不
   信任。整库 1475 个文件：冷扫 0.8 秒 → 库没大改时 **40 毫秒**。
+- **导出 / 归档 / 重算名称的发现阶段走缓存扫描**：三处原先直接调同步的 `scanAll()`，整库冷扫
+  1 秒以上、每次动作都重扫一遍，而且这一整段没有让出事件循环。改用 `createScanCache().scanAsync()`
+  （库没变时直接交上一次的结果，项目目录之间让出）；重算名称那一路带标题，导出与归档不带，
+  两套选项各自缓存，库变了都会重扫。
 
 ## Alternatives considered
 
