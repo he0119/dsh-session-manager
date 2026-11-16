@@ -13,6 +13,7 @@ import { decompress } from 'fzstd'
 import { encodeSegment, projectionCacheDir, sessionDir } from '../src/paths.ts'
 import { projectKey } from '../src/project-key.ts'
 import { readRegistry, validateRegistry, writeRegistryAtomic } from '../src/registry.ts'
+import { createRemoteWriteGate } from '../src/remote-write.ts'
 import { createDavClient } from '../src/dav.ts'
 import type { AttachmentPort, AttachmentRef } from '../src/attachments.ts'
 import { SYNC_INDEX_FILE, SYNC_INDEX_UNIT, SYNC_INDEX_VERSION, SYNC_NAMESPACE_DIR } from '../src/sync.ts'
@@ -999,6 +1000,54 @@ test('GET/POST /sync?mode=tidy：只整理自己那一格，预演不删、落�
       1,
     )
   } finally {
+    rmSync(sandbox.base, { recursive: true, force: true })
+  }
+})
+
+test('POST /sync：写权限被别的入口拿着时，落地与整理都回 409，一个字节不写', async () => {
+  const sandbox = makeSandbox('web-sync-busy')
+  let puts = 0
+  const dav: DavPort = {
+    baseUrl: 'https://dav.example.com/dsh',
+    list: async () => {
+      throw new Error('拿不到写权限时不该读远端')
+    },
+    get: async () => {
+      throw new Error('拿不到写权限时不该读远端')
+    },
+    put: async () => {
+      puts += 1
+    },
+    delete: async () => {},
+    ensure: async () => {},
+    probe: async () => {
+      throw new Error('拿不到写权限时不该读远端')
+    },
+  }
+  const gate = createRemoteWriteGate()
+  const hold = gate.tryAcquire('自动推送')!
+  const handlers = createApiHandlers(
+    deps(sandbox, {
+      sync: async () => ({
+        settings: { url: 'https://dav.example.com/dsh', machineId: 'robot-a', mapping: {} },
+        dav,
+      }),
+      remoteWrite: gate,
+    }),
+  )
+  try {
+    for (const [method, url] of [
+      ['POST', `${API_PREFIX}/sync?mode=apply`],
+      ['POST', `${API_PREFIX}/sync?mode=tidy`],
+    ] as const) {
+      const { res, captured } = fakeRes()
+      await handlers['GET|POST /sync']!(fakeReq(method, url), res)
+      assert.equal(captured.status, 409, `${url} 应当被写权限挡住`)
+      assert.match(String(payload(captured).error), /自动推送.*还在跑/)
+    }
+    assert.equal(puts, 0, '被挡住时不该写远端')
+  } finally {
+    hold()
     rmSync(sandbox.base, { recursive: true, force: true })
   }
 })
@@ -2419,6 +2468,56 @@ test('POST /migrate：落地时把 备份 / 改写 / 搬目录 / 注册表 / 复
     .filter((item) => item['phase'] === 'backup')
     .map((item) => item['label'])
   assert.deepEqual(labels, ['session-b', '会话甲'], 'label 优先用标题，没有标题的那条退回 id')
+})
+
+test('POST /delete：别的入口拿着写权限时只删本机，远端那一步如实报没删', async () => {
+  const sandbox = makeSandbox('web-delete-remote-busy')
+  writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000, { title: '远端这次不删' })
+  const fixture = await startDavFixture({ root: join(sandbox.base, 'dav') })
+  const dav = createDavClient({ baseUrl: fixture.url })
+  try {
+    const push = createApiHandlers(
+      deps(sandbox, {
+        sync: async () => ({ settings: { url: fixture.url, machineId: 'robot-a', mapping: {} }, dav }),
+      }),
+    )
+    const pushed = fakeRes()
+    await push['GET|POST /sync']!(
+      fakeReq('POST', `${API_PREFIX}/sync?mode=apply`, Buffer.from(JSON.stringify({ apply: true }))),
+      pushed.res,
+    )
+    assert.equal(pushed.captured.status, 200)
+
+    const gate = createRemoteWriteGate()
+    const hold = gate.tryAcquire('自动推送')!
+    const handlers = createApiHandlers(
+      deps(sandbox, {
+        sync: async () => ({ settings: { url: fixture.url, machineId: 'robot-a', mapping: {} }, dav }),
+        remoteWrite: gate,
+      }),
+    )
+    const { res, captured } = fakeRes()
+    await handlers['POST /delete']!(
+      fakeReq(
+        'POST',
+        `${API_PREFIX}/delete`,
+        Buffer.from(JSON.stringify({ sessionIds: ['session-a'], mode: 'apply', alsoRemote: true })),
+      ),
+      res,
+    )
+    assert.equal(captured.status, 200, '本机删除照常做完')
+    const body = payload(captured)
+    const remote = body['remote'] as Record<string, unknown>
+    assert.equal(remote['removed'], 0, '远端一个包都没删')
+    assert.match((remote['problems'] as string[]).join('\n'), /自动推送.*远端这次没有删/)
+    // 远端那个包还在（这次没删）；本机目录已经没了。
+    assert.ok((await dav.get('dsh-session-manager/robot-a/session-a.dshsess')).length > 0)
+    assert.equal(existsSync(sessionDir(sandbox.sessionsRoot, CWD_A, 'session-a')), false)
+    hold()
+  } finally {
+    await fixture.close()
+    rmSync(sandbox.base, { recursive: true, force: true })
+  }
 })
 
 test('POST /delete：先备整个会话目录再删，逐条报进度（预演只报扫描那一段）', async () => {

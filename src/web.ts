@@ -68,6 +68,11 @@ import {
 import { type EffectMode, type PickerKind, type RegistryOps, type ResolvedPaths, type SyncInfo, type SyncRuntime } from './tools.ts'
 import { lastRunView, type SyncRunRecord } from './sync-state.ts'
 import {
+  createRemoteWriteGate,
+  type RemoteWriteGate,
+  type RemoteWriteOwner,
+} from './remote-write.ts'
+import {
   applyImport,
   buildBundleAsync,
   entryBytes,
@@ -115,6 +120,12 @@ export interface ApiDeps {
   now?: () => Date
   /** 插件版本，写进包的来源信息。 */
   pluginVersion?: string
+  /**
+   * 写远端格子的互斥锁（手动同步落地、整理远端、删除远端共用）。
+   *
+   * 由入口注入，与自动推送、模型工具共用同一把；缺席时本模块自己造一把，只够覆盖本端口里的三处。
+   */
+  remoteWrite?: RemoteWriteGate
   /**
    * 宿主注册表动作的探测（`immediate` 还是 `restart-required` 由它推出来）。
    *
@@ -606,6 +617,12 @@ function fileName(count: number, at: Date): string {
   return `dsh-sessions-${count}-${stamp}.dshsess`
 }
 
+/** "写远端那把锁被谁拿着"的一句话；没人拿着时给一句通用的。 */
+function remoteBusyMessage(owner: RemoteWriteOwner | undefined): string {
+  if (owner === undefined) return '另一件事正在写远端，等它结束再试'
+  return `上一轮${owner.label}还在跑（${new Date(owner.startedAt).toLocaleTimeString('zh-CN')} 开始），等它结束再试`
+}
+
 /**
  * 自动推送那一轮的响应体。
  *
@@ -691,6 +708,8 @@ function autoPushLastPayload(outcome: AutoPushOutcome | undefined): Record<strin
 export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingMessage, res: ServerResponse) => Promise<void>> {
   const { paths, decodeAll } = deps
   const now = deps.now ?? ((): Date => new Date())
+  /** 写远端格子的闸；生产由入口注入同一把，测试缺席时自己造。 */
+  const remoteWrite = deps.remoteWrite ?? createRemoteWriteGate()
   // 标题只给界面看（`/state`）与导入预演看（包自己带着日志）。导出那条路上没人读它，
   // 所以那里扫库时刻意不传 resolveTitle——别为用不上的东西花钱。
   const resolveTitle =
@@ -1463,14 +1482,27 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
         })
         return
       }
-      await streamResult(res, async (report) => {
-        const outcome = await runTidy(syncDeps, { apply: tidyApply, onProgress: report })
-        return {
-          mode: tidyApply ? 'apply' : 'plan',
-          remote: { url: runtime.settings.url, machineId: runtime.settings.machineId },
-          ...outcome,
-        }
-      })
+      /*
+       * 整理与落地写的是同一份索引：拿不到写权限就不开始，避免用旧快照盖掉别人刚写进去的条目。
+       * 预演（GET）只读远端，不拿锁。
+       */
+      const release = tidyApply ? remoteWrite.tryAcquire('整理远端') : undefined
+      if (tidyApply && release === undefined) {
+        sendJson(res, 409, { error: remoteBusyMessage(remoteWrite.current()) })
+        return
+      }
+      try {
+        await streamResult(res, async (report) => {
+          const outcome = await runTidy(syncDeps, { apply: tidyApply, onProgress: report })
+          return {
+            mode: tidyApply ? 'apply' : 'plan',
+            remote: { url: runtime.settings.url, machineId: runtime.settings.machineId },
+            ...outcome,
+          }
+        })
+      } finally {
+        release?.()
+      }
       return
     }
 
@@ -1485,6 +1517,15 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
       sendJson(res, 409, {
         error: `上一轮同步还在跑（${new Date(applying.startedAt).toLocaleTimeString('zh-CN')} 开始），等它结束再试`,
       })
+      return
+    }
+    /*
+     * 落地要写自己那一格的索引与包，先拿写权限：自动推送、整理远端、删除远端、模型工具可能正拿着。
+     * 预演（!apply）只读，不拿锁。
+     */
+    const releaseRemote = apply ? remoteWrite.tryAcquire('同步') : undefined
+    if (apply && releaseRemote === undefined) {
+      sendJson(res, 409, { error: remoteBusyMessage(remoteWrite.current()) })
       return
     }
     sendEventStream(res)
@@ -1624,6 +1665,8 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
         panelEmit({ type: 'sync', applying: null, last: lastApply })
       }
       sendEvent(res, { type: 'error', error: message })
+    } finally {
+      releaseRemote?.()
     }
     res.end()
   }
@@ -1689,10 +1732,27 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
           problems: ['这个宿主没有配置 WebDAV 同步，远端什么都没删（下次同步可能又拉回来）'],
         }
       }
-      return removeRemoteCopies(
-        { dav: runtime.dav, settings: runtime.settings, ...(deps.now === undefined ? {} : { now: deps.now }) },
-        ids,
-      )
+      /*
+       * 本机已经删完了，这一步只清远端；拿不到写权限就如实报"远端这次没删"，不排队等。
+       * 排队会拿着删除之前读到的索引去写，反而可能把别人刚写的条目盖掉。
+       */
+      const release = remoteWrite.tryAcquire('删除远端')
+      if (release === undefined) {
+        return {
+          removed: 0,
+          bytes: 0,
+          others: [],
+          problems: [`${remoteBusyMessage(remoteWrite.current())}，远端这次没有删`],
+        }
+      }
+      try {
+        return await removeRemoteCopies(
+          { dav: runtime.dav, settings: runtime.settings, ...(deps.now === undefined ? {} : { now: deps.now }) },
+          ids,
+        )
+      } finally {
+        release()
+      }
     },
   }
 

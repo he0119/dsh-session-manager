@@ -34,6 +34,7 @@ import {
 } from './tools.ts'
 import type { AutoPushTimer } from './sync.ts'
 import { readSyncRun, writeSyncRun } from './sync-state.ts'
+import { createRemoteWriteGate } from './remote-write.ts'
 import { API_PREFIX, registerWebRoutes, type WebServerLike } from './web.ts'
 
 // 配置 schema 必须从入口导出：Loader 拿它校验 profile 里那一节，设置接缝拿它在插件管理器里生成
@@ -83,7 +84,13 @@ export function apply(ctx: Context, config: PluginConfigInput = {}): () => void 
   }
 
   const paths = resolvePaths(config)
-  const disposers = registerTools(ctx, config)
+  /*
+   * 写远端格子的互斥锁：手动同步、整理远端、删除远端、自动推送、模型工具 sync_sessions 共用这一把。
+   * 它们各自在开始前读一次远端、落地时整份重写索引；两件一起跑时后写的会用旧快照盖掉前一个的条目。
+   * 锁是进程内的；跨进程（桌面版与 Web 版同时跑）挡不住，那要 WebDAV 的条件写，见 remote-write.ts。
+   */
+  const remoteWrite = createRemoteWriteGate()
+  const disposers = registerTools(ctx, config, { remoteWrite })
 
   // 项目身份（git remote）只在这里造一份：它有进程内缓存（一个目录只问一次 git），而 /state 是页面的
   // 热路径——每次请求都新建一份等于把缓存扔掉。见 src/repo.ts 的 createRepoLookup()。
@@ -115,7 +122,10 @@ export function apply(ctx: Context, config: PluginConfigInput = {}): () => void 
    *
    * 配置改了不必重启：每次事件来时现读一遍配置（见 `createAutoPushTimer()`）。
    */
-  const autoPushPromise: Promise<AutoPushTimer | undefined> = resolveAutoPushRuntime(ctx, config, paths, { repoLocations }).then(
+  const autoPushPromise: Promise<AutoPushTimer | undefined> = resolveAutoPushRuntime(ctx, config, paths, {
+    repoLocations,
+    remoteWrite,
+  }).then(
     (resolved) => {
       if (resolved === undefined) return undefined
       info(
@@ -164,6 +174,7 @@ export function apply(ctx: Context, config: PluginConfigInput = {}): () => void 
       paths,
       decodeAll,
       pluginVersion: pluginVersion(),
+      remoteWrite,
       syncRun: {
         read: () => readSyncRun(home),
         write: (run) => writeSyncRun(home, run),

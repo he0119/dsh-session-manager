@@ -67,6 +67,7 @@ import { createGitRunner, repoLocation, createRepoLocationCache, type GitRunner,
 import { sessionMetaOfRecord } from './visibility.ts'
 import type { ProjectionCacheReader } from './projection-cache.ts'
 import { readRegistry, validateRegistry } from './registry.ts'
+import { createRemoteWriteGate, type RemoteWriteGate } from './remote-write.ts'
 import { takeEffectOnHostAll, type EffectDeps } from './take-effect.ts'
 import { relocateHeaderCwdShallow, relocateHeaderCwdText } from './session-log.ts'
 import type { TitleQuery } from './session-title.ts'
@@ -4463,6 +4464,12 @@ export interface AutoPushTimerDeps {
   /** 定时器工厂；缺省用全局的 `setTimeout` / `clearTimeout`（测试注入假的，不必真等）。 */
   setTimer?: (handler: () => void, ms: number) => unknown
   clearTimer?: (handle: unknown) => void
+  /**
+   * 写远端格子的互斥锁（与界面端点、工具共用同一把）。
+   *
+   * 缺省自己造一把：只测调度器时够用；生产由 `src/index.ts` 造一份交给所有入口。
+   */
+  remoteWrite?: RemoteWriteGate
 }
 
 /** 自动推送调度器的对外形状。 */
@@ -4558,6 +4565,8 @@ export function createAutoPushTimer(deps: AutoPushTimerDeps): AutoPushTimer {
   const note = (outcome: AutoPushOutcome): void => {
     lastOutcome = outcome
   }
+  /** 写自己那一格的闸；与手动同步、整理、删除远端、模型工具共用同一把（生产由入口注入）。 */
+  const gate = deps.remoteWrite ?? createRemoteWriteGate(now)
 
   const tick = async (options: { onProgress?: ProgressReporter } = {}): Promise<AutoPushOutcome> => {
     /*
@@ -4568,6 +4577,12 @@ export function createAutoPushTimer(deps: AutoPushTimerDeps): AutoPushTimer {
      */
     if (running !== undefined) return { ran: false, skip: 'busy', failures: failuresOf(lastOutcome) }
     if (!deps.clock.enabled()) return { ran: false, skip: 'disabled', failures: failuresOf(lastOutcome) }
+    /*
+     * 别的入口正在写远端（手动同步落地、整理、删除远端、工具）：这一轮直接跳过，不排队。排队会让它
+     * 拿着读于排队之前的快照去写，反而更容易盖掉别人刚写进去的东西；下一轮安静窗口会自己再来。
+     */
+    const release = gate.tryAcquire('自动推送')
+    if (release === undefined) return { ran: false, skip: 'busy', failures: failuresOf(lastOutcome) }
     const pending = (async (): Promise<AutoPushOutcome> => {
       const startedAt = now()
       runningState = { startedAt, progress: null }
@@ -4589,6 +4604,7 @@ export function createAutoPushTimer(deps: AutoPushTimerDeps): AutoPushTimer {
     try {
       return await pending
     } finally {
+      release()
       running = undefined
       runningState = undefined
       // 跑着的时候又来事件：这一轮读的是它开始之前的快照，那一轮得再补一次。
