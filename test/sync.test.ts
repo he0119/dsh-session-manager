@@ -754,6 +754,56 @@ test('sync：索引的自描述字段与附件 id 要校验，坏值不参与同
   assert.deepEqual(index?.entries[0]?.attachments, [{ kind: 'image', id: `sha256:${hex}` }])
 })
 
+test('readRemoteLibrary：各机器格的索引同时读，不按格子排队', async () => {
+  const names = ['alpha', 'beta', 'gamma']
+  let started = 0
+  let releaseAll: (() => void) | undefined
+  const allStarted = new Promise<void>((resolve) => {
+    releaseAll = resolve
+  })
+  const index = (machine: string): Buffer =>
+    Buffer.from(
+      JSON.stringify({
+        unit: SYNC_INDEX_UNIT,
+        version: SYNC_INDEX_VERSION,
+        machineId: machine,
+        entries: [],
+      }),
+    )
+  const dav: DavPort = {
+    baseUrl: 'https://dav.example.com/dsh',
+    list: async () => names.map((name) => ({ name, kind: 'collection' as const })),
+    get: async (path) => {
+      started += 1
+      if (started === names.length) releaseAll?.()
+      // 三台都开始读了才放行：串行实现会卡在这里，被下面的超时判红。
+      await allStarted
+      return index(path.split('/')[1] ?? '')
+    },
+    put: async () => {},
+    delete: async () => {},
+    ensure: async () => {},
+    probe: async () => {
+      throw new Error('这条用例不探测')
+    },
+  }
+  let timeout: NodeJS.Timeout | undefined
+  const guard = new Promise<never>((_, reject) => {
+    timeout = setTimeout(() => reject(new Error('索引读取没有并发：第一台还在等，后面的没开始')), 1000)
+  })
+  try {
+    const library = await Promise.race([
+      readRemoteLibrary(dav, { url: 'https://dav.example.com/dsh', machineId: 'alpha', mapping: {} }),
+      guard,
+    ])
+    assert.deepEqual(library.machines, names)
+    assert.equal(started, names.length, '三台都发起了读取')
+    assert.deepEqual(library.problems, [])
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout)
+  }
+})
+
 // ── 落地（真服务） ────────────────────────────────────────────────────────
 
 test('sync：端到端——A 推送、B 拉取，cwd 改写成 B 的路径且注册表跟着登记', async () => {
