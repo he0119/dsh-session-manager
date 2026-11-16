@@ -52,6 +52,19 @@ test('dav：put 自动建父集合，get 原样读回', async () => {
   })
 })
 
+test('dav：get 超过 maxBytes 时拒绝，并说清上限', async () => {
+  await withFixture('get-limit', async (_fixture, client) => {
+    await client.put('machines/robot-a/big', Buffer.alloc(1024))
+    const error = await client.get('machines/robot-a/big', { maxBytes: 16 }).then(
+      () => undefined,
+      (thrown: unknown) => thrown,
+    )
+    assert.ok(error instanceof DavError)
+    assert.equal(error.status, 413)
+    assert.match(error.message, /超过上限 16/)
+  })
+})
+
 test('dav：list 给出子项的种类与字节数，且不含自己', async () => {
   await withFixture('list', async (_fixture, client) => {
     await client.put('machines/robot-a/index.json', Buffer.from('{"a":1}', 'utf8'))

@@ -715,6 +715,45 @@ test('sync：索引解析宽容——坏 JSON / 缺 id / 没有代次都不炸�
   assert.match(problems.join('\n'), /读不出来的删除记录/)
 })
 
+test('sync：索引的自描述字段与附件 id 要校验，坏值不参与同步', () => {
+  const problems: string[] = []
+  assert.equal(parseIndex('{}', 'robot-a', problems), undefined)
+  assert.match(problems.join('\n'), /没有 entries 数组/)
+
+  assert.equal(
+    parseIndex(JSON.stringify({ unit: 'other-tool/sync', version: 3, entries: [] }), 'robot-a', problems),
+    undefined,
+  )
+  assert.match(problems.join('\n'), /不是本插件的索引/)
+
+  assert.equal(
+    parseIndex(JSON.stringify({ unit: 'dsh-session-manager/sync', version: 99, entries: [] }), 'robot-a', problems),
+    undefined,
+  )
+  assert.match(problems.join('\n'), /版本 99 不受支持/)
+
+  const hex = 'a'.repeat(64)
+  const index = parseIndex(
+    JSON.stringify({
+      unit: 'dsh-session-manager/sync',
+      version: 3,
+      entries: [
+        {
+          id: 'ok',
+          files: [{ version: 0, bytes: 3, sha256: 'b' }],
+          attachments: [
+            { kind: 'image', id: 'sha256:../../outside' },
+            { kind: 'image', id: `sha256:${hex}` },
+          ],
+        },
+      ],
+    }),
+    'robot-a',
+    problems,
+  )
+  assert.deepEqual(index?.entries[0]?.attachments, [{ kind: 'image', id: `sha256:${hex}` }])
+})
+
 // ── 落地（真服务） ────────────────────────────────────────────────────────
 
 test('sync：端到端——A 推送、B 拉取，cwd 改写成 B 的路径且注册表跟着登记', async () => {

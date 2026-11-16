@@ -75,6 +75,7 @@ export async function applyPlan(plan: RelocationPlan, options: ApplyOptions): Pr
   const sourceDirs = new Set(plan.sessions.map((session) => session.from))
   const backup = await createBackup({
     backupRoot,
+    sessionsRoot: plan.root,
     registryPath,
     sessions: plan.sessions,
     artifacts: artifactMoves,
