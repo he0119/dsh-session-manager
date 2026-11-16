@@ -16,6 +16,7 @@ import { createDavClient } from '../src/dav.ts'
 import { projectionCacheDir } from '../src/paths.ts'
 import { projectKey } from '../src/project-key.ts'
 import { readRegistry } from '../src/registry.ts'
+import { createRemoteWriteGate, type RemoteWriteGate } from '../src/remote-write.ts'
 import { remoteBundlePath, remoteIndexPath } from '../src/sync.ts'
 import {
   archiveOps,
@@ -184,6 +185,8 @@ async function makeHost(
     picker?: 'absent' | 'browse' | 'native' | 'broken'
     /** 宿主内存里活着的会话 id（有 `sessions` 服务才问得出来；缺省 = 这个宿主没有那个服务）。 */
     liveSessions?: string[]
+    /** 写远端格子的互斥锁（与界面、自动推送共用；缺省自己造一把）。 */
+    remoteWrite?: RemoteWriteGate
   } = {},
 ): Promise<{ ctx: Context; defs: CapturedTool[] }> {
   const defs: CapturedTool[] = []
@@ -281,7 +284,7 @@ async function makeHost(
     name: 'test-host',
     inject: ['tools'],
     apply: (ctx: Context) => {
-      registerTools(ctx, config)
+      registerTools(ctx, config, { ...(options.remoteWrite === undefined ? {} : { remoteWrite: options.remoteWrite }) })
     },
   })
   await fiber.await()
@@ -750,6 +753,28 @@ test('sync_sessions：没配 sync.url 时如实说"没配置"（不发任何请�
   assert.equal(result.applied, false)
   assert.match(result.problems.join('\n'), /没有配置 WebDAV 同步/)
   rmSync(sb.base, { recursive: true, force: true })
+})
+
+test('sync_sessions：别的入口拿着写权限时 apply 直接拒绝，不碰远端', async () => {
+  const sb = makeSandbox('tools-sync-busy')
+  const gate = createRemoteWriteGate()
+  const hold = gate.tryAcquire('自动推送')!
+  const config: PluginConfig = {
+    sessionsRoot: sb.root,
+    registryPath: sb.registryPath,
+    backupRoot: sb.backupRoot,
+    sync: { url: 'https://dav.invalid/dsh', machineId: 'robot-a', mapping: {} },
+  }
+  try {
+    const { defs } = await makeHost(config, { remoteWrite: gate })
+    const result = (await run(byName(defs).get('sync_sessions')!, { apply: true })) as SyncToolResult
+    assert.equal(result.ok, false)
+    assert.equal(result.applied, false)
+    assert.match(result.problems.join('\n'), /自动推送.*这次没有同步/)
+  } finally {
+    hold()
+    rmSync(sb.base, { recursive: true, force: true })
+  }
 })
 
 test('sync_sessions：空白会话不上传（工具侧也读宿主投影缓存），并在 notes 里报一句', async () => {

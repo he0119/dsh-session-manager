@@ -38,6 +38,7 @@ import {
 import { projectKey } from './project-key.ts'
 import { projectionCacheDir } from './paths.ts'
 import { createProjectionReader } from './projection-cache.ts'
+import { createRemoteWriteGate, type RemoteWriteGate } from './remote-write.ts'
 import { describeWarm, warmCheckpoints } from './checkpoint-warm.ts'
 import { describeEffect, describePlannedEffect, effectOf } from './take-effect.ts'
 import {
@@ -291,7 +292,7 @@ export async function resolveAutoPushRuntime(
   ctx: unknown,
   config: PluginConfigInput = {},
   paths: ResolvedPaths,
-  options: { repoLocations?: SyncDeps['repoLocations'] } = {},
+  options: { repoLocations?: SyncDeps['repoLocations']; remoteWrite?: RemoteWriteGate } = {},
 ): Promise<{ deps: SyncDeps; timer: AutoPushTimer } | undefined> {
   const runtime = await syncRuntime(ctx, config)
   if (runtime === undefined) return undefined
@@ -326,6 +327,7 @@ export async function resolveAutoPushRuntime(
   const auto = (): AutoConfig | undefined => autoPushSection(syncSection(config))
   const timer = createAutoPushTimer({
     clock: { enabled: () => auto()?.enabled === true },
+    ...(options.remoteWrite === undefined ? {} : { remoteWrite: options.remoteWrite }),
     run: async (options) => {
       // 每次真跑之前重新解析一次设置：`sync` 是活引用，用户可能刚把 URL 或密码改掉。
       const fresh = await syncRuntime(ctx, config)
@@ -442,6 +444,27 @@ export interface SyncToolResult {
   takesEffect: EffectMode
   summary: string
   problems: string[]
+}
+
+/** 一次没有真正跑起来的同步：`ok` 为 false，计数全空，只带一句原因。 */
+function syncToolUnavailable(message: string): SyncToolResult {
+  return {
+    ok: false,
+    applied: false,
+    pulled: [],
+    replaced: [],
+    pushed: [],
+    notes: [],
+    bytesIn: 0,
+    bytesOut: 0,
+    attachmentsIn: 0,
+    attachmentsOut: 0,
+    attachmentsMissing: 0,
+    machines: [],
+    takesEffect: 'immediate',
+    summary: message,
+    problems: [message],
+  }
 }
 
 /**
@@ -1117,10 +1140,17 @@ export interface MigrateToolResult {
 
 /**
  * 按插件配置里 `tools` 一节的开关注册工具（6 个全开时就是 6 个）。
+ * @param options.remoteWrite 写远端格子的互斥锁；生产由 `src/index.ts` 造一份交给界面、工具与
+ *   自动推送共用。缺席时自己造一把（只测工具时够用）。
  * @returns cordis effect disposer 列表（宿主热卸载时逐个调用）。
  */
-export function registerTools(ctx: Context, config: PluginConfigInput = {}): Array<() => void> {
+export function registerTools(
+  ctx: Context,
+  config: PluginConfigInput = {},
+  options: { remoteWrite?: RemoteWriteGate } = {},
+): Array<() => void> {
   const paths = resolvePaths(config)
+  const remoteWrite = options.remoteWrite ?? createRemoteWriteGate()
   const mode = (): EffectMode => effectMode(ctx)
   // 预演/执行/回滚都走 src/migrate.ts 那一份编排，界面端点用的是同一个 deps 形状——
   // 两个入口（工具 / 界面）因此不会各写一套。
@@ -1612,25 +1642,24 @@ export function registerTools(ctx: Context, config: PluginConfigInput = {}): Arr
         async execute(args): Promise<SyncToolResult> {
           const runtime = await syncRuntime(ctx, config)
           if (runtime === undefined) {
-            return {
-              ok: false,
-              applied: false,
-              pulled: [],
-              replaced: [],
-              pushed: [],
-              notes: [],
-              bytesIn: 0,
-              bytesOut: 0,
-              attachmentsIn: 0,
-              attachmentsOut: 0,
-              attachmentsMissing: 0,
-              machines: [],
-              takesEffect: 'immediate',
-              summary: '没有配置 WebDAV 同步：插件配置里的 sync.url 是空的。',
-              problems: ['没有配置 WebDAV 同步（插件配置的 sync.url）'],
+            return syncToolUnavailable('没有配置 WebDAV 同步：插件配置里的 sync.url 是空的。')
+          }
+          /*
+           * 真落地才拿写权限：预演只读远端，与别的写手同时跑不会改任何东西，不需要挡。拿不到时
+           * 直接回一句，不排队——排队之后拿旧快照去写，正是这把锁要防的事。
+           */
+          let release: (() => void) | undefined
+          if (args.apply === true) {
+            release = remoteWrite.tryAcquire('同步')
+            if (release === undefined) {
+              const owner = remoteWrite.current()
+              const at =
+                owner === undefined ? '' : `（${new Date(owner.startedAt).toLocaleTimeString('zh-CN')} 开始）`
+              return syncToolUnavailable(`上一轮${owner?.label ?? '同步'}还在跑${at}，这次没有同步。`)
             }
           }
-          const outcome = await runSync(
+          try {
+            const outcome = await runSync(
             {
               dav: runtime.dav,
               settings: runtime.settings,
@@ -1697,6 +1726,9 @@ export function registerTools(ctx: Context, config: PluginConfigInput = {}): Arr
               .filter((line): line is string => line !== undefined)
               .join('\n'),
             problems: [...outcome.plan.problems, ...outcome.problems],
+            }
+          } finally {
+            release?.()
           }
         },
       }),

@@ -23,6 +23,7 @@ import { createDavClient } from '../src/dav.ts'
 import { scanAll, type DiscoveredSession } from '../src/discovery.ts'
 import { sessionDir } from '../src/paths.ts'
 import { readRegistry, writeRegistryAtomic } from '../src/registry.ts'
+import { createRemoteWriteGate } from '../src/remote-write.ts'
 import {
   SYNC_INDEX_FILE,
   SYNC_NAMESPACE_DIR,
@@ -860,6 +861,32 @@ test('createAutoPushTimer：上一轮还在跑时这一轮让开（busy），不
   assert.equal(second.skip, 'busy')
   release?.()
   await first
+  timer.stop()
+})
+
+test('createAutoPushTimer：别的入口正拿着远端写权限时这一轮跳过，run 一次都不调', async () => {
+  const gate = createRemoteWriteGate()
+  const hold = gate.tryAcquire('同步')!
+  let runs = 0
+  const timer = createAutoPushTimer({
+    clock: { enabled: () => true },
+    remoteWrite: gate,
+    run: async () => {
+      runs += 1
+      return { ran: true, failures: 0 }
+    },
+    setTimer: () => 1,
+    clearTimer: () => undefined,
+  })
+  const skipped = await timer.tick()
+  assert.equal(runs, 0, '拿不到写权限就不该跑')
+  assert.equal(skipped.ran, false)
+  assert.equal(skipped.skip, 'busy')
+
+  hold()
+  const after = await timer.tick()
+  assert.equal(runs, 1, '释放之后同一把闸能跑')
+  assert.equal(after.ran, true)
   timer.stop()
 })
 
