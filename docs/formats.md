@@ -155,9 +155,12 @@ gzip( 'DSHSESS1\n' | u32le 清单长度 | 清单 JSON | 各文件原始字节 | 
 - `formatVersion` 只有两种：包里**没有**附件对象时写 1（清单里连 `attachments` 那一节都没有，装旧版
   的宿主也读得了）；真要带对象才写 2，清单多一节 `attachments`（每条记 `id`、`kind`、`name`、
   `bytes`、`offset`）。同步推的包**只有日志**，对象走上面那个共享库；`导出` 才会把对象装进包。
-- 读的时候逐条校验，坏包不进导入流程：magic 认得出；版本落在 1..2；每个
-  `[offset, offset + bytes)` 落在载荷内、sha256 对得上；附件对象按它 id 里的 sha 核；`dirName` 必须
-  等于 `encodeSegment(id)`（宿主要拿目录名与 header 对得上）。
+- 读的时候逐条校验，坏包不进导入流程：magic 认得出；版本落在 1..2；解压后的载荷不超过
+  2 GiB（`MAX_BUNDLE_RAW_BYTES`）；每个 `[offset, offset + bytes)` 落在载荷内、sha256 对得上；
+  附件对象按它 id 里的 sha 核；`dirName` 必须等于 `encodeSegment(id)`（宿主要拿目录名与 header
+  对得上）；`files[].name` 必须是 `parseSessionLogName()` 认得的单段规范名（`session.jsonl`、
+  `session.vN.jsonl`、可带 `.zstd`），且清单里的 `version` 与文件名里的代次一致——这一段是落盘路径
+  的唯一来源，放 `../` 或绝对路径进来就等于让包决定往哪儿写。
 - 落地走 `planImport()` / `applyImport()`：把 header 里的 `cwd` 改写成**这台机器**的路径，写盘先写
   `.part` 再 rename；导入只跳过、不覆盖。
 

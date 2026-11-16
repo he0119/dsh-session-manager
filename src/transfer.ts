@@ -46,7 +46,7 @@ import {
 } from './attachments.ts'
 import { canonicalDir } from './canonical-path.ts'
 import { decodeLogTextChunked } from './log-decode.ts'
-import { encodeSegment, sessionDir } from './paths.ts'
+import { encodeSegment, parseSessionLogName, sessionDir } from './paths.ts'
 import { reHome, writeRegistryAtomic } from './registry.ts'
 import { foldTitleInFrames } from './session-title.ts'
 import { branchSessionLog, relocateSessionPathsChunked, relocateSessionPathsText } from './session-log.ts'
@@ -66,6 +66,24 @@ export const BUNDLE_FORMAT_VERSION = 2
  * 一张空的附件表。再老的版本不存在（v1 是本插件第一版包格式）。
  */
 export const BUNDLE_MIN_FORMAT_VERSION = 1
+
+/**
+ * 解压之后的包体上限（字节）。
+ *
+ * 为什么要有：`gunzip` 默认不设上限，一个几十 KB 的包可以解出几十 GB，把宿主的内存吃光。正常整库包
+ * 实测在几百 MB 量级，2 GiB 留了足够余量；超出的包按"读不了"拒掉，而不是先分配再失败。
+ */
+export const MAX_BUNDLE_RAW_BYTES = 2 * 1024 * 1024 * 1024
+
+/** `readBundle()` / `readBundleAsync()` 的选项。 */
+export interface ReadBundleOptions {
+  /**
+   * 解压后的上限（字节），缺省 {@link MAX_BUNDLE_RAW_BYTES}。
+   *
+   * 只给测试把上限压小用；生产调用方不传。
+   */
+  maxRawBytes?: number
+}
 
 /** 导出源：一条已发现的会话。 */
 export interface ExportSource {
@@ -496,6 +514,22 @@ export function parseBundle(raw: Buffer): SessionBundle {
       if (typeof file?.name !== 'string' || typeof file.bytes !== 'number' || typeof file.offset !== 'number') {
         throw new Error(`bundle session ${value.id} has a malformed file entry`)
       }
+      /*
+       * 文件名只能是单段规范名（`session.vN.jsonl[.zstd]`）。`applyImport()` 会拿它拼目标路径，
+       * 放 `../` 或绝对路径进来就等于让包决定往哪儿写；`parseSessionLogName()` 的正则同时排除了
+       * `/`、`\` 与 `..`，所以校验放在这里一次就够。
+       */
+      const parsedName = parseSessionLogName(file.name)
+      if (parsedName === undefined) {
+        throw new Error(
+          `bundle session ${value.id} has a log file name that is not a single session log: ${JSON.stringify(file.name)}`,
+        )
+      }
+      if (parsedName.version !== file.version) {
+        throw new Error(
+          `bundle session ${value.id} file ${file.name} says version ${file.version} in the manifest but ${parsedName.version} in its name`,
+        )
+      }
       if (file.offset < 0 || file.bytes < 0 || file.offset + file.bytes > payload.length) {
         throw new Error(`bundle session ${value.id} file ${file.name} points outside the payload`)
       }
@@ -567,17 +601,27 @@ function notGzip(error: unknown): Error {
   return new Error(`not a gzip-compressed session bundle: ${error instanceof Error ? error.message : String(error)}`)
 }
 
+/** 解压失败：超过上限时说清是"太大"，不要伪装成"不是 gzip"。 */
+function gunzipError(error: unknown, limit: number): Error {
+  if ((error as { code?: string } | null)?.code === 'ERR_BUFFER_TOO_LARGE') {
+    return new Error(`bundle expands beyond the ${limit}-byte limit (refusing to read it)`)
+  }
+  return notGzip(error)
+}
+
 /**
  * 解析并校验一个包。
  * @param bytes 包字节（`.dshsess` 原文）。
+ * @param options 解压上限（缺省 {@link MAX_BUNDLE_RAW_BYTES}）。
  * @throws 任何一项不变式不满足时抛错，消息指出是哪一条。
  */
-export function readBundle(bytes: Buffer): SessionBundle {
+export function readBundle(bytes: Buffer, options: ReadBundleOptions = {}): SessionBundle {
+  const limit = options.maxRawBytes ?? MAX_BUNDLE_RAW_BYTES
   let raw: Buffer
   try {
-    raw = gunzipSync(bytes)
+    raw = gunzipSync(bytes, { maxOutputLength: limit })
   } catch (error) {
-    throw notGzip(error)
+    throw gunzipError(error, limit)
   }
   return parseBundle(raw)
 }
@@ -589,14 +633,16 @@ export function readBundle(bytes: Buffer): SessionBundle {
  * `contentRelationsOf()`）一次要解好几个几十 MB 的包，必须走这一条。
  *
  * @param bytes 包字节（`.dshsess` 原文）。
+ * @param options 解压上限（缺省 {@link MAX_BUNDLE_RAW_BYTES}）。
  * @returns 解析好的包。
  */
-export async function readBundleAsync(bytes: Buffer): Promise<SessionBundle> {
+export async function readBundleAsync(bytes: Buffer, options: ReadBundleOptions = {}): Promise<SessionBundle> {
+  const limit = options.maxRawBytes ?? MAX_BUNDLE_RAW_BYTES
   let raw: Buffer
   try {
-    raw = await gunzipAsync(bytes)
+    raw = await gunzipAsync(bytes, { maxOutputLength: limit })
   } catch (error) {
-    throw notGzip(error)
+    throw gunzipError(error, limit)
   }
   return parseBundle(raw)
 }
@@ -1045,6 +1091,16 @@ export async function applyImport(
     })
     const session = byId.get(entry.id)
     if (!session) throw new Error(`internal error: plan entry ${entry.id} has no session in the bundle`)
+
+    /*
+     * 第二道闸：即使调用方绕过 `readBundle()` 自己拼了一个 SessionBundle，也不让带路径的文件名落到
+     * `join(entry.dir, ...)` 里。`parseSessionLogName()` 只认单段规范名，`..`、`/`、`\` 都过不了。
+     */
+    for (const file of session.files) {
+      if (parseSessionLogName(file.name) === undefined) {
+        throw new Error(`refusing to write a log file with an unsafe name: ${JSON.stringify(file.name)}`)
+      }
+    }
 
     mkdirSync(entry.dir, { recursive: true })
     const rename = options.rename?.get(session.id)
