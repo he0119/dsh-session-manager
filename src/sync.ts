@@ -55,7 +55,7 @@ import { readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import { canonicalDir, type DirCanonicalizer } from './canonical-path.ts'
-import { commitAttachmentObject, scanAttachmentRefs, type AttachmentPort, type AttachmentRef } from './attachments.ts'
+import { commitAttachmentObject, isAttachmentId, scanAttachmentRefs, type AttachmentPort, type AttachmentRef } from './attachments.ts'
 import { warmCheckpoints, type WarmDeps } from './checkpoint-warm.ts'
 import type { AutoConfig } from './config.ts'
 import type { DavPort } from './dav.ts'
@@ -99,6 +99,12 @@ export const SYNC_INDEX_UNIT = 'dsh-session-manager/sync'
  * 拿它当活动时间，版本 3 用 `lastActiveAt`。缺这一项的那些条目判不出谁更新，退回"不动"。
  */
 export const SYNC_INDEX_VERSION = 3
+
+/** 一份索引正文的上限：正常 1400 条约 0.5～0.7 MB，32 MB 足够，坏文件不整份解析。 */
+export const MAX_INDEX_TEXT_BYTES = 32 * 1024 * 1024
+
+/** 一份索引最多收多少条会话记录：防止一个失控的远端把内存撑满。 */
+export const MAX_INDEX_ENTRIES = 100_000
 
 /** 解析后的同步设置（配置里的原始形态见 tools.ts 的 `SyncConfig`）。 */
 export interface SyncSettings {
@@ -1582,9 +1588,48 @@ export function parseIndex(text: string, machine: string, problems: string[]): R
     problems.push(`${machine} 的 ${SYNC_INDEX_FILE} 不是一个对象`)
     return undefined
   }
-  const value = parsed as { entries?: unknown; deleted?: unknown; updatedAt?: unknown; pluginVersion?: unknown }
+  const value = parsed as {
+    unit?: unknown
+    version?: unknown
+    entries?: unknown
+    deleted?: unknown
+    updatedAt?: unknown
+    pluginVersion?: unknown
+  }
+  /*
+   * 自描述字段：写入端 `indexPayload()` 一直在写这两个，读端以前没看。别的工具往同一个目录里放一份
+   * `index.json`、或者将来格式升版时，至少要在这里认出来，而不是把里面的 `entries` 当成自己人照读。
+   * 两项都允许缺席（最早那版索引没有它们），但写了就必须对。
+   */
+  if (value.unit !== undefined && value.unit !== SYNC_INDEX_UNIT) {
+    problems.push(`${machine} 的 ${SYNC_INDEX_FILE} 不是本插件的索引（unit=${JSON.stringify(value.unit)}）`)
+    return undefined
+  }
+  if (value.version !== undefined) {
+    if (
+      typeof value.version !== 'number' ||
+      !Number.isInteger(value.version) ||
+      value.version < 1 ||
+      value.version > SYNC_INDEX_VERSION
+    ) {
+      problems.push(
+        `${machine} 的 ${SYNC_INDEX_FILE} 版本 ${String(value.version)} 不受支持（本插件读到 ${SYNC_INDEX_VERSION}）`,
+      )
+      return undefined
+    }
+  }
+  if (!Array.isArray(value.entries)) {
+    problems.push(`${machine} 的 ${SYNC_INDEX_FILE} 没有 entries 数组`)
+    return undefined
+  }
+  if (value.entries.length > MAX_INDEX_ENTRIES) {
+    problems.push(
+      `${machine} 的 ${SYNC_INDEX_FILE} 记录太多（${value.entries.length} 条，上限 ${MAX_INDEX_ENTRIES}），整份跳过`,
+    )
+    return undefined
+  }
   const entries: RemoteIndex['entries'] = []
-  for (const raw of Array.isArray(value.entries) ? value.entries : []) {
+  for (const raw of value.entries) {
     const entry = raw as Partial<RemoteSessionEntry>
     if (typeof entry?.id !== 'string' || entry.id === '') {
       problems.push(`${machine} 的索引里有一条没有 id 的记录，已跳过`)
@@ -1592,7 +1637,15 @@ export function parseIndex(text: string, machine: string, problems: string[]): R
     }
     const files: FileFingerprint[] = []
     for (const file of Array.isArray(entry.files) ? entry.files : []) {
-      if (typeof file?.version !== 'number' || typeof file.bytes !== 'number' || typeof file.sha256 !== 'string') {
+      if (
+        typeof file?.version !== 'number' ||
+        !Number.isFinite(file.version) ||
+        file.version < 0 ||
+        typeof file.bytes !== 'number' ||
+        !Number.isFinite(file.bytes) ||
+        file.bytes < 0 ||
+        typeof file.sha256 !== 'string'
+      ) {
         continue
       }
       files.push({ version: file.version, bytes: file.bytes, sha256: file.sha256 })
@@ -1605,7 +1658,11 @@ export function parseIndex(text: string, machine: string, problems: string[]): R
     for (const raw of Array.isArray(entry.attachments) ? entry.attachments : []) {
       const item = raw as Partial<IndexedAttachment>
       if (item?.kind !== 'image' && item?.kind !== 'file') continue
-      if (typeof item.id !== 'string' || item.id === '') continue
+      /*
+       * id 会直接拼成远端对象路径（`remoteAttachmentPath()` 取 `sha256:` 后面那一段），
+       * 不校验的话 `aa/../../x` 这种值能让客户端去取共享库外面的东西。
+       */
+      if (!isAttachmentId(item.id)) continue
       attachments.push({
         kind: item.kind,
         id: item.id,
@@ -1773,6 +1830,9 @@ export async function readRemoteLibrary(dav: DavPort, settings: SyncSettings): P
       // 但会显示成"远端机器：attachments"）。
       .filter((entry) => entry.kind === 'collection' && entry.name !== SYNC_ATTACHMENTS_DIR)
       .map((entry) => entry.name)
+      // 集合名来自远端：`..` 会让后面的 index 路径跑到命名空间外面；正常机器格名由
+      // `machineDirName()` 编出来，不会长成这样。
+      .filter((name) => name !== '.' && name !== '..' && !name.includes('/') && !name.includes('\\'))
       .sort()
   } catch (error) {
     problems.push(`列远端 ${SYNC_NAMESPACE_DIR}/ 失败：${error instanceof Error ? error.message : String(error)}`)
@@ -1781,7 +1841,16 @@ export async function readRemoteLibrary(dav: DavPort, settings: SyncSettings): P
   for (const dirName of machines) {
     let text: string
     try {
-      text = (await dav.get(`${SYNC_NAMESPACE_DIR}/${dirName}/${SYNC_INDEX_FILE}`)).toString('utf8')
+      const bytes = await dav.get(`${SYNC_NAMESPACE_DIR}/${dirName}/${SYNC_INDEX_FILE}`, {
+        maxBytes: MAX_INDEX_TEXT_BYTES,
+      })
+      if (bytes.length > MAX_INDEX_TEXT_BYTES) {
+        problems.push(
+          `读远端 ${dirName}/${SYNC_INDEX_FILE} 失败：索引 ${bytes.length} 字节，超过上限 ${MAX_INDEX_TEXT_BYTES}`,
+        )
+        continue
+      }
+      text = bytes.toString('utf8')
     } catch (error) {
       // 404 = 这台机器还没推送过内容（或推送了一半）：不算问题，它这次不贡献任何会话。
       if ((error as { status?: number } | null)?.status === 404) continue
@@ -3450,6 +3519,7 @@ export async function applyPreparedSync(
     try {
       await createBackup({
         backupRoot: deps.backupRoot,
+        sessionsRoot: deps.sessionsRoot,
         registryPath: deps.registryPath,
         sessions: doomed.map((session) => ({
           id: session.id,
@@ -3734,6 +3804,7 @@ export async function applyPreparedSync(
       try {
         await createBackup({
           backupRoot: deps.backupRoot,
+          sessionsRoot: deps.sessionsRoot,
           registryPath: deps.registryPath,
           sessions: ready.flatMap((entry) => {
             const session = byId.get(entry.id)

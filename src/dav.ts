@@ -29,6 +29,12 @@ export class DavError extends Error {
   }
 }
 
+/** `DavPort.get()` 的选项。 */
+export interface DavGetOptions {
+  /** 响应体的上限（字节）；超过时抛 `DavError`（status 413）。 */
+  maxBytes?: number
+}
+
 /** 一个远端条目（`list()` 的结果，只取本插件用得到的两个属性）。 */
 export interface DavEntry {
   /** 相对当前集合的名称（文件不带扩展名处理，目录不带尾斜杠）。 */
@@ -65,8 +71,13 @@ export interface DavPort {
   readonly baseUrl: string
   /** 列一个集合的直接子项；集合不存在返回空数组。 */
   list(collection: string): Promise<DavEntry[]>
-  /** 读一个文件；不存在抛 `DavError`（status 404）。 */
-  get(path: string): Promise<Buffer>
+  /**
+   * 读一个文件；不存在抛 `DavError`（status 404）。
+   *
+   * `maxBytes` 给了就拒绝超过它的响应：先看 `Content-Length`，读完再看实际长度（分块传输没有长度头）。
+   * 索引与包的读取用它挡住"远端回一份失控的大文件"。
+   */
+  get(path: string, options?: DavGetOptions): Promise<Buffer>
   /** 写一个文件；父集合不存在会先建出来，这一实例里已经建过的层级不再问第二遍。 */
   put(path: string, bytes: Buffer): Promise<void>
   /**
@@ -344,7 +355,7 @@ export function createDavClient(options: DavOptions): DavPort {
       })
     },
 
-    async get(path: string): Promise<Buffer> {
+    async get(path: string, options: DavGetOptions = {}): Promise<Buffer> {
       const response = await request('GET', path)
       if (response.status !== 200) {
         throw new DavError(
@@ -354,7 +365,29 @@ export function createDavClient(options: DavOptions): DavPort {
           path,
         )
       }
-      return Buffer.from(await response.arrayBuffer())
+      const maxBytes = options.maxBytes
+      if (maxBytes !== undefined) {
+        const declared = Number(response.headers.get('content-length'))
+        if (Number.isFinite(declared) && declared > maxBytes) {
+          void response.body?.cancel()
+          throw new DavError(
+            `GET ${urlOf(path)} 声明 ${declared} 字节，超过上限 ${maxBytes}`,
+            413,
+            'GET',
+            path,
+          )
+        }
+      }
+      const bytes = Buffer.from(await response.arrayBuffer())
+      if (maxBytes !== undefined && bytes.length > maxBytes) {
+        throw new DavError(
+          `GET ${urlOf(path)} 读了 ${bytes.length} 字节，超过上限 ${maxBytes}`,
+          413,
+          'GET',
+          path,
+        )
+      }
+      return bytes
     },
 
     async put(path: string, bytes: Buffer): Promise<void> {

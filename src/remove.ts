@@ -291,6 +291,7 @@ export async function runRemoval(
   // 1) 备份（整份会话目录 + 注册表快照）。备份是唯一一份可以恢复的副本，删之前必须成功。
   const backup = await createBackup({
     backupRoot: deps.backupRoot,
+    sessionsRoot: deps.sessionsRoot,
     registryPath: deps.registryPath,
     // 删除没有"目标目录"：清单里每条会话的 targetDir 由 createBackup 填成备份内那份副本。
     sessions: plan.entries.map((entry) => ({ id: entry.id, sourceDir: entry.dir, files: entry.files, ...(entry.title === undefined ? {} : { title: entry.title }) })),

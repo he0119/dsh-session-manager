@@ -20,7 +20,7 @@ import {
   type MigrateRequest,
 } from '../src/migrate.ts'
 import { scanAll } from '../src/discovery.ts'
-import { createBackup } from '../src/journal.ts'
+import { createBackup, readManifest } from '../src/journal.ts'
 import { sessionDir } from '../src/paths.ts'
 import { writeRegistryAtomic, readRegistry } from '../src/registry.ts'
 import type { DecodeAll, HostRegistryPort, SessionHeader, WorkspaceRegistryState } from '../src/types.ts'
@@ -255,6 +255,7 @@ test('覆盖前那份备份：目录像删除那样搬回，注册表像迁移�
   const session = scanAll(sb.deps.sessionsRoot, decodeAll).find((item) => item.id === sb.sessionId)!
   const backup = await createBackup({
     backupRoot: sb.deps.backupRoot,
+    sessionsRoot: sb.deps.sessionsRoot,
     registryPath: sb.deps.registryPath,
     kind: 'replace',
     now: new Date('2026-10-05T08:00:00.000Z'),
@@ -310,6 +311,35 @@ test('列举备份：坏目录跳过而不是让整张列表打不开', async ()
   const listed = listBackups(sb.deps)
   assert.equal(listed.length, 1, '只有那一条真备份应当出现')
   assert.equal(listBackups({ ...sb.deps, backupRoot: join(sb.base, 'nope') }).length, 0, '备份根不存在时回空列表')
+  rmSync(sb.base, { recursive: true, force: true })
+})
+
+test('回滚清单：路径跑出会话库 / 备份目录，或者文件名不是单段日志名，整份拒掉', async () => {
+  const sb = makeSandbox('migrate-manifest-paths')
+  const dir = sessionDir(sb.deps.sessionsRoot, FROM, sb.sessionId)
+  const session = scanAll(sb.deps.sessionsRoot, decodeAll).find((item) => item.id === sb.sessionId)!
+  const backup = await createBackup({
+    backupRoot: sb.deps.backupRoot,
+    sessionsRoot: sb.deps.sessionsRoot,
+    registryPath: sb.deps.registryPath,
+    kind: 'migrate',
+    now: new Date('2026-10-05T08:00:00.000Z'),
+    sessions: [{ id: sb.sessionId, sourceDir: dir, targetDir: join(sb.base, 'target'), files: session.files }],
+  })
+  const manifest = JSON.parse(readFileSync(backup.manifestPath, 'utf8')) as {
+    sessions: Array<{ sourceDir: string; files: string[] }>
+  }
+  assert.doesNotThrow(() => readManifest(backup.dir), '自己写出来的清单必须过得去')
+
+  manifest.sessions[0]!.sourceDir = dirname(sb.deps.sessionsRoot)
+  writeFileSync(backup.manifestPath, JSON.stringify(manifest))
+  assert.throws(() => readManifest(backup.dir), /不在会话库里/)
+
+  manifest.sessions[0]!.sourceDir = dir
+  manifest.sessions[0]!.files[0] = '../../escaped.jsonl.zstd'
+  writeFileSync(backup.manifestPath, JSON.stringify(manifest))
+  assert.throws(() => readManifest(backup.dir), /不是单段日志名/)
+
   rmSync(sb.base, { recursive: true, force: true })
 })
 

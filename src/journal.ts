@@ -5,8 +5,9 @@
 // 因为备份发生在改写之前，所以它同时是"原状"与"回滚源"，无需第二份副本。
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { cp, mkdir, rename, rmdir, rm, writeFile } from 'node:fs/promises'
-import { basename, dirname, join } from 'node:path'
+import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path'
 
+import { parseSessionLogName } from './paths.ts'
 import type { ProgressReporter, SessionMove } from './types.ts'
 
 const MANIFEST = 'manifest.json'
@@ -56,6 +57,13 @@ export interface BackupManifest {
   createdAt: string
   registryPath: string
   registryBackup: string
+  /**
+   * 备份时本机会话库的根。
+   *
+   * 老备份没有这一项；有了它，回滚才能确认每条 `sourceDir` 真的在这个库下面，而不是只看"是绝对路径、
+   * 没有 `..`"。新写的清单都带。
+   */
+  sessionsRoot?: string
   /** 这次备份是哪一类操作留下的（老备份没有这个字段 = 迁移）。 */
   kind?: BackupKind
   /** 这次迁移的源/目标工作区目录（后加的字段，老备份没有）。 */
@@ -69,6 +77,8 @@ export interface BackupManifest {
 export interface CreateBackupOptions {
   /** 备份根目录（会创建）。 */
   backupRoot: string
+  /** 本机会话库根；写进清单，回滚时用来确认 `sourceDir` 没跑出库外。 */
+  sessionsRoot: string
   /** workspace.json 路径。 */
   registryPath: string
   /**
@@ -105,7 +115,17 @@ export async function createBackup(options: CreateBackupOptions): Promise<{
   manifestPath: string
   manifest: BackupManifest
 }> {
-  const { backupRoot, registryPath, sessions, artifacts = [], kind = 'migrate', from, to, now = new Date() } = options
+  const {
+    backupRoot,
+    sessionsRoot,
+    registryPath,
+    sessions,
+    artifacts = [],
+    kind = 'migrate',
+    from,
+    to,
+    now = new Date(),
+  } = options
   const dir = join(backupRoot, stampName(now))
   await mkdir(join(dir, 'sessions'), { recursive: true })
 
@@ -144,6 +164,7 @@ export async function createBackup(options: CreateBackupOptions): Promise<{
   const manifest: BackupManifest = {
     version: 1,
     createdAt: now.toISOString(),
+    sessionsRoot,
     registryPath,
     registryBackup,
     kind,
@@ -157,10 +178,120 @@ export async function createBackup(options: CreateBackupOptions): Promise<{
   return { dir, manifestPath, manifest }
 }
 
+/** 单段路径名：不含分隔符，也不是 `.` / `..`。 */
+function isSingleSegment(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    value !== '' &&
+    value !== '.' &&
+    value !== '..' &&
+    !value.includes('/') &&
+    !value.includes('\\')
+  )
+}
+
+/** 绝对路径，且原文里不能带 `..` 段。 */
+function absolutePath(value: unknown, label: string): string {
+  if (typeof value !== 'string' || value === '') throw new Error(`${label} 缺失或不是字符串`)
+  if (!isAbsolute(value)) throw new Error(`${label} 不是绝对路径：${value}`)
+  if (value.split(/[\\/]+/).includes('..')) throw new Error(`${label} 里带 ..：${value}`)
+  return resolve(value)
+}
+
+/** `child` 是否在 `parent` 目录下面（相等也算）。 */
+function isUnder(child: string, parent: string): boolean {
+  const base = resolve(parent)
+  const target = resolve(child)
+  return target === base || target.startsWith(base.endsWith(sep) ? base : base + sep)
+}
+
+/**
+ * 校验并归一一份备份清单。
+ *
+ * 回滚会按清单里的路径 `rm` / `rename`，所以清单不能只是"JSON 能解析"：路径必须是绝对路径、不能带
+ * `..`，会话的原目录必须在 `sessionsRoot` 下面，删除 / 覆盖两类备份里的 `targetDir` 必须是备份目录
+ * 里的那份副本。老备份没有 `sessionsRoot`，那一条只能退到"绝对路径 + 不带 `..`"。
+ */
+function parseManifest(raw: unknown, dir: string): BackupManifest {
+  if (typeof raw !== 'object' || raw === null) throw new Error('备份清单不是一个对象')
+  const value = raw as Partial<BackupManifest>
+  if (value.version !== 1) throw new Error(`备份清单版本 ${String(value.version)} 不受支持`)
+  if (typeof value.createdAt !== 'string' || value.createdAt === '') throw new Error('备份清单缺 createdAt')
+  const kind = value.kind ?? 'migrate'
+  if (kind !== 'migrate' && kind !== 'delete' && kind !== 'replace') {
+    throw new Error(`备份清单的 kind 不认识：${String(kind)}`)
+  }
+  const sessionsRoot =
+    value.sessionsRoot === undefined ? undefined : absolutePath(value.sessionsRoot, 'sessionsRoot')
+  const registryPath = absolutePath(value.registryPath, 'registryPath')
+  const registryBackup = absolutePath(value.registryBackup, 'registryBackup')
+  if (!isUnder(registryBackup, dir)) throw new Error(`registryBackup 不在备份目录里：${registryBackup}`)
+
+  if (!Array.isArray(value.sessions)) throw new Error('备份清单缺 sessions 数组')
+  const sessions: BackupSessionEntry[] = value.sessions.map((rawSession, index) => {
+    const session = rawSession as Partial<BackupSessionEntry>
+    const label = `sessions[${index}]`
+    if (typeof session.id !== 'string' || session.id === '') throw new Error(`${label}.id 缺失`)
+    if (!isSingleSegment(session.dirName)) throw new Error(`${label}.dirName 不是单段名`)
+    const sourceDir = absolutePath(session.sourceDir, `${label}.sourceDir`)
+    const targetDir = absolutePath(session.targetDir, `${label}.targetDir`)
+    if (sessionsRoot !== undefined && !isUnder(sourceDir, sessionsRoot)) {
+      throw new Error(`${label}.sourceDir 不在会话库里：${sourceDir}`)
+    }
+    if (kind !== 'migrate' && !isUnder(targetDir, dir)) {
+      throw new Error(`${label}.targetDir 不在备份目录里：${targetDir}`)
+    }
+    if (!Array.isArray(session.files) || session.files.length === 0) {
+      throw new Error(`${label}.files 缺失`)
+    }
+    for (const name of session.files) {
+      if (!isSingleSegment(name) || parseSessionLogName(name) === undefined) {
+        throw new Error(`${label}.files 里有不是单段日志名的项：${JSON.stringify(name)}`)
+      }
+    }
+    return {
+      id: session.id,
+      dirName: session.dirName,
+      sourceDir,
+      targetDir,
+      files: [...session.files],
+    }
+  })
+
+  const rawArtifacts = value.artifacts
+  if (rawArtifacts !== undefined && !Array.isArray(rawArtifacts)) {
+    throw new Error('备份清单的 artifacts 不是数组')
+  }
+  const artifacts: BackupArtifactEntry[] = (rawArtifacts ?? []).map((rawArtifact, index) => {
+    const artifact = rawArtifact as Partial<BackupArtifactEntry>
+    const label = `artifacts[${index}]`
+    const sourcePath = absolutePath(artifact.sourcePath, `${label}.sourcePath`)
+    const targetPath = absolutePath(artifact.targetPath, `${label}.targetPath`)
+    const backupPath = absolutePath(artifact.backupPath, `${label}.backupPath`)
+    if (!isUnder(backupPath, dir)) throw new Error(`${label}.backupPath 不在备份目录里：${backupPath}`)
+    if (typeof artifact.isDir !== 'boolean') throw new Error(`${label}.isDir 不是布尔值`)
+    return { sourcePath, targetPath, isDir: artifact.isDir, backupPath }
+  })
+
+  return {
+    version: 1,
+    createdAt: value.createdAt,
+    ...(sessionsRoot === undefined ? {} : { sessionsRoot }),
+    registryPath,
+    registryBackup,
+    kind,
+    ...(value.from === undefined ? {} : { from: value.from }),
+    ...(value.to === undefined ? {} : { to: value.to }),
+    sessions,
+    artifacts,
+  }
+}
+
 /** 读取一份备份清单。 */
 export function readManifest(dir: string): { manifest: BackupManifest; manifestPath: string } {
   const manifestPath = join(dir, MANIFEST)
-  return { manifest: JSON.parse(readFileSync(manifestPath, 'utf8')) as BackupManifest, manifestPath }
+  const parsed = JSON.parse(readFileSync(manifestPath, 'utf8')) as unknown
+  return { manifest: parseManifest(parsed, dir), manifestPath }
 }
 
 /** 回滚结果。 */
