@@ -3348,7 +3348,7 @@ async function pushAttachments(
     const path = port.pathOf(ref)
     let bytes: Buffer
     try {
-      bytes = readFileSync(path as string)
+      bytes = await readFile(path as string)
     } catch {
       counters.missing += 1
       continue
