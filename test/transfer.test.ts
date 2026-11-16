@@ -25,6 +25,7 @@ import {
   entryBytes,
   planImport,
   readBundle,
+  readBundleAsync,
   type ExportSource,
 } from '../src/transfer.ts'
 import { encodeRawFrame } from '../src/zstd-frame.ts'
@@ -78,7 +79,12 @@ function writeSession(
 
   const dir = sessionDir(root, options.cwd, options.id)
   mkdirSync(dir, { recursive: true })
-  const name = compression === 'zstd' ? `session.v${version}.jsonl.zstd` : `session.v${version}.jsonl`
+  // 与 paths.ts 的 generationLogFilename() 同一套形状：v0 没有版本分量，vN 才带 .vN。
+  const name = compression === 'zstd'
+    ? `session.v${version}.jsonl.zstd`
+    : version === 0
+      ? 'session.jsonl'
+      : `session.v${version}.jsonl`
   const path = join(dir, name)
   writeFileSync(path, buf)
   const files: SessionLogFile[] = [{ name, path, version, compression, bytes: buf.length }]
@@ -190,6 +196,29 @@ test('包校验：sha256、截断、magic、formatVersion 任何一项不对都�
   assert.throws(() => readBundle(Buffer.from('这不是一个包')), /gzip/i)
 })
 
+test('包校验：日志文件名必须是单段规范名，不能借 ../ 写到会话目录外', () => {
+  const root = makeRoot('transfer-file-name')
+  const source = writeSession(root, { id: 'session-a', cwd: FROM_CWD })
+  const bundle = buildBundle([source])
+  const escaped = withManifest(bundle, (manifest) => {
+    const sessions = manifest['sessions'] as Array<Record<string, unknown>>
+    const files = sessions[0]!['files'] as Array<Record<string, unknown>>
+    files[0]!['name'] = '../../escaped.jsonl.zstd'
+  })
+
+  // 清单里其余字段（偏移、sha256、dirName）都是对的：拒绝只能来自文件名本身。
+  assert.throws(() => readBundle(escaped), /single session log|unsafe/i)
+})
+
+test('包校验：解压后超过上限时明确说太大，而不是伪装成坏 gzip', async () => {
+  const root = makeRoot('transfer-size-limit')
+  const source = writeSession(root, { id: 'session-a', cwd: FROM_CWD })
+  const bundle = buildBundle([source])
+
+  assert.throws(() => readBundle(bundle, { maxRawBytes: 8 }), /limit/i)
+  await assert.rejects(readBundleAsync(bundle, { maxRawBytes: 8 }), /limit/i)
+})
+
 test('导入：预演不写字节，落地后 cwd 被改写成目标工作区且除 cwd 外正文不变', async () => {
   const root = makeRoot('transfer-import')
   const source = writeSession(root, { id: 'session-a', cwd: FROM_CWD, events: 3 })
@@ -296,7 +325,7 @@ test('导入：明文 v0 日志（无 zstd 外壳）走文本改写，同样只�
   await applyImport(bundle, plan, { root: targetRoot, targetCwd: TO_CWD, decodeAll })
 
   const name = bundle.sessions[0]!.files[0]!.name
-  assert.equal(name, 'session.v0.jsonl')
+  assert.equal(name, 'session.jsonl')
   const written = join(sessionDir(targetRoot, TO_CWD, 'session-v0'), name)
   const next = readFileSync(written, 'utf8')
   const nextLines = next.split('\n')
