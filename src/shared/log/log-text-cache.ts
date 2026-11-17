@@ -49,6 +49,32 @@ export interface LogTextCache {
  */
 export const DEFAULT_CACHED_LOG_CHARS = 64 * 1024 * 1024
 
+/**
+ * 与 `text.split('\n')` 同一份结果，只是按 2M 字符一段切开、段间让出。
+ *
+ * 一份 16MB 的日志解开是几千万字符，`split()` 会在主线程上按住上百毫秒；切段之后每段只有几毫秒。
+ * 行可能跨段：上一段的尾巴先留着，下一段的第一行拼回去再收。
+ */
+export async function splitLinesAsync(text: string): Promise<string[]> {
+  if (text.length === 0) return ['']
+  const CHUNK_CHARS = 2 * 1024 * 1024
+  const lines: string[] = []
+  let carry = ''
+  for (let offset = 0; offset < text.length; offset += CHUNK_CHARS) {
+    const piece = text.slice(offset, offset + CHUNK_CHARS)
+    const parts = piece.split('\n')
+    if (carry !== '') {
+      parts[0] = carry + parts[0]
+      carry = ''
+    }
+    if (offset + CHUNK_CHARS < text.length) carry = parts.pop() ?? ''
+    lines.push(...parts)
+    await new Promise<void>((resolve) => setImmediate(resolve))
+  }
+  if (carry !== '') lines.push(carry)
+  return lines
+}
+
 /** 造一份日志文本缓存。 */
 export function createLogTextCache(options: { maxChars?: number } = {}): LogTextCache {
   const maxChars = options.maxChars ?? DEFAULT_CACHED_LOG_CHARS
@@ -66,7 +92,7 @@ export function createLogTextCache(options: { maxChars?: number } = {}): LogText
       // 先把上一份放掉再解新的：这一页只看一条会话，没有理由让两份几千万字符的文本同时被引用。
       entry = undefined
       const text = await decodeLogTextChunked(await readFile(source.path), source.compression)
-      const lines = text.split('\n')
+      const lines = await splitLinesAsync(text)
       // 判据拿的是**读之前**的 stat：文件在我们读的这一刻又长了，这份结果就不会被当成"文件没变"复用。
       if (key !== undefined && text.length <= maxChars) entry = { key, lines }
       return lines

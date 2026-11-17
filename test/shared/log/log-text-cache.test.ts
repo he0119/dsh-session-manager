@@ -8,7 +8,7 @@ import { mkdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import test from 'node:test'
 
-import { createLogTextCache } from '../../../src/shared/log/log-text-cache.ts'
+import { createLogTextCache, splitLinesAsync } from '../../../src/shared/log/log-text-cache.ts'
 import { encodeRawFrame } from '../../../src/shared/log/zstd-frame.ts'
 import { sandboxDir } from '../../fixtures/sandbox.ts'
 
@@ -26,6 +26,17 @@ function writeLog(path: string, lines: readonly string[]): void {
 }
 
 const HEADER = JSON.stringify({ type: 'session', version: 4, id: 'session-a', createdAt: 1000, cwd: '/tmp/project' })
+
+test('splitLinesAsync：跨段切行与 split 逐项一致（含空文本与结尾换行）', async () => {
+  assert.deepEqual(await splitLinesAsync(''), [''])
+  assert.deepEqual(await splitLinesAsync('a\nb'), ['a', 'b'])
+  assert.deepEqual(await splitLinesAsync('a\nb\n'), ['a', 'b', ''])
+
+  // 3MB 文本，行会跨过 2M 字符的段边界。
+  const lines = Array.from({ length: 1000 }, (_, index) => `line-${index}-${'x'.repeat(3000)}`)
+  const text = `${lines.join('\n')}\n`
+  assert.deepEqual(await splitLinesAsync(text), text.split('\n'))
+})
 
 test('createLogTextCache：文件没变时直接给上一次切好的行（不重读、不再解压）', async () => {
   const dir = resetSandbox()

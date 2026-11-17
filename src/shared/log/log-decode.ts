@@ -73,7 +73,30 @@ async function decodeChunks(bytes: Buffer, chunkBytes: number): Promise<string> 
     if (end < bytes.length) await yieldToLoop()
   }
   parts.push(decoder.end())
-  return parts.join('')
+  return joinPartsAsync(parts)
+}
+
+/**
+ * 把分块解出来的字符串拼成一份，每 2M 字符让出一次。
+ *
+ * 45MB 的文本直接 `parts.join('')` 会在主线程上拼一份几十 MB 的字符串；先按 2M 字符归组、组间
+ * 让出，最后只剩二十来段要拼。
+ */
+async function joinPartsAsync(parts: readonly string[]): Promise<string> {
+  const JOIN_CHARS = 2 * 1024 * 1024
+  const groups: string[] = []
+  let current = ''
+  for (const part of parts) {
+    current += part
+    if (current.length >= JOIN_CHARS) {
+      groups.push(current)
+      current = ''
+      await yieldToLoop()
+    }
+  }
+  if (current !== '') groups.push(current)
+  await yieldToLoop()
+  return groups.join('')
 }
 
 /**
