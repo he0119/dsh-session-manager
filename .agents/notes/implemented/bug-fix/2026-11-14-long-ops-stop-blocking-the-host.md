@@ -76,6 +76,14 @@ Status: implemented
 - **日志切行与解码拼接分块**：`linesOf()` 的 `text.split('\n')` 改成按 2M 字符切段、跨段行尾拼回；
   `decodeAllChunked()` 的 `parts.join('')` 改成按 2M 字符归组再拼。45MB 文本的最长停顿从 175
   毫秒降到 61～132 毫秒；仍有一段在 zstd 分块解码退回整份解压。
+- **请求体、路径改写、差异切行与产物规划再分块**：`readBody()` 不再一次
+  `Buffer.concat(chunks)`，190MB 包实测 82 毫秒 → 89 毫秒总耗时、最长停顿 1 毫秒；16MB 日志的
+  `relocateSessionPathsChunked()` 不再整份 `split`/`join`，最长停顿 72 → **37 毫秒**；`/sync-diff`
+  与同步内容关系改用 `splitLinesAsync()`；产物规划新增异步版本，迁移那条路不再整份切行。
+- **校验工具只读日志头**：`verify_workspace_sessions` 原来为一行 header 读整份日志，现在走
+  `readLogHeader()` 的 64KB 前缀，每 32 个文件让出一轮；大项目不会连续读几百 MB。
+- **路径修复的源根扫描分块**：`planPathRepair()` 的 `selfRootValues()` 改用 `splitLinesAsync()`，
+  不再整份 `split`；路径改写本身复用上面那套分块。
 
 ## Alternatives considered
 

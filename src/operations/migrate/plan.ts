@@ -7,7 +7,7 @@ import { readFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 
 import { accountedOwners } from '../../shared/accounting.ts'
-import { planArtifactMoves } from './artifacts.ts'
+import { planArtifactMovesAsync } from './artifacts.ts'
 import { canonicalDir } from '../../shared/canonical-path.ts'
 import { projectDirOf, scanAllAsync, type DiscoveredSession } from '../../shared/library/discovery.ts'
 import { familyOf } from '../../shared/family.ts'
@@ -363,7 +363,7 @@ export async function buildRelocationPlan(options: BuildPlanOptions): Promise<Re
     const merged: NonNullable<RelocationPlan['artifacts']> = { moves: [], problems: [], skipped: [] }
     // 按来源目录排序再算：跨目录勾选时"先算哪一组"不该由勾选顺序决定（越界问题清单要可比）。
     for (const fromDir of [...byFromDir.keys()].sort()) {
-      const result = planArtifactMoves({ sessions: byFromDir.get(fromDir)!, fromDir, toDir: to })
+      const result = await planArtifactMovesAsync({ sessions: byFromDir.get(fromDir)!, fromDir, toDir: to })
       merged.moves.push(...result.moves)
       merged.problems.push(...result.problems)
       merged.skipped.push(...result.skipped)

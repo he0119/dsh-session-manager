@@ -20,6 +20,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import { accountedOwners } from './shared/accounting.ts'
 import { canonicalDirIfExists } from './shared/canonical-path.ts'
 import { locateSession, type DiscoveredSession } from './shared/library/discovery.ts'
+import { concatBuffersAsync, splitLinesAsync } from './shared/text-chunks.ts'
 import {
   assertBackupDir,
   listBackups,
@@ -334,7 +335,9 @@ export function readBody(req: IncomingMessage, limit = MAX_BODY_BYTES): Promise<
       }
       chunks.push(chunk)
     })
-    req.on('end', () => resolve(Buffer.concat(chunks)))
+    req.on('end', () => {
+      void concatBuffersAsync(chunks).then(resolve, reject)
+    })
     req.on('error', (error: Error) => reject(error))
   })
 }
@@ -2048,7 +2051,7 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
       }
       const bytes = entryBytes(bundle, remoteFile)
       // 分块解压、块间让出：这条会话可能几十 MB，整份解会把宿主按住一两秒（差异页是点一下就要等的地方）。
-      remoteLines = (await decodeLogTextChunked(bytes, remoteFile.compression)).split('\n')
+      remoteLines = await splitLinesAsync(await decodeLogTextChunked(bytes, remoteFile.compression))
       remoteLogBytes = bytes.byteLength
     } catch (error) {
       sendJson(res, 422, { error: `远端那份读不出来：${error instanceof Error ? error.message : String(error)}` })
@@ -2056,7 +2059,7 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
     }
     let localLines: string[]
     try {
-      localLines = (await decodeLogTextChunked(await readFile(file.path), file.compression)).split('\n')
+      localLines = await splitLinesAsync(await decodeLogTextChunked(await readFile(file.path), file.compression))
     } catch (error) {
       sendJson(res, 422, { error: `本机那份读不出来：${error instanceof Error ? error.message : String(error)}` })
       return

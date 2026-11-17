@@ -14,6 +14,8 @@ import { cpSync, existsSync as fsExists, mkdirSync, renameSync, rmSync, statSync
 import { cp, mkdir, rename, rm } from 'node:fs/promises'
 import { dirname, posix, win32 } from 'node:path'
 
+import { splitLinesAsync } from '../../shared/text-chunks.ts'
+
 import type { ArtifactMove, ArtifactSkip } from '../../shared/types.ts'
 
 // ── 路径方言 ──────────────────────────────────────────────────────────────
@@ -116,8 +118,8 @@ export interface ArtifactCandidate {
  * @param text 已解码的完整日志正文（多帧全解，不是只解首帧）。
  * @param options.cwd 会话工作目录，用于解析相对路径。
  */
-export function extractArtifactsFromLog(
-  text: string,
+function extractArtifactsFromLines(
+  lines: readonly string[],
   options: { cwd?: string } = {},
 ): { candidates: ArtifactCandidate[] } {
   const cwd = options.cwd
@@ -134,7 +136,7 @@ export function extractArtifactsFromLog(
     }
   }
 
-  for (const line of String(text ?? '').split('\n')) {
+  for (const line of lines) {
     if (!line) continue
     let e: Record<string, unknown>
     try {
@@ -180,6 +182,26 @@ export function extractArtifactsFromLog(
   return { candidates: [...found.values()] }
 }
 
+/**
+ * 从单个会话日志正文里提取产物候选。
+ * @param text 已解码的完整日志正文（多帧全解，不是只解首帧）。
+ * @param options.cwd 会话工作目录，用于解析相对路径。
+ */
+export function extractArtifactsFromLog(
+  text: string,
+  options: { cwd?: string } = {},
+): { candidates: ArtifactCandidate[] } {
+  return extractArtifactsFromLines(String(text ?? '').split('\n') as string[], options)
+}
+
+/** 与 {@link extractArtifactsFromLog} 同一份结果，只是按段切行、段间让出。 */
+export async function extractArtifactsFromLogAsync(
+  text: string,
+  options: { cwd?: string } = {},
+): Promise<{ candidates: ArtifactCandidate[] }> {
+  return extractArtifactsFromLines(await splitLinesAsync(String(text ?? '')), options)
+}
+
 /** `planArtifactMoves` 的选项。 */
 export interface PlanArtifactOptions {
   /** 会话 id 与已解码的完整日志正文。 */
@@ -204,6 +226,71 @@ export interface ArtifactPlanResult {
 /**
  * 规划产物搬迁。
  */
+export async function planArtifactMovesAsync(options: PlanArtifactOptions): Promise<ArtifactPlanResult> {
+  const {
+    sessions,
+    fromDir,
+    toDir,
+    includeKinds = ['created', 'delivered', 'modified'],
+    exists = fsExists,
+    isDirectory = (p: string): boolean => {
+      try {
+        return statSync(p).isDirectory()
+      } catch {
+        return false
+      }
+    },
+  } = options
+
+  const problems: string[] = []
+  const skipped: ArtifactSkip[] = []
+  const byPath = new Map<
+    string,
+    { sourcePath: string; kind: string; isDir: boolean; sessionIds: string[] }
+  >()
+
+  for (const session of sessions) {
+    const { candidates } = await extractArtifactsFromLogAsync(session.text, { cwd: fromDir })
+    for (const c of candidates) {
+      if (!includeKinds.includes(c.kind)) {
+        skipped.push({ path: c.path, reason: `kind ${c.kind} excluded`, sessionId: session.id })
+        continue
+      }
+      if (!isInside(c.path, fromDir)) {
+        skipped.push({ path: c.path, reason: 'outside the source workspace', sessionId: session.id })
+        continue
+      }
+      if (!exists(c.path)) {
+        skipped.push({ path: c.path, reason: 'no longer on disk', sessionId: session.id })
+        continue
+      }
+      const prev = byPath.get(c.path)
+      if (prev) prev.sessionIds.push(session.id)
+      else byPath.set(c.path, { sourcePath: c.path, kind: c.kind, isDir: isDirectory(c.path), sessionIds: [session.id] })
+    }
+  }
+
+  // 剪掉被别的 move（目录）包含的路径，避免重复搬迁
+  const all = [...byPath.values()].sort((a, b) => a.sourcePath.length - b.sourcePath.length)
+  const kept: ArtifactMove[] = []
+  for (const m of all) {
+    if (kept.some((k) => k.isDir && isInside(m.sourcePath, k.sourcePath))) continue
+    kept.push({ ...m, relative: '', targetPath: '' })
+  }
+
+  for (const m of kept) {
+    // 相对化与拼接都用**产物自己的方言**：它已经被 isInside 认可在 fromDir 之内，两者同源。
+    // 用宿主那套算的话，`C:\Users\me\x.txt` 会相对化成一个带盘符的怪串。
+    const flavor = flavorFor(m.sourcePath, fromDir)
+    const api = apiOf(flavor)
+    m.relative = api.relative(canonical(fromDir, flavor), canonical(m.sourcePath, flavor))
+    m.targetPath = apiOf(flavorFor(toDir, m.sourcePath)).join(toDir, m.relative)
+    if (exists(m.targetPath)) problems.push(`artifact target already exists: ${m.targetPath}`)
+  }
+
+  return { moves: kept, problems, skipped }
+}
+
 export function planArtifactMoves(options: PlanArtifactOptions): ArtifactPlanResult {
   const {
     sessions,

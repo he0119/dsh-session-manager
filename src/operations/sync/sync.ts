@@ -63,6 +63,7 @@ import { scanAllAsync, type DiscoveredSession } from '../../shared/library/disco
 import { createBackup } from '../../shared/journal.ts'
 import { encodeSegment, parseSessionLogName } from '../../shared/paths.ts'
 import { decodeLogTextChunked } from '../../shared/log/log-decode.ts'
+import { splitLinesAsync } from '../../shared/text-chunks.ts'
 import { createGitRunner, repoLocation, createRepoLocationCache, type GitRunner, type RepoLocation, type RepoLocationLookup } from '../../shared/repo.ts'
 import { sessionMetaOfRecord } from '../../shared/visibility.ts'
 import type { ProjectionCacheReader } from '../../shared/library/projection-cache.ts'
@@ -2833,8 +2834,8 @@ export async function prepareSync(
         const mine = await readFile(localFile.path)
         const theirs = entryBytes(bundle, remoteFile)
         const diff = diffSessionLogs(
-          (await decodeLogTextChunked(mine, localFile.compression)).split('\n'),
-          (await decodeLogTextChunked(theirs, remoteFile.compression)).split('\n'),
+          await splitLinesAsync(await decodeLogTextChunked(mine, localFile.compression)),
+          await splitLinesAsync(await decodeLogTextChunked(theirs, remoteFile.compression)),
           { localBytes: mine.byteLength, remoteBytes: theirs.byteLength },
         )
         const relation = {

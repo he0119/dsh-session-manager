@@ -22,6 +22,7 @@ import { statSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 
 import { decodeLogTextChunked } from './log-decode.ts'
+import { splitLinesAsync } from '../text-chunks.ts'
 
 /** 要读的日志：路径与压缩方式（与 discovery.ts 的 `SessionLogFile` 同形）。 */
 export interface LogTextSource {
@@ -48,32 +49,6 @@ export interface LogTextCache {
  * 翻页最费时的那一份。再大的不缓存。
  */
 export const DEFAULT_CACHED_LOG_CHARS = 64 * 1024 * 1024
-
-/**
- * 与 `text.split('\n')` 同一份结果，只是按 2M 字符一段切开、段间让出。
- *
- * 一份 16MB 的日志解开是几千万字符，`split()` 会在主线程上按住上百毫秒；切段之后每段只有几毫秒。
- * 行可能跨段：上一段的尾巴先留着，下一段的第一行拼回去再收。
- */
-export async function splitLinesAsync(text: string): Promise<string[]> {
-  if (text.length === 0) return ['']
-  const CHUNK_CHARS = 2 * 1024 * 1024
-  const lines: string[] = []
-  let carry = ''
-  for (let offset = 0; offset < text.length; offset += CHUNK_CHARS) {
-    const piece = text.slice(offset, offset + CHUNK_CHARS)
-    const parts = piece.split('\n')
-    if (carry !== '') {
-      parts[0] = carry + parts[0]
-      carry = ''
-    }
-    if (offset + CHUNK_CHARS < text.length) carry = parts.pop() ?? ''
-    lines.push(...parts)
-    await new Promise<void>((resolve) => setImmediate(resolve))
-  }
-  if (carry !== '') lines.push(carry)
-  return lines
-}
 
 /** 造一份日志文本缓存。 */
 export function createLogTextCache(options: { maxChars?: number } = {}): LogTextCache {

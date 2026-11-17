@@ -6,7 +6,7 @@ import test from 'node:test'
 
 import { decompress } from 'fzstd'
 
-import { applyArtifactMoves, extractArtifactsFromLog, isInside, planArtifactMoves, resolveArtifactPath } from '../../../src/operations/migrate/artifacts.ts'
+import { applyArtifactMoves, extractArtifactsFromLog, isInside, planArtifactMoves, planArtifactMovesAsync, resolveArtifactPath } from '../../../src/operations/migrate/artifacts.ts'
 import { applyPlan, verifyAppliedPlan } from '../../../src/operations/migrate/execute.ts'
 import { readManifest, rollback } from '../../../src/shared/journal.ts'
 import { buildRelocationPlan } from '../../../src/operations/migrate/plan.ts'
@@ -104,6 +104,18 @@ test('规划：与磁盘存在性求交 + 工作区外剔除', () => {
   const reasons = plan.skipped.map((s) => s.reason).sort()
   assert.deepEqual(reasons, ['no longer on disk', 'outside the source workspace'])
   assert.equal(plan.problems.length, 0)
+})
+
+test('规划：异步版本与同步版本给出同一份计划', async () => {
+  const text = logText([writeCall(CWD + '\\a.txt'), writeCall(CWD + '\\dir\\b.txt'), delivered(CWD + '\\c.txt')])
+  const options = {
+    sessions: [{ id: 's1', text }],
+    fromDir: CWD,
+    toDir: 'C:\\Users\\me\\Work\\temp',
+    exists: () => true,
+    isDirectory: () => false,
+  }
+  assert.deepEqual(await planArtifactMovesAsync(options), planArtifactMoves(options))
 })
 
 test('规划：嵌套剪枝——目录整体搬走时不再单独搬它内部的文件', () => {

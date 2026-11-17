@@ -8,7 +8,8 @@ import { mkdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import test from 'node:test'
 
-import { createLogTextCache, splitLinesAsync } from '../../../src/shared/log/log-text-cache.ts'
+import { createLogTextCache } from '../../../src/shared/log/log-text-cache.ts'
+import { splitLinesAsync } from '../../../src/shared/text-chunks.ts'
 import { encodeRawFrame } from '../../../src/shared/log/zstd-frame.ts'
 import { sandboxDir } from '../../fixtures/sandbox.ts'
 
