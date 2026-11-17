@@ -500,7 +500,7 @@ export async function contentFingerprintChunked(
   compression: string | null,
   decodeAll: DecodeAll,
 ): Promise<FileFingerprint> {
-  const bytes = readFileSync(path)
+  const bytes = await readFile(path)
   const content = contentBytes(bytes, compression, decodeAll)
   const hash = createHash('sha256')
   /** 一次哈希多少字节；见上面的说明。 */
@@ -3018,7 +3018,7 @@ async function attachmentRefsOfFile(file: SessionLogFile, cache: AttachmentRefCa
   }
   const hit = stamp === undefined ? undefined : cache.get(file.path)
   if (hit !== undefined && hit.stamp === stamp) return hit.refs
-  const bytes = readFileSync(file.path)
+  const bytes = await readFile(file.path)
   const text = await decodeLogTextChunked(bytes, file.compression)
   const refs = scanAttachmentRefs(text)
   if (stamp !== undefined) {
