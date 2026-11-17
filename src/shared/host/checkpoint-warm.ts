@@ -1,4 +1,4 @@
-// src/shared/host/checkpoint-warm.ts — 落地之后请宿主把它自己那份投影检查点补上（零 DSH 依赖，端口由宿主半侧注入）。
+// src/shared/host/checkpoint-warm.ts — 应用之后请宿主把它自己那份投影检查点补上（零 DSH 依赖，端口由宿主半侧注入）。
 //
 // 为什么需要这一步：侧边栏那一行显示什么**不来自日志**。宿主的 `session/list` 对"没活过的会话"只读它
 // 自己持久化的投影检查点（`<storages>/session_projcache/sessions/<id>.json`），读不到就回退成
@@ -15,8 +15,8 @@
 //   2. `sessionProjectionCache.coldSnapshot()`：折叠所有投影单元并写回检查点（宿主自己的文档写明
 //      "第一次冷读会建立缓存行"）。
 //
-// 代价是每条落地会话要把整份日志读一遍折一遍（≈ 手动点开一次的代价）。所以这里逐条兜住失败、绝不影响
-// 落地结论：日志已经在盘上了，这一步只补宿主那份派生数据。
+// 代价是每条应用会话要把整份日志读一遍折一遍（≈ 手动点开一次的代价）。所以这里逐条兜住失败、绝不影响
+// 应用结论：日志已经在盘上了，这一步只补宿主那份派生数据。
 //
 // @module dsh-session-manager/shared/host/checkpoint-warm
 import type { CheckpointWarmPort, ProgressReporter, WarmOutcome } from '../types.ts'
@@ -42,13 +42,13 @@ function reasonOf(error: unknown): string {
 /**
  * 请宿主给这几条会话补上投影检查点。
  *
- * 去重后**逐条**走一遍（失败一条不影响后面的），拿不到端口就如实报 `unavailable`——这条路径不是落地的
- * 一部分：`warmed + failed` 不等于落地条数时也不该抛。
+ * 去重后**逐条**走一遍（失败一条不影响后面的），拿不到端口就如实报 `unavailable`——这条路径不是应用的
+ * 一部分：`warmed + failed` 不等于应用条数时也不该抛。
  *
- * @param ids 刚落地的会话 id（重复的会去掉）。
- * @param deps 宿主端口（缺席就什么都不做）。
+ * @param ids 刚应用的会话 id（重复的会去掉）。
+ * @param deps 宿主接口（缺席就什么都不做）。
  * @param onProgress 逐条报一次（`phase: 'warm'`）。这一步**每条会话要把整份日志读一遍折一遍**
- *   （见下面那句代价），落地几百条时它是最后一段长活，所以它值得一条进度；拿不到端口时一条都不报。
+ *   （见下面那句代价），应用几百条时它是最后一段长活，所以它值得一条进度；拿不到端口时一条都不报。
  * @returns 补上了几条、失败几条、这个宿主有没有那套动作。
  */
 export async function warmCheckpoints(
@@ -63,7 +63,7 @@ export async function warmCheckpoints(
   try {
     port = deps.hostCheckpoints?.()
   } catch (error) {
-    // 探测本身失败按"没有那套动作"报，并把原因带上（与 take-effect.ts 对探测失败的口径一致）。
+    // 探测本身失败按"没有那套动作"报，并把原因带上（与 take-effect.ts 对探测失败的标准一致）。
     return { warmed: 0, failed: 0, unavailable: true, problems: [reasonOf(error)] }
   }
   if (port === undefined) return { warmed: 0, failed: 0, unavailable: true, problems: [] }
@@ -91,7 +91,7 @@ export async function warmCheckpoints(
  * 这一步"结果怎样"的措辞，工具层与界面层共用这一份（与 take-effect.ts 的 `describeEffect()` 同一条
  * 约定：同一个结论不写两遍）。
  *
- * @param outcome 补完之后拿到的结果；`undefined` = 这一步没跑（预演、纯推送）。
+ * @param outcome 补完之后拿到的结果；`undefined` = 这一步没跑（预览、纯推送）。
  * @returns 一句给人看的结论；没什么可说的时返回 undefined（调用方据此不添这一行）。
  */
 export function describeWarm(outcome: WarmOutcome | undefined): string | undefined {
@@ -107,6 +107,6 @@ export function describeWarm(outcome: WarmOutcome | undefined): string | undefin
   if (outcome.failed === 0) return head
   const tail = outcome.problems.length === 0 ? '' : `：${outcome.problems.join('；')}`
   return (
-    `${head}另有 ${outcome.failed} 条没补上（日志已经在盘上，不影响落地；点开一次照样会有）${tail}`
+    `${head}另有 ${outcome.failed} 条没补上（日志已经在盘上，不影响应用；点开一次照样会有）${tail}`
   )
 }

@@ -12,7 +12,7 @@
  * （`test/client.test.mjs` 按产物文本核这一条）。类型面绑死的代价是上游换形状时这一侧编译
  * 不过；换来的是键集校验，比"装进 profile 才现形"便宜。
  *
- * 键名点分，前缀就是它属于哪一块：`page.*` 骨架、`list.*` 会话列表、`transfer.*` 传输、
+ * 键名点分，前缀就是它属于哪一块：`page.*` 外壳、`list.*` 会话列表、`transfer.*` 传输、
  * `migrate.*` 迁移、`manage.*` 逐条管理、`help.*` 说明、`sync.*` 同步、`dirPicker.*` 目录
  * 浏览、`backup.*` 备份与回滚；`table.*` / `cwd.*` / `tag.*` / `effect.*` / `verify.*` /
  * `error.*` 是跨页共用的那几类。取消 / 关闭 / 保存三个词**不自己写**：宿主 `common` 命名空间
@@ -44,7 +44,7 @@ export type Translate = TranslateNS<typeof NS>
 
 /** 中文文案（键集真源）。 */
 export const zh = {
-  // 页面骨架：侧栏那一行 + 页面标题 + 页头那几枚页面级动作
+  // 页面外壳：侧栏那一行 + 页面标题 + 页头那几枚页面级动作
   'page.title': '会话管理',
   'page.library': '会话库',
   'page.refresh': '刷新',
@@ -85,7 +85,7 @@ export const zh = {
   'list.empty': '这个会话库里还没有会话。',
 
   // 列表动作行上那枚入口：它开的就是上面那个弹窗（导出要用勾选，导入不用，所以它不受勾选限制）。
-  'import.hint': '选一个包和目标目录；按「导入」先算一份只读计划，逐条列出会写什么，确认才落盘。',
+  'import.hint': '选一个包和目标目录；按「导入」先算一份只读计划，逐条列出会写什么，确认才写入磁盘。',
   'import.fileLabel': '要导入的包',
   'import.pickFile': '选择文件…',
   'import.noFile': '还没有选',
@@ -97,19 +97,19 @@ export const zh = {
   // 与迁移页的目标目录同一个字段（值控件 + 候选面板 + 手输路径），空着时值控件上显示这一句。
   'import.targetPlaceholder': '选择目标目录…',
   'dialog.acknowledge': '我明白',
-  'dialog.previewing': '预演中…',
+  'dialog.previewing': '正在预览…',
   'import.action': '导入',
   'import.dialogTitle': '导入会话包',
   'import.confirmTitle': '将要写入',
   'import.apply': '确认导入',
   'import.back': '返回',
   'import.applying': '导入中…',
-  'import.progress.note': '导入只增不覆盖：中断了再导一次，已经落地的那些会跳过。',
+  'import.progress.note': '导入只增不覆盖：中断了再导一次，已经写进去的那些会跳过。',
   'import.planSummary': '将创建 {create} 条、跳过 {skip} 条，共 {bytes}',
-  // 包里有附件对象时补一句：会话日志之外还有一段要落地的字节，它决定了"导完图能不能显示出来"。
+  // 包里有附件对象时补一句：会话日志之外还有一段要写进去的字节，它决定了"导完图能不能显示出来"。
   'import.planAttachments': '包里还有附件对象 {attachments} 个（{bytes}），其中 {adds} 个本机没有，会一并落进本机附件库。',
   'import.planAttachmentsUnavailable':
-    '其中 {count} 个对象这个宿主落不了（没有附件服务，或认不出这种引用）：它们不会落地，会话照旧导入。',
+    '其中 {count} 个对象这个宿主写不进去（没有附件服务，或认不出这种引用）：它们不会写进去，会话照旧导入。',
   'table.action': '动作',
   'table.conclusion': '结论',
   'table.session': '会话',
@@ -124,9 +124,9 @@ export const zh = {
   // 跳过的行**没有** toCwd，但那不是"没有 cwd"：它们根本不会被写盘。
   'cwd.skipped': '跳过，不改写',
   'import.done': '已写入 {count} 条会话（{bytes}）。',
-  // 只补附件的那种落地（日志早就在库里、图是挂的）：会话那一条是 0，得有一句说清这次写的是什么。
+  // 只补附件的那种导入（日志早就在库里、图是挂的）：会话那一条是 0，得有一句说清这次写的是什么。
   'import.doneAttachments': '附件对象 {count} 个（{bytes}）。',
-  'import.attachmentProblems': '另有 {count} 个对象没落地。',
+  'import.attachmentProblems': '另有 {count} 个对象没写进去。',
   'import.needFile': '请先选择要导入的 .dshsess 包。',
   'import.needTarget': '请先选择目标目录。',
 
@@ -134,7 +134,7 @@ export const zh = {
   'migrate.to.label': '迁移到的目录',
   'list.ungrouped': '未分组',
   'migrate.to.pick': '选择目标目录…',
-  // 目录字段（迁移的源 / 目标、导入的落地目录三处共用同一个组件，见 DirectoryField.tsx）：
+  // 目录字段（迁移的源 / 目标、导入的目标目录三处共用同一个组件，见 DirectoryField.tsx）：
   'pathField.type': '手输路径',
   'pathField.collapse': '收起',
   'pathField.placeholder': '目录的绝对路径',
@@ -202,10 +202,10 @@ export const zh = {
   'verify.pass': '复核通过',
   'verify.fail': '复核未通过',
   // 生效方式只留短句：「为什么会这样」的长解释在说明页的 FAQ（`help.faq.restart*`），这里不复述。
-  // `effect.restart` 是落地**之后**的结论（带处置），`effect.plannedRestart` 是确认弹窗里的**事前**
+  // `effect.restart` 是应用**之后**的结论（带处置），`effect.plannedRestart` 是确认弹窗里的**事前**
   // 提示（只是告知，处置留给结论那一句）。
   'effect.restart': '需重启 DSH 才生效；重启前请勿再改工作区。',
-  'effect.plannedRestart': '落地后需重启 DSH 才生效。',
+  'effect.plannedRestart': '应用后需重启 DSH 才生效。',
   'problems.title': '问题',
 
   // ---- 备份与回滚 ----
@@ -216,7 +216,7 @@ export const zh = {
   // 删除 / 迁移之后提示里那枚「撤销」：它开的是备份与回滚那面，并且直接摆出这份备份的回滚确认。
   'undo.action': '撤销',
   'undo.tip': '把这次动过的会话搬回去：打开这份备份的回滚确认',
-  'backup.hint': '迁移、导入落地、删除都会先留一份字节级备份，「回滚」与「恢复」把它还原回去。',
+  'backup.hint': '迁移、导入应用、删除都会先留一份字节级备份，「回滚」与「恢复」把它还原回去。',
   'backup.rootLabel': '备份根目录',
   'backup.empty': '还没有备份。',
   'backup.row': '{sessions} 条会话 · {artifacts} 项产物',
@@ -415,7 +415,7 @@ export const zh = {
   'help.entry.title': '哪里做什么',
   'help.entry.sessions': '整个会话库都在这里，侧边栏点不到的那些也在：左边按项目筛，中间是平铺的表，行尾可以看详情。勾选后可以归档、重新生成名称、迁移、导出或删除：名称是按整段对话重算的，你手动改过名的与子智能体会话会跳过。迁移把勾中的会话搬到一个目标目录——改写工作目录、挪走日志目录、更新工作区注册表；侧边栏看不见的那几类搬不走，先在列表里单独处理。',
   'help.entry.export': '列表底部动作行里的「导出所选」：把勾中的会话打成 .dshsess 包交给浏览器下载，不弹窗、不写盘——亲子会话跟着走的那几条也在里面，完成后顶上的提示会报条数、字节与带上的附件对象。',
-  'help.entry.import': '底部状态栏那枚「导入…」：选一个 .dshsess 包（也可以直接把它拖到页面上）与落地目录，先看一份只读计划，确认才把包里的会话放进那个项目；目标目录默认填左栏选中的项目。',
+  'help.entry.import': '底部状态栏那枚「导入…」：选一个 .dshsess 包（也可以直接把它拖到页面上）与目标目录，先看一份只读计划，确认才把包里的会话放进那个项目；目标目录默认填左栏选中的项目。',
   'help.entry.sync': '页头那枚同步状态打开：在几台机器之间同步会话（WebDAV），先给一份只读计划，确认才真的拉取与推送。远端地址、机器名与路径映射在插件设置里改，改完不用重启。会话日志引用的附件对象走远端一个共享目录，字节相同的只传一次：本机缺的取回、远端缺的补上，两边都没有的只报一句（它在计划里不出现）。',
   'help.entry.backup': '底部状态栏那枚「备份与回滚」打开：几个会写盘的操作共同的后悔面，迁移、删除、同步覆盖本机那份之前都会先留一份字节级备份。「回滚」把迁移搬走的那份搬回来（连工作区注册表一起还原），「恢复」只把备份里那份搬回去，注册表不动。',
   'help.where.title': '数据从哪来',
@@ -489,7 +489,7 @@ export const zh = {
   'sync.action': '同步',
   'sync.dialogTitle': '将要同步',
   'sync.running': '正在同步',
-  // 落地跑完那一页的标题：四段里的最后一段（见 design.md 的「执行与结果」）。
+  // 应用跑完那一页的标题：四段里的最后一段（见 design.md 的「执行与结果」）。
   'sync.done.title': '同步完成',
   'sync.busy': '同步中…',
   // 关掉窗口之后那一趟还在跑（见 logic/syncJob.ts）：弹窗里那枚按钮、状态栏那一格、以及结果页上
@@ -610,9 +610,9 @@ export const zh = {
   'sync.skippedBlank': '跳过 {count} 条空白会话（建出来但一轮都没聊过），它们不参与同步。',
   'sync.liveHint': '有 {count} 条会话正被宿主打开（标着「活动中」）：先切到别的会话或重启宿主，才能覆盖本机那份或选正本。',
 
-  // 同步设置表单（宿主设置接缝）
+  // 同步设置表单（宿主设置接口）
   'sync.form.loading': '正在读配置…',
-  'sync.form.unavailable': '这个宿主没把设置接缝给出来，URL 与映射只能在插件配置里改。',
+  'sync.form.unavailable': '这个宿主没把设置接口给出来，URL 与映射只能在插件配置里改。',
   'sync.form.readOnly': '这份配置文档是只读的，改不了。',
   'sync.field.url': '远端地址',
   'sync.field.urlHint': 'WebDAV 地址，可以填服务器根（插件在它下面自建 dsh-session-manager/）；清空就等于关掉同步。',
@@ -629,7 +629,7 @@ export const zh = {
   'sync.password.shadowed': '这个引用由启动环境提供，那里永远优先，界面改不了；要换就先清掉那个环境变量。',
   'sync.password.unavailable': '这个宿主没给出凭据服务，密码只能放进环境变量（或自己编辑宿主的凭据文件）。',
   'sync.field.mapping': '路径映射',
-  'sync.field.mappingHint': '右边填这台机器上的目录；远端那一栏要逐字对上别的机器记下的工作目录，认不出来就跳过。配了就按配的落地。',
+  'sync.field.mappingHint': '右边填这台机器上的目录；远端那一栏要逐字对上别的机器记下的工作目录，认不出来就跳过。配了就按配的应用。',
   'sync.field.mappingEmpty': '还没有映射：远端记的是它自己机器上的工作目录，不映射的话那些会话会被跳过。',
   'sync.map.add': '添加一行',
   'sync.map.remove': '删除',
@@ -727,7 +727,7 @@ export const zh = {
   'progress.tidy': '正在整理远端：第 {current} / {total} 个包',
   // 补齐那条是逐条请宿主冷读（有分母），所以它的分母与其它段一样在文案里。
   'progress.warm': '正在请宿主补齐列表元数据 {current} / {total}',
-  // 下面这两段没有分母（一次网络往返、一次注册表落盘）：只说在做什么，不画条。
+  // 下面这两段没有分母（一次网络往返、一次注册表写入磁盘）：只说在做什么，不画条。
   'progress.registry': '正在更新工作区登记…',
   'progress.remote': '正在读取远端索引…',
   // 认不出来的段名（宿主比界面新时）与"还没收到第一条事件"这两句兜底。
@@ -916,7 +916,7 @@ export const en: LocaleDictOf<typeof NS> = {
   'backup.entry': 'Backups & rollback ({count})',
   'undo.action': 'Undo',
   'undo.tip': 'Move the sessions this run touched back: open the rollback confirm for that backup',
-  'backup.hint': 'Every migration, landing import and delete leaves a byte-level backup first; Roll back and Restore put it back.',
+  'backup.hint': 'Every migration, import and delete leaves a byte-level backup first; Roll back and Restore put it back.',
   'backup.rootLabel': 'Backup root',
   'backup.empty': 'No backups yet.',
   'backup.row': '{sessions} sessions · {artifacts} artifacts',
@@ -1112,7 +1112,7 @@ export const en: LocaleDictOf<typeof NS> = {
   'help.entry.title': 'What lives where',
   'help.entry.sessions': 'The whole session library is here, including sessions the sidebar cannot reach: the left rail filters by project, the middle is a flat table, and the row end opens details. Ticked rows can be archived, retitled, migrated, exported or deleted: names are redone from the whole conversation, and sessions you renamed by hand or subagent sessions are skipped. Migration moves the ticked sessions into one target directory — it rewrites the recorded working directory, moves the log directory and updates the workspace registry. The rows the sidebar hides cannot move, so deal with them in the list first.',
   'help.entry.export': 'Export selected, in the action row under the list: packs the ticked sessions into a .dshsess bundle and hands it to the browser — no dialog, nothing written. Sessions that follow their parent come along, and the notice at the top reports the count, bytes and the attachment objects carried.',
-  'help.entry.import': 'Import… in the status bar: pick a .dshsess bundle (you can also drop it onto the page) and a landing directory, look at a read-only plan first, and only confirming puts the bundle’s sessions into that project. The target defaults to the project selected on the left.',
+  'help.entry.import': 'Import… in the status bar: pick a .dshsess bundle (you can also drop it onto the page) and a target directory, look at a read-only plan first, and only confirming puts the bundle’s sessions into that project. The target defaults to the project selected on the left.',
   'help.entry.sync': 'Opened from the sync state in the header: syncs sessions between machines over WebDAV and first shows a read-only plan, pulling and pushing only once you confirm. The remote address, machine names and path mappings are set in the plugin settings, with no restart. Attachment objects referenced by session logs travel through one shared remote folder, and identical bytes are uploaded once: missing ones are fetched, ones the remote lacks are uploaded, and ones nobody has are reported in one line (they never show up in the plan).',
   'help.entry.backup': 'Opened from Backups & rollback in the status bar: the undo surface shared by the operations that write, where every migration, delete and overwrite of this machine’s copy leaves a byte-level backup first. Roll back brings back what a migration moved (the workspace registry included); Restore only moves the backed-up copy back and leaves the registry alone.',
   'help.where.title': 'Where the data comes from',

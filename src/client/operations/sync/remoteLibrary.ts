@@ -6,7 +6,7 @@
  * 之后翻来翻去只是在这份上查表（见
  * [远端位置一次刷新读一次](../../../../.agents/notes/implemented/architecture/2026-11-15-remote-placement-read-once-per-refresh.md)）。
  *
- * 什么时候重读由调用方决定（`load()`）：页面拿到一份**新的**清单时、以及一次同步真的落地之后（那一次
+ * 什么时候重读由调用方决定（`load()`）：页面拿到一份**新的**清单时、以及一次同步真的应用之后（那一次
  * 会改远端）。store 自己不订阅任何东西，所以测试不必先造一条面板流。
  *
  * @module dsh-session-manager/client/operations/sync/remoteLibrary

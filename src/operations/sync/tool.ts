@@ -103,9 +103,9 @@ function describeSync(
   attachments?: { in?: SyncAttachmentIn; out?: SyncAttachmentOut },
   deleted?: { ids: readonly string[]; bytes: number },
 ): string {
-  const head = `${applied ? '已同步' : '预演'}：拉取 ${plan.pullIds.length} 条、推送 ${plan.pushIds.length} 条（本机 ${plan.localCount} 条，远端 ${plan.remoteCount} 条，来自 ${plan.machines.join('、') || '还没有机器'}）`
+  const head = `${applied ? '已同步' : '预览'}：拉取 ${plan.pullIds.length} 条、推送 ${plan.pushIds.length} 条（本机 ${plan.localCount} 条，远端 ${plan.remoteCount} 条，来自 ${plan.machines.join('、') || '还没有机器'}）`
   if (!applied) {
-    // 预演时把"跟着删"的条数也报出来：确认那一下之后它会真的删（先进备份）。
+    // 预览时把"跟着删"的条数也报出来：确认那一下之后它会真的删（先进备份）。
     return plan.deleted.length === 0
       ? head
       : `${head}。其中 ${plan.deleted.length} 条已在别处删除，确认后会跟着删（先进备份）`
@@ -117,7 +117,7 @@ function describeSync(
     deleted === undefined || deleted.ids.length === 0
       ? ''
       : `，跟着删掉 ${deleted.ids.length} 条已在别处删除的会话（旧的那份已进备份）`
-  return `${head}。实际落地：拉取 ${pulled.length} 条、推送 ${pushed.length} 条${overwrote}${followed}${describeSyncObjects(attachments)}`
+  return `${head}。实际应用：拉取 ${pulled.length} 条、推送 ${pushed.length} 条${overwrote}${followed}${describeSyncObjects(attachments)}`
 }
 
 /**
@@ -158,7 +158,7 @@ export interface SyncToolContext {
   config: PluginConfigInput
   /** 会话库、注册表与备份根。 */
   paths: ResolvedPaths
-  /** 写远端格子的互斥锁：预演不拿，真落地才拿。 */
+  /** 写远端格子的互斥锁：预览不拿，真应用才拿。 */
   remoteWrite: RemoteWriteGate
   /** 这次调用能看到哪种生效模式。 */
   mode: () => EffectMode
@@ -221,7 +221,7 @@ export function syncTool(context: SyncToolContext): ToolDefinition {
           return syncToolUnavailable('没有配置 WebDAV 同步：插件配置里的 sync.url 是空的。')
         }
         /*
-         * 真落地才拿写权限：预演只读远端，与别的写手同时跑不会改任何东西，不需要挡。拿不到时
+         * 真应用才拿写权限：预览只读远端，与别的写手同时跑不会改任何东西，不需要挡。拿不到时
          * 直接回一句，不排队——排队之后拿旧快照去写，正是这把锁要防的事。
          */
         let release: (() => void) | undefined
@@ -248,9 +248,9 @@ export function syncTool(context: SyncToolContext): ToolDefinition {
             projection: createProjectionReader(projectionCacheDir(paths.registryPath)),
             // 覆盖本机那份之前要问一句"这条还在跑吗"（与删除同一条理由：宿主手里有它的写句柄）。
             liveSessionIds: () => liveSessionIds(ctx),
-            // 拉取会把会话重挂到目标工作区（写注册表），所以整批落地之后同样要把宿主重新接管一遍。
+            // 拉取会把会话重挂到目标工作区（写注册表），所以整批应用之后同样要把宿主重新接管一遍。
             hostRegistry: () => hostRegistryPort(ctx),
-            // 同一处收口：拉取来的会话在本机没有投影检查点，请宿主把列表元数据折出来（见 checkpoint-warm.ts）。
+            // 同一处统一处理：拉取来的会话在本机没有投影检查点，请宿主把列表元数据折出来（见 checkpoint-warm.ts）。
             hostCheckpoints: () => hostCheckpointPort(ctx),
             // 附件对象走远端共享库（推送只补远端缺的、拉取只取本机缺的），包本身照旧只有日志。
             attachments: () => attachmentPort(ctx),
@@ -267,13 +267,13 @@ export function syncTool(context: SyncToolContext): ToolDefinition {
           notes: planNotes(outcome.plan),
           bytesIn: outcome.applied ? outcome.bytesIn : outcome.plan.bytesIn,
           bytesOut: outcome.applied ? outcome.bytesOut : outcome.plan.bytesOut,
-          // 只落地那一次报得出这两个数：预演不知道远端共享库里有哪些对象（见 SyncOutcome 的字段说明）。
+          // 只应用那一次报得出这两个数：预览不知道远端共享库里有哪些对象（见 SyncOutcome 的字段说明）。
           attachmentsIn: outcome.attachmentIn?.written ?? 0,
           attachmentsOut: outcome.attachmentOut?.uploaded ?? 0,
           attachmentsMissing: outcome.attachmentOut?.missing ?? 0,
           machines: outcome.plan.machines,
           /*
-           * 这次同步要不要重启才被承认：落地按真实结果说，预演按探测说（与界面那条路同一个口径，
+           * 这次同步要不要重启才被承认：应用按真实结果说，预览按探测说（与界面那条路同一个标准，
            * 见 src/web.ts 里的 `syncEffect()`）。两种模式都只在"真有会话要落到本机"时才谈得上生效：
            * 纯推送不改本机任何东西，`restart-required` 在那时会是一句假警告。
            */
@@ -296,7 +296,7 @@ export function syncTool(context: SyncToolContext): ToolDefinition {
             ),
             describeWarm(outcome.warm),
             describeLeftovers(collectLeftovers(outcome)),
-            // 预演也要把"执行后会怎样"说出来，否则调用方要到落地之后才知道要重启（与迁移工具同一条）。
+            // 预览也要把"执行后会怎样"说出来，否则调用方要到应用之后才知道要重启（与迁移工具同一条）。
             outcome.applied || outcome.plan.pullIds.length === 0 ? undefined : describePlannedEffect(mode()),
           ]
             .filter((line): line is string => line !== undefined)

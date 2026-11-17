@@ -6,7 +6,7 @@
 // 不跑副作用，也没法调用这个模块的入口），所以在这一层逐条钉住。
 //
 // 六个动作各自的"结果页长什么样"不在这里：那些是各面板传给 `startRun()` 的 `render(done)`，界面冒烟
-// 照着点击走一遍（见 test/plugin/client.test.mjs 的「迁移落地之后进度在状态窗里」那两条）。
+// 照着点击走一遍（见 test/plugin/client.test.mjs 的「迁移应用之后进度在状态窗里」那两条）。
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
@@ -15,7 +15,7 @@ import { backgroundRun, dismissRun, getRun, openRunDialog, startRun, subscribeRu
 import { runChipLabel, runTitle } from '../../../../src/client/operations/manage/runLabel.ts'
 
 /**
- * 翻译替身：把键与参数拼成一句可比较的字符串（与冒烟测试的示例数据同一口径）。
+ * 翻译假对象：把键与参数拼成一句可比较的字符串（与冒烟测试的示例数据同一标准）。
  */
 const t = (key: string, params?: Record<string, unknown>): string =>
   params === undefined ? key : `${key}:${JSON.stringify(params)}`
@@ -28,7 +28,7 @@ const progress = (phase: string, done: number, total: number, label?: string): P
   ...(label === undefined ? {} : { label }),
 })
 
-/** 等一轮微任务 / 定时器，让 `startRun` 里那几个 `.then` 落地。 */
+/** 等一轮微任务 / 定时器，让 `startRun` 里那几个 `.then` 应用。 */
 const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0))
 
 /**
@@ -210,7 +210,7 @@ test('订阅：每次变化通知一次，退订之后不再叫', async () => {
   assert.equal(startRun('tidy', () => Promise.resolve('ok'), () => null), true)
   assert.equal(calls, 1, '发起时通知一次（状态窗要开）')
   await settle()
-  assert.equal(calls, 2, '结论落地再通知一次')
+  assert.equal(calls, 2, '结论应用再通知一次')
   off()
   // 退订之后任何变化都不该再叫到它（`getRun()` 是读的入口，订阅只是"变了叫我"）。
   dismissRun()

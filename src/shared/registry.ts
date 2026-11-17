@@ -12,7 +12,7 @@
 //   tables: { workspaces: { [id]: { path, title, sessionIds[], createdAt, updatedAt } } }
 //
 // 注意：宿主进程内持有该注册表的内存副本，绕过它直接改写文件会被之后的宿主写入覆盖，
-// 因此落盘后需要重启生效；能在进程内走 ctx.workspaceRegistry 时不要用本模块落盘。
+// 因此写入磁盘后需要重启生效；能在进程内走 ctx.workspaceRegistry 时不要用本模块写入磁盘。
 import { randomUUID } from 'node:crypto'
 import { readFileSync, renameSync, writeFileSync } from 'node:fs'
 
@@ -98,9 +98,9 @@ export function readRegistry(path: string): WorkspaceRegistryState {
 }
 
 /**
- * 原子落盘（临时文件 + rename），保持宿主的 2 空格缩进与结尾换行。
+ * 原子写入磁盘（临时文件 + rename），保持宿主的 2 空格缩进与结尾换行。
  *
- * 警告：宿主进程内持有内存副本，绕过它直接落盘需要重启才会被承认，且可能被覆盖。
+ * 警告：宿主进程内持有内存副本，绕过它直接写入磁盘需要重启才会被承认，且可能被覆盖。
  */
 export function writeRegistryAtomic(path: string, reg: WorkspaceRegistryState): void {
   const tmp = `${path}.dsh-session-manager.tmp`
@@ -275,7 +275,7 @@ function sessionIdsOf(reg: WorkspaceRegistryState): Set<string> {
 /**
  * 复核一次注册表改动：**会话 id 不新增（除计划带来的）、不丢失；已存在的工作区 id 与路径不变**。
  *
- * 这三条是"活体落盘由宿主代劳"之后唯一还需要插件自己盯的东西：宿主分配 id 的地方只有"新建工作区"
+ * 这三条是"运行时直接写文件由宿主代劳"之后唯一还需要插件自己盯的东西：宿主分配 id 的地方只有"新建工作区"
  * 一处，其余一律复用。复核失败不改变磁盘（文件已经写好），只把问题报出去。
  */
 export function verifyRegistryChange(
@@ -285,7 +285,7 @@ export function verifyRegistryChange(
 ): RegistryVerification {
   const problems: string[] = []
   const valid = validateRegistry(after)
-  if (!valid.ok) problems.push(...valid.problems.map((p) => `落盘后的注册表不合法：${p}`))
+  if (!valid.ok) problems.push(...valid.problems.map((p) => `写入磁盘后的注册表不合法：${p}`))
 
   // 工作区：已存在的（不在 removedSources 里、也不是目标）必须**同一个 id、同一条路径**还在
   const removedIds = new Set(change.removedSources.map((s) => s.workspaceId))
@@ -303,7 +303,7 @@ export function verifyRegistryChange(
 
   // 目标：只多不少，且多出来的正是计划里那批
   const target = afterByPath.get(change.targetPath)
-  if (target === undefined) problems.push(`目标工作区 ${change.targetPath} 不在落盘结果里`)
+  if (target === undefined) problems.push(`目标工作区 ${change.targetPath} 不在写入磁盘结果里`)
   else {
     const had = new Set(beforeByPath(before, change.targetPath)?.sessionIds ?? [])
     const want = new Set([...had, ...change.added])
@@ -332,10 +332,10 @@ export function verifyRegistryChange(
   const allowedNew = new Set(change.added)
   const allowedGone = new Set(change.droppedStale.flatMap((entry) => entry.sessionIds))
   for (const sid of beforeSessions) {
-    if (!afterSessions.has(sid) && !allowedGone.has(sid)) problems.push(`会话 ${sid} 在落盘结果里没了（id 不该变）`)
+    if (!afterSessions.has(sid) && !allowedGone.has(sid)) problems.push(`会话 ${sid} 在写入磁盘结果里没了（id 不该变）`)
   }
   for (const sid of afterSessions) {
-    if (!beforeSessions.has(sid) && !allowedNew.has(sid)) problems.push(`落盘结果里多了计划外的会话 ${sid}`)
+    if (!beforeSessions.has(sid) && !allowedNew.has(sid)) problems.push(`写入磁盘结果里多了计划外的会话 ${sid}`)
   }
 
   return { ok: problems.length === 0, problems }
@@ -346,7 +346,7 @@ function beforeByPath(reg: WorkspaceRegistryState, path: string): WorkspaceRecor
   return Object.values(reg.tables.workspaces).find((rec) => rec.path === path)
 }
 
-/** 计划里记着、落盘结果里整份都没有的一条归属（见 `missingMemberships()`）。 */
+/** 计划里记着、写入磁盘结果里整份都没有的一条归属（见 `missingMemberships()`）。 */
 export interface MissingMembership {
   /** 这条会话在计划里属于哪个目录的工作区。 */
   path: string
@@ -357,9 +357,9 @@ export interface MissingMembership {
 }
 
 /**
- * 计划里该有、落盘结果里**整份都没有**的归属。
+ * 计划里该有、写入磁盘结果里**整份都没有**的归属。
  *
- * 宿主自己那一步是按内存里那份整份落盘的，于是它内存里没有的归属会被一起抹掉——这跟"计划里删掉了
+ * 宿主自己那一步是按内存里那份整份写入磁盘的，于是它内存里没有的归属会被一起抹掉——这跟"计划里删掉了
  * 一条"在文件上长得一模一样，所以判据只能是"计划里有、盘上没了"。
  *
  * 按目录（而不是工作区 id）比：新建的工作区由宿主分配 id，计划里那个只是预测值，拿 id 比会把一次

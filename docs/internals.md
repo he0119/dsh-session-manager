@@ -14,7 +14,7 @@
   宿主启动时校验的四条，本插件在写前与写后各验一次。
 - [有损的 projectKey 会撞名，动手前先查](../.agents/notes/implemented/architecture/2026-09-27-lossy-project-key-collision.md)：
   `C:\x\y` 与 `C:\x-y` 编码结果相同，宿主的 `realpath` 检查抓不到。
-- [落地目录要写成宿主存的那个拼写](../.agents/notes/implemented/bug-fix/2026-10-04-landing-directory-is-the-hosts-spelling.md)：
+- [目标目录要写成宿主存的那个拼写](../.agents/notes/implemented/bug-fix/2026-10-04-landing-directory-is-the-hosts-spelling.md)：
   宿主按 `fs.realpath` 归一后的字符串比工作区 `path` 与会话 `cwd`，另一种拼写（git 给的正斜杠、手输的
   结尾分隔符）会变成一条成员表恒为空的工作区；归一在计划那一层，`planSync` / `planImport` /
   `buildRelocationPlan` 三个入口共用 `canonicalDir()`。
@@ -34,25 +34,25 @@
   （`restoreRegistry()`），"重启后一致"才成立。
 - [宿主不认的登记不算成员，搬完剩下的要说出来](../.agents/notes/implemented/bug-fix/2026-10-08-stale-registrations-do-not-hold-a-workspace.md)：
   `reHome()` 判"源工作区被搬空了吗"按**认领**算（悬空登记不算数，并在同一次里顺手摘掉），只剩侧边栏
-  不显示的会话时那块工作区留着——`strandedSources` / `describeStranded()` 一处措辞，报给预演、结果、
+  不显示的会话时那块工作区留着——`strandedSources` / `describeStranded()` 一处措辞，报给预览、结果、
   界面与工具返回值。
 - [生效提示先说在事前，且只在需要重启时说话](../.agents/notes/implemented/architecture/2026-10-06-restart-notice-up-front-and-only-on-bad-news.md)：
-  `/sync` 与 `sync_sessions` 的预演一律按探测回答"执行时会不会需要重启"（迁移那条路本来就是），界面在
-  确认弹窗里先说、落地后只在需要重启时留一条 warn 横幅；长解释只在说明弹窗的 FAQ。
+  `/sync` 与 `sync_sessions` 的预览一律按探测回答"执行时会不会需要重启"（迁移那条路本来就是），界面在
+  确认弹窗里先说、应用后只在需要重启时留一条 warn 横幅；长解释只在说明弹窗的 FAQ。
 
 ## 文件格式与搬运
 
-路径、字段与落地前的校验写在 [formats.md](formats.md)；这一节只列决策。
+路径、字段与应用前的校验写在 [formats.md](formats.md)；这一节只列决策。
 
 - [多帧 zstd 变成启动期硬失败](../.agents/notes/implemented/bug-fix/2026-09-27-multiframe-zstd-is-a-hard-failure.md)：
   只解首帧会静默丢掉整个会话，所以解码器由调用方注入、装配时先验守卫。
 - [.dshsess 是一条 gzip 流，不是 tar](../.agents/notes/implemented/architecture/2026-09-27-dshsess-is-one-gzip-stream.md)：
-  容器的形状与落地前的四道校验。
+  容器的形状与应用前的四道校验。
 - [会话包要把附件对象一起带走](../.agents/notes/implemented/feature/2026-10-13-bundles-carry-attachment-objects.md)：
-  日志里只有引用、字节在宿主附件库里，所以包得自己带上那几个对象（v2 起），端口缺席时按"只带日志"降级。
+  日志里只有引用、字节在宿主附件库里，所以包得自己带上那几个对象（v2 起），接口缺席时按"只带日志"降级。
 - [同步的附件对象走远端一个共享目录](../.agents/notes/implemented/feature/2026-10-16-sync-carries-attachment-objects.md)：
   同步的包只带日志，对象走远端 `attachments/` 那份内容寻址的共享目录；手动同步还补对象（本机缺的取回、
-  远端缺的传上），端口缺席时整块不参与。
+  远端缺的传上），接口缺席时整块不参与。
 - [动作之后先改那几行，不等整库快照](../.agents/notes/implemented/architecture/2026-11-11-actions-patch-the-list-first.md)：
   归档 / 删除 / 迁移 / 重算名称的成功响应里就写着改了哪几条，先按它改（`statePatch.ts`），整库快照随后
   在后台覆盖；订阅处只认换了对象的快照，免得旧快照把补丁盖回去——「取消归档」一条的标签 1.97 s → 0.87 s。
@@ -69,7 +69,7 @@
   文件在本机是 `files/<sha 前两位>/<sha>/<名字>`（图片没有名字），所以引用与包清单都要带着它，缺了算不出
   路径、整包按坏包拒掉。
 - [导入只跳过，不覆盖](../.agents/notes/implemented/architecture/2026-09-27-import-skips-never-overwrites.md)：
-  冲突只报告，落地先写 `.part` 再 rename。
+  冲突只报告，应用先写 `.part` 再 rename。
 - [产物证据分层，并做两道收窄](../.agents/notes/implemented/architecture/2026-09-27-artifact-evidence-layers.md)：
   权威证据与启发式候选、存在性求交、嵌套剪枝。
 - [迁移只有一份编排，两个入口](../.agents/notes/implemented/architecture/2026-09-27-one-orchestration-two-entrances.md)：
@@ -80,7 +80,7 @@
 ## 跨机器同步
 
 - [WebDAV 同步是运输层，只增不覆盖](../.agents/notes/implemented/feature/2026-10-01-webdav-sync-is-a-transport.md)：
-  远端只放包与索引（一机一格），落地复用导入那条编排；密码只放引用，值进 DSH 的凭据。
+  远端只放包与索引（一机一格），应用复用导入那条编排；密码只放引用，值进 DSH 的凭据。
 - [两边都有同一个 id 时择新，空白会话不搬](../.agents/notes/implemented/feature/2026-10-04-sync-picks-the-newer-copy.md)：
   按内容与宿主的最后活动时间（提问与消息两枚钟里晚的那枚）择新，远端那份赢时先备份（`kind: replace`）再换；空白会话不上传，并从
   自己那格的索引里撤下。
@@ -92,7 +92,7 @@
   不插事件）；走的是导入那条编排。现在只有「两份都保留」那一档会走它，三档见下一条。
 - [裁决分三种：选单边只留一份，两份都留才落新会话](../.agents/notes/implemented/feature/2026-11-14-single-side-drops-the-other.md)：
   差异页改成三枚（只保留本机 / 只保留远端 / 两份都保留）；`keepLoser` 只在第三档置位，原 id 归最后
-  活动时间更晚的那份，判不出或远端落不了地时归本机。
+  活动时间更晚的那份，判不出或远端写不进去地时归本机。
 - [落成新会话的标记标题不能打乱事件 seq](../.agents/notes/implemented/bug-fix/2026-10-18-branch-title-keeps-seq-dense.md)：
   标记不能插在最后一条标题之后（后面的 `seq` 会错位，宿主读成 torn JSONL）；改最后一条标题的
   `data.title`，没有标题时才追加到末尾，并校验事件 `seq` 与位置一一对应、标题事件满足 v4 形状。
@@ -102,11 +102,11 @@
 - [远端建目录在同一次同步里只发一轮](../.agents/notes/implemented/simplification/2026-10-07-mkcol-once-per-client.md)：
   客户端实例里记下已确认存在的层级，一次推送的 MKCOL 从「每个文件两行」降到最多两行。
 - [同步配置在页面里就地可改，只有 sync 是活字段](../.agents/notes/implemented/architecture/2026-10-01-sync-config-is-live-in-the-page.md)：
-  表单读写 profile 那份配置文档，路径映射按行增删（远端 cwd 那一栏带上次预演见过的候选），三个路径
+  表单读写 profile 那份配置文档，路径映射按行增删（远端 cwd 那一栏带上次预览见过的候选），三个路径
   字段刻意不做成活的。
-- [落地时把「当前工作目录」里的旧机器路径一起改写](../.agents/notes/implemented/bug-fix/2026-11-13-imported-working-directory-paths.md)：
+- [应用时把「当前工作目录」里的旧机器路径一起改写](../.agents/notes/implemented/bug-fix/2026-11-13-imported-working-directory-paths.md)：
   宿主拿 `working-directory/change` 的最后一个值当会话的当前工作目录，并要求它在本机是绝对路径——
-  别的机器（别的系统）的写法会让投影失败、整条会话读不出来。导入落地与 `repair_session_paths` 只改
+  别的机器（别的系统）的写法会让投影失败、整条会话读不出来。导入应用与 `repair_session_paths` 只改
   那几行「本机不认」的值，比对时两边归一成占位符，于是"只差这条路径"的两份仍算同一份。
 - [同步没做到的那几条要点得出名字](../.agents/notes/implemented/bug-fix/2026-11-13-sync-leftovers-are-pointed.md)：
   `problems` 只是几句汇总，界面从来没渲染过它们——状态变黄之后用户拿不到"哪条、为什么"。现在宿主由
@@ -129,7 +129,7 @@
   解压、块间让出，逐条报 `attachScan`；同一份文件的结果按 `size + mtime` 缓存。
 - [同步跑着时点状态栏那格，看到的是进度](../.agents/notes/implemented/bug-fix/2026-11-14-sync-panel-opens-at-progress.md)：
   那格点开的弹窗原来停在面板段（只有「上次同步」和一枚按不动的「同步」），看不出这一趟在做什么。
-  现在按"这一页走到哪 + 宿主那边跑没跑"决定段落（`operations/sync/syncStage.ts`）：跑着时直接是落地段（进度块），
+  现在按"这一页走到哪 + 宿主那边跑没跑"决定段落（`operations/sync/syncStage.ts`）：跑着时直接是应用段（进度块），
   跑完回到面板段；认领来的那一趟没有逐条事件，改说那句"这一页看不到逐条进度"。
 - [迁移、差异与导出不再整份解压 / 压缩日志](../.agents/notes/implemented/bug-fix/2026-11-14-long-ops-stop-blocking-the-host.md)：
   迁移改写与复核原来为一个 header 付四次整份解码（单条 16.8 MB 的日志 9.9 秒），差异页两边各整份解一次
@@ -145,25 +145,25 @@
 - [跨机器的项目身份是 git remote](../.agents/notes/implemented/feature/2026-10-01-project-identity-is-the-git-remote.md)：
   索引记身份与仓库内相对路径，落 `本机仓库根 + 相对路径`；显式映射优先，认不出来就跳过并点名仓库。
 - [工作区组头只摆名字与一枚主机标签，项目身份与本机路径进悬浮提示](../.agents/notes/implemented/feature/2026-10-04-workspace-shows-project-identity.md)：
-  列表与同步弹窗的组头、目录字段的候选面板（迁移的目标与导入的落地目录，见
+  列表与同步弹窗的组头、目录字段的候选面板（迁移的目标与导入的目标目录，见
   [目录字段那篇](../.agents/notes/implemented/architecture/2026-10-07-directory-field-picks-from-a-panel.md)）
   共用 `planRows` 的称呼规则（组头与面板只摆名字 + 一枚主机名标签，路径与条数退到第二行与悬浮提示；
   只有一行可用的值控件里身份与路径都在文本里），身份由 `/state` 的 `repos` 报来（注入的入口带进程内缓存）。
-- [同步预演按项目分组](../.agents/notes/implemented/feature/2026-10-04-sync-plan-groups-by-project.md)：
+- [同步预览按项目分组](../.agents/notes/implemented/feature/2026-10-04-sync-plan-groups-by-project.md)：
   三张表各自按项目目录分组，路径在组头说一次，行里只剩动作、会话名与大小。
-- [确认之后照着预演那份数据落地](../.agents/notes/implemented/architecture/2026-10-11-sync-confirm-reuses-the-preview.md)：
-  预演算出来的计划连输入一起留下（`SyncPrepared`），响应带回 `planId`，确认那次照它落地；输入那套设置、
+- [确认之后照着预览那份数据应用](../.agents/notes/implemented/architecture/2026-10-11-sync-confirm-reuses-the-preview.md)：
+  预览算出来的计划连输入一起留下（`SyncPrepared`），响应带回 `planId`，确认那次照它应用；输入那套设置、
   本机的代次文件、投影缓存那两件事、要覆盖的那几条是否还活着、远端索引有一处对不上就从零重算。
 - [同步关掉窗口之后接着跑，回来还看得见](../.agents/notes/implemented/feature/2026-10-21-sync-keeps-running-when-the-window-closes.md)：
-  落地那一趟的状态搬到模块级（`src/client/operations/sync/syncJob.ts`）：忙碌时弹窗那枚「取消」换成「转到后台」，
+  应用那一趟的状态搬到模块级（`src/client/operations/sync/syncJob.ts`）：忙碌时弹窗那枚「取消」换成「转到后台」，
   进度与结论改在状态栏那一格报、点它回到同一扇窗（开别的弹窗、关掉窗口再回来都还在）；刷新之后从面板那条唯一的长连接
-  （`GET /panel/events`）上认领还在跑的那一趟。宿主那边同一时间只允许一趟落地（第二趟 409）。自动推送
+  （`GET /panel/events`）上认领还在跑的那一趟。宿主那边同一时间只允许一趟应用（第二趟 409）。自动推送
   那一轮同理：调度器记下"正跑着的那一轮"（`AutoPushTimer.status()`）并把之后的每条进度推给订阅者
   （`subscribe()`），面板连接把每一条都转给页面——后台那一轮不管是自己跑的还是手点发起的，横幅与
-  「正在自动推送…」都能一帧不落地接上，不必点一下才吃一句"上一轮还在跑"。
+  「正在自动推送…」都能一帧不应用接上，不必点一下才吃一句"上一轮还在跑"。
 
   这一页现在只有**一条**长连接（[一条连接看完这一页](2026-10-21-one-stream-for-the-whole-panel.md)）：
-  宿主事实、扫库进度、整库清单、落地那一趟、自动推送那一轮、以及"库变了"的重读通知都从它来，原来
+  宿主事实、扫库进度、整库清单、应用那一趟、自动推送那一轮、以及"库变了"的重读通知都从它来，原来
   那几条一次性状态端点与"在跑才开"的小流都不在了。
 - [自动推送只往远端推](../.agents/notes/implemented/feature/2026-10-14-auto-push-is-push-only.md)：
   后台跑一轮，计划里摘掉拉取与"覆盖本机"那几类，所以它不覆盖、不备份、不写注册表、也不请宿主折
@@ -187,25 +187,25 @@
   「插件设置」跳到插件页；配置挂 `plugins.bundle.config`（按包名作键），按功能分小节（「同步」）。
   分法照官方 `dsh-context`。
 - [整理远端只清自己那一格](../.agents/notes/implemented/feature/2026-11-12-sync-tidy-own-cell.md)：
-  同一条会话常在两格里各有一份（本机实测 1417 条里 1066 条如此）。落地时勾「顺手整理远端」只删**自己
+  同一条会话常在两格里各有一份（本机实测 1417 条里 1066 条如此）。应用时勾「顺手整理远端」只删**自己
   那一格**里多余的包：另一格更全的、或一模一样的（一样时留格子名最靠前的那格，两台机器算出来同一份，
   不会互相删）；两边各自写过的不动。写索引之后再删包，孤儿包顺手清。
 - [远端两格副本同代次时更长的赢](../.agents/notes/implemented/bug-fix/2026-11-12-sync-merge-prefers-longer-cell.md)：
   同一 id 在多台机器的格子里都有副本时，`readRemoteLibrary()` 原来在"同代次、内容不同、活动时间也读
-  不到"时按格子名排序取第一个——格子名与谁更新无关，于是续写过的那份永远被旧副本盖住，每轮预演都
+  不到"时按格子名排序取第一个——格子名与谁更新无关，于是续写过的那份永远被旧副本盖住，每轮预览都
   叫「重推刷新」。现在先比最高代次的字节数（日志只追加，更长就是续写过的）。
-- [同步预演不再每轮重问 git、重算全库指纹](../.agents/notes/implemented/architecture/2026-11-10-sync-preview-reuses-git-and-fingerprints.md)：
+- [同步预览不再每轮重问 git、重算全库指纹](../.agents/notes/implemented/architecture/2026-11-10-sync-preview-reuses-git-and-fingerprints.md)：
   目录 → 项目身份与文件内容指纹都按进程缓存（后者按 `size + mtimeMs` 失效），入口造一份交给 `/state`、
-  手动同步与自动推送共用：同一份库上预演 8.7 s → 1.5～2 s。
+  手动同步与自动推送共用：同一份库上预览 8.7 s → 1.5～2 s。
 - [改一次裁决只重算计划](../.agents/notes/implemented/architecture/2026-11-12-replan-on-decision.md)：
-  弹窗里每点一次「以本机为准 / 以远端为准」，原来重走一遍 `prepareSync()`（预演 2.1 s）；现在带着
-  `planId` 回来，宿主用预演留下的输入（本机清单、远端索引、项目身份、内容指纹、那几对的内容关系）只
+  弹窗里每点一次「以本机为准 / 以远端为准」，原来重走一遍 `prepareSync()`（预览 2.1 s）；现在带着
+  `planId` 回来，宿主用预览留下的输入（本机清单、远端索引、项目身份、内容指纹、那几对的内容关系）只
   跑一遍纯计划计算（`replanPrepared()`），几十毫秒。
-- `src/operations/sync/dav.ts` 是那四种方法与 Basic 鉴权（含宽容的多状态响应解析），`src/operations/sync/index.ts` 是索引与远端布局，`sync.ts` 是计划与落地：
-  界面那条路是 `prepareSync()` 算计划并把输入留下、确认时 `syncPrepared()` 照它落地（`planId` 指认
+- `src/operations/sync/dav.ts` 是那四种方法与 Basic 鉴权（含宽容的多状态响应解析），`src/operations/sync/index.ts` 是索引与远端布局，`sync.ts` 是计划与应用：
+  界面那条路是 `prepareSync()` 算计划并把输入留下、确认时 `syncPrepared()` 照它应用（`planId` 指认
   宿主手里那份），`src/operations/sync/tool.ts` 的 `sync_sessions` 走单次调用那条（`runSync()`）。自动推送是同一个
   计划层上的第三条路：`runAutoPush()` 用 `pushOnly` 算一份只推的计划（`narrowToPushOnly()` 把
-  `skip` 里那些"本机会被远端顶掉"的行摘出去，拉取整表清空），没有预演与确认那一步，没得推时也落一次
+  `skip` 里那些"本机会被远端顶掉"的行摘出去，拉取整表清空），没有预览与确认那一步，没得推时也落一次
   空计划把本机那格索引收窄；`createAutoPushTimer()` 手里只有安静窗口一个计时器、没有周期唤醒，开关是
   活字段（关掉不必重启），`src/operations/sync/runtime.ts` 的 `resolveAutoPushRuntime()` 是它唯一的接线（宿主造一个挂在
   插件生命周期上，`GET /auto-push` 端点用同一个，用户手点那一次就是直接 `tick()`）。
@@ -230,14 +230,14 @@
 - [子智能体不能被单独操作](../.agents/notes/implemented/architecture/2026-09-30-subagents-cannot-be-operated-alone.md)：
   单独点名一律拒并指名父会话，孤儿除外。
 - [子智能体缩进到父会话的下一级](../.agents/notes/implemented/architecture/2026-09-30-subagents-indent-under-their-parent.md)：
-  旧版按组缩进（「会话」页平铺之后不再适用），今天只在删除 / 迁移的预演清单里还这么画。
+  旧版按组缩进（「会话」页平铺之后不再适用），今天只在删除 / 迁移的预览清单里还这么画。
 - [子智能体折在父会话下面](../.agents/notes/implemented/feature/2026-11-14-subagents-fold-under-their-parent.md)：
   默认收起、父行挂折叠标记，条数只数顶层会话。
 
 ## 列表、筛选与分组
 
 - [列整库的分页按目录分组](../.agents/notes/implemented/architecture/2026-09-27-group-by-directory-not-workspace.md)：
-  分组键是 `cwd`，工作区名称只是路径的标签。今天还分组的是「传输」页与同步预演；「会话」页改成平铺
+  分组键是 `cwd`，工作区名称只是路径的标签。今天还分组的是「传输」页与同步预览；「会话」页改成平铺
   表格（项目是一列）+ 左侧项目树（项目与筛选、整组勾选），见
   [全宽工作台那篇](../.agents/notes/implemented/architecture/2026-11-12-session-page-is-a-full-width-workbench.md)。
 - [「未分组」就是外壳那一组](../.agents/notes/implemented/bug-fix/2026-09-28-ungrouped-means-the-sidebar-group.md)：
@@ -267,16 +267,16 @@
 - [库没变时复用上一次的扫描结果](../.agents/notes/implemented/architecture/2026-10-19-reuse-scan-results-between-refreshes.md)：
   指纹是目录清单加每个日志与投影缓存文件的 `size`/`mtimeMs`；粗粒度时间戳下的漏判由 racy 窗口兜住，
   基准取"上一次取指纹的时刻"。页面打开（`GET /state`）与导出 / 归档 / 重算名称的发现阶段用它；
-  迁移与同步落地前仍重扫，不参与写盘判断。
+  迁移与同步应用前仍重扫，不参与写盘判断。
 - [投影记录解析一次就记住](../.agents/notes/implemented/architecture/2026-11-10-projection-record-parsed-once.md)：
   按 `size + mtimeMs + 身份` 记住解析过的那四个字段，重扫时只有刚被改写的那些重新解析：同一份库再扫一遍
   1159～1203 ms → 395～421 ms。
 - [打开一条会话的内容不再扫整库](../.agents/notes/implemented/architecture/2026-11-10-locate-one-session-without-scanning.md)：
   按 id 直接找会话目录（目录名就是 `encodeSegment(id)`），同一份日志连着翻页只解压一次
   （`src/shared/log/log-text-cache.ts`）：中位会话一页 1.6 s → 0.13 s，大日志的后续页 1.5～4 s → 十几毫秒。
-- [落地之后请宿主补投影检查点](../.agents/notes/implemented/bug-fix/2026-10-07-landing-warms-the-projection-checkpoint.md)：
+- [应用之后请宿主补投影检查点](../.agents/notes/implemented/bug-fix/2026-10-07-landing-warms-the-projection-checkpoint.md)：
   侧边栏的标题 / 空白 / 最后活动时间都只认宿主那份记录，而那份记录只在**活着的**会话上被写；导入、同步
-  拉取、迁移落地之后借宿主自己的两个服务冷读一遍补上（`src/shared/host/checkpoint-warm.ts`）。
+  拉取、迁移应用之后借宿主自己的两个服务冷读一遍补上（`src/shared/host/checkpoint-warm.ts`）。
 - [重新生成名称：临时把会话挂回宿主](../.agents/notes/implemented/feature/2026-10-12-retitle-attaches-the-session-to-ask-the-title-service.md)：
   名称服务的显式重算入口只认**活会话**，而这里要处理的是整库里早已不在内存里的那些——端口把一条会话
   临时读出来、挂上、重算、自己开写句柄把新事件写下去、再摘掉（`src/shared/host/ports.ts` 的 `titleRefreshPort()`
@@ -296,13 +296,13 @@
 
 ## 浏览器半侧
 
-界面与样式的完整口径在 [design.md](design.md)；下面索引的是每条规格背后的决策与代价。
+界面与样式的完整标准在 [design.md](design.md)；下面索引的是每条规格背后的决策与代价。
 
 - [产物是经典脚本，只 require 基线模块](../.agents/notes/implemented/architecture/2026-09-27-client-artifact-is-a-classic-script.md)
   与 [peer 范围就是宿主的装配门](../.agents/notes/implemented/architecture/2026-09-28-peer-range-is-the-hosts-assembly-gate.md)：
   客户端模块系统的契约，以及收不下就整条 bundle 不装的那道门。
 - [这一页只连一条长连接](../.agents/notes/implemented/architecture/2026-10-21-one-stream-for-the-whole-panel.md)：
-  整库清单、扫库进度、落地那一趟、自动推送那一轮、以及"库被改过了"都走 `GET /panel/events` 这一条
+  整库清单、扫库进度、应用那一趟、自动推送那一轮、以及"库被改过了"都走 `GET /panel/events` 这一条
   SSE；页面不再轮询，也不再有"在跑才开一条流"的那种小流。动作（用户点下去的那一次）的进度仍在它自己
   那条请求上。
 - [颜色只走检查面的 token](../.agents/notes/implemented/bug-fix/2026-09-27-token-only-colors.md)：
@@ -334,9 +334,9 @@
   跳过），自动整理只删重复与被取代的包、孤儿包留着。它给「只推」那篇加了边界。
 - [页头那枚同步状态点哪一档颜色](../.agents/notes/implemented/architecture/2026-11-13-sync-chip-dot-colors.md)：
   五档（转圈 / 红 / 黄 / 绿 / 灰），次序即优先级；黄=跑完了但有几条没做到或要重启，绿=自动推送开着。
-  记录里新增 `problems` / `takesEffect` 两列，"还要不要重启"不落盘、按进程启动时刻算。
-- [同步的计划与落地并进同一个弹窗](../.agents/notes/implemented/architecture/2026-11-13-sync-plan-lives-in-the-same-dialog.md)：
-  面板 → 计划 → 落地 → 结果四段同处一枚弹窗（外壳归 `SyncPanel`），标题 / 宽度 / 底栏跟着段换；有表才是 1080，
+  记录里新增 `problems` / `takesEffect` 两列，"还要不要重启"不写入磁盘、按进程启动时刻算。
+- [同步的计划与应用并进同一个弹窗](../.agents/notes/implemented/architecture/2026-11-13-sync-plan-lives-in-the-same-dialog.md)：
+  面板 → 计划 → 应用 → 结果四段同处一枚弹窗（外壳归 `SyncPanel`），标题 / 宽度 / 底栏跟着段换；有表才是 1080，
   一句话的计划仍是 640。它取代了"同步面板上再叠一层确认框"那个形状。
 - [同步的进度在状态栏那一格](../.agents/notes/implemented/architecture/2026-11-12-sync-progress-lives-in-the-status-bar.md)：
   列表上方那条 100px 的进度横幅删掉——它压的是列表，而"跑到第几条"跟勾了什么无关。状态栏多一格说一句
@@ -395,14 +395,14 @@
   词条进「说明」页，并钉了一条两行的上限。
 - [说明弹窗 FAQ 的答案不被挤成零宽](../.agents/notes/implemented/bug-fix/2026-10-07-faq-answers-collapse-to-zero-width.md)：
   FAQ 是"问题一行、答案一行"，那一栏自己声明单列，不能沿用词条表那套两列网格。
-- [预演表的状态列只放短标签，整句挂 title](../.agents/notes/implemented/bug-fix/2026-10-03-status-column-holds-a-short-tag.md)：
+- [预览表的状态列只放短标签，整句挂 title](../.agents/notes/implemented/bug-fix/2026-10-03-status-column-holds-a-short-tag.md)：
   窄列装不下整句时改文案与列宽，不是让标签顶到邻居身上；三段清单同形，状态与会话名分成两列。
-- [同步预演的三段清单要有段头](../.agents/notes/implemented/bug-fix/2026-10-07-sync-plan-sections-need-headings.md)：
+- [同步预览的三段清单要有段头](../.agents/notes/implemented/bug-fix/2026-10-07-sync-plan-sections-need-headings.md)：
   三行条数原来是与正文同一档的 `.dsm-hint`，改成 `h3` 段头 + 条数药丸；段头贴住它自己那张表。
 - [写盘动作是一个按钮开一个确认弹窗](../.agents/notes/implemented/architecture/2026-10-03-one-click-confirm-dialog.md)：
   计划与"做不做"这个决定同框；只有会写盘的动作问，归档与导出不问。
-- [同步的预演与落地都走 SSE 报进度](../.agents/notes/implemented/architecture/2026-10-03-sync-progress-streams-over-sse.md)：
-  预演与落地回同一个事件流形状；算计划的四段各有各的分母（没有分母的那段不画条），写盘分拉取与推送
+- [同步的预览与应用都走 SSE 报进度](../.agents/notes/implemented/architecture/2026-10-03-sync-progress-streams-over-sse.md)：
+  预览与应用回同一个事件流形状；算计划的四段各有各的分母（没有分母的那段不画条），写盘分拉取与推送
   两段，跳过的那些不进分母，也没有中途取消。
 - [每个长动作都报进度，段名共用一套词汇](../.agents/notes/implemented/architecture/2026-10-08-every-long-action-streams-progress.md)：
   同步那套地基（`ProgressEvent` + `streamResult()` + `ProgressBlock`）现在六个动作共用（迁移 / 删除 /

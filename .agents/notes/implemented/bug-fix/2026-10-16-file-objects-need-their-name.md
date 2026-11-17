@@ -25,8 +25,8 @@ $DSH_HOME/attachments/v1/file-objects/<sha 前两位>/<sha>         文件另有
 
 - 日志扫描（`refsInValue()`）在 `attachment.name` 是非空字符串时把它收进 `AttachmentRef.name`——
   与 `bytes` 同一条"后来那行没写就不抹掉已有的值"的规矩。
-- 宿主端口把它交下去（`fileHostPath({ attachmentId, name })`）。**不做任何猜测**：引用里没有名字时
-  仍然返回 `undefined`（由调用方如实报"这一个落不了"），不拿 id 去凑一个名字。
+- 宿主接口把它交下去（`fileHostPath({ attachmentId, name })`）。**不做任何猜测**：引用里没有名字时
+  仍然返回 `undefined`（由调用方如实报"这一个写不进去"），不拿 id 去凑一个名字。
 - 导出/导入的 v2 清单里那条记录也多一项 `name`（`{ id, kind, name?, bytes, offset }`）：落回来的时候
   要它算路径。**文件条目缺名字整包拒掉**（`file without a name`）——写这个格式的只有本插件，见到就是
   坏包；名字是空串同样拒（`malformed name`）。图片没有这一项。
@@ -60,4 +60,4 @@ $DSH_HOME/attachments/v1/file-objects/<sha 前两位>/<sha>         文件另有
 - v2 清单的多一个可选字段不涉及兼容：v2 这个格式只在**本插件的这次开发里**存在过，线上装得到的版本
   （0.5.0）根本不带 `attachments` 那一节。
 - 引用里带的名字是**日志里的原文**，插件不解释它（合法不合法由宿主判）；名字里带路径分隔符之类的东西
-  由宿主拒，插件如实报"这一个落不了"，不做替换。
+  由宿主拒，插件如实报"这一个写不进去"，不做替换。

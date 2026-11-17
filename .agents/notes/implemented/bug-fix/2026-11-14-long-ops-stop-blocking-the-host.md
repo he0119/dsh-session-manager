@@ -9,7 +9,7 @@ Status: implemented
 
 | 操作 | 同步耗时（单条 16.8 MB 日志） | 原因 |
 | --- | --- | --- |
-| 迁移改写 | **9.9 秒 / 文件** | `relocateHeaderCwd()` 整份解压、按行重排、再把结果整份解一遍自校验；改完 `applyPlan` 又整份解两遍做落盘复验 |
+| 迁移改写 | **9.9 秒 / 文件** | `relocateHeaderCwd()` 整份解压、按行重排、再把结果整份解一遍自校验；改完 `applyPlan` 又整份解两遍做写入磁盘复验 |
 | 迁移复核 | 1.8 秒 / 文件 | `verifyAppliedPlan()` 为了读 header 解整份日志 |
 | 差异页 | 3.1 秒 | 两边日志各 `decodeAll()` 整份解一次 |
 | 导出（40 条 / 52 MB） | 1.1 秒，整库导出约 30 秒 | `gzipSync()` 在压缩整包；附件扫描还逐条整份解日志 |
@@ -21,7 +21,7 @@ Status: implemented
 ## Decision
 
 - **迁移改写只解首帧**：`applyPlan()` 改用 `relocateHeaderCwdShallow()`（首帧之外逐字节原样拼回），
-  落盘复验改成 `readLogHeader()` 只读 header；`verifyAppliedPlan()` 同样只读 header。实测 9.9 秒 →
+  写入磁盘复验改成 `readLogHeader()` 只读 header；`verifyAppliedPlan()` 同样只读 header。实测 9.9 秒 →
   **23 毫秒**（含读文件、写临时文件、复验、rename）。`test/operations/migrate/engine.test.ts` 有一条守卫：把送进
   `decodeAll` 的最大一段钉住（超过 64 KB 就红）。
 - **差异页分块解压**：`sync-diff` 两边都走 `decodeLogTextChunked()`（128 KB 一块、块间让出）。总耗时
@@ -46,8 +46,8 @@ Status: implemented
 - **迁移勾选产物时分块读日志**：`buildRelocationPlan()` 改为异步、逐文件分块解压，16.8 MB 会话的
   产物定位总耗时 2.7 秒、最长停顿 153 毫秒。
 - **路径修复工具走分块**：`planPathRepair()` / `applyPathRepair()` 改成异步分块读日志、异步写临时文件，
-  备份复制走 `fs.promises.cp`。16.8 MB 会话的预演：1.8 秒一次按住 → 1.8 秒总耗时、最长一次停顿
-  **122 毫秒**；落地里的改写与复验也走同一套分块。
+  备份复制走 `fs.promises.cp`。16.8 MB 会话的预览：1.8 秒一次按住 → 1.8 秒总耗时、最长一次停顿
+  **122 毫秒**；应用里的改写与复验也走同一套分块。
 - **扫库记住首帧**：`readLogHeaderForScan()` 按 `size:mtimeMs` 缓存每个日志首帧解出来的 header，
   只给扫描用（写盘路径仍走 `readLogHeader()` 现读）。另加 git 式 racy 规则：记录不足 1 秒的条目不
   信任。整库 1475 个文件：冷扫 0.8 秒 → 库没大改时 **40 毫秒**。
@@ -56,14 +56,14 @@ Status: implemented
   （库没变时直接交上一次的结果，项目目录之间让出）；重算名称那一路带标题，导出与归档不带，
   两套选项各自缓存，库变了都会重扫。
 
-- **导入 / 拉取的大包异步解、异步写**：导入与同步拉取改用 `readBundleAsync()`；导入预演先用
+- **导入 / 拉取的大包异步解、异步写**：导入与同步拉取改用 `readBundleAsync()`；导入预览先用
   `bundleTitlesAsync()` 每折一条就让出一次，再交给 `planImport()`；`applyImport()` 与附件对象提交
   改用 `fs/promises` 的 `mkdir` / `writeFile` / `rename` / `chmod`。几十 MB 的包不再整段按住主线程。
 - **日志首次读取与同步差异异步读**：内容视图第一次打开、`/sync-diff` 的两边日志都改用
   `readFile()` / `readBundleAsync()`；后面的分块解码本来就会让出。
 - **指纹与附件引用先异步读**：`contentFingerprintChunked()` 与 `attachmentRefsOfFile()` 的整份
   `readFileSync()` 改成 `await readFile()`，哈希与解码仍按块让出。
-- **迁移落地与产物复制异步写**：`applyPlan()` 的逐文件读、临时文件写、改名、建目录 / 清空目录，
+- **迁移应用与产物复制异步写**：`applyPlan()` 的逐文件读、临时文件写、改名、建目录 / 清空目录，
   以及 `applyArtifactMovesAsync()` 的同卷 rename / 跨卷 copy，都改走 `fs/promises`。
 - **扫库在项目目录内部也按会话让出**：`scanProjectDirAsync()` 每 16 条让出一次；`scanAllAsync()`
   不再等整个项目目录读完。
@@ -90,7 +90,7 @@ Status: implemented
 - **把 applyPlan / applyImport 整条改成异步**：能让 `cpSync` 与整份解码都走线程池，但要把
   `migrate.ts`、工具层与十几处测试一起改成 async，收益主要在"备份复制 1.4 秒"这一项；先把按秒计的
   解码去掉，代价小得多。
-- **worker 线程跑整份改写**：数据要跨线程拷一份（几十 MB），还要把 `decodeAll` / 附件端口搬过去，
+- **worker 线程跑整份改写**：数据要跨线程拷一份（几十 MB），还要把 `decodeAll` / 附件接口搬过去，
   复杂度高于收益。
 - **差异页保留整份解压**：3.1 秒的停顿在"点一下就要等"的地方不可接受；多花 1.3 秒换 110 毫秒的
   最长停顿值得。

@@ -21,7 +21,7 @@
 // 判据用"上一次取指纹的时刻"而不是"现在"：库静止时文件的时间戳早已比那一刻更旧，这条不触发；正在被
 // 追加的日志本来每次都会改指纹，重扫是应该的。
 //
-// 什么时候**不**用这份缓存：迁移计划、同步预演与落地都在动作之前重新扫一遍（那几步马上要动磁盘，值得
+// 什么时候**不**用这份缓存：迁移计划、同步预览与应用都在动作之前重新扫一遍（那几步马上要动磁盘，值得
 // 看最新的）；页面打开（`GET /state`）与导出 / 归档 / 重算名称的发现阶段用它。缓存只影响"看到多新"，
 // 不影响任何写盘判断。
 import { readdirSync, statSync } from 'node:fs'
@@ -78,7 +78,7 @@ export interface ScanCache {
   scanAsync(root: string, decodeAll: DecodeAll, options?: ScanCacheOptions): Promise<DiscoveredSession[]>
 }
 
-/** 目录读不动就当它不存在（与 `scanAllAsync()` 同一个口径：坏目录不该让整页打不开）。 */
+/** 目录读不动就当它不存在（与 `scanAllAsync()` 同一个标准：坏目录不该让整页打不开）。 */
 function readdirSafe(dir: string): string[] {
   try {
     return readdirSync(dir)

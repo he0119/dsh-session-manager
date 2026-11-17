@@ -133,7 +133,7 @@ export async function attachmentRefsOfFile(file: SessionLogFile, cache: Attachme
  * 掉。包是自校验过的（`readBundle()` 逐条核过偏移与 sha256），所以这里的偏移一定落在载荷内。
  *
  * 包自己带来的对象（v2 的包：旧版本推送的，或别人手工放进来的）从这份名单里摘掉——它们由导入那条
- * 路随包落地，共享库里没有它们，去那儿取只会白跑一趟并报一串假问题。
+ * 路随包应用，共享库里没有它们，去那儿取只会白跑一趟并报一串假问题。
  */
 export async function attachmentRefsOfBundle(bundle: SessionBundle): Promise<AttachmentRef[]> {
   const packed = new Set(bundle.attachments.map((entry) => `${entry.kind}:${entry.id}`))
@@ -238,11 +238,11 @@ export function summarizeAbsent(absent: AbsentObjects): {
 }
 
 /**
- * 从共享库取一个对象落地（调用方已经确认远端有它）。
+ * 从共享库取一个对象应用（调用方已经确认远端有它）。
  *
- * 字节照导入那条路的规格落地：`commitAttachmentObject()` 先写 `.part` 再 rename、`0o400`；本机已经有了
+ * 字节照导入那条路的规格应用：`commitAttachmentObject()` 先写 `.part` 再 rename、`0o400`；本机已经有了
  * 的算 `present`（同一个对象被多条会话引用时只真写一次）。单个对象取不回来只记问题：一个对象缺失不该
- * 把整条会话挡在库外，与导入同一条口径。
+ * 把整条会话挡在库外，与导入同一条标准。
  */
 export async function fetchAttachment(
   deps: SyncDeps,
@@ -310,7 +310,7 @@ export async function pullAttachments(
  * 把导入那条路落下的**随包对象**记进这次同步的对象账。
  *
  * 这一版推送的包只有日志（对象走共享库），但远端那份包可能是 v2 的（旧版本推的、别人手工放上去的）：
- * 那种包的对象由 `applyImport()` 落地，不经过下面这条共享库的路。两边都记同一本账，界面那句「另取回
+ * 那种包的对象由 `applyImport()` 应用，不经过下面这条共享库的路。两边都记同一本账，界面那句「另取回
  * 附件对象 N 个」才对得上这一次到底搬了几个。
  */
 export function countPackedAttachments(outcome: ImportOutcome, counters: SyncAttachmentIn): void {
@@ -336,9 +336,9 @@ export function countPackedAttachments(outcome: ImportOutcome, counters: SyncAtt
  * 张图时，界面会停在同一行上几分钟不动——而"传了多少"恰恰是那一趟唯一在变的东西。
  *
  * `total` 数的是"要看过的对象"（含远端已有、本机已缺那几种只需核一下的），不是"要传的字节"：分母与
- * 分子同口径，条才会匀速走。
+ * 分子同标准，条才会匀速走。
  *
- * @param done 从 0 开始的序号（界面按 `done + 1` 说"正在处理第几个"，与另外几段同一个口径）。
+ * @param done 从 0 开始的序号（界面按 `done + 1` 说"正在处理第几个"，与另外几段同一个标准）。
  * @param total 这一批要看的对象总数。
  * @param ref 当前这一个（界面只拿它当 key，认得出是哪个对象）。
  */
@@ -513,8 +513,8 @@ export async function repairAttachments(
 /**
  * 这次从远端共享库取回、落进本机附件库的对象。
  *
- * `bytes` 是这些对象的字节数（不含会话日志，`bytesIn` 才是日志那一边）。逐条落不了的写进
- * `problems`（与会话那边的失败面分开：一个对象取不回来不该把整条会话挡在库外，与导入同一条口径）。
+ * `bytes` 是这些对象的字节数（不含会话日志，`bytesIn` 才是日志那一边）。逐条写不进去的写进
+ * `problems`（与会话那边的失败面分开：一个对象取不回来不该把整条会话挡在库外，与导入同一条标准）。
  */
 export interface SyncAttachmentIn {
   written: number

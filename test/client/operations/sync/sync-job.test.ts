@@ -1,6 +1,6 @@
 // 同步任务那一份状态（`src/client/operations/sync/syncJob.ts`）。
 //
-// 为什么单独钉它：落地这趟现在可以关掉窗口继续跑，所以它的状态必须活过组件卸载——而"活过卸载"这件事
+// 为什么单独钉它：应用这趟现在可以关掉窗口继续跑，所以它的状态必须活过组件卸载——而"活过卸载"这件事
 // 在界面冒烟里测不到（假 React 不会卸载、也不会跑副作用）。逻辑收在 store 里，这里就能逐条钉：跑到哪、
 // 结束之后结论留多久、谁取走、认领来的那一趟怎么收尾、迟到的进度会不会把状态改回去。
 import assert from 'node:assert/strict'
@@ -47,7 +47,7 @@ const idle: SyncRoundStatus = { applying: null, last: null }
 /**
  * 假的"那一路状态"（生产上是面板事件流上 `sync` 那一条）。
  *
- * `watch` 订阅时立刻用**当下那一份**回调一次（真的那一份就是这个口径），之后 `push()` 一次推一条。
+ * `watch` 订阅时立刻用**当下那一份**回调一次（真的那一份就是这个标准），之后 `push()` 一次推一条。
  */
 function fakeWatch(initial?: SyncRoundStatus): {
   watch: (listener: (status: SyncRoundStatus) => void) => () => void
@@ -70,7 +70,7 @@ function fakeWatch(initial?: SyncRoundStatus): {
   }
 }
 
-/** 等一轮微任务 / 定时器，让 store 里那些 `.then` 落地。 */
+/** 等一轮微任务 / 定时器，让 store 里那些 `.then` 应用。 */
 const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0))
 
 test('开一趟：跑着的时候看得到进度，结束后结论留着等界面取走', async () => {
@@ -104,7 +104,7 @@ test('开一趟：跑着的时候看得到进度，结束后结论留着等界�
   assert.equal(job.snapshot().done, null, '按「完成」之后才清空：结果页关掉，下一趟回来是面板段')
 })
 
-test('已经有一趟在跑时不再开第二趟（两趟落地会互相踩）', async () => {
+test('已经有一趟在跑时不再开第二趟（两趟应用会互相踩）', async () => {
   let resolveApply: ((value: SyncResponse) => void) | undefined
   let calls = 0
   const apply: SyncJobApply = () => {

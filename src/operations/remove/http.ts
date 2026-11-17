@@ -62,7 +62,7 @@ export function removeHandlers(ctx: WebContext): Record<string, Handler> {
   }
 
   /**
-   * 删除会话：`mode=apply` 才真删（**先备份再删**），缺省只预演。
+   * 删除会话：`mode=apply` 才真删（**先备份再删**），缺省只预览。
    *
    * 恢复不在这里：删掉的那份就在本插件备份根下，走「备份与回滚」那份清单（见 journal.ts 的
    * `BackupKind`）。删除**不碰注册表**，所以恢复之后登记与归档状态原样还在（见 src/operations/remove/remove.ts）。
@@ -84,7 +84,7 @@ export function removeHandlers(ctx: WebContext): Record<string, Handler> {
     const apply = fields['mode'] === 'apply'
     /** 同时删远端（缺省 false；界面在配了同步时默认勾上）。只在真删那一步才动远端。 */
     const alsoRemote = fields['alsoRemote'] === true
-    // 删除落地要**先按字节备份整份会话目录**再删，整库删除同样是几十秒的活（与迁移同量级），
+    // 删除应用要**先按字节备份整份会话目录**再删，整库删除同样是几十秒的活（与迁移同量级），
     // 所以它也走事件流：`scan`（重算计划）、`backup`、`remove`、`verify`（勾了也走 `remote` 那一步）。
     await streamResult(res, async (report) => {
       const run: RemovalRun = await runRemoval(
@@ -95,7 +95,7 @@ export function removeHandlers(ctx: WebContext): Record<string, Handler> {
       return {
         mode: apply ? 'apply' : 'plan',
         ok: run.plan.ok && (!apply || run.verified),
-        /** 「将会删掉什么」的那份计划（预演与执行同源）。 */
+        /** 「将会删掉什么」的那份计划（预览与执行同源）。 */
         preview: run.plan,
         applied: run.applied,
         dirsRemoved: run.dirsRemoved,
@@ -117,7 +117,7 @@ export function removeHandlers(ctx: WebContext): Record<string, Handler> {
   /**
    * 归档 / 取消归档所选会话（`archived: false` 即取消归档）。
    *
-   * 走宿主的 `workspaceRegistry`：它一次做完"落盘 + 改内存 + 广播"，侧边栏即时跟着变，所以这里
+   * 走宿主的 `workspaceRegistry`：它一次做完"写入磁盘 + 改内存 + 广播"，侧边栏即时跟着变，所以这里
    * 如实回报 `immediate`。一条失败不影响其余（逐条收集失败原因）——把每条的状态原样告诉界面，
    * 比"整体失败、什么都不说"更有用。
    */
@@ -153,7 +153,7 @@ export function removeHandlers(ctx: WebContext): Record<string, Handler> {
     }
     const done: string[] = []
     const failed: Array<{ id: string; error: string }> = []
-    // 逐条走宿主的注册表动作（每条一次落盘 + 广播），勾一整页会话时这一段是可感知的，所以它报进度。
+    // 逐条走宿主的注册表动作（每条一次写入磁盘 + 广播），勾一整页会话时这一段是可感知的，所以它报进度。
     await streamResult(res, async (report) => {
       for (const [index, id] of targets.entries()) {
         report({ phase: 'archive', total: targets.length, done: index, id })

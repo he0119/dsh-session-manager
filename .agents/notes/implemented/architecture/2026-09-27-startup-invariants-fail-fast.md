@@ -24,7 +24,7 @@ Status: implemented
 
 ## Alternatives considered
 
-**只在最终提交前校验一次。** 中间状态也会落盘（`writeRegistryAtomic()` 是原子写但不参与事务），
+**只在最终提交前校验一次。** 中间状态也会写入磁盘（`writeRegistryAtomic()` 是原子写但不参与事务），
 而「前一次校验通过、后一次没通过」正是需要被发现的那种情形。
 
 **让宿主的校验兜底。** 它兜底的代价是下次启动整个 workspace 域起不来，而报错信息指的是注册表文件，

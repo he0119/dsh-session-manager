@@ -87,7 +87,7 @@ export async function ensureFixture(profileName, options = {}) {
  *   backups/                         备份根（同步覆盖本机时要往里写）
  *   dirs/p*                          项目目录（真实存在，迁移/导入的目标要用）
  *   dirs/target                      迁移的目标工作区
- *   dav/                             远端那一份的落盘目录（假 WebDAV 的 root）
+ *   dav/                             远端那一份的写入磁盘目录（假 WebDAV 的 root）
  *   remote-lib/                      造远端时"另一台机器"的库（生成期用完即留，便于排查）
  */
 async function generate(profileName) {

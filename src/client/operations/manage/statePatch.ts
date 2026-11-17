@@ -1,7 +1,7 @@
 /**
  * 一次动作之后就地改清单里的那几条（不等宿主重扫整库）。
  *
- * 为什么要有这一层：动作落地之后，界面原来靠 `reload()` 重连那条面板流、等宿主重新扫一遍整库再把清单
+ * 为什么要有这一层：动作应用之后，界面原来靠 `reload()` 重连那条面板流、等宿主重新扫一遍整库再把清单
  * 发回来——本机 1423 条会话上那一步实测 0.9～1.1 秒（扫库 + 750 KB 快照 + 重画每一行），而这次动作改了
  * 哪几条，响应里本来就写着。先按响应把这几行改对，用户点完立刻看到结果；那份整库快照照旧在后台取回来
  * 覆盖它，快照到了以快照为准（它是磁盘的真话）。
@@ -20,7 +20,7 @@ export interface TitlePatch {
   title: string
 }
 
-/** 一条要改的会话：迁移落地之后它落在哪个目录（`dir` 是会话目录本身）。 */
+/** 一条要改的会话：迁移应用之后它落在哪个目录（`dir` 是会话目录本身）。 */
 export interface MovePatch {
   id: string
   dir: string
@@ -50,7 +50,7 @@ export function patchArchived(state: StateResponse, ids: readonly string[], arch
   return touched ? { ...state, sessions } : state
 }
 
-/** 删除落地之后把这几条从清单里摘掉（级联带走的子智能体也在 `entries` 里）。 */
+/** 删除应用之后把这几条从清单里摘掉（级联带走的子智能体也在 `entries` 里）。 */
 export function patchRemoved(state: StateResponse, ids: readonly string[]): StateResponse {
   if (ids.length === 0) return state
   const gone = new Set(ids)
@@ -79,7 +79,7 @@ export function patchTitles(state: StateResponse, entries: readonly TitlePatch[]
 }
 
 /**
- * 迁移落地之后把这几个会话挪到目标目录（分组跟着换）。
+ * 迁移应用之后把这几个会话挪到目标目录（分组跟着换）。
  *
  * `to` 是这次迁移的目标目录（`preview.to`）。没有 cwd 的会话（落 `_no-cwd` 项目目录）只换 `dir`，不给它
  * 补一个 cwd——那会让它在列表里凭空多出一个"项目目录"。

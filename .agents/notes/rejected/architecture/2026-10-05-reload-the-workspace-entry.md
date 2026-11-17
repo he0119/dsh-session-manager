@@ -3,7 +3,7 @@
 Status: rejected — 真实宿主上重挂会连带拆掉 `sessionController`，侧边栏清空
 
 被 [改完注册表把活儿交给宿主自己做](../../implemented/architecture/2026-10-05-hand-the-change-to-the-host.md)
-取代。下面写的是它**落地时的形状**：`src/reload.ts` / `workspaceReloadPort()` 这些符号已经被取代，
+取代。下面写的是它**应用时的形状**：`src/reload.ts` / `workspaceReloadPort()` 这些符号已经被取代，
 留在这里是因为"重挂加载条目"这条路很诱人，而它的代价有现象可查。
 
 ## Problem
@@ -16,7 +16,7 @@ Status: rejected — 真实宿主上重挂会连带拆掉 `sessionController`，
 3. `WorkspaceRegistry` 的 header 索引（`headers` / `sessionPaths`），在启动时建一次，`readSessionHeader`
    对不在内存里的 id 直接回缓存里的旧头。
 
-侧边栏读的是第 2、3 层。所以一次迁移、回滚或导入落地之后，磁盘已经是对的，宿主却还停在旧的归属上；
+侧边栏读的是第 2、3 层。所以一次迁移、回滚或导入应用之后，磁盘已经是对的，宿主却还停在旧的归属上；
 更糟的是此时任何一次工作区改动（新建 / 改名 / 归档）都会用内存副本把这次写盘**覆盖掉**，而这次写盘
 没有任何报错。
 
@@ -38,7 +38,7 @@ Status: rejected — 真实宿主上重挂会连带拆掉 `sessionController`，
 - 依赖 `workspaceRegistry` 的条目会被 Cordis 级联重挂（`disposed` → `mounted`），这是重挂的应有之
   义，不是副作用；
 - 三处写注册表的编排都在写完之后调它，但**执行时机由编排层决定**：迁移、回滚各一次，导入 / 同步
-  拉取按**整批**收口一次（不是每条会话重挂一次）；
+  拉取按**整批**统一处理一次（不是每条会话重挂一次）；
 - 探测不到那一行（换过模块名、老宿主、只有工具没有界面的前端）就不重挂，工具与界面如实说
   `restart-required`；重挂**失败也不把迁移说成失败**（文件已经写好了），只报"仍需重启"，并把原因
   原样带给用户。

@@ -3,10 +3,10 @@
  *
  * 这里决定的不只是"有哪些字段"，还有**哪些字段能在插件管理器里改**：`sync` 整节带 `.volatile()`，
  * 于是它在宿主手里是**活引用**（`config.sync` 是一个用 `.get()` 取值的 Ref），Loader 每次配置变更都是
- * 对同一个引用做就地更新——界面上改完 URL 与映射，下一次预演/同步就用新值，**不必重启 DSH**。
+ * 对同一个引用做就地更新——界面上改完 URL 与映射，下一次预览/同步就用新值，**不必重启 DSH**。
  *
  * `sessionsRoot` / `registryPath` / `backupRoot` 刻意**不标** volatile，两处原因：它们改了会半生效
- * （会话库已经按旧根读进来了），而且设置接缝**只暴露 volatile 字段**——不标就自然不出现在那张表单上，
+ * （会话库已经按旧根读进来了），而且设置接入点**只暴露 volatile 字段**——不标就自然不出现在那张表单上，
  * 不会摆出"改了好像生效、其实要重启"的输入框。
  *
  * volatile 还要求字段有**固定对象路径**（不能嵌在数组/字典里），所以 `sync` 是一个具名子对象，
@@ -25,7 +25,7 @@ import z from '@deepseek-ai/schemastery'
  *
  * 为什么手写而不是让 TS 推导：schemastery 推导出来的类型里带着 cosmokit 内部的 `Volatile` 引用，
  * 而本包的声明是逐文件 unbundle 出来的（tsdown 的 types 目标），那种匿名推导类型没法命名（TS2742）。
- * 于是这两个导出显式标注、并在赋值处转一次型——**只为声明能落地**，运行期就是 schemastery 那份
+ * 于是这两个导出显式标注、并在赋值处转一次型——**只为声明能应用**，运行期就是 schemastery 那份
  * schema 本身（谁在乎这件事，看 `Config` 与 `--dump-config` 的实际输出）。
  */
 export interface ConfigSchema {
@@ -44,7 +44,7 @@ export interface SyncConfig {
   /**
    * 密码的**引用**（环境变量名），不是密码本身。
    *
-   * 与 DSH 自己的口径一致：配置里只放引用，值由宿主的 credentials 服务解析；没有那个服务时退到
+   * 与 DSH 自己的标准一致：配置里只放引用，值由宿主的 credentials 服务解析；没有那个服务时退到
    * `process.env`。于是配置备份、同步、截图都不会把密码带走。
    *
    * 界面上的密码框（[SyncConfigForm](./client/operations/sync/SyncConfigForm.tsx)）把用户直接输入的密码写进
@@ -86,7 +86,7 @@ export interface SyncConfig {
  * 缺席与 `true` 都是开——不写这一节就等于全开，升级上来的老配置因此行为不变。
  */
 export interface ToolsConfig {
-  /** `plan_session_migration`：只读预演迁移。 */
+  /** `plan_session_migration`：只读预览迁移。 */
   plan?: boolean
   /** `migrate_sessions`：真搬（要 `apply: true` 才写盘）。 */
   migrate?: boolean
@@ -167,7 +167,7 @@ export const SyncConfigSchema = z
  *
  * 刻意**不标** volatile：注册发生在插件装配那一刻（`registerTools()` 只跑一次），标成活字段等于承诺
  * "改完立即生效"，而实际上要重启宿主才会按新开关重新装配。不标就不会出现在设置页那张表单上，用户
- * 只在配置文件里改，改完重启——与三个路径字段同一类口径（见上面的模块注释）。
+ * 只在配置文件里改，改完重启——与三个路径字段同一类标准（见上面的模块注释）。
  */
 export const ToolsConfigSchema = z.object({
   plan: z.boolean(),
@@ -180,7 +180,7 @@ export const ToolsConfigSchema = z.object({
 /**
  * 插件配置的 schema。
  *
- * Loader 用它校验 profile 里那一节（非法值在装配时当场抛），设置接缝用它生成那张表单。根节点
+ * Loader 用它校验 profile 里那一节（非法值在装配时当场抛），设置接入点用它生成那张表单。根节点
  * 刻意**不**标 volatile：标了会把上面三个路径字段也一起变成活字段、暴露进表单。
  */
 export const Config = z.object({

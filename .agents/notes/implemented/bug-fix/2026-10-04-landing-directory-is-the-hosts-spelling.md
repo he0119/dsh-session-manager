@@ -1,4 +1,4 @@
-# Agent Note: 落地目录要写成宿主存的那个拼写
+# Agent Note: 目标目录要写成宿主存的那个拼写
 
 Status: implemented
 
@@ -9,20 +9,20 @@ Status: implemented
 与 header 索引；`sessionIds` getter 只留 `sessionPath(id) === record.path` 的那些，启动时还会为每条被
 滤掉的会话写一行 warn）。于是同一个目录的**另一种拼写**在宿主眼里是另一个目录。
 
-落地那一侧过去直接用来路的原字符串：同步的仓库身份那一路取 `git rev-parse --show-toplevel` 的原文
+应用那一侧过去直接用来路的原字符串：同步的仓库身份那一路取 `git rev-parse --show-toplevel` 的原文
 （Windows 上是 `C:/…` 正斜杠），显式映射与迁移/导入的目标目录来自用户手输（可能带结尾分隔符、`..`
 段、大小写不一致）——都不一定是宿主会存的那个串。后果不是"路径显示得不好看"，而是三件事同时发生：
 
-- 注册表里多出一条**谁也不认**的工作区：登记着刚落地的那批会话，成员表恒为空；
+- 注册表里多出一条**谁也不认**的工作区：登记着刚应用的那批会话，成员表恒为空；
 - 界面（外壳侧边栏）因此出现"两个同名工作区，其中一个点开没有内容"，而那批会话在外壳里没有归属；
 - 插件自己的列表按 `cwd` 分组，那批会话也另成一组（另一种拼写 = 另一个目录）；迁移页那条"会话 header
   的 `cwd` 必须等于源"的检查同样报错。
 
 ## Decision
 
-落地目录在**计划**这一层就归一成宿主存的那个写法（`src/shared/canonical-path.ts` 的 `canonicalDir()`）。
-计划里报的 `toCwd`、改写进 header 的 `cwd`、注册表那条记录的 `path` 因此是同一个字符串——预演看到的
-就是落地用的（一条编排两个入口那条口径的延伸）。
+目标目录在**计划**这一层就归一成宿主存的那个写法（`src/shared/canonical-path.ts` 的 `canonicalDir()`）。
+计划里报的 `toCwd`、改写进 header 的 `cwd`、注册表那条记录的 `path` 因此是同一个字符串——预览看到的
+就是应用用的（一条编排两个入口那条标准的延伸）。
 
 三个入口都归一，它们是"目录最终写进注册表与 header"的全部来路：
 
@@ -31,7 +31,7 @@ Status: implemented
 - `planImport()` 的 `targetCwd`（导入页与同步共用）；
 - `buildRelocationPlan()` 的 `to`（迁移页）。
 
-配套口径：
+配套标准：
 
 - 用 `fs.realpathSync.native`，不是 `fs.realpathSync`：非 native 那只在 Windows 上**不解析大小写**
   （实测 `C:\USERS\…` 原样返回），而宿主用的 `fs/promises.realpath` 会解析（同一个输入返回
@@ -56,15 +56,15 @@ Status: implemented
 - **要求用户自己把路径写规范**：另一种拼写本来就是**同一台机器上真实存在的目录**，人没有理由知道
   宿主存的是哪一个串。
 - **在宿主里改（`create()` / `attachSession()` 复用已有记录）**：宿主的 `create()` 已经做
-  `realpathNormalize()`；出问题的那条路根本没走它——插件落地是直接原子写 `workspace.json`（宿主的
+  `realpathNormalize()`；出问题的那条路根本没走它——插件应用是直接原子写 `workspace.json`（宿主的
   内存副本与写句柄都在别处，进程内入口在旧宿主上不存在，见
   [生效模式如实探测](../architecture/2026-09-27-effect-mode-tells-the-truth.md)）。
 
 ## Consequences
 
-- 落地时每个目标目录多一次 `realpath` 系统调用（按目录，不按会话）。
-- 用户手输的拼写会显示成规范写法（`D:\proj\` → `D:\proj`）：预演、注册表、header 三处一致。
+- 应用时每个目标目录多一次 `realpath` 系统调用（按目录，不按会话）。
+- 用户手输的拼写会显示成规范写法（`D:\proj\` → `D:\proj`）：预览、注册表、header 三处一致。
 - **已经写坏的历史数据不会自己好**：那条多出来的工作区记录还在（成员表恒为空），要手工把它登记的会话
-  并回规范那条记录再删掉；header 里那种拼写同样要改写才与插件列表的分组一致。插件的写入口径从此不再
+  并回规范那条记录再删掉；header 里那种拼写同样要改写才与插件列表的分组一致。插件的写入标准从此不再
   产生新的。
 - 目标目录不存在时的行为与报错文案不变。

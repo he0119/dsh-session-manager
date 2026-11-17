@@ -194,7 +194,7 @@ export interface SyncRunRecord {
   /** 那一趟的判断：改动立刻生效，还是要重启 DSH。 */
   takesEffect?: 'immediate' | 'restart-required'
   /**
-   * 那一趟要求的重启**还没发生**（宿主读记录时按进程启动时刻算好，不落盘）。
+   * 那一趟要求的重启**还没发生**（宿主读记录时按进程启动时刻算好，不写入磁盘）。
    *
    * 缺这一项 = 旧宿主没这个能力，按"不用重启"处理。
    */
@@ -219,11 +219,11 @@ export interface ImportAttachmentEntry {
   id: string
   kind: 'image' | 'file'
   bytes: number
-  /** 会写下去 / 本机已有 / 落不了（宿主没有附件服务或认不出这种引用）。 */
+  /** 会写下去 / 本机已有 / 写不进去（宿主没有附件服务或认不出这种引用）。 */
   action: 'create' | 'present' | 'unavailable'
 }
 
-/** 导入（预演或落地）的响应。 */
+/** 导入（预览或应用）的响应。 */
 export interface ImportResponse {
   mode: 'plan' | 'apply'
   ok: boolean
@@ -241,17 +241,17 @@ export interface ImportResponse {
   attachmentBytes: number
   written?: string[]
   registryWritten?: boolean
-  /** 落地时真写下去的附件对象条数与字节数。 */
+  /** 应用时真写下去的附件对象条数与字节数。 */
   attachmentWritten?: number
   attachmentPresent?: number
   attachmentWrittenBytes?: number
-  /** 没能落地的附件（宿主没有附件服务、路径写不进去…）。 */
+  /** 没能应用的附件（宿主没有附件服务、路径写不进去…）。 */
   attachmentProblems?: string[]
   note?: string
   bundle?: { createdAt: string; source: { sessionsRoot?: string; pluginVersion?: string }; sessions: number }
 }
 
-/** 把响应体读成 JSON，失败时把人话抛出去（HTTP 层与业务错误都在这里收口）。 */
+/** 把响应体读成 JSON，失败时把人话抛出去（HTTP 层与业务错误都在这里统一处理）。 */
 async function asJson<T>(response: Response): Promise<T> {
   const text = await response.text()
   let parsed: unknown
@@ -357,7 +357,7 @@ export async function fetchRemoteLibrary(signal?: AbortSignal): Promise<RemoteLi
 
 /**
  * 一次性响应：流还没开始就被挡下（参数不对、没配同步、方法不对、内部错误）时宿主回的是普通 JSON，
- * 带状态码。这里保持与其它端点同一套口径——把宿主给的原话抛出去。
+ * 带状态码。这里保持与其它端点同一套标准——把宿主给的原话抛出去。
  */
 async function readOneShot<T>(response: Response): Promise<T> {
   const text = await response.text()
@@ -377,7 +377,7 @@ async function readOneShot<T>(response: Response): Promise<T> {
  *
  * @param response 宿主回的那份响应。
  * @param onProgress 进度事件的回调（只有流走得到）。
- * @param what 出错时的主语（「预演」「同步」「迁移」…）。
+ * @param what 出错时的主语（「预览」「同步」「迁移」…）。
  */
 async function readEventStream<T>(
   response: Response,
@@ -481,7 +481,7 @@ export async function exportSessions(sessionIds: readonly string[]): Promise<Exp
   }
 }
 
-/** 导入一个包：`mode: 'plan'` 只预演不写盘。 */
+/** 导入一个包：`mode: 'plan'` 只预览不写盘。 */
 export async function importBundle(
   bytes: ArrayBuffer,
   targetCwd: string,
@@ -495,8 +495,8 @@ export async function importBundle(
     body: bytes,
   })
   /*
-   * 包本身读不动、落地目录不在这类判定发生在**收到请求体之后、流开始之前**，回的是 400 + JSON；
-   * 一旦开始干活（预演逐条读包、落地逐条写盘）就是事件流，正文从 `result` 事件里拿。
+   * 包本身读不动、目标目录不在这类判定发生在**收到请求体之后、流开始之前**，回的是 400 + JSON；
+   * 一旦开始干活（预览逐条读包、应用逐条写盘）就是事件流，正文从 `result` 事件里拿。
    */
   return readEventStream<ImportResponse>(response, onProgress, '导入')
 }
@@ -563,7 +563,7 @@ export interface SyncPullEntry {
     | 'keep-remote'
     /** 别处删过了、远端这份比那次删除更旧：不拉回来（见 `SyncDeletedEntry`）。 */
     | 'deleted'
-  /** 落选的本机那份也要留（「两份都保留」那一档）：落地时落成一条新会话。 */
+  /** 落选的本机那份也要留（「两份都保留」那一档）：应用时落成一条新会话。 */
   keepLoser?: true
   reason?: string
 }
@@ -579,7 +579,7 @@ export interface SyncPushEntry {
   code: 'missing' | 'local-ahead' | 'local-newer' | 'identical' | 'remote-ahead' | 'diverged' | 'keep-local'
   /** 远端那份由哪台机器贡献（"远端领先 / 两边各自写过"要指名道姓）。 */
   machine?: string
-  /** 落选的远端那份也要留（「两份都保留」那一档）：落地时落成一条新会话。 */
+  /** 落选的远端那份也要留（「两份都保留」那一档）：应用时落成一条新会话。 */
   keepLoser?: true
   reason?: string
 }
@@ -632,9 +632,9 @@ export interface SyncResponse {
   remote: { url: string; machineId: string }
   plan: SyncPlan
   /**
-   * 这次预演的号码：确认那次带上它，宿主就照着这份计划落地、不再重算一遍（见 `applySync()`）。
+   * 这次预览的号码：确认那次带上它，宿主就照着这份计划应用、不再重算一遍（见 `applySync()`）。
    *
-   * 只有预演（`mode: 'plan'`）会给；落地那次的响应里没有它。
+   * 只有预览（`mode: 'plan'`）会给；应用那次的响应里没有它。
    */
   planId?: string
   applied: boolean
@@ -648,7 +648,7 @@ export interface SyncResponse {
    * 附件对象那一段（远端共享库里搬的那些，见宿主 `SyncOutcome`）：按对象计，不按引用计。
    *
    * 缺席 = 这个宿主没有附件服务（**不是"零个对象"**）：界面据此一个字都不说，而不是报一串 0。两项都
-   * 只在落地那次的响应里可能有（预演不知道远端有哪些对象）。
+   * 只在应用那次的响应里可能有（预览不知道远端有哪些对象）。
    */
   attachmentIn?: { written: number; present: number; bytes: number }
   attachmentOut?: { uploaded: number; skipped: number; bytes: number; missing: number }
@@ -660,22 +660,22 @@ export interface SyncResponse {
   indexWritten: boolean
   problems: string[]
   /**
-   * 没做到的条目（点名版）：预演与落地都给，界面在「上次同步」那张清单里逐条列（带 id 的可跳回列表）。
+   * 没做到的条目（点名版）：预览与应用都给，界面在「上次同步」那张清单里逐条列（带 id 的可跳回列表）。
    *
    * 旧宿主没有这一项，界面退回按 `problems` 画。
    */
   leftovers?: SyncLeftover[]
   /**
-   * 这次落地走的哪条路（只有"先预演、后确认"那条路会给）。
+   * 这次应用走的哪条路（只有"先预览、后确认"那条路会给）。
    *
-   * `reused` = 预演之后本机与远端都没变，照着预演那份计划落的盘；`recomputed` = 有一处对不上（`reason`
+   * `reused` = 预览之后本机与远端都没变，照着预览那份计划落的盘；`recomputed` = 有一处对不上（`reason`
    * 说明是哪一处），宿主这次从零重算了一遍——界面据此说一句，免得计划与结果对不上时没人解释。
    */
   planSource?: { kind: 'reused' } | { kind: 'recomputed'; reason: string }
   /**
-   * 这次同步要不要重启 DSH 才被承认（与迁移/导入同一套口径）。
+   * 这次同步要不要重启 DSH 才被承认（与迁移/导入同一套标准）。
    *
-   * 落地那次说的是**实际结果**；预演那次说的是"执行时会不会需要"（按宿主端口的探测）——界面靠它在
+   * 应用那次说的是**实际结果**；预览那次说的是"执行时会不会需要"（按宿主接口的探测）——界面靠它在
    * 按下「确认同步」之前就把这句话摆出来。两种模式都只在真有会话要落到本机时才谈得上生效。
    */
   takesEffect: 'immediate' | 'restart-required'
@@ -683,7 +683,7 @@ export interface SyncResponse {
   /**
    * 整理远端那一步的账目。
    *
-   * 预演那次报"能删几个包"（`count`），落地那次报"实际删了几个"（`removed` + `orphans`）。缺席 = 这次
+   * 预览那次报"能删几个包"（`count`），应用那次报"实际删了几个"（`removed` + `orphans`）。缺席 = 这次
    * 没有可整理的，或这台宿主/这一版不认这件事（旧宿主）。
    */
   tidy?: SyncTidy
@@ -692,22 +692,22 @@ export interface SyncResponse {
 /** 整理远端那一步的账目（见 `SyncResponse.tidy`）。 */
 export type SyncTidy = { count: number; bytes: number } | { removed: number; orphans: number; bytes: number }
 
-/** 只整理远端（`?mode=tidy`）的响应：预演只算账，落地真删。 */
+/** 只整理远端（`?mode=tidy`）的响应：预览只算账，应用真删。 */
 export interface TidyResponse {
   mode: 'plan' | 'apply'
   remote: { url: string; machineId: string }
-  /** 真删了没有（预演那次 false）。 */
+  /** 真删了没有（预览那次 false）。 */
   applied: boolean
-  /** 账目：预演是"将要删的"，落地是"实际删掉的"。 */
+  /** 账目：预览是"将要删的"，应用是"实际删掉的"。 */
   tidy: { removed: number; orphans: number; bytes: number }
   problems: string[]
 }
 
 /**
- * 预演一次同步（读远端，什么都不写），边算边报进度。
+ * 预览一次同步（读远端，什么都不写），边算边报进度。
  *
- * 宿主对预演与落地回的都是 **SSE**：预演要先扫本机（每条会话读头、折标题）、再读远端索引、最后逐条
- * 比对内容，冷启动时那几秒里界面原来只有一句"预演中…"；落地的理由是上百条各一次网络往返。事件形状
+ * 宿主对预览与应用回的都是 **SSE**：预览要先扫本机（每条会话读头、折标题）、再读远端索引、最后逐条
+ * 比对内容，冷启动时那几秒里界面原来只有一句"正在预览…"；应用的理由是上百条各一次网络往返。事件形状
  * 两条路完全一样，所以 `readEventStream()` 一份就够。
  *
  * @param onProgress 每收到一条进度事件调一次。
@@ -718,8 +718,8 @@ export async function fetchSyncPlan(
   decisions?: ReadonlyMap<string, SyncDecision>,
   planId?: string,
 ): Promise<SyncResponse> {
-  // 带有裁决的预演必须走 POST：GET 没有请求体，宿主那侧就不知道用户替哪一对挑了正本。没有裁决时
-  // 仍用 GET，保持"预演本来就不写任何东西"的样子。
+  // 带有裁决的预览必须走 POST：GET 没有请求体，宿主那侧就不知道用户替哪一对挑了正本。没有裁决时
+  // 仍用 GET，保持"预览本来就不写任何东西"的样子。
   //
   // 带上 `planId` 是另一件事：宿主对得上就**只重算计划那一层**（见 `replanPrepared()`），不再把整条
   // 同步流程走一遍——用户点一次「以本机为准」原来要等的那几秒就是它。
@@ -738,19 +738,19 @@ export async function fetchSyncPlan(
     },
     ...(body === undefined ? {} : { body }),
   })
-  return readEventStream<SyncResponse>(response, onProgress, '预演')
+  return readEventStream<SyncResponse>(response, onProgress, '预览')
 }
 
 /**
  * 真的跑一次同步（拉取 + 推送），边跑边报进度。
  *
- * 把预演给的 `planId` 带上：宿主对得上就**照着那份计划落地**，不再把同一份计划重算一遍（用户按下确认
- * 到第一条拉取之间原来要等的那几秒正是它），对不上（宿主重启过、又一次预演把它换掉了）就照旧从零
+ * 把预览给的 `planId` 带上：宿主对得上就**照着那份计划应用**，不再把同一份计划重算一遍（用户按下确认
+ * 到第一条拉取之间原来要等的那几秒正是它），对不上（宿主重启过、又一次预览把它换掉了）就照旧从零
  * 算一遍；响应里的 `planSource` 说清这次走的哪条路。
  *
- * @param planId 预演那次响应里的 `planId`；没有（旧调用方 / 没有预演数据）就按"从零算一遍"处理。
+ * @param planId 预览那次响应里的 `planId`；没有（旧调用方 / 没有预览数据）就按"从零算一遍"处理。
  * @param onProgress 每收到一条进度事件调一次。
- * @returns 落地结果；单条失败在 `problems` 里，不是抛错。
+ * @returns 应用结果；单条失败在 `problems` 里，不是抛错。
  */
 export async function applySync(
   planId?: string,
@@ -773,7 +773,7 @@ export async function applySync(
 /**
  * 只整理远端：删掉本机这一格里多余的包，不拉取、不推送、不动本机任何会话。
  *
- * 预演（GET）只读远端、算一遍账；落地（POST）先重写自己那格的索引，再逐个删包。两条都走 SSE：
+ * 预览（GET）只读远端、算一遍账；应用（POST）先重写自己那格的索引，再逐个删包。两条都走 SSE：
  * 一次整理可能几百个包、几十秒，进度得看得见（段名 `tidy`，一个包一条）。
  *
  * @param apply false = 只算账；true = 真删。
@@ -788,13 +788,13 @@ export async function tidyRemote(
     method: apply ? 'POST' : 'GET',
     headers: { accept: 'text/event-stream' },
   })
-  return readEventStream<TidyResponse>(response, onProgress, apply ? '整理远端' : '整理远端预演')
+  return readEventStream<TidyResponse>(response, onProgress, apply ? '整理远端' : '整理远端预览')
 }
 
 /**
- * 落地那一趟的状态（面板事件流上 `sync` 那一条的正文）。
+ * 应用那一趟的状态（面板事件流上 `sync` 那一条的正文）。
  *
- * 为什么要它：落地这趟可以**关掉窗口继续跑**（见 [syncJob.ts](./operations/sync/syncJob.ts)），于是它会比发起
+ * 为什么要它：应用这趟可以**关掉窗口继续跑**（见 [syncJob.ts](./operations/sync/syncJob.ts)），于是它会比发起
  * 它的那个页面活得久。刷新之后的页面、另一个页签都靠这一份知道"刚才那一趟还在跑 / 刚跑完"。
  *
  * 宿主进程内存里只留一份，重启就没了。
@@ -802,7 +802,7 @@ export async function tidyRemote(
 export interface SyncRoundStatus {
   /** 正在跑的那一趟；`null` = 没有。`progress` 是宿主记下的最后一条进度事件。 */
   applying: { startedAt: number; progress: ProgressEvent | null } | null
-  /** 最近一次落地的结论。 */
+  /** 最近一次应用的结论。 */
   last: {
     startedAt: number
     finishedAt: number
@@ -859,7 +859,7 @@ export async function testSync(): Promise<SyncTestResponse> {
 /**
  * `GET /auto-push` 的响应：**当场**跑一轮自动推送的结论。
  *
- * 与 `/sync` 的落地响应同形的那几个字段（`plan` / `pulled` / `pushed` / `bytesIn` / `bytesOut` /
+ * 与 `/sync` 的应用响应同形的那几个字段（`plan` / `pulled` / `pushed` / `bytesIn` / `bytesOut` /
  * `problems` / `takesEffect` / `planSource`）只在**真跑了**的那一次才有；没跑（`ran: false`）时它
  * 只报"是因为什么没跑"。`skip` 是机器可读的原因，句子在界面这一侧挑（见 `autoPushSentence()`）。
  */
@@ -874,7 +874,7 @@ export interface AutoPushResponse {
   failures: number
   /** 最近一次失败 / 问题的原话。 */
   problem?: string
-  /** 真跑了才有（与 `/sync` 的落地响应同形）。 */
+  /** 真跑了才有（与 `/sync` 的应用响应同形）。 */
   plan?: SyncPlan
   pulled?: string[]
   pushed?: Array<{ id: string; action: 'upload' | 'update' }>
@@ -918,7 +918,7 @@ export interface AutoPushLast {
 /**
  * 面板事件流上的一条事件（`GET /panel/events`）。
  *
- * 这一页打开期间只有这一条连接：清单、落地那一趟、自动推送那一轮、以及"库变了"的通知都从它来。
+ * 这一页打开期间只有这一条连接：清单、应用那一趟、自动推送那一轮、以及"库变了"的通知都从它来。
  * 形状与 `src/web.ts` 的 `panelEvents()` 一一对应，两处一起改。
  */
 export type PanelEvent =
@@ -928,7 +928,7 @@ export type PanelEvent =
   | { type: 'progress'; progress: ProgressEvent }
   /** 整库清单（与 `GET /state` 同一份取值）。 */
   | ({ type: 'snapshot' } & { state: StateResponse })
-  /** 落地那一趟现在什么样。 */
+  /** 应用那一趟现在什么样。 */
   | ({ type: 'sync' } & SyncRoundStatus)
   /** 自动推送那一轮现在什么样。 */
   | ({ type: 'auto-push' } & AutoPushRoundStatus)
@@ -1031,7 +1031,7 @@ export function openPanelStream(
  * 当场跑一轮自动推送：只把本机的会话推到远端，**一个字节都不拉**，也不动本机任何会话。
  *
  * 回的是事件流（与 `/sync` 同一套事件形状，宿主那侧标 `what: 'auto-push'`），所以进度能画在页面
- * 横幅上。这条路上**没有预演 / 确认**那一步：它只推不改本机，按下去就是一次。
+ * 横幅上。这条路上**没有预览 / 确认**那一步：它只推不改本机，按下去就是一次。
  *
  * 没配置同步、或这个宿主没有自动推送的调度器时，宿主回一次性 JSON + 409，`readEventStream()` 按
  * `content-type` 分流，异常里带的是宿主的原话。
@@ -1051,7 +1051,7 @@ export async function runAutoPushNow(
 
 // ---- 会话管理：迁移 / 备份 / 回滚 ----
 
-/** 预演里的一条会话（宿主 `MigrationPreview.sessions`）。 */
+/** 预览里的一条会话（宿主 `MigrationPreview.sessions`）。 */
 export interface PreviewSession {
   id: string
   /** 折叠出的标题；没有时界面显示 id。 */
@@ -1067,7 +1067,7 @@ export interface PreviewSession {
   via?: { id: string; title?: string }
 }
 
-/** 迁移预演的结果（宿主 `MigrationPreview`）。 */
+/** 迁移预览的结果（宿主 `MigrationPreview`）。 */
 export interface MigrationPreview {
   ok: boolean
   problems: string[]
@@ -1187,9 +1187,9 @@ export interface RollbackResponse {
 }
 
 /**
- * 迁移或只预演。
+ * 迁移或只预览。
  *
- * 回的是事件流：预演要扫整库（点名的会话可能散在任意项目目录里），落地要备份、改写每份日志的首帧、
+ * 回的是事件流：预览要扫整库（点名的会话可能散在任意项目目录里），应用要备份、改写每份日志的首帧、
  * 搬目录、复核、请宿主补检查点——实测 47 条会话 / 67.5 MB 要 45 秒（改写首帧是大头），那段时间原来
  * 只有一个不动的按钮。
  *
@@ -1233,7 +1233,7 @@ export async function rollbackBackup(
 
 // ---- 会话管理：删除 / 归档 ----
 
-/** 删除预演里的一条会话（宿主 `RemovalPlan.entries`）。 */
+/** 删除预览里的一条会话（宿主 `RemovalPlan.entries`）。 */
 export interface DeleteEntry {
   id: string
   /** 折叠出的标题；没有时界面显示 id。 */
@@ -1243,7 +1243,7 @@ export interface DeleteEntry {
   dir: string
   files: Array<{ name: string; bytes: number }>
   bytes: number
-  /** 宿主内存里活着（这种会被预演挡下，正常不会出现在条目里）。 */
+  /** 宿主内存里活着（这种会被预览挡下，正常不会出现在条目里）。 */
   live: boolean
   /** 日志 header 里的 `origin`（子智能体会话写 `subagent`）。 */
   origin?: string
@@ -1251,7 +1251,7 @@ export interface DeleteEntry {
   via?: { id: string; title?: string }
 }
 
-/** 删除（预演或落地）的响应。 */
+/** 删除（预览或应用）的响应。 */
 export interface DeleteResponse {
   mode: 'plan' | 'apply'
   ok: boolean
@@ -1290,7 +1290,7 @@ export interface DeleteResponse {
 /**
  * 删除会话（`mode: 'apply'` 才真删，且**先备份再删**）。
  *
- * 回的是事件流：预演要扫整库找这些会话与它们的后代，落地要先把整份会话目录按字节备份、再逐条删、
+ * 回的是事件流：预览要扫整库找这些会话与它们的后代，应用要先把整份会话目录按字节备份、再逐条删、
  * 最后复核。计划本身不 ok（会话不在库里、宿主内存里活着…）与复核没过**都还是结果**——它们带着完整
  * 的 `preview`，页面要把清单与问题摆出来。
  */
@@ -1324,7 +1324,7 @@ export interface ArchiveResponse {
   archived: string[]
   /** 逐条的失败原因（一条失败不影响其余）。 */
   failed: Array<{ id: string; error: string }>
-  /** 宿主服务"落盘 + 改内存 + 广播"一次做完，所以必然即时生效。 */
+  /** 宿主服务"写入磁盘 + 改内存 + 广播"一次做完，所以必然即时生效。 */
   takesEffect: 'immediate'
   error?: string
 }
@@ -1345,7 +1345,7 @@ export async function archiveSessions(
     headers: { 'content-type': 'application/json', accept: 'text/event-stream' },
     body: JSON.stringify({ sessionIds, archived }),
   })
-  // 逐条走宿主的注册表动作（每条一次落盘 + 广播），勾一整页时这一段是可感知的，所以它也报进度。
+  // 逐条走宿主的注册表动作（每条一次写入磁盘 + 广播），勾一整页时这一段是可感知的，所以它也报进度。
   const parsed = await readEventStream<ArchiveResponse>(response, onProgress, '归档')
   if (!Array.isArray(parsed.failed)) throw new Error(parsed.error ?? '归档没有回结果')
   return parsed

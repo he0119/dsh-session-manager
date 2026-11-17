@@ -1,4 +1,4 @@
-// 迁移编排（src/operations/migrate/migrate.ts）的单元面：预演只读、dry-run 不写、回滚只认自己的备份根。
+// 迁移编排（src/operations/migrate/migrate.ts）的单元面：预览只读、dry-run 不写、回滚只认自己的备份根。
 //
 // 工具层那条路径由 test/plugin/tools.test.ts 端到端覆盖（plan → migrate → verify → rollback），
 // 这里补的是**界面也会用到的**那些边界：备份目录的越界拒绝、备份清单的列举、dry-run 的零写入。
@@ -97,12 +97,12 @@ function makeSandbox(name: string, ids: readonly string[] = ['session-migrate-1'
   }
 }
 
-test('预演：把源项目目录的会话与注册表变更算出来，一个字节都不写', async () => {
+test('预览：把源项目目录的会话与注册表变更算出来，一个字节都不写', async () => {
   const sb = makeSandbox('migrate-preview')
   const before = readFileSync(join(sb.deps.registryPath), 'utf8')
 
   const preview = await previewMigration(sb.deps, req(sb))
-  assert.equal(preview.ok, true, `预演应当可用：${preview.problems.join('; ')}`)
+  assert.equal(preview.ok, true, `预览应当可用：${preview.problems.join('; ')}`)
   assert.equal(preview.sessions.length, 1)
   assert.equal(preview.sessions[0]?.registered, true)
   assert.equal(preview.files, 1)
@@ -114,22 +114,22 @@ test('预演：把源项目目录的会话与注册表变更算出来，一个�
   assert.equal(readFileSync(sb.deps.registryPath, 'utf8'), before)
   const dirName = basename(sessionDir(sb.deps.sessionsRoot, FROM, sb.sessionId))
   assert.equal(existsSync(sessionDir(sb.deps.sessionsRoot, FROM, sb.sessionId)), true, '会话应当还在源项目目录')
-  assert.equal(existsSync(join(sb.deps.sessionsRoot, preview.targetProjectDir, dirName)), false, '预演不该建目标会话目录')
+  assert.equal(existsSync(join(sb.deps.sessionsRoot, preview.targetProjectDir, dirName)), false, '预览不该建目标会话目录')
   rmSync(sb.base, { recursive: true, force: true })
 })
 
-test('预演：目标的另一种拼写先归一（同一个目录不会凭写法多出一条工作区记录）', async () => {
+test('预览：目标的另一种拼写先归一（同一个目录不会凭写法多出一条工作区记录）', async () => {
   const sb = makeSandbox('migrate-canonical-to')
   // 结尾分隔符是"另一种拼写"里最朴素的一种；Windows 上还有 git 给的正斜杠（见 canonical-path.test.ts）
   const preview = await previewMigration(sb.deps, req(sb, { to: `${TO}${sep}` }))
 
   assert.equal(preview.ok, true, `另一种拼写应当照常可用：${preview.problems.join('; ')}`)
-  assert.equal(preview.to, TO, '落地用的是归一之后的那个字符串')
+  assert.equal(preview.to, TO, '应用用的是归一之后的那个字符串')
   assert.equal(preview.registryChange?.targetPath, TO, '注册表里那条记录的 path 也是它')
   rmSync(sb.base, { recursive: true, force: true })
 })
 
-test('预演：目标就是这几条会话现在住的那个目录（换种拼写也一样）→ 没东西可搬', async () => {
+test('预览：目标就是这几条会话现在住的那个目录（换种拼写也一样）→ 没东西可搬', async () => {
   const sb = makeSandbox('migrate-same-directory')
   const preview = await previewMigration(sb.deps, req(sb, { to: `${FROM}${sep}` }))
 
@@ -141,7 +141,7 @@ test('预演：目标就是这几条会话现在住的那个目录（换种拼�
   rmSync(sb.base, { recursive: true, force: true })
 })
 
-test('dry-run：runMigration(apply:false) 与预演同形，且不写盘', async () => {
+test('dry-run：runMigration(apply:false) 与预览同形，且不写盘', async () => {
   const sb = makeSandbox('migrate-dryrun')
   const run = await runMigration(sb.deps, req(sb), { apply: false })
 
@@ -192,7 +192,7 @@ test('子集：只搬点名的会话，源工作区没被搬空就留在注册�
 
   assert.equal(run.applied, true)
   assert.equal(run.verified, true, `复核应当通过：${run.problems.join('; ')}`)
-  // 预演与落地看到的是同一份子集
+  // 预览与应用看到的是同一份子集
   assert.deepEqual(run.preview.sessions.map((s) => s.id), ['session-go'])
   assert.equal(run.moved, 1)
   // 没被点名的那条必须原地不动
@@ -209,7 +209,7 @@ test('子集：只搬点名的会话，源工作区没被搬空就留在注册�
   rmSync(sb.base, { recursive: true, force: true })
 })
 
-test('子集：点名的会话不在源项目目录里 → 预演就报问题，而不是静默少搬', async () => {
+test('子集：点名的会话不在源项目目录里 → 预览就报问题，而不是静默少搬', async () => {
   const sb = makeSandbox('migrate-subset-unknown', ['session-a'])
   const preview = await previewMigration(sb.deps, { to: TO, sessionIds: ['session-a', 'session-ghost'] })
 
@@ -417,7 +417,7 @@ test('宿主没接住时把这次算好的注册表写回文件（它自己那�
     hostRegistry: () => ({
       refreshIndex: async () => {},
       ensureWorkspace: async () => {
-        // 宿主的真实行为：新建工作区那一步它按内存里那份整份落盘（单单元契约），插件写好的文件当场被盖。
+        // 宿主的真实行为：新建工作区那一步它按内存里那份整份写入磁盘（单单元契约），插件写好的文件当场被盖。
         writeRegistryAtomic(sb.deps.registryPath, before)
         clobbered += 1
         return 'ws-host-1'
@@ -453,7 +453,7 @@ test('宿主没接住时把这次算好的注册表写回文件（它自己那�
 })
 
 /**
- * 一个"像真宿主"的端口：它按**内存里那份**整份落盘（`dsh-storage-json` 的单单元契约），并且只认
+ * 一个"像真宿主"的端口：它按**内存里那份**整份写入磁盘（`dsh-storage-json` 的单单元契约），并且只认
  * `known` 里的会话（盘上早就没有的那些它认不出来，`attachSession()` 会回绝——真实宿主拿 header 缓存
  * 校验 cwd，同样回绝）。
  */
@@ -485,7 +485,7 @@ function memoryHost(options: {
           updatedAt: stamp,
         }
         options.memory.global.workspaceIds.push(id)
-        // 真实宿主：新建工作区那一步它按内存里那份整份落盘，插件写好的文件当场被盖。
+        // 真实宿主：新建工作区那一步它按内存里那份整份写入磁盘，插件写好的文件当场被盖。
         persist()
         return id
       },
@@ -576,7 +576,7 @@ test('宿主不认的悬空登记只报出来，不写回文件', async () => {
   assert.equal(run.effect?.membershipsRestored, undefined, '要不回来的不能算要回来了')
   assert.deepEqual(run.effect?.membershipsUnrecognized, [ghost])
   assert.match(run.summary, /另有 1 条归属宿主不认/)
-  // 关键：不硬写回文件（写回去只会让它下次落盘再抹一次）。
+  // 关键：不硬写回文件（写回去只会让它下次写入磁盘再抹一次）。
   const after = readRegistry(sb.deps.registryPath)
   assert.deepEqual(after.tables.workspaces['ws-other']?.sessionIds, [])
   // 复核照旧点名这一条没了（悬空登记的清理是另一条路的事）。

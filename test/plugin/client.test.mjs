@@ -64,18 +64,18 @@ const REUSED_COMMON = ['cancel', 'close', 'loading', 'save']
 /**
  * 假的 react：钩子给出初始值，同时把创建出来的元素记下来，供"页签还在吗"这类断言用。
  *
- * `firstNull` 是给"要验证**有数据**时那棵树"用的：页面骨架（ManagerPanel）就是用它自己的
+ * `firstNull` 是给"要验证**有数据**时那棵树"用的：页面外壳（ManagerPanel）就是用它自己的
  * `useState(null)` 持有会话库，而假钩子本来永远停在 null，于是有数据的分支（分组列表、
  * 各种表格）在冒烟里根本走不到。给了它就只替换**第一次** `useState(null)`——后面那些 null
  * 状态（错误提示、导入计划…）必须保持空，否则会渲染出不存在的数据。
  *
- * `nulls` 是那条规矩的延伸：要往**更后面**的某个 null 状态里种数据（比如迁移页的预演结果，
+ * `nulls` 是那条规矩的延伸：要往**更后面**的某个 null 状态里种数据（比如迁移页的预览结果，
  * 见下面的用例），就按顺序把前几个 null 状态写成 null、要种的那个写成值。顺序同样是调用方与
  * 组件之间的约定，种错了表现为"期望的元素没渲染出来"（当场红），不会静默过。
  *
- * `meta` 是页面骨架里那份 `/meta` 状态（初始化值是 `undefined`——它在页面上的语义是"还没到"，
+ * `meta` 是页面外壳里那份 `/meta` 状态（初始化值是 `undefined`——它在页面上的语义是"还没到"，
  * 与 null 不能混，所以单开一个种子而不是挤进 `nulls`）。它是渲染顺序里**第一个** `useState(undefined)`
- * 的状态（骨架的钩子先于任何分页跑；设置表单里那几个 undefined 状态都在后面）。
+ * 的状态（外壳的钩子先于任何分页跑；设置表单里那几个 undefined 状态都在后面）。
  */
 function fakeReact(recorded = [], firstNull = undefined, panel = undefined, arrays = [], strings = [], nulls = [], meta = undefined, sets = []) {
   let seededPanel = false
@@ -119,7 +119,7 @@ function fakeReact(recorded = [], firstNull = undefined, panel = undefined, arra
     },
     useState: (value) => {
       // 假钩子**不改**状态（每次渲染都还是种子那个值），但把"谁被 set 成了什么"记下来：面板把
-      // `onProgress` 接没接到 api 上、落地之后有没有清掉进度，只有这一条路能看见（见下面「迁移落地
+      // `onProgress` 接没接到 api 上、应用之后有没有清掉进度，只有这一条路能看见（见下面「迁移应用
       // 的进度真的进了界面状态」那条用例）。
       /*
        * 页面级那两个"执行状态窗"（`RunDialog` / `RunChip`）各自持有一个 `useState(null)`，值来自模块级
@@ -145,12 +145,12 @@ function fakeReact(recorded = [], firstNull = undefined, panel = undefined, arra
       if (value === null && nullSeeds.length > 0) {
         return [nullSeeds.shift(), set]
       }
-      // `/meta` 那一份（见上面的 meta 说明）。排在 null 之后、数组与空串之前，与骨架里的调用顺序一致。
+      // `/meta` 那一份（见上面的 meta 说明）。排在 null 之后、数组与空串之前，与外壳里的调用顺序一致。
       if (value === undefined && undefinedSeeds.length > 0) {
         return [undefinedSeeds.shift(), set]
       }
       // 页面上那几块"做事的面"的状态（`useState('none')`）：假钩子不会点按钮，于是列表之外的
-      // 三个弹窗与说明在冒烟里一次都跑不到。只替换**第一个** `useState('none')`（骨架里那个，
+      // 三个弹窗与说明在冒烟里一次都跑不到。只替换**第一个** `useState('none')`（外壳里那个，
       // 默认就是列表），其余字符串状态照旧。用例仍旧用 `panel: 'transfer'` 这种写法点名要开哪一面；
       // 传 `'manage'` 表示"什么都不开"，就是这一页默认的样子。
       if (!seededPanel && value === 'none' && panel !== undefined) {
@@ -269,7 +269,7 @@ function recordedTagPairs(recorded) {
  * 一枚标签的「提示 + 文字 + 色调」：提示在包着它的 `Tooltip`（组件元素）上，文字与 tone 在 `Tag` 上。
  *
  * 官方 `Tag` 不转发 `title`，本页的提示改走官方 `Tooltip`（锚点是外面那层 `dsm-tag` 的 span）。
- * 用例读的是这个三元组，不是 DOM 属性——替身把 `Tooltip` 原样返回，DOM 与线上一致。
+ * 用例读的是这个三元组，不是 DOM 属性——假对象把 `Tooltip` 原样返回，DOM 与线上一致。
  */
 function tagPairOf(node) {
   if (node === null || typeof node !== 'object') return undefined
@@ -322,7 +322,7 @@ function tagPairsIn(node, out = []) {
 /**
  * 某枚元素外面那层 `Tooltip` 的提示文字；没有就返回 `undefined`。
  *
- * 替身把 `Tooltip` 原样返回（DOM 与线上一致），所以"提示挂在哪一枚元素上"要这样配对读。
+ * 假对象把 `Tooltip` 原样返回（DOM 与线上一致），所以"提示挂在哪一枚元素上"要这样配对读。
  */
 function hintAround(recorded, matches) {
   for (const node of recorded) {
@@ -402,7 +402,7 @@ function topDialog(recorded) {
  * 从元素树里收集所有字符串（文案就是字符串，键回显也是）。
  *
  * 遇到**函数组件**就带着 props 调一次再往下走：本文件没有真的渲染器，不这么做的话嵌套的
- * 页面（默认那一页「会话」）永远不在树上，冒烟只能看见骨架那一层，页面里的错就漏过去了。
+ * 页面（默认那一页「会话」）永远不在树上，冒烟只能看见外壳那一层，页面里的错就漏过去了。
  * 假钩子是无状态的，多调一次不会改变什么。
  */
 function strings(node, out = []) {
@@ -468,7 +468,7 @@ function loadBundle({ firstNull, panel, arrays, strings, nulls, meta, fetch } = 
     window: { __ModuleLoader__: { load: (value) => { entry = value } } },
     document: fakeDocument(nodes),
     console,
-    // 浏览器里这两样是全局的：同步的落地走事件流，读流那一步要按 UTF-8 解码（api.ts 里 new 的是
+    // 浏览器里这两样是全局的：同步的应用走事件流，读流那一步要按 UTF-8 解码（api.ts 里 new 的是
     // TextDecoder）。vm 的新上下文默认什么都不给，少一个就会在"读流"那一步抛 ReferenceError，而它
     // 只会表现成"进度没出现"，看不出是环境缺件。
     TextDecoder,
@@ -498,12 +498,12 @@ function loadBundle({ firstNull, panel, arrays, strings, nulls, meta, fetch } = 
     if (specifier === '@deepseek-ai/dsh-client-ui-primitives') {
       return {
         /*
-         * `Button` 的替身：真的那个是 `forwardRef`，按 `variant` / `size` 上官方那套类名，并把原生
+         * `Button` 的假对象：真的那个是 `forwardRef`，按 `variant` / `size` 上官方那套类名，并把原生
          * button 属性透传下去。这里照 props 造一个真的 `<button>`——用例要核的正是"主动作是不是
          * 落在这个容器里""它禁没禁用""文案对不对"，这些全在**入参**上。
          */
         /*
-         * `StateDot` 的替身：真的那个按 `state` 挑颜色 / 转圈；这里造一个带 `data-state` 的 span——用例
+         * `StateDot` 的假对象：真的那个按 `state` 挑颜色 / 转圈；这里造一个带 `data-state` 的 span——用例
          * 要核的正是"页头那枚点该点哪一档"，那是**入参**。
          */
         StateDot: (props) => react.createElement('span', { 'data-state': props.state, 'aria-hidden': 'true' }),
@@ -518,13 +518,13 @@ function loadBundle({ firstNull, panel, arrays, strings, nulls, meta, fetch } = 
           )
         },
         /*
-         * `Tag` 的替身：真的那个画 `<span data-tone=…>`（类名是 CSS module 的哈希名）。用例核的是
+         * `Tag` 的假对象：真的那个画 `<span data-tone=…>`（类名是 CSS module 的哈希名）。用例核的是
          * "这枚标签是不是中性/危险那几档""文案是什么"，所以把 `tone` 原样搬到 `data-tone` 上。
          */
         Tag: (props) =>
           react.createElement('span', { 'data-tone': props.tone ?? 'outline', className: props.className }, props.children),
         /*
-         * `Input` 的替身：真的那个是 `<span class="wrap">` 包一个内部化的 `<input>`，外部属性全透传给
+         * `Input` 的假对象：真的那个是 `<span class="wrap">` 包一个内部化的 `<input>`，外部属性全透传给
          * 那个 input。用例核的是"有没有一个输入框、它的值与提示对不对"。
          */
         Input: (props) => {
@@ -534,13 +534,13 @@ function loadBundle({ firstNull, panel, arrays, strings, nulls, meta, fetch } = 
           return react.createElement('input', { ...rest, 'data-primitive-input': 'true', className })
         },
         /*
-         * `Tooltip` 的替身：真的那枚把提示画成气泡（`portal` 到 body），并给锚点挂
-         * `aria-describedby` 与一串鼠标 / 焦点处理器，DOM 里锚点本身不套壳。所以替身也原样返回锚点：
+         * `Tooltip` 的假对象：真的那枚把提示画成气泡（`portal` 到 body），并给锚点挂
+         * `aria-describedby` 与一串鼠标 / 焦点处理器，DOM 里锚点本身不套壳。所以假对象也原样返回锚点：
          * 用例要核"这条提示写的是什么"，去 `recorded` 里找 `Tooltip` 这个组件元素读 `label`。
          */
         Tooltip: (props) => props.children,
         /*
-         * `Checkbox` 的替身：真的那个是 `<label>` 包 `<input type=checkbox>` 与可见 label。用例核的是
+         * `Checkbox` 的假对象：真的那个是 `<label>` 包 `<input type=checkbox>` 与可见 label。用例核的是
          * 勾选态、禁用态与无障碍名字（`label` 传空串时名字由外面的行 label 兜底）。
          */
         Checkbox: (props) =>
@@ -557,7 +557,7 @@ function loadBundle({ firstNull, panel, arrays, strings, nulls, meta, fetch } = 
             },
           ),
         /*
-         * `SegmentedControl` 的替身：真的那个是 `role="tablist"` 包一排 `role="tab"`，类名同样是 hash。
+         * `SegmentedControl` 的假对象：真的那个是 `role="tablist"` 包一排 `role="tab"`，类名同样是 hash。
          * 用例要核的是**顺序与默认页**（顺序 = `options` 的顺序，默认页 = 受控的 `value`），
          * 所以这里照 `options` 造出真的 `role=tab` 那一排，`aria-selected` 按 `value` 判。
          */
@@ -584,7 +584,7 @@ function loadBundle({ firstNull, panel, arrays, strings, nulls, meta, fetch } = 
             ),
           ),
         /*
-         * `Switch` 的替身：真的那个画一个受控开关（按钮 + 滑块）。用例要核的是"这里是官方那个开关，
+         * `Switch` 的假对象：真的那个画一个受控开关（按钮 + 滑块）。用例要核的是"这里是官方那个开关，
          * 而不是本页手写的勾选框"以及它的三处入参（`checked` / `disabled` / `label`），
          * 所以按 props 造一个带 `data-switch` 的元素记进 `recorded`。
          */
@@ -597,7 +597,7 @@ function loadBundle({ firstNull, panel, arrays, strings, nulls, meta, fetch } = 
             'aria-label': props.label,
             onClick: () => props.onChange(!props.checked),
           }),
-        // `Modal` 的替身：真那个会 createPortal 到 body、管 Escape 与焦点归还，这里没有渲染器也没有
+        // `Modal` 的假对象：真那个会 createPortal 到 body、管 Escape 与焦点归还，这里没有渲染器也没有
         // DOM；用例只关心它的四处入参——`open`（回 null 的契约）、`title`、`children` 与 `footer`。
         Modal: (props) =>
           props.open === false
@@ -702,7 +702,7 @@ function mount({ translate, state, meta, panel, arrays, strings, nulls, configFo
       // 宿主机凭据服务上（`remote.credentials`）。
       injectedServices.push({ dependencies })
       const scoped = {
-        // 设置接缝（`configForms`）按用例给：不给就等于宿主没提供它，同步设置表单要自己说明。
+        // 设置接入点（`configForms`）按用例给：不给就等于宿主没提供它，同步设置表单要自己说明。
         ...(configForms === undefined ? {} : { configForms }),
         // 凭据服务同理：不给就等于宿主没装凭据提供方，密码框那一块要说明"只能走环境变量"。
         ...(credentials === undefined ? {} : { remote: { credentials } }),
@@ -1001,7 +1001,7 @@ test('客户端产物：页面上没有页签，四件事各是一处入口', { 
   /*
    * 页签那一层用的是官方 `SegmentedControl`（`role="tablist"` + `aria-selected`），所以这里核的是
    * **页面上**那套东西不见了。整份产物里不能完全不提它：设置表单里"自动那一档"的三选一正是同一个
-   * 原语，那是表单控件、不是页签——判据落在页面骨架那几个文件上。
+   * 原语，那是表单控件、不是页签——判据落在页面外壳那几个文件上。
    */
   const pageFiles = ['ManagerPanel.tsx', 'SyncPanel.tsx', 'ManagePanel.tsx']
   const byName = new Map(clientSourceFiles().map((file) => [file.name, file.source]))
@@ -1053,7 +1053,7 @@ test('客户端产物：页头那枚同步状态说"多久以前、成没成"', 
   assert.equal(neverText.some((item) => String(item).includes('sync.chip.at')), false, '没有记录就不说时间')
 })
 
-test('客户端产物：同步落地之后不回面板，换成结果页（一句结论、没做到的清单、撤销、完成）', { skip }, async () => {
+test('客户端产物：同步应用之后不回面板，换成结果页（一句结论、没做到的清单、撤销、完成）', { skip }, async () => {
   /*
    * 这条照着用户的动作走一遍：计划那一段按「确认同步」→ 宿主推一条进度、再推收尾 → 界面换成结果页。
    * 为什么不能像别的用例那样把结果"种"进状态里：这一趟的结论在 `logic/syncJob.ts` 的模块级 store 里
@@ -1284,7 +1284,7 @@ function primaryPlacements(node, inside = 'root', out = []) {
   if (node === null || typeof node !== 'object') return out
   const className = String(node.props?.className ?? '')
   const classes = className.split(/\s+/)
-  // 官方 `Modal` 的底部动作行：真那个的类名来自 CSS module（`_footer_xxxx`），示例数据里的替身叫
+  // 官方 `Modal` 的底部动作行：真那个的类名来自 CSS module（`_footer_xxxx`），示例数据里的假对象叫
   // `dsm-fakeDialogFooter`。弹窗级的主动作就该站在这儿。
   const footer = classes.some((name) => name.startsWith('_footer_') || name === 'dsm-fakeDialogFooter')
   const nested = footer ? 'dialogFooter' : classes.includes('dsm-cardHead') ? 'cardHead' : classes.includes('dsm-controls') ? 'controls' : inside
@@ -1340,11 +1340,11 @@ test('客户端产物：卡片级的主动作长在卡片底部的动作行里�
   }
   // 「会话」页那一行放的是归档 / 取消归档 / 重新生成名称 / 迁移 / 导出所选 / 删除，六枚都没有
   // `dsm-primary`（删除是破坏性动作、靠 spacer 顶到右端）；导入那面一枚「导入」、同步那面一枚「同步」
-  // （那张设置表单自己的「保存」只在宿主有设置接缝时才画，归表单那条用例钉）。
+  // （那张设置表单自己的「保存」只在宿主有设置接入点时才画，归表单那条用例钉）。
   const expected = {
     manage: [],
     import: ['dialogFooter'],
-    // 同步那一面自己就是弹窗（计划与落地都并进去了），主动作与导入一样在底栏。
+    // 同步那一面自己就是弹窗（计划与应用都并进去了），主动作与导入一样在底栏。
     sync: ['dialogFooter'],
   }
   for (const [panel, places] of Object.entries(expected)) {
@@ -1360,7 +1360,7 @@ test('客户端产物：页面上凡是官方 Button 都带边框，没有裸着
   // 更像一段灰字）；旁边内建设置页那枚只读的「打开配置文件」反倒是带边框的 `outline`（量到
   // `border: rgba(0, 0, 0, 0.12) 1px`）。
   //
-  // 口径：这一页凡是用官方 `Button` 的地方都给边框——主动作 `primary`、其余 `outline`。唯一一枚
+  // 标准：这一页凡是用官方 `Button` 的地方都给边框——主动作 `primary`、其余 `outline`。唯一一枚
   // **手写**的文字按钮在例外面：每行标题那一格（`.dsm-rowOpen`）——它是整行的主动作，外观必须跟
   // 旁边那段字一样，所以颜色、字号、盒子都归本页 CSS 管。
   const state = {
@@ -1565,7 +1565,7 @@ test('客户端产物：页面组件在初始状态下能渲染成元素（不�
   const { component } = registrations[0]
   const { inject } = registrations[0].registration
   // 假 react 的钩子返回初始值，因此走的是「还没读到数据」那一支渲染；
-  // 它照样会把整个函数体跑一遍（文案、格式化、表格骨架），是产物层面最便宜的渲染冒烟。
+  // 它照样会把整个函数体跑一遍（文案、格式化、表格外壳），是产物层面最便宜的渲染冒烟。
   const element = component(inject())
   assert.equal(typeof element, 'object')
   assert.notEqual(element, null)
@@ -1986,7 +1986,7 @@ function pickPlacements(node, inside = 'root', out = []) {
       : classes.includes('dsm-controls')
         ? 'controls'
         : inside
-  // 官方 `Button` 是组件：下穿到它的渲染结果（替身画出来的是一个真的 `<button>`，文案与禁用态
+  // 官方 `Button` 是组件：下穿到它的渲染结果（假对象画出来的是一个真的 `<button>`，文案与禁用态
   // 都在那个元素上）。**不能在这里也记一笔**——否则同一枚按钮会被记两次（一次按组件、一次按它画出来
   // 的 button），"一对选行工具"就成了两对。判据只有一处：那个真的 `button`。
   if (isComponentType(node.type)) return pickPlacements(renderType(node.type, node.props), nested, out)
@@ -2342,7 +2342,7 @@ test('客户端产物：迁移弹窗——计划逐条列出会话，跟着父�
       .filter((node) => node.type === 'button')
       .map((button) => strings(button)[0]),
     ['cancel', 'migrate.apply'],
-    '底部是「取消 / 确认迁移」，确认那个是唯一的落地入口',
+    '底部是「取消 / 确认迁移」，确认那个是唯一的应用入口',
   )
 
   // 没有子智能体跟随时那句话不该出现（否则每次迁移都多一行噪音）
@@ -2391,10 +2391,10 @@ test('客户端产物：迁移弹窗——计划逐条列出会话，跟着父�
   )
 })
 
-test('客户端产物：勾中的会话都搬不走时，迁移弹窗不再停在「预演中…」', { skip }, () => {
+test('客户端产物：勾中的会话都搬不走时，迁移弹窗不再停在「正在预览…」', { skip }, () => {
   // 侧边栏不显示的会话（已归档 / 空白 / 子智能体）不进迁移计划（见 ManagePanel 的 `migratable`）。
   // 勾中的只有这种时，`runPreview()` 在空集合上直接返回，一份计划都不会去取——弹窗原来会一直停在
-  // 「预演中…」，而那句话等的是一个永远不会发出的请求。这里种的就是那一刻：picked = 一条已归档，
+  // 「正在预览…」，而那句话等的是一个永远不会发出的请求。这里种的就是那一刻：picked = 一条已归档，
   // `migratePending` 是"还没结果"（response 与 error 都是 null）。
   const state = {
     sessionsRoot: '/home/u/.dsh/sessions',
@@ -2427,7 +2427,7 @@ test('客户端产物：勾中的会话都搬不走时，迁移弹窗不再停�
   const text = strings(tree)
 
   assert.ok(text.includes('migrate.nothingVisible'), '要说清"这次没有可迁移的会话"，而不是干等着')
-  assert.equal(text.includes('dialog.previewing'), false, '不该再摆一个永远等不到结果的「预演中…」')
+  assert.equal(text.includes('dialog.previewing'), false, '不该再摆一个永远等不到结果的「正在预览…」')
 
   const footer = mounted.recorded.find((node) => String(node.props?.className) === 'dsm-fakeDialogFooter')
   const apply = elementsOf(footer)
@@ -2436,10 +2436,10 @@ test('客户端产物：勾中的会话都搬不走时，迁移弹窗不再停�
   assert.equal(apply?.props?.disabled, true, '一条都搬不走时确认按钮是禁用的')
 })
 
-test('客户端产物：迁移的「要不要重启」——确认前先说一句，落地后只在需要重启时留一句', { skip }, () => {
-  // 与同步页同一口径（见下面那条同步用例）：「需要重启」是坏消息，既不跟"复核通过"那条绿色结论共用
+test('客户端产物：迁移的「要不要重启」——确认前先说一句，应用后只在需要重启时留一句', { skip }, () => {
+  // 与同步页同一标准（见下面那条同步用例）：「需要重启」是坏消息，既不跟"复核通过"那条绿色结论共用
   // 一块底，也不在没事的时候说一句"无需重启"；而且要在按「确认迁移」**之前**说出来，事后才说等于没提醒
-  // （预演那次的口径由宿主给，见 src/web.ts 与 test/plugin/web.test.ts）。
+  // （预览那次的标准由宿主给，见 src/web.ts 与 test/plugin/web.test.ts）。
   const state = {
     sessionsRoot: '/home/u/.dsh/sessions',
     registryPath: '/home/u/.dsh/registry.json',
@@ -2559,8 +2559,8 @@ test('客户端产物：迁移的「要不要重启」——确认前先说一�
   )
 
   /*
-   * 落地之后那一句（需要重启才生效）不在这条里：它跟着结果页走，见上面
-   * 「迁移落地之后进度在状态窗里，跑完换成结果页」那条——那里点完「确认迁移」再看结果页。
+   * 应用之后那一句（需要重启才生效）不在这条里：它跟着结果页走，见上面
+   * 「迁移应用之后进度在状态窗里，跑完换成结果页」那条——那里点完「确认迁移」再看结果页。
    * 原先这里核的是页面上一份 `effect` 状态（复核通过 + 那句警告），那份状态已经没有了：结论、复核、
    * 「要不要重启」与「撤销」都在同一扇结果窗里说。
    */
@@ -2644,8 +2644,8 @@ const MIGRATE_FIELD_STATE = {
 }
 
 /**
- * 「会话」页（迁移并进来之后）的 null 状态顺序（页面骨架的 `state` 由 mount 的 `firstNull` 种，这里
- * 从它自己那个 `error` 开始）：骨架 error → `busy` → `error` → `notice` → 删除弹窗 → `progress` →
+ * 「会话」页（迁移并进来之后）的 null 状态顺序（页面外壳的 `state` 由 mount 的 `firstNull` 种，这里
+ * 从它自己那个 `error` 开始）：外壳 error → `busy` → `error` → `notice` → 删除弹窗 → `progress` →
  * `retitle` → `inspecting` → 目标字段 open → 目标字段 manual → **迁移弹窗** → **迁移结论**。
  *
  * 迁移那一路的状态**声明在原有状态之后**（见 ManagePanel.tsx 的注释），所以既有用例的种子位置不变；
@@ -2659,7 +2659,7 @@ const manageNulls = ({
   inspecting = null,
   notice = null,
 } = {}) => [
-  null, // 页面骨架自己的 error（它排在分页之前，分页的 `state` 由 mount 的 firstNull 种）
+  null, // 页面外壳自己的 error（它排在分页之前，分页的 `state` 由 mount 的 firstNull 种）
   busy,
   null, // error
   notice, // 提示那一行（归档 / 导出之后那句）
@@ -2756,7 +2756,7 @@ test('客户端产物：迁移弹窗里的目标目录是那枚值控件，点�
     mounted.recorded.some((node) => String(node.props?.className ?? '').includes('dsm-candidatePicker')),
     '候选面板开在这个字段下面',
   )
-  // 目标候选＝已登记的工作区（与传输页的落地目录同一份构造）：目录这里不数会话条数。
+  // 目标候选＝已登记的工作区（与传输页的目标目录同一份构造）：目录这里不数会话条数。
   const rows = candidateRows(mounted.recorded)
   assert.deepEqual(rows.map((row) => strings(row)[0]), ['工作区甲', '工作区乙'], '一行一个候选，名字在第一行')
   assert.deepEqual(strings(rows[0]), ['工作区甲', '/home/u/dev/alpha'], '第二行是本机路径')
@@ -2872,9 +2872,9 @@ test('客户端产物：宿主没有目录选择器时，候选面板里不摆�
   )
 })
 
-test('客户端产物：导入那面的落地目录是同一枚值控件，候选与迁移页的目标目录同一份', { skip }, () => {
-  // null 状态按渲染顺序种：骨架的 error / 导入面的 file / payload / pending / busy / error / progress /
-  // **目录字段的面板**（种成"落地目录的候选面板开着"——候选就住在面板里）。
+test('客户端产物：导入那面的目标目录是同一枚值控件，候选与迁移页的目标目录同一份', { skip }, () => {
+  // null 状态按渲染顺序种：外壳的 error / 导入面的 file / payload / pending / busy / error / progress /
+  // **目录字段的面板**（种成"目标目录的候选面板开着"——候选就住在面板里）。
   const mounted = mount({
     state: MIGRATE_FIELD_STATE,
     panel: 'import',
@@ -2888,7 +2888,7 @@ test('客户端产物：导入那面的落地目录是同一枚值控件，候�
   assert.equal(mounted.recorded.filter((node) => node.type === 'select').length, 0, '不再有原生下拉框')
   assert.equal(mounted.recorded.filter((node) => node.type === 'option').length, 0, '也就没有 <option> 了')
   const value = valueControl(mounted.recorded)
-  assert.ok(value, '落地目录是那枚值控件')
+  assert.ok(value, '目标目录是那枚值控件')
   assert.equal(value.props['aria-expanded'], true, '面板开着时它是 expanded')
   assert.equal(
     value.props['aria-label'],
@@ -2914,7 +2914,7 @@ test('客户端产物：导入那面的落地目录是同一枚值控件，候�
   assert.ok(text.includes('import.fileLabel'), '包那一个字段有标签')
 })
 
-test('客户端产物：导入那面的落地目录也能手输（候选之外的路径）', { skip }, () => {
+test('客户端产物：导入那面的目标目录也能手输（候选之外的路径）', { skip }, () => {
   // null 顺序同上，最后一个是「手输路径」展开着的那个字段。
   const mounted = mount({
     state: MIGRATE_FIELD_STATE,
@@ -3382,7 +3382,7 @@ test('客户端产物：同步页的同步块——没配置只说明，配置�
   assert.ok(text(off).includes('sync.offHint'), '没配置时要说明怎么配')
   assert.ok(!buttonTexts(off).includes('sync.action'), '没配置时不该出现同步按钮')
 
-  // 配置了：远端与这台机器报出来，预演与确认两个按钮都在
+  // 配置了：远端与这台机器报出来，预览与确认两个按钮都在
   const on = mount({
     state: { ...base, sync: { url: 'https://dav.example.com/dsh', machineId: 'robot-a', mappings: 2 } },
     panel: 'sync',
@@ -3401,7 +3401,7 @@ test('客户端产物：同步页的同步块——没配置只说明，配置�
   )
   assert.ok(onText.includes('sync.hint:{"mappings":2}'), '要报出映射条数')
   // 机器名不再重复印在标题上：它挪到了机器名那一栏的**灰字**里（宿主解析出来的缺省值，没配就是
-  // 主机名），与「超时」那一栏的 30000 同一个口径——留空不等于没有值。那一栏归表单那条用例钉。
+  // 主机名），与「超时」那一栏的 30000 同一个标准——留空不等于没有值。那一栏归表单那条用例钉。
   // 三个入口：「插件设置」在页头；「整理远端」（只删本机那一格里多余的包，不拉不推）在正文那行工具里；
   // 「同步」是这一面的主动作，与导入一样在**底栏**（footer 渲染在正文之后，所以它排在最后）。
   // 「确认同步」只有进了计划那一段才在树上。
@@ -3412,7 +3412,7 @@ test('客户端产物：同步页的同步块——没配置只说明，配置�
   ])
 })
 
-test('客户端产物：同步设置表单按 entry id 向设置接缝取控制器，宿主没提供时说实话', { skip }, () => {
+test('客户端产物：同步设置表单按 entry id 向设置接入点取控制器，宿主没提供时说实话', { skip }, () => {
   const state = {
     sessionsRoot: '/home/u/.dsh/sessions',
     registryPath: '/home/u/.dsh/registry.json',
@@ -3429,7 +3429,7 @@ test('客户端产物：同步设置表单按 entry id 向设置接缝取控制�
       revision: 7,
       value: {
         sync: {
-          // 机器名**没配过**（接缝里就没有这一项）：真实场景就是这个样子，缺省值由宿主解析。
+          // 机器名**没配过**（接入点里就没有这一项）：真实场景就是这个样子，缺省值由宿主解析。
           url: 'https://dav.example.com/dsh',
           timeoutMs: 30000,
           passwordRef: 'MY_DAV_PASSWORD',
@@ -3466,9 +3466,9 @@ test('客户端产物：同步设置表单按 entry id 向设置接缝取控制�
   assert.ok(text.includes('sync.field.mapping'), '映射字段在场')
   assert.ok(
     mounted.recorded.some((node) => node.type === 'input' && node.props?.value === 'https://dav.example.com/dsh'),
-    'URL 是从接缝里读出来的，不是页面自己存的',
+    'URL 是从接入点里读出来的，不是页面自己存的',
   )
-  // 机器名那一栏：接缝里没这一项（没配过），宿主状态里解析出来是 robot-a —— 框里应当是**空的**、
+  // 机器名那一栏：接入点里没这一项（没配过），宿主状态里解析出来是 robot-a —— 框里应当是**空的**、
   // 灰字是那个名字。灰字不是值：它不会进草稿，保存时也不会被写成一条"等于缺省值"的覆盖
   // （覆盖会把这一栏从此顶上一个「已覆盖」徽标，见 syncForm.ts 的 draftOps）。
   const machineInput = mounted.recorded.find(
@@ -3477,7 +3477,7 @@ test('客户端产物：同步设置表单按 entry id 向设置接缝取控制�
   assert.ok(machineInput !== undefined, '机器名那一栏的灰字是宿主解析出来的缺省值')
   assert.equal(machineInput.props.value, '', '没配过就画成空的——灰字只是缺省，不是值')
 
-  // 映射表是行：左右各一个输入框，值分别来自接缝里的那一对键值
+  // 映射表是行：左右各一个输入框，值分别来自接入点里的那一对键值
   const mappingInputs = mounted.recorded.filter(
     (node) => node.type === 'input' && (node.props?.value === '/home/alice/dev/proj' || node.props?.value === '/opt/work/proj'),
   )
@@ -3507,16 +3507,16 @@ test('客户端产物：同步设置表单按 entry id 向设置接缝取控制�
   assert.ok(!text.includes('syncFieldPassword'), '不该有「密码引用」那一栏')
   assert.ok(
     !mounted.recorded.some((node) => node.props?.value === 'MY_DAV_PASSWORD'),
-    '接缝里的引用名原样出现在输入框里，就是那一栏又回来了',
+    '接入点里的引用名原样出现在输入框里，就是那一栏又回来了',
   )
 
-  // 宿主没提供设置接缝（例如只装了设置外壳）：这一块要自己说明，而不是画一张点了没用的表单
+  // 宿主没提供设置接入点（例如只装了设置外壳）：这一块要自己说明，而不是画一张点了没用的表单
   const bare = mount({ state, panel: 'sync' })
   const bareText = strings(settingsOf(bare))
-  assert.ok(bareText.includes('sync.form.unavailable'), '没接缝时说清只能在配置里改')
-  assert.ok(!bareText.includes('sync.map.add'), '没接缝时不画表单')
+  assert.ok(bareText.includes('sync.form.unavailable'), '没接入点时说清只能在配置里改')
+  assert.ok(!bareText.includes('sync.map.add'), '没接入点时不画表单')
 
-  // 有接缝、没有凭据服务（宿主没装凭据提供方）：表单照画，只是密码那一块说清只能走环境变量，
+  // 有接入点、没有凭据服务（宿主没装凭据提供方）：表单照画，只是密码那一块说清只能走环境变量，
   // 不摆一个按下去必然被拒的输入框。
   const noCredentials = mount({
     state,
@@ -3564,7 +3564,7 @@ test('客户端产物：同步设置里的「测试连接」——按钮、只�
    * 状态位。设置页只渲染 `SettingsPanel` → `SyncConfigForm`，而这棵树上唯一一个 `useState(null)` 就是
    * 表单的测试结论（`testResult`）——所以种子只有一条。
    *
-   * 页面（骨架 + 同步分页）那边也有一串 null 状态，但它们不在这一棵树上：这一条渲染的是设置页。
+   * 页面（外壳 + 同步分页）那边也有一串 null 状态，但它们不在这一棵树上：这一条渲染的是设置页。
    */
   const outcomeOf = (outcome) =>
     render({ nulls: [outcome] })
@@ -3681,11 +3681,11 @@ test('客户端产物：同步设置里的「测试连接」——按钮、只�
   )
 })
 
-test('客户端产物：同步预演三张表的状态列只放短标签，整句解释挂在 title 上', { skip }, () => {
-  // 两次真实事故（都是用户截图报的）：一是动作列沿用导入预演那 60px，而它装的是「本机有、远端没有」
+test('客户端产物：同步预览三张表的状态列只放短标签，整句解释挂在 title 上', { skip }, () => {
+  // 两次真实事故（都是用户截图报的）：一是动作列沿用导入预览那 60px，而它装的是「本机有、远端没有」
   // 这种短语（实测 110px，en 158px），nowrap 直接画到后面那一列的会话名上；二是「这次不动」那一段
   // 把状态与会话名拼成同一句同色同号的文字（原来的 `syncNote`），三行读下来分不出哪个是状态、哪个
-  // 是会话。现在三张表一个口径：状态列放短标签、会话单独一列，整句留在 title 里；列宽与兜底规则在
+  // 是会话。现在三张表一个标准：状态列放短标签、会话单独一列，整句留在 title 里；列宽与兜底规则在
   // styles.ts（由 test/plugin/styles.test.mjs 钉住）。
   const state = {
     sessionsRoot: '/home/u/.dsh/sessions',
@@ -3735,17 +3735,17 @@ test('客户端产物：同步预演三张表的状态列只放短标签，整�
     problems: [],
     takesEffect: 'immediate',
   }
-  // 顺序：骨架的错误 → 同步页的 sync（那份计划）→ 弹窗开关（种成 'plan'，计划表只在弹窗里画）。
+  // 顺序：外壳的错误 → 同步页的 sync（那份计划）→ 弹窗开关（种成 'plan'，计划表只在弹窗里画）。
   const mounted = mount({ state, panel: 'sync', nulls: [null, response, 'plan'] })
   const tree = mounted.registrations[0].component(mounted.registrations[0].registration.inject())
   const text = strings(tree)
 
-  // 两张表都带上"同步预演"这个变体类：列宽由它自己那条规则给（styles.ts 的 .dsm-syncPlanTable）。
+  // 两张表都带上"同步预览"这个变体类：列宽由它自己那条规则给（styles.ts 的 .dsm-syncPlanTable）。
   const tables = mounted.recorded.filter((node) => node.type === 'table')
   assert.equal(
     tables.filter((node) => String(node.props?.className).includes('dsm-syncPlanTable')).length,
     3,
-    '拉取与推送那两张表、还有「这次不动」那张表都要带变体类，否则列宽还是导入预演那 60px',
+    '拉取与推送那两张表、还有「这次不动」那张表都要带变体类，否则列宽还是导入预览那 60px',
   )
   assert.ok(
     tables.some((node) => String(node.props?.className).includes('dsm-keptTable')),
@@ -3759,7 +3759,7 @@ test('客户端产物：同步预演三张表的状态列只放短标签，整�
   assert.equal(
     mounted.recorded.filter((node) => node.type === 'th' && node.props?.className === 'dsm-colCwd').length,
     0,
-    '同步预演的表里不再有 cwd 列——路径去组头了',
+    '同步预览的表里不再有 cwd 列——路径去组头了',
   )
 
   // 三段的段头是 `h3.dsm-planHead`（标题 + 条数药丸），不再是与正文同档的一行 `.dsm-hint`——"三段之间
@@ -3810,11 +3810,11 @@ test('客户端产物：同步预演三张表的状态列只放短标签，整�
   )
   assert.ok(text.includes('session-d'), '会话名照旧是那一行看得见的文字')
 
-  // 计划还没回来的那一段：弹窗开着、正文是"预演中…"，确认禁用（别让上一次那份计划冒充这一次的）。
+  // 计划还没回来的那一段：弹窗开着、正文是"正在预览…"，确认禁用（别让上一次那份计划冒充这一次的）。
   const waiting = mount({ state, panel: 'sync', nulls: [null, response, 'plan', 'plan'] })
   const waitingRecorded = waiting.recorded
   const waitingText = strings(waiting.registrations[0].component(waiting.registrations[0].registration.inject()))
-  assert.ok(waitingText.includes('dialog.previewing'), '计划在路上时正文是"预演中…"')
+  assert.ok(waitingText.includes('dialog.previewing'), '计划在路上时正文是"正在预览…"')
   assert.equal(
     waitingText.some((item) => String(item).startsWith('sync.planWork')),
     false,
@@ -3829,7 +3829,7 @@ test('客户端产物：同步预演三张表的状态列只放短标签，整�
 
 test('客户端产物：会拉取那张表分得清「拉一条新的」与「覆盖本机那份」；空白会话只在正文里报一句', { skip }, () => {
   /*
-   * 两条新口径都要在界面上看得出来：
+   * 两条新标准都要在界面上看得出来：
    *   - 「会拉取」里现在混着两种事：从无到有拉一条（本机没有它）与**覆盖本机那份**（本机有，但它更
    *     新）。两者都往本机落内容，但后者会把本机已有的东西换掉，所以标签得分开，整句挂在 title 上；
    *   - 空白会话没有内容可同步，逐条列出来只是把三张表撑长：只在正文里报一句条数。
@@ -4088,7 +4088,7 @@ test('客户端产物：同步三张表挂会话列表那套类型标签（本�
   )
 })
 
-test('客户端产物：同步预演三张表按项目分组，路径只在组头上说一次', { skip }, () => {
+test('客户端产物：同步预览三张表按项目分组，路径只在组头上说一次', { skip }, () => {
   // 为什么分组：一次整库同步的计划里同一个目录会连着出现十几条，逐行印一遍同样的路径只是把人绕进去，
   // 还从会话名那一列扣宽度。分组键的规则在 src/client/operations/sync/syncGroups.ts（test/client/operations/sync/syncGroups.test.ts 逐条钉
   // 着），这里只管"组画出来没有、路径是不是只出现在组头、行里还剩下什么"。
@@ -4199,7 +4199,7 @@ test('客户端产物：同步预演三张表按项目分组，路径只在组�
   assert.deepEqual(
     rowIds,
     ['session-5', 'session-6', 'session-7', 'session-2', 'session-1', 'session-4', 'session-3', 'session-10', 'session-8', 'session-9'],
-    '拉取那张表按落地目录分组、推送那张表按本机目录分组、没动按各自那一边分组；组内顺序就是计划给的顺序',
+    '拉取那张表按目标目录分组、推送那张表按本机目录分组、没动按各自那一边分组；组内顺序就是计划给的顺序',
   )
 
   // 路径只在组头：拉取行的来源路径不许再当可见文字，它退到那一行的悬浮提示里（只有真的改写过才补）。
@@ -4266,8 +4266,8 @@ test('客户端产物：同步独占「同步」分页，传输页不再有那�
 
 // ---- 确认弹窗：一个动作一个入口 ----
 //
-// 这次改动把"先点预演、看页面上的结果、再点确认"换成了"点动作 → 弹窗里看清单 → 确认或取消"。
-// 下面几条钉住三件事：① 每个会写盘的动作只有一个入口（页面上不再有独立的预演按钮）；② 弹窗里摆的
+// 这次改动把"先点预览、看页面上的结果、再点确认"换成了"点动作 → 弹窗里看清单 → 确认或取消"。
+// 下面几条钉住三件事：① 每个会写盘的动作只有一个入口（页面上不再有独立的预览按钮）；② 弹窗里摆的
 // 是宿主那份计划（清单、问题、备份位置），主按钮在计划不 ok 时真的禁用；③ 级联进来的行有出处标签。
 
 /** 页面上开着的那几个弹窗（官方 `Modal` 渲染出来的 `role="dialog"` 元素，标题在 `aria-label` 上）。 */
@@ -4279,7 +4279,7 @@ function dialogsOf(recorded) {
  * 弹窗里 footer 那两个按钮。
  *
  * 识别方式：手写 `<button className="dsm-button dsm-primary">` 换成了官方 `Button variant="…"`，
- * 替身把 `variant` 落在 `data-variant` 上（见上面假 require 里 `Button` 的说明），所以判据换成
+ * 假对象把 `variant` 落在 `data-variant` 上（见上面假 require 里 `Button` 的说明），所以判据换成
  * 看 `data-variant`。判的东西没变：footer 里哪一枚是主动作、哪一枚是取消。
  */
 function footerButtonsOf(recorded) {
@@ -4298,7 +4298,7 @@ function cancelOf(recorded) {
   return footerButtonsOf(recorded).find((node) => node.props?.['data-variant'] !== 'primary')
 }
 
-test('客户端产物：会写盘的四个动作各自只有一个入口，预演不占页面按钮', { skip }, () => {
+test('客户端产物：会写盘的四个动作各自只有一个入口，预览不占页面按钮', { skip }, () => {
   const state = {
     sessionsRoot: '/home/u/.dsh/sessions',
     registryPath: '/home/u/.dsh/registry.json',
@@ -4316,9 +4316,9 @@ test('客户端产物：会写盘的四个动作各自只有一个入口，预�
   const importPanel = panelText('import')
   const sync = panelText('sync')
 
-  // 页面上只剩"那个动作"本身；`dialog.previewing`（"预演中…"）只该出现在开着的弹窗里，页面上一律没有。
+  // 页面上只剩"那个动作"本身；`dialog.previewing`（"正在预览…"）只该出现在开着的弹窗里，页面上一律没有。
   for (const text of [manage, importPanel, sync]) {
-    assert.equal(text.includes('dialog.previewing'), false, '关着弹窗时页面上不该有"预演中…"')
+    assert.equal(text.includes('dialog.previewing'), false, '关着弹窗时页面上不该有"正在预览…"')
   }
   assert.ok(manage.includes('manage.delete.action'), '「会话」页的写入口是「删除所选」')
   // 迁移并进同一页之后，它那枚「迁移」也在这条动作行上（写入发生在它自己的弹窗里）。
@@ -4362,7 +4362,7 @@ test('客户端产物：删除弹窗摆出清单与备份位置，计划不 ok �
     summary: '将删除 2 条会话',
     takesEffect: 'restart-required',
   })
-  // null 顺序：骨架的 error / 会话页的 busy / error / notice / **pending**（勾选集由 arrays 种）。
+  // null 顺序：外壳的 error / 会话页的 busy / error / notice / **pending**（勾选集由 arrays 种）。
   const mounted = (ok) =>
     mount({ state, panel: 'manage', arrays: [['s-1']], nulls: [null, null, null, null, { plan: planOf(ok), error: null }] })
   const render = (ok) => {
@@ -4449,7 +4449,7 @@ test('客户端产物：删除弹窗摆出清单与备份位置，计划不 ok �
   )
   assert.equal(primaryOf(bad.recorded).props.disabled, true, '计划不 ok 时确认按钮禁用（不能一边报问题一边让删）')
 
-  // 计划还没回来那一段（弹窗已经被点开、宿主还没答）：正文是"预演中…"，确认同样禁用——这一格不能
+  // 计划还没回来那一段（弹窗已经被点开、宿主还没答）：正文是"正在预览…"，确认同样禁用——这一格不能
   // 出现"清单还没到手就能按确认"的窗口。
   const waiting = mount({
     state,
@@ -4459,7 +4459,7 @@ test('客户端产物：删除弹窗摆出清单与备份位置，计划不 ok �
   })
   const waitingRecorded = waiting.recorded
   const waitingText = strings(waiting.registrations[0].component(waiting.registrations[0].registration.inject()))
-  assert.ok(waitingText.includes('dialog.previewing'), '计划在路上时正文是"预演中…"')
+  assert.ok(waitingText.includes('dialog.previewing'), '计划在路上时正文是"正在预览…"')
   assert.equal(primaryOf(waitingRecorded).props.disabled, true, '计划没到手时确认按钮禁用')
 })
 
@@ -4591,7 +4591,7 @@ test('客户端产物：导入那一面没有第二张列表（筛选条、分�
   )
 })
 
-test('客户端产物：导入弹窗里摆的是那张预演表，全是跳过时确认按钮禁用', { skip }, () => {
+test('客户端产物：导入弹窗里摆的是那张预览表，全是跳过时确认按钮禁用', { skip }, () => {
   const state = {
     sessionsRoot: '/home/u/.dsh/sessions',
     registryPath: '/home/u/.dsh/registry.json',
@@ -4610,7 +4610,7 @@ test('客户端产物：导入弹窗里摆的是那张预演表，全是跳过�
     rehomed: [],
     bytes: 10,
   })
-  /** 同一条计划，但包里带着附件对象：一个本机没有（会写）、一个这个宿主落不了。 */
+  /** 同一条计划，但包里带着附件对象：一个本机没有（会写）、一个这个宿主写不进去。 */
   const withAttachments = (action) => ({
     ...planOf(action),
     attachments: [
@@ -4620,7 +4620,7 @@ test('客户端产物：导入弹窗里摆的是那张预演表，全是跳过�
     attachmentAdds: 1,
     attachmentBytes: 64425,
   })
-  // null 顺序：骨架的 error / 导入面的 file / payload / **pending**（空串那一个是导入目标目录）。
+  // null 顺序：外壳的 error / 导入面的 file / payload / **pending**（空串那一个是导入目标目录）。
   const mounted = (action, plan = planOf(action)) =>
     mount({
       state,
@@ -4649,7 +4649,7 @@ test('客户端产物：导入弹窗里摆的是那张预演表，全是跳过�
   )
   assert.equal(primaryOf(skip.recorded).props.disabled, true, '一条都不会创建时确认按钮禁用')
 
-  // 包里有附件对象：正文多一句说清有几个、多大、其中几个本机没有；落不了的那几个也要点名。
+  // 包里有附件对象：正文多一句说清有几个、多大、其中几个本机没有；写不进去的那几个也要点名。
   const attached = render('create', withAttachments('create'))
   assert.ok(
     attached.text.some(
@@ -4659,7 +4659,7 @@ test('客户端产物：导入弹窗里摆的是那张预演表，全是跳过�
   )
   assert.ok(
     attached.text.some((item) => String(item).includes('import.planAttachmentsUnavailable')),
-    '这个宿主落不了的那几个要如实说（否则用户以为图也导进来了）',
+    '这个宿主写不进去的那几个要如实说（否则用户以为图也导进来了）',
   )
 
   // 一条会话都不建、只有附件要补：确认按钮**可用**——这正是"图挂了，重导同一个包补上"那条路。
@@ -4684,7 +4684,7 @@ test('客户端产物：回滚弹窗先摆动作清单再确认（清单就是�
     sessions: [],
     workspaces: [],
   }
-  // null 顺序：骨架的 error / 备份页的 error / notice / busy / **dialog**（备份清单由第一个数组种）。
+  // null 顺序：外壳的 error / 备份页的 error / notice / busy / **dialog**（备份清单由第一个数组种）。
   const item = mount({
     state,
     panel: 'backup',
@@ -4749,7 +4749,7 @@ test('客户端产物：备份清单认三种来源——迁移/删除/覆盖前
     sessions: [],
     workspaces: [],
   }
-  // 第一个空数组状态是页面骨架的勾选集（列表常驻），备份清单是第二个。
+  // 第一个空数组状态是页面外壳的勾选集（列表常驻），备份清单是第二个。
   const mounted = mount({ state, panel: 'backup', arrays: [[], backups] })
   const text = strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
   assert.ok(text.includes('backup.kind.migrate'), '迁移那份的标签照旧')
@@ -4810,12 +4810,12 @@ test('客户端产物：备份清单认三种来源——迁移/删除/覆盖前
 // ---- 「要不要重启」怎么摆 ----
 //
 // 这一句曾经跟「已拉取 N 条…」拼成同一个字符串、画在**绿色**成功横幅里，于是"需要重启"与"不需要重启"
-// 共用一块绿底，读的人分不出哪句是坏消息；文案本身也长到要分两行。现在的口径是：
+// 共用一块绿底，读的人分不出哪句是坏消息；文案本身也长到要分两行。现在的标准是：
 //   - **只在坏消息时说话**：宿主自己接住时一个字都不说；
 //   - 结论单独一条 warn 横幅，不跟绿色横幅同层；
-//   - 真要重启时，预演弹窗里就提前说（判据由宿主随响应给，见 test/plugin/web.test.ts 与 src/web.ts）。
+//   - 真要重启时，预览弹窗里就提前说（判据由宿主随响应给，见 test/plugin/web.test.ts 与 src/web.ts）。
 
-test('客户端产物：需要重启的结论单独一条 warn 横幅，预演弹窗里提前说，不需要重启时一句都不摆', { skip }, () => {
+test('客户端产物：需要重启的结论单独一条 warn 横幅，预览弹窗里提前说，不需要重启时一句都不摆', { skip }, () => {
   const state = {
     sessionsRoot: '/home/u/.dsh/sessions',
     registryPath: '/home/u/.dsh/registry.json',
@@ -4857,9 +4857,9 @@ test('客户端产物：需要重启的结论单独一条 warn 横幅，预演�
     indexWritten: false,
     problems: [],
   }
-  /** 预演：库里什么都没有，`takesEffect` 说的是"执行时会不会需要重启"（宿主端口的探测）。 */
+  /** 预览：库里什么都没有，`takesEffect` 说的是"执行时会不会需要重启"（宿主接口的探测）。 */
   const planned = (takesEffect) => ({ ...base, mode: 'plan', takesEffect })
-  /** 落地：真的拉进来一条，`takesEffect` 说的是"刚才那次实际怎样"。 */
+  /** 应用：真的拉进来一条，`takesEffect` 说的是"刚才那次实际怎样"。 */
   const landed = (takesEffect) => ({
     ...base,
     mode: 'apply',
@@ -4879,9 +4879,9 @@ test('客户端产物：需要重启的结论单独一条 warn 横幅，预演�
   /** 画出某句文案的那个元素：要核"它长什么颜色"就得拿到元素本身，光看文字分不出横幅与段落。 */
   const nodeOf = (mounted, text) => mounted.recorded.find((node) => node.props?.children === text)
 
-  // ① 预演：宿主那头需要重启时，正文里在「确认同步」之前先摆一句（弹窗开着 = 种成 'plan'）。
+  // ① 预览：宿主那头需要重启时，正文里在「确认同步」之前先摆一句（弹窗开着 = 种成 'plan'）。
   const warned = render(planned('restart-required'), 'plan')
-  assert.ok(warned.text.includes('effect.plannedRestart'), '预演里就要说"落地后需重启"')
+  assert.ok(warned.text.includes('effect.plannedRestart'), '预览里就要说"应用后需重启"')
   assert.equal(
     String(nodeOf(warned.mounted, 'effect.plannedRestart').props.className),
     'dsm-warn',
@@ -4892,7 +4892,7 @@ test('客户端产物：需要重启的结论单独一条 warn 横幅，预演�
   const calm = render(planned('immediate'), 'plan')
   assert.equal(calm.text.includes('effect.plannedRestart'), false, '不需要重启时不提前警告')
 
-  // ② 落地：需要重启时结论单独一条 warn 横幅。
+  // ② 应用：需要重启时结论单独一条 warn 横幅。
   const warnedLanded = render(landed('restart-required'))
   const banner = warnedLanded.mounted.recorded.find(
     (node) => String(node.props?.className) === 'dsm-banner dsm-warn',
@@ -4920,7 +4920,7 @@ test('客户端产物：需要重启的结论单独一条 warn 横幅，预演�
 // （见 src/web.ts 的 sendEventStream），界面把弹窗正文换成进度条。下面两条分别钉住"进度怎么画"与
 // "确认按钮真的接在那条事件流上"。
 
-test('客户端产物：落地时弹窗正文换成进度条（第几条 / 共几条 + 当前那一条）', { skip }, () => {
+test('客户端产物：应用时弹窗正文换成进度条（第几条 / 共几条 + 当前那一条）', { skip }, () => {
   const state = {
     sessionsRoot: '/home/u/.dsh/sessions',
     registryPath: '/home/u/.dsh/registry.json',
@@ -4930,8 +4930,8 @@ test('客户端产物：落地时弹窗正文换成进度条（第几条 / 共�
     workspaces: [],
   }
   const progressOf = (phase, done, total, label) => ({ phase, done, total, id: 's-1', label })
-  // 顺序：骨架的错误 → 同步页的 sync / 弹窗开关 / busy / error / notice → **progress**（第 6 个
-  // `useState(null)`）。`busy` 种成 'apply'：假钩子不会点按钮，落地那一段只能这样走进去。
+  // 顺序：外壳的错误 → 同步页的 sync / 弹窗开关 / busy / error / notice → **progress**（第 6 个
+  // `useState(null)`）。`busy` 种成 'apply'：假钩子不会点按钮，应用那一段只能这样走进去。
   const mounted = mount({
     state,
     panel: 'sync',
@@ -4961,15 +4961,15 @@ test('客户端产物：落地时弹窗正文换成进度条（第几条 / 共�
   assert.equal(hintOfClass(recorded, 'dsm-progressItem'), '会话九', '条目那行的悬浮提示是完整名字')
   assert.ok(text.includes('会话九'), '当前那一条的标题也在（一条几 MB 的包会在这停一会儿）')
   assert.ok(text.includes('sync.progress.note'), '并说明为什么这里没有「取消」')
-  assert.equal(recorded.some((node) => node.type === 'table'), false, '落地时不再画计划表（那张表说的是"将要"）')
+  assert.equal(recorded.some((node) => node.type === 'table'), false, '应用时不再画计划表（那张表说的是"将要"）')
   assert.equal(primaryOf(recorded).props.children, 'sync.busy', '确认按钮变成"同步中…"')
-  assert.equal(primaryOf(recorded).props.disabled, true, '落地时确认按钮禁用（不能按第二下）')
+  assert.equal(primaryOf(recorded).props.disabled, true, '应用时确认按钮禁用（不能按第二下）')
   /*
-   * 落地时「取消」不再是"取消"：那一趟在宿主那边会一直跑到结束，窗口关掉只等于把它挂到后台，所以这一枚
+   * 应用时「取消」不再是"取消"：那一趟在宿主那边会一直跑到结束，窗口关掉只等于把它挂到后台，所以这一枚
    * 变成「转到后台」并且**可以按**（原来这里禁用，用户只能干看着）。关掉之后进度搬到页面顶上的横幅，
    * 回到这一页还在（见 logic/syncJob.ts 与 ManagerPanel 的说明）。
    */
-  assert.notEqual(cancelOf(recorded).props.disabled, true, '落地时这一枚可以按：它只是把窗口收起来')
+  assert.notEqual(cancelOf(recorded).props.disabled, true, '应用时这一枚可以按：它只是把窗口收起来')
   assert.equal(cancelOf(recorded).props.children, 'sync.background', '忙碌时它说的是「转到后台」，不是「取消」')
 
   // 拉取那一段用另一句：两段分母不同，文案得跟着 phase 走。
@@ -4992,9 +4992,9 @@ test('客户端产物：落地时弹窗正文换成进度条（第几条 / 共�
   )
 
   /*
-   * 算计划那三段（预演就有，落地也先走一遍）：扫本机 / 读远端索引 / 比对内容。
+   * 算计划那三段（预览就有，应用也先走一遍）：扫本机 / 读远端索引 / 比对内容。
    *
-   * `dialog` 与 `busy` 都种成 'plan'：假钩子不会点按钮，预演那一段只能这样走进去。进度事件里的
+   * `dialog` 与 `busy` 都种成 'plan'：假钩子不会点按钮，预览那一段只能这样走进去。进度事件里的
    * `done` 同样是"已经做完的条数"，所以界面上的第几条是 `done + 1`。
    */
   const phaseOf = (progress) => {
@@ -5009,10 +5009,10 @@ test('客户端产物：落地时弹窗正文换成进度条（第几条 / 共�
   const scanning = phaseOf({ phase: 'scan', done: 42, total: 85 })
   assert.equal(scanning.bar.props['aria-valuenow'], 43, '扫到第 43 条（done 是已经扫完的条数）')
   assert.equal(scanning.bar.props['aria-valuemax'], 85, '分母是这次要尝试的条目数')
-  assert.ok(scanning.text.includes('progress.scan:{"current":43,"total":85}'), '预演时说"正在扫描本机会话"')
-  assert.equal(scanning.text.includes('dialog.previewing'), false, '有具体进度就不摆那句静态的「预演中…」')
+  assert.ok(scanning.text.includes('progress.scan:{"current":43,"total":85}'), '预览时说"正在扫描本机会话"')
+  assert.equal(scanning.text.includes('dialog.previewing'), false, '有具体进度就不摆那句静态的「正在预览…」')
   assert.equal(scanning.mounted.recorded.some((node) => node.type === 'table'), false, '计划还没回来，不画表')
-  assert.equal(scanning.text.includes('sync.progress.note'), false, '预演阶段还没有东西可覆盖，不摆那句"只增不覆盖"')
+  assert.equal(scanning.text.includes('sync.progress.note'), false, '预览阶段还没有东西可覆盖，不摆那句"只增不覆盖"')
 
   // 读远端索引是一次往返，没有"第几条"可讲（宿主给的分母是 0）：固定一句话，**不摆条**——画一条
   // 1/1 的会让人以为已经做完了，而它其实还在等。
@@ -5043,7 +5043,7 @@ const progressOf = (phase, done, total, label) => ({ phase, done, total, id: 's-
 /**
  * 走一遍「确认迁移 → 宿主报进度 → 跑完」，每一步都能看当时的树。
  *
- * 为什么必须真点一下按钮：迁移落地之后，进度与结果画在**状态窗**里（`RunDialog`；状态在模块级
+ * 为什么必须真点一下按钮：迁移应用之后，进度与结果画在**状态窗**里（`RunDialog`；状态在模块级
  * `logic/runJob.ts`，结果页由发起它的面板当场给的 `render(done)` 拼出来）。冒烟测试的示例数据没有口子把一份结论
  * 种进那个状态——只能照着用户的动作走：点「确认迁移」→ 喂一条进度 → 喂结果。
  *
@@ -5116,12 +5116,12 @@ function migrationRun({ restart = false, sessions, picked = ['s-1'], applied: ov
         headers: { get: (name) => (name === 'content-type' ? 'text/event-stream; charset=utf-8' : null) },
         body: { getReader: () => ({ read: () => new Promise((resolve) => pending.push(resolve)) }) },
         text: async () => {
-          throw new Error('落地走的是事件流，不该读一次性 text()')
+          throw new Error('应用走的是事件流，不该读一次性 text()')
         },
       }
     },
   })
-  /** 等几轮微任务 / 事件循环：让 fetch、读流、`startRun` 的 `.then` 依次落地。 */
+  /** 等几轮微任务 / 事件循环：让 fetch、读流、`startRun` 的 `.then` 依次应用。 */
   const flush = async () => {
     for (let i = 0; i < 6; i += 1) await new Promise((resolve) => setImmediate(resolve))
   }
@@ -5141,7 +5141,7 @@ function migrationRun({ restart = false, sessions, picked = ['s-1'], applied: ov
   }
 }
 
-test('客户端产物：迁移落地之后进度在状态窗里，跑完换成结果页，按「完成」收掉', { skip }, async () => {
+test('客户端产物：迁移应用之后进度在状态窗里，跑完换成结果页，按「完成」收掉', { skip }, async () => {
   const run = migrationRun({ restart: true })
   // 第一段：计划弹窗。点 footer 里那枚主动作（确认迁移）——用户就是这么走的。
   const planned = run.render()
@@ -5217,7 +5217,7 @@ test('客户端产物：进度块的段名是一份共用词汇，认不出来�
    *
    * 走的是**归档**那一路（`busy === 'archive'`）：它是这一页上唯一"进度直接画在页面上"的动作，不需要
    * 点按钮就能进那一段。其余几个写盘动作的进度画在状态窗里（`RunDialog`），那一路由上面
-   * 「迁移落地之后进度在状态窗里」那条照着点击走一遍。
+   * 「迁移应用之后进度在状态窗里」那条照着点击走一遍。
    */
   const render = (progress) => {
     const mounted = mount({ state, panel: 'manage', arrays: [['s-1']], nulls: manageNulls({ busy: 'archive', progress }) })
@@ -5266,7 +5266,7 @@ test('客户端产物：进度块的段名是一份共用词汇，认不出来�
   assert.ok(unknown.text.includes('progress.working'), '认不出来的段名退到"正在处理…"')
 })
 
-test('客户端产物：确认同步打的是落地端点，读的是一条事件流而不是等一次性 JSON', { skip }, async () => {
+test('客户端产物：确认同步打的是应用端点，读的是一条事件流而不是等一次性 JSON', { skip }, async () => {
   const state = {
     sessionsRoot: '/home/u/.dsh/sessions',
     registryPath: '/home/u/.dsh/registry.json',
@@ -5362,11 +5362,11 @@ test('客户端产物：确认同步打的是落地端点，读的是一条事�
   assert.ok(reads >= chunks.length + 1, '一直读到 done（不是读一块就收手）')
 })
 
-test('客户端产物：确认同步带着预演给的号码（宿主据此不再重算计划）', { skip }, async () => {
+test('客户端产物：确认同步带着预览给的号码（宿主据此不再重算计划）', { skip }, async () => {
   /*
-   * 预演的响应里带着 `planId`，确认那次要原样带回去——少带一次，宿主只能把那份计划从零重算一遍
-   * （用户按下确认之后那几秒的空档就是它）。这里把预演的那份响应**种**进 `sync` 状态（顺序见
-   * 上面那条用例的 `nulls`），于是弹窗里那份计划就是"刚预演完"的样子，再点确认看它打了什么。
+   * 预览的响应里带着 `planId`，确认那次要原样带回去——少带一次，宿主只能把那份计划从零重算一遍
+   * （用户按下确认之后那几秒的空档就是它）。这里把预览的那份响应**种**进 `sync` 状态（顺序见
+   * 上面那条用例的 `nulls`），于是弹窗里那份计划就是"刚预览完"的样子，再点确认看它打了什么。
    */
   const state = {
     sessionsRoot: '/home/u/.dsh/sessions',
@@ -5422,7 +5422,7 @@ test('客户端产物：确认同步带着预演给的号码（宿主据此不�
   const mounted = mount({
     state,
     panel: 'sync',
-    // 位置约定同上一条：`nulls[1]` 是 sync（这里种成刚预演完的那份）、`nulls[2]` 是弹窗开着。
+    // 位置约定同上一条：`nulls[1]` 是 sync（这里种成刚预览完的那份）、`nulls[2]` 是弹窗开着。
     nulls: [null, planned, 'plan'],
     fetch: async (url, init) => {
       calls.push({ url: String(url), method: init?.method, body: init?.body })
@@ -5443,7 +5443,7 @@ test('客户端产物：确认同步带着预演给的号码（宿主据此不�
 
   strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
   /*
-   * 计划与落地同处**一枚**弹窗（不再是"面板上再叠一层确认框"）：种着计划那一段时，树上只该有一枚
+   * 计划与应用同处**一枚**弹窗（不再是"面板上再叠一层确认框"）：种着计划那一段时，树上只该有一枚
    * `role="dialog"`，标题也换成「将要同步」。
    */
   const dialogs = dialogsOf(mounted.recorded)
@@ -5463,9 +5463,9 @@ test('客户端产物：确认同步带着预演给的号码（宿主据此不�
   ])
 })
 
-test('客户端产物：同步预演读的也是一条事件流（不是等一次性 JSON）', { skip }, async () => {
-  // 预演也要进度：它得先扫本机、再读远端索引、最后逐条比对内容，冷启动时那几秒界面原来只有一句
-  // "预演中…"。宿主两条路回的是同一个形状，所以这里钉的就是"点「同步」打的是那个端点、读的是流"。
+test('客户端产物：同步预览读的也是一条事件流（不是等一次性 JSON）', { skip }, async () => {
+  // 预览也要进度：它得先扫本机、再读远端索引、最后逐条比对内容，冷启动时那几秒界面原来只有一句
+  // "正在预览…"。宿主两条路回的是同一个形状，所以这里钉的就是"点「同步」打的是那个端点、读的是流"。
   const state = {
     sessionsRoot: '/home/u/.dsh/sessions',
     registryPath: '/home/u/.dsh/registry.json',
@@ -5542,7 +5542,7 @@ test('客户端产物：同步预演读的也是一条事件流（不是等一�
 
   strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
   const open = mounted.recorded.find((node) => node.type === 'button' && node.props?.children === 'sync.action')
-  assert.ok(open !== undefined, '卡片头上那个「同步」就是预演的入口')
+  assert.ok(open !== undefined, '卡片头上那个「同步」就是预览的入口')
   open.props.onClick()
   for (let tries = 0; tries < 50 && index < chunks.length; tries += 1) {
     await new Promise((resolve) => setImmediate(resolve))
@@ -5551,16 +5551,16 @@ test('客户端产物：同步预演读的也是一条事件流（不是等一�
   assert.deepEqual(calls.filter((call) => call.url !== undefined), [
     { url: '/dsh-session-manager/api/sync', method: 'GET', accept: 'text/event-stream' },
   ])
-  assert.equal(calls.some((call) => call.text === true), false, '预演也不走一次性 text()')
+  assert.equal(calls.some((call) => call.text === true), false, '预览也不走一次性 text()')
   assert.equal(index, chunks.length, '三条事件都读出来了（含算计划的那两条）')
   assert.ok(reads >= chunks.length + 1, '一直读到 done（不是读一块就收手）')
 })
 
-test('客户端产物：迁移落地时宿主报的每条进度都到了状态窗里（事件流 → 界面）', { skip }, async () => {
+test('客户端产物：迁移应用时宿主报的每条进度都到了状态窗里（事件流 → 界面）', { skip }, async () => {
   /*
-   * 上面那条「迁移落地之后进度在状态窗里」是把一条进度喂进去看它怎么画。这一条从另一头补两件事：
-   *   1) 请求长什么样——勾中的两条里侧边栏看不见的那条**不该**被送进落地请求（宿主对点名的隐藏会话
-   *      一律拒，送进去整次落地就失败），而弹窗里要点名说少带了它；
+   * 上面那条「迁移应用之后进度在状态窗里」是把一条进度喂进去看它怎么画。这一条从另一头补两件事：
+   *   1) 请求长什么样——勾中的两条里侧边栏看不见的那条**不该**被送进应用请求（宿主对点名的隐藏会话
+   *      一律拒，送进去整次应用就失败），而弹窗里要点名说少带了它；
    *   2) 宿主那条事件流真的接到了界面上：喂进去的进度与结果都出现在状态窗里（同一个假 fetch 边收边记）。
    */
   const run = migrationRun({
@@ -5597,9 +5597,9 @@ test('客户端产物：迁移落地时宿主报的每条进度都到了状态�
   assert.equal(dialogsOf(done.el)[0].props['aria-label'], 'run.migrate.done', '收尾那条把它换成结果页')
   assert.ok(done.text.includes('已迁移 1 条会话。'), '结果就是宿主回的那份')
 
-  // `/meta` 与 `/state` 是骨架首屏那两条（假钩子把 effect 直接跑了），这里只认落地那一条。
+  // `/meta` 与 `/state` 是外壳首屏那两条（假钩子把 effect 直接跑了），这里只认应用那一条。
   const landing = run.calls.filter((call) => call.url === '/dsh-session-manager/api/migrate')
-  assert.equal(landing.length, 1, '落地只打一次')
+  assert.equal(landing.length, 1, '应用只打一次')
   assert.equal(landing[0].method, 'POST')
   assert.equal(landing[0].accept, 'text/event-stream', '界面明说自己要事件流')
   // 源是"勾中且**搬得走**"的那些：s-2 侧边栏看不见（hidden），请求体里不该有它。
@@ -6086,7 +6086,7 @@ test('客户端产物：一轮一节折得起来，标题自己画折叠标记',
 
 test('客户端产物：同步设置表单的字段顺序——自动推送排在最后，紧挨着保存', { skip }, async () => {
   /*
-   * 这一条钉的是**分组**，不是美观：表单前三组说的是"这条通道是什么"（怎么连、怎么认证、落地到哪），
+   * 这一条钉的是**分组**，不是美观：表单前三组说的是"这条通道是什么"（怎么连、怎么认证、应用到哪），
    * 自动推送说的是"连上之后让它自己怎么跑"——另一件事。它曾经夹在「超时」与「用户名」之间，把"怎么连"
    * 那一组切成了两半。
    *
@@ -6134,11 +6134,11 @@ test('客户端产物：同步设置表单的字段顺序——自动推送排�
   const mapping = at('sync.field.mapping')
   const auto = at('sync.field.auto')
 
-  // 前三组：怎么连 → 怎么认证 → 落地到哪。
+  // 前三组：怎么连 → 怎么认证 → 应用到哪。
   assert.ok(url < machine, 'URL 在最上面')
   assert.ok(machine < timeout, '机器标识与超时同一行，标识在前')
   assert.ok(timeout < user, '认证那一组在连接参数之后')
-  assert.ok(user < mapping, '落地映射在认证之后')
+  assert.ok(user < mapping, '应用映射在认证之后')
   // 自动那一档在最后：它不属于上面任何一组，而且是个"存了才生效"的选择，靠近保存。
   assert.ok(mapping < auto, '自动那一档排在路径映射之后（曾经的错是夹在超时与用户名之间）')
   assert.ok(timeout < auto && user < auto, '它不在"怎么连/怎么认证"那一组里')
@@ -6359,7 +6359,7 @@ test('客户端产物：自动那一档是一行三选一（官方分段控件�
 test('客户端产物：「看差异」只给两边真有可比那两份的行，点下去带的是那一条', { skip }, () => {
   // 判据是"两边**真有可比的两份**"，不是"状态看着可疑"：`missing`（另一边没有）比出来是空的，给一枚
   // 按钮只会让人白点一次；两边都写过的那几类（远端更新 / 本机更新 / 两边各自写过）按下同步之前最该
-  // 先看一眼——所以那几类必须有。示例数据沿用同步预演那条：拉取那条改成"远端更新、会顶掉本机这份"。
+  // 先看一眼——所以那几类必须有。示例数据沿用同步预览那条：拉取那条改成"远端更新、会顶掉本机这份"。
   const state = {
     sessionsRoot: '/home/u/.dsh/sessions',
     registryPath: '/home/u/.dsh/registry.json',
@@ -6410,22 +6410,22 @@ test('客户端产物：「看差异」只给两边真有可比那两份的行�
     problems: [],
     takesEffect: 'immediate',
   }
-  // 顺序：骨架的错误 → 同步页的 sync（那份计划）→ 弹窗开关（种成 'plan'，计划表只在弹窗里画）。
+  // 顺序：外壳的错误 → 同步页的 sync（那份计划）→ 弹窗开关（种成 'plan'，计划表只在弹窗里画）。
   const mounted = mount({ state, panel: 'sync', nulls: [null, response, 'plan'] })
 
-  // 这一次渲染只会铺出页签那一层骨架：种下去的 sync / 弹窗开关要等树被走一遍才落到页签内容上，
+  // 这一次渲染只会铺出页签那一层外壳：种下去的 sync / 弹窗开关要等树被走一遍才落到页签内容上，
   // 所以下面照别处一样把树交给 `strings()` 走一遍（它顺带把嵌套组件真正跑起来）。
   const tree = mounted.registrations[0].component(mounted.registrations[0].registration.inject())
   const text = strings(tree)
 
-  // `session-d` 标着 live，而它正是要裁决的那条：预演里先把「先切走或重启」说出来，
+  // `session-d` 标着 live，而它正是要裁决的那条：预览里先把「先切走或重启」说出来，
   // 别让人点进差异才发现按钮没了。
-  assert.ok(text.some((value) => value.includes('sync.liveHint')), '活会话的裁决在预演里就有提示')
+  assert.ok(text.some((value) => value.includes('sync.liveHint')), '活会话的裁决在预览里就有提示')
 
   // 四条计划行各留一格（拉取一条、推送三条），比不了的留空——列才对得齐。
   const cells = mounted.recorded.filter((node) => node.props?.className === 'dsm-diffCell')
   assert.equal(cells.length, 4, '每条计划行都留着最后一格，比不了的留空（列才对得齐）')
-  // 页面上别处也有按钮（刷新、预演、确认同步…），所以按文案认自己那几枚。
+  // 页面上别处也有按钮（刷新、预览、确认同步…），所以按文案认自己那几枚。
   const buttons = mounted.recorded.filter(
     (node) => node.type === 'button' && node.props?.children === 'sync.diff.open',
   )
@@ -6440,7 +6440,7 @@ test('客户端产物：「看差异」只给两边真有可比那两份的行�
     (node) =>
       node.type === 'th' && node.props?.className === 'dsm-colAction' && node.props?.children === 'table.conclusion',
   )
-  assert.equal(conclusionHeads.length, 3, '预演三张表的头一格都换成了「结论」')
+  assert.equal(conclusionHeads.length, 3, '预览三张表的头一格都换成了「结论」')
 
   // 点下去带的是哪一条：把这几次 setState 收到的 id 收集起来，正好是那三条会互相顶掉 / 分叉的。
   for (const button of buttons) button.props?.onClick?.()

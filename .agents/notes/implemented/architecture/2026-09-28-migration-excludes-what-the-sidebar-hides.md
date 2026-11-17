@@ -31,7 +31,7 @@ Status: implemented
 - **空白**：只有宿主自己知道（它记在投影缓存的 `sessionListMetadata.blank` 里，初始 `true`、第一个
   `turn/start` 之后翻掉），所以读 `<registryPath 同级的 storages>/session_projcache/sessions/<id>.json`。
   **读不到就按「会显示」处理**（`blank` 缺省 = `false`），与宿主冷会话分支的 `metadata?.blank ?? false`
-  同一口径；身份（`createdAt` + `cwd`）对不上也不认。
+  同一标准；身份（`createdAt` + `cwd`）对不上也不认。
 
 命令行那条路与界面走同一个编排层，空白读取器由 `src/operations/migrate/migrate.ts` 按 `registryPath` 反推缓存目录自己
 造一个，所以「工具说 12 条、界面说 10 条」不会再出现。

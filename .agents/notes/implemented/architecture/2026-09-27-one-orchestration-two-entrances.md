@@ -12,9 +12,9 @@ Status: implemented
 
 ## Decision
 
-编排只有一份（`src/operations/migrate/migrate.ts`：预演 / 执行 / 回滚 / 备份清单），各入口只负责把结果翻译成自己的
+编排只有一份（`src/operations/migrate/migrate.ts`：预览 / 执行 / 回滚 / 备份清单），各入口只负责把结果翻译成自己的
 形状。`previewMigration()` 与 `runMigration()` 调的是同一个 `buildRelocationPlan()`，`apply:false`
-就是预演——「预览和实做不一致」在这种结构下不可能发生，它们本来就是同一次计算，只是一个不落盘。
+就是预览——「预览和实做不一致」在这种结构下不可能发生，它们本来就是同一次计算，只是一个不写入磁盘。
 
 注册表的前置校验（`loadRegistryForWrite()`）在这条链路的最前面。
 
@@ -24,7 +24,7 @@ Status: implemented
 演化之后连「什么问题算 problem」都会分叉。
 
 **界面走工具层的入口（把工具当成内部 API）。** 工具层是给模型的**声明面**（schema、描述、返回
-形状），把它当内部调用面会让界面被工具的描述与权限口径绑住。
+形状），把它当内部调用面会让界面被工具的描述与权限标准绑住。
 
 **抽出第三个模块，两侧共用。** `src/operations/migrate/migrate.ts` 就是那个模块——它的边界是「与界面和模型都无关的
 编排」，两侧的宿主依赖由调用方注入。

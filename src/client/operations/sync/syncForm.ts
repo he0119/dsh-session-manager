@@ -1,14 +1,14 @@
 /**
- * 「同步设置」表单的数据面：宿主设置接缝的配置读写面收在这里，外加映射表那段草稿的解析/格式化。
+ * 「同步设置」表单的数据面：宿主设置接入点的配置读写面收在这里，外加映射表那段草稿的解析/格式化。
  *
- * 为什么用宿主的设置接缝（`configForms.get(entryId)`）而不是插件自己存一份：配置只有一个来源。
- * 接缝读的是 profile 那一层（组合层 + 用户层），写回去的是**用户层**——也就是设置对话框右上角
+ * 为什么用宿主的设置接入点（`configForms.get(entryId)`）而不是插件自己存一份：配置只有一个来源。
+ * 接入点读的是 profile 那一层（组合层 + 用户层），写回去的是**用户层**——也就是设置对话框右上角
  * 「Open configuration file」打开的那份文档。插件另存一份状态文件就会有两个真相，用户改哪一个
  * 都只对一半。
  *
  * 为什么写卡在这里而不是照官方那样注册 `plugins.bundle.config` 这个 Slot：那个 Slot 的贡献面（`hooks`
  * 约定、`view: 'page'` 投影）是给"插件管理器里本插件那一页"用的，而本插件的同步设置与同步确认
- * 是同一件事——分开两页会让"我改了 URL，去看计划"多一次跳转。接缝本身是命名空间寻址的（同一份
+ * 是同一件事——分开两页会让"我改了 URL，去看计划"多一次跳转。接入点本身是命名空间寻址的（同一份
  * 控制器，谁取都是那一份），所以放在本页不改变读写语义。
  *
  * 字段那一层刻意只留**结构**：`ctx` 的成员只在运行期成立，由 `test/client.test.mjs` 的注册面
@@ -21,7 +21,7 @@
 import type { AutoMode } from '../../api.ts'
 import type { SessionManagerKey } from '../../shared/i18n/locales.ts'
 
-/** 本插件在 profile 里的 entry id：设置接缝按它寻址（`cordis.patch.yml` 里那个 insert 的 id）。 */
+/** 本插件在 profile 里的 entry id：设置接入点按它寻址（`cordis.patch.yml` 里那个 insert 的 id）。 */
 export const SYNC_SECTION = 'session-manager'
 
 /**
@@ -64,7 +64,7 @@ export interface SyncFormSnapshot {
 /** 一条路径编辑（与宿主 `mutate` 收的形状同形）。 */
 export type SyncPathOp = { op: 'set'; path: readonly string[]; value: unknown } | { op: 'unset'; path: readonly string[] }
 
-/** 设置接缝给本插件那一节的读写面。 */
+/** 设置接入点给本插件那一节的读写面。 */
 export interface SyncConfigApi {
   getSnapshot(): SyncFormSnapshot
   subscribe(listener: () => void): () => void
@@ -186,7 +186,7 @@ export function syncSectionOf(snapshot: SyncFormSnapshot | undefined): SyncSecti
  * 这次表单按哪个引用名读写密码：配置里写了就用它，没写（或只有空白）用缺省名。
  *
  * 引用名**只来自插件配置**（`sync.passwordRef`，在插件配置页那份 volatile 表单里改），这张表单上
- * 没有它那一栏——这是官方那几个要密钥的卡片的口径（网页搜索那张卡只摆密钥，`apiKeyEnv` 留在配置里）：
+ * 没有它那一栏——这是官方那几个要密钥的卡片的标准（网页搜索那张卡只摆密钥，`apiKeyEnv` 留在配置里）：
  * 卡片问的是"密码是什么"，"放在哪个名字下"是配置的事。
  *
  * 与核心层 `passwordRefOf()`（src/tools.ts）同一套规则：两边得算出同一个名字，否则界面存进去的
@@ -203,7 +203,7 @@ export function passwordRefOf(value: Pick<SyncSectionValue, 'passwordRef'>): str
  * 密码框里的草稿 → 这次保存要写进凭据库的值。
  *
  * 空白（含只有空格）表示"这次不写"——留着已存的那一个，而不是拿空值去覆盖它：那既是官方那个
- * 只写控件的口径（空草稿不写），也是"改 URL 时不想动密码"这条最平常的用法。
+ * 只写控件的标准（空草稿不写），也是"改 URL 时不想动密码"这条最平常的用法。
  * @param draft 密码框里的原文。
  * @returns 要写的密码；空白时 undefined。
  */
@@ -305,12 +305,12 @@ export function draftProblems(draft: SyncDraft): DraftProblem[] {
 /**
  * 一次保存要发出去的两件事：配置文档里的路径编辑，以及要写进凭据库的那一笔密码。
  *
- * 两件事走的是**两条不同的通道**——编辑走设置接缝（写用户层的配置文档），密码走宿主的凭据服务
+ * 两件事走的是**两条不同的通道**——编辑走设置接入点（写用户层的配置文档），密码走宿主的凭据服务
  * （值不进配置）——所以这里把它们一起算好交给界面，界面只管按顺序发。写密码用的引用名取自**生效值**
  * （`passwordRefOf`）：表单上没有引用名那一栏，它只由插件配置决定，所以保存与解析读的是同一份。
  */
 export interface SyncSavePlan {
-  /** 发往设置接缝的路径编辑。 */
+  /** 发往设置接入点的路径编辑。 */
   ops: SyncPathOp[]
   /** 要写进凭据库的那一笔；密码框留空、或宿主没有凭据服务时不发。 */
   password?: { ref: string; value: string }
@@ -340,7 +340,7 @@ export function savePlan(
 /**
  * 「测试连接」的结论里界面用得上的那几个字段（宿主响应的形状见 api.ts 的 `SyncTestResponse`）。
  *
- * 只留结构、不 import 那一侧：与 `SyncSectionValue` 同一个口径，宿主多带几个字段也不影响这里。
+ * 只留结构、不 import 那一侧：与 `SyncSectionValue` 同一个标准，宿主多带几个字段也不影响这里。
  */
 export interface SyncTestOutcome {
   code: string

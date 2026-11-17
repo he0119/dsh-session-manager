@@ -27,7 +27,7 @@ export interface CwdSubject {
   readonly action: 'create' | 'skip'
   /** 包里的原 cwd；缺省表示这条会话本来就没有 cwd。 */
   readonly fromCwd?: string
-  /** 落盘后的 cwd；跳过的行与本来就没有 cwd 的会话都没有这个字段。 */
+  /** 写入磁盘后的 cwd；跳过的行与本来就没有 cwd 的会话都没有这个字段。 */
   readonly toCwd?: string
 }
 
@@ -188,7 +188,7 @@ export function pathLabel(subject: ProjectSubject): string {
   return title === undefined ? path : `${title} — ${path}`
 }
 
-/** 一个目录字段里的一行候选（迁移的目标 / 导入的落地目录共用）。 */
+/** 一个目录字段里的一行候选（迁移的目标 / 导入的目标目录共用）。 */
 export interface PathRow extends ProjectSubject {
   /** 值（也是 React 的 key）：目录路径。 */
   path: string
@@ -279,7 +279,7 @@ export function filterPathRows(rows: readonly PathRow[], query: string): PathRow
 /**
  * 一个目录字段的**目标**候选：已登记工作区（注册表里同一目录登记了两回就只留一条）**外加当前值本身**。
  *
- * 「迁移」的目标目录与「导入」的落地目录问的是同一件事——"落到哪个已登记的目录"，所以两处共用这一份
+ * 「迁移」的目标目录与「导入」的目标目录问的是同一件事——"落到哪个已登记的目录"，所以两处共用这一份
  * 候选：候选多一份少一份都会变成"换个地方就换个说法"。
  *
  * 盘上已经没有的那些也照旧列出来（`missing: true`，面板里挂一枚标签、点不动）：它们是用户登记过的
@@ -327,7 +327,7 @@ export interface FamilySubject {
   readonly via?: { readonly id: string; readonly title?: string }
 }
 
-/** 一个出处怎么称呼：有标题用标题，没有才用 id（与 `sessionLabel` 同一套口径）。 */
+/** 一个出处怎么称呼：有标题用标题，没有才用 id（与 `sessionLabel` 同一套标准）。 */
 function referentName(referent: { readonly id: string; readonly title?: string }): string {
   const title = referent.title?.trim()
   return title === undefined || title === '' ? referent.id : title

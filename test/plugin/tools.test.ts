@@ -168,8 +168,8 @@ async function startSibling(host: Context, service: string, value: unknown): Pro
  * @param options.persistence - 假宿主的会话持久化：`absent` = 没有这个服务，`ready` = 有。
  * @param options.wrongTargetId - 故意让"复用目标工作区"返回一个错的 id（验插件当场停下报需要重启）。
  * @param options.attachFails - 让挂靠抛错（验失败路径不把一次成功的迁移说成失败）。
- * @param options.onCall - 每次调用宿主动作记一笔（台账：验调用顺序与"改在落盘之后"）。
- * @param options.mutateOnRefresh - "按磁盘重看一眼"时顺手改一下注册表文件（验落盘后的 id 复核会报出来）。
+ * @param options.onCall - 每次调用宿主动作记一笔（台账：验调用顺序与"改在写入磁盘之后"）。
+ * @param options.mutateOnRefresh - "按磁盘重看一眼"时顺手改一下注册表文件（验写入磁盘后的 id 复核会报出来）。
  * @param options.picker - 是否提供 directoryPicker，以及它报的是哪种能力（`broken` = 形状不认）。
  */
 async function makeHost(
@@ -200,7 +200,7 @@ async function makeHost(
   const registryOption = options.registry ?? 'absent'
   if (registryOption !== 'absent') {
     // 假宿主尽量像真的：工作区按路径复用（同一条路径返回同一个 id）、挂/摘真的改成员表、
-    // 源空了能被删掉。它**不写文件**——文件那一步仍然由插件自己走，这正是要测的接缝。
+    // 源空了能被删掉。它**不写文件**——文件那一步仍然由插件自己走，这正是要测的接入点。
     const workspaces = new Map<string, { id: string; path: string; sessionIds: string[] }>()
     const state = typeof registryOption === 'object' ? registryOption : undefined
     for (const [id, rec] of Object.entries(state?.tables.workspaces ?? {})) {
@@ -452,19 +452,19 @@ test('改完注册表交给宿主自己做：顺序、id 复核、失败退路',
     persistence: 'ready',
     onCall: (call) => {
       calls.push(call)
-      // 台账记的是**那一刻文件里的归属**：刷新若不是发生在落盘之后，这里就读不到 session-b。
+      // 台账记的是**那一刻文件里的归属**：刷新若不是发生在写入磁盘之后，这里就读不到 session-b。
       if (call.startsWith('refresh:')) {
-        atRefresh.push(readRegistry(ok.registryPath).tables.workspaces['ws-temp']?.sessionIds.join(',') ?? '还没落盘')
+        atRefresh.push(readRegistry(ok.registryPath).tables.workspaces['ws-temp']?.sessionIds.join(',') ?? '还没写入磁盘')
       }
     },
   })
-  // 只读的预演不许碰宿主：它一个字节都没写，只说"执行时会怎样"。
+  // 只读的预览不许碰宿主：它一个字节都没写，只说"执行时会怎样"。
   const planned = (await run(byName(defs).get('migrate_sessions')!, { sessionIds: ok.ids, to: ok.toDir })) as MigrateToolResult
   assert.equal(planned.applied, false)
-  assert.equal(planned.takesEffect, 'immediate', '预演按探测说"执行时会当场生效"')
+  assert.equal(planned.takesEffect, 'immediate', '预览按探测说"执行时会当场生效"')
   assert.match(planned.summary, /执行时由宿主自己改/)
-  assert.equal(calls.length, 0, '预演不打扰宿主')
-  assert.deepEqual(readRegistry(ok.registryPath), ok.registry, '预演不得改注册表')
+  assert.equal(calls.length, 0, '预览不打扰宿主')
+  assert.deepEqual(readRegistry(ok.registryPath), ok.registry, '预览不得改注册表')
 
   const applied = (await run(byName(defs).get('migrate_sessions')!, {
     sessionIds: ok.ids,
@@ -475,7 +475,7 @@ test('改完注册表交给宿主自己做：顺序、id 复核、失败退路',
   assert.equal(applied.verified, true, applied.problems.join('; '))
   assert.equal(applied.takesEffect, 'immediate')
   assert.match(applied.summary, /无需重启 DSH/)
-  assert.deepEqual(atRefresh, ['session-b,session-a'], '刷新必须在注册表落盘之后发生')
+  assert.deepEqual(atRefresh, ['session-b,session-a'], '刷新必须在注册表写入磁盘之后发生')
   // 复用已有工作区（同一个 id）→ 按计划顺序挂到末尾 → 源侧摘空 → 删掉空工作区
   assert.deepEqual(calls, [
     'refresh:1',
@@ -522,7 +522,7 @@ test('改完注册表交给宿主自己做：顺序、id 复核、失败退路',
   assert.ok(degraded.backupDir && existsSync(degraded.backupDir), '失败也不该顺手回滚')
   assert.deepEqual(readRegistry(bad.registryPath).tables.workspaces['ws-temp']?.sessionIds, ['session-b', 'session-a'])
 
-  // ---- 会话 id 被动过：落盘后的复核必须报出来（迁移本身仍算做过） ----
+  // ---- 会话 id 被动过：写入磁盘后的复核必须报出来（迁移本身仍算做过） ----
   const tampered = makeSandbox('effect-id-tamper')
   const tampering = await makeHost(configOf(tampered), {
     registry: tampered.registry,
@@ -539,7 +539,7 @@ test('改完注册表交给宿主自己做：顺序、id 复核、失败退路',
   })) as MigrateToolResult
   assert.equal(caught.applied, true)
   assert.equal(caught.verified, false, 'id 被改过就必须复核失败')
-  assert.match(caught.problems.join('; '), /session-a 在落盘结果里没了（id 不该变）/)
+  assert.match(caught.problems.join('; '), /session-a 在写入磁盘结果里没了（id 不该变）/)
   assert.match(caught.problems.join('; '), /多了计划外的会话 session-a-renamed/)
 
   // ---- 回滚：为了原样保住工作区 id，走整份写回文件，如实报"需要重启" ----
@@ -823,7 +823,7 @@ test('sync_sessions：空白会话不上传（工具侧也读宿主投影缓存�
   }
 })
 
-test('sync_sessions：预演只读、apply 才落地；远端那条按映射改写成目标路径', async () => {
+test('sync_sessions：预览只读、apply 才应用；远端那条按映射改写成目标路径', async () => {
   const sb = makeSandbox('tools-sync')
   const fixture = await startDavFixture({ root: join(sb.base, 'dav') })
   const uploader = createDavClient({ baseUrl: fixture.url })
@@ -862,13 +862,13 @@ test('sync_sessions：预演只读、apply 才落地；远端那条按映射改�
     assert.equal(
       existsSync(join(sb.root, projectKey(sb.toDir), id)),
       false,
-      '预演不落地：库里不该多出这条',
+      '预览不应用：库里不该多出这条',
     )
-    // 预演也要回答"执行后要不要重启"（与界面那条路同一个口径）：调用方得能在落地**之前**提醒用户。
-    assert.equal(preview.takesEffect, 'restart-required', '预演按探测说，而不是"这次什么都没干"')
+    // 预览也要回答"执行后要不要重启"（与界面那条路同一个标准）：调用方得能在应用**之前**提醒用户。
+    assert.equal(preview.takesEffect, 'restart-required', '预览按探测说，而不是"这次什么都没干"')
     assert.ok(
       preview.summary.endsWith('执行后需要重启 DSH 才会生效；重启前请勿再改任何工作区。'),
-      `预演正文里也要有这句：${preview.summary}`,
+      `预览正文里也要有这句：${preview.summary}`,
     )
 
     const applied = (await run(sync, { apply: true })) as SyncToolResult
@@ -1166,7 +1166,7 @@ test('重新生成名称的端口：新事件由自己开的写句柄写盘，�
   assert.deepEqual(await titleRefreshPort(trailingSeed.ctx)!.refresh('s-1'), { status: 'retitled', title: '新名字' })
   assert.deepEqual(trailingSeed.disk.slice(362), [{ type: 'session/title', seq: 362 }])
 
-  // 三、用户手动改过名：一次模型调用都不发，也不为那条标记单独写盘（那只是还原过程的记账）。
+  // 三、用户手动改过名：一次模型调用都不发，也不为那条标记单独写盘（那只是还原过程的计数）。
   const pinned = fakeRetitleHost({ stored: 246 })
   pinned.current = { title: '我自己改的名字', source: { kind: 'user' } }
   assert.deepEqual(await titleRefreshPort(pinned.ctx)!.refresh('s-1'), { status: 'skipped', reason: 'pinned' })
@@ -1181,9 +1181,9 @@ test('重新生成名称的端口：新事件由自己开的写句柄写盘，�
     status: 'retitled',
     title: '重算出来的名字',
   })
-  assert.equal(unpinned.disk.at(-1)?.type, 'session/title', '连 user 源一起重算时也要落盘')
+  assert.equal(unpinned.disk.at(-1)?.type, 'session/title', '连 user 源一起重算时也要写入磁盘')
 
-  // 五、重算之后还是同一条 provider 标题：报"没变"，但 provider 确实又写了一条事件，照旧落盘。
+  // 五、重算之后还是同一条 provider 标题：报"没变"，但 provider 确实又写了一条事件，照旧写入磁盘。
   const unchanged = fakeRetitleHost({ stored: 246 })
   unchanged.current = { title: '已经挺好的标题', source: { kind: 'provider' } }
   unchanged.onRefresh = async (session) => {
@@ -1194,7 +1194,7 @@ test('重新生成名称的端口：新事件由自己开的写句柄写盘，�
     status: 'unchanged',
     title: '已经挺好的标题',
   })
-  assert.equal(unchanged.disk.length, 248, '标记 + 标题，两条都要落盘')
+  assert.equal(unchanged.disk.length, 248, '标记 + 标题，两条都要写入磁盘')
 
   // 六、还是没有标题（没有用户消息）：如实说这条没什么可命名的，磁盘一个字都不动。
   const empty = fakeRetitleHost({ stored: 246 })
@@ -1257,9 +1257,9 @@ test('重新生成名称的端口：新事件由自己开的写句柄写盘，�
   assert.equal(liveSession.log.at(-1)?.type, 'session/title')
 })
 
-// ── 事件层接线：turn/end → 落盘 → touched() ─────────────────────────────────────
+// ── 事件层接线：turn/end → 写入磁盘 → touched() ─────────────────────────────────────
 //
-// 这一组测的是自动推送的**事件入口**。顺序是它的全部要点：`turn/end` 到的时候日志还没落盘（宿主的
+// 这一组测的是自动推送的**事件入口**。顺序是它的全部要点：`turn/end` 到的时候日志还没写入磁盘（宿主的
 // checkpoint 策略不管 `turn/end`），而推送读的是磁盘字节——所以必须"先冲盘、再说该推了"。顺序反了
 // 就会推上去一份缺最后几步的半截会话。
 
@@ -1331,9 +1331,9 @@ function eventHost(options: {
   return result
 }
 
-test('事件接线：turn/end 先落盘、再说该推了（顺序错了会推半截会话）', async () => {
+test('事件接线：turn/end 先写入磁盘、再说该推了（顺序错了会推半截会话）', async () => {
   /*
-   * 这是事件层的**核心断言**：`flush` 必须排在 `touched()` 前面。反过来的话推送会读到一份还没落盘的
+   * 这是事件层的**核心断言**：`flush` 必须排在 `touched()` 前面。反过来的话推送会读到一份还没写入磁盘的
    * 日志——宿主的 checkpoint 策略只覆盖模型请求 / 工具派发 / 步进三处，`turn/end` 不在其中，所以这不是
    * 一个"理论上可能"的竞态。
    *
@@ -1502,7 +1502,7 @@ test('resolveAutoPushRuntime：叫它就跑，接连两轮都不该被"间隔"�
   }
 })
 
-test('附件端口：文件引用要把名字交给宿主（缺名字算不出本机路径）', () => {
+test('附件接口：文件引用要把名字交给宿主（缺名字算不出本机路径）', () => {
   const id = 'sha256:' + 'ab'.repeat(32)
   const calls: Array<{ method: string; ref: Record<string, unknown> }> = []
   // 假宿主照 `dsh-attachment-local` 的判据：`fileHostPath()` 只认带合法名字的引用，缺名字直接抛错
@@ -1533,7 +1533,7 @@ test('附件端口：文件引用要把名字交给宿主（缺名字算不出�
   )
   assert.deepEqual(calls.at(-1), { method: 'file', ref: { attachmentId: id, name: 'notes.txt' } })
 
-  // 引用里没有名字：算不出路径——宿主会抛，端口吞成 undefined（由调用方如实报"这一个落不了"），
+  // 引用里没有名字：算不出路径——宿主会抛，端口吞成 undefined（由调用方如实报"这一个写不进去"），
   // 不做成崩溃，也不猜一个名字出来。
   assert.equal(port?.pathOf({ id, kind: 'file' }), undefined)
 
@@ -1570,7 +1570,7 @@ function writeForeignPathSession(sb: Sandbox, id: string, cwd: string, foreignRo
 
 const FOREIGN_ROOT = 'C:\\Users\\me\\Work\\repo'
 
-test('修日志路径：预演只读，落地把 working-directory 改成本机路径并留备份', async () => {
+test('修日志路径：预览只读，应用把 working-directory 改成本机路径并留备份', async () => {
   const sb = makeSandbox('repair')
   const cwd = '/home/me/repo'
   const written = writeForeignPathSession(sb, 'session-w', cwd, FOREIGN_ROOT)
@@ -1578,7 +1578,7 @@ test('修日志路径：预演只读，落地把 working-directory 改成本机�
   const tool = byName(defs).get('repair_session_paths')
   assert.ok(tool, '修日志路径的工具要注册出来')
 
-  // 预演：认出来、说清从哪儿搬到哪儿、一个字节都不写
+  // 预览：认出来、说清从哪儿搬到哪儿、一个字节都不写
   const preview = (await run(tool, {})) as {
     applied: boolean
     sessions: string[]
@@ -1592,9 +1592,9 @@ test('修日志路径：预演只读，落地把 working-directory 改成本机�
   assert.equal(preview.events, 2, '两条 working-directory/change')
   assert.ok(preview.summary.includes(FOREIGN_ROOT), '要把推出来的源根写进说明')
   assert.ok(preview.summary.includes(cwd))
-  assert.deepEqual(readFileSync(written.path), written.bytes, '预演不许写盘')
+  assert.deepEqual(readFileSync(written.path), written.bytes, '预览不许写盘')
 
-  // 落地：改写 + 备份
+  // 应用：改写 + 备份
   const applied = (await run(tool, { apply: true })) as {
     applied: boolean
     sessions: string[]
@@ -1617,7 +1617,7 @@ test('修日志路径：预演只读，落地把 working-directory 改成本机�
   assert.ok(after.some((line) => line.includes('user/message') && line.includes(JSON.stringify(FOREIGN_ROOT).slice(1, -1))), '正文里的旧路径原样保留')
 
   // 备份是改写前的逐字节副本，恢复就是把那一份复制回去
-  assert.ok(applied.backupDir, '落地要留备份')
+  assert.ok(applied.backupDir, '应用要留备份')
   const backup = join(applied.backupDir!, 'sessions', projectKey(cwd), 'session-w', 'session.v4.jsonl.zstd')
   assert.deepEqual(readFileSync(backup), written.bytes, '备份里必须是改写前的原字节')
   assert.equal(existsSync(join(applied.backupDir!, 'repair.json')), true, '备份目录要说明这是哪一次修了什么')

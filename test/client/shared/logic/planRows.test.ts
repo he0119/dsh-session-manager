@@ -249,9 +249,9 @@ test('目标候选：宿主说盘上已经没有的那些照旧列出来，但�
     ],
   )
 })
-// ---- 删除预演：「这条是怎么进来的」 ----
+// ---- 删除预览：「这条是怎么进来的」 ----
 //
-// 删除会沿父子关系向下展开（见 `src/operations/remove/remove.ts` 的 `familyOf()`），所以预演清单里会出现用户**没勾过**
+// 删除会沿父子关系向下展开（见 `src/operations/remove/remove.ts` 的 `familyOf()`），所以预览清单里会出现用户**没勾过**
 // 的会话。行上那枚标签就是它的解释：不挂，用户只会看到"我明明只选了一条，怎么要删三条"。
 
 test('级联带进来的行：说"随父会话删"，提示里点名是哪一条（有标题用标题）', () => {
@@ -264,7 +264,7 @@ test('级联带进来的行：说"随父会话删"，提示里点名是哪一条
     text: 'manage.delete.via',
     tip: 'manage.delete.viaTip:{"name":"session-p"}',
   })
-  // 标题是空白串与没有标题同一条路（`sessionLabel` 也是这个口径）
+  // 标题是空白串与没有标题同一条路（`sessionLabel` 也是这个标准）
   assert.deepEqual(deleteFamilyNote({ via: { id: 'session-p', title: '  ' } }, t)?.tip, 'manage.delete.viaTip:{"name":"session-p"}')
 })
 

@@ -32,7 +32,7 @@ import { readSyncRun, writeSyncRun } from './operations/sync/sync-state.ts'
 import { createRemoteWriteGate } from './operations/sync/remote-write.ts'
 import { API_PREFIX, registerWebRoutes, type WebServerLike } from './web.ts'
 
-// 配置 schema 必须从入口导出：Loader 拿它校验 profile 里那一节，设置接缝拿它在插件管理器里生成
+// 配置 schema 必须从入口导出：Loader 拿它校验 profile 里那一节，设置接入点拿它在插件管理器里生成
 // 那张表单（没有 schema 的插件根本不出现在那一页上）。**只有 `sync` 那一节是 volatile**，所以表单
 // 里只有它可改、且改完立即生效；三个路径字段留在配置文件里（理由见 src/config.ts）。
 export { Config } from './config.ts'
@@ -81,7 +81,7 @@ export function apply(ctx: Context, config: PluginConfigInput = {}): () => void 
   const paths = resolvePaths(config)
   /*
    * 写远端格子的互斥锁：手动同步、整理远端、删除远端、自动推送、模型工具 sync_sessions 共用这一把。
-   * 它们各自在开始前读一次远端、落地时整份重写索引；两件一起跑时后写的会用旧快照盖掉前一个的条目。
+   * 它们各自在开始前读一次远端、应用时整份重写索引；两件一起跑时后写的会用旧快照盖掉前一个的条目。
    * 锁是进程内的；跨进程（桌面版与 Web 版同时跑）挡不住，那要 WebDAV 的条件写，见 remote-write.ts。
    */
   const remoteWrite = createRemoteWriteGate()
@@ -179,7 +179,7 @@ export function apply(ctx: Context, config: PluginConfigInput = {}): () => void 
       // "迁移何时生效"要读宿主服务（workspaceRegistry、sessionPersistence），那件事只在这里做得了。
       // 交出的是**探测**而不是结论：执行过的那些由编排层按实际结果报（见 src/shared/host/take-effect.ts）。
       hostRegistry: () => hostRegistryPort(ctx),
-      // 落地（迁移 / 导入 / 拉取）之后要请宿主把那些会话的列表元数据折出来：侧边栏的名字不来自日志，
+      // 应用（迁移 / 导入 / 拉取）之后要请宿主把那些会话的列表元数据折出来：侧边栏的名字不来自日志，
       // 宿主只在"活的会话"时写那份检查点（见 src/shared/host/checkpoint-warm.ts）。同样是**探测**不是结论。
       hostCheckpoints: () => hostCheckpointPort(ctx),
       // 同理：目录选择器是"桌面对话框"还是"页面内浏览"，只有宿主自己知道。

@@ -5,7 +5,7 @@
 // 那几条必须报出来（describeStranded()）。三者各自都有单测，但"全量迁移之后工作区还在不在"只有把它们
 // 串起来才看得见，而它正是用户看见的那个现象（一个画出来却一条都不显示的工作区）。
 //
-// 宿主那一侧用假宿主端口"像真宿主"：成员按 header 的 cwd 归一之后是否等于记录的 path 过滤（宿主
+// 宿主那一侧用假宿主接口"像真宿主"：成员按 header 的 cwd 归一之后是否等于记录的 path 过滤（宿主
 // `WorkspaceEntity.sessionIds` 就是这个判据），挂靠按同一条校验、不合格就回绝。
 import assert from 'node:assert/strict'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
@@ -203,7 +203,7 @@ test('E2E：只剩悬空登记的源工作区，全量迁移后必须被删掉',
 
   assert.equal(run.applied, true)
   assert.equal(run.verified, true, run.problems.join('; '))
-  // 预演就得说清楚：这块工作区会被删，顺带摘掉那条盘上已经没有的登记。
+  // 预览就得说清楚：这块工作区会被删，顺带摘掉那条盘上已经没有的登记。
   assert.deepEqual(
     run.preview.registryChange?.removedSources.map((entry) => entry.workspaceId),
     ['ws-from'],
@@ -211,7 +211,7 @@ test('E2E：只剩悬空登记的源工作区，全量迁移后必须被删掉',
   assert.deepEqual(run.preview.registryChange?.droppedStale.map((entry) => entry.sessionIds), [['session-ghost']])
   assert.match(run.preview.summary, /顺带清掉 1 条宿主不认的悬空登记/)
 
-  // 落盘结果：源工作区没了、目标工作区认下了那条会话
+  // 写入磁盘结果：源工作区没了、目标工作区认下了那条会话
   const after = readRegistry(fx.registryPath)
   assert.equal(after.tables.workspaces['ws-from'], undefined, '源工作区必须被删掉（这正是"残留工作区"那一条）')
   assert.deepEqual(after.tables.workspaces['ws-to']?.sessionIds, ['session-visible'])

@@ -13,7 +13,7 @@
 //      改名/换值不通知插件；硬用就得在注释里写明理由，并登记进下面的例外表。
 //   3) 每个 `var(--dsw-alias-*)` 都要带回落值：宿主主题不提供这个 token 时（旧版本、别的
 //      profile）界面还能照常显示，而不是整条声明作废。
-//   4) 标签（`.dsm-tag`）不许折行。真实事故（用户截图报的）：导入预演表的动作列里，
+//   4) 标签（`.dsm-tag`）不许折行。真实事故（用户截图报的）：导入预览表的动作列里，
 //      标签是可以按字折行的，于是自动布局把它压到一列只有一个汉字宽——「跳过」竖成两行、
 //      表头「动作」也折了，整张表看着错位。标签是个小块，不该被当成一句话来排版。
 //   5) `state-*` 色不许裸当文字色。真实事故（用 agent-browser 打开真实设置页量出来的）：
@@ -268,18 +268,18 @@ test('分组表头里的标签与名字一样高：行高压到 18px（12px 的�
   }
 })
 
-test('预演表的动作列：同步那张表自己量列宽，标签再长也不许顶到下一列', () => {
-  // 真实事故（用户截图报的）：同步预演的动作列沿用了导入预演那 60px（单元格左右各 8px padding，
+test('预览表的动作列：同步那张表自己量列宽，标签再长也不许顶到下一列', () => {
+  // 真实事故（用户截图报的）：同步预览的动作列沿用了导入预览那 60px（单元格左右各 8px padding，
   // 内容只有 44px），而它装的是「本机有、远端没有」这种动词短语——浏览器里实测 110px，en 那句
   // 158px，nowrap 顶出格子 114px、压住后面那一列的会话名 98px。修法两半：这张表自己量列宽，
   // 再加一条"顶不出去"的兜底。
   const syncRule = ruleBody('.dsm-syncPlanTable .dsm-colAction')
-  assert.notEqual(syncRule, null, '同步预演的动作列要单独声明列宽')
+  assert.notEqual(syncRule, null, '同步预览的动作列要单独声明列宽')
   const width = Number(/width:\s*([\d.]+)px/.exec(syncRule ?? '')?.[1])
   // 浏览器里量到最长的那颗标签 63px（en 'Re-push'）；加上单元格左右 8px padding 是 79px。
   assert.ok(width >= 79, `动作列声明了 ${width}px，装不下最长的标签（要 ≥79px）`)
   const tag = ruleBody('.dsm-planTable .dsm-tag')
-  assert.notEqual(tag, null, '预演表的标签要有兜底规则')
+  assert.notEqual(tag, null, '预览表的标签要有兜底规则')
   assert.match(tag ?? '', /max-width:\s*100%/, '标签要限宽，否则顶出格子压住邻居')
   assert.match(tag ?? '', /overflow:\s*hidden/, '限了宽还要截断，不然文字照旧画在格子外面')
 
@@ -303,7 +303,7 @@ test('组头只摆名字：右端那两串数字靠自己的 margin-left 贴住�
 })
 
 test('计划表的项目组头：一条横幅，横排的是内层那一行', () => {
-  // 同步预演按项目分组之后，组头是表里跨列的一行（`.dsm-planTable .dsm-planGroupHead`）。
+  // 同步预览按项目分组之后，组头是表里跨列的一行（`.dsm-planTable .dsm-planGroupHead`）。
   // 它得自己声明两件事，否则会被 `.dsm-table th` 压回去：
   //   - 字色：那一条把 th 一律写成次要色，而组头的名字是这一段的标题（与列表那边的组头同色）；
   //   - 底色：浅色主题里 bg-layer 那几档是同一个白，层次只能靠"字色兑出来的一层"（同 .dsm-groupHead）。
@@ -520,7 +520,7 @@ test('左栏项目树：208px 宽，窄到 960px 收成浮层', () => {
     /\.dsm-tree\.dsm-treeOpen ~ \.dsm-workbenchMain \.dsm-scrim\s*\{\s*visibility:\s*visible/,
     '左栏成了浮层（≤960）而且打开时，那层空白显形',
   )
-  // 少动一点：这一层不想要动画时，滑出与收起都当场完成（与轮次标题那条同一个口径）。
+  // 少动一点：这一层不想要动画时，滑出与收起都当场完成（与轮次标题那条同一个标准）。
   assert.match(
     css,
     /@media \(prefers-reduced-motion: reduce\) \{\s*\.dsm-tree,\s*\.dsm-inspector,\s*\.dsm-scrim\s*\{\s*transition:\s*none/,

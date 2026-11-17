@@ -37,8 +37,8 @@ Status: implemented
 ## Consequences
 
 - 归档走的是**相反**的一条路：它**只能**走宿主能力（`ctx.workspaceRegistry` 的 `archiveSession()` /
-  `unarchiveSession()` 一次落盘 + 改内存 + 广播，侧边栏即时跟着变）；宿主没有这个服务（非 Web
+  `unarchiveSession()` 一次写入磁盘 + 改内存 + 广播，侧边栏即时跟着变）；宿主没有这个服务（非 Web
   profile）时如实回 409 并说明原因，不绕过去直接写注册表文件——那样写出来的状态与宿主内存不一致，
-  下次宿主自己落盘就把它盖掉了。
-- `test/operations/remove/remove.test.ts` 核「预演零写入、先备份再删、复核、空项目目录清理、活着的会话拒删、恢复把
+  下次宿主自己写入磁盘就把它盖掉了。
+- `test/operations/remove/remove.test.ts` 核「预览零写入、先备份再删、复核、空项目目录清理、活着的会话拒删、恢复把
   目录（含锁文件）搬回来且**不还原注册表**」。

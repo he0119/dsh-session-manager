@@ -61,7 +61,7 @@ test('isUngrouped：「谁都没认领」与「侧边栏会显示」两件事同
   assert.equal(isUngrouped({ blank: true }), false, '空白会话默认不显示（只有当前那条临时 New Session 例外，那件事插件看不到）')
   assert.equal(isUngrouped({ archived: true }), false, '已归档在默认归档过滤下不显示')
   assert.equal(isUngrouped({ origin: 'subagent', owned: true }), false)
-  assert.equal(isUngrouped({ blank: undefined }), true, '宿主没说空白 = 按会显示处理，与 hiddenReason 同口径')
+  assert.equal(isUngrouped({ blank: undefined }), true, '宿主没说空白 = 按会显示处理，与 hiddenReason 同标准')
 })
 
 test('visibilityFacts：三件事实只在一处拼（hiddenReasonOf 与 isUngrouped 读的是同一份）', () => {

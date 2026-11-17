@@ -91,7 +91,7 @@ interface HostSessionPersistence {
  *
  * 为什么不自己写文件：宿主内存里那份注册表才是权威（单单元契约：写入才改它，绝不从磁盘重读），
  * 文件改完它不认——侧边栏还是旧归属，之后任何一次工作区改动还会把这次写盘盖掉。宿主那套动作
- * （复用/新建工作区、挂会话、摘会话、删工作区）自己会落盘、也会通知界面，交给它做最省事也最稳。
+ * （复用/新建工作区、挂会话、摘会话、删工作区）自己会写入磁盘、也会通知界面，交给它做最省事也最稳。
  *
  * 认形状不认实现：少一件就当"这个宿主没有这套动作"，绝不半套上场。
  *
@@ -138,13 +138,13 @@ export function hostRegistryPort(ctx: unknown): HostRegistryPort | undefined {
       const workspace = (await registry.create!.call(registry, path, title)) as { id: string }
       return workspace.id
     },
-    // 挂靠是**前插**，而计划是**追加**：挂完再挪到末尾，顺序才跟预演里看到的一致。
+    // 挂靠是**前插**，而计划是**追加**：挂完再挪到末尾，顺序才跟预览里看到的一致。
     attachSession: async (workspaceId, sessionId) => {
       const entity = need(workspaceId)
       await entity.attachSession(sessionId)
       await entity.insertSessionBefore(sessionId)
     },
-    // 工作区已经不在了也当成功：摘除本来就幂等，真正的一致性由落盘后的复核盯着。
+    // 工作区已经不在了也当成功：摘除本来就幂等，真正的一致性由写入磁盘后的复核盯着。
     detachSession: async (workspaceId, sessionId) => {
       await entityOf(workspaceId)?.detachSession(sessionId)
     },
@@ -446,7 +446,7 @@ export function attachmentPort(ctx: unknown): AttachmentPort | undefined {
         if (ref.name !== undefined) wanted.name = ref.name
         return (ref.kind === 'image' ? image : file).call(store, wanted)
       } catch {
-        // 形状不认（引用不是内容寻址 id、宿主换了 provider）：这一个对象落不了，由调用方如实报出去。
+        // 形状不认（引用不是内容寻址 id、宿主换了 provider）：这一个对象写不进去，由调用方如实报出去。
         return undefined
       }
     },
@@ -473,7 +473,7 @@ export function directoryPickerKind(ctx: unknown): PickerKind {
 /**
  * 宿主的归档能力（`ctx.workspaceRegistry` 的 `archiveSession` / `unarchiveSession`）。
  *
- * 单独收成一个端口：归档是**宿主的能力**（它一次做完"落盘 + 改内存 + 广播"，侧边栏即时跟着变），
+ * 单独收成一个端口：归档是**宿主的能力**（它一次做完"写入磁盘 + 改内存 + 广播"，侧边栏即时跟着变），
  * 而本插件的界面层只认形状、不读服务。服务不在（`workspaceRegistry` 挂在 Web profile 上）时
  * 端口为 `undefined`，界面据此禁用按钮并说明原因，而不是绕过宿主去写注册表文件。
  */
@@ -522,7 +522,7 @@ export function liveSessionIds(ctx: unknown): ReadonlySet<string> {
     }
     return ids
   } catch {
-    // 列会话不该把"删除"这条路径整个打挂：判断不了就当空集，预演那边也不会谎称它们一定没在跑。
+    // 列会话不该把"删除"这条路径整个打挂：判断不了就当空集，预览那边也不会谎称它们一定没在跑。
     return new Set<string>()
   }
 }

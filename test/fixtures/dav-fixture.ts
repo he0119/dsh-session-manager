@@ -35,7 +35,7 @@ function xml(text: string): string {
 
 /**
  * 起一个 假的 WebDAV 服务。
- * @param options.root 落盘目录（调用方保证先清干净）。
+ * @param options.root 写入磁盘目录（调用方保证先清干净）。
  * @param options.auth 给了就校验 Basic 凭据，不匹配一律 401。
  * @param options.prefix 资源根路径，默认 `/dav`。
  * @returns 服务句柄。

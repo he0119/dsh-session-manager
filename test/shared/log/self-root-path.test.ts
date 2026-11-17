@@ -1,6 +1,6 @@
 // 跟着会话根搬的路径：映射规则与"只动那几个字段"的行级改写。
 //
-// 这一层是所有改写路径的底座（导入落地、修已落地的日志、两边比对都走它），所以这里的判据要钉死：
+// 这一层是所有改写路径的底座（导入应用、修已应用的日志、两边比对都走它），所以这里的判据要钉死：
 // 值只在源根底下才翻译、翻译只动 `data` 里那一个字段、原样保留的部分一个字节都不变。
 import assert from 'node:assert/strict'
 import test from 'node:test'
@@ -65,7 +65,7 @@ test('rewriteSelfRootLine：别的类型的事件一行都不动（正文里的�
   assert.deepEqual(result.changes, [])
 })
 
-test('rewriteSelfRootLine：accept 说不改就不改（落地那条路用它跳过"本机本来就合法"的值）', () => {
+test('rewriteSelfRootLine：accept 说不改就不改（应用那条路用它跳过"本机本来就合法"的值）', () => {
   const line = JSON.stringify({ type: 'working-directory/change', seq: 1, time: 1, data: { cwd: '/home/me/repo/sub' } })
   const result = rewriteSelfRootLine(line, { root: '/home/me/repo', to: '/elsewhere', accept: () => false })
   assert.equal(result.line, line)

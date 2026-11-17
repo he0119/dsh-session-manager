@@ -7,7 +7,7 @@
  *
  * 三段式，像 `git diff`：共有的折成一句话、两条尾巴各列一份。三类关系分得清（同一份日志的三种形态）：
  *
- * 1. **事件逐条一致**——只有 header 里的 `cwd` 之类不同（迁移落地会改写它）。这种情况"保哪份都一样"，
+ * 1. **事件逐条一致**——只有 header 里的 `cwd` 之类不同（迁移应用会改写它）。这种情况"保哪份都一样"，
  *    界面上要说成一句话，不能跟真分叉混起来。
  * 2. **一边是另一边的前缀**——同一条会话在两边继续写，只是一边写得远一点。这也不是分叉，
  *    报告成"本机又多写了 N 条"。
@@ -121,9 +121,9 @@ export function SyncDiffDialog({
   target: SyncDiffTarget
   /** 这条会话已经选过的留法；再打开时让对应那枚按钮显出选中态。 */
   decision?: SyncDecision
-  /** 只有真分叉才给：选留哪一份，落地那一步按它办。 */
+  /** 只有真分叉才给：选留哪一份，应用那一步按它办。 */
   onDecide?: (decision: SyncDecision) => void
-  /** 宿主手里还有写句柄：不给选择，只说明原因（裁决会被落地那一步拦下）。 */
+  /** 宿主手里还有写句柄：不给选择，只说明原因（裁决会被应用那一步拦下）。 */
   live?: boolean
   onClose: () => void
   t: Translate
@@ -158,7 +158,7 @@ export function SyncDiffDialog({
       contentClassName="dsm-dialogContent dsm-diffContent"
       footer={
         // 续写 / 一致这两类本来就不用选；只有真分叉才摆这三枚。都不预选：留哪一份由人定，默认高亮一枚
-        // 会替用户做半个决定。活会话不给按钮：宿主还会接着写，落地那一步必拦，摆出来只会让人以为选了
+        // 会替用户做半个决定。活会话不给按钮：宿主还会接着写，应用那一步必拦，摆出来只会让人以为选了
         // 就能同步。原因在正文顶部那条 banner 里，底栏不再塞一段字。
         diff?.relation === 'forked' && onDecide !== undefined && live !== true ? (
           <>

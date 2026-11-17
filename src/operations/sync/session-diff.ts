@@ -4,14 +4,14 @@
 // 说不出"哪儿不一样、谁多了什么"，而删掉哪一边、留哪一边是**人**该做的决定。这个模块把那个判定拆成
 // 看得懂的三段：共同的、本机多出来的、远端多出来的。
 //
-// 三点口径：
+// 三点标准：
 //
 // 1. **按行比，不按"语义"比**。同一份日志在两台机器上是逐字节相同的（复制过去的那一段就是原样），
 //    每边新增的事件接在各自后面，所以"共同前缀"可以拿原文字符串直接比——不解析 JSON 就不会把
 //    "格式一样但字段顺序不同"这种噪音报成差异。解析只用在**要显示的那几条**上（见 `previewOf()`）。
-// 2. **header 单独算一类差异**。迁移与导入落地时会改写 header 里的 `cwd`（见 session-log.ts 的
+// 2. **header 单独算一类差异**。迁移与导入应用时会改写 header 里的 `cwd`（见 session-log.ts 的
 //    `relocateHeaderCwd()`），于是"同一份会话在另一台机器上"常常只有这一行不同——事件一条不差。
-//    这种情形的结论是"两份内容一样、保哪份都一样"，不该跟真分叉混在一起说。同理，落地时还会把
+//    这种情形的结论是"两份内容一样、保哪份都一样"，不该跟真分叉混在一起说。同理，应用时还会把
 //    `working-directory/change` 里那些跟着会话根搬的值一起改（见 self-root-path.ts）：它们写的是
 //    "这条会话落在哪儿"，所以比对前两边都归一成占位符，不算内容差异。
 // 3. **尾巴的三种关系要说清**：一边的尾巴是另一边的逐字节前缀时，那不是分叉，是"同一条又往前写了
@@ -193,7 +193,7 @@ function selfRootAgnostic(lines: readonly string[], root: string | undefined): s
   })
 }
 
-/** 日志的正文（去掉 header 与空行）。空行不占事件位，与 `readTranscript()` 同一口径。 */
+/** 日志的正文（去掉 header 与空行）。空行不占事件位，与 `readTranscript()` 同一标准。 */
 function body(lines: readonly string[]): string[] {
   const out: string[] = []
   for (const line of lines.slice(1)) {
@@ -295,7 +295,7 @@ function previewOf(
 /**
  * 一条条目压成一行：正文取首行、工具调用带工具名、其余退回类型。
  *
- * `truncated` 是解析器的记账（哪一格被截到上限了）：被截的那一格补一个省略号，否则界面上看起来像
+ * `truncated` 是解析器的计数（哪一格被截到上限了）：被截的那一格补一个省略号，否则界面上看起来像
  * "原文就到这里"，而真相是"后面还有、要看就点开那一格"。
  */
 function briefOf(item: TranscriptItem, limit: number): string {
@@ -334,7 +334,7 @@ function briefOf(item: TranscriptItem, limit: number): string {
   return text
 }
 
-/** 这一格被截过没有（解析器的 `truncated` 记账里有没有它）。 */
+/** 这一格被截过没有（解析器的 `truncated` 计数里有没有它）。 */
 function wasTruncated(item: TranscriptItem, field: 'text' | 'reasoning' | 'args'): boolean {
   return (item.truncated ?? []).some((entry) => entry.field === field)
 }

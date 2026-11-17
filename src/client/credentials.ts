@@ -2,7 +2,7 @@
  * 宿主凭据服务（浏览器半侧的 `remote.credentials`）的持有处。
  *
  * 为什么要有这一层：密码的值**不进配置文档**，它由宿主的凭据服务持有、按引用名（环境变量名）解析
- * ——这是 DSH 自己的口径（见 [官方凭据子系统的说明](https://deepseek-harness.github.io/deepseek-harness/reference/subsystems/credentials)），
+ * ——这是 DSH 自己的标准（见 [官方凭据子系统的说明](https://deepseek-harness.github.io/deepseek-harness/reference/subsystems/credentials)），
  * 也是官方那几个要密钥的插件（如网页搜索、GitHub webhook）的做法：配置里只有引用名，值由配置界面
  * 通过 `remote.credentials` 的 `set` 写进宿主的凭据库。读的那一半只有"配没配、能不能写"（
  * `describe`）——**没有任何一条读路径会返回值**，所以界面上那个输入框永远是空的。

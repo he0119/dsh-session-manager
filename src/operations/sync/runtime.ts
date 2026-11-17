@@ -97,7 +97,7 @@ export function passwordRefOf(sync: SyncConfig): string {
 /**
  * 解析一个密码引用。
  *
- * 先问宿主的 credentials 服务（DSH 的口径：配置里放引用，值由服务解析），拿不到再退到
+ * 先问宿主的 credentials 服务（DSH 的标准：配置里放引用，值由服务解析），拿不到再退到
  * `process.env`——没有那个服务的 profile 也能用（往环境变量里放密码）。
  * @param ctx 宿主上下文（探测式读取，缺席不影响）。
  * @param ref 环境变量名。
@@ -161,7 +161,7 @@ export async function syncRuntime(ctx: unknown, config: PluginConfigInput = {}):
  * 两处**必须**一起造的理由（也是这个函数存在的全部意义）：调度器与那一轮读的配置、远端、库位置都得
  * 是同一份。少一处就会出现"界面上改了 URL，自动推送还在打旧地址"这种最难查的不一致。
  *
- * 依赖里那几样可选服务按**探测**收（与 `src/index.ts` 里 web 端点那一套同一个口径）：这个宿主没有
+ * 依赖里那几样可选服务按**探测**收（与 `src/index.ts` 里 web 端点那一套同一个标准）：这个宿主没有
  * 投影缓存 / 工作区注册表时，自动推送照旧跑——它只推不拉，本来就用不到"备份"与"请宿主重折检查点"
  * 那几样（它们挂在"真有东西落到本机"那条路上）。
  *
@@ -238,8 +238,8 @@ interface HostSessionsService {
 /**
  * 把自动推送接到会话事件上：**本机安静下来之后才推**。这是自动推送唯一的触发源。
  *
- * 为什么不能直接把事件当成"该推了"：`turn/end` 到的时候**日志还没落盘**。宿主的
- * `dsh-session-checkpoint-policy` 只在模型请求、工具派发、agent 步进三处落盘，`turn/end` 不在其中；
+ * 为什么不能直接把事件当成"该推了"：`turn/end` 到的时候**日志还没写入磁盘**。宿主的
+ * `dsh-session-checkpoint-policy` 只在模型请求、工具派发、agent 步进三处写入磁盘，`turn/end` 不在其中；
  * `turn/end` 的契约原文就写着 "The loop does not await a flush at turn boundaries… consumers that
  * read storage after `turn/end` flush themselves"。而推送读的正是磁盘字节——少了这一步，推送出去的会
  * 是一份**缺最后几步**的半截会话（而且远端会把它当成"本机的最新"，下一轮才补上，中间那一版是错的）。

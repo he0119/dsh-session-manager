@@ -1,4 +1,4 @@
-// src/shared/accounting.ts — 「这条会话被哪个工作区认领」的唯一一份判据（宿主 `Workspace.sessionIds` 的口径）。
+// src/shared/accounting.ts — 「这条会话被哪个工作区认领」的唯一一份判据（宿主 `Workspace.sessionIds` 的标准）。
 //
 // 注册表里**登记**了不等于**认领**：宿主把记录里的 `sessionIds` 再过滤一遍才发给界面——
 //

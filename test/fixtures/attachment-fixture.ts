@@ -11,7 +11,7 @@ import { dirname, join } from 'node:path'
 import type { AttachmentPort, AttachmentRef } from '../../src/shared/attachments.ts'
 import { sandboxDir } from './sandbox.ts'
 
-/** 内容寻址 id：与宿主 `sha256:<hex>` 同一口径。 */
+/** 内容寻址 id：与宿主 `sha256:<hex>` 同一标准。 */
 export function attachmentIdOf(bytes: Buffer): string {
   return `sha256:${createHash('sha256').update(bytes).digest('hex')}`
 }
@@ -49,7 +49,7 @@ export interface AttachmentStore {
   /** 库根（图片在 `objects/` 下，文件在 `files/` 下——与宿主同形）。 */
   root: string
   port: AttachmentPort
-  /** 往库里放一个对象，返回它落地的路径（调用方通常还要核权限位）。 */
+  /** 往库里放一个对象，返回它应用的路径（调用方通常还要核权限位）。 */
   put(ref: AttachmentRef, bytes: Buffer): string
   /** 对象在本机的路径（对象不在也给得出）。 */
   pathOf(ref: AttachmentRef): string

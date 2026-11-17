@@ -1,4 +1,4 @@
-// 落地目录的规范拼写：宿主把工作区路径与会话 cwd 都存成 `fs.realpath` 归一之后的样子，并按字符串
+// 目标目录的规范拼写：宿主把工作区路径与会话 cwd 都存成 `fs.realpath` 归一之后的样子，并按字符串
 // 相等比成员资格。这个测试钉住"另一种拼写会被换成宿主存的那个写法"。
 import assert from 'node:assert/strict'
 import { mkdirSync, realpathSync, rmSync } from 'node:fs'

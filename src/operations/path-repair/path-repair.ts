@@ -1,12 +1,12 @@
-// src/operations/path-repair/path-repair.ts — 把已经落地的会话日志里"跟着会话根搬"的路径改成本机路径。
+// src/operations/path-repair/path-repair.ts — 把已经应用的会话日志里"跟着会话根搬"的路径改成本机路径。
 //
 // 为什么需要它：日志从另一台机器（另一种系统）搬过来时，header 的 cwd 会被改写成本机路径（库目录名与
 // 它绑死，不改写落不下来），而 `working-directory/change` 里那些值原样留着。宿主拿最后那个值当会话的
 // 当前工作目录，并要求它在本机是绝对路径——别的系统的写法不成立，投影失败，**整条会话读不出来**
 // （界面报"历史加载失败"）。判据与取舍见 self-root-path.ts 与 .agents/notes 里那篇笔记。
 //
-// 导入/同步落地那条路已经顺手改写了（transfer.ts）。这个模块修的是**已经躺在本机**的那些：
-// 先算计划（只读，改哪几条、从哪个根搬到哪个根、哪些搬不了），再落地（备份、逐文件原子替换、修完复验）。
+// 导入/同步应用那条路已经顺手改写了（transfer.ts）。这个模块修的是**已经躺在本机**的那些：
+// 先算计划（只读，改哪几条、从哪个根搬到哪个根、哪些搬不了），再应用（备份、逐文件原子替换、修完复验）。
 //
 // 与迁移的区别：迁移搬目录 + 改 header；这里**不动任何目录**，只改那几行事件里的路径值。
 import { readFileSync } from 'node:fs'
@@ -21,7 +21,7 @@ import { relocateSessionPaths, relocateSessionPathsChunked, relocateSessionPaths
 import { stampName } from '../../shared/journal.ts'
 import type { CompressFrame, DecodeAll, ProgressReporter } from '../../shared/types.ts'
 
-/** 一条日志的修复计划（只读算出来的，落地时照着它做）。 */
+/** 一条日志的修复计划（只读算出来的，应用时照着它做）。 */
 export interface PathRepairFilePlan {
   name: string
   path: string
@@ -50,7 +50,7 @@ export interface PathRepairSessionPlan {
   problem?: string
 }
 
-/** 预演结果。 */
+/** 预览结果。 */
 export interface PathRepairPlanResult {
   /** 需要动的会话（有可改的日志，或有改不了的取值需要交代）。 */
   sessions: PathRepairSessionPlan[]
@@ -92,7 +92,7 @@ async function selfRootValues(text: string): Promise<string[]> {
   return values
 }
 
-/** 按分隔符切段（与 self-root-path.ts 同一口径，这里只需要"末段"）。 */
+/** 按分隔符切段（与 self-root-path.ts 同一标准，这里只需要"末段"）。 */
 function segments(value: string): string[] {
   return value.split(/[\\/]+/).filter((segment) => segment !== '')
 }
@@ -104,7 +104,7 @@ function segments(value: string): string[] {
  * 除了会话根本身，还常有它底下的工作树路径（`…\homelab\.agents\worktrees\fix\x`）。取最长的同名前缀
  * 正好落在"会话根"那一层。
  *
- * 预演会把推出来的映射原样打出来，人看一眼就知道对不对；推不出来（改了目录名、盘符对不上）时让调用方
+ * 预览会把推出来的映射原样打出来，人看一眼就知道对不对；推不出来（改了目录名、盘符对不上）时让调用方
  * 用 `from` 明确给一个。
  *
  * @param values 日志里出现过的、跟着会话根搬的取值。
@@ -169,7 +169,7 @@ export async function planPathRepair(
         fileProblems.push(`${file.name} 读不出来：${error instanceof Error ? error.message : String(error)}`)
         continue
       }
-      // "本机不认的"才需要搬：本机就合法的路径属于历史事实（与 session-log.ts 的 `accept` 同一口径）。
+      // "本机不认的"才需要搬：本机就合法的路径属于历史事实（与 session-log.ts 的 `accept` 同一标准）。
       const values = (await selfRootValues(text)).filter((value) => !isAbsolute(value))
       if (values.length === 0) continue
       const from = options.from ?? deriveSourceRoot(values, to)
@@ -221,7 +221,7 @@ export interface PathRepairApplyOptions {
   onProgress?: ProgressReporter
 }
 
-/** 落地结果。 */
+/** 应用结果。 */
 export interface PathRepairOutcome {
   /** 备份目录（没备份就没有）。 */
   backupDir?: string
@@ -233,12 +233,12 @@ export interface PathRepairOutcome {
 }
 
 /**
- * 落地一份修复计划：备份 → 逐文件原子替换 → 复验。
+ * 应用一份修复计划：备份 → 逐文件原子替换 → 复验。
  *
  * 复验是"修完之后再算一遍"：改写后的日志再走一次同样的规划，必须**一条都不用改**（不再有本机不认的
  * 路径、也没有映射不上的取值）。这一条不过就抛错——临时文件还没 rename，原文件一个字节没动。
  *
- * @param plans 预演出来的计划（`problem` 非空的会话会被跳过）。
+ * @param plans 预览出来的计划（`problem` 非空的会话会被跳过）。
  * @param options 解码器、可选的备份根与进度。
  * @returns 改了几份日志、几条事件，以及逐条问题。
  * @throws 备份之后任何一份日志改写失败时抛错（此前已改完的文件保留，问题在 `problems` 里交代）。
@@ -299,7 +299,7 @@ export async function applyPathRepair(
       if (result.unchanged) continue
       const tmp = `${file.path}.dsh-session-manager.tmp`
       await writeFile(tmp, result.buffer)
-      // 复验：落盘前那一份必须能解出来，且再规划一遍一条都不用改。
+      // 复验：写入磁盘前那一份必须能解出来，且再规划一遍一条都不用改。
       const written = await decodeLogTextChunked(await readFile(tmp), file.compression)
       const again = relocateSessionPathsText(written, { from: file.from, to: file.to })
       if (again.rewritten !== 0 || again.unmapped.length > 0 || again.nextHeader.cwd !== file.to) {

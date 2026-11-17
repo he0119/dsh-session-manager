@@ -9,7 +9,7 @@
  * 这一层只做三件事：调宿主端点、记本地草稿、把结果摆出来。判定都在宿主侧（`src/web.ts` +
  * `src/operations/transfer/transfer.ts`）：计划返回的就是将要发生的事，页面不自己推算。
  *
- * 落地那一下**先看清再确认**：点「导入」只算一份只读计划（`mode: 'plan'`），弹窗里逐条列出会写什么
+ * 应用那一下**先看清再确认**：点「导入」只算一份只读计划（`mode: 'plan'`），弹窗里逐条列出会写什么
  * （create / skip、cwd 改写到哪），确认了才写盘——与删除、迁移、回滚同一条分界。导出那一边不在这里：
  * 它只把已有字节打成包给浏览器下载，不改本机任何东西，所以那枚按钮按下去就做。
  *
@@ -66,7 +66,7 @@ export interface ImportPanelProps extends Pick<PanelShare, 't' | 'state' | 'meta
   /** 关掉这一面（取消、右上角叉、Escape、点遮罩）。 */
   onClose: () => void
   /**
-   * 落地成功之后要说的那句话，交给页面说（弹窗随后关掉）。
+   * 应用成功之后要说的那句话，交给页面说（弹窗随后关掉）。
    *
    * 成功时弹窗里没什么可看的：写入的条数与字节正是页面顶部那条提示该报的，列表也已经重读过了。
    */
@@ -102,10 +102,10 @@ export function ImportPanel({
   /**
    * 最近收到的那条进度事件（见 api.ts 的 `importBundle()`）。
    *
-   * 包上传那一段宿主报不了（那是浏览器与网络的事），收到之后的预演（逐条读包里的日志折标题）与落地
+   * 包上传那一段宿主报不了（那是浏览器与网络的事），收到之后的预览（逐条读包里的日志折标题）与应用
    * （逐条写盘、改写首帧 cwd）是真花时间的两段。
    *
-   * 声明排在**最后**（不跟 `busy` 挤在一起）：冒烟用例按位置往 null 状态里种值（见 test/client.test.mjs
+   * 声明排在**最后**（不跟 `busy` 挤在一起）：冒烟用例按位置往 null 状态里初始值（见 test/client.test.mjs
    * 的 `nulls`），插在中间会让后面那些种子的位置整体错一格。
    */
   const [progress, setProgress] = React.useState<ProgressEvent | null>(null)
@@ -113,7 +113,7 @@ export function ImportPanel({
   // 宿主有没有目录选择器、是哪一种；`null`（含旧宿主没这个字段）时候选面板里不摆「浏览文件系统…」。
   // 这一项来自 `/meta`（与清单无关、先到），所以清单还在读时那枚按钮也不至于晚一步出现。
   const pickerKind = (state ?? meta)?.pickerKind ?? null
-  /** 落地目录那一个字段的展开状态（这一面只有它一个目录字段）。 */
+  /** 目标目录那一个字段的展开状态（这一面只有它一个目录字段）。 */
   const fields = useDirectoryFields<'target'>()
   /** 目标目录的候选：与「迁移」的目标目录同一份构造（见 planRows.directoryTargetRows）。 */
   const targetRows = React.useMemo(
@@ -209,7 +209,7 @@ export function ImportPanel({
   /**
    * 弹窗里按「确认导入」：真写盘。
    *
-   * 一条都没写进去（计划里全是 skip，或落地被拒）时把结果摆回弹窗里：冲突原因就在 `problems` 与每行的
+   * 一条都没写进去（计划里全是 skip，或应用被拒）时把结果摆回弹窗里：冲突原因就在 `problems` 与每行的
    * `reason` 上，用户得看着它改包或改目标，而不是只收到一句"没写成功"。
    */
   const applyImport = (): void => {
@@ -231,7 +231,7 @@ export function ImportPanel({
         const wrote = result.created.length
         const objects = result.attachmentWritten ?? 0
         /*
-         * 落地算成功有两种：写了会话，或**只补了附件对象**（日志早就在库里、图是挂的——重导一次同一个包
+         * 应用算成功有两种：写了会话，或**只补了附件对象**（日志早就在库里、图是挂的——重导一次同一个包
          * 正是那条修复路径）。两种都在结果页里说清；一条都没写进去时，把计划里那些问题摆出来。
          */
         if (wrote > 0 || objects > 0) {
@@ -247,7 +247,7 @@ export function ImportPanel({
                   })}
                 </div>
               )}
-              {/* 落地失败的那几个对象不静默：界面上那句"图片加载失败"正是它们，而用户在这里才知道是为什么。 */}
+              {/* 写入失败的那几个对象不静默：界面上那句"图片加载失败"正是它们，而用户在这里才知道是为什么。 */}
               {failed > 0 && <p className="dsm-warn">{t('import.attachmentProblems', { count: failed })}</p>}
               <ProblemsBlock t={t} problems={result.problems} />
             </div>
@@ -287,7 +287,7 @@ export function ImportPanel({
   const attachmentAdds = plan?.attachmentAdds ?? 0
   /** 包里的对象总字节（含本机已有的那些，所以不能拿 `attachmentBytes` 顶替）。 */
   const attachmentTotalBytes = planAttachments.reduce((sum, item) => sum + item.bytes, 0)
-  /** 这个宿主落不了的（没有附件服务、认不出引用）：要如实说出来，不能让用户以为图也导进来了。 */
+  /** 这个宿主写不进去的（没有附件服务、认不出引用）：要如实说出来，不能让用户以为图也导进来了。 */
   const attachmentUnavailable = planAttachments.filter((item) => item.action === 'unavailable').length
 
   /**
@@ -373,7 +373,7 @@ export function ImportPanel({
               <input ref={filePicker} type="file" accept=".dshsess" hidden onChange={pickFile} />
             </div>
 
-            {/* 落地目录：与「迁移」的目标目录是同一个组件、同一份候选（见 DirectoryField.tsx）。 */}
+            {/* 目标目录：与「迁移」的目标目录是同一个组件、同一份候选（见 DirectoryField.tsx）。 */}
             <DirectoryField
               t={t}
               controls={fields}

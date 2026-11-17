@@ -12,7 +12,7 @@
  * `sessionVisible()` 再抄一遍——以前正是这么抄错的（只看"有没有认领"，于是子智能体/空白/已归档也被
  * 算成「未分组」）。所以在宿主侧算一次（见 `src/shared/visibility.ts` 的 `isUngrouped()`），这里只读结论。
  *
- * 五类的口径：
+ * 五类的标准：
  *   - `subagent`：header 里的 `origin === "subagent"`（外壳把它挂在父会话下面）；
  *   - `blank`：宿主投影缓存说它一个 turn 都没开始过；
  *   - `archived`：id 在注册表的归档集里；

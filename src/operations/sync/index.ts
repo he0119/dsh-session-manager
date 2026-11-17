@@ -324,7 +324,7 @@ export function parseIndex(text: string, machine: string, problems: string[]): R
       if (item?.kind !== 'image' && item?.kind !== 'file') continue
       /*
        * id 会直接拼成远端对象路径（`remoteAttachmentPath()` 取 `sha256:` 后面那一段），
-       * 不校验的话 `aa/../../x` 这种值能让客户端去取共享库外面的东西。
+       * 不校验的话 `aa/../../x` 这初始值能让客户端去取共享库外面的东西。
        */
       if (!isAttachmentId(item.id)) continue
       attachments.push({

@@ -1,4 +1,4 @@
-// 删除会话：预演 → 备份 → 真删 → 复核 → 从备份恢复。
+// 删除会话：预览 → 备份 → 真删 → 复核 → 从备份恢复。
 //
 // 这是本插件唯一一处**真删用户数据**的路径（宿主没有删会话的能力，见 src/operations/remove/remove.ts 的说明），所以
 // 这里把每一步都钉死：宿主内存里活着的拒删、不在库里的拒删、删除前必须先落下备份、删完目录真的没了、
@@ -104,14 +104,14 @@ function deps(sandbox: Sandbox, extra: Partial<RemoveDeps> = {}): RemoveDeps {
     registryPath: sandbox.registryPath,
     backupRoot: sandbox.backupRoot,
     decodeAll,
-    // 与界面那条路一致：预演里按标题认会话（见 session-title.ts）
+    // 与界面那条路一致：预览里按标题认会话（见 session-title.ts）
     resolveTitle: createTitleResolver({ decodeAll }),
     now: new Date('2026-09-27T00:00:00.000Z'),
     ...extra,
   }
 }
 
-test('预演：列清会删什么，一个字节都不写', async () => {
+test('预览：列清会删什么，一个字节都不写', async () => {
   const sandbox = makeSandbox('remove-plan')
   const dir = writeSession(sandbox, 'session-doomed', 1000, { title: '不要了的会话' })
 
@@ -121,8 +121,8 @@ test('预演：列清会删什么，一个字节都不写', async () => {
   assert.deepEqual(run.plan.entries.map((e) => e.id), ['session-doomed'])
   assert.deepEqual(run.plan.entries.map((e) => e.title), ['不要了的会话'])
   assert.equal(run.plan.files, 1)
-  assert.equal(existsSync(dir), true, '预演不许动磁盘')
-  assert.equal(existsSync(sandbox.backupRoot), false, '预演不许建备份目录')
+  assert.equal(existsSync(dir), true, '预览不许动磁盘')
+  assert.equal(existsSync(sandbox.backupRoot), false, '预览不许建备份目录')
 })
 
 test('执行：先备份（整份会话目录）再删，复核通过；空掉的项目目录顺手清掉', async () => {
@@ -181,7 +181,7 @@ test('恢复：从备份把整个会话目录搬回原位（含 session.lock）�
   assert.notEqual(readFileSync(sandbox.registryPath, 'utf8'), registryBefore)
 })
 
-test('预演：标题优先取扫描那一趟读到的投影记录，一条会话只问一次', async () => {
+test('预览：标题优先取扫描那一趟读到的投影记录，一条会话只问一次', async () => {
   const sandbox = makeSandbox('remove-projection')
   writeSession(sandbox, 'session-doomed', 1000, { title: '日志里的名字' })
   const reads: string[] = []
@@ -196,7 +196,7 @@ test('预演：标题优先取扫描那一趟读到的投影记录，一条会�
   assert.deepEqual(reads, ['session-doomed'], '一条会话只问一次记录')
 })
 
-test('宿主内存里活着的会话拒删：进 problems，不进待删条目（预演与执行都拦住）', async () => {
+test('宿主内存里活着的会话拒删：进 problems，不进待删条目（预览与执行都拦住）', async () => {
   const sandbox = makeSandbox('remove-live')
   writeSession(sandbox, 'session-doomed', 1000)
   const withLive = deps(sandbox, { liveSessionIds: () => new Set(['session-doomed']) })
@@ -280,7 +280,7 @@ test('级联：点名父会话 → 全部后代一起进计划（多级、跨项
     assert.deepEqual(entry.via, { id: 'session-parent', title: '父会话' }, `${id} 要说清是跟着谁来的`)
     assert.equal(entry.origin, 'subagent')
   }
-  // 预演摘要要把多出来的条数说出来，否则用户只会看到"我只勾了一条、它要删四条"
+  // 预览摘要要把多出来的条数说出来，否则用户只会看到"我只勾了一条、它要删四条"
   const run = await runRemoval(deps(sandbox), { sessionIds: ['session-parent'] }, { apply: false })
   assert.match(run.summary, /将删除 4 个会话/)
   assert.match(run.summary, /其中 3 条是子智能体会话/)
@@ -425,7 +425,7 @@ test('远端一个包都没删、别处也没有副本时，提示条里不提�
   assert.equal(run.remote?.removed, 0, '远端那一步照旧跑过（结论还在结果里，只是不写进提示）')
 })
 
-test('删除的预演那句也不再报文件数与字节数', async () => {
+test('删除的预览那句也不再报文件数与字节数', async () => {
   const sandbox = makeSandbox('remove-plan-short')
   writeSession(sandbox, 'session-doomed', 1000)
   const run = await runRemoval(deps(sandbox), { sessionIds: ['session-doomed'] }, { apply: false })

@@ -9,14 +9,14 @@ Status: implemented
 
 ## Decision
 
-三种处理里只留一条：**冲突只报告**。预演把那条会话标成 skip 并附上它在库里的位置，落地时创建数为
+三种处理里只留一条：**冲突只报告**。预览把那条会话标成 skip 并附上它在库里的位置，应用时创建数为
 0 就直接 409。
 
 两条同源的细节：
 
 - **无 `cwd` 的会话不硬塞**：保持没有 `cwd`、不参与注册表改归属。给它编一个 `cwd` 会让 header 声称一个
   它从未工作过的目录；
-- **落地先写 `<规范名>.part` 再 rename**：`parseSessionLogName` 不认 `.part`，所以中途崩溃留下的是
+- **应用先写 `<规范名>.part` 再 rename**：`parseSessionLogName` 不认 `.part`，所以中途崩溃留下的是
   「发现阶段会忽略的文件」，而不是一个只有半截日志、看起来却正常的会话。
 
 ## Alternatives considered
@@ -32,6 +32,6 @@ Status: implemented
 ## Consequences
 
 - 导入是**只增**的操作：它不会让目标库里已有的任何一条会话变差。
-- 冲突的条数与位置在预演里就能看到，落地时不会出现「以为导了 40 条、其实 39 条」。
-- `.part` 这条约定让「崩溃」与「坏数据」不会混在一起——`test/operations/transfer/transfer.test.ts` 把导入预演、落地与
+- 冲突的条数与位置在预览里就能看到，应用时不会出现「以为导了 40 条、其实 39 条」。
+- `.part` 这条约定让「崩溃」与「坏数据」不会混在一起——`test/operations/transfer/transfer.test.ts` 把导入预览、应用与
   冲突跳过分别钉住。

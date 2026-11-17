@@ -116,7 +116,7 @@ test('同步设置：草稿里能当场看出来的问题（挡住保存，且�
   assert.deepEqual(bad[0], { code: 'mapping', problem: { code: 'mapDuplicate', line: 2, from: '/a' } })
 })
 
-test('同步设置：接缝没给出值时不编造（空节 → 空草稿）', () => {
+test('同步设置：接入点没给出值时不编造（空节 → 空草稿）', () => {
   assert.deepEqual(syncSectionOf(undefined), {})
   assert.deepEqual(syncSectionOf({ status: 'ready', writable: true }), {})
   assert.deepEqual(draftFrom(syncSectionOf({ status: 'ready', writable: true, value: { sync: { url: 'https://x' } } })), {

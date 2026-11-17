@@ -1,6 +1,6 @@
 // src/tools.ts — 把 6 个工具注册给宿主：开关、依赖与顺序。
 //
-// 每个工具的**定义**在它自己的操作目录里：`operations/migrate/tool.ts`（计划 / 落地 / 回滚 / 复核）、
+// 每个工具的**定义**在它自己的操作目录里：`operations/migrate/tool.ts`（计划 / 应用 / 回滚 / 复核）、
 // `operations/path-repair/tool.ts`、`operations/sync/tool.ts`。这里只剩三件事：
 //
 //   * 读插件配置的 `tools` 一节，按开关决定注册哪几个（关掉的连 `register` 都不调，宿主那份工具清单里
@@ -40,7 +40,7 @@ export function registerTools(
   const paths = resolvePaths(config)
   const remoteWrite = options.remoteWrite ?? createRemoteWriteGate()
   const mode = (): EffectMode => effectMode(ctx)
-  // 预演/执行/回滚都走 src/operations/migrate/migrate.ts 那一份编排，界面端点用的是同一个 deps 形状——
+  // 预览/执行/回滚都走 src/operations/migrate/migrate.ts 那一份编排，界面端点用的是同一个 deps 形状——
   // 两个入口（工具 / 界面）因此不会各写一套。
   const deps: MigrateDeps = {
     sessionsRoot: paths.sessionsRoot,
@@ -49,7 +49,7 @@ export function registerTools(
     decodeAll,
     // 每次调用重新探测（加载条目会随 profile 的热应用来去），探测不到就是"只能重启"。
     hostRegistry: () => hostRegistryPort(ctx),
-    // 迁移改写了 cwd，旧检查点因此对不上：收口时请宿主重折一遍（见 checkpoint-warm.ts）。
+    // 迁移改写了 cwd，旧检查点因此对不上：统一处理时请宿主重折一遍（见 checkpoint-warm.ts）。
     hostCheckpoints: () => hostCheckpointPort(ctx),
     // 宿主持在内存里的会话搬不动（见 plan.ts 的 `BuildPlanOptions.live`）：两个入口都要问同一件事。
     liveSessionIds: () => liveSessionIds(ctx),

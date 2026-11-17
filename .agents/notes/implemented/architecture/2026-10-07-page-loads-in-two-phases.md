@@ -23,7 +23,7 @@ header、再为每条折一次标题（本机 454 条会话，热投影缓存下
 - `GET /state`：同一批字段**加上**这次扫库扫出来的 `problems` / `repos` / `sessions` / `workspaces`。
   它是 `/meta` 的**超集**：这五项两边来自同一个 `metaFacts()`，不各算一份。
 
-客户端 `Promise.allSettled([fetchMeta(), fetchState()])`：先到的先落地，`/state` 回来再填清单。页头与
+客户端 `Promise.allSettled([fetchMeta(), fetchState()])`：先到的先应用，`/state` 回来再填清单。页头与
 各分页按 `state ?? meta` 取那些**不依赖清单**的字段，凡是清单到位前答不出来的地方一律说「读取中…」：
 
 - 页头：「会话库：」后面先印 `/meta` 给的位置，条数那一段说「读取中…」；两份都没到（首帧）时整行只有

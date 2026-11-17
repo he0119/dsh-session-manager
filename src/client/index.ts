@@ -133,7 +133,7 @@ interface SlotsService {
 /**
  * `configForms` 服务的最小面：按命名空间取本插件那一节的读写控制器。
  *
- * 这是宿主的设置接缝：读的是生效配置（组合层 + 用户层），写的是用户层——也就是设置对话框里
+ * 这是宿主的设置接入点：读的是生效配置（组合层 + 用户层），写的是用户层——也就是设置对话框里
  * 「Open configuration file」打开的那份文档。插件不另存一份，配置只有一个来源。
  */
 interface ConfigFormsService {
@@ -181,7 +181,7 @@ export interface ClientContext {
    * 到位时回调才跑，卸载时跑回调返回的清理函数。返回值是那个子 fiber，本模块不用它。
    *
    * 依赖名与回调拿到的服务由调用方自己配对（泛型参数），本模块不认识具体服务——那种"只在运行期
-   * 成立"的形状是本包客户端半侧的统一口径（类型面不 import 宿主客户端包）。
+   * 成立"的形状是本包客户端半侧的统一标准（类型面不 import 宿主客户端包）。
    */
   inject<T extends object>(
     dependencies: readonly string[],
@@ -199,7 +199,7 @@ export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dsh-session-manager: dictionaries')
   ctx.effect(() => installStyles(), 'dsh-session-manager: stylesheet')
 
-  // 设置接缝是可选依赖：它由插件管理器提供，缺席（例如只装了设置外壳的宿主）时同步设置表单自己
+  // 设置接入点是可选依赖：它由插件管理器提供，缺席（例如只装了设置外壳的宿主）时同步设置表单自己
   // 说明"这个宿主不能在界面里改"，而不是让整页装不上。取到的那一份控制器就是宿主给本插件这一节
   // 的读写面，原样收下——不包一层转发，免得两处形状各自漂移。
   ctx.inject<{ configForms?: ConfigFormsService }>(['configForms'], (scoped) => {

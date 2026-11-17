@@ -278,7 +278,7 @@ interface CountState {
 
 const emptyState = (): CountState => ({ byType: {}, events: 0, human: 0, synthetic: 0 })
 
-/** 把 `[from, to)` 这几行记进账里（`countTranscript()` 与它的分块版本共用这一段，口径因此不会分叉）。 */
+/** 把 `[from, to)` 这几行记进账里（`countTranscript()` 与它的分块版本共用这一段，标准因此不会分叉）。 */
 function countRange(lines: readonly string[], from: number, to: number, state: CountState): void {
   for (let index = from; index < to; index += 1) {
     const line = lines[index]
@@ -556,7 +556,7 @@ export async function readTranscriptAsync(
   return parsePage(lines, await countTranscriptAsync(lines), options)
 }
 
-/** 拿到计数之后真正组装一页（两个入口共用这一段，分页与截断的口径因此不会分叉）。 */
+/** 拿到计数之后真正组装一页（两个入口共用这一段，分页与截断的标准因此不会分叉）。 */
 function parsePage(lines: readonly string[], counts: TranscriptCounts, options: TranscriptOptions): TranscriptPage {
   const headerLine = lines[0]
   if (headerLine === undefined) throw new Error('session log is empty')

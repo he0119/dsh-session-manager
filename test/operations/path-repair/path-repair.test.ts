@@ -1,9 +1,9 @@
-// test/operations/path-repair/path-repair.test.ts — 修已落地日志里"别的机器留下的路径"：推源根、算计划、落地。
+// test/operations/path-repair/path-repair.test.ts — 修已应用日志里"别的机器留下的路径"：推源根、算计划、应用。
 //
 // 三条判据要钉死：
 //   1) 源根是从日志里推出来的（末段与会话根同名的那个前缀），推不出就让调用方用 from 给；
 //   2) 只要有取值映射不上，这条会话就整条不修（半修等于没修，宿主照样读不出来）；
-//   3) 落地是"备份 → 原子替换 → 复验"，复验不过时原文件一个字节都没动。
+//   3) 应用是"备份 → 原子替换 → 复验"，复验不过时原文件一个字节都没动。
 import assert from 'node:assert/strict'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -124,7 +124,7 @@ test('算计划：给 from 就不推，按给的根算', async () => {
   rmSync(sandboxDir('path-repair-from'), { recursive: true, force: true })
 })
 
-test('落地：备份原字节、原子替换、复验通过；再算一遍计划是空的', async () => {
+test('应用：备份原字节、原子替换、复验通过；再算一遍计划是空的', async () => {
   const base = sandboxDir('path-repair-apply')
   const root = join(base, 'sessions')
   rmSync(base, { recursive: true, force: true })
@@ -155,7 +155,7 @@ test('落地：备份原字节、原子替换、复验通过；再算一遍计�
   rmSync(base, { recursive: true, force: true })
 })
 
-test('落地：写盘前复验不过就抛，原文件一个字节都不动（不留半成品）', async () => {
+test('应用：写盘前复验不过就抛，原文件一个字节都不动（不留半成品）', async () => {
   const base = sandboxDir('path-repair-guard')
   const root = join(base, 'sessions')
   rmSync(base, { recursive: true, force: true })
@@ -166,7 +166,7 @@ test('落地：写盘前复验不过就抛，原文件一个字节都不动（�
   const plan = await planPathRepair([session], { decodeAll })
   assert.equal(plan.sessions[0]!.problem, undefined)
 
-  // 故意换一个"写坏的压缩器"：帧里的内容被截短，落盘前那一份就不对了。
+  // 故意换一个"写坏的压缩器"：帧里的内容被截短，写入磁盘前那一份就不对了。
   const broken = (text: string): Buffer => encodeRawFrame(text.slice(0, Math.max(text.length - 3, 0)))
   await assert.rejects(
     async () => applyPathRepair(plan.sessions, { decodeAll, compressFrame: broken }),

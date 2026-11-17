@@ -18,7 +18,7 @@ Status: implemented
 | 单元 | 多帧原语、首帧边界、**多帧感知守卫会拒绝 `node:zlib`** | `test/shared/log/zstd-frame.test.ts` |
 | 单元 | 保结构改写只动 header；拒绝错 `cwd` / 非 header / 首帧多行 | `test/shared/log/session-log.test.ts` |
 | 单元 | 启动四条不变式逐类可抓；`reHome` 前后校验 | `test/shared/registry.test.ts` |
-| 单元 | 迁移编排：预演只读、dry-run 零写入、执行后复核、回滚还原、**备份目录越界一律拒** | `test/operations/migrate/migrate.test.ts` |
+| 单元 | 迁移编排：预览只读、dry-run 零写入、执行后复核、回滚还原、**备份目录越界一律拒** | `test/operations/migrate/migrate.test.ts` |
 | 产物契约 | 按模块加载器契约执行 `lib/client.js`：导出面、Slot、字典键集、四个分页、两级标记 | `test/plugin/client.test.mjs` |
 | 宿主契约 | 在**真实 Cordis fiber** 里加载 `lib/index.js`：激活、可选服务探测、八条路由挂上、卸载摘干净 | `test/plugin/artifact.test.mjs` |
 | 端到端 | 沙箱内造多帧日志 + 注册表，跑 `plan → apply → verify → rollback`，断言**逐字节**还原 | `test/operations/migrate/engine.test.ts` |

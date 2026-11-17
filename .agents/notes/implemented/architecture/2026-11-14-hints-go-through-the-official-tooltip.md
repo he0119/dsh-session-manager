@@ -36,8 +36,8 @@ Status: implemented
 
 - 提示立刻出、跟主题走、键盘聚焦也出；长提示在气泡里换行，不再被窗口边裁掉。
 - 气泡 `portal` 到 body 外：祖先的 `overflow` 与层叠上下文不再影响它。
-- 测试替身把 `Tooltip` 原样返回（DOM 与线上一致），用例改成读 `Hint` 元素的 `text`（`hintOfClass` /
+- 测试假对象把 `Tooltip` 原样返回（DOM 与线上一致），用例改成读 `Hint` 元素的 `text`（`hintOfClass` /
   `hintAround`），不再读 DOM 上的 `title`。
-- 官方 `Tag` 那条硬约束跟着改口径：标签挂外层 span 仍然是为了 `flex: none`、限宽截断、行高对齐，
+- 官方 `Tag` 那条硬约束跟着改标准：标签挂外层 span 仍然是为了 `flex: none`、限宽截断、行高对齐，
   提示改由 `Hint` 给（见 `AGENTS.md` 与 `docs/design.md` §6）。
 - 真实 dev 页面上核过：把鼠标停在同一行的标题上，气泡在下方出现且不被列表卡片的 `overflow` 裁掉。

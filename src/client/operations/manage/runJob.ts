@@ -57,7 +57,7 @@ export interface RunState {
    *
    * 一条流程从头到尾一个宽度：从「做事那一面」（导入面、备份与回滚、同步面，都是 1080）发起的动作，
    * 状态窗与结果页也停在 1080；从确认弹窗（640）发起的就停在 640。否则同一条流程里窗口会先宽后窄，
-   * 看着像换了一件事（口径见 design.md 的「执行与结果」）。
+   * 看着像换了一件事（标准见 design.md 的「执行与结果」）。
    */
   wide: boolean
 }
@@ -122,7 +122,7 @@ export function startRun<T>(
     options.onChange?.(done)
   }
   void work((progress) => {
-    // 只认还在跑的那一趟：请求那边已经给了结论之后，迟到的进度不该把界面改回"在跑"（与 syncJob 同一个口径）。
+    // 只认还在跑的那一趟：请求那边已经给了结论之后，迟到的进度不该把界面改回"在跑"（与 syncJob 同一个标准）。
     if (current === null || current.kind !== kind || !current.running) return
     current = { ...current, progress }
     emit()

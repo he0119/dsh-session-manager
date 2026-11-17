@@ -1,7 +1,7 @@
 // test/operations/sync/session-diff.test.ts — 两条日志的比对：共同到哪条、之后各自写了什么、header 差在哪。
 //
 // 这份比对是"同一个 id 两边各自写过"那条路上**人做决定**的依据，所以三件事要钉死：
-//   1) 共同前缀按原文逐行算，header 不参与（迁移落地会改写 cwd，那不算"事件分叉"）；
+//   1) 共同前缀按原文逐行算，header 不参与（迁移应用会改写 cwd，那不算"事件分叉"）；
 //   2) 尾巴的三种关系分得清：续写（一边是另一边的逐字节前缀）与真分叉不是一回事；
 //   3) 预览只是"够认出来"，条数、字节数、没列出来的数目都必须如实。
 import assert from 'node:assert/strict'
@@ -9,7 +9,7 @@ import test from 'node:test'
 
 import { DEFAULT_DIFF_PREVIEW, diffSessionLogs } from '../../../src/operations/sync/session-diff.ts'
 
-/** header：只有 `cwd` 按参数变（迁移落地改的就是它）。 */
+/** header：只有 `cwd` 按参数变（迁移应用改的就是它）。 */
 const header = (cwd = '/home/uy_sun/dev/a'): string =>
   JSON.stringify({ type: 'session', version: 4, id: 'session-abc', createdAt: 1791456394217, cwd, isSeeded: false })
 
@@ -158,7 +158,7 @@ test('比对：坏行的条数由调用方给（两边的解析问题各算各�
 const dirChange = (seq: number, cwd: string): string => ev(seq, 'working-directory/change', { cwd })
 
 test('比对：只差"跟着会话根搬的路径"时仍算同一份（不算两边各写过）', () => {
-  // 同一条会话：本机这份落地时把工作目录改成了本机路径，远端那份还是另一台机器的写法。
+  // 同一条会话：本机这份应用时把工作目录改成了本机路径，远端那份还是另一台机器的写法。
   const local = [header('/home/me/repo'), ...shared, dirChange(3, '/home/me/repo/.agents/worktrees/fix/x'), user(4, '继续')]
   const remote = [header('C:\\work\\repo'), ...shared, dirChange(3, 'C:\\work\\repo\\.agents\\worktrees\\fix\\x'), user(4, '继续')]
   const diff = diffSessionLogs(local, remote, facts())

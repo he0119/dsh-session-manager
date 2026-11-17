@@ -1,7 +1,7 @@
 // 导入导出这两条端点：读完一个包 / 打出一个包，中间按事件流报进度。
 //
-// 边界都在宿主这一侧：包必须自校验通过、冲突只跳过不覆盖、目标目录必须真实存在。编排（打包、预演、
-// 落地）在 transfer.ts，这里只负责 HTTP 形状：读参数、翻成那边认识的请求、把结果按 JSON 或事件流回给
+// 边界都在宿主这一侧：包必须自校验通过、冲突只跳过不覆盖、目标目录必须真实存在。编排（打包、预览、
+// 应用）在 transfer.ts，这里只负责 HTTP 形状：读参数、翻成那边认识的请求、把结果按 JSON 或事件流回给
 // 界面。
 //
 // @module dsh-session-manager/operations/transfer/http
@@ -128,18 +128,18 @@ function fileName(count: number, at: Date): string {
       targetCwd,
       registry: registry ?? undefined,
       registryPath: paths.registryPath,
-      // 预演的每条会话要显示标题：包里的日志已经整份在内存里，折叠一次比再读盘便宜
+      // 预览的每条会话要显示标题：包里的日志已经整份在内存里，折叠一次比再读盘便宜
       // （见 transfer.bundleTitle）。
       decodeAll,
-      // 附件库里那些对象的去处在宿主手里（见 ApiDeps.attachments）；没有这个端口时计划里那几条一律
-      // 报 unavailable，包里的日志照旧落地。
+      // 附件库里那些对象的去处在宿主手里（见 ApiDeps.attachments）；没有这个接口时计划里那几条一律
+      // 报 unavailable，包里的日志照旧导进去。
       attachments: attachmentPort(),
     }
 
     /*
-     * 计划与落地都走事件流：包本身的字节是**请求体**（上传那一段宿主报不了，那是浏览器与网络的事），
-     * 但收到之后还有几段长的——预演要逐条读包里的日志折标题（实测 250 条 / 70.9 MB 约 1.7 秒）、数
-     * 一遍包里的附件对象在不在本机，落地要逐条写盘并改写首帧 cwd（同一条包实测 18.9 秒）。这几段原来
+     * 计划与应用都走事件流：包本身的字节是**请求体**（上传那一段宿主报不了，那是浏览器与网络的事），
+     * 但收到之后还有几段长的——预览要逐条读包里的日志折标题（实测 250 条 / 70.9 MB 约 1.7 秒）、数
+     * 一遍包里的附件对象在不在本机，应用要逐条写盘并改写首帧 cwd（同一条包实测 18.9 秒）。这几段原来
      * 界面上只有一句「导入中…」。
      */
     await streamResult(res, async (report) => {
@@ -168,8 +168,8 @@ function fileName(count: number, at: Date): string {
 
       if (!apply) return { ...payload, ok: plan.ok }
       /*
-       * 一件都不会发生时不必走落地：会话都在库里，包里的附件对象本机也一个不缺。**只缺附件**那种
-       * （日志早就导过、图是挂的）要放行——那正是这次要修的那个现状，落地那一步会把缺的对象补上，
+       * 一件都不会发生时不必走应用：会话都在库里，包里的附件对象本机也一个不缺。**只缺附件**那种
+       * （日志早就导过、图是挂的）要放行——那正是这次要修的那个现状，应用那一步会把缺的对象补上，
        * 一个日志字节都不覆盖。
        */
       if (plan.created.length === 0 && plan.attachmentAdds === 0) {
@@ -191,7 +191,7 @@ function fileName(count: number, at: Date): string {
           : undefined
         /*
          * 导进来的会话从没在本机活过，宿主的投影检查点里没有它们：侧边栏会显示"未命名"、时间退回
-         * createdAt，直到被点开一次。这里请宿主自己冷读一遍补上（逐条兜住失败，不影响落地结论，
+         * createdAt，直到被点开一次。这里请宿主自己冷读一遍补上（逐条兜住失败，不影响应用结论，
          * 见 checkpoint-warm.ts）。
          */
         const warm = await warmCheckpoints(outcome.written, { hostCheckpoints }, report)
@@ -211,7 +211,7 @@ function fileName(count: number, at: Date): string {
           ...(outcome.written.length === 0 ? {} : { warm }),
           note: [
             effect === undefined
-              ? '会话已落盘（这次没有改注册表）：宿主重新扫描后就会出现在侧边栏，不需要重启。'
+              ? '会话已写入磁盘（这次没有改注册表）：宿主重新扫描后就会出现在侧边栏，不需要重启。'
               : describeEffect(effect),
             describeWarm(warm),
           ]

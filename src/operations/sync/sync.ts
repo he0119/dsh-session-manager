@@ -1,4 +1,4 @@
-// src/operations/sync/sync.ts — 把 WebDAV 当**运输层**的会话同步（计划与落地）。
+// src/operations/sync/sync.ts — 把 WebDAV 当**运输层**的会话同步（计划与应用）。
 //
 // 远端不是"库"，只是一批包加一份索引：
 //
@@ -10,10 +10,10 @@
 // MKCOL 自建。
 //
 // 为什么远端不能直接放会话库：库里的目录名是 `projectKey(cwd)`，header 里的 `cwd` 又与目录名绑死
-// （见 paths.ts）。两台机器的同一个项目路径不同，字节级的库互不相认。所以这里只放大包，落地一律
+// （见 paths.ts）。两台机器的同一个项目路径不同，字节级的库互不相认。所以这里只放大包，应用一律
 // 走 `transfer.ts` 的 `planImport/applyImport`——由它把 `cwd` 改写成**这台机器**的路径。
 //
-// 落地目录要先归一成**宿主存的那个拼写**（`canonicalize`，见 canonical-path.ts）：仓库根来自
+// 目标目录要先归一成**宿主存的那个拼写**（`canonicalize`，见 canonical-path.ts）：仓库根来自
 // `git rev-parse --show-toplevel`（Windows 上是 `C:/…`），映射值来自用户手输，而宿主把工作区路径
 // 与会话 cwd 都存成 `fs.realpath` 归一之后的样子、并按字符串相等比成员资格。不归一的话同一个目录
 // 会多出一条谁也不认的工作区记录（那条记录登记的那些会话全被滤掉，界面上是个空工作区）。
@@ -21,16 +21,16 @@
 // 为什么一机一格：WebDAV 没有锁，多台机器共写一份 `index.json` 就是"后写的盖掉先写的"。每台机器
 // 只写自己那一格、读别人的全部，就不需要锁。
 //
-// 预演与落地是**两次调用、两份数据**：`prepareSync()` 算计划，并把落地真正要用的输入（本机整库、远端
+// 预览与应用是**两次调用、两份数据**：`prepareSync()` 算计划，并把应用真正要用的输入（本机整库、远端
 // 索引、项目身份、比对过的指纹、投影缓存那两件事）一起留下；界面按下确认之后由 `syncPrepared()` 拿
-// 那份数据落地，不再把同一份计划重算一次。那份数据会旧（它描述的是预演那一刻），所以落地前先由
+// 那份数据应用，不再把同一份计划重算一次。那份数据会旧（它描述的是预览那一刻），所以应用前先由
 // `stalePlanReason()` 验一遍"本机与远端还是不是那个样子"：对得上就照它走，对不上就从零重算一遍
 // （宁慢不错——覆盖本机那份会撤掉本机目录，判据旧了会丢内容）。`runSync()` 是单次调用那条路
 // （工具层与老调用方），算完就用。
 //
-// 冲突口径：**空白不搬运，两边都有按"谁更新"择新**。
+// 冲突标准：**空白不搬运，两边都有按"谁更新"择新**。
 //
-//   - 空白会话（宿主投影缓存判 `blank`，与迁移页同一条口径：建出来但一轮都没开始过）本机不会上传，
+//   - 空白会话（宿主投影缓存判 `blank`，与迁移页同一条标准：建出来但一轮都没开始过）本机不会上传，
 //     也会从这台机器自己的那份索引里撤下来——它没有内容可同步，别的机器也就不必再看到它；反过来，
 //     本机这条是空白而远端那条有内容时，以远端为准（空的没什么可保的）。
 //   - 同一 id 两边都有：内容一致不动；本机严格领先（远端确实是本机这份的前缀）重新推送刷新；
@@ -38,14 +38,14 @@
 //     投影缓存里的两枚钟（`lastPromptAt` 最后一次提问、`timeContext.lastMessageTime` 最后一条消息，
 //     取晚的那枚），远端那份取索引里记的同一个值。远端更新就把本机那份**先备份再换掉**（走导入那条
 //     编排，理由见下面 pull 的说明）；本机更新就把自己这一格刷成最新。两边的时间有一个读不到（老索引
-//     没这个字段、宿主没挂投影缓存）就退回旧口径：不动，只在报告里说清。
+//     没这个字段、宿主没挂投影缓存）就退回旧标准：不动，只在报告里说清。
 //
 // 为什么要那枚细的钟：只比"最后一次提问"时，"推送之后本机又跑了几轮、两边的日志各自长出来"这种
 // 情况两边的提问时间往往一模一样，于是最该分高下的场合反而判不出来（本机这份被日志重写切过之后尤其
 // 如此）。`lastMessageTime` 把 agent 自己写进去的也算进去，正好补这一段。
 //
 // 为什么"谁更新"用的是宿主折出来的活动时间而不是文件修改时间：文件的 mtime 经不起复制（下载、
-// 解包、备份还原都会把它抹平），而这两枚钟与日志内容同生共死，落地改写 cwd 时也不受影响。
+// 解包、备份还原都会把它抹平），而这两枚钟与日志内容同生共死，应用改写 cwd 时也不受影响。
 // 判据仍然**不**拿时间反推"谁是祖先"：代次那边的四种关系是结构性的，时间只在结构判不出来时分高下。
 
 import { createHash, randomUUID } from 'node:crypto'
@@ -78,7 +78,7 @@ import { readBundleAsync, entryBytes, buildBundleAsync, type ImportOptions, plan
 import { type RemoteWriteGate, createRemoteWriteGate } from './remote-write.ts'
 
 /**
- * 这条会话落地到本机的哪个目录：先取本机这条的 cwd 归一，缺席才把远端记的 cwd 按同步映射（或本机
+ * 这条会话应用到本机的哪个目录：先取本机这条的 cwd 归一，缺席才把远端记的 cwd 按同步映射（或本机
  * 仓库）翻过来。"覆盖本机那份"与裁决"以远端为准"两处用的是同一把尺子。
  */
 function resolveLandedCwd(
@@ -99,7 +99,7 @@ function resolveLandedCwd(
 
 /**
  * 真分叉那一句怎么开头：说清"各自写了对方没有的条目"与各自多几条（内容关系在手就带条数），不再拿
- * "两边各自写过"当桶名——续写的对已经走 `local-ahead`/`remote-ahead`，说的都是"谁续写了几条"。
+ * "两边各自写过"当分组名——续写的对已经走 `local-ahead`/`remote-ahead`，说的都是"谁续写了几条"。
  */
 function forkText(content: ContentRelation | undefined, machine: string): string {
   if (content === undefined) return '同一个 id 两边各自写了对方没有的条目'
@@ -113,7 +113,7 @@ export type NewerSide = 'local' | 'remote' | 'unknown'
  * 比"谁更新"：本机那份的活动时间与远端索引里记的那个。
  *
  * 两边都拿得到才下结论，缺一个就是 `unknown`——**不下手**好过按半个事实覆盖掉一份；两边一样新也
- * 归 `unknown`（同一次活动各写各的，随手挑一个赢家会凭空丢掉另一份）。这几种都退回旧口径：报告里
+ * 归 `unknown`（同一次活动各写各的，随手挑一个赢家会凭空丢掉另一份）。这几种都退回旧标准：报告里
  * 说清是"远端更新"还是"各自写了对方没有的条目"，但一个字节都不动。
  *
  * @param mine 本机那份的最后活动时间（`activeAt()` 折出来的；缺席 = 不知道）。
@@ -152,7 +152,7 @@ export function remoteActiveAt(entry: { lastActiveAt?: number; lastPromptAt?: nu
  * 为什么要有这一条：代次相同、内容不同（两边各自从同一份往下写）在 `relation()` 眼里就是 `diverged`，
  * 而它只比代次集合与哈希，比不出谁更长。远端合并两格副本时若只按活动时间判，而两边都没记那枚钟
  * （旧版同步推上去的记录、或投影缓存里没有），就只能退回"格子名排序取第一个"——那跟谁更新毫无关系。
- * 一条会话在 A 上写过、被 B 拉下来继续写、B 再推上去，之后 A 的格子名恰好排在前面，每次预演都会说
+ * 一条会话在 A 上写过、被 B 拉下来继续写、B 再推上去，之后 A 的格子名恰好排在前面，每次预览都会说
  * "本机续写了 N 条，重推刷新"，推完还是同一句，永远收敛不了。日志是追加写，同代次更长的那份确实
  * 就是更新的那份，用它当第一判据比格子名可靠。
  *
@@ -184,7 +184,7 @@ export function newerSide(mine: number | undefined, theirs: number | undefined):
  * 「两份都保留」时谁占原来的 id，以及为什么。
  *
  * 只有 `remote-newer` 是"远端那份占 id"：比不出来（旧索引没有那枚钟、或者两边一样）、以及更晚的是
- * 远端那份但它这次落不了地，都由本机这份占。
+ * 远端那份但它这次写不进去地，都由本机这份占。
  */
 type BothKeeper = 'local-newer' | 'remote-newer' | 'remote-blocked' | 'unknown'
 
@@ -202,7 +202,7 @@ function bothNote(why: BothKeeper, machine: string): string {
     case 'remote-newer':
       return `两份都保留：${machine} 那份更晚，占住原来的 id（本机那份落成一条新会话）`
     case 'remote-blocked':
-      return `两份都保留：${machine} 那份更晚，但它这次落不了地（缺映射、目标目录不存在或会话正开着），改由本机这份占住原来的 id（${machine} 那份落成一条新会话）`
+      return `两份都保留：${machine} 那份更晚，但它这次写不进去地（缺映射、目标目录不存在或会话正开着），改由本机这份占住原来的 id（${machine} 那份落成一条新会话）`
     case 'unknown':
       return `两份都保留：比不出哪份更晚，由本机这份占住原来的 id（${machine} 那份落成一条新会话）`
   }
@@ -214,7 +214,7 @@ export interface SyncPullEntry {
   title?: string
   /** 包里的原 cwd。 */
   fromCwd?: string
-  /** 落盘后的 cwd（没有 cwd 的会话没有这一项，落 `_no-cwd`）。 */
+  /** 写入磁盘后的 cwd（没有 cwd 的会话没有这一项，落 `_no-cwd`）。 */
   toCwd?: string
   /** 贡献这条的机器。 */
   machine: string
@@ -237,7 +237,7 @@ export interface SyncPullEntry {
     /** 别处删过了、远端这份比那次删除更旧：不拉回来（见 `SyncDeletedEntry`）。 */
     | 'deleted'
   /**
-   * 落选的本机那份也要留（只有「两份都保留」的裁决才置它）：落地时落成一条新会话，原 id 让给远端那份。
+   * 落选的本机那份也要留（只有「两份都保留」的裁决才置它）：应用时落成一条新会话，原 id 让给远端那份。
    * 缺席 = 只留远端那份，本机这份先备份再被顶掉。
    */
   keepLoser?: true
@@ -257,7 +257,7 @@ export interface SyncPushEntry {
   /** 远端那一份由哪台机器贡献（"远端领先 / 两边各自写过"要指名道姓）。 */
   machine?: string
   /**
-   * 落选的远端那份也要留（只有「两份都保留」的裁决才置它）：落地时把远端那份落成一条新会话，
+   * 落选的远端那份也要留（只有「两份都保留」的裁决才置它）：应用时把远端那份落成一条新会话，
    * 原 id 仍由本机这份占着。缺席 = 只留本机这份，远端那份不落到本机。
    */
   keepLoser?: true
@@ -356,7 +356,7 @@ export interface SyncPlanInput {
   /**
    * 两边各自写过时的裁决（会话 id → 留哪一份）。
    *
-   * 三种口径见 `SyncDecision`：选单边时另一份不留（本机那份先备份再被顶掉；远端那份不落到本机）；
+   * 三种标准见 `SyncDecision`：选单边时另一份不留（本机那份先备份再被顶掉；远端那份不落到本机）；
    * 选「两份都保留」时另一份落成一条**新会话**（新 id，标题带「原标题 · 来自 <机器> <时刻>」的来源
    * 标记，见 `branchSessionLog()`），占原 id 的那份按最后活动时间定。缺席 = 这条没有裁决，照旧两条
    * 都不动（`diverged`）。
@@ -370,18 +370,18 @@ export interface SyncPlanInput {
    * 身份 → 本机仓库根（`repoLocation()` 扫出来的）。
    *
    * 两张表的分工：`mapping` 是用户显式配的（他说了算），`repos` 是从本机磁盘上认出来的项目。显式的
-   * 先赢——配了映射就按映射落地，不会因为"本机恰好也有这个仓库"而改道。两边都没有就跳过（照旧）。
+   * 先赢——配了映射就按映射应用，不会因为"本机恰好也有这个仓库"而改道。两边都没有就跳过（照旧）。
    */
   repos?: ReadonlyMap<string, string>
   /** 算指纹；计划阶段只对"两边都有"的会话算（整库哈希不该被白算）。 */
   hashFile?: (path: string, version: number, compression: string | null) => FileFingerprint
-  /** 目标目录是不是真的存在（映射对不上真实目录就不落地）。 */
+  /** 目标目录是不是真的存在（映射对不上真实目录就不应用）。 */
   isDirectory?: (path: string) => boolean
   /**
    * 读这条本机会话的空白与最后活动时间（宿主投影缓存；见 visibility.ts 的 `SessionMeta`）。
    *
    * 缺席 = 两件事都不知道：空白按"非空白"处理（宁可不判，也不把用户看得见的会话悄悄踢出同步），
-   * 活动时间按"比不出来"处理（退回"不动"）。这与迁移页那边 `resolveBlank` 缺席时的口径一致。
+   * 活动时间按"比不出来"处理（退回"不动"）。这与迁移页那边 `resolveBlank` 缺席时的标准一致。
    */
   sessionMeta?: (session: DiscoveredSession) => SessionMeta | undefined
   /**
@@ -392,9 +392,9 @@ export interface SyncPlanInput {
    */
   isLive?: (id: string) => boolean
   /**
-   * 把落地目录换成宿主存的那个拼写（缺省 `canonicalDir`，见 canonical-path.ts）。
+   * 把目标目录换成宿主存的那个拼写（缺省 `canonicalDir`，见 canonical-path.ts）。
    *
-   * 计划里报的 `toCwd` 与落地用的必须是同一个字符串，所以归一发生在**计划**这一层：预演看到的目标、
+   * 计划里报的 `toCwd` 与应用用的必须是同一个字符串，所以归一发生在**计划**这一层：预览看到的目标、
    * 改写进 header 的 cwd、注册表里那条记录的 `path` 因此是同一份值。可注入是为了让计划这条纯计算的
    * 测试不必真建目录。
    */
@@ -409,7 +409,7 @@ export interface SyncPlanInput {
 }
 
 /**
- * 本机仓库根 + 仓库内相对路径 → 落地目录。
+ * 本机仓库根 + 仓库内相对路径 → 目标目录。
  *
  * 相对路径来自**别的机器**（那边记的是 POSIX 分隔符），这里交给 `join` 归一化：同一平台内是拼路径，
  * 跨平台时 `join` 会把 `/` 当分隔符处理，落到本机该有的形状。
@@ -495,13 +495,13 @@ export function planSync(input: SyncPlanInput): SyncPlan {
       continue
     }
     if (entry.cwd === undefined) {
-      // 没有 cwd 的会话不硬塞一个：照着包里的样子落 `_no-cwd`，也不进注册表（与导入同一条口径）。
+      // 没有 cwd 的会话不硬塞一个：照着包里的样子落 `_no-cwd`，也不进注册表（与导入同一条标准）。
       pull.push({ ...base, action: 'create', code: 'missing' })
       pullIds.push(id)
       bytesIn += bytes
       continue
     }
-    // 落地顺序：显式映射（用户配了就算数）→ 仓库身份 + 仓库内相对路径（配置不必每台机器一份）→ 跳过。
+    // 应用顺序：显式映射（用户配了就算数）→ 仓库身份 + 仓库内相对路径（配置不必每台机器一份）→ 跳过。
     const viaRepo = entry.repo === undefined ? undefined : input.repos?.get(entry.repo)
     const picked =
       input.mapping.get(entry.cwd) ??
@@ -613,14 +613,14 @@ export function planSync(input: SyncPlanInput): SyncPlan {
      * 分高下，而空白那份不用比分——它没有内容可保。
      */
     /*
-     * 裁决优先于"比谁新"：两边各自写过时用户已经挑好留哪一份。三种口径：
+     * 裁决优先于"比谁新"：两边各自写过时用户已经挑好留哪一份。三种标准：
      *   - `keep-local`：只留本机这份——远端那份不落到本机（它还在原来那台机器上）；
      *   - `keep-remote`：只留远端那份——本机这份先备份再被顶掉；
      *   - `keep-both`：两份都留——最后活动时间更晚的那份占原来的 id，另一份落成一条新会话。
      * 空白那份与结构性的"远端领先"不在此列：前者没有内容可保，后者本来就不是分叉。
      */
     const asked = isBlank || kind === 'remote-ahead' ? undefined : input.decisions?.get(session.id)
-    /** 落地那一步要用的目录（裁决"留远端那份"要它；与"覆盖本机那份"同一把尺子）。 */
+    /** 应用那一步要用的目录（裁决"留远端那份"要它；与"覆盖本机那份"同一把尺子）。 */
     const target = resolveLandedCwd(input, session, remote)
     /** 远端那份这次真落得下来吗：缺映射、映射指到的目录不存在、会话正开着都算落不下来。 */
     const remoteLands = (): boolean => {
@@ -632,7 +632,7 @@ export function planSync(input: SyncPlanInput): SyncPlan {
      * 「两份都保留」为什么由这一方占原 id：比最后活动时间（与"谁更新"同一个值）。
      *
      * 三种退化都归到"本机占"：比不出来（旧索引没记这枚钟、或者两边一样）、以及更晚的是远端那份但它
-     * 这次落不了地。后者不能就这么把行降成"不动"——那等于按了按钮什么也没发生；本机占 id 那份总能
+     * 这次写不进去地。后者不能就这么把行降成"不动"——那等于按了按钮什么也没发生；本机占 id 那份总能
      * 推上去，两份内容也都还在。
      */
     let both: BothKeeper | undefined
@@ -667,7 +667,7 @@ export function planSync(input: SyncPlanInput): SyncPlan {
       continue
     }
     if (decision === 'keep-remote') {
-      // 落不了地的两种情形照旧拦下（与"覆盖本机那份"那两道拦同一口径）：没有映射、或映射指到的目录不存在。
+      // 写不进去地的两种情形照旧拦下（与"覆盖本机那份"那两道拦同一标准）：没有映射、或映射指到的目录不存在。
       if (target === undefined && remote.cwd !== undefined) {
         push.push({
           ...common,
@@ -739,7 +739,7 @@ export function planSync(input: SyncPlanInput): SyncPlan {
         continue
       }
       /*
-       * 落地目录：**本机这条自己的 cwd 优先**。这条会话在本机已经有家（还有工作区登记），不该因为
+       * 目标目录：**本机这条自己的 cwd 优先**。这条会话在本机已经有家（还有工作区登记），不该因为
        * 远端记着另一条路径就把它搬走；本机这条没有 cwd 时才按"显式映射 → 仓库身份"认，与新建拉取
        * 同一条路。两种来路都要归一：本机这条的 cwd 也可能是宿主不认的另一种拼写（分隔符、大小写、
        * 结尾分隔符）。
@@ -789,7 +789,7 @@ export function planSync(input: SyncPlanInput): SyncPlan {
       bytesIn += bytes
       continue
     }
-    // 分叉、且有一边读不到活动时间（老索引 / 宿主没挂投影缓存）：退回旧口径，两条都不动，理由是"比不出来"。
+    // 分叉、且有一边读不到活动时间（老索引 / 宿主没挂投影缓存）：退回旧标准，两条都不动，理由是"比不出来"。
     push.push({
       ...common,
       action: 'skip',
@@ -840,7 +840,7 @@ export function planSync(input: SyncPlanInput): SyncPlan {
  * **拉取整表摘掉**。`plan.pull` 不是"远端有什么"，而是"这次要往**本机**放什么"（含"覆盖本机那份"）。
  * 只推的那条路上一个字都不该落到本机——无人在场，而覆盖本机是这个插件里唯一会撤掉本机已有内容的
  * 动作。连同 `pullIds` 与 `bytesIn` 一起清掉，消费方（界面、工具返回值、进度分母）读到的就是同一
- * 件事：这次没有落地。
+ * 件事：这次没有应用。
  *
  * **推送表逐条过滤**，留下的恰好是"本机这一侧确实领先"的那几类：
  *   - `upload` / `missing`（远端没有）：本机独有，推送时只有新增；
@@ -856,8 +856,8 @@ export function planSync(input: SyncPlanInput): SyncPlan {
  * 摘掉的行不进 `blank`：`blank` 是"空白会话"专用的名单，混进"因为只推所以不推"的条目就把两件事说成
  * 一件了。
  *
- * **`problems` 里那两条"目录不存在"要改写**：它们是拉取侧算落地目录时记下的（映射指到了一个不存在的
- * 目录），而只推的这条路**不看落地目录**——那个坑在这次动作里根本不存在，留着它会让自动推送在界面上
+ * **`problems` 里那两条"目录不存在"要改写**：它们是拉取侧算目标目录时记下的（映射指到了一个不存在的
+ * 目录），而只推的这条路**不看目标目录**——那个坑在这次动作里根本不存在，留着它会让自动推送在界面上
  * 报一个与它无关的错，甚至按 `ok: false` 拦住整轮。原文改成一句把因果说清的话：它只影响拉取。
  *
  * @param plan 已经算完的两张表（就地收窄）。
@@ -896,7 +896,7 @@ const MISSING_TARGET_RE = /^同步映射把 (.*) 指到了 (.*)，但那不是�
 function missingTargetProblem(problem: string): string | undefined {
   const matched = MISSING_TARGET_RE.exec(problem)
   if (matched === null) return undefined
-  return `同步映射把 ${matched[1]} 指到了 ${matched[2]}，那个目录在不在不影响这次推送（只有拉取才要落地目录）`
+  return `同步映射把 ${matched[1]} 指到了 ${matched[2]}，那个目录在不在不影响这次推送（只有拉取才要目标目录）`
 }
 
 /**
@@ -908,9 +908,9 @@ function missingTargetProblem(problem: string): string | undefined {
  *
  * 六段（`phase`）各有各的分母，合起来算一个百分比只会骗人：算计划要先扫本机、再读远端索引、再逐个
  * 目录认本机仓库的身份（真机量到这一段比前两段加起来还长：13 个目录跑一轮 `git rev-parse` 约
- * 0.2 秒）、最后逐条比对内容，然后落地再分拉与推两段（先拉的 3 条与后推的 84 条同样不是一个分母）。
- * **预演报的是前四段**；落地那一次要么照着预演那份数据直接走（只多报一条 `remote`——它要重读一次远端
- * 索引，验数据有没有变），要么（数据变了、或这次没有预演数据）从零重算一遍、把那四段照报一遍。所以
+ * 0.2 秒）、最后逐条比对内容，然后应用再分拉与推两段（先拉的 3 条与后推的 84 条同样不是一个分母）。
+ * **预览报的是前四段**；应用那一次要么照着预览那份数据直接走（只多报一条 `remote`——它要重读一次远端
+ * 索引，验数据有没有变），要么（数据变了、或这次没有预览数据）从零重算一遍、把那四段照报一遍。所以
  * 按下确认到第一条拉取之间总有一条东西在动，不会对着一动不动的按钮干等。
  */
 /**
@@ -918,18 +918,18 @@ function missingTargetProblem(problem: string): string | undefined {
  *
  * `done` 是**已经做完**的条数——事件发在开始处理下一条之前，所以正在处理的是第 `done + 1` 条。
  *
- * 六段各有各的分母：`scan` / `remote` / `repo` / `compare` 是算计划的四段（预演就有），
+ * 六段各有各的分母：`scan` / `remote` / `repo` / `compare` 是算计划的四段（预览就有），
  * `pull` / `push` 是真写盘的两段。`id` 与 `label` 只有写盘那两段有（"正在处理某一条"），算计划那四段
  * 只报做到哪儿。
  */
 export type SyncProgress = ProgressEvent
 
-/** 落地的结果。 */
+/** 应用的结果。 */
 export interface SyncOutcome {
   plan: SyncPlan
   /** 这次是不是真的写盘了（`apply` 为 false 时全是只读）。 */
   applied: boolean
-  /** 拉取并落盘的会话 id。 */
+  /** 拉取并写入磁盘的会话 id。 */
   pulled: string[]
   /**
    * 其中**覆盖掉本机原来那份**的会话 id（它们是 `pulled` 的子集）。
@@ -948,7 +948,7 @@ export interface SyncOutcome {
    * 附件对象那一段（远端共享库里搬的那些），按**对象**计而不是按引用计：同一个对象被多条会话引用只
    * 搬一次。宿主没有附件服务时两项都缺席——界面据此什么都不说，而不是报一串 0。
    *
-   * 只有真跑（`applied`）时才有意义；预演那一步不知道远端有哪些对象（远端索引里只记日志的指纹，
+   * 只有真跑（`applied`）时才有意义；预览那一步不知道远端有哪些对象（远端索引里只记日志的指纹，
    * 见 `prepareSync()`），所以计划里报不出这个数。
    */
   attachmentIn?: SyncAttachmentIn
@@ -975,7 +975,7 @@ export interface SyncOutcome {
   tidy?: SyncTidyResult
   /**
    * 拉取改的那几笔注册表有没有被宿主接住（见 take-effect.ts）：`undefined` = 这次没写注册表
-   * （预演或纯推送）。
+   * （预览或纯推送）。
    */
   effect?: EffectOutcome
   /**
@@ -984,9 +984,9 @@ export interface SyncOutcome {
    */
   warm?: WarmOutcome
   /**
-   * 这次落地走的哪条路（只有"先预演、后确认"那条路会写它）。
+   * 这次应用走的哪条路（只有"先预览、后确认"那条路会写它）。
    *
-   * 单次调用（工具层那一次 `apply:true`，没有"预演那份"这回事）没有这一项。
+   * 单次调用（工具层那一次 `apply:true`，没有"预览那份"这回事）没有这一项。
    */
   planSource?: SyncPlanSource
   problems: string[]
@@ -1017,9 +1017,9 @@ export interface SyncLeftover {
  * 2. **其它问题**：`plan.problems` 与 `outcome.problems` 的原话（映射指错、远端索引读不动、整理失败
  *    这几类），它们不属于某一条会话，原样列出。
  *
- * 完全一样的句子只留一条（计划与落地两段可能算出同一句）。
+ * 完全一样的句子只留一条（计划与应用两段可能算出同一句）。
  *
- * @param outcome 一次同步（预演或落地）的结论。
+ * @param outcome 一次同步（预览或应用）的结论。
  * @returns 点名与否的条目；一件事都没有时是空数组。
  */
 export function collectLeftovers(outcome: SyncOutcome): SyncLeftover[] {
@@ -1060,9 +1060,9 @@ export function collectLeftovers(outcome: SyncOutcome): SyncLeftover[] {
 }
 
 /**
- * 落地走的是哪条路（见 `SyncOutcome.planSource`）。
+ * 应用走的是哪条路（见 `SyncOutcome.planSource`）。
  *
- * - `reused`：预演之后本机与远端一个字节都没变，**照着预演那份计划落地**——不再扫库、不再比对内容、
+ * - `reused`：预览之后本机与远端一个字节都没变，**照着预览那份计划应用**——不再扫库、不再比对内容、
  *   也不再把项目身份重问一遍；`plan` 就是用户确认过的那一份（见 `syncPrepared()`）。
  * - `recomputed`：有一处对不上（`reason` 说明是哪一处），这次从零重算了一遍计划，`plan` 是新的那份。
  */
@@ -1113,7 +1113,7 @@ export interface SyncDeps extends EffectDeps, WarmDeps {
   /**
    * 文件内容指纹（见 `createFingerprintCache()`）。
    *
-   * 缺省用进程里那一份（键：路径 + size + mtimeMs）：日志只在会话被写时才变，两次预演之间绝大多数
+   * 缺省用进程里那一份（键：路径 + size + mtimeMs）：日志只在会话被写时才变，两次预览之间绝大多数
    * 文件一个字节都没动，没必要再读、再解、再哈希一遍。
    */
   fingerprint?: FingerprintOf
@@ -1121,7 +1121,7 @@ export interface SyncDeps extends EffectDeps, WarmDeps {
    * 这次是**只推不拉**（自动推送那条路，见 `runAutoPush()`）。
    *
    * 缺席 = false：界面与工具那两条手动路照旧两个方向都做。它只影响算计划那一步（`planSync()` 据此
-   * 摘掉拉取与"覆盖本机"），落地那一侧不需要分支——一份没有拉取的计划，落地自然只剩推与收尾。
+   * 摘掉拉取与"覆盖本机"），应用那一侧不需要分支——一份没有拉取的计划，应用自然只剩推与收尾。
    */
   pushOnly?: boolean
   /**
@@ -1142,12 +1142,12 @@ export interface SyncDeps extends EffectDeps, WarmDeps {
   /**
    * 内容关系那份额外的缓存（同步里"两边各自写过"那些对的对法）。
    *
-   * 缺省用进程里那一份（见 `contentRelationCache`）；测试要用"每一轮互不影响"的口径时注入一份新的。
+   * 缺省用进程里那一份（见 `contentRelationCache`）；测试要用"每一轮互不影响"的标准时注入一份新的。
    */
   relationCache?: Map<string, ContentRelation>
 }
 
-/** 读注册表；读不到按"没有注册表"处理（会话照旧落地，只是不进工作区分组）。 */
+/** 读注册表；读不到按"没有注册表"处理（会话照旧可用，只是不进工作区分组）。 */
 function readRegistryLoose(path: string): { registry?: WorkspaceRegistryState; problem?: string } {
   try {
     const registry = readRegistry(path)
@@ -1180,28 +1180,28 @@ function repoCandidates(deps: SyncDeps, local: readonly DiscoveredSession[]): st
 }
 
 /**
- * 预演算出来的那份数据：**落地要用的东西全在里面**，确认之后照着它走，不再重算（见 `syncPrepared()`）。
+ * 预览算出来的那份数据：**应用要用的东西全在里面**，确认之后照着它走，不再重算（见 `syncPrepared()`）。
  *
  * 为什么把计划与它的输入一起留下：算一次计划的四段（扫本机 / 读远端索引 / 逐个候选目录问 git / 逐条
  * 比对内容）里，后三段全是要等的活——真机量到 13 个候选目录跑一轮 `git rev-parse` 约 0.2 秒，比对要
- * 读完每一条要参与的日志。预演已经做过一遍，落地再走一遍只是把同样的结论重算一次。
+ * 读完每一条要参与的日志。预览已经做过一遍，应用再走一遍只是把同样的结论重算一次。
  *
- * 这份数据描述的是**预演那一刻**的本机与远端，本身会旧：落地之前由 `stalePlanReason()` 验一遍，
+ * 这份数据描述的是**预览那一刻**的本机与远端，本身会旧：应用之前由 `stalePlanReason()` 验一遍，
  * 对不上就从零重算（分叉在 `syncPrepared()`）。
  */
 export interface SyncPrepared {
-  /** 预演算出来的计划。 */
+  /** 预览算出来的计划。 */
   plan: SyncPlan
   /** 本机整库（`scanAllAsync()` 的结果）。 */
   local: DiscoveredSession[]
-  /** 读回来的远端索引（落地不再读第二遍）。 */
+  /** 读回来的远端索引（应用不再读第二遍）。 */
   remote: RemoteLibrary
   /** 项目身份：本机目录 → 仓库根。 */
   repos: Map<string, string>
   /**
-   * 目录 → 仓库位置：预演问过 git 的那些。
+   * 目录 → 仓库位置：预览问过 git 的那些。
    *
-   * 落地推一条会话时要往自己那份索引里写它的项目身份，本来每个目录还要再问一次 git。身份是"这条会话
+   * 应用推一条会话时要往自己那份索引里写它的项目身份，本来每个目录还要再问一次 git。身份是"这条会话
    * 属于哪个项目"的机器无关说法，几秒钟之内不会变，而且是给别的机器看的提示——写旧一版不会让谁的
    * 会话落错地方。
    */
@@ -1211,36 +1211,36 @@ export interface SyncPrepared {
   /**
    * 比对阶段算过的内容指纹（日志路径 → 指纹）。
    *
-   * 落地推这些会话时要把它写进自己那份索引：照预演那份走时那些字节已经验过没变，直接用它，不再读
+   * 应用推这些会话时要把它写进自己那份索引：照预览那份走时那些字节已经验过没变，直接用它，不再读
    * 第二遍。
    */
   fingerprints: Map<string, FileFingerprint>
   /**
-   * 预演判过的"两边各自写过"那几对的内容关系（会话 id → 关系）。
+   * 预览判过的"两边各自写过"那几对的内容关系（会话 id → 关系）。
    *
    * 改一次裁决就要重算计划（那一对从"分叉、都不动"变成推或拉）。关系已经读回来了——读远端包、解压、
    * 比对，一对大日志就是一两秒——重算只该换 `decisions` 再跑一遍纯计算（见 `replanPrepared()`），不能
    * 把这一趟重做。
    */
   relations: Map<string, ContentRelation>
-  /** 预演那一刻的事实快照（只用来判"变了没有"，不参与任何判定）。 */
+  /** 预览那一刻的事实快照（只用来判"变了没有"，不参与任何判定）。 */
   facts: SyncFacts
   /**
    * 这份计划是"只推不拉"算出来的（见 `SyncPlanInput.pushOnly`）。
    *
-   * 落地那一步要看它：只推这份计划里没有一条拉取，所以"落地"实际上只剩"推 + 重写自己那格的索引"。
+   * 应用那一步要看它：只推这份计划里没有一条拉取，所以"应用"实际上只剩"推 + 重写自己那格的索引"。
    * 留这一项给报告与测试一个可断言的形状——否则"这次为什么什么都没拉"只能从两张空表里反推。
    */
   pushOnly: boolean
 }
 
-/** 预演那一刻本机与远端的事实：`stalePlanReason()` 拿它与眼下的一刻比。 */
+/** 预览那一刻本机与远端的事实：`stalePlanReason()` 拿它与眼下的一刻比。 */
 interface SyncFacts {
   /**
    * 那份计划是在哪套输入下算出来的：远端地址、机器名、映射表与三个库位置。
    *
    * 为什么它也算"事实"：界面这次确认时，宿主会**重新解析**一遍同步设置（映射表、机器名都从配置现读），
-   * 拿旧的映射表落地就是把会话落到用户刚改掉的那个目录以外的地方。凭据不进这份摘要——它只影响读远端，
+   * 拿旧的映射表应用就是把会话落到用户刚改掉的那个目录以外的地方。凭据不进这份摘要——它只影响读远端，
    * 换了凭据会在远端指纹那一步露出来。
    */
   settings: string
@@ -1273,10 +1273,10 @@ function settingsDigest(deps: SyncDeps): string {
 }
 
 /**
- * 一条日志文件的"预演那一刻长什么样"。
+ * 一条日志文件的"预览那一刻长什么样"。
  *
  * `mtimeMs` 缺席 = 这一份验不了（stat 失败，或者扫描时读到的字节数与这次 stat 对不上）：调用方按
- * "不新鲜"处理——宁可重算一遍，也不要照着一份来历不清的指纹落盘。
+ * "不新鲜"处理——宁可重算一遍，也不要照着一份来历不清的指纹写入磁盘。
  */
 function fileFact(file: SessionLogFile): SyncFacts['local'][number]['files'][number] {
   try {
@@ -1290,7 +1290,7 @@ function fileFact(file: SessionLogFile): SyncFacts['local'][number]['files'][num
 /**
  * 远端那份索引的指纹：把计划会读到的每个字段按确定的顺序拼出来再哈希。
  *
- * 比的是"预演与落地之间远端有没有被动过"（见 `stalePlanReason()`）。为什么不直接
+ * 比的是"预览与应用之间远端有没有被动过"（见 `stalePlanReason()`）。为什么不直接
  * `JSON.stringify()` 那份索引：文件是别的机器写的，键的顺序不在我们手里。
  *
  * 只拼各机器自己的索引：`entries`（联集）是从它们推出来的，索引一样、联集就一样。
@@ -1336,9 +1336,9 @@ function defaultFingerprintOf(decodeAll: DecodeAll): FingerprintOf {
 }
 
 /**
- * 算一份计划，并且把**落地要用的输入一起留下**。
+ * 算一份计划，并且把**应用要用的输入一起留下**。
  *
- * 预演走它，落地也走它（后者拿到的那份数据交给 `applyPreparedSync()`）。四段各有各的分母：
+ * 预览走它，应用也走它（后者拿到的那份数据交给 `applyPreparedSync()`）。四段各有各的分母：
  * `scan` / `remote` / `repo` / `compare`。
  *
  * @param deps 远端、设置与本地库的位置。
@@ -1386,7 +1386,7 @@ export async function prepareSync(
    */
   const git = deps.git ?? defaultGitRunner
   const sharedLocate = deps.repoLocations ?? createRepoLocationCache(git)
-  // 这一趟问过哪些目录也记下来：落地照这份清单接着用（见 `SyncPrepared.located`）。
+  // 这一趟问过哪些目录也记下来：应用照这份清单接着用（见 `SyncPrepared.located`）。
   const located = new Map<string, Promise<RepoLocation | undefined>>()
   const locate = (dir: string): Promise<RepoLocation | undefined> => {
     const cached = located.get(dir)
@@ -1407,12 +1407,12 @@ export async function prepareSync(
       if (found !== undefined && !repos.has(found.repo)) repos.set(found.repo, found.root)
     }
   }
-  // 指纹走"与 cwd 无关"的那份：落地会改写 cwd，按字节比会把拉取来的那份判成"两边各自写过"。
-  // 同一份文件在两次预演之间没动时，`fingerprint`（缺省那个带缓存的）直接给上一次的值。
+  // 指纹走"与 cwd 无关"的那份：应用会改写 cwd，按字节比会把拉取来的那份判成"两边各自写过"。
+  // 同一份文件在两次预览之间没动时，`fingerprint`（缺省那个带缓存的）直接给上一次的值。
   const fingerprintOf = deps.fingerprint ?? defaultFingerprintOf(deps.decodeAll)
   const contentHash = (path: string, version: number, compression: string | null): FileFingerprint =>
     fingerprintOf(path, version, compression)
-  /** 比对阶段算过的指纹：落地写回自己那份索引时直接用它（见 `SyncPrepared.fingerprints`）。 */
+  /** 比对阶段算过的指纹：应用写回自己那份索引时直接用它（见 `SyncPrepared.fingerprints`）。 */
   const fingerprints = new Map<string, FileFingerprint>()
   //
   // 第四段（比对）的分母：**两边都有**的那些会话的文件数。本机独有的那些只算字节、不读内容，
@@ -1461,7 +1461,7 @@ export async function prepareSync(
     }
   }
   /*
-   * 投影缓存那两件事（空白、最后活动时间）按会话读一次就够：算计划要它、写回索引时还要它、落地前
+   * 投影缓存那两件事（空白、最后活动时间）按会话读一次就够：算计划要它、写回索引时还要它、应用前
    * 验"有没有变"也要它。宿主没给这个口子（工具层在没挂投影缓存的宿主上就是这样）时什么都不读，
    * 两件事都按"不知道"处理。
    */
@@ -1470,7 +1470,7 @@ export async function prepareSync(
    * 这条本机会话的空白与两枚活动时间。
    *
    * 扫描已经读过那条投影记录（`session.meta`）就直接折，不再碰文件；调用方显式注入了 `sessionMeta`
-   * 时以它为准。按 id 记一次：算计划要它、写回索引时还要它、落地前验"有没有变"也要它。
+   * 时以它为准。按 id 记一次：算计划要它、写回索引时还要它、应用前验"有没有变"也要它。
    */
   const metaOfSession = (session: Pick<DiscoveredSession, 'id' | 'createdAt' | 'cwd' | 'meta'>): SessionMeta | undefined => {
     if (deps.sessionMeta === undefined) return sessionMetaOfRecord(session.meta)
@@ -1528,7 +1528,7 @@ export async function prepareSync(
         const remoteFile = bundled === undefined ? undefined : [...bundled.files].sort((l, r) => r.version - l.version)[0]
         const localFile = [...session.files].sort((l, r) => r.version - l.version)[0]
         if (remoteFile === undefined || localFile === undefined) continue
-        // 与差异页同一口径：读宿主也读的那一份（最高代次）。
+        // 与差异页同一标准：读宿主也读的那一份（最高代次）。
         const mine = await readFile(localFile.path)
         const theirs = entryBytes(bundle, remoteFile)
         const diff = diffSessionLogs(
@@ -1587,8 +1587,8 @@ export async function prepareSync(
   plan.ok = plan.problems.length === 0
 
   /*
-   * 事实快照：只记"预演那一刻是什么样"。代次文件、投影缓存那两件事、远端索引的指纹都取自这一刻的读取
-   * 结果——落地前比这三样，比得上就说明"照着这份计划走"与"现在重算一遍"是同一件事。
+   * 事实快照：只记"预览那一刻是什么样"。代次文件、投影缓存那两件事、远端索引的指纹都取自这一刻的读取
+   * 结果——应用前比这三样，比得上就说明"照着这份计划走"与"现在重算一遍"是同一件事。
    */
   const facts: SyncFacts = {
     settings: settingsDigest(deps),
@@ -1612,13 +1612,13 @@ export async function prepareSync(
  * 为什么要有它：同步弹窗里每改一次「以本机为准 / 以远端为准」，计划表就要跟着变（那一对从"分叉、两边都
  * 不动"变成推或拉）。原来这条路是重新走一遍 `prepareSync()`——重扫本机、重读远端索引、重问 git、重算
  * 比对的指纹，几秒起步；而它需要的输入（本机清单、远端索引、项目身份、内容指纹、那几对的内容关系）在
- * 预演那一刻已经全部算出来了，改的只是 `decisions` 这一个参数。计划本身是纯计算（`planSync`），几十
+ * 预览那一刻已经全部算出来了，改的只是 `decisions` 这一个参数。计划本身是纯计算（`planSync`），几十
  * 毫秒就够。
  *
- * @param prepared 上一次预演留下的那份（`prepareSync()` 的返回值）。
+ * @param prepared 上一次预览留下的那份（`prepareSync()` 的返回值）。
  * @param deps 只用到设置（映射表与机器名）、活会话与投影记录这几个读法；不会碰磁盘或网络。
  * @param decisions 新的裁决表；缺省 = 不替任何一对挑正本。
- * @returns 换过计划的那一份；其余输入原样带过去（落地的指纹、事实快照都还用得上）。
+ * @returns 换过计划的那一份；其余输入原样带过去（应用的指纹、事实快照都还用得上）。
  */
 export function replanPrepared(
   prepared: SyncPrepared,
@@ -1627,8 +1627,8 @@ export function replanPrepared(
 ): SyncPrepared {
   const normalized = normalizeMapping(deps.settings.mapping)
   /*
-   * 指纹只查预演算过的那一份：日志没变的话那个值就是眼下这一份（落地前还会再验一遍事实）。查不到
-   * （预演之后新出现的文件）才现算——那是少数，且只在真的要比对时才走到。
+   * 指纹只查预览算过的那一份：日志没变的话那个值就是眼下这一份（应用前还会再验一遍事实）。查不到
+   * （预览之后新出现的文件）才现算——那是少数，且只在真的要比对时才走到。
    */
   const hashFile = (path: string, version: number, compression: string | null): FileFingerprint =>
     prepared.fingerprints.get(path) ?? contentFingerprint(path, version, compression, deps.decodeAll)
@@ -1655,9 +1655,9 @@ export function replanPrepared(
 }
 
 /**
- * 只预演的那份结果（界面与工具层两条路共用同一个形状）。
+ * 只预览的那份结果（界面与工具层两条路共用同一个形状）。
  *
- * @param prepared 预演算出来的那份数据。
+ * @param prepared 预览算出来的那份数据。
  * @returns `applied: false` 的结果：计划在里面，写盘那几项全空。
  */
 export function plannedOutcome(prepared: SyncPrepared): SyncOutcome {
@@ -1749,18 +1749,18 @@ export async function removeRemoteCopies(deps: RemoteCopiesPort, ids: readonly s
 }
 
 /**
- * 照着预演那份数据落地：拉取、覆盖、收口、推送、重写自己那份索引。
+ * 照着预览那份数据应用：拉取、覆盖、统一处理、推送、重写自己那份索引。
  *
  * 拉取那一侧复用 `planImport/applyImport`（与设置页的「导入」是同一条路），所以包的自校验、
- * `.part` 落地、注册表重挂、`_no-cwd` 的口径都不用在这里重写一遍：同步只是"从哪儿拿包"与
+ * `.part` 应用、注册表重挂、`_no-cwd` 的标准都不用在这里重写一遍：同步只是"从哪儿拿包"与
  * "往哪儿放包"这两件事不同。
  *
- * 这一段几乎不问宿主任何东西：会话库、投影缓存、内存里活着的会话都在预演那一刻的输入里，项目身份也
- * 接着用预演问过的那些目录（预演一个身份条目都没见过时它一个目录都没问，那几条要推的目录这时候才问
+ * 这一段几乎不问宿主任何东西：会话库、投影缓存、内存里活着的会话都在预览那一刻的输入里，项目身份也
+ * 接着用预览问过的那些目录（预览一个身份条目都没见过时它一个目录都没问，那几条要推的目录这时候才问
  * 一次 git）。所以调用方要么刚算完（`runSync()`），要么先验过那份数据还作数（`syncPrepared()`）。
  *
  * @param deps 远端、设置与本地库的位置。
- * @param prepared 预演那份数据。
+ * @param prepared 预览那份数据。
  * @param options.onProgress 每开始处理一条调一次（`pull` / `push` 两段）。
  * @returns 结果；单条失败只记进 `problems`，不半路放弃整次同步。
  */
@@ -1776,8 +1776,8 @@ export async function applyPreparedSync(
   const problems: string[] = []
   const { plan, local, remote } = prepared
   /*
-   * 整理远端：只算"自己那一格里多余的那些"，删的动作放在索引写完之后（见下面的注释）。预演那次不算它，
-   * 那次不改远端；界面在预演里看到的数字由 `/sync` 那一侧按同一份远端索引算一遍。
+   * 整理远端：只算"自己那一格里多余的那些"，删的动作放在索引写完之后（见下面的注释）。预览那次不算它，
+   * 那次不改远端；界面在预览里看到的数字由 `/sync` 那一侧按同一份远端索引算一遍。
    */
   const tidyPlan = options.tidy === true ? planTidy(remote, deps.settings.machineId) : undefined
   const tidyIds = new Set((tidyPlan?.entries ?? []).map((entry) => entry.id))
@@ -1789,7 +1789,7 @@ export async function applyPreparedSync(
    *
    * 顺序照删除那条路：**先备份，备份不成功就一条都不删**（备份是唯一一份能恢复的副本），再删目录，
    * 最后把这台机器那一格里的包删掉。注册表不动：宿主把"登记了但日志不在"当正常状态（与 remove.ts
-   * 同一条口径）。
+   * 同一条标准）。
    */
   const deletedIds = new Set(plan.deletedIds)
   const deletedNow: string[] = []
@@ -1863,16 +1863,16 @@ export async function applyPreparedSync(
   const reportAttachments = (label?: string): AttachmentReporter => (done, total, ref) =>
     emit({ phase: 'attach', done, total, id: ref.id, ...(label === undefined ? {} : { label }) })
   /**
-   * 预演比对时算过的指纹直接接着用（同一个字节数、同一个 mtime，落地之前验过）。
+   * 预览比对时算过的指纹直接接着用（同一个字节数、同一个 mtime，应用之前验过）。
    *
-   * 本机独有的那些预演时没算过（它们不进比对，算它才是白花），这里现算——只有真推送的那几条。
+   * 本机独有的那些预览时没算过（它们不进比对，算它才是白花），这里现算——只有真推送的那几条。
    */
   const fingerprintOf = deps.fingerprint ?? defaultFingerprintOf(deps.decodeAll)
   const contentHash = (path: string, version: number, compression: string | null): FileFingerprint =>
     prepared.fingerprints.get(path) ?? fingerprintOf(path, version, compression)
-  /** 投影缓存那两件事用预演读出来的那一份（落地不再问宿主）。 */
+  /** 投影缓存那两件事用预览读出来的那一份（应用不再问宿主）。 */
   const metaOf = (session: Pick<DiscoveredSession, 'id'>): SessionMeta | undefined => prepared.meta.get(session.id)
-  /** 项目身份接着用预演问过 git 的那些；预演没问过的目录（远端一个身份条目都没有时它不问）现在问。 */
+  /** 项目身份接着用预览问过 git 的那些；预览没问过的目录（远端一个身份条目都没有时它不问）现在问。 */
   const git = deps.git ?? defaultGitRunner
   const sharedLocate = deps.repoLocations ?? createRepoLocationCache(git)
   const located = new Map(prepared.located)
@@ -1896,12 +1896,12 @@ export async function applyPreparedSync(
   let bytesIn = 0
   let bytesOut = 0
   let registryWritten = false
-  /** 拉取改的那几笔注册表（按执行顺序），整批落地之后一起交给宿主。 */
+  /** 拉取改的那几笔注册表（按执行顺序），整批应用之后一起交给宿主。 */
   const registryChanges: RegistryChange[] = []
   /*
    * 附件对象那一段：远端共享库里搬的那些（见 `SYNC_ATTACHMENTS_DIR`）。端口**这一次现探**，整批共用
    * 一个取值——中途到达/消失的服务在两台机器之间翻转的话，中途换端口只会让同一批里前后两条会话按不同
-   * 的口径落地。宿主没有这个服务（`port === undefined`）时下面几步全部跳过，包与索引与升级前逐字节
+   * 的标准应用。宿主没有这个服务（`port === undefined`）时下面几步全部跳过，包与索引与升级前逐字节
    * 一致。
    */
   const port = deps.attachments?.()
@@ -2027,7 +2027,7 @@ export async function applyPreparedSync(
         registryPath: deps.registryPath,
         decodeAll: deps.decodeAll,
         // 远端那份包万一是自带的（旧版同步推的、或别人手工放上去的），导入那条路照旧把它当成随包带
-        // 来的对象落地；这一版推送的包只有日志，下面那一步负责从共享库补。
+        // 来的对象应用；这一版推送的包只有日志，下面那一步负责从共享库补。
         ...(port === undefined ? {} : { attachments: port }),
       }
       /*
@@ -2064,7 +2064,7 @@ export async function applyPreparedSync(
    *
    * 三步的顺序是安全边界，不是风格：包取不到 / 坏了就一个字节都不动本机那份；备份不成功同样一条都不
    * 动（备份是旧那份**唯一**的副本，`kind: 'replace'` 见 journal.ts）。只有前两步都过了才落到"撤掉
-   * 旧目录、按导入落地"。
+   * 旧目录、按导入应用"。
    *
    * 为什么要先撤掉整个目录、而不是逐文件覆盖：同一目录里留着旧代次就是坏数据（宿主把目录里的代次
    * 一起读进来），而新旧两份的代次名可能重合、也可能不重合，逐文件覆盖两种都处理不对。
@@ -2155,18 +2155,18 @@ export async function applyPreparedSync(
   }
 
   // ── 让宿主认下这批改动：拉取会把会话挂到目标工作区（改注册表），与迁移是同一条语义。
-  //    整批落地之后按顺序收口一次，而不是每条会话各来一遍。注册表终态一并交过去：宿主没接住时
+  //    整批应用之后按顺序统一处理一次，而不是每条会话各来一遍。注册表终态一并交过去：宿主没接住时
   //    它会用内存副本盖掉这次写盘，那时得靠这份终态写回来（见 take-effect.ts 的 `restoreRegistry()`）。
   const effect = registryWritten
     ? await takeEffectOnHostAll(registryChanges, deps, { registry })
     : undefined
   /*
-   * ── 接着请宿主把这批会话的列表元数据折出来（同一个收口点）─────────────────────
+   * ── 接着请宿主把这批会话的列表元数据折出来（同一个统一处理点）─────────────────────
    *
    * 侧边栏那一行的名字不来自日志：宿主对"从没在本机活过"的会话只读它自己持久化的投影检查点，读不到就
    * 显示"未命名"；而检查点只在活的会话（创建 / `turn/end` / 释放）时被写。拉取来的会话恰好两样都不占，
    * 于是标题、空白判据、最后活动时间一起缺——最后这一样还会让下一次同步的"谁更新"判不出来。详见
-   * checkpoint-warm.ts：这一步只是把宿主自己的冷读走一遍，失败逐条兜住，不影响上面的落地结论。
+   * checkpoint-warm.ts：这一步只是把宿主自己的冷读走一遍，失败逐条兜住，不影响上面的应用结论。
    */
   const warm = await warmCheckpoints(pulled, deps)
 
@@ -2194,7 +2194,7 @@ export async function applyPreparedSync(
    *   - **空白会话**：没有内容可贡献，留着它只会让别的机器把它拉走；
    *   - **刚换成远端那份的**：本机这份现在是别人那份内容，自己这格的旧记录（以及那个包）描述的是
    *     已经不在的那份，留着会让"同一个 id 有多台贡献"那条判据去比两份不同的指纹。
-   * 例外是从**自己这格**换回来的那条：那格的记录描述的正是刚落地这份内容（判据与 cwd 无关），留着是
+   * 例外是从**自己这格**换回来的那条：那格的记录描述的正是刚应用这份内容（判据与 cwd 无关），留着是
    * 对的——撤掉反而会让远端整个少一条会话。
    */
   for (const id of plan.blank) ownEntries.delete(id)
@@ -2247,7 +2247,7 @@ export async function applyPreparedSync(
        *
        * 顺序照着"先对象、后包"：包一到位，别的机器立刻就能拉到这条会话并按它去找对象（对象先齐，
        * 那一侧才不会出现"会话在、图是挂的"）。中途失败只记问题，包照旧推——一个对象传不上去不该把
-       * 整条会话挡在同步之外（与导入那条路同一个口径）。
+       * 整条会话挡在同步之外（与导入那条路同一个标准）。
        */
       /*
        * 这条会话引用过哪些对象：推送要传的那一份，同时记进自己那一格的索引——别的机器补对象时读索引
@@ -2274,7 +2274,7 @@ export async function applyPreparedSync(
         },
       })
       await deps.dav.put(remoteBundlePath(deps.settings.machineId, entry.id), bundle)
-      // 身份是"这条会话属于哪个项目"的机器无关说法：别的机器凭它 + 仓库内相对路径落地，不必配映射。
+      // 身份是"这条会话属于哪个项目"的机器无关说法：别的机器凭它 + 仓库内相对路径应用，不必配映射。
       const found = session.cwd === undefined ? undefined : await locate(session.cwd)
       // 活动时间跟着记录一起上去：别的机器靠它判"两边各自写过时谁更新"（见 planSync 与 readRemoteLibrary）。
       const meta = metaOf(session)
@@ -2346,7 +2346,7 @@ export async function applyPreparedSync(
     let orphansRemoved = 0
     let bytes = tidyPlan.bytes
     for (const entry of tidyPlan.entries) {
-      // 每开始删一个就报一次（`done` 是已完成的条数，与其它段同一套口径）；名字带标题，界面那行
+      // 每开始删一个就报一次（`done` 是已完成的条数，与其它段同一套标准）；名字带标题，界面那行
       // 小字才不是一串 id。
       emit({ phase: 'tidy', total, done, id: entry.id, label: byId.get(entry.id)?.title ?? entry.id })
       try {
@@ -2472,26 +2472,26 @@ function sameMeta(left: SessionMeta | undefined, right: SessionMeta | undefined)
 }
 
 /**
- * 这份预演数据还作不作数（作数 = 落地可以照着它走）。
+ * 这份预览数据还作不作数（作数 = 应用可以照着它走）。
  *
- * 判据只问"预演之后有没有东西变了"，不问"该不该照原来那份走"：计划是纯计算，输入没变，输出就一样。
+ * 判据只问"预览之后有没有东西变了"，不问"该不该照原来那份走"：计划是纯计算，输入没变，输出就一样。
  * 五处：
  *   1. **这份计划是在哪套输入下算的**（远端地址、机器名、映射表、三个库位置）：界面这次确认时宿主会重新
- *      解析同步设置，拿旧的映射表落地就会落到用户刚改掉的那个目录以外的地方；
- *   2. **本机的代次文件**：目录里的日志文件不多不少，每个文件的字节数与 mtime 都还是预演那一刻那个
+ *      解析同步设置，拿旧的映射表应用就会落到用户刚改掉的那个目录以外的地方；
+ *   2. **本机的代次文件**：目录里的日志文件不多不少，每个文件的字节数与 mtime 都还是预览那一刻那个
  *      ——"推哪几条"与内容比对都建立在它上面；
  *   3. **投影缓存那两件事**（空白、最后活动时间）：它们决定"这条参不参与""两边谁更新"，变了判定就
  *      可能翻过来；
- *   4. 计划里要**覆盖本机**的那几条，宿主这会儿还没拿在手里：预演时问过，隔了一会儿可能又活了。
+ *   4. 计划里要**覆盖本机**的那几条，宿主这会儿还没拿在手里：预览时问过，隔了一会儿可能又活了。
  *      那一步要撤掉本机那份目录，与删除拒掉活会话同一个理由；
  *   5. **远端那份索引**：别的机器推过东西就可能把判定翻过来，所以这里重读一次再比指纹。
  *
- * 为什么不按"预演过去多久了"判：按时间只能保证"不太旧"，而这里的判据是结构性的（集合与字节都对得
+ * 为什么不按"预览过去多久了"判：按时间只能保证"不太旧"，而这里的判据是结构性的（集合与字节都对得
  * 上），所以隔多久都能照走；反过来，只隔一秒但那条会话刚好又跑了一轮，这里也一定看得出来。预览之后
  * **新建**的会话不在判据里：它不在那份计划里，这次不参与（下一次同步会带上它）。
  *
  * @param deps 远端、设置与本地库的位置。
- * @param prepared 要验的那份预演数据。
+ * @param prepared 要验的那份预览数据。
  * @param options.onProgress 重读远端索引那一下报一条 `remote`（没有分母，见 `prepareSync()`）。
  * @returns 不能照它走的理由（一句给人看的话）；`undefined` = 还作数。
  */
@@ -2501,9 +2501,9 @@ export async function stalePlanReason(
   options: { onProgress?: ProgressReporter } = {},
 ): Promise<string | undefined> {
   const byId = new Map(prepared.local.map((session) => [session.id, session]))
-  // 第一件事：这份计划还是不是拿眼下这套设置算出来的（映射表变了，落地的目录就不是用户改后的那个）。
+  // 第一件事：这份计划还是不是拿眼下这套设置算出来的（映射表变了，应用的目录就不是用户改后的那个）。
   if (settingsDigest(deps) !== prepared.facts.settings) {
-    return '同步设置（远端地址 / 机器名 / 映射表 / 库位置）在预演之后改过'
+    return '同步设置（远端地址 / 机器名 / 映射表 / 库位置）在预览之后改过'
   }
   for (const fact of prepared.facts.local) {
     let names: string[]
@@ -2513,7 +2513,7 @@ export async function stalePlanReason(
       return `本机的 ${fact.id} 这条会话目录已经不在了`
     }
     if (names.sort().join('\n') !== fact.files.map((file) => file.name).sort().join('\n')) {
-      return `本机的 ${fact.id} 在预演之后多了一代或少了一代（代次文件变了）`
+      return `本机的 ${fact.id} 在预览之后多了一代或少了一代（代次文件变了）`
     }
     for (const file of fact.files) {
       let size = -1
@@ -2526,7 +2526,7 @@ export async function stalePlanReason(
         return `本机的 ${fact.id} 少了 ${file.name}`
       }
       if (file.mtimeMs === undefined || mtimeMs !== file.mtimeMs || size !== file.bytes) {
-        return `本机的 ${fact.id} 在预演之后又动过（${file.name} 与预演那一刻不是一个样子）`
+        return `本机的 ${fact.id} 在预览之后又动过（${file.name} 与预览那一刻不是一个样子）`
       }
     }
   }
@@ -2534,7 +2534,7 @@ export async function stalePlanReason(
     for (const fact of prepared.facts.local) {
       const session = byId.get(fact.id)
       if (session === undefined) continue
-      // 这里要的是**刚读到的**那一份（`byId` 来自重新扫一遍库），不是预演那一刻缓存下来的值。
+      // 这里要的是**刚读到的**那一份（`byId` 来自重新扫一遍库），不是预览那一刻缓存下来的值。
       const fresh =
         deps.sessionMeta === undefined
           ? sessionMetaOfRecord(session.meta)
@@ -2543,7 +2543,7 @@ export async function stalePlanReason(
               createdAt: session.createdAt,
               ...(session.cwd === undefined ? {} : { cwd: session.cwd }),
             })
-      if (!sameMeta(fact.meta, fresh)) return `本机的 ${fact.id} 在预演之后又动过（宿主那份列表元数据变了）`
+      if (!sameMeta(fact.meta, fresh)) return `本机的 ${fact.id} 在预览之后又动过（宿主那份列表元数据变了）`
     }
   }
   const live = deps.liveSessionIds?.()
@@ -2563,21 +2563,21 @@ export async function stalePlanReason(
   })
   const remote = await readRemoteLibrary(deps.dav, deps.settings)
   if (remoteDigest(remote) !== prepared.facts.remote) {
-    return '远端那份索引在预演之后变了（别的机器推过东西）'
+    return '远端那份索引在预览之后变了（别的机器推过东西）'
   }
   return undefined
 }
 
 /**
- * 落地一次同步：预演那份数据还作数就照着它走（不再重算），变了就从零重算一遍。
+ * 应用一次同步：预览那份数据还作数就照着它走（不再重算），变了就从零重算一遍。
  *
- * 这是界面那条路（先预演、后确认）的落地口，`planSource` 报的就是走的哪一条。工具层是单次调用，
- * 没有"预演那份"这回事，直接走 `runSync()`。
+ * 这是界面那条路（先预览、后确认）的应用口，`planSource` 报的就是走的哪一条。工具层是单次调用，
+ * 没有"预览那份"这回事，直接走 `runSync()`。
  *
  * @param deps 远端、设置与本地库的位置。
- * @param prepared 预演那份数据（`prepareSync()` 的返回值）。
+ * @param prepared 预览那份数据（`prepareSync()` 的返回值）。
  * @param options.onProgress 每开始处理一条调一次。
- * @returns 落地结果；`planSource.kind === 'recomputed'` 说明这次是重算的（`reason` 是哪一处对不上）。
+ * @returns 应用结果；`planSource.kind === 'recomputed'` 说明这次是重算的（`reason` 是哪一处对不上）。
  */
 export async function syncPrepared(
   deps: SyncDeps,
@@ -2602,14 +2602,14 @@ export async function syncPrepared(
 }
 
 /**
- * 单次跑完一次同步：算计划（落地时接着用它）。
+ * 单次跑完一次同步：算计划（应用时接着用它）。
  *
- * 工具层与老调用方走这条——一次调用里预演与落地是同一件事，没有"确认"这一步。界面那条"先预演、后
+ * 工具层与老调用方走这条——一次调用里预览与应用是同一件事，没有"确认"这一步。界面那条"先预览、后
  * 确认"的路分两次调用：`prepareSync()` + `syncPrepared()`。
  *
  * @param deps 远端、设置与本地库的位置。
  * @param options.apply 为 false 只算计划（除了读远端，什么都不写）。
- * @param options.onProgress 每开始处理一条调一次（见 `SyncProgress`）；预演与落地报的是同一套事件
+ * @param options.onProgress 每开始处理一条调一次（见 `SyncProgress`）；预览与应用报的是同一套事件
  *   （算计划的四段 + 写盘的两段）。回调同步调用、不 await，所以它自己不许抛。
  * @returns 结果；单条失败只记进 `problems`，不半路放弃整次同步。
  */
@@ -2633,7 +2633,7 @@ export async function runSync(
  * 自动推送这一轮跑没跑、跑成了什么。
  *
  * 形状刻意分两层：`ran` / `skip` 说"这一轮**动了没有、为什么没动**"，`outcome` 才是真跑之后那份
- * 落地结果（与手动同步同一个形状，界面因此能复用同一套解析）。不把两者揉成一个可选字段，是因为
+ * 应用结果（与手动同步同一个形状，界面因此能复用同一套解析）。不把两者揉成一个可选字段，是因为
  * "没跑"有三种完全不同的原因（没开、没到点、上一轮还在跑），界面上那三句话也不一样。
  */
 export interface AutoPushOutcome {
@@ -2641,7 +2641,7 @@ export interface AutoPushOutcome {
   ran: boolean
   /** 没跑的原因（机器可读，句子在浏览器半侧）。 */
   skip?: AutoPushSkip
-  /** 真跑了的落地结果。 */
+  /** 真跑了的应用结果。 */
   outcome?: SyncOutcome
   /** 真跑的开始与结束时刻（毫秒）；没跑就没有。 */
   startedAt?: number
@@ -2686,7 +2686,7 @@ export type AutoPushEvent =
  * 是"用户多半已经转头去干别的"的量级；代价是最后一轮之后最多晚 5 分钟才上云。依据见
  * [让自动推送等安静之后再跑](../../../.agents/notes/implemented/bug-fix/2026-10-22-auto-push-waits-for-quiet.md)。
  *
- * 落盘不靠这个窗口等：宿主侧在调 `touched()` 之前已经 `await sessions.flush(session)` 过了（见
+ * 写入磁盘不靠这个窗口等：宿主侧在调 `touched()` 之前已经 `await sessions.flush(session)` 过了（见
  * `src/tools.ts` 的 `attachAutoPushToSessions()`），窗口纯粹是"别在人还在的时候抢资源"。
  */
 export const AUTO_PUSH_QUIET_MS = 300_000
@@ -2720,7 +2720,7 @@ export interface AutoPushClock {
 /** `createAutoPushTimer()` 的依赖。 */
 export interface AutoPushTimerDeps {
   /**
-   * 跑一轮（`runAutoPush()` 的真身由调用方注入；测试注入一个记账的假实现）。
+   * 跑一轮（`runAutoPush()` 的真身由调用方注入；测试注入一个计数的假实现）。
    */
   run: (options?: { onProgress?: ProgressReporter }) => Promise<AutoPushOutcome>
   /** 当前配置（活引用现读）。 */
@@ -2754,7 +2754,7 @@ export interface AutoPushTimer {
    * 那一次是在 `await sessions.flush(session)` 之后调的，其余事件只算"还在活动"）。窗口内再来事件就
    * 把计时**重置**，所以一整段连着写的时间里一次都不推。
    *
-   * 关着的时候什么都不做：不排队、不记账——打开之后写的下一轮会照常触发，没有"欠着一次"这回事。
+   * 关着的时候什么都不做：不排队、不计数——打开之后写的下一轮会照常触发，没有"欠着一次"这回事。
    */
   touched(): void
   /** 最近一次结论（不碰网络）。 */
@@ -2843,7 +2843,7 @@ export function createAutoPushTimer(deps: AutoPushTimerDeps): AutoPushTimer {
     if (running !== undefined) return { ran: false, skip: 'busy', failures: failuresOf(lastOutcome) }
     if (!deps.clock.enabled()) return { ran: false, skip: 'disabled', failures: failuresOf(lastOutcome) }
     /*
-     * 别的入口正在写远端（手动同步落地、整理、删除远端、工具）：这一轮直接跳过，不排队。排队会让它
+     * 别的入口正在写远端（手动同步应用、整理、删除远端、工具）：这一轮直接跳过，不排队。排队会让它
      * 拿着读于排队之前的快照去写，反而更容易盖掉别人刚写进去的东西；下一轮安静窗口会自己再来。
      */
     const release = gate.tryAcquire('自动推送')
@@ -2950,12 +2950,12 @@ function failuresOf(outcome: AutoPushOutcome | undefined): number {
  *
  *   1. **只推不拉**（`pushOnly`）：计划里没有拉取、没有"覆盖本机"，所以这一轮**永远不改本机任何
  *      会话**。这不是省钱，是安全边界——覆盖本机那份要动本机已有内容，界面上那道动作前面挡着一个
- *      确认弹窗，后台不该绕过它。也正因为没有落地那一段，这一轮不必问宿主"这条还活着吗"、不必
+ *      确认弹窗，后台不该绕过它。也正因为没有应用那一段，这一轮不必问宿主"这条还活着吗"、不必
  *      备份、不写注册表、不请宿主重折投影检查点：那几件事全都挂在"真有东西落到本机"那条路上。
- *   2. **没有预演与确认**：一次调用算完就落地（`runSync()` 那条单次调用路），而**不是**
- *      `syncPrepared()`——那个是"照着用户确认过的那份计划落地"，后台没有用户确认过的东西。
+ *   2. **没有预览与确认**：一次调用算完就应用（`runSync()` 那条单次调用路），而**不是**
+ *      `syncPrepared()`——那个是"照着用户确认过的那份计划应用"，后台没有用户确认过的东西。
  *   3. **没得推也要收尾一次**：本机删掉的会话得从**自己那一格的索引**里消失，而今天那一步只在
- *      `applyPreparedSync()` 里（且总是会走到）。所以"计划里一条都不推"时仍要走一次落地——一份空的
+ *      `applyPreparedSync()` 里（且总是会走到）。所以"计划里一条都不推"时仍要走一次应用——一份空的
  *      计划，落下去只会重写索引。不这么做的话，删掉的会话会永远留在自己的格子索引里，别的机器照着
  *      它去取包时取到一个不存在的对象。
  *
@@ -2972,7 +2972,7 @@ function failuresOf(outcome: AutoPushOutcome | undefined): number {
  * 本机那格的索引里是不是还留着眼下**已经没有**的会话（见 `runAutoPush()` 的 `idle` 判据）。
  *
  * 判据是集合包含：索引里记着的每个 id 都得在本机现在的库里。本机删掉一条会话之后那个 id 就不在了，
- * 于是这一项为真——值得走一趟落地把索引刷新掉。反过来"本机新加了一条"不算（那时 `pushIds` 里有它，
+ * 于是这一项为真——值得走一趟应用把索引刷新掉。反过来"本机新加了一条"不算（那时 `pushIds` 里有它，
  * 走不到这个判据）。
  *
  * 只看**自己那一格**：别的机器的格子由它们自己维护，那些记录本来就不该由这里撤。
@@ -3011,7 +3011,7 @@ export async function runAutoPush(
   const mode = config.mode
   const startedAt = now()
   /*
-   * 三个条件都成立才是"真的没事干"（`idle`），此时连落地都不走：索引里要写的东西与远端那份逐字节
+   * 三个条件都成立才是"真的没事干"（`idle`），此时连应用都不走：索引里要写的东西与远端那份逐字节
    * 相同，再 PUT 一次只是白跑一趟网络。三条各自挡一种"看着没事、其实要收尾"的情形：
    *
    *   1. `pushIds` 非空 → 有会话要推；

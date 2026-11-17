@@ -1,14 +1,14 @@
 # 会话与同步的文件格式
 
-本文写三处落盘形态：本机会话库（宿主写、本包只读）、远端同步格子（本包写）、会话包 `.dshsess`
-（两边之间搬运的那一个）。字段是什么意思、落地前校验哪些不变式，都在这里；**为什么**这么定在
+本文写三处写入磁盘形态：本机会话库（宿主写、本包只读）、远端同步格子（本包写）、会话包 `.dshsess`
+（两边之间搬运的那一个）。字段是什么意思、应用前校验哪些不变式，都在这里；**为什么**这么定在
 [.agents/notes](../.agents/notes/AGENTS.md) 里，界面与样式的规格在 [design.md](design.md)。
 
 本机现在这个库：1436 条会话、日志合计 1097 MB。
 
 ## 本机会话库
 
-路径按宿主的约定（本包复刻同一套口径，见 [src/shared/paths.ts](../src/shared/paths.ts)）：
+路径按宿主的约定（本包复刻同一套标准，见 [src/shared/paths.ts](../src/shared/paths.ts)）：
 
 ```
 <会话根>/<projectKey(cwd)>/<encodeSegment(id)>/session.vN.jsonl.zstd
@@ -32,7 +32,7 @@
   `origin: "subagent"` 与 `parentSession`。宿主加载时核「目录名 ↔ header 里的 id 与 cwd」，对不上
   直接失败，所以搬会话改路径时这一行的 `cwd` 必须跟着改。正文里的旧路径属于历史事实，保持原样——
   **唯一的例外**是 `working-directory/change` 的 `data.cwd`：宿主拿它的最后一个值当这条会话的当前
-  工作目录，并要求在本机是绝对路径，别的机器（别的系统）的写法会让整条会话读不出来，所以导入落地与
+  工作目录，并要求在本机是绝对路径，别的机器（别的系统）的写法会让整条会话读不出来，所以导入应用与
   「修日志路径」会把**本机不认的**那些值跟着会话根一起改（见
   [决策](../.agents/notes/implemented/bug-fix/2026-11-13-imported-working-directory-paths.md)）。
 - **事件**（之后每行一条）：`type`、`seq`、`time`、`data`。常见的有 `user/message`、
@@ -88,7 +88,7 @@
 | `machineId` / `updatedAt` / `pluginVersion` | 谁写的、什么时候、哪一版插件；只用于排查，不参与判定 |
 | `entries[].files` | 每个代次一条 `{version, bytes, sha256}`：比对只看它，不必先下包 |
 | `entries[].cwd` | 那条会话在这台机器上的工作目录；拉取时按它找目标目录 |
-| `entries[].repo` / `repoPath` | 跨机器的项目身份（仓库 remote 归一之后）与会话 cwd 在仓库里的相对路径；没有映射时靠它落地 |
+| `entries[].repo` / `repoPath` | 跨机器的项目身份（仓库 remote 归一之后）与会话 cwd 在仓库里的相对路径；没有映射时靠它应用 |
 | `entries[].lastActiveAt` | 这条会话在这台机器上的最后活动时间（宿主投影里两枚钟取晚的那枚） |
 | `entries[].attachments` | 这条会话的日志引用过哪些附件对象（`{kind, id, name?}`，`id` 带 `sha256:` 前缀）。**空数组 = 查过、一个都没有**；缺席 = 还没查过（老版本写的，或写它的机器没有附件服务）。补对象那一步靠它决定"还缺哪些对象"，有它就不必把日志解压一遍 |
 | `deleted[]` | 这台机器删掉、并要求别再拉回来的那些会话（墓碑）：`{id, at}`，`at` 是删除时刻（毫秒）。同步据此不拉取比它旧的副本，并让别的机器把自己那份（比它旧的）跟着删掉。**缺席 = 一条都没删过**；老版本读不认它、写回时丢掉 |
@@ -161,9 +161,9 @@ gzip( 'DSHSESS1\n' | u32le 清单长度 | 清单 JSON | 各文件原始字节 | 
   2 GiB（`MAX_BUNDLE_RAW_BYTES`）；每个 `[offset, offset + bytes)` 落在载荷内、sha256 对得上；
   附件对象按它 id 里的 sha 核；`dirName` 必须等于 `encodeSegment(id)`（宿主要拿目录名与 header
   对得上）；`files[].name` 必须是 `parseSessionLogName()` 认得的单段规范名（`session.jsonl`、
-  `session.vN.jsonl`、可带 `.zstd`），且清单里的 `version` 与文件名里的代次一致——这一段是落盘路径
+  `session.vN.jsonl`、可带 `.zstd`），且清单里的 `version` 与文件名里的代次一致——这一段是写入磁盘路径
   的唯一来源，放 `../` 或绝对路径进来就等于让包决定往哪儿写。
-- 落地走 `planImport()` / `applyImport()`：把 header 里的 `cwd` 改写成**这台机器**的路径，写盘先写
+- 应用走 `planImport()` / `applyImport()`：把 header 里的 `cwd` 改写成**这台机器**的路径，写盘先写
   `.part` 再 rename；导入只跳过、不覆盖。
 
 ## 读写顺序

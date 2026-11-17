@@ -158,7 +158,7 @@ export function DirectoryPicker({
       )}
 
       <div className="dsm-controls">
-        {/* 落地这一下走官方 primary：它写的是值，是这张面板的主动作。 */}
+        {/* 应用这一下走官方 primary：它写的是值，是这张面板的主动作。 */}
         <Button
           variant="primary"
           size="sm"

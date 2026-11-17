@@ -13,7 +13,7 @@
 // 三条的**顺序**也是宿主的顺序，所以一条会话同时符合多条时，这里报的是宿主先判的那条——界面上的
 // 说明文字因此与用户"它在侧边栏为什么没有"的直觉一致。
 //
-// 缺失即"看不见"这件事要保守：`blank` 读不到时按 `false` 处理（＝显示），这与宿主自己的冷会话口径
+// 缺失即"看不见"这件事要保守：`blank` 读不到时按 `false` 处理（＝显示），这与宿主自己的冷会话标准
 // 一致（`summarizeCold()` 用 `metadata?.blank ?? false`）。反过来假设它空白，就会把一条用户看得见的
 // 会话从迁移候选里悄悄拿掉，那是这里最不该犯的错。
 import { readProjectionCache, type ProjectionCacheQuery, type ProjectionCacheRecord } from './library/projection-cache.ts'
@@ -66,7 +66,7 @@ export interface VisibilityOptions {
 }
 
 /**
- * 把一条会话与注册表的口径归结成**三件事实**（判据的输入只有这一份，别处不许各拼一份）。
+ * 把一条会话与注册表的标准归结成**三件事实**（判据的输入只有这一份，别处不许各拼一份）。
  *
  * @param subject 会话（要 id / createdAt / cwd / header.origin）。
  * @param options 归档集与空白读取器。
@@ -152,7 +152,7 @@ export function createBlankResolver(options: { cacheDir?: string }): (query: Pro
  * "空白那条路认这个格式、时间那条路不认"，而它们本该同生共死。
  */
 export interface SessionMeta {
-  /** 宿主判定的"空白会话"；`undefined` = 宿主没说（见 visibility.ts 开头那段保守口径）。 */
+  /** 宿主判定的"空白会话"；`undefined` = 宿主没说（见 visibility.ts 开头那段保守标准）。 */
   blank?: boolean
   /** 最后一次**提问**的时间（毫秒）；`undefined` = 读不到。 */
   lastPromptAt?: number

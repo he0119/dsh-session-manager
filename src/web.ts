@@ -61,7 +61,7 @@ export interface WebServerLike {
 }
 
 /**
- * 端点处理要用的那一组东西：位置、几个口径单一的读取器、宿主能力位与面板广播口。
+ * 端点处理要用的那一组东西：位置、几个标准单一的读取器、宿主能力位与面板广播口。
  *
  * 为什么汇成一个对象：处理逻辑按操作搬到了 `src/operations/<操作>/http.ts`，它们不直接碰
  * `createApiHandlers()` 的闭包——那样只能整段复制；汇成一个只读面之后，各端点拿到的仍是**同一份**
@@ -87,7 +87,7 @@ export interface WebContext {
   hostRegistry: () => HostRegistryPort | undefined
   hostCheckpoints: () => CheckpointWarmPort | undefined
   attachmentPort: () => AttachmentPort | undefined
-  /** 把一条事件广播给所有开着的面板连接（落地那一趟、自动推送、库变了都走它）。 */
+  /** 把一条事件广播给所有开着的面板连接（应用那一趟、自动推送、库变了都走它）。 */
   panelEmit: (event: Record<string, unknown>) => void
   /** 迁移编排的依赖（工具层与端点共用同一份形状）。 */
   migrateDeps: MigrateDeps
@@ -141,7 +141,7 @@ export interface ApiDeps {
   /** 插件版本，写进包的来源信息。 */
   pluginVersion?: string
   /**
-   * 写远端格子的互斥锁（手动同步落地、整理远端、删除远端共用）。
+   * 写远端格子的互斥锁（手动同步应用、整理远端、删除远端共用）。
    *
    * 由入口注入，与自动推送、模型工具共用同一把；缺席时本模块自己造一把，只够覆盖本端口里的三处。
    */
@@ -153,13 +153,13 @@ export interface ApiDeps {
    * 本模块只认 `{ register() }` 形状，不该知道 Cordis 的存在。
    *
    * 生效模式**不单独注入**：界面能说的"无需重启"必须与执行路径真能做到的事一致，所以两者
-   * 同源——拿不到这个端口就是"需要重启"。
+   * 同源——拿不到这个接口就是"需要重启"。
    */
   hostRegistry?: () => HostRegistryPort | undefined
   /**
    * 宿主"补齐列表元数据"的端口（`sessionQuery` + `sessionProjectionCache`，见 checkpoint-warm.ts）。
    *
-   * 同 `hostRegistry`：要读宿主服务，所以由入口探测后注入；缺席 = 这个宿主补不了，落地照旧成功，
+   * 同 `hostRegistry`：要读宿主服务，所以由入口探测后注入；缺席 = 这个宿主补不了，应用照旧成功，
    * 只是那些会话在侧边栏要等第一次点开才有标题。
    */
   hostCheckpoints?: () => CheckpointWarmPort | undefined
@@ -226,13 +226,13 @@ export interface ApiDeps {
    * 目录 → 项目身份的缓存（见 repo.ts 的 `createRepoLocationCache()`）。
    *
    * 由入口注入：`/state` 与同步共用同一份，一次同步计划因此不必为每个候选目录重新起三个 git 进程。
-   * 缺席 = 每次预演现问一遍 git（结论不变，只是慢）。
+   * 缺席 = 每次预览现问一遍 git（结论不变，只是慢）。
    */
   repoLocations?: RepoLocationLookup
   /**
    * 造一次 WebDAV 同步的运行时（远端 + 设置）；没配置同步时返回 undefined。
    *
-   * 每次调用都重新解析密码引用：DSH 的口径是"每次操作解析一次引用"，换了环境变量不必重启插件。
+   * 每次调用都重新解析密码引用：DSH 的标准是"每次操作解析一次引用"，换了环境变量不必重启插件。
    * 要读宿主服务（credentials），所以同 `effectMode` 一样由入口注入。
    */
   sync?: () => Promise<SyncRuntime | undefined>
@@ -268,7 +268,7 @@ export interface ApiDeps {
  * 自动推送那一轮的响应体。
  *
  * 真跑了的时候把那份 `SyncOutcome` **摊平**进来（`plan` / `pulled` / `pushed` / `bytesIn` / `bytesOut`
- * / `problems` / `planSource` / `takesEffect`），形状与 `/sync` 落地那次逐字段同源——界面因此能复用
+ * / `problems` / `planSource` / `takesEffect`），形状与 `/sync` 应用那次逐字段同源——界面因此能复用
  * 同一套解析，不必为"后台跑的那一轮"再写一遍。没跑（`skip`）时那几项一个都不给：那条路上没有计划、
  * 没有结果，给一份空的只会让界面去猜哪个字段是真的。
  *
@@ -294,7 +294,7 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
   const now = deps.now ?? ((): Date => new Date())
   /** 写远端格子的闸；生产由入口注入同一把，测试缺席时自己造。 */
   const remoteWrite = deps.remoteWrite ?? createRemoteWriteGate()
-  // 标题只给界面看（`/state`）与导入预演看（包自己带着日志）。导出那条路上没人读它，
+  // 标题只给界面看（`/state`）与导入预览看（包自己带着日志）。导出那条路上没人读它，
   // 所以那里扫库时刻意不传 resolveTitle——别为用不上的东西花钱。
   const resolveTitle =
     deps.resolveTitle ?? createTitleResolver({ cacheDir: projectionCacheDir(paths.registryPath), decodeAll })
@@ -334,13 +334,13 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
    * 解开的行，够用且不影响别的会话（换一条会话就把它顶掉）。
    */
   const logs = createLogTextCache()
-  // 宿主内存里活着的会话：删除会拒掉它们。端口缺席时按空集（判断不了）——预演的输出里没有
+  // 宿主内存里活着的会话：删除会拒掉它们。接口缺席时按空集（判断不了）——预览的输出里没有
   // 任何一处声称"这些一定没在跑"，界面上那句说明也是这么写的。
   const liveSessionIds = (): ReadonlySet<string> => deps.liveSessionIds?.() ?? new Set<string>()
   // 宿主注册表动作的探测：迁移 / 导入 / 同步拉取共用这一个；探测本身在宿主那一侧，
   // 界面这一层只转手（见 ApiDeps.hostRegistry）。
   const hostRegistry = (): HostRegistryPort | undefined => deps.hostRegistry?.()
-  // 同理：把宿主的两个冷读服务转手给编排层（迁移 / 导入 / 同步拉取三个落地口共用，见 ApiDeps.hostCheckpoints）。
+  // 同理：把宿主的两个冷读服务转手给编排层（迁移 / 导入 / 同步拉取三个应用口共用，见 ApiDeps.hostCheckpoints）。
   const hostCheckpoints = (): CheckpointWarmPort | undefined => deps.hostCheckpoints?.()
   // 附件库的探测（导出往里收对象、导入往外补对象，见 ApiDeps.attach）。缺席 = 这个宿主没有附件服务：
   // 包照旧只带日志，导入也照旧只落日志——与升级前完全一致。
@@ -349,7 +349,7 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
   /**
    * 面板事件流的订阅者（每一条 SSE 响应就是一个）。
    *
-   * 为什么是"广播"而不是"每个请求各查一次"：这一页打开之后要盯的东西有好几种——整库清单、落地那一趟、
+   * 为什么是"广播"而不是"每个请求各查一次"：这一页打开之后要盯的东西有好几种——整库清单、应用那一趟、
    * 自动推送那一轮、以及"某个动作改完了，重读一次"。它们都发生在宿主这一侧，而且**多数不是这一页发起
    * 的**（定时器发起的一轮、另一个页签点的同步、工具层调的动作）。所以由宿主推、页面只订一条流。
    */
@@ -466,7 +466,7 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
   /**
    * 面板事件流：这一页打开期间**只有这一条长连接**，各种状态都从它来。
    *
-   * 它替掉的是原来四件事：打开页面时的 `GET /meta` + `GET /state` 两个请求、落地那一趟的
+   * 它替掉的是原来四件事：打开页面时的 `GET /meta` + `GET /state` 两个请求、应用那一趟的
    * `GET /sync?mode=status` 轮询、以及自动推送的 `GET /auto-push?mode=status` 轮询 +
    * `mode=watch` 那条"在跑才开"的流。四处各问一次的时候，问题不只是省几个请求——**没在听的那些
    * 事永远看不到**：后台自己跑的一轮、另一个页签点的同步，页面都得靠"进页面时问一次"去撞。
@@ -476,9 +476,9 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
    * - `ready`：宿主事实（与 `GET /meta` 同一份取值），连上就先发，页头不必等扫库；
    * - `progress`：扫库那一段逐条报（`phase: 'scan'`）；
    * - `snapshot`：整库清单（与 `GET /state` 同一份取值，见 `readState()`）；
-   * - `sync`：落地那一趟的当前状态 + 上一轮结论（`applying` 为 null 就是没在跑）；
+   * - `sync`：应用那一趟的当前状态 + 上一轮结论（`applying` 为 null 就是没在跑）；
    * - `auto-push`：自动推送那一轮同理（`running` 为 null 就是没在跑）；
-   * - `stale`：本机的会话库被改过了（某个动作落地、或一次同步拉取下来），页面据此重连要一份新清单；
+   * - `stale`：本机的会话库被改过了（某个动作应用、或一次同步拉取下来），页面据此重连要一份新清单；
    * - `ping`：心跳，15 秒一次。
    *
    * 为什么开头先来一份"当前状态"再跟着推：从连上到第一条事件之间有可能正好有一轮跑完（那是几十毫秒
@@ -496,7 +496,7 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
     // ① 宿主事实：位置、能力位、同步配置。这一条不扫库，所以页头立刻能画出来。
     sendEvent(res, { type: 'ready', meta: metaFacts() })
     /*
-     * ② 后台那两种状态的当下：落地那一趟与自动推送那一轮。
+     * ② 后台那两种状态的当下：应用那一趟与自动推送那一轮。
      *
      * 自动推送的调度器要等配置与凭据解析完才存在（`deps.autoPush()` 是个挂起的 promise），所以这一条
      * 可能比别的晚一点；拿不到就说明这个宿主没有自动推送，`running` / `last` 都是 null。
@@ -565,15 +565,15 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
     registryPath: paths.registryPath,
     backupRoot: paths.backupRoot,
     decodeAll,
-    // 迁移页挑会话时同样按标题认人（与传输页同一套口径）。
+    // 迁移页挑会话时同样按标题认人（与传输页同一套标准）。
     resolveTitle,
     // 标题从进程里共用那份投影记录取（不含这份的话，每条会话都要把同一个 JSON 重新解析一遍）。
     projection,
     // 每次调用重新探测（只有工具的前端 / 老版本宿主可能没有这套动作）。
     hostRegistry,
-    // 迁移改写了 cwd，旧检查点因此对不上：收口时请宿主重折一遍（见 checkpoint-warm.ts）。
+    // 迁移改写了 cwd，旧检查点因此对不上：统一处理时请宿主重折一遍（见 checkpoint-warm.ts）。
     hostCheckpoints,
-    // 宿主持在内存里的那些搬不动（见 plan.ts 的 `BuildPlanOptions.live`）：界面同样要问，否则预演会
+    // 宿主持在内存里的那些搬不动（见 plan.ts 的 `BuildPlanOptions.live`）：界面同样要问，否则预览会
     // 报一个"22 条全搬走"的计划，执行时宿主在第一条就回绝。
     liveSessionIds,
   }
@@ -581,7 +581,7 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
   const takesEffect = (): EffectMode => (hostRegistry() === undefined ? 'restart-required' : 'immediate')
 
   // 各操作的端点工厂共用这一份：缓存、写锁与宿主能力位都只有一份，各自 new 一份会让库被扫两遍、
-  // 两趟落地各拿一把锁。`sync` 另带一份状态（预演缓存、正在跑的那一趟），所以单独收着。
+  // 两趟应用各拿一把锁。`sync` 另带一份状态（预览缓存、正在跑的那一趟），所以单独收着。
   const ctx: WebContext = {
     deps,
     paths,
@@ -606,7 +606,7 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
   return {
     'GET /meta': meta,
     'GET /state': state,
-    // 这一页打开期间只有这一条长连接：清单、落地那一趟、自动推送那一轮、以及"库变了"的通知都从它来。
+    // 这一页打开期间只有这一条长连接：清单、应用那一趟、自动推送那一轮、以及"库变了"的通知都从它来。
     'GET /panel/events': panelEvents,
     ...transcriptHandlers(ctx),
     ...migrationHandlers(ctx),

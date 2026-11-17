@@ -23,7 +23,7 @@ Status: implemented
 | --- | --- | --- |
 | `.dsm-root`（正文） | 14px / 20px | 内建卡片标题 14px/20px |
 | `.dsm-hint`（说明句） | 12px / 18px | 内建卡片描述 12px/18px |
-| `.dsm-planHead`（预演弹窗的段头） | 14px / 600 | 段头走正文那一档，与 12px 的说明句差一档 |
+| `.dsm-planHead`（预览弹窗的段头） | 14px / 600 | 段头走正文那一档，与 12px 的说明句差一档 |
 | `.dsm-dialogBody`（弹窗正文） | 14px / 20px | 弹窗里摆的就是页面上的组件，两处同规格 |
 | `.dsm-dialog .dsm-button`（弹窗按钮） | 14px | 同上 |
 | `.dsm-defs`（说明页的词条） | 14px / 22px | 正文那一档 |
