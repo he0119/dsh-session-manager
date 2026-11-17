@@ -682,8 +682,11 @@ export const zh = {
   'sync.autoSync.failed': '自动同步连续失败 {count} 次。',
   'sync.autoSync.problem': '自动同步最近一次的问题：{problem}',
   'sync.autoPush.skip.idleSync': '没有要对齐的会话',
-  // 状态栏那一格（39px 的单行）：只放得下一句短的，细节留在同步弹窗里。
-  'sync.bar.running': '同步中 {done}/{total}',
+  // 状态栏那一格（39px 的单行）：只放得下一句短的，细节留在同步弹窗里。数的是**会话**与**附件对象**两种
+  // （见 operations/sync/syncBarTally.ts）：前者是还要搬几条会话，后者只在这一趟真要搬对象时才出现。
+  'sync.bar.runningSessions': '同步中 · {done}/{total} 条会话',
+  'sync.bar.runningBoth': '同步中 · {done}/{total} 条会话 · 附件 {objectsDone}/{objectsTotal}',
+  'sync.bar.runningObjects': '同步中 · 附件 {objectsDone}/{objectsTotal}',
   'sync.bar.runningUnknown': '同步中…',
   'sync.bar.done': '同步完成 · {count} 条',
   'sync.bar.donePlain': '同步完成',
@@ -1372,7 +1375,9 @@ export const en: LocaleDictOf<typeof NS> = {
   'sync.autoSync.failed': 'Automatic sync has failed {count} time(s) in a row.',
   'sync.autoSync.problem': 'Latest automatic sync problem: {problem}',
   'sync.autoPush.skip.idleSync': 'Nothing to align',
-  'sync.bar.running': 'Syncing {done}/{total}',
+  'sync.bar.runningSessions': 'Syncing · {done}/{total} sessions',
+  'sync.bar.runningBoth': 'Syncing · {done}/{total} sessions · {objectsDone}/{objectsTotal} attachments',
+  'sync.bar.runningObjects': 'Syncing · {objectsDone}/{objectsTotal} attachments',
   'sync.bar.runningUnknown': 'Syncing…',
   'sync.bar.done': 'Synced · {count} sessions',
   'sync.bar.donePlain': 'Sync finished',

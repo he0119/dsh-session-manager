@@ -433,9 +433,10 @@ tsconfig.client.json       Web Client 自己的类型工程（DOM + JSX；Host �
 | `src/client/operations/sync/SyncDiffDialog.tsx` | 同步页那枚「看差异」打开的**只读**比对视图（官方 `Modal`，三段：共有的折成一句、本机与远端各列一条尾巴，条目沿用内容视图那种事件卡头行）。 |
 | `src/client/operations/sync/syncForm.ts` | 同步设置的读写面（宿主设置接入点 `configForms`）与映射草稿的解析（表单上自动是**一行三选一**，草稿里收成 `auto: 'off' \| 'push' \| 'sync'` 一个值；换档时转成最小的那几条编辑——只推送写 `sync.autoPush` 并清掉 `autoSync`，双向反过来，关掉两栏都清）。 |
 | `src/client/operations/sync/syncGroups.ts` | 同步预览那三张表按项目目录分组的规则。 |
-| `src/client/operations/sync/syncStage.ts` | 同步那一面此刻摆哪一段（面板 / 计划 / 应用 / 结果，三个输入：这一页自己的意图、宿主那边跑没跑、这一趟完了没有；`test/client/operations/sync/sync-stage.test.ts` 逐支钉住——状态栏那枚「同步中 3/7」点开时看的正是它）。 |
+| `src/client/operations/sync/syncStage.ts` | 同步那一面此刻摆哪一段（面板 / 计划 / 应用 / 结果，三个输入：这一页自己的意图、宿主那边跑没跑、这一趟完了没有；`test/client/operations/sync/sync-stage.test.ts` 逐支钉住——状态栏那枚「同步中 · 3/7 条会话」点开时看的正是它）。 |
 | `src/client/operations/sync/syncJob.ts` | 一轮同步（拉取 + 推送）在界面的生命周期——模块级状态，关掉弹窗 / 开别的弹窗 / 关设置都不影响它，刷新之后从 `panelEvents` 上 `sync` 那一半认领，`test/client/operations/sync/sync-job.test.ts` 钉住。 |
 | `src/client/operations/sync/syncJobLabel.ts` | 同步那一趟在**状态栏**上说的那一句（跑着 / 刚跑完 / 没跑，三支各一句短话）；纯函数，`test/client/operations/sync/sync-job-label.test.ts` 钉住。 |
+| `src/client/operations/sync/syncBarTally.ts` | 从进度事件里折出状态栏那两串数（搬完几条会话 / 处理了几个附件对象）：`pull` 与 `push` 换段时把上一段并进来，`attach` 按会话分批累加，其余各段一个数都不动；纯函数，`test/client/operations/sync/sync-bar-tally.test.ts` 钉住。 |
 | `src/client/operations/sync/syncChipDot.ts` | 那枚点该点哪一档（跑着 / 失败 / 有遗留 / 自动开着（只推或双向）/ 什么都没有，次序即优先级，`test/client/operations/sync/sync-chip-dot.test.ts` 摆开矩阵）与按钮悬浮提示那句短话（`syncChipNote()`）。 |
 | `src/client/operations/sync/syncNotice.ts` | 一次同步应用之后页面顶部那句话（结论先说条数，其余项折成一句「另有：A、B、C。」，顶掉 / 删掉本机内容时那句「旧的那份在「备份与回滚」里」只说一次；`test/client/operations/sync/sync-notice.test.ts` 钉住字数与分句）。 |
 | `src/client/operations/sync/syncLeftovers.ts` | 「上次同步没做到的那几条」在界面这一侧怎么读：页头那枚状态的悬浮提示与弹窗里那张清单共用一份，旧宿主只给 `problems` 时退到它。 |

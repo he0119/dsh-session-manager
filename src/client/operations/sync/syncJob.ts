@@ -26,6 +26,7 @@
 
 import { applySync, type ProgressEvent, type SyncResponse, type SyncRoundStatus } from '../../api.ts'
 import { panelEvents } from '../../shared/logic/panelEvents.ts'
+import { emptyTally, foldBarTally, type SyncBarTally } from './syncBarTally.ts'
 import type { SyncDecision } from '../../api.ts'
 
 /** 一趟结束之后的结论。 */
@@ -54,6 +55,13 @@ export interface SyncJobSnapshot {
   startedAt: number | null
   /** 最后一条进度事件；一条都还没收到就是 `null`。 */
   progress: ProgressEvent | null
+  /**
+   * 状态栏那一格要的两串数（搬了几条会话、搬了几个附件对象），由进度事件折出来。
+   *
+   * 与 `progress` 分开：`progress` 说的是"最后那一条事件是哪一段、到第几条"，同步那一面照它画进度块；
+   * 状态栏只有一串字，要的是跨段的累计（见 `syncBarTally.ts`）。
+   */
+  tally: SyncBarTally
   /** 刚结束、还没被界面取走 / 关掉的结论。 */
   done: SyncJobDone | null
 }
@@ -121,7 +129,14 @@ export interface SyncJob {
  */
 export function createSyncJob(deps: SyncJobDeps): SyncJob {
   const listeners = new Set<(snapshot: SyncJobSnapshot) => void>()
-  let current: SyncJobSnapshot = { running: false, adopted: false, startedAt: null, progress: null, done: null }
+  let current: SyncJobSnapshot = {
+    running: false,
+    adopted: false,
+    startedAt: null,
+    progress: null,
+    tally: emptyTally(),
+    done: null,
+  }
   /** 退订那一路状态（接上过一次就不再重订）。 */
   let unwatch: (() => void) | null = null
 
@@ -130,11 +145,30 @@ export function createSyncJob(deps: SyncJobDeps): SyncJob {
     for (const listener of [...listeners]) listener(current)
   }
 
+  /**
+   * 认领来的那一趟：宿主只记着**最后一条**事件，而且同一条会随每次变化重复推过来。
+   *
+   * 所以不往旧的那一份上折（同一条折两遍就多算了），每条都从空的一份重新折：认领来的那一趟本来
+   * 也只有这一条，前面几段早就在宿主那边跑过去了。
+   *
+   * @param progress 宿主记下的那一条；没有就是 `null`。
+   * @returns 折出来的那一份。
+   */
+  const tallyOf = (progress: ProgressEvent | null): SyncBarTally =>
+    progress === null ? emptyTally() : foldBarTally(emptyTally(), progress)
+
   /** 把宿主给的"跑完了"折成结论：有结果说结果，只有计数就说计数。 */
   const finishAdopted = (last: SyncRoundStatus['last']): void => {
     if (last === null) {
       // 宿主那边没有留下结论（进程重启过）：如实说"这一轮结束了"，但不编一个数字。
-      emit({ running: false, adopted: false, startedAt: null, progress: null, done: { ok: true } })
+      emit({
+        running: false,
+        adopted: false,
+        startedAt: null,
+        progress: null,
+        tally: emptyTally(),
+        done: { ok: true },
+      })
       return
     }
     emit({
@@ -142,6 +176,7 @@ export function createSyncJob(deps: SyncJobDeps): SyncJob {
       adopted: false,
       startedAt: null,
       progress: null,
+      tally: emptyTally(),
       done: {
         ok: last.ok,
         adopted: { pulled: last.pulled, pushed: last.pushed },
@@ -162,7 +197,7 @@ export function createSyncJob(deps: SyncJobDeps): SyncJob {
     if (status.applying !== null) {
       if (current.running) {
         // 自己发起的那一趟进度更细（它自己那条请求带着），不拿这份粗的盖掉；认领来的那一趟才用它更新。
-        if (current.adopted) emit({ progress: status.applying.progress })
+        if (current.adopted) emit({ progress: status.applying.progress, tally: tallyOf(status.applying.progress) })
         return
       }
       emit({
@@ -170,6 +205,7 @@ export function createSyncJob(deps: SyncJobDeps): SyncJob {
         adopted: true,
         startedAt: status.applying.startedAt,
         progress: status.applying.progress,
+        tally: tallyOf(status.applying.progress),
         done: null,
       })
       return
@@ -188,15 +224,29 @@ export function createSyncJob(deps: SyncJobDeps): SyncJob {
     start(input) {
       if (current.running) return false
       // 新的一轮：上一轮的结论让位（不然横幅刚清掉又冒出来）。
-      emit({ running: true, adopted: false, startedAt: Date.now(), progress: null, done: null })
+      emit({
+        running: true,
+        adopted: false,
+        startedAt: Date.now(),
+        progress: null,
+        tally: emptyTally(),
+        done: null,
+      })
       const onProgress = (progress: ProgressEvent): void => {
         // 只认还在跑的那一趟：万一它已经结束（比如宿主那边立刻失败），迟到的进度不该把状态改回去。
         if (!current.running) return
-        emit({ progress })
+        emit({ progress, tally: foldBarTally(current.tally, progress) })
       }
       void deps.apply(input.planId, onProgress, input.decisions, input.tidy).then(
         (result) => {
-          emit({ running: false, adopted: false, startedAt: null, progress: null, done: { ok: true, result } })
+          emit({
+            running: false,
+            adopted: false,
+            startedAt: null,
+            progress: null,
+            tally: emptyTally(),
+            done: { ok: true, result },
+          })
         },
         (cause: unknown) => {
           emit({
@@ -204,6 +254,7 @@ export function createSyncJob(deps: SyncJobDeps): SyncJob {
             adopted: false,
             startedAt: null,
             progress: null,
+            tally: emptyTally(),
             done: { ok: false, error: cause instanceof Error ? cause.message : String(cause) },
           })
         },
