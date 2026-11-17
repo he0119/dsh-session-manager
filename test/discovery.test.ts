@@ -110,6 +110,24 @@ test('scanAllAsync：与同步 scanAll 同一份结果（分目录让出不换�
   assert.deepEqual(asyncSessions, sync)
 })
 
+test('scanAllAsync：一个项目目录里也按会话让出，不是整目录读完才让', async () => {
+  const root = resetSandbox()
+  for (let index = 0; index < 20; index += 1) {
+    const id = `session-${String(index).padStart(2, '0')}`
+    writeLog(join(root, '--proj-a--', id), headerOf(id, { createdAt: 1000 + index }))
+  }
+  let yielded = false
+  let sawProgressAfterYield = false
+  const sessions = await scanAllAsync(root, decodeAll, {
+    onProgress: (done) => {
+      if (done === 0) setImmediate(() => { yielded = true })
+      if (done >= 16 && yielded) sawProgressAfterYield = true
+    },
+  })
+  assert.equal(sessions.length, 20)
+  assert.equal(sawProgressAfterYield, true, '第 16 条之后应当已经让出过一次事件循环')
+})
+
 // 按 id 直接定位：内容视图每翻一页都要定位一次，所以它不能是"扫一遍整库再筛"。
 // 这组用例同时钉住兜底：目录名不是 id 的编码时仍要能找到，找不到才算真的没有。
 test('locateSession：只读这一条，不为其它会话折标题（整库扫一遍会为每条都调一次）', () => {

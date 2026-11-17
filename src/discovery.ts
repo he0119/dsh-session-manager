@@ -316,6 +316,36 @@ export function scanProjectDir(projectDir: string, decodeAll: DecodeAll, options
   return out
 }
 
+/** 一个项目目录里每扫这么多条会话让出一次：单条只读首帧，攒到这个数仍在几十毫秒的预算内。 */
+const SCAN_YIELD_EVERY = 16
+
+/**
+ * 与 {@link scanProjectDir} 同一份结果，只是按会话让出事件循环。
+ *
+ * 项目目录内部也可能有几十上百条会话（一个活跃工作区就是这样）。`scanAllAsync()` 原来只在
+ * 项目目录之间让出，这样一个目录会整段占住主线程；这里每扫 `SCAN_YIELD_EVERY` 条让一次。
+ */
+export async function scanProjectDirAsync(
+  projectDir: string,
+  decodeAll: DecodeAll,
+  options: ScanOptions = {},
+): Promise<DiscoveredSession[]> {
+  const out: DiscoveredSession[] = []
+  const names = readdirSync(projectDir)
+  let index = 0
+  for (const dirName of names) {
+    options.onProgress?.(index, names.length)
+    index += 1
+    const dir = join(projectDir, dirName)
+    if (!statSync(dir).isDirectory()) continue
+    const session = readSessionDir(dir, dirName, decodeAll, options)
+    if (session !== undefined) out.push(session)
+    if (index % SCAN_YIELD_EVERY === 0) await new Promise<void>((resolve) => setImmediate(resolve))
+  }
+  out.sort((a, b) => b.createdAt - a.createdAt)
+  return out
+}
+
 /**
  * 按 id 找到一条会话：只读它自己那一份日志，不碰库里其它会话。
  *
@@ -476,17 +506,16 @@ export async function scanAllAsync(
     scanned += projectDir.entries
     try {
       out.push(
-        ...scanProjectDir(projectDir.path, decodeAll, {
+        ...(await scanProjectDirAsync(projectDir.path, decodeAll, {
           ...options,
           ...(options.onProgress === undefined
             ? {}
             : { onProgress: (done: number) => options.onProgress?.(base + done, total) }),
-        }),
+        })),
       )
     } catch {
       continue
     }
-    await new Promise<void>((resolve) => setImmediate(resolve))
   }
   out.sort((a, b) => b.createdAt - a.createdAt)
   return out
