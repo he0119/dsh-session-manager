@@ -2634,10 +2634,11 @@ test('POST /import：预演按包里的条数读、落地只按"会创建"的那
   assert.deepEqual(
     progressOf(planned.captured).map((item) => [item['phase'], item['total'], item['done']]),
     [
-      // 库那一遍扫描没有"第几条"可讲（目录项的条数与包里的条数不是一回事）
-      ['scan', 0, 0],
+      // 标题先异步折（每几条让出一次），之后才算库里已有会话的那一遍扫描。
       ['read', 2, 0],
       ['read', 2, 1],
+      // 库那一遍扫描没有"第几条"可讲（目录项的条数与包里的条数不是一回事）
+      ['scan', 0, 0],
     ],
     '预演逐条读包里的日志折标题，分母是包里的条数',
   )
@@ -2648,9 +2649,9 @@ test('POST /import：预演按包里的条数读、落地只按"会创建"的那
   assert.deepEqual(
     progressOf(applied.captured).map((item) => [item['phase'], item['total'], item['done']]),
     [
-      ['scan', 0, 0],
       ['read', 2, 0],
       ['read', 2, 1],
+      ['scan', 0, 0],
       // session-a 已在库里 → 一条都不写；分母是 1（会创建的那些），所以恰好走满
       ['write', 1, 0],
       ['registry', 0, 0],

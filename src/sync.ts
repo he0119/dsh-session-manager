@@ -55,7 +55,7 @@ import { readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import { canonicalDir, type DirCanonicalizer } from './canonical-path.ts'
-import { commitAttachmentObject, isAttachmentId, scanAttachmentRefs, type AttachmentPort, type AttachmentRef } from './attachments.ts'
+import { commitAttachmentObjectAsync, isAttachmentId, scanAttachmentRefs, type AttachmentPort, type AttachmentRef } from './attachments.ts'
 import { warmCheckpoints, type WarmDeps } from './checkpoint-warm.ts'
 import type { AutoConfig } from './config.ts'
 import type { DavPort } from './dav.ts'
@@ -71,7 +71,7 @@ import { createRemoteWriteGate, type RemoteWriteGate } from './remote-write.ts'
 import { takeEffectOnHostAll, type EffectDeps } from './take-effect.ts'
 import { relocateHeaderCwdShallow, relocateHeaderCwdText } from './session-log.ts'
 import type { TitleQuery } from './session-title.ts'
-import { applyImport, attachmentActionOf, buildBundleAsync, entryBytes, planImport, readBundle, readBundleAsync, type ExportSource, type ImportOptions, type ImportOutcome, type SessionBundle } from './transfer.ts'
+import { applyImport, attachmentActionOf, buildBundleAsync, entryBytes, planImport, readBundleAsync, type ExportSource, type ImportOptions, type ImportOutcome, type SessionBundle } from './transfer.ts'
 import type {
   DecodeAll,
   EffectOutcome,
@@ -3162,7 +3162,7 @@ async function fetchAttachment(
   }
   try {
     const bytes = await deps.dav.get(remoteAttachmentPath(ref))
-    if (commitAttachmentObject(path, bytes) === 'present') counters.present += 1
+    if ((await commitAttachmentObjectAsync(path, bytes)) === 'present') counters.present += 1
     else {
       counters.written += 1
       counters.bytes += bytes.length
@@ -3677,7 +3677,7 @@ export async function applyPreparedSync(
     if (session === undefined) continue
     try {
       // 附件对象不必随包搬：落选那份的日志引用还是那几个 sha，本机对象库里已经有它们。
-      const bundle = readBundle(
+      const bundle = await readBundleAsync(
         await buildBundleAsync(
           [{ id: session.id, cwd: session.cwd, createdAt: session.createdAt, dir: session.dir, files: session.files }],
           { now: new Date().toISOString() },
@@ -3715,7 +3715,7 @@ export async function applyPreparedSync(
     if (session === undefined || machine === undefined) continue
     try {
       const bytes = await deps.dav.get(remoteBundlePath(machine, entry.id))
-      const bundle = readBundle(bytes)
+      const bundle = await readBundleAsync(bytes)
       const importOptions: ImportOptions & { decodeAll: DecodeAll } = {
         root: deps.sessionsRoot,
         targetCwd: session.cwd ?? '',
@@ -3753,7 +3753,7 @@ export async function applyPreparedSync(
     })
     try {
       const bytes = await deps.dav.get(remoteBundlePath(entry.machine, entry.id))
-      const bundle = readBundle(bytes)
+      const bundle = await readBundleAsync(bytes)
       // 没有 cwd 的会话不看 targetCwd（`planImport` 只对带 cwd 的会话用它），这里给空串是照契约填参。
       const importOptions: ImportOptions & { decodeAll: DecodeAll } = {
         root: deps.sessionsRoot,
@@ -3808,7 +3808,7 @@ export async function applyPreparedSync(
     const fetched = new Map<string, SessionBundle>()
     for (const entry of replaceJobs) {
       try {
-        fetched.set(entry.id, readBundle(await deps.dav.get(remoteBundlePath(entry.machine, entry.id))))
+        fetched.set(entry.id, await readBundleAsync(await deps.dav.get(remoteBundlePath(entry.machine, entry.id))))
       } catch (error) {
         problems.push(
           `覆盖 ${entry.id} 失败（远端那包取不到或坏了，本机那份没动）：${error instanceof Error ? error.message : String(error)}`,

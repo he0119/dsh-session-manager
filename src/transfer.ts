@@ -29,14 +29,14 @@
 //   - 会话目录名必须等于 encodeSegment(id)——宿主启动时会校验目录名与 header id 一致，
 //     不满足的包要在这里拒掉，而不是让它去污染会话库。
 import { createHash } from 'node:crypto'
-import { readFile } from 'node:fs/promises'
+import { mkdir, readFile, rename as renameFile, writeFile } from 'node:fs/promises'
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createGzip, gunzip, gunzipSync, gzipSync } from 'node:zlib'
 import { promisify } from 'node:util'
 
 import {
-  commitAttachmentObject,
+  commitAttachmentObjectAsync,
   decodeLogText,
   isAttachmentId,
   scanAttachmentRefs,
@@ -773,6 +773,13 @@ export interface ImportOptions {
    */
   decodeAll?: DecodeAll
   /**
+   * 已经算好的标题（键是包里的会话 id，`undefined` 也算"算过、没有标题"）。
+   *
+   * 导入预演会先用 `bundleTitlesAsync()` 在会话之间让出事件循环，再把这份表交给 `planImport()`；
+   * 不传时退回同步折标题（测试与不关心响应性的调用方走这条）。
+   */
+  titles?: ReadonlyMap<string, string | undefined>
+  /**
    * 目标附件库的端口（引用 → 本机绝对路径）。
    *
    * 缺席 = 这个宿主没有附件服务：包里的对象读不出来也落不下去，计划里那几条一律报 `unavailable`，
@@ -817,6 +824,39 @@ function bundleTitle(bundle: SessionBundle, session: BundleSession, decodeAll: D
 }
 
 /**
+ * 异步预计算包里的标题：与 `bundleTitle()` 同一个判据，只是每折几条就让出一次事件循环。
+ *
+ * 导入预演实测 250 条 / 70.9 MB 要 1.7 秒；这段全在主线程里折标题，期间宿主连一个请求都接不了。
+ * 标题本身是一条条算的，不需要停在同一个宏任务里。
+ *
+ * @param bundle 已经解析好的包。
+ * @param decodeAll 多帧感知解码器。
+ * @param options.onProgress 每开始折一条报一次（`phase: 'read'`，与 `planImport()` 原来那一段同一个名字）。
+ * @returns 包里的会话 id → 标题；没有标题的也写进表里（值为 `undefined`），避免 `planImport()` 又折一遍。
+ */
+export async function bundleTitlesAsync(
+  bundle: SessionBundle,
+  decodeAll: DecodeAll,
+  options: { onProgress?: ProgressReporter } = {},
+): Promise<Map<string, string | undefined>> {
+  /** 每折这么多条让出一次：单条通常不到几毫秒，攒到这个数仍在几十毫秒的预算内。 */
+  const YIELD_EVERY = 8
+  const titles = new Map<string, string | undefined>()
+  for (const [index, session] of bundle.sessions.entries()) {
+    options.onProgress?.({
+      phase: 'read',
+      total: bundle.sessions.length,
+      done: index,
+      id: session.id,
+      label: session.id,
+    })
+    titles.set(session.id, bundleTitle(bundle, session, decodeAll))
+    if ((index + 1) % YIELD_EVERY === 0) await new Promise<void>((resolve) => setImmediate(resolve))
+  }
+  return titles
+}
+
+/**
  * 规划一次导入（不写任何字节）。
  *
  * 判定顺序（每条会话独立）：
@@ -845,19 +885,28 @@ export function planImport(bundle: SessionBundle, options: ImportOptions): Impor
     const rename = options.rename?.get(session.id)
     // 换过 id 就是**另一条会话**：目录、同 id 冲突、报告都按新 id 算（原 id 那条留给正本去占）。
     const effectiveId = rename?.newId ?? session.id
-    options.onProgress?.({
-      phase: 'read',
-      total: bundle.sessions.length,
-      done: index,
-      id: effectiveId,
-      // 标题就是这一步要从日志里折出来的东西，所以它此刻还不知道：用 id 当名字。
-      label: effectiveId,
-    })
+    /*
+     * 标题已经由调用方预先算好（`titles`）时，这一段进度已经在那边报过；这里不再报一遍，
+     * 否则进度条会从满格退回 0。
+     */
+    if (options.titles === undefined) {
+      options.onProgress?.({
+        phase: 'read',
+        total: bundle.sessions.length,
+        done: index,
+        id: effectiveId,
+        // 标题就是这一步要从日志里折出来的东西，所以它此刻还不知道：用 id 当名字。
+        label: effectiveId,
+      })
+    }
     const withCwd = hasCwd(session)
     const dir = sessionDir(root, withCwd ? targetCwd : undefined, effectiveId)
     const files = session.files.map((file) => ({ name: file.name, bytes: file.bytes }))
     const existing = existingDirs.get(encodeSegment(effectiveId))
-    const sessionTitle = bundleTitle(bundle, session, decodeAll)
+    const sessionTitle =
+      options.titles?.has(session.id) === true
+        ? options.titles.get(session.id)
+        : bundleTitle(bundle, session, decodeAll)
     const titled = sessionTitle === undefined ? {} : { title: sessionTitle }
 
     if (existing !== undefined) {
@@ -1064,7 +1113,7 @@ export async function applyImport(
           continue
         }
         try {
-          if (commitAttachmentObject(path, attachmentBytes(bundle, entry)) === 'present') {
+          if ((await commitAttachmentObjectAsync(path, attachmentBytes(bundle, entry))) === 'present') {
             attachmentPresent += 1
           } else {
             attachmentWritten += 1
@@ -1102,7 +1151,7 @@ export async function applyImport(
       }
     }
 
-    mkdirSync(entry.dir, { recursive: true })
+    await mkdir(entry.dir, { recursive: true })
     const rename = options.rename?.get(session.id)
     for (const [fileIndex, file] of session.files.entries()) {
       const raw = entryBytes(bundle, file)
@@ -1124,8 +1173,8 @@ export async function applyImport(
         })
       }
       const part = join(entry.dir, `${file.name}.part`)
-      writeFileSync(part, next)
-      renameSync(part, join(entry.dir, file.name))
+      await writeFile(part, next)
+      await renameFile(part, join(entry.dir, file.name))
       bytes += next.length
     }
     written.push(entry.id)

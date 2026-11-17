@@ -22,6 +22,7 @@ import {
   attachmentBytes,
   buildBundle,
   buildBundleAsync,
+  bundleTitlesAsync,
   entryBytes,
   planImport,
   readBundle,
@@ -217,6 +218,26 @@ test('包校验：解压后超过上限时明确说太大，而不是伪装成�
 
   assert.throws(() => readBundle(bundle, { maxRawBytes: 8 }), /limit/i)
   await assert.rejects(readBundleAsync(bundle, { maxRawBytes: 8 }), /limit/i)
+})
+
+test('bundleTitlesAsync：与同步折标题同结果，planImport 直接用这份预计算', async () => {
+  const root = makeRoot('transfer-async-titles')
+  const source = writeSession(root, {
+    id: 'session-a',
+    cwd: FROM_CWD,
+    eventLines: [JSON.stringify({ type: 'session/title', seq: 0, data: { title: '异步折出来的标题' } })],
+  })
+  const bundle = readBundle(buildBundle([source]))
+  const phases: string[] = []
+  const titles = await bundleTitlesAsync(bundle, decodeAll, {
+    onProgress: (event) => phases.push(event.phase),
+  })
+  assert.equal(titles.get('session-a'), '异步折出来的标题')
+  assert.deepEqual(phases, ['read'], '预计算按包里的会话报 read 进度')
+
+  const targetRoot = makeRoot('transfer-async-titles-target')
+  const plan = planImport(bundle, { root: targetRoot, targetCwd: TO_CWD, titles })
+  assert.equal(plan.entries[0]?.title, '异步折出来的标题', 'planImport 不再自己折一遍')
 })
 
 test('导入：预演不写字节，落地后 cwd 被改写成目标工作区且除 cwd 外正文不变', async () => {
