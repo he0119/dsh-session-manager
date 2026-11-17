@@ -70,6 +70,12 @@ Status: implemented
 - **整库扫描只留异步入口**：同步的 `scanAll()` 与扫描缓存里的同步 `scan()` 删除；`locateSession()`
   改成异步，内容视图与同步差异两个端点跟着 `await`。真实库 1515 条冷扫 821 毫秒，同步版会把主线程
   整段按住；异步版总耗时 477 毫秒、最长停顿 27 毫秒。
+- **读包哈希与导出拼接分块**：`readBundleAsync()` 改用 `parseBundleAsync()` 与 `sha256Async()`
+  （每 4MB 让出），190MB 包最长停顿 177 → 89 毫秒；`gzipParts()` 的输出按 4MB 拷进目标缓冲，
+  不再一次 `Buffer.concat()`，190MB 包导出最长停顿 92 → 4 毫秒。
+- **日志切行与解码拼接分块**：`linesOf()` 的 `text.split('\n')` 改成按 2M 字符切段、跨段行尾拼回；
+  `decodeAllChunked()` 的 `parts.join('')` 改成按 2M 字符归组再拼。45MB 文本的最长停顿从 175
+  毫秒降到 61～132 毫秒；仍有一段在 zstd 分块解码退回整份解压。
 
 ## Alternatives considered
 
