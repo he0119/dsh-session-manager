@@ -231,7 +231,7 @@ export interface ScanOptions {
    *
    * `total` 是**这次要尝试的条目数**：先 readdir 数一遍再扫，所以进度条会恰好走满（数进去的条目都
    * 会 stat 一次，只有临时文件的目录也算一格，它同样要花时间）。`scanProjectDir()` 单独调用时
-   * `total` 是这个项目目录里的条目数，`scanAll()` 会把它接成整个库的分母。
+   * `total` 是这个项目目录里的条目数，`scanAllAsync()` 会把它接成整个库的分母。
    */
   onProgress?: (done: number, total: number) => void
 }
@@ -363,12 +363,12 @@ export async function scanProjectDirAsync(
  * @param options 扫描选项（`projection` 与 `resolveTitle` 与整库扫描同一个口径）。
  * @returns 会话；库里没有这一条时 undefined。
  */
-export function locateSession(
+export async function locateSession(
   root: string,
   id: string,
   decodeAll: DecodeAll,
   options: ScanOptions = {},
-): DiscoveredSession | undefined {
+): Promise<DiscoveredSession | undefined> {
   const dirName = encodeSegment(id)
   const found: DiscoveredSession[] = []
   let projectNames: string[]
@@ -397,7 +397,7 @@ export function locateSession(
     found.sort((a, b) => b.createdAt - a.createdAt)
     return found[0]
   }
-  return scanAll(root, decodeAll, options).find((session) => session.id === id)
+  return (await scanAllAsync(root, decodeAll, options)).find((session) => session.id === id)
 }
 
 /** 项目目录路径（由 cwd 推出项目目录名）。 */
@@ -410,66 +410,9 @@ export function projectDirOf(root: string, cwd: string): string {
  *
  * 单个项目目录坏掉只跳过它：整页会话列不出来比少一条会话严重得多（界面与迁移的族展开都要横跨项目
  * 目录，所以这一步不能因为一个坏项目目录就整体失败）。
- */
-export function scanAll(root: string, decodeAll: DecodeAll, options: ScanOptions = {}): DiscoveredSession[] {
-  const out: DiscoveredSession[] = []
-  let projectDirNames: string[]
-  try {
-    projectDirNames = readdirSync(root)
-  } catch {
-    return out
-  }
-  /*
-   * 先把"这次要 stat 的条目"数出来：进度条的分母，也是为什么整库扫描会多一轮 readdir。
-   *
-   * 只有 readdir，不读任何日志，相对扫描本身可以忽略；换来的是分母**确定**——进度条会恰好走满，
-   * 不会像"边扫边猜总数"那样停在 80% 或者越过 100%。
-   */
-  const projectDirs: Array<{ path: string; entries: number }> = []
-  for (const projectDirName of projectDirNames) {
-    const projectDirPath = join(root, projectDirName)
-    try {
-      if (!statSync(projectDirPath).isDirectory()) continue
-    } catch {
-      continue
-    }
-    let entries = 0
-    try {
-      entries = readdirSync(projectDirPath).length
-    } catch {
-      // 读不动就按 0 计：真去扫时它同样会失败、同样被跳过。
-    }
-    projectDirs.push({ path: projectDirPath, entries })
-  }
-  const total = projectDirs.reduce((sum, dir) => sum + dir.entries, 0)
-  let scanned = 0
-  for (const projectDir of projectDirs) {
-    const base = scanned
-    scanned += projectDir.entries
-    try {
-      out.push(
-        ...scanProjectDir(projectDir.path, decodeAll, {
-          ...options,
-          // 项目目录级的条数换成整库的：一次同步是"扫 85 条"，不是"扫 12 个项目目录各若干条"。
-          ...(options.onProgress === undefined
-            ? {}
-            : { onProgress: (done: number) => options.onProgress?.(base + done, total) }),
-        }),
-      )
-    } catch {
-      // 单个项目目录坏掉不该让整页打不开：跳过它，界面照旧能用。
-      continue
-    }
-  }
-  out.sort((a, b) => b.createdAt - a.createdAt)
-  return out
-}
-
-/**
- * 与 {@link scanAll} 同一份结果，只是**每个项目目录之间让出一轮事件循环**。
  *
- * 整库 1477 个文件冷扫一次要 1.2～1.3 秒，这期间页面请求与长连接都排着队。页面打开走这一条；
- * 单个项目目录内部仍然是同步的（一个目录通常几条会话，最多几十毫秒），让出的粒度按目录走就够。
+ * 这是**唯一的**整库扫描入口：没有同步版本。整库 1477 个文件冷扫一次要 1.2～1.3 秒，同步版会把
+ * 页面请求与长连接一起按住；这里在项目目录之间、以及一个项目目录内部每 16 条会话都会让出。
  */
 export async function scanAllAsync(
   root: string,
@@ -495,7 +438,7 @@ export async function scanAllAsync(
     try {
       entries = readdirSync(projectDirPath).length
     } catch {
-      // 同 scanAll：读不动就按 0 计。
+      // 同 scanAllAsync：读不动就按 0 计。
     }
     projectDirs.push({ path: projectDirPath, entries })
   }

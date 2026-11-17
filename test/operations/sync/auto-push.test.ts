@@ -20,7 +20,7 @@ import { decompress } from 'fzstd'
 
 import { autoPushSection } from '../../../src/config.ts'
 import { createDavClient } from '../../../src/operations/sync/dav.ts'
-import { scanAll, type DiscoveredSession } from '../../../src/shared/library/discovery.ts'
+import type { DiscoveredSession } from '../../../src/shared/library/discovery.ts'
 import { sessionDir } from '../../../src/shared/paths.ts'
 import { readRegistry, writeRegistryAtomic } from '../../../src/shared/registry.ts'
 import { createRemoteWriteGate } from '../../../src/operations/sync/remote-write.ts'

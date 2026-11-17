@@ -59,7 +59,7 @@ import { commitAttachmentObjectAsync, isAttachmentId, scanAttachmentRefs, type A
 import { warmCheckpoints, type WarmDeps } from '../../shared/host/checkpoint-warm.ts'
 import type { AutoConfig } from '../../config.ts'
 import type { DavPort } from './dav.ts'
-import { scanAll, scanAllAsync, type DiscoveredSession } from '../../shared/library/discovery.ts'
+import { scanAllAsync, type DiscoveredSession } from '../../shared/library/discovery.ts'
 import { createBackup } from '../../shared/journal.ts'
 import { encodeSegment, parseSessionLogName } from '../../shared/paths.ts'
 import { decodeLogTextChunked } from '../../shared/log/log-decode.ts'
@@ -1031,7 +1031,7 @@ export interface SyncPlanInput {
    * 都不动（`diverged`）。
    */
   decisions?: ReadonlyMap<string, SyncDecision>
-  /** 本机整库（`scanAll()` 的结果）。 */
+  /** 本机整库（`scanAllAsync()` 的结果）。 */
   local: readonly DiscoveredSession[]
   remote: RemoteLibrary
   mapping: ReadonlyMap<string, string>
@@ -2493,7 +2493,7 @@ function repoCandidates(deps: SyncDeps, local: readonly DiscoveredSession[]): st
 export interface SyncPrepared {
   /** 预演算出来的计划。 */
   plan: SyncPlan
-  /** 本机整库（`scanAll()` 的结果）。 */
+  /** 本机整库（`scanAllAsync()` 的结果）。 */
   local: DiscoveredSession[]
   /** 读回来的远端索引（落地不再读第二遍）。 */
   remote: RemoteLibrary

@@ -67,6 +67,9 @@ Status: implemented
   以及 `applyArtifactMovesAsync()` 的同卷 rename / 跨卷 copy，都改走 `fs/promises`。
 - **扫库在项目目录内部也按会话让出**：`scanProjectDirAsync()` 每 16 条让出一次；`scanAllAsync()`
   不再等整个项目目录读完。
+- **整库扫描只留异步入口**：同步的 `scanAll()` 与扫描缓存里的同步 `scan()` 删除；`locateSession()`
+  改成异步，内容视图与同步差异两个端点跟着 `await`。真实库 1515 条冷扫 821 毫秒，同步版会把主线程
+  整段按住；异步版总耗时 477 毫秒、最长停顿 27 毫秒。
 
 ## Alternatives considered
 

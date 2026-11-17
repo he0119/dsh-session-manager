@@ -19,7 +19,7 @@ import {
   type MigrateDeps,
   type MigrateRequest,
 } from '../../../src/operations/migrate/migrate.ts'
-import { scanAll } from '../../../src/shared/library/discovery.ts'
+import { scanAllAsync } from '../../../src/shared/library/discovery.ts'
 import { createBackup, readManifest } from '../../../src/shared/journal.ts'
 import { sessionDir } from '../../../src/shared/paths.ts'
 import { writeRegistryAtomic, readRegistry } from '../../../src/shared/registry.ts'
@@ -253,7 +253,7 @@ test('覆盖前那份备份：目录像删除那样搬回，注册表像迁移�
   // 连注册表一起还原——只搬目录会让登记停在被覆盖之后的那份路径上。
   const sb = makeSandbox('migrate-replace')
   const dir = sessionDir(sb.deps.sessionsRoot, FROM, sb.sessionId)
-  const session = scanAll(sb.deps.sessionsRoot, decodeAll).find((item) => item.id === sb.sessionId)!
+  const session = (await scanAllAsync(sb.deps.sessionsRoot, decodeAll)).find((item) => item.id === sb.sessionId)!
   const backup = await createBackup({
     backupRoot: sb.deps.backupRoot,
     sessionsRoot: sb.deps.sessionsRoot,
@@ -318,7 +318,7 @@ test('列举备份：坏目录跳过而不是让整张列表打不开', async ()
 test('回滚清单：路径跑出会话库 / 备份目录，或者文件名不是单段日志名，整份拒掉', async () => {
   const sb = makeSandbox('migrate-manifest-paths')
   const dir = sessionDir(sb.deps.sessionsRoot, FROM, sb.sessionId)
-  const session = scanAll(sb.deps.sessionsRoot, decodeAll).find((item) => item.id === sb.sessionId)!
+  const session = (await scanAllAsync(sb.deps.sessionsRoot, decodeAll)).find((item) => item.id === sb.sessionId)!
   const backup = await createBackup({
     backupRoot: sb.deps.backupRoot,
     sessionsRoot: sb.deps.sessionsRoot,

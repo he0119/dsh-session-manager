@@ -12,7 +12,7 @@ import { decompress } from 'fzstd'
 
 import type { AttachmentRef } from '../../../src/shared/attachments.ts'
 import { createDavClient, type DavPort } from '../../../src/operations/sync/dav.ts'
-import { scanAll, type DiscoveredSession } from '../../../src/shared/library/discovery.ts'
+import { scanAllAsync, type DiscoveredSession } from '../../../src/shared/library/discovery.ts'
 import { sessionDir } from '../../../src/shared/paths.ts'
 import { projectKey } from '../../../src/shared/project-key.ts'
 import { readRegistry, writeRegistryAtomic } from '../../../src/shared/registry.ts'
@@ -147,8 +147,8 @@ function addGeneration(machine: Machine, id: string, version: number, event?: st
 
 
 /** 宿主续写：往当前最高代次日志追加一帧（同一个 `session.vN` 文件变长，不是多一个代次）。 */
-function appendToLatest(machine: Machine, id: string, event: string): void {
-  const session = scanAll(machine.sessionsRoot, decodeAll).find((item) => item.id === id)
+async function appendToLatest(machine: Machine, id: string, event: string): Promise<void> {
+  const session = (await scanAllAsync(machine.sessionsRoot, decodeAll)).find((item) => item.id === id)
   assert.ok(session !== undefined, `找不到会话 ${id}`)
   const file = [...session.files].sort((left, right) => right.version - left.version)[0]
   assert.ok(file !== undefined, `会话 ${id} 没有日志`)
@@ -254,7 +254,7 @@ function planPhases(events: readonly SyncProgress[]): string[] {
     .map((event) => `${event.phase} ${event.done}/${event.total}`)
 }
 
-test('scanAll：进度分母是"这次要尝试的条目数"，跨项目目录也是同一个分母', () => {
+test('scanAllAsync：进度分母是"这次要尝试的条目数"，跨项目目录也是同一个分母', async () => {
   // 分母数少了（比如只数真会话）进度条会停在 33%；数多了又永远走不到头；而**按项目目录分别报**
   // 会让进度条每换一个目录就跳回 0。这里的库跨两个项目目录：A 里两条会话 + 一个只有临时文件的
   // 目录 + 一个普通文件（4 个条目），B 里一条会话（1 个条目）——分母是 5，一条条数到 4。
@@ -270,7 +270,7 @@ test('scanAll：进度分母是"这次要尝试的条目数"，跨项目目录�
     writeFileSync(join(projectDir, 'stray.txt'), 'not a session')
 
     const seen: string[] = []
-    const sessions = scanAll(machine.sessionsRoot, decodeAll, {
+    const sessions = await scanAllAsync(machine.sessionsRoot, decodeAll, {
       onProgress: (done, total) => seen.push(`${done}/${total}`),
     })
     // 目录遍历顺序由文件系统给，所以只钉形状：每条报一次、分母不变、done 从 0 数到 total - 1。
@@ -1261,7 +1261,7 @@ test('sync：端到端——两边各推送各的；远端领先时本机那份�
     assert.deepEqual(bApplied.pulled, ['a1'])
     assert.deepEqual(bApplied.replaced, ['a1'], '覆盖掉的单独报出来，界面据此多说一句')
     // 本机这份成了两代、而且与 A 那份逐代同名（内容指纹与 cwd 无关）
-    const localAfter = scanAll(b.sessionsRoot, decodeAll).find((session) => session.id === 'a1')
+    const localAfter = (await scanAllAsync(b.sessionsRoot, decodeAll)).find((session) => session.id === 'a1')
     assert.deepEqual(localAfter?.files.map((file) => file.version), [4, 5])
 
     const backupDir = join(b.base, 'backups', '2026-10-01T00-00-00-000Z')
@@ -1379,7 +1379,7 @@ test('sync：端到端——要覆盖本机那份之前先问"还在跑吗"；�
     assert.deepEqual(failed.pulled, [])
     assert.deepEqual(failed.replaced, [])
     assert.match(failed.problems.join('\n'), /备份失败/)
-    const untouched = scanAll(b.sessionsRoot, decodeAll).find((session) => session.id === 's1')
+    const untouched = (await scanAllAsync(b.sessionsRoot, decodeAll)).find((session) => session.id === 's1')
     assert.deepEqual(untouched?.files.map((file) => file.version), [4], '本机那份一个字节都没动')
   } finally {
     await fixture.close()
@@ -1503,7 +1503,7 @@ test('sync：端到端——扫描出来的会话与指纹能被远端读回认�
   try {
     writeSession(a, 's1', 1000)
     await syncMachine(a, dav, settings(a, { machineId: 'robot-a' }), { apply: true })
-    const local = scanAll(a.sessionsRoot, decodeAll)
+    const local = await scanAllAsync(a.sessionsRoot, decodeAll)
     const remote = await readRemoteLibrary(dav, settings(a, { machineId: 'robot-a' }))
     const mine =
       local[0]?.files.map((file) => contentFingerprint(file.path, file.version, file.compression, decodeAll)) ?? []
@@ -1824,7 +1824,7 @@ test('sync：端到端——两个不同路径的克隆靠 git remote 认成同�
       ['remote 0/0', 'repo 0/1'],
       '本机还没有会话、注册表里有一个工作区：扫本机没有条目可数，候选目录就那一个',
     )
-    const local = scanAll(b.sessionsRoot, decodeAll)
+    const local = await scanAllAsync(b.sessionsRoot, decodeAll)
     assert.equal(local.length, 1)
     assert.equal(local[0]?.cwd, bSub, 'cwd 改写成这台机器的克隆路径（中间那条映射一个字都没配）')
     assert.equal(readHeader(b, bSub, 's1').cwd, bSub, '落地那条会话的 header 也是新路径')
@@ -1877,7 +1877,7 @@ test('sync：拉取之后继续写，还能推送回远端（判据不看 cwd，
       { apply: true, git: gitNone },
     )
     assert.deepEqual(pulled.pulled, ['s1'])
-    const file = scanAll(b.sessionsRoot, decodeAll)[0]?.files[0]
+    const file = (await scanAllAsync(b.sessionsRoot, decodeAll))[0]?.files[0]
     assert.ok(file !== undefined)
     assert.notEqual(
       createHash('sha256').update(readFileSync(file.path)).digest('hex'),
@@ -1920,10 +1920,10 @@ test('同步：从别的机器拉回来、续写一条再推上去，下一轮�
     writeSession(a, 's1', 1000)
     await syncMachine(a, dav, configA, { apply: true, git: gitNone })
     await syncMachine(b, dav, configB, { apply: true, git: gitNone })
-    assert.equal(scanAll(b.sessionsRoot, decodeAll).length, 1, '前提：B 拉到了这一条')
+    assert.equal((await scanAllAsync(b.sessionsRoot, decodeAll)).length, 1, '前提：B 拉到了这一条')
 
     // B 这边续写一条（宿主在同一份日志后面追加），再推上去。
-    appendToLatest(b, 's1', '{"type":"user/message","seq":1,"data":{"text":"B 又写了一条"}}')
+    await appendToLatest(b, 's1', '{"type":"user/message","seq":1,"data":{"text":"B 又写了一条"}}')
     const pushed = await syncMachine(b, dav, configB, { apply: true, git: gitNone })
     assert.deepEqual(pushed.problems, [])
     assert.deepEqual(pushed.pushed, [{ id: 's1', action: 'update' }])
@@ -1963,8 +1963,8 @@ test('sync：裁决 keep-remote——只留远端那份，本机这份先备份�
       apply: true,
       git: gitNone,
     })
-    appendToLatest(a, 's1', '{"type":"user/message","seq":1,"data":{"text":"A-tail"}}')
-    appendToLatest(b, 's1', '{"type":"user/message","seq":1,"data":{"text":"B-tail"}}')
+    await appendToLatest(a, 's1', '{"type":"user/message","seq":1,"data":{"text":"A-tail"}}')
+    await appendToLatest(b, 's1', '{"type":"user/message","seq":1,"data":{"text":"B-tail"}}')
     await syncMachine(b, dav, settings(b, { machineId: 'robot-b' }), {
       apply: true,
       git: gitNone,
@@ -1985,7 +1985,7 @@ test('sync：裁决 keep-remote——只留远端那份，本机这份先备份�
     assert.deepEqual(outcome.problems, [])
     assert.deepEqual(outcome.replaced, ['s1'])
     assert.deepEqual(outcome.pulled, ['s1'], '只留远端那份：本机这份不另存一条')
-    const sessions = scanAll(a.sessionsRoot, decodeAll)
+    const sessions = await scanAllAsync(a.sessionsRoot, decodeAll)
     assert.equal(sessions.length, 1, '选单边就只留一份')
     const original = sessions[0]
     assert.ok(original !== undefined)
@@ -2030,7 +2030,7 @@ test('sync：改一次裁决只重算计划那一层——不再读远端包，�
     writeSession(a, 's1', 1000, {
       eventLines: [JSON.stringify({ type: 'assistant/message', seq: 1, data: { text: 'A 写的那一条' } })],
     })
-    const [source] = scanAll(a.sessionsRoot, decodeAll)
+    const [source] = await scanAllAsync(a.sessionsRoot, decodeAll)
     assert.ok(source !== undefined)
     const log = source.files[0]
     assert.ok(log !== undefined)
@@ -2094,8 +2094,8 @@ test('sync：裁决 keep-local——只留本机这份，远端那份不落到�
       apply: true,
       git: gitNone,
     })
-    appendToLatest(a, 's1', '{"type":"user/message","seq":1,"data":{"text":"A-tail"}}')
-    appendToLatest(b, 's1', '{"type":"user/message","seq":1,"data":{"text":"B-tail"}}')
+    await appendToLatest(a, 's1', '{"type":"user/message","seq":1,"data":{"text":"A-tail"}}')
+    await appendToLatest(b, 's1', '{"type":"user/message","seq":1,"data":{"text":"B-tail"}}')
     await syncMachine(b, dav, settings(b, { machineId: 'robot-b' }), {
       apply: true,
       git: gitNone,
@@ -2111,7 +2111,7 @@ test('sync：裁决 keep-local——只留本机这份，远端那份不落到�
     assert.deepEqual(outcome.problems, [])
     assert.deepEqual(outcome.pushed, [{ id: 's1', action: 'update' }])
     assert.deepEqual(outcome.pulled, [], '只留本机这份：远端那份不落到本机')
-    const sessions = scanAll(a.sessionsRoot, decodeAll)
+    const sessions = await scanAllAsync(a.sessionsRoot, decodeAll)
     assert.equal(sessions.length, 1, '选单边就只留一份')
     const original = sessions[0]
     assert.ok(original !== undefined)
@@ -2152,8 +2152,8 @@ test('sync：裁决 keep-both——两份都留，更晚的本机这份占原 id
       apply: true,
       git: gitNone,
     })
-    appendToLatest(a, 's1', '{"type":"user/message","seq":1,"data":{"text":"A-tail"}}')
-    appendToLatest(b, 's1', '{"type":"user/message","seq":1,"data":{"text":"B-tail"}}')
+    await appendToLatest(a, 's1', '{"type":"user/message","seq":1,"data":{"text":"A-tail"}}')
+    await appendToLatest(b, 's1', '{"type":"user/message","seq":1,"data":{"text":"B-tail"}}')
     await syncMachine(b, dav, settings(b, { machineId: 'robot-b' }), {
       apply: true,
       git: gitNone,
@@ -2170,7 +2170,7 @@ test('sync：裁决 keep-both——两份都留，更晚的本机这份占原 id
     assert.deepEqual(outcome.pushed, [{ id: 's1', action: 'update' }], '更晚的本机这份占原 id')
     assert.equal(outcome.pulled.length, 1, '远端那份落成了一条新会话')
     assert.ok(!outcome.pulled.includes('s1'), '原 id 仍是本机这份，不是从远端拉回来')
-    const sessions = scanAll(a.sessionsRoot, decodeAll)
+    const sessions = await scanAllAsync(a.sessionsRoot, decodeAll)
     assert.equal(sessions.length, 2, '两份都在')
     const original = sessions.find((session) => session.id === 's1')
     const branch = sessions.find((session) => session.id !== 's1')
@@ -2214,8 +2214,8 @@ test('sync：裁决 keep-both 而远端更晚——远端那份占原 id，本�
       apply: true,
       git: gitNone,
     })
-    appendToLatest(a, 's1', '{"type":"user/message","seq":1,"data":{"text":"A-tail"}}')
-    appendToLatest(b, 's1', '{"type":"user/message","seq":1,"data":{"text":"B-tail"}}')
+    await appendToLatest(a, 's1', '{"type":"user/message","seq":1,"data":{"text":"A-tail"}}')
+    await appendToLatest(b, 's1', '{"type":"user/message","seq":1,"data":{"text":"B-tail"}}')
     await syncMachine(b, dav, settings(b, { machineId: 'robot-b' }), {
       apply: true,
       git: gitNone,
@@ -2237,7 +2237,7 @@ test('sync：裁决 keep-both 而远端更晚——远端那份占原 id，本�
     assert.deepEqual(outcome.problems, [])
     assert.deepEqual(outcome.replaced, ['s1'], '原 id 由远端那份占住')
     assert.equal(outcome.pulled.length, 2, '落选的本机那份 + 拉回来的正本')
-    const sessions = scanAll(a.sessionsRoot, decodeAll)
+    const sessions = await scanAllAsync(a.sessionsRoot, decodeAll)
     assert.equal(sessions.length, 2, '两份都在')
     const original = sessions.find((session) => session.id === 's1')
     const branch = sessions.find((session) => session.id !== 's1')
@@ -2279,8 +2279,8 @@ test('sync：裁决 keep-both 时落选那份没能落成新会话，这一条�
       apply: true,
       git: gitNone,
     })
-    appendToLatest(a, 's1', '{"type":"user/message","seq":1,"data":{"text":"A-tail"}}')
-    appendToLatest(b, 's1', '{"type":"user/message","seq":1,"data":{"text":"B-tail"}}')
+    await appendToLatest(a, 's1', '{"type":"user/message","seq":1,"data":{"text":"A-tail"}}')
+    await appendToLatest(b, 's1', '{"type":"user/message","seq":1,"data":{"text":"B-tail"}}')
     await syncMachine(b, dav, settings(b, { machineId: 'robot-b' }), {
       apply: true,
       git: gitNone,
@@ -2311,13 +2311,13 @@ test('sync：裁决 keep-both 时落选那份没能落成新会话，这一条�
       outcome.problems.some((problem) => problem.includes('落成新会话失败')),
       `失败要说出来（实际 ${JSON.stringify(outcome.problems)}）`,
     )
-    assert.equal(scanAll(a.sessionsRoot, decodeAll).length, 1, '没多出一条只落地一半的副本')
+    assert.equal((await scanAllAsync(a.sessionsRoot, decodeAll)).length, 1, '没多出一条只落地一半的副本')
     const textOf = (session: DiscoveredSession): string =>
       [...session.files]
         .sort((left, right) => right.version - left.version)
         .map((file) => decodeAll(readFileSync(file.path)))
         .join('\n')
-    const only = scanAll(a.sessionsRoot, decodeAll)[0]
+    const only = (await scanAllAsync(a.sessionsRoot, decodeAll))[0]
     assert.ok(only !== undefined)
     assert.match(textOf(only), /A-tail/, '本机这份原样没动')
   } finally {
@@ -2433,7 +2433,7 @@ test('sync：端到端——真 git 认身份，两台机器仓库路径不同�
 
     const outcome = await syncMachine(b, dav, { ...config, machineId: 'robot-b' }, { apply: true })
     assert.deepEqual(outcome.pulled, ['s1'], '一条映射都没配，靠身份落地')
-    assert.equal(scanAll(b.sessionsRoot, decodeAll)[0]?.cwd, bSub)
+    assert.equal((await scanAllAsync(b.sessionsRoot, decodeAll))[0]?.cwd, bSub)
     assert.equal(readHeader(b, bSub, 's1').cwd, bSub, '落地那条会话的 header 也是本机克隆里的路径')
     assert.notEqual(aSub, bSub)
   } finally {
@@ -3177,7 +3177,7 @@ test('同步拉取：远端那份包自带对象（v2）时由导入落地，不
   try {
     storeA.put(ref, image)
     writeSession(a, 's1', 1000, { eventLines: [attachmentEvent(ref, image.length)] })
-    const [source] = scanAll(a.sessionsRoot, decodeAll)
+    const [source] = await scanAllAsync(a.sessionsRoot, decodeAll)
     assert.ok(source !== undefined)
     const log = source.files[0]
     assert.ok(log !== undefined)
@@ -3354,19 +3354,19 @@ test('附件引用按文件缓存：戳没变就复用，改写之后重算', as
     const ref: AttachmentRef = { id: attachmentIdOf(image), kind: 'image' }
     writeSession(machine, 's1', 1000, { eventLines: [attachmentEvent(ref, image.length)] })
     const cache = createAttachmentRefCache()
-    const files = (): ReturnType<typeof scanAll>[number]['files'] => scanAll(dir, decodeAll)[0]?.files ?? []
-    const first = await attachmentRefsOfFiles(files(), cache)
+    const files = async (): Promise<Awaited<ReturnType<typeof scanAllAsync>>[number]['files']> => (await scanAllAsync(dir, decodeAll))[0]?.files ?? []
+    const first = await attachmentRefsOfFiles(await files(), cache)
     assert.equal(first.length, 1)
     assert.equal(cache.size, 1, '一个文件只占一项')
-    assert.deepEqual(await attachmentRefsOfFiles(files(), cache), first, '戳没变就给同一份结论')
+    assert.deepEqual(await attachmentRefsOfFiles(await files(), cache), first, '戳没变就给同一份结论')
 
     // 改写同一份文件（追加一条新引用）：戳变了，缓存必须跟着重算。
-    const file = files()[0]
+    const file = (await files())[0]
     assert.ok(file !== undefined)
     const second = Buffer.from('第二张图')
     const refTwo: AttachmentRef = { id: attachmentIdOf(second), kind: 'image' }
     writeFileSync(file.path, Buffer.concat([readFileSync(file.path), encodeRawFrame(`${attachmentEvent(refTwo, second.length)}\n`)]))
-    const updated = await attachmentRefsOfFiles(files(), cache)
+    const updated = await attachmentRefsOfFiles(await files(), cache)
     assert.equal(updated.length, 2, '新引用扫得出来')
     assert.equal(cache.size, 1, '同一个路径还是只占一项（换掉旧的那份）')
   } finally {
@@ -3535,7 +3535,7 @@ test('同步内容判据：两边都没再动的那一对，第二轮不再去�
     writeSession(a, 's1', 1000, {
       eventLines: [JSON.stringify({ type: 'assistant/message', seq: 1, data: { text: 'A 写的那一条' } })],
     })
-    const [source] = scanAll(a.sessionsRoot, decodeAll)
+    const [source] = await scanAllAsync(a.sessionsRoot, decodeAll)
     assert.ok(source !== undefined)
     const log = source.files[0]
     assert.ok(log !== undefined)
@@ -3633,7 +3633,7 @@ test('sync：整理远端只手自己那一格——被取代的旧包删掉，�
     writeSession(a, 's1', 1000)
     await syncMachine(a, dav, configA, { apply: true, git: gitNone })
     await syncMachine(b, dav, configB, { apply: true, git: gitNone })
-    appendToLatest(b, 's1', '{"type":"user/message","seq":1,"data":{"text":"B 又写了一条"}}')
+    await appendToLatest(b, 's1', '{"type":"user/message","seq":1,"data":{"text":"B 又写了一条"}}')
     await syncMachine(b, dav, configB, { apply: true, git: gitNone })
 
     // A 再同步一次，并勾上整理：本机这份被远端顶掉，自己那一格里的旧包删掉。
@@ -3717,7 +3717,7 @@ test('sync：只整理远端——预演只算账、落地才删，索引重写�
     writeSession(a, 's1', 1000)
     await syncMachine(a, dav, configA, { apply: true, git: gitNone })
     await syncMachine(b, dav, configB, { apply: true, git: gitNone })
-    appendToLatest(b, 's1', '{"type":"user/message","seq":1,"data":{"text":"B 又写了一条"}}')
+    await appendToLatest(b, 's1', '{"type":"user/message","seq":1,"data":{"text":"B 又写了一条"}}')
     await syncMachine(b, dav, configB, { apply: true, git: gitNone })
 
     // 预演：报一条，但一个字节都不动（连 DELETE 都不该发出去）。
