@@ -505,7 +505,7 @@ export function SyncConfigForm({
             {saving ? t('sync.form.saving') : t('save')}
           </Button>
           {/*
-           * 「测试连接」只读一次远端（PROPFIND）：照样走官方 outline——"不写盘"不是裸着的理由，
+           * 「测试连接」只读一次远端（PROPFIND）：照样走官方 outline——"不写入磁盘"不是裸着的理由，
            * 内建设置页那枚同样只读的「打开配置文件」正是带边框的（量到 `border: rgba(0, 0, 0, 0.12) 1px`）。
            */}
           <Button variant="outline" size="sm" onClick={testConnection} disabled={!canTest}>

@@ -219,7 +219,7 @@
   标题才落在同一个左缘上，表头「标题」也对得齐。
   「项目」那一列在册项目写工作区标题、没登记的写路径——平铺之后它是"这条属于哪个目录"的唯一出处。
 - 表头三列可点着排（标题 / 大小 / 时间），默认时间从新到旧；**表头吸顶**（`position: sticky`），
-  滚的是列表自己。排序只改看，不写盘；比较与筛选在 `operations/manage/manageRows.ts`，`test/client/operations/manage/manageRows.test.ts` 直接测。
+  滚的是列表自己。排序只改看，不写入磁盘；比较与筛选在 `operations/manage/manageRows.ts`，`test/client/operations/manage/manageRows.test.ts` 直接测。
 - **左栏的项目树**：`全部项目` + 每个项目（顶层会话条数：子智能体折在父行下面，不算进去；父在别处的子智能体自己占一行，照旧算一条）。点项目名 = 只看它；鼠标停在项目行上出现
   勾选框 = 整组勾选，作用面与卡头「全选」一致（筛出来的那些），勾了一部分画横杠；这个项目在当前
   视图里没有可勾的行时，勾选框不画。筛选标签在左栏底部，搜索框在卡头；筛选标签条数按整库算，
@@ -253,7 +253,7 @@
 
 - 弹窗外壳用官方 `Modal`；宽度 `min(640px, 100%)`，正文自己写 **14px / 20px**（官方 Modal portal 到
   `document.body`，不写会继承文档根的 16px）。
-- 会写盘的动作一个按钮开一个确认弹窗：计划与"做不做"同框；只读的预览（看差异、导出、测试连接）
+- 会写入磁盘的动作一个按钮开一个确认弹窗：计划与"做不做"同框；只读的预览（看差异、导出、测试连接）
   不开确认，直接说"这一步只读"。
 - 弹窗正文的块间距挂在**自己的正文容器**上，不挂官方外层（见 §4.2）。普通确认弹窗用
   `.dsm-dialogBody`（`gap: 8px`）；差异弹窗用 `.dsm-diffBody`（`gap: 24px`）。
@@ -263,7 +263,7 @@
 
 ### 2.5 执行与结果
 
-会写盘或耗时的动作只有一条流程：**确认 → 执行中 → 结果 → 完成**。四段说的是同一件事的四个时刻，
+会写入磁盘或耗时的动作只有一条流程：**确认 → 执行中 → 结果 → 完成**。四段说的是同一件事的四个时刻，
 所以它们共用一套形状，不做成四扇窗口。
 
 1. **确认**：就是 §2.4 的确认弹窗（计划 / 账目与「取消 / 确认」）。它只负责"要不要做"。
@@ -414,11 +414,11 @@
   会话、失败原因都在那一面里说（认领来的那趟由页面把那句话递过去）。
 - 关掉窗口不停手：执行中那枚是「转到后台」（关掉窗口、活儿照跑），进度与结论搬到状态栏那一格——它
   挂在**页面**这一级（状态在 `operations/manage/runJob.ts` / `operations/sync/syncJob.ts` 的模块级 store 里），开别的弹窗、
-  关掉窗口再回来都还在。点那一格回到同一扇窗，已经跑完就直接是结果页。这是所有写盘动作共同的一条，
+  关掉窗口再回来都还在。点那一格回到同一扇窗，已经跑完就直接是结果页。这是所有写入磁盘动作共同的一条，
   不再只有同步有。
 - 需要重启这类坏消息在确认前先说，应用后只在真的需要重启时留一条 warn 横幅；成功不要再叠一遍。
 - 空态、加载态、失败态各说各的；失败带原始原因，不吞成一句"操作失败"。
-- 写盘前先备份；计划永远只读，确认才应用。
+- 写入磁盘前先备份；计划永远只读，确认才应用。
 
 ## 9. 验收
 
@@ -444,7 +444,7 @@ pnpm typecheck && pnpm build && pnpm test && pnpm check:package
 - [ ] 字号落在 §3 的几档里；次要文字同时是 12/18，不只是换颜色。
 - [ ] 窄列放短标签，整句在 `title`；不可用动作说明了原因与出路。
 - [ ] 深浅主题各看一遍；需要重启之类的坏消息在确认前说出来。
-- [ ] 写盘动作走完四段（确认 / 执行中 / 结果 / 完成）：结果页底栏只有一枚「完成」，状态栏那一格能回到
+- [ ] 写入磁盘动作走完四段（确认 / 执行中 / 结果 / 完成）：结果页底栏只有一枚「完成」，状态栏那一格能回到
       同一扇窗；执行中关窗＝转后台，没有"取消"。
 - [ ] 改动了哪条规格，就同一次改了 `test/plugin/styles.test.mjs` / `test/plugin/client.test.mjs` 里对应的断言。
 
@@ -456,7 +456,7 @@ pnpm typecheck && pnpm build && pnpm test && pnpm check:package
 | 页头照内建设置页（已被取代） | [2026-09-28](../.agents/notes/implemented/architecture/2026-09-28-page-header-matches-the-builtin-settings.md) |
 | 正文与次要文字两档 | [2026-10-07](../.agents/notes/implemented/architecture/2026-10-07-body-type-matches-the-builtin-settings.md) |
 | 控制件用官方原语 | [2026-10-15](../.agents/notes/implemented/architecture/2026-10-15-controls-come-from-the-official-primitives.md) |
-| 写盘动作共用一扇执行窗 | [2026-11-15](../.agents/notes/implemented/architecture/2026-11-15-actions-share-one-run-dialog.md) |
+| 写入磁盘动作共用一扇执行窗 | [2026-11-15](../.agents/notes/implemented/architecture/2026-11-15-actions-share-one-run-dialog.md) |
 | 卡片动作行 | [2026-10-07](../.agents/notes/implemented/architecture/2026-10-07-card-actions-live-in-a-footer-row.md) |
 | 一对选行工具 | [2026-10-08](../.agents/notes/implemented/bug-fix/2026-10-08-one-pair-of-pick-tools.md) |
 | 行上动作等悬停（已被取代） | [2026-10-12](../.agents/notes/implemented/architecture/2026-10-12-row-action-waits-for-hover.md) |

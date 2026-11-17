@@ -228,7 +228,7 @@ export interface PathRepairOutcome {
   /** 改写了多少份日志、多少条事件。 */
   files: number
   events: number
-  /** 逐条问题（写盘失败、修完复验不过…）。 */
+  /** 逐条问题（写入磁盘失败、修完复验不过…）。 */
   problems: string[]
 }
 

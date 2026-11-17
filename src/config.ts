@@ -88,15 +88,15 @@ export interface SyncConfig {
 export interface ToolsConfig {
   /** `plan_session_migration`：只读预览迁移。 */
   plan?: boolean
-  /** `migrate_sessions`：真搬（要 `apply: true` 才写盘）。 */
+  /** `migrate_sessions`：真搬（要 `apply: true` 才写入磁盘）。 */
   migrate?: boolean
   /** `rollback_session_migration`：按备份逐字节回滚。 */
   rollback?: boolean
   /** `verify_workspace_sessions`：只读复核日志与 header。 */
   verify?: boolean
-  /** `sync_sessions`：与 WebDAV 远端同步（要 `apply: true` 才写盘）。 */
+  /** `sync_sessions`：与 WebDAV 远端同步（要 `apply: true` 才写入磁盘）。 */
   sync?: boolean
-  /** `repair_session_paths`：修日志里别的机器留下的路径（要 `apply: true` 才写盘）。 */
+  /** `repair_session_paths`：修日志里别的机器留下的路径（要 `apply: true` 才写入磁盘）。 */
   repair?: boolean
 }
 

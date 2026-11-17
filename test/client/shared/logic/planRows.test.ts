@@ -2,7 +2,7 @@
 //
 // 这一格在用户截图上错过：一次 20 条**全部跳过**的导入，每一行的 cwd 都写着
 // 「保持无 cwd（落 _no-cwd）」，而那些会话明明都有 cwd（截图里第一条就在
-// /home/uy_sun/dev/dsh-aperture），并且它们根本不会被写盘。等于把"什么都不会发生"说成了
+// /home/uy_sun/dev/dsh-aperture），并且它们根本不会被写入磁盘。等于把"什么都不会发生"说成了
 // "你的会话要被丢进无 cwd 项目目录"。根因是那一格只判断 `toCwd === undefined`——跳过的行按设计也没有
 // `toCwd`（见 `src/operations/transfer/transfer.ts` 的 ImportEntry），于是两支不同的情况被合并成了一句错话。
 //
@@ -31,7 +31,7 @@ const t = (key: string, params?: Record<string, unknown>): string =>
   params ? `${key}:${JSON.stringify(params)}` : key
 
 test('跳过的行：说"跳过"，不说 cwd 会怎样', () => {
-  // 这条就是截图里那一条：有 cwd、但库里已经有同 id，所以不会写盘。
+  // 这条就是截图里那一条：有 cwd、但库里已经有同 id，所以不会写入磁盘。
   const plan = describeCwd({ action: 'skip', fromCwd: '/home/uy_sun/dev/dsh-aperture' })
   assert.deepEqual(plan, { kind: 'skip' })
 })

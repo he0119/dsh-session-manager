@@ -45,5 +45,5 @@ Status: implemented
 - 应用那一趟切到后台（「转到后台」）之后，弹窗关掉，进度回到状态栏那一格——这条路径与之前一致。
 - `SyncPanel` 从"一面的正文"变成"一整个弹窗"：它得自己拿 `onClose`，以及那枚「撤销」要去的那一面
   （`onOpenBackups`）。跑完那一段是**结果页**，不是回到面板——见
-  [写盘动作共用一扇执行窗](./2026-11-15-actions-share-one-run-dialog.md)。
+  [写入磁盘动作共用一扇执行窗](./2026-11-15-actions-share-one-run-dialog.md)。
 - 计划段不再有 ConfirmDialog 的「正在预览…」外壳：那几秒由它自己画进度块（与导入那一段同一个写法）。

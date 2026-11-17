@@ -3,7 +3,7 @@
 // 为什么单独一层：本插件有三处会改注册表（迁移、导入、同步拉取），三处都撞上同一件事——磁盘上的
 // `workspace.json` 只是**第三份**拷贝。宿主持着内存里那份（它才是权威：`dsh-storage-json` 的单单元
 // 契约定死了"写入才改它、绝不从磁盘重读"），还持着一张启动时建的"这条会话住哪儿"的缓存表。文件写对了
-// 不等于宿主认了：侧边栏仍按旧归属显示，之后任何一次工作区改动还会拿内存副本把这次写盘盖掉。
+// 不等于宿主认了：侧边栏仍按旧归属显示，之后任何一次工作区改动还会拿内存副本把这次写入磁盘盖掉。
 //
 // 所以这里做的不是"再写一次文件"，而是**把活儿交给宿主自己做**：
 //   1. 先让它按磁盘重看一眼（刷新 header 缓存 + 重建活会话索引，跟它启动时做的两步一样）——不先做
@@ -25,7 +25,7 @@
 // 会话 id 全程只被"挂靠 / 摘掉"，既不新建也不改名；已存在的工作区复用自己那条记录、id 不变。
 //
 // 本模块保持**零 DSH 依赖**：端口由宿主那半侧（`src/tools.ts` 的 `hostRegistryPort()`）探测后注入；
-// 写盘只借 `registry.ts` 的原子写，与迁移 / 导入 / 同步用的是同一份。
+// 写入磁盘只借 `registry.ts` 的原子写，与迁移 / 导入 / 同步用的是同一份。
 import { missingMemberships, readRegistry, writeRegistryAtomic } from '../registry.ts'
 import type {
   EffectMode,
@@ -62,7 +62,7 @@ export interface TakeEffectOptions {
 
 /**
  * 宿主没接住之后，把这次算好的注册表整份写回文件。
- * @returns 真的写回去了才 true；没有终态 / 没给路径 / 写盘本身失败都是 false，由措辞如实分岔。
+ * @returns 真的写回去了才 true；没有终态 / 没给路径 / 写入磁盘本身失败都是 false，由措辞如实分岔。
  */
 function restoreRegistry(deps: EffectDeps, options: TakeEffectOptions): boolean {
   const registry = options.registry

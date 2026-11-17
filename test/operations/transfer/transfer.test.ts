@@ -280,7 +280,7 @@ test('导入：预览不写字节，应用后 cwd 被改写成目标工作区且
   assert.deepEqual(plan.rehomed, ['session-a'])
   assert.equal(plan.entries[0]!.toCwd, TO_CWD)
   assert.equal(plan.registryChange?.createdTarget, true)
-  // 预览不写盘
+  // 预览不写入磁盘
   assert.equal(existsSync(plan.entries[0]!.dir), false)
 
   const registryPath = join(targetRoot, '..', 'workspace.json')

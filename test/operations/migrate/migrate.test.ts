@@ -141,7 +141,7 @@ test('预览：目标就是这几条会话现在住的那个目录（换种拼�
   rmSync(sb.base, { recursive: true, force: true })
 })
 
-test('dry-run：runMigration(apply:false) 与预览同形，且不写盘', async () => {
+test('dry-run：runMigration(apply:false) 与预览同形，且不写入磁盘', async () => {
   const sb = makeSandbox('migrate-dryrun')
   const run = await runMigration(sb.deps, req(sb), { apply: false })
 

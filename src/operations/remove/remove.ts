@@ -11,7 +11,7 @@
 //   - 反过来，恢复备份时那条会话的登记、归档状态**自动**回到原样，不必再补写一次注册表，
 //     也就不会在恢复时把用户之后做的注册表改动覆盖掉。
 //
-// 与迁移共用同一套预览/确认标准：`plan` 只读、`apply` 才写盘，且计划里 `ok` 不为 true 就拒绝执行。
+// 与迁移共用同一套预览/确认标准：`plan` 只读、`apply` 才写入磁盘，且计划里 `ok` 不为 true 就拒绝执行。
 //
 // **子智能体跟着父会话走**：点名一条会话，它的**全部后代**（沿 header 的 `parentSession` 找下去）一起删，
 // 因为子会话在外壳侧边栏里只挂在父会话的 `subagentCatalog` 下——父的日志一没了，子会话就再没有别的
@@ -258,7 +258,7 @@ export async function planRemoval(
  *
  * @param deps 路径与探测口。
  * @param request 要删的会话 id。
- * @param options.apply 是否真的写盘。
+ * @param options.apply 是否真的写入磁盘。
  * @param options.onProgress 全程进度：`scan`（重算一遍计划）、`backup`（先复制再删）、`remove`（逐条
  *   删目录）、`verify`（复核删掉了、备份里那份还在）。
  * @returns 执行结果；计划不 ok 时 `applied` 为 false 且原样带回 `problems`。

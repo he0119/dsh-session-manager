@@ -5,7 +5,7 @@
 //   1) 插件入口的自描述字段与 cordis.patch.yml / inject 一致
 //   2) 能注册出 6 个工具，且 parameters / output.render 形状符合宿主契约
 //   3) apply 返回单个卸载函数（Cordis 契约），卸载后路由与工具都摘掉
-//   4) apply 那次写盘只有一件：把旧默认备份根搬进插件目录（其余动作都是只读）
+//   4) apply 那次写入磁盘只有一件：把旧默认备份根搬进插件目录（其余动作都是只读）
 //
 // **为什么这里用真实 Cordis，而不是一个纯对象假装 ctx**：Cordis 的 Context 是 Proxy，服务属性
 // 只有在当前 fiber 的 `inject` 里声明过才可读，否则**同步抛** `cannot get property "X" without

@@ -121,7 +121,7 @@ export const zh = {
   'table.skip': '跳过',
   'cwd.rewritten': '{from} → {to}',
   'cwd.keep': '没有工作目录（落 _no-cwd）',
-  // 跳过的行**没有** toCwd，但那不是"没有 cwd"：它们根本不会被写盘。
+  // 跳过的行**没有** toCwd，但那不是"没有 cwd"：它们根本不会被写入磁盘。
   'cwd.skipped': '跳过，不改写',
   'import.done': '已写入 {count} 条会话（{bytes}）。',
   // 只补附件的那种导入（日志早就在库里、图是挂的）：会话那一条是 0，得有一句说清这次写的是什么。
@@ -169,11 +169,11 @@ export const zh = {
     '（已归档的取消归档、空白的删掉、子智能体连着它的父会话一起迁），或者改勾父会话。',
   'migrate.action': '迁移',
   'migrate.acknowledge':
-    '迁移会改写这些会话记录的工作目录，写盘之后要回退只能走「备份与回滚」。',
+    '迁移会改写这些会话记录的工作目录，写入磁盘之后要回退只能走「备份与回滚」。',
   'migrate.dialogTitle': '将要迁移',
   'migrate.apply': '确认迁移',
   'migrate.running': '迁移中…',
-  'migrate.progress.note': '这一步会写盘；中断会在库里留下中间状态，之后可以在「备份与回滚」里回退。',
+  'migrate.progress.note': '这一步会写入磁盘；中断会在库里留下中间状态，之后可以在「备份与回滚」里回退。',
   'migrate.summary': '将迁移 {sessions} 条会话（{files} 个日志，{bytes}）',
   'migrate.blocked': '这次不会搬任何会话：先解决下面的问题，再按「确认迁移」。',
   'migrate.family':
@@ -231,7 +231,7 @@ export const zh = {
   'backup.rollback.confirm': '确认回滚',
   'backup.rollback.running': '回滚中…',
   'backup.progress.note': '还原会逐个会话把目录搬回去、逐文件复写字节；中断了再点一次这份备份即可。',
-  'backup.rollback.actions': '以下是回滚会做的 {count} 个动作（还没有写盘）：',
+  'backup.rollback.actions': '以下是回滚会做的 {count} 个动作（还没有写入磁盘）：',
   'backup.rollback.done': '已回滚 {sessions} 条会话、还原 {files} 个文件并恢复注册表。',
   'backup.restore.action': '恢复',
   'backup.restore.acknowledge':
@@ -239,7 +239,7 @@ export const zh = {
   'backup.restore.dialogTitle': '将要恢复',
   'backup.restore.confirm': '确认恢复',
   'backup.restore.running': '恢复中…',
-  'backup.restore.actions': '以下是恢复会做的 {count} 个动作（还没有写盘）：',
+  'backup.restore.actions': '以下是恢复会做的 {count} 个动作（还没有写入磁盘）：',
   'backup.restore.done': '已恢复 {sessions} 条会话、还原 {files} 个文件（注册表未改动）。',
 
   // ---- 会话（逐条管理：归档 / 重算名称 / 迁移 / 删除） ----
@@ -414,10 +414,10 @@ export const zh = {
   'help.categories.note': '一条会话可能同时属于几类，行上就挂几枚标签。',
   'help.entry.title': '哪里做什么',
   'help.entry.sessions': '整个会话库都在这里，侧边栏点不到的那些也在：左边按项目筛，中间是平铺的表，行尾可以看详情。勾选后可以归档、重新生成名称、迁移、导出或删除：名称是按整段对话重算的，你手动改过名的与子智能体会话会跳过。迁移把勾中的会话搬到一个目标目录——改写工作目录、挪走日志目录、更新工作区注册表；侧边栏看不见的那几类搬不走，先在列表里单独处理。',
-  'help.entry.export': '列表底部动作行里的「导出所选」：把勾中的会话打成 .dshsess 包交给浏览器下载，不弹窗、不写盘——亲子会话跟着走的那几条也在里面，完成后顶上的提示会报条数、字节与带上的附件对象。',
+  'help.entry.export': '列表底部动作行里的「导出所选」：把勾中的会话打成 .dshsess 包交给浏览器下载，不弹窗、不写入磁盘——亲子会话跟着走的那几条也在里面，完成后顶上的提示会报条数、字节与带上的附件对象。',
   'help.entry.import': '底部状态栏那枚「导入…」：选一个 .dshsess 包（也可以直接把它拖到页面上）与目标目录，先看一份只读计划，确认才把包里的会话放进那个项目；目标目录默认填左栏选中的项目。',
   'help.entry.sync': '页头那枚同步状态打开：在几台机器之间同步会话（WebDAV），先给一份只读计划，确认才真的拉取与推送。远端地址、机器名与路径映射在插件设置里改，改完不用重启。会话日志引用的附件对象走远端一个共享目录，字节相同的只传一次：本机缺的取回、远端缺的补上，两边都没有的只报一句（它在计划里不出现）。',
-  'help.entry.backup': '底部状态栏那枚「备份与回滚」打开：几个会写盘的操作共同的后悔面，迁移、删除、同步覆盖本机那份之前都会先留一份字节级备份。「回滚」把迁移搬走的那份搬回来（连工作区注册表一起还原），「恢复」只把备份里那份搬回去，注册表不动。',
+  'help.entry.backup': '底部状态栏那枚「备份与回滚」打开：几个会写入磁盘的操作共同的后悔面，迁移、删除、同步覆盖本机那份之前都会先留一份字节级备份。「回滚」把迁移搬走的那份搬回来（连工作区注册表一起还原），「恢复」只把备份里那份搬回去，注册表不动。',
   'help.where.title': '数据从哪来',
   'help.where.library': '会话库',
   'help.where.libraryText': '每个目录就是一条会话；名称、大小和是否显示都从这里的日志读出来。',

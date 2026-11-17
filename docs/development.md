@@ -111,7 +111,7 @@ Linux/CI 上 symlink 正常，用 `pnpm install` 走 `pnpm-lock.yaml` 即可。
 `import` 各测试文件：`node:test` 在直接运行该模块时同样会注册并执行用例，只是不再经过子进程隔离。
 代价是某个文件抛错会影响同进程的其它文件，因此 runner 对每个文件单独 try/catch 汇总。
 
-写盘的测试一律用 `test/fixtures/sandbox.ts` 的 `sandboxDir(名字)` 拿目录（`test/.sandbox/<名字>`，
+写入磁盘的测试一律用 `test/fixtures/sandbox.ts` 的 `sandboxDir(名字)` 拿目录（`test/.sandbox/<名字>`，
 `.gitignore` 里挡的就是这一个根）：别在自己目录下另起 `.sandbox`，否则几十个目录各留一份，谁也看不出
 谁没清干净。
 
@@ -242,7 +242,7 @@ tsconfig.client.json       Web Client 自己的类型工程（DOM + JSX；Host �
 
 #### `src/shared/host/`：把改动交给宿主
 
-写盘之后的两步善后，迁移、导入、同步三个应用口共用：让宿主认下新的注册表、补上被改写会话的列表元数据。
+写入磁盘之后的两步善后，迁移、导入、同步三个应用口共用：让宿主认下新的注册表、补上被改写会话的列表元数据。
 
 | 文件 | 职责 | DSH 依赖 |
 | --- | --- | --- |
@@ -260,7 +260,7 @@ tsconfig.client.json       Web Client 自己的类型工程（DOM + JSX；Host �
 
 | 文件 | 职责 | DSH 依赖 |
 | --- | --- | --- |
-| `src/operations/migrate/migrate.ts` | 迁移编排：预览 / 执行 / 回滚 / 备份清单（工具与界面两个入口共用）；写盘之后交 `src/shared/host/take-effect.ts` 把改动交给宿主自己做、`src/shared/host/checkpoint-warm.ts` 补上被改写 cwd 那几条的检查点，并拿备份与写入磁盘结果复核「会话 id 不变」 | 无 |
+| `src/operations/migrate/migrate.ts` | 迁移编排：预览 / 执行 / 回滚 / 备份清单（工具与界面两个入口共用）；写入磁盘之后交 `src/shared/host/take-effect.ts` 把改动交给宿主自己做、`src/shared/host/checkpoint-warm.ts` 补上被改写 cwd 那几条的检查点，并拿备份与写入磁盘结果复核「会话 id 不变」 | 无 |
 | `src/operations/migrate/plan.ts` | 只读计划：源是**点名的那些会话**（`sessionIds`，每条按自己的 `cwd` 算，所以可以跨目录）、目标推导、阻塞问题、注册表变更（隐藏的会话逐个点名拒绝，点中的那些再向下展开整族；宿主持着的进 `liveSkipped`，按来源目录分组算产物） | 无 |
 | `src/operations/migrate/execute.ts` | 执行 + 独立复核（含产物目标位校验） | 无 |
 | `src/operations/migrate/artifacts.ts` | 会话产物提取（证据分层）、规划（求交/剪枝）、搬迁 | 无 |
@@ -418,7 +418,7 @@ tsconfig.client.json       Web Client 自己的类型工程（DOM + JSX；Host �
 | `src/client/operations/manage/manageRows.ts` | 平铺表的筛 / 排与项目行勾选状态（`sessionsInProject` / `sortSessions` / `groupPickState`，`test/client/operations/manage/manageRows.test.ts` 钉住）。 |
 | `src/client/operations/manage/sessionFilter.ts` | 背后的筛选与搜索判据。 |
 | `src/client/operations/manage/statePatch.ts` | 动作应用之后就地改清单里的那几条（不等宿主重扫整库）；全是纯函数，一条都没变时原样返回同一个 state。 |
-| `src/client/operations/manage/runJob.ts` | 六个写盘动作（删除 / 迁移 / 导入 / 回滚 / 整理远端 / 重算名称）共用的那一趟执行——模块级单槽状态：起跑时打开状态窗、进度一条条进来、可以「转到后台」（窗口关掉、活儿照跑）、跑完把结论挂到同一个槽里等用户按「完成」收走，一次只放一趟（第二趟被拒），`test/client/operations/manage/run-job.test.ts` 钉住。 |
+| `src/client/operations/manage/runJob.ts` | 六个写入磁盘动作（删除 / 迁移 / 导入 / 回滚 / 整理远端 / 重算名称）共用的那一趟执行——模块级单槽状态：起跑时打开状态窗、进度一条条进来、可以「转到后台」（窗口关掉、活儿照跑）、跑完把结论挂到同一个槽里等用户按「完成」收走，一次只放一趟（第二趟被拒），`test/client/operations/manage/run-job.test.ts` 钉住。 |
 | `src/client/operations/manage/runLabel.ts` | 那一扇窗与其入口的说法（标题、状态栏那一格的短标签、失败那句「没做成」，纯函数，同一个 `test/client/operations/manage/run-job.test.ts` 钉住）。 |
 
 #### `operations/sync/`：同步面

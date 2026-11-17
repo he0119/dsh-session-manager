@@ -888,7 +888,7 @@ export interface ImportEntry {
   files: Array<{ name: string; bytes: number }>
 }
 
-/** 一次导入的计划（纯计算，不写盘）。 */
+/** 一次导入的计划（纯计算，不写入磁盘）。 */
 export interface ImportPlan {
   /** 有可应用内容（会创建会话，或会补上附件对象）且无阻塞问题。 */
   ok: boolean

@@ -147,7 +147,7 @@ export function readLogHeader(path: string, decodeAll: DecodeAll): { header: Ses
  * `size:mtimeMs` 认文件，另加一条 git 式的 racy 规则：**记录不到 1 秒的条目不信任**——同一秒里
  * 又被改写、大小还一样时时间戳分不出来（那时重读一次，成本只落在刚动过的那些文件上）。
  *
- * 只给扫描用（`readSessionDir()`）；要写盘的路径（迁移写入磁盘复验、复核）一律走 `readLogHeader()`
+ * 只给扫描用（`readSessionDir()`）；要写入磁盘的路径（迁移写入磁盘复验、复核）一律走 `readLogHeader()`
  * 现读，不经过这里。
  */
 const scanHeaderCache = new Map<string, { stamp: string; at: number; header: SessionHeader; bytes: number }>()

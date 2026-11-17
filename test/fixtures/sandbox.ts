@@ -10,7 +10,7 @@
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-/** 测试会写盘的临时根。 */
+/** 测试会写入磁盘的临时根。 */
 export const SANDBOX_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '.sandbox')
 
 /** `test/.sandbox/<name>` 的绝对路径；不创建目录，调用方自己 `mkdirSync`。 */

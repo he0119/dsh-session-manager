@@ -3,10 +3,10 @@
  *
  * 一、cwd 那一格在**跳过**的行上说过错话。
  *
- * 计划里的 `toCwd` 只在「会写盘、而且包里本来有 cwd」的会话上出现（见 `src/operations/transfer/transfer.ts` 的
+ * 计划里的 `toCwd` 只在「会写入磁盘、而且包里本来有 cwd」的会话上出现（见 `src/operations/transfer/transfer.ts` 的
  * `ImportEntry`）：按设计，跳过的行没有 `toCwd`，包里没有 cwd 的会话也没有。原来那一格只判断
  * `toCwd === undefined`，于是把跳过的行显示成「保持无 cwd（落 _no-cwd）」——那些会话明明有 cwd
- * （比如 `/home/uy_sun/dev/dsh-aperture`），而且它们根本不会被写盘。用户看到的是"我的会话要被丢进
+ * （比如 `/home/uy_sun/dev/dsh-aperture`），而且它们根本不会被写入磁盘。用户看到的是"我的会话要被丢进
  * 无 cwd 项目目录了"，这是把"什么都不会发生"说成了"会发生一件坏事"。
  *
  * 二、一行的"名字"该是标题还是 id（`sessionLabel`）：以前到处显示 `session-9f3c…`，用户认不出是哪条。
@@ -42,7 +42,7 @@ export function describeCwd(subject: CwdSubject): CwdPlan {
   // 先判跳过：跳过时 `toCwd` 必然缺省，但那**不代表**"这条会话没有 cwd"，更不代表要落 _no-cwd。
   if (subject.action === 'skip') return { kind: 'skip' }
   if (subject.toCwd === undefined) return { kind: 'keepNoCwd' }
-  // 会写盘且有 cwd 时 `fromCwd` 必然有（`toCwd` 就是由它存在推出来的），兜底只为类型与坏数据。
+  // 会写入磁盘且有 cwd 时 `fromCwd` 必然有（`toCwd` 就是由它存在推出来的），兜底只为类型与坏数据。
   return { kind: 'rewrite', from: subject.fromCwd ?? '—', to: subject.toCwd }
 }
 

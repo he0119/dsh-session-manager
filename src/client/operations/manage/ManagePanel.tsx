@@ -967,7 +967,7 @@ export function ManagePanel({
               平铺表格：一行一条，按目录分组时写在各组头上的「项目」变成一列。表头跟列表一起滚没意义，
               它是列的说明，所以贴在列表顶部（见 styles.ts 的 .dsm-tableHead）。
 
-              排序只在界面上排，不写盘：同一份清单换一种看法，不该留下副作用。
+              排序只在界面上排，不写入磁盘：同一份清单换一种看法，不该留下副作用。
             */}
             <SessionListBox fill>
               <div className="dsm-tableHead">

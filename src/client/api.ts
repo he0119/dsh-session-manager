@@ -481,7 +481,7 @@ export async function exportSessions(sessionIds: readonly string[]): Promise<Exp
   }
 }
 
-/** 导入一个包：`mode: 'plan'` 只预览不写盘。 */
+/** 导入一个包：`mode: 'plan'` 只预览不写入磁盘。 */
 export async function importBundle(
   bytes: ArrayBuffer,
   targetCwd: string,
@@ -496,7 +496,7 @@ export async function importBundle(
   })
   /*
    * 包本身读不动、目标目录不在这类判定发生在**收到请求体之后、流开始之前**，回的是 400 + JSON；
-   * 一旦开始干活（预览逐条读包、应用逐条写盘）就是事件流，正文从 `result` 事件里拿。
+   * 一旦开始干活（预览逐条读包、应用逐条写入磁盘）就是事件流，正文从 `result` 事件里拿。
    */
   return readEventStream<ImportResponse>(response, onProgress, '导入')
 }

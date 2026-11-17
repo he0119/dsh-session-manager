@@ -90,7 +90,7 @@ interface HostSessionPersistence {
  * 探测宿主那套"改注册表"的动作，收成一个端口交给核心层。
  *
  * 为什么不自己写文件：宿主内存里那份注册表才是权威（单单元契约：写入才改它，绝不从磁盘重读），
- * 文件改完它不认——侧边栏还是旧归属，之后任何一次工作区改动还会把这次写盘盖掉。宿主那套动作
+ * 文件改完它不认——侧边栏还是旧归属，之后任何一次工作区改动还会把这次写入磁盘盖掉。宿主那套动作
  * （复用/新建工作区、挂会话、摘会话、删工作区）自己会写入磁盘、也会通知界面，交给它做最省事也最稳。
  *
  * 认形状不认实现：少一件就当"这个宿主没有这套动作"，绝不半套上场。
@@ -229,7 +229,7 @@ interface HostSessionHandle {
 /**
  * 宿主的 `sessionPersistence` 的写入口：要"开一个写句柄"，以及句柄上的"追加一段 / 关掉"。
  *
- * 这一件是**必须**的，不是可选：写盘得由这个句柄做。会话自己的 `append()` 只按 id 路由给"已登记写
+ * 这一件是**必须**的，不是可选：写入磁盘得由这个句柄做。会话自己的 `append()` 只按 id 路由给"已登记写
  * 句柄"的那一条（见 `dsh-session-persistence-jsonl` 的 `install()`：
  * `this.writers.get(session.id)?.enqueueLive(...)`），而路由出去的事件带的是**内存日志里的 seq**。
  * 可是 `prepare()` 还原会话时会自己补一条 `session/end-seed`（见下），内存副本因此比磁盘多一条、
@@ -372,8 +372,8 @@ export function titleRefreshPort(ctx: unknown): TitleRefreshPort | undefined {
         store.announce!.call(store, session)
         const outcome = await settle(session, options)
 
-        // 自己开句柄写盘：不用 `sessions.flush()`，那条路按 id 路由出去的事件带的是内存副本里的
-        // seq，而内存副本比磁盘多一条，写盘会被宿主的连续性校验挡住（见 `HostSessionWritePort`）。
+        // 自己开句柄写入磁盘：不用 `sessions.flush()`，那条路按 id 路由出去的事件带的是内存副本里的
+        // seq，而内存副本比磁盘多一条，写入磁盘会被宿主的连续性校验挡住（见 `HostSessionWritePort`）。
         const produced = (session as HostSessionLog).snapshotEvents(stored)
         // 头一条就是 `prepare()` 补的那条标记时，它不算"改了东西"：只有它、没有别的新事件时不写，
         // 免得给日志添一条什么都没发生的记号。

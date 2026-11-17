@@ -161,11 +161,11 @@ test('恢复：从备份把整个会话目录搬回原位（含 session.lock）�
   writeRegistryAtomic(sandbox.registryPath, registry)
   const mutated = readFileSync(sandbox.registryPath, 'utf8')
 
-  // 先看动作清单（dry-run 不写盘）
+  // 先看动作清单（dry-run 不写入磁盘）
   const dry = await rollbackMigration({ backupRoot: sandbox.backupRoot }, { backupDir: run.backupDir!, dryRun: true })
   assert.equal(dry.registryRestored, false)
   assert.equal(dry.actions.some((action) => action.startsWith('registry untouched')), true)
-  assert.equal(existsSync(dir), false, 'dry-run 不许写盘')
+  assert.equal(existsSync(dir), false, 'dry-run 不许写入磁盘')
 
   const outcome = await rollbackMigration({ backupRoot: sandbox.backupRoot }, { backupDir: run.backupDir! })
   assert.equal(outcome.dryRun, false)

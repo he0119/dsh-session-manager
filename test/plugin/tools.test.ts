@@ -925,7 +925,7 @@ test('补齐列表元数据的端口：认形状，按宿主自己的两步走�
 })
 
 /**
- * 一套照宿主语义做出来的假件，只做"临时挂载 → 重算 → 写盘 → 摘掉"这条路上用到的几件。
+ * 一套照宿主语义做出来的假件，只做"临时挂载 → 重算 → 写入磁盘 → 摘掉"这条路上用到的几件。
  *
  * 三处**必须照宿主原样**，不然就测不出它：
  *
@@ -960,7 +960,7 @@ interface FakeRetitleHost {
   current: FakeTitleSnapshot
   /** 下一次 `sessionTitle.refresh()` 干什么（默认往会话里 append 一条标题并返回 provider 快照）。 */
   onRefresh: (session: FakeRetitleSession) => Promise<FakeTitleSnapshot>
-  /** 让下一次写盘的 `append()` 失败（模拟磁盘上已经被别人写过了、游标对不上）。 */
+  /** 让下一次写入磁盘的 `append()` 失败（模拟磁盘上已经被别人写过了、游标对不上）。 */
   failAppend?: Error
   /** 让写句柄的 `close()` 失败。 */
   failClose?: Error
@@ -985,7 +985,7 @@ function fakeRetitleHost(options: { stored?: number; endsWithSeed?: boolean } = 
   /** 宿主那条"活会话的 append 按 id 路由给写句柄"的路：句柄开着就收进它的缓冲。 */
   let routed: FakeRetitleEvent[] | undefined
 
-  /** 宿主写盘的那一步：先核 seq 连续（`assertContiguous`），再落到磁盘上。 */
+  /** 宿主写入磁盘的那一步：先核 seq 连续（`assertContiguous`），再落到磁盘上。 */
   const writeBatch = async (events: readonly FakeRetitleEvent[]): Promise<void> => {
     calls.push(`write:${String(events.length)}`)
     if (host.failAppend !== undefined) throw host.failAppend
@@ -1035,7 +1035,7 @@ function fakeRetitleHost(options: { stored?: number; endsWithSeed?: boolean } = 
     announce: (): void => {
       calls.push('announce')
     },
-    /** 宿主 `session/flush` 上的持久化监听器：把路由过来的事件排干写盘（旧路子用的就是它）。 */
+    /** 宿主 `session/flush` 上的持久化监听器：把路由过来的事件排干写入磁盘（旧路子用的就是它）。 */
     flush: async (): Promise<boolean> => {
       calls.push('flush')
       if (routed !== undefined && routed.length > 0) await writeBatch(routed.splice(0))
@@ -1101,7 +1101,7 @@ function fakeRetitleHost(options: { stored?: number; endsWithSeed?: boolean } = 
   return host
 }
 
-test('重新生成名称的端口：新事件由自己开的写句柄写盘，且无论成败都把会话摘掉', async () => {
+test('重新生成名称的端口：新事件由自己开的写句柄写入磁盘，且无论成败都把会话摘掉', async () => {
   const retitleCtx = (parts: Record<string, unknown>): unknown => ({
     get: (name: string) => parts[name],
   })
@@ -1122,7 +1122,7 @@ test('重新生成名称的端口：新事件由自己开的写句柄写盘，�
   assert.equal(titleRefreshPort(retitleCtx({ ...all, sessionPersistence: {} })), undefined, '持久化形状不认')
   assert.equal(titleRefreshPort({}), undefined, '连 ctx 形状都不对时也必须给个答案，而不是抛')
 
-  // 写盘不再经 `sessions.flush()`，所以它缺席不影响这条能力在不在。
+  // 写入磁盘不再经 `sessions.flush()`，所以它缺席不影响这条能力在不在。
   const sessionsWithoutFlush = { ...(all.sessions as Record<string, unknown>) }
   delete sessionsWithoutFlush.flush
   assert.ok(titleRefreshPort(retitleCtx({ ...all, sessions: sessionsWithoutFlush })), '不需要 flush 也算有这个能力')
@@ -1146,7 +1146,7 @@ test('重新生成名称的端口：新事件由自己开的写句柄写盘，�
     'write:2',
     'close',
     'detach',
-  ], '写盘要排在卸载之前：自己开句柄写下去，再把会话还回去')
+  ], '写入磁盘要排在卸载之前：自己开句柄写下去，再把会话还回去')
   assert.deepEqual(
     trailingTurn.disk.slice(246),
     [
@@ -1166,7 +1166,7 @@ test('重新生成名称的端口：新事件由自己开的写句柄写盘，�
   assert.deepEqual(await titleRefreshPort(trailingSeed.ctx)!.refresh('s-1'), { status: 'retitled', title: '新名字' })
   assert.deepEqual(trailingSeed.disk.slice(362), [{ type: 'session/title', seq: 362 }])
 
-  // 三、用户手动改过名：一次模型调用都不发，也不为那条标记单独写盘（那只是还原过程的计数）。
+  // 三、用户手动改过名：一次模型调用都不发，也不为那条标记单独写入磁盘（那只是还原过程的计数）。
   const pinned = fakeRetitleHost({ stored: 246 })
   pinned.current = { title: '我自己改的名字', source: { kind: 'user' } }
   assert.deepEqual(await titleRefreshPort(pinned.ctx)!.refresh('s-1'), { status: 'skipped', reason: 'pinned' })
@@ -1174,7 +1174,7 @@ test('重新生成名称的端口：新事件由自己开的写句柄写盘，�
   assert.equal(pinned.disk.length, 246, '什么都没变，就不要给日志添一条空记号')
   assert.equal(pinned.isLive(), false)
 
-  // 四、`includePinned` 显式打开时（一次性清理那些"标题是脚本 / 导入写的"会话）：照样重算并写盘。
+  // 四、`includePinned` 显式打开时（一次性清理那些"标题是脚本 / 导入写的"会话）：照样重算并写入磁盘。
   const unpinned = fakeRetitleHost({ stored: 246 })
   unpinned.current = { title: '脚本写下的名字', source: { kind: 'user' } }
   assert.deepEqual(await titleRefreshPort(unpinned.ctx)!.refresh('s-1', { includePinned: true }), {
@@ -1225,14 +1225,14 @@ test('重新生成名称的端口：新事件由自己开的写句柄写盘，�
   await assert.rejects(() => titleRefreshPort(broken.ctx)!.refresh('s-1'), /请求超时/)
   assert.equal(broken.isLive(), false, '重算抛错也要把会话摘掉')
 
-  // 八、写盘被挡住（磁盘上已经被别人写过，游标对不上）：如实报错，而且会话照样摘掉。
+  // 八、写入磁盘被挡住（磁盘上已经被别人写过，游标对不上）：如实报错，而且会话照样摘掉。
   //    这一条正是缺陷的第二种表现：报错之后手没放干净，这条会话就留在宿主内存里当"活会话"，
   //    之后每次点都走活会话那条路——算得出、报成功、写不进。
   const blocked = fakeRetitleHost({ stored: 246 })
   blocked.current = { title: '旧名字', source: { kind: 'provider' } }
   blocked.failAppend = new Error('append seq mismatch for "s-1": expected 248 at index 0, got 246')
   await assert.rejects(() => titleRefreshPort(blocked.ctx)!.refresh('s-1'), /append seq mismatch/)
-  assert.equal(blocked.isLive(), false, '写盘失败也必须把会话摘掉：漏一条它就一直在列表里挂"活动中"、还删不掉')
+  assert.equal(blocked.isLive(), false, '写入磁盘失败也必须把会话摘掉：漏一条它就一直在列表里挂"活动中"、还删不掉')
 
   // 九、句柄关不掉：如实报错，会话照样摘掉，而标题已经写下去了。
   const closeFails = fakeRetitleHost({ stored: 246 })
@@ -1592,7 +1592,7 @@ test('修日志路径：预览只读，应用把 working-directory 改成本机�
   assert.equal(preview.events, 2, '两条 working-directory/change')
   assert.ok(preview.summary.includes(FOREIGN_ROOT), '要把推出来的源根写进说明')
   assert.ok(preview.summary.includes(cwd))
-  assert.deepEqual(readFileSync(written.path), written.bytes, '预览不许写盘')
+  assert.deepEqual(readFileSync(written.path), written.bytes, '预览不许写入磁盘')
 
   // 应用：改写 + 备份
   const applied = (await run(tool, { apply: true })) as {
