@@ -75,9 +75,11 @@ import {
 import {
   applyImport,
   buildBundleAsync,
+  bundleTitlesAsync,
   entryBytes,
   planImport,
   readBundle,
+  readBundleAsync,
   type BundleSourceInfo,
   type ImportPlan,
   type ImportOptions,
@@ -1116,7 +1118,7 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
 
     let bundle
     try {
-      bundle = readBundle(bytes)
+      bundle = await readBundleAsync(bytes)
     } catch (error) {
       sendJson(res, 400, { error: error instanceof Error ? error.message : String(error) })
       return
@@ -1153,7 +1155,12 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
     await streamResult(res, async (report) => {
       // 计划算不出来（包坏了、注册表重挂失败…）：抛出去就是 `error` 事件，界面照原话报——与原来
       // 那次 500 的正文是同一条消息。
-      const plan: ImportPlan = planImport(bundle, { ...options, onProgress: report })
+      /*
+       * 标题先异步折一遍（每几条让出一次）：250 条 / 70.9 MB 的包实测 1.7 秒，原来整段都在主线程里。
+       * `planImport()` 拿到这份表就不再逐条解压，只做它自己的目录检查与注册表计算。
+       */
+      const titles = await bundleTitlesAsync(bundle, decodeAll, { onProgress: report })
+      const plan: ImportPlan = planImport(bundle, { ...options, titles, onProgress: report })
 
       const payload = {
         mode: apply ? 'apply' : 'plan',

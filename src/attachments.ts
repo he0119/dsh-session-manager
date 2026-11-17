@@ -15,6 +15,7 @@
 //
 // @module dsh-session-manager/attachments
 import { chmodSync, existsSync, mkdirSync, renameSync, statSync, writeFileSync } from 'node:fs'
+import { chmod, mkdir, rename, stat, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 
 import type { DecodeAll } from './types.ts'
@@ -194,5 +195,21 @@ export function commitAttachmentObject(path: string, bytes: Buffer): CommitOutco
   // rename 之后补一次 chmod：目标已存在时 rename 保留的是**旧文件**的权限位，而旧文件可能是别的
   // 来源写下的（权限不对）。对象库的规格只有一条，写下去就照它对齐。
   chmodSync(path, 0o400)
+  return 'written'
+}
+
+/** 与 `commitAttachmentObject()` 同一条路径，只是每一步都走异步文件 API。 */
+export async function commitAttachmentObjectAsync(path: string, bytes: Buffer): Promise<CommitOutcome> {
+  try {
+    if ((await stat(path)).size === bytes.length) return 'present'
+  } catch {
+    // 不存在或读不到：照常写一份新的。
+  }
+  await mkdir(dirname(path), { recursive: true, mode: 0o700 })
+  const part = `${path}.part`
+  await writeFile(part, bytes, { mode: 0o400 })
+  await rename(part, path)
+  // 目标已存在时 rename 保留旧文件的权限位；对象库的规格只有一条，写下去就照它对齐。
+  await chmod(path, 0o400)
   return 'written'
 }
