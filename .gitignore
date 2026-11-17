@@ -8,3 +8,6 @@ test/.sandbox/
 .pnpm-store/
 .npm-cache/
 *.tgz
+
+# 性能基准的夹具（按 profile 缓存，随时可再生）
+bench/.work/

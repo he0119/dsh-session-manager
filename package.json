@@ -58,7 +58,11 @@
     "test": "node test/run-all.mjs",
     "test:runner": "node --test",
     "check:package": "node scripts/check-package.mjs",
-    "check": "tsc -p tsconfig.test.json && node test/run-all.mjs"
+    "check": "tsc -p tsconfig.test.json && node test/run-all.mjs",
+    "bench": "node bench/run.mjs",
+    "bench:small": "node bench/run.mjs --profile small",
+    "bench:full": "node bench/run.mjs --profile full",
+    "bench:update": "node bench/run.mjs --update"
   },
   "keywords": [
     "dsh",

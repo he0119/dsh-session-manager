@@ -1,0 +1,251 @@
+{
+  "version": 1,
+  "profiles": {
+    "default": {
+      "node": "v24.21.0",
+      "generatedAt": "2026-11-17T07:51:27.547Z",
+      "calibrationMs": 56.2,
+      "scenarios": {
+        "calibration.cpu": {
+          "wallMs": 56.2,
+          "stallMs": 56,
+          "rssMb": 203
+        },
+        "plugin.register": {
+          "wallMs": 1.5,
+          "stallMs": 0,
+          "rssMb": 111
+        },
+        "scan.cold": {
+          "wallMs": 78.9,
+          "stallMs": 5,
+          "rssMb": 116
+        },
+        "state.cold": {
+          "wallMs": 94.6,
+          "stallMs": 17,
+          "rssMb": 130
+        },
+        "state.warm": {
+          "wallMs": 14.1,
+          "stallMs": 11,
+          "rssMb": 139
+        },
+        "transcript.large": {
+          "wallMs": 248.4,
+          "stallMs": 22,
+          "rssMb": 192
+        },
+        "transcript.page": {
+          "wallMs": 23.4,
+          "stallMs": 21,
+          "rssMb": 213
+        },
+        "export.20": {
+          "wallMs": 115.3,
+          "stallMs": 18,
+          "rssMb": 155
+        },
+        "import.plan": {
+          "wallMs": 136.7,
+          "stallMs": 15,
+          "rssMb": 169
+        },
+        "migrate.preview": {
+          "wallMs": 51,
+          "stallMs": 10,
+          "rssMb": 142
+        },
+        "delete.preview": {
+          "wallMs": 52.6,
+          "stallMs": 9,
+          "rssMb": 137
+        },
+        "migrate.apply": {
+          "wallMs": 218.8,
+          "stallMs": 12,
+          "rssMb": 139
+        },
+        "delete.apply": {
+          "wallMs": 173.1,
+          "stallMs": 13,
+          "rssMb": 122
+        },
+        "import.apply": {
+          "wallMs": 465.5,
+          "stallMs": 15,
+          "rssMb": 168
+        },
+        "sync.preview": {
+          "wallMs": 71.3,
+          "stallMs": 15,
+          "rssMb": 151
+        }
+      }
+    },
+    "small": {
+      "node": "v24.21.0",
+      "generatedAt": "2026-11-17T07:51:32.858Z",
+      "calibrationMs": 53.7,
+      "scenarios": {
+        "calibration.cpu": {
+          "wallMs": 53.7,
+          "stallMs": 51,
+          "rssMb": 180
+        },
+        "plugin.register": {
+          "wallMs": 1.1,
+          "stallMs": 0,
+          "rssMb": 109
+        },
+        "scan.cold": {
+          "wallMs": 30.1,
+          "stallMs": 5,
+          "rssMb": 109
+        },
+        "state.cold": {
+          "wallMs": 31.6,
+          "stallMs": 4,
+          "rssMb": 112
+        },
+        "state.warm": {
+          "wallMs": 2.7,
+          "stallMs": 0,
+          "rssMb": 112
+        },
+        "transcript.large": {
+          "wallMs": 98.8,
+          "stallMs": 25,
+          "rssMb": 143
+        },
+        "transcript.page": {
+          "wallMs": 8.7,
+          "stallMs": 4,
+          "rssMb": 147
+        },
+        "export.20": {
+          "wallMs": 96.5,
+          "stallMs": 8,
+          "rssMb": 135
+        },
+        "import.plan": {
+          "wallMs": 107.4,
+          "stallMs": 10,
+          "rssMb": 157
+        },
+        "migrate.preview": {
+          "wallMs": 17.4,
+          "stallMs": 8,
+          "rssMb": 114
+        },
+        "delete.preview": {
+          "wallMs": 13.9,
+          "stallMs": 9,
+          "rssMb": 116
+        },
+        "migrate.apply": {
+          "wallMs": 134.7,
+          "stallMs": 8,
+          "rssMb": 116
+        },
+        "delete.apply": {
+          "wallMs": 109.2,
+          "stallMs": 7,
+          "rssMb": 111
+        },
+        "import.apply": {
+          "wallMs": 370.3,
+          "stallMs": 12,
+          "rssMb": 149
+        },
+        "sync.preview": {
+          "wallMs": 22.5,
+          "stallMs": 6,
+          "rssMb": 133
+        }
+      }
+    },
+    "full": {
+      "node": "v24.21.0",
+      "generatedAt": "2026-11-17T07:53:28.623Z",
+      "calibrationMs": 54.4,
+      "scenarios": {
+        "calibration.cpu": {
+          "wallMs": 54.4,
+          "stallMs": 55,
+          "rssMb": 181
+        },
+        "plugin.register": {
+          "wallMs": 0.6,
+          "stallMs": 0,
+          "rssMb": 110
+        },
+        "scan.cold": {
+          "wallMs": 179.6,
+          "stallMs": 7,
+          "rssMb": 131
+        },
+        "state.cold": {
+          "wallMs": 235,
+          "stallMs": 43,
+          "rssMb": 156
+        },
+        "state.warm": {
+          "wallMs": 37.5,
+          "stallMs": 34,
+          "rssMb": 171
+        },
+        "transcript.large": {
+          "wallMs": 863.6,
+          "stallMs": 75,
+          "rssMb": 378
+        },
+        "transcript.page": {
+          "wallMs": 74.9,
+          "stallMs": 71,
+          "rssMb": 457
+        },
+        "export.20": {
+          "wallMs": 118.9,
+          "stallMs": 36,
+          "rssMb": 162
+        },
+        "import.plan": {
+          "wallMs": 123.2,
+          "stallMs": 15,
+          "rssMb": 171
+        },
+        "migrate.preview": {
+          "wallMs": 138.3,
+          "stallMs": 12,
+          "rssMb": 177
+        },
+        "delete.preview": {
+          "wallMs": 131.3,
+          "stallMs": 10,
+          "rssMb": 174
+        },
+        "migrate.apply": {
+          "wallMs": 390.6,
+          "stallMs": 17,
+          "rssMb": 186
+        },
+        "delete.apply": {
+          "wallMs": 286.1,
+          "stallMs": 12,
+          "rssMb": 150
+        },
+        "import.apply": {
+          "wallMs": 461.2,
+          "stallMs": 19,
+          "rssMb": 170
+        },
+        "sync.preview": {
+          "wallMs": 177.5,
+          "stallMs": 26,
+          "rssMb": 210
+        }
+      }
+    }
+  }
+}
