@@ -12,8 +12,7 @@
 // handler，不必起 HTTP 服务。路由路径固定在本插件命名空间下，`(kind, path)` 与别的插件不会撞。
 
 import { join } from 'node:path'
-import type { IncomingMessage, ServerResponse } from 'node:http'
-
+import { IncomingMessage, ServerResponse } from 'node:http'
 import { migrationHandlers } from './operations/migrate/http.ts'
 import { removeHandlers } from './operations/remove/http.ts'
 import { retitleHandlers } from './operations/retitle/http.ts'
@@ -21,8 +20,8 @@ import { autoPushLastPayload, syncHandlers } from './operations/sync/http.ts'
 import { transcriptHandlers } from './operations/transcript/http.ts'
 import { transferHandlers } from './operations/transfer/http.ts'
 import { accountedOwners } from './shared/accounting.ts'
-import { type DiscoveredSession } from './shared/library/discovery.ts'
-import { type MigrateDeps } from './operations/migrate/migrate.ts'
+import type { DiscoveredSession } from './shared/library/discovery.ts'
+import type { MigrateDeps } from './operations/migrate/migrate.ts'
 import type { AttachmentPort } from './shared/attachments.ts'
 import { projectionCacheDir } from './shared/paths.ts'
 import { createProjectionReader, type ProjectionCacheQuery, type ProjectionCacheReader } from './shared/library/projection-cache.ts'
@@ -31,14 +30,13 @@ import { createLogTextCache, type LogTextCache } from './shared/log/log-text-cac
 import { effectOf } from './shared/host/take-effect.ts'
 import type { RepoLocationLookup } from './shared/repo.ts'
 import { createTitleResolver, type TitleQuery } from './shared/log/session-title.ts'
-import { type AutoPushTimer, type SyncOutcome } from './operations/sync/sync.ts'
+import type { AutoPushTimer, SyncOutcome } from './operations/sync/sync.ts'
 import type { SyncInfo, SyncRuntime } from './operations/sync/runtime.ts'
 import type { PickerKind, RegistryOps } from './shared/host/ports.ts'
 import type { ResolvedPaths } from './shared/plugin-paths.ts'
-import type { EffectMode } from './shared/types.ts'
+import type { EffectMode, CheckpointWarmPort, DecodeAll, HostRegistryPort, ProgressReporter, TitleRefreshPort } from './shared/types.ts'
 import { lastRunView, type SyncRunRecord } from './operations/sync/sync-state.ts'
 import { createRemoteWriteGate, type RemoteWriteGate } from './operations/sync/remote-write.ts'
-import type { CheckpointWarmPort, DecodeAll, HostRegistryPort, ProgressReporter, TitleRefreshPort } from './shared/types.ts'
 import { readBody, sendEvent, sendEventStream, sendJson, streamResult } from './shared/http/respond.ts'
 import { loadRegistry, summarizeSessions, summarizeWorkspaces } from './shared/http/view.ts'
 import { createSessionMetaResolver, type SessionMeta } from './shared/visibility.ts'
@@ -264,8 +262,6 @@ export interface ApiDeps {
 
 /** 界面要展示的一条会话。 */
 
-
-
 /** "写远端那把锁被谁拿着"的一句话；没人拿着时给一句通用的。 */
 
 /**
@@ -349,7 +345,6 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
   // 附件库的探测（导出往里收对象、导入往外补对象，见 ApiDeps.attach）。缺席 = 这个宿主没有附件服务：
   // 包照旧只带日志，导入也照旧只落日志——与升级前完全一致。
   const attachmentPort = (): AttachmentPort | undefined => deps.attachments?.()
-
 
   /**
    * 面板事件流的订阅者（每一条 SSE 响应就是一个）。
@@ -565,8 +560,6 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
     res.end()
   }
 
-
-
   const migrateDeps: MigrateDeps = {
     sessionsRoot: paths.sessionsRoot,
     registryPath: paths.registryPath,
@@ -609,16 +602,6 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
     takesEffect,
   }
   const sync = syncHandlers(ctx)
-
-
-
-
-
-
-
-
-
-
 
   return {
     'GET /meta': meta,

@@ -4,7 +4,7 @@ Status: implemented
 
 ## Problem
 
-自动推送每五分钟跑一轮，每一轮都会对"两边各自写过"的那些会话读整份日志判谁是谁的前缀（`src/operations/sync/sync.ts`
+自动推送每五分钟跑一轮，每一轮都会对"两边各自写过"的那些会话读整份日志判谁是谁的前缀（`src/operations/sync/fingerprint.ts`
 的 `contentRelationsOf()`）。这一段原先做三件会占住主线程的事：
 
 1. `deps.dav.get()` 取回远端那个会话包之后，`readBundle()` 用 `gunzipSync()` 整份解开；

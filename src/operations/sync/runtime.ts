@@ -30,13 +30,9 @@ import {
 } from '../../shared/host/ports.ts'
 import { createDavClient, type DavPort } from './dav.ts'
 import type { RemoteWriteGate } from './remote-write.ts'
-import {
-  createAutoPushTimer,
-  runAutoPush,
-  type AutoPushTimer,
-  type SyncDeps,
-  type SyncSettings,
-} from './sync.ts'
+import { createAutoPushTimer, runAutoPush, type AutoPushTimer } from './auto-push.ts'
+import type { SyncDeps } from './sync.ts'
+import type { SyncSettings } from './settings.ts'
 
 /** 界面要知道的同步配置（只有非敏感字段，没有密码）。 */
 export interface SyncInfo {
