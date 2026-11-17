@@ -6,8 +6,10 @@
 
 发一次版是两步：版本号提交走 PR 合进 main，再给合并后的那个提交打标签、只推标签（见「一次发布」）。
 
-依赖与构建走 pnpm（`packageManager` 钉在 `pnpm@11.7.0`），发布链路上仍有两处是 npm：`npm view` 查线上
-版本、`npm publish` 真发布——可信发布与 provenance 是 npm CLI 的能力，工作流里那两步没有换。
+依赖、构建与**发布**都走 pnpm（`packageManager` 钉在 `pnpm@12.21.0`）。发布那两步因此是
+`pnpm view` 查线上版本、`pnpm publish --provenance --access public --no-git-checks` 真发布：pnpm 12
+自己支持可信发布，OIDC 凭据由它换，公开包的 provenance 在可信发布下也会自动附上。`--no-git-checks`
+是因为标签构建是 detached HEAD，pnpm 那三条 git 检查在那时没有意义。
 
 ## 包名与 scope
 
@@ -34,11 +36,12 @@ Trusted Publisher。也就是说 `@he0119/dsh-session-manager` 的**第一个版
 
 ```sh
 # 1) 手动发首版（同时也是 @he0119 scope 的创建动作）
-npm login                      # 以 he0119 登录，需要 2FA
+pnpm login                     # 以 he0119 登录，需要 2FA
 pnpm run build                 # lib/ 不进 git，先出产物
-npm publish --access public    # 不加 --provenance：本机没有 OIDC，签不出证明
-#    ↑ 发出去的就是 package.json 里那个版本：先 pnpm version 改号再发，
-#      别用 npm publish 顺手发一个 git 里没有的版本
+pnpm publish --access public --no-git-checks
+#    ↑ 本机没有 OIDC，pnpm 不会签 provenance（只有可信发布下才自动签）；
+#      发出去的就是 package.json 里那个版本：先 pnpm version 改号再发，
+#      别用 pnpm publish 顺手发一个 git 里没有的版本
 
 # 2) 去 npm 包设置页登记 Trusted Publisher（表格见下一节）
 #    https://www.npmjs.com/package/@he0119/dsh-session-manager/access
@@ -159,13 +162,13 @@ GitHub 在 Release 页面建标签时，会把它落在**当刻 main 的 HEAD** 
 
 ## 发布前的包内容自检
 
-`pnpm run check:package`（`scripts/check-package.mjs`）用 **npm 自己的打包器**（`npm pack --dry-run`）
-核对四件事：运行期文件一个不少、`main`/`types`/`exports`/`dsh.bundle.patch` 指向的路径都在包里、
+`pnpm run check:package`（`scripts/check-package.mjs`）用**发布那一步同一个打包器**（`pnpm pack
+--dry-run`）核对四件事：运行期文件一个不少、`main`/`types`/`exports`/`dsh.bundle.patch` 指向的路径都在包里、
 产物内部的相对 import（tsdown 抽出来的带哈希 chunk）没指到包外，`src/`、`test/`、`docs/`、
 `scripts/`、`.github/` 与 `tsconfig*` 都没有外泄；外加一条跨文件不变式——`cordis.patch.yml` 里
 insert 的 `name` 必须等于 `package.json` 的包名。
 
-它复述的是 npm 的打包规则里**最容易被误以为不需要检查**的那部分：入口指着一个没被打进包的文件，
+它复述的是打包规则里**最容易被误以为不需要检查**的那部分：入口指着一个没被打进包的文件，
 本地测试全绿、装进宿主才报错。CI 与 Publish 都会跑它，所以它对发布是硬门禁。
 
 ⚠️ 它必须在 `build` 之后跑（`lib/` 不进 git）；脚本自己也要求这样，产物不存在时会以「缺少运行期文件」

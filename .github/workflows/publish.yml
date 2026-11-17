@@ -31,15 +31,14 @@ jobs:
         with:
           fetch-depth: 0
 
-      # 发布固定使用 Node 24.11：它属于本包 engines 的支持范围，并自带满足可信发布要求（>= 11.5.1）的 npm 11。
-      # pnpm 只负责装依赖与跑构建（版本同样来自 package.json 的 packageManager），
-      # 真正发布的那一步仍然是 npm —— 可信发布与 provenance 是 npm CLI 的能力。
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v5
+      # 发布固定使用 Node 24.11：它属于本包 engines 的支持范围，与 CI 那条钉在 22.19 的分开，
+      # 免得为了发布换 Node 牵动构建环境。pnpm 版本来自 package.json 的 packageManager（12.21.0）。
+      # `install: false`：下面要先把标签校验完再装依赖，这里只把 pnpm 与 Node 摆好。
+      - uses: pnpm/setup@v3
         with:
-          node-version: 24.11.0
-          registry-url: https://registry.npmjs.org
-          cache: pnpm
+          runtime: node@24.11.0
+          cache: true
+          install: false
 
       - name: 校验标签与 package.json
         run: |
@@ -113,9 +112,9 @@ jobs:
       # 放在校验之后：标签打错了就没必要花这几分钟装依赖。
       - run: pnpm install --frozen-lockfile
 
-      # 打包内容自检。用 npm 自己的打包器核对「包里该有的都有、入口不指空气、test/ 不外泄」——
-      # 它和 npm publish 之间只差最后那一下 PUT，所以这里红灯就是发布红灯。
-      # prepublishOnly 此刻还没跑（它由 npm publish 触发），所以先显式构建一次。
+      # 打包内容自检。用发布那一步同一个打包器（`pnpm pack`）核对「包里该有的都有、入口不指空气、
+      # test/ 不外泄」——它与 `pnpm publish` 之间只差最后那一下 PUT，所以这里红灯就是发布红灯。
+      # prepublishOnly 此刻还没跑（它由 pnpm publish 触发），所以先显式构建一次。
       - run: pnpm run build
       - run: pnpm run check:package
 
@@ -125,7 +124,7 @@ jobs:
         run: |
           set -euo pipefail
           version="$(node -p 'require("./package.json").version')"
-          if npm view "@he0119/dsh-session-manager@${version}" version >/dev/null 2>&1; then
+          if pnpm view "@he0119/dsh-session-manager@${version}" version >/dev/null 2>&1; then
             echo "@he0119/dsh-session-manager@${version} 已经在 npm 上了。"
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
@@ -135,10 +134,13 @@ jobs:
 
       # --access public 对带 scope 的包是必需的：scoped 包默认 restricted，而 restricted 需要付费组织。
       # package.json 里的 publishConfig.access 已经声明过一次，这里再显式给一次——发布是唯一不可撤销的动作，
-      # 参数摆在眼前比藏在配置里好。--provenance 附上构建来源证明（要求 package.json 的 repository 指向本仓库）。
+      # 参数摆在眼前比藏在配置里好。--provenance 附上构建来源证明（要求 package.json 的 repository 指向本仓库；
+      # 可信发布下 pnpm 本来就会附上，这里显式写出来免得哪天默认值变了没人注意）。
+      # --no-git-checks：标签构建是 detached HEAD，pnpm 那三条 git 检查（干净、在发布分支、跟远程同步）
+      # 在这里没有意义，关掉比让它们靠"CI 里恰好跳过"更明确。
       - name: 发布到 npm
         if: steps.check.outputs.skip != 'true'
-        run: npm publish --provenance --access public
+        run: pnpm publish --provenance --access public --no-git-checks
 
       - name: 该版本已存在，跳过发布
         if: steps.check.outputs.skip == 'true'
