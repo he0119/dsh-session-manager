@@ -15,7 +15,7 @@ import { backgroundRun, dismissRun, getRun, openRunDialog, startRun, subscribeRu
 import { runChipLabel, runTitle } from '../../../../src/client/operations/manage/runLabel.ts'
 
 /**
- * 翻译替身：把键与参数拼成一句可比较的字符串（与冒烟夹具同一口径）。
+ * 翻译替身：把键与参数拼成一句可比较的字符串（与冒烟测试的示例数据同一口径）。
  */
 const t = (key: string, params?: Record<string, unknown>): string =>
   params === undefined ? key : `${key}:${JSON.stringify(params)}`

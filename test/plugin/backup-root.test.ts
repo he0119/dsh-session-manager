@@ -99,7 +99,7 @@ test('搬不动就一动不动，并如实报错', () => {
     mkdirSync(from, { recursive: true })
     // 新根要待的那一层先占成一个**文件**：新根因此"不存在"，而 mkdir 那一步必然失败。
     writeFileSync(join(home, 'dsh-session-manager'), 'not a directory\n')
-    assert.equal(existsSync(join(home, CURRENT)), false, '夹具成立：新根本来就不存在')
+    assert.equal(existsSync(join(home, CURRENT)), false, '前提成立：新根本来就不存在')
 
     const adopted = adoptLegacyBackupRoot()
     assert.equal(adopted?.ok, false, '搬不动不许假装搬了')

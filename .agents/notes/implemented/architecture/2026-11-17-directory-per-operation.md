@@ -35,7 +35,7 @@ Status: implemented
 状态窗）、`backup`（备份与回滚）、`help`（说明页）。
 
 测试跟着 `src/` 走：`test/{shared,operations,client}/` 与源码同构，入口级与门禁那一批（端点、工具、
-配置、产物冒烟、文档检查）收进 `test/plugin/`，共用夹具在 `test/fixtures/`。runner 改成递归扫描——
+配置、产物冒烟、文档检查）收进 `test/plugin/`，共用的测试数据在 `test/fixtures/`。runner 改成递归扫描——
 目录名不是判据，新加一层不该让文件悄悄不跑。测试写盘的临时目录收成一个根 `test/.sandbox/<名字>`
 （`test/fixtures/sandbox.ts` 的 `sandboxDir()`），不再每个文件在自己目录下各起一个 `.sandbox`。
 
@@ -43,7 +43,7 @@ Status: implemented
 会话库扫描单独一层 `src/shared/library/`：扫库、按 id 定位、两级缓存。落地之后请宿主认下改动的两步
 （`take-effect` / `checkpoint-warm`）放 `src/shared/host/`，因为迁移、导入、同步三个落地口都调它。
 
-这一轮**只移动、不改名、不拆内容**：92 个源码文件与 77 个测试文件 / 夹具按上表换位置，导入说明符按
+这一轮**只移动、不改名、不拆内容**：92 个源码文件与 77 个测试文件、测试数据按上表换位置，导入说明符按
 新位置重算，正文一个字不改。`sync.ts`（4803 行）、`web.ts`（2230 行）、`tools.ts`（1739 行）的拆分
 是另一件事，混在移动里出错时无法区分「路径写错」与「拆逻辑写错」。
 
@@ -62,7 +62,7 @@ Status: implemented
 
 ## Consequences
 
-- 92 个源码文件与 77 个测试文件 / 夹具移动，707 处导入说明符改写；`docs/development.md` 的逐文件表
+- 92 个源码文件与 77 个测试文件、测试数据移动，707 处导入说明符改写；`docs/development.md` 的逐文件表
   改成按目录的 25 个小节，每个文件一行；`AGENTS.md`、`docs/design.md`、`docs/internals.md`、
   `docs/formats.md` 与 `.agents/notes/` 里指路的路径一并改到新位置。
 - `test/plugin/client.test.mjs` 里那三条「扫 `src/client/components` 的源码守卫」（JSX 裸注释、原生 `title`、

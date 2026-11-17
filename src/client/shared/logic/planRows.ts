@@ -307,7 +307,7 @@ export function directoryTargetRows(
       path: workspace.path,
       title: workspace.title,
       ...(repos[workspace.path] === undefined ? {} : { repo: repos[workspace.path] }),
-      // 宿主说盘上没有了才标：`exists` 缺席（旧宿主 / 夹具）按"还在"处理，不在界面上替宿主猜。
+      // 宿主说盘上没有了才标：`exists` 缺席（旧宿主 / 测试数据）按"还在"处理，不在界面上替宿主猜。
       ...(workspace.exists === false ? { missing: true } : {}),
     })
   }

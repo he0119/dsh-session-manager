@@ -75,8 +75,8 @@ function makeSandbox(name: string): Sandbox {
       join(dir, 'session.v4.jsonl.zstd'),
       Buffer.concat([
         encodeRawFrame(`${JSON.stringify(header)}\n`),
-        // 日志里必须真有一轮（`turn/start`）：候选口径不读日志判空白，但夹具照真实形状写，
-        // 免得这里"因为夹具不真实而恰好通过"。
+        // 日志里必须真有一轮（`turn/start`）：候选口径不读日志判空白，但测试数据照真实形状写，
+        // 免得这里"因为测试数据不真实而恰好通过"。
         encodeRawFrame(`${JSON.stringify({ type: 'turn/start', seq: 0, time: createdAt, data: { turn: 1 } })}\n`),
         encodeRawFrame(`${JSON.stringify({ type: 'turn/end', seq: 1, time: createdAt + 1, data: { turn: 1 } })}\n`),
       ]),
@@ -158,7 +158,7 @@ test('只搬点名的那些：子智能体跟着父会话走，没点名的（�
   assert.equal(preview.cascaded, 1)
   assert.deepEqual(preview.sessions[1]?.via, { id: 'session-visible' })
   assert.equal(preview.sessions[1]?.registered, false, '子智能体从来不在册，跟着搬也不改变成员资格')
-  // 目标项目目录名由 cwd 推出，夹具里两个目录不撞 key
+  // 目标项目目录名由 cwd 推出，测试数据里两个目录不撞 key
   assert.notEqual(projectKey(sandbox.source), projectKey(sandbox.target))
 })
 

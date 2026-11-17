@@ -166,7 +166,7 @@ test/                      测试（run-all.mjs 是进程内 runner）
 ├─ shared/                 与 src/shared 对应（含 log/ library/ host/）
 ├─ operations/             与 src/operations 对应，一个操作一个目录
 ├─ client/                 浏览器半侧的纯逻辑（shared/logic/ 与 operations/）
-└─ fixtures/               共用夹具：DAV 假服务、附件库、sandbox()
+└─ fixtures/               共用的测试数据与假服务：DAV 假服务、附件库、sandbox()
 docs/                      本目录（formats.md 是落盘格式、design.md 是界面与样式的规格入口）
 AGENTS.md                  给 AI 助手与贡献者的协作约定（提交信息口径、验证清单、界面硬约束）
 tsdown.config.ts           三份构建配置：host（lib/index.js）、types（lib/types/*.d.ts）、client（lib/client.js，

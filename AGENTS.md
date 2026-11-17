@@ -106,7 +106,7 @@ pnpm bench
   （`bash .agents/skills/transcript-e2e/scripts/run.sh`，驱动真实 dev GUI、只读会话库），动过
   `TranscriptDialog.tsx` / `operations/transcript/*` / `src/operations/transcript/transcript.ts` 之后跑一遍它。
 - 真实会话库上的**写操作**（迁移 `apply`、回滚、导入落地）先问再做；验收优先用只读预演。
-- 验收需要临时夹具（假会话等）时用完立刻删干净，并在报告里写明造过什么、清掉了没有。
+- 验收需要临时造的测试数据（假会话等）时用完立刻删干净，并在报告里写明造过什么、清掉了没有。
 
 ## 性能与阻塞预算
 

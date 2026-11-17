@@ -1,7 +1,7 @@
 /**
  * 界面文案：两份语言 + 命名空间。
  *
- * 形状照官方客户端插件（`dsh-client-ui-jobs`、Web 端夹具 `fixture-live-client`、官方文档
+ * 形状照官方客户端插件（`dsh-client-ui-jobs`、Web 端示例插件 `fixture-live-client`、官方文档
  * 「新增设置卡片」那一页的示例）：字典是扁平的 `键 → 文案`，`{name}` 是占位符；`zh` 是键集
  * 真源，`en` 按 `LocaleDictOf<NS>` 逐键核；命名空间用 `declare module` 合并进
  * `LocaleNamespaceMap`，于是注册 Slot 那里的 `locale: NS` 换来的 `t` **带键集类型**——写错

@@ -36,7 +36,7 @@ interface Sandbox {
   base: string
   deps: MigrateDeps
   sessionId: string
-  /** 夹具里那几条会话的 id：源就是点名的那些，所以请求默认点名全部。 */
+  /** 测试数据里那几条会话的 id：源就是点名的那些，所以请求默认点名全部。 */
   ids: string[]
 }
 
@@ -423,7 +423,7 @@ test('宿主没接住时把这次算好的注册表写回文件（它自己那�
         return 'ws-host-1'
       },
       attachSession: async () => {
-        throw new Error('夹具：宿主拒绝挂靠')
+        throw new Error('假宿主拒绝挂靠')
       },
       detachSession: async () => {},
       members: async () => [],
@@ -432,7 +432,7 @@ test('宿主没接住时把这次算好的注册表写回文件（它自己那�
   }
   const run = await runMigration(deps, req(sb, { title: 'to' }), { apply: true })
 
-  assert.equal(clobbered, 1, '夹具要真的盖过一次，否则这条测试什么也没测')
+  assert.equal(clobbered, 1, '这次改写要真的盖过一次，否则这条测试什么也没测')
   assert.equal(run.applied, true, '宿主没接住不该把迁移说成失败')
   assert.equal(run.effect?.kind, 'failed')
   assert.equal(run.effect?.registryRestored, true, '宿主动过手，就必须把这次的结果写回去')
@@ -490,9 +490,9 @@ function memoryHost(options: {
         return id
       },
       attachSession: async (workspaceId, sessionId) => {
-        if (!options.known.has(sessionId)) throw new Error(`夹具：宿主不认这条会话 ${sessionId}`)
+        if (!options.known.has(sessionId)) throw new Error(`假宿主不认这条会话 ${sessionId}`)
         const record = options.memory.tables.workspaces[workspaceId]
-        if (record === undefined) throw new Error(`夹具：没有这条工作区 ${workspaceId}`)
+        if (record === undefined) throw new Error(`假宿主没有这块工作区 ${workspaceId}`)
         if (!record.sessionIds.includes(sessionId)) record.sessionIds.push(sessionId)
         attached.push({ workspaceId, sessionId })
         persist()

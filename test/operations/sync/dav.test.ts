@@ -17,14 +17,14 @@ function freshRoot(name: string): string {
   return dir
 }
 
-/** 起夹具、跑用例、收服务与临时目录（夹具用完立刻删干净）。 */
+/** 起假服务、跑用例、收服务与临时目录（用完立刻删干净）。 */
 async function withFixture(
   name: string,
   run: (fixture: DavFixture, client: ReturnType<typeof createDavClient>) => Promise<void>,
   options: {
-    /** 夹具要求的凭据。 */
+    /** 假服务要求的凭据。 */
     auth?: { username: string; password: string }
-    /** 给客户端用的凭据；缺省与夹具一致（测"凭据错"时给一组不一样的）。 */
+    /** 给客户端用的凭据；缺省与假服务一致（测"凭据错"时给一组不一样的）。 */
     clientAuth?: { username: string; password: string }
   } = {},
 ): Promise<void> {
@@ -146,7 +146,7 @@ test('dav：Basic 凭据不对时如实报 401', async () => {
     },
     { auth, clientAuth: { username: 'alice', password: 'wrong' } },
   )
-  // 凭据对了就能列出来：同一个夹具配置下换个客户端再来一次
+  // 凭据对了就能列出来：同一份假服务配置下换个客户端再来一次
   const root = freshRoot('auth-ok')
   const fixture = await startDavFixture({ root, auth })
   try {

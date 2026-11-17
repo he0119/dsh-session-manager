@@ -1,6 +1,6 @@
 // test/client/operations/sync/sync-job-label.test.ts — 状态栏那一格「同步」此刻说哪一句。
 //
-// 为什么在这一层核：那一格 39px、单行，说什么全靠这四个分支；而"跑着"那种状态在冒烟夹具里种不出来
+// 为什么在这一层核：那一格 39px、单行，说什么全靠这四个分支；而"跑着"那种状态在冒烟测试的示例数据里种不出来
 // （`syncJob` 是产物内部的模块级状态，只能靠真跑一趟同步才会变），所以分支本身必须单独钉住。
 import assert from 'node:assert/strict'
 import test from 'node:test'

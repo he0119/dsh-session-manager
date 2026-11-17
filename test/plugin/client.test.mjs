@@ -123,7 +123,7 @@ function fakeReact(recorded = [], firstNull = undefined, panel = undefined, arra
       // 的进度真的进了界面状态」那条用例）。
       /*
        * 页面级那两个"执行状态窗"（`RunDialog` / `RunChip`）各自持有一个 `useState(null)`，值来自模块级
-       * 状态（`logic/runJob.ts`：起跑、进度、转到后台）——冒烟夹具推不动它，所以它也不该从种子表里拿
+       * 状态（`logic/runJob.ts`：起跑、进度、转到后台）——冒烟测试的示例数据推不动它，所以它也不该从种子表里拿
        * 一个值：给了就是「删除 / 迁移 / 同步」那几面后面的状态整体挤后一位，症状是"期望的那块界面根本
        * 不是那个样子"。这里让它对种子表完全透明（不占序号、不记 set），与它挂进来之前一样。
        */
@@ -612,7 +612,7 @@ function loadBundle({ firstNull, panel, arrays, strings, nulls, meta, fetch } = 
                   'data-close-label': props.closeLabel,
                 },
                 react.createElement('h2', { className: 'dsm-fakeDialogTitle' }, props.title),
-                // 真那个在标题下面摆一行支撑句（描述远端地址那类事实），夹具照它来，否则用例看不见这段话。
+                // 真那个在标题下面摆一行支撑句（描述远端地址那类事实），示例数据照它来，否则用例看不见这段话。
                 props.description === undefined
                   ? null
                   : react.createElement('p', { className: 'dsm-fakeDialogDescription' }, props.description),
@@ -1057,7 +1057,7 @@ test('客户端产物：同步落地之后不回面板，换成结果页（一�
   /*
    * 这条照着用户的动作走一遍：计划那一段按「确认同步」→ 宿主推一条进度、再推收尾 → 界面换成结果页。
    * 为什么不能像别的用例那样把结果"种"进状态里：这一趟的结论在 `logic/syncJob.ts` 的模块级 store 里
-   * （跑到哪、完了没有都得等事件流），冒烟夹具没有种它的口子；换成点击 + 假 `fetch` 才真的走那条线。
+   * （跑到哪、完了没有都得等事件流），冒烟测试的示例数据没有种它的口子；换成点击 + 假 `fetch` 才真的走那条线。
    */
   const state = {
     sessionsRoot: '/home/u/.dsh/sessions',
@@ -1203,7 +1203,7 @@ test('客户端产物：提示行只说结果，不再挂「撤销」（撤销�
 
 test('客户端产物：点哪个入口就开哪一面，列表一直挂在后面', { skip }, () => {
   // 同步与备份是 1080 宽的弹窗（`.dsm-workDialog`），导入是 640 的窄弹窗（它只有两个字段，没有清单要摆）。
-  // 列表**不卸载**——勾选与滚动位置要跟着留下来；这里的夹具不往下渲染它（见 loadBundle 里那条说明），
+  // 列表**不卸载**——勾选与滚动位置要跟着留下来；这里的示例数据不往下渲染它（见 loadBundle 里那条说明），
   // 但元素还在。
   for (const [surface, title, wide] of [
     ['import', 'import.dialogTitle', false],
@@ -1284,7 +1284,7 @@ function primaryPlacements(node, inside = 'root', out = []) {
   if (node === null || typeof node !== 'object') return out
   const className = String(node.props?.className ?? '')
   const classes = className.split(/\s+/)
-  // 官方 `Modal` 的底部动作行：真那个的类名来自 CSS module（`_footer_xxxx`），夹具里的替身叫
+  // 官方 `Modal` 的底部动作行：真那个的类名来自 CSS module（`_footer_xxxx`），示例数据里的替身叫
   // `dsm-fakeDialogFooter`。弹窗级的主动作就该站在这儿。
   const footer = classes.some((name) => name.startsWith('_footer_') || name === 'dsm-fakeDialogFooter')
   const nested = footer ? 'dialogFooter' : classes.includes('dsm-cardHead') ? 'cardHead' : classes.includes('dsm-controls') ? 'controls' : inside
@@ -1383,7 +1383,7 @@ test('客户端产物：页面上凡是官方 Button 都带边框，没有裸着
     )
   }
   // 卡片底部那条动作行不能是空的：动作要有地方站（位置那条判据在 primaryPlacements 那个用例里）。
-  // 备份页不在此列：它的动作长在**每一行**上，夹具里没有备份条目，那条行根本不会渲染。
+  // 备份页不在此列：它的动作长在**每一行**上，示例数据里没有备份条目，那条行根本不会渲染。
   // 只有「会话」页还有卡片壳；导入与同步那两面都是"弹窗即容器"（卡片会在对话框里再画一圈边框），
   // 它们的动作行归上面 `primaryPlacements` 那条钉。
   for (const panel of ['manage']) {
@@ -2196,7 +2196,7 @@ test('客户端产物：「会话」页的筛选条把不匹配的行筛掉，�
 test('客户端产物：「会话」页一条都没筛出来时，那个吃满高度的列表框还在（表头不跟着消失）', { skip }, () => {
   // 主栏那一版列表吃满卡片剩下的高度、自己滚（styles.ts 的 .dsm-listFill）。筛空时如果把框换成一句
   // <p>，表头与那片区域就一起收掉了：表头是列的说明，不该因为"这一筛没命中"而消失。所以空态必须画在
-  // 框**里面**。这里种一个库里没有的类别（夹具里没有"活动中"的会话）来走到那个分支。
+  // 框**里面**。这里种一个库里没有的类别（示例数据里没有"活动中"的会话）来走到那个分支。
   const state = {
     sessionsRoot: '/home/u/.dsh/sessions',
     registryPath: '/home/u/.dsh/registry.json',
@@ -2774,7 +2774,7 @@ test('客户端产物：迁移弹窗里的目标目录是那枚值控件，点�
 test('客户端产物：候选里盘上已经没有的目录挂一枚标签，并且点不动', { skip }, () => {
   // 注册表里的登记不保证盘上还有（项目文件夹被删掉、目录改了名之后那条登记照旧在）：这种候选照旧
   // **列出来**（"我登记过的那块工作区还在名单里"），但点下去只会撞上宿主那句「目标工作区目录不存在」
-  // （`assertTargetCwd()`）——所以在点之前就把它标出来、置灰。`exists` 缺席（旧宿主 / 夹具）按"还在"
+  // （`assertTargetCwd()`）——所以在点之前就把它标出来、置灰。`exists` 缺席（旧宿主 / 测试数据）按"还在"
   // 处理，不在界面上替宿主猜（见 planRows.directoryTargetRows）。
   const state = {
     ...MIGRATE_FIELD_STATE,
@@ -2852,7 +2852,7 @@ test('客户端产物：面板头那枚「浏览文件系统…」把同一处�
 
 test('客户端产物：宿主没有目录选择器时，候选面板里不摆「浏览文件系统…」', { skip }, () => {
   const { pickerKind, ...withoutPicker } = MIGRATE_FIELD_STATE
-  assert.equal(pickerKind, 'browse', '夹具本来是"有选择器"那一档')
+  assert.equal(pickerKind, 'browse', '示例数据本来是"有选择器"那一档')
   const mounted = mount({
     state: withoutPicker,
     panel: 'manage',
@@ -5044,7 +5044,7 @@ const progressOf = (phase, done, total, label) => ({ phase, done, total, id: 's-
  * 走一遍「确认迁移 → 宿主报进度 → 跑完」，每一步都能看当时的树。
  *
  * 为什么必须真点一下按钮：迁移落地之后，进度与结果画在**状态窗**里（`RunDialog`；状态在模块级
- * `logic/runJob.ts`，结果页由发起它的面板当场给的 `render(done)` 拼出来）。冒烟夹具没有口子把一份结论
+ * `logic/runJob.ts`，结果页由发起它的面板当场给的 `render(done)` 拼出来）。冒烟测试的示例数据没有口子把一份结论
  * 种进那个状态——只能照着用户的动作走：点「确认迁移」→ 喂一条进度 → 喂结果。
  *
  * 事件流由用例推着走（`push()` 一条分帧、`end()` 收尾），所以中途可以随时 `render()` 看那一刻的界面。
@@ -5672,8 +5672,8 @@ test('样式源码：CSS 正文里没有反引号（模板字面量会被提前�
 })
 
 test('组件源码：一处 variant="ghost" 都不许有（官方缺省的那个变体就是裸的）', () => {
-  // 渲染树那条判据只能盖到夹具里**真渲染出来**的那些：横幅上的关闭、picker 展开之后的工具、备份页
-  // 每一行上的恢复 / 回滚都是按需渲染的，夹具里没有对应的数据就一个都不出现（实测：把横幅那枚改回
+  // 渲染树那条判据只能盖到示例数据里**真渲染出来**的那些：横幅上的关闭、picker 展开之后的工具、备份页
+  // 每一行上的恢复 / 回滚都是按需渲染的，示例数据里没有对应的数据就一个都不出现（实测：把横幅那枚改回
   // ghost，渲染树那条断言仍然是绿的）。所以这一条直接扫源码——`ghost` 是官方 `Button` 的缺省变体，
   // 用上它就等于"无边框无底色、鼠标放上去才看得出是按钮"。
   //
@@ -5981,7 +5981,7 @@ test('客户端产物：同步弹窗说清"上次同步"与没做到的每一条
 })
 
 test('组件源码：同步那一面自己就是弹窗，而且整条流程一个宽度（1080）', () => {
-  // 为什么扫源码：计划那一段要靠真跑一趟同步才会出现，夹具里种不出 planId 那一套状态。而"宽度"这条
+  // 为什么扫源码：计划那一段要靠真跑一趟同步才会出现，示例数据里种不出 planId 那一套状态。而"宽度"这条
   // 是返工两次的地方：先按"这一段摆什么"分档（面板 640、计划 1080、结果 640），于是在同一条流程里
   // 窗口先宽后窄；现在按"这一扇窗最宽的那一段"定死——同步每一步都是 1080（见 design.md 的「执行与结果」）。
   const sync = readFileSync(join(root, 'src/client/operations/sync/SyncPanel.tsx'), 'utf8')
@@ -6359,7 +6359,7 @@ test('客户端产物：自动那一档是一行三选一（官方分段控件�
 test('客户端产物：「看差异」只给两边真有可比那两份的行，点下去带的是那一条', { skip }, () => {
   // 判据是"两边**真有可比的两份**"，不是"状态看着可疑"：`missing`（另一边没有）比出来是空的，给一枚
   // 按钮只会让人白点一次；两边都写过的那几类（远端更新 / 本机更新 / 两边各自写过）按下同步之前最该
-  // 先看一眼——所以那几类必须有。夹具沿用同步预演那条：拉取那条改成"远端更新、会顶掉本机这份"。
+  // 先看一眼——所以那几类必须有。示例数据沿用同步预演那条：拉取那条改成"远端更新、会顶掉本机这份"。
   const state = {
     sessionsRoot: '/home/u/.dsh/sessions',
     registryPath: '/home/u/.dsh/registry.json',

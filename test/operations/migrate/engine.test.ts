@@ -123,7 +123,7 @@ function makeSandbox(name: string, options: { unowned?: boolean } = {}): Sandbox
   }
 }
 
-// 源由 `sessionIds` 决定（没有"源目录"这个参数了）：默认点名夹具里那几条，个别用例自己覆盖。
+// 源由 `sessionIds` 决定（没有"源目录"这个参数了）：默认点名测试数据里那几条，个别用例自己覆盖。
 const opts = (sb: Sandbox, extra: Record<string, unknown> = {}) => ({
   root: sb.root,
   registry: sb.registry,
@@ -142,7 +142,7 @@ test('迁移只解首帧：整份日志不进解码器（改写与复核都不�
   const sb = makeSandbox('migrate-shallow')
   const big = makeLog('session-a', sb.fromDir, 8000)
   writeFileSync(join(sb.root, sb.sourceProjectDirName, 'session-a', 'session.v4.jsonl.zstd'), big)
-  assert.ok(big.length > 1024 * 1024, `夹具得够大（现在是 ${big.length} 字节）`)
+  assert.ok(big.length > 1024 * 1024, `测试数据得够大（现在是 ${big.length} 字节）`)
 
   let maxBytes = 0
   const counting: DecodeAll = (buf) => {

@@ -119,7 +119,7 @@ function writeSession(
             },
           }),
         ]),
-    // 标题在 DSH 里是日志事件（最新一条生效），不是 header 字段——夹具得照这个样子写，
+    // 标题在 DSH 里是日志事件（最新一条生效），不是 header 字段——测试数据得照这个样子写，
     // 否则测的就不是真实数据形状了（见 src/shared/log/session-title.ts）。
     ...(options.title === undefined
       ? []
@@ -1436,7 +1436,7 @@ function fakeHostPort(options: { onRefresh?: (registryPath: string) => void; att
       return id
     },
     attachSession: async (workspaceId: string, sessionId: string) => {
-      if (options.attachFails === true) throw new Error('夹具：挂靠失败')
+      if (options.attachFails === true) throw new Error('假宿主：挂靠失败')
       const rec = workspaces.get(workspaceId)
       if (rec !== undefined && !rec.sessionIds.includes(sessionId)) rec.sessionIds.push(sessionId)
     },
@@ -1522,7 +1522,7 @@ test('POST /migrate：宿主没接住时如实报"需要重启"，而不是照�
       ...base,
       refreshIndex: async (): Promise<void> => {
         calls += 1
-        throw new Error('夹具：宿主没接住')
+        throw new Error('假宿主没接住')
       },
     }),
   })
@@ -1537,7 +1537,7 @@ test('POST /migrate：宿主没接住时如实报"需要重启"，而不是照�
   assert.equal(body['applied'], true, '宿主没接住不该把迁移说成失败')
   assert.equal(body['verified'], true)
   assert.equal(body['takesEffect'], 'restart-required', '界面能说的"无需重启"必须来自真实结果')
-  assert.match(String(body['summary']), /宿主没接住这次改动（夹具：宿主没接住）/)
+  assert.match(String(body['summary']), /宿主没接住这次改动（假宿主没接住）/)
 })
 
 test('POST /rollback：先 dryRun 看动作，再真回滚到原状', async () => {
@@ -2695,7 +2695,7 @@ test('事件流：每写完一条就把 socket 推给内核（同步循环里也
   const afterFlush: number[] = []
   const server = createServer((req, res) => {
     const real = res.socket
-    if (real === null) throw new Error('这个夹具需要一个真实 socket')
+    if (real === null) throw new Error('这项测试需要一个真实 socket')
     const socket = new Proxy(real, {
       get(target, prop, receiver) {
         if (prop === 'uncork') {
@@ -3382,7 +3382,7 @@ test('GET /sync-diff：两边事件一致、只有 header 的 cwd 不同，且�
       logVersion: 4,
     })
     const before = readFileSync(localPath)
-    // 夹具记的是这台服务器**收到过的全部**请求，里面已经有搭场景时那两次 PUT——只看端点这一段。
+    // 这份假服务记的是这台服务器**收到过的全部**请求，里面已经有搭场景时那两次 PUT——只看端点这一段。
     const requestsBefore = fixture.requests.length
     const handlers = createApiHandlers(
       deps(sandbox, {

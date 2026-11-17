@@ -87,5 +87,5 @@ Status: implemented
 - 代码面：`.dsm-tabs` 与 `.dsm-panel` 那层限宽删掉；`SegmentedControl` 不再被 require；
   `PanelShare` 多一个 `openTransfer`；字典删掉 `page.tab.*`，加上 `place.*` / `sync.chip.*` /
   `transfer.dialogTitle` / `manage.transfer.action` / `page.help.title` / `help.entry.*`。
-- 测试夹具：列表一直挂着，开了弹窗的用例里它不展开（`ManagePanel` 那条元素仍在 `recorded` 里），否则
+- 测试数据：列表一直挂着，开了弹窗的用例里它不展开（`ManagePanel` 那条元素仍在 `recorded` 里），否则
   同一批「全选 / 清空」会被数两遍；列表自己的表现由 `panel: 'manage'` 那批用例覆盖。

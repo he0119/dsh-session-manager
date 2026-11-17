@@ -433,7 +433,7 @@ pnpm typecheck && pnpm build && pnpm test && pnpm check:package
 - `test/plugin/client.test.mjs` 是结构与行为的可执行部分：控件来源、动作位置、选行工具、入口、弹窗流程。
 - 界面改动在真实 dev GUI 里量 `getComputedStyle` / `getBoundingClientRect`，深浅两套主题各看一遍；
   不推算色值，不凭截图猜间距。
-- 验收用的临时夹具（假会话等）用完立刻删干净，并在报告里写明造过什么、清掉了没有。
+- 验收用的临时造的测试数据（假会话等）用完立刻删干净，并在报告里写明造过什么、清掉了没有。
 - 新断言要篡改验证：把被测行为改回去，测试必须变红。
 
 界面改动自查：

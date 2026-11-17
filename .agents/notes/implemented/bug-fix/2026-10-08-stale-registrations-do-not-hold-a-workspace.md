@@ -65,7 +65,7 @@ Status: implemented
   `stranded` 计数。
 - 注册表复核多了一条放行条件：`droppedStale` 里点名的 id 允许消失；没点名而消失照旧报
   "会话 id 在落盘结果里没了"。落盘复核因此不再因为清账而误报。
-- `test/operations/migrate/residual-workspace.test.ts`（隔离夹具 + 像真宿主的端口：悬空登记不挡删除、隐藏成员留下并被点名、
+- `test/operations/migrate/residual-workspace.test.ts`（隔离出来的临时库 + 像真宿主的端口：悬空登记不挡删除、隐藏成员留下并被点名、
   挑了子集时不误报）、`test/shared/registry.test.ts`（`reHome()` 与复核的放行/抓错）、`test/plugin/web.test.ts`、
   `test/plugin/tools.test.ts`、`test/plugin/client.test.mjs` 各钉住一条。篡改验证四处：计划层不传 `staleSessionIds`、
   报告层永远空 `strandedSources`、宿主侧不摘悬空登记、复核不放行——各自都让对应用例变红。

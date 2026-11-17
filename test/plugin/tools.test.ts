@@ -128,7 +128,7 @@ function makeSandbox(name: string): Sandbox {
     toDir,
     projectDirName,
     logs,
-    // 源就是点名的那些会话（没有"源目录"这个参数了）：夹具里这两条，个别用例自己收紧。
+    // 源就是点名的那些会话（没有"源目录"这个参数了）：测试数据里这两条，个别用例自己收紧。
     ids: ['session-a', 'session-b'],
     backupRoot: join(base, 'backups'),
   }
@@ -216,7 +216,7 @@ async function makeHost(
           return [...rec.sessionIds]
         },
         attachSession: async (sessionId: string) => {
-          if (options.attachFails === true) throw new Error('夹具：挂靠失败')
+          if (options.attachFails === true) throw new Error('假宿主：挂靠失败')
           options.onCall?.(`attach:${sessionId}`)
           if (!rec.sessionIds.includes(sessionId)) rec.sessionIds.push(sessionId)
         },
@@ -517,7 +517,7 @@ test('改完注册表交给宿主自己做：顺序、id 复核、失败退路',
   })) as MigrateToolResult
   assert.equal(degraded.applied, true, '宿主没接住不该把一次成功的迁移说成失败')
   assert.equal(degraded.takesEffect, 'restart-required')
-  assert.match(degraded.summary, /宿主没接住这次改动（夹具：挂靠失败）/)
+  assert.match(degraded.summary, /宿主没接住这次改动（假宿主：挂靠失败）/)
   assert.match(degraded.summary, /重启 DSH/)
   assert.ok(degraded.backupDir && existsSync(degraded.backupDir), '失败也不该顺手回滚')
   assert.deepEqual(readRegistry(bad.registryPath).tables.workspaces['ws-temp']?.sessionIds, ['session-b', 'session-a'])
@@ -1450,7 +1450,7 @@ test('事件接线：卸载函数摘掉监听', async () => {
 })
 
 /**
- * 造一个**真的**自动推送运行时：真配置（`sync.autoPush`）、真本地库、真 WebDAV 夹具、真调度器。
+ * 造一个**真的**自动推送运行时：真配置（`sync.autoPush`）、真本地库、真 假的 WebDAV 服务、真调度器。
  *
  * 用它测那些"接线接对了没有"的事：配置读到了、凭据解析出来了、`run()` 真的走到了远端。
  */
@@ -1548,7 +1548,7 @@ test('附件端口：文件引用要把名字交给宿主（缺名字算不出�
 // ---- repair_session_paths：别台机器留下的路径 ----
 //
 // 现场：会话已经落在本机（header 是本机路径），但 `working-directory/change` 里还是另一台机器的写法。
-// 夹具按真实库的形状摆：项目目录名 = projectKey(header.cwd)，日志按事件一帧。
+// 样例库按真实库的形状摆：项目目录名 = projectKey(header.cwd)，日志按事件一帧。
 
 /** 造一条"事件里带着另一台机器路径"的会话，返回它的日志路径与原始字节。 */
 function writeForeignPathSession(sb: Sandbox, id: string, cwd: string, foreignRoot: string): { path: string; bytes: Buffer } {

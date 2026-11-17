@@ -12,7 +12,7 @@ import { startDavFixture } from '../test/fixtures/dav-fixture.ts'
 /**
  * 造一份上下文。
  * @param manifest `ensureFixture()` 的返回值。
- * @param options.withDav 起一个夹具 WebDAV（同步场景要）。
+ * @param options.withDav 起一个假的 WebDAV 服务（同步场景要）。
  */
 export async function createContext(manifest, options = {}) {
   const settings = {
@@ -36,7 +36,7 @@ export async function createContext(manifest, options = {}) {
       backupRoot: manifest.backupRoot,
     },
     decodeAll,
-    // 每次调用现造一个"运行时"（与 `syncRuntime()` 同形），远端指向夹具。
+    // 每次调用现造一个"运行时"（与 `syncRuntime()` 同形），远端指向那份假服务。
     sync: async () => (dav === undefined ? undefined : { settings, dav }),
     syncInfo: () => ({
       url: settings.url,

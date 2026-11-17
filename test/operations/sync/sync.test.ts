@@ -1,4 +1,4 @@
-// WebDAV 同步：计划是纯计算，落地打一个真的 WebDAV 夹具（两台假机器各一个库）。
+// WebDAV 同步：计划是纯计算，落地打一个真的 假的 WebDAV 服务（两台假机器各一个库）。
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
@@ -1517,7 +1517,7 @@ test('sync：端到端——扫描出来的会话与指纹能被远端读回认�
 
 test('contentFingerprint：cwd 不同、内容相同的两份会话哈希相同，且等于冻结值', () => {
   // 冻结值来自"解整篇 + 自校验"的旧实现：换实现不许改哈希口径，否则远端索引里已发布的
-  // 指纹会被判成"两边各自写过"。同一份夹具用两个 cwd 各算一次，钉住"cwd 无关"。
+  // 指纹会被判成"两边各自写过"。同一份日志用两个 cwd 各算一次，钉住"cwd 无关"。
   const FROZEN = 'f22b7f75e4cc10d9b3dd31fabfe99c168c27756dbdc89fceebe1a51792422d3a'
   const dir = join(SANDBOX, 'fingerprint')
   rmSync(dir, { recursive: true, force: true })
@@ -2558,7 +2558,7 @@ test('sync：测试连接打真服务——空远端、已有机器格、凭据�
     const withMachine = await testSyncConnection(good)
     assert.deepEqual(withMachine.machines, ['robot-a'])
     assert.equal(withMachine.namespaceExists, true)
-    // 只读：探测本身只有两次 PROPFIND，没有 MKCOL / PUT / GET（上面那次 PUT 是造夹具，不算在探测里）。
+    // 只读：探测本身只有两次 PROPFIND，没有 MKCOL / PUT / GET（上面那次 PUT 是造测试数据，不算在探测里）。
     assert.deepEqual(
       fixture.requests.slice(before).map((line) => line.split(' ')[0]),
       ['PROPFIND', 'PROPFIND'],
@@ -2675,7 +2675,7 @@ function seedRemoteObject(root: string, ref: AttachmentRef, bytes: Buffer): void
   writeFileSync(path, bytes)
 }
 
-/** 远端共享库的落盘位置（夹具的服务根就是 `fixture.root`）。 */
+/** 远端共享库的落盘位置（假服务的根就是 `fixture.root`）。 */
 function remoteObjectOnDisk(root: string, ref: AttachmentRef): string {
   return join(root, remoteAttachmentPath(ref))
 }
@@ -2758,7 +2758,7 @@ test('同步推送：远端已有的对象不再传第二遍（每轮重推时�
     assert.equal(
       refs[0]!.id.slice('sha256:'.length, 'sha256:'.length + 2),
       refs[1]!.id.slice('sha256:'.length, 'sha256:'.length + 2),
-      '这两个对象必须落在同一层目录里（夹具选材的前提，不成立这条测试就没在验缓存）',
+      '这两个对象必须落在同一层目录里（挑这几条数据的前提，不成立这条测试就没在验缓存）',
     )
     store.put(refs[0]!, one)
     store.put(refs[1]!, two)
@@ -2934,7 +2934,7 @@ test('同步进度：附件对象那一段也报 attach（带发起它的那条�
     await syncMachine(a, dav, settings(a, { machineId: 'robot-a' }), {
       apply: true,
       attachments: () => storeA.port,
-      // 标题由夹具给（真宿主从投影缓存读）：label 断言要的正是"读到的那个名字"。
+      // 标题由测试数据给（真宿主从投影缓存读）：label 断言要的正是"读到的那个名字"。
       titles: { s1: '带图的那条' },
       onProgress: (event) => pushed.push(event),
     })

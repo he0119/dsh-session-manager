@@ -19,7 +19,7 @@ import {
 } from '../../../../src/client/operations/manage/sessionFilter.ts'
 
 // 同 planRows.test.ts：不 import `src/client/api.ts`（它会把 src/client 拉进没有 DOM 的 Host 工程）。
-// 判据声明的 `SessionFacts` 只要求它真正读的那几个字段，所以夹具就是最小形状。
+// 判据声明的 `SessionFacts` 只要求它真正读的那几个字段，所以测试数据就是最小形状。
 
 /** 一行会话。 */
 const s = (id: string, extra: Partial<SessionFacts> = {}): SessionFacts => ({ id, ...extra })

@@ -101,7 +101,7 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
    * 这一页自己那条"做完了"的提示（目前只有导入用它）。
    *
    * 为什么放在页面这一级：导入成功之后弹窗就关掉了，写入的条数与字节总得有个地方说；列表顶部那条
-   * 横幅正是删除、迁移、归档那几件事共用的位置。用 `undefined` 起头而不是 `null`：冒烟夹具按顺序把
+   * 横幅正是删除、迁移、归档那几件事共用的位置。用 `undefined` 起头而不是 `null`：冒烟测试的示例数据按顺序把
    * 种子发给 null 状态（见 test/client.test.mjs 的 `nulls`），这里插一个 null 会让后面整体错一格。
    */
   const [notice, setNotice] = React.useState<string | undefined>(undefined)
@@ -117,7 +117,7 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
   /**
    * 从别处"定位"过来的那条会话（同步弹窗里那几枚「只看这一条」）。
    *
-   * 用 `undefined` 起头而不是 `null`：冒烟夹具按位置往 null 状态里种值（见 test/client.test.mjs），
+   * 用 `undefined` 起头而不是 `null`：冒烟测试的示例数据按位置往 null 状态里种值（见 test/client.test.mjs），
    * 这里插一个 null 会让后面那些种子整体错一格（与 `notice` / `droppedFile` 同一条理由）。
    */
   const [focusId, setFocusId] = React.useState<string | undefined>(undefined)
@@ -186,7 +186,7 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
    *
    * `undefined` = 还没读到。它只决定那枚按钮要不要带数字，读失败就照旧只写名字——比画一个"0 份"诚实
    * （一次目录列举，`/backups` 只读，与备份清单同一份来源）。用 `undefined` 而不是 `null` 起头：冒烟
-   * 夹具按顺序把种子发给 null 状态，这里插一个 null 会让「会话」页后面那些整体错一格。
+   * 示例数据按顺序把种子发给 null 状态，这里插一个 null 会让「会话」页后面那些整体错一格。
    */
   const [backupCount, setBackupCount] = React.useState<number | undefined>(undefined)
   /**

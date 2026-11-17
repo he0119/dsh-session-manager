@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // bench/run.mjs — 跑基准，并与提交进仓库的基线比一比。
 //
-// 一次运行 = 生成/复用夹具 → 先跑校准（把机器快慢归一化）→ 每个场景各起一个**子进程**（冷缓存、独立
+// 一次运行 = 生成/复用样例库 → 先跑校准（把机器快慢归一化）→ 每个场景各起一个**子进程**（冷缓存、独立
 // RSS、互不污染）→ 汇总成表 → 对照基线判定。
 //
 // 判定三条：
@@ -83,7 +83,7 @@ function runChildProcess(args, scenarioId) {
 }
 
 /**
- * 把夹具的文件先读一遍，摸热 OS 的页缓存。
+ * 把样例库的文件先读一遍，摸热 OS 的页缓存。
  *
  * 为什么需要：刚跑完构建或装依赖时，`bench/.work` 那几十 MB 会被挤出页缓存，第一次跑基准就变成
  * 磁盘冷读——2026-11-17 实测 `scan.cold` 因此报了「比基线慢 +364.8%」，紧接着重跑是 -4.1%。
@@ -188,9 +188,9 @@ async function main() {
   if (args.json === true) {
     process.stdout.write(JSON.stringify(report, null, 2) + '\n')
   } else {
-    process.stdout.write(`\n夹具：${manifest.profile} · ${manifest.sessions.length} 条会话 / ${(manifest.totalBytes / 1024 / 1024).toFixed(1)} MB · 远端 ${manifest.remote.pushed} 条\n`)
+    process.stdout.write(`\n样例库：${manifest.profile} · ${manifest.sessions.length} 条会话 / ${(manifest.totalBytes / 1024 / 1024).toFixed(1)} MB · 远端 ${manifest.remote.pushed} 条\n`)
     process.stdout.write(`校准：${calibrationMs.toFixed(1)} ms（wall 一律除以它再比）\n`)
-    process.stdout.write(`夹具已摸热：${warmed.files} 个文件 / ${(warmed.bytes / 1024 / 1024).toFixed(1)} MB\n\n`)
+    process.stdout.write(`样例库已摸热：${warmed.files} 个文件 / ${(warmed.bytes / 1024 / 1024).toFixed(1)} MB\n\n`)
     process.stdout.write(`${pad('场景', 20)}${pad('wall(ms)', 10)}${pad('相对基线', 10)}${pad('停顿/预算', 14)}${pad('RSS(MB)', 9)}\n`)
     process.stdout.write('─'.repeat(64) + '\n')
   }
