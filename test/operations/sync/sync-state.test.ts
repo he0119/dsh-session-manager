@@ -128,13 +128,19 @@ test('「没做到的条目」原样写入磁盘、也读得回来（点名版�
       pushed: 1,
       problems: ['同步映射把 /home/u/dev/x 指到了 /nope，但那不是一个存在的目录'],
       leftovers: [
-        { message: '甲（session-1）：目标目录不存在：/nope', sessionId: 'session-1' },
-        { message: '同步映射把 /home/u/dev/x 指到了 /nope，但那不是一个存在的目录' },
+        {
+          message: '甲（session-1）：目标目录不存在：/nope',
+          sessionId: 'session-1',
+          title: '甲',
+          kind: 'path' as const,
+          detail: '目标目录不存在：/nope',
+        },
+        { message: '同步映射把 /home/u/dev/x 指到了 /nope，但那不是一个存在的目录', kind: 'other' as const },
       ],
       takesEffect: 'immediate' as const,
     }
     writeSyncRun(home, run)
-    assert.deepEqual(readSyncRun(home), run, '带 id 的与不带 id 的都读得回来')
+    assert.deepEqual(readSyncRun(home), run, '带 id、拆开的两半与分类都读得回来')
   })
 })
 
@@ -148,8 +154,17 @@ test('「没做到的条目」形状不对也当没有（宁可只少一张清�
     assert.equal(readSyncRun(home), undefined, '缺 message')
     writeFileSync(syncStatePath(home), JSON.stringify({ sync: { ...base, leftovers: [{ message: 'x', sessionId: 7 }] } }))
     assert.equal(readSyncRun(home), undefined, 'sessionId 不是字符串')
+    writeFileSync(syncStatePath(home), JSON.stringify({ sync: { ...base, leftovers: [{ message: 'x', title: 7 }] } }))
+    assert.equal(readSyncRun(home), undefined, 'title 不是字符串')
+    writeFileSync(syncStatePath(home), JSON.stringify({ sync: { ...base, leftovers: [{ message: 'x', detail: 7 }] } }))
+    assert.equal(readSyncRun(home), undefined, 'detail 不是字符串')
+    writeFileSync(syncStatePath(home), JSON.stringify({ sync: { ...base, leftovers: [{ message: 'x', kind: 7 }] } }))
+    assert.equal(readSyncRun(home), undefined, 'kind 不是字符串')
     // 不带 id 的那种是合法条目（映射、远端索引那几步没有会话可指）。
     writeFileSync(syncStatePath(home), JSON.stringify({ sync: { ...base, leftovers: [{ message: 'x' }] } }))
     assert.deepEqual(readSyncRun(home), { ...base, leftovers: [{ message: 'x' }] }, '只有 message 也行')
+    // 认不出的分类照样读回来（以后宿主多一种分类时，这一版不该整条记录当没有）；界面把它归到「其它问题」。
+    writeFileSync(syncStatePath(home), JSON.stringify({ sync: { ...base, leftovers: [{ message: 'x', kind: 'later-kind' }] } }))
+    assert.deepEqual(readSyncRun(home), { ...base, leftovers: [{ message: 'x', kind: 'later-kind' }] }, '不认识的 kind 也读回来')
   })
 })

@@ -3779,7 +3779,7 @@ test('sync：没做到的条目点名到会话，「本来就没事」的那些�
       ],
       push: [
         { id: 'session-d', title: '丁', action: 'skip', code: 'identical', reason: '远端已经有这一份' },
-        { id: 'session-e', title: '戊', action: 'skip', code: 'diverged', reason: '两边各自写过，这次不动' },
+        { id: 'session-e', title: '戊', action: 'skip', code: 'diverged', blockedBy: 'newer-unknown', reason: '两边各自写过，这次不动' },
         { id: 'session-f', title: '己', action: 'upload', code: 'missing' },
       ],
       problems: ['同步映射里有一条空的来源路径（远端 cwd）'],
@@ -3788,10 +3788,22 @@ test('sync：没做到的条目点名到会话，「本来就没事」的那些�
   }
   const leftovers = collectLeftovers(outcome as never)
   assert.deepEqual(leftovers, [
-    { message: '甲（session-a）：目标目录不存在：/nope', sessionId: 'session-a' },
-    { message: '戊（session-e）：两边各自写过，这次不动', sessionId: 'session-e' },
-    { message: '同步映射里有一条空的来源路径（远端 cwd）' },
-    { message: '读远端 machine-x/index.json 失败：404' },
+    {
+      message: '甲（session-a）：目标目录不存在：/nope',
+      sessionId: 'session-a',
+      title: '甲',
+      kind: 'path',
+      detail: '目标目录不存在：/nope',
+    },
+    {
+      message: '戊（session-e）：两边各自写过，这次不动',
+      sessionId: 'session-e',
+      title: '戊',
+      kind: 'fork',
+      detail: '两边各自写过，这次不动',
+    },
+    { message: '同步映射里有一条空的来源路径（远端 cwd）', kind: 'other' },
+    { message: '读远端 machine-x/index.json 失败：404', kind: 'other' },
   ])
 })
 
@@ -3808,13 +3820,21 @@ test('sync：附件对象两边都没有时，按会话点名（带 id 就能「
     {
       message: '甲（session-a）：这条会话引用的 3 个附件对象本机没有、远端共享库里也没有（持有这些对象的机器还没推送它们）',
       sessionId: 'session-a',
+      title: '甲',
+      kind: 'attachment',
+      detail: '这条会话引用的 3 个附件对象本机没有、远端共享库里也没有（持有这些对象的机器还没推送它们）',
     },
     {
       message:
         'session-b：这条会话引用的 1 个附件对象本机没有、远端共享库里也没有（持有这些对象的机器还没推送它们）',
       sessionId: 'session-b',
+      kind: 'attachment',
+      detail: '这条会话引用的 1 个附件对象本机没有、远端共享库里也没有（持有这些对象的机器还没推送它们）',
     },
-    { message: '本机有 4 个附件对象在远端共享库里也没有，这次补不上（持有这些对象的机器还没推送它们）：涉及 2 条会话' },
+    {
+      message: '本机有 4 个附件对象在远端共享库里也没有，这次补不上（持有这些对象的机器还没推送它们）：涉及 2 条会话',
+      kind: 'other',
+    },
   ])
 })
 
@@ -3836,7 +3856,7 @@ test('sync：缺映射的跳过不算没做到——那是这台机器没有那�
 test('sync：完全一样的两句只留一条（计划与应用两段可能算出同一句）', () => {
   const same = '同步映射把 /a 指到了 /b，但那不是一个存在的目录'
   const outcome = { plan: { pull: [], push: [], problems: [same] }, problems: [same] }
-  assert.deepEqual(collectLeftovers(outcome as never), [{ message: same }])
+  assert.deepEqual(collectLeftovers(outcome as never), [{ message: same, kind: 'other' }])
 })
 
 test('远端位置：每台机器的格子都列全（不是只留"领先的那一份"），按最后活动时间从新到旧', () => {

@@ -1166,7 +1166,7 @@ test('客户端产物：同步应用之后不回面板，换成结果页（一�
     done.text.some((item) => String(item).includes('sync.appliedReplaced:{"count":1}')),
     '覆盖本机那份折进"另有：…"那一句',
   )
-  assert.ok(done.text.includes('run.problemsTitle:{"count":1}'), '没做到的逐条列出来')
+  assert.ok(done.text.includes('sync.leftovers.title:{"count":1}'), '没做到的逐条列出来（与「上次同步」那张同一个抬头）')
   assert.ok(done.text.includes('s-4：远端那份读不出来'), '原话照搬，不吞掉是哪一条')
   assert.ok(done.text.includes('effect.restart'), '要重启才生效时在结果页上说')
   assert.equal(primaryOf(done.el).props.children, 'run.finish', '底栏只剩「完成」')
@@ -5909,10 +5909,12 @@ test('客户端产物：按钮的悬浮提示只说这一档一句话（明细�
   assert.equal(chipTitle({}, null), 'sync.chip.noteOff', '没配置时说"还没配置远端"')
 })
 
-test('客户端产物：同步弹窗说清"上次同步"与没做到的每一条，带 id 的给「只看这一条」', { skip }, () => {
+test('客户端产物：同步弹窗把没做到的按原因分组、每条拆成名字/id/原因，带 id 的给「只看这一条」', { skip }, () => {
   /*
-   * 页头那枚黄点只说得出"有 2 条没做到"——窗口一关就只剩这一句，而"哪一条、为什么"才是要处理的东西。
-   * 这条用例盯的就是那一块：时间与条数一句话，然后逐条列出原话；带 sessionId 的那条多一枚按钮。
+   * 页头那枚黄点只说得出"几条没做到"——窗口一关就只剩这一句，而"哪一条、为什么"才是要处理的东西。
+   * 这条用例盯的就是那一块：时间与条数一句话；按原因分组（缺附件 / 两边都写过 / 正开着 / 目录对不上 /
+   * 其它各一枚标签 + 条数）；一条拆成名字、id、原因三行；每组默认只摆三条，其余按需展开；
+   * 带 sessionId 的那条多一枚「只看这一条」。
    */
   const at = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString()
   const sync = {
@@ -5926,8 +5928,43 @@ test('客户端产物：同步弹窗说清"上次同步"与没做到的每一条
       pushed: 2,
       problems: ['同步映射把 /a 指到了 /nope，但那不是一个存在的目录'],
       leftovers: [
-        { message: '甲（session-1）：目标目录不存在：/nope', sessionId: 'session-1' },
-        { message: '同步映射把 /a 指到了 /nope，但那不是一个存在的目录' },
+        {
+          message: '甲（session-1）：目标目录不存在：/nope',
+          sessionId: 'session-1',
+          title: '甲',
+          kind: 'path',
+          detail: '目标目录不存在：/nope',
+        },
+        { message: '同步映射把 /a 指到了 /nope，但那不是一个存在的目录', kind: 'other' },
+        // 同一组四条：默认只摆三条，第四条与"展开其余 1 条"由那一组自己管。
+        {
+          message: '乙（session-2）：两边各自写过，两条都不动',
+          sessionId: 'session-2',
+          title: '乙',
+          kind: 'fork',
+          detail: '两边各自写过，两条都不动',
+        },
+        {
+          message: '丙（session-3）：两边各自写过，两条都不动',
+          sessionId: 'session-3',
+          title: '丙',
+          kind: 'fork',
+          detail: '两边各自写过，两条都不动',
+        },
+        {
+          message: '丁（session-4）：两边各自写过，两条都不动',
+          sessionId: 'session-4',
+          title: '丁',
+          kind: 'fork',
+          detail: '两边各自写过，两条都不动',
+        },
+        {
+          message: '戊（session-5）：两边各自写过，两条都不动',
+          sessionId: 'session-5',
+          title: '戊',
+          kind: 'fork',
+          detail: '两边各自写过，两条都不动',
+        },
       ],
     },
   }
@@ -5954,9 +5991,34 @@ test('客户端产物：同步弹窗说清"上次同步"与没做到的每一条
     text.includes('sync.last.facts:{"when":"time.hours:{\\"count\\":3}","pulled":1,"pushed":2}'),
     '时间与"拉几条推几条"摆在一句里',
   )
-  assert.ok(text.includes('sync.leftovers.title:{"count":2}'), '先报没做到几条')
-  assert.ok(text.includes('甲（session-1）：目标目录不存在：/nope'), '没做到的原话逐条列出来')
+  assert.ok(text.includes('sync.leftovers.title:{"count":6}'), '先报没做到几条')
+  // 按原因分组：组头是类别标签 + 条数，组按「两边都写过 → 目录对不上 → 其它」的次序出现。
+  assert.ok(text.includes('sync.leftovers.group.fork'), '两边都写过的那一组有自己的标签')
+  assert.ok(text.includes('sync.leftovers.group.path'), '目录对不上的那一组有自己的标签')
+  assert.ok(text.includes('sync.leftovers.group.other'), '不属于任何会话的那些落在「其它问题」')
+  assert.ok(text.includes('sync.leftovers.count:{"count":4}'), '两边都写过那一组报 4 条')
+  assert.ok(text.includes('sync.leftovers.count:{"count":1}'), '另外两组各 1 条')
+  assert.ok(
+    text.indexOf('sync.leftovers.group.fork') < text.indexOf('sync.leftovers.group.path') &&
+      text.indexOf('sync.leftovers.group.path') < text.indexOf('sync.leftovers.group.other'),
+    '组按「要裁决 → 要改配置 → 其它」的次序排（读的人先看到最要紧的两类）',
+  )
+
+  // 一条拆成三行：会话名、id、原因。原来三者挤在一句里，50 条时只看得到开头四条。
+  assert.ok(text.includes('甲'), '会话名单独一行')
+  assert.ok(text.includes('session-1'), 'id 单独一行（等宽、次要色）')
+  assert.ok(text.includes('目标目录不存在：/nope'), '原因单独一行')
+  assert.equal(
+    text.includes('甲（session-1）：目标目录不存在：/nope'),
+    false,
+    '拆开之后不再把「名字（id）：原因」整句画一遍（那就是原来读不清的样子）',
+  )
   assert.ok(text.includes('同步映射把 /a 指到了 /nope，但那不是一个存在的目录'), '不属于哪条会话的那些也列出来')
+
+  // 四条那一组只摆三条：第四条不渲染，换成「展开其余 1 条」。
+  assert.ok(text.includes('乙') && text.includes('丙') && text.includes('丁'), '前三条照着摆')
+  assert.equal(text.includes('戊'), false, '超过三条的默认收起')
+  assert.ok(text.includes('sync.leftovers.more:{"count":1}'), '收起的那条给出「展开其余 1 条」')
 
   /*
    * 按钮从 `recorded` 里找而不是从 `tree` 走一遍：弹窗那一层（`WorkDialog`）把正文交给自己的子组件，
@@ -5965,7 +6027,7 @@ test('客户端产物：同步弹窗说清"上次同步"与没做到的每一条
   const focusButtons = mounted.recorded.filter(
     (el) => el.type === 'button' && strings(el).includes('sync.leftovers.focus'),
   )
-  assert.equal(focusButtons.length, 1, '只有带 sessionId 的那条给「只看这一条」')
+  assert.equal(focusButtons.length, 4, '摆出来的四条各一枚「只看这一条」（收起的那条不建按钮）')
   assert.equal(typeof focusButtons[0].props.onClick, 'function', '那枚按钮点了要能跳到列表')
 
   // 旧记录（只有 problems、没有 leftovers）也要画得出来：按汇总句一条一句地列。
