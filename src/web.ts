@@ -10,7 +10,8 @@
 //
 // 与 webServer 服务解耦：本模块只要求一个 `{ register(route) }`，测试里用假 req/res 直接打
 // handler，不必起 HTTP 服务。路由路径固定在本插件命名空间下，`(kind, path)` 与别的插件不会撞。
-import { readFileSync, statSync } from 'node:fs'
+import { statSync } from 'node:fs'
+import { readFile, stat } from 'node:fs/promises'
 
 import { decodeLogTextChunked } from './log-decode.ts'
 import { basename, join } from 'node:path'
@@ -78,7 +79,6 @@ import {
   bundleTitlesAsync,
   entryBytes,
   planImport,
-  readBundle,
   readBundleAsync,
   type BundleSourceInfo,
   type ImportPlan,
@@ -2038,7 +2038,7 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
     let remoteLines: string[]
     let remoteLogBytes: number
     try {
-      const bundle = readBundle(bundleBytes)
+      const bundle = await readBundleAsync(bundleBytes)
       const bundled = bundle.sessions.find((item) => item.id === id)
       if (bundled === undefined) {
         sendJson(res, 404, { error: `远端包里没有 ${id}（清单与索引对不上）` })
@@ -2059,7 +2059,7 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
     }
     let localLines: string[]
     try {
-      localLines = (await decodeLogTextChunked(readFileSync(file.path), file.compression)).split('\n')
+      localLines = (await decodeLogTextChunked(await readFile(file.path), file.compression)).split('\n')
     } catch (error) {
       sendJson(res, 422, { error: `本机那份读不出来：${error instanceof Error ? error.message : String(error)}` })
       return
@@ -2074,7 +2074,7 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
     }
     try {
       const diff = diffSessionLogs(localLines, remoteLines, {
-        localBytes: statSync(file.path).size,
+        localBytes: (await stat(file.path)).size,
         remoteBytes: remoteLogBytes,
         localProblems: problemsOf(localLines, '本机'),
         remoteProblems: problemsOf(remoteLines, '远端'),
