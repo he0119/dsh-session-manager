@@ -24,7 +24,7 @@
   与严格路逐字节相同。
 - [生效模式如实探测，不假装即时生效](../.agents/notes/implemented/architecture/2026-09-27-effect-mode-tells-the-truth.md)
   与[改完注册表把活儿交给宿主自己做](../.agents/notes/implemented/architecture/2026-10-05-hand-the-change-to-the-host.md)：
-  `src/take-effect.ts` 拿到宿主那套动作（`hostRegistryPort()`：先按磁盘刷 header 缓存，再复用 / 新建
+  `src/shared/host/take-effect.ts` 拿到宿主那套动作（`hostRegistryPort()`：先按磁盘刷 header 缓存，再复用 / 新建
   工作区、挂会话、摘会话、删空工作区）就把改动交给它自己做，拿不到就如实说这次改动需要重启 DSH。被
   回退的那条路（重挂加载条目）留在[否决记录](../.agents/notes/rejected/architecture/2026-10-05-reload-the-workspace-entry.md)里。
 - [宿主持着的会话不搬，但要说出来](../.agents/notes/implemented/bug-fix/2026-10-08-live-sessions-cannot-move.md)：
@@ -129,7 +129,7 @@
   解压、块间让出，逐条报 `attachScan`；同一份文件的结果按 `size + mtime` 缓存。
 - [同步跑着时点状态栏那格，看到的是进度](../.agents/notes/implemented/bug-fix/2026-11-14-sync-panel-opens-at-progress.md)：
   那格点开的弹窗原来停在面板段（只有「上次同步」和一枚按不动的「同步」），看不出这一趟在做什么。
-  现在按"这一页走到哪 + 宿主那边跑没跑"决定段落（`logic/syncStage.ts`）：跑着时直接是落地段（进度块），
+  现在按"这一页走到哪 + 宿主那边跑没跑"决定段落（`operations/sync/syncStage.ts`）：跑着时直接是落地段（进度块），
   跑完回到面板段；认领来的那一趟没有逐条事件，改说那句"这一页看不到逐条进度"。
 - [迁移、差异与导出不再整份解压 / 压缩日志](../.agents/notes/implemented/bug-fix/2026-11-14-long-ops-stop-blocking-the-host.md)：
   迁移改写与复核原来为一个 header 付四次整份解码（单条 16.8 MB 的日志 9.9 秒），差异页两边各整份解一次
@@ -155,7 +155,7 @@
   预演算出来的计划连输入一起留下（`SyncPrepared`），响应带回 `planId`，确认那次照它落地；输入那套设置、
   本机的代次文件、投影缓存那两件事、要覆盖的那几条是否还活着、远端索引有一处对不上就从零重算。
 - [同步关掉窗口之后接着跑，回来还看得见](../.agents/notes/implemented/feature/2026-10-21-sync-keeps-running-when-the-window-closes.md)：
-  落地那一趟的状态搬到模块级（`src/client/logic/syncJob.ts`）：忙碌时弹窗那枚「取消」换成「转到后台」，
+  落地那一趟的状态搬到模块级（`src/client/operations/sync/syncJob.ts`）：忙碌时弹窗那枚「取消」换成「转到后台」，
   进度与结论改在状态栏那一格报、点它回到同一扇窗（开别的弹窗、关掉窗口再回来都还在）；刷新之后从面板那条唯一的长连接
   （`GET /panel/events`）上认领还在跑的那一趟。宿主那边同一时间只允许一趟落地（第二趟 409）。自动推送
   那一轮同理：调度器记下"正跑着的那一轮"（`AutoPushTimer.status()`）并把之后的每条进度推给订阅者
@@ -201,7 +201,7 @@
   弹窗里每点一次「以本机为准 / 以远端为准」，原来重走一遍 `prepareSync()`（预演 2.1 s）；现在带着
   `planId` 回来，宿主用预演留下的输入（本机清单、远端索引、项目身份、内容指纹、那几对的内容关系）只
   跑一遍纯计划计算（`replanPrepared()`），几十毫秒。
-- `src/dav.ts` 是那四种方法与 Basic 鉴权（含宽容的多状态响应解析），`src/sync.ts` 是索引、计划与落地：
+- `src/operations/sync/dav.ts` 是那四种方法与 Basic 鉴权（含宽容的多状态响应解析），`src/operations/sync/sync.ts` 是索引、计划与落地：
   界面那条路是 `prepareSync()` 算计划并把输入留下、确认时 `syncPrepared()` 照它落地（`planId` 指认
   宿主手里那份），`src/tools.ts` 的 `sync_sessions` 走单次调用那条（`runSync()`）。自动推送是同一个
   计划层上的第三条路：`runAutoPush()` 用 `pushOnly` 算一份只推的计划（`narrowToPushOnly()` 把
@@ -243,7 +243,7 @@
 - [「未分组」就是外壳那一组](../.agents/notes/implemented/bug-fix/2026-09-28-ungrouped-means-the-sidebar-group.md)：
   一个名字一个定义，三处读同一个结论。
 - [「认领」是宿主那份成员表](../.agents/notes/implemented/bug-fix/2026-10-04-accounted-means-the-hosts-membership.md)：
-  注册表里的**登记**不算数，cwd 归一到记录 `path` 才算——判据只在 `src/accounting.ts` 写一遍。
+  注册表里的**登记**不算数，cwd 归一到记录 `path` 才算——判据只在 `src/shared/accounting.ts` 写一遍。
 - [迁移的源就是你勾的那些会话](../.agents/notes/implemented/architecture/2026-10-13-source-is-what-you-tick.md)：
   勾选就是源（可以跨目录），目标目录在弹窗里选一次，**没有独立的迁移页**（那枚「迁移」挂在列表的
   动作行上）；`from` 参数与 `includeUnowned` 开关一并删掉。
@@ -273,17 +273,17 @@
   1159～1203 ms → 395～421 ms。
 - [打开一条会话的内容不再扫整库](../.agents/notes/implemented/architecture/2026-11-10-locate-one-session-without-scanning.md)：
   按 id 直接找会话目录（目录名就是 `encodeSegment(id)`），同一份日志连着翻页只解压一次
-  （`src/log-text-cache.ts`）：中位会话一页 1.6 s → 0.13 s，大日志的后续页 1.5～4 s → 十几毫秒。
+  （`src/shared/log/log-text-cache.ts`）：中位会话一页 1.6 s → 0.13 s，大日志的后续页 1.5～4 s → 十几毫秒。
 - [落地之后请宿主补投影检查点](../.agents/notes/implemented/bug-fix/2026-10-07-landing-warms-the-projection-checkpoint.md)：
   侧边栏的标题 / 空白 / 最后活动时间都只认宿主那份记录，而那份记录只在**活着的**会话上被写；导入、同步
-  拉取、迁移落地之后借宿主自己的两个服务冷读一遍补上（`src/checkpoint-warm.ts`）。
+  拉取、迁移落地之后借宿主自己的两个服务冷读一遍补上（`src/shared/host/checkpoint-warm.ts`）。
 - [重新生成名称：临时把会话挂回宿主](../.agents/notes/implemented/feature/2026-10-12-retitle-attaches-the-session-to-ask-the-title-service.md)：
   名称服务的显式重算入口只认**活会话**，而这里要处理的是整库里早已不在内存里的那些——端口把一条会话
   临时读出来、挂上、重算、自己开写句柄把新事件写下去、再摘掉（`src/tools.ts` 的 `titleRefreshPort()`
-  + `src/retitle.ts`）。写盘不走 `sessions.flush()`：还原出来的副本比磁盘多一条 `session/end-seed`，
+  + `src/operations/retitle/retitle.ts`）。写盘不走 `sessions.flush()`：还原出来的副本比磁盘多一条 `session/end-seed`，
   路由出去的事件序号对不上写句柄的游标。
 - [会话内容视图：在插件里把日志解析出来](../.agents/notes/implemented/feature/2026-10-12-transcript-view-parses-the-log-itself.md)：
-  一条事件一条条目、工具调用只算一次、上限与分页都在解析层（`src/transcript.ts` + `GET /transcript` +
+  一条事件一条条目、工具调用只算一次、上限与分页都在解析层（`src/operations/transcript/transcript.ts` + `GET /transcript` +
   会话页右栏那枚「打开完整内容」）；不走宿主，所以侧边栏看不见的会话也能读。
 
 ## 删除与归档

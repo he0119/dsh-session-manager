@@ -21,7 +21,7 @@ Status: rejected — 一次迁移只有一个目标，跨目录的一条来源�
 
 迁移页把「未分组」做成一个独立来源。四种口径被钉在一起，少一条就会出现「界面说 2 条、宿主说 3 条」：
 
-- **候选**：`unowned` + `ungrouped` + **有 `cwd`**（`planRows.unownedSessions()` 与 `src/plan.ts`
+- **候选**：`unowned` + `ungrouped` + **有 `cwd`**（`planRows.unownedSessions()` 与 `src/operations/migrate/plan.ts`
   的发现阶段是同一条判据）；
 - **请求**：界面上的哨兵值 `UNOWNED_SOURCE`（`@unowned`）在发请求那一刻被翻译成 `unowned: true` +
   `from: ''`；哨兵既不下线也不当文案露出来；

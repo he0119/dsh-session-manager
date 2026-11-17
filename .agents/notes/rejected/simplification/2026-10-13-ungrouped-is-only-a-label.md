@@ -28,7 +28,7 @@ Status: rejected — 源改成"点名的那些会话"之后，源不再被限制
   照旧在候选里；把项目重建到别处，选这条旧目录当源、目标指到新目录就迁过去了。真正必须存在的是
   **源项目目录**（会话日志那一层，`projectDirOf(root, from)`），计划层照旧检查它。
 - **「未分组」退回它本来的位置**：行上的一枚标签（`list.ungrouped`）与会话页筛选条上的一枚筛选标签。
-  判据没有变，仍是 `src/visibility.ts` 的 `isUngrouped()`（谁都没认领 **且** 侧边栏会显示它），
+  判据没有变，仍是 `src/shared/visibility.ts` 的 `isUngrouped()`（谁都没认领 **且** 侧边栏会显示它），
   见 [「未分组」就是外壳那一组](../../implemented/bug-fix/2026-09-28-ungrouped-means-the-sidebar-group.md)。
 - **`unowned` 参数从三处删掉**：计划层（`BuildPlanOptions`）、编排层（`MigrateRequest` /
   `MigrationPreview`）与 `/migrate` 端点；`from` 是必填的（空串 ⇒ 计划报 `from is required`，
@@ -53,7 +53,7 @@ Status: rejected — 源改成"点名的那些会话"之后，源不再被限制
 - 一次迁移只处理一个目录；"这几个目录里没在册的那几条一次收编"要按目录各来一次。
 - 源目录已经被删掉这条路上，`registered` 与注册表变更都按宿主的**认领**口径走（目录解析不出来 ⇒ 宿主
   不算成员），而注册表里那条登记还在，所以迁移照旧按"从那块工作区摘走"处理，源记录被摘空后删掉。
-  `test/engine.test.ts` 用"项目文件夹删了 → 迁到重建后的目录 → 复核 → 回滚"把这条钉住。
+  `test/operations/migrate/engine.test.ts` 用"项目文件夹删了 → 迁到重建后的目录 → 复核 → 回滚"把这条钉住。
 - 界面上少两个字典键（`migrate.from.unownedHint` / `migrate.projectDirsUnowned`），
   `planRows` 少了哨兵值与 `unownedSessions()`，`DirectoryField` 少了只为哨兵存在的 `manualValue`。
 - 被取代的那条决策留在[否决记录](../../rejected/architecture/2026-09-27-unowned-is-a-migration-source.md)；

@@ -35,7 +35,7 @@ Status: implemented
 
 - 多一列「项目」——平铺之后它是"这条属于哪个目录"的唯一出处，在册项目写工作区标题、没登记的写路径；
 - 表头三列可点着排（标题 / 大小 / 时间），默认时间从新到旧；排序只改看，不写盘。比较与筛选是
-  纯函数（[manageRows.ts](../../../../src/client/logic/manageRows.ts)），`test/manageRows.test.ts` 直接测；
+  纯函数（[manageRows.ts](../../../../src/client/operations/manage/manageRows.ts)），`test/client/operations/manage/manageRows.test.ts` 直接测；
 - 组头取消之后，"这条属于哪个项目""只看这个项目""整组处理"三件事挪到**左侧项目树**（见下）。
 
 ### 左栏：项目与筛选

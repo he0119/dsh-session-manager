@@ -14,7 +14,7 @@ Status: implemented
 会多出一层只属于某一个插件的名字，读起来像是"这个家目录的备份"，而不是"这个插件的备份"。
 
 麻烦的是改默认值这件事本身。清单只读 `backupRoot` **一个**根（`listBackups()`），而回滚前那道越界
-检查只认备份根下的路径（`src/migrate.ts` 的 `assertBackupDir()`：回滚会按清单里的路径搬目录、写注
+检查只认备份根下的路径（`src/operations/migrate/migrate.ts` 的 `assertBackupDir()`：回滚会按清单里的路径搬目录、写注
 册表，等于"以清单为准的任意写"，所以界面能传的字符串只换来自己写过的那棵子树）。于是"只改默认值"
 会让已经写好的备份同时从列表里消失、也没法按路径滚回去——等于把回退凭据锁在门外。
 
@@ -48,7 +48,7 @@ Status: implemented
 
 - **旧备份继续可用**：升级后第一次启动，`~/.dsh/dsh-session-manager-backups` 整体出现在
   `~/.dsh/dsh-session-manager/backups`，界面里的备份清单与按路径回滚都不受影响。
-- 冒烟测试 `test/artifact.test.mjs` 会真的 `apply()` 一次插件，因此它现在把 `DSH_HOME` 指向一座临时
+- 冒烟测试 `test/plugin/artifact.test.mjs` 会真的 `apply()` 一次插件，因此它现在把 `DSH_HOME` 指向一座临时
   目录——跑测试不该拿运行者真实的 `~/.dsh` 当场地。
-- `test/backup-root.test.ts` 钉默认路径的字面值，以及搬迁的四个分支（正常搬迁、没旧目录、新根已在、
+- `test/plugin/backup-root.test.ts` 钉默认路径的字面值，以及搬迁的四个分支（正常搬迁、没旧目录、新根已在、
   搬不动）：把默认值改回去、或者去掉"新根已存在就不动"这一条，这几条断言都会变红。

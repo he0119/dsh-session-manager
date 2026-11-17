@@ -13,7 +13,7 @@ Status: implemented
 
 ## Decision
 
-列表把子智能体折到父会话下面（`logic/manageRows.ts` 的 `foldSubagents()`）：
+列表把子智能体折到父会话下面（`operations/manage/manageRows.ts` 的 `foldSubagents()`）：
 
 - 父行标题前面挂一枚折叠标记（尖角 + 条数），**默认收起**；点它展开，子行在父行下面按层级缩进一级
   （16px）列出来，再点收起。父子那条边仍按「族」的判据走（`origin === "subagent"` 加 `parentSession`），

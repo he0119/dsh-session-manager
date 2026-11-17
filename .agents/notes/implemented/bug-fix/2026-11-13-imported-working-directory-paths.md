@@ -27,11 +27,11 @@ Status: implemented
   落在源根之外的值原样保留，并报给用户（"这几个改不了"）。
 - **判据为什么是"本机不是绝对路径"**：本机就合法的路径（Linux 上换目录、`/home/a/repo` →
   `/home/b/repo`）宿主读得出来，改它只是抹掉事实。跨系统的写法才让会话读不出来，也只改那些。
-- **落到哪两处**：导入/同步落地（`src/transfer.ts` 的 `rewriteCwd()`，与 header 改写同一处），以及
-  修**已经落地**的日志（`src/path-repair.ts` + 工具 `repair_session_paths`，默认只预演）。
+- **落到哪两处**：导入/同步落地（`src/operations/transfer/transfer.ts` 的 `rewriteCwd()`，与 header 改写同一处），以及
+  修**已经落地**的日志（`src/operations/path-repair/path-repair.ts` + 工具 `repair_session_paths`，默认只预演）。
 - **字节级分寸**：仍然只重压改动的那几帧，其余帧原样拼接；改完整份重新解码，必须逐字节等于文本形态
   的改写结果，否则不落盘。修已经落地的日志之前先留一份逐字节备份。
-- **比对那一侧**：`src/session-diff.ts` 比两份日志时，把两边"会话根底下的路径"都归一成占位符再比。
+- **比对那一侧**：`src/operations/sync/session-diff.ts` 比两份日志时，把两边"会话根底下的路径"都归一成占位符再比。
   没有这一步，改写过的那份会被同步报成"两边各写过"，它在本机续写之后就再也推不回远端。
 
 ## 只有这一条路径要搬

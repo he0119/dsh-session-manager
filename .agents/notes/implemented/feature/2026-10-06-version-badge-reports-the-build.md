@@ -27,7 +27,7 @@ Status: implemented
 - **徽标落在「会话管理」页的右下角**（`ManagerPanel` 的页脚，页面最后一个元素）：`v0.3.1` 或
   `v0.3.1 · 0b8c452`，悬浮提示用字典把那句话补全（"发布版"还是"本地构建 git …"）。字号比正文小一档、
   颜色取页内最静的那一档（`label-tertiary`，与页头说明行同一个 token），靠右对齐——它不该跟内容抢注意力。
-- 文本规则（`v0.0.0` 怎么拼、`-dirty` 挂在哪）单独放在 `src/client/logic/version.ts` 这个**纯**模块里，
+- 文本规则（`v0.0.0` 怎么拼、`-dirty` 挂在哪）单独放在 `src/client/shared/logic/version.ts` 这个**纯**模块里，
   读构建期常量的那一支在 `src/client/build.ts`：于是规则能被不经过构建的单元测试直接钉住，而"常量真的
   注入了"由产物用例核。
 
@@ -59,7 +59,7 @@ Status: implemented
 - 开发实例（软链进 profile 的检出）右下角是 `v0.3.1 · 0b8c452`；npm 装的那份是 `v0.3.1`——报告问题时
   前者能指到具体提交。
 - `src/client/build.ts` 里那三个标识符在源码里**不存在**：只有经过 `tsdown` 的产物才能跑，直接 import 它
-  会 ReferenceError。所以纯规则单独放在 `logic/version.ts`，`test/version.test.ts` 不经过构建就能钉它。
+  会 ReferenceError。所以纯规则单独放在 `shared/logic/version.ts`，`test/client/shared/logic/version.test.ts` 不经过构建就能钉它。
 - `tsconfig.test.json` 的 `include` 多了 `scripts/`：构建判据与其它源码进同一趟类型检查。
 - 篡改验证（把被测行为改回去，测试必须变红）：去掉 `define` → 产物里那三个标识符原样留着，页面渲染
   当场 ReferenceError，产物用例红；去掉"HEAD 上有标签就不挂 hash"那一步 → `build-identity` 用例红；

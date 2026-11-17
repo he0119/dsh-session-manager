@@ -20,7 +20,7 @@ Cordis 的 Context 是个 Proxy，**服务属性只有在当前 fiber 的 `injec
   晚于本插件到位时，回调会在它到位后跑，端点不会永远缺席；
 - 卸载时子 fiber 随父 fiber 一起释放，所以 `ctx.inject` 里注册的路由不需要再手工收集。
 
-测试侧对应的决定：`test/artifact.test.mjs` 与 `test/tools.test.ts` 都在**真实 Cordis 的 fiber 上**、
+测试侧对应的决定：`test/plugin/artifact.test.mjs` 与 `test/plugin/tools.test.ts` 都在**真实 Cordis 的 fiber 上**、
 并由**兄弟** fiber 提供服务，就是为了让这类错误在测试里就炸。
 
 ## Alternatives considered

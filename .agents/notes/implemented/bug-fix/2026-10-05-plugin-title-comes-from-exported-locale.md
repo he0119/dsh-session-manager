@@ -32,7 +32,7 @@ locale 目录"，一个字典都不读，标题静默变成包名；本地测试
 
 三处门禁跟着钉：
 
-- [test/locale.test.mjs](../../../../test/locale.test.mjs)：`en.json` 在、每个文件名是语言 id、
+- [test/plugin/locale.test.mjs](../../../../test/plugin/locale.test.mjs)：`en.json` 在、每个文件名是语言 id、
   各语言 `meta` 的键集与英文一致、`exports` 与 `files` 真的放行了 `locale/*.json`。
 - [scripts/check-package.mjs](../../../../scripts/check-package.mjs) 的运行期文件清单加入这两份
   JSON——宿主真的会读它们，少任何一份都只在装进 profile 后现形。
@@ -42,7 +42,7 @@ locale 目录"，一个字典都不读，标题静默变成包名；本地测试
 
 - **只发 `locale/zh.json`**：宿主的发现入口是常量 `en.json`，单独一份中文文件不会被 readdir 到；
   中文标题不会出现，也不会报错。
-- **把展示文案塞进本包自己的字典（`src/client/logic/locales.ts`）**：那份字典只覆盖本包页面里的字，
+- **把展示文案塞进本包自己的字典（`src/client/shared/i18n/locales.ts`）**：那份字典只覆盖本包页面里的字，
   插件列表那一行由宿主外壳渲染、读的是包的元信息，改自己的字典对它没有影响。
 - **只把 `package.json.description` 改成人话**：描述确实会回退到它，但标题没有对应的回退位（`name`
   只能是 npm 包名）；而且同一个字段还服务 npm 的检索与项目主页，两个受众要的东西不一样。

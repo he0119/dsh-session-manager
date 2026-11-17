@@ -1,0 +1,524 @@
+// src/shared/library/discovery.ts — 会话发现：扫项目目录、只解首帧读 header。
+//
+// 性能取舍：整份解码一条 6MB 日志约 1～2 秒，而发现阶段只需要 header（首个 frame）。
+// 首帧实测仅 ~200 字节，因此这里只解码**候选前缀**，不碰其余帧。
+// 读 header 只抓文件开头一段（`HEADER_PREFIX_BYTES`）：首帧实测 168～299 字节，1003 个文件没有一个超过
+// 64 KB，而日志整份合计 619 MB——为这 212 字节去读整份，是这个库里最贵的一次白读。
+//
+// 严格的自洽性切分（decodeAll(前) + decodeAll(后) === decodeAll(整体)）留给执行阶段，
+// 发现阶段用"前缀可解码 + 以换行结尾 + 能解析成合法 header"三重判据，够严且便宜。
+//
+// 标题（`title`）不在这里读：它不在 header 里，而在日志事件里，读法自成一层（session-title.ts），
+// 由调用方通过 `resolveTitle` 注入——发现阶段该多便宜就多便宜，要不要标题由调用方决定。
+import { closeSync, openSync, readFileSync, readSync, readdirSync, statSync } from 'node:fs'
+import { join } from 'node:path'
+
+import { encodeSegment, parseSessionLogName } from '../paths.ts'
+import { projectKey } from '../project-key.ts'
+import type { ProjectionCacheReader, ProjectionCacheRecord } from './projection-cache.ts'
+import type { TitleQuery } from '../log/session-title.ts'
+import type { DecodeAll, SessionHeader, SessionLogFile } from '../types.ts'
+import { ZSTD_MAGIC } from '../log/zstd-frame.ts'
+
+/** header 必须含有的键（宿主 isHeaderLine 的必填集）。 */
+const HEADER_REQUIRED = ['type', 'version', 'id', 'createdAt', 'isSeeded', 'delegationDepth'] as const
+
+function isHeaderShape(value: unknown): value is SessionHeader {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
+  const v = value as Record<string, unknown>
+  return (
+    HEADER_REQUIRED.every((k) => Object.hasOwn(v, k)) &&
+    v['type'] === 'session' &&
+    typeof v['id'] === 'string' &&
+    typeof v['version'] === 'number' &&
+    typeof v['createdAt'] === 'number' &&
+    (v['cwd'] === undefined || typeof v['cwd'] === 'string')
+  )
+}
+
+/** 廉价读出的 header。 */
+export interface QuickHeader {
+  header: SessionHeader
+  /** 首帧结束偏移（回退整份解码时为文件长度）。 */
+  boundary: number
+  /** 已解码的文本（至少含 header 行）。 */
+  text: string
+}
+
+/**
+ * 廉价读出会话 header：只解首帧。
+ * @param buf 日志字节。
+ * @param decodeAll 多帧感知解码器。
+ * @param options.searchLimit 在多少字节内寻找首帧边界（超出则回退整份解码）。
+ * @throws 无法解析出合法 header 时抛错。
+ */
+export function readHeaderQuick(
+  buf: Buffer,
+  decodeAll: DecodeAll,
+  options: { searchLimit?: number } = {},
+): QuickHeader {
+  const searchLimit = options.searchLimit ?? 65536
+  const candidates: number[] = []
+  const limit = Math.min(buf.length, searchLimit)
+  for (let i = 1; i + 3 < limit; i++) {
+    if (buf[i] === ZSTD_MAGIC[0] && buf[i + 1] === ZSTD_MAGIC[1] && buf[i + 2] === ZSTD_MAGIC[2] && buf[i + 3] === ZSTD_MAGIC[3]) {
+      candidates.push(i)
+    }
+  }
+  if (buf.length <= searchLimit) candidates.push(buf.length)
+
+  for (const i of candidates) {
+    let text: string
+    try {
+      text = decodeAll(buf.subarray(0, i))
+    } catch {
+      continue
+    }
+    if (!text.endsWith('\n')) continue
+    const firstLine = text.split('\n')[0] ?? ''
+    if (!firstLine.startsWith('{"type":"session"')) continue
+    try {
+      const header: unknown = JSON.parse(firstLine)
+      if (isHeaderShape(header)) return { header, boundary: i, text }
+    } catch {
+      // 截断的 JSON：不是真边界
+    }
+  }
+
+  // 回退：整份解码（慢，但正确）
+  const text = decodeAll(buf)
+  const firstLine = text.split('\n')[0] ?? ''
+  const header: unknown = JSON.parse(firstLine)
+  if (!isHeaderShape(header)) throw new Error('log does not start with a well-formed session header')
+  return { header, boundary: buf.length, text: firstLine + '\n' }
+}
+
+/**
+ * 读 header 只看文件开头这么多字节。
+ *
+ * 首帧是 header 那一行所在的那一帧，实测 168～299 字节（本机 1003 个日志文件里最大的 299）。给到 64 KB
+ * 是它的两百多倍，留出来的是"某天首帧变胖"的余量。真的超过这个数时 `readHeaderQuick()` 解不出来，
+ * 调用方退回读整份——那条路一直留着，正确性不依赖这个数。
+ */
+const HEADER_PREFIX_BYTES = 64 * 1024
+
+/** 读文件开头的至多 `length` 字节（文件更短时就是整份）。 */
+function readPrefix(path: string, length: number): Buffer {
+  const fd = openSync(path, 'r')
+  try {
+    const buf = Buffer.allocUnsafe(length)
+    const read = readSync(fd, buf, 0, length, 0)
+    return read === length ? buf : buf.subarray(0, read)
+  } finally {
+    closeSync(fd)
+  }
+}
+
+/**
+ * 读一个日志文件的 header，同时给出**整份**文件的字节数。
+ *
+ * 字节数取 `statSync().size` 而不是读到的长度：界面那一列与同步的内容指纹比的是整份日志，不是这一段。
+ *
+ * @param path 日志文件。
+ * @param decodeAll 解码器。
+ * @returns header 与该文件的字节数。
+ * @throws 首帧解不出合法 header 时抛错（与 `readHeaderQuick()` 同口径）。
+ */
+export function readLogHeader(path: string, decodeAll: DecodeAll): { header: SessionHeader; bytes: number } {
+  const bytes = statSync(path).size
+  const take = Math.min(bytes, HEADER_PREFIX_BYTES)
+  const prefix = readPrefix(path, take)
+  if (take < bytes) {
+    try {
+      return { header: readHeaderQuick(prefix, decodeAll).header, bytes }
+    } catch {
+      // 首帧比前缀还大：退回读整份（实测没有这种情况，留着是为了让"读多少"不影响对错）。
+    }
+  }
+  const buf = take === bytes ? prefix : readFileSync(path)
+  return { header: readHeaderQuick(buf, decodeAll).header, bytes }
+}
+
+/**
+ * 扫库时记住每个日志首帧解出来的 header。
+ *
+ * 扫一遍整库要为 1475 个文件各开一次、读 64 KB、解首帧（实测 0.33～0.58 秒），而其中绝大多数文件
+ * 上次扫的时候就长这样：整库只在用户真正发消息时才追加一条日志，其余时间一动不动。缓存按
+ * `size:mtimeMs` 认文件，另加一条 git 式的 racy 规则：**记录不到 1 秒的条目不信任**——同一秒里
+ * 又被改写、大小还一样时时间戳分不出来（那时重读一次，成本只落在刚动过的那些文件上）。
+ *
+ * 只给扫描用（`readSessionDir()`）；要写盘的路径（迁移落盘复验、复核）一律走 `readLogHeader()`
+ * 现读，不经过这里。
+ */
+const scanHeaderCache = new Map<string, { stamp: string; at: number; header: SessionHeader; bytes: number }>()
+const SCAN_HEADER_CACHE_MAX = 8192
+
+function readLogHeaderForScan(path: string, decodeAll: DecodeAll): { header: SessionHeader; bytes: number } {
+  let stamp: string
+  try {
+    const info = statSync(path)
+    stamp = `${info.size}:${info.mtimeMs}`
+  } catch {
+    // 文件在扫描途中被删了：把错原样交给 readLogHeader 抛，调用方照旧跳过这个目录。
+    return readLogHeader(path, decodeAll)
+  }
+  const hit = scanHeaderCache.get(path)
+  if (hit !== undefined && hit.stamp === stamp && Date.now() - hit.at > 1000) {
+    // 挪到队尾：Map 的插入顺序就是淘汰顺序。
+    scanHeaderCache.delete(path)
+    scanHeaderCache.set(path, hit)
+    return { header: hit.header, bytes: hit.bytes }
+  }
+  const fresh = readLogHeader(path, decodeAll)
+  scanHeaderCache.set(path, { stamp, at: Date.now(), header: fresh.header, bytes: fresh.bytes })
+  if (scanHeaderCache.size > SCAN_HEADER_CACHE_MAX) {
+    const oldest = scanHeaderCache.keys().next().value
+    if (oldest !== undefined) scanHeaderCache.delete(oldest)
+  }
+  return fresh
+}
+
+/** 一个项目目录下发现的会话。 */
+export interface DiscoveredSession {
+  /** 目录名（应等于 encodeSegment(header.id)）。 */
+  dirName: string
+  /** 会话目录的绝对路径。 */
+  dir: string
+  id: string
+  cwd: string | undefined
+  createdAt: number
+  header: SessionHeader
+  /** 该会话目录里的代次日志文件，按代次升序。 */
+  files: SessionLogFile[]
+  /**
+   * 折叠出的标题；读不到就没有（界面此时退回显示 id）。
+   *
+   * 标题不在 header 里而在日志事件里，所以它由调用方注入的 `resolveTitle` 去取
+   * （见 session-title.ts：先宿主投影缓存、后日志开头的有界前缀）。发现阶段自己不读它。
+   */
+  title?: string
+  /**
+   * 宿主投影缓存里那条记录（标题、空白判据、两枚活动时间都在里面），这次配了 `projection` 才有。
+   *
+   * 扫描时**读一次就挂在这里**：标题从它取，`/state` 的空白判据与同步的"谁更新"也从它取。以前这两处
+   * 各自去读同一个文件，每条会话读两遍（本机 994 条：一趟 680～770 ms）。
+   */
+  meta?: ProjectionCacheRecord
+}
+
+/** `scanProjectDir()` 的选项。 */
+export interface ScanOptions {
+  /**
+   * 读标题。缺席 = 这次扫描不要标题（例如导出时只关心字节，标题是白花的钱）。
+   *
+   * 抛错按"这条没有标题"处理：标题是装饰，不该让整页会话列不出来。
+   */
+  resolveTitle?: (query: TitleQuery) => string | undefined
+  /**
+   * 读一条会话的投影记录（可选，见 projection-cache.ts）。
+   *
+   * 给了就**每条会话读一次**，结果挂在 `DiscoveredSession.meta` 上：标题走它、空白判据与同步的活动时间
+   * 也走它。缺席 = 这次扫描不碰投影缓存（导出只要字节，标题与空白都用不到）。
+   *
+   * 抛错按"这条没有记录"处理：与读文件那条路同一口径，坏数据不该让整页列不出来。
+   */
+  projection?: ProjectionCacheReader
+  /**
+   * 扫到一条之前报一次（同步预演与落地的进度条用）。
+   *
+   * `done` 是**已经扫完**的条数——事件发在开始处理第 `done + 1` 条之前，与同步那两段
+   * （`SyncProgress`）同一个口径，界面两处都用 `done + 1` 说"正在处理第几条"。
+   *
+   * `total` 是**这次要尝试的条目数**：先 readdir 数一遍再扫，所以进度条会恰好走满（数进去的条目都
+   * 会 stat 一次，只有临时文件的目录也算一格，它同样要花时间）。`scanProjectDir()` 单独调用时
+   * `total` 是这个项目目录里的条目数，`scanAll()` 会把它接成整个库的分母。
+   */
+  onProgress?: (done: number, total: number) => void
+}
+
+/**
+ * 读一个会话目录：代次日志、header、可选的投影记录与标题。
+ *
+ * 从 `scanProjectDir()` 里拆出来是为了让"按 id 定位一条会话"（`locateSession()`）与"扫一遍目录"用同一份
+ * 读法：两条路一旦各写一遍，迟早会出现"列表里这条有标题、点开却没有"这类没人查得出来的差。
+ *
+ * @param dir 会话目录的绝对路径。
+ * @param dirName 目录名（应等于 encodeSegment(header.id)）。
+ * @param decodeAll 多帧感知解码器。
+ * @param options 扫描选项（只用到 `projection` 与 `resolveTitle`）。
+ * @returns 会话；目录里只有临时 / 伴生文件时 undefined。
+ * @throws 同一目录里的代次日志 header 对不上（id 或 cwd 不同）时抛错。
+ */
+function readSessionDir(
+  dir: string,
+  dirName: string,
+  decodeAll: DecodeAll,
+  options: ScanOptions,
+): DiscoveredSession | undefined {
+  const files: SessionLogFile[] = []
+  let header: SessionHeader | null = null
+  for (const name of readdirSync(dir)) {
+    const parsed = parseSessionLogName(name)
+    if (!parsed) continue
+    const path = join(dir, name)
+    const { header: h, bytes } = readLogHeaderForScan(path, decodeAll)
+    if (header && h.id !== header.id) throw new Error(`inconsistent header ids inside ${dir}`)
+    if (header && h.cwd !== header.cwd) throw new Error(`inconsistent header cwd inside ${dir}`)
+    header = h
+    files.push({ name, path, version: parsed.version, compression: parsed.compression, bytes })
+  }
+  if (!header || files.length === 0) return undefined // 只有临时/伴生文件的目录
+  files.sort((a, b) => a.version - b.version)
+  const session: DiscoveredSession = { dirName, dir, id: header.id, cwd: header.cwd, createdAt: header.createdAt, header, files }
+  if (options.projection !== undefined) {
+    try {
+      const record = options.projection({
+        id: session.id,
+        createdAt: session.createdAt,
+        ...(session.cwd === undefined ? {} : { cwd: session.cwd }),
+      })
+      if (record !== undefined) session.meta = record
+    } catch {
+      // 读不到记录不影响"这条会话在库里"这个事实
+    }
+  }
+  if (options.resolveTitle) {
+    try {
+      const title = options.resolveTitle(session)
+      if (title !== undefined && title !== '') session.title = title
+    } catch {
+      // 标题读不出来不影响"这条会话在库里"这个事实
+    }
+  }
+  return session
+}
+
+/**
+ * 扫描一个项目目录下的全部会话。
+ * @param projectDir 形如 `<root>/--C-Users-me-proj--` 的目录。
+ * @param decodeAll 多帧感知解码器。
+ * @param options.resolveTitle 读标题的回调（可选）。
+ * @returns 会话数组，按 createdAt 降序（新→旧，与宿主注册表显示顺序一致）。
+ */
+export function scanProjectDir(projectDir: string, decodeAll: DecodeAll, options: ScanOptions = {}): DiscoveredSession[] {
+  const out: DiscoveredSession[] = []
+  const names = readdirSync(projectDir)
+  let index = 0
+  for (const dirName of names) {
+    options.onProgress?.(index, names.length)
+    index += 1
+    const dir = join(projectDir, dirName)
+    if (!statSync(dir).isDirectory()) continue
+    const session = readSessionDir(dir, dirName, decodeAll, options)
+    if (session !== undefined) out.push(session)
+  }
+  out.sort((a, b) => b.createdAt - a.createdAt)
+  return out
+}
+
+/** 一个项目目录里每扫这么多条会话让出一次：单条只读首帧，攒到这个数仍在几十毫秒的预算内。 */
+const SCAN_YIELD_EVERY = 16
+
+/**
+ * 与 {@link scanProjectDir} 同一份结果，只是按会话让出事件循环。
+ *
+ * 项目目录内部也可能有几十上百条会话（一个活跃工作区就是这样）。`scanAllAsync()` 原来只在
+ * 项目目录之间让出，这样一个目录会整段占住主线程；这里每扫 `SCAN_YIELD_EVERY` 条让一次。
+ */
+export async function scanProjectDirAsync(
+  projectDir: string,
+  decodeAll: DecodeAll,
+  options: ScanOptions = {},
+): Promise<DiscoveredSession[]> {
+  const out: DiscoveredSession[] = []
+  const names = readdirSync(projectDir)
+  let index = 0
+  for (const dirName of names) {
+    options.onProgress?.(index, names.length)
+    index += 1
+    const dir = join(projectDir, dirName)
+    if (!statSync(dir).isDirectory()) continue
+    const session = readSessionDir(dir, dirName, decodeAll, options)
+    if (session !== undefined) out.push(session)
+    if (index % SCAN_YIELD_EVERY === 0) await new Promise<void>((resolve) => setImmediate(resolve))
+  }
+  out.sort((a, b) => b.createdAt - a.createdAt)
+  return out
+}
+
+/**
+ * 按 id 找到一条会话：只读它自己那一份日志，不碰库里其它会话。
+ *
+ * 为什么需要它：会话目录名就是 `encodeSegment(id)`（见 paths.ts，与宿主同一套）。所以"找一条会话"不必
+ * 把整库 1295 条日志头都读一遍——走一遍项目目录、找同名目录、只读这一条就够了。打开一条会话内容的
+ * 请求（`GET /transcript`）与"比两份日志"（`GET /sync/diff`）都只关心一条会话，实测整库扫一遍要
+ * 1.4 秒量级，而这样找一条是几毫秒。
+ *
+ * 兜底：目录名不是 id 的编码（手改过、早期版本留下的库）时退回整库扫一遍。正常库里这条兜底不会触发，
+ * 但"找不找得到"不该依赖目录命名这个约定。
+ *
+ * @param root 会话库根。
+ * @param id 会话 id。
+ * @param decodeAll 多帧感知解码器。
+ * @param options 扫描选项（`projection` 与 `resolveTitle` 与整库扫描同一个口径）。
+ * @returns 会话；库里没有这一条时 undefined。
+ */
+export function locateSession(
+  root: string,
+  id: string,
+  decodeAll: DecodeAll,
+  options: ScanOptions = {},
+): DiscoveredSession | undefined {
+  const dirName = encodeSegment(id)
+  const found: DiscoveredSession[] = []
+  let projectNames: string[]
+  try {
+    projectNames = readdirSync(root)
+  } catch {
+    return undefined
+  }
+  for (const projectName of projectNames) {
+    const dir = join(root, projectName, dirName)
+    try {
+      if (!statSync(dir).isDirectory()) continue
+    } catch {
+      continue
+    }
+    try {
+      const session = readSessionDir(dir, dirName, decodeAll, options)
+      // 目录名对得上、header 里的 id 也要对得上：同名的残留目录不算"这条会话在库里"。
+      if (session !== undefined && session.id === id) found.push(session)
+    } catch {
+      // 这个候选目录读不动（header 坏了、代次之间对不上）：还有别的候选与下面的兜底。
+    }
+  }
+  if (found.length > 0) {
+    // 同一个 id 出现在两个项目目录里时，取新建的那一条：与整库扫描按 createdAt 降序后取第一条同一口径。
+    found.sort((a, b) => b.createdAt - a.createdAt)
+    return found[0]
+  }
+  return scanAll(root, decodeAll, options).find((session) => session.id === id)
+}
+
+/** 项目目录路径（由 cwd 推出项目目录名）。 */
+export function projectDirOf(root: string, cwd: string): string {
+  return join(root, projectKey(cwd))
+}
+
+/**
+ * 扫**整个**会话库：根下每个项目目录各扫一遍，合成一份列表（按 createdAt 降序）。
+ *
+ * 单个项目目录坏掉只跳过它：整页会话列不出来比少一条会话严重得多（界面与迁移的族展开都要横跨项目
+ * 目录，所以这一步不能因为一个坏项目目录就整体失败）。
+ */
+export function scanAll(root: string, decodeAll: DecodeAll, options: ScanOptions = {}): DiscoveredSession[] {
+  const out: DiscoveredSession[] = []
+  let projectDirNames: string[]
+  try {
+    projectDirNames = readdirSync(root)
+  } catch {
+    return out
+  }
+  /*
+   * 先把"这次要 stat 的条目"数出来：进度条的分母，也是为什么整库扫描会多一轮 readdir。
+   *
+   * 只有 readdir，不读任何日志，相对扫描本身可以忽略；换来的是分母**确定**——进度条会恰好走满，
+   * 不会像"边扫边猜总数"那样停在 80% 或者越过 100%。
+   */
+  const projectDirs: Array<{ path: string; entries: number }> = []
+  for (const projectDirName of projectDirNames) {
+    const projectDirPath = join(root, projectDirName)
+    try {
+      if (!statSync(projectDirPath).isDirectory()) continue
+    } catch {
+      continue
+    }
+    let entries = 0
+    try {
+      entries = readdirSync(projectDirPath).length
+    } catch {
+      // 读不动就按 0 计：真去扫时它同样会失败、同样被跳过。
+    }
+    projectDirs.push({ path: projectDirPath, entries })
+  }
+  const total = projectDirs.reduce((sum, dir) => sum + dir.entries, 0)
+  let scanned = 0
+  for (const projectDir of projectDirs) {
+    const base = scanned
+    scanned += projectDir.entries
+    try {
+      out.push(
+        ...scanProjectDir(projectDir.path, decodeAll, {
+          ...options,
+          // 项目目录级的条数换成整库的：一次同步是"扫 85 条"，不是"扫 12 个项目目录各若干条"。
+          ...(options.onProgress === undefined
+            ? {}
+            : { onProgress: (done: number) => options.onProgress?.(base + done, total) }),
+        }),
+      )
+    } catch {
+      // 单个项目目录坏掉不该让整页打不开：跳过它，界面照旧能用。
+      continue
+    }
+  }
+  out.sort((a, b) => b.createdAt - a.createdAt)
+  return out
+}
+
+/**
+ * 与 {@link scanAll} 同一份结果，只是**每个项目目录之间让出一轮事件循环**。
+ *
+ * 整库 1477 个文件冷扫一次要 1.2～1.3 秒，这期间页面请求与长连接都排着队。页面打开走这一条；
+ * 单个项目目录内部仍然是同步的（一个目录通常几条会话，最多几十毫秒），让出的粒度按目录走就够。
+ */
+export async function scanAllAsync(
+  root: string,
+  decodeAll: DecodeAll,
+  options: ScanOptions = {},
+): Promise<DiscoveredSession[]> {
+  const out: DiscoveredSession[] = []
+  let projectDirNames: string[]
+  try {
+    projectDirNames = readdirSync(root)
+  } catch {
+    return out
+  }
+  const projectDirs: Array<{ path: string; entries: number }> = []
+  for (const projectDirName of projectDirNames) {
+    const projectDirPath = join(root, projectDirName)
+    try {
+      if (!statSync(projectDirPath).isDirectory()) continue
+    } catch {
+      continue
+    }
+    let entries = 0
+    try {
+      entries = readdirSync(projectDirPath).length
+    } catch {
+      // 同 scanAll：读不动就按 0 计。
+    }
+    projectDirs.push({ path: projectDirPath, entries })
+  }
+  const total = projectDirs.reduce((sum, dir) => sum + dir.entries, 0)
+  let scanned = 0
+  for (const projectDir of projectDirs) {
+    const base = scanned
+    scanned += projectDir.entries
+    try {
+      out.push(
+        ...(await scanProjectDirAsync(projectDir.path, decodeAll, {
+          ...options,
+          ...(options.onProgress === undefined
+            ? {}
+            : { onProgress: (done: number) => options.onProgress?.(base + done, total) }),
+        })),
+      )
+    } catch {
+      continue
+    }
+    // 项目目录本身也是一层让出点：目录多、每个只有几条会话时，单靠会话计数攒不到 16 条。
+    await new Promise<void>((resolve) => setImmediate(resolve))
+  }
+  out.sort((a, b) => b.createdAt - a.createdAt)
+  return out
+}

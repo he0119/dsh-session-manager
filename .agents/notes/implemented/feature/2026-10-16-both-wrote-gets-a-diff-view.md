@@ -57,7 +57,7 @@ Status: implemented
 - 索引 v3 铺开之后，那批"旧索引缺 `lastActiveAt`"的 `diverged` 会自己消失，剩下的才是真分叉。
 - 远端取包失败、本机读不出来、机器名对不上这些情况都各有状态码与整句说明；这条路**不降级成写操作**，
   失败就只是没看成。
-- 两张分类表（关系 / 种类 / 两边分别落哪一档）是纯数据，放在 `src/client/logic/diffTags.ts`，
-  由 `test/diff-tags.test.ts` 钉住；改档位就是改判据，会在那一层变红。
-- 两边那两块与三格计数同理：`src/client/logic/diffStats.ts` 是判据（两块都在、0 条也在、三格各有
-  各的数），`test/diff-stats.test.ts` 钉住。
+- 两张分类表（关系 / 种类 / 两边分别落哪一档）是纯数据，放在 `src/client/operations/sync/diffTags.ts`，
+  由 `test/client/operations/sync/diff-tags.test.ts` 钉住；改档位就是改判据，会在那一层变红。
+- 两边那两块与三格计数同理：`src/client/operations/sync/diffStats.ts` 是判据（两块都在、0 条也在、三格各有
+  各的数），`test/client/operations/sync/diff-stats.test.ts` 钉住。

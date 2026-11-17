@@ -4,7 +4,7 @@ Status: implemented
 
 ## Problem
 
-本页的中英文案原先自带一套：两份字典都是普通对象，键集一致只靠 `test/client.test.mjs` 在运行期比对；
+本页的中英文案原先自带一套：两份字典都是普通对象，键集一致只靠 `test/plugin/client.test.mjs` 在运行期比对；
 `t` 由本插件注册 `settings.section` 时自己 `inject`，组件再留一层中文兜底（`translateWith(zh)`）。三件
 事由此成立：
 
@@ -32,7 +32,7 @@ Status: implemented
 ## 只引类型，运行期字节不变
 
 `verbatimModuleSyntax` 下类型导入会被完全擦除：产物里仍然只有那三个平台基线模块的 `require`
-（`test/client.test.mjs` 按产物文本核这一条），`dsh.client.external` 一个条目都没加。类型层的绑定不
+（`test/plugin/client.test.mjs` 按产物文本核这一条），`dsh.client.external` 一个条目都没加。类型层的绑定不
 构成运行时依赖，也不会把 `schemastery` 之类拖进浏览器产物。
 
 ## 中文兜底删掉了
@@ -43,7 +43,7 @@ Status: implemented
 
 ## 运行期的第二道
 
-编译期管字面量键，动态拼出来的键（标签表、状态码 → 键的映射）管不到。`test/client.test.mjs` 的假
+编译期管字面量键，动态拼出来的键（标签表、状态码 → 键的映射）管不到。`test/plugin/client.test.mjs` 的假
 翻译函数因此当场核两件事：问到的键在本字典里，或者在那三个刻意复用的 `common` 词里；另有一条核
 `inject()` 里**没有** `t`（多 inject 一个会把框架那一个盖掉）。
 
@@ -66,5 +66,5 @@ Status: implemented
 - 宿主 `common` 的键集变了（比如 `save` 改名），本包会在编译期跟着红——这正是要的：那时该决定是
   跟着改还是自己写一份。
 - 组件 props 里 `t` 变成必填，任何"忘了传 `t`"的渲染路径会当场编译不过，而不是静默显示中文。
-- `src/client/logic/locales.ts` 之外的客户端源码仍然只认"一个 `(key, params) => string` 的形状"，
+- `src/client/shared/i18n/locales.ts` 之外的客户端源码仍然只认"一个 `(key, params) => string` 的形状"，
   键集类型从那一处 `Translate` 单向流出。

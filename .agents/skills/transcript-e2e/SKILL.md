@@ -1,6 +1,6 @@
 ---
 name: transcript-e2e
-description: 在真实 dev GUI 上端到端验收「会话管理」页的内容视图：把整份日志读完，核对分节与顺序、折叠有没有收干净、页头"画面正中是第几条"跟命中测试是否一致。改了内容视图（`TranscriptDialog.tsx`、`logic/transcript*`、`src/transcript.ts`）之后跑它。
+description: 在真实 dev GUI 上端到端验收「会话管理」页的内容视图：把整份日志读完，核对分节与顺序、折叠有没有收干净、页头"画面正中是第几条"跟命中测试是否一致。改了内容视图（`TranscriptDialog.tsx`、`operations/transcript/*`、`src/operations/transcript/transcript.ts`）之后跑它。
 ---
 
 # 会话内容视图的端到端自检
@@ -55,6 +55,6 @@ bash .agents/skills/transcript-e2e/scripts/run.sh [实例地址] [会话行号]
   收内容的默认规则——不收就是"标记折起了、九千多像素的正文还溢在下面"。
 - **折叠不触发 `scroll`**：读数要听 `toggle`（它不冒泡，得在列表上捕获着听），否则它会停在折叠前的值。
 - **`src/client/styles.ts` 的 CSS 正文不许出现反引号**：模板字面量会当场截断，`pnpm build` 报出的位置
-  离真凶很远；`test/client.test.mjs` 有一条守卫断言专门说这件事。
+  离真凶很远；`test/plugin/client.test.mjs` 有一条守卫断言专门说这件事。
 - **别把 `pnpm build` 的输出丢掉**：构建失败时静默重定向会让人拿旧产物量出一堆假结论；量之前先确认
   `lib/client.js` 的时间戳是新的。

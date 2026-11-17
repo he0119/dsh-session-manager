@@ -74,9 +74,9 @@ Status: implemented
 还得给每一枚标签配一个受控的开合状态，收益对不上代价。
 
 **只把 `className` 传给 `Tag`、不包 span。** 这是最初的做法，结果是布局挂钩**静默失效**（`.dsm-tag`
-选择器一条都不命中）而且提示全丢——`pnpm test` 与 `test/styles.test.mjs` 当时都还是绿的，因为样式表里
+选择器一条都不命中）而且提示全丢——`pnpm test` 与 `test/plugin/styles.test.mjs` 当时都还是绿的，因为样式表里
 规则还在、只是 DOM 里没有带这个类的元素。现在每枚标签都必须落到"自己带类"或"被带类的 span 包着"两
-种之一，由 `test/client.test.mjs` 钉住。
+种之一，由 `test/plugin/client.test.mjs` 钉住。
 
 **弹窗那对按钮继续用 `ghost` + `size="sm"`。** 官方弹窗（`RiskConfirmation`）用的是 `outline` +
 `primary`、**缺省尺寸**，量到就是 36px / 14px；`sm` 是 28px / 12px，摆在弹窗里比官方那对轻一档，同屏
@@ -86,12 +86,12 @@ Status: implemented
 
 - 浏览器半侧的基线模块名单不变：仍然只 `require` `react` / `react/jsx-runtime` /
   `@deepseek-ai/dsh-client-ui-primitives`，`dsh.client.external` 仍是空数组。
-- 冒烟测试（`test/client.test.mjs`）的假 react 得认 `forwardRef` 与 `memo`：官方 `Button` 是
+- 冒烟测试（`test/plugin/client.test.mjs`）的假 react 得认 `forwardRef` 与 `memo`：官方 `Button` 是
   `forwardRef(function Button(…))`，早先判 `typeof node.type === 'function'` 的走法认不出它，37 条
   client 用例集体变红。现在统一走 `isComponentType()` / `renderType()` / `typeNameOf()`。
 - 钉"每枚标签都带上 `.dsm-tag`"的那条断言是本页最容易复发的一处：类名漏传不会报错、不会崩，只会让
   样式静默失效。
-- `test/styles.test.mjs` 的 token 例外表从四例缩到两例：填充按钮的前景色那枚不再需要本页登记，官方
+- `test/plugin/styles.test.mjs` 的 token 例外表从四例缩到两例：填充按钮的前景色那枚不再需要本页登记，官方
   Tag / Input / SegmentedControl 三份 CSS module 用的那三枚也不再出现在本页 CSS 里（这份检查扫的是
   `src/client/styles.ts`，注释也算——所以本页注释里也不要写出那枚 token 的名字，写出来就会被当成
   "本页在用它"）。

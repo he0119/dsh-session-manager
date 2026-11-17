@@ -41,7 +41,7 @@ Status: implemented
 列表**不卸载**：开关弹窗只是挂载 / 卸载另一面，勾选与滚动位置留在原处（实测：勾一条 → 开导出 / 导入
 → 关掉，行仍是勾上的，「已选 1」不变）。
 
-外壳是 [WorkDialog](../../../../src/client/components/WorkDialog.tsx)（`.dsm-dialog.dsm-workDialog`，
+外壳是 [WorkDialog](../../../../src/client/shared/ui/WorkDialog.tsx)（`.dsm-dialog.dsm-workDialog`，
 1080 宽；正文层 `.dsm-workBody` 自带 16px 节奏）。宽度沿用这三面原来在页面上的可读宽度，搬进弹窗一个字
 不用重排；窄窗口下 `min(1080px, 100%)` 自己收。
 

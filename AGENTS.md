@@ -15,7 +15,7 @@
 | --- | --- |
 | `README.md` / `README.en.md` | 安装、设置页与四个工具怎么用；两份的键与结构保持对齐 |
 | `AGENTS.md` | 本文件：协作约定、提交信息口径、验证清单、界面硬约束 |
-| `.agents/notes/` | 决策的依据、被否决的备选方案与代价；一条决策一篇，格式由 `test/notes.test.ts` 核 |
+| `.agents/notes/` | 决策的依据、被否决的备选方案与代价；一条决策一篇，格式由 `test/plugin/notes.test.ts` 核 |
 | `.agents/skills/` | 给 agent 的可复用流程，一个技能一个目录（`SKILL.md` + 它自己的资源文件），由 DSH 的技能机制发现；不放决策依据 |
 | `docs/AGENTS.md` | `docs/` 这一层的文档规范与写作规则 |
 | `docs/design.md` | 界面与样式的唯一规格：页面骨架、排版、间距、颜色、控件、文案与验收 |
@@ -88,13 +88,13 @@ pnpm typecheck && pnpm build && pnpm test && pnpm check:package
 - **新断言要篡改验证**：把被测行为改回去，测试必须变红；报告里说明做了哪些篡改。
   [颜色只走检查面的 token](.agents/notes/implemented/bug-fix/2026-09-27-token-only-colors.md) 里那句
   "反事实都验过会失败"就是这个意思。
-- `test/notes.test.ts` 只核**声明**：`.agents/notes/` 下的路径形状、头部三行、`Status:` 与所在目录是否
+- `test/plugin/notes.test.ts` 只核**声明**：`.agents/notes/` 下的路径形状、头部三行、`Status:` 与所在目录是否
   一致、`## Problem` 是不是第一个二级标题、必备章节在不在、`implemented/` 里有没有混进提案用语、
   相对链接能不能解析。改笔记格式就同一次改动里改它。
 - 界面与样式的改动要**在真实 dev GUI 里量**（`getComputedStyle` 的实测值），不要推算色值；
   深浅两套主题各量一遍再下结论。内容视图有一份现成的端到端自检
   （`bash .agents/skills/transcript-e2e/scripts/run.sh`，驱动真实 dev GUI、只读会话库），动过
-  `TranscriptDialog.tsx` / `logic/transcript*` / `src/transcript.ts` 之后跑一遍它。
+  `TranscriptDialog.tsx` / `operations/transcript/*` / `src/operations/transcript/transcript.ts` 之后跑一遍它。
 - 真实会话库上的**写操作**（迁移 `apply`、回滚、导入落地）先问再做；验收优先用只读预演。
 - 验收需要临时夹具（假会话等）时用完立刻删干净，并在报告里写明造过什么、清掉了没有。
 
@@ -112,14 +112,14 @@ pnpm typecheck && pnpm build && pnpm test && pnpm check:package
   （见下一条），否则 `flex: none`、限宽截断、行高对齐那几条会**静默失效**。
 - **悬浮提示一律走 `Hint`（官方 `Tooltip`），不写原生 `title`**：原生那枚是浏览器画的——延迟两三秒、
   字体配色不受控、被窗口边裁掉、触屏出不来。`title` 只留给组件的标题属性（弹窗标题、说明页分节标题、
-  计划表分节头）。`test/client.test.mjs` 里有一条守卫按这个规则扫 `src/client/components`。
+  计划表分节头）。`test/plugin/client.test.mjs` 里有一条守卫按这个规则扫 `src/client/**/*.tsx`。
 - 颜色只用宿主 Theme 检查面列出的 `--dsw-alias-*`，每条声明都带中性回落值；检查面没有的例外只登记在
-  `test/styles.test.mjs`，别处不再列第二份。
+  `test/plugin/styles.test.mjs`，别处不再列第二份。
 - **布局：`gap` 只对直接拥有这些子元素的那一层生效。** 页内分页、弹窗正文都要各自包一层拿节奏；
   官方 `Modal` 的 `contentClassName` 落在**外层**，里面那层官方 body 没有 gap。完整的节奏表与归属规则见
   [design.md §4](docs/design.md#4-间距与布局归属)。
 - **卡片级主动作放卡片底部动作行**；带勾选的清单全站只有一对「全选 / 清空」；行上的动作等悬停。
-  结构与位置由 `test/client.test.mjs` 的 `primaryPlacements()` / `pickPlacements()` 钉住。
+  结构与位置由 `test/plugin/client.test.mjs` 的 `primaryPlacements()` / `pickPlacements()` 钉住。
 - `src/client/styles.ts` 的 CSS 正文里**不许出现反引号**（模板字面量会被提前截断，报错落在很远处）；
   类名一律 `dsm-` 前缀。
 - 文案走官方客户端 locale 机制：`zh` 是键集真源，`en` 逐键核；组件从**框架 props** 拿 `t`，不自己
@@ -129,8 +129,8 @@ pnpm typecheck && pnpm build && pnpm test && pnpm check:package
 
 ## 代码结构
 
-- 核心层（`src/*.ts`，除 `tools.ts` / `index.ts` / `web.ts` 与 `client/**`）**零 DSH 依赖**：
-  插件外壳、工具层、界面端点与测试共用同一份编排（`src/migrate.ts`）。
+- 核心层（`src/shared/**` 与 `src/operations/**`）**零 DSH 依赖**：
+  插件外壳、工具层、界面端点与测试共用同一份编排（`src/operations/migrate/migrate.ts`）。
 - `src/client/**` 不在 Host 半侧 tsconfig 的 include 里（它要 DOM 与 JSX，走 `tsconfig.client.json`）。
 - `lib/` 是构建产物，不入版本库；`src/`、`test/`、`docs/`、`scripts/`、`.github/` 不进 npm 包
   （`pnpm check:package` 会核，同时核"运行期文件一个都不少"与产物内部相对 import 有没有指到包外）。

@@ -22,13 +22,13 @@ Status: implemented
 
 - **迁移改写只解首帧**：`applyPlan()` 改用 `relocateHeaderCwdShallow()`（首帧之外逐字节原样拼回），
   落盘复验改成 `readLogHeader()` 只读 header；`verifyAppliedPlan()` 同样只读 header。实测 9.9 秒 →
-  **23 毫秒**（含读文件、写临时文件、复验、rename）。`test/engine.test.ts` 有一条守卫：把送进
+  **23 毫秒**（含读文件、写临时文件、复验、rename）。`test/operations/migrate/engine.test.ts` 有一条守卫：把送进
   `decodeAll` 的最大一段钉住（超过 64 KB 就红）。
 - **差异页分块解压**：`sync-diff` 两边都走 `decodeLogTextChunked()`（128 KB 一块、块间让出）。总耗时
   从 1.6 秒升到 2.9 秒（块间让出的代价），但最长一次停顿从 1.6 秒降到 **110 毫秒**。
 - **导出走异步**：新增 `buildBundleAsync()`，读文件走 `fs/promises`、附件扫描走分块解压、最后那次
   gzip 走线程池的 `zlib.gzip`。导出端点与同步推送改用它；`buildBundle()` 留着给测试与小包，两份产物
-  逐字节相同（`test/transfer.test.ts` 有等价断言）。40 条 / 52 MB：1.1 秒一次按住 → 1.6 秒但最长
+  逐字节相同（`test/operations/transfer/transfer.test.ts` 有等价断言）。40 条 / 52 MB：1.1 秒一次按住 → 1.6 秒但最长
   停顿 **36 毫秒**。
 - **路径改写按帧自校验**：`relocateSessionPaths()` 改完不再把整份新缓冲解一遍（16 MB 压缩、48 MB
   文本，1.8 秒），改成"改过的那一帧当场解回比对 + 逐帧文本拼起来等于整份改写结果"。单文件

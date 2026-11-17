@@ -1,0 +1,1633 @@
+/**
+ * 「同步」弹窗：按 WebDAV 配置在多台机器之间拉取与推送（点「同步」先在弹窗里看只读计划，确认才落盘）。
+ *
+ * 它为什么不再占一个页签：同步是一条**常设**通道，用户不会天天打开它，可它会自己在后台跑。所以页面
+ * 那一级只留一枚状态（配没配、自动推送开没开、这一趟跑完没有，见
+ * [ManagerPanel.tsx](../../shell/ManagerPanel.tsx)），点开才是这一面——远端通到哪、要不要走一趟、计划与差异。
+ * 配置也不在这一面，在插件页那张卡里（`plugins.bundle.config`）。
+ *
+ * 这一面**自己就是那枚弹窗**（`WorkDialog`），分三段：面板（一句话说清这条通道通到哪 + 一排工具）→
+ * 计划 → 落地。主动作（「同步」/「确认同步」/「同步中…」）在**底栏**，与导入、删除、迁移同一处；正文
+ * 那行只放工具（「立即推送一次」「整理远端」），"决定"与"工具"不混在一排。
+ *
+ * 这一层只做三件事：调宿主端点、记本地草稿、把结果摆出来。所有判定都在宿主侧
+ * （`src/web.ts` + `src/operations/sync/sync.ts`）：计划返回的就是将要发生的事，页面不自己推算。会话库数据由页面
+ * 骨架（[ManagerPanel.tsx](../../shell/ManagerPanel.tsx)）拉好传进来，开关弹窗不各拉一份。
+ *
+ * 落地那一次是**流式**的：宿主按条推事件，正文换成进度条与"正在推送 12 / 84"（见
+ * [api.ts](../../api.ts) 的 `applySync` 与 [ProgressBlock.tsx](../../shared/ui/ProgressBlock.tsx)）。同步是这一页里
+ * "按条走网络"的那个动作，一次整库同步可能是几十秒；同一套进度块现在也被迁移 / 删除 / 回滚 / 导入 /
+ * 归档 / 扫库复用（见 [ProgressBlock.tsx](../../shared/ui/ProgressBlock.tsx)）。
+ *
+ * 弹窗里那三张计划表（会拉取 / 会推送 / 没动）按**项目目录**分组：一次整库同步的计划里，同一个目录会连着
+ * 出现十几条，逐行印一遍同样的路径只是把人绕进去。分组键怎么取、组怎么排见
+ * [syncGroups.ts](./syncGroups.ts)——那是纯函数，规则在 `test/syncGroups.test.ts` 里逐条钉着。
+ *
+ * 样式只在 [styles.ts](../../styles.ts) 里定义，颜色只用 `--dsw-alias-*` 主题 token；控件以手写的原生
+ * 元素为主，确认弹窗外壳走官方控件库的 `Modal`（[ConfirmDialog.tsx](../../shared/ui/ConfirmDialog.tsx) 里说了
+ * 为什么）。渲染路径上不许做会抛的事——抛出去整个 Slot 条目会变成崩溃占位（控制台里是
+ * `slot entry crashed in '…'`）。
+ *
+ * @module dsh-session-manager/client/operations/sync/SyncPanel
+ */
+
+import * as React from 'react'
+
+import { Button, Checkbox, StateDot, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
+
+import { Hint } from '../../shared/ui/Hint.tsx'
+
+import {
+  fetchSyncPlan,
+  runAutoPushNow,
+  tidyRemote,
+  type AutoMode,
+  type AutoPushLast,
+  type AutoPushResponse,
+  type AutoPushRoundStatus,
+  type ProgressEvent,
+  type SessionSummary,
+  type SyncDecision,
+  type SyncPullEntry,
+  type SyncPushEntry,
+  type SyncResponse,
+  type TidyResponse,
+} from '../../api.ts'
+import { ConfirmDialog } from '../../shared/ui/ConfirmDialog.tsx'
+import { WorkDialog } from '../../shared/ui/WorkDialog.tsx'
+import { groupKey } from '../../shared/logic/groups.ts'
+import { panelEvents, type PanelSnapshot } from '../../shared/logic/panelEvents.ts'
+import { WorkspaceIcon } from '../../shared/ui/icons.tsx'
+import type { SessionManagerKey, Translate } from '../../shared/i18n/locales.ts'
+import { AUTO_PUSH_SKIP_CODES } from './autoPush.ts'
+import { startRun } from '../manage/runJob.ts'
+import { syncJob, type SyncJobSnapshot } from './syncJob.ts'
+import { syncStage, type SyncStage } from './syncStage.ts'
+import { agoLabel } from '../../shared/logic/relativeTime.ts'
+import { describeSyncNotice } from './syncNotice.ts'
+import { leftoversOf } from './syncLeftovers.ts'
+import { remoteLibrary } from './remoteLibrary.ts'
+import { projectLabel, sessionLabel, type SessionLabel } from '../../shared/logic/planRows.ts'
+import { ProgressBlock } from '../../shared/ui/ProgressBlock.tsx'
+import { ProblemsBlock } from '../../shared/ui/ProblemsBlock.tsx'
+import { formatBytes, formatTime, sessionTags, type TagCopy } from '../../shared/ui/sessionList.tsx'
+import { SyncDiffDialog, type SyncDiffTarget } from './SyncDiffDialog.tsx'
+import { groupSyncRows, syncProjectOf, syncPullTip, type SyncGroup, type SyncSide } from './syncGroups.ts'
+import type { PanelShare } from '../../types.ts'
+
+/** 异常 → 一句话（弹窗正文与横幅共用，同迁移页）。 */
+function reasonOf(cause: unknown): string {
+  return cause instanceof Error ? cause.message : String(cause)
+}
+
+/**
+ * 计划行 + 它来自哪张表。
+ *
+ * 「这次不动」那张表把两个方向的跳过项并在一起，而"属于哪个项目"要看方向（见 `syncProjectOf()`），
+ * 所以方向必须跟着行一起走，不能到了渲染那一步再猜——推送行的 `cwd` 与拉取行的 `fromCwd` 都可能是
+ * 同一段路径，靠字段碰运气认方向迟早认错。
+ */
+interface SyncKeptRow {
+  readonly side: SyncSide
+  readonly entry: SyncPullEntry | SyncPushEntry
+}
+
+/** 拉取 / 推送两种计划行的公共字段（只为 `syncWhy()` / `syncTag()` 取字段用）。 */
+interface SyncRow {
+  reason?: string
+  code: SyncPullEntry['code'] | SyncPushEntry['code']
+  action: string
+  machine?: string
+  fromCwd?: string
+  toCwd?: string
+  /** 落选那一份也留着（「两份都保留」那一档）。 */
+  keepLoser?: true
+}
+
+/**
+ * 「没动」那一类为什么没动：判据在宿主侧的 `code` 上，页面只把它翻成一句话。
+ *
+ * 认不出来的码退回原始字符串：新增一类关系时界面上会出现一个生词，好过悄悄显示成"已跳过"。
+ */
+/**
+ * 这一行能不能看差异。
+ *
+ * 判据是"两边**真有可比的两份**"，不是"状态看着可疑"：
+ *   - `diverged`：两边各自写过又判不出谁更新（计划里两条都不动）——最需要看的就是它；
+ *   - `remote-newer` / `remote-ahead`：远端那份会**顶掉本机这份**，按下同步之前先看一眼；
+ *   - `local-newer` / `local-ahead`：本机这份会顶掉远端那份，同样先看一眼。
+ *
+ * 其余几种没有可比的两份：`missing`（另一边没有）、`identical`（内容一致，比出来是空）、
+ * `blank-local`（本机这条是空白）、`no-mapping` / `missing-target`（连落地目录都没有）。
+ */
+function diffable(entry: SyncPullEntry | SyncPushEntry): boolean {
+  switch (entry.code) {
+    case 'diverged':
+    case 'remote-newer':
+    case 'remote-ahead':
+    case 'local-newer':
+    case 'local-ahead':
+    case 'keep-local':
+    case 'keep-remote':
+      return true
+    default:
+      return false
+  }
+}
+
+/** 计划行最后那一格：能比的给一枚「看差异」，不能比的留空（列照旧留着，各行的列才对得齐）。 */
+function DiffCell({
+  entry,
+  onOpen,
+  t,
+}: {
+  entry: SyncPullEntry | SyncPushEntry
+  onOpen: () => void
+  t: Translate
+}): React.ReactElement {
+  return (
+    <td className="dsm-diffCell">
+      {diffable(entry) ? (
+        <Button variant="outline" size="sm" onClick={onOpen}>
+          {t('sync.diff.open')}
+        </Button>
+      ) : null}
+    </td>
+  )
+}
+
+function syncWhy(entry: SyncRow, t: Translate): string {
+  switch (entry.code) {
+    case 'missing':
+      return t(entry.action === 'create' ? 'sync.why.missingPull' : 'sync.why.missingPush')
+    case 'local-ahead':
+      return t('sync.why.localAhead')
+    case 'local-newer':
+      return t('sync.why.localNewer')
+    case 'remote-ahead':
+      return t('sync.why.remoteAhead', { machine: entry.machine ?? '' })
+    case 'diverged':
+      return t('sync.why.diverged', { machine: entry.machine ?? '' })
+    case 'no-mapping':
+      return t('sync.why.noMapping', { from: entry.fromCwd ?? '' })
+    case 'missing-target':
+      return t('sync.why.missingTarget', { to: entry.toCwd ?? '' })
+    case 'keep-local':
+    case 'keep-remote':
+      // 计划算出来的原话已经写清"以谁为准、另一份去哪"，直接拿它当悬浮提示，不另写一句。
+      return entry.reason ?? String(entry.code)
+    default:
+      return String(entry.code)
+  }
+}
+
+/**
+ * 「没动」那一类的短标签：状态进标签，整句（`syncWhy()`）挂在它的 `title` 上。
+ *
+ * 与拉取 / 推送两张表同一口径：窄列里放不下整句，而**状态与会话名必须是两种东西**——挤成一行同色同号的
+ * 文字时，一列"某某：两边各自写过（robot-b）"读起来分不出哪个是状态、哪个是会话。认不出来的码退回
+ * 整句（宁可挤，也不要显示成一个生词）。
+ */
+function syncTag(entry: SyncRow, t: Translate): string {
+  switch (entry.code) {
+    case 'remote-ahead':
+      return t('sync.tag.remoteAhead')
+    case 'diverged':
+      return t('sync.tag.diverged')
+    case 'local-newer':
+      return t('sync.tag.localNewer')
+    case 'no-mapping':
+      return t('sync.tag.noMapping')
+    case 'missing-target':
+      return t('sync.tag.missingTarget')
+    case 'keep-local':
+      return entry.keepLoser === true ? t('sync.tag.keepBoth') : t('sync.tag.keepLocal')
+    case 'keep-remote':
+      return entry.keepLoser === true ? t('sync.tag.keepBoth') : t('sync.tag.keepRemote')
+    default:
+      return syncWhy(entry, t)
+  }
+}
+
+/**
+ * 「会拉取」里的**覆盖行**用哪句整句当 title。
+ *
+ * 覆盖本机那份是三张表里唯一会动本机已有内容的动作，所以那一列不能只说「拉取」：标签说的是动作
+ * （「覆盖本机」），title 说清"谁更新、会拿谁换掉本机这份"。码认不出来就退回标签本身（与 `syncWhy()`
+ * 同一条兜底规则：宁可挤，也不显示成一个生词）。
+ */
+function replaceCodeKey(code: SyncPullEntry['code']): SessionManagerKey {
+  switch (code) {
+    case 'remote-ahead':
+      return 'sync.why.replaceAhead'
+    case 'remote-newer':
+      return 'sync.why.replaceNewer'
+    case 'blank-local':
+      return 'sync.why.replaceBlank'
+    default:
+      return 'sync.tag.replace'
+  }
+}
+
+/**
+ * 覆盖行那句悬浮提示。
+ *
+ * 裁决「留远端这份」的那一类带着计划里的原话——它写明另一份是留着（「两份都保留」）还是不留，界面再拼
+ * 一句只会和宿主说的对不上；其余几种照旧走固定的那几句。
+ */
+function replaceHint(entry: SyncPullEntry, t: Translate): string {
+  if (entry.code === 'keep-remote' && entry.reason !== undefined) return entry.reason
+  return t(replaceCodeKey(entry.code))
+}
+
+/**
+ * 「会推送」那张表里一行挂哪颗标签、整句是什么。
+ *
+ * 三件事共用这张表：本机独有（推一条新的）、本机领先（重推刷新远端）、两边各自写过而本机更晚（分叉
+ * 重推）。后两者都是"重推"，但后者要让用户知道"远端也有一份、本机这份更晚，推送会把它那格刷成最新"，
+ * 所以标签与整句都分开。标签一律短到装得进那一列（列宽与实测见 styles.ts），整句挂在 title 上。
+ * 码认不出来时退回"推一条新的"那一套（与拉取表的兜底同一条规则）。
+ */
+function pushTag(entry: SyncPushEntry, t: Translate): { label: string; title: string; repush: boolean } {
+  switch (entry.code) {
+    case 'local-ahead':
+      return { label: t('sync.tag.repush'), title: t('sync.why.localAhead'), repush: true }
+    case 'local-newer':
+      return { label: t('sync.tag.localNewer'), title: t('sync.why.localNewer'), repush: true }
+    /*
+     * 裁决「留本机这份」（或「两份都保留」而本机更晚）：动作是把自己这一格刷成最新，所以与上面两类同
+     * 一档（重推、quiet）；整句用计划给的原话——它写着另一份去哪了，界面再拼一句只会和宿主对不上。
+     */
+    case 'keep-local':
+      return {
+        label: entry.keepLoser === true ? t('sync.tag.keepBoth') : t('sync.tag.keepLocal'),
+        title: entry.reason ?? t('sync.tag.keepLocal'),
+        repush: true,
+      }
+    default:
+      return { label: t('sync.tag.push'), title: t('sync.why.missingPush'), repush: false }
+  }
+}
+
+/**
+ * 三段清单的段头：标题在左、条数进一颗中性药丸。
+ *
+ * 原来这里是一行 `.dsm-hint`（13px/400 的次要色），与正文里"跳过 N 条空白会话…"那种说明句一模一样，
+ * 于是三张表之间没有可见的分界（用户报的"和其他内容区分并不明显"）。段头用 `h3`：读屏可以按标题在
+ * 三段之间跳，视觉上标题是 13px/600 的主文字色、条数退回 12px 的中性药丸——标题、正文、标签三种
+ * 东西各有各的形状，扫一眼就分得出来。条数那句与会话列表、组头共用（`list.sessionsInDir`）。
+ */
+function PlanSectionHead({ title, count, t }: { title: string; count: number; t: Translate }): React.ReactElement {
+  return (
+    <h3 className="dsm-planHead">
+      {title}
+      {/*
+        这一段的条数：中性事实（"有 N 条"），无健康度含义——官方 Tag 的 neutral，对应 .dsm-tagIdle。
+        官方 `Tag` 不收 `title`，这一处本来也没给。`dsm-tag` 挂在 Tag 自己身上：styles.ts 里
+        `.dsm-planHead .dsm-tag` 那条把"药丸里的条数不跟着段头一起加粗"这条规格指到这里。
+      */}
+      <Tag className="dsm-tag" tone="neutral">{t('list.sessionsInDir', { count })}</Tag>
+    </h3>
+  )
+}
+
+/**
+ * 计划表里的项目组头：一条横跨整行的横幅（`<th colSpan>` 占满那一行）。
+ *
+ * 为什么在表里插一行、而不是一个项目一张表：会话名与大小必须仍然对着 `<thead>` 那两列，而一张表只有
+ * 一个表头——一张表一个项目的话，"动作 / 会话 / 大小"这套表头要么每个项目重复一遍，要么只剩第一张
+ * 有，列宽也会各算各的。
+ *
+ * 组头的画法与列表那边的组头同一档（字色 12% 兑出来的横幅、工作区图形、名字 + 条数），但没有折叠与
+ * 勾选：弹窗里这份清单只是读一遍，不在这儿挑东西。称呼规则也共用一份（`planRows.projectLabel()`）：
+ * 那一行只摆名字（工作区名称，没登记就是项目名），项目身份与本机路径一起进悬浮提示——它们都是机器
+ * 字符串，摆在行里又长又会被截断，而"这是哪个仓库、在哪儿"是想知道才看的信息。
+ */
+function PlanGroupHead({
+  group,
+  columns,
+  repo,
+  t,
+}: {
+  group: SyncGroup<unknown>
+  columns: number
+  /** 这一组的项目身份（宿主 `/state` 的 `repos`）；认不出来时没有。 */
+  repo?: string
+  t: Translate
+}): React.ReactElement {
+  const label = projectLabel({ path: group.path, title: group.title, repo }, t)
+  return (
+    <tr className="dsm-planGroup">
+      <th className="dsm-planGroupHead" colSpan={columns} scope="colgroup">
+        <span className="dsm-planGroupInner">
+          <WorkspaceIcon />
+          <Hint text={label.tip}>
+            <span className="dsm-groupTitle">{label.name}</span>
+          </Hint>
+          {/* 与列表那边同一枚标签：有项目身份的目录挂主机名，悬浮提示里给全整条身份。
+              `dsm-tag` 挂在包着它的那层 span 上（弹窗里的组头与列表里的组头同一条行高规格）。 */}
+          {label.host !== undefined && (
+            <Hint text={repo}>
+              <span className="dsm-tag">
+                <Tag tone="neutral">{label.host}</Tag>
+              </span>
+            </Hint>
+          )}
+          <span className="dsm-groupCounts">
+            <span className="dsm-hint">{t('list.sessionsInDir', { count: group.rows.length })}</span>
+          </span>
+        </span>
+      </th>
+    </tr>
+  )
+}
+
+/**
+ * 这一行的**会话类型**标签：与会话列表**同一套**判据（`sessionList.sessionTags()` →
+ * `sessionFilter.hasAttribute()`），所以同一条会话在「会话」页与这里挂的标签一模一样——两处各算一套
+ * 的话，用户看到的就是两个不同的"什么是空白 / 子智能体"。
+ *
+ * 计划行本身只带 id、标题与体积，类型得从 `/state` 那份会话清单里按 id 取；本机还没有这条会话时
+ * （「会拉取」里新建的那些）取不到，就不挂标签——那是"它还没落到本机"，不是"它什么类型都不是"。
+ *
+ * 不挂「未分组」：计划表按项目目录分组，组头已经写着这条属于哪个目录（同会话页的理由：归属那一格
+ * 已经写着它，不重复挂）。
+ *
+ * @param session `/state` 里那条会话；本机没有就是 `undefined`。
+ * @returns 要挂的标签（字典键 + 说明键），顺序与会话列表一致。
+ */
+function typeTagsOf(session: SessionSummary | undefined): TagCopy[] {
+  return session === undefined ? [] : sessionTags(session, { ungrouped: false })
+}
+
+/**
+ * 会话名那一格：显示标题、没有标题才退到 id（`sessionLabel()`），后面跟着会话类型标签，id 与整句说明
+ * 在悬浮提示里。
+ *
+ * 拉取行的提示还会补上"这条的 cwd 从哪改写到哪"（`syncPullTip()`）——那句话原来占着 cwd 一列，
+ * 现在落地的目录已经在组头上，只有真的改写过的行才需要再说一句从哪儿来。
+ *
+ * 名字与标签同占一格用的是会话列表那套 `.dsm-rowLabel`（标签 `flex: none`、名字自己负责省略），
+ * 三张表因此在窄列里也有同一种排布。
+ */
+function SessionCell({
+  label,
+  tip,
+  tags,
+  t,
+}: {
+  label: SessionLabel
+  tip: string
+  tags: TagCopy[]
+  t: Translate
+}): React.ReactElement {
+  return (
+    <td>
+      <span className="dsm-rowLabel">
+        <Hint text={tip}>
+          <span className={label.kind === 'title' ? 'dsm-rowTitle' : 'dsm-rowId'}>{label.text}</span>
+        </Hint>
+        {tags.map((tag) => (
+          <Hint key={tag.key} text={t(tag.tip)}>
+            <span className="dsm-tag">
+              <Tag tone="neutral">{t(tag.key)}</Tag>
+            </span>
+          </Hint>
+        ))}
+      </span>
+    </td>
+  )
+}
+
+/**
+ * `autoPushSentence()` 用得上的那几项。
+ *
+ * 两条来路：手点那一次拿到的是整份 `AutoPushResponse`；页面那条长连接推来的上一轮只有计数
+ * （`pushedCount`），所以这里收窄成"两边都有"的那几项，句子只写一份。
+ */
+type AutoPushSentenceSource = Pick<AutoPushResponse, 'ran' | 'skip' | 'bytesOut' | 'attachmentOut'> & {
+  pushed?: readonly unknown[]
+  pushedCount?: number
+  pulled?: readonly unknown[]
+  pulledCount?: number
+}
+
+/**
+ * 自动推送那一枚「立即推送一次」的结论 → 一句话。
+ *
+ * 判定在宿主侧（`AutoPushOutcome`），这一层只挑句子：真跑了区分"推了 N 条"与"没有要推的"，没跑说清是
+ * 哪**一种**没跑——「等下一轮」与「上一轮还在跑」对用户是两件完全不同的事。认不出来的码**整条退回**
+ * 「没跑」那一句，不编一个原因：界面比宿主旧时说的是"没跑，但宿主没说清为什么"，而不是猜一个。
+ */
+
+function autoPushSentence(t: Translate, response: AutoPushSentenceSource, mode: AutoMode = 'push'): string {
+  /*
+   * 句子按模式分两套：只推那一档说"推了几条"，双向那一档要说"拉了几条、推了几条"，还要说"没有要对齐
+   * 的"——同一句话套在两档上会有一半是假话（推送说"拉取 0 条"、双向说"只推送、绝不拉取"）。
+   */
+  const bidirectional = mode === 'sync'
+  if (response.ran !== true) {
+    // 认得出的码才挑句子；认不出的（宿主比界面新）整条退回"没说清原因"，不编一个。
+    const known = (AUTO_PUSH_SKIP_CODES as readonly string[]).includes(response.skip ?? '')
+    const skipKey =
+      bidirectional && response.skip === 'idle' ? 'sync.autoPush.skip.idleSync' : `sync.autoPush.skip.${response.skip}`
+    const reason = known && response.skip !== undefined
+      ? t(skipKey as SessionManagerKey)
+      : t('sync.autoPush.noReason')
+    return t(bidirectional ? 'sync.autoSync.skipped' : 'sync.autoPush.skipped', { reason })
+  }
+  // 手点那一次给的是整份结果，长连接推来的上一轮只给计数（见 `AutoPushLast`）。
+  const pushed = response.pushedCount ?? response.pushed?.length ?? 0
+  const pulled = response.pulledCount ?? response.pulled?.length ?? 0
+  if (bidirectional) {
+    if (pushed === 0 && pulled === 0) return t('sync.autoSync.nothing')
+    return t('sync.autoSync.done', {
+      pulled,
+      pushed,
+      bytesOut: formatBytes(response.bytesOut ?? 0),
+    })
+  }
+  if (pushed === 0) return t('sync.autoPush.nothing')
+  const uploaded = response.attachmentOut?.uploaded ?? 0
+  return (
+    t('sync.autoPush.done', { pushed, bytesOut: formatBytes(response.bytesOut ?? 0) }) +
+    // 附件对象走的是另一条路（远端共享库），所以单独一句：与 `/sync` 那条横幅同一个口径。
+    (uploaded === 0
+      ? ''
+      : ` ${t('sync.autoPush.attachments', {
+          uploaded,
+          bytes: formatBytes(response.attachmentOut?.bytes ?? 0),
+        })}`)
+  )
+}
+
+/**
+ * 这次同步搬了附件对象没有。
+ *
+ * 搬了就说（拉取、推送各一句），一个都没动就一个字都不说；宿主没有附件服务时响应里根本没有那两项
+ * （不是 0），所以这里也一个字都不说——与"宿主没有附件服务就静默降级"同一条口径。
+ */
+
+/**
+ * 同步页。
+ */
+export function SyncPanel({
+  t,
+  state,
+  meta,
+  reload,
+  /**
+   * 打开「备份与回滚」那一面（结果页上那枚「撤销」）。
+   *
+   * 同步改过本机内容时，旧的那份就在备份里（覆盖本机、跟着删都先备份）；那枚按钮把用户送过去自己挑。
+   * 缺席时（没有备份这一面的调用方）就不摆它——点了没反应的按钮比不摆更糟。
+   */
+  onOpenBackups,
+  /** 关掉这一面（这一面自己就是那枚弹窗了，见文件末尾的说明）。 */
+  onClose,
+  /**
+   * 「只看这一条」：把某条会话交给页面骨架（关掉这一面、在列表里筛到它）。
+   *
+   * 缺席时那几行只显示文字——旧宿主、或没有列表的调用方不该看到一个点了没反应的按钮。
+   */
+  onFocusSession,
+}: Pick<PanelShare, 't' | 'state' | 'meta' | 'reload'> & {
+  onOpenBackups?: () => void
+  onClose: () => void
+  onFocusSession?: (id: string) => void
+}): React.ReactElement {
+  /** 最近一次计划或结果：映射表的远端候选与弹窗正文都读它（关掉弹窗之后候选还得在）。 */
+  const [sync, setSync] = React.useState<SyncResponse | null>(null)
+  /**
+   * 落地这次要不要顺手整理远端（勾选框）。
+   *
+   * 默认不勾：它会删远端的东西（虽然删的只是自己那一格里多余的副本）。挂在这一页而不在 store 里——
+   * 它属于"这一次落地"，弹窗一关就该回到默认。
+   */
+  const [tidy, setTidy] = React.useState(false)
+  /**
+   * 同步弹窗开着吗（`plan` = 正在看 / 正在算计划、`apply` = 落地跑着、正文是进度）。
+   *
+   * `apply` 只是**这一扇窗口还开着**；关掉它不等于停——那一趟的生命周期在 `syncJob` 里（模块级），
+   * 关掉之后状态栏那一格接着报进度，点它回到这一面（见 logic/syncJob.ts 的说明）。
+   */
+  const [dialog, setDialog] = React.useState<'plan' | 'apply' | null>(null)
+  /** 预演（只读算计划）在跑：这一段仍然挂在这个组件上，切走就丢——它几秒就完，没有"后台"的必要。 */
+  const [busy, setBusy] = React.useState<'plan' | null>(null)
+  const [error, setError] = React.useState<string | null>(null)
+  /**
+   * 「立即推送一次」那一条路跑完之后的结论（它没有结果页：这条路不写本机，也不开确认弹窗）。
+   *
+   * 落地那一趟的结论不在这里：它在结果段（`stage === 'done'`）里说，见 `doneLine()`。
+   */
+  const [notice, setNotice] = React.useState<string | null>(null)
+  /** 落地时逐条失败的原因（宿主只把成功的那些算进 pulled/pushed，失败的在这里）。 */
+  const [failures, setFailures] = React.useState<readonly string[]>([])
+  /**
+   * 落地进行到哪了：宿主每开始处理一条推一条事件（见 api.ts 的 `applySync`）。
+   *
+   * `null` 有两种时候——还没开始、以及刚开始那一段（宿主先验一遍预演那份数据还作不作数：重读一次远端
+   * 索引，本机那边只比文件的时间与大小，很快）。前一条进度事件一到就换成真正的进度块。
+   */
+  const [progress, setProgress] = React.useState<ProgressEvent | null>(null)
+  /** 两边各自写过时用户挑的正本（会话 id → 选择）；预演与落地都把它带上。 */
+  const [decisions, setDecisions] = React.useState<Record<string, SyncDecision>>({})
+
+  /**
+   * 落地那一趟现在跑到哪儿（模块级 store；关掉弹窗、切页签、关掉设置都不影响它）。
+   *
+   * 初值是**当场读一次**而不是传函数：假 React（client.test.mjs）的 `useState` 不会调用惰性初始化，
+   * 传函数会让测试里读到的是函数本身。
+   */
+  const [job, setJob] = React.useState<SyncJobSnapshot>(syncJob.snapshot())
+  React.useEffect(() => syncJob.subscribe(setJob), [])
+  /**
+   * 落地在跑：这一页发起的（store 说在跑），或者窗口正处在落地模式。
+   *
+   * 两个条件都要：store 是"活儿还在跑"，`dialog === 'apply'` 是"这一页刚刚按下确认、结论还没回来"。
+   * 后者覆盖按下到第一条进度之间那一瞬间——那时窗口已经是落地模式，但 store 的通知还没渲染上来。
+   */
+  const applying = job.running || dialog === 'apply'
+  /**
+   * 正文里画哪一条进度：落地那趟的最新一条；它还没来就先沿用预演最后那一条。
+   *
+   * 两段报的是同一套事件（扫本机 / 读远端索引 / 比对内容），预演那一条不会是"另一种活"；而按下确认
+   * 之后先空着、等下一次事件再画，只会让进度块闪一下。
+   */
+  const liveProgress = job.progress ?? progress
+
+  /**
+   * 「立即推送一次」（`GET /auto-push`，只推不拉）走到哪儿了。
+   *
+   * `null` = 这一轮没在跑（还没按、或刚跑完）。它与 `busy` 分开：那条路**不改本机**，所以它既不该
+   * 禁用「同步」，也不该被「同步」禁用——两条路各自跑自己的。进度走页面横幅，不开确认弹窗：这条路上
+   * 没有"将要发生什么"要确认（见契约 §4.3）。
+   */
+  const [autoPushing, setAutoPushing] = React.useState(false)
+  /** 这一轮的进度事件（`autoPushing` 为真时才可能有；宿主从算计划那几段就开始报）。 */
+  const [autoProgress, setAutoProgress] = React.useState<ProgressEvent | null>(null)
+  /**
+   * 我们正看着的那一轮的开始时刻（没在看就是 `null`）。
+   *
+   * 用来分清"刚跑完的那一轮"与"几分钟前的旧结论"：只有确实看着它从跑到跑完，才把结论摆出来——
+   * 否则每次进这一页都会把上一轮那句话再说一遍。
+   */
+  const watchingAutoPush = React.useRef<number | null>(null)
+
+  /**
+   * 同步配置（宿主插件配置里的 `sync` 块）；`null` 或字段缺席都按"没配置"处理，只画一句说明。
+   *
+   * 这一项不依赖清单（`/meta` 先到），所以按 `state ?? meta` 取；两份都还没到时**不能**按"没配置"
+   * 画——那时该说的是"读取中…"，否则页面会先断言一句假的"这台机器没配同步"再改口。
+   */
+  const facts = state ?? meta
+  const syncInfo = facts?.sync ?? null
+  const syncKnown = facts !== undefined
+  /** 自动那一档：`off` / `push` / `sync`。句子、按钮名与那句"已开"都跟着它换。 */
+  const autoMode: AutoMode = syncInfo?.autoPush?.mode ?? 'off'
+
+  /**
+   * 点「同步」：开弹窗并算一份只读计划（`GET /sync` 只读远端，什么都不写）。
+   *
+   * 计划取不到（没配同步、远端连不上）时**不开空弹窗**：关掉它，把宿主/网络给的原话摆到页面横幅上。
+   * 那类错不是"这份计划有什么问题"，留在弹窗里只会让人以为还能按确认。
+   */
+  /**
+   * 按一组裁决重新预演。裁决变了必须重算：计划里这一对会从「两边各写各的」变成会拉取 / 会推送，
+   * 拿旧计划确认会按旧结论落地。重算期间正文让给进度条（`planning`），确认按钮也禁用。
+   */
+  const planWith = (next: Record<string, SyncDecision>): void => {
+    setDialog('plan')
+    setBusy('plan')
+    setError(null)
+    setNotice(null)
+    setFailures([])
+    setProgress(null)
+    const picked = new Map(Object.entries(next))
+    // 带着上一份计划的 `planId`：宿主对得上就只重算计划那一层（见 web.ts 的 `replanPrepared()`），
+    // 不再重扫本机、重读远端索引、重问 git。
+    const planId = picked.size === 0 ? undefined : sync?.planId
+    void fetchSyncPlan(setProgress, picked.size === 0 ? undefined : picked, planId).then(
+      (response) => {
+        setBusy(null)
+        setSync(response)
+      },
+      (cause) => {
+        setBusy(null)
+        setDialog(null)
+        setError(t('error.failed', { reason: reasonOf(cause) }))
+      },
+    )
+  }
+
+  /** 点「同步」：清掉上一轮的裁决，算一份全新的只读计划。 */
+  const openSync = (): void => {
+    setDecisions({})
+    setTidy(false)
+    planWith({})
+  }
+
+  /** 差异页里选了正本：关上差异页，带着这组选择重新预演（计划表因此换成会拉取 / 会推送的行）。 */
+  const decide = (id: string, decision: SyncDecision): void => {
+    const next = { ...decisions, [id]: decision }
+    setDecisions(next)
+    setDiffTarget(undefined)
+    planWith(next)
+  }
+
+  /**
+   * 弹窗里按「确认同步」：真的拉取与推送。
+   *
+   * 带上预演给的 `planId`：宿主对得上就**照着那份计划落地**（不再重算一遍，见 api.ts 的 `applySync`）；
+   * 对不上就由宿主从零算一遍，结果里的 `planSource` 会在下面那句提示里说清。
+   *
+   * 逐条失败（某一条拉取失败）照旧把成功的那部分报出来，失败的那些**在页面横幅上逐条留着**——弹窗
+   * 关掉之后它们还得看得见；不然用户只知道"同步过了"，不知道有一条没成。
+   */
+  const doSyncApply = (): void => {
+    setError(null)
+    // 预演那一条进度留着当起点（见 `liveProgress` 的说明），不发出去清空——它马上就会被落地的事件接上。
+    // 只有"这次看的就是一份预演"时才递那个号码：上一次落地的结果也放在 `sync` 里，它不是预演。
+    const picked = new Map(Object.entries(decisions))
+    const started = syncJob.start({
+      ...(sync?.mode === 'plan' && sync.planId !== undefined ? { planId: sync.planId } : {}),
+      decisions: picked,
+      ...(tidy ? { tidy: true } : {}),
+    })
+    if (!started) {
+      // 已经有一趟在跑（可能就是刷新之前发起、这一页认领来的那一趟）：不再开第二趟，弹窗收起来，
+      // 进度看上面那条横幅。宿主那边同样只放一趟（落地还在跑时，第二趟会拿到 409）。
+      setDialog(null)
+      return
+    }
+    setDialog('apply')
+  }
+
+  /**
+   * 这一趟跑完之后要跟着做的几件事：把结果记成"最近一次"、清掉裁决、重读右栏的远端位置。
+   *
+   * 为什么不在发起的地方 `.then`：发起之后组件随时可能已经卸载（用户点了「转到后台」、切了页签），
+   * 而那一趟还在跑。状态留在 store 里（`job.done`），谁挂载谁读——结果页就是拿它画的（见 `syncStage`）。
+   *
+   * 这里**不取走**那份结论：结果页还开着、用户还没按「完成」，取走会让那一段当场退回面板段。
+   * 认领来的那一趟（别处发起）也没有完整结果可记，只有几条计数，所以不在这条路上。
+   */
+  const freshResult = React.useRef<SyncJobSnapshot['done']>(null)
+  React.useEffect(() => {
+    const done = job.done
+    if (done === null || done.adopted !== undefined || !done.ok) return
+    if (freshResult.current === done) return
+    freshResult.current = done
+    const result = done.result
+    if (result === undefined) return
+    setSync(result)
+    setDecisions({})
+    /*
+     * 这一趟改过远端（推上去的包、补上去的对象）：右栏那行「远端」要重新读一次，不然它还停在落地之前
+     * 的样子。落空的那些（只拉取）读一次也无害——清单本来就可能在另一台机器上被改过。
+     */
+    void remoteLibrary.load()
+  }, [job.done])
+
+  /**
+   * 结果页上那句结论：与提示条同一套折法（见 logic/syncNotice.ts），只是这次摆在结果页正文里。
+   *
+   * 没有完整结果（认领来的那一趟）时只能说条数；一条会话都没搬、也没补对象时退回"两边一样"那一句，
+   * 而不是报一串 0。
+   */
+  const doneLine = (done: NonNullable<SyncJobSnapshot['done']>): { ok: boolean; text: string } => {
+    if (!done.ok) return { ok: false, text: t('run.error', { reason: done.error ?? '' }) }
+    const result = done.result
+    if (result === undefined) {
+      const pulled = done.adopted?.pulled ?? 0
+      const pushed = done.adopted?.pushed ?? 0
+      return {
+        ok: true,
+        text: pulled === 0 && pushed === 0 ? t('sync.background.donePlain') : t('sync.background.done', { pulled, pushed }),
+      }
+    }
+    const tidied = result.tidy !== undefined && 'removed' in result.tidy ? result.tidy : null
+    const notice = describeSyncNotice(
+      {
+        pulled: result.pulled.length,
+        pushed: result.pushed.length,
+        replaced: result.replaced.length,
+        deleted: result.deleted?.ids.length ?? 0,
+        attachmentsIn: result.attachmentIn?.written ?? 0,
+        attachmentsOut: result.attachmentOut?.uploaded ?? 0,
+        attachmentsMissing: result.attachmentOut?.missing ?? 0,
+        tidied: tidied === null ? 0 : tidied.removed + tidied.orphans,
+        replanned: result.planSource?.kind === 'recomputed',
+      },
+      t,
+    )
+    return { ok: true, text: notice ?? t('sync.nothing') }
+  }
+
+  /**
+   * 结果页上要不要给「撤销」：这次动过本机的内容（覆盖本机的那几份、跟着删的那几条），旧的那份就在
+   * 备份里；认领来的那一趟只知道"拉了几条"，同样说得上。
+   *
+   * 备份页由页面骨架打开（与删除 / 迁移结果页上那枚同一个去处）。
+   */
+  const undoable = (done: NonNullable<SyncJobSnapshot['done']>): boolean => {
+    if (onOpenBackups === undefined) return false
+    const result = done.result
+    if (result === undefined) return (done.adopted?.pulled ?? 0) > 0
+    return result.replaced.length > 0 || (result.deleted?.ids.length ?? 0) > 0
+  }
+
+  /**
+   * 点「整理远端」：先只算账（读远端索引、列自己那一格，什么都不写），把数字摆进弹窗，确认了才真删。
+   *
+   * 算账与真删是两次请求：`GET /sync?mode=tidy` 与 `POST` 同一个地址。中间远了会重新读一遍远端——那是
+   * 好事，真删的判据永远是"按下确认那一刻的远端"。
+   */
+  const openTidy = (): void => {
+    setTidyError(undefined)
+    setTidyPlan(undefined)
+    setTidyProgress(undefined)
+    setTidyDialog('plan')
+    setTidyBusy(true)
+    void tidyRemote(false, setTidyProgress).then(
+      (response) => {
+        setTidyPlan(response)
+        setTidyBusy(false)
+      },
+      (cause: unknown) => {
+        setTidyError(cause instanceof Error ? cause.message : String(cause))
+        setTidyBusy(false)
+      },
+    )
+  }
+
+  /**
+   * 弹窗里按「开始整理」：真删自己那一格里多余的包。
+   *
+   * 与其它写操作同一条：确认之后交给状态窗（进度 → 结果 → 「完成」），不再让这枚确认弹窗兼做进度窗。
+   */
+  const doTidyApply = (): void => {
+    setTidyError(undefined)
+    setTidyProgress(undefined)
+    setTidyDialog(undefined)
+    setTidyBusy(true)
+    startRun(
+      'tidy',
+      (report) => tidyRemote(true, report),
+      (done) => {
+        if (!done.ok) return <p className="dsm-error">{t('run.error', { reason: done.error ?? '' })}</p>
+        const response = done.result as TidyResponse
+        const total = response.tidy.removed + response.tidy.orphans
+        return (
+          <div className="dsm-planBody">
+            <div className="dsm-ok">
+              {total === 0
+                ? t('sync.tidy.empty')
+                : t('sync.tidy.done', { count: total, size: formatBytes(response.tidy.bytes) })}
+            </div>
+            <ProblemsBlock t={t} problems={response.problems} />
+          </div>
+        )
+      },
+      {
+        onChange: (done) => {
+          setTidyBusy(false)
+          if (!done.ok) return
+          const response = done.result as TidyResponse
+          setTidyPlan(response)
+          setFailures(response.problems)
+        },
+        // 同步面是 1080，整理远端的进度与结果也停在那一档。
+        wide: true,
+      },
+    )
+  }
+
+  /**
+   * 点「立即推送一次」：当场跑一轮自动推送（只推不拉）。
+   *
+   * 与「同步」的两处不同：**没有预演与确认**（这条路上不会有东西落到本机，所以没有"将要动什么"要
+   * 摆给人看），并且进度画在页面横幅上而不是弹窗里。逐条失败照旧从 `problems` 里取出来摆到横幅上；
+   * 连续失败那句由宿主随响应给的 `failures` 说（成功清零）。
+   */
+  const doAutoPush = (): void => {
+    if (autoPushing) return
+    setAutoPushing(true)
+    setAutoProgress(null)
+    setError(null)
+    setNotice(null)
+    setFailures([])
+    void runAutoPushNow(setAutoProgress).then(
+      (response) => {
+        setAutoPushing(false)
+        setAutoProgress(null)
+        setNotice(autoPushSentence(t, response, autoMode))
+        setFailures(response.problems ?? [])
+        /*
+         * 宿主说"上一轮还在跑"（`skip: 'busy'`）：那一轮跑到哪不用这里去问——面板那条连接已经把它的
+         * 进度推过来了（谁发起的一轮都会推），横幅上接着画就是。
+         */
+        // 推的那一侧不改本机任何东西，所以这里**不 reload**（会话列表与工作区归属都不会变）；
+        // 只有宿主说连续失败，才把最近那次的原因也摆出来（它可能来自上一轮，这一轮横幅里没有）。
+        if (response.failures > 0 && response.problem !== undefined) {
+          setFailures((current) => [...current, t('sync.autoPush.problem', { problem: response.problem ?? '' })])
+        }
+      },
+      (cause) => {
+        setAutoPushing(false)
+        setAutoProgress(null)
+        setError(t('error.failed', { reason: reasonOf(cause) }))
+      },
+    )
+  }
+
+
+  /**
+   * 自动推送那一轮跑到哪儿了：读**页面那条唯一的连接**（`panelEvents` 上的 `auto-push` 那一半）。
+   *
+   * 为什么不再自己开一条流：那一轮多数不是这一页发起的（后台写完一轮、另一个页签
+   * 点的「立即推送一次」），而进度只回给发起它的那个请求——页面这边本来什么都看不到，原来只能靠
+   * "进页面时问一次 + 在跑才接一条自己的流"。现在这些都在同一条连接上，也就没有"没在听所以看不见"
+   * 这件事了。
+   *
+   * 手里这一份（`autoPushing` / `autoProgress`）与手点那一次共用：横幅、按钮的「正在自动推送…」都不
+   * 用写第二份。看着它跑完才把结论摆出来（`watchingAutoPush` 记着那一轮的开始时刻），免得每次进这一页
+   * 都把上一轮那句话再说一遍。
+   */
+  React.useEffect(() => {
+    const apply = (status: AutoPushRoundStatus): void => {
+      if (status.running === null) {
+        const startedAt = watchingAutoPush.current
+        watchingAutoPush.current = null
+        setAutoPushing(false)
+        setAutoProgress(null)
+        // 只给"确实看着它跑完"的那一轮说结论：几分钟前跑过的那一轮不该在进页面时被重新念一遍。
+        if (status.last === null || startedAt === null || (status.last.startedAt ?? 0) < startedAt) return
+        setNotice(autoPushSentence(t, status.last, autoMode))
+        setFailures(status.last.problems)
+        return
+      }
+      watchingAutoPush.current = status.running.startedAt
+      setAutoPushing(true)
+      setAutoProgress(status.running.progress)
+      // 正在跑的就是它：上面那句"上一轮还在跑"撤掉，免得两句话同时在屏上。
+      setNotice(null)
+    }
+    const read = (snapshot: PanelSnapshot): void => apply(snapshot.autoPush)
+    // 先读当下那一份：这一页可能是"那一轮跑了 20 秒才打开"的情形。
+    read(panelEvents.snapshot())
+    return panelEvents.subscribe(read)
+  }, [t])
+
+  /**
+   * 进度块下面补的那句话：只有真写盘的两段（拉取 / 推送）才有意义——预演阶段还没有东西可覆盖。
+   *
+   * 各页的那句话不同（迁移说的是"中断会留下中间状态、可在备份页回退"，导入说的是"只增不覆盖"），
+   * 所以它由调用方给，而不是塞进共用的 [ProgressBlock.tsx](../../shared/ui/ProgressBlock.tsx)。
+   */
+  const syncNote = (event: ProgressEvent): string | undefined =>
+    event.phase === 'pull' || event.phase === 'push' ? t('sync.progress.note') : undefined
+
+  const syncPlan = sync?.plan ?? null
+  /**
+   * 预演报上来的"整理能删多少"（见 api.ts 的 `SyncTidy`）。缺席 = 没有可整理的，或旧宿主不认这件事——
+   * 那时这一个勾选框根本不摆。
+   */
+  const syncTidy = sync?.tidy !== undefined && 'count' in sync.tidy ? sync.tidy : null
+  // 覆盖本机那份也摆在「会拉取」这张表里（它同样是往本机落内容），只是行上挂一颗不同的标签。
+  /**
+   * 要看差异的那一条（`undefined` = 没打开）。
+   *
+   * 初值刻意用 `undefined` 而不是 `null`：界面测试的假 React 按"第几个 `useState(null)`"往状态里种
+   * 数据（见 test/client.test.mjs 的 `nulls`），新加一个 null 状态会把后面那些的序号整体挤一位。
+   */
+  const [diffTarget, setDiffTarget] = React.useState<SyncDiffTarget | undefined>(undefined)
+  /*
+   * 「整理远端」那个弹窗的状态。初始值一律是 `undefined` 而不是 `null`：这一组状态与「同步」那个
+   * 弹窗（`dialog`）是两件事，种测试数据的假钩子按 `useState(null)` 的**出现顺序**喂种子，多几个
+   * null 状态会把别人那份数据挤后一格。写成 undefined 就不参与那套顺序。
+   *
+   * `plan` = 正在算账 / 等确认，`apply` = 正在删，`undefined` = 弹窗没开。
+   */
+  const [tidyDialog, setTidyDialog] = React.useState<'plan' | 'apply'>()
+  /** 预演算出来的账目（还没算出来就是 undefined）。 */
+  const [tidyPlan, setTidyPlan] = React.useState<TidyResponse>()
+  const [tidyBusy, setTidyBusy] = React.useState(false)
+  const [tidyProgress, setTidyProgress] = React.useState<ProgressEvent>()
+  const [tidyError, setTidyError] = React.useState<string>()
+  const syncPulls = syncPlan?.pull.filter((entry) => entry.action !== 'skip') ?? []
+  const syncPushes = syncPlan?.push.filter((entry) => entry.action !== 'skip') ?? []
+  // 空白会话不进那三张表，只在正文里报一句：它们没有内容可同步，逐条列出来只是把表撑长。
+  const syncBlank = syncPlan?.blank?.length ?? 0
+  /** 别处删过、本机这份更旧的那些：这次跟着删（先进备份，见 `SyncDeletedEntry`）。 */
+  const syncDeleted = syncPlan?.deleted ?? []
+  // 只留"有信息量"的没动项：`identical` 是"远端已经有这一份"，整库同步时它是最多也最没用的一类。
+  const syncKept: SyncKeptRow[] =
+    syncPlan === null
+      ? []
+      : [
+          ...syncPlan.pull
+            .filter((entry) => entry.action === 'skip')
+            .map((entry): SyncKeptRow => ({ side: 'pull', entry })),
+          ...syncPlan.push
+            .filter((entry) => entry.action === 'skip' && entry.code !== 'identical')
+            .map((entry): SyncKeptRow => ({ side: 'push', entry })),
+        ]
+  const syncClean =
+    syncPlan !== null &&
+    syncPulls.length === 0 &&
+    syncPushes.length === 0 &&
+    syncKept.length === 0 &&
+    syncDeleted.length === 0
+  /**
+   * 三张表各自按**项目目录**分组（见 [syncGroups.ts](./syncGroups.ts)）：拉取行按落地后的本机目录、
+   * 推送行按本机目录、「没动」按它自己那一边的目录。工作区名称从 `/state` 来（同一个路径在别处显示
+   * 成什么名字，这里就是什么名字）；首帧还没读到状态时标题缺席，组头退回路径本身。
+   */
+  const workspaces = state?.workspaces ?? []
+  /**
+   * `/state` 那份会话清单按 id 索引：计划行只带 id，会话类型（空白 / 子智能体 / 已归档 / 活着的）要从
+   * 这里取（见 `typeTagsOf()`）——判据与会话列表同一套，本页不自己算。
+   */
+  const sessionsById = new Map((state?.sessions ?? []).map((session) => [session.id, session]))
+  /**
+   * 这些行就算选了正本、或本来就轮到覆盖本机，落地也会因为宿主还开着这条会话而被拦下。
+   *
+   * 计划行的 code 已经在宿主侧表达了这个结论（`diverged` / `remote-*`），页面只拿 `/state` 的
+   * `live` 标出“哪几条是活的”，在打开差异之前就把话说在前面；不替宿主判断能不能落。
+   */
+  const liveBlocked = new Set(
+    [...(syncPlan?.pull ?? []), ...(syncPlan?.push ?? [])]
+      .filter(
+        (entry) =>
+          (entry.code === 'diverged' ||
+            entry.code === 'local-ahead' ||
+            entry.code === 'local-newer' ||
+            entry.code === 'remote-ahead' ||
+            entry.code === 'remote-newer' ||
+            entry.code === 'keep-local' ||
+            entry.code === 'keep-remote') &&
+          sessionsById.get(entry.id)?.live === true,
+      )
+      .map((entry) => entry.id),
+  ).size
+  const pullGroups = groupSyncRows(syncPulls, (entry) => syncProjectOf(entry, 'pull'), workspaces)
+  const pushGroups = groupSyncRows(syncPushes, (entry) => syncProjectOf(entry, 'push'), workspaces)
+  const keptGroups = groupSyncRows(syncKept, (row) => syncProjectOf(row.entry, row.side), workspaces)
+  /**
+   * 上次同步的计划里见过的远端 cwd：交给映射表当候选。
+   *
+   * 它解决的是这一栏唯一真正难的地方——远端那一侧必须**逐字**对上别的机器记下的路径，而那条路径
+   * 靠人背是靠不住的（抄错一个字符，结果就是"没配映射，跳过"）。没有过计划时它是空的，行为退回手填。
+   */
+  const remoteCwds = [
+    ...new Set(
+      [...(syncPlan?.pull ?? []).map((entry) => entry.fromCwd), ...(syncPlan?.push ?? []).map((entry) => entry.cwd)].filter(
+        (cwd): cwd is string => typeof cwd === 'string' && cwd !== '',
+      ),
+    ),
+  ]
+  /** 计划还在算：正文暂时不画（`sync` 里可能还留着上一次的那份结果，摆出来会被当成这次的）。 */
+  const planning = dialog === 'plan' && busy === 'plan'
+  /**
+   * 落地之后要不要重启才被宿主承认。
+   *
+   * **只在需要重启时说话**，而且单独一条横幅、不塞进上面那条绿色成功横幅——两件事共用一个颜色底时，
+   * 读的人分不出哪句是坏消息。判据取自最近一次结果：`mode === 'apply'` 说明它是落地回来的，不是预演
+   * （与迁移同一口径，见 [ManagePanel.tsx](../manage/ManagePanel.tsx)）。
+   */
+  const restartWarn =
+    sync !== null && sync.mode === 'apply' && sync.pulled.length > 0 && sync.takesEffect === 'restart-required'
+
+  /** 计划那一段里有没有表（决定那一档要不要 1080）。 */
+  const hasPlanTables = syncPlan !== null && (syncPulls.length > 0 || syncPushes.length > 0 || syncKept.length > 0)
+
+  /**
+   * 这一段说哪件事：面板（填表单 / 说状态）→ 计划 → 落地 → 结果。四段同处一个弹窗（与导入那一面同一个
+   * 形状，见 design.md 的「执行与结果」那一节）。
+   *
+   * 判据不只看这一页自己的 `dialog`：状态栏那枚「同步中 3/7」点开时，这一页并没有"走到"落地段
+   * （`dialog` 还是 `null`），可那一趟正在跑——只看 `dialog` 就会摆成面板段，进度一条字都没有。
+   * 跑完也不回面板段：结论、没做到的清单与「撤销」都在结果页上，按「完成」才收掉。
+   * 规则在 [syncStage](./syncStage.ts) 那一份里，`test/sync-stage.test.ts` 逐支钉着。
+   */
+  const stage: SyncStage = syncStage(dialog, job.running, job.done !== null)
+  /** 结果页那一条结论（跑完了才有；`stage === 'done'` 时才用）。 */
+  const done = job.done
+  /** 结果页上那句话：成没成、搬了几条、另有几项。 */
+  const doneVerdict = stage === 'done' && done !== null ? doneLine(done) : null
+
+  /**
+   * 「上次同步」那张清单要说的话。
+   *
+   * 数据有两处来路，取**新的那一份**：这一页刚跑完的那趟（`job.done`，带完整结果），否则是磁盘上那条
+   * 记录（`state.json`，重启之后还在）。条目本身由 `leftoversOf()` 归一（点名版优先，旧记录退回汇总句）。
+   */
+  const lastRun = syncInfo?.lastRun ?? null
+  const lastItems = leftoversOf(job.done !== null && job.done.ok ? job.done.result : lastRun)
+  const lastFacts =
+    lastRun !== null
+      ? t('sync.last.facts', { when: agoLabel(t, lastRun.at), pulled: lastRun.pulled, pushed: lastRun.pushed })
+      : job.done !== null && job.done.ok
+        ? t('sync.last.justNow')
+        : null
+
+  /**
+   * 这一面自己就是那枚弹窗（`WorkDialog`）：标题、说明、宽度与底栏都跟着 `stage` 变。
+   *
+   * 为什么不再"面板 + 叠一层确认框"：那是两枚弹窗，用户按「同步」之后看到的是一个新窗口盖在旧窗口上，
+   * 而它们说的是同一件事的两段。导入那一面先改成了同一个弹窗里的三段，这里跟它对齐。
+   * 宽度跟着段走：面板段 640（几句话），计划段 1080（三张表）。
+   */
+  return (
+    <>
+      <WorkDialog
+        t={t}
+        title={t(
+          stage === 'idle'
+            ? 'sync.title'
+            : stage === 'apply'
+              ? 'sync.running'
+              : stage === 'done'
+                ? job.done?.ok === true
+                  ? 'sync.done.title'
+                  : 'run.failed'
+                : 'sync.dialogTitle',
+        )}
+        {...(stage === 'idle' && syncInfo !== null ? { description: t('sync.where', { url: syncInfo.url }) } : {})}
+        /*
+          宽度跟着**里面摆什么**走：面板段、结果段与"两边一样、没有要同步的"那种计划段都只有几句话，
+          640 正好；有计划表时才要 1080（三张表在 640 里会把动作列挤成一个字）。没有表却撑到 1080，
+          右边会空一大块。
+        */
+        // 一扇窗从头到尾一个宽度：同步这一面每一步都按计划段那三张表的宽度（1080）来，不再
+        // 「面板 640 → 计划 1080 → 结果 640」来回跳（口径见 design.md 的「执行与结果」）。
+        size="wide"
+        onClose={onClose}
+        // 没配置同步时底栏整块不摆：一枚点了没反应的「同步」比没有更糟（与正文那句说明同一条口径）。
+        footer={
+          stage === 'idle' && syncInfo === null ? undefined : stage === 'idle' ? (
+            <>
+              <Button variant="outline" data-modal-autofocus="" onClick={onClose}>
+                {t('cancel')}
+              </Button>
+              <Button
+                variant="primary"
+                onClick={openSync}
+                disabled={syncInfo === null || busy !== null || applying}
+              >
+                {t('sync.action')}
+              </Button>
+            </>
+          ) : stage === 'plan' ? (
+            <>
+              {/* 计划这一段「取消」是**回面板**：包与目标都还在，改一改再算一次比关掉重来省事。 */}
+              <Button variant="outline" onClick={() => setDialog(null)}>
+                {t('sync.back')}
+              </Button>
+              <Button
+                variant="primary"
+                onClick={doSyncApply}
+                disabled={planning || sync === null || syncPlan === null}
+              >
+                {t('sync.applyAction')}
+              </Button>
+            </>
+          ) : stage === 'done' ? (
+            /*
+              结果页上底栏只剩一枚「完成」：它把这扇窗关掉，同时收掉那份结论（下一趟回来是面板段）。
+              与删除 / 迁移那些结果页同一个动作、同一个词。
+            */
+            <Button
+              variant="primary"
+              data-modal-autofocus=""
+              onClick={() => {
+                syncJob.dismiss()
+                onClose()
+              }}
+            >
+              {t('run.finish')}
+            </Button>
+          ) : (
+            <>
+              {/* 落地跑着的时候，「取消」换成「转到后台」：窗口收起来，那一趟照跑。这是用户要的那个动作——
+                  落地可能几分钟，不该因为"我关掉了窗口"就没法看它跑到哪。 */}
+              <Button variant="outline" onClick={onClose}>
+                {t('sync.background')}
+              </Button>
+              <Button variant="primary" disabled>
+                {t('sync.busy')}
+              </Button>
+            </>
+          )
+        }
+      >
+      {error !== null && (
+        <p className="dsm-banner dsm-error">
+          <span>{error}</span>
+          <span className="dsm-spacer" />
+          <Button variant="outline" size="sm" onClick={() => setError(null)}>
+            {t('error.dismiss')}
+          </Button>
+        </p>
+      )}
+      {notice !== null && (
+        <p className="dsm-banner dsm-ok">
+          <span>{notice}</span>
+          <span className="dsm-spacer" />
+          <Button variant="outline" size="sm" onClick={() => setNotice(null)}>
+            {t('error.dismiss')}
+          </Button>
+        </p>
+      )}
+
+      {restartWarn && stage !== 'done' && (
+        // 不定 dismiss：它不是这次操作的错，而是"这次落地还没被宿主承认"这个事实，下一次同步开始
+        // （`sync` 换成新的计划）时它自己就没了。
+        <p className="dsm-banner dsm-warn">{t('effect.restart')}</p>
+      )}
+
+      {failures.map((problem) => (
+        <p key={problem} className="dsm-banner dsm-warn">
+          {problem}
+        </p>
+      ))}
+
+      {/*
+       * 「立即推送一次」那一条路上的进度：它走的是同一个 `ProgressBlock`（同一套事件），只是摆在页面
+       * 横幅的位置而不是弹窗正文里。摆在这一块的是"这一轮在做什么"，与上面那几条"上一次的结论"
+       * 分开——它们说的是两件事。
+       */}
+      {autoPushing && (
+        <div className="dsm-banner dsm-progressBanner">
+          {/* 与「后台同步」那张同一个头：状态点 + 这是哪一趟（自动推送）。 */}
+          <div className="dsm-progressHead">
+            <StateDot state="ongoing" />
+            <span className="dsm-progressTitle">
+              {t(autoMode === 'sync' ? 'sync.autoSync.running' : 'sync.autoPush.running')}
+            </span>
+          </div>
+          {autoProgress === null ? null : <ProgressBlock t={t} progress={autoProgress} note={syncNote(autoProgress)} />}
+        </div>
+      )}
+
+        {stage === 'idle' &&       <>
+        {/*
+          上次同步：多久以前、拉了几条、推了几条，以及**没做到的逐条**（点名版带「只看这一条」）。
+
+          为什么摆在这里：页头那枚黄点只说"有 1 条没做到"，窗口一关就只剩这一句；而"哪一条、为什么"
+          才是用户下一步要处理的东西。记录存在磁盘上（`state.json`），重启之后回来还看得到。
+        */}
+        {(lastFacts !== null || lastItems.length > 0) && (
+          /*
+            两块分开画（见 styles.ts 的 `.dsm-lastRun` 那一段）：干净那一趟只有一行标题 + 一行读数；
+            有遗留时才成"一块记录"——底色 + 左边一道告警色细线，与下面那几句说明分开。
+          */
+          <div
+            className="dsm-lastRun"
+            data-dsm-lastrun=""
+            {...(lastItems.length > 0 ? { 'data-dsm-leftover': 'true' } : {})}
+          >
+            <p className="dsm-lastRunHead">
+              <span className="dsm-lastRunTitle">{t('sync.last.title')}</span>
+              {lastFacts !== null && <span className="dsm-lastRunFacts">{lastFacts}</span>}
+            </p>
+            {lastRun !== null && !lastRun.ok && (
+              <p className="dsm-warn">{t('sync.last.failed', { reason: lastRun.error ?? '—' })}</p>
+            )}
+            {lastItems.length > 0 && (
+              <div className="dsm-leftovers">
+                <p className="dsm-leftoversTitle">{t('sync.leftovers.title', { count: lastItems.length })}</p>
+                <ul className="dsm-listPlain">
+                  {lastItems.map((item, index) => (
+                    <li key={`${index}-${item.message}`} className="dsm-leftoverRow">
+                      <span>{item.message}</span>
+                      {item.sessionId !== undefined && onFocusSession !== undefined && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            if (item.sessionId !== undefined) onFocusSession(item.sessionId)
+                          }}
+                        >
+                          {t('sync.leftovers.focus')}
+                        </Button>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        )}
+        {/* 没配置同步时只留一句话：摆一个点了没反应的按钮比不摆更糟（与「宿主没有归档能力」同一条口径）。 */}
+        <p className="dsm-hint">
+          {!syncKnown
+            ? t('loading')
+            : syncInfo === null
+              ? t('sync.offHint')
+              : t('sync.hint', { mappings: syncInfo.mappings })}
+        </p>
+        {/*
+         * 自动推送开着时在 `sync.hint` 之外**再补一句**：上面那句说的是"按一下会做什么"，这一句说的是
+         * "不按也会自己发生"——两件事，少一句用户就不知道这台机器在后台推东西。
+         *
+         * 判据取自宿主给的 `syncInfo.autoPush`（没有这个字段 = 没开），页面不自己从配置表单那个开关推：
+         * 那张表单画的是**草稿**，而这一句要说的是**现在生效的**那份配置。
+         */}
+        {syncInfo?.autoPush !== undefined && (
+          <p className="dsm-hint">{t(autoMode === 'sync' ? 'sync.autoSync.enabled' : 'sync.autoPush.enabled')}</p>
+        )}
+        {/* 这里只有工具：主动作「同步」在**底栏**（与导入、删除、迁移同一处）。
+            这一页没有把入口放进页头：配置不在这一页（挂在插件页上），读完上面那一句就知道该去哪儿改。 */}
+        <div className="dsm-controls">
+          {syncInfo !== null && (
+            <>
+            {/*
+             * 「立即推送一次」是同一行里那枚**非 primary** 的动作：主动作仍然只有「同步」一枚（结构与
+             * `test/client.test.mjs` 的 `primaryPlacements()` 钉着这一条）。
+             *
+             * 只在开关开着时才摆：没开时它在界面上等于一个"和按「同步」有什么不一样"的谜（宿主那侧回
+             * 的也会是"这个宿主没开自动推送"）。摆出来时它不禁用自己——这一轮跑着时再按一次由宿主的
+             * `busy` 闸挡住，界面这里只把字换成「正在自动推送…」。
+             */}
+            {syncInfo.autoPush !== undefined && (
+              <Button variant="outline" size="sm" onClick={doAutoPush} disabled={autoPushing}>
+                {autoPushing
+                  ? t(autoMode === 'sync' ? 'sync.autoSync.running' : 'sync.autoPush.running')
+                  : t(autoMode === 'sync' ? 'sync.autoSync.now' : 'sync.autoPush.now')}
+              </Button>
+            )}
+            {/*
+              「整理远端」：只删本机这一格里多余的包，不拉不推、不动本机任何会话。与「同步」里那个勾选框
+              是同一件事的两条路——勾选框顺着落地一起做，这一枚不必先跑一趟完整同步。
+            */}
+            <Button variant="outline" size="sm" onClick={openTidy} disabled={busy !== null || applying || tidyBusy}>
+              {t('sync.tidy.action')}
+            </Button>
+            </>
+          )}
+        </div>
+      </>
+
+}
+        {stage === 'plan' && (
+          <>
+            {planning &&
+              (progress === null ? (
+                <p className="dsm-hint">{t('dialog.previewing')}</p>
+              ) : (
+                <ProgressBlock t={t} progress={progress} note={syncNote(progress)} />
+              ))}
+                    {/* 落地：前面三个阶段（算计划）与后面两段（拉取 / 推送）报的是同一套事件，画法也一样。 */}
+        {!planning && sync !== null && syncPlan !== null && (
+          <div className="dsm-planBody">
+            {/*
+              结论先行：这一趟要不要做、成没成，一句话、加粗、带色。
+              数字与远端机器往下沉成脚注（12px）——原来三件事挤在同一句 14px 里、还一起染成"成功"色，
+              四行字看着一个样，读不出哪句是结论（用户截图里说的"区分度不高"）。
+              绿色从此只表示"没有要同步的"；有活干或者有问题时那一行不染成功色。
+            */}
+            <p
+              className={
+                syncClean
+                  ? 'dsm-planVerdict dsm-ok'
+                  : syncPlan.ok && sync.problems.length === 0
+                    ? 'dsm-planVerdict'
+                    : 'dsm-planVerdict dsm-warn'
+              }
+            >
+              {syncClean
+                ? t('sync.nothing')
+                : syncDeleted.length === 0
+                  ? t('sync.planWork', { pull: syncPlan.pullIds.length, push: syncPlan.pushIds.length })
+                  : t('sync.planWorkDeleted', {
+                      pull: syncPlan.pullIds.length,
+                      push: syncPlan.pushIds.length,
+                      deleted: syncDeleted.length,
+                    })}
+            </p>
+            <p className="dsm-hint dsm-planFacts">
+              {t('sync.planFacts', { local: syncPlan.localCount, remote: syncPlan.remoteCount })}
+              {syncPlan.machines.length > 0
+                ? ` · ${t('sync.machines', { machines: syncPlan.machines.join('、') })}`
+                : ''}
+            </p>
+            {/* 事前提醒：这次落地之后要不要重启，得在按「确认同步」**之前**说出来（见 `effect.plannedRestart`）。
+                纯推送不改本机任何东西，所以只在真有会话要落到本机、且宿主那头需要重启时才摆这一句。 */}
+            {syncPulls.length > 0 && sync.takesEffect === 'restart-required' && (
+              <p className="dsm-warn">{t('effect.plannedRestart')}</p>
+            )}
+            {/*
+              整理远端：只删本机这一格里多余的包（另一格有一模一样的、或更全的）。默认不勾——它会删
+              远端的东西；勾了之后落地那次才做，预演这一下只是把"能删几个"报出来。
+            */}
+            {syncTidy !== null && syncTidy.count > 0 && (
+              <div className="dsm-options">
+                <Checkbox
+                  checked={tidy}
+                  label={t('sync.tidy.check', { count: syncTidy.count, size: formatBytes(syncTidy.bytes) })}
+                  onChange={setTidy}
+                />
+              </div>
+            )}
+            {liveBlocked > 0 && <p className="dsm-warn">{t('sync.liveHint', { count: liveBlocked })}</p>}
+            {sync.problems.map((problem) => (
+              <p key={problem} className="dsm-warn">
+                {problem}
+              </p>
+            ))}
+            {/*
+              脚注清单：空白会话的去处、附件对象还要对一遍——两件事都是"表里没有、但这一趟会碰到"的交代。
+              原来它们是两行同款的 12px 灰字，混在正文里；收成一条清单之后与结论、数字分得开。
+            */}
+            {(syncBlank > 0 || (syncClean && facts?.attachments === true)) && (
+              <ul className="dsm-listPlain dsm-planNotes">
+                {syncBlank > 0 && <li>{t('sync.skippedBlank', { count: syncBlank })}</li>}
+                {syncClean && facts?.attachments === true && <li>{t('sync.nothingAttachments')}</li>}
+              </ul>
+            )}
+
+            {syncPulls.length > 0 && (
+              <>
+                <PlanSectionHead title={t('sync.pullHead')} count={syncPulls.length} t={t} />
+                <table className="dsm-table dsm-planTable dsm-syncPlanTable">
+                  <thead>
+                    <tr>
+                      <th className="dsm-colAction">{t('table.conclusion')}</th>
+                      <th className="dsm-colSession">{t('table.session')}</th>
+                      <th className="dsm-colBytes">{t('table.bytes')}</th>
+                      <th className="dsm-colDiff">{t('sync.diff.column')}</th>
+                    </tr>
+                  </thead>
+                  {pullGroups.map((group) => (
+                    // 每个项目一个 <tbody>：组头是它自己的表头行（colSpan 占满），列对齐由上面那一个
+                    // <thead> 统一给。
+                    <tbody key={groupKey(group.path)}>
+                      <PlanGroupHead group={group} columns={4} repo={state?.repos?.[group.path]} t={t} />
+                      {group.rows.map((entry) => {
+                        const label = sessionLabel(entry)
+                        // 覆盖本机那份单独一颗标签、另挂一条整句：它跟"从无到有拉一条"不是一回事。
+                        const replace = entry.action === 'replace'
+                        return (
+                          <tr key={entry.id}>
+                            <td>
+                              {/*
+                                覆盖本机那份 vs 从无到有拉一条：前者是"远端那版会顶掉本机这份"，
+                                后者是"本机还没有、这是新增"。用 tone 把这层语义说出来——
+                                `replace` 走 `quiet`（只有文字、没有底色，与原 `.dsm-tagSkip` 同形），
+                                `pull` 走 `success`（本机多一条，是"新增"，与原 `.dsm-tagCreate` 同形）。
+                                整句解释仍在外面那一层 span 的 title 上（官方 `Tag` 不收 `title`）。
+                                `dsm-tag` 挂在包着它的那层 span 上：styles.ts 的 `.dsm-planTable .dsm-tag`
+                                那条负责"状态列装不下时限宽截断、别顶到会话名那一列"。
+                              */}
+                              <Hint text={replace ? replaceHint(entry, t) : t('sync.why.missingPull')}>
+                                <span className="dsm-tag">
+                                  <Tag tone={replace ? 'quiet' : 'success'}>
+                                    {t(replace ? 'sync.tag.replace' : 'sync.tag.pull')}
+                                  </Tag>
+                                </span>
+                              </Hint>
+                            </td>
+                            <SessionCell
+                              label={label}
+                              tip={syncPullTip(entry, label.tip, t)}
+                              tags={typeTagsOf(sessionsById.get(entry.id))}
+                              t={t}
+                            />
+                            <td className="dsm-meta">{formatBytes(entry.bytes)}</td>
+                            <DiffCell entry={entry} onOpen={() => setDiffTarget({ id: entry.id, ...(entry.machine === undefined ? {} : { machine: entry.machine }), ...(entry.title === undefined ? {} : { title: entry.title }) })} t={t} />
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  ))}
+                </table>
+              </>
+            )}
+
+            {syncPushes.length > 0 && (
+              <>
+                <PlanSectionHead title={t('sync.pushHead')} count={syncPushes.length} t={t} />
+                <table className="dsm-table dsm-planTable dsm-syncPlanTable">
+                  <thead>
+                    <tr>
+                      <th className="dsm-colAction">{t('table.conclusion')}</th>
+                      <th className="dsm-colSession">{t('table.session')}</th>
+                      <th className="dsm-colBytes">{t('table.bytes')}</th>
+                      <th className="dsm-colDiff">{t('sync.diff.column')}</th>
+                    </tr>
+                  </thead>
+                  {pushGroups.map((group) => (
+                    <tbody key={groupKey(group.path)}>
+                      <PlanGroupHead group={group} columns={4} repo={state?.repos?.[group.path]} t={t} />
+                      {group.rows.map((entry) => {
+                        const label = sessionLabel(entry)
+                        const tag = pushTag(entry, t)
+                        return (
+                          <tr key={entry.id}>
+                            <td>
+                              {/* 同上一张表：`repush` 是"重推一遍、远端已有"，`quiet`；否则是本机新增，`success`。 */}
+                              <Hint text={tag.title}>
+                                <span className="dsm-tag">
+                                  <Tag tone={tag.repush ? 'quiet' : 'success'}>{tag.label}</Tag>
+                                </span>
+                              </Hint>
+                            </td>
+                            <SessionCell label={label} tip={label.tip} tags={typeTagsOf(sessionsById.get(entry.id))} t={t} />
+                            <td className="dsm-meta">{formatBytes(entry.bytes)}</td>
+                            <DiffCell entry={entry} onOpen={() => setDiffTarget({ id: entry.id, ...(entry.machine === undefined ? {} : { machine: entry.machine }), ...(entry.title === undefined ? {} : { title: entry.title }) })} t={t} />
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  ))}
+                </table>
+              </>
+            )}
+
+            {syncDeleted.length > 0 && (
+              <>
+                <PlanSectionHead title={t('sync.deletedHead')} count={syncDeleted.length} t={t} />
+                {/* 这张表说的是**要动手**的事（跟着删），所以排在「没动」之前；删除前先备份，
+                    与删除那条路同一个备份根（界面在提示里给「撤销」）。 */}
+                <table className="dsm-table dsm-planTable dsm-syncPlanTable">
+                  <thead>
+                    <tr>
+                      <th className="dsm-colAction">{t('table.conclusion')}</th>
+                      <th className="dsm-colSession">{t('table.session')}</th>
+                      <th className="dsm-colMachine">{t('table.deletedAt')}</th>
+                      <th className="dsm-colBytes">{t('table.bytes')}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {syncDeleted.map((entry) => {
+                      const label = sessionLabel(entry)
+                      return (
+                        <tr key={entry.id}>
+                          <td>
+                            <Hint text={entry.title ?? entry.id}>
+                              <span className="dsm-tag">
+                                <Tag tone="warning">{t('sync.tag.deleted')}</Tag>
+                              </span>
+                            </Hint>
+                          </td>
+                          <SessionCell label={label} tip={label.tip} tags={typeTagsOf(sessionsById.get(entry.id))} t={t} />
+                          <td className="dsm-cwd">{`${entry.by} · ${formatTime(entry.at)}`}</td>
+                          <td className="dsm-colBytes dsm-num">{formatBytes(entry.bytes)}</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </>
+            )}
+
+            {syncKept.length > 0 && (
+              <>
+                <PlanSectionHead title={t('sync.keptHead')} count={syncKept.length} t={t} />
+                {/* 与拉取 / 推送两张表同一种画法：状态列放标签、会话单独一列——挤成一行同色的说明时，
+                    状态与会话名分不出来（用户截图报的）。整句仍在标签的 title 上。
+                    第三列是**远端是哪台机器**：分组之后路径已经在组头上（缺映射那类给的就是远端
+                    路径），这一列再不重复它——剩下的信息只有"另一份是谁的"。 */}
+                <table className="dsm-table dsm-planTable dsm-syncPlanTable dsm-keptTable">
+                  <thead>
+                    <tr>
+                      <th className="dsm-colAction">{t('table.conclusion')}</th>
+                      <th className="dsm-colSession">{t('table.session')}</th>
+                      <th className="dsm-colMachine">{t('table.machine')}</th>
+                      <th className="dsm-colDiff">{t('sync.diff.column')}</th>
+                    </tr>
+                  </thead>
+                  {keptGroups.map((group) => (
+                    <tbody key={groupKey(group.path)}>
+                      <PlanGroupHead group={group} columns={4} repo={state?.repos?.[group.path]} t={t} />
+                      {group.rows.map(({ entry }) => {
+                        const label = sessionLabel(entry)
+                        return (
+                          <tr key={entry.id}>
+                            <td>
+                              {/* "这条不动"：中性事实，不表示健康也不表示新增——`quiet`，与原 `.dsm-tagSkip` 同形。 */}
+                              <Hint text={syncWhy(entry, t)}>
+                                <span className="dsm-tag">
+                                  <Tag tone="quiet">{syncTag(entry, t)}</Tag>
+                                </span>
+                              </Hint>
+                            </td>
+                            <SessionCell label={label} tip={label.tip} tags={typeTagsOf(sessionsById.get(entry.id))} t={t} />
+                            <td className="dsm-cwd">{entry.machine ?? ''}</td>
+                            <DiffCell entry={entry} onOpen={() => setDiffTarget({ id: entry.id, ...(entry.machine === undefined ? {} : { machine: entry.machine }), ...(entry.title === undefined ? {} : { title: entry.title }) })} t={t} />
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  ))}
+                </table>
+              </>
+            )}
+          </div>
+        )}
+          </>
+        )}
+        {/*
+          结果段：做完就在这一页上说完——一句结论、没做到的那些逐条、要不要重启、以及「撤销」。
+          它替换的是原来"回到面板段、结论塞在面板顶上一条绿色横幅里"的做法：那条横幅说的与这里同一件事，
+          而用户看到它的时候窗口已经换回表单了，读完还得自己找下一步。
+        */}
+        {stage === 'done' && done !== null && doneVerdict !== null && (
+          <div className="dsm-planBody">
+            <div className={doneVerdict.ok ? 'dsm-ok' : 'dsm-error'}>{doneVerdict.text}</div>
+            {done.result === undefined ? null : <ProblemsBlock t={t} problems={done.result.problems} />}
+            {done.result !== undefined &&
+              done.result.pulled.length > 0 &&
+              done.result.takesEffect === 'restart-required' && <p className="dsm-warn">{t('effect.restart')}</p>}
+            {undoable(done) && (
+              <div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    // 先收掉结果页，再打开「备份与回滚」：两扇窗口不该叠在一起。
+                    syncJob.dismiss()
+                    onOpenBackups?.()
+                  }}
+                >
+                  {t('undo.action')}
+                </Button>
+              </div>
+            )}
+          </div>
+        )}
+        {stage === 'apply' && (
+          <>
+            {/* 落地：前面三个阶段（算计划）与后面两段（拉取 / 推送）报的是同一套事件，画法也一样。 */}
+            {liveProgress === null ? (
+              job.adopted ? null : <p className="dsm-hint">{t('progress.waiting')}</p>
+            ) : (
+              <ProgressBlock t={t} progress={liveProgress} note={syncNote(liveProgress)} />
+            )}
+            {/*
+              认领来的那一趟（刷新页面、或者从另一个标签页发起）宿主只留下"跑没跑、搬了几条"，
+              没有逐条事件。这时先把话说清：这一页看不到逐条进度，跑完会补上条数——不摆一条不会动的
+              进度条，也不拿一句"正在准备…"替它。
+            */}
+            {job.adopted && <p className="dsm-hint">{t('sync.background.adopted')}</p>}
+          </>
+        )}
+      </WorkDialog>
+
+      {/*
+        整理远端那个弹窗：正文只有一句账目（几个包、多少字节）与一句"只碰自己那一格"，进度在那一段
+        真删的时候才出现。与同步那个弹窗分开：这条路上没有计划表、没有裁决、也不需要 planId。
+      */}
+      {tidyDialog === undefined ? null : (
+        <ConfirmDialog
+          t={t}
+          title={t('sync.tidy.dialogTitle')}
+          confirmLabel={t('sync.tidy.confirm')}
+          acknowledge={t('sync.tidy.acknowledge')}
+          busyLabel={t('sync.tidy.running')}
+          busy={tidyBusy && tidyDialog === 'apply'}
+          planning={tidyBusy && tidyDialog === 'plan'}
+          planningDetail={tidyProgress === undefined ? undefined : <ProgressBlock t={t} progress={tidyProgress} />}
+          error={tidyError ?? null}
+          onConfirm={doTidyApply}
+          onCancel={() => {
+            setTidyDialog(undefined)
+            setTidyBusy(false)
+          }}
+        >
+          {tidyDialog === 'apply' &&
+            (tidyProgress === undefined ? (
+              <p className="dsm-hint">{t('progress.waiting')}</p>
+            ) : (
+              <ProgressBlock t={t} progress={tidyProgress} />
+            ))}
+          {tidyDialog === 'plan' && tidyPlan !== undefined && (
+            <>
+              <p>
+                {tidyPlan.tidy.removed + tidyPlan.tidy.orphans === 0
+                  ? t('sync.tidy.empty')
+                  : t('sync.tidy.plan', {
+                      count: tidyPlan.tidy.removed + tidyPlan.tidy.orphans,
+                      size: formatBytes(tidyPlan.tidy.bytes),
+                    })}
+              </p>
+              <p className="dsm-hint">{t('sync.tidy.onlyOwnCell')}</p>
+            </>
+          )}
+        </ConfirmDialog>
+      )}
+      {diffTarget === undefined ? null : (
+        <SyncDiffDialog
+          target={diffTarget}
+          {...(decisions[diffTarget.id] === undefined ? {} : { decision: decisions[diffTarget.id] })}
+          onDecide={(decision) => decide(diffTarget.id, decision)}
+          live={sessionsById.get(diffTarget.id)?.live === true}
+          onClose={() => setDiffTarget(undefined)}
+          t={t}
+        />
+      )}
+    </>
+  )
+}

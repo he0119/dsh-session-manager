@@ -37,7 +37,7 @@ Status: implemented
   时钟"这个决定，那个没变。
 
 装过旧版的人配置里可能还留着 `sync.autoPushIntervalMs`：它现在只是一个没人读的多余字段，解析不会报错，
-行为上当作不存在（`test/auto-push.test.ts` 里有一条钉住这件事）。
+行为上当作不存在（`test/operations/sync/auto-push.test.ts` 里有一条钉住这件事）。
 
 ## Alternatives considered
 

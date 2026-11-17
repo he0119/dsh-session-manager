@@ -8,7 +8,7 @@ Status: implemented
 
 ## Problem
 
-「备份与回滚」那张清单原先长在「迁移」分页的底部。可它躺的不只是迁移留下的备份：`src/journal.ts` 给
+「备份与回滚」那张清单原先长在「迁移」分页的底部。可它躺的不只是迁移留下的备份：`src/shared/journal.ts` 给
 每份备份记一个 `kind`，三种来路——迁移（`migrate`）、删除（`delete`）、同步覆盖本机那份（`replace`）。
 
 于是界面得在三处替它"远程引路"：
@@ -22,7 +22,7 @@ Status: implemented
 
 ## Decision
 
-- 「备份与回滚」是页内第五个分页（`src/client/components/BackupPanel.tsx`），页签顺序 会话 → 传输 →
+- 「备份与回滚」是页内第五个分页（`src/client/operations/backup/BackupPanel.tsx`），页签顺序 会话 → 传输 →
   同步 → 备份 → 说明：它是三个写操作共同的后悔面，不属于其中任何一个动作页，所以排在动作页之后、
   "一次性读的参考页"「说明」之前。
 - 清单、回滚 / 恢复弹窗与 `isRestore()` / `backupKindLabel()` 整套搬进新分页，动作页不再 import
@@ -53,7 +53,7 @@ Status: implemented
 
 ## Consequences
 
-- 页签从 5 个变 6 个（`test/client.test.mjs` 钉着顺序与默认停在第一个）；说明页词条数 20 → 21。
+- 页签从 5 个变 6 个（`test/plugin/client.test.mjs` 钉着顺序与默认停在第一个）；说明页词条数 20 → 21。
 - 「备份」页与动作页共用页头（会话库位置）与同一份 `/state`；它自己只读 `/backups`，不依赖会话库清单，
   所以"库里一条会话都没有"不影响它。
 - 回滚 / 恢复落地后照旧 `reload()` 再重读清单：回滚会改工作区注册表，页头那行"N 个工作区"要跟着变。

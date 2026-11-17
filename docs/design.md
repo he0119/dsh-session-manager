@@ -40,7 +40,7 @@
   - 页头标题右边那枚**同步状态**（官方 `Button` + `StateDot`）：只说本地知道的事实——这一趟正跑着、
     刚才跑完、磁盘上记着的上一次（`多久以前` / `失败（多久以前）`）、退到配置的「自动推送」或
     「未配置」。点开是远端、计划、差异与确认。它**不联网**，所以不报"待拉几条"。
-    那枚点按"本地知道哪一件事实"上色，次序即优先级（判据是纯函数 `logic/syncChipDot.ts`）：
+    那枚点按"本地知道哪一件事实"上色，次序即优先级（判据是纯函数 `operations/sync/syncChipDot.ts`）：
 
     | 点 | 什么时候 | 官方状态 |
     | --- | --- | --- |
@@ -59,15 +59,15 @@
     「上次同步」里列全（带「只看这一条」），不往这枚按钮上搬：一行会话名加路径就是 40 字，三条就能把
     提示撑得比按钮本身还高（见
     [那篇决策](../.agents/notes/implemented/simplification/2026-11-14-sync-chip-tooltip-one-line.md)）。
-    判据在 `logic/syncChipDot.ts`（`syncChipDot()` 管颜色、`syncChipNote()` 管这句），
-    `test/sync-chip-dot.test.ts` 逐档钉着。
+    判据在 `operations/sync/syncChipDot.ts`（`syncChipDot()` 管颜色、`syncChipNote()` 管这句），
+    `test/client/operations/sync/sync-chip-dot.test.ts` 逐档钉着。
     「自动」有三档（设置表单里一行三选一：关闭 / 仅推送 / 双向）：绿点的提示、同步那一面那句"已开"、以及手动入口的
     名字（「立即推送一次」/「立即同步一次」）都按档说，别让按钮写着"推送"却跑了一趟双向。
   - 底部状态栏里的「**导入…**」（`import.entry`）：它与勾选无关（包里带什么跟列表勾了什么不相干），
     开一个 640 的窄弹窗——两个字段（包 / 目标目录）与一对按钮。目标目录默认填左栏「项目」筛着的那个，
     可改可手输。**包也可以直接拖进来**：整页是一个落点（拖着文件时画一圈虚线 + 一句「松手就导入这个
     包」，松手就开这一面并已经拿着包），弹窗里那一格自己也是落点（虚线框，悬停转品牌色）。判据只有
-    后缀一条（`logic/fileDrop.ts`），一次一个；
+    后缀一条（`operations/transfer/fileDrop.ts`），一次一个；
   - 底部状态栏里的「备份与回滚（N）」（三种写操作共同的后悔面，不属于其中任何一件动作；份数来自
     一次 `/backups` 的目录列举，0 份时只写名字）。
 - **勾选是整页一份**：`ManagerPanel` 持有 `useSessionPicking()`，行勾选、"全选 / 清空"与那枚
@@ -79,14 +79,13 @@
   不进提示条的四样：日志文件数 / 字节数这类收据、"复核：通过"（失败才说）、备份目录的绝对路径
   （「撤销」与状态栏的「备份与回滚」都能到同一份）、制度性解释（"下次同步不会再把它拉回来"这类，
   至多留一句）。其余几项折成一句"另有：A、B、C。"，不逐项各占一句——一次什么都碰上的同步曾经报到
-  187 字，现在 99 字以内（`logic/syncNotice.ts`，`test/sync-notice.test.ts` 钉住）。没有信息量的
+  187 字，现在 99 字以内（`operations/sync/syncNotice.ts`，`test/client/operations/sync/sync-notice.test.ts` 钉住）。没有信息量的
   分句整句不出现：删远端时"删掉 0 个包（0 字节）"、同步时"拉取 0 条"，都不摆。
 - **常驻说明句（`dsm-hint`）不超过两行**：面板开头、设置项下面那些解释各一句、50 字上下（同步那一句
   121 字压到 52、自动同步那句 123 字压到 47）；细节去「说明」页的问答里看。
 - 主栏页标题右边依次是这枚同步状态、「?」（说明弹窗）、「刷新」（重读 `/meta` + `/state`）与「插件设置」
   （跳插件页，宿主 `pluginNavigation.openBundle(包名)`）。四枚都是页面级入口，与标题同排。
-- 插件页那一格是**分组设置**的形状，照官方 `dsh-context` 那张配置卡（
-  `src/client/components/settingsCard.tsx`）：一组一个 16px/600 的组标题，组里一行一件事——标签
+- 插件页那一格是**分组设置**的形状，照官方 `dsh-context` 那张配置卡：一组一个 16px/600 的组标题，组里一行一件事——标签
   14px 与它的说明 12px 在左、控件靠右（输入框固定 320px，不随窗口拉成长条）；组与组之间一条
   0.5px 的发丝线。控件外观仍归官方控件库，本页只写摆位。
 - 密码那一行也走同一个形状：`type=password` 的官方 `Input` + 标签旁边一枚官方 `Tag`（已配置 /
@@ -158,8 +157,8 @@
     脚注清单（`dsm-planNotes`），不再与结论混成一行同款的灰字。段内节奏 12px（`dsm-planBody`）。
   - 落地段：标题「同步中…」，正文是进度块，底栏「转到后台 / 同步中…」（那一枚禁用）。**从状态栏那格
     「同步中 3/7」点进来时也是这一段**，只要那一趟还在跑——那一格说的就是这一趟，点进来却只看到
-    「上次同步」和一枚按不动的「同步」，是实测过的现象（判据见 [syncStage.ts](../src/client/logic/syncStage.ts)，
-    `test/sync-stage.test.ts` 逐支钉着）。跑完自动回到面板段，结论在那里说；认领来的那一趟没有逐条
+    「上次同步」和一枚按不动的「同步」，是实测过的现象（判据见 [syncStage.ts](../src/client/operations/sync/syncStage.ts)，
+    `test/client/operations/sync/sync-stage.test.ts` 逐支钉着）。跑完自动回到面板段，结论在那里说；认领来的那一趟没有逐条
     事件，落地段改说那句"这一页看不到逐条进度"。
 - 「备份与回滚」是**面板类**：正文一行工具（刷新），清单上的恢复 / 回滚走行内 `sm`，没有底栏。宽度沿用它们原来在页面上的可读宽度，一个字不用重排；关掉等于
   卸载，弹窗里那份计划随之清掉。
@@ -220,7 +219,7 @@
   标题才落在同一个左缘上，表头「标题」也对得齐。
   「项目」那一列在册项目写工作区标题、没登记的写路径——平铺之后它是"这条属于哪个目录"的唯一出处。
 - 表头三列可点着排（标题 / 大小 / 时间），默认时间从新到旧；**表头吸顶**（`position: sticky`），
-  滚的是列表自己。排序只改看，不写盘；比较与筛选在 `logic/manageRows.ts`，`test/manageRows.test.ts` 直接测。
+  滚的是列表自己。排序只改看，不写盘；比较与筛选在 `operations/manage/manageRows.ts`，`test/client/operations/manage/manageRows.test.ts` 直接测。
 - **左栏的项目树**：`全部项目` + 每个项目（顶层会话条数：子智能体折在父行下面，不算进去；父在别处的子智能体自己占一行，照旧算一条）。点项目名 = 只看它；鼠标停在项目行上出现
   勾选框 = 整组勾选，作用面与卡头「全选」一致（筛出来的那些），勾了一部分画横杠；这个项目在当前
   视图里没有可勾的行时，勾选框不画。筛选标签在左栏底部，搜索框在卡头；筛选标签条数按整库算，
@@ -268,8 +267,8 @@
 所以它们共用一套形状，不做成四扇窗口。
 
 1. **确认**：就是 §2.4 的确认弹窗（计划 / 账目与「取消 / 确认」）。它只负责"要不要做"。
-2. **执行中**：按下确认之后换成**状态窗**（[RunDialog.tsx](../src/client/components/RunDialog.tsx)）：
-   标题说这件事正在做（「正在删除」），正文是进度块（[ProgressBlock.tsx](../src/client/components/ProgressBlock.tsx)）
+2. **执行中**：按下确认之后换成**状态窗**（[RunDialog.tsx](../src/client/shared/ui/RunDialog.tsx)）：
+   标题说这件事正在做（「正在删除」），正文是进度块（[ProgressBlock.tsx](../src/client/shared/ui/ProgressBlock.tsx)）
    加上这件事自己那句说明（"删除先备份再删，中断了这份备份就在「备份与回滚」里"），底栏是「转到后台」与
    一枚按不动的动作键。第一条进度还没到之前正文只有一句「正在准备…」，不画一条 0/0 的进度条。
 3. **转到后台**：执行中点「转到后台」或标题栏那枚 ×，窗口关掉，活儿在宿主那边继续跑。它的进度与结论
@@ -278,17 +277,17 @@
    已经跑完就直接落在结果页。**执行中关窗不是取消**：这一版没有中途停下的入口，用户看到的字也不该
    让他以为停了。
 4. **结果**：同一个窗口换成结果页（标题「删除完成」）：一句结论（成功色或错误色），需要的话跟着
-   「没做到 N 条」清单（[ProblemsBlock.tsx](../src/client/components/ProblemsBlock.tsx)）、"需重启才生效"
+   「没做到 N 条」清单（[ProblemsBlock.tsx](../src/client/shared/ui/ProblemsBlock.tsx)）、"需重启才生效"
    那句、以及「撤销」。撤销只在"这件事留下了能回退的备份"时出现，点了先收掉结果页、再打开
    「备份与回滚」指着那份备份。底栏**只剩一枚「完成」**。
 5. **完成**：按它（或关掉窗口）收掉结论，状态栏那一格随之消失，回到页面；下次再进来是普通的面板。
 
 同步那一面是同一个形状，只是多一段计划：面板（状态与工具）→ 计划（三张表）→ 执行中 → 结果。
-它的执行中与结果都在同一扇 `WorkDialog` 里换段（见 [syncStage.ts](../src/client/logic/syncStage.ts)），
+它的执行中与结果都在同一扇 `WorkDialog` 里换段（见 [syncStage.ts](../src/client/operations/sync/syncStage.ts)），
 结果页的标题是「同步完成」，正文是一句结论加「撤销」。**跑完不回面板段**：结论塞在面板顶上一条绿色
 横幅里时，用户还得自己找下一步，而"后台同步结束：…"这种话在状态栏、横幅、同步面各说一遍就没人读了。
 
-状态放在客户端内存里（[runJob.ts](../src/client/logic/runJob.ts)、[syncJob.ts](../src/client/logic/syncJob.ts)），
+状态放在客户端内存里（[runJob.ts](../src/client/operations/manage/runJob.ts)、[syncJob.ts](../src/client/operations/sync/syncJob.ts)），
 所以**刷新整个页面就没了**——宿主那边照旧跑完，但这一份内存是新的。后台同步例外：它那一趟能从
 `GET /panel/events` 认领回来（只剩"跑没跑、搬了几条"）。
 
@@ -296,7 +295,7 @@
 **1080**（摆表或两面：同步面、备份与回滚、导出面）。哪一档由"这条流程里最宽的那一段"决定，所以
 同步是 1080 全程（计划段那三张表要这个宽度，面板段与结果段跟着它，不再"面板 640 → 计划 1080 →
 结果 640"来回跳）；删除、迁移、重算名称是 640 全程；从「备份与回滚」（1080）发起的回滚/恢复、从
-同步面发起的整理远端都停在 1080（[runJob.ts](../src/client/logic/runJob.ts) 的 `RunState.wide`）。
+同步面发起的整理远端都停在 1080（[runJob.ts](../src/client/operations/manage/runJob.ts) 的 `RunState.wide`）。
 这一条是量出来的返工：同一件事的窗口先宽后窄，读起来像换了一件事。
 
 ## 3. 排版
@@ -363,7 +362,7 @@
 
 - 颜色只用宿主 Theme 检查面列出的 `--dsw-alias-*`，每条声明都带中性回落值：
   `var(--dsw-alias-token, fallback)`。检查面没有的两枚例外（`label-tertiary`、
-  `settings-card-stroke`）登记在 `test/styles.test.mjs`，不在别处再列一份。
+  `settings-card-stroke`）登记在 `test/plugin/styles.test.mjs`，不在别处再列一份。
 - `state-*` 色是指示色，不裸当文字色；状态文字要先和 `label-primary` 兑一下（见 `.dsm-warn` /
   `.dsm-error` / `.dsm-ok`）。
 - 主题切换只换 token，不换布局；深色下背景三级可能同色，层次不能只靠底色差。
@@ -393,7 +392,7 @@
 
 ## 7. 文案
 
-- 字典在 `src/client/logic/locales.ts`，`zh` 是键集真源，`en` 由 `LocaleDictOf` 逐键核；少键 / 多键 /
+- 字典在 `src/client/shared/i18n/locales.ts`，`zh` 是键集真源，`en` 由 `LocaleDictOf` 逐键核；少键 / 多键 /
   写错键都是编译错误。组件从框架 props 拿 `t`，不自己 inject，不留中文兜底。
 - 键名点分；通用词（取消 / 关闭 / 保存）复用宿主 `common` 命名空间。
 - 术语照 [glossary.md](glossary.md) 那张表写：哪个词是官方的、别写什么、出处在哪都在那里，这份规格
@@ -405,7 +404,7 @@
 
 - 长动作（迁移、同步、导入、删除、回滚、整理远端、重算名称）走逐条进度：确认之后进状态窗，进度块在
   正文里，不转圈等一次性结果；跑完在同一个窗口里换成结果页（见 §2.5）。
-- 进度块（弹窗里与状态栏旁边那面里是同一个，见 [ProgressBlock.tsx](../src/client/components/ProgressBlock.tsx)）
+- 进度块（弹窗里与状态栏旁边那面里是同一个，见 [ProgressBlock.tsx](../src/client/shared/ui/ProgressBlock.tsx)）
   自上而下四行：那句"做到哪儿了" → 进度条 → 正在处理的那一条（12/18 三级色、单行省略、完整名字挂
   `title`）→ 这句动作自己的说明。块内节奏 6px，用容器的 `gap` 表达，行上的 `<p>` 外边距归零——浏览器
   默认的 1em 上下会让这四行一会儿贴住、一会儿隔开一截。
@@ -414,7 +413,7 @@
   3/7」，跑完 12 秒内「同步完成 · 2 条」或「同步失败」，点一下开同步那一面；字节、正在处理的那条
   会话、失败原因都在那一面里说（认领来的那趟由页面把那句话递过去）。
 - 关掉窗口不停手：执行中那枚是「转到后台」（关掉窗口、活儿照跑），进度与结论搬到状态栏那一格——它
-  挂在**页面**这一级（状态在 `logic/runJob.ts` / `logic/syncJob.ts` 的模块级 store 里），开别的弹窗、
+  挂在**页面**这一级（状态在 `operations/manage/runJob.ts` / `operations/sync/syncJob.ts` 的模块级 store 里），开别的弹窗、
   关掉窗口再回来都还在。点那一格回到同一扇窗，已经跑完就直接是结果页。这是所有写盘动作共同的一条，
   不再只有同步有。
 - 需要重启这类坏消息在确认前先说，落地后只在真的需要重启时留一条 warn 横幅；成功不要再叠一遍。
@@ -429,9 +428,9 @@
 pnpm typecheck && pnpm build && pnpm test && pnpm check:package
 ```
 
-- `test/styles.test.mjs` 是样式规格的可执行部分：token、字号、页头、卡片几何、间距节奏、弹窗正文层、
+- `test/plugin/styles.test.mjs` 是样式规格的可执行部分：token、字号、页头、卡片几何、间距节奏、弹窗正文层、
   标签不折行。改一条规格就同一次改这里。
-- `test/client.test.mjs` 是结构与行为的可执行部分：控件来源、动作位置、选行工具、入口、弹窗流程。
+- `test/plugin/client.test.mjs` 是结构与行为的可执行部分：控件来源、动作位置、选行工具、入口、弹窗流程。
 - 界面改动在真实 dev GUI 里量 `getComputedStyle` / `getBoundingClientRect`，深浅两套主题各看一遍；
   不推算色值，不凭截图猜间距。
 - 验收用的临时夹具（假会话等）用完立刻删干净，并在报告里写明造过什么、清掉了没有。
@@ -440,14 +439,14 @@ pnpm typecheck && pnpm build && pnpm test && pnpm check:package
 界面改动自查：
 
 - [ ] 控件全部来自官方原语，没有 `variant="ghost"`，主操作只有一枚。
-- [ ] 没有检查面之外的颜色 token；新增例外已登记进 `test/styles.test.mjs`。
+- [ ] 没有检查面之外的颜色 token；新增例外已登记进 `test/plugin/styles.test.mjs`。
 - [ ] 块间距挂在直接拥有子元素的那一层，已在 DOM 里量过相邻块的 `top` / `bottom`。
 - [ ] 字号落在 §3 的几档里；次要文字同时是 12/18，不只是换颜色。
 - [ ] 窄列放短标签，整句在 `title`；不可用动作说明了原因与出路。
 - [ ] 深浅主题各看一遍；需要重启之类的坏消息在确认前说出来。
 - [ ] 写盘动作走完四段（确认 / 执行中 / 结果 / 完成）：结果页底栏只有一枚「完成」，状态栏那一格能回到
       同一扇窗；执行中关窗＝转后台，没有"取消"。
-- [ ] 改动了哪条规格，就同一次改了 `test/styles.test.mjs` / `test/client.test.mjs` 里对应的断言。
+- [ ] 改动了哪条规格，就同一次改了 `test/plugin/styles.test.mjs` / `test/plugin/client.test.mjs` 里对应的断言。
 
 ## 10. 规格索引
 

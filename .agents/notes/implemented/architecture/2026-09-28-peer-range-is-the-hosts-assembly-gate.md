@@ -33,6 +33,6 @@ rc（`^0.2.0-rc.1` 收得下 `0.2.1-rc.1`，收不下 `0.3.0-rc.1`，换 minor �
 
 - 真遇到改名删导出，`Slot` 条目会渲染成一个空 `div`（控制台里是 `slot entry crashed in '<slot>'`），
   使用者看到的是空白而不是错误——所以这道门是唯一的拦，不能只靠「编译期能发现」。
-- 升级宿主代时必须同时改 peer 范围与 `devDependencies`；`test/manifest.test.mjs` 核的是**声明**：
+- 升级宿主代时必须同时改 peer 范围与 `devDependencies`；`test/plugin/manifest.test.mjs` 核的是**声明**：
   拿宿主自己的 `evaluatePluginCompatibility` 走一遍 `package.json`，要求它接受
   `devDependencies` 装的那条版本线、又不接受更早的宿主。

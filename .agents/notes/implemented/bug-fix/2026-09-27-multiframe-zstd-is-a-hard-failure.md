@@ -19,7 +19,7 @@ Status: implemented
 
 - 解码器由调用方注入（`DecodeAll`），核心层自己**不挑**解码器；
 - `assertMultiFrameAware(decodeAll)` 构造两个 raw 帧、期望读回 `"AB"`，只解首帧的解码器会让它抛错；
-- 回归用例里**直接用 `node:zlib` 验证这条守卫确实会拒绝它**（`test/zstd-frame.test.ts`）。
+- 回归用例里**直接用 `node:zlib` 验证这条守卫确实会拒绝它**（`test/shared/log/zstd-frame.test.ts`）。
 
 ## Alternatives considered
 

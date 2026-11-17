@@ -37,5 +37,5 @@ Status: implemented
 
 - 一次推送的 MKCOL 请求从 2N 次降到 2 次（N 为这一轮要推的包与索引数），远端日志里不再每个文件顶着
   两行建目录。
-- `test/dav.test.ts` 钉住两条：同一客户端里重复 `ensure()` 只发一次 MKCOL；同一目录连续 `put()` 的
+- `test/operations/sync/dav.test.ts` 钉住两条：同一客户端里重复 `ensure()` 只发一次 MKCOL；同一目录连续 `put()` 的
   请求序列恰好是「两次 MKCOL + 三次 PUT」。

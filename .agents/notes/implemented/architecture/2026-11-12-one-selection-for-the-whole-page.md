@@ -27,10 +27,10 @@ Status: implemented
 - **状态栏那枚入口带份数**：一次 `/backups` 的目录列举，在挂载、手动刷新、以及任一弹窗关掉之后各读一次；
   0 份或还没读到时只写名字（不画"0 份"）。
 - **同步结论落盘**：`<DSH_HOME>/dsh-session-manager/state.json` 里记一条
-  `{ sync: { at, ok, pulled, pushed, error? } }`（见 [sync-state.ts](../../../../src/sync-state.ts)），
+  `{ sync: { at, ok, pulled, pushed, error? } }`（见 [sync-state.ts](../../../../src/operations/sync/sync-state.ts)），
   `/meta` 的同步那一栏带上 `lastRun`。页头那枚状态按"证据新鲜程度"选句子：这一趟正跑着 → 这一进程里
   刚跑完 → 磁盘上那一条（多久以前 / 失败（多久以前））→ 配置事实（自动推送 / 未配置）。
-  "多久以前"是纯函数（[relativeTime.ts](../../../../src/client/logic/relativeTime.ts)），档位单独测。
+  "多久以前"是纯函数（[relativeTime.ts](../../../../src/client/shared/logic/relativeTime.ts)），档位单独测。
 - **只记手动同步**：自动推送那一轮只推不拉，混进"上次同步"会让"拉 0 条"读成失败；它跑着的结果仍然由
   页面顶上那条横幅说。
 

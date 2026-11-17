@@ -25,13 +25,13 @@ Status: implemented
 
 ## Decision
 
-**定位不扫库。** `src/discovery.ts` 的 `locateSession()`：会话目录名就是 `encodeSegment(id)`（与宿主
-同一套，见 `src/paths.ts`），所以走一遍项目目录、找同名目录、只读它自己那一份日志头就够——本机 28 个
+**定位不扫库。** `src/shared/library/discovery.ts` 的 `locateSession()`：会话目录名就是 `encodeSegment(id)`（与宿主
+同一套，见 `src/shared/paths.ts`），所以走一遍项目目录、找同名目录、只读它自己那一份日志头就够——本机 28 个
 项目目录、1295 个会话，实测几毫秒。`GET /transcript` 与 `GET /sync/diff` 都改走它。目录名不是 id 的
 编码时（手改过的库）退回整库扫一遍，"找得到"这件事不依赖目录命名这个约定。
 
-**同一份日志连着读多页时只解压一次。** `src/log-text-cache.ts` 的 `createLogTextCache()` 留一份切好的
-行：判据是 `路径 + size + mtimeMs + 压缩方式`，命中时连文件都不读。解压走 `src/log-decode.ts` 已有的
+**同一份日志连着读多页时只解压一次。** `src/shared/log/log-text-cache.ts` 的 `createLogTextCache()` 留一份切好的
+行：判据是 `路径 + size + mtimeMs + 压缩方式`，命中时连文件都不读。解压走 `src/shared/log/log-decode.ts` 已有的
 分块版本（块与块之间让出事件循环），整份解压不再把宿主主线程按住。只留一份（这一页同时只看一条会话），
 解开后超过 64M 字符的不缓存（文本是 UTF-16，一个字符两字节）。
 

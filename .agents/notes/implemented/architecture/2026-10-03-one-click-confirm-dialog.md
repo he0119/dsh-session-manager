@@ -9,8 +9,8 @@ Status: implemented
 内容推走。用户按第二下时，眼前的东西已经不在他刚才看的位置上。三个分页（会话 / 迁移 / 传输 / 同步）
 再加上「备份与回滚」里的回滚，一共五处都是这个形状。
 
-计划本身是**只读、便宜、可重复**的一次计算（`src/migrate.ts` 的 `apply:false`、`src/remove.ts` 的
-`mode: 'plan'`、`src/sync.ts` 的 `options.apply === false`）。用户真正要做的决定只有一个：「这份清单，
+计划本身是**只读、便宜、可重复**的一次计算（`src/operations/migrate/migrate.ts` 的 `apply:false`、`src/operations/remove/remove.ts` 的
+`mode: 'plan'`、`src/operations/sync/sync.ts` 的 `options.apply === false`）。用户真正要做的决定只有一个：「这份清单，
 做不做」。把"看清单"与"做决定"拆成两次点击、两个位置，就是把一个决定拆成了两件事。
 
 ## Decision
@@ -29,7 +29,7 @@ Status: implemented
 - **归档与导出不问**：归档走宿主能力、即时且可逆，导出只把已有字节打成包——分界线是"这一步会不会
   写盘、写了以后要不要后悔"。
 
-弹窗外壳是 `src/client/components/ConfirmDialog.tsx`（四个分页共用）：它走官方控件库的 `Modal`，
+弹窗外壳是 `src/client/shared/ui/ConfirmDialog.tsx`（四个分页共用）：它走官方控件库的 `Modal`，
 管遮罩、Escape、焦点归还与菜单叠层；计划由**调用方**取、正文由调用方画——"取哪一份计划"是那个动
 作自己的事，端点类型与清单结构也只在各页里。初始焦点给「取消」而不是主按钮
 （`data-modal-autofocus`）：确认键是这个弹窗里最重的动作，键盘用户不该因为对话框一出现
@@ -57,7 +57,7 @@ Status: implemented
 - 计划在弹窗打开之后才回来，用户可能已经取消：各页都用 `current === null ? current : …` 原地作废，
   否则一份晚到的计划会把已经关掉的弹窗**重新打开**。
 - 同步页的 `sync`（最后一次计划或结果）仍然留着：映射表的远端候选读它，关掉弹窗之后候选还得在。
-- 页面上的动作按钮只剩一个入口，`test/client.test.mjs` 钉住"关着弹窗时页面上没有『预演中…』"，
+- 页面上的动作按钮只剩一个入口，`test/plugin/client.test.mjs` 钉住"关着弹窗时页面上没有『预演中…』"，
   并逐个核弹窗的标题、正文与底部按钮。
 - 弹窗宽度按清单量（640px）：官方那张卡是 `min(380px, 100%)`，按"一句话 + 两个按钮"量的，装不下会话
   行与预演表。宽度用重复类名提一档特异性，免得跟宿主注入的官方样式比先后顺序。

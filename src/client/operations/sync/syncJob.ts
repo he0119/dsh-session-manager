@@ -1,0 +1,236 @@
+/**
+ * 一轮同步（拉取 + 推送）在界面这一侧的生命周期：关掉弹窗之后它还在跑，回到这一页还能看见。
+ *
+ * 为什么要有这么一份东西：落地是这一页最长的动作（一次整库同步要读远端索引、逐条走网络）。原先它挂在
+ * 同步弹窗那个组件上——弹窗一关、页签一切、"设置"窗口一关，那棵组件树就卸载了，进度与结果全丢；
+ * 而宿主那一侧的活儿还在继续（实测：客户端中途断开之后，服务端的 handler 照旧把整趟跑完）。用户看到
+ * 的却是"什么都没发生"，回来也只能靠自己猜。
+ *
+ * 所以把状态搬到**模块级**：组件挂不挂载都不影响它，谁渲染谁读。三件事：
+ *
+ * 1. 这一页发起的那一趟：走事件流，进度最细；
+ * 2. 关掉弹窗（「转到后台」）/ 切页签 / 关掉整个设置窗口：都不影响它，回来时状态栏那一格报进度，
+ *    点它回到同步那一面接着看；
+ * 3. 刷新了整个页面（或者从另一个页签发起）：那一趟还在宿主里跑，但这一份内存已经没了——于是从
+ *    **面板事件流**（`GET /panel/events` 上 `sync` 那一条）认领：宿主一有变化就推过来，这一页说"还在跑"，
+ *    跑完把"搬了几条"补上。
+ *
+ * 跑完之后结论留在 `done` 里，同步那一面据此摆**结果页**（见 [syncStage.ts](./syncStage.ts)）；用户按
+ * 「完成」才把它收掉（`dismiss()`）。
+ *
+ * 边界写在明处：**认领来的那一趟没有逐条进度，也没有完整结果**（宿主那边只留"跑没跑、搬了几条"），
+ * 细节要以发起它的那个页面为准。
+ *
+ * @module dsh-session-manager/client/operations/sync/syncJob
+ */
+
+import { applySync, type ProgressEvent, type SyncResponse, type SyncRoundStatus } from '../../api.ts'
+import { panelEvents } from '../../shared/logic/panelEvents.ts'
+import type { SyncDecision } from '../../api.ts'
+
+/** 一趟结束之后的结论。 */
+export interface SyncJobDone {
+  /** 这趟成没成。 */
+  ok: boolean
+  /**
+   * 这一页自己发起的那一趟带着完整结果（界面据此说已拉取 / 已推送、覆盖了几条、附件对象搬了几个）。
+   *
+   * 认领来的那一趟没有它——宿主只留下几条计数（见 `adopted`）。
+   */
+  result?: SyncResponse
+  /** 认领来的那一趟：宿主记下的几条计数（没有完整结果）。 */
+  adopted?: { pulled: number; pushed: number }
+  /** 失败原因（异常消息，或宿主事件流里那条 `error`）。 */
+  error?: string
+}
+
+/** 界面读的那一份状态。只读、每次变化换一个新对象（订阅者据此判"变了没有"）。 */
+export interface SyncJobSnapshot {
+  /** 现在有一趟在跑。 */
+  running: boolean
+  /** 在跑的这一趟不是这一页发起的（刷新之后认领来的）。 */
+  adopted: boolean
+  /** 这一趟从什么时候开始（宿主给的毫秒时间戳）；不知道就是 `null`。 */
+  startedAt: number | null
+  /** 最后一条进度事件；一条都还没收到就是 `null`。 */
+  progress: ProgressEvent | null
+  /** 刚结束、还没被界面取走 / 关掉的结论。 */
+  done: SyncJobDone | null
+}
+
+/** 一次落地的入口（生产上就是 `applySync()`；测试换成一个假的即可）。 */
+export type SyncJobApply = (
+  planId: string | undefined,
+  onProgress: (event: ProgressEvent) => void,
+  decisions: ReadonlyMap<string, SyncDecision> | undefined,
+  tidy: boolean | undefined,
+) => Promise<SyncResponse>
+
+/** 造一份 store 时给的依赖。 */
+export interface SyncJobDeps {
+  /** 真跑一趟。 */
+  apply: SyncJobApply
+  /**
+   * 订阅"后台有没有一趟在跑"（生产上是面板事件流上 `sync` 那一条）。
+   *
+   * 约定：订阅时立刻用**当下那一份**回调一次（不然"页面刚打开、那一趟已经跑了 20 秒"这种情形会漏），
+   * 之后每次变化再回调。
+   *
+   * @returns 退订。
+   */
+  watch: (listener: (status: SyncRoundStatus) => void) => () => void
+}
+
+/** 界面用的那几个口子。 */
+export interface SyncJob {
+  /** 现在这一份状态。 */
+  snapshot(): SyncJobSnapshot
+  /**
+   * 订阅状态变化。
+   *
+   * @param listener 每次变化调一次（拿到新快照）。
+   * @returns 退订函数（组件卸载时调）。
+   */
+  subscribe(listener: (snapshot: SyncJobSnapshot) => void): () => void
+  /**
+   * 开一趟落地。
+   *
+   * @param input 预演给的 `planId` 与这一趟的裁决；都没有就是"从零算一遍"。
+   * @returns 已经有一趟在跑时返回 `false`（这一趟没开）。
+   */
+  start(input: { planId?: string; decisions?: ReadonlyMap<string, SyncDecision>; tidy?: boolean }): boolean
+  /**
+   * 收掉结束结论（结果页上那枚「完成」，或者状态栏那一格自己超时收走）。正在跑的那一趟不受影响。
+   *
+   * 界面读的是 `snapshot().done`：结果页开着的时候它就在那儿，收掉之后才没有（见 `syncStage`）。
+   */
+  dismiss(): void
+  /**
+   * 接上宿主那一路状态（页面打开时调一次；重复调没有副作用）。
+   *
+   * 这一页自己发起的、正在跑的那一趟不会被它打乱：已经有主的那一份进度更细，不拿粗的盖掉它。
+   */
+  refresh(): void
+}
+
+/**
+ * 造一份同步任务状态。
+ *
+ * @param deps 落地入口与"那一趟跑到哪"的订阅口（订阅走页面那条长连接，见 `panelEvents.ts`）。
+ * @returns 那几个口子（见 {@link SyncJob}）。
+ */
+export function createSyncJob(deps: SyncJobDeps): SyncJob {
+  const listeners = new Set<(snapshot: SyncJobSnapshot) => void>()
+  let current: SyncJobSnapshot = { running: false, adopted: false, startedAt: null, progress: null, done: null }
+  /** 退订那一路状态（接上过一次就不再重订）。 */
+  let unwatch: (() => void) | null = null
+
+  const emit = (patch: Partial<SyncJobSnapshot>): void => {
+    current = { ...current, ...patch }
+    for (const listener of [...listeners]) listener(current)
+  }
+
+  /** 把宿主给的"跑完了"折成结论：有结果说结果，只有计数就说计数。 */
+  const finishAdopted = (last: SyncRoundStatus['last']): void => {
+    if (last === null) {
+      // 宿主那边没有留下结论（进程重启过）：如实说"这一轮结束了"，但不编一个数字。
+      emit({ running: false, adopted: false, startedAt: null, progress: null, done: { ok: true } })
+      return
+    }
+    emit({
+      running: false,
+      adopted: false,
+      startedAt: null,
+      progress: null,
+      done: {
+        ok: last.ok,
+        adopted: { pulled: last.pulled, pushed: last.pushed },
+        ...(last.error === undefined ? {} : { error: last.error }),
+      },
+    })
+  }
+
+  /**
+   * 宿主说"后台那一趟现在什么样"（面板事件流推过来的每一条）。
+   *
+   * 三种情形各走一条：还在跑（没主就认领、有主就更新进度）、跑完了（认领来的那一趟收尾）、
+   * 本来就没有（什么都不做——不能把上一次的旧结论重新摆出来）。
+   *
+   * @param status 宿主推来的那一条。
+   */
+  const applyStatus = (status: SyncRoundStatus): void => {
+    if (status.applying !== null) {
+      if (current.running) {
+        // 自己发起的那一趟进度更细（它自己那条请求带着），不拿这份粗的盖掉；认领来的那一趟才用它更新。
+        if (current.adopted) emit({ progress: status.applying.progress })
+        return
+      }
+      emit({
+        running: true,
+        adopted: true,
+        startedAt: status.applying.startedAt,
+        progress: status.applying.progress,
+        done: null,
+      })
+      return
+    }
+    if (current.running && current.adopted) finishAdopted(status.last)
+  }
+
+  return {
+    snapshot: () => current,
+    subscribe(listener) {
+      listeners.add(listener)
+      return () => {
+        listeners.delete(listener)
+      }
+    },
+    start(input) {
+      if (current.running) return false
+      // 新的一轮：上一轮的结论让位（不然横幅刚清掉又冒出来）。
+      emit({ running: true, adopted: false, startedAt: Date.now(), progress: null, done: null })
+      const onProgress = (progress: ProgressEvent): void => {
+        // 只认还在跑的那一趟：万一它已经结束（比如宿主那边立刻失败），迟到的进度不该把状态改回去。
+        if (!current.running) return
+        emit({ progress })
+      }
+      void deps.apply(input.planId, onProgress, input.decisions, input.tidy).then(
+        (result) => {
+          emit({ running: false, adopted: false, startedAt: null, progress: null, done: { ok: true, result } })
+        },
+        (cause: unknown) => {
+          emit({
+            running: false,
+            adopted: false,
+            startedAt: null,
+            progress: null,
+            done: { ok: false, error: cause instanceof Error ? cause.message : String(cause) },
+          })
+        },
+      )
+      return true
+    },
+    dismiss() {
+      emit({ done: null })
+    },
+    refresh() {
+      if (unwatch !== null) return
+      unwatch = deps.watch(applyStatus)
+    },
+  }
+}
+
+/**
+ * 这一页共用的那一份（模块级：组件卸载不影响它，见模块开头的说明）。
+ *
+ * 生产上直接用它；测试要换掉落地入口时用 {@link createSyncJob} 造一份自己的。
+ */
+export const syncJob: SyncJob = createSyncJob({
+  apply: (planId, onProgress, decisions, tidy) => applySync(planId, onProgress, decisions, tidy),
+  // 那一路状态挂在页面那条唯一的连接上（见 [panelEvents.ts](../../shared/logic/panelEvents.ts)）：订阅时先给当下那一份，
+  // 之后每变一次给一次。
+  watch: (listener) => {
+    listener(panelEvents.snapshot().sync)
+    return panelEvents.subscribe((snapshot) => listener(snapshot.sync))
+  },
+})

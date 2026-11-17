@@ -23,7 +23,7 @@ Status: implemented
 
 ## Decision
 
-加一把**进程内**的互斥锁（`src/remote-write.ts` 的 `createRemoteWriteGate()`），一个插件实例造一把，
+加一把**进程内**的互斥锁（`src/operations/sync/remote-write.ts` 的 `createRemoteWriteGate()`），一个插件实例造一把，
 五个入口共用：
 
 - **拿不到就不做，不排队**：`tryAcquire(label)` 返回 `undefined` 时，手动同步 / 整理回 409，模型工具

@@ -32,4 +32,4 @@ Status: implemented
   不能按组一刀切。
 - 「未分组」在这两页上因此是一枚**标签 / 筛选类别**，不是一个可整批带走的实体（外壳那一组可以横跨
   多个目录）——见 [「未分组」就是外壳那一组](../bug-fix/2026-09-28-ungrouped-means-the-sidebar-group.md)。
-- 顺序与边界（组间顺序、重复路径、空串 `cwd`、组内定序）在 `test/groups.test.ts` 里钉着。
+- 顺序与边界（组间顺序、重复路径、空串 `cwd`、组内定序）在 `test/client/shared/logic/groups.test.ts` 里钉着。

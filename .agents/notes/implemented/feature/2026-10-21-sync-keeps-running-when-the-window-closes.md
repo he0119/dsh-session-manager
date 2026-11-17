@@ -17,7 +17,7 @@ Status: implemented
 
 ## Decision
 
-**那一趟的状态从组件里搬到模块级**（`src/client/logic/syncJob.ts`）。组件挂不挂载都不影响它，谁渲染
+**那一趟的状态从组件里搬到模块级**（`src/client/operations/sync/syncJob.ts`）。组件挂不挂载都不影响它，谁渲染
 谁读：
 
 - **发起**：确认之后由 store 发请求，进度事件进 store；
@@ -70,10 +70,10 @@ Status: implemented
 - 刷新整个页面之后能认领到还在跑的那一趟，但没有逐条进度（只有宿主记下的最后一条）与完整结果。
 - 同一时间只允许一趟落地；第二趟拿到 409，界面那一侧由 store 直接拦住，宿主那边兜底。
 - 多出来的两份进程内存状态（正在跑的那一趟、最近一次的结论）各只有一条记录，宿主重启即清空。
-- 进度条与横幅复用了现有的 `ProgressBlock` 与 `.dsm-banner`，没有新增样式；`test/sync-job.test.ts`
-  钉 store 的七条行为，`test/web.test.ts` 钉状态端点与那道闸，`test/client.test.mjs` 钉忙碌时那枚
+- 进度条与横幅复用了现有的 `ProgressBlock` 与 `.dsm-banner`，没有新增样式；`test/client/operations/sync/sync-job.test.ts`
+  钉 store 的七条行为，`test/plugin/web.test.ts` 钉状态端点与那道闸，`test/plugin/client.test.mjs` 钉忙碌时那枚
   按钮不再是"取消"。
 - 自动推送那一轮的进度同样是"只回给发起者"，所以由节拍器把状态与之后的每条进度交给面板那条连接
-  （订阅者挂在节拍器上，一个宿主一个）；`test/auto-push.test.ts` 钉"没在跑 / 跑到第几条 / 跑完留结论"
-  三段与"订阅之后一条条推、退订就不再推"，`test/web.test.ts` 钉面板流上那一条的形状（结论只回计数
+  （订阅者挂在节拍器上，一个宿主一个）；`test/operations/sync/auto-push.test.ts` 钉"没在跑 / 跑到第几条 / 跑完留结论"
+  三段与"订阅之后一条条推、退订就不再推"，`test/plugin/web.test.ts` 钉面板流上那一条的形状（结论只回计数
   不回计划）与"连接断了就退订"。

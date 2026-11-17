@@ -15,7 +15,7 @@ Status: implemented
 
 ## Decision
 
-共用的边界划在**一行的解剖结构**与**列表的框**上，只在 `src/client/components/sessionList.tsx`
+共用的边界划在**一行的解剖结构**与**列表的框**上，只在 `src/client/shared/ui/sessionList.tsx`
 里写一遍。各页自己的东西留在各页：会话页的归属那一格与删除计划、迁移的目标目录字段与备份回滚——
 分组、标签、筛选与勾选**每个列整库的分页各接一遍同一条线**，今天接这条线的是「会话」与「传输」。
 

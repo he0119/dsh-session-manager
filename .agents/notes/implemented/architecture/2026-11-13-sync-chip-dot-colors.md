@@ -18,7 +18,7 @@ Status: implemented
 
 ## Decision
 
-五档，判据全在 `src/client/logic/syncChipDot.ts`（纯函数，矩阵在 `test/sync-chip-dot.test.ts`），次序即
+五档，判据全在 `src/client/operations/sync/syncChipDot.ts`（纯函数，矩阵在 `test/client/operations/sync/sync-chip-dot.test.ts`），次序即
 优先级：
 
 | 点 | 什么时候 | 官方状态 |
@@ -31,7 +31,7 @@ Status: implemented
 
 三处配套：
 
-1. **落盘记录加两列**（`src/sync-state.ts` 的 `SyncRunRecord`）：`problems`（宿主原话，失败那趟不写）与
+1. **落盘记录加两列**（`src/operations/sync/sync-state.ts` 的 `SyncRunRecord`）：`problems`（宿主原话，失败那趟不写）与
    `takesEffect`（宿主当时的判断）。旧版本写的记录没有这两项，读的时候当"没有遗留"，不迁移。
 2. **"还要不要重启"不落盘**：`lastRunView(run, bootedAt)` 拿记录的 `at` 与这个进程的启动时刻比——记录跑在
    这个进程里就是还没重启，比进程还早就说明中间重启过、那趟早生效了。落盘的话它会永远黄下去。

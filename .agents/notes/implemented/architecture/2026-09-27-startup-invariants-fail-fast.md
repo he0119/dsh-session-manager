@@ -36,5 +36,5 @@ Status: implemented
 ## Consequences
 
 - `reHome()` 的前后校验让「迁移完成」与「迁移留下了合法状态」是同一件事。
-- 注册表被外部改坏时迁移会拒绝执行，而不是把坏状态搬着走——`test/registry.test.ts` 把四条不变式
+- 注册表被外部改坏时迁移会拒绝执行，而不是把坏状态搬着走——`test/shared/registry.test.ts` 把四条不变式
   逐类钉住。

@@ -22,7 +22,7 @@ Status: implemented
 
 一份地基，六个动作共用（迁移 / 删除 / 回滚 / 导入 / 归档 / 扫库，外加原来的同步）：
 
-- **宿主侧一个类型**：`src/types.ts` 的 `ProgressEvent { phase, total, done, id?, label? }` 与
+- **宿主侧一个类型**：`src/shared/types.ts` 的 `ProgressEvent { phase, total, done, id?, label? }` 与
   `ProgressReporter`。同步原来那份 `SyncProgress` 就是它（`export type SyncProgress = ProgressEvent`），
   两处不再各有一份形状。
 - **宿主侧一个出口**：`src/web.ts` 的 `streamResult(res, run)`。`/state`、`/migrate`、`/delete`、
@@ -41,10 +41,10 @@ Status: implemented
   期间就画满，正读成"已经做完了"。
 - **`done` 是"已经做完的条数"**，事件发在**开始处理下一条之前**，所以界面说"正在处理第 `done + 1` 条"。
   分母是"要做的条数"，不是"成功的条数"：某一条失败时进度照样走到底，失败那条在结论的 `problems` 里。
-- **浏览器半侧一份实现**：`src/client/logic/eventStream.ts`（原 `syncStream.ts`，改成通用）+ `src/client/api.ts`
+- **浏览器半侧一份实现**：`src/client/shared/logic/eventStream.ts`（原 `syncStream.ts`，改成通用）+ `src/client/api.ts`
   的 `readEventStream(response, onProgress, what)`，六个端点共用；按 `content-type` 分流，不是事件流的
   退回一次性 JSON（流开始之前就被挡下的错仍是 JSON + 状态码）。渲染只有一处：
-  `src/client/components/ProgressBlock.tsx`（原长在 `SyncPanel` 里），`progressTextOf` 按 `phase` 选
+  `src/client/shared/ui/ProgressBlock.tsx`（原长在 `SyncPanel` 里），`progressTextOf` 按 `phase` 选
   `progress.*` 文案，**认不出来的段名退到「正在处理…」**（宿主比界面新时不至于画出一片空白）。
 - **进度摆在动作自己的那个弹窗正文里**：落地那一段把计划表换掉（计划表说的是"将要"，这时候已经过期
   了），标题从「将要迁移」换成「迁移中…」，取消键在落地期间禁用（与同步同一条规矩）。归档与扫库没有
@@ -53,7 +53,7 @@ Status: implemented
   回退"，导入是"只增不覆盖、再导一次"。
 - **`/export` 一个字都不改**：它的响应体**就是产物本身**（250 条 / 70.9 MB 实测 1.45 秒），改事件流
   只能把整包字节塞进 JSON（base64 多 33% 字节、双份内存）。它仍然是二进制一次性响应，
-  `test/web.test.ts` 钉住这条。
+  `test/plugin/web.test.ts` 钉住这条。
 - **对外契约变了**："计划不 ok"（源目录不存在、会话不在库里、包里的会话都已在库里、宿主拒了一条归档）
   从 409 变成 200 + `result` 里的 `ok: false`——流一旦开始，HTTP 状态早就发出去了。正文（`preview` /
   `problems` / `failed`）与原来那份一字不差，界面读的就是它。
@@ -111,12 +111,12 @@ Status: implemented
 - 逐条改写首帧是迁移唯一的成本（99.6%）：进度条在那一段会**慢慢**走（47 条要走 45 秒），这不是卡住。
   要更快得换压缩实现或只重写首帧所在的第一个 zstd 帧，那是另一件事。
 - `/export` 是唯一没有进度的动作，也是唯一一次性响应：它没有"第几条"可讲（一个包一个响应体）。
-- 事件形状与同步那条完全一致，所以 `test/web.test.ts` 里逐端点核的是**段名与分母的顺序**、
-  `test/client.test.mjs` 核的是"四个弹窗正文真的接上了进度块"、`total: 0` 不画条、认不出来的段名退到
+- 事件形状与同步那条完全一致，所以 `test/plugin/web.test.ts` 里逐端点核的是**段名与分母的顺序**、
+  `test/plugin/client.test.mjs` 核的是"四个弹窗正文真的接上了进度块"、`total: 0` 不画条、认不出来的段名退到
   「正在处理…」。
 - "进度到底会不会动"另有两处**测试里钉得住**的断言（时序类断言进不了测试：跨进程 + 慢机器上必飘）：
-  一条是 `test/web.test.ts` 里用真 `node:http` 服务器量"每条事件写完 socket 里不留缓冲"（去掉
-  `uncork()` 当场红），一条是 `test/client.test.mjs` 里从 SSE 字节一路核到"宿主报的那条进度真的
+  一条是 `test/plugin/web.test.ts` 里用真 `node:http` 服务器量"每条事件写完 socket 里不留缓冲"（去掉
+  `uncork()` 当场红），一条是 `test/plugin/client.test.mjs` 里从 SSE 字节一路核到"宿主报的那条进度真的
   进了界面状态、收尾时又清回 null"（去掉面板传给 api 的那个回调当场红）。
 - 界面复用已有的 `.dsm-progress` / `.dsm-hint` / `.dsm-rowTitle`，没有新增颜色或尺寸，也没有新增
   `styles.ts` 里的声明（深浅两套主题的实测值见同步那篇）。
@@ -124,4 +124,4 @@ Status: implemented
 - 归档那条进度没有弹窗，勾一整页时它摆在动作行下面；每一条一次宿主往返，失败逐条兜住、不影响其余
   （失败原因仍在结论里）。
 - 段名与文案是编译期绑定的：`progress.*` 少一个键 `pnpm typecheck` 就红（`en` 由 `LocaleDictOf` 逐键核），
-  多一个键同样红；运行期那一遍在 `test/client.test.mjs`（页面问到的每个键都在字典里）。
+  多一个键同样红；运行期那一遍在 `test/plugin/client.test.mjs`（页面问到的每个键都在字典里）。

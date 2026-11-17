@@ -56,7 +56,7 @@ Status: implemented
 
 ## Consequences
 
-- 两处钉着：`test/styles.test.mjs` 查 `.dsm-root` 与 `.dsm-hint` 的字号与行高；`test/client.test.mjs`
+- 两处钉着：`test/plugin/styles.test.mjs` 查 `.dsm-root` 与 `.dsm-hint` 的字号与行高；`test/plugin/client.test.mjs`
   里"动作页每段说明不超过两行"那条上限按新排版重算了容量（卡片正文宽 534px、说明句 12px，一行约 44
   个汉字 / 87 个字符，两行的容量 88 / 174，两个上限值贴着它）。
 - 会话列表那两级的**字号差没了**：组头与会话行现在都是 14px（组头 600 + 主文字色，行 400 + 次要色，

@@ -21,7 +21,7 @@ Status: implemented
 ## Decision
 
 「摆哪一段」改成两个输入一起判：这一页自己的意图（`dialog`）与宿主那边跑没跑（`job.running`）。
-规则抽成纯函数 `syncStage(local, running)`（`src/client/logic/syncStage.ts`）：
+规则抽成纯函数 `syncStage(local, running)`（`src/client/operations/sync/syncStage.ts`）：
 
 - `local` 非空就跟它走——这一页正在算计划，不能被后台那一趟拽走（那是用户当下在看的东西）；
 - `local` 为空而 `running` 为真：直接摆落地段，进度块就在那里；
@@ -48,5 +48,5 @@ Status: implemented
 - 认领来的那一趟点开是「正在同步」+ 那句说明（没有逐条进度可画），跑完自动回到面板段并补上条数；
   不再出现"停在正在同步、按钮永远按不动"的死状态。
 - 跑着时从状态栏进来，弹窗宽度跟着落地段走（1080），关掉再开还是这一段，直到那一趟结束。
-- 分支判定在 `test/sync-stage.test.ts` 里逐支钉着；"跑着"这种状态在冒烟夹具里种不出来，所以只钉
-  纯函数那一层（与 `test/sync-job-label.test.ts` 同一条理由）。
+- 分支判定在 `test/client/operations/sync/sync-stage.test.ts` 里逐支钉着；"跑着"这种状态在冒烟夹具里种不出来，所以只钉
+  纯函数那一层（与 `test/client/operations/sync/sync-job-label.test.ts` 同一条理由）。

@@ -28,7 +28,7 @@ Status: implemented
   （浅 5.8:1 / 深 10.4:1），state 色只留在边框和一层淡填充上；非当文字色不可时就
   `color-mix(in srgb, …, 55%, label-primary)` 兑一下——亮色主题往深里走、深色主题往浅里走，
   同一条声明在两套主题里各自走向可读的一侧（实测 warn 5.57:1 / error 9.75:1 / ok 5.82:1）。
-- **名单外的 token** 要登记进 `test/styles.test.mjs` 的例外表并写明理由（现有两例：
+- **名单外的 token** 要登记进 `test/plugin/styles.test.mjs` 的例外表并写明理由（现有两例：
   `label-primary-foreground`、`label-tertiary`）。
 
 ## Alternatives considered
@@ -44,7 +44,7 @@ Status: implemented
 
 ## Consequences
 
-- 五条纪律由 `test/styles.test.mjs` 机械核对（颜色必须走 token、token 必须在名单里、token 必须带回落
+- 五条纪律由 `test/plugin/styles.test.mjs` 机械核对（颜色必须走 token、token 必须在名单里、token 必须带回落
   值、标签不许折行、state 色不许裸当文字色），反事实都验过会失败。
 - **对比度推不出来**：它取决于宿主**当时**给的那套 token 值。上面这些比值是在浏览器里量的——
   `agent-browser` 打开真实的设置页，逐个元素取 `getComputedStyle` 的前景色，背景色沿祖先链一路

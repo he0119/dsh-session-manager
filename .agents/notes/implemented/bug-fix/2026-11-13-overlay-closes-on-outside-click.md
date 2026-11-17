@@ -48,8 +48,8 @@ Status: implemented
   display:none）。
 - 浮动面板打开时，列表上的一切点击都先变成"收起"；要选行、要看详情，收起之后再点。
 - 960–1180 那一档点左栏不会收起右栏（那一层不盖左栏），选项目照旧一下就成。
-- 结构由 `test/client.test.mjs` 钉住：那层空白挂在主栏里、不在工作台那一层，`aria-hidden`，点它
-  一次写下两处状态（左栏收起、右栏清空）。显形的两条规则、定位与 z-index 由 `test/styles.test.mjs`
+- 结构由 `test/plugin/client.test.mjs` 钉住：那层空白挂在主栏里、不在工作台那一层，`aria-hidden`，点它
+  一次写下两处状态（左栏收起、右栏清空）。显形的两条规则、定位与 z-index 由 `test/plugin/styles.test.mjs`
   钉住。
 - 真实 dev GUI 里量到的（工作台宽 796px，窗口 900）：两层浮动面板任一打开时那层空白的矩形与主栏逐像素
   相同（80, 62, 796, 667），计算值 `display: block`、`position: absolute`、`z-index: 5`、背景

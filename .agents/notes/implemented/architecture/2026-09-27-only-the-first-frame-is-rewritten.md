@@ -29,8 +29,8 @@ Status: implemented
 
 **只读用途走浅路**（`splitFirstFrameFast` + `relocateHeaderCwdShallow`）：不整篇解码，只解候选前缀，
 也不做那步等式自校验。省得掉的理由是等式在这里多余——截断帧会被解码器拒绝（fzstd 报
-`unexpected EOF`，`test/zstd-frame.test.ts` 把这条前提钉住），所以"前缀能解出、且以换行结尾"已经
-够判定。两条路的**产出逐字节相同**：`test/session-log.test.ts` 逐份比对两者的字节，`test/sync.test.ts`
+`unexpected EOF`，`test/shared/log/zstd-frame.test.ts` 把这条前提钉住），所以"前缀能解出、且以换行结尾"已经
+够判定。两条路的**产出逐字节相同**：`test/shared/log/session-log.test.ts` 逐份比对两者的字节，`test/operations/sync/sync.test.ts`
 用旧实现冻结下来的 sha256 钉住指纹口径。
 
 落盘那条路仍然走严格路：`relocateHeaderCwd` 多花的时间买的是"写出去的字节整体可解码"。

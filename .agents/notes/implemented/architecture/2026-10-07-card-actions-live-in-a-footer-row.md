@@ -31,7 +31,7 @@ Status: implemented
 - 据此的两处改动：传输页的「导出所选」从卡头挪到列表下方的动作行；同步页拆成两张卡——「WebDAV 同步」
   （标题 + 远端 + 一句话 + 动作行里的「同步」）与「同步设置」（表单，它自己的保存 / 放弃 / 测试连接本来
   就在动作行里）。
-- 这条规矩由 `test/client.test.mjs` 按结构钉住：一次下探里每一枚 `dsm-primary` 按钮所在的容器只能是
+- 这条规矩由 `test/plugin/client.test.mjs` 按结构钉住：一次下探里每一枚 `dsm-primary` 按钮所在的容器只能是
   动作行，不能是卡头（`primaryPlacements()`）。
 
 ## Alternatives considered

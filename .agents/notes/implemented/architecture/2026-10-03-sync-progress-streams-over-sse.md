@@ -30,7 +30,7 @@ Status: implemented
 - `{ type: 'result', result: <一次性 JSON 那份形状> }`——收尾，形状与原来完全一样。
 - `{ type: 'error', error: '...' }`——流已经开始之后才出的错（那时 HTTP 状态早就是 200 了）。
 
-进程里由 `src/sync.ts` 的 `runSync(deps, { apply, onProgress })` 报事件，`src/web.ts` 转成 SSE（界面那条
+进程里由 `src/operations/sync/sync.ts` 的 `runSync(deps, { apply, onProgress })` 报事件，`src/web.ts` 转成 SSE（界面那条
 路是 `prepareSync()` + `syncPrepared()`，见
 [确认之后照着预演那份数据落地](./2026-10-11-sync-confirm-reuses-the-preview.md)）。要点：
 
@@ -55,7 +55,7 @@ Status: implemented
   用不带上报的那份（`contentHash`）——否则收尾时会再冒出一条 `compare` 事件，界面上的条会跳回 0。
 - **流开始之前的错仍是一次性 JSON**：没配同步（409）、`mode=test` 这些在 `sendEventStream` 之前就返回
   了。客户端按 `content-type` 分流，所以同一个端点两种形状都认。
-- **界面把弹窗正文换成进度条**：`src/client/components/ProgressBar.tsx`（手写的 6px 轨道，颜色只
+- **界面把弹窗正文换成进度条**：`src/client/shared/ui/ProgressBar.tsx`（手写的 6px 轨道，颜色只
   走检查面的 token）+ 「正在推送 22 / 84」+ 当前那一条的标题 + 一句"中断了再点一次会接着补齐"。
   弹窗标题从「将要同步」换成「正在同步」，按钮从「导入中…」换成「同步中…」——落地时它已经不是"将
   要"了。预演那条路上弹窗标题是「将要同步」（它确实还没写盘），正文在计划回来之前就是这段进度。
@@ -65,7 +65,7 @@ Status: implemented
   两条路的失败提示因此是同一种句子。
 - **没有「取消」**：中途撒手会在宿主侧留下半截状态（远端可能已经收下几个包）。同步是只增不覆盖、可
   重复的，再点一次就接着补齐——这句写在弹窗正文里，取消键在落地期间保持禁用。
-- **分帧与解释放在与 DOM 无关的 `src/client/logic/eventStream.ts`**：一次 `response.body` 的读取
+- **分帧与解释放在与 DOM 无关的 `src/client/shared/logic/eventStream.ts`**：一次 `response.body` 的读取
   边界与事件边界无关，一条事件被拆在两次读取之间是常态（中文标题还会让 UTF-8 多字节跨块），所以
   "攒够一条才吐" 是有状态的。它放在单独一个文件里，是因为 Host 侧那份 tsconfig **没有 DOM**（那
   条边界让"浏览器 API 出现在 Host 代码里"在类型层面就不成立）——把纯字符串处理与
@@ -123,5 +123,5 @@ Status: implemented
 - 实测（真实 dev GUI，两种主题都量过）：轨道 6px / 圆角 3px，浅色 `rgba(0, 0, 0, 0.1)`、深色
   `rgba(255, 255, 255, 0.12)`（都来自 `border-l2`）；填充浅色 `rgb(15, 17, 21)`、深色
   `rgb(249, 250, 251)`（`brand-primary`）；计数行 12px/18px（次要文字那一档），颜色是 `label-secondary`。
-- 验收用了一个本地假 WebDAV（`test/dav-fixture.ts` 加一层"每条 PUT 慢 250ms"的代理）与真实的
+- 验收用了一个本地假 WebDAV（`test/fixtures/dav-fixture.ts` 加一层"每条 PUT 慢 250ms"的代理）与真实的
   `~/.dsh/sessions`（**只推送不拉取**，84 条会话写到临时目录里），验完删干净、配置改回原值。

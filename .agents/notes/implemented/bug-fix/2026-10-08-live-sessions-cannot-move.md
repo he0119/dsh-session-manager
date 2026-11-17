@@ -68,8 +68,8 @@ GUI 上做不到，功能会被整个卡住。**点名**的那几条仍然拒绝
   一步因此不碰它。
 - 宿主那一步没接住时，磁盘上留下的是这次的结果（而不是宿主的内存副本），"重启后一致"重新成立；
   迁移的注册表复核也因此不再因为宿主盖过盘而误报。
-- `test/engine.test.ts`（计划层）、`test/migrate.test.ts`（执行 + 写回）、`test/web.test.ts`（界面端点）、
-  `test/tools.test.ts`（工具层）各钉住一条，`test/client.test.mjs` 钉住界面那行提示。
-- 出路的措辞也各钉一条：`test/client.test.mjs` 的字典检查要求悬浮提示与说明页那条问答里出现"重启
-  DSH"、删除卡片那条指到「说明」页，`test/remove.test.ts` 要求拒绝信息里带着"重启 DSH 让宿主放手，
+- `test/operations/migrate/engine.test.ts`（计划层）、`test/operations/migrate/migrate.test.ts`（执行 + 写回）、`test/plugin/web.test.ts`（界面端点）、
+  `test/plugin/tools.test.ts`（工具层）各钉住一条，`test/plugin/client.test.mjs` 钉住界面那行提示。
+- 出路的措辞也各钉一条：`test/plugin/client.test.mjs` 的字典检查要求悬浮提示与说明页那条问答里出现"重启
+  DSH"、删除卡片那条指到「说明」页，`test/operations/remove/remove.test.ts` 要求拒绝信息里带着"重启 DSH 让宿主放手，
   之后别先点开它再删"。把任一处改回"先关掉它"，两条都会变红。

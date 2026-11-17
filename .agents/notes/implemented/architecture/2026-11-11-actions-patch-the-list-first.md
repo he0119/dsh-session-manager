@@ -17,7 +17,7 @@ Status: implemented
 
 ## Decision
 
-1. `src/client/logic/statePatch.ts`：四个纯函数，按动作响应改那几条——`patchArchived`（`archived` 与
+1. `src/client/operations/manage/statePatch.ts`：四个纯函数，按动作响应改那几条——`patchArchived`（`archived` 与
    `hidden` 一起按宿主那条优先级重算：子智能体 > 空白 > 已归档）、`patchRemoved`（会话与工作区登记一起
    摘）、`patchTitles`、`patchMoved`（换 cwd / dir，清「未分组」，没 cwd 的不补）。一条都没变时原样返回
    同一个 `state`，不做无谓重画。

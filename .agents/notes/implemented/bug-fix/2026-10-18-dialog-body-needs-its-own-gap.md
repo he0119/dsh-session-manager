@@ -38,7 +38,7 @@ Status: implemented
 ## Consequences
 
 - 差异弹窗的块间节奏现在真的生效：真实 GUI 量到正文直接子元素间隔 `24px`，块内 `12px`。
-- `test/styles.test.mjs` 钉住 `.dsm-diffBody` 的 `display: flex` 与 `gap: 24px`；只写外层那层会再退回
+- `test/plugin/styles.test.mjs` 钉住 `.dsm-diffBody` 的 `display: flex` 与 `gap: 24px`；只写外层那层会再退回
   0px 而测试不红，所以这条断言盯的是真正的正文层。
 - 以后给官方 `Modal` 加内容时，先看 `contentClassName` 落在哪一层；需要块间距就自己包一层，不按外层
   的类名推断。

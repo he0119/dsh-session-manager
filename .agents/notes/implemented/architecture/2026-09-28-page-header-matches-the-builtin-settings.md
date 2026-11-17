@@ -63,9 +63,9 @@ Status: implemented
 ## Consequences
 
 - 检查面只列到 `label-secondary`（#61666b，比 `label-tertiary` 深一档），所以 `label-tertiary` 进了
-  `test/styles.test.mjs` 的例外表并带回落链。
-- 规格有两处钉着：`test/styles.test.mjs` 查标题的 `font-size` / `font-weight` / `line-height`、说明行
-  的 `font-size` 与 token、页头的 `flex-direction` 与 `gap`；`test/client.test.mjs` 查结构（标题必须
+  `test/plugin/styles.test.mjs` 的例外表并带回落链。
+- 规格有两处钉着：`test/plugin/styles.test.mjs` 查标题的 `font-size` / `font-weight` / `line-height`、说明行
+  的 `font-size` 与 token、页头的 `flex-direction` 与 `gap`；`test/plugin/client.test.mjs` 查结构（标题必须
   是 `h2`、说明必须是 `p`、标题与说明都是页头的直接子节点、页头里一枚按钮都没有、`page.refresh` 在
   `.dsm-tabsRow` 里）。
 - 标题不再按字号算行高（`line-height: 1.2`）而是写死 24px：量出来的就是 24px，16px 的比例是 19.2px，

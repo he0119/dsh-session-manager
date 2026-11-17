@@ -17,14 +17,14 @@ Status: implemented
 多一条一次性的读，右栏加一格：
 
 - **宿主**：`GET /remote` 一遍读齐远端（每台机器那份 `index.json`，不是包），回
-  `会话 id → [{ machine, path, bytes, lastActiveAt? }]`（`src/sync.ts` 的 `remotePlacements()`，
-  纯函数，`test/sync.test.ts` 钉住排序与聚合）。与 `RemoteLibrary.entries` 的口径刻意不同：那里每个
+  `会话 id → [{ machine, path, bytes, lastActiveAt? }]`（`src/operations/sync/sync.ts` 的 `remotePlacements()`，
+  纯函数，`test/operations/sync/sync.test.ts` 钉住排序与聚合）。与 `RemoteLibrary.entries` 的口径刻意不同：那里每个
   id 只留**赢的那一份**（用来判"该拿哪份"），这里按机器逐份列全（用来回答"哪几处有"）。
   没配同步 → 409（界面据此整格不出现），不是"远端空着"。
-- **界面**：一次刷新只读一次（`src/client/logic/remoteLibrary.ts`，模块级 store）。触发点是清单换了
+- **界面**：一次刷新只读一次（`src/client/operations/sync/remoteLibrary.ts`，模块级 store）。触发点是清单换了
   对象（`panelEvents` 上 `state` 变了）与一次同步落地之后——后者会改远端，不重读就还停在落地之前的
-  样子。右栏那格只是**查表**：选中哪条会话就在这份上查，不现读（`src/client/logic/remoteRows.ts`
-  决定摆什么，`test/remoteRows.test.ts` 钉住）。
+  样子。右栏那格只是**查表**：选中哪条会话就在这份上查，不现读（`src/client/operations/sync/remoteRows.ts`
+  决定摆什么，`test/client/operations/sync/remoteRows.test.ts` 钉住）。
 - **说不全时不撒谎**：读失败照实说原因；某台机器的索引没读到时不说"远端没有这条会话"（它可能就在
   那台没读到的机器里），改说"可能不全"。只有**一台都没缺**时"远端没有"才是结论。
 

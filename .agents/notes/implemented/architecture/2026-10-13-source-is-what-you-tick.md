@@ -3,7 +3,7 @@
 Status: implemented
 
 取代了[源永远是一个目录（「未分组」只是一枚标签）](../../rejected/simplification/2026-10-13-ungrouped-is-only-a-label.md)。
-「未分组」仍然只是一枚标签，那一条没有变（判据仍在 `src/visibility.ts`）；变的是"源"这件事：
+「未分组」仍然只是一枚标签，那一条没有变（判据仍在 `src/shared/visibility.ts`）；变的是"源"这件事：
 它不再被限制成一个目录。
 
 ## Problem
@@ -37,15 +37,15 @@ Status: implemented
   只有一处实现（`DirectoryField.tsx`）。
 - **"能勾"与"搬得走"分开管**：并进「会话」页之后，勾选集是**五件事共用**的（归档 / 取消归档 / 改名 /
   迁移 / 删除），所以它不能为迁移单独变窄——侧边栏不显示的会话（已归档 / 空白）在这一页照旧能勾，
-  归档与删除正是照着它们来的。迁移那一侧因此自己把 `hidden`（`/state` 上那份结论，`src/visibility.ts`
+  归档与删除正是照着它们来的。迁移那一侧因此自己把 `hidden`（`/state` 上那份结论，`src/shared/visibility.ts`
   算的）的摘出去：请求体只带看得见的那些，弹窗里用一句「另有 N 条勾中的会话这次不搬」把差额说清。
   行上唯一灰着的仍是"父会话也在库里"的子智能体（提示点名该勾哪条父会话）。宿主那条契约没动：在
-  `src/plan.ts` 里对**点名**的隐藏会话逐条拒绝，工具与脚本照旧会拿到那条拒绝——界面不送它们，是为了
+  `src/operations/migrate/plan.ts` 里对**点名**的隐藏会话逐条拒绝，工具与脚本照旧会拿到那条拒绝——界面不送它们，是为了
   不让"混进一条隐藏会话"把整次落地变成一次没有出口的报错。
 - **产物按每条会话自己的来源目录定位**：`planArtifactMoves()` 把 `fromDir` 当"日志里那些相对路径的
   基准"（`extractArtifactsFromLog({ cwd })`），所以计划层按 `SessionMove.from` 分组、每组各算一次再
   合并（顺序按来源目录排序，越界问题清单才是可比的）。拿一个目录当唯一基准的话，别的来源目录里那几条
-  的产物会被拼到别人家去——`test/artifacts.test.ts` 的"勾选跨目录"那条钉住它。
+  的产物会被拼到别人家去——`test/operations/migrate/artifacts.test.ts` 的"勾选跨目录"那条钉住它。
 - **`includeUnowned` 开关删掉**：它存在的理由是"源的目录里那几条没在册的会话"，现在没有"源目录"了，
   没在册的那几条只要被勾上就跟着走（注册表变更照旧报"从不属于任何工作区的会话里收编 N 条"）。
 
@@ -83,7 +83,7 @@ Status: implemented
   （`from`）只在真的同源时才写，跨目录那次改报来源目录的条数（`sourceDirs`），「备份」页据此显示
   「N 个来源目录 → 目标」。
 - 计划层少了"源项目目录不存在"这一类问题（源是会话，不是目录：日志所在的目录当然在），多了"点名的
-  会话已经在目标里了"这条；`src/plan.ts` 里两次整库扫描并成一次（不再有"扫源目录 + 扫全库认族"两趟）。
+  会话已经在目标里了"这条；`src/operations/migrate/plan.ts` 里两次整库扫描并成一次（不再有"扫源目录 + 扫全库认族"两趟）。
 - 界面文案少了 `migrate.from.*` / `migrate.scope.*` / `migrate.includeUnowned` / `migrate.source.*`
   这些键，多了「迁移到的目录」与两条说明（先选目标目录、勾中的隐藏会话这次不搬）。
 - 页签从 6 枚减到 5 枚（会话 / 传输 / 同步 / 备份 / 说明）：`page.tab.migrate` 与 `help.tabs.migrate`

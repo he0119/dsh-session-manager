@@ -1,7 +1,7 @@
 /**
  * 列表与那三个弹窗共用的入参。
  *
- * 数据只取一次：`/state` 由页面骨架（[ManagerPanel.tsx](./ManagerPanel.tsx)）拉，面板只管渲染
+ * 数据只取一次：`/state` 由页面骨架（[ManagerPanel.tsx](./shell/ManagerPanel.tsx)）拉，面板只管渲染
  * 与自己的动作。这样开关弹窗不会各拉一份，也避免"两处对同一个库给出不同数字"。
  *
  * @module dsh-session-manager/client/types
@@ -9,8 +9,8 @@
 
 import type { MetaResponse, SessionSummary, StateResponse } from './api.ts'
 import type { DirectoryApi } from './directory.ts'
-import type { Translate } from './logic/locales.ts'
-import type { SessionPicking } from './components/sessionList.tsx'
+import type { Translate } from './shared/i18n/locales.ts'
+import type { SessionPicking } from './shared/ui/sessionList.tsx'
 
 /** 面板入参。 */
 export interface PanelShare {
@@ -30,7 +30,7 @@ export interface PanelShare {
   /**
    * 开「备份与回滚」，并直接指着某一份备份（删除 / 迁移之后那枚「撤销」走的这条）。
    *
-   * 弹窗由页面骨架持有（见 [ManagerPanel.tsx](./components/ManagerPanel.tsx)）：动作页只报"刚留下
+   * 弹窗由页面骨架持有（见 [ManagerPanel.tsx](./shell/ManagerPanel.tsx)）：动作页只报"刚留下
    * 哪一份"，由它把那面打开并把那份备份交给备份清单——回滚的动作清单与确认框仍由那边摆。
    */
   openBackup?: (dir: string) => void
@@ -47,12 +47,12 @@ export interface PanelShare {
    * 这一页的勾选集。
    *
    * 由页面骨架持有、列表与导出清单共用同一份：勾了 6 条再开「导出 / 导入」，导出那一栏里就是这 6 条
-   * （原来两个页签各有一套，切过去要重勾一遍）。判据在 [sessionList.tsx](./components/sessionList.tsx)
+   * （原来两个页签各有一套，切过去要重勾一遍）。判据在 [sessionList.tsx](./shared/ui/sessionList.tsx)
    * 的 `useSessionPicking()`。
    */
   picking: SessionPicking<SessionSummary>
   /**
-   * 就地改清单里的那几条（见 [statePatch.ts](./logic/statePatch.ts)）。
+   * 就地改清单里的那几条（见 [statePatch.ts](./operations/manage/statePatch.ts)）。
    *
    * 动作落地之后先按响应把改过的行改对：用户点完立刻看到结果，不必等宿主把整库重扫一遍再把快照发
    * 回来（本机 1423 条上那一步 0.9～1.1 秒）。整库快照随后在后台取回来覆盖它，到了以快照为准。

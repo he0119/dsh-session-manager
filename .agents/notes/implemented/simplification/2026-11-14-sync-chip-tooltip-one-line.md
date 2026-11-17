@@ -47,5 +47,5 @@ Status: implemented
 - 少一次"悬停 → 读三条 → 再点开"的往返；代价是看不到具体哪几条，要多点一下——明细在弹窗里列全。
 - 字典里删掉 `sync.chip.dot.*`（8 个键）与 `sync.chip.moreLeftovers`，新增 7 个 `sync.chip.note*`；
   中英两份同进同退。
-- 判据仍在 `logic/syncChipDot.ts` 的纯函数里：`syncChipDot()` 管颜色，`syncChipNote()` 管这句短话；
-  `test/sync-chip-dot.test.ts` 把每一档都钉了一条。
+- 判据仍在 `operations/sync/syncChipDot.ts` 的纯函数里：`syncChipDot()` 管颜色，`syncChipNote()` 管这句短话；
+  `test/client/operations/sync/sync-chip-dot.test.ts` 把每一档都钉了一条。

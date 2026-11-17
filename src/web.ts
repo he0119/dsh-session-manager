@@ -5,7 +5,7 @@
 // 并把每次写入的边界条件（目标目录必须真实存在、包必须自校验通过、冲突只跳过不覆盖、回滚只能
 // 回滚自己写下的备份）挡在宿主这一侧，而不是指望界面传对参数。
 //
-// 编排本身在 `src/migrate.ts`（工具层与这一层共用一份），本模块只负责 HTTP 形状：
+// 编排本身在 `src/operations/migrate/migrate.ts`（工具层与这一层共用一份），本模块只负责 HTTP 形状：
 // 读参数、翻译成那边认识的请求、把结果按 JSON 回给界面。
 //
 // 与 webServer 服务解耦：本模块只要求一个 `{ register(route) }`，测试里用假 req/res 直接打
@@ -13,13 +13,13 @@
 import { statSync } from 'node:fs'
 import { readFile, stat } from 'node:fs/promises'
 
-import { decodeLogTextChunked } from './log-decode.ts'
+import { decodeLogTextChunked } from './shared/log/log-decode.ts'
 import { basename, join } from 'node:path'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 
-import { accountedOwners } from './accounting.ts'
-import { canonicalDirIfExists } from './canonical-path.ts'
-import { locateSession, scanAll, type DiscoveredSession } from './discovery.ts'
+import { accountedOwners } from './shared/accounting.ts'
+import { canonicalDirIfExists } from './shared/canonical-path.ts'
+import { locateSession, scanAll, type DiscoveredSession } from './shared/library/discovery.ts'
 import {
   assertBackupDir,
   listBackups,
@@ -28,22 +28,22 @@ import {
   runMigration,
   type MigrateDeps,
   type MigrateRequest,
-} from './migrate.ts'
-import { familyOf, loneSubagents } from './family.ts'
-import type { AttachmentPort } from './attachments.ts'
-import { projectionCacheDir } from './paths.ts'
-import { createProjectionReader, type ProjectionCacheReader } from './projection-cache.ts'
-import { createScanCache } from './scan-cache.ts'
-import { describeWarm, warmCheckpoints } from './checkpoint-warm.ts'
-import { readRegistry, validateRegistry } from './registry.ts'
-import { createLogTextCache } from './log-text-cache.ts'
-import { readTranscript } from './transcript.ts'
-import { diffSessionLogs } from './session-diff.ts'
-import { runRetitle } from './retitle.ts'
-import { describeEffect, effectOf, takeEffectOnHost } from './take-effect.ts'
-import { runRemoval, type RemoveDeps, type RemovalRun } from './remove.ts'
-import type { RepoLocationLookup } from './repo.ts'
-import { createTitleResolver, type TitleQuery } from './session-title.ts'
+} from './operations/migrate/migrate.ts'
+import { familyOf, loneSubagents } from './shared/family.ts'
+import type { AttachmentPort } from './shared/attachments.ts'
+import { projectionCacheDir } from './shared/paths.ts'
+import { createProjectionReader, type ProjectionCacheReader } from './shared/library/projection-cache.ts'
+import { createScanCache } from './shared/library/scan-cache.ts'
+import { describeWarm, warmCheckpoints } from './shared/host/checkpoint-warm.ts'
+import { readRegistry, validateRegistry } from './shared/registry.ts'
+import { createLogTextCache } from './shared/log/log-text-cache.ts'
+import { readTranscript } from './operations/transcript/transcript.ts'
+import { diffSessionLogs } from './operations/sync/session-diff.ts'
+import { runRetitle } from './operations/retitle/retitle.ts'
+import { describeEffect, effectOf, takeEffectOnHost } from './shared/host/take-effect.ts'
+import { runRemoval, type RemoveDeps, type RemovalRun } from './operations/remove/remove.ts'
+import type { RepoLocationLookup } from './shared/repo.ts'
+import { createTitleResolver, type TitleQuery } from './shared/log/session-title.ts'
 import {
   collectLeftovers,
   removeRemoteCopies,
@@ -65,14 +65,14 @@ import {
   type SyncPrepared,
   type SyncProgress,
   type SyncDecision,
-} from './sync.ts'
+} from './operations/sync/sync.ts'
 import { type EffectMode, type PickerKind, type RegistryOps, type ResolvedPaths, type SyncInfo, type SyncRuntime } from './tools.ts'
-import { lastRunView, type SyncRunRecord } from './sync-state.ts'
+import { lastRunView, type SyncRunRecord } from './operations/sync/sync-state.ts'
 import {
   createRemoteWriteGate,
   type RemoteWriteGate,
   type RemoteWriteOwner,
-} from './remote-write.ts'
+} from './operations/sync/remote-write.ts'
 import {
   applyImport,
   buildBundleAsync,
@@ -83,9 +83,9 @@ import {
   type BundleSourceInfo,
   type ImportPlan,
   type ImportOptions,
-} from './transfer.ts'
-import type { CheckpointWarmPort, DecodeAll, HostRegistryPort, ProgressReporter, TitleRefreshPort, WorkspaceRegistryState } from './types.ts'
-import { createSessionMetaResolver, hiddenReason, isUngrouped, type HiddenReason, type SessionMeta } from './visibility.ts'
+} from './operations/transfer/transfer.ts'
+import type { CheckpointWarmPort, DecodeAll, HostRegistryPort, ProgressReporter, TitleRefreshPort, WorkspaceRegistryState } from './shared/types.ts'
+import { createSessionMetaResolver, hiddenReason, isUngrouped, type HiddenReason, type SessionMeta } from './shared/visibility.ts'
 
 /** 本插件占用的路由前缀。 */
 export const API_PREFIX = '/dsh-session-manager/api'
@@ -399,7 +399,7 @@ function sendEvent(res: ServerResponse, event: unknown): void {
  * 兜底。
  *
  * 为什么是**共用一个**而不是每个端点各写一遍：这套形状原先只有 `/sync` 有（见
- * [同步那篇决策](../../.agents/notes/implemented/architecture/2026-10-03-sync-progress-streams-over-sse.md)），
+ * [同步那篇决策](../.agents/notes/implemented/architecture/2026-10-03-sync-progress-streams-over-sse.md)），
  * 而"按下到结束之间没有任何反馈"是**所有**长动作共有的毛病——迁移落地实测 47 条 / 67.5 MB 要 45 秒
  * （逐条改写首帧占 45 秒），导入落地 250 条 / 70.9 MB 要 19 秒，那些时间里界面只有一个不动的按钮。
  * 地基抽在这里，各端点只负责"报哪几段"。
@@ -1699,7 +1699,7 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
    * 自动推送：`GET /auto-push` 当场跑一轮（**只推不拉**），边跑边报进度。
    *
    * 为什么只有一个方向、没有 `mode=apply` 那种分岔：自动推送这条路**没有确认那一步**——它不改本机
-   * 任何东西（见 [sync.ts](./sync.ts) 的 `runAutoPush()`），所以"预演"与"落地"在它这里本来就是同一件
+   * 任何东西（见 [sync.ts](./operations/sync/sync.ts) 的 `runAutoPush()`），所以"预演"与"落地"在它这里本来就是同一件
    * 事。界面上那枚「立即推送一次」点下去就是真跑，进度画在页面横幅上。
    *
    * 点下去就是真跑，没有"距上次才过了几秒"这种闸——自动推送现在只在写完一轮之后自己跑，这条是让人
@@ -1784,7 +1784,7 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
    * 删除会话：`mode=apply` 才真删（**先备份再删**），缺省只预演。
    *
    * 恢复不在这里：删掉的那份就在本插件备份根下，走「备份与回滚」那份清单（见 journal.ts 的
-   * `BackupKind`）。删除**不碰注册表**，所以恢复之后登记与归档状态原样还在（见 src/remove.ts）。
+   * `BackupKind`）。删除**不碰注册表**，所以恢复之后登记与归档状态原样还在（见 src/operations/remove/remove.ts）。
    */
   const deleteSessions = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     let body: unknown
@@ -2097,7 +2097,7 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
    *
    * 为什么不并进 `/state`：那一份是"扫本机"的结果，页头与清单都等它；远端是另一台机器上的东西，
    * 读不到（NAS 关着、密码过期）时不该把本机的清单一起拖住。所以另开一条，界面拿到新清单之后顺手问
-   * 一次，读到就整份缓存在页面这一层（见 `src/client/logic/remoteLibrary.ts`）。
+   * 一次，读到就整份缓存在页面这一层（见 `src/client/operations/sync/remoteLibrary.ts`）。
    *
    * 一次给全部而不是按会话问：右栏选中一条会话时要立刻有答案，按会话现问会让每次点选都等一次网络。
    * 便宜是因为读的只是每台机器那份 `index.json`，不是包本身。

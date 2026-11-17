@@ -37,5 +37,5 @@ Status: implemented
 
 - 能勾的集合与「单独操作不会被拒的集合」一致——否则用户只能靠点下去被拒来发现自己点错了。
 - 界面的判据是 `/state` 给的 `origin` 与 `parentSession` 两个字段，与宿主侧同源。
-- `test/remove.test.ts` 与 `test/web.test.ts` 把这几条逐个钉住（只删子时的提示、孤儿、环、点名的
+- `test/operations/remove/remove.test.ts` 与 `test/plugin/web.test.ts` 把这几条逐个钉住（只删子时的提示、孤儿、环、点名的
   同时又是别人的子智能体）。

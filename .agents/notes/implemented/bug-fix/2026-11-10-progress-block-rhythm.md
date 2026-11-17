@@ -44,5 +44,5 @@ Status: implemented
 - 当前条目单行省略，长标题不再把这一块撑高或顶出边界；完整名字在悬浮提示里。
 - 弹窗里的进度块（迁移 / 删除 / 回滚 / 导入 / 同步）走同一份组件，观感与外层横幅一致。
 - 横幅比原来高（12px 内边距 + 最多五行），后台同步跑着时页面顶部多占一行的高度。
-- `test/styles.test.mjs` 钉住"行外边距归零 + 块内 6px"；`test/client.test.mjs` 钉住"计数在条上面"与
+- `test/plugin/styles.test.mjs` 钉住"行外边距归零 + 块内 6px"；`test/plugin/client.test.mjs` 钉住"计数在条上面"与
   条目那行的挂钩。

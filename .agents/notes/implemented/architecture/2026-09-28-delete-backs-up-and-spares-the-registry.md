@@ -5,7 +5,7 @@ Status: implemented
 ## Problem
 
 宿主没有「删除一条会话」的能力：`dsh-session-persistence` 那条缝上没有 delete，sqlite 的
-`_deleteSession` 是私有的。所以删除只能是本插件做文件系统操作（`src/remove.ts`），而**真删用户数据
+`_deleteSession` 是私有的。所以删除只能是本插件做文件系统操作（`src/operations/remove/remove.ts`），而**真删用户数据
 这件事本身没有第二次机会**。
 
 剩下的问题是：删掉之后，注册表里那条登记怎么办。
@@ -40,5 +40,5 @@ Status: implemented
   `unarchiveSession()` 一次落盘 + 改内存 + 广播，侧边栏即时跟着变）；宿主没有这个服务（非 Web
   profile）时如实回 409 并说明原因，不绕过去直接写注册表文件——那样写出来的状态与宿主内存不一致，
   下次宿主自己落盘就把它盖掉了。
-- `test/remove.test.ts` 核「预演零写入、先备份再删、复核、空项目目录清理、活着的会话拒删、恢复把
+- `test/operations/remove/remove.test.ts` 核「预演零写入、先备份再删、复核、空项目目录清理、活着的会话拒删、恢复把
   目录（含锁文件）搬回来且**不还原注册表**」。
