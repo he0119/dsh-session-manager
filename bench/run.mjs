@@ -11,7 +11,7 @@
 //
 // @module dsh-session-manager/bench/run
 import { execFile } from 'node:child_process'
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { ensureFixture } from './fixture.mjs'
@@ -82,6 +82,55 @@ function runChildProcess(args, scenarioId) {
   })
 }
 
+/**
+ * 把夹具的文件先读一遍，摸热 OS 的页缓存。
+ *
+ * 为什么需要：刚跑完构建或装依赖时，`bench/.work` 那几十 MB 会被挤出页缓存，第一次跑基准就变成
+ * 磁盘冷读——2026-11-17 实测 `scan.cold` 因此报了「比基线慢 +364.8%」，紧接着重跑是 -4.1%。
+ * 那种红灯量的不是代码，却会训练人「红了就重跑」，门就失效了。所以先摸一遍，让每次跑都从同一个
+ * 起点开始；真正"冷"的是应用层的缓存（扫库缓存、日志缓存），那个照旧按各场景的 `prepare` 算。
+ *
+ * @param manifest `ensureFixture()` 的返回值。
+ * @returns 读过的文件数与字节数（打印用）。
+ */
+function warmFixture(manifest) {
+  let files = 0
+  let bytes = 0
+  const visit = (path) => {
+    let entries
+    try {
+      entries = readdirSync(path, { withFileTypes: true })
+    } catch {
+      // 不是目录（注册表那份 JSON）：直接读它。
+      try {
+        bytes += readFileSync(path).byteLength
+        files += 1
+      } catch {
+        // 读不动就跳过。
+      }
+      return
+    }
+    for (const entry of entries) {
+      const child = join(path, entry.name)
+      if (entry.isDirectory()) {
+        // 写操作场景的临时副本（`.tmp-*`）不进统计：它们每次现造现删。
+        if (entry.name.startsWith('.tmp-')) continue
+        visit(child)
+        continue
+      }
+      if (!entry.isFile()) continue
+      try {
+        bytes += readFileSync(child).byteLength
+        files += 1
+      } catch {
+        // 读不动的文件（权限、刚好被删）跳过：让它按原样暴露给真正要读它的场景。
+      }
+    }
+  }
+  for (const path of [manifest.sessionsRoot, manifest.projectionDir, manifest.davRoot, manifest.registryPath]) visit(path)
+  return { files, bytes }
+}
+
 function loadBaseline() {
   if (!existsSync(BASELINE_PATH)) return undefined
   try {
@@ -113,6 +162,7 @@ async function main() {
 
   const startedAt = Date.now()
   const manifest = await ensureFixture(args.profile, { rebuild: args.rebuild })
+  const warmed = warmFixture(manifest)
   const selected = args.only === undefined ? SCENARIOS : SCENARIOS.filter((scenario) => args.only.includes(scenario.id))
   if (selected.length === 0) throw new Error(`--only 没选中任何场景：${args.only.join(',')}`)
 
@@ -139,7 +189,8 @@ async function main() {
     process.stdout.write(JSON.stringify(report, null, 2) + '\n')
   } else {
     process.stdout.write(`\n夹具：${manifest.profile} · ${manifest.sessions.length} 条会话 / ${(manifest.totalBytes / 1024 / 1024).toFixed(1)} MB · 远端 ${manifest.remote.pushed} 条\n`)
-    process.stdout.write(`校准：${calibrationMs.toFixed(1)} ms（wall 一律除以它再比）\n\n`)
+    process.stdout.write(`校准：${calibrationMs.toFixed(1)} ms（wall 一律除以它再比）\n`)
+    process.stdout.write(`夹具已摸热：${warmed.files} 个文件 / ${(warmed.bytes / 1024 / 1024).toFixed(1)} MB\n\n`)
     process.stdout.write(`${pad('场景', 20)}${pad('wall(ms)', 10)}${pad('相对基线', 10)}${pad('停顿/预算', 14)}${pad('RSS(MB)', 9)}\n`)
     process.stdout.write('─'.repeat(64) + '\n')
   }
