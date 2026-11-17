@@ -22,7 +22,7 @@ Status: implemented
 
 ## Decision
 
-给这个插件加一条宿主端口 **`titleRefreshPort()`**（`src/shared/host/ports.ts`），它自己完成一次**临时挂载**：
+给这个插件加一条宿主接口 **`titleRefreshPort()`**（`src/shared/host/ports.ts`），它自己完成一次**临时挂载**：
 
 1. `sessionQuery.readSession(id)` 把日志整份读完并校验（不建活会话，与补检查点那条路同一个调用）；
 2. `sessions.prepare(id, { seed, meta: header, inheritedEventCount, eventState: 'detached' })` 用宿主
@@ -52,7 +52,7 @@ Status: implemented
 自己开句柄写就没有这一步歧义：`sessionPersistence.open()` 的游标就是磁盘上的条数，而 `prepare()` 补的
 那条标记正好占住游标那个序号，整批写下去逐条递增。宿主自己的 resume 也是这么写构造期那几条的
 （`dsh-agent-loop` 的 `appendUnstoredSuffix()`）。只有那条标记、没有别的新事件时不写：那只是还原过程的
-记账，不值得给日志添一条什么都没发生的记录。
+计数，不值得给日志添一条什么都没发生的记录。
 
 围绕这一条端口的三件事各有各的地方：
 
@@ -104,7 +104,7 @@ Status: implemented
 - **写句柄只围住写盘那一步**（模型调用期间不开）：跨进程的写租约因此不会在一次 2–3 秒的模型请求期间
   被一直占着。代价是"读日志到开句柄"之间多了一个窗口——这期间别人往这条会话写了事件的话，追加会被
   连续性校验挡下并如实报错，不会写歪。
-- **要落地就有进度**：勾十条会话是半分钟量级，因此这一枚按钮与归档 / 删除 / 迁移 / 同步共用
+- **要应用就有进度**：勾十条会话是半分钟量级，因此这一枚按钮与归档 / 删除 / 迁移 / 同步共用
   [同一条事件流](../architecture/2026-10-08-every-long-action-streams-progress.md)。
 - 端口与编排各有一份用例钉住行为（`test/plugin/tools.test.ts` 的假宿主——照宿主的还原构造、`seq = 日志条数`
   与写句柄的连续性校验造出来，断言的是"磁盘上真的多了哪几条、会话有没有留下来"；`test/operations/retitle/retitle.test.ts`
@@ -122,5 +122,5 @@ Status: implemented
 - **本机实测（web-dev 实例 :3081，2026-10-12）**：两条停在兜底名称上的历史会话（`你好` 16 KB、
   `你能做什么？` 25 KB）各一次调用后落成 `问候` 与 `AI助手能做什么`；解日志核对，最后一条
   `session/title` 的 `source.kind = provider`、provider 为 `session-title-all-prompts-llm`——
-  **落盘**的，不是只在内存里。动作之后 `/state` 里这两条都是 `live: false`（临时挂载都还回去了），
+  **写入磁盘**的，不是只在内存里。动作之后 `/state` 里这两条都是 `live: false`（临时挂载都还回去了），
   该库 5 份日志的 seq 连续性审计全绿（`~/.dsh/titlefix/retitle-verify.mjs` 与 `audit-logs.mjs`）。

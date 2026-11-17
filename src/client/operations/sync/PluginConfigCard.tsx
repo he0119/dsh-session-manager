@@ -7,7 +7,7 @@
  * 上留一枚「同步设置」，点过来看到的就是这一格。
  *
  * 契约给的 props：`view` 是 `summary`（列表里那一行的一句话）或 `page`（这一页的正文），`form` 是宿主
- * 给的配置读写面（本包不用它——表单自己走 `configForms` 接缝，见 [SyncConfigForm](./SyncConfigForm.tsx)）。
+ * 给的配置读写面（本包不用它——表单自己走 `configForms` 接入点，见 [SyncConfigForm](./SyncConfigForm.tsx)）。
  *
  * @module dsh-session-manager/client/operations/sync/PluginConfigCard
  */

@@ -18,7 +18,7 @@ export interface SessionSort {
   readonly dir: 'asc' | 'desc'
 }
 
-/** 排与筛要读的那几个字段（`SessionSummary` 与测试夹具都满足它）。 */
+/** 排与筛要读的那几个字段（`SessionSummary` 与测试数据都满足它）。 */
 export interface SortableSession {
   readonly id: string
   readonly title?: string

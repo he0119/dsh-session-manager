@@ -1,4 +1,4 @@
-// 界面用的宿主端点：列会话、导出、导入（预演与落地），以及各条拒绝面。
+// 界面用的宿主端点：列会话、导出、导入（预览与应用），以及各条拒绝面。
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { EventEmitter } from 'node:events'
@@ -119,7 +119,7 @@ function writeSession(
             },
           }),
         ]),
-    // 标题在 DSH 里是日志事件（最新一条生效），不是 header 字段——夹具得照这个样子写，
+    // 标题在 DSH 里是日志事件（最新一条生效），不是 header 字段——测试数据得照这个样子写，
     // 否则测的就不是真实数据形状了（见 src/shared/log/session-title.ts）。
     ...(options.title === undefined
       ? []
@@ -134,7 +134,7 @@ function writeSession(
   )
 }
 
-/** 内容寻址 id：与宿主 `sha256:<hex>` 同一口径。 */
+/** 内容寻址 id：与宿主 `sha256:<hex>` 同一标准。 */
 function attachmentIdOf(bytes: Buffer): string {
   return `sha256:${createHash('sha256').update(bytes).digest('hex')}`
 }
@@ -284,7 +284,7 @@ function fakeRes(): { res: ServerResponse; captured: Captured; close: () => void
 /**
  * 把一次响应体拆成 SSE 事件（`data:` 行，事件之间空行）。
  *
- * 同步的落地那一次走的就是这个形状（见 src/web.ts 的 sendEventStream）：`progress` 每条一次、
+ * 同步的应用那一次走的就是这个形状（见 src/web.ts 的 sendEventStream）：`progress` 每条一次、
  * `result` 收尾。
  */
 function events(res: Captured): Array<Record<string, unknown>> {
@@ -734,7 +734,7 @@ test('POST /export：单独导出子智能体被拒；点名父会话时子智�
   assert.ok(Number(packed.headers['x-dsh-session-bytes']) > 0)
 })
 
-test('POST /import：预演不写盘，落地后会话与注册表一起落盘', async () => {
+test('POST /import：预览不写盘，应用后会话与注册表一起写入磁盘', async () => {
   const source = makeSandbox('web-import-source')
   writeSession(source.sessionsRoot, 'session-a', CWD_A, 1000, { title: '被导出的会话' })
   const exportHandlers = createApiHandlers(deps(source))
@@ -764,9 +764,9 @@ test('POST /import：预演不写盘，落地后会话与注册表一起落盘',
   const planBody = payload(planned.captured)
   assert.equal(planBody['ok'], true)
   assert.deepEqual(planBody['created'], ['session-a'])
-  // 预演表里显示的是标题（id 退到悬浮提示）：它从包里的日志事件折出来，清单格式没为此改过。
+  // 预览表里显示的是标题（id 退到悬浮提示）：它从包里的日志事件折出来，清单格式没为此改过。
   assert.equal((planBody['entries'] as Array<Record<string, unknown>>)[0]!['title'], '被导出的会话')
-  assert.equal(existsSync(join(sessionDir(target.sessionsRoot, CWD_B, 'session-a'))), false, '预演不写盘')
+  assert.equal(existsSync(join(sessionDir(target.sessionsRoot, CWD_B, 'session-a'))), false, '预览不写盘')
 
   const applied = fakeRes()
   await handlers['POST /import']!(fakeReq('POST', `${targetUrl}&mode=apply`, bundleBytes), applied.res)
@@ -785,7 +785,7 @@ test('POST /import：预演不写盘，落地后会话与注册表一起落盘',
   assert.deepEqual(registry.tables.workspaces[Object.keys(registry.tables.workspaces)[0]!]!.sessionIds, ['session-a'])
 })
 
-test('POST /import：落地之后请宿主把列表元数据折出来，补不上也不影响落地', async () => {
+test('POST /import：应用之后请宿主把列表元数据折出来，补不上也不影响应用', async () => {
   const source = makeSandbox('web-import-warm-source')
   writeSession(source.sessionsRoot, 'session-a', CWD_A, 1000, { title: '被导出的会话' })
   const exportHandlers = createApiHandlers(deps(source))
@@ -805,7 +805,7 @@ test('POST /import：落地之后请宿主把列表元数据折出来，补不�
     tables: { workspaces: {} },
   })
 
-  // 宿主那两条服务"能调但读不动"：这一步只补派生数据，落地必须照旧算成功。
+  // 宿主那两条服务"能调但读不动"：这一步只补派生数据，应用必须照旧算成功。
   const warmed: string[] = []
   const handlers = createApiHandlers(
     deps(target, {
@@ -822,10 +822,10 @@ test('POST /import：落地之后请宿主把列表元数据折出来，补不�
     fakeReq('POST', `${API_PREFIX}/import?targetCwd=${encodeURIComponent(CWD_B)}&mode=apply`, bundleBytes),
     applied.res,
   )
-  assert.equal(applied.captured.status, 200, '补不上列表元数据不该把落地说成失败')
+  assert.equal(applied.captured.status, 200, '补不上列表元数据不该把应用说成失败')
   const body = payload(applied.captured)
   assert.deepEqual(body['written'], ['session-a'])
-  assert.deepEqual(warmed, ['session-a'], '刚落地的会话要各补一次')
+  assert.deepEqual(warmed, ['session-a'], '刚应用的会话要各补一次')
   assert.equal((body['warm'] as Record<string, unknown>)['failed'], 1)
   assert.match(String(body['note']), /没补上/)
 })
@@ -863,8 +863,8 @@ test('POST /import：包坏了、目标目录不合法、库已存在同 id，�
   assert.equal(badTarget.captured.status, 400)
   assert.match(String(payload(badTarget.captured)['error']), /不存在/)
 
-  // 库里已有同 id：预演 ok=false、落地也是"结果"（`ok:false` + 原话），一个字节都不覆盖。
-  // 落地那份现在从事件流的 `result` 里回（流已经开始了，不能再改 HTTP 状态）。
+  // 库里已有同 id：预览 ok=false、应用也是"结果"（`ok:false` + 原话），一个字节都不覆盖。
+  // 应用那份现在从事件流的 `result` 里回（流已经开始了，不能再改 HTTP 状态）。
   const conflict = fakeRes()
   await handlers['POST /import']!(fakeReq('POST', url, bundleBytes), conflict.res)
   assert.equal(conflict.captured.status, 200)
@@ -876,14 +876,14 @@ test('POST /import：包坏了、目标目录不合法、库已存在同 id，�
   assert.equal(
     conflictApply.captured.headers['content-type'],
     'text/event-stream; charset=utf-8',
-    '落地开始干活之后回的是事件流：状态码早就发出去了，结论只能从 result 里读',
+    '应用开始干活之后回的是事件流：状态码早就发出去了，结论只能从 result 里读',
   )
   assert.equal(payload(conflictApply.captured)['ok'], false)
-  // 一件都不会发生（会话都在库里、包里的附件对象本机也都有）时落地在写盘之前就被挡下。
+  // 一件都不会发生（会话都在库里、包里的附件对象本机也都有）时应用在写盘之前就被挡下。
   assert.match(String(payload(conflictApply.captured)['error']), /没有可导入的内容/)
 })
 
-test('POST /sync：带着预演给的 planId 回来，只重算计划、不再读一遍远端索引', async () => {
+test('POST /sync：带着预览给的 planId 回来，只重算计划、不再读一遍远端索引', async () => {
   const sandbox = makeSandbox('web-sync-replan')
   writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000, { title: '要同步的会话' })
   const fixture = await startDavFixture({ root: join(sandbox.base, 'dav') })
@@ -922,12 +922,12 @@ test('POST /sync：带着预演给的 planId 回来，只重算计划、不再�
     assert.equal((first['plan'] as Record<string, unknown>)['ok'], true)
     const planId = String(first['planId'])
     const callsAfterFirst = remoteCalls
-    assert.ok(callsAfterFirst > 0, '第一次预演要读远端索引')
+    assert.ok(callsAfterFirst > 0, '第一次预览要读远端索引')
 
     // 界面在弹窗里改一次裁决就是这一次调用：同一份 planId、换一组 decisions。
     const second = await call({ planId, decisions: {} })
     assert.equal(remoteCalls, callsAfterFirst, '带着 planId 回来不再读远端索引（只重算计划那一层）')
-    assert.equal(second['planId'], planId, '计划 id 沿用：落地那次仍对得上')
+    assert.equal(second['planId'], planId, '计划 id 沿用：应用那次仍对得上')
     assert.deepEqual(second['plan'], first['plan'], '同一组裁决算出来的计划不变')
   } finally {
     await fixture.close()
@@ -935,7 +935,7 @@ test('POST /sync：带着预演给的 planId 回来，只重算计划、不再�
   }
 })
 
-test('GET/POST /sync?mode=tidy：只整理自己那一格，预演不删、落地删一次', async () => {
+test('GET/POST /sync?mode=tidy：只整理自己那一格，预览不删、应用删一次', async () => {
   const sandbox = makeSandbox('web-tidy')
   /** 一格索引：一条会话、一份代次指纹。两格写得一模一样，才构成"重复"。 */
   const cellIndex = (machineId: string): Buffer =>
@@ -987,14 +987,14 @@ test('GET/POST /sync?mode=tidy：只整理自己那一格，预演不删、落�
     return payload(captured)
   }
   try {
-    // 预演：报一条（100 字节），一个字节都不删。
+    // 预览：报一条（100 字节），一个字节都不删。
     const plan = await call('GET')
     assert.equal(plan['mode'], 'plan')
     assert.deepEqual(plan['tidy'], { removed: 1, orphans: 0, bytes: 100 })
     assert.deepEqual(plan['problems'], [])
-    assert.deepEqual(deleted, [], '预演不删任何东西')
+    assert.deepEqual(deleted, [], '预览不删任何东西')
 
-    // 落地：删掉本机那一格的包，并把它从索引里摘掉。
+    // 应用：删掉本机那一格的包，并把它从索引里摘掉。
     const applied = await call('POST')
     assert.equal(applied['mode'], 'apply')
     assert.equal(applied['applied'], true)
@@ -1014,7 +1014,7 @@ test('GET/POST /sync?mode=tidy：只整理自己那一格，预演不删、落�
   }
 })
 
-test('POST /sync：写权限被别的入口拿着时，落地与整理都回 409，一个字节不写', async () => {
+test('POST /sync：写权限被别的入口拿着时，应用与整理都回 409，一个字节不写', async () => {
   const sandbox = makeSandbox('web-sync-busy')
   let puts = 0
   const dav: DavPort = {
@@ -1075,7 +1075,7 @@ test('registerWebRoutes：注册十六条精确路由，方法不对回 405', as
     [
       `exact ${API_PREFIX}/meta`,
       `exact ${API_PREFIX}/state`,
-      // 面板只开这一条长连接（清单、落地那一趟、自动推送那一轮都在它上面）。
+      // 面板只开这一条长连接（清单、应用那一趟、自动推送那一轮都在它上面）。
       `exact ${API_PREFIX}/panel/events`,
       `exact ${API_PREFIX}/transcript`,
       `exact ${API_PREFIX}/sync-diff`,
@@ -1115,7 +1115,7 @@ test('registerWebRoutes：注册十六条精确路由，方法不对回 405', as
 
 // ---- 会话管理：迁移 / 备份 / 回滚 ----
 
-test('POST /migrate：mode 缺省只预演，预演结果里带上来源/目标项目目录与注册表变更', async () => {
+test('POST /migrate：mode 缺省只预览，预览结果里带上来源/目标项目目录与注册表变更', async () => {
   const sandbox = makeSandbox('web-migrate-plan')
   writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000, { title: '要搬走的会话' })
 
@@ -1132,16 +1132,16 @@ test('POST /migrate：mode 缺省只预演，预演结果里带上来源/目标�
   assert.equal(body['applied'], false)
   const preview = body['preview'] as Record<string, unknown>
   assert.equal((preview['sessions'] as unknown[]).length, 1)
-  // 预演里也带标题：迁移页挑会话与传输页用同一套口径（标题可见、id 退到悬浮提示）。
+  // 预览里也带标题：迁移页挑会话与传输页用同一套标准（标题可见、id 退到悬浮提示）。
   assert.equal((preview['sessions'] as Array<Record<string, unknown>>)[0]!['title'], '要搬走的会话')
   // 项目目录名是**绝对路径**：join(会话根, projectKey(工作区目录))；来源是**一列**（勾选可以跨目录）
   assert.deepEqual(preview['sourceProjectDirs'], [join(sandbox.sessionsRoot, projectKey(CWD_A))])
   assert.deepEqual(preview['sessionIds'], ['session-a'])
   assert.equal(preview['targetProjectDir'], join(sandbox.sessionsRoot, projectKey(CWD_B)))
   assert.equal((preview['registryChange'] as Record<string, unknown>)['targetPath'], CWD_B)
-  // 没注入 effectMode 时按保守说法回：注册表落盘还要重启才被承认。
+  // 没注入 effectMode 时按保守说法回：注册表写入磁盘还要重启才被承认。
   assert.equal(body['takesEffect'], 'restart-required')
-  // 预演不写盘：会话还在源项目目录
+  // 预览不写盘：会话还在源项目目录
   assert.equal(existsSync(sessionDir(sandbox.sessionsRoot, CWD_A, 'session-a')), true)
 })
 
@@ -1175,7 +1175,7 @@ test('POST /migrate：只搬点名的那些会话（源就是它们，未点名�
   assert.deepEqual(readRegistry(sandbox.registryPath).tables.workspaces['ws-a']?.sessionIds, ['session-a'])
 })
 
-test('POST /migrate：宿主持着的会话不搬，预演里报出 liveSkipped（源工作区不被摘空）', async () => {
+test('POST /migrate：宿主持着的会话不搬，预览里报出 liveSkipped（源工作区不被摘空）', async () => {
   const sandbox = makeSandbox('web-migrate-live')
   writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000)
   writeSession(sandbox.sessionsRoot, 'session-b', CWD_A, 2000)
@@ -1238,7 +1238,7 @@ test('POST /migrate：宿主持着的会话不搬，预演里报出 liveSkipped�
   assert.match((payload(named.captured)['problems'] as string[]).join('; '), /restart DSH, then migrate them/)
 })
 
-test('POST /migrate：侧边栏不显示的会话搬不走、源工作区因此留着，预演里报出 strandedSources', async () => {
+test('POST /migrate：侧边栏不显示的会话搬不走、源工作区因此留着，预览里报出 strandedSources', async () => {
   const sandbox = makeSandbox('web-migrate-stranded')
   writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000)
   writeSession(sandbox.sessionsRoot, 'session-blank', CWD_A, 2000)
@@ -1353,7 +1353,7 @@ test('POST /migrate：来源目录已经被删掉也照旧能迁（少了 sessio
   assert.deepEqual((preview['sessions'] as { id: string }[]).map((s) => s.id).sort(), ['session-a', 'session-b'])
   // 来源目录本身不在盘上这件事不该被当成问题：日志与 header 里的 cwd 都还在。
   assert.equal(payload(captured)['ok'], true)
-  // 预演不写盘
+  // 预览不写盘
   assert.equal(existsSync(sessionDir(sandbox.sessionsRoot, gone, 'session-b')), true)
 
   // 少了 sessionIds：400 —— 源只有"点名了哪几条"这一条路（空数组同理）。
@@ -1420,8 +1420,8 @@ test('POST /migrate：勾选跨目录——两个来源目录里的会话一次�
 /**
  * 一个"像真宿主"的假宿主：工作区按路径复用、挂/摘真的改成员表。
  *
- * 它**不写文件**——文件那一步仍由插件自己走（这正是要测的接缝）。`onRefresh` 拿来做台账：
- * 记下的必须是"那一刻文件里的归属"，才说明刷新发生在落盘之后。
+ * 它**不写文件**——文件那一步仍由插件自己走（这正是要测的接入点）。`onRefresh` 拿来做台账：
+ * 记下的必须是"那一刻文件里的归属"，才说明刷新发生在写入磁盘之后。
  */
 function fakeHostPort(options: { onRefresh?: (registryPath: string) => void; attachFails?: boolean } = {}): ApiDeps['hostRegistry'] {
   const workspaces = new Map<string, { id: string; path: string; sessionIds: string[] }>()
@@ -1436,7 +1436,7 @@ function fakeHostPort(options: { onRefresh?: (registryPath: string) => void; att
       return id
     },
     attachSession: async (workspaceId: string, sessionId: string) => {
-      if (options.attachFails === true) throw new Error('夹具：挂靠失败')
+      if (options.attachFails === true) throw new Error('假宿主：挂靠失败')
       const rec = workspaces.get(workspaceId)
       if (rec !== undefined && !rec.sessionIds.includes(sessionId)) rec.sessionIds.push(sessionId)
     },
@@ -1455,7 +1455,7 @@ test('POST /migrate：mode=apply 真搬并回可回滚的备份；有那套动�
   const sandbox = makeSandbox('web-migrate-apply')
   writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000)
 
-  // 台账：刷新必须在注册表落盘之后才发生，所以这里顺手记下那一刻文件里的归属。
+  // 台账：刷新必须在注册表写入磁盘之后才发生，所以这里顺手记下那一刻文件里的归属。
   const calls: string[] = []
   const host = fakeHostPort()
   const base = host!()!
@@ -1483,7 +1483,7 @@ test('POST /migrate：mode=apply 真搬并回可回滚的备份；有那套动�
   assert.equal(body['moved'], 1)
   assert.equal(body['takesEffect'], 'immediate')
   assert.equal(typeof body['backupDir'], 'string')
-  assert.deepEqual(calls, ['session-a'], '刷新要真的发生，且发生在注册表落盘之后')
+  assert.deepEqual(calls, ['session-a'], '刷新要真的发生，且发生在注册表写入磁盘之后')
   assert.match(String(body['summary']), /无需重启 DSH/)
 
   // 真的搬了：目标项目目录里有、源项目目录里没有、header.cwd 已改写
@@ -1522,7 +1522,7 @@ test('POST /migrate：宿主没接住时如实报"需要重启"，而不是照�
       ...base,
       refreshIndex: async (): Promise<void> => {
         calls += 1
-        throw new Error('夹具：宿主没接住')
+        throw new Error('假宿主没接住')
       },
     }),
   })
@@ -1537,7 +1537,7 @@ test('POST /migrate：宿主没接住时如实报"需要重启"，而不是照�
   assert.equal(body['applied'], true, '宿主没接住不该把迁移说成失败')
   assert.equal(body['verified'], true)
   assert.equal(body['takesEffect'], 'restart-required', '界面能说的"无需重启"必须来自真实结果')
-  assert.match(String(body['summary']), /宿主没接住这次改动（夹具：宿主没接住）/)
+  assert.match(String(body['summary']), /宿主没接住这次改动（假宿主没接住）/)
 })
 
 test('POST /rollback：先 dryRun 看动作，再真回滚到原状', async () => {
@@ -1640,7 +1640,7 @@ test('GET /state：会话行带上"侧边栏为什么不显示"，以及归档�
   writeSession(sandbox.sessionsRoot, 'session-blank', CWD_B, 3000)
   writeProjectionCache(sandbox, 'session-a', { createdAt: 1000, cwd: CWD_A, blank: false })
   writeProjectionCache(sandbox, 'session-blank', { createdAt: 3000, cwd: CWD_B, blank: true })
-  // 已归档：id 在注册表的归档集里（同时仍在 ws-a 的登记表里，归档不动记账）
+  // 已归档：id 在注册表的归档集里（同时仍在 ws-a 的登记表里，归档不动计数）
   const registry = readRegistry(sandbox.registryPath)
   registry.global.archivedSessionIds = ['session-a']
   writeRegistryAtomic(sandbox.registryPath, registry)
@@ -1678,7 +1678,7 @@ test('GET /state：注入归档端口后 archiveAvailable 为 true', async () =>
   assert.equal(payload(captured)['archiveAvailable'], true)
 })
 
-test('POST /delete：预演不写盘、落地先备份再删，二者共用同一份计划', async () => {
+test('POST /delete：预览不写盘、应用先备份再删，二者共用同一份计划', async () => {
   const sandbox = makeSandbox('web-delete')
   const dir = sessionDir(sandbox.sessionsRoot, CWD_A, 'session-a')
   writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000, { title: '不要了的会话' })
@@ -1699,7 +1699,7 @@ test('POST /delete：预演不写盘、落地先备份再删，二者共用同�
   assert.deepEqual((preview['entries'] as Array<Record<string, unknown>>).map((entry) => entry['id']), ['session-a'])
   assert.equal((preview['entries'] as Array<Record<string, unknown>>)[0]!['title'], '不要了的会话')
   assert.equal((preview['entries'] as Array<Record<string, unknown>>)[0]!['dir'], dir)
-  assert.equal(existsSync(dir), true, '预演不许动磁盘')
+  assert.equal(existsSync(dir), true, '预览不许动磁盘')
 
   const applied = await post({ sessionIds: ['session-a'], mode: 'apply' })
   assert.equal(applied.status, 200)
@@ -1708,12 +1708,12 @@ test('POST /delete：预演不写盘、落地先备份再删，二者共用同�
   assert.equal(applyBody['verified'], true)
   assert.match(String(applyBody['summary']), /已删除 1 个会话/)
   assert.equal(typeof applyBody['backupDir'], 'string')
-  assert.equal(existsSync(dir), false, '落地之后会话目录该没了')
+  assert.equal(existsSync(dir), false, '应用之后会话目录该没了')
   // 备份落在本插件的备份根下（「备份与回滚」那张卡读的就是它）
   assert.equal(existsSync(applyBody['backupDir'] as string), true)
 })
 
-test('POST /delete：删父会话时把子智能体一起带上，预演里带着出处字段', async () => {
+test('POST /delete：删父会话时把子智能体一起带上，预览里带着出处字段', async () => {
   const sandbox = makeSandbox('web-delete-family')
   writeSession(sandbox.sessionsRoot, 'session-parent', CWD_A, 1000, { title: '父会话' })
   writeSession(sandbox.sessionsRoot, 'session-child', CWD_A, 2000, { title: '子智能体', origin: 'subagent', parentSession: 'session-parent' })
@@ -1745,7 +1745,7 @@ test('POST /delete：状态不允许（会话不在库里）时把完整计划�
     fakeReq('POST', `${API_PREFIX}/delete`, Buffer.from(JSON.stringify({ sessionIds: ['session-ghost'], mode: 'apply' }))),
     res,
   )
-  // 与 /migrate 同一套：落地那条路是事件流，状态码发在结果之前，所以"计划不 ok"落在正文里。
+  // 与 /migrate 同一套：应用那条路是事件流，状态码发在结果之前，所以"计划不 ok"落在正文里。
   assert.equal(captured.status, 200)
   const body = payload(captured)
   assert.equal(body['ok'], false)
@@ -2131,7 +2131,7 @@ test('GET /sync?mode=test：只读探一次，把结论与"这次有没有凭据
   }
 })
 
-test('POST /sync?mode=apply：预演不落地，apply 走事件流拉取远端那条并登记进本机工作区', async () => {
+test('POST /sync?mode=apply：预览不应用，apply 走事件流拉取远端那条并登记进本机工作区', async () => {
   const sandbox = makeSandbox('web-sync')
   writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000)
   const fixture = await startDavFixture({ root: join(sandbox.base, 'dav') })
@@ -2166,13 +2166,13 @@ test('POST /sync?mode=apply：预演不落地，apply 走事件流拉取远端�
     assert.equal(
       preview.captured.headers['content-type'],
       'text/event-stream; charset=utf-8',
-      '预演也走事件流：它要扫本机、读远端、逐条比对，冷的时候几秒，界面得说出做到哪儿了',
+      '预览也走事件流：它要扫本机、读远端、逐条比对，冷的时候几秒，界面得说出做到哪儿了',
     )
     const previewStream = events(preview.captured)
     assert.deepEqual(
       previewStream.map((event) => event['type']),
       ['progress', 'progress', 'result'],
-      '预演报的是算计划的三段：扫本机的 1 条、读远端索引 1 条，再收尾',
+      '预览报的是算计划的三段：扫本机的 1 条、读远端索引 1 条，再收尾',
     )
     assert.deepEqual(
       previewStream.filter((event) => event['type'] === 'progress').map((event) => event['progress']),
@@ -2180,7 +2180,7 @@ test('POST /sync?mode=apply：预演不落地，apply 走事件流拉取远端�
         { phase: 'scan', total: 1, done: 0 },
         { phase: 'remote', total: 0, done: 0 },
       ],
-      '读远端索引那一段没有分母（total: 0）：界面只说"正在读取远端索引…"。预演没有 pull/push——那两段要真写盘；本机与远端没有同 id 的会话，比对那段一个文件都不用读',
+      '读远端索引那一段没有分母（total: 0）：界面只说"正在读取远端索引…"。预览没有 pull/push——那两段要真写盘；本机与远端没有同 id 的会话，比对那段一个文件都不用读',
     )
     const plan = previewStream.find((event) => event['type'] === 'result')?.['result'] as Record<string, unknown>
     assert.equal(plan['mode'], 'plan')
@@ -2189,11 +2189,11 @@ test('POST /sync?mode=apply：预演不落地，apply 走事件流拉取远端�
     assert.equal(
       existsSync(sessionDir(sandbox.sessionsRoot, CWD_A, 'session-remote')),
       false,
-      '预演一个字节都不落地',
+      '预览一个字节都不应用',
     )
-    // 预演也要回答"这次落地之后要不要重启"：判据是宿主端口的探测（这个宿主没有那套动作），而不是
+    // 预览也要回答"这次应用之后要不要重启"：判据是宿主接口的探测（这个宿主没有那套动作），而不是
     // "这次什么都没干"。界面的确认弹窗就靠它在按下确认之前先把这句话说出来。
-    assert.equal(plan['takesEffect'], 'restart-required', '预演就把"落地后要重启"说清楚')
+    assert.equal(plan['takesEffect'], 'restart-required', '预览就把"应用后要重启"说清楚')
 
     const applied = fakeRes()
     await handlers['GET|POST /sync']!(fakeReq('POST', `${API_PREFIX}/sync?mode=apply`), applied.res)
@@ -2201,7 +2201,7 @@ test('POST /sync?mode=apply：预演不落地，apply 走事件流拉取远端�
     assert.equal(
       applied.captured.headers['content-type'],
       'text/event-stream; charset=utf-8',
-      '落地那一次是事件流（界面靠它显示"正在推送 12 / 84"）',
+      '应用那一次是事件流（界面靠它显示"正在推送 12 / 84"）',
     )
     const stream = events(applied.captured)
     assert.deepEqual(
@@ -2234,7 +2234,7 @@ test('POST /sync?mode=apply：预演不落地，apply 走事件流拉取远端�
     assert.deepEqual([...(registry.tables.workspaces['ws-a']?.sessionIds ?? [])].sort(), ['session-a', 'session-remote'])
     assert.equal(validateRegistry(registry).ok, true, '同步完的注册表仍然满足启动不变式')
 
-    // 落地完再预演一次：本机已经有这条、内容一致，没有会话要落到本机，此时不该再说"需要重启"——
+    // 应用完再预览一次：本机已经有这条、内容一致，没有会话要落到本机，此时不该再说"需要重启"——
     // 纯推送（或没事可做）不改本机任何东西，那时候说重启是一句假警告。
     const after = fakeRes()
     await handlers['GET|POST /sync']!(fakeReq('GET', `${API_PREFIX}/sync`), after.res)
@@ -2243,14 +2243,14 @@ test('POST /sync?mode=apply：预演不落地，apply 走事件流拉取远端�
       unknown
     >
     assert.deepEqual((afterResult['plan'] as Record<string, unknown>)['pullIds'], [], '这条已经在本机了')
-    assert.equal(afterResult['takesEffect'], 'immediate', '没有会话要落地就不谈"生效"')
+    assert.equal(afterResult['takesEffect'], 'immediate', '没有会话要应用就不谈"生效"')
   } finally {
     await fixture.close()
     rmSync(sandbox.base, { recursive: true, force: true })
   }
 })
 
-test('POST /sync：裁决随预演与落地一起走，keep-remote 只留远端那份', async () => {
+test('POST /sync：裁决随预览与应用一起走，keep-remote 只留远端那份', async () => {
   const sandbox = makeSandbox('web-sync-decisions')
   writeSession(sandbox.sessionsRoot, 'session-split', CWD_A, 1000, {
     eventLines: ['{"type":"user/message","seq":1,"data":{"text":"A-tail"}}'],
@@ -2309,7 +2309,7 @@ test('POST /sync：裁决随预演与落地一起走，keep-remote 只留远端�
       applied.res,
     )
     const outcome = payload(applied.captured)
-    assert.deepEqual(outcome['planSource'], { kind: 'reused' }, '同一组裁决能复用预演那份')
+    assert.deepEqual(outcome['planSource'], { kind: 'reused' }, '同一组裁决能复用预览那份')
     assert.deepEqual(outcome['replaced'], ['session-split'])
     const pulled = outcome['pulled'] as string[]
     assert.deepEqual(pulled, ['session-split'], '只留远端那份：本机这份不另存一条')
@@ -2323,7 +2323,7 @@ test('POST /sync：裁决随预演与落地一起走，keep-remote 只留远端�
   }
 })
 
-test('POST /sync?mode=apply：带着预演给的 planId 就照着那份计划落地（一份预演只够落地一次）', async () => {
+test('POST /sync?mode=apply：带着预览给的 planId 就照着那份计划应用（一份预览只够应用一次）', async () => {
   const sandbox = makeSandbox('web-sync-preview')
   writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000)
   const fixture = await startDavFixture({ root: join(sandbox.base, 'dav') })
@@ -2354,7 +2354,7 @@ test('POST /sync?mode=apply：带着预演给的 planId 就照着那份计划落
     const preview = fakeRes()
     await handlers['GET|POST /sync']!(fakeReq('GET', `${API_PREFIX}/sync`), preview.res)
     const planned = payload(preview.captured)
-    assert.equal(typeof planned['planId'], 'string', '预演回一个号码：确认那次带着它回来')
+    assert.equal(typeof planned['planId'], 'string', '预览回一个号码：确认那次带着它回来')
 
     const applied = fakeRes()
     await handlers['GET|POST /sync']!(
@@ -2364,7 +2364,7 @@ test('POST /sync?mode=apply：带着预演给的 planId 就照着那份计划落
     assert.deepEqual(
       progressOf(applied.captured).map((progress) => progress['phase']),
       ['remote', 'pull', 'push'],
-      '照预演那份走：只重读一次远端索引（验数据有没有变），扫本机 / 问 git / 比对内容那几段不再走',
+      '照预览那份走：只重读一次远端索引（验数据有没有变），扫本机 / 问 git / 比对内容那几段不再走',
     )
     const outcome = payload(applied.captured)
     assert.deepEqual(outcome['planSource'], { kind: 'reused' })
@@ -2372,7 +2372,7 @@ test('POST /sync?mode=apply：带着预演给的 planId 就照着那份计划落
     assert.deepEqual((outcome['plan'] as Record<string, unknown>)['pullIds'], ['session-remote'])
     assert.ok(existsSync(sessionDir(sandbox.sessionsRoot, CWD_A, 'session-remote')), '该落的还是落了')
 
-    // 一份预演只够落地一次：拿着同一个号码再来一次，宿主手里已经没有那份数据了，退回从零重算。
+    // 一份预览只够应用一次：拿着同一个号码再来一次，宿主手里已经没有那份数据了，退回从零重算。
     const again = fakeRes()
     await handlers['GET|POST /sync']!(
       fakeReq('POST', `${API_PREFIX}/sync?mode=apply`, Buffer.from(JSON.stringify({ planId: planned['planId'] }))),
@@ -2425,7 +2425,7 @@ test('GET /state：整库扫描逐条报进度，收尾仍是那一份清单', a
   assert.equal(body['sessionsRoot'], sandbox.sessionsRoot)
 })
 
-test('POST /migrate：落地时把 备份 / 改写 / 搬目录 / 注册表 / 复核 / 补齐 逐段报出来', async () => {
+test('POST /migrate：应用时把 备份 / 改写 / 搬目录 / 注册表 / 复核 / 补齐 逐段报出来', async () => {
   const sandbox = makeSandbox('web-migrate-progress')
   writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000, { title: '会话甲' })
   writeSession(sandbox.sessionsRoot, 'session-b', CWD_A, 2000)
@@ -2461,17 +2461,17 @@ test('POST /migrate：落地时把 备份 / 改写 / 搬目录 / 注册表 / 复
       ['rewrite', 2, 1],
       ['move', 2, 0],
       ['move', 2, 1],
-      // 注册表是一次落盘，没有"第几条"：分母 0，界面只说在做什么、不画条
+      // 注册表是一次写入磁盘，没有"第几条"：分母 0，界面只说在做什么、不画条
       ['registry', 0, 0],
       ['verify', 2, 0],
       ['verify', 2, 1],
-      // 落地之后请宿主把列表元数据折出来（不然侧边栏是"未命名"）
+      // 应用之后请宿主把列表元数据折出来（不然侧边栏是"未命名"）
       ['warm', 2, 0],
       ['warm', 2, 1],
     ],
     '段名与真实步骤一一对应、顺序一致；每段开始处理下一条之前先报一条',
   )
-  // 会话按"最新在前"排（与侧边栏同一口径）：session-b 是后建的，所以它排在前面。
+  // 会话按"最新在前"排（与侧边栏同一标准）：session-b 是后建的，所以它排在前面。
   assert.deepEqual(warmed, ['session-b', 'session-a'], '补齐那一段真的是逐条走宿主')
   assert.equal(payload(captured)['verified'], true, '收尾仍是原来那份结论')
   // 报进度不许碰数据：本条会话的名字只出现在 id / label 上，备份目录里那份快照才是字节真相。
@@ -2531,7 +2531,7 @@ test('POST /delete：别的入口拿着写权限时只删本机，远端那一�
   }
 })
 
-test('POST /delete：先备整个会话目录再删，逐条报进度（预演只报扫描那一段）', async () => {
+test('POST /delete：先备整个会话目录再删，逐条报进度（预览只报扫描那一段）', async () => {
   const sandbox = makeSandbox('web-delete-progress')
   writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000, { title: '会话甲' })
   writeSession(sandbox.sessionsRoot, 'session-b', CWD_A, 2000)
@@ -2539,13 +2539,13 @@ test('POST /delete：先备整个会话目录再删，逐条报进度（预演�
   const body = (mode: string): Buffer =>
     Buffer.from(JSON.stringify({ sessionIds: ['session-a', 'session-b'], mode }))
 
-  // 预演：只有"重算计划"那一段要花时间（扫整个库）
+  // 预览：只有"重算计划"那一段要花时间（扫整个库）
   const planned = fakeRes()
   await handlers['POST /delete']!(fakeReq('POST', `${API_PREFIX}/delete`, body('plan')), planned.res)
   assert.deepEqual(
     progressOf(planned.captured).map((item) => item['phase']),
     ['scan', 'scan'],
-    '预演不写盘：不该出现 backup / remove / verify 那几段',
+    '预览不写盘：不该出现 backup / remove / verify 那几段',
   )
 
   const applied = fakeRes()
@@ -2567,7 +2567,7 @@ test('POST /delete：先备整个会话目录再删，逐条报进度（预演�
   assert.equal(payload(applied.captured)['verified'], true)
 })
 
-test('POST /rollback：预演与落地都逐条报"正在还原"，迁移备份还多一段注册表', async () => {
+test('POST /rollback：预览与应用都逐条报"正在还原"，迁移备份还多一段注册表', async () => {
   const sandbox = makeSandbox('web-rollback-progress')
   writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000, { title: '会话甲' })
   writeSession(sandbox.sessionsRoot, 'session-b', CWD_A, 2000)
@@ -2597,7 +2597,7 @@ test('POST /rollback：预演与落地都逐条报"正在还原"，迁移备份�
       ['restore', 2, 1, 'session-a'],
       ['registry', 0, 0, undefined],
     ],
-    '预演也要逐条走一遍清单（不写盘而已）：分母是会话数，注册表那一段没有分母',
+    '预览也要逐条走一遍清单（不写盘而已）：分母是会话数，注册表那一段没有分母',
   )
   assert.equal(payload(dry)['dryRun'], true)
 
@@ -2605,7 +2605,7 @@ test('POST /rollback：预演与落地都逐条报"正在还原"，迁移备份�
   assert.deepEqual(
     progressOf(done).map((item) => item['phase']),
     ['restore', 'restore', 'registry'],
-    '落地报的是同一套段名（界面一条进度块跑完预演与落地两条路）',
+    '应用报的是同一套段名（界面一条进度块跑完预览与应用两条路）',
   )
   assert.equal(payload(done)['registryRestored'], true)
   assert.deepEqual(
@@ -2615,7 +2615,7 @@ test('POST /rollback：预演与落地都逐条报"正在还原"，迁移备份�
   )
 })
 
-test('POST /import：预演按包里的条数读、落地只按"会创建"的那些写', async () => {
+test('POST /import：预览按包里的条数读、应用只按"会创建"的那些写', async () => {
   const source = makeSandbox('web-import-progress-src')
   writeSession(source.sessionsRoot, 'session-a', CWD_A, 1000, { title: '会话甲' })
   writeSession(source.sessionsRoot, 'session-b', CWD_A, 2000)
@@ -2632,7 +2632,7 @@ test('POST /import：预演按包里的条数读、落地只按"会创建"的那
   )
   const bundle = exported.captured.body
 
-  // 落地到一个只有其中一条的库：那一条会被跳过（分母只算"会创建"的那些，进度条才走得满）
+  // 应用到一个只有其中一条的库：那一条会被跳过（分母只算"会创建"的那些，进度条才走得满）
   const target = makeSandbox('web-import-progress-dst')
   writeSession(target.sessionsRoot, 'session-a', CWD_A, 1000)
   const handlers = createApiHandlers(
@@ -2651,7 +2651,7 @@ test('POST /import：预演按包里的条数读、落地只按"会创建"的那
       // 库那一遍扫描没有"第几条"可讲（目录项的条数与包里的条数不是一回事）
       ['scan', 0, 0],
     ],
-    '预演逐条读包里的日志折标题，分母是包里的条数',
+    '预览逐条读包里的日志折标题，分母是包里的条数',
   )
   assert.equal(payload(planned.captured)['ok'], true)
 
@@ -2668,7 +2668,7 @@ test('POST /import：预演按包里的条数读、落地只按"会创建"的那
       ['registry', 0, 0],
       ['warm', 1, 0],
     ],
-    '落地沿用同一份计划（不再读一遍包），只按会创建的那些逐条写盘',
+    '应用沿用同一份计划（不再读一遍包），只按会创建的那些逐条写盘',
   )
   const body = payload(applied.captured)
   assert.deepEqual(body['written'], ['session-b'])
@@ -2695,7 +2695,7 @@ test('事件流：每写完一条就把 socket 推给内核（同步循环里也
   const afterFlush: number[] = []
   const server = createServer((req, res) => {
     const real = res.socket
-    if (real === null) throw new Error('这个夹具需要一个真实 socket')
+    if (real === null) throw new Error('这项测试需要一个真实 socket')
     const socket = new Proxy(real, {
       get(target, prop, receiver) {
         if (prop === 'uncork') {
@@ -2919,7 +2919,7 @@ test('GET /panel/events：开头 ready + 两种后台状态，扫完推一份清
 
   // 两种后台状态：这一趟都没跑，所以都是 null。
   const sync = seen.find((event) => event['type'] === 'sync')
-  assert.ok(sync !== undefined, '要说清落地那一趟现在什么样')
+  assert.ok(sync !== undefined, '要说清应用那一趟现在什么样')
   assert.equal(sync['applying'], null)
   assert.equal(sync['last'], null)
   const autoPush = seen.find((event) => event['type'] === 'auto-push')
@@ -2938,7 +2938,7 @@ test('GET /panel/events：开头 ready + 两种后台状态，扫完推一份清
   assert.ok(progressOf(captured).some((event) => event['phase'] === 'scan'), '扫库进度走同一條流')
 })
 
-test('GET /panel/events：落地那一趟一起跑，进度与结论都推给面板（发起者在另一个请求里）', async () => {
+test('GET /panel/events：应用那一趟一起跑，进度与结论都推给面板（发起者在另一个请求里）', async () => {
   const sandbox = makeSandbox('web-panel-sync')
   writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000)
   const fixture = await startDavFixture({ root: join(sandbox.base, 'dav') })
@@ -2985,11 +2985,11 @@ test('GET /panel/events：落地那一趟一起跑，进度与结论都推给面
     await new Promise((resolve) => setTimeout(resolve, 20))
     const before = events(panel.captured).length
 
-    // 落地由**另一个请求**发起（真实情形是另一个页签，或者关掉窗口之后重开的那个页面）。
+    // 应用由**另一个请求**发起（真实情形是另一个页签，或者关掉窗口之后重开的那个页面）。
     const applied = fakeRes()
     const running = handlers['GET|POST /sync']!(fakeReq('POST', `${API_PREFIX}/sync?mode=apply`), applied.res)
     await new Promise((resolve) => setTimeout(resolve, 40))
-    // 跑着的时候第二趟被拒：两趟一起跑会互相踩（同一份预演缓存、同一个远端、同一条本机日志）。
+    // 跑着的时候第二趟被拒：两趟一起跑会互相踩（同一份预览缓存、同一个远端、同一条本机日志）。
     const second = fakeRes()
     await handlers['GET|POST /sync']!(fakeReq('POST', `${API_PREFIX}/sync?mode=apply`), second.res)
     assert.equal(second.captured.status, 409, '上一轮还在跑就不开第二趟')
@@ -3018,7 +3018,7 @@ test('GET /panel/events：落地那一趟一起跑，进度与结论都推给面
     assert.equal(last['ok'], true)
     assert.equal(last['pulled'], 1, '留下"搬了几条"给没在听那条流的人看')
     // 拉取会把会话落到本机：别的页面得重读一次清单。
-    assert.ok(panelEvents.some((event) => event['type'] === 'stale'), '落地之后推一条"库变了"')
+    assert.ok(panelEvents.some((event) => event['type'] === 'stale'), '应用之后推一条"库变了"')
     // 发起的那个请求自己照旧拿到完整结果（面板这条流只给计数）。
     assert.equal(payload(applied.captured)['mode'], 'apply')
   } finally {
@@ -3179,7 +3179,7 @@ test('GET /auto-push：当场跑一轮，结果摊平着回来', async () => {
   assert.deepEqual(result['pulled'], [], '只推这条路上拉取永远是空的')
   assert.equal(result['bytesIn'], 0)
   assert.equal(result['bytesOut'], 10)
-  assert.equal(result['planSource'], undefined, '自动推送没有"预演那份"，所以没有 planSource')
+  assert.equal(result['planSource'], undefined, '自动推送没有"预览那份"，所以没有 planSource')
   // 只推不改本机 → 永远 immediate（不能走 effectOf 探出一句假警告）。
   assert.equal(result['takesEffect'], 'immediate')
   assert.ok(result['plan'] !== undefined, '计划一起带回来（界面按需显示）')
@@ -3296,7 +3296,7 @@ test('POST /export：附件对象跟着包走，条数/字节/本机缺的那几
   assert.deepEqual(attachmentBytes(bundle, bundle.attachments[0]!), present)
 })
 
-test('POST /import：日志已在库里、只缺附件对象时照样落地（写会话 0 条、补对象 1 个）', async () => {
+test('POST /import：日志已在库里、只缺附件对象时照样应用（写会话 0 条、补对象 1 个）', async () => {
   const source = makeSandbox('web-import-attachments-source')
   const store = makeAttachmentStore(source.base)
   const image = Buffer.from('要补进另一个库的图片字节')
@@ -3324,7 +3324,7 @@ test('POST /import：日志已在库里、只缺附件对象时照样落地（�
   await importer['POST /import']!(fakeReq('POST', url, exported.captured.body), applied.res)
 
   const result = payload(applied.captured)
-  assert.equal(result['ok'], true, '只有附件要补时落地也是成功（界面据此收掉弹窗并刷新）')
+  assert.equal(result['ok'], true, '只有附件要补时应用也是成功（界面据此收掉弹窗并刷新）')
   assert.deepEqual(result['written'], [], '一条会话都没写（库里已经有它）')
   assert.equal(result['attachmentWritten'], 1)
   assert.equal(result['attachmentPresent'], 0)
@@ -3382,7 +3382,7 @@ test('GET /sync-diff：两边事件一致、只有 header 的 cwd 不同，且�
       logVersion: 4,
     })
     const before = readFileSync(localPath)
-    // 夹具记的是这台服务器**收到过的全部**请求，里面已经有搭场景时那两次 PUT——只看端点这一段。
+    // 这份假服务记的是这台服务器**收到过的全部**请求，里面已经有搭场景时那两次 PUT——只看端点这一段。
     const requestsBefore = fixture.requests.length
     const handlers = createApiHandlers(
       deps(sandbox, {

@@ -17,7 +17,7 @@ Promise，浏览器那侧、测试与 `session-diff.ts` 的调用点都要跟着
 
 把"数一遍"拆成三段，`readTranscript()` 与端点各走一条：
 
-- `countRange(lines, from, to, state)`：真正逐行记账的那一段，两个入口共用，口径不会分叉。
+- `countRange(lines, from, to, state)`：真正逐行计数的那一段，两个入口共用，标准不会分叉。
 - `countTranscript()`：同步版本，保留给几行的差异子集与测试。
 - `countTranscriptAsync()`：每 `COUNT_CHUNK_LINES = 2048` 行 `await` 一次（`setImmediate`）。
   `readTranscriptAsync()` 用它拿账，再走与同步版本**同一个** `parsePage()` 组装这一页。
@@ -43,7 +43,7 @@ Promise，浏览器那侧、测试与 `session-diff.ts` 的调用点都要跟着
   三四十毫秒，日志再长一点又回去；没有结构性的保证。
 - **交给 worker**：计数要先把 31 MB 的行数组传过去，而分块已经能把停顿压进 10 ms 量级，不满足"分块压不到
   50 ms"这一道门。
-- **同一段逻辑写两份**（同步一份、异步一份）：两份实现迟早分叉，`counts` 与 `items` 的口径必须逐字节一致。
+- **同一段逻辑写两份**（同步一份、异步一份）：两份实现迟早分叉，`counts` 与 `items` 的标准必须逐字节一致。
 
 ## Consequences
 

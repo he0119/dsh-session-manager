@@ -47,7 +47,7 @@ test('log-decode：解压过程中会把事件循环让出去（同一个进程�
   })
   const decoded = decodeAllChunked(bytes)
   const raced = decoded.then(() => '解压完了' as const)
-  // 谁先落地：分块解压中途让出事件循环，定时器才排得进来说话；整份解压会把这一段占满，定时器只能排在它之后。
+  // 谁先应用：分块解压中途让出事件循环，定时器才排得进来说话；整份解压会把这一段占满，定时器只能排在它之后。
   assert.equal(await Promise.race([timer, raced]), '定时器')
   await decoded
 })

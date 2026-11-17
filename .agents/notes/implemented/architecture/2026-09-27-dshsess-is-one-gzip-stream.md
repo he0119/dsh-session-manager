@@ -4,7 +4,7 @@ Status: implemented
 
 ## Problem
 
-导出要把若干会话（日志 + 清单）装进一个文件，导入要能逐条校验、逐条落地。容器格式有几种现成的
+导出要把若干会话（日志 + 清单）装进一个文件，导入要能逐条校验、逐条应用。容器格式有几种现成的
 选择。
 
 后缀与开头那串魔法字节是同一件事的两种说法：`DSHSESS1` 与 `.dshsess`（DSH + sessions）。这层一致性
@@ -46,7 +46,7 @@ gzip( 'DSHSESS1\n' | u32le 清单长度 | 清单 JSON | 各文件的原始字节
 
 ## Consequences
 
-- 包是自校验的：坏包在落地之前被拒，进不了会话库。
+- 包是自校验的：坏包在应用之前被拒，进不了会话库。
 - 清单带 sha256 与偏移，导入不必信任文件名或顺序。
 - `test/operations/transfer/transfer.test.ts` 核字节往返与整个拒绝面（每条校验各有一条用例）。
 - `test/plugin/client.test.mjs` 专门断言产物里不再出现那个少一个字母的后缀。

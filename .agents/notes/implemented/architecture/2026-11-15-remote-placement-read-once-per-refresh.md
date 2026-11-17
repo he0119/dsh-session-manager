@@ -18,11 +18,11 @@ Status: implemented
 
 - **宿主**：`GET /remote` 一遍读齐远端（每台机器那份 `index.json`，不是包），回
   `会话 id → [{ machine, path, bytes, lastActiveAt? }]`（`src/operations/sync/index.ts` 的 `remotePlacements()`，
-  纯函数，`test/operations/sync/sync.test.ts` 钉住排序与聚合）。与 `RemoteLibrary.entries` 的口径刻意不同：那里每个
+  纯函数，`test/operations/sync/sync.test.ts` 钉住排序与聚合）。与 `RemoteLibrary.entries` 的标准刻意不同：那里每个
   id 只留**赢的那一份**（用来判"该拿哪份"），这里按机器逐份列全（用来回答"哪几处有"）。
   没配同步 → 409（界面据此整格不出现），不是"远端空着"。
 - **界面**：一次刷新只读一次（`src/client/operations/sync/remoteLibrary.ts`，模块级 store）。触发点是清单换了
-  对象（`panelEvents` 上 `state` 变了）与一次同步落地之后——后者会改远端，不重读就还停在落地之前的
+  对象（`panelEvents` 上 `state` 变了）与一次同步应用之后——后者会改远端，不重读就还停在应用之前的
   样子。右栏那格只是**查表**：选中哪条会话就在这份上查，不现读（`src/client/operations/sync/remoteRows.ts`
   决定摆什么，`test/client/operations/sync/remoteRows.test.ts` 钉住）。
 - **说不全时不撒谎**：读失败照实说原因；某台机器的索引没读到时不说"远端没有这条会话"（它可能就在
@@ -49,6 +49,6 @@ Status: implemented
   收进响应头，那是另一次改动的活。
 - 右栏那格多一行（机器 + 字节 + 最后活动时间），路径另起一行用等宽字（`.dsm-inspectorPath`），
   悬停看全文；同一 id 在几处都有时一处一行。没配同步时整格不出现——与"这个宿主没有附件服务"那几条
-  同一条口径：没这个能力就不摆一个永远空着的格子。
-- 一次同步落地之后会重读一次远端：那是这一页唯一"改完立刻再看一眼"的地方（推上去的包、补上去的
+  同一条标准：没这个能力就不摆一个永远空着的格子。
+- 一次同步应用之后会重读一次远端：那是这一页唯一"改完立刻再看一眼"的地方（推上去的包、补上去的
   对象都在远端）。

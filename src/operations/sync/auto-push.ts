@@ -16,7 +16,7 @@ import { type RemoteWriteGate, createRemoteWriteGate } from './remote-write.ts'
  * 自动推送这一轮跑没跑、跑成了什么。
  *
  * 形状刻意分两层：`ran` / `skip` 说"这一轮**动了没有、为什么没动**"，`outcome` 才是真跑之后那份
- * 落地结果（与手动同步同一个形状，界面因此能复用同一套解析）。不把两者揉成一个可选字段，是因为
+ * 应用结果（与手动同步同一个形状，界面因此能复用同一套解析）。不把两者揉成一个可选字段，是因为
  * "没跑"有三种完全不同的原因（没开、没到点、上一轮还在跑），界面上那三句话也不一样。
  */
 export interface AutoPushOutcome {
@@ -24,7 +24,7 @@ export interface AutoPushOutcome {
   ran: boolean
   /** 没跑的原因（机器可读，句子在浏览器半侧）。 */
   skip?: AutoPushSkip
-  /** 真跑了的落地结果。 */
+  /** 真跑了的应用结果。 */
   outcome?: SyncOutcome
   /** 真跑的开始与结束时刻（毫秒）；没跑就没有。 */
   startedAt?: number
@@ -69,7 +69,7 @@ export type AutoPushEvent =
  * 是"用户多半已经转头去干别的"的量级；代价是最后一轮之后最多晚 5 分钟才上云。依据见
  * [让自动推送等安静之后再跑](../../../.agents/notes/implemented/bug-fix/2026-10-22-auto-push-waits-for-quiet.md)。
  *
- * 落盘不靠这个窗口等：宿主侧在调 `touched()` 之前已经 `await sessions.flush(session)` 过了（见
+ * 写入磁盘不靠这个窗口等：宿主侧在调 `touched()` 之前已经 `await sessions.flush(session)` 过了（见
  * `src/tools.ts` 的 `attachAutoPushToSessions()`），窗口纯粹是"别在人还在的时候抢资源"。
  */
 export const AUTO_PUSH_QUIET_MS = 300_000
@@ -103,7 +103,7 @@ export interface AutoPushClock {
 /** `createAutoPushTimer()` 的依赖。 */
 export interface AutoPushTimerDeps {
   /**
-   * 跑一轮（`runAutoPush()` 的真身由调用方注入；测试注入一个记账的假实现）。
+   * 跑一轮（`runAutoPush()` 的真身由调用方注入；测试注入一个计数的假实现）。
    */
   run: (options?: { onProgress?: ProgressReporter }) => Promise<AutoPushOutcome>
   /** 当前配置（活引用现读）。 */
@@ -137,7 +137,7 @@ export interface AutoPushTimer {
    * 那一次是在 `await sessions.flush(session)` 之后调的，其余事件只算"还在活动"）。窗口内再来事件就
    * 把计时**重置**，所以一整段连着写的时间里一次都不推。
    *
-   * 关着的时候什么都不做：不排队、不记账——打开之后写的下一轮会照常触发，没有"欠着一次"这回事。
+   * 关着的时候什么都不做：不排队、不计数——打开之后写的下一轮会照常触发，没有"欠着一次"这回事。
    */
   touched(): void
   /** 最近一次结论（不碰网络）。 */
@@ -226,7 +226,7 @@ export function createAutoPushTimer(deps: AutoPushTimerDeps): AutoPushTimer {
     if (running !== undefined) return { ran: false, skip: 'busy', failures: failuresOf(lastOutcome) }
     if (!deps.clock.enabled()) return { ran: false, skip: 'disabled', failures: failuresOf(lastOutcome) }
     /*
-     * 别的入口正在写远端（手动同步落地、整理、删除远端、工具）：这一轮直接跳过，不排队。排队会让它
+     * 别的入口正在写远端（手动同步应用、整理、删除远端、工具）：这一轮直接跳过，不排队。排队会让它
      * 拿着读于排队之前的快照去写，反而更容易盖掉别人刚写进去的东西；下一轮安静窗口会自己再来。
      */
     const release = gate.tryAcquire('自动推送')
@@ -333,12 +333,12 @@ function failuresOf(outcome: AutoPushOutcome | undefined): number {
  *
  *   1. **只推不拉**（`pushOnly`）：计划里没有拉取、没有"覆盖本机"，所以这一轮**永远不改本机任何
  *      会话**。这不是省钱，是安全边界——覆盖本机那份要动本机已有内容，界面上那道动作前面挡着一个
- *      确认弹窗，后台不该绕过它。也正因为没有落地那一段，这一轮不必问宿主"这条还活着吗"、不必
+ *      确认弹窗，后台不该绕过它。也正因为没有应用那一段，这一轮不必问宿主"这条还活着吗"、不必
  *      备份、不写注册表、不请宿主重折投影检查点：那几件事全都挂在"真有东西落到本机"那条路上。
- *   2. **没有预演与确认**：一次调用算完就落地（`runSync()` 那条单次调用路），而**不是**
- *      `syncPrepared()`——那个是"照着用户确认过的那份计划落地"，后台没有用户确认过的东西。
+ *   2. **没有预览与确认**：一次调用算完就应用（`runSync()` 那条单次调用路），而**不是**
+ *      `syncPrepared()`——那个是"照着用户确认过的那份计划应用"，后台没有用户确认过的东西。
  *   3. **没得推也要收尾一次**：本机删掉的会话得从**自己那一格的索引**里消失，而今天那一步只在
- *      `applyPreparedSync()` 里（且总是会走到）。所以"计划里一条都不推"时仍要走一次落地——一份空的
+ *      `applyPreparedSync()` 里（且总是会走到）。所以"计划里一条都不推"时仍要走一次应用——一份空的
  *      计划，落下去只会重写索引。不这么做的话，删掉的会话会永远留在自己的格子索引里，别的机器照着
  *      它去取包时取到一个不存在的对象。
  *
@@ -355,7 +355,7 @@ function failuresOf(outcome: AutoPushOutcome | undefined): number {
  * 本机那格的索引里是不是还留着眼下**已经没有**的会话（见 `runAutoPush()` 的 `idle` 判据）。
  *
  * 判据是集合包含：索引里记着的每个 id 都得在本机现在的库里。本机删掉一条会话之后那个 id 就不在了，
- * 于是这一项为真——值得走一趟落地把索引刷新掉。反过来"本机新加了一条"不算（那时 `pushIds` 里有它，
+ * 于是这一项为真——值得走一趟应用把索引刷新掉。反过来"本机新加了一条"不算（那时 `pushIds` 里有它，
  * 走不到这个判据）。
  *
  * 只看**自己那一格**：别的机器的格子由它们自己维护，那些记录本来就不该由这里撤。
@@ -394,7 +394,7 @@ export async function runAutoPush(
   const mode = config.mode
   const startedAt = now()
   /*
-   * 三个条件都成立才是"真的没事干"（`idle`），此时连落地都不走：索引里要写的东西与远端那份逐字节
+   * 三个条件都成立才是"真的没事干"（`idle`），此时连应用都不走：索引里要写的东西与远端那份逐字节
    * 相同，再 PUT 一次只是白跑一趟网络。三条各自挡一种"看着没事、其实要收尾"的情形：
    *
    *   1. `pushIds` 非空 → 有会话要推；

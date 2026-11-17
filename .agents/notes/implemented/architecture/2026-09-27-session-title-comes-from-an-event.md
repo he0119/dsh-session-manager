@@ -44,6 +44,6 @@ Status: implemented
 ## Consequences
 
 - `/state` 每次刷新列表都会走一遍，所以预算与缓存的先后顺序都是性能取舍的一部分，不是实现细节。
-- 导入预演里的标题不走上面这条路：它直接从 `.dshsess` 的**载荷**里折（`src/operations/transfer/transfer.ts` 的
-  `bundleTitle`），因为那些会话还没落盘、宿主也没有它们的缓存；清单格式没为此改过
+- 导入预览里的标题不走上面这条路：它直接从 `.dshsess` 的**载荷**里折（`src/operations/transfer/transfer.ts` 的
+  `bundleTitle`），因为那些会话还没写入磁盘、宿主也没有它们的缓存；清单格式没为此改过
   （`BUNDLE_FORMAT_VERSION` 不动），所以旧包、别人的包一样能被折出标题。

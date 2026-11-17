@@ -5,7 +5,7 @@
 // 那几条必须报出来（describeStranded()）。三者各自都有单测，但"全量迁移之后工作区还在不在"只有把它们
 // 串起来才看得见，而它正是用户看见的那个现象（一个画出来却一条都不显示的工作区）。
 //
-// 宿主那一侧用夹具端口"像真宿主"：成员按 header 的 cwd 归一之后是否等于记录的 path 过滤（宿主
+// 宿主那一侧用假宿主接口"像真宿主"：成员按 header 的 cwd 归一之后是否等于记录的 path 过滤（宿主
 // `WorkspaceEntity.sessionIds` 就是这个判据），挂靠按同一条校验、不合格就回绝。
 import assert from 'node:assert/strict'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
@@ -32,9 +32,9 @@ interface Fixture {
   from: string
   to: string
   deps: MigrateDeps
-  /** 夹具宿主实际收到的动作（断言"宿主自己有没有把那块工作区删掉"）。 */
+  /** 假宿主实际收到的动作（断言"宿主自己有没有把那块工作区删掉"）。 */
   calls: string[]
-  /** 夹具宿主现在认这块工作区的哪些成员（与宿主同一条过滤：cwd 归一 == 记录的 path）。 */
+  /** 假宿主现在认这块工作区的哪些成员（与宿主同一条过滤：cwd 归一 == 记录的 path）。 */
   hostMembers: (workspaceId: string) => string[]
 }
 
@@ -126,7 +126,7 @@ function makeFixture(
   writeRegistryAtomic(registryPath, registry)
 
   /*
-   * 夹具宿主：内存里一份记录 + 一张"这条会话现在住在哪"的索引。
+   * 假宿主：内存里一份记录 + 一张"这条会话现在住在哪"的索引。
    *
    * 索引在 `refreshIndex()` 时按磁盘重建（真宿主启动时做的两步之一），`sessionPath()` 查不到就返回
    * undefined——**悬空登记因此在宿主那边根本不算成员**，与真宿主一致。
@@ -163,7 +163,7 @@ function makeFixture(
       attachSession: async (workspaceId, sessionId) => {
         calls.push(`attach ${sessionId}`)
         const record = records.get(workspaceId)
-        if (record === undefined) throw new Error(`夹具：工作区 ${workspaceId} 不在`)
+        if (record === undefined) throw new Error(`假宿主不认这块工作区 ${workspaceId}`)
         const cwd = sessionPath(sessionId)
         // 真宿主就是拿索引里那份 header 校验的：对不上就一口回绝（活会话正是栽在这一步）。
         if (cwd !== record.path) throw new Error(`attach refused: its cwd resolves to '${String(cwd)}'`)
@@ -203,7 +203,7 @@ test('E2E：只剩悬空登记的源工作区，全量迁移后必须被删掉',
 
   assert.equal(run.applied, true)
   assert.equal(run.verified, true, run.problems.join('; '))
-  // 预演就得说清楚：这块工作区会被删，顺带摘掉那条盘上已经没有的登记。
+  // 预览就得说清楚：这块工作区会被删，顺带摘掉那条盘上已经没有的登记。
   assert.deepEqual(
     run.preview.registryChange?.removedSources.map((entry) => entry.workspaceId),
     ['ws-from'],
@@ -211,7 +211,7 @@ test('E2E：只剩悬空登记的源工作区，全量迁移后必须被删掉',
   assert.deepEqual(run.preview.registryChange?.droppedStale.map((entry) => entry.sessionIds), [['session-ghost']])
   assert.match(run.preview.summary, /顺带清掉 1 条宿主不认的悬空登记/)
 
-  // 落盘结果：源工作区没了、目标工作区认下了那条会话
+  // 写入磁盘结果：源工作区没了、目标工作区认下了那条会话
   const after = readRegistry(fx.registryPath)
   assert.equal(after.tables.workspaces['ws-from'], undefined, '源工作区必须被删掉（这正是"残留工作区"那一条）')
   assert.deepEqual(after.tables.workspaces['ws-to']?.sessionIds, ['session-visible'])

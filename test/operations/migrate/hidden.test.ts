@@ -1,6 +1,6 @@
 // 点名的会话与"外壳侧边栏看得见什么"对齐：子智能体、空白、已归档那三类搬不走。
 //
-// 这条口径来自一次真实的账对不上：迁移面板的「未分组」报 4 条，外壳侧边栏那一组只显示 1 条。四条里
+// 这条标准来自一次真实的账对不上：迁移面板的「未分组」报 4 条，外壳侧边栏那一组只显示 1 条。四条里
 // 三条是侧边栏不显示的（一条子智能体会话、两条只有 seed 事件的空白会话，其中一条还已归档），而面板
 // 照旧把它们算进候选与条数。现在"哪些能勾"由 `src/shared/visibility.ts` 一条判据决定：界面据此把那些行
 // 置灰，宿主这一侧则对点名的隐藏会话逐个报出理由（判据同一份，见 plan.ts）。
@@ -75,8 +75,8 @@ function makeSandbox(name: string): Sandbox {
       join(dir, 'session.v4.jsonl.zstd'),
       Buffer.concat([
         encodeRawFrame(`${JSON.stringify(header)}\n`),
-        // 日志里必须真有一轮（`turn/start`）：候选口径不读日志判空白，但夹具照真实形状写，
-        // 免得这里"因为夹具不真实而恰好通过"。
+        // 日志里必须真有一轮（`turn/start`）：候选标准不读日志判空白，但测试数据照真实形状写，
+        // 免得这里"因为测试数据不真实而恰好通过"。
         encodeRawFrame(`${JSON.stringify({ type: 'turn/start', seq: 0, time: createdAt, data: { turn: 1 } })}\n`),
         encodeRawFrame(`${JSON.stringify({ type: 'turn/end', seq: 1, time: createdAt + 1, data: { turn: 1 } })}\n`),
       ]),
@@ -158,7 +158,7 @@ test('只搬点名的那些：子智能体跟着父会话走，没点名的（�
   assert.equal(preview.cascaded, 1)
   assert.deepEqual(preview.sessions[1]?.via, { id: 'session-visible' })
   assert.equal(preview.sessions[1]?.registered, false, '子智能体从来不在册，跟着搬也不改变成员资格')
-  // 目标项目目录名由 cwd 推出，夹具里两个目录不撞 key
+  // 目标项目目录名由 cwd 推出，测试数据里两个目录不撞 key
   assert.notEqual(projectKey(sandbox.source), projectKey(sandbox.target))
 })
 
@@ -187,7 +187,7 @@ test('点名叫一条侧边栏不显示的会话：报的是"它被隐藏了"，
 
 test('投影缓存缺席（没挂那个域的老宿主）：不凭空判空白，点名那条照旧能迁', async () => {
   const sandbox = makeSandbox('hidden-no-cache')
-  // 把缓存目录整个搬走：`resolveBlank` 读不到记录 → 按"会显示"处理，与宿主自己的冷会话口径一致
+  // 把缓存目录整个搬走：`resolveBlank` 读不到记录 → 按"会显示"处理，与宿主自己的冷会话标准一致
   // （`summarizeCold()` 用 `metadata?.blank ?? false`）。反过来假设它空白，就会把用户点得动的会话
   // 当成"隐藏"，还没迁就先报错。
   rmSync(join(sandbox.base, 'storages', 'session_projcache'), { recursive: true, force: true })

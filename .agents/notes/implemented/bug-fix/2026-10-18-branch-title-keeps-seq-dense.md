@@ -29,7 +29,7 @@ complete frame contains a torn JSONL record
 - **没有标题时才追加到末尾**：末尾之后没有事件，`seq` 仍连续；小日志的标题读取预算够得着，大日志
   本来也没有标题可读。追加的标记按 v4 的 `session/title` 形状写：`time` 为 epoch 毫秒、
   `messageSeqs: []`、`source: { kind: 'user' }`。
-- `assertBranched()` 加一条与宿主同口径的校验：header 之后第 i 个事件 `seq` 必须等于 i，不等就拒绝
+- `assertBranched()` 加一条与宿主同标准的校验：header 之后第 i 个事件 `seq` 必须等于 i，不等就拒绝
   产出。这样同类错误在插件自己的测试里就变红，而不是等宿主打开时才报"日志损坏"。
 
 ## Alternatives considered

@@ -20,7 +20,7 @@ const decodeAll: DecodeAll = (buf: Uint8Array): string => Buffer.from(decompress
 const FROM = 'C:\\Users\\hmy01\\Downloads'
 const TO = 'C:\\Users\\hmy01\\Works\\Temp\\dsh-temp'
 
-/** 造一条"一条事件一帧"的日志，形状与宿主落盘一致。 */
+/** 造一条"一条事件一帧"的日志，形状与宿主写入磁盘一致。 */
 function makeLog(header: Partial<SessionHeader>, events: unknown[]): Buffer {
   const frames = [encodeRawFrame(JSON.stringify(header) + '\n')]
   for (const e of events) frames.push(encodeRawFrame(JSON.stringify(e) + '\n'))
@@ -401,7 +401,7 @@ test('relocateSessionPathsText：from 与 header 都对不上时当场抛（防�
   assert.throws(() => relocateSessionPathsText(text, { from: WIN_ROOT, to: POSIX_ROOT }), /expected/)
 })
 
-test('relocateSessionPathsText：修已落地的日志（header 已是本机路径）只要给 from 就能改事件', () => {
+test('relocateSessionPathsText：修已应用的日志（header 已是本机路径）只要给 from 就能改事件', () => {
   const text = [
     JSON.stringify({ ...header, cwd: POSIX_ROOT }),
     JSON.stringify({ type: 'working-directory/change', seq: 0, time: 1, data: { cwd: `${WIN_ROOT}\\.agents\\x` } }),

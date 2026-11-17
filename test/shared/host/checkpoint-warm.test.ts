@@ -1,7 +1,7 @@
-// 「落地之后请宿主补投影检查点」这一层的单元面：去重、逐条兜住、拿不到端口就如实报。
+// 「应用之后请宿主补投影检查点」这一层的单元面：去重、逐条兜住、拿不到端口就如实报。
 //
 // 为什么单独一个文件：这条路径的**失败语义**就是它的全部价值——它补的是宿主那份派生数据，绝不能因为
-// 它失败就把一次成功的落地说成失败（见 src/shared/host/checkpoint-warm.ts 的开头）。
+// 它失败就把一次成功的应用说成失败（见 src/shared/host/checkpoint-warm.ts 的开头）。
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
@@ -63,7 +63,7 @@ test('逐条去重、按顺序走一遍，重复的 id 只补一次', async () =
   assert.match(String(describeWarm(outcome)), /2 条/)
 })
 
-test('一条失败不影响后面的：计数分开、原因进 problems，落地照旧算成功', async () => {
+test('一条失败不影响后面的：计数分开、原因进 problems，应用照旧算成功', async () => {
   const fake = fakePort({ fail: ['s-2'] })
   const outcome = await warmCheckpoints(['s-1', 's-2', 's-3'], { hostCheckpoints: () => fake.port })
   assert.equal(outcome.warmed, 2)
@@ -74,7 +74,7 @@ test('一条失败不影响后面的：计数分开、原因进 problems，落�
   const sentence = String(describeWarm(outcome))
   assert.match(sentence, /2 条/)
   assert.match(sentence, /1 条没补上/)
-  assert.match(sentence, /不影响落地/)
+  assert.match(sentence, /不影响应用/)
 })
 
 test('失败多于三条时只带前三条原因，条数照实报', async () => {
@@ -84,7 +84,7 @@ test('失败多于三条时只带前三条原因，条数照实报', async () =>
   assert.equal(outcome.problems.length, 3)
 })
 
-test('没注入这个端口时按"这个宿主补不了"处理，而不是抛', async () => {
+test('没注入这个接口时按"这个宿主补不了"处理，而不是抛', async () => {
   const outcome = await warmCheckpoints(['s-1'], {})
   assert.equal(outcome.unavailable, true)
   assert.equal(outcome.failed, 0)

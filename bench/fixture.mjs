@@ -1,4 +1,4 @@
-// bench/fixture.mjs — 造一份"像真实会话库"的夹具，给所有场景共用。
+// bench/fixture.mjs — 造一份"像真实会话库"的样例库，给所有场景共用。
 //
 // 为什么不用现成的真实库：它只在这台机器上、内容还一直在变，基线的可比性立刻没了。这里生成的东西
 // 逐字节可复现（固定种子 + 固定 zstd 压缩），规模与形状对着真实库取：几百到一千多条会话、分在几十个
@@ -6,7 +6,7 @@
 // 投影缓存记录（标题、空白、两枚活动时间）。
 //
 // 远端那一格不是手写的索引：**用生产代码自己推上去**（`runSync({apply:true})` 从一份"别的机器"的库
-// 推到夹具 WebDAV）。手写索引等于把格式契约复述一遍，而基准要测的正是真实格式下的开销。
+// 推到假的 WebDAV 服务）。手写索引等于把格式契约复述一遍，而基准要测的正是真实格式下的开销。
 //
 // 生成一次之后按 profile 缓存到 `bench/.work/<profile>/`；生成器版本或 profile 变了才重来。
 //
@@ -27,7 +27,7 @@ import { startDavFixture } from '../test/fixtures/dav-fixture.ts'
 import { PROFILES } from './profiles.mjs'
 import { between, rng } from './rng.mjs'
 
-/** 夹具生成器的版本：改了生成方式就 +1，旧目录作废。 */
+/** 样例库生成器的版本：改了生成方式就 +1，旧目录作废。 */
 const FIXTURE_VERSION = 8
 
 const WORDS = [
@@ -42,7 +42,7 @@ const LOREM = (random, words) => {
   return out.join('')
 }
 
-/** 一份夹具的缓存目录。 */
+/** 一份样例库的缓存目录。 */
 export function workDir(profileName) {
   return join(import.meta.dirname, '.work', profileName)
 }
@@ -63,7 +63,7 @@ export function readManifest(profileName) {
 }
 
 /**
- * 确保夹具存在。
+ * 确保样例库存在。
  * @param profileName small / default / full
  * @param options.rebuild 强制重造
  * @returns manifest（字段见文件末尾 `generate()`）。
@@ -77,7 +77,7 @@ export async function ensureFixture(profileName, options = {}) {
 }
 
 /**
- * 生成一份夹具。
+ * 生成一份样例库。
  *
  * 目录形状：
  *
@@ -87,7 +87,7 @@ export async function ensureFixture(profileName, options = {}) {
  *   backups/                         备份根（同步覆盖本机时要往里写）
  *   dirs/p*                          项目目录（真实存在，迁移/导入的目标要用）
  *   dirs/target                      迁移的目标工作区
- *   dav/                             远端那一份的落盘目录（夹具 WebDAV 的 root）
+ *   dav/                             远端那一份的写入磁盘目录（假 WebDAV 的 root）
  *   remote-lib/                      造远端时"另一台机器"的库（生成期用完即留，便于排查）
  */
 async function generate(profileName) {

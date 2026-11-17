@@ -83,7 +83,7 @@ export interface SelfRootLineOptions {
   root: string
   /** 目标会话根。 */
   to: string
-  /** 这个取值要不要改（缺省全改；日志落地那条路只改"本机不认的"，见 session-log.ts）。 */
+  /** 这个取值要不要改（缺省全改；日志写入那条路只改"本机不认的"，见 session-log.ts）。 */
   accept?: (value: string) => boolean
 }
 
@@ -105,7 +105,7 @@ export function rewriteSelfRootLine(line: string, options: SelfRootLineOptions):
   try {
     before = JSON.parse(line)
   } catch {
-    // 坏行不是这里的事：内容视图另外记账（见 transcript.ts），这里原样放过。
+    // 坏行不是这里的事：内容视图另外计数（见 transcript.ts），这里原样放过。
     return untouched
   }
   // 改的是副本：核"除这几个字段外没变"要拿未改动的原值来比。

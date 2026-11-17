@@ -1,4 +1,4 @@
-// 会话包传输：容器的字节往返、包校验的拒绝面、导入预演与落地、冲突与无 cwd 的分支。
+// 会话包传输：容器的字节往返、包校验的拒绝面、导入预览与应用、冲突与无 cwd 的分支。
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
@@ -264,7 +264,7 @@ test('bundleTitlesAsync：每条标题之后都让出，不是一个宏任务里
   assert.equal(sawProgressAfterYield, true, '第一条之后应当已经让出过一次事件循环')
 })
 
-test('导入：预演不写字节，落地后 cwd 被改写成目标工作区且除 cwd 外正文不变', async () => {
+test('导入：预览不写字节，应用后 cwd 被改写成目标工作区且除 cwd 外正文不变', async () => {
   const root = makeRoot('transfer-import')
   const source = writeSession(root, { id: 'session-a', cwd: FROM_CWD, events: 3 })
   const original = decodeAll(readFileSync(source.files[0]!.path))
@@ -280,7 +280,7 @@ test('导入：预演不写字节，落地后 cwd 被改写成目标工作区且
   assert.deepEqual(plan.rehomed, ['session-a'])
   assert.equal(plan.entries[0]!.toCwd, TO_CWD)
   assert.equal(plan.registryChange?.createdTarget, true)
-  // 预演不写盘
+  // 预览不写盘
   assert.equal(existsSync(plan.entries[0]!.dir), false)
 
   const registryPath = join(targetRoot, '..', 'workspace.json')
@@ -323,7 +323,7 @@ test('导入：目标 cwd 与日志原有 cwd 相同时逐字节不改写', asyn
   assert.deepEqual(readFileSync(written), onDisk)
 })
 
-test('导入：库里已有同 id 的会话时只跳过、绝不覆盖，且预演 ok=false', async () => {
+test('导入：库里已有同 id 的会话时只跳过、绝不覆盖，且预览 ok=false', async () => {
   const root = makeRoot('transfer-conflict')
   const source = writeSession(root, { id: 'session-a', cwd: FROM_CWD })
   const bundle = readBundle(buildBundle([source]))
@@ -395,7 +395,7 @@ test('导入：目标目录的另一种拼写先归一（header 的 cwd 与注�
   const plan = planImport(bundle, { root: targetRoot, targetCwd: spelled, registry, now: '2026-09-27T00:00:00.000Z', newId: 'ws-target' })
 
   assert.equal(plan.ok, true, plan.problems.join('; '))
-  assert.equal(plan.entries[0]?.toCwd, to, '落地用的是归一之后的那个字符串')
+  assert.equal(plan.entries[0]?.toCwd, to, '应用用的是归一之后的那个字符串')
   assert.equal(plan.nextRegistry?.tables.workspaces['ws-target']?.path, to, '注册表那条记录的 path 也是它')
 
   const registryPath = join(targetRoot, '..', 'workspace.json')
@@ -650,7 +650,7 @@ test('导入：日志早就在库里、只缺对象时照旧补对象，一条�
   assert.deepEqual(plan.created, [], '库里已经有这条会话')
   assert.equal(plan.entries[0]!.action, 'skip')
   assert.equal(plan.attachmentAdds, 1, '但缺的那个对象要补上')
-  assert.equal(plan.ok, true, '只有附件要补时，计划也是"有可落地内容"')
+  assert.equal(plan.ok, true, '只有附件要补时，计划也是"有可应用内容"')
 
   const outcome = await applyImport(bundle, plan, {
     root: targetRoot,
@@ -680,7 +680,7 @@ test('导入：宿主没有附件服务时对象一条都不落，计划里如�
     ['unavailable'],
   )
   assert.equal(plan.attachmentAdds, 0)
-  assert.equal(plan.ok, true, '会话照旧能导：附件落不了不影响日志')
+  assert.equal(plan.ok, true, '会话照旧能导：附件写不进去不影响日志')
 
   const outcome = await applyImport(bundle, plan, { root: targetRoot, targetCwd: TO_CWD, decodeAll })
   assert.deepEqual(outcome.written, ['session-a'])
@@ -772,7 +772,7 @@ test('读包：v1 的老包（没有 attachments 那一节）照旧读得出来�
 })
 
 
-test('导入：别的系统写下的 working-directory/change 跟着落地目录改（不改这条会话就读不出来）', async () => {
+test('导入：别的系统写下的 working-directory/change 跟着目标目录改（不改这条会话就读不出来）', async () => {
   const root = makeRoot('transfer-import-paths')
   const source = writeSession(root, {
     id: 'session-w',
@@ -802,7 +802,7 @@ test('导入：别的系统写下的 working-directory/change 跟着落地目录
   )
   const lines = written.split('\n')
   assert.equal(JSON.parse(lines[0]!).cwd, TO_CWD)
-  // 两条 working-directory/change 都换成落地目录（子路径跟着走，分隔符跟着目标走）
+  // 两条 working-directory/change 都换成目标目录（子路径跟着走，分隔符跟着目标走）
   assert.deepEqual(
     lines.filter((line) => line.includes('working-directory/change')).map((line) => JSON.parse(line).data.cwd),
     [`${TO_CWD}\\.agents\\worktrees\\fix\\x`, TO_CWD],

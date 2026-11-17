@@ -1,6 +1,6 @@
 // 迁移、回滚与备份清单这三条端点：参数与工具层同一套（都进 runMigration）。
 //
-// 落地要改注册表、还要请宿主补投影检查点，这两件事都发生在流开始之后，所以进度与"要不要重启"都从
+// 应用要改注册表、还要请宿主补投影检查点，这两件事都发生在流开始之后，所以进度与"要不要重启"都从
 // 事件流里说；只有参数不对这类判定在写头之前回一次性 JSON。
 //
 // @module dsh-session-manager/operations/migrate/http
@@ -26,7 +26,7 @@ export function migrationHandlers(ctx: WebContext): Record<string, Handler> {
     sendJson(res, 200, { backupRoot: paths.backupRoot, backups: listBackups(migrateDeps) })
   }
 
-  /** 迁移：`mode=apply` 执行，缺省只预演。参数与工具层同一套（都进 runMigration）。 */
+  /** 迁移：`mode=apply` 执行，缺省只预览。参数与工具层同一套（都进 runMigration）。 */
   const migrate = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     let body: unknown
     try {
@@ -70,7 +70,7 @@ export function migrationHandlers(ctx: WebContext): Record<string, Handler> {
     }
     const apply = fields['mode'] === 'apply'
     /*
-     * 干活那一段走事件流：迁移落地要备份、改写、搬目录、复核、请宿主补检查点——实测 47 条会话 /
+     * 干活那一段走事件流：迁移应用要备份、改写、搬目录、复核、请宿主补检查点——实测 47 条会话 /
      * 67.5 MB 要 45 秒（其中改写首帧占 45 秒）。计划不 ok 与复核没过**都还是结果**：它们带着
      * 完整的 `preview`，界面要把清单与问题摆出来，所以一样从 `result` 事件回，而不是当成流的错。
      */

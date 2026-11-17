@@ -5,13 +5,13 @@
 | 文档 | 写什么 | 不写什么 |
 | --- | --- | --- |
 | [internals.md](internals.md) | 决策地图（按主题索引到笔记）、当前机制里没有笔记承载的部分 | 决策依据与被否决的备选方案（→ [.agents/notes/](../.agents/notes/AGENTS.md)） |
-| [design.md](design.md) | 界面与样式的完整规格：页面骨架、排版、间距、颜色、控件、文案、验收 | 决策依据与被否决的备选方案（→ 笔记）；逐文件职责（→ development.md） |
+| [design.md](design.md) | 界面与样式的完整规格：页面外壳、排版、间距、颜色、控件、文案、验收 | 决策依据与被否决的备选方案（→ 笔记）；逐文件职责（→ development.md） |
 | [development.md](development.md) | 目录结构、逐文件职责、开发命令、开发实例怎么起 | 会与 `package.json` 脚本漂移的逐条清单 |
-| [formats.md](formats.md) | 落盘格式：本机会话库、远端同步格子、会话包 `.dshsess` 的字段与校验 | 决策依据（→ 笔记）；界面规格（→ design.md）；逐文件职责（→ development.md） |
+| [formats.md](formats.md) | 磁盘上的格式：本机会话库、远端同步格子、会话包 `.dshsess` 的字段与校验 | 决策依据（→ 笔记）；界面规格（→ design.md）；逐文件职责（→ development.md） |
 | [flows.md](flows.md) | 各种操作从界面动作到宿主动作的流程：读写哪些文件、失败怎么办 | 字段与校验（→ formats.md）；决策依据（→ 笔记） |
 | [releasing.md](releasing.md) | 发布流程、落点三道校验、PR 标题与日志分组 | 历史（→ git 与 PR） |
 | [glossary.md](glossary.md) | 术语：官方怎么说的、照写什么、别写什么、出处在哪 | 决策依据（→ 笔记）；机制说明（→ internals.md） |
-| 根 [AGENTS.md](../AGENTS.md) | 协作约定、硬约束、提交信息口径、验证清单、界面与样式的硬约束 | 故事、完整例子、能从链到的家读到的内容 |
+| 根 [AGENTS.md](../AGENTS.md) | 协作约定、硬约束、提交信息标准、验证清单、界面与样式的硬约束 | 故事、完整例子、能从链到的家读到的内容 |
 
 放一份新文档之前先问它属于哪一行；都不属于就先想清楚它是哪一类，再回来改这张表。
 
@@ -25,7 +25,7 @@
 - **数字只写实测值**：测试条数、在真实 dev GUI 里量出来的色值与像素、产物字节数；机制写文件与函数名，
   不复述 diff。
 - 中文单语。唯一的英文正文是 [README.en.md](../README.en.md)，它与 `README.md` 的键与结构保持对齐。
-- 语言按根 [AGENTS.md](../AGENTS.md) 的「说人话」：写具体动作与结果，不用「收口」这类词。
+- 语言按根 [AGENTS.md](../AGENTS.md) 的「说人话」：写具体动作与结果，不用「统一处理」这类词。
 - 措辞调整与纯局部实现细节不需要新的文档段落，也不需要决策笔记。
 
 ## 门禁

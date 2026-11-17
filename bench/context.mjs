@@ -1,7 +1,7 @@
 // 给各场景造一份"和宿主里一样"的依赖面：真实的 `createApiHandlers()` + 真实的位置与读取器。
 //
 // 注入的都是**生产实现**：解码器、标题读取器、投影读取器、扫库缓存、内容缓存。唯一假的是宿主侧那几件
-// 动作（注册表、检查点、活会话）——基准不管它们，界面那几条写操作也只跑预演。
+// 动作（注册表、检查点、活会话）——基准不管它们，界面那几条写操作也只跑预览。
 //
 // @module dsh-session-manager/bench/context
 import { createApiHandlers } from '../src/web.ts'
@@ -12,7 +12,7 @@ import { startDavFixture } from '../test/fixtures/dav-fixture.ts'
 /**
  * 造一份上下文。
  * @param manifest `ensureFixture()` 的返回值。
- * @param options.withDav 起一个夹具 WebDAV（同步场景要）。
+ * @param options.withDav 起一个假的 WebDAV 服务（同步场景要）。
  */
 export async function createContext(manifest, options = {}) {
   const settings = {
@@ -36,7 +36,7 @@ export async function createContext(manifest, options = {}) {
       backupRoot: manifest.backupRoot,
     },
     decodeAll,
-    // 每次调用现造一个"运行时"（与 `syncRuntime()` 同形），远端指向夹具。
+    // 每次调用现造一个"运行时"（与 `syncRuntime()` 同形），远端指向那份假服务。
     sync: async () => (dav === undefined ? undefined : { settings, dav }),
     syncInfo: () => ({
       url: settings.url,

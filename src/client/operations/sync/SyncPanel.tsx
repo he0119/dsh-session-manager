@@ -1,5 +1,5 @@
 /**
- * 「同步」弹窗：按 WebDAV 配置在多台机器之间拉取与推送（点「同步」先在弹窗里看只读计划，确认才落盘）。
+ * 「同步」弹窗：按 WebDAV 配置在多台机器之间拉取与推送（点「同步」先在弹窗里看只读计划，确认才写入磁盘）。
  *
  * 它为什么不再占一个页签：同步是一条**常设**通道，用户不会天天打开它，可它会自己在后台跑。所以页面
  * 那一级只留一枚状态（配没配、自动推送开没开、这一趟跑完没有，见
@@ -7,14 +7,14 @@
  * 配置也不在这一面，在插件页那张卡里（`plugins.bundle.config`）。
  *
  * 这一面**自己就是那枚弹窗**（`WorkDialog`），分三段：面板（一句话说清这条通道通到哪 + 一排工具）→
- * 计划 → 落地。主动作（「同步」/「确认同步」/「同步中…」）在**底栏**，与导入、删除、迁移同一处；正文
+ * 计划 → 应用。主动作（「同步」/「确认同步」/「同步中…」）在**底栏**，与导入、删除、迁移同一处；正文
  * 那行只放工具（「立即推送一次」「整理远端」），"决定"与"工具"不混在一排。
  *
  * 这一层只做三件事：调宿主端点、记本地草稿、把结果摆出来。所有判定都在宿主侧
  * （`src/web.ts` + `src/operations/sync/sync.ts`）：计划返回的就是将要发生的事，页面不自己推算。会话库数据由页面
- * 骨架（[ManagerPanel.tsx](../../shell/ManagerPanel.tsx)）拉好传进来，开关弹窗不各拉一份。
+ * 外壳（[ManagerPanel.tsx](../../shell/ManagerPanel.tsx)）拉好传进来，开关弹窗不各拉一份。
  *
- * 落地那一次是**流式**的：宿主按条推事件，正文换成进度条与"正在推送 12 / 84"（见
+ * 应用那一次是**流式**的：宿主按条推事件，正文换成进度条与"正在推送 12 / 84"（见
  * [api.ts](../../api.ts) 的 `applySync` 与 [ProgressBlock.tsx](../../shared/ui/ProgressBlock.tsx)）。同步是这一页里
  * "按条走网络"的那个动作，一次整库同步可能是几十秒；同一套进度块现在也被迁移 / 删除 / 回滚 / 导入 /
  * 归档 / 扫库复用（见 [ProgressBlock.tsx](../../shared/ui/ProgressBlock.tsx)）。
@@ -118,7 +118,7 @@ interface SyncRow {
  *   - `local-newer` / `local-ahead`：本机这份会顶掉远端那份，同样先看一眼。
  *
  * 其余几种没有可比的两份：`missing`（另一边没有）、`identical`（内容一致，比出来是空）、
- * `blank-local`（本机这条是空白）、`no-mapping` / `missing-target`（连落地目录都没有）。
+ * `blank-local`（本机这条是空白）、`no-mapping` / `missing-target`（连目标目录都没有）。
  */
 function diffable(entry: SyncPullEntry | SyncPushEntry): boolean {
   switch (entry.code) {
@@ -184,7 +184,7 @@ function syncWhy(entry: SyncRow, t: Translate): string {
 /**
  * 「没动」那一类的短标签：状态进标签，整句（`syncWhy()`）挂在它的 `title` 上。
  *
- * 与拉取 / 推送两张表同一口径：窄列里放不下整句，而**状态与会话名必须是两种东西**——挤成一行同色同号的
+ * 与拉取 / 推送两张表同一标准：窄列里放不下整句，而**状态与会话名必须是两种东西**——挤成一行同色同号的
  * 文字时，一列"某某：两边各自写过（robot-b）"读起来分不出哪个是状态、哪个是会话。认不出来的码退回
  * 整句（宁可挤，也不要显示成一个生词）。
  */
@@ -365,7 +365,7 @@ function typeTagsOf(session: SessionSummary | undefined): TagCopy[] {
  * 在悬浮提示里。
  *
  * 拉取行的提示还会补上"这条的 cwd 从哪改写到哪"（`syncPullTip()`）——那句话原来占着 cwd 一列，
- * 现在落地的目录已经在组头上，只有真的改写过的行才需要再说一句从哪儿来。
+ * 现在应用的目录已经在组头上，只有真的改写过的行才需要再说一句从哪儿来。
  *
  * 名字与标签同占一格用的是会话列表那套 `.dsm-rowLabel`（标签 `flex: none`、名字自己负责省略），
  * 三张表因此在窄列里也有同一种排布。
@@ -451,7 +451,7 @@ function autoPushSentence(t: Translate, response: AutoPushSentenceSource, mode: 
   const uploaded = response.attachmentOut?.uploaded ?? 0
   return (
     t('sync.autoPush.done', { pushed, bytesOut: formatBytes(response.bytesOut ?? 0) }) +
-    // 附件对象走的是另一条路（远端共享库），所以单独一句：与 `/sync` 那条横幅同一个口径。
+    // 附件对象走的是另一条路（远端共享库），所以单独一句：与 `/sync` 那条横幅同一个标准。
     (uploaded === 0
       ? ''
       : ` ${t('sync.autoPush.attachments', {
@@ -465,7 +465,7 @@ function autoPushSentence(t: Translate, response: AutoPushSentenceSource, mode: 
  * 这次同步搬了附件对象没有。
  *
  * 搬了就说（拉取、推送各一句），一个都没动就一个字都不说；宿主没有附件服务时响应里根本没有那两项
- * （不是 0），所以这里也一个字都不说——与"宿主没有附件服务就静默降级"同一条口径。
+ * （不是 0），所以这里也一个字都不说——与"宿主没有附件服务就静默降级"同一条标准。
  */
 
 /**
@@ -486,7 +486,7 @@ export function SyncPanel({
   /** 关掉这一面（这一面自己就是那枚弹窗了，见文件末尾的说明）。 */
   onClose,
   /**
-   * 「只看这一条」：把某条会话交给页面骨架（关掉这一面、在列表里筛到它）。
+   * 「只看这一条」：把某条会话交给页面外壳（关掉这一面、在列表里筛到它）。
    *
    * 缺席时那几行只显示文字——旧宿主、或没有列表的调用方不该看到一个点了没反应的按钮。
    */
@@ -499,42 +499,42 @@ export function SyncPanel({
   /** 最近一次计划或结果：映射表的远端候选与弹窗正文都读它（关掉弹窗之后候选还得在）。 */
   const [sync, setSync] = React.useState<SyncResponse | null>(null)
   /**
-   * 落地这次要不要顺手整理远端（勾选框）。
+   * 应用这次要不要顺手整理远端（勾选框）。
    *
    * 默认不勾：它会删远端的东西（虽然删的只是自己那一格里多余的副本）。挂在这一页而不在 store 里——
-   * 它属于"这一次落地"，弹窗一关就该回到默认。
+   * 它属于"这一次应用"，弹窗一关就该回到默认。
    */
   const [tidy, setTidy] = React.useState(false)
   /**
-   * 同步弹窗开着吗（`plan` = 正在看 / 正在算计划、`apply` = 落地跑着、正文是进度）。
+   * 同步弹窗开着吗（`plan` = 正在看 / 正在算计划、`apply` = 应用跑着、正文是进度）。
    *
    * `apply` 只是**这一扇窗口还开着**；关掉它不等于停——那一趟的生命周期在 `syncJob` 里（模块级），
    * 关掉之后状态栏那一格接着报进度，点它回到这一面（见 logic/syncJob.ts 的说明）。
    */
   const [dialog, setDialog] = React.useState<'plan' | 'apply' | null>(null)
-  /** 预演（只读算计划）在跑：这一段仍然挂在这个组件上，切走就丢——它几秒就完，没有"后台"的必要。 */
+  /** 预览（只读算计划）在跑：这一段仍然挂在这个组件上，切走就丢——它几秒就完，没有"后台"的必要。 */
   const [busy, setBusy] = React.useState<'plan' | null>(null)
   const [error, setError] = React.useState<string | null>(null)
   /**
    * 「立即推送一次」那一条路跑完之后的结论（它没有结果页：这条路不写本机，也不开确认弹窗）。
    *
-   * 落地那一趟的结论不在这里：它在结果段（`stage === 'done'`）里说，见 `doneLine()`。
+   * 应用那一趟的结论不在这里：它在结果段（`stage === 'done'`）里说，见 `doneLine()`。
    */
   const [notice, setNotice] = React.useState<string | null>(null)
-  /** 落地时逐条失败的原因（宿主只把成功的那些算进 pulled/pushed，失败的在这里）。 */
+  /** 应用时逐条失败的原因（宿主只把成功的那些算进 pulled/pushed，失败的在这里）。 */
   const [failures, setFailures] = React.useState<readonly string[]>([])
   /**
-   * 落地进行到哪了：宿主每开始处理一条推一条事件（见 api.ts 的 `applySync`）。
+   * 应用进行到哪了：宿主每开始处理一条推一条事件（见 api.ts 的 `applySync`）。
    *
-   * `null` 有两种时候——还没开始、以及刚开始那一段（宿主先验一遍预演那份数据还作不作数：重读一次远端
+   * `null` 有两种时候——还没开始、以及刚开始那一段（宿主先验一遍预览那份数据还作不作数：重读一次远端
    * 索引，本机那边只比文件的时间与大小，很快）。前一条进度事件一到就换成真正的进度块。
    */
   const [progress, setProgress] = React.useState<ProgressEvent | null>(null)
-  /** 两边各自写过时用户挑的正本（会话 id → 选择）；预演与落地都把它带上。 */
+  /** 两边各自写过时用户挑的正本（会话 id → 选择）；预览与应用都把它带上。 */
   const [decisions, setDecisions] = React.useState<Record<string, SyncDecision>>({})
 
   /**
-   * 落地那一趟现在跑到哪儿（模块级 store；关掉弹窗、切页签、关掉设置都不影响它）。
+   * 应用那一趟现在跑到哪儿（模块级 store；关掉弹窗、切页签、关掉设置都不影响它）。
    *
    * 初值是**当场读一次**而不是传函数：假 React（client.test.mjs）的 `useState` 不会调用惰性初始化，
    * 传函数会让测试里读到的是函数本身。
@@ -542,16 +542,16 @@ export function SyncPanel({
   const [job, setJob] = React.useState<SyncJobSnapshot>(syncJob.snapshot())
   React.useEffect(() => syncJob.subscribe(setJob), [])
   /**
-   * 落地在跑：这一页发起的（store 说在跑），或者窗口正处在落地模式。
+   * 应用在跑：这一页发起的（store 说在跑），或者窗口正处在应用模式。
    *
    * 两个条件都要：store 是"活儿还在跑"，`dialog === 'apply'` 是"这一页刚刚按下确认、结论还没回来"。
-   * 后者覆盖按下到第一条进度之间那一瞬间——那时窗口已经是落地模式，但 store 的通知还没渲染上来。
+   * 后者覆盖按下到第一条进度之间那一瞬间——那时窗口已经是应用模式，但 store 的通知还没渲染上来。
    */
   const applying = job.running || dialog === 'apply'
   /**
-   * 正文里画哪一条进度：落地那趟的最新一条；它还没来就先沿用预演最后那一条。
+   * 正文里画哪一条进度：应用那趟的最新一条；它还没来就先沿用预览最后那一条。
    *
-   * 两段报的是同一套事件（扫本机 / 读远端索引 / 比对内容），预演那一条不会是"另一种活"；而按下确认
+   * 两段报的是同一套事件（扫本机 / 读远端索引 / 比对内容），预览那一条不会是"另一种活"；而按下确认
    * 之后先空着、等下一次事件再画，只会让进度块闪一下。
    */
   const liveProgress = job.progress ?? progress
@@ -593,8 +593,8 @@ export function SyncPanel({
    * 那类错不是"这份计划有什么问题"，留在弹窗里只会让人以为还能按确认。
    */
   /**
-   * 按一组裁决重新预演。裁决变了必须重算：计划里这一对会从「两边各写各的」变成会拉取 / 会推送，
-   * 拿旧计划确认会按旧结论落地。重算期间正文让给进度条（`planning`），确认按钮也禁用。
+   * 按一组裁决重新预览。裁决变了必须重算：计划里这一对会从「两边各写各的」变成会拉取 / 会推送，
+   * 拿旧计划确认会按旧结论应用。重算期间正文让给进度条（`planning`），确认按钮也禁用。
    */
   const planWith = (next: Record<string, SyncDecision>): void => {
     setDialog('plan')
@@ -627,7 +627,7 @@ export function SyncPanel({
     planWith({})
   }
 
-  /** 差异页里选了正本：关上差异页，带着这组选择重新预演（计划表因此换成会拉取 / 会推送的行）。 */
+  /** 差异页里选了正本：关上差异页，带着这组选择重新预览（计划表因此换成会拉取 / 会推送的行）。 */
   const decide = (id: string, decision: SyncDecision): void => {
     const next = { ...decisions, [id]: decision }
     setDecisions(next)
@@ -638,7 +638,7 @@ export function SyncPanel({
   /**
    * 弹窗里按「确认同步」：真的拉取与推送。
    *
-   * 带上预演给的 `planId`：宿主对得上就**照着那份计划落地**（不再重算一遍，见 api.ts 的 `applySync`）；
+   * 带上预览给的 `planId`：宿主对得上就**照着那份计划应用**（不再重算一遍，见 api.ts 的 `applySync`）；
    * 对不上就由宿主从零算一遍，结果里的 `planSource` 会在下面那句提示里说清。
    *
    * 逐条失败（某一条拉取失败）照旧把成功的那部分报出来，失败的那些**在页面横幅上逐条留着**——弹窗
@@ -646,8 +646,8 @@ export function SyncPanel({
    */
   const doSyncApply = (): void => {
     setError(null)
-    // 预演那一条进度留着当起点（见 `liveProgress` 的说明），不发出去清空——它马上就会被落地的事件接上。
-    // 只有"这次看的就是一份预演"时才递那个号码：上一次落地的结果也放在 `sync` 里，它不是预演。
+    // 预览那一条进度留着当起点（见 `liveProgress` 的说明），不发出去清空——它马上就会被应用的事件接上。
+    // 只有"这次看的就是一份预览"时才递那个号码：上一次应用的结果也放在 `sync` 里，它不是预览。
     const picked = new Map(Object.entries(decisions))
     const started = syncJob.start({
       ...(sync?.mode === 'plan' && sync.planId !== undefined ? { planId: sync.planId } : {}),
@@ -656,7 +656,7 @@ export function SyncPanel({
     })
     if (!started) {
       // 已经有一趟在跑（可能就是刷新之前发起、这一页认领来的那一趟）：不再开第二趟，弹窗收起来，
-      // 进度看上面那条横幅。宿主那边同样只放一趟（落地还在跑时，第二趟会拿到 409）。
+      // 进度看上面那条横幅。宿主那边同样只放一趟（应用还在跑时，第二趟会拿到 409）。
       setDialog(null)
       return
     }
@@ -683,7 +683,7 @@ export function SyncPanel({
     setSync(result)
     setDecisions({})
     /*
-     * 这一趟改过远端（推上去的包、补上去的对象）：右栏那行「远端」要重新读一次，不然它还停在落地之前
+     * 这一趟改过远端（推上去的包、补上去的对象）：右栏那行「远端」要重新读一次，不然它还停在应用之前
      * 的样子。落空的那些（只拉取）读一次也无害——清单本来就可能在另一台机器上被改过。
      */
     void remoteLibrary.load()
@@ -728,7 +728,7 @@ export function SyncPanel({
    * 结果页上要不要给「撤销」：这次动过本机的内容（覆盖本机的那几份、跟着删的那几条），旧的那份就在
    * 备份里；认领来的那一趟只知道"拉了几条"，同样说得上。
    *
-   * 备份页由页面骨架打开（与删除 / 迁移结果页上那枚同一个去处）。
+   * 备份页由页面外壳打开（与删除 / 迁移结果页上那枚同一个去处）。
    */
   const undoable = (done: NonNullable<SyncJobSnapshot['done']>): boolean => {
     if (onOpenBackups === undefined) return false
@@ -806,7 +806,7 @@ export function SyncPanel({
   /**
    * 点「立即推送一次」：当场跑一轮自动推送（只推不拉）。
    *
-   * 与「同步」的两处不同：**没有预演与确认**（这条路上不会有东西落到本机，所以没有"将要动什么"要
+   * 与「同步」的两处不同：**没有预览与确认**（这条路上不会有东西落到本机，所以没有"将要动什么"要
    * 摆给人看），并且进度画在页面横幅上而不是弹窗里。逐条失败照旧从 `problems` 里取出来摆到横幅上；
    * 连续失败那句由宿主随响应给的 `failures` 说（成功清零）。
    */
@@ -880,7 +880,7 @@ export function SyncPanel({
   }, [t])
 
   /**
-   * 进度块下面补的那句话：只有真写盘的两段（拉取 / 推送）才有意义——预演阶段还没有东西可覆盖。
+   * 进度块下面补的那句话：只有真写盘的两段（拉取 / 推送）才有意义——预览阶段还没有东西可覆盖。
    *
    * 各页的那句话不同（迁移说的是"中断会留下中间状态、可在备份页回退"，导入说的是"只增不覆盖"），
    * 所以它由调用方给，而不是塞进共用的 [ProgressBlock.tsx](../../shared/ui/ProgressBlock.tsx)。
@@ -890,7 +890,7 @@ export function SyncPanel({
 
   const syncPlan = sync?.plan ?? null
   /**
-   * 预演报上来的"整理能删多少"（见 api.ts 的 `SyncTidy`）。缺席 = 没有可整理的，或旧宿主不认这件事——
+   * 预览报上来的"整理能删多少"（见 api.ts 的 `SyncTidy`）。缺席 = 没有可整理的，或旧宿主不认这件事——
    * 那时这一个勾选框根本不摆。
    */
   const syncTidy = sync?.tidy !== undefined && 'count' in sync.tidy ? sync.tidy : null
@@ -910,7 +910,7 @@ export function SyncPanel({
    * `plan` = 正在算账 / 等确认，`apply` = 正在删，`undefined` = 弹窗没开。
    */
   const [tidyDialog, setTidyDialog] = React.useState<'plan' | 'apply'>()
-  /** 预演算出来的账目（还没算出来就是 undefined）。 */
+  /** 预览算出来的账目（还没算出来就是 undefined）。 */
   const [tidyPlan, setTidyPlan] = React.useState<TidyResponse>()
   const [tidyBusy, setTidyBusy] = React.useState(false)
   const [tidyProgress, setTidyProgress] = React.useState<ProgressEvent>()
@@ -940,7 +940,7 @@ export function SyncPanel({
     syncKept.length === 0 &&
     syncDeleted.length === 0
   /**
-   * 三张表各自按**项目目录**分组（见 [syncGroups.ts](./syncGroups.ts)）：拉取行按落地后的本机目录、
+   * 三张表各自按**项目目录**分组（见 [syncGroups.ts](./syncGroups.ts)）：拉取行按应用后的本机目录、
    * 推送行按本机目录、「没动」按它自己那一边的目录。工作区名称从 `/state` 来（同一个路径在别处显示
    * 成什么名字，这里就是什么名字）；首帧还没读到状态时标题缺席，组头退回路径本身。
    */
@@ -951,7 +951,7 @@ export function SyncPanel({
    */
   const sessionsById = new Map((state?.sessions ?? []).map((session) => [session.id, session]))
   /**
-   * 这些行就算选了正本、或本来就轮到覆盖本机，落地也会因为宿主还开着这条会话而被拦下。
+   * 这些行就算选了正本、或本来就轮到覆盖本机，应用也会因为宿主还开着这条会话而被拦下。
    *
    * 计划行的 code 已经在宿主侧表达了这个结论（`diverged` / `remote-*`），页面只拿 `/state` 的
    * `live` 标出“哪几条是活的”，在打开差异之前就把话说在前面；不替宿主判断能不能落。
@@ -990,11 +990,11 @@ export function SyncPanel({
   /** 计划还在算：正文暂时不画（`sync` 里可能还留着上一次的那份结果，摆出来会被当成这次的）。 */
   const planning = dialog === 'plan' && busy === 'plan'
   /**
-   * 落地之后要不要重启才被宿主承认。
+   * 应用之后要不要重启才被宿主承认。
    *
    * **只在需要重启时说话**，而且单独一条横幅、不塞进上面那条绿色成功横幅——两件事共用一个颜色底时，
-   * 读的人分不出哪句是坏消息。判据取自最近一次结果：`mode === 'apply'` 说明它是落地回来的，不是预演
-   * （与迁移同一口径，见 [ManagePanel.tsx](../manage/ManagePanel.tsx)）。
+   * 读的人分不出哪句是坏消息。判据取自最近一次结果：`mode === 'apply'` 说明它是应用回来的，不是预览
+   * （与迁移同一标准，见 [ManagePanel.tsx](../manage/ManagePanel.tsx)）。
    */
   const restartWarn =
     sync !== null && sync.mode === 'apply' && sync.pulled.length > 0 && sync.takesEffect === 'restart-required'
@@ -1003,10 +1003,10 @@ export function SyncPanel({
   const hasPlanTables = syncPlan !== null && (syncPulls.length > 0 || syncPushes.length > 0 || syncKept.length > 0)
 
   /**
-   * 这一段说哪件事：面板（填表单 / 说状态）→ 计划 → 落地 → 结果。四段同处一个弹窗（与导入那一面同一个
+   * 这一段说哪件事：面板（填表单 / 说状态）→ 计划 → 应用 → 结果。四段同处一个弹窗（与导入那一面同一个
    * 形状，见 design.md 的「执行与结果」那一节）。
    *
-   * 判据不只看这一页自己的 `dialog`：状态栏那枚「同步中 3/7」点开时，这一页并没有"走到"落地段
+   * 判据不只看这一页自己的 `dialog`：状态栏那枚「同步中 3/7」点开时，这一页并没有"走到"应用段
    * （`dialog` 还是 `null`），可那一趟正在跑——只看 `dialog` 就会摆成面板段，进度一条字都没有。
    * 跑完也不回面板段：结论、没做到的清单与「撤销」都在结果页上，按「完成」才收掉。
    * 规则在 [syncStage](./syncStage.ts) 那一份里，`test/sync-stage.test.ts` 逐支钉着。
@@ -1061,10 +1061,10 @@ export function SyncPanel({
           右边会空一大块。
         */
         // 一扇窗从头到尾一个宽度：同步这一面每一步都按计划段那三张表的宽度（1080）来，不再
-        // 「面板 640 → 计划 1080 → 结果 640」来回跳（口径见 design.md 的「执行与结果」）。
+        // 「面板 640 → 计划 1080 → 结果 640」来回跳（标准见 design.md 的「执行与结果」）。
         size="wide"
         onClose={onClose}
-        // 没配置同步时底栏整块不摆：一枚点了没反应的「同步」比没有更糟（与正文那句说明同一条口径）。
+        // 没配置同步时底栏整块不摆：一枚点了没反应的「同步」比没有更糟（与正文那句说明同一条标准）。
         footer={
           stage === 'idle' && syncInfo === null ? undefined : stage === 'idle' ? (
             <>
@@ -1110,8 +1110,8 @@ export function SyncPanel({
             </Button>
           ) : (
             <>
-              {/* 落地跑着的时候，「取消」换成「转到后台」：窗口收起来，那一趟照跑。这是用户要的那个动作——
-                  落地可能几分钟，不该因为"我关掉了窗口"就没法看它跑到哪。 */}
+              {/* 应用跑着的时候，「取消」换成「转到后台」：窗口收起来，那一趟照跑。这是用户要的那个动作——
+                  应用可能几分钟，不该因为"我关掉了窗口"就没法看它跑到哪。 */}
               <Button variant="outline" onClick={onClose}>
                 {t('sync.background')}
               </Button>
@@ -1142,7 +1142,7 @@ export function SyncPanel({
       )}
 
       {restartWarn && stage !== 'done' && (
-        // 不定 dismiss：它不是这次操作的错，而是"这次落地还没被宿主承认"这个事实，下一次同步开始
+        // 不定 dismiss：它不是这次操作的错，而是"这次应用还没被宿主承认"这个事实，下一次同步开始
         // （`sync` 换成新的计划）时它自己就没了。
         <p className="dsm-banner dsm-warn">{t('effect.restart')}</p>
       )}
@@ -1220,7 +1220,7 @@ export function SyncPanel({
             )}
           </div>
         )}
-        {/* 没配置同步时只留一句话：摆一个点了没反应的按钮比不摆更糟（与「宿主没有归档能力」同一条口径）。 */}
+        {/* 没配置同步时只留一句话：摆一个点了没反应的按钮比不摆更糟（与「宿主没有归档能力」同一条标准）。 */}
         <p className="dsm-hint">
           {!syncKnown
             ? t('loading')
@@ -1260,7 +1260,7 @@ export function SyncPanel({
             )}
             {/*
               「整理远端」：只删本机这一格里多余的包，不拉不推、不动本机任何会话。与「同步」里那个勾选框
-              是同一件事的两条路——勾选框顺着落地一起做，这一枚不必先跑一趟完整同步。
+              是同一件事的两条路——勾选框顺着应用一起做，这一枚不必先跑一趟完整同步。
             */}
             <Button variant="outline" size="sm" onClick={openTidy} disabled={busy !== null || applying || tidyBusy}>
               {t('sync.tidy.action')}
@@ -1279,7 +1279,7 @@ export function SyncPanel({
               ) : (
                 <ProgressBlock t={t} progress={progress} note={syncNote(progress)} />
               ))}
-                    {/* 落地：前面三个阶段（算计划）与后面两段（拉取 / 推送）报的是同一套事件，画法也一样。 */}
+                    {/* 应用：前面三个阶段（算计划）与后面两段（拉取 / 推送）报的是同一套事件，画法也一样。 */}
         {!planning && sync !== null && syncPlan !== null && (
           <div className="dsm-planBody">
             {/*
@@ -1313,14 +1313,14 @@ export function SyncPanel({
                 ? ` · ${t('sync.machines', { machines: syncPlan.machines.join('、') })}`
                 : ''}
             </p>
-            {/* 事前提醒：这次落地之后要不要重启，得在按「确认同步」**之前**说出来（见 `effect.plannedRestart`）。
+            {/* 事前提醒：这次应用之后要不要重启，得在按「确认同步」**之前**说出来（见 `effect.plannedRestart`）。
                 纯推送不改本机任何东西，所以只在真有会话要落到本机、且宿主那头需要重启时才摆这一句。 */}
             {syncPulls.length > 0 && sync.takesEffect === 'restart-required' && (
               <p className="dsm-warn">{t('effect.plannedRestart')}</p>
             )}
             {/*
               整理远端：只删本机这一格里多余的包（另一格有一模一样的、或更全的）。默认不勾——它会删
-              远端的东西；勾了之后落地那次才做，预演这一下只是把"能删几个"报出来。
+              远端的东西；勾了之后应用那次才做，预览这一下只是把"能删几个"报出来。
             */}
             {syncTidy !== null && syncTidy.count > 0 && (
               <div className="dsm-options">
@@ -1560,7 +1560,7 @@ export function SyncPanel({
         )}
         {stage === 'apply' && (
           <>
-            {/* 落地：前面三个阶段（算计划）与后面两段（拉取 / 推送）报的是同一套事件，画法也一样。 */}
+            {/* 应用：前面三个阶段（算计划）与后面两段（拉取 / 推送）报的是同一套事件，画法也一样。 */}
             {liveProgress === null ? (
               job.adopted ? null : <p className="dsm-hint">{t('progress.waiting')}</p>
             ) : (

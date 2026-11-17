@@ -1,4 +1,4 @@
-// src/shared/canonical-path.ts — 落地目录的规范拼写。
+// src/shared/canonical-path.ts — 目标目录的规范拼写。
 //
 // 宿主的 workspace 注册表把 `path` 存成 `fs.realpath` 归一之后的样子，会话的成员资格也拿 header 的
 // `cwd` 过同一个 realpath 再按**字符串相等**比（`@deepseek-ai/dsh-workspace` 的 `realpathNormalize`
@@ -8,7 +8,7 @@
 // 这种拼写有一个很具体的来源：Windows 上 `git rev-parse --show-toplevel` 返回 `C:/…`（正斜杠），
 // 而宿主存的是 `C:\…`；手输的路径也可能带结尾分隔符、`..` 段或大小写不一致。
 //
-// 这一层只做一件事：把要落地的目录换成宿主会存的那个字符串。目录不存在或读不动时**原样返回**——
+// 这一层只做一件事：把要应用的目录换成宿主会存的那个字符串。目录不存在或读不动时**原样返回**——
 // 那几种情况本来就该由调用方按原来的拼写报"目标目录不存在"，而不是在这里变成一个空串。
 import { realpathSync, statSync } from 'node:fs'
 

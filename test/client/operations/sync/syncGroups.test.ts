@@ -3,7 +3,7 @@
 // 分组是纯函数（`src/client/operations/sync/syncGroups.ts`），边界在这里钉死；页面只负责把组画出来。
 // 重点不是"能分组"，而是那几条容易被后来的改动磨掉的规矩：
 //
-//   - 分组键取的是**本机那个目录**（拉取看落地后的 `toCwd`、推看 `cwd`）：用户是从"我哪个项目
+//   - 分组键取的是**本机那个目录**（拉取看应用后的 `toCwd`、推看 `cwd`）：用户是从"我哪个项目
 //     要动"这个角度读计划的，远端那一侧的路径只是"从哪儿来"；
 //   - 唯一的例外是**没有映射**的拉取行：本机根本没有那个项目可分组，退到远端路径当组头——
 //     那正是要用户补的那条映射；
@@ -30,7 +30,7 @@ function shape<T>(groups: readonly { path: string; title?: string; rows: readonl
   return groups.map((group) => [group.path, group.rows])
 }
 
-test('拉取行：分组键是落地后的本机目录', () => {
+test('拉取行：分组键是应用后的本机目录', () => {
   // 映射把远端的 /home/b/dev/x 落到了本机的 alpha：组头该是 alpha，不是远端那条路径。
   assert.equal(
     syncProjectOf({ fromCwd: '/home/b/dev/x', toCwd: '/home/u/dev/alpha' }, 'pull'),
@@ -124,7 +124,7 @@ test('拉取行的悬浮提示：只有真的改写了才补"从哪到哪"', () 
 
 test('排序与标题这两条规则与列表那边共用同一份实现', () => {
   // 「同一个目录在两处排的位置一样」不是巧合，是一份实现：这两条被抽到了 groups.ts。
-  // 这里只钉"它们确实对外可用且口径如此"；组内顺序、空组不出现在 groups.test.ts。
+  // 这里只钉"它们确实对外可用且标准如此"；组内顺序、空组不出现在 groups.test.ts。
   assert.deepEqual(orderProjectPaths(['/b', '/a', ''], registry), ['/a', '/b', ''])
   assert.deepEqual([...workspaceTitles(registry)], [
     ['/home/u/dev/beta', '测试工作区'],

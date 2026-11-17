@@ -3,7 +3,7 @@
 本仓库的协作约定，给 AI 助手与贡献者看。安装与用法在 [README](README.md)，
 决策的依据与被否决的备选方案在 [.agents/notes/](.agents/notes/AGENTS.md)，决策地图在
 [docs/internals.md](docs/internals.md)，界面与样式的完整规格在 [docs/design.md](docs/design.md)，
-落盘格式在 [docs/formats.md](docs/formats.md)，各种操作的流程在 [docs/flows.md](docs/flows.md)，
+磁盘上的格式在 [docs/formats.md](docs/formats.md)，各种操作的流程在 [docs/flows.md](docs/flows.md)，
 目录结构与逐文件职责在 [docs/development.md](docs/development.md)。文档、提交信息、
 给维护者的报告一律用中文（[README.en.md](README.en.md) 是与 README 对齐的英文版）。
 
@@ -14,14 +14,14 @@
 | 文档 | 写什么 |
 | --- | --- |
 | `README.md` / `README.en.md` | 安装、设置页与四个工具怎么用；两份的键与结构保持对齐 |
-| `AGENTS.md` | 本文件：协作约定、提交信息口径、验证清单、界面硬约束 |
+| `AGENTS.md` | 本文件：协作约定、提交信息规矩、验证清单、界面硬约束 |
 | `.agents/notes/` | 决策的依据、被否决的备选方案与代价；一条决策一篇，格式由 `test/plugin/notes.test.ts` 核 |
 | `.agents/skills/` | 给 agent 的可复用流程，一个技能一个目录（`SKILL.md` + 它自己的资源文件），由 DSH 的技能机制发现；不放决策依据 |
 | `docs/AGENTS.md` | `docs/` 这一层的文档规范与写作规则 |
-| `docs/design.md` | 界面与样式的唯一规格：页面骨架、排版、间距、颜色、控件、文案与验收 |
+| `docs/design.md` | 界面与样式的唯一规格：页面外壳、排版、间距、颜色、控件、文案与验收 |
 | `docs/internals.md` | 决策地图（按主题索引到笔记），以及没有笔记承载的当前机制 |
 | `docs/development.md` | 目录结构、逐文件职责、开发命令 |
-| `docs/formats.md` | 落盘格式：本机会话库、远端同步格子、会话包 `.dshsess` |
+| `docs/formats.md` | 磁盘上的格式：本机会话库、远端同步格子、会话包 `.dshsess` |
 | `docs/flows.md` | 各种操作的流程：从界面动作到宿主动作，读写哪些文件 |
 | `docs/releasing.md` | 发布流程（推 `v*` 标签触发可信发布） |
 | `docs/glossary.md` | 术语表：官方怎么说、照写什么、别写什么、出处在哪 |
@@ -33,12 +33,12 @@
 ## 说人话
 
 文档、提交信息、PR 描述和给维护者的报告都写清谁做什么、条件、结果；术语第一次出现先解释。不用
-「收口」「闭环」这类词代替动作，不写只表态度的句子；技术术语照官方口径保留，不为了口语化把准确说法
+「收口」「闭环」这类词代替动作，不写只表态度的句子；技术术语照官方说法保留，不为了口语化把准确说法
 换掉。
 
 ## 官方文档
 
-上游口径以官方文档站为准（<https://deepseek-harness.github.io/deepseek-harness/>，中英双语）。与本包
+上游说法以官方文档站为准（<https://deepseek-harness.github.io/deepseek-harness/>，中英双语）。与本包
 关系最近的四页：
 
 - [Web Client](https://deepseek-harness.github.io/deepseek-harness/reference/subsystems/web-client)：
@@ -65,7 +65,7 @@
 - 谁报的（「用户报的」「用户截图报的」）——把现象与量到的数字写出来就够了；
 - 演化过程（「原本是…后来改成…」）——直接写最终形态。
 
-其余口径：
+其余规矩：
 
 - 语言按上面的「说人话」：标题和正文直接写动作与结果，不用「收口」「闭环」这类词。
 - 中文 conventional commits：`feat / fix / docs / refactor / test / build / chore`；破坏性变更加
@@ -91,7 +91,7 @@ pnpm typecheck && pnpm build && pnpm test && pnpm check:package
 pnpm bench
 ```
 
-判定与口径见 [bench/README.md](bench/README.md)：最长主线程停顿不得超过场景预算，归一化后的耗时不得
+判定与说法见 [bench/README.md](bench/README.md)：最长主线程停顿不得超过场景预算，归一化后的耗时不得
 比 `bench/baseline.json` 慢 25% 以上。有意变慢（换了实现、多了功能）要重写基线（`pnpm bench:update`）
 并在 PR 里说明慢在哪儿、值不值。
 
@@ -105,8 +105,8 @@ pnpm bench
   深浅两套主题各量一遍再下结论。内容视图有一份现成的端到端自检
   （`bash .agents/skills/transcript-e2e/scripts/run.sh`，驱动真实 dev GUI、只读会话库），动过
   `TranscriptDialog.tsx` / `operations/transcript/*` / `src/operations/transcript/transcript.ts` 之后跑一遍它。
-- 真实会话库上的**写操作**（迁移 `apply`、回滚、导入落地）先问再做；验收优先用只读预演。
-- 验收需要临时夹具（假会话等）时用完立刻删干净，并在报告里写明造过什么、清掉了没有。
+- 真实会话库上的**写操作**（迁移 `apply`、回滚、导入应用）先问再做；验收优先用只读预览。
+- 验收需要临时造的测试数据（假会话等）时用完立刻删干净，并在报告里写明造过什么、清掉了没有。
 
 ## 性能与阻塞预算
 
@@ -117,7 +117,7 @@ pnpm bench
 - **超过 50 毫秒**：必须让出事件循环（分块 + `setImmediate`，或异步 I/O）。
 - **超过 200 毫秒**：必须异步、分片或交给线程池；不能靠一个 `async` 签名糊过去。
 
-几条执行口径：
+几条执行规则：
 
 - **`async` 不等于不阻塞**：`async` 函数里仍可以 `readFileSync()` / `gunzipSync()` / 一次大
   `Buffer.concat()`；改签名之前先找真正的同步段。
@@ -137,7 +137,7 @@ pnpm bench
 
 ## 界面与样式的硬约束
 
-完整规格（页面骨架、排版、间距、颜色、控件、文案、反馈、验收）在 [docs/design.md](docs/design.md)；
+完整规格（页面外壳、排版、间距、颜色、控件、文案、反馈、验收）在 [docs/design.md](docs/design.md)；
 这里只列违反一次就会静默坏掉、且每轮都要在上下文里的门。
 
 - 浏览器半侧只 `require` **平台基线模块**：`react`、`react/jsx-runtime`、官方控件库

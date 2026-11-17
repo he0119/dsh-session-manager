@@ -75,10 +75,10 @@ export function BackupPanel({
   /**
    * 最近收到的那条进度事件（见 api.ts 的 `rollbackBackup()`）。
    *
-   * 预演也要逐条走一遍清单（`restore` 那一段：目录搬回哪、文件从哪还原），落地还要真的逐文件复写
+   * 预览也要逐条走一遍清单（`restore` 那一段：目录搬回哪、文件从哪还原），应用还要真的逐文件复写
    * 字节——整库回滚是几十秒的活。
    *
-   * 声明排在**最后**（不跟 `busy` 挤在一起）：冒烟用例按位置往 null 状态里种值（见 test/client.test.mjs
+   * 声明排在**最后**（不跟 `busy` 挤在一起）：冒烟用例按位置往 null 状态里初始值（见 test/client.test.mjs
    * 的 `nulls`），插在中间会让后面那些种子的位置整体错一格。
    */
   const [progress, setProgress] = React.useState<ProgressEvent | null>(null)
@@ -138,7 +138,7 @@ export function BackupPanel({
    * （刚被清理掉、或者路径来自一条过期的提示）。读到之后按目录找一次，找到了才开——找不到时这一面
    * 就是普通的清单，用户自己看。
    *
-   * `opened` 记住已经为哪个目录开过：清单刷新（回滚落地之后又重读一遍）不该把弹窗重新顶出来。
+   * `opened` 记住已经为哪个目录开过：清单刷新（回滚应用之后又重读一遍）不该把弹窗重新顶出来。
    */
   const opened = React.useRef<string | undefined>(undefined)
   React.useEffect(() => {
@@ -191,7 +191,7 @@ export function BackupPanel({
     )
   }
 
-  /** 这份备份此刻正在落地（不是"正在算清单"）。标题、按钮态与正文都按它分岔。 */
+  /** 这份备份此刻正在应用（不是"正在算清单"）。标题、按钮态与正文都按它分岔。 */
   const running = dialog !== null && busy === dialog.backup.dir
 
   return (
@@ -200,7 +200,7 @@ export function BackupPanel({
         <p className="dsm-banner dsm-error">
           <span>{error}</span>
           <span className="dsm-spacer" />
-          {/* 关掉一条横幅：本页不用官方缺省的 ghost（那条口径见「动作行里的动作带边框」那篇笔记）。 */}
+          {/* 关掉一条横幅：本页不用官方缺省的 ghost（那条标准见「动作行里的动作带边框」那篇笔记）。 */}
           <Button variant="outline" size="sm" onClick={() => setError(null)}>
             {t('error.dismiss')}
           </Button>
@@ -276,7 +276,7 @@ export function BackupPanel({
       {dialog !== null && (
         <ConfirmDialog
           t={t}
-          // 落地那一段标题也换掉：这时候已经不是"将要"了，正文里正跑着进度。
+          // 应用那一段标题也换掉：这时候已经不是"将要"了，正文里正跑着进度。
           title={t(
             isRestore(dialog.backup)
               ? running
@@ -293,14 +293,14 @@ export function BackupPanel({
           busyLabel={t(isRestore(dialog.backup) ? 'backup.restore.running' : 'backup.rollback.running')}
           busy={running}
           planning={dialog.plan === null && dialog.error === null}
-          // 算动作清单那一段也要逐条走一遍备份（`restore` 那条事件），把静态的「预演中…」换成进度。
+          // 算动作清单那一段也要逐条走一遍备份（`restore` 那条事件），把静态的「正在预览…」换成进度。
           planningDetail={progress === null ? undefined : <ProgressBlock t={t} progress={progress} />}
           error={dialog.error}
           disabled={dialog.plan === null}
           onConfirm={() => apply(dialog.backup)}
           onCancel={() => setDialog(null)}
         >
-          {/* 落地：逐条搬目录、逐文件复写字节，正文换成进度（那份动作清单说的是"将要"）。 */}
+          {/* 应用：逐条搬目录、逐文件复写字节，正文换成进度（那份动作清单说的是"将要"）。 */}
           {running &&
             (progress === null ? (
               <p className="dsm-hint">{t('progress.waiting')}</p>

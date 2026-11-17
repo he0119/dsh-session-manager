@@ -31,7 +31,7 @@ Status: implemented
   `sync.progress.note`、`help.faq.backupA`），说明页的"每页做什么"多一条 `help.tabs.backup`。
 - 清单的重读不靠别的页通知：切分页会**卸载**上一个分页，这一页每次挂载都自己 `GET /backups`。于是
   "刚做完迁移 / 删除 / 同步，切过来就能看见它留下的那一份"是卸载-重挂顺带得到的，不需要跨页事件。
-- 迁移落地后不再顺带重读备份清单（原先的 `reload().then(() => loadBackups())` 只剩 `reload()`）。
+- 迁移应用后不再顺带重读备份清单（原先的 `reload().then(() => loadBackups())` 只剩 `reload()`）。
 
 ## Alternatives considered
 
@@ -56,4 +56,4 @@ Status: implemented
 - 页签从 5 个变 6 个（`test/plugin/client.test.mjs` 钉着顺序与默认停在第一个）；说明页词条数 20 → 21。
 - 「备份」页与动作页共用页头（会话库位置）与同一份 `/state`；它自己只读 `/backups`，不依赖会话库清单，
   所以"库里一条会话都没有"不影响它。
-- 回滚 / 恢复落地后照旧 `reload()` 再重读清单：回滚会改工作区注册表，页头那行"N 个工作区"要跟着变。
+- 回滚 / 恢复应用后照旧 `reload()` 再重读清单：回滚会改工作区注册表，页头那行"N 个工作区"要跟着变。

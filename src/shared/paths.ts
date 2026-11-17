@@ -1,4 +1,4 @@
-// src/shared/paths.ts — 会话日志路径的构造与解析（复刻宿主口径）。
+// src/shared/paths.ts — 会话日志路径的构造与解析（复刻宿主标准）。
 //
 // 目录布局（宿主 src/index.ts）：
 //   <root>/<projectKey(cwd)>/<encodeSegment(id)>/session.vN.jsonl.zstd

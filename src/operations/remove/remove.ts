@@ -1,4 +1,4 @@
-// src/operations/remove/remove.ts — 删除会话的宿主侧编排：预演 / 执行 / （恢复走 journal 的回滚）。
+// src/operations/remove/remove.ts — 删除会话的宿主侧编排：预览 / 执行 / （恢复走 journal 的回滚）。
 //
 // 为什么"删除"要先备份：宿主**没有**删除会话的能力（`dsh-session-persistence` 的 seam 里没有删除
 // 接口，见 docs/internals.md），所以这件事只能由本插件动文件系统。一旦自己动手，"删错了"就没有
@@ -11,12 +11,12 @@
 //   - 反过来，恢复备份时那条会话的登记、归档状态**自动**回到原样，不必再补写一次注册表，
 //     也就不会在恢复时把用户之后做的注册表改动覆盖掉。
 //
-// 与迁移共用同一套预演/确认口径：`plan` 只读、`apply` 才写盘，且计划里 `ok` 不为 true 就拒绝执行。
+// 与迁移共用同一套预览/确认标准：`plan` 只读、`apply` 才写盘，且计划里 `ok` 不为 true 就拒绝执行。
 //
 // **子智能体跟着父会话走**：点名一条会话，它的**全部后代**（沿 header 的 `parentSession` 找下去）一起删，
 // 因为子会话在外壳侧边栏里只挂在父会话的 `subagentCatalog` 下——父的日志一没了，子会话就再没有别的
 // 入口，留在盘上只会变成"本插件看得见、侧边栏看不见"的隐形残留。反向（只删子、留着父）不拦，只在
-// 预演里点明父会话下面会留一个点不开的条目：孤儿要收拾，而"这条子智能体我就是要删掉"也是正当需求。
+// 预览里点明父会话下面会留一个点不开的条目：孤儿要收拾，而"这条子智能体我就是要删掉"也是正当需求。
 import { existsSync, readdirSync, rmdirSync, statSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
 import { dirname } from 'node:path'
@@ -51,7 +51,7 @@ export interface RemoveDeps {
    * 还会被列在会话列表里（`dsh-session-persistence-jsonl` 的写路径按会话目录定位）。这跟宿主
    * 自己归档一条正在跑的会话会被拒绝是同一件事。
    *
-   * 缺席 = 无法判断，按"都不活着"处理（删之前的预演会如实说明这件事）。
+   * 缺席 = 无法判断，按"都不活着"处理（删之前的预览会如实说明这件事）。
    */
   liveSessionIds?: () => ReadonlySet<string>
   /** 注入时间，便于测试。 */
@@ -66,7 +66,7 @@ export interface RemoveDeps {
   remoteRemove?: (ids: readonly string[]) => Promise<RemoteRemoval>
 }
 
-/** 一次删除（或预演）的请求。 */
+/** 一次删除（或预览）的请求。 */
 export interface RemoveRequest {
   /** 要删的会话 id（非空）。 */
   sessionIds: readonly string[]
@@ -79,7 +79,7 @@ export interface RemoveRequest {
   alsoRemote?: boolean
 }
 
-/** 预演里的一条会话。 */
+/** 预览里的一条会话。 */
 export interface RemoveEntry {
   id: string
   title?: string
@@ -88,7 +88,7 @@ export interface RemoveEntry {
   dir: string
   files: SessionLogFile[]
   bytes: number
-  /** 宿主内存里活着（这些会被预演挡下）。 */
+  /** 宿主内存里活着（这些会被预览挡下）。 */
   live: boolean
   /** 日志 header 里的 `origin`（子智能体会话写 `subagent`；界面据此挂标签）。 */
   origin?: string
@@ -100,7 +100,7 @@ export interface RemoveEntry {
   via?: { id: string; title?: string }
 }
 
-/** 删除计划：界面看到的预演结果就是执行时会做的事。 */
+/** 删除计划：界面看到的预览结果就是执行时会做的事。 */
 export interface RemovalPlan {
   ok: boolean
   problems: string[]
@@ -109,7 +109,7 @@ export interface RemovalPlan {
   bytes: number
   /** 级联带进来的条数（点名之外、跟着父会话一起删的子智能体后代）。 */
   cascaded: number
-  /** 备份会落在哪（执行时是真实目录；预演时是按当前时间算出来的那一个）。 */
+  /** 备份会落在哪（执行时是真实目录；预览时是按当前时间算出来的那一个）。 */
   backupRoot: string
 }
 
@@ -253,7 +253,7 @@ export async function planRemoval(
 /**
  * 执行（或只做 dry-run）删除。
  *
- * `apply: false` 时只返回预演，一个字节都不写——界面上的「预演删除」与「确认删除」走的是同一个
+ * `apply: false` 时只返回预览，一个字节都不写——界面上的「预览删除」与「确认删除」走的是同一个
  * 计划函数，因此不存在"预览一套、实做另一套"。
  *
  * @param deps 路径与探测口。
@@ -276,7 +276,7 @@ export async function runRemoval(
    * 一遍——同一个弹窗里同一句话出现两次，用户截图里就是那个样子）。
    */
   if (!plan.ok) return { applied: false, ...empty, summary: '这次一条都没删。' }
-  /** 整族一起删时把"多出来的那几条"说清楚，否则预演清单里会冒出用户没勾过的会话。 */
+  /** 整族一起删时把"多出来的那几条"说清楚，否则预览清单里会冒出用户没勾过的会话。 */
   const cascadeNote =
     plan.cascaded === 0 ? '' : ` 其中 ${plan.cascaded} 条是子智能体会话，跟着点名的会话一起删。`
   if (!options.apply) {

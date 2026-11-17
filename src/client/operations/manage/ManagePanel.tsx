@@ -3,11 +3,11 @@
  * 删除，以及**迁移**（导出 / 导入在同一行上打开一个弹窗，见 TransferPanel）。
  *
  * 与「传输」页的分工：传输页是"把会话带走 / 带回来"，这一页是"这条会话我不要了 / 先收起来 / 换个
- * 目录"。两页共用同一份 `/state`（页面骨架只拉一次）与同一套列表骨架
+ * 目录"。两页共用同一份 `/state`（页面外壳只拉一次）与同一套列表外壳
  * （[sessionList.tsx](../../shared/ui/sessionList.tsx)），所以行、标签、条数、筛选条、选行那一对按钮都不会各说各话。
  *
  * **迁移原先单独占一个分页，现在并进这条动作行**：它的源改成"你勾中的那些会话"之后，那一页剩下的只有
- * 一张与这一页逐字同形的列表 + 底部一枚「迁移」+ 一个弹窗（选目标目录、看预演、确认）。两页各自的
+ * 一张与这一页逐字同形的列表 + 底部一枚「迁移」+ 一个弹窗（选目标目录、看预览、确认）。两页各自的
  * 列表、筛选与勾选本来就是同一份实现，合成一页之后"勾几条会话，再决定拿它们做什么"是一条路，而不是
  * 先在两页之间选一页。**勾不动的行只有子智能体**（它们跟着父会话走）：侧边栏不显示的那几类在这一页
  * 照旧能勾（这一页恰恰是用来收拾它们的），迁移那一路因此**只把看得见的那些送进计划**、并在弹窗里说明
@@ -23,13 +23,13 @@
  *     路径，而组头就写着它，重复那一次是白占标题的宽度；注册表没认领的会话仍挂「未分组」小标签（它
  *     与组头说的是两件事：组头是目录，标签是"注册表不认这条"）；
  *   - **删除那一下就把清单摆出来**：点「删除所选」开确认弹窗，里面是"哪些会话会被删、备份落在哪"，
- *     确认才落盘（见 [ConfirmDialog.tsx](../../shared/ui/ConfirmDialog.tsx)）；执行时**先备份再删**（见 src/operations/remove/remove.ts），
+ *     确认才写入磁盘（见 [ConfirmDialog.tsx](../../shared/ui/ConfirmDialog.tsx)）；执行时**先备份再删**（见 src/operations/remove/remove.ts），
  *     恢复走「迁移」页的「备份与回滚」；
- *   - **归档走宿主能力**（`workspaceRegistry`），一次落盘 + 改内存 + 广播，侧边栏即时跟着变；宿主
+ *   - **归档走宿主能力**（`workspaceRegistry`），一次写入磁盘 + 改内存 + 广播，侧边栏即时跟着变；宿主
  *     没有这个能力时按钮禁用并说明原因，而不是绕过宿主去写注册表文件。
  *   - **标题也能在这里重算**（见 [retitleNotes.ts](../retitle/retitleNotes.ts) 与宿主侧 `src/operations/retitle/retitle.ts`）：
  *     历史会话的标题多半停在"首句前几个词"的兜底名称上，这一枚按钮请宿主的名称服务按整段对话重算一遍
- *     （逐条挂载 → 重算 → 落盘 → 摘掉，见 `src/tools.ts` 的 `titleRefreshPort()`）。跳过与失败分开说：
+ *     （逐条挂载 → 重算 → 写入磁盘 → 摘掉，见 `src/tools.ts` 的 `titleRefreshPort()`）。跳过与失败分开说：
  *     你自己改过名的那些不动，子智能体的不算。
  *
  * @module dsh-session-manager/client/operations/manage/ManagePanel
@@ -98,7 +98,7 @@ import { remoteLibrary, type RemoteLibraryState } from '../sync/remoteLibrary.ts
 import { patchArchived, patchMoved, patchRemoved, patchTitles } from './statePatch.ts'
 import type { PanelShare } from '../../types.ts'
 
-/** 一次迁移落地之后的结论：复核过没过、备份在哪、要不要重启（原样透出宿主报的三件事）。 */
+/** 一次迁移应用之后的结论：复核过没过、备份在哪、要不要重启（原样透出宿主报的三件事）。 */
 interface MigrationEffect {
   verified: boolean
   backupDir?: string
@@ -118,7 +118,7 @@ export function ManagePanel({
   setProject,
   openBackup,
   /**
-   * 从别处"定位"过来的那条会话（同步弹窗里那几枚「只看这一条」交给页面骨架，骨架再交下来）。
+   * 从别处"定位"过来的那条会话（同步弹窗里那几枚「只看这一条」交给页面外壳，外壳再交下来）。
    *
    * 它一变就把筛选条重置成"只看这一条"：筛选标签清空、搜索框填上这个 id。用 id 而不是标题——标题可能重名，
    * 而搜索框本来就按"名称或 ID"匹配（见 `list.filter.search`）。
@@ -189,7 +189,7 @@ export function ManagePanel({
    * 删除弹窗：`null` = 没开；开了之后先是一份空壳（计划还在算），算完填进去。
    *
    * 计划与"弹窗开没开"合成一个状态，是因为它俩本来就是一回事：没有弹窗就没有要看的计划，取消
-   * （或落地成功）之后那份计划也不该留在页面上——它说的是按下去那一刻的库，留着只会让人以为它还算数。
+   * （或应用成功）之后那份计划也不该留在页面上——它说的是按下去那一刻的库，留着只会让人以为它还算数。
    */
   const [pending, setPending] = React.useState<{ plan: DeleteResponse | null; error: string | null } | null>(null)
   const [failed, setFailed] = React.useState<Array<{ id: string; error: string }>>([])
@@ -198,7 +198,7 @@ export function ManagePanel({
    *
    * 删除那两段是"扫整库"与"先备份再删"，归档那段是逐条走宿主的注册表动作——都是按下之后要等的活。
    *
-   * 声明排在**最后**（不跟 `busy` 挤在一起）：冒烟用例按位置往 null 状态里种值（见 test/client.test.mjs
+   * 声明排在**最后**（不跟 `busy` 挤在一起）：冒烟用例按位置往 null 状态里初始值（见 test/client.test.mjs
    * 的 `nulls`），插在中间会让后面那些种子的位置整体错一格。
    */
   const [progress, setProgress] = React.useState<ProgressEvent | null>(null)
@@ -214,12 +214,12 @@ export function ManagePanel({
   /*
    * ================== 迁移那一路（原先的 MigrationPanel） ==================
    *
-   * 这些声明**一律排在前面那些状态之后**：冒烟用例按位置往 null / 空串状态里种值（见 test/client.test.mjs
+   * 这些声明**一律排在前面那些状态之后**：冒烟用例按位置往 null / 空串状态里初始值（见 test/client.test.mjs
    * 的 mount），插在中间会让既有的会话页用例整体错一格。顺序：`to` / `title`（两个空串，排在筛选条那个
    * 搜索词之后）→ `fields`（open / manual 两个 null）→ `migratePending` → `effect`。
    */
 
-  /** 目标目录。它跨弹窗留着：连着迁两批时第二次打开弹窗就有一份预演在等着。 */
+  /** 目标目录。它跨弹窗留着：连着迁两批时第二次打开弹窗就有一份预览在等着。 */
   const [to, setTo] = React.useState('')
   const [title, setTitle] = React.useState('')
   const [includeArtifacts, setIncludeArtifacts] = React.useState(false)
@@ -234,18 +234,18 @@ export function ManagePanel({
   /**
    * 迁移弹窗：`null` = 没开；开了先是一份空壳（计划还在算，或目标还没选）。
    *
-   * 与删除弹窗同一套形状（计划 + 异常合成一个状态）：没有弹窗就没有要看的计划，取消（或落地成功）
+   * 与删除弹窗同一套形状（计划 + 异常合成一个状态）：没有弹窗就没有要看的计划，取消（或应用成功）
    * 之后那份计划也不该留在页面上。
    */
   const [migratePending, setMigratePending] = React.useState<{
     response: MigrationResponse | null
     error: string | null
   } | null>(null)
-  /** 上一次迁移落地之后的结论（复核 / 备份 / 生效方式）：弹窗关了之后它还得在页面上留着。 */
+  /** 上一次迁移应用之后的结论（复核 / 备份 / 生效方式）：弹窗关了之后它还得在页面上留着。 */
   /**
    * 刚做完的那件事留下了哪个备份目录（删除 / 迁移各一份），以及要不要在提示里给「撤销」。
    *
-   * 声明在**最后一个 null 状态**的位置上：冒烟夹具按调用顺序把种子发给 null 状态（见
+   * 声明在**最后一个 null 状态**的位置上：冒烟测试的示例数据按调用顺序把种子发给 null 状态（见
    * test/client.test.mjs 的 `nulls`），插在中间会让后面那些整体错一格。
    */
 
@@ -269,9 +269,9 @@ export function ManagePanel({
    *
    * 平铺之后没有组头了，「整组处理」这件事改成"先按项目筛，再全选"：选中一个项目，清单就只剩它，
    * 卡头那对「全选 / 清空」的作用面跟着变成这一批。取一个对象而不是一个字符串，是因为冒烟用例按
-   * 位置往空串状态里种值（见 test/client.test.mjs 的 mount），多一个字符串会让后面那些种子整体错一格。
+   * 位置往空串状态里初始值（见 test/client.test.mjs 的 mount），多一个字符串会让后面那些种子整体错一格。
    */
-  // 「项目」这一格由页面骨架持有（导入要拿它当目标目录的初值，见 ManagerPanel 的说明），这里只读写它。
+  // 「项目」这一格由页面外壳持有（导入要拿它当目标目录的初值，见 ManagerPanel 的说明），这里只读写它。
   const projectPath = project?.path ?? null
   /**
    * 表头那一列的排序：点一下换列，再点一下换方向。
@@ -481,14 +481,14 @@ export function ManagePanel({
   /**
    * 目标候选：已登记工作区（同一路径只留一条），外加当前值本身。
    *
-   * 与「传输」页导入的落地目录共用同一个构造（见 planRows.directoryTargetRows）：两处问的是同一件事。
+   * 与「传输」页导入的目标目录共用同一个构造（见 planRows.directoryTargetRows）：两处问的是同一件事。
    */
   const targetRows = React.useMemo<PathRow[]>(
     () => directoryTargetRows(state?.workspaces ?? [], state?.repos, to),
     [state, to],
   )
 
-  /** 请求体：源是勾中且搬得走的那些 id，目标只有一个（预演与落地用同一份参数）。 */
+  /** 请求体：源是勾中且搬得走的那些 id，目标只有一个（预览与应用用同一份参数）。 */
   const request = (mode: 'plan' | 'apply', target: string, artifacts: boolean): MigrationRequest => ({
     mode,
     sessionIds: [...migratable],
@@ -501,7 +501,7 @@ export function ManagePanel({
   const previewToken = React.useRef(0)
 
   /**
-   * 取一份预演（只读，不落盘）。
+   * 取一份预览（只读，不写入磁盘）。
    *
    * 目标为空时不取：弹窗正文是一句「先选一个目标目录」，主按钮禁用——还没到能算计划的地步。
    *
@@ -534,7 +534,7 @@ export function ManagePanel({
   }
 
   /**
-   * 点「迁移」：开弹窗，同时把只读的迁移计划取回来（`mode: 'plan'`，不落盘）。
+   * 点「迁移」：开弹窗，同时把只读的迁移计划取回来（`mode: 'plan'`，不写入磁盘）。
    *
    * 参数不齐时不开口：没勾会话时按钮本来就是禁用的；目标为空时弹窗里那句提示会告诉用户下一步该做什么，
    * 空弹窗也比一句"还没到能算计划的地步"合适——目标就在这个弹窗里选。
@@ -594,9 +594,9 @@ export function ManagePanel({
   }
 
   /**
-   * 弹窗里按「确认迁移」：真的搬（宿主那边是同一个 `buildRelocationPlan()`，只是这次落盘并复核）。
+   * 弹窗里按「确认迁移」：真的搬（宿主那边是同一个 `buildRelocationPlan()`，只是这次写入磁盘并复核）。
    *
-   * 落地失败但正文里带着完整结果（计划不 ok / 复核没过）时把那份结果摆回弹窗里——用户正看着清单，
+   * 写入失败但正文里带着完整结果（计划不 ok / 复核没过）时把那份结果摆回弹窗里——用户正看着清单，
    * 新的问题清单就该出现在同一个位置；请求本身没走通（网络、参数被拒）才抛给页面横幅并关掉弹窗。
    */
   const applyMigration = (): void => {
@@ -741,8 +741,8 @@ export function ManagePanel({
   /**
    * 点「删除所选」：开弹窗，同时把只读的删除计划取回来。
    *
-   * 计划是**只读**的一次计算（`mode: 'plan'` 不落盘，见 src/operations/remove/remove.ts），所以这一步可以放心地替用户
-   * 做掉——他还没承诺任何事。取回来之前弹窗里只有一行"预演中…"，落地按钮是禁用的。
+   * 计划是**只读**的一次计算（`mode: 'plan'` 不写入磁盘，见 src/operations/remove/remove.ts），所以这一步可以放心地替用户
+   * 做掉——他还没承诺任何事。取回来之前弹窗里只有一行"正在预览…"，应用按钮是禁用的。
    *
    * 计划回来时弹窗可能已经被取消掉了（用户在这几百毫秒里按了 Escape）：`current === null` 时原地
    * 作废，不然一个已经被关掉的弹窗会被打印出来的计划**重新打开**。
@@ -840,13 +840,13 @@ export function ManagePanel({
   // 迁移弹窗正文里那些从计划派生出来的东西（同原先的 MigrationPanel）。
   const preview = migratePending?.response?.preview ?? null
   const planned = preview !== null && preview.ok
-  /** 目标还没定：这一份不是"预演中"，而是"等你选目标"——两者在弹窗里长得不一样。 */
+  /** 目标还没定：这一份不是"预览中"，而是"等你选目标"——两者在弹窗里长得不一样。 */
   const waitingForTarget = to.trim() === ''
   const registry = preview?.registryChange ?? null
   /** 顺带摘掉的悬空登记条数（宿主本来就不认它们，见宿主 `RegistryChange.droppedStale`）。 */
   const staleDropped = (registry?.droppedStale ?? []).reduce((n, entry) => n + entry.sessionIds.length, 0)
   /**
-   * 这次改动会不会**需要重启**才被宿主承认：预演那次按宿主端口的探测说（见 src/web.ts 的迁移端点），
+   * 这次改动会不会**需要重启**才被宿主承认：预览那次按宿主接口的探测说（见 src/web.ts 的迁移端点），
    * 摆在弹窗里当事前提醒。注册表本来就不用改（`unchanged`）时没有"生效"可谈，不摆这一句。
    */
   const plannedRestart =
@@ -859,7 +859,7 @@ export function ManagePanel({
   /**
    * 勾中的一条都搬不走（全是侧边栏不显示的）。
    *
-   * 这时**不该**再摆「预演中…」：`runPreview()` 在空集合上直接返回，一份计划都不会去取，那一行等下去
+   * 这时**不该**再摆「正在预览…」：`runPreview()` 在空集合上直接返回，一份计划都不会去取，那一行等下去
    * 永远等不到——弹窗里要说的是一句"这些都不搬、先在列表里处理"，而不是一个不会结束的等待。
    */
   const nothingMigratable = migratable.length === 0
@@ -877,7 +877,7 @@ export function ManagePanel({
         <p className="dsm-banner dsm-error">
           <span>{error}</span>
           <span className="dsm-spacer" />
-          {/* 关掉一条横幅：本页不用官方缺省的 ghost（那条口径见「动作行里的动作带边框」那篇笔记）。 */}
+          {/* 关掉一条横幅：本页不用官方缺省的 ghost（那条标准见「动作行里的动作带边框」那篇笔记）。 */}
           <Button variant="outline" size="sm" onClick={() => setError(null)}>
             {t('error.dismiss')}
           </Button>
@@ -1051,7 +1051,7 @@ export function ManagePanel({
               </Button>
               {/*
                 「迁移」也在这条动作行上：它与归档 / 改名 / 删除是同一句话——"对勾中的这些做一件事"。
-                它开自己的弹窗（目标目录 + 预演 + 确认），所以这里只是一枚按钮。
+                它开自己的弹窗（目标目录 + 预览 + 确认），所以这里只是一枚按钮。
               */}
               <Button
                 variant="outline"
@@ -1139,12 +1139,12 @@ export function ManagePanel({
       {pending !== null && (
         <ConfirmDialog
           t={t}
-          // 落地那一段标题也换掉：这时候已经不是"将要"了，正文里正跑着进度。
+          // 应用那一段标题也换掉：这时候已经不是"将要"了，正文里正跑着进度。
           title={t('manage.delete.dialogTitle')}
           confirmLabel={t('manage.delete.apply')}
           acknowledge={t('manage.delete.acknowledge')}
           planning={pending.plan === null && pending.error === null}
-          // 预演要扫整库（找这些会话与它们的后代），那几秒里把静态的「预演中…」换成进度。
+          // 预览要扫整库（找这些会话与它们的后代），那几秒里把静态的「正在预览…」换成进度。
           planningDetail={progress === null ? undefined : <ProgressBlock t={t} progress={progress} />}
           error={pending.error}
           disabled={pending.plan === null || !pending.plan.preview.ok}
@@ -1221,11 +1221,11 @@ export function ManagePanel({
       {migratePending !== null && (
         <ConfirmDialog
           t={t}
-          // 落地那一段标题也换掉：这时候已经不是"将要"了，正文里正跑着进度。
+          // 应用那一段标题也换掉：这时候已经不是"将要"了，正文里正跑着进度。
           title={t('migrate.dialogTitle')}
           confirmLabel={t('migrate.apply')}
           acknowledge={t('migrate.acknowledge')}
-          // 目标为空时不算"预演中"：那时正文是一句"先选目标目录"，不是一句等待；一条都搬不走时同理
+          // 目标为空时不算"预览中"：那时正文是一句"先选目标目录"，不是一句等待；一条都搬不走时同理
           //（那一份计划根本不会去取，等下去等不到）。
           planning={
             !waitingForTarget &&
@@ -1233,7 +1233,7 @@ export function ManagePanel({
             migratePending.response === null &&
             migratePending.error === null
           }
-          // 算计划那一段不是空等（要扫整库认族、算注册表变更），所以有事件就把那句静态的「预演中…」
+          // 算计划那一段不是空等（要扫整库认族、算注册表变更），所以有事件就把那句静态的「正在预览…」
           // 换成进度。
           planningDetail={progress === null ? undefined : <ProgressBlock t={t} progress={progress} />}
           error={migratePending.error}
@@ -1244,7 +1244,7 @@ export function ManagePanel({
           {(
             <>
               {/*
-                目标目录是这一弹窗的第一步。`title` 与产物开关跟着它：三者都是"这次怎么落地"的参数，
+                目标目录是这一弹窗的第一步。`title` 与产物开关跟着它：三者都是"这次怎么应用"的参数，
                 摆在同一块地方，用户不必在页面与弹窗之间来回看。
               */}
               <DirectoryField
@@ -1276,13 +1276,13 @@ export function ManagePanel({
                 />
               </label>
               {/*
-                名称不进预演的正文（那份计划里只报"新建 / 复用目标工作区"这一件事，不报它的名字），所以
-                改它不必重新预演：落地那次请求现取这个名字。产物开关不一样——它直接改变计划里的条数，
-                所以跟着重新预演。
+                名称不进预览的正文（那份计划里只报"新建 / 复用目标工作区"这一件事，不报它的名字），所以
+                改它不必重新预览：应用那次请求现取这个名字。产物开关不一样——它直接改变计划里的条数，
+                所以跟着重新预览。
               */}
               <div className="dsm-options">
                 {/*
-                  这个开关直接改变计划里的条数（带上产物 vs 只带会话），所以跟着重新预演。
+                  这个开关直接改变计划里的条数（带上产物 vs 只带会话），所以跟着重新预览。
                   走官方 `Checkbox`：`label` 就是原来那个 `<span>` 里的文案，勾选框与文案一起构成
                   可见 label（原先的 `<label className="dsm-check">` 那层由官方原语自己长出来）。
                 */}
@@ -1314,7 +1314,7 @@ export function ManagePanel({
               {!waitingForTarget && preview !== null && (
                 <>
                   {/*
-                    计划过不去时不说"将迁移 N 条"：那句是承诺，而 `ok === false` 意味着一条都不会落地
+                    计划过不去时不说"将迁移 N 条"：那句是承诺，而 `ok === false` 意味着一条都不会写进去
                     （确认按钮也禁用了）。这时摆一句"这次不会搬任何会话"，下面那张问题清单才是原因。
                   */}
                   {planned ? (

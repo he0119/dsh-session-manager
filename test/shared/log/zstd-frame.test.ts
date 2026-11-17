@@ -57,7 +57,7 @@ test('splitFirstFrame：单帧文件也能切分（rest 为空）', () => {
  * 造一个"载荷里真的嵌着 zstd magic 字节"的帧。
  *
  * 不能把 magic 写进字符串：`encodeRawFrame` 会按 UTF-8 重新编码，`0xb5`/`0xfd` 会变成多字节序列，
- * 于是载荷里根本没有那四个字节（这种夹具看起来在测边界，其实什么都没测）。这里先写等长的 ASCII
+ * 于是载荷里根本没有那四个字节（这种测试数据看起来在测边界，其实什么都没测）。这里先写等长的 ASCII
  * 占位串，再把四个字节盖上去——长度不变，帧仍然合法。
  */
 function frameWithEmbeddedMagic(text: string, placeholder = 'XYZW'): Buffer {
@@ -115,7 +115,7 @@ test('splitFirstFrameFast：单帧文件退化为整份（rest 为空）', () =>
 })
 
 test('splitFirstFrameFast：载荷中的偶然 magic 字节不会被误判为帧边界', () => {
-  // 与严格实现那条同形，夹具也一样"真的嵌了 magic 字节"：快路径只解前缀，靠"截断帧解不出来"
+  // 与严格实现那条同形，测试数据也一样"真的嵌了 magic 字节"：快路径只解前缀，靠"截断帧解不出来"
   // 把假边界挡掉（严格实现则是靠 head + tail === full）。
   const f1 = frameWithEmbeddedMagic('abcXYZWdef\n')
   const rest = encodeRawFrame('tail\n')

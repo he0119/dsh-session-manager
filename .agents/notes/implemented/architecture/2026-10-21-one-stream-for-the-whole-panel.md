@@ -7,7 +7,7 @@ Status: implemented
 「会话管理」页打开之后要盯四件事，`.agents/notes/` 里对应四份互不相干的实现：
 
 - 整库清单：`GET /meta` + `GET /state` 两个请求；
-- 落地那一趟（同步）：`GET /sync?mode=status` 一次性状态，页面靠轮询它认领"后台还在跑"；
+- 应用那一趟（同步）：`GET /sync?mode=status` 一次性状态，页面靠轮询它认领"后台还在跑"；
 - 自动推送那一轮：`GET /auto-push?mode=status` 一次 + 说"在跑"才开的 `GET /auto-push?mode=watch`；
 - 用户自己点下去的动作：各自那条响应的 SSE。
 
@@ -32,7 +32,7 @@ Status: implemented
 | `ready` | 宿主事实（与 `GET /meta` 同一份取值） | `GET /meta` |
 | `progress` | 扫库"扫到第几条" | `/state` 流里那一段进度 |
 | `snapshot` | 整库清单（与 `GET /state` 同一份取值，同一个 `readState()`） | `GET /state` |
-| `sync` | 落地那一趟：`applying`（跑着的那一趟 + 最后一条进度）+ `last`（上一轮结论） | `GET /sync?mode=status` |
+| `sync` | 应用那一趟：`applying`（跑着的那一趟 + 最后一条进度）+ `last`（上一轮结论） | `GET /sync?mode=status` |
 | `auto-push` | 自动推送那一轮：`running` + `last`（只回计数） | `GET /auto-push?mode=status` 与 `mode=watch` |
 | `stale` | 本机会话库被改过了，请重连要一份新清单 | 无（原来靠手动刷新） |
 | `ping` | 15 秒一次心跳 | 无 |
@@ -43,7 +43,7 @@ Status: implemented
 
 客户端侧（`src/client/shared/logic/panelEvents.ts`）是模块级的一份状态：`meta` / `state` / `scan` / `sync` /
 `autoPush` / 连接状态。清单只有一条读法——重连一次（`refresh()`），手动「刷新」、`stale`、以及"一次动作
-落地之后要重读"走的都是它。原来那些端点与"在跑才开"的小流全部删掉：
+应用之后要重读"走的都是它。原来那些端点与"在跑才开"的小流全部删掉：
 
 - 宿主：`/sync?mode=status`、`/auto-push?mode=status`、`/auto-push?mode=watch` 三条不再存在；
 - 客户端：`fetchSyncStatus()`、`fetchAutoPushStatus()`、`watchAutoPush()`、`fetchMeta()`、`fetchState()`

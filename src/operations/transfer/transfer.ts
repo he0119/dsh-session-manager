@@ -14,7 +14,7 @@
 //
 // 为什么 v2 要带附件对象：日志里只有**引用**（`attachmentId: "sha256:…"`），图片与文件的字节在
 // 宿主的附件库里（见 [attachments.ts](../../shared/attachments.ts) 的文件头）。只带日志的包换一个 `$DSH_HOME`
-// 落地，用户看到的是「图片加载失败，点击重试」，而且点多少次都一样——引用在、对象不在。所以 v2 把
+// 应用，用户看到的是「图片加载失败，点击重试」，而且点多少次都一样——引用在、对象不在。所以 v2 把
 // "这条会话引用到的对象"也放进载荷，清单里各记一条（内容寻址 id、属于哪个库、字节数与偏移）。
 //
 // 读的兼容面：**一个对象都不带的包照旧写 v1**（清单形状与升级前逐字节同形，装旧版的宿主也读得了），
@@ -216,7 +216,7 @@ async function sha256Async(buf: Buffer): Promise<string> {
  * @param options.now 清单时间戳，便于测试注入。
  * @param options.onProgress 逐条会话报一次（`phase: 'pack'`）：每条要把它全部代次的字节读出来、
  *   算一次 sha256，整库导出时这一步是真花时间的（实测 250 条 / 70.9 MB 约 1.4 秒）。
- * @param options.attachments 附件那一段（端口 + 解码器 + 报告回调）；缺席 = 这个包不带对象。
+ * @param options.attachments 附件那一段（接口 + 解码器 + 报告回调）；缺席 = 这个包不带对象。
  * @throws 某个文件读不到时抛错（不产出半成品包）。
  */
 export function buildBundle(
@@ -800,7 +800,7 @@ export function readBundle(bytes: Buffer, options: ReadBundleOptions = {}): Sess
 /**
  * 同上，但 gunzip 走 libuv 线程池（`zlib.gunzip` 的异步入口），不占主线程。
  *
- * 同步那条留给"手上已经拿着包、马上就要用"的落地路径；同步里的内容比对（见 `sync.ts` 的
+ * 同步那条留给"手上已经拿着包、马上就要用"的应用路径；同步里的内容比对（见 `sync.ts` 的
  * `contentRelationsOf()`）一次要解好几个几十 MB 的包，必须走这一条。
  *
  * @param bytes 包字节（`.dshsess` 原文）。
@@ -833,7 +833,7 @@ export function attachmentBytes(bundle: SessionBundle, entry: BundleAttachmentEn
 /**
  * 扫一遍会话库，收集**已存在的会话目录名**（encodeSegment(id) → 目录路径，取第一个）。
  *
- * 会话 id 在整库里按注册表记账是全局唯一的，所以冲突检测必须扫所有项目目录，不能只看目标项目目录：
+ * 会话 id 在整库里按注册表计数是全局唯一的，所以冲突检测必须扫所有项目目录，不能只看目标项目目录：
  * 只扫目标项目目录会让同一个 id 在库里悄悄出现两份，而宿主的注册表只记得住一份。
  */
 function scanExistingSessionDirs(root: string): Map<string, string> {
@@ -881,7 +881,7 @@ export interface ImportEntry {
   reason?: string
   /** 包里的原 cwd（缺省表示这条会话本来就没有 cwd）。 */
   fromCwd?: string
-  /** 落盘后的 cwd；包里的会话没有 cwd 时保持没有（落 `_no-cwd` 项目目录）。 */
+  /** 写入磁盘后的 cwd；包里的会话没有 cwd 时保持没有（落 `_no-cwd` 项目目录）。 */
   toCwd?: string
   /** 目标会话目录。 */
   dir: string
@@ -890,7 +890,7 @@ export interface ImportEntry {
 
 /** 一次导入的计划（纯计算，不写盘）。 */
 export interface ImportPlan {
-  /** 有可落地内容（会创建会话，或会补上附件对象）且无阻塞问题。 */
+  /** 有可应用内容（会创建会话，或会补上附件对象）且无阻塞问题。 */
   ok: boolean
   problems: string[]
   entries: ImportEntry[]
@@ -900,7 +900,7 @@ export interface ImportPlan {
   rehomed: string[]
   /** 载荷总字节数（日志）。 */
   bytes: number
-  /** 包里的附件对象：本机没有的、本来就在的、落不了的。 */
+  /** 包里的附件对象：本机没有的、本来就在的、写不进去的。 */
   attachments: ImportAttachmentEntry[]
   /** 本条会话日志之外的附件字节数（会被写下去的）。 */
   attachmentBytes: number
@@ -914,7 +914,7 @@ export interface ImportPlan {
  * 计划里的一条附件对象。
  *
  * 三条分支与"会发生什么"一一对应：`create` 会写下去（本机缺这个对象）、`present` 本机已有（一个字节
- * 都不写）、`unavailable` 落不了（宿主不认识这种引用，或没有附件服务）——最后一种要如实报出来，
+ * 都不写）、`unavailable` 写不进去（宿主不认识这种引用，或没有附件服务）——最后一种要如实报出来，
  * 因为用户会去界面上找那几张图，而它们不会出现。
  */
 export interface ImportAttachmentEntry {
@@ -932,7 +932,7 @@ export interface ImportOptions {
   targetCwd: string
   /** 当前注册表（缺省则不动注册表，导入的会话落成"未分组"）。 */
   registry?: WorkspaceRegistryState
-  /** 注册表路径；给了才会落盘。 */
+  /** 注册表路径；给了才会写入磁盘。 */
   registryPath?: string
   /** 新建工作区的显示标题。 */
   title?: string
@@ -946,7 +946,7 @@ export interface ImportOptions {
   /**
    * 已经算好的标题（键是包里的会话 id，`undefined` 也算"算过、没有标题"）。
    *
-   * 导入预演会先用 `bundleTitlesAsync()` 在会话之间让出事件循环，再把这份表交给 `planImport()`；
+   * 导入预览会先用 `bundleTitlesAsync()` 在会话之间让出事件循环，再把这份表交给 `planImport()`；
    * 不传时退回同步折标题（测试与不关心响应性的调用方走这条）。
    */
   titles?: ReadonlyMap<string, string | undefined>
@@ -958,7 +958,7 @@ export interface ImportOptions {
    */
   attachments?: AttachmentPort
   /**
-   * 换 id 落成**另一条会话**（同步裁决里落选那一份的去处）：包里的会话换成 `newId` 落盘，并在最新
+   * 换 id 落成**另一条会话**（同步裁决里落选那一份的去处）：包里的会话换成 `newId` 写入磁盘，并在最新
    * 一代日志里插一条标记标题（「原标题 · 来自 <机器> <时刻>」，见 `branchSessionLog()`）。键是包里
    * 的原 id。
    */
@@ -966,8 +966,8 @@ export interface ImportOptions {
   now?: string
   newId?: string
   /**
-   * 预演进度：`scan`（扫一遍库里已有的会话目录，分母 0）→ `read`（逐条读包里的日志折标题，
-   * 分母是包里的条数——这一段是导入预演的大头，包里每条会话都要解一段字节）→
+   * 预览进度：`scan`（扫一遍库里已有的会话目录，分母 0）→ `read`（逐条读包里的日志折标题，
+   * 分母是包里的条数——这一段是导入预览的大头，包里每条会话都要解一段字节）→
    * `attach`（逐个数一遍包里的附件对象在不在本机，分母是包里的对象数）。
    */
   onProgress?: ProgressReporter
@@ -980,7 +980,7 @@ function hasCwd(session: BundleSession): boolean {
 /**
  * 包里的标题：载荷已经整份在内存里，按代次取最新那一代，在它的开头有界地折一次标题。
  *
- * 只解最新一代的前缀（与 `session-title.readLogTitle` 同一口径）：标题是宿主在会话开头落的，
+ * 只解最新一代的前缀（与 `session-title.readLogTitle` 同一标准）：标题是宿主在会话开头落的，
  * 老代次的标题必然也被后一代继承，代次越新越接近"最后一条生效"。
  * @returns 标题；没有解码器、没有文件或读不到时为 undefined。
  */
@@ -997,7 +997,7 @@ function bundleTitle(bundle: SessionBundle, session: BundleSession, decodeAll: D
 /**
  * 异步预计算包里的标题：与 `bundleTitle()` 同一个判据，只是每折几条就让出一次事件循环。
  *
- * 导入预演实测 250 条 / 70.9 MB 要 1.7 秒；这段全在主线程里折标题，期间宿主连一个请求都接不了。
+ * 导入预览实测 250 条 / 70.9 MB 要 1.7 秒；这段全在主线程里折标题，期间宿主连一个请求都接不了。
  * 标题本身是一条条算的，不需要停在同一个宏任务里。
  *
  * @param bundle 已经解析好的包。
@@ -1037,12 +1037,12 @@ export async function bundleTitlesAsync(
 export function planImport(bundle: SessionBundle, options: ImportOptions): ImportPlan {
   const { root, registry, title, decodeAll, now, newId } = options
   /*
-   * 落地目录换成宿主存的那个拼写：改写进 header 的 `cwd` 与注册表里那条记录的 `path` 都是它，两者
+   * 目标目录换成宿主存的那个拼写：改写进 header 的 `cwd` 与注册表里那条记录的 `path` 都是它，两者
    * 不一致时宿主认不出这条工作区（见 canonical-path.ts）。没有 cwd 的会话用不到它，空串照旧。
    */
   const targetCwd = canonicalDir(options.targetCwd)
   // 库那一遍扫描没有"第几条"可讲（它是整库的目录项，条数与包里的条数不是一回事）：报一段没有分母的，
-  // 界面只说"正在扫描会话库…"，与同步读远端索引那一段同一个口径。
+  // 界面只说"正在扫描会话库…"，与同步读远端索引那一段同一个标准。
   options.onProgress?.({ phase: 'scan', total: 0, done: 0 })
   const existingDirs = scanExistingSessionDirs(root)
   const entries: ImportEntry[] = []
@@ -1152,16 +1152,16 @@ export function planImport(bundle: SessionBundle, options: ImportOptions): Impor
 }
 
 /**
- * 一个对象在本机算什么：要写下去（`create`）、本来就在（`present`）、还是落不了（`unavailable`）。
+ * 一个对象在本机算什么：要写下去（`create`）、本来就在（`present`）、还是写不进去（`unavailable`）。
  *
  * 判据是**路径 + 字节数**：对象名就是内容的 sha256，所以"同名同字节数"已经足够说明本机这份就是它
  * （真读一遍再核 sha256 要把每个对象都过一遍盘，而读写两侧各自都会验一次）。字节数对不上（上次崩在
  * 半途、被人动过）时不报 `present`——那是**会重写**的一支，计划里必须算进"会发生写"的那些。
  *
- * 导入预演与同步两处共用这一条：两处对"本机有没有"必须是同一个说法，否则同一条会话在两个页面会报
+ * 导入预览与同步两处共用这一条：两处对"本机有没有"必须是同一个说法，否则同一条会话在两个页面会报
  * 不同的数。声明的大小不知道时（老日志的引用里没有 `bytes`）退回"文件在就算在"。
  *
- * @param port 宿主附件库端口；缺席（宿主没有附件服务）= 这一条谁都落不了。
+ * @param port 宿主附件库端口；缺席（宿主没有附件服务）= 这一条谁都写不进去。
  * @param ref 引用（`bytes` 是日志或清单里声明的字节数，可以没有）。
  */
 export function attachmentActionOf(
@@ -1186,7 +1186,7 @@ function attachmentAction(
   return attachmentActionOf(port, entry)
 }
 
-/** 落地结果。 */
+/** 应用结果。 */
 export interface ImportOutcome {
   written: string[]
   bytes: number
@@ -1197,18 +1197,18 @@ export interface ImportOutcome {
   /** 写下去的附件字节数。 */
   attachmentBytes: number
   /**
-   * 没能落地的附件（宿主不认识这种引用、路径写不进去…）。
+   * 没能应用的附件（宿主不认识这种引用、路径写不进去…）。
    *
    * 与日志那条路不同，这里**不抛**：日志是这条包的主体，一个附件写不进去不该让整次导入失败
-   * （退化成升级前那种"日志进来了、图还是挂的"），但用户必须看到是哪几个对象没落地。
+   * （退化成升级前那种"日志进来了、图还是挂的"），但用户必须看到是哪几个对象没写进去。
    */
   attachmentProblems: string[]
-  /** 注册表是否已落盘。 */
+  /** 注册表是否已写入磁盘。 */
   registryWritten: boolean
 }
 
 /**
- * 落地时改写一条日志：header 的 cwd 换成这台机器上的路径，`working-directory/change` 里那些
+ * 应用时改写一条日志：header 的 cwd 换成这台机器上的路径，`working-directory/change` 里那些
  * "在这台机器上不成立"的路径（别的机器/别的系统的写法）跟着会话根一起搬。
  *
  * 不搬会怎样：宿主拿那条事件的最后一个值当这条会话的当前工作目录，而它要求本机绝对路径——`C:\…`
@@ -1217,7 +1217,7 @@ export interface ImportOutcome {
  *
  * @param buf 日志字节。
  * @param compression 压缩形态（`zstd` 走保结构的帧改写，明文走同义的行改写）。
- * @param entry 计划里的这一条（包里的原 cwd 与落地后的 cwd）。
+ * @param entry 计划里的这一条（包里的原 cwd 与应用后的 cwd）。
  * @param decodeAll 多帧感知解码器。
  * @returns 改写后的字节；不需要改写时是原样的同一份字节。
  */
@@ -1237,7 +1237,7 @@ async function rewriteCwd(
 }
 
 /**
- * 落地一次导入。
+ * 应用一次导入。
  *
  * 顺序是**先对象、后日志**：会话目录一旦出现，宿主下一次列会话就会把它连同图片一起读；对象要是这时
  * 还没落下去，用户看到的就是升级前那种"图挂了"。反过来（先日志后对象）会留下一个窗口期，而这段窗口
@@ -1269,7 +1269,7 @@ export async function applyImport(
   let attachmentBytesWritten = 0
   if (bundle.attachments.length > 0) {
     if (options.attachments === undefined) {
-      attachmentProblems.push(`这个宿主没有附件服务，包里的 ${bundle.attachments.length} 个附件对象没有落地`)
+      attachmentProblems.push(`这个宿主没有附件服务，包里的 ${bundle.attachments.length} 个附件对象没有应用`)
     } else {
       for (const [index, entry] of bundle.attachments.entries()) {
         options.onProgress?.({ phase: 'attach', total: bundle.attachments.length, done: index, id: entry.id })
@@ -1279,7 +1279,7 @@ export async function applyImport(
           ...(entry.name === undefined ? {} : { name: entry.name }),
         })
         if (path === undefined) {
-          attachmentProblems.push(`宿主容不下附件 ${entry.id}（${entry.kind}），这一个没有落地`)
+          attachmentProblems.push(`宿主容不下附件 ${entry.id}（${entry.kind}），这一个没有应用`)
           continue
         }
         try {
@@ -1291,7 +1291,7 @@ export async function applyImport(
           }
         } catch (error) {
           attachmentProblems.push(
-            `附件 ${entry.id} 落地失败：${error instanceof Error ? error.message : String(error)}`,
+            `附件 ${entry.id} 写入失败：${error instanceof Error ? error.message : String(error)}`,
           )
         }
       }

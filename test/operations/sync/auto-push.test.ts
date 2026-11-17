@@ -2,7 +2,7 @@
 //
 // 这一份与 sync.test.ts 分开，是因为它钉的是一组**方向性**的断言——"这一轮永远不会动本机"不是靠读
 // 代码看出来的，而是靠"跑完之后本机每一个字节都没变"验出来的。计划那一层（planSync 的 pushOnly 过滤）
-// 是纯计算，所以前半段可以直接喂给它；后半段走真的 WebDAV 夹具，验落地那一条。
+// 是纯计算，所以前半段可以直接喂给它；后半段走真的 假的 WebDAV 服务，验应用那一条。
 //
 // 反事实（改回去必须变红的那些）：
 //   - 把 `planSync` 里那句 `if (input.pushOnly === true) narrowToPushOnly(...)` 去掉 → "拉取表空"
@@ -219,7 +219,7 @@ function sessionOf(id: string, files: { version: number; bytes: number }[], cwd 
 
 test('planSync(pushOnly)：拉取整表摘掉，且不因为"目标目录不存在"而报错', () => {
   // 远端有一条本机没有的（今天会拉取），而映射把它指到一个**不存在**的目录（今天会记 problem）。
-  // 只推这条路上那两件事都不该发生：它不改本机，落地目录自然也不关它的事。
+  // 只推这条路上那两件事都不该发生：它不改本机，目标目录自然也不关它的事。
   const mine = sessionOf('mine', [{ version: 4, bytes: 10 }])
   const plan = planSync({
     local: [mine],
@@ -231,10 +231,10 @@ test('planSync(pushOnly)：拉取整表摘掉，且不因为"目标目录不存�
   })
   assert.deepEqual(plan.pull, [], '只推这条路上一张拉取表都不该有')
   assert.deepEqual(plan.pullIds, [], '拉取 id 一并清空（进度分母读它）')
-  assert.equal(plan.bytesIn, 0, '不落地就没有入流量')
+  assert.equal(plan.bytesIn, 0, '不应用就没有入流量')
   assert.ok(
     !plan.problems.some((problem) => problem.includes('不是一个存在的目录')),
-    `只推的路上不该因为落地目录报错，实际 problems：${plan.problems.join(' | ')}`,
+    `只推的路上不该因为目标目录报错，实际 problems：${plan.problems.join(' | ')}`,
   )
   assert.ok(
     plan.problems.every((problem) => !problem.includes('不是一个存在的目录')),
@@ -599,7 +599,7 @@ test('runAutoPush：远端更新、本机落后的那条——本机内容原地
      * 那一格的索引也不该动（没有可推的、也没有要撤下的），这一轮因此是 `idle`。
      */
     assert.equal(outcome.skip, 'idle', '本机落后 → 这一轮没有可推的')
-    assert.equal(outcome.outcome, undefined, 'idle 那一轮连落地都不走（没有 SyncOutcome 可报）')
+    assert.equal(outcome.outcome, undefined, 'idle 那一轮连应用都不走（没有 SyncOutcome 可报）')
 
     // 再从远端读一遍：本机那一格的索引里没有 shared（这一轮没推过），远端那份照旧是 v4+v5。
     const library = await readRemoteLibrary(dav, settings(machine))
@@ -644,7 +644,7 @@ test('runAutoPush：本机删掉的会话从自己那格索引里撤下来（即
     assert.equal(
       second.skip,
       undefined,
-      '索引里有本机已经没有的会话 → 不是 idle，这一轮要走落地把索引刷新',
+      '索引里有本机已经没有的会话 → 不是 idle，这一轮要走应用把索引刷新',
     )
     assert.deepEqual(second.outcome?.pushed, [], '没有可推的（被删的那条不在本机了，剩下的那条远端已有）')
     assert.deepEqual(
@@ -701,7 +701,7 @@ test('runAutoPush：真的没得推时连索引都不写（idle）', async () =>
 
     assert.equal(second.ran, true)
     assert.equal(second.skip, 'idle', '没有可推的、也没有要撤下的 → 空跑')
-    assert.equal(second.outcome, undefined, 'idle 那一轮连落地都不走（也就没有 indexWritten 可看）')
+    assert.equal(second.outcome, undefined, 'idle 那一轮连应用都不走（也就没有 indexWritten 可看）')
     assert.ok(before.includes('"only"') && after.includes('"only"'), '索引内容照旧')
   } finally {
     await fixture.close()
@@ -1192,7 +1192,7 @@ test('touched()：上一轮还在跑时记下"补一次"，跑完立刻补推', 
   assert.equal(runs.length, 1, '第一轮在跑')
 
   timer.touched()
-  assert.equal(timers.live(), 0, '跑着的时候不排窗口（只记账，跑完再补）')
+  assert.equal(timers.live(), 0, '跑着的时候不排窗口（只计数，跑完再补）')
 
   release?.()
   await first

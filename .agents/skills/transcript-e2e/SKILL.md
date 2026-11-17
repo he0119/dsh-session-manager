@@ -13,7 +13,7 @@ description: 在真实 dev GUI 上端到端验收「会话管理」页的内容�
 
 ```sh
 bash .agents/skills/transcript-e2e/scripts/run.sh [实例地址] [会话行号]
-# 默认：http://127.0.0.1:3081、第 5 行（dev 夹具里那份 941 条的会话）
+# 默认：http://127.0.0.1:3081、第 5 行（dev 实例里的样例会话里那份 941 条的会话）
 ```
 
 前置：dev 实例在跑（`systemctl --user status dsh-web-dev`，`DSH_HOME=~/.dsh-dev`）、`agent-browser` 可
@@ -28,7 +28,7 @@ bash .agents/skills/transcript-e2e/scripts/run.sh [实例地址] [会话行号]
 4. 跑 `scripts/probe.js`：页头那个数必须等于用 `elementFromPoint` 独立算出的那张卡的位次（滚到中间、
    再折起中心线所在的那一节，各一次）。中心线正好落在两张卡之间时这一态记为 `skipped`。
 
-## dev 夹具的基线（941 条那份会话）
+## dev 实例里的样例会话的基线（941 条那份会话）
 
 | 量 | 值 |
 | --- | --- |

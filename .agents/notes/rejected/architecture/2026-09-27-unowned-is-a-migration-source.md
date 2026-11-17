@@ -4,7 +4,7 @@ Status: rejected — 一次迁移只有一个目标，跨目录的一条来源�
 
 被[源永远是一个目录，「未分组」只是一枚标签](../../rejected/simplification/2026-10-13-ungrouped-is-only-a-label.md)
 取代；那一条自己又被[迁移的源就是你勾的那些会话](../../implemented/architecture/2026-10-13-source-is-what-you-tick.md)
-取代了。下面写的是它**落地时的形状**：`planRows.unownedSessions()`、哨兵值 `UNOWNED_SOURCE`、
+取代了。下面写的是它**应用时的形状**：`planRows.unownedSessions()`、哨兵值 `UNOWNED_SOURCE`、
 `BuildPlanOptions.unowned` 与 `test/unowned.test.ts` 这些符号都已经删掉，留在这里是因为"给没在册的
 那批一个可以整批带走的来源"这条路很诱人，而它的代价有现象可查（横跨的目录数与唯一的目标对不上）。
 
@@ -19,7 +19,7 @@ Status: rejected — 一次迁移只有一个目标，跨目录的一条来源�
 
 ## Proposal
 
-迁移页把「未分组」做成一个独立来源。四种口径被钉在一起，少一条就会出现「界面说 2 条、宿主说 3 条」：
+迁移页把「未分组」做成一个独立来源。四种标准被钉在一起，少一条就会出现「界面说 2 条、宿主说 3 条」：
 
 - **候选**：`unowned` + `ungrouped` + **有 `cwd`**（`planRows.unownedSessions()` 与 `src/operations/migrate/plan.ts`
   的发现阶段是同一条判据）；

@@ -207,7 +207,7 @@ const yieldToLoop = (): Promise<void> => new Promise((resolve) => setImmediate(r
  * 与 {@link relocateSessionPaths} 同一个结果，只是**每一步都不把主线程按住**：整份文本用
  * `decodeAllChunked()`（128 KB 一块、块间让出）解出来，帧与帧之间也各让一轮。
  *
- * 给导入落地那条路用：拉一条 16.8 MB 的会话，同步版本要 3.1 秒不能接请求；这里总耗时相近，但最长
+ * 给导入应用那条路用：拉一条 16.8 MB 的会话，同步版本要 3.1 秒不能接请求；这里总耗时相近，但最长
  * 一次停顿只有百毫秒级。判据与同步版本完全相同（整份改写结果是真源，逐帧拼起来必须与它逐字符相同）。
  */
 export async function relocateSessionPathsChunked(
@@ -685,7 +685,7 @@ export interface SelfRootPathOptions {
   /**
    * 源会话根（这条会话在**写它的那台机器**上住在哪儿）。
    *
-   * 缺省取 header 的 cwd：导入落地时 header 还是原样，正是这个用法；修已经落了地的日志时要显式给
+   * 缺省取 header 的 cwd：导入应用时 header 还是原样，正是这个用法；修已经落了地的日志时要显式给
    * （那时 header 已经是这台机器的路径了）。
    */
   from?: string
@@ -859,7 +859,7 @@ export interface RelocatePathsResult extends SelfRootPathRewrite {
  * 帧形态的路径改写：header 的 cwd 与事件里那些跟着会话根搬的路径一起换，产出新日志字节。
  *
  * 只重压**改动了的那几帧**，其余帧原样拼接；改完之后整份重新解码，必须逐字节等于"文本形态改写"的
- * 结果，否则抛错不落盘。
+ * 结果，否则抛错不写入磁盘。
  *
  * @throws 首帧不承载 header、任何一帧解不出来、或改写结果与文本形态对不上时抛错（不产出半成品）。
  */

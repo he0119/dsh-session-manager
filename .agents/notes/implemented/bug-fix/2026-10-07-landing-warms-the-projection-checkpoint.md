@@ -1,4 +1,4 @@
-# Agent Note: 落地之后请宿主补投影检查点
+# Agent Note: 应用之后请宿主补投影检查点
 
 Status: implemented
 
@@ -14,12 +14,12 @@ Status: implemented
 「谁更新」也一起读不到。
 
 本机实测（2026-10-07）：422 条已存会话里 276 条没有身份对得上的检查点（MaaEnd 240/249、
-smart-home-deploy 27/48）；`dsh-session-manager` 那 33 个成员里有一条（10-06 15:59 落地）在侧边栏显示
+smart-home-deploy 27/48）；`dsh-session-manager` 那 33 个成员里有一条（10-06 15:59 应用）在侧边栏显示
 `Untitled 6d`，在真实 GUI 里点开一次之后变成 `准备发布0.1.0版本 6d`，整页刷新后仍在。
 
 ## Decision
 
-三处落地（导入 / 同步拉取 / 迁移）在收口时多走一步 `warmCheckpoints()`
+三处应用（导入 / 同步拉取 / 迁移）在统一处理时多走一步 `warmCheckpoints()`
 （[src/shared/host/checkpoint-warm.ts](../../../../src/shared/host/checkpoint-warm.ts)）：对**这次刚落到本机**的会话逐条调用宿主
 自己的两个服务——
 
@@ -34,23 +34,23 @@ smart-home-deploy 27/48）；`dsh-session-manager` 那 33 个成员里有一条�
 `{asOfSeq: 297, values: {title: '准备发布0.1.0版本'}}`，并写下
 `<root>/session_projcache/sessions/<id>.json`（`identity` 与 header 逐字段相同，
 `rows.title = {ver: 1, seq: 297}`）；同一份 header 再走 `cachedSnapshot()` 拿到的就是这个标题——补之前
-它是 `null`，也就是侧边栏回退成「未命名」的那一步。落盘是宿主自己的 fail-soft 后台写，在那之前值已经在
+它是 `null`，也就是侧边栏回退成「未命名」的那一步。写入磁盘是宿主自己的 fail-soft 后台写，在那之前值已经在
 它内存里那份表上。
 
 端口由宿主那半侧探测（[src/shared/host/ports.ts](../../../../src/shared/host/ports.ts) 的 `hostCheckpointPort()`），核心层只认
 `{ warm(id) }` 这个形状——与 `hostRegistryPort()` 同一套做法：两个服务少一件就当"这个宿主没有这套动作"，
 如实报 `unavailable`，绝不半套上场。
 
-几条硬口径：
+几条硬标准：
 
-- **它不属于落地**：逐条兜住失败，只计数与带原因（最多三条），绝不改落地结论——`verified`、命令返回、
+- **它不属于应用**：逐条兜住失败，只计数与带原因（最多三条），绝不改应用结论——`verified`、命令返回、
   已写盘的字节都不受它影响；日志已经在盘上，缺的只是宿主那份派生数据。
-- **顺序**：与"把注册表改动交给宿主自己做"同一次收口（拉取是整批一次），措辞只在
+- **顺序**：与"把注册表改动交给宿主自己做"同一次统一处理（拉取是整批一次），措辞只在
   `describeWarm()` 一处给出，工具层与界面层不各说各话。
-- **只在真有会话落地时才跑**：纯推送、什么都没做的同步连端口都不探（`warmed + failed` 全零且不是
+- **只在真有会话应用时才跑**：纯推送、什么都没做的同步连端口都不探（`warmed + failed` 全零且不是
   `unavailable` 时，结论里不摆这一行）。
 
-代价写在明处：每条落地会话要把整份日志读一遍折一遍（≈ 手动点开一次的代价，但换来的是持久的记录）。
+代价写在明处：每条应用会话要把整份日志读一遍折一遍（≈ 手动点开一次的代价，但换来的是持久的记录）。
 
 ## Alternatives considered
 
@@ -65,9 +65,9 @@ smart-home-deploy 27/48）；`dsh-session-manager` 那 33 个成员里有一条�
 
 **等上游在列表路径里自己冷读。** 上游 0.2.1-alpha 的冷列表只有"读检查点"这一条路，
 [coldSnapshot()](https://github.com/deepseek-ai/deepseek-harness/discussions/8610) 没有调用点；同一现象
-的另一半（记录在、冷列表不采用它）在 discussion #8610 里还没定论。等它之前，每条落地的会话都要人点一次。
+的另一半（记录在、冷列表不采用它）在 discussion #8610 里还没定论。等它之前，每条应用的会话都要人点一次。
 
-**落地时把那几条"取成活会话"。** 真实 GUI 点开走的正是这条路（实测留下 `session.lock`、追加一条
+**应用时把那几条"取成活会话"。** 真实 GUI 点开走的正是这条路（实测留下 `session.lock`、追加一条
 `session/end-seed`、写下检查点），代价是宿主持有这些会话的内存副本与写句柄——一次拉 240 条时不可接受，
 而冷读只补派生数据、不建活会话、不碰日志。
 
@@ -76,9 +76,9 @@ smart-home-deploy 27/48）；`dsh-session-manager` 那 33 个成员里有一条�
 
 ## Consequences
 
-- 落地之后不用逐条点开，侧边栏就有标题、`blank` 与最后活动时间；下一次同步的「谁更新」因此也判得出来
+- 应用之后不用逐条点开，侧边栏就有标题、`blank` 与最后活动时间；下一次同步的「谁更新」因此也判得出来
   （那条判据读的就是同一份记录的 `lastPromptAt` / `lastMessageTime`）。
-- 落地变慢：每条落地会话多一次完整日志读取与折叠。目前**不设上限、不做后台化**——一次拉几条时无感，
+- 应用变慢：每条应用会话多一次完整日志读取与折叠。目前**不设上限、不做后台化**——一次拉几条时无感，
   几百条的大批量会明显拉长那次请求。
 - 读不动的（老格式、坏日志）逐条跳过并计数，那几条仍旧要等第一次点开；`unavailable` 的宿主（只装了
   工具的前端、老版本）整批跳过。

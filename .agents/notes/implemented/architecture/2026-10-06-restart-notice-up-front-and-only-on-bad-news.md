@@ -10,7 +10,7 @@ Status: implemented
 
 它在两处没有说到点子上：
 
-- **说晚了**：同步的预演响应里 `takesEffect` 恒为 `immediate`（判据写成了 `apply && pulled > 0`），
+- **说晚了**：同步的预览响应里 `takesEffect` 恒为 `immediate`（判据写成了 `apply && pulled > 0`），
   于是确认弹窗里没有任何提示，用户按下「确认同步」、会话已经拉进库里，才知道要重启。模型工具那条路
   早就有 `describePlannedEffect()`（`migrate_sessions` 的 dry-run 正文里带着这一句），界面这一侧缺它
   不是设计，是漏掉了。
@@ -19,13 +19,13 @@ Status: implemented
 
 ## Decision
 
-- **预演响应里的 `takesEffect` 回答"执行时会不会需要重启"，落地那次回答"刚才实际怎样"**：迁移那条路
+- **预览响应里的 `takesEffect` 回答"执行时会不会需要重启"，应用那次回答"刚才实际怎样"**：迁移那条路
   本来就是前者（`effectOf(undefined, 探测)`），同步这条路改成同一形状（`src/operations/sync/http.ts` 的 `syncEffect()`；
-  工具 `sync_sessions` 同一口径，dry-run 正文追加 `describePlannedEffect()`）。两种模式都只在**真有
+  工具 `sync_sessions` 同一标准，dry-run 正文追加 `describePlannedEffect()`）。两种模式都只在**真有
   会话要落到本机**时才谈得上生效：纯推送不改本机任何东西，那时说重启是一句假警告。
 - **只在坏消息时说话**：宿主自己接住时界面一个字都不说（`effect.immediate` 这条文案随之删掉）。
-- **两句分工**：`effect.plannedRestart` 是确认弹窗里的事前提示（只说"落地后需重启"），
-  `effect.restart` 是落地之后的结论（带处置："重启前请勿再改工作区"）。两句都短。
+- **两句分工**：`effect.plannedRestart` 是确认弹窗里的事前提示（只说"应用后需重启"），
+  `effect.restart` 是应用之后的结论（带处置："重启前请勿再改工作区"）。两句都短。
 - **结论单独一条 warn 横幅**，不再拼进绿色成功横幅（同步页）；迁移页的结论块同理，只在
   `restart-required` 时多一行。
 - 「为什么会这样」的长解释仍然只写在说明页的 FAQ（`help.faq.restartA`）里，界面别处不复述。
@@ -38,20 +38,20 @@ Status: implemented
 **把需要重启那句留在绿色横幅里，只把颜色改掉。** 那条横幅的颜色是"这次操作成没成"的结论，同一个
 横幅里放两种结论必然有一种是错的：改颜色等于把"成功"说成"警告"。
 
-**只做事后提示（维持现状）。** 这句话的含义正是"按确认之前你该知道"；落地之后才说，用户已经错过了
+**只做事后提示（维持现状）。** 这句话的含义正是"按确认之前你该知道"；应用之后才说，用户已经错过了
 "现在要不要做这件事"的判断。
 
-**弹窗里改读 `/state` 的能力位。** 多一个真相来源、多一层状态依赖；判据本来就随预演响应一起回来，
+**弹窗里改读 `/state` 的能力位。** 多一个真相来源、多一层状态依赖；判据本来就随预览响应一起回来，
 和计划同一份最省。
 
 **用提示条（Toast）。** 这条结论要留在页面上（重启之前那个限制一直在），而 Toast 会自己消失。
 
 ## Consequences
 
-- **对外契约变了**：`/sync` 的预演响应与 `sync_sessions` 的 dry-run 里，`takesEffect` 不再恒为
-  `immediate`——没有那套宿主动作的机器上会回 `restart-required`。按老口径把"预演 = 这次不用重启"
+- **对外契约变了**：`/sync` 的预览响应与 `sync_sessions` 的 dry-run 里，`takesEffect` 不再恒为
+  `immediate`——没有那套宿主动作的机器上会回 `restart-required`。按老标准把"预览 = 这次不用重启"
   读的调用方会看到不同的答案，新答案才是对的。
 - 颜色没有新增 token：沿用 `dsm-warn` 与 `dsm-banner dsm-warn`（与失败横幅同一个面）。
-- 测试：`test/plugin/web.test.ts`（预演按探测说、没事可做时 `immediate`）、`test/plugin/tools.test.ts`（工具同口径
+- 测试：`test/plugin/web.test.ts`（预览按探测说、没事可做时 `immediate`）、`test/plugin/tools.test.ts`（工具同标准
   且正文带那句）、`test/plugin/client.test.mjs`（弹窗提前说、结论单独一条 warn 横幅、不需要重启时一句都不摆）。
   字典里删掉 `effect.immediate` 之后，谁再问这个键，那份"页面问到的键必须在字典里"的断言会当场变红。

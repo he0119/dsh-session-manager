@@ -4,7 +4,7 @@
  * 为什么不是原生下拉框：候选是"有多少个工作区就有多少条"，原生下拉框只能一行行滚着找、也写不进筛选词。
  * 面板与页面内的目录浏览框
  * （[DirectoryPicker.tsx](./DirectoryPicker.tsx)）是同一套皮、同一个列表：一边是"从候选里挑"，
- * 一边是"去文件系统里找"，两件事在同一处收口，所以两边各有一枚按钮切过去（那枚按钮只在宿主提供
+ * 一边是"去文件系统里找"，两件事在同一处统一处理，所以两边各有一枚按钮切过去（那枚按钮只在宿主提供
  * 了目录选择器时才出现，见 `onFilesystem`）。
  *
  * **点一行就是选中**（随即关掉面板）：这里挑的是"要用的那个目录"，没有第二步要确认的东西——真正的
@@ -28,7 +28,7 @@ import type { Translate } from '../i18n/locales.ts'
 export interface CandidatePanelProps {
   /** 注入面给的翻译函数。 */
   t: Translate
-  /** 面板标题：就是它所在那个字段的名字（迁移的目标目录 / 导入的落地目录）。 */
+  /** 面板标题：就是它所在那个字段的名字（迁移的目标目录 / 导入的目标目录）。 */
   label: string
   /** 候选行（调用方已经补过当前值）。 */
   rows: readonly PathRow[]
@@ -96,7 +96,7 @@ export function CandidatePanel({
                   type="button"
                   className="dsm-dirEntry dsm-candidate"
                   aria-current={row.path === value ? 'true' : undefined}
-                  // 盘上已经没有的目录点不动（标签与悬浮提示说清为什么）：选中它只会在落地那一步撞上
+                  // 盘上已经没有的目录点不动（标签与悬浮提示说清为什么）：选中它只会在应用那一步撞上
                   // 宿主那句「目标工作区目录不存在」。它照旧列在这里，是因为它是用户登记过的工作区。
                   disabled={copy.missing !== undefined}
                   onClick={() => onPick(row.path)}

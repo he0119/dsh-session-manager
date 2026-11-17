@@ -161,7 +161,7 @@ test('产物冒烟：宿主提供 webServer 时挂上十六条界面路由，卸
     [
       'exact /dsh-session-manager/api/meta',
       'exact /dsh-session-manager/api/state',
-      // 这一页只开这一条长连接（清单、落地那一趟、自动推送那一轮都在它上面）。
+      // 这一页只开这一条长连接（清单、应用那一趟、自动推送那一轮都在它上面）。
       'exact /dsh-session-manager/api/panel/events',
       'exact /dsh-session-manager/api/transcript',
       'exact /dsh-session-manager/api/sync-diff',

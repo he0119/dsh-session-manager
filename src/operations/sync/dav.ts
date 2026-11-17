@@ -4,7 +4,7 @@
 // 就要跟着它的安全更新与 Node 版本走。代码量在这里换得到。
 //
 // 为什么把 `fetch` 做成可注入：同步的端到端测试要打一个真的 HTTP 服务（test/dav.test.ts 起一个
-// 只实现这四种方法的夹具），而不是打桩——PROPFIND 的多状态响应、409 建目录这些**协议层**的行为，
+// 只实现这四种方法的假实现），而不是打桩——PROPFIND 的多状态响应、409 建目录这些**协议层**的行为，
 // 打桩是测不出来的。
 //
 // 与 DSH 解耦：本模块零 DSH 依赖，只用全局 fetch（engines 要求 node ^22.19 || >=24，全局 fetch 在）。
@@ -65,7 +65,7 @@ export interface DavProbe {
   detail?: string
 }
 
-/** 远端资源的最小面。测试用夹具实现它，`createDavClient()` 也实现它。 */
+/** 远端资源的最小面。测试用假实现顶上它，`createDavClient()` 也实现它。 */
 export interface DavPort {
   /** 资源根地址（报告里显示用）。 */
   readonly baseUrl: string

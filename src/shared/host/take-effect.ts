@@ -12,14 +12,14 @@
 //      这几件事它自己会写文件、也会通知界面，所以侧边栏不用刷新就变了，进程也不用重启。
 //
 // **它中途拒绝时还有一件必须做的事**：宿主那一步只要动过手（最迟的一次是 `ensureWorkspace()` 新建
-// 工作区），它就会拿内存里那份整份落盘——插件刚写好的 `workspace.json` 当场被盖掉，磁盘上留下的是
+// 工作区），它就会拿内存里那份整份写入磁盘——插件刚写好的 `workspace.json` 当场被盖掉，磁盘上留下的是
 // 宿主的旧归属。所以失败之后要把这次算好的注册表**整份写回来**（`restoreRegistry()`），"重启后一致"
 // 才是真的：重启后宿主读的是磁盘，文件对了就对了。
 //
-// **它全盘接受、却顺手抹掉别人的归属时**，成败判据就不够用了：它那一步是拿内存里那份整份落盘的，
+// **它全盘接受、却顺手抹掉别人的归属时**，成败判据就不够用了：它那一步是拿内存里那份整份写入磁盘的，
 // 内存里没有的归属会被一起抹掉（另一台宿主写过的、或上一次写回文件之后的），而它照样一路成功。
 // 所以接受之后还要拿计划与盘上那份比一次（`missingMemberships()`），少了就让宿主重新挂一遍
-// （`restoreMemberships()`）——它的挂靠会立刻落盘，磁盘与侧边栏因此一起回到这次的结果上，不用重启；
+// （`restoreMemberships()`）——它的挂靠会立刻写入磁盘，磁盘与侧边栏因此一起回到这次的结果上，不用重启；
 // 它不认的那几条（盘上早就没有这条会话）不硬写回文件，只如实报出来。
 //
 // 会话 id 全程只被"挂靠 / 摘掉"，既不新建也不改名；已存在的工作区复用自己那条记录、id 不变。
@@ -38,7 +38,7 @@ import type {
 /** 编排层要承认的最小形状：一个"这个宿主能不能当场把账改掉"的探测函数。 */
 export interface EffectDeps {
   /**
-   * 宿主注册表动作的探测（可选）：拿得到就返回一个端口，拿不到就是 undefined——这个宿主只能重启。
+   * 宿主注册表动作的探测（可选）：拿得到就返回一个接口，拿不到就是 undefined——这个宿主只能重启。
    *
    * 每次调用**重新探测**：只有工具的前端、老版本宿主都可能没有这套动作，探测结果不该被缓存。
    */
@@ -71,7 +71,7 @@ function restoreRegistry(deps: EffectDeps, options: TakeEffectOptions): boolean 
     writeRegistryAtomic(deps.registryPath, registry)
     return true
   } catch {
-    // 写不回去也不能把已经落地的迁移说成失败：结论里那句"重启前先核对文件"会兜住。
+    // 写不回去也不能把已经应用的迁移说成失败：结论里那句"重启前先核对文件"会兜住。
     return false
   }
 }
@@ -79,12 +79,12 @@ function restoreRegistry(deps: EffectDeps, options: TakeEffectOptions): boolean 
 /**
  * 宿主接受之后，把"计划里有、盘上整份没有了"的归属要回来。
  *
- * 宿主那一步是按内存里那份整份落盘的，所以它内存里没有的归属会被一起抹掉——它自己不会发现这件事
+ * 宿主那一步是按内存里那份整份写入磁盘的，所以它内存里没有的归属会被一起抹掉——它自己不会发现这件事
  * （对它来说那份就是权威）。插件拿计划（`options.registry`）与盘上那份比一次，少了就让宿主重新挂
- * 一遍：`attachSession()` 会立刻把它那份落盘，磁盘与侧边栏因此一起回到这次的结果上。
+ * 一遍：`attachSession()` 会立刻把它那份写入磁盘，磁盘与侧边栏因此一起回到这次的结果上。
  *
  * 它不认的那几条（盘上早就没有这条会话的悬空登记、header 的 cwd 与记录对不上的）**不写回文件**：
- * 写回去只会让它下次落盘再抹一次，而且那本来就不是"归属丢了"，是"宿主早就不认这条登记"。
+ * 写回去只会让它下次写入磁盘再抹一次，而且那本来就不是"归属丢了"，是"宿主早就不认这条登记"。
  * @param port 宿主注册表动作的端口。
  * @param deps 编排依赖（要 `registryPath` 才复核得了）。
  * @param expected 这次算出来的注册表终态；缺席就不复核（不能拿没给的东西当判据）。
@@ -162,7 +162,7 @@ export async function applyOnHost(
   }
 
   // ④′ 计划顺带清掉的**悬空登记**也要在宿主那份里摘掉：它内存里那条记录还留着这些 id，
-  //     不摘的话下一次它自己落盘就把它们写回文件、那块工作区又删不掉了（`detachSession()` 本来就幂等，
+  //     不摘的话下一次它自己写入磁盘就把它们写回文件、那块工作区又删不掉了（`detachSession()` 本来就幂等，
   //     摘一个宿主不认的 id 与摘一个真成员是同一个动作）。
   for (const entry of change.droppedStale) {
     for (const sessionId of entry.sessionIds) await port.detachSession(entry.workspaceId, sessionId)
@@ -194,7 +194,7 @@ export function takeEffectOnHost(
 }
 
 /**
- * 一次落地里的一串改动按顺序交给宿主（同步一次可能拉进来好几条，每条各带一份注册表改动）。
+ * 一次应用里的一串改动按顺序交给宿主（同步一次可能拉进来好几条，每条各带一份注册表改动）。
  *
  * 任何一条失败就整体报失败：宿主那边可能只改到一半，文件是写对了的，所以退路仍是"重启后一致"。
  * @param changes 按执行顺序排好的改动（`unchanged` 的会被跳过）。
@@ -243,7 +243,7 @@ export async function takeEffectOnHostAll(
   try {
     memberships = await restoreMemberships(port, deps, options.registry)
   } catch {
-    // 要回来这一步本身出错不能反过来把已经落地的改动说成失败：这只是一次补偿。
+    // 要回来这一步本身出错不能反过来把已经应用的改动说成失败：这只是一次补偿。
     memberships = undefined
   }
   return {
@@ -270,7 +270,7 @@ export function describeEffect(outcome: EffectOutcome): string {
       const unrecognized = outcome.membershipsUnrecognized?.length ?? 0
       const lines = ['宿主已经自己改完这份注册表（会话只在工作区之间换归属，id 没变），侧边栏这就跟上了，无需重启 DSH。']
       if (restored > 0) {
-        // 它那一步是拿内存里那份整份落盘的：内存里没有的归属会被一起抹掉，所以要回来（见 restoreMemberships()）。
+        // 它那一步是拿内存里那份整份写入磁盘的：内存里没有的归属会被一起抹掉，所以要回来（见 restoreMemberships()）。
         lines.push(
           `复核发现它顺手抹掉了 ${restored} 条别的归属（它内存里本来就没有这些会话），` +
             '已让它重新认下——磁盘与侧边栏都回到这次的结果上。',
@@ -282,7 +282,7 @@ export function describeEffect(outcome: EffectOutcome): string {
       return lines.join('\n')
     }
     case 'failed':
-      // 宿主一旦动过手就会按内存整份落盘：写回来了才敢说"磁盘上就是这次的结果"（见 `restoreRegistry()`）。
+      // 宿主一旦动过手就会按内存整份写入磁盘：写回来了才敢说"磁盘上就是这次的结果"（见 `restoreRegistry()`）。
       return outcome.registryRestored === true
         ? `宿主没接住这次改动（${outcome.error ?? '原因未知'}）：` +
             '注册表已按这次的结果重新写回磁盘，重启 DSH 后一致；重启前请勿再改任何工作区，' +
@@ -304,7 +304,7 @@ export function describeEffect(outcome: EffectOutcome): string {
 }
 
 /**
- * 计划 / 预演口径：这次改动**执行时**会不会当场生效。
+ * 计划 / 预览标准：这次改动**执行时**会不会当场生效。
  *
  * 与 `describeEffect()` 分开：那个说的是"已经发生的事"，这个说的是"会发生的事"。
  * @param mode 探测到的生效模式（`src/tools.ts` 的 `effectMode()`）。

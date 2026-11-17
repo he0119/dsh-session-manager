@@ -1,7 +1,7 @@
-// 同步那四条端点（预览与落地、自动推送、比两份日志、列远端格子），以及面板要读的"上一趟落地"。
+// 同步那四条端点（预览与应用、自动推送、比两份日志、列远端格子），以及面板要读的"上一趟应用"。
 //
-// 为什么整组放在这里：这四条共用一份**每次服务实例只有一份**的预演缓存与落地闸——预演算出的计划要
-// 被下一次确认消费掉，两趟落地同时跑会互相踩。这份状态与端点因此必须待在一起，不能一半留在 web.ts 的
+// 为什么整组放在这里：这四条共用一份**每次服务实例只有一份**的预览缓存与应用闸——预览算出的计划要
+// 被下一次确认消费掉，两趟应用同时跑会互相踩。这份状态与端点因此必须待在一起，不能一半留在 web.ts 的
 // 闭包里、另一半搬走。
 //
 // @module dsh-session-manager/operations/sync/http
@@ -117,11 +117,11 @@ export function syncHandlers(ctx: WebContext): SyncHandlers {
   }
 }
 
-  /** 落地那一趟的当前状态（`null` = 没在跑）。面板流开头那条与之后每条事件都带它。 */
+  /** 应用那一趟的当前状态（`null` = 没在跑）。面板流开头那条与之后每条事件都带它。 */
   const applyingPayload = (): Record<string, unknown> | null =>
     applying === null ? null : { startedAt: applying.startedAt, progress: applying.progress }
 
-  /** 把裁决表折成一个稳定串：确认那次据此判断"还是预演时那组选择吗"。 */
+  /** 把裁决表折成一个稳定串：确认那次据此判断"还是预览时那组选择吗"。 */
   const decisionsKeyOf = (decisions: ReadonlyMap<string, SyncDecision> | undefined): string => {
     if (decisions === undefined || decisions.size === 0) return ''
     return [...decisions]
@@ -131,11 +131,11 @@ export function syncHandlers(ctx: WebContext): SyncHandlers {
   }
 
   /**
-   * WebDAV 同步：`?mode=apply` 才真跑（拉取 + 推送），`?mode=test` 只探一次连通性，缺省只预演（读远端，
+   * WebDAV 同步：`?mode=apply` 才真跑（拉取 + 推送），`?mode=test` 只探一次连通性，缺省只预览（读远端，
    * 什么都不写）。
    *
-   * 两次调用是一件事：预演算出来的计划与它的输入留在 `preview` 里、响应带回一个 `planId`，确认那次
-   * 带着它回来就照着那份数据落地（见 `SyncPrepared`）——用户按下确认到第一条拉取之间因此不必把同一份
+   * 两次调用是一件事：预览算出来的计划与它的输入留在 `preview` 里、响应带回一个 `planId`，确认那次
+   * 带着它回来就照着那份数据应用（见 `SyncPrepared`）——用户按下确认到第一条拉取之间因此不必把同一份
    * 计划重算一遍。
    *
    * 拉取来的会话走的是**导入那条编排**（`planImport/applyImport`），所以这里与
@@ -146,20 +146,20 @@ export function syncHandlers(ctx: WebContext): SyncHandlers {
     const mode = url.searchParams.get('mode')
     const apply = mode === 'apply'
     /*
-     * 确认那次体里带着预演给的 `planId`（见下面 `preview` 那段）。**体要在别的 await 之前读完**：请求体
+     * 确认那次体里带着预览给的 `planId`（见下面 `preview` 那段）。**体要在别的 await 之前读完**：请求体
      * 是一条流，先去做别的事再回来读，等于让它在这段时间里一直挂着（测试里的假请求更是早就把 `end`
      * 发完了——等回来接的时候已经没人在听，读的那一头就永远等下去）。
      */
     let planId: string | undefined
     let decisions: Map<string, SyncDecision> | undefined
-    /** 落地这次要不要顺手整理自己那一格（预演那次不算它——整理会删远端的东西）。 */
+    /** 应用这次要不要顺手整理自己那一格（预览那次不算它——整理会删远端的东西）。 */
     let tidy = false
     if (req.method === 'POST') {
       try {
         const body = (await readJson(req)) as { planId?: unknown; decisions?: unknown; tidy?: unknown } | null
         if (typeof body?.planId === 'string' && body.planId !== '') planId = body.planId
         if (body?.tidy === true) tidy = true
-        // 裁决表：只认这三种值，别的键/值当没写——界面与工具都可能把旧数据递回来。
+        // 裁决表：只认这三初始值，别的键/值当没写——界面与工具都可能把旧数据递回来。
         if (body?.decisions !== null && typeof body?.decisions === 'object' && !Array.isArray(body.decisions)) {
           const picked = new Map<string, SyncDecision>()
           for (const [id, value] of Object.entries(body.decisions)) {
@@ -168,7 +168,7 @@ export function syncHandlers(ctx: WebContext): SyncHandlers {
           if (picked.size > 0) decisions = picked
         }
       } catch {
-        // 体不是 JSON：按"没有预演那份"处理——这条路上体只用来指认缓存与裁决，读不出来就不用它们。
+        // 体不是 JSON：按"没有预览那份"处理——这条路上体只用来指认缓存与裁决，读不出来就不用它们。
       }
     }
     const runtime = await deps.sync?.()
@@ -208,12 +208,12 @@ export function syncHandlers(ctx: WebContext): SyncHandlers {
       ...(deps.repoLocations === undefined ? {} : { repoLocations: deps.repoLocations }),
       // 覆盖本机那份之前要问一句"这条还在跑吗"（与删除同一条理由：宿主手里有它的写句柄）。
       liveSessionIds,
-      // 拉取会把会话挂到目标工作区（改注册表）：整批落地之后由编排层收口交给宿主一次。
+      // 拉取会把会话挂到目标工作区（改注册表）：整批应用之后由编排层统一处理交给宿主一次。
       hostRegistry,
-      // 拉取来的会话在本机没有投影检查点：同一次收口里请宿主把列表元数据折出来（见 checkpoint-warm.ts）。
+      // 拉取来的会话在本机没有投影检查点：同一次统一处理里请宿主把列表元数据折出来（见 checkpoint-warm.ts）。
       hostCheckpoints,
       // 附件对象走远端共享库（`dsh-session-manager/attachments/…`）：推送时只补远端缺的、拉取时只取
-      // 本机缺的，包本身照旧只有日志。宿主没有附件服务时端口缺席，这条路静默降级（见 sync.ts）。
+      // 本机缺的，包本身照旧只有日志。宿主没有附件服务时接口缺席，这条路静默降级（见 sync.ts）。
       attachments: attachmentPort,
       ...(deps.pluginVersion === undefined ? {} : { pluginVersion: deps.pluginVersion }),
       ...(deps.now === undefined ? {} : { now: deps.now }),
@@ -221,8 +221,8 @@ export function syncHandlers(ctx: WebContext): SyncHandlers {
     /**
      * 这次同步要不要重启才被承认。
      *
-     * 落地那次按**真实结果**说（见 take-effect.ts 的 `effectOf()`）；预演那次按探测说——"要不要重启"
-     * 得在按下确认**之前**就摆出来，事后才说等于没提醒（与迁移预演同一套口径）。
+     * 应用那次按**真实结果**说（见 take-effect.ts 的 `effectOf()`）；预览那次按探测说——"要不要重启"
+     * 得在按下确认**之前**就摆出来，事后才说等于没提醒（与迁移预览同一套标准）。
      *
      * 两种模式都只在"真有会话要落到本机"时才谈得上生效：纯推送不改本机任何东西，此时
      * `restart-required` 是一句假警告。
@@ -233,7 +233,7 @@ export function syncHandlers(ctx: WebContext): SyncHandlers {
       }
       return outcome.plan.pullIds.length === 0 ? 'immediate' : takesEffect()
     }
-    /** 预演与落地回同一份形状的结果，界面两条路都用同一套解析。 */
+    /** 预览与应用回同一份形状的结果，界面两条路都用同一套解析。 */
     const payloadOf = (outcome: SyncOutcome): Record<string, unknown> => ({
       mode: apply ? 'apply' : 'plan',
       remote: { url: runtime.settings.url, machineId: runtime.settings.machineId },
@@ -244,10 +244,10 @@ export function syncHandlers(ctx: WebContext): SyncHandlers {
     })
 
     /*
-     * 预演与落地都走事件流：`{type:'progress'}` 每做一条一次、`{type:'result'}` 收尾、`{type:'error'}`
-     * 兜底。预演也要进度——它得先扫本机（每条会话读头、折标题）、再读远端索引、最后逐条比对内容，
-     * 冷启动时这几秒里界面原来只有一句"预演中…"；落地那边同样受益，按下确认后到第一条拉取完成之间
-     * 报的是重读远端索引那一条（照预演那份走时）。
+     * 预览与应用都走事件流：`{type:'progress'}` 每做一条一次、`{type:'result'}` 收尾、`{type:'error'}`
+     * 兜底。预览也要进度——它得先扫本机（每条会话读头、折标题）、再读远端索引、最后逐条比对内容，
+     * 冷启动时这几秒里界面原来只有一句"正在预览…"；应用那边同样受益，按下确认后到第一条拉取完成之间
+     * 报的是重读远端索引那一条（照预览那份走时）。
      *
      * 流一旦开始，HTTP 状态就已经发出去了（200），所以这一段的错误只能靠事件说——客户端按
      * `content-type` 区分"流"与"一次性 JSON"（没配置同步那类错发生在写头之前，仍然是 JSON +
@@ -256,8 +256,8 @@ export function syncHandlers(ctx: WebContext): SyncHandlers {
     /*
      * 只整理远端：`?mode=tidy`，GET 只算账（读远端、不写），POST 真删。
      *
-     * 与落地分开是因为它不碰本机任何东西：不扫库、不拉不推、不写注册表。所以它既不需要预演缓存
-     * （没有 planId），也没有"要不要重启"那一套；只需要跟落地同一道闸——两边都写自己那一格的索引，
+     * 与应用分开是因为它不碰本机任何东西：不扫库、不拉不推、不写注册表。所以它既不需要预览缓存
+     * （没有 planId），也没有"要不要重启"那一套；只需要跟应用同一道闸——两边都写自己那一格的索引，
      * 同时跑会互相踩。进度照旧走事件流：一次整理可能几百个包、几十秒。
      */
     if (mode === 'tidy') {
@@ -269,8 +269,8 @@ export function syncHandlers(ctx: WebContext): SyncHandlers {
         return
       }
       /*
-       * 整理与落地写的是同一份索引：拿不到写权限就不开始，避免用旧快照盖掉别人刚写进去的条目。
-       * 预演（GET）只读远端，不拿锁。
+       * 整理与应用写的是同一份索引：拿不到写权限就不开始，避免用旧快照盖掉别人刚写进去的条目。
+       * 预览（GET）只读远端，不拿锁。
        */
       const release = tidyApply ? remoteWrite.tryAcquire('整理远端') : undefined
       if (tidyApply && release === undefined) {
@@ -293,10 +293,10 @@ export function syncHandlers(ctx: WebContext): SyncHandlers {
     }
 
     /*
-     * 一趟落地还没跑完就不再开第二趟。
+     * 一趟应用还没跑完就不再开第二趟。
      *
      * 这道闸挡的是"关掉窗口继续跑"带来的新情况：那趟现在比发起它的页面活得久，用户可能刷新之后、或者
-     * 在另一个页签里再点一次。两趟一起跑会互相踩（同一份预演缓存、同一个远端、同一条本机日志），
+     * 在另一个页签里再点一次。两趟一起跑会互相踩（同一份预览缓存、同一个远端、同一条本机日志），
      * 所以第二趟在这里就被拒——一次性 JSON + 409，发生在写响应头之前，界面能照实说清是"还在跑"。
      */
     if (apply && applying !== null) {
@@ -306,8 +306,8 @@ export function syncHandlers(ctx: WebContext): SyncHandlers {
       return
     }
     /*
-     * 落地要写自己那一格的索引与包，先拿写权限：自动推送、整理远端、删除远端、模型工具可能正拿着。
-     * 预演（!apply）只读，不拿锁。
+     * 应用要写自己那一格的索引与包，先拿写权限：自动推送、整理远端、删除远端、模型工具可能正拿着。
+     * 预览（!apply）只读，不拿锁。
      */
     const releaseRemote = apply ? remoteWrite.tryAcquire('同步') : undefined
     if (apply && releaseRemote === undefined) {
@@ -330,14 +330,14 @@ export function syncHandlers(ctx: WebContext): SyncHandlers {
       }
       if (!apply) {
         /*
-         * 预演：算一份计划，并且把那一次算出来的输入留在 `preview` 里（见 `SyncPrepared`）。
+         * 预览：算一份计划，并且把那一次算出来的输入留在 `preview` 里（见 `SyncPrepared`）。
          *
-         * `planId` 就是这个格子的号码：确认那次带着它回来，对得上就**照着这份数据落地**，不再把同一
+         * `planId` 就是这个格子的号码：确认那次带着它回来，对得上就**照着这份数据应用**，不再把同一
          * 份计划重算一次（用户按下确认到第一条拉取之间原来要等的那几秒就是它）。
          */
         /*
          * 带着上一次的 `planId` 回来、只换了裁决（用户点「以本机为准 / 以远端为准」）：计划只该重算
-         * 那一层——扫本机、读远端索引、问 git、算指纹这些输入都还在那份预演里（见 `replanPrepared()`）。
+         * 那一层——扫本机、读远端索引、问 git、算指纹这些输入都还在那份预览里（见 `replanPrepared()`）。
          * 几十毫秒，而不是把整条同步流程再走一遍。
          */
         const reused = preview !== null && planId !== undefined && preview.id === planId ? preview : undefined
@@ -360,21 +360,21 @@ export function syncHandlers(ctx: WebContext): SyncHandlers {
           result: {
             ...payloadOf(plannedOutcome(planned)),
             planId: id,
-            // 预演里也报一次"整理能删多少"：界面据此决定那个勾选框摆不摆、写多少个包。它只是账目，
-            // 真删的条件与判据在落地那次由 `planTidy()` 按当时的远端索引重算一遍。
+            // 预览里也报一次"整理能删多少"：界面据此决定那个勾选框摆不摆、写多少个包。它只是账目，
+            // 真删的条件与判据在应用那次由 `planTidy()` 按当时的远端索引重算一遍。
             tidy: tidySummary(planned.remote, runtime.settings.machineId),
           },
         })
       } else {
         /*
-         * 落地：体里带着预演给的 `planId` 时优先照着那份数据走（见 sync.ts 的 `syncPrepared()`——它会先
-         * 验一遍那份数据还作不作数，变了就从零重算）。对不上（宿主重启过、又一次预演把它换掉了、旧
+         * 应用：体里带着预览给的 `planId` 时优先照着那份数据走（见 sync.ts 的 `syncPrepared()`——它会先
+         * 验一遍那份数据还作不作数，变了就从零重算）。对不上（宿主重启过、又一次预览把它换掉了、旧
          * 客户端没带 id）就照旧从零算一遍；结果里的 `planSource` 说清这次走的哪条路。
          */
         const candidate = preview !== null && planId !== undefined && preview.id === planId ? preview : undefined
-        // 裁决是预演输入的一部分：同一份 planId 但选择变了，就不能拿旧计划落地。
+        // 裁决是预览输入的一部分：同一份 planId 但选择变了，就不能拿旧计划应用。
         const cached = candidate !== undefined && candidate.decisionsKey === decisionsKeyOf(decisions) ? candidate.value : undefined
-        // 消费掉：一份预演只够落地一次（第二次带着同一个 id 回来就重算一遍）。
+        // 消费掉：一份预览只够应用一次（第二次带着同一个 id 回来就重算一遍）。
         if (candidate !== undefined) preview = null
         const outcome: SyncOutcome =
           cached !== undefined
@@ -396,7 +396,7 @@ export function syncHandlers(ctx: WebContext): SyncHandlers {
                     : {
                         planSource: {
                           kind: 'recomputed' as const,
-                          reason: '预演那份的裁决与这次不一致（或那份已经不在宿主手里了），按这次的选择重算',
+                          reason: '预览那份的裁决与这次不一致（或那份已经不在宿主手里了），按这次的选择重算',
                         },
                       }),
                 }
@@ -406,7 +406,7 @@ export function syncHandlers(ctx: WebContext): SyncHandlers {
                     ...(await runSync(syncDeps, { apply: true, onProgress, ...(tidy ? { tidy: true } : {}) })),
                     planSource: {
                       kind: 'recomputed',
-                      reason: '预演那份已经不在宿主手里了（宿主重启过，或又一次预演把它换掉了）',
+                      reason: '预览那份已经不在宿主手里了（宿主重启过，或又一次预览把它换掉了）',
                     },
                   }
         lastApply = {
@@ -461,7 +461,7 @@ export function syncHandlers(ctx: WebContext): SyncHandlers {
    * 自动推送：`GET /auto-push` 当场跑一轮（**只推不拉**），边跑边报进度。
    *
    * 为什么只有一个方向、没有 `mode=apply` 那种分岔：自动推送这条路**没有确认那一步**——它不改本机
-   * 任何东西（见 [sync.ts](./operations/sync/sync.ts) 的 `runAutoPush()`），所以"预演"与"落地"在它这里本来就是同一件
+   * 任何东西（见 [sync.ts](./operations/sync/sync.ts) 的 `runAutoPush()`），所以"预览"与"应用"在它这里本来就是同一件
    * 事。界面上那枚「立即推送一次」点下去就是真跑，进度画在页面横幅上。
    *
    * 点下去就是真跑，没有"距上次才过了几秒"这种闸——自动推送现在只在写完一轮之后自己跑，这条是让人
@@ -512,7 +512,7 @@ export function syncHandlers(ctx: WebContext): SyncHandlers {
    *
    * 这是同步里"同一个 id 两边各自写过"（计划里的 `diverged`）那条路的只读出口：那个判定只说得出
    * "两边不一样"，说不出"哪儿不一样、谁多了什么"，而删哪边、留哪边只能由人决定。所以这里把两份日志都
-   * 读出来交给 `diffSessionLogs()` 算一份差异，**一个字节都不写**：不落盘本机、不改远端。
+   * 读出来交给 `diffSessionLogs()` 算一份差异，**一个字节都不写**：不写入磁盘本机、不改远端。
    *
    * 远端那一份得先下来：包在 `dsh-session-manager/<机器>/<id>.dshsess`，拉取时取的就是同一个对象，
    * 所以这一步走网络、按条下（日志平均几百 KB，最大几 MB）。取哪台机器由调用方指名（界面从计划里
@@ -534,13 +534,13 @@ export function syncHandlers(ctx: WebContext): SyncHandlers {
       sendJson(res, 409, { error: '这个宿主没有配置 WebDAV 同步（插件配置里的 sync.url 是空的）' })
       return
     }
-    // 与内容视图同一口径：按 id 直接找（不扫整库），标题也走同一份投影记录。
+    // 与内容视图同一标准：按 id 直接找（不扫整库），标题也走同一份投影记录。
     const session = await locateSession(paths.sessionsRoot, id, decodeAll, { projection, resolveTitle })
     if (session === undefined) {
       sendJson(res, 404, { error: `会话库里没有 ${id}` })
       return
     }
-    // 与内容视图同一口径：读宿主也读的那一份（最高代次）。
+    // 与内容视图同一标准：读宿主也读的那一份（最高代次）。
     const file = [...session.files].sort((left, right) => right.version - left.version)[0]
     if (file === undefined) {
       sendJson(res, 422, { error: '这条会话目录里没有日志文件' })
@@ -599,7 +599,7 @@ export function syncHandlers(ctx: WebContext): SyncHandlers {
       sendJson(res, 422, { error: `本机那份读不出来：${error instanceof Error ? error.message : String(error)}` })
       return
     }
-    // 坏行条数交给解析器记账（`limit` 只影响条目，`problemCount` 是整份的账）；header 坏了就直说哪一边。
+    // 坏行条数交给解析器计数（`limit` 只影响条目，`problemCount` 是整份的账）；header 坏了就直说哪一边。
     // 坏行条数要在整份日志上数（几十 MB 的那种也有）：走分块版本，别把主线程按住。
     const problemsOf = async (lines: readonly string[], label: string): Promise<number> => {
       try {

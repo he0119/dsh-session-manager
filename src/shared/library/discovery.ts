@@ -122,7 +122,7 @@ function readPrefix(path: string, length: number): Buffer {
  * @param path 日志文件。
  * @param decodeAll 解码器。
  * @returns header 与该文件的字节数。
- * @throws 首帧解不出合法 header 时抛错（与 `readHeaderQuick()` 同口径）。
+ * @throws 首帧解不出合法 header 时抛错（与 `readHeaderQuick()` 同标准）。
  */
 export function readLogHeader(path: string, decodeAll: DecodeAll): { header: SessionHeader; bytes: number } {
   const bytes = statSync(path).size
@@ -147,7 +147,7 @@ export function readLogHeader(path: string, decodeAll: DecodeAll): { header: Ses
  * `size:mtimeMs` 认文件，另加一条 git 式的 racy 规则：**记录不到 1 秒的条目不信任**——同一秒里
  * 又被改写、大小还一样时时间戳分不出来（那时重读一次，成本只落在刚动过的那些文件上）。
  *
- * 只给扫描用（`readSessionDir()`）；要写盘的路径（迁移落盘复验、复核）一律走 `readLogHeader()`
+ * 只给扫描用（`readSessionDir()`）；要写盘的路径（迁移写入磁盘复验、复核）一律走 `readLogHeader()`
  * 现读，不经过这里。
  */
 const scanHeaderCache = new Map<string, { stamp: string; at: number; header: SessionHeader; bytes: number }>()
@@ -220,14 +220,14 @@ export interface ScanOptions {
    * 给了就**每条会话读一次**，结果挂在 `DiscoveredSession.meta` 上：标题走它、空白判据与同步的活动时间
    * 也走它。缺席 = 这次扫描不碰投影缓存（导出只要字节，标题与空白都用不到）。
    *
-   * 抛错按"这条没有记录"处理：与读文件那条路同一口径，坏数据不该让整页列不出来。
+   * 抛错按"这条没有记录"处理：与读文件那条路同一标准，坏数据不该让整页列不出来。
    */
   projection?: ProjectionCacheReader
   /**
-   * 扫到一条之前报一次（同步预演与落地的进度条用）。
+   * 扫到一条之前报一次（同步预览与应用的进度条用）。
    *
    * `done` 是**已经扫完**的条数——事件发在开始处理第 `done + 1` 条之前，与同步那两段
-   * （`SyncProgress`）同一个口径，界面两处都用 `done + 1` 说"正在处理第几条"。
+   * （`SyncProgress`）同一个标准，界面两处都用 `done + 1` 说"正在处理第几条"。
    *
    * `total` 是**这次要尝试的条目数**：先 readdir 数一遍再扫，所以进度条会恰好走满（数进去的条目都
    * 会 stat 一次，只有临时文件的目录也算一格，它同样要花时间）。`scanProjectDir()` 单独调用时
@@ -360,7 +360,7 @@ export async function scanProjectDirAsync(
  * @param root 会话库根。
  * @param id 会话 id。
  * @param decodeAll 多帧感知解码器。
- * @param options 扫描选项（`projection` 与 `resolveTitle` 与整库扫描同一个口径）。
+ * @param options 扫描选项（`projection` 与 `resolveTitle` 与整库扫描同一个标准）。
  * @returns 会话；库里没有这一条时 undefined。
  */
 export async function locateSession(
@@ -393,7 +393,7 @@ export async function locateSession(
     }
   }
   if (found.length > 0) {
-    // 同一个 id 出现在两个项目目录里时，取新建的那一条：与整库扫描按 createdAt 降序后取第一条同一口径。
+    // 同一个 id 出现在两个项目目录里时，取新建的那一条：与整库扫描按 createdAt 降序后取第一条同一标准。
     found.sort((a, b) => b.createdAt - a.createdAt)
     return found[0]
   }

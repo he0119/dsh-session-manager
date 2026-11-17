@@ -18,7 +18,7 @@ Status: implemented
 
 ## Decision
 
-- **勾选集上移到页面骨架**：`ManagerPanel` 持有一个 `useSessionPicking()`，列表与导出弹窗共用同一个对象
+- **勾选集上移到页面外壳**：`ManagerPanel` 持有一个 `useSessionPicking()`，列表与导出弹窗共用同一个对象
   （`PanelShare.picking`）。TransferPanel 不再自己起状态——于是"勾了 6 条，导出栏里就是这 6 条"是同一份
   数据，不是两次拷贝。关掉弹窗回来，列表里仍是这 6 条。
 - **删除 / 迁移的成功提示带「撤销」**：提示带上那次动作留下的 `backupDir`，按钮走 `openBackup(dir)`：
@@ -26,7 +26,7 @@ Status: implemented
   归档这类不留备份的动作不摆它；任何一条新提示都会把上一枚撤销清掉（一份备份只撤刚做的那件事）。
 - **状态栏那枚入口带份数**：一次 `/backups` 的目录列举，在挂载、手动刷新、以及任一弹窗关掉之后各读一次；
   0 份或还没读到时只写名字（不画"0 份"）。
-- **同步结论落盘**：`<DSH_HOME>/dsh-session-manager/state.json` 里记一条
+- **同步结论写入磁盘**：`<DSH_HOME>/dsh-session-manager/state.json` 里记一条
   `{ sync: { at, ok, pulled, pushed, error? } }`（见 [sync-state.ts](../../../../src/operations/sync/sync-state.ts)），
   `/meta` 的同步那一栏带上 `lastRun`。页头那枚状态按"证据新鲜程度"选句子：这一趟正跑着 → 这一进程里
   刚跑完 → 磁盘上那一条（多久以前 / 失败（多久以前））→ 配置事实（自动推送 / 未配置）。
@@ -57,5 +57,5 @@ Status: implemented
 - 「撤销」只在删除 / 迁移的成功提示里；关掉提示之后仍能从状态栏进清单，按时间找那一份（备份还在）。
 - 撤销按钮点下去会关掉提示（`notify(null)`），用户取消回滚时那条提示也回不来了——它本来就是一句过去时。
 - 状态文件是插件在 `$DSH_HOME` 里多写的一个小文件；读不出来时界面安静地退回"配没配"那一句。
-- 勾选上移让测试夹具里"第一个空数组状态"从 `ManagePanel` 挪到了 `ManagerPanel`：备份清单那几条用例因此
+- 勾选上移让测试数据里"第一个空数组状态"从 `ManagePanel` 挪到了 `ManagerPanel`：备份清单那几条用例因此
   多垫一个 `[]`，`nulls` 的顺序不变（`undoAt` 排在最后一个 null 状态）。

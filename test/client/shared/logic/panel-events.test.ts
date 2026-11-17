@@ -1,6 +1,6 @@
 // 面板那条唯一的长连接（`src/client/shared/logic/panelEvents.ts`）。
 //
-// 为什么单独钉它：这一页现在全靠一条流（清单、落地那一趟、自动推送那一轮、以及"库变了"），而"断了要
+// 为什么单独钉它：这一页现在全靠一条流（清单、应用那一趟、自动推送那一轮、以及"库变了"），而"断了要
 // 自己接回来、接回来要重新要一份清单"这类事在界面冒烟里测不到（假 React 不跑副作用、也不会断开）。
 // 逻辑收在 store 里，这里就能逐条钉：每条事件落到哪一半、断了怎么等、库变了之后怎么重读、走了之后
 // 还连不连。
@@ -88,7 +88,7 @@ const meta = (sessionsRoot: string): PanelEvent => ({
   meta: { sessionsRoot, registryPath: '/home/u/.dsh/registry.json', pickerKind: 'native', archiveAvailable: true, retitleAvailable: true },
 })
 
-test('连上之后：ready 摆上宿主事实，进度进"扫到第几条"，清单落地就把进度收掉', () => {
+test('连上之后：ready 摆上宿主事实，进度进"扫到第几条"，清单应用就把进度收掉', () => {
   const streams = fakeStreams()
   const store = createPanelEvents(streams.deps)
   store.start()
@@ -128,7 +128,7 @@ test('两种后台状态各落到自己那一半，互不覆盖', () => {
     progress: { phase: 'push', done: 1, total: 2 },
   })
 
-  // 落地那一趟收尾不该动自动推送那一半（反过来也一样）。
+  // 应用那一趟收尾不该动自动推送那一半（反过来也一样）。
   streams.push({ type: 'sync', applying: null, last: { startedAt: 100, finishedAt: 300, ok: true, pulled: 2, pushed: 1 } })
   assert.equal(store.snapshot().sync.applying, null)
   assert.equal(store.snapshot().sync.last?.pulled, 2)
@@ -164,7 +164,7 @@ test('宿主说"库变了"：攒一下，只重连一次', () => {
   // 连上已经有一会儿了（不是"刚重连过"那种情形，见下面那条用例）。
   clock += 10_000
 
-  // 一次落地会连着改好几处：三条 stale 只该换来一次重连。
+  // 一次应用会连着改好几处：三条 stale 只该换来一次重连。
   streams.push({ type: 'stale', what: 'state' })
   streams.push({ type: 'stale', what: 'state' })
   streams.push({ type: 'stale', what: 'state' })
@@ -186,7 +186,7 @@ test('刚重连过就收到 stale：不再多扫一遍库（那一趟已经把�
   streams.push(meta('/s'))
   streams.push({ type: 'snapshot', state: { sessions: [], workspaces: [] } as never })
 
-  // 动作落地之后：这一页自己重连了一次（`reload()`），紧接着面板流上又来一条 `stale`。
+  // 动作应用之后：这一页自己重连了一次（`reload()`），紧接着面板流上又来一条 `stale`。
   void store.reload()
   assert.equal(streams.opened, 2, '重连一次')
   streams.push(meta('/s'))

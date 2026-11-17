@@ -115,7 +115,7 @@ export async function buildRelocationPlan(options: BuildPlanOptions): Promise<Re
 
   if (typeof root !== 'string' || !root) problems.push('root is required (path to the sessions root)')
   if (typeof options.to !== 'string' || !options.to) problems.push('to is required (target workspace directory)')
-  // 点名的会话：去重、去掉空白项，保持点名顺序（预演与备份都按这个顺序读）。
+  // 点名的会话：去重、去掉空白项，保持点名顺序（预览与备份都按这个顺序读）。
   const requested = Array.isArray(options.sessionIds)
     ? [...new Set(options.sessionIds.filter((id): id is string => typeof id === 'string' && id !== ''))]
     : []
@@ -176,7 +176,7 @@ export async function buildRelocationPlan(options: BuildPlanOptions): Promise<Re
   /*
    * 宿主持在内存里的那批（`live`）与侧边栏看不见的那三类一样，搬不走——但**理由不同**，处置也不同：
    * 那三类是"用户在外壳里看不见、要搬先去会话页处理"，这一批是"宿主正攥着它，这次搬不动"，等它放手
-   * （重启 DSH）之后还能再迁一次。所以不能只把它们从可搬的那批里滤掉：`liveSkipped` 要一路报到预演、
+   * （重启 DSH）之后还能再迁一次。所以不能只把它们从可搬的那批里滤掉：`liveSkipped` 要一路报到预览、
    * 工具返回值与界面上，否则用户看到的就是"勾了 22 条、搬走 9 条"而没有任何解释。
    *
    * 名单里的来源有两处：点名的那几条里活着的（下面 `splitLive`）、以及它们的后代里活着的（`noteLive`）
@@ -233,7 +233,7 @@ export async function buildRelocationPlan(options: BuildPlanOptions): Promise<Re
     }
     /*
      * 点名的会话宿主持着：这次搬不动（理由见 `BuildPlanOptions.live`），但**不算问题**——它已经进了
-     * `liveSkipped`，预演、工具返回值与界面都会说清"少搬了这几条、重启 DSH 之后再迁"。
+     * `liveSkipped`，预览、工具返回值与界面都会说清"少搬了这几条、重启 DSH 之后再迁"。
      *
      * 与隐藏的那三类不同：宿主放手之后它就是能搬的（重启即可），所以这里不拦下整份计划；而界面那一侧
      * 也会把这类行置灰（`/state` 报得出每条的 live），正常路径上勾不到它。
@@ -266,7 +266,7 @@ export async function buildRelocationPlan(options: BuildPlanOptions): Promise<Re
       noteLive(s)
       continue
     }
-    // 级联带进来的（用户没点名的那几条）要说清出处：预演里会因此多出没勾过的会话。
+    // 级联带进来的（用户没点名的那几条）要说清出处：预览里会因此多出没勾过的会话。
     const via = selectedIds.has(s.id)
       ? undefined
       : { id: familyRoot.id, ...(familyRoot.title === undefined ? {} : { title: familyRoot.title }) }
@@ -350,7 +350,7 @@ export async function buildRelocationPlan(options: BuildPlanOptions): Promise<Re
       }
       texts.push({
         id: s.id,
-        // 多代次（v3 + v4）按代次顺序拼接，与宿主读取口径一致
+        // 多代次（v3 + v4）按代次顺序拼接，与宿主读取标准一致
         text: parts.join(''),
       })
     }
@@ -408,7 +408,7 @@ export async function buildRelocationPlan(options: BuildPlanOptions): Promise<Re
   }
 
   // 搬完还剩人的源工作区：留下的都是**侧边栏不显示**的会话（宿主认的成员，判据见 visibility.ts），
-  // 这次搬不走、那块记录也就删不掉。理由必须跟着预演与结果一起报出去（见 describeStranded()）。
+  // 这次搬不走、那块记录也就删不掉。理由必须跟着预览与结果一起报出去（见 describeStranded()）。
   const strandedSources: StrandedSource[] = []
   if (registryChange !== null && nextRegistry !== null) {
     const removed = new Set(registryChange.removedSources.map((source) => source.workspaceId))
@@ -449,7 +449,7 @@ export async function buildRelocationPlan(options: BuildPlanOptions): Promise<Re
   }
 }
 
-/** 人类可读的计划摘要（工具返回值与预演摘要共用）。 */
+/** 人类可读的计划摘要（工具返回值与预览摘要共用）。 */
 export function describePlan(plan: RelocationPlan): string {
   const lines: string[] = []
   lines.push(`迁移 ${plan.sessions.length} 个会话：`)
@@ -502,7 +502,7 @@ const STRANDED_LABELS: ReadonlyArray<readonly [StrandedReason, string]> = [
  *
  * 为什么两行都得说：留下的那几条**不在**这次的清单里（它们侧边栏不显示，见 visibility.ts），
  * 而不说清楚，用户看到的就是"全部迁完了，怎么还有一块空工作区"——预留一个"少搬了但没人提"的坑，
- * 与 `liveSkipped` 那句是同一个口径。
+ * 与 `liveSkipped` 那句是同一个标准。
  *
  * @param sources 见 `RelocationPlan.strandedSources`。
  * @returns 摘要里要追加的行（空数组 = 每块源工作区都搬空了）。

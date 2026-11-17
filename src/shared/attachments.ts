@@ -5,13 +5,13 @@
 // （图片：`$DSH_HOME/attachments/v1/objects/<前两位>/<sha256>`；文件：`files/<前两位>/<sha256>/<名字>`，
 // 内容寻址的那一份在 `file-objects/<前两位>/<sha256>`，见宿主的 dsh-attachment-local）。
 // 于是只带日志的会话包换一个 `$DSH_HOME` 打开，得到的是"引用在、对象不在"——界面上一句
-// 「图片加载失败，点击重试」，点几次都一样。这一层补的就是那段字节：**包把对象一起带走，落地把
+// 「图片加载失败，点击重试」，点几次都一样。这一层补的就是那段字节：**包把对象一起带走，应用把
 // 对象写进目标库**。
 //
 // 为什么在核心层（零 DSH 依赖）：**引用的形状**（日志 JSON）与**对象放在哪儿**是两件事。前者是格式，
 // 后者是宿主的库。核心只认一个端口 `AttachmentPort`（引用 → 本机绝对路径，纯路径计算、不读对象），
 // 由宿主实现（`ctx.attachments.imageHostPath()/fileHostPath()`，见 src/tools.ts 的 `attachmentPort()`）。
-// 端口缺席（宿主没有附件服务）时这一层整个不生效：包照旧只带日志，与旧版一样。
+// 接口缺席（宿主没有附件服务）时这一层整个不生效：包照旧只带日志，与旧版一样。
 //
 // @module dsh-session-manager/shared/attachments
 import { chmodSync, existsSync, mkdirSync, renameSync, statSync, writeFileSync } from 'node:fs'
@@ -22,7 +22,7 @@ import type { DecodeAll } from './types.ts'
 
 /**
  * 附件的两个库：图片对象与文件对象**分开存**（宿主 dsh-attachment-local 的两个目录），
- * 所以一个引用除了内容寻址 id 之外还必须知道它属于哪个库，落地时才知道往哪儿写。
+ * 所以一个引用除了内容寻址 id 之外还必须知道它属于哪个库，应用时才知道往哪儿写。
  */
 export type AttachmentKind = 'image' | 'file'
 
@@ -153,7 +153,7 @@ export function scanAttachmentRefs(text: string): AttachmentRef[] {
 /**
  * 一份日志文件的明文：zstd 外壳的解一次，明文的原样。
  *
- * 与 `relocateHeaderCwd*` / `foldTitleInFrames` 同一口径——日志的压缩形态由文件后缀决定，核心不认识
+ * 与 `relocateHeaderCwd*` / `foldTitleInFrames` 同一标准——日志的压缩形态由文件后缀决定，核心不认识
  * 别的形态。
  * @param buf 磁盘上的原始字节。
  * @param compression `'zstd'` 或 null。

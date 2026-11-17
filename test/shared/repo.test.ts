@@ -162,7 +162,7 @@ test('同步用的项目身份：同一个目录只问一次 git，根与相对�
   assert.deepEqual(await lookup('/work/proj/packages/web'), first)
   assert.equal(calls, 3, '缓存命中就不再起 git 进程')
 
-  // 认不出来的目录也记住（不然每次预演都会为它再起一次进程）
+  // 认不出来的目录也记住（不然每次预览都会为它再起一次进程）
   assert.equal(await lookup('/work/plain'), undefined)
   assert.equal(await lookup('/work/plain'), undefined)
   assert.equal(calls, 4, '第二个目录只问一次')

@@ -135,7 +135,7 @@ export function splitFirstFrame(
  * （fzstd 报 `unexpected EOF`），所以"候选前缀能解出、且以换行结尾"这个判据本身已经够用。那份校验
  * 要求整篇解码外加一次尾部解码，一条 6 MB 的会话要多花两秒——只读用途（内容指纹）不该为它买单。
  *
- * **只读用途**用它；要把切分结果拿去改写并落盘（`relocateHeaderCwd`）时仍然用 [`splitFirstFrame`]：
+ * **只读用途**用它；要把切分结果拿去改写并写入磁盘（`relocateHeaderCwd`）时仍然用 [`splitFirstFrame`]：
  * 那条路上多花的时间买的是"写出去的字节整体可解码"。
  *
  * @param buf 完整日志字节。

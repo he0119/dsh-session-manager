@@ -72,7 +72,7 @@ const FILTERS: Array<{ key: TranscriptFilterKey; label: SessionManagerKey }> = [
   { key: 'other', label: 'manage.transcript.filter.other' },
 ]
 
-/** 「查看全文」时单条格子的上限：日志里最大的一条工具输出实测 100 KB 上下，这个额度够它落地。 */
+/** 「查看全文」时单条格子的上限：日志里最大的一条工具输出实测 100 KB 上下，这个额度够它应用。 */
 const FULL_ITEM_CHARS = 400_000
 
 /** 筛选那一行的高度交给 CSS 的那个自定义属性（轮次标题的 sticky 偏移量）。 */

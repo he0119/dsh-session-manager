@@ -27,10 +27,10 @@ Status: implemented
   落在源根之外的值原样保留，并报给用户（"这几个改不了"）。
 - **判据为什么是"本机不是绝对路径"**：本机就合法的路径（Linux 上换目录、`/home/a/repo` →
   `/home/b/repo`）宿主读得出来，改它只是抹掉事实。跨系统的写法才让会话读不出来，也只改那些。
-- **落到哪两处**：导入/同步落地（`src/operations/transfer/transfer.ts` 的 `rewriteCwd()`，与 header 改写同一处），以及
-  修**已经落地**的日志（`src/operations/path-repair/path-repair.ts` + 工具 `repair_session_paths`，默认只预演）。
+- **落到哪两处**：导入/同步应用（`src/operations/transfer/transfer.ts` 的 `rewriteCwd()`，与 header 改写同一处），以及
+  修**已经应用**的日志（`src/operations/path-repair/path-repair.ts` + 工具 `repair_session_paths`，默认只预览）。
 - **字节级分寸**：仍然只重压改动的那几帧，其余帧原样拼接；改完整份重新解码，必须逐字节等于文本形态
-  的改写结果，否则不落盘。修已经落地的日志之前先留一份逐字节备份。
+  的改写结果，否则不写入磁盘。修已经应用的日志之前先留一份逐字节备份。
 - **比对那一侧**：`src/operations/sync/session-diff.ts` 比两份日志时，把两边"会话根底下的路径"都归一成占位符再比。
   没有这一步，改写过的那份会被同步报成"两边各写过"，它在本机续写之后就再也推不回远端。
 
@@ -52,9 +52,9 @@ Status: implemented
 
 ## Consequences
 
-- 落地或修完之后，本机这份日志与远端那份的**事件字节不同**了。同步的内容指纹仍只归一 header 的
+- 应用或修完之后，本机这份日志与远端那份的**事件字节不同**了。同步的内容指纹仍只归一 header 的
   cwd，所以这几对筛不动，会走"取两边日志逐行比"那条较贵的路（比对侧已归一，结论是同一份）。
-- 修日志要把整条会话解一遍（扫全库时最贵的一段），所以工具默认只预演，并允许只点名几条会话。
+- 修日志要把整条会话解一遍（扫全库时最贵的一段），所以工具默认只预览，并允许只点名几条会话。
 - 备份目录里是逐字节副本加一份 `repair.json`，没有迁移那份 `manifest.json`；撤回的方式是把它复制回去，
   不走 `rollback_session_migration`。
 - 宿主持在内存里的会话不动（它手上是另一份日志），工具会点名让人先关掉或重启。

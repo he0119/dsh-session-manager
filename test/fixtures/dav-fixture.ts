@@ -1,4 +1,4 @@
-// test/fixtures/dav-fixture.ts — 一个**真的** WebDAV 夹具：只实现同步用到的那四种方法，外加一个"往远端放一条
+// test/fixtures/dav-fixture.ts — 一个**真的** 假的 WebDAV 服务：只实现同步用到的那四种方法，外加一个"往远端放一条
 // 会话"的播种函数。
 //
 // 为什么不用打桩的 fetch：PROPFIND 的多状态响应、MKCOL 的 405、"先建父集合再 PUT"这些是协议层的
@@ -6,7 +6,7 @@
 // 客户端那一侧走真的 HTTP。
 //
 // 文件名不以 `.test.ts` 结尾，所以 test/run-all.mjs 不会把它当测试文件加载——它是给
-// dav.test.ts、sync.test.ts 与 tools.test.ts 共用的夹具。
+// dav.test.ts、sync.test.ts 与 tools.test.ts 共用的假服务。
 import { createHash } from 'node:crypto'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
@@ -16,7 +16,7 @@ import type { DavPort } from '../../src/operations/sync/dav.ts'
 import { remoteBundlePath, remoteIndexPath, SYNC_INDEX_UNIT, SYNC_INDEX_VERSION } from '../../src/operations/sync/index.ts'
 import { buildBundle } from '../../src/operations/transfer/transfer.ts'
 
-/** 夹具句柄。 */
+/** 服务句柄。 */
 export interface DavFixture {
   /** 资源根地址（形如 `http://127.0.0.1:port/dav`）。 */
   url: string
@@ -34,11 +34,11 @@ function xml(text: string): string {
 }
 
 /**
- * 起一个 WebDAV 夹具。
- * @param options.root 落盘目录（调用方保证先清干净）。
+ * 起一个 假的 WebDAV 服务。
+ * @param options.root 写入磁盘目录（调用方保证先清干净）。
  * @param options.auth 给了就校验 Basic 凭据，不匹配一律 401。
  * @param options.prefix 资源根路径，默认 `/dav`。
- * @returns 夹具句柄。
+ * @returns 服务句柄。
  */
 export async function startDavFixture(options: {
   root: string

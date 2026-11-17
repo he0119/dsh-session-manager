@@ -1,7 +1,7 @@
 /**
  * 一轮同步（拉取 + 推送）在界面这一侧的生命周期：关掉弹窗之后它还在跑，回到这一页还能看见。
  *
- * 为什么要有这么一份东西：落地是这一页最长的动作（一次整库同步要读远端索引、逐条走网络）。原先它挂在
+ * 为什么要有这么一份东西：应用是这一页最长的动作（一次整库同步要读远端索引、逐条走网络）。原先它挂在
  * 同步弹窗那个组件上——弹窗一关、页签一切、"设置"窗口一关，那棵组件树就卸载了，进度与结果全丢；
  * 而宿主那一侧的活儿还在继续（实测：客户端中途断开之后，服务端的 handler 照旧把整趟跑完）。用户看到
  * 的却是"什么都没发生"，回来也只能靠自己猜。
@@ -58,7 +58,7 @@ export interface SyncJobSnapshot {
   done: SyncJobDone | null
 }
 
-/** 一次落地的入口（生产上就是 `applySync()`；测试换成一个假的即可）。 */
+/** 一次应用的入口（生产上就是 `applySync()`；测试换成一个假的即可）。 */
 export type SyncJobApply = (
   planId: string | undefined,
   onProgress: (event: ProgressEvent) => void,
@@ -93,9 +93,9 @@ export interface SyncJob {
    */
   subscribe(listener: (snapshot: SyncJobSnapshot) => void): () => void
   /**
-   * 开一趟落地。
+   * 开一趟应用。
    *
-   * @param input 预演给的 `planId` 与这一趟的裁决；都没有就是"从零算一遍"。
+   * @param input 预览给的 `planId` 与这一趟的裁决；都没有就是"从零算一遍"。
    * @returns 已经有一趟在跑时返回 `false`（这一趟没开）。
    */
   start(input: { planId?: string; decisions?: ReadonlyMap<string, SyncDecision>; tidy?: boolean }): boolean
@@ -116,7 +116,7 @@ export interface SyncJob {
 /**
  * 造一份同步任务状态。
  *
- * @param deps 落地入口与"那一趟跑到哪"的订阅口（订阅走页面那条长连接，见 `panelEvents.ts`）。
+ * @param deps 应用入口与"那一趟跑到哪"的订阅口（订阅走页面那条长连接，见 `panelEvents.ts`）。
  * @returns 那几个口子（见 {@link SyncJob}）。
  */
 export function createSyncJob(deps: SyncJobDeps): SyncJob {
@@ -223,7 +223,7 @@ export function createSyncJob(deps: SyncJobDeps): SyncJob {
 /**
  * 这一页共用的那一份（模块级：组件卸载不影响它，见模块开头的说明）。
  *
- * 生产上直接用它；测试要换掉落地入口时用 {@link createSyncJob} 造一份自己的。
+ * 生产上直接用它；测试要换掉应用入口时用 {@link createSyncJob} 造一份自己的。
  */
 export const syncJob: SyncJob = createSyncJob({
   apply: (planId, onProgress, decisions, tidy) => applySync(planId, onProgress, decisions, tidy),

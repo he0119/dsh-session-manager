@@ -1,5 +1,5 @@
 /**
- * 「会话管理」页的骨架：一条工具条 + 工作台 + 一条状态栏。页面只做一件事——看这个库、对勾选的这批
+ * 「会话管理」页的外壳：一条工具条 + 工作台 + 一条状态栏。页面只做一件事——看这个库、对勾选的这批
  * 做事；其余三件事各自是一处入口 + 一个宽弹窗（[WorkDialog.tsx](../shared/ui/WorkDialog.tsx)）。
  *
  * 为什么去掉页签：页签让"你在哪一页"顶替了"你要对哪些会话做什么"。勾选原先只在「会话」页有效，
@@ -101,7 +101,7 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
    * 这一页自己那条"做完了"的提示（目前只有导入用它）。
    *
    * 为什么放在页面这一级：导入成功之后弹窗就关掉了，写入的条数与字节总得有个地方说；列表顶部那条
-   * 横幅正是删除、迁移、归档那几件事共用的位置。用 `undefined` 起头而不是 `null`：冒烟夹具按顺序把
+   * 横幅正是删除、迁移、归档那几件事共用的位置。用 `undefined` 起头而不是 `null`：冒烟测试的示例数据按顺序把
    * 种子发给 null 状态（见 test/client.test.mjs 的 `nulls`），这里插一个 null 会让后面整体错一格。
    */
   const [notice, setNotice] = React.useState<string | undefined>(undefined)
@@ -117,7 +117,7 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
   /**
    * 从别处"定位"过来的那条会话（同步弹窗里那几枚「只看这一条」）。
    *
-   * 用 `undefined` 起头而不是 `null`：冒烟夹具按位置往 null 状态里种值（见 test/client.test.mjs），
+   * 用 `undefined` 起头而不是 `null`：冒烟测试的示例数据按位置往 null 状态里初始值（见 test/client.test.mjs），
    * 这里插一个 null 会让后面那些种子整体错一格（与 `notice` / `droppedFile` 同一条理由）。
    */
   const [focusId, setFocusId] = React.useState<string | undefined>(undefined)
@@ -126,7 +126,7 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
    * 重数一遍备份份数（状态栏那枚入口上的数字）。
    *
    * 只读一次目录（`GET /backups` 与备份清单同一份来源）。三类写操作都会留一份备份，所以它在这些时刻
-   * 各读一次：页面挂上、手动刷新、以及任何一面关掉之后（那时刚做完的动作已经落盘）。
+   * 各读一次：页面挂上、手动刷新、以及任何一面关掉之后（那时刚做完的动作已经写入磁盘）。
    * 读失败就保持原样：那个数字只是入口上的一句提示，不该让页面报错。
    */
   const countBackups = React.useCallback((): void => {
@@ -162,7 +162,7 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
   /**
    * 关掉正在开的那一面：等于回到列表。
    *
-   * 顺带重数一遍备份份数：那一面里刚做完的动作（导入落地、回滚、同步）都会留下或还原一份备份，
+   * 顺带重数一遍备份份数：那一面里刚做完的动作（导入应用、回滚、同步）都会留下或还原一份备份，
    * 入口上的数字得跟着变。
    */
   const close = React.useCallback((): void => {
@@ -186,7 +186,7 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
    *
    * `undefined` = 还没读到。它只决定那枚按钮要不要带数字，读失败就照旧只写名字——比画一个"0 份"诚实
    * （一次目录列举，`/backups` 只读，与备份清单同一份来源）。用 `undefined` 而不是 `null` 起头：冒烟
-   * 夹具按顺序把种子发给 null 状态，这里插一个 null 会让「会话」页后面那些整体错一格。
+   * 示例数据按顺序把种子发给 null 状态，这里插一个 null 会让「会话」页后面那些整体错一格。
    */
   const [backupCount, setBackupCount] = React.useState<number | undefined>(undefined)
   /**
@@ -221,7 +221,7 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
   const [job, setJob] = React.useState<SyncJobSnapshot>(syncJob.snapshot())
   React.useEffect(() => syncJob.subscribe(setJob), [])
   /**
-   * 接上宿主那一路"落地那一趟跑到哪"（页面那条唯一的连接上就有，见 panelEvents.ts）。
+   * 接上宿主那一路"应用那一趟跑到哪"（页面那条唯一的连接上就有，见 panelEvents.ts）。
    *
    * 刷新整个页面之后这一份内存是新的，状态只能从宿主那里认领；没配同步时那一路本来也不会有活儿。
    */
@@ -267,7 +267,7 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
    *
    * 别处（面板流上那条 `stale`）走的也是它——读清单只有这一条路。
    *
-   * @returns 新清单落地（或 30 秒之后）resolve：各弹窗的 `await reload()` 之后要接着读新清单。
+   * @returns 新清单应用（或 30 秒之后）resolve：各弹窗的 `await reload()` 之后要接着读新清单。
    */
   const load = React.useCallback((): Promise<void> => {
     setBusy(true)
@@ -276,7 +276,7 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
   }, [countBackups])
 
   /**
-   * 就地改清单（见 statePatch.ts）：动作落地之后先让那一行改对，不等整库快照。
+   * 就地改清单（见 statePatch.ts）：动作应用之后先让那一行改对，不等整库快照。
    *
    * 写进 `state` 同一个位置，所以它与快照走同一条渲染路径——一份数据，没有"本地副本与快照打架"这回事；
    * 快照随后到达时直接盖掉它（快照是磁盘的真话）。
@@ -295,14 +295,14 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
    * 已经摊进 `state` 的那份快照。
    *
    * 为什么记它：面板流每次 `publish` 都会把**同一份** `snapshot.state` 再发一遍（连接状态、进度、
-   * 后台同步的状态都在变，而清单没变）。原来这里无脑 `setState(snapshot.state)`，于是动作落地后刚
+   * 后台同步的状态都在变，而清单没变）。原来这里无脑 `setState(snapshot.state)`，于是动作应用后刚
    * 按响应改过的那几行（见 `patch`）会在下一次 publish 时被旧快照盖回去——实测"取消归档"那一行要等
    * 整库快照回来（约 1.2 秒）才变。只认**换了对象**的那一份：patch 改过之后，旧快照的引用对不上新
    * state，自然不再盖回去；新快照到达时引用变了，照旧覆盖。
    */
   const lastSnapshotState = React.useRef<StateResponse | null>(null)
 
-  // 快照一变就重画；新清单落地之后收掉"刷新中"。
+  // 快照一变就重画；新清单应用之后收掉"刷新中"。
   React.useEffect(() => {
     const read = (snapshot: PanelSnapshot): void => {
       if (snapshot.state !== null && snapshot.state !== lastSnapshotState.current) {
@@ -548,7 +548,7 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
           {/* 宿主报的是原话（扫库失败、连不上）：界面只负责把它套进「刚才那件事没成：…」那一句。 */}
           <span>{t('error.failed', { reason: error })}</span>
           <span className="dsm-spacer" />
-          {/* 关掉一条横幅：本页不用官方缺省的 ghost（那条口径见「动作行里的动作带边框」那篇笔记）。 */}
+          {/* 关掉一条横幅：本页不用官方缺省的 ghost（那条标准见「动作行里的动作带边框」那篇笔记）。 */}
           <Button variant="outline" size="sm" onClick={() => setError(null)}>
             {t('error.dismiss')}
           </Button>
@@ -601,7 +601,7 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
       {surface === 'sync' && (
         /*
           这一面**自己就是弹窗**（`SyncPanel` 里那枚 `WorkDialog`）：它的标题、说明、宽度与底栏都跟着
-          "面板 / 计划 / 落地"那三段变，页面这一级只管把 onClose 与认领来的结论交过去。
+          "面板 / 计划 / 应用"那三段变，页面这一级只管把 onClose 与认领来的结论交过去。
         */
         <SyncPanel
           t={t}

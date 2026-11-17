@@ -28,7 +28,7 @@ export interface SessionSummary {
   hidden?: HiddenReason
   /** 是否在注册表的归档集里（管理页据此决定按钮写「归档」还是「取消归档」）。 */
   archived: boolean
-  /** 宿主判它"一轮都没开始过"（见 visibility.ts）；缓存缺席时按 `false` 处理，与宿主的冷会话口径一致。 */
+  /** 宿主判它"一轮都没开始过"（见 visibility.ts）；缓存缺席时按 `false` 处理，与宿主的冷会话标准一致。 */
   blank: boolean
   /** 日志 header 里的 `origin`（只有子智能体会话会写）。 */
   origin?: string
@@ -165,7 +165,7 @@ export function summarizeSessions(
     const archived = options.archived.has(session.id)
     const facts = {
       ...(session.header.origin === undefined ? {} : { origin: session.header.origin }),
-      // 记录里没有这一条（读不到）时不写 `blank`，与"宿主没说"同一口径（见 visibility.ts）。
+      // 记录里没有这一条（读不到）时不写 `blank`，与"宿主没说"同一标准（见 visibility.ts）。
       ...(session.meta?.blank === undefined && options.resolveBlank === undefined ? {} : { blank }),
       archived,
     }

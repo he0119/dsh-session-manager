@@ -85,7 +85,7 @@ test('配置 schema：活引用每次现读（这就是"界面上改完不用重
   assert.equal(await syncRuntime({}, config), undefined)
 })
 
-test('配置 schema：活引用与普通对象给出同一份值（两种来路同一口径）', () => {
+test('配置 schema：活引用与普通对象给出同一份值（两种来路同一标准）', () => {
   const plain = { sync: { url: 'https://x.example/dav', machineId: 'm', mapping: { '/a': '/b' }, timeoutMs: 5000 } }
   const live = { sync: { get: () => plain.sync } }
   assert.deepEqual(describeSyncConfig(plain), describeSyncConfig(live as unknown as PluginConfigInput))
@@ -94,7 +94,7 @@ test('配置 schema：活引用与普通对象给出同一份值（两种来路�
 })
 
 test('配置 schema：只有 passwordRef 声明成凭据引用（配置携带引用，值归凭据提供方）', () => {
-  // 官方口径的那枚标记（`z.string().role('credential-ref')`，官方那几个要密钥的插件都这么写）。
+  // 官方标准的那枚标记（`z.string().role('credential-ref')`，官方那几个要密钥的插件都这么写）。
   // 钉住它是因为标错/漏标的代价不对称：漏标没有任何运行期症状，只有"以后谁按角色做通用表单"时才
   // 发现这一项被当成了普通值。
   assert.equal(fieldMeta(SyncConfigSchema, 'passwordRef')?.['role'], 'credential-ref')

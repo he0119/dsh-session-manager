@@ -5,10 +5,10 @@
 //   - `state.cold` / `state.warm`：`GET /state` 第一次与第二次（后者走扫库缓存）
 //   - `transcript.large` / `transcript.page`：内容视图第一页与翻到深处（后者走日志缓存）
 //   - `export.20`：导出 20 条会话（打包是纯 CPU + 逐条读日志）
-//   - `import.plan`：导入预演（读包、逐条比目标目录）
-//   - `migrate.preview`：迁移 20 条的预演（写之前那一步）
-//   - `delete.preview`：删除 20 条的预演（先备份再删那一步的"先备份"部分）
-//   - `sync.preview`：同步预演（扫本机 + 读远端索引 + 三对"两边各自写过"的内容比对）
+//   - `import.plan`：导入预览（读包、逐条比目标目录）
+//   - `migrate.preview`：迁移 20 条的预览（写之前那一步）
+//   - `delete.preview`：删除 20 条的预览（先备份再删那一步的"先备份"部分）
+//   - `sync.preview`：同步预览（扫本机 + 读远端索引 + 三对"两边各自写过"的内容比对）
 //   - `plugin.register`：插件 `apply()` 里注册 6 个工具（每次启动都要走）
 //   - `calibration.cpu`：固定的 CPU 活，用来把不同机器的 wall 归一化（见 bench/README.md）
 //
@@ -54,7 +54,7 @@ async function setup(manifest, options) {
 }
 
 /**
- * 复制一份可写的库（写操作场景专用：落地会真的搬/删/写，不能碰基准夹具本体）。
+ * 复制一份可写的库（写操作场景专用：应用会真的搬/删/写，不能碰基准样例库本体）。
  *
  * 复制在 `prepare` 里做，不计入 wall——测的是"点下确认之后"那一段，不是准备一份实验环境。
  */
@@ -220,7 +220,7 @@ export const SCENARIOS = [
   },
   {
     id: 'import.plan',
-    title: '导入预演（20 条的包）',
+    title: '导入预览（20 条的包）',
     budgetMs: 50,
     iterations: 3,
     async prepare(context) {
@@ -242,7 +242,7 @@ export const SCENARIOS = [
   },
   {
     id: 'migrate.preview',
-    title: '迁移预演 20 条',
+    title: '迁移预览 20 条',
     budgetMs: 50,
     iterations: 3,
     async prepare(context) {
@@ -256,7 +256,7 @@ export const SCENARIOS = [
   },
   {
     id: 'delete.preview',
-    title: '删除预演 20 条',
+    title: '删除预览 20 条',
     budgetMs: 50,
     iterations: 3,
     async prepare(context) {
@@ -270,7 +270,7 @@ export const SCENARIOS = [
   },
   {
     id: 'migrate.apply',
-    title: '迁移落地 20 条（复制一份库再动）',
+    title: '迁移应用 20 条（复制一份库再动）',
     budgetMs: 50,
     iterations: 1,
     async prepare(context) {
@@ -289,7 +289,7 @@ export const SCENARIOS = [
   },
   {
     id: 'delete.apply',
-    title: '删除落地 20 条（先备份再删）',
+    title: '删除应用 20 条（先备份再删）',
     budgetMs: 50,
     iterations: 1,
     async prepare(context) {
@@ -308,13 +308,13 @@ export const SCENARIOS = [
   },
   {
     id: 'import.apply',
-    title: '导入落地 20 条（复制一份库再动）',
+    title: '导入应用 20 条（复制一份库再动）',
     budgetMs: 50,
     iterations: 1,
     async prepare(context) {
       context.copy = await freshLibrary(context.manifest)
       context.ctx = await setup(context.copy)
-      // 先导出，再把这几条从副本里删掉——导入落地才有"新建"可做（否则计划是"库里都有"）。
+      // 先导出，再把这几条从副本里删掉——导入应用才有"新建"可做（否则计划是"库里都有"）。
       const ids = context.ctx.mediumIds.slice(0, 20)
       const exported = await call(context.ctx.handlers, 'POST /export', {
         body: Buffer.from(JSON.stringify({ sessionIds: ids })),
@@ -339,7 +339,7 @@ export const SCENARIOS = [
   },
   {
     id: 'sync.preview',
-    title: '同步预演（本机 + 远端索引 + 三对内容比对）',
+    title: '同步预览（本机 + 远端索引 + 三对内容比对）',
     budgetMs: 50,
     iterations: 3,
     async prepare(context) {

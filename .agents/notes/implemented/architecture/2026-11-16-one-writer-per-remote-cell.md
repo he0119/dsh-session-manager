@@ -7,13 +7,13 @@ Status: implemented
 远端同步的布局是"一台机器一格包 + 一份 `index.json`"（见
 [formats.md](../../../../docs/formats.md)）。写自己那一格的入口有五个：
 
-- 界面上的手动同步落地（`POST /sync?mode=apply`）；
+- 界面上的手动同步应用（`POST /sync?mode=apply`）；
 - 界面上的整理远端（`POST /sync?mode=tidy`）；
 - 删除会话时勾了「同时删除远端」（`removeRemoteCopies()`）；
 - 后台自动推送（`createAutoPushTimer()` → `runAutoPush()`）；
 - 模型工具 `sync_sessions`（`apply: true`）。
 
-它们各自在开始前读一次远端，落地时**整份重写**自己那一格的索引。手动同步原先只用 `applying` 挡
+它们各自在开始前读一次远端，应用时**整份重写**自己那一格的索引。手动同步原先只用 `applying` 挡
 "另一趟手动同步"，整理只挡手动同步，自动推送有自己的 `busy`，删除与工具完全不看这些闸。两件事一起
 跑时，后写的那个拿的是较早读到的快照：刚推上去的条目会消失、刚留下的删除记录会被抹掉，下一次同步
 于是把删掉的会话又拉回来。
@@ -31,7 +31,7 @@ Status: implemented
   `remoteCopiesPort` 在结果里报"远端这次没有删"（本机已经删完了，不能回滚那一步）。
 - **排队为什么不行**：排到之后用的还是开始前读到的快照，正好是这把锁要防的"旧快照盖新条目"；跳过
   则下一轮会重新读一份新的。
-- **只挡写，不挡读**：预演、`GET /remote`、`/sync-diff` 不拿锁；它们只读，最多看到一次写的中途，
+- **只挡写，不挡读**：预览、`GET /remote`、`/sync-diff` 不拿锁；它们只读，最多看到一次写的中途，
   不会把别人的改动盖掉。
 - **进程内**：桌面版与 Web 版同时跑、或者同一 profile 起两个进程时挡不住。那一层要靠 WebDAV 的条件
   写（ETag / If-Match），不是所有服务器都支持，这一版不做；`remote-write.ts` 的文件头写明了这条边界。

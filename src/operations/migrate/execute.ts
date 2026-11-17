@@ -4,7 +4,7 @@
 //   1. 备份（注册表 + 全部受影响会话目录 + 待搬产物，字节级）
 //   2. 原地改写各日志首帧的 cwd（临时文件 + rename，成功前不动原文件）
 //   3. 把会话目录移入目标项目目录
-//   4. 原子落盘注册表
+//   4. 原子写入磁盘注册表
 //   5. 清理空的源项目目录
 //   6. 搬迁会话产物（可选）
 // 事后可用 verifyAppliedPlan() 独立复核。
@@ -34,7 +34,7 @@ export interface ApplyOptions {
    * 执行进度（见 `types.ts` 的 `ProgressEvent`）。
    *
    * 四段：`backup`（备份，`createBackup` 逐条报）、`rewrite`（逐**文件**改写首帧——这一段在真实库上
-   * 是最大头，一条会话几 MB 时一步就要几百毫秒）、`move`（逐条会话搬目录）、`registry`（落盘注册表，
+   * 是最大头，一条会话几 MB 时一步就要几百毫秒）、`move`（逐条会话搬目录）、`registry`（写入磁盘注册表，
    * 没有分母）。改写的分母是**文件数**而不是会话数：那才是这一步真实的工作单位。
    */
   onProgress?: ProgressReporter
@@ -100,7 +100,7 @@ export async function applyPlan(plan: RelocationPlan, options: ApplyOptions): Pr
      *
      * 原来走的是整份改写（`relocateHeaderCwd()`）：解整份日志、按行重排、再把结果整份解一遍自校验。
      * 本机最大的一份压缩后 16.8 MB，一次要 7 秒——迁移十条这样的会话，宿主就僵住一分多钟，而这件
-     * 事只改一行。逐字节原样要求由"首帧之外不动"这个实现本身保证，落盘前的复验也只读 header。
+     * 事只改一行。逐字节原样要求由"首帧之外不动"这个实现本身保证，写入磁盘前的复验也只读 header。
      */
     const r = relocateHeaderCwdShallow(buf, { from: s.from, to: s.to, decodeAll, compressFrame })
     if (r.unchanged) {
@@ -109,7 +109,7 @@ export async function applyPlan(plan: RelocationPlan, options: ApplyOptions): Pr
     }
     const tmp = `${f.path}.dsh-session-manager.tmp`
     await writeFile(tmp, r.buffer)
-    // 落盘前复验：临时文件的 header 必须是目标 cwd、id 不变（只读首帧，不整份解压）。
+    // 写入磁盘前复验：临时文件的 header 必须是目标 cwd、id 不变（只读首帧，不整份解压）。
     const check = readLogHeader(tmp, decodeAll).header
     if (check.cwd !== s.to || check.id !== s.id) {
       throw new Error(`temp verification failed for ${f.path}`)

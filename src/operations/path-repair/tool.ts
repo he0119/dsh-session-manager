@@ -1,4 +1,4 @@
-// 「修已经落地的日志路径」那条工具的定义：预演说明、读写计划与落地都在 path-repair.ts 里。
+// 「修已经应用的日志路径」那条工具的定义：预览说明、读写计划与应用都在 path-repair.ts 里。
 //
 // @module dsh-session-manager/operations/path-repair/tool
 import { defineTool, type ToolDefinition } from '@deepseek-ai/dsh-tools'
@@ -11,7 +11,7 @@ import type { MigrateDeps } from '../migrate/migrate.ts'
 import { applyPathRepair, planPathRepair, type PathRepairPlanResult } from './path-repair.ts'
 
 /**
- * 修日志路径的预演说明：扫了多少、哪几条要动、每条改几条事件、从哪个根搬到哪个根。
+ * 修日志路径的预览说明：扫了多少、哪几条要动、每条改几条事件、从哪个根搬到哪个根。
  *
  * 写给人看的一段：`from` 是推出来的（或调用方给的）源根，跟目标根并排写出来，人一眼就能看出
  * "这条会话原来在别的机器的哪个目录"。

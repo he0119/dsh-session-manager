@@ -3,7 +3,7 @@
 Status: rejected — 源改成"点名的那些会话"之后，源不再被限制成一个目录；「未分组」仍然只是一枚标签（这一条没变，见后继笔记）
 
 被[迁移的源就是你勾的那些会话](../../implemented/architecture/2026-10-13-source-is-what-you-tick.md)取代。
-下面写的是它**落地时的形状**：`BuildPlanOptions.from`、`MigrateRequest.from`、`migrate_*` 工具的两个
+下面写的是它**应用时的形状**：`BuildPlanOptions.from`、`MigrateRequest.from`、`migrate_*` 工具的两个
 `from` 参数、`planRows.migrationSourceRows()` / `migrationMatching()` 与
 `test/unowned.test.ts` 这些符号都已经删掉，留在这里是因为"一次迁移只处理一个目录"这条路读起来很干净，
 而它办不到的事有现象可查（下面 `## Problem` 里那 8 条会话分在 4 个目录里，一次只能迁一个）。
@@ -51,7 +51,7 @@ Status: rejected — 源改成"点名的那些会话"之后，源不再被限制
 ## Consequences
 
 - 一次迁移只处理一个目录；"这几个目录里没在册的那几条一次收编"要按目录各来一次。
-- 源目录已经被删掉这条路上，`registered` 与注册表变更都按宿主的**认领**口径走（目录解析不出来 ⇒ 宿主
+- 源目录已经被删掉这条路上，`registered` 与注册表变更都按宿主的**认领**标准走（目录解析不出来 ⇒ 宿主
   不算成员），而注册表里那条登记还在，所以迁移照旧按"从那块工作区摘走"处理，源记录被摘空后删掉。
   `test/operations/migrate/engine.test.ts` 用"项目文件夹删了 → 迁到重建后的目录 → 复核 → 回滚"把这条钉住。
 - 界面上少两个字典键（`migrate.from.unownedHint` / `migrate.projectDirsUnowned`），

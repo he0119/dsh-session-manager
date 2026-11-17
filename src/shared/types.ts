@@ -198,7 +198,7 @@ export type EffectMode = 'immediate' | 'restart-required'
 /**
  * 宿主注册表动作的端口：插件把"改这份账"的活儿交给宿主自己做（见 .agents/notes 里就地刷新那篇）。
  *
- * 每一件都对应宿主本来就有的动作（官方界面移动会话走的就是它们）：它先落盘、再改内存、再通知界面，
+ * 每一件都对应宿主本来就有的动作（官方界面移动会话走的就是它们）：它先写入磁盘、再改内存、再通知界面，
  * 所以侧边栏不刷新就自己跟上。会话 id 只被"挂靠 / 摘掉"、从不新建；已存在的工作区 id 不变
  * （`ensureWorkspace()` 对同一条路径是幂等的）。
  *
@@ -246,7 +246,7 @@ export interface EffectOutcome {
   /**
    * `applied` 之后复核出**被宿主顺手抹掉、又让它重新认下**的归属（会话 id，按认下的顺序）。
    *
-   * 宿主自己那一步是按内存里那份整份落盘的：它内存里没有的归属会被一起抹掉（另一台宿主写过的、
+   * 宿主自己那一步是按内存里那份整份写入磁盘的：它内存里没有的归属会被一起抹掉（另一台宿主写过的、
    * 或上一次写回文件之后的），而这一步照样算"成功"。发现之后由插件让它重新挂一遍（见
    * `take-effect.ts` 的 `restoreMemberships()`），磁盘与侧边栏因此都回到这次的结果上。
    */
@@ -255,13 +255,13 @@ export interface EffectOutcome {
    * 该要回来、但宿主不认的那些归属（通常是盘上早就没有这条会话的悬空登记）。
    *
    * 这一类**不硬写回文件**：宿主不认它们是有理由的（header 的 cwd 对不上记录里的 path），写回去
-   * 只会让它下次落盘再抹一次。如实报出来，让用户知道这几条只在计划里。
+   * 只会让它下次写入磁盘再抹一次。如实报出来，让用户知道这几条只在计划里。
    */
   membershipsUnrecognized?: string[]
   /**
    * `failed` 时插件**已经把算好的注册表整份写回文件**了（见 `take-effect.ts` 的 `restoreRegistry()`）。
    *
-   * 为什么必须写回来：宿主那一步只要动过手就会按内存整份落盘，把插件写的那份当场盖掉；不写回来，
+   * 为什么必须写回来：宿主那一步只要动过手就会按内存整份写入磁盘，把插件写的那份当场盖掉；不写回来，
    * "重启后一致"就是假的。走不到这一步（没给注册表路径 / 没有算好的终态）时为 undefined，
    * 措辞要据此分岔，不能硬说文件是对的。
    */
@@ -281,16 +281,16 @@ export interface CheckpointWarmPort {
   /**
    * 让宿主对**一条已存会话**冷读一遍日志、把折叠结果写成检查点（不建活会话、不动日志）。
    *
-   * 失败时抛错：调用方逐条兜住——落地已经成功，这里补的是宿主那份派生数据。
+   * 失败时抛错：调用方逐条兜住——应用已经成功，这里补的是宿主那份派生数据。
    */
   warm(sessionId: string): Promise<void>
 }
 
-/** 一次落地之后"请宿主补检查点"的结果（见 checkpoint-warm.ts 的 `warmCheckpoints()`）。 */
+/** 一次应用之后"请宿主补检查点"的结果（见 checkpoint-warm.ts 的 `warmCheckpoints()`）。 */
 export interface WarmOutcome {
   /** 真的补上的条数。 */
   warmed: number
-  /** 试过但没补上的条数（逐条兜住，不影响落地结论）。 */
+  /** 试过但没补上的条数（逐条兜住，不影响应用结论）。 */
   failed: number
   /** 这个宿主没有那套动作（老版本 / 只装了工具的前端 / 没挂投影缓存）时为 true。 */
   unavailable: boolean
@@ -302,8 +302,8 @@ export interface WarmOutcome {
  * 一次长动作里的**一段**做到哪儿了（宿主 → 界面，见 `src/web.ts` 的 SSE 端点）。
  *
  * `done` 是**已经做完**的条数——事件发在开始处理第 `done + 1` 条之前，与 `discovery.ts` 的
- * `ScanOptions.onProgress` 同一个口径。`total: 0` 表示这一段没有分母（一次网络往返、一次注册表
- * 落盘），界面只摆那段话、不画条：画一条 1/1 的会让人以为已经做完了。
+ * `ScanOptions.onProgress` 同一个标准。`total: 0` 表示这一段没有分母（一次网络往返、一次注册表
+ * 写入磁盘），界面只摆那段话、不画条：画一条 1/1 的会让人以为已经做完了。
  *
  * `phase` 是**跨动作共用的一份词汇**（扫库、备份、改写、写入、删、还原、打包、复核……），界面
  * 因此只有一套渲染与一份文案；每个动作只报自己真会走的那几段。
@@ -331,7 +331,7 @@ export interface ProgressEvent {
 
 /** 进度事件的段名（共用词汇，见 `ProgressEvent`）。 */
 export type ProgressPhase =
-  /** 扫会话库（`GET /state`、预演、删除预演、导入核对）。 */
+  /** 扫会话库（`GET /state`、预览、删除预览、导入核对）。 */
   | 'scan'
   /** 读包：解压、逐文件校验 sha256、折标题。 */
   | 'read'
@@ -357,7 +357,7 @@ export type ProgressPhase =
   | 'rewrite'
   /** 把会话目录搬进目标项目目录。 */
   | 'move'
-  /** 写入落盘的会话（导入、拉取落地）。 */
+  /** 写入写入磁盘的会话（导入、拉取应用）。 */
   | 'write'
   /** 删除会话目录。 */
   | 'remove'
@@ -371,7 +371,7 @@ export type ProgressPhase =
   | 'tidy'
   /** 归档 / 取消归档（逐条走宿主注册表动作）。 */
   | 'archive'
-  /** 落盘注册表（没有分母）。 */
+  /** 写入磁盘注册表（没有分母）。 */
   | 'registry'
   /** 复核（读回刚落下的东西）。 */
   | 'verify'
@@ -471,7 +471,7 @@ export interface RegistryChange {
   /**
    * 顺带摘掉的**宿主不认的**悬空登记（盘上已经没有这些会话，见 `ReHomeOptions.staleSessionIds`）。
    *
-   * 与 `movedFrom` 并列：那不是"搬走"而是"清账"，落盘复核据此放行"这几条 id 从注册表里消失"
+   * 与 `movedFrom` 并列：那不是"搬走"而是"清账"，写入磁盘复核据此放行"这几条 id 从注册表里消失"
    * （见 `verifyRegistryChange()`），宿主那一步也要把它们从自己的记录里摘掉。
    */
   droppedStale: Array<{ workspaceId: string; path: string; sessionIds: string[] }>

@@ -36,7 +36,7 @@ Status: implemented
   看不到它，连"调了被拒"这一轮都不会发生。
 - **这一节不是活字段**（`ToolsConfigSchema` 不标 `.volatile()`）。注册发生在装配时，标了就等于向设置面
   承诺"改完立即生效"，而实际上得重启宿主才会按新开关重新装配。不标就不会出现在设置页那张表单上——与
-  `sessionsRoot` / `registryPath` / `backupRoot` 三个路径字段同一类口径（见
+  `sessionsRoot` / `registryPath` / `backupRoot` 三个路径字段同一类标准（见
   [同步配置在页面里就地可改](../architecture/2026-10-01-sync-config-is-live-in-the-page.md) 里"哪些字段
   是活的"那一段）。
 - **启动日志点名**：关掉任何一个工具时，`apply()` 往日志里写一句"按配置没有注册 xxx（改完要重启才

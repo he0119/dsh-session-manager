@@ -1,10 +1,10 @@
-// src/operations/migrate/migrate.ts — 迁移的宿主侧编排：预演 / 执行 / 回滚 / 备份清单。
+// src/operations/migrate/migrate.ts — 迁移的宿主侧编排：预览 / 执行 / 回滚 / 备份清单。
 //
 // 为什么单独一层：同一套动作有**两个入口**（模型工具、设置里的界面）。编排只写一遍，
 // 各入口只负责把结果翻译成自己的形状——否则"工具说会这样、界面说会那样"迟早会发生。
 // 本模块保持**零 DSH 依赖**（不 import cordis / dsh-tools），因此测试可以直接用它。
 //
-// 计划仍然是一等产物：预演与执行走同一个 `buildRelocationPlan()`，界面看到的预演结果就是
+// 计划仍然是一等产物：预览与执行走同一个 `buildRelocationPlan()`，界面看到的预览结果就是
 // 执行时会做的事；回滚只依据备份清单，不认识计划。
 import { existsSync, readdirSync, statSync } from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
@@ -42,7 +42,7 @@ export interface MigrateDeps extends EffectDeps, WarmDeps {
   backupRoot: string
   decodeAll: DecodeAll
   /**
-   * 读会话名称（可选）：预演结果里带上它，界面挑会话时按标题认人（见 session-title.ts）。
+   * 读会话名称（可选）：预览结果里带上它，界面挑会话时按标题认人（见 session-title.ts）。
    * 缺席就不读——工具层只报数量，不需要。
    */
   resolveTitle?: (query: TitleQuery) => string | undefined
@@ -50,27 +50,27 @@ export interface MigrateDeps extends EffectDeps, WarmDeps {
    * 读"宿主判这条会话空白吗"（可选，见 visibility.ts）。
    *
    * 缺席时本模块**自己**按 `registryPath` 反推宿主投影缓存目录造一个：迁移动不动某个来源里的会话，
-   * 必须与外壳侧边栏显示的那批对齐，这是**编排层**的口径，不该因为入口是工具还是界面而不同。
+   * 必须与外壳侧边栏显示的那批对齐，这是**编排层**的标准，不该因为入口是工具还是界面而不同。
    */
   resolveBlank?: (query: { id: string; createdAt: number; cwd?: string }) => boolean | undefined
   /**
    * 读每条会话的投影记录（可选，见 projection-cache.ts）。
    *
    * 缺席时按 `registryPath` 反推宿主投影缓存目录造一个：迁移动不动某个来源里的会话，必须与外壳侧边栏
-   * 显示的那批对齐，这是**编排层**的口径，不该因为入口是工具还是界面而不同。
+   * 显示的那批对齐，这是**编排层**的标准，不该因为入口是工具还是界面而不同。
    */
   projection?: ProjectionCacheReader
   /**
    * 宿主持在内存里的会话 id（可选，见 plan.ts 的 `BuildPlanOptions.live`）。
    *
-   * **两个入口都必须给**：预演与执行走的是同一个计划，“宿主手里那几条搬不动”这件事不能只有界面知道
+   * **两个入口都必须给**：预览与执行走的是同一个计划，“宿主手里那几条搬不动”这件事不能只有界面知道
    * （工具层漏掉它就会让模型以为 22 条全搬走了）。缺席 = 这个宿主问不出来（只有工具的前端 / 老版本），
    * 那时按"一条都不活着"处理——与以前的行为一致。
    */
   liveSessionIds?: () => ReadonlySet<string>
 }
 
-/** 一次迁移/预演的请求。 */
+/** 一次迁移/预览的请求。 */
 export interface MigrateRequest {
   /**
    * 要迁移的会话 id（**必填、非空**）。**源就是它们**：每条会话的源目录是它自己的 `cwd`，所以一次
@@ -88,7 +88,7 @@ export interface MigrateRequest {
   includeArtifacts?: boolean
 }
 
-/** 预演里的一条会话。 */
+/** 预览里的一条会话。 */
 export interface PreviewSession {
   id: string
   /** 折叠出的标题；读不到就没有（见 session-title.ts）。界面靠它认会话，id 退到悬浮提示。 */
@@ -104,7 +104,7 @@ export interface PreviewSession {
   via?: { id: string; title?: string }
 }
 
-/** 预演结果：界面与工具读的是同一份。 */
+/** 预览结果：界面与工具读的是同一份。 */
 export interface MigrationPreview {
   ok: boolean
   problems: string[]
@@ -265,7 +265,7 @@ async function buildPlan(
   request: MigrateRequest,
   onProgress?: ProgressReporter,
 ): Promise<RelocationPlan> {
-  // 空白判据：扫描那一趟就把记录读出来（每条会话一次），界面与工具层因此走同一套候选口径。
+  // 空白判据：扫描那一趟就把记录读出来（每条会话一次），界面与工具层因此走同一套候选标准。
   const projection = deps.projection ?? createProjectionReader(projectionCacheDir(deps.registryPath))
   return buildRelocationPlan({
     root: deps.sessionsRoot,
@@ -284,7 +284,7 @@ async function buildPlan(
 }
 
 /**
- * 只读预演：算出"将会发生什么"，不写任何字节。
+ * 只读预览：算出"将会发生什么"，不写任何字节。
  *
  * @param options.onProgress 发现阶段的进度（`scan`：扫源目录或整库）。
  */
@@ -299,13 +299,13 @@ export async function previewMigration(
 /**
  * 执行（或只做 dry-run）。
  *
- * `apply: false` 时只返回预演，一个字节都不写——工具层与界面层的"预演"都走这里，
+ * `apply: false` 时只返回预览，一个字节都不写——工具层与界面层的"预览"都走这里，
  * 因此不存在"预览一套、实做另一套"。
  *
  * 真的改过注册表之后还会把活儿交给宿主自己做（见 `takeEffectOnHost()`）；那是异步的，所以这里也是。
  *
- * @param options.onProgress 全程的进度（见 `types.ts` 的 `ProgressEvent`）：预演那条路上只有 `scan`；
- *   落地那条路上依次是 `scan`（重算一遍计划，与预演同源）、`backup`、`rewrite`、`move`、`registry`、
+ * @param options.onProgress 全程的进度（见 `types.ts` 的 `ProgressEvent`）：预览那条路上只有 `scan`；
+ *   应用那条路上依次是 `scan`（重算一遍计划，与预览同源）、`backup`、`rewrite`、`move`、`registry`、
  *   `verify`、`warm`。段与段的分母各自独立——合并成一个百分比只会骗人。
  */
 export async function runMigration(
@@ -380,7 +380,7 @@ export async function runMigration(
     summary: [
       `已迁移 ${plan.sessions.length} 个会话（改写 ${result.rewritten} 个日志、移动 ${result.moved} 个目录` +
         `${result.artifactsMoved > 0 ? `、搬迁 ${result.artifactsMoved} 项产物` : ''}）。`,
-      // 少搬了谁必须写在最前面那一段里：这一句是执行结果的全部交代，不能只出现在预演里。
+      // 少搬了谁必须写在最前面那一段里：这一句是执行结果的全部交代，不能只出现在预览里。
       plan.liveSkipped.length > 0
         ? `另有 ${plan.liveSkipped.length} 条会话宿主持在内存里（还活着），这次没搬：` +
           `${plan.liveSkipped.map((session) => session.id).join('、')}——重启 DSH 之后再迁一次。`

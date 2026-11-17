@@ -154,7 +154,7 @@ test('reHome：结果永不违反不变式（含未知会话 id）', () => {
   assert.equal(validateRegistry(registry).ok, true)
 })
 
-// 缺归属：宿主拿内存里那份整份落盘之后，别人那几条就是这么没的（见 registry.ts 的 missingMemberships）。
+// 缺归属：宿主拿内存里那份整份写入磁盘之后，别人那几条就是这么没的（见 registry.ts 的 missingMemberships）。
 test('缺归属：计划里有、盘上整份都没有的才算', () => {
   const expected = makeRegistry()
   const actual = structuredClone(expected)
@@ -195,13 +195,13 @@ test('reHome：宿主不认的悬空登记不算成员，源工作区照样删�
   ])
   assert.equal(registry.tables.workspaces['ws-downloads'], undefined)
   assert.deepEqual(registry.global.workspaceIds, ['ws-temp'])
-  // 复核要放行这次点名摘掉的悬空登记（否则每次落地都会误报"会话 id 少了"）
+  // 复核要放行这次点名摘掉的悬空登记（否则每次应用都会误报"会话 id 少了"）
   assert.deepEqual(verifyRegistryChange(before, registry, change).problems, [])
   assert.equal(validateRegistry(registry).ok, true)
 
   // 篡改：同一份结果、但计划里不报这条摘除——复核必须把它抓出来，说明上面那条断言不是白过的。
   const silent = { ...change, droppedStale: [] }
-  assert.match(verifyRegistryChange(before, registry, silent).problems.join(';'), /session-ghost 在落盘结果里没了/)
+  assert.match(verifyRegistryChange(before, registry, silent).problems.join(';'), /session-ghost 在写入磁盘结果里没了/)
 })
 
 test('reHome：留下真成员的工作区还在，但它的悬空登记被顺手摘掉', () => {

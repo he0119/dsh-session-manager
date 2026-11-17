@@ -4,7 +4,7 @@ Status: implemented
 
 ## Problem
 
-`.dshsess` 的清单里，每条日志只记一个 `name`，落盘时由 `applyImport()` 用它拼目标路径：
+`.dshsess` 的清单里，每条日志只记一个 `name`，写入磁盘时由 `applyImport()` 用它拼目标路径：
 
 ```ts
 const part = join(entry.dir, `${file.name}.part`)
@@ -31,8 +31,8 @@ renameSync(part, join(entry.dir, file.name))
 - **文件名必须是单段规范名**：`parseSessionLogName(name)` 必须认得出它，也就是只接受
   `session.jsonl`、`session.vN.jsonl`、以及带 `.zstd` 后缀的这几种。这个正则同时排除了 `/`、`\` 与
   `..`，所以不需要再单独判 `basename`。清单里写的 `version` 还必须与文件名里的代次一致——不一致的包
-  会在落盘后让发现阶段读出另一个代次，属于同一类"清单与实际不符"。
-- **落盘前再判一次**：`applyImport()` 在 `join(entry.dir, ...)` 之前重新检查 `session.files[].name`。
+  会在写入磁盘后让发现阶段读出另一个代次，属于同一类"清单与实际不符"。
+- **写入磁盘前再判一次**：`applyImport()` 在 `join(entry.dir, ...)` 之前重新检查 `session.files[].name`。
   正常路径永远走不到这一条（`readBundle()` 已经拒过），但它挡住的是"调用方自己拼了一个 SessionBundle"
   这种绕过读包校验的用法。
 - **解压上限 2 GiB**：`MAX_BUNDLE_RAW_BYTES` 作为默认值传给 `gunzipSync` / `gunzip` 的
@@ -44,7 +44,7 @@ renameSync(part, join(entry.dir, file.name))
 - **只判 `basename(name) === name`**：在 Linux 上 `..\..\x` 是一个合法文件名，`join` 不会把它当分隔符；
   换到 Windows 上同一个名字就会被拆成路径。用 `parseSessionLogName()` 的白名单一次覆盖两套分隔符，
   也不依赖运行平台。
-- **落盘时用 `path.resolve()` 再判是否在 `entry.dir` 下面**：能挡住穿越，但会让"名字长什么样"与
+- **写入磁盘时用 `path.resolve()` 再判是否在 `entry.dir` 下面**：能挡住穿越，但会让"名字长什么样"与
   "包格式允许什么"分成两套判据；白名单更窄，读包时就拒掉，后面的代码不必再考虑这种输入。
 - **把解压上限放到调用方（端点）**：同步拉取、工具、界面三个入口都要各写一遍，漏一个就回到原点。
   放在 `readBundle()` 这一层，默认值只写一次。

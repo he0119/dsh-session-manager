@@ -103,7 +103,7 @@ test('这两项写坏了也当没有（旧的记录里本来就没有它们）',
   })
 })
 
-test('「还要不要重启」按进程启动时刻算，不落盘', () => {
+test('「还要不要重启」按进程启动时刻算，不写入磁盘', () => {
   const at = '2026-11-12T12:00:00.000Z'
   const run = { at, ok: true, pulled: 1, pushed: 0, takesEffect: 'restart-required' as const }
   const ranAt = Date.parse(at)
@@ -119,7 +119,7 @@ test('「还要不要重启」按进程启动时刻算，不落盘', () => {
   assert.equal(lastRunView({ at, ok: false, pulled: 0, pushed: 0, error: 'x' }, ranAt - 60_000).pendingRestart, false)
 })
 
-test('「没做到的条目」原样落盘、也读得回来（点名版要跨重启还认得出是哪条会话）', () => {
+test('「没做到的条目」原样写入磁盘、也读得回来（点名版要跨重启还认得出是哪条会话）', () => {
   withHome((home) => {
     const run = {
       at: '2026-11-13T09:00:00.000Z',
