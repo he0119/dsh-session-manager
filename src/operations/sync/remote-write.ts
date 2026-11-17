@@ -56,3 +56,9 @@ export function createRemoteWriteGate(now: () => number = Date.now): RemoteWrite
     },
   }
 }
+
+
+export function remoteBusyMessage(owner: RemoteWriteOwner | undefined): string {
+  if (owner === undefined) return '另一件事正在写远端，等它结束再试'
+  return `上一轮${owner.label}还在跑（${new Date(owner.startedAt).toLocaleTimeString('zh-CN')} 开始），等它结束再试`
+}

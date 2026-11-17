@@ -20,7 +20,7 @@ Status: implemented
 ## Decision
 
 - **预演响应里的 `takesEffect` 回答"执行时会不会需要重启"，落地那次回答"刚才实际怎样"**：迁移那条路
-  本来就是前者（`effectOf(undefined, 探测)`），同步这条路改成同一形状（`src/web.ts` 的 `syncEffect()`；
+  本来就是前者（`effectOf(undefined, 探测)`），同步这条路改成同一形状（`src/operations/sync/http.ts` 的 `syncEffect()`；
   工具 `sync_sessions` 同一口径，dry-run 正文追加 `describePlannedEffect()`）。两种模式都只在**真有
   会话要落到本机**时才谈得上生效：纯推送不改本机任何东西，那时说重启是一句假警告。
 - **只在坏消息时说话**：宿主自己接住时界面一个字都不说（`effect.immediate` 这条文案随之删掉）。

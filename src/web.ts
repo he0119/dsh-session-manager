@@ -10,92 +10,45 @@
 //
 // 与 webServer 服务解耦：本模块只要求一个 `{ register(route) }`，测试里用假 req/res 直接打
 // handler，不必起 HTTP 服务。路由路径固定在本插件命名空间下，`(kind, path)` 与别的插件不会撞。
-import { statSync } from 'node:fs'
-import { readFile, stat } from 'node:fs/promises'
 
-import { decodeLogTextChunked } from './shared/log/log-decode.ts'
-import { basename, join } from 'node:path'
+import { join } from 'node:path'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 
+import { migrationHandlers } from './operations/migrate/http.ts'
+import { removeHandlers } from './operations/remove/http.ts'
+import { retitleHandlers } from './operations/retitle/http.ts'
+import { autoPushLastPayload, syncHandlers } from './operations/sync/http.ts'
+import { transcriptHandlers } from './operations/transcript/http.ts'
+import { transferHandlers } from './operations/transfer/http.ts'
 import { accountedOwners } from './shared/accounting.ts'
-import { canonicalDirIfExists } from './shared/canonical-path.ts'
-import { locateSession, type DiscoveredSession } from './shared/library/discovery.ts'
-import { concatBuffersAsync, splitLinesAsync } from './shared/text-chunks.ts'
-import {
-  assertBackupDir,
-  listBackups,
-  loadRegistryForWrite,
-  rollbackMigration,
-  runMigration,
-  type MigrateDeps,
-  type MigrateRequest,
-} from './operations/migrate/migrate.ts'
-import { familyOf, loneSubagents } from './shared/family.ts'
+import { type DiscoveredSession } from './shared/library/discovery.ts'
+import { type MigrateDeps } from './operations/migrate/migrate.ts'
 import type { AttachmentPort } from './shared/attachments.ts'
 import { projectionCacheDir } from './shared/paths.ts'
-import { createProjectionReader, type ProjectionCacheReader } from './shared/library/projection-cache.ts'
+import { createProjectionReader, type ProjectionCacheQuery, type ProjectionCacheReader } from './shared/library/projection-cache.ts'
 import { createScanCache } from './shared/library/scan-cache.ts'
-import { describeWarm, warmCheckpoints } from './shared/host/checkpoint-warm.ts'
-import { readRegistry, validateRegistry } from './shared/registry.ts'
-import { createLogTextCache } from './shared/log/log-text-cache.ts'
-import { readTranscript } from './operations/transcript/transcript.ts'
-import { diffSessionLogs } from './operations/sync/session-diff.ts'
-import { runRetitle } from './operations/retitle/retitle.ts'
-import { describeEffect, effectOf, takeEffectOnHost } from './shared/host/take-effect.ts'
-import { runRemoval, type RemoveDeps, type RemovalRun } from './operations/remove/remove.ts'
+import { createLogTextCache, type LogTextCache } from './shared/log/log-text-cache.ts'
+import { effectOf } from './shared/host/take-effect.ts'
 import type { RepoLocationLookup } from './shared/repo.ts'
 import { createTitleResolver, type TitleQuery } from './shared/log/session-title.ts'
-import {
-  collectLeftovers,
-  removeRemoteCopies,
-  plannedOutcome,
-  prepareSync,
-  replanPrepared,
-  readRemoteLibrary,
-  remoteBundlePath,
-  remotePlacements,
-  runSync,
-  runTidy,
-  syncPrepared,
-  testSyncConnection,
-  tidySummary,
-  type AutoPushOutcome,
-  type AutoPushTimer,
-  type SyncLeftover,
-  type SyncOutcome,
-  type SyncPrepared,
-  type SyncProgress,
-  type SyncDecision,
-} from './operations/sync/sync.ts'
+import { type AutoPushTimer, type SyncOutcome } from './operations/sync/sync.ts'
 import type { SyncInfo, SyncRuntime } from './operations/sync/runtime.ts'
 import type { PickerKind, RegistryOps } from './shared/host/ports.ts'
 import type { ResolvedPaths } from './shared/plugin-paths.ts'
 import type { EffectMode } from './shared/types.ts'
 import { lastRunView, type SyncRunRecord } from './operations/sync/sync-state.ts'
-import {
-  createRemoteWriteGate,
-  type RemoteWriteGate,
-  type RemoteWriteOwner,
-} from './operations/sync/remote-write.ts'
-import {
-  applyImport,
-  buildBundleAsync,
-  bundleTitlesAsync,
-  entryBytes,
-  planImport,
-  readBundleAsync,
-  type BundleSourceInfo,
-  type ImportPlan,
-  type ImportOptions,
-} from './operations/transfer/transfer.ts'
-import type { CheckpointWarmPort, DecodeAll, HostRegistryPort, ProgressReporter, TitleRefreshPort, WorkspaceRegistryState } from './shared/types.ts'
-import { createSessionMetaResolver, hiddenReason, isUngrouped, type HiddenReason, type SessionMeta } from './shared/visibility.ts'
+import { createRemoteWriteGate, type RemoteWriteGate } from './operations/sync/remote-write.ts'
+import type { CheckpointWarmPort, DecodeAll, HostRegistryPort, ProgressReporter, TitleRefreshPort } from './shared/types.ts'
+import { readBody, sendEvent, sendEventStream, sendJson, streamResult } from './shared/http/respond.ts'
+import { loadRegistry, summarizeSessions, summarizeWorkspaces } from './shared/http/view.ts'
+import { createSessionMetaResolver, type SessionMeta } from './shared/visibility.ts'
+
+/** 本插件占用的路由前缀。 */
+export { MAX_BODY_BYTES, readBody } from './shared/http/respond.ts'
+export type { Handler } from './shared/http/respond.ts'
 
 /** 本插件占用的路由前缀。 */
 export const API_PREFIX = '/dsh-session-manager/api'
-
-/** 请求体上限：一个会话包可能有几十 MB，给足；再大的一律拒掉而不是把它读进内存。 */
-export const MAX_BODY_BYTES = 512 * 1024 * 1024
 
 /** `webServer.register()` 接受的形状（只取本模块用得到的那部分）。 */
 export interface WebRouteLike {
@@ -107,6 +60,69 @@ export interface WebRouteLike {
 /** webServer 服务的最小面。 */
 export interface WebServerLike {
   register(route: WebRouteLike): () => void
+}
+
+/**
+ * 端点处理要用的那一组东西：位置、几个口径单一的读取器、宿主能力位与面板广播口。
+ *
+ * 为什么汇成一个对象：处理逻辑按操作搬到了 `src/operations/<操作>/http.ts`，它们不直接碰
+ * `createApiHandlers()` 的闭包——那样只能整段复制；汇成一个只读面之后，各端点拿到的仍是**同一份**
+ * 缓存与同一把闸（`scanForAction` 的库缓存、`logs` 的解压缓存、`remoteWrite` 的写锁）。
+ */
+export interface WebContext {
+  deps: ApiDeps
+  paths: ResolvedPaths
+  decodeAll: DecodeAll
+  now: () => Date
+  remoteWrite: RemoteWriteGate
+  /** 读会话名称（投影缓存优先，缺了退到日志前缀）。 */
+  resolveTitle: (query: TitleQuery) => string | undefined
+  /** 同一份投影记录里的空白与最后活动时间（同步要的那两枚）。 */
+  sessionMeta: (query: ProjectionCacheQuery) => SessionMeta | undefined
+  /** 扫库时每条会话读一次的那份投影记录。 */
+  projection: ProjectionCacheReader
+  /** 按整库动作的扫描（带库指纹缓存，见 scan-cache.ts）。 */
+  scanForAction: (options?: { titles?: boolean }) => Promise<DiscoveredSession[]>
+  /** 会话内容的分页读取缓存（同一条会话连着读几页只解一次）。 */
+  logs: LogTextCache
+  liveSessionIds: () => ReadonlySet<string>
+  hostRegistry: () => HostRegistryPort | undefined
+  hostCheckpoints: () => CheckpointWarmPort | undefined
+  attachmentPort: () => AttachmentPort | undefined
+  /** 把一条事件广播给所有开着的面板连接（落地那一趟、自动推送、库变了都走它）。 */
+  panelEmit: (event: Record<string, unknown>) => void
+  /** 迁移编排的依赖（工具层与端点共用同一份形状）。 */
+  migrateDeps: MigrateDeps
+  /** 这个宿主的生效模式：改完注册表要不要重启。 */
+  takesEffect: () => EffectMode
+}
+
+/**
+ * 界面**先**要的那几项：会话库在哪、宿主有哪些能力位。
+ *
+ * 不碰会话库就能答出来（`paths` 是配置解析的结果，能力位是宿主服务的探测），所以它跟着 `GET /meta`
+ * 单独先回一份；`GET /state` 的响应是它的**超集**（同样这几个字段 + 扫库扫出来的清单）。
+ */
+interface MetaFacts {
+  sessionsRoot: string
+  registryPath: string
+  pickerKind: PickerKind | null
+  archiveAvailable: boolean
+  /** 这个宿主能不能重新生成会话名称（`sessionTitle` 在不在，见 ApiDeps.titleRefresh）。 */
+  retitleAvailable: boolean
+  /**
+   * 这个宿主有没有附件库服务（`ctx.attachments`，见 attachmentPort()）。有它的机器手动同步时会顺带
+   * 把附件对象对一遍（本机缺的取回、远端缺的补上），界面据此在"没有会话要搬"时补一句——那一趟真正
+   * 会做的事不在会话计划里，光看"没有要同步的"会以为确认了也没意义。
+   */
+  attachments: boolean
+  /**
+   * 同步那一栏：没配置时是 null；配了的话带上 `lastRun`（上一次手动同步的结论，没有就不带）。
+   *
+   * 为什么把 `lastRun` 塞进这一栏而不是单开一栏：页头那枚状态读的正是它，两处分的越细，界面越要
+   * 记着"这几栏合起来才是同一个东西"。
+   */
+  sync: (SyncInfo & { lastRun?: SyncRunRecord }) | null
 }
 
 /** 依赖（都可注入，便于测试）。 */
@@ -247,386 +263,10 @@ export interface ApiDeps {
 }
 
 /** 界面要展示的一条会话。 */
-interface SessionSummary {
-  id: string
-  /** 折叠出的标题；读不到时界面退回显示 id（见 session-title.ts）。 */
-  title?: string
-  cwd?: string
-  createdAt: number
-  dir: string
-  /** 外壳侧边栏会把它放进「未分组」那一组（判据见 visibility.ts 的 `isUngrouped()` 与 accounting.ts 的「认领」）。 */
-  ungrouped: boolean
-  bytes: number
-  files: Array<{ name: string; bytes: number }>
-  /** 外壳侧边栏不显示这条会话的原因（缺省 = 会显示，见 visibility.ts）。 */
-  hidden?: HiddenReason
-  /** 是否在注册表的归档集里（管理页据此决定按钮写「归档」还是「取消归档」）。 */
-  archived: boolean
-  /** 宿主判它"一轮都没开始过"（见 visibility.ts）；缓存缺席时按 `false` 处理，与宿主的冷会话口径一致。 */
-  blank: boolean
-  /** 日志 header 里的 `origin`（只有子智能体会话会写）。 */
-  origin?: string
-  /**
-   * 日志 header 里的 `parentSession`：这条子智能体会话挂在哪条会话下面。
-   *
-   * 界面据此把子智能体缩进到父会话的下一级（见 client/groups.ts 的 `nestSessions()`）。判据与删除/迁移的
-   * 级联展开是同一个字段——列表里看到的父子关系与"删/搬会带上谁"因此不会各说各话。
-   */
-  parentSession?: string
-  /** 宿主内存里活着（删除会拒它）。 */
-  live: boolean
-}
 
-/**
- * 界面**先**要的那几项：会话库在哪、宿主有哪些能力位。
- *
- * 不碰会话库就能答出来（`paths` 是配置解析的结果，能力位是宿主服务的探测），所以它跟着 `GET /meta`
- * 单独先回一份；`GET /state` 的响应是它的**超集**（同样这几个字段 + 扫库扫出来的清单）。
- */
-interface MetaFacts {
-  sessionsRoot: string
-  registryPath: string
-  pickerKind: PickerKind | null
-  archiveAvailable: boolean
-  /** 这个宿主能不能重新生成会话名称（`sessionTitle` 在不在，见 ApiDeps.titleRefresh）。 */
-  retitleAvailable: boolean
-  /**
-   * 这个宿主有没有附件库服务（`ctx.attachments`，见 attachmentPort()）。有它的机器手动同步时会顺带
-   * 把附件对象对一遍（本机缺的取回、远端缺的补上），界面据此在"没有会话要搬"时补一句——那一趟真正
-   * 会做的事不在会话计划里，光看"没有要同步的"会以为确认了也没意义。
-   */
-  attachments: boolean
-  /**
-   * 同步那一栏：没配置时是 null；配了的话带上 `lastRun`（上一次手动同步的结论，没有就不带）。
-   *
-   * 为什么把 `lastRun` 塞进这一栏而不是单开一栏：页头那枚状态读的正是它，两处分的越细，界面越要
-   * 记着"这几栏合起来才是同一个东西"。
-   */
-  sync: (SyncInfo & { lastRun?: SyncRunRecord }) | null
-}
 
-/** 界面要展示的一个工作区。 */
-interface WorkspaceSummary {
-  id: string
-  path: string
-  title: string
-  /** 宿主报给界面的那一份成员（**认领**的那些，见 accounting.ts），不是注册表里的登记原样。 */
-  sessionIds: string[]
-  /**
-   * 这个目录在盘上还在不在（解析得出来、而且是个目录，判据用 `canonicalDirIfExists()`）。
-   *
-   * 注册表里的登记不保证盘上还有：项目文件夹被删掉、目录改了名之后，那条登记照旧在，"这块工作区
-   * 是搬空了还是人没了"因此不能只看注册表。界面拿它做一件事——把目标候选里**已经不存在的那些**
-   * 标出来（见 `planRows.directoryTargetRows` 与 `CandidatePanel`）：不标的话，候选列表里
-   * "盘上还在的"与"只剩一条登记的"长得一模一样，点下去只会撞上 `assertTargetCwd()` 那句
-   * 「目标工作区目录不存在」。
-   */
-  exists: boolean
-}
-
-/** 读请求体。 */
-export function readBody(req: IncomingMessage, limit = MAX_BODY_BYTES): Promise<Buffer> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = []
-    let size = 0
-    req.on('data', (chunk: Buffer) => {
-      size += chunk.length
-      if (size > limit) {
-        reject(new Error(`请求体超过上限 ${limit} 字节`))
-        req.destroy?.()
-        return
-      }
-      chunks.push(chunk)
-    })
-    req.on('end', () => {
-      void concatBuffersAsync(chunks).then(resolve, reject)
-    })
-    req.on('error', (error: Error) => reject(error))
-  })
-}
-
-function sendJson(res: ServerResponse, status: number, value: unknown): void {
-  const body = Buffer.from(JSON.stringify(value), 'utf8')
-  res.writeHead(status, {
-    'content-type': 'application/json; charset=utf-8',
-    'content-length': String(body.length),
-    'cache-control': 'no-store',
-  })
-  res.end(body)
-}
-
-function sendBytes(res: ServerResponse, status: number, body: Buffer, headers: Record<string, string>): void {
-  res.writeHead(status, { 'content-length': String(body.length), 'cache-control': 'no-store', ...headers })
-  res.end(body)
-}
-
-/**
- * 把响应切成事件流（SSE）。
- *
- * 为什么这里需要流：同步是唯一"按条走网络"的长动作——一次整库同步可能是几百次往返，界面只有一句
- * "同步中…"时，用户没有任何办法判断它在推进还是卡住了。宿主 `webServer` 的路由 handler
- * **owning the full response lifecycle**（`WebRoute.handler` 的契约原文，允许一直握着响应，SSE
- * 就是它举的例子），所以这里可以直接写。
- *
- * `x-accel-buffering: no` 是给反向代理看的：默认它们会攒够一段缓冲才转发，攒着就等于没有进度。
- * 压缩中间件按 `content-type` 前缀判断并从压缩里**豁免** SSE（宿主那一层的 filter 里写死的），
- * 所以这里不必再管 gzip。
- */
-function sendEventStream(res: ServerResponse): void {
-  res.writeHead(200, {
-    'content-type': 'text/event-stream; charset=utf-8',
-    'cache-control': 'no-store',
-    connection: 'keep-alive',
-    'x-accel-buffering': 'no',
-  })
-}
-
-/**
- * 写一条 SSE 事件（事件体是一行 JSON，形状为 `{ type, ... }`）。
- *
- * `uncork()` 那一句是**必须有**的，不是保险：`res.write()` 每次都会把 socket 重新 cork 住（实测
- * `writableCorked` 从 0 变 1、`writableLength` 就是这条事件），Node 要等下一次事件循环才把它推给内核。
- * 而报进度的这些循环是**同步**的——读日志、改首帧、搬目录中间一次 `await` 都没有——所以不主动
- * uncork 的话，一整段干完之前一个字节都发不出去，所有事件在结束时一起到，进度条会从"正在准备…"
- * 直接跳到做完（跨进程实测：不 uncork 五条事件全在 1537ms 到达，uncork 之后是 33/330/630/930/1230ms）。
- * 同步那条路本来能走，是因为它每一步都在 await 网络往返，事件循环自然会转。
- *
- * `res.socket` 用可选链：万一响应被中间件包过一层（没有 socket），退化成原来的行为，而不是抛错。
- * 多调用几次 uncork 是无害的（实测不抛错、不影响正文）。
- */
-function sendEvent(res: ServerResponse, event: unknown): void {
-  if (res.writableEnded) return
-  res.write(`data: ${JSON.stringify(event)}\n\n`)
-  res.socket?.uncork()
-}
-
-/**
- * 把一个长动作跑成事件流：`{type:'progress'}` 每做一条一次、`{type:'result'}` 收尾、`{type:'error'}`
- * 兜底。
- *
- * 为什么是**共用一个**而不是每个端点各写一遍：这套形状原先只有 `/sync` 有（见
- * [同步那篇决策](../.agents/notes/implemented/architecture/2026-10-03-sync-progress-streams-over-sse.md)），
- * 而"按下到结束之间没有任何反馈"是**所有**长动作共有的毛病——迁移落地实测 47 条 / 67.5 MB 要 45 秒
- * （逐条改写首帧占 45 秒），导入落地 250 条 / 70.9 MB 要 19 秒，那些时间里界面只有一个不动的按钮。
- * 地基抽在这里，各端点只负责"报哪几段"。
- *
- * 两段流之外的**判定**（参数不对、这个宿主没这个能力、备份目录越界）仍然在流开始**之前**回一次性
- * JSON 带状态码——那时还没有任何一个字节发出去，用状态码说比用事件说清楚。流一旦开始，HTTP 状态
- * 就已经是 200 了，之后的错只能靠 `{type:'error'}` 说（客户端按 `content-type` 分流）。
- *
- * @param res 响应对象（`webServer` 的路由 handler 拥有完整的响应生命周期，SSE 就是它举的例子）。
- * @param run 真正干活的那一段；`report` 是同步调用、不 await 的上报口（实现里不许抛）。
- */
-async function streamResult(
-  res: ServerResponse,
-  run: (report: ProgressReporter) => Promise<unknown> | unknown,
-): Promise<void> {
-  sendEventStream(res)
-  try {
-    const result = await run((progress) => sendEvent(res, { type: 'progress', progress }))
-    sendEvent(res, { type: 'result', result })
-  } catch (error) {
-    sendEvent(res, { type: 'error', error: error instanceof Error ? error.message : String(error) })
-  }
-  res.end()
-}
-
-/** 读注册表；文件缺失或坏掉都只记为问题，不拦住"列出会话"。 */
-function loadRegistry(
-  path: string,
-): { registry: WorkspaceRegistryState | null; problems: string[] } {
-  try {
-    const registry = readRegistry(path)
-    const check = validateRegistry(registry)
-    return { registry, problems: check.ok ? [] : check.problems.map((problem) => `注册表：${problem}`) }
-  } catch (error) {
-    return {
-      registry: null,
-      problems: [`读不到注册表 ${path}：${error instanceof Error ? error.message : String(error)}`],
-    }
-  }
-}
-
-/**
- * 这次点名的会话里有没有"单独的子智能体"（父会话还在库里、又不会被一起带上），有就给出拒绝文案。
- *
- * 子智能体跟着父会话走（见 family.ts）：单独归档 / 导出它，要么在父会话的 `subagent/catalog` 里留下
- * 一条指着不存在会话的条目，要么打出一个父会话不在里面的包。所以这几条路都直接拒，并指名该点谁。
- * 删除那条路在自己的编排里做同一件事（文案在 remove.ts，多一条父会话名称）。
- */
-function loneSubagentError(
-  all: readonly DiscoveredSession[],
-  ids: readonly string[],
-  resolveTitle?: (query: TitleQuery) => string | undefined,
-): string | undefined {
-  const byId = new Map(all.map((session) => [session.id, session]))
-  const lone = loneSubagents(all, new Set(ids))
-  if (lone.length === 0) return undefined
-  return lone
-    .map((item) => {
-      const parent = byId.get(item.parentId)
-      // 拒绝这条路上才去读父会话的标题（整库带标题扫一遍要 1.7s，见 discovery.ts 的取舍）：
-      // 只有一条会话、而且只在这条罕见的错误分支上读。
-      const title =
-        parent === undefined
-          ? undefined
-          : (resolveTitle?.({
-              id: parent.id,
-              createdAt: parent.createdAt,
-              ...(parent.cwd === undefined ? {} : { cwd: parent.cwd }),
-              files: parent.files.map((file) => ({ path: file.path, version: file.version })),
-            }) ?? parent.title)
-      const owner = title === undefined || title.trim() === '' ? item.parentId : `${title.trim()}（${item.parentId}）`
-      return `session ${item.id} 是子智能体会话（它跟着父会话走）：请改点名它的父会话 ${owner}`
-    })
-    .join('；')
-}
-
-/**
- * 点名的那批 id → 实际要动手的那批：点名的在前，随后是各自跟来的子智能体（`familyOf()`）。
- *
- * 库里找不到的 id 原样留着（调用方照旧逐条报"不在库里"，不静默少做一件事）。
- */
-function withSubagents(all: readonly DiscoveredSession[], ids: readonly string[]): string[] {
-  const byId = new Map(all.map((session) => [session.id, session]))
-  const known = new Set(byId.keys())
-  const roots = ids.flatMap((id) => {
-    const session = byId.get(id)
-    return session === undefined ? [] : [session]
-  })
-  const expanded = familyOf(all, roots).map(({ session }) => session.id)
-  return [...ids.filter((id) => !known.has(id)), ...expanded]
-}
-
-/**
- * 把发现结果与注册表对起来，得到界面要的行。
- *
- * `ungrouped` = 这条会话在外壳侧边栏里落在「未分组」那一组里（判据与理由见 visibility.ts 的
- * `isUngrouped()`）。行上的标签、会话页那枚筛选标签、迁移页那个来源都读它——**不再**发"有没有工作区
- * 认领"这个中间事实：以前那三处各自拿它去推「未分组」，于是子智能体/空白/已归档这些侧边栏根本不放进
- * 那一组的会话也被标成了「未分组」。
- *
- * "有没有主"那一半读的是 `accounted`（`accounting.ts` 算好的**认领**，不是注册表里的登记原样）：
- * 目录改名 / 删掉之后登记还在、会话却已经不算任何工作区的成员，外壳那边正是这么算的。
- *
- * `hidden` 是外壳侧边栏"会不会显示这条会话"的判据结果（见 visibility.ts）：三份列表各自要看的东西
- * 不同——导出照单全收、迁移只收侧边栏看得见的、管理页要把看不见的原因标出来——所以这里一次算清，
- * 三处都读同一个字段，避免"面板说 4 条、侧边栏显示 1 条"这种对不上的账。
- */
-function summarizeSessions(
-  sessions: readonly DiscoveredSession[],
-  options: {
-    /** 会话 id → 认领它的工作区 id（`accountedOwners()`）。 */
-    accounted: ReadonlyMap<string, string>
-    archived: ReadonlySet<string>
-    resolveBlank?: (query: { id: string; createdAt: number; cwd?: string }) => boolean | undefined
-    live: ReadonlySet<string>
-  },
-): SessionSummary[] {
-  return sessions.map((session) => {
-    // 扫描时已经读过那条投影记录（`session.meta`）就直接取，不再按缓存目录读第二遍；只在调用方显式
-    // 注入了读取器时才走它（测试用它钉"读不到空白"的边界）。
-    const blank =
-      options.resolveBlank === undefined
-        ? session.meta?.blank === true
-        : options.resolveBlank({ id: session.id, createdAt: session.createdAt, cwd: session.cwd }) === true
-    const archived = options.archived.has(session.id)
-    const facts = {
-      ...(session.header.origin === undefined ? {} : { origin: session.header.origin }),
-      // 记录里没有这一条（读不到）时不写 `blank`，与"宿主没说"同一口径（见 visibility.ts）。
-      ...(session.meta?.blank === undefined && options.resolveBlank === undefined ? {} : { blank }),
-      archived,
-    }
-    const hidden = hiddenReason(facts)
-    return {
-      id: session.id,
-      ...(session.title === undefined ? {} : { title: session.title }),
-      cwd: session.cwd,
-      createdAt: session.createdAt,
-      dir: session.dir,
-      ungrouped: isUngrouped({ ...facts, owned: options.accounted.has(session.id) }),
-      bytes: session.files.reduce((sum, file) => sum + file.bytes, 0),
-      files: session.files.map((file) => ({ name: file.name, bytes: file.bytes })),
-      archived,
-      blank,
-      ...(session.header.origin === undefined ? {} : { origin: session.header.origin }),
-      ...(session.header.parentSession === undefined
-        ? {}
-        : { parentSession: session.header.parentSession }),
-      live: options.live.has(session.id),
-      ...(hidden === undefined ? {} : { hidden }),
-    }
-  })
-}
-
-/**
- * 界面要的工作区：`sessionIds` 报**认领**的那些（登记里 cwd 已经对不上的不算成员），与宿主发给渲染层
- * 的那一份同源（见 accounting.ts）——工作区那一行的条数与外壳那一组里的会话因此不会各说各话。
- */
-function summarizeWorkspaces(
-  registry: WorkspaceRegistryState | null,
-  accounted: ReadonlyMap<string, string>,
-): WorkspaceSummary[] {
-  return (registry?.global.workspaceIds ?? []).flatMap((id) => {
-    const record = registry?.tables.workspaces[id]
-    if (!record) return []
-    return [
-      {
-        id,
-        path: record.path,
-        title: record.title,
-        sessionIds: record.sessionIds.filter((sessionId) => accounted.get(sessionId) === id),
-        // 一次 stat（不存在时是一次失败的 realpath），工作区一多也只是十几下；它挡的是"点了一行必然
-        // 报错的候选"。
-        exists: canonicalDirIfExists(record.path) !== undefined,
-      },
-    ]
-  })
-}
-
-/** 读 JSON 请求体；迁移/回滚这类请求很小，给 1 MiB 上限就够（大文件走 readBody 的默认上限）。 */
-async function readJson(req: IncomingMessage, limit = 1024 * 1024): Promise<unknown> {
-  const body = await readBody(req, limit)
-  return JSON.parse(body.toString('utf8') || '{}')
-}
-
-/**
- * 读一个整数查询参数。
- *
- * 缺席或不是整数时返回 `undefined`——那是"调用方没提要求"，该由核心层用它自己的缺省值；**不回落成
- * 0**：`?limit=` 与 `?limit=abc` 都不该被当成"只看一条"。
- */
-function intParam(url: URL, name: string): number | undefined {
-  const raw = url.searchParams.get(name)
-  if (raw === null || raw.trim() === '') return undefined
-  const value = Number(raw)
-  return Number.isSafeInteger(value) ? value : undefined
-}
-
-/** 目标目录必须真实存在：header.cwd 指向一个不存在的目录，导入或迁移出来的会话是坏的。 */
-function assertTargetCwd(value: unknown): string {
-  if (typeof value !== 'string' || value.trim() === '') throw new Error('缺少目标工作区目录（targetCwd）')
-  const cwd = value.trim()
-  let stat
-  try {
-    stat = statSync(cwd)
-  } catch {
-    throw new Error(`目标工作区目录不存在：${cwd}`)
-  }
-  if (!stat.isDirectory()) throw new Error(`目标工作区不是一个目录：${cwd}`)
-  return cwd
-}
-
-function fileName(count: number, at: Date): string {
-  const stamp = at.toISOString().replace(/[:.]/g, '-').replace(/Z$/, '')
-  return `dsh-sessions-${count}-${stamp}.dshsess`
-}
 
 /** "写远端那把锁被谁拿着"的一句话；没人拿着时给一句通用的。 */
-function remoteBusyMessage(owner: RemoteWriteOwner | undefined): string {
-  if (owner === undefined) return '另一件事正在写远端，等它结束再试'
-  return `上一轮${owner.label}还在跑（${new Date(owner.startedAt).toLocaleTimeString('zh-CN')} 开始），等它结束再试`
-}
 
 /**
  * 自动推送那一轮的响应体。
@@ -640,45 +280,6 @@ function remoteBusyMessage(owner: RemoteWriteOwner | undefined): string {
  * @param info 同步配置里的非敏感字段（远端地址与机器名）；界面拿来在横幅上说"推到哪儿了"。
  * @returns 响应体。
  */
-function autoPushPayload(
-  outcome: AutoPushOutcome,
-  info: SyncInfo | undefined,
-  /** 这一轮可能改本机（双向那一档）时，宿主接不接得住注册表改动；只推那一档根本不问。 */
-  fallbackEffect: EffectMode,
-): Record<string, unknown> {
-  const base = {
-    mode: 'auto-push' as const,
-    remote: { url: info?.url ?? '', machineId: info?.machineId ?? '' },
-    ran: outcome.ran,
-    ...(outcome.skip === undefined ? {} : { skip: outcome.skip }),
-    failures: outcome.failures,
-    ...(outcome.problem === undefined ? {} : { problem: outcome.problem }),
-    ...(outcome.startedAt === undefined ? {} : { startedAt: outcome.startedAt }),
-    ...(outcome.finishedAt === undefined ? {} : { finishedAt: outcome.finishedAt }),
-  }
-  const applied = outcome.outcome
-  if (applied === undefined) return base
-  return {
-    ...base,
-    plan: applied.plan,
-    pulled: applied.pulled,
-    replaced: applied.replaced,
-    pushed: applied.pushed,
-    bytesIn: applied.bytesIn,
-    bytesOut: applied.bytesOut,
-    registryWritten: applied.registryWritten,
-    indexWritten: applied.indexWritten,
-    problems: applied.problems,
-    ...(applied.planSource === undefined ? {} : { planSource: applied.planSource }),
-    /*
-     * 只推那一档**永远不会**需要重启：它不改本机任何会话，注册表一个字节都没动——所以调用方传进来的
-     * `fallbackEffect` 在那条路上是 `immediate`（写死它而不是问宿主：那个探测问的是"宿主能不能接住
-     * 这次的注册表改动"，而这次根本没有那种改动，探出来的只会是一句假警告）。双向那一档真的会写注册
-     * 表，于是由 `effectOf()` 按这次的结论说话。
-     */
-    takesEffect: effectOf(applied.effect, fallbackEffect),
-  }
-}
 
 /**
  * 上一轮自动推送的**计数**（推了几条、搬了多少字节）。
@@ -689,27 +290,9 @@ function autoPushPayload(
  * @param outcome 上一轮的结论；还没有就是 `undefined`。
  * @returns 摊平的那几项；没跑过是 null。
  */
-function autoPushLastPayload(outcome: AutoPushOutcome | undefined): Record<string, unknown> | null {
-  if (outcome === undefined) return null
-  return {
-    ran: outcome.ran,
-    ...(outcome.skip === undefined ? {} : { skip: outcome.skip }),
-    failures: outcome.failures,
-    ...(outcome.problem === undefined ? {} : { problem: outcome.problem }),
-    ...(outcome.startedAt === undefined ? {} : { startedAt: outcome.startedAt }),
-    ...(outcome.finishedAt === undefined ? {} : { finishedAt: outcome.finishedAt }),
-    // 两个计数都容错：这一份是"上一轮的账"，宿主与界面的形状对不上时宁可少说一句，也不该让整条
-    // 长连接因为一个空数组字段崩掉（认领来的那一轮只有计数，没有完整结果）。
-    pushedCount: outcome.outcome?.pushed?.length ?? 0,
-    // 双向那一档才有拉取：横幅上那句"拉取 N 条、推送 M 条"读的就是这两个计数。
-    pulledCount: outcome.outcome?.pulled?.length ?? 0,
-    bytesOut: outcome.outcome?.bytesOut ?? 0,
-    ...(outcome.outcome?.attachmentOut === undefined ? {} : { attachmentOut: outcome.outcome.attachmentOut }),
-    problems: outcome.outcome?.problems ?? [],
-  }
-}
 
 /** 界面用的全部 handler，键是 `METHOD 路径后缀`；方法可以写成 `GET|POST`（`/sync` 两种都要）。 */
+
 export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingMessage, res: ServerResponse) => Promise<void>> {
   const { paths, decodeAll } = deps
   const now = deps.now ?? ((): Date => new Date())
@@ -767,40 +350,6 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
   // 包照旧只带日志，导入也照旧只落日志——与升级前完全一致。
   const attachmentPort = (): AttachmentPort | undefined => deps.attachments?.()
 
-  /**
-   * 最近一次预演算出来的那份数据（见 sync.ts 的 `SyncPrepared`）。
-   *
-   * 只留一份、而且**一次就消费掉**：界面一次只开一个同步弹窗，确认用的必须是它自己那次预演的结论。
-   * 又一次预演（或者宿主重启、旧页面再来确认）会把它换掉，拿着旧 id 回来的那次自然落到"从零重算"
-   * 那条路上——不错，只是慢。
-   */
-  let preview: { id: string; value: SyncPrepared; decisionsKey: string } | null = null
-  /** 预演编号：只用来把"这次确认"对回"那次预演"，不承担任何安全职责。 */
-  let previewSeq = 0
-
-  /**
-   * 正在跑的那一趟落地（`null` = 没有）。
-   *
-   * 为什么要有它：落地这趟现在可以**关掉窗口继续跑**（界面那一侧把进度搬到页面横幅上）。于是它会
-   * 比发起它的那个页面活得久——用户关掉设置、刷新页面、或者换一个页签回来，都可能再点一次「同步」。
-   * 两趟落地同时在跑会互相踩（同一份预演缓存、同一个远端、同一条本机日志），所以这里留一个闸：
-   * 跑着的时候第二趟直接被拒，界面据此说清"上一轮还在跑"。
-   *
-   * 只记"跑没跑、从什么时候开始、最后一条进度"，结果仍在发起那一侧的事件流里——这条状态是给
-   * **没在听那条流的人**（刷新之后的页面、另一个页签）看的。
-   */
-  let applying: { startedAt: number; progress: SyncProgress | null } | null = null
-  /** 最近一次落地的结论（同上：给没在听流的人说"刚才那一趟成没成、搬了几条"）。 */
-  let lastApply: {
-    startedAt: number
-    finishedAt: number
-    ok: boolean
-    pulled: number
-    pushed: number
-    error?: string
-    /** 这一趟没做到的条目（点名版，见 `sync.ts` 的 `collectLeftovers()`）：页面据此说清"哪一条"。 */
-    leftovers?: SyncLeftover[]
-  } | null = null
 
   /**
    * 面板事件流的订阅者（每一条 SSE 响应就是一个）。
@@ -826,26 +375,6 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
     }
   }
 
-  /** 落地那一趟的当前状态（`null` = 没在跑）。面板流开头那条与之后每条事件都带它。 */
-  const applyingPayload = (): Record<string, unknown> | null =>
-    applying === null ? null : { startedAt: applying.startedAt, progress: applying.progress }
-
-  /** 把裁决表折成一个稳定串：确认那次据此判断"还是预演时那组选择吗"。 */
-  const decisionsKeyOf = (decisions: ReadonlyMap<string, SyncDecision> | undefined): string => {
-    if (decisions === undefined || decisions.size === 0) return ''
-    return [...decisions]
-      .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
-      .map(([id, decision]) => `${id}\u0000${decision}`)
-      .join('\n')
-  }
-
-  /**
-   * 先答「库在哪、这个宿主能不能归档」这一份，不等扫库。
-   *
-   * 为什么单开一条而不是等 `/state`：那一份要扫完整库（每条会话都要读 header、还要折标题），
-   * 界面在它回来之前只能空着页头；而这两件事从 `paths` 与宿主服务上直接就有，没有理由跟着清单一起等。
-   * 判据只有一处——`/state` 摊开的就是这一份。
-   */
   /**
    * 这个宿主进程起来的时刻：只用来判"上次那趟要求的重启有没有发生"（见 `lastRunView()`）。
    *
@@ -988,7 +517,7 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
         last: autoPushLastPayload(status?.last),
       }
     }
-    sendEvent(res, { type: 'sync', applying: applyingPayload(), last: lastApply })
+    sendEvent(res, { type: 'sync', ...sync.applyStatus() })
     sendEvent(res, { type: 'auto-push', ...autoPushNow() })
     /*
      * ③ 之后跟着推。
@@ -1036,208 +565,7 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
     res.end()
   }
 
-  const exportSessions = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
-    const body = await readBody(req)
-    let wanted: unknown
-    try {
-      wanted = JSON.parse(body.toString('utf8') || '{}')
-    } catch {
-      sendJson(res, 400, { error: '请求体不是合法 JSON' })
-      return
-    }
-    const ids = (wanted as { sessionIds?: unknown }).sessionIds
-    if (!Array.isArray(ids) || ids.length === 0) {
-      sendJson(res, 400, { error: '请选择至少一个会话（sessionIds）' })
-      return
-    }
 
-    const all = await scanForAction()
-    const byId = new Map(all.map((session) => [session.id, session]))
-    const named: string[] = ids.map((id) => String(id))
-    const missing = named.filter((id) => !byId.has(id))
-    if (missing.length > 0) {
-      sendJson(res, 404, { error: `这些会话不在库里：${missing.join(', ')}` })
-      return
-    }
-    // 子智能体不单独打包：它跟着父会话进包，否则包里那条 catalog 会指向一个包内不存在的会话。
-    const lone = loneSubagentError(all, named, resolveTitle)
-    if (lone !== undefined) {
-      sendJson(res, 400, { error: lone })
-      return
-    }
-
-    const sources = withSubagents(all, named).map((id) => {
-      const session = byId.get(id)!
-      return { id: session.id, cwd: session.cwd, createdAt: session.createdAt, dir: session.dir, files: session.files }
-    })
-    const at = now()
-    const source: BundleSourceInfo = { sessionsRoot: paths.sessionsRoot, pluginVersion: deps.pluginVersion }
-    /*
-     * 附件对象跟着包走：日志里只有引用，字节在宿主的附件库里。库里没有的那几个照样报出来
-     * ——用户需要知道"这次有几张图没能带走"，而不是等到了另一台机器上才发现图挂了。
-     * 一个都没带成时包是 v1（见 transfer.ts 的 buildBundle），这几枚响应头仍然如实报数。
-     */
-    const port = attachmentPort()
-    let packed: { packed: number; bytes: number; missing: number } = { packed: 0, bytes: 0, missing: 0 }
-    const bundle = await buildBundleAsync(sources, {
-      now: at.toISOString(),
-      source,
-      ...(port === undefined
-        ? {}
-        : {
-            attachments: {
-              port,
-              decodeAll,
-              onReport: (report) => {
-                packed = { packed: report.packed, bytes: report.bytes, missing: report.missing.length }
-              },
-            },
-          }),
-    })
-    const bytes = sources.reduce((sum, item) => sum + item.files.reduce((s, file) => s + file.bytes, 0), 0)
-    sendBytes(res, 200, bundle, {
-      'content-type': 'application/octet-stream',
-      'content-disposition': `attachment; filename="${fileName(sources.length, at)}"`,
-      // 包里到底几条 / 多少字节：界面那句"已导出 N 条"要说的是**包里的**，勾一条父会话时它比勾选数多
-      'x-dsh-session-count': String(sources.length),
-      'x-dsh-session-bytes': String(bytes),
-      // 附件那两枚：带走了几个对象、有多少字节；`-missing` 是本机附件库里找不到的那几个（日志里有引用、
-      // 对象不在，包带不走），界面据此提醒一句而不是假装没事。
-      'x-dsh-attachment-count': String(packed.packed),
-      'x-dsh-attachment-bytes': String(packed.bytes),
-      'x-dsh-attachment-missing': String(packed.missing),
-    })
-  }
-
-  const importSessions = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
-    const url = new URL(req.url ?? '/', 'http://localhost')
-    const apply = url.searchParams.get('mode') === 'apply'
-
-    const bytes = await readBody(req)
-    if (bytes.length === 0) {
-      sendJson(res, 400, { error: '请求体为空：请上传一个 .dshsess 文件' })
-      return
-    }
-
-    let bundle
-    try {
-      bundle = await readBundleAsync(bytes)
-    } catch (error) {
-      sendJson(res, 400, { error: error instanceof Error ? error.message : String(error) })
-      return
-    }
-
-    let targetCwd: string
-    try {
-      targetCwd = assertTargetCwd(url.searchParams.get('targetCwd'))
-    } catch (error) {
-      sendJson(res, 400, { error: error instanceof Error ? error.message : String(error) })
-      return
-    }
-
-    const { registry, problems } = loadRegistry(paths.registryPath)
-    const options: ImportOptions = {
-      root: paths.sessionsRoot,
-      targetCwd,
-      registry: registry ?? undefined,
-      registryPath: paths.registryPath,
-      // 预演的每条会话要显示标题：包里的日志已经整份在内存里，折叠一次比再读盘便宜
-      // （见 transfer.bundleTitle）。
-      decodeAll,
-      // 附件库里那些对象的去处在宿主手里（见 ApiDeps.attachments）；没有这个端口时计划里那几条一律
-      // 报 unavailable，包里的日志照旧落地。
-      attachments: attachmentPort(),
-    }
-
-    /*
-     * 计划与落地都走事件流：包本身的字节是**请求体**（上传那一段宿主报不了，那是浏览器与网络的事），
-     * 但收到之后还有几段长的——预演要逐条读包里的日志折标题（实测 250 条 / 70.9 MB 约 1.7 秒）、数
-     * 一遍包里的附件对象在不在本机，落地要逐条写盘并改写首帧 cwd（同一条包实测 18.9 秒）。这几段原来
-     * 界面上只有一句「导入中…」。
-     */
-    await streamResult(res, async (report) => {
-      // 计划算不出来（包坏了、注册表重挂失败…）：抛出去就是 `error` 事件，界面照原话报——与原来
-      // 那次 500 的正文是同一条消息。
-      /*
-       * 标题先异步折一遍（每几条让出一次）：250 条 / 70.9 MB 的包实测 1.7 秒，原来整段都在主线程里。
-       * `planImport()` 拿到这份表就不再逐条解压，只做它自己的目录检查与注册表计算。
-       */
-      const titles = await bundleTitlesAsync(bundle, decodeAll, { onProgress: report })
-      const plan: ImportPlan = planImport(bundle, { ...options, titles, onProgress: report })
-
-      const payload = {
-        mode: apply ? 'apply' : 'plan',
-        bundle: { createdAt: bundle.createdAt, source: bundle.source, sessions: bundle.sessions.length },
-        problems: [...problems, ...plan.problems],
-        entries: plan.entries,
-        created: plan.created,
-        rehomed: plan.rehomed,
-        bytes: plan.bytes,
-        attachments: plan.attachments,
-        attachmentAdds: plan.attachmentAdds,
-        attachmentBytes: plan.attachmentBytes,
-        registryChange: plan.registryChange,
-      }
-
-      if (!apply) return { ...payload, ok: plan.ok }
-      /*
-       * 一件都不会发生时不必走落地：会话都在库里，包里的附件对象本机也一个不缺。**只缺附件**那种
-       * （日志早就导过、图是挂的）要放行——那正是这次要修的那个现状，落地那一步会把缺的对象补上，
-       * 一个日志字节都不覆盖。
-       */
-      if (plan.created.length === 0 && plan.attachmentAdds === 0) {
-        return { ...payload, ok: false, error: '没有可导入的内容：会话都已在库里，包里的附件对象本机也都有' }
-      }
-
-      try {
-        const outcome = await applyImport(bundle, plan, { ...options, decodeAll, onProgress: report })
-        // 导入会改注册表（把会话挂进目标工作区），与迁移是同一条语义：改完就把活儿交给宿主自己做，
-        // 而不是把"重启 DSH 最稳妥"留给用户。注册表这次没动时（没有要挂的 / 读不到注册表）没有这一步。
-        // 注册表终态一并交过去：宿主没接住时它会用内存副本盖掉这次写盘，那时得靠这份终态写回来
-        // （见 take-effect.ts 的 `restoreRegistry()`）。
-        const effect = outcome.registryWritten
-          ? await takeEffectOnHost(
-              plan.registryChange,
-              { hostRegistry, registryPath: paths.registryPath },
-              { registry: plan.nextRegistry },
-            )
-          : undefined
-        /*
-         * 导进来的会话从没在本机活过，宿主的投影检查点里没有它们：侧边栏会显示"未命名"、时间退回
-         * createdAt，直到被点开一次。这里请宿主自己冷读一遍补上（逐条兜住失败，不影响落地结论，
-         * 见 checkpoint-warm.ts）。
-         */
-        const warm = await warmCheckpoints(outcome.written, { hostCheckpoints }, report)
-        // 会话真落到本机了：别的页面（以及本页的清单）得重读一次。
-        if (outcome.written.length > 0) panelEmit({ type: 'stale', what: 'state' })
-        return {
-          ...payload,
-          ok: true,
-          written: outcome.written,
-          writtenBytes: outcome.bytes,
-          attachmentWritten: outcome.attachmentWritten,
-          attachmentPresent: outcome.attachmentPresent,
-          attachmentWrittenBytes: outcome.attachmentBytes,
-          attachmentProblems: outcome.attachmentProblems,
-          registryWritten: outcome.registryWritten,
-          takesEffect: effectOf(effect, takesEffect()),
-          ...(outcome.written.length === 0 ? {} : { warm }),
-          note: [
-            effect === undefined
-              ? '会话已落盘（这次没有改注册表）：宿主重新扫描后就会出现在侧边栏，不需要重启。'
-              : describeEffect(effect),
-            describeWarm(warm),
-          ]
-            .filter((line): line is string => line !== undefined)
-            .join('\n'),
-        }
-      } catch (error) {
-        // 写盘写到一半失败：正文里那份**计划**照样带回去（界面把冲突与原因摆在弹窗里），
-        // 与原来 500 那次的正文同一个形状。
-        return { ...payload, ok: false, error: error instanceof Error ? error.message : String(error) }
-      }
-    })
-  }
 
   const migrateDeps: MigrateDeps = {
     sessionsRoot: paths.sessionsRoot,
@@ -1259,933 +587,50 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
   // 没注入就按"需要重启"说：宁可保守，也不谎称已经生效。执行过的那些走执行结果（见 effectOf）。
   const takesEffect = (): EffectMode => (hostRegistry() === undefined ? 'restart-required' : 'immediate')
 
-  const backups = async (_req: IncomingMessage, res: ServerResponse): Promise<void> => {
-    sendJson(res, 200, { backupRoot: paths.backupRoot, backups: listBackups(migrateDeps) })
-  }
-
-  /** 迁移：`mode=apply` 执行，缺省只预演。参数与工具层同一套（都进 runMigration）。 */
-  const migrate = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
-    let body: unknown
-    try {
-      body = await readJson(req)
-    } catch {
-      sendJson(res, 400, { error: '请求体不是合法 JSON' })
-      return
-    }
-    const fields = (body ?? {}) as Record<string, unknown>
-    /*
-     * **源就是点名的那些会话**（不带源目录这个参数）：它们可以来自不同的目录，每条会话的源目录是它自己的
-     * `cwd`——"把删掉的项目文件夹里那几条迁到重建后的位置"就是点名它们 + 给一个目标目录。所以这里只判
-     * "点名了没有"，来源目录还在不在由项目目录（会话日志那一层）那一侧说话。
-     */
-    const ids = fields['sessionIds']
-    if (!Array.isArray(ids) || ids.length === 0) {
-      sendJson(res, 400, { error: '缺少要迁移的会话（sessionIds）' })
-      return
-    }
-    let to: string
-    try {
-      to = assertTargetCwd(fields['to'])
-    } catch (error) {
-      sendJson(res, 400, { error: error instanceof Error ? error.message : String(error) })
-      return
-    }
-
-    // 注册表是迁移的前置条件（要往上面登记新工作区）。它坏了就不该动手，先如实拒掉。
-    try {
-      loadRegistryForWrite(paths.registryPath)
-    } catch (error) {
-      sendJson(res, 409, { error: error instanceof Error ? error.message : String(error) })
-      return
-    }
-
-    const request: MigrateRequest = {
-      to,
-      sessionIds: ids.map((id) => String(id)),
-      includeArtifacts: fields['includeArtifacts'] === true,
-      ...(typeof fields['title'] === 'string' && fields['title'].trim() !== '' ? { title: fields['title'].trim() } : {}),
-    }
-    const apply = fields['mode'] === 'apply'
-    /*
-     * 干活那一段走事件流：迁移落地要备份、改写、搬目录、复核、请宿主补检查点——实测 47 条会话 /
-     * 67.5 MB 要 45 秒（其中改写首帧占 45 秒）。计划不 ok 与复核没过**都还是结果**：它们带着
-     * 完整的 `preview`，界面要把清单与问题摆出来，所以一样从 `result` 事件回，而不是当成流的错。
-     */
-    await streamResult(res, async (report) => {
-      const run = await runMigration(migrateDeps, request, { apply, onProgress: report })
-      // 真搬过（或改写过注册表）就意味着别处看到的清单已经过期了。
-      if (apply && (run.moved > 0 || run.rewritten > 0)) {
-        panelEmit({ type: 'stale', what: 'state' })
-      }
-      return {
-        mode: apply ? 'apply' : 'plan',
-        ok: run.preview.ok && (!apply || run.verified),
-        preview: run.preview,
-        applied: run.applied,
-        rewritten: run.rewritten,
-        moved: run.moved,
-        artifactsMoved: run.artifactsMoved,
-        verified: run.verified,
-        ...(run.backupDir === undefined ? {} : { backupDir: run.backupDir }),
-        problems: run.problems,
-        summary: run.summary,
-        ...(run.warm === undefined ? {} : { warm: run.warm }),
-        // 真的改过注册表就认执行结果，没改过才退到探测（见 take-effect.ts 的 effectOf）。
-        takesEffect: effectOf(run.effect, takesEffect()),
-        // 复核没过时那句话与原来 500 那次的正文一致（结果形状不变，只是换了种运法）。
-        ...(apply && !run.verified ? { error: '迁移后的复核未通过，请查看 problems 并考虑回滚' } : {}),
-      }
-    })
-  }
-
-  /** 回滚：`dryRun` 只回动作清单；只认本插件备份根下的目录（越界一律拒）。 */
-  const rollbackBackup = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
-    let body: unknown
-    try {
-      body = await readJson(req)
-    } catch {
-      sendJson(res, 400, { error: '请求体不是合法 JSON' })
-      return
-    }
-    const fields = (body ?? {}) as Record<string, unknown>
-    const backupDir = fields['backupDir']
-    try {
-      assertBackupDir({ backupRoot: paths.backupRoot }, backupDir)
-    } catch (error) {
-      sendJson(res, 400, { error: error instanceof Error ? error.message : String(error) })
-      return
-    }
-    const dryRun = fields['dryRun'] === true
-    // 回滚 = 逐条会话把目录搬回去 + 逐文件字节还原，整库回滚同样是几十秒的活（同迁移），所以它也报进度。
-    await streamResult(res, async (report) => {
-      const outcome = await rollbackMigration(
-        { backupRoot: paths.backupRoot },
-        { backupDir: String(backupDir), dryRun, onProgress: report },
-      )
-      if (!dryRun) panelEmit({ type: 'stale', what: 'state' })
-      return {
-        mode: dryRun ? 'plan' : 'apply',
-        ...outcome,
-        takesEffect: effectOf(outcome.effect, takesEffect()),
-      }
-    })
-  }
-
-  /**
-   * WebDAV 同步：`?mode=apply` 才真跑（拉取 + 推送），`?mode=test` 只探一次连通性，缺省只预演（读远端，
-   * 什么都不写）。
-   *
-   * 两次调用是一件事：预演算出来的计划与它的输入留在 `preview` 里、响应带回一个 `planId`，确认那次
-   * 带着它回来就照着那份数据落地（见 `SyncPrepared`）——用户按下确认到第一条拉取之间因此不必把同一份
-   * 计划重算一遍。
-   *
-   * 拉取来的会话走的是**导入那条编排**（`planImport/applyImport`），所以这里与
-   * 导入端点同一套边界：包必须自校验通过、同 id 只跳过、`_no-cwd` 直接落项目目录。
-   */
-  const syncSessions = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
-    const url = new URL(req.url ?? '/', 'http://localhost')
-    const mode = url.searchParams.get('mode')
-    const apply = mode === 'apply'
-    /*
-     * 确认那次体里带着预演给的 `planId`（见下面 `preview` 那段）。**体要在别的 await 之前读完**：请求体
-     * 是一条流，先去做别的事再回来读，等于让它在这段时间里一直挂着（测试里的假请求更是早就把 `end`
-     * 发完了——等回来接的时候已经没人在听，读的那一头就永远等下去）。
-     */
-    let planId: string | undefined
-    let decisions: Map<string, SyncDecision> | undefined
-    /** 落地这次要不要顺手整理自己那一格（预演那次不算它——整理会删远端的东西）。 */
-    let tidy = false
-    if (req.method === 'POST') {
-      try {
-        const body = (await readJson(req)) as { planId?: unknown; decisions?: unknown; tidy?: unknown } | null
-        if (typeof body?.planId === 'string' && body.planId !== '') planId = body.planId
-        if (body?.tidy === true) tidy = true
-        // 裁决表：只认这三种值，别的键/值当没写——界面与工具都可能把旧数据递回来。
-        if (body?.decisions !== null && typeof body?.decisions === 'object' && !Array.isArray(body.decisions)) {
-          const picked = new Map<string, SyncDecision>()
-          for (const [id, value] of Object.entries(body.decisions)) {
-            if (value === 'keep-local' || value === 'keep-remote' || value === 'keep-both') picked.set(id, value)
-          }
-          if (picked.size > 0) decisions = picked
-        }
-      } catch {
-        // 体不是 JSON：按"没有预演那份"处理——这条路上体只用来指认缓存与裁决，读不出来就不用它们。
-      }
-    }
-    const runtime = await deps.sync?.()
-    if (runtime === undefined) {
-      sendJson(res, 409, { error: '这个宿主没有配置 WebDAV 同步（插件配置里的 sync.url 是空的）' })
-      return
-    }
-    if (mode === 'test') {
-      // 只读探一次：判定在 sync.ts，这里补上"这次有没有带凭据"两个事实——界面据此把 401 分成
-      // "没配上密码"与"服务器不认这套"，那两句的处置完全不同。
-      try {
-        const result = await testSyncConnection(runtime.dav)
-        sendJson(res, 200, {
-          mode: 'test',
-          remote: { url: runtime.settings.url, machineId: runtime.settings.machineId },
-          ...result,
-          username: runtime.settings.username ?? null,
-          hasPassword: runtime.settings.password !== undefined,
-        })
-      } catch (error) {
-        sendJson(res, 500, { error: error instanceof Error ? error.message : String(error) })
-      }
-      return
-    }
-    const syncDeps = {
-      dav: runtime.dav,
-      settings: runtime.settings,
-      sessionsRoot: paths.sessionsRoot,
-      registryPath: paths.registryPath,
-      backupRoot: paths.backupRoot,
-      decodeAll,
-      resolveTitle,
-      sessionMeta,
-      // 扫本机那一趟读一次的投影记录（空白与两枚活动时间从它取，见 sync.ts 的 `SyncDeps.projection`）。
-      projection,
-      // 项目身份那份 git 缓存（入口注入的那一份，见 `ApiDeps.repoLocations`）。
-      ...(deps.repoLocations === undefined ? {} : { repoLocations: deps.repoLocations }),
-      // 覆盖本机那份之前要问一句"这条还在跑吗"（与删除同一条理由：宿主手里有它的写句柄）。
-      liveSessionIds,
-      // 拉取会把会话挂到目标工作区（改注册表）：整批落地之后由编排层收口交给宿主一次。
-      hostRegistry,
-      // 拉取来的会话在本机没有投影检查点：同一次收口里请宿主把列表元数据折出来（见 checkpoint-warm.ts）。
-      hostCheckpoints,
-      // 附件对象走远端共享库（`dsh-session-manager/attachments/…`）：推送时只补远端缺的、拉取时只取
-      // 本机缺的，包本身照旧只有日志。宿主没有附件服务时端口缺席，这条路静默降级（见 sync.ts）。
-      attachments: attachmentPort,
-      ...(deps.pluginVersion === undefined ? {} : { pluginVersion: deps.pluginVersion }),
-      ...(deps.now === undefined ? {} : { now: deps.now }),
-    }
-    /**
-     * 这次同步要不要重启才被承认。
-     *
-     * 落地那次按**真实结果**说（见 take-effect.ts 的 `effectOf()`）；预演那次按探测说——"要不要重启"
-     * 得在按下确认**之前**就摆出来，事后才说等于没提醒（与迁移预演同一套口径）。
-     *
-     * 两种模式都只在"真有会话要落到本机"时才谈得上生效：纯推送不改本机任何东西，此时
-     * `restart-required` 是一句假警告。
-     */
-    const syncEffect = (outcome: SyncOutcome): EffectMode => {
-      if (outcome.applied) {
-        return outcome.pulled.length === 0 ? 'immediate' : effectOf(outcome.effect, takesEffect())
-      }
-      return outcome.plan.pullIds.length === 0 ? 'immediate' : takesEffect()
-    }
-    /** 预演与落地回同一份形状的结果，界面两条路都用同一套解析。 */
-    const payloadOf = (outcome: SyncOutcome): Record<string, unknown> => ({
-      mode: apply ? 'apply' : 'plan',
-      remote: { url: runtime.settings.url, machineId: runtime.settings.machineId },
-      ...outcome,
-      problems: [...outcome.plan.problems, ...outcome.problems],
-      leftovers: collectLeftovers(outcome),
-      takesEffect: syncEffect(outcome),
-    })
-
-    /*
-     * 预演与落地都走事件流：`{type:'progress'}` 每做一条一次、`{type:'result'}` 收尾、`{type:'error'}`
-     * 兜底。预演也要进度——它得先扫本机（每条会话读头、折标题）、再读远端索引、最后逐条比对内容，
-     * 冷启动时这几秒里界面原来只有一句"预演中…"；落地那边同样受益，按下确认后到第一条拉取完成之间
-     * 报的是重读远端索引那一条（照预演那份走时）。
-     *
-     * 流一旦开始，HTTP 状态就已经发出去了（200），所以这一段的错误只能靠事件说——客户端按
-     * `content-type` 区分"流"与"一次性 JSON"（没配置同步那类错发生在写头之前，仍然是 JSON +
-     * 409/500）。
-     */
-    /*
-     * 只整理远端：`?mode=tidy`，GET 只算账（读远端、不写），POST 真删。
-     *
-     * 与落地分开是因为它不碰本机任何东西：不扫库、不拉不推、不写注册表。所以它既不需要预演缓存
-     * （没有 planId），也没有"要不要重启"那一套；只需要跟落地同一道闸——两边都写自己那一格的索引，
-     * 同时跑会互相踩。进度照旧走事件流：一次整理可能几百个包、几十秒。
-     */
-    if (mode === 'tidy') {
-      const tidyApply = req.method === 'POST'
-      if (tidyApply && applying !== null) {
-        sendJson(res, 409, {
-          error: `上一轮同步还在跑（${new Date(applying.startedAt).toLocaleTimeString('zh-CN')} 开始），等它结束再试`,
-        })
-        return
-      }
-      /*
-       * 整理与落地写的是同一份索引：拿不到写权限就不开始，避免用旧快照盖掉别人刚写进去的条目。
-       * 预演（GET）只读远端，不拿锁。
-       */
-      const release = tidyApply ? remoteWrite.tryAcquire('整理远端') : undefined
-      if (tidyApply && release === undefined) {
-        sendJson(res, 409, { error: remoteBusyMessage(remoteWrite.current()) })
-        return
-      }
-      try {
-        await streamResult(res, async (report) => {
-          const outcome = await runTidy(syncDeps, { apply: tidyApply, onProgress: report })
-          return {
-            mode: tidyApply ? 'apply' : 'plan',
-            remote: { url: runtime.settings.url, machineId: runtime.settings.machineId },
-            ...outcome,
-          }
-        })
-      } finally {
-        release?.()
-      }
-      return
-    }
-
-    /*
-     * 一趟落地还没跑完就不再开第二趟。
-     *
-     * 这道闸挡的是"关掉窗口继续跑"带来的新情况：那趟现在比发起它的页面活得久，用户可能刷新之后、或者
-     * 在另一个页签里再点一次。两趟一起跑会互相踩（同一份预演缓存、同一个远端、同一条本机日志），
-     * 所以第二趟在这里就被拒——一次性 JSON + 409，发生在写响应头之前，界面能照实说清是"还在跑"。
-     */
-    if (apply && applying !== null) {
-      sendJson(res, 409, {
-        error: `上一轮同步还在跑（${new Date(applying.startedAt).toLocaleTimeString('zh-CN')} 开始），等它结束再试`,
-      })
-      return
-    }
-    /*
-     * 落地要写自己那一格的索引与包，先拿写权限：自动推送、整理远端、删除远端、模型工具可能正拿着。
-     * 预演（!apply）只读，不拿锁。
-     */
-    const releaseRemote = apply ? remoteWrite.tryAcquire('同步') : undefined
-    if (apply && releaseRemote === undefined) {
-      sendJson(res, 409, { error: remoteBusyMessage(remoteWrite.current()) })
-      return
-    }
-    sendEventStream(res)
-    const startedAt = Date.now()
-    if (apply) {
-      applying = { startedAt, progress: null }
-      panelEmit({ type: 'sync', applying: applyingPayload(), last: lastApply })
-    }
-    try {
-      const onProgress = (progress: SyncProgress): void => {
-        // 给"没在听这条流的人"留一份最新进度（刷新之后进来的页面读它）。
-        if (apply && applying !== null) applying.progress = progress
-        sendEvent(res, { type: 'progress', progress })
-        // 面板那条流上的页面看的就是这一条：它们不会去听这条响应（那是发起者自己的）。
-        if (apply) panelEmit({ type: 'sync', applying: applyingPayload(), last: lastApply })
-      }
-      if (!apply) {
-        /*
-         * 预演：算一份计划，并且把那一次算出来的输入留在 `preview` 里（见 `SyncPrepared`）。
-         *
-         * `planId` 就是这个格子的号码：确认那次带着它回来，对得上就**照着这份数据落地**，不再把同一
-         * 份计划重算一次（用户按下确认到第一条拉取之间原来要等的那几秒就是它）。
-         */
-        /*
-         * 带着上一次的 `planId` 回来、只换了裁决（用户点「以本机为准 / 以远端为准」）：计划只该重算
-         * 那一层——扫本机、读远端索引、问 git、算指纹这些输入都还在那份预演里（见 `replanPrepared()`）。
-         * 几十毫秒，而不是把整条同步流程再走一遍。
-         */
-        const reused = preview !== null && planId !== undefined && preview.id === planId ? preview : undefined
-        let planned: SyncPrepared
-        let id: string
-        if (reused !== undefined) {
-          planned = replanPrepared(reused.value, syncDeps, decisions)
-          id = reused.id
-        } else {
-          planned = await prepareSync(syncDeps, {
-            onProgress,
-            ...(decisions === undefined ? {} : { decisions }),
-          })
-          previewSeq += 1
-          id = `${previewSeq}-${Math.random().toString(36).slice(2, 8)}`
-        }
-        preview = { id, value: planned, decisionsKey: decisionsKeyOf(decisions) }
-        sendEvent(res, {
-          type: 'result',
-          result: {
-            ...payloadOf(plannedOutcome(planned)),
-            planId: id,
-            // 预演里也报一次"整理能删多少"：界面据此决定那个勾选框摆不摆、写多少个包。它只是账目，
-            // 真删的条件与判据在落地那次由 `planTidy()` 按当时的远端索引重算一遍。
-            tidy: tidySummary(planned.remote, runtime.settings.machineId),
-          },
-        })
-      } else {
-        /*
-         * 落地：体里带着预演给的 `planId` 时优先照着那份数据走（见 sync.ts 的 `syncPrepared()`——它会先
-         * 验一遍那份数据还作不作数，变了就从零重算）。对不上（宿主重启过、又一次预演把它换掉了、旧
-         * 客户端没带 id）就照旧从零算一遍；结果里的 `planSource` 说清这次走的哪条路。
-         */
-        const candidate = preview !== null && planId !== undefined && preview.id === planId ? preview : undefined
-        // 裁决是预演输入的一部分：同一份 planId 但选择变了，就不能拿旧计划落地。
-        const cached = candidate !== undefined && candidate.decisionsKey === decisionsKeyOf(decisions) ? candidate.value : undefined
-        // 消费掉：一份预演只够落地一次（第二次带着同一个 id 回来就重算一遍）。
-        if (candidate !== undefined) preview = null
-        const outcome: SyncOutcome =
-          cached !== undefined
-            ? await syncPrepared(syncDeps, cached, {
-                onProgress,
-                ...(decisions === undefined ? {} : { decisions }),
-                ...(tidy ? { tidy: true } : {}),
-              })
-            : decisions !== undefined
-              ? {
-                  ...(await runSync(syncDeps, {
-                    apply: true,
-                    onProgress,
-                    decisions,
-                    ...(tidy ? { tidy: true } : {}),
-                  })),
-                  ...(planId === undefined
-                    ? {}
-                    : {
-                        planSource: {
-                          kind: 'recomputed' as const,
-                          reason: '预演那份的裁决与这次不一致（或那份已经不在宿主手里了），按这次的选择重算',
-                        },
-                      }),
-                }
-              : planId === undefined
-                ? await runSync(syncDeps, { apply: true, onProgress, ...(tidy ? { tidy: true } : {}) })
-                : {
-                    ...(await runSync(syncDeps, { apply: true, onProgress, ...(tidy ? { tidy: true } : {}) })),
-                    planSource: {
-                      kind: 'recomputed',
-                      reason: '预演那份已经不在宿主手里了（宿主重启过，或又一次预演把它换掉了）',
-                    },
-                  }
-        lastApply = {
-          startedAt,
-          finishedAt: Date.now(),
-          ok: true,
-          pulled: outcome.pulled.length,
-          pushed: outcome.pushed.length,
-          leftovers: collectLeftovers(outcome),
-        }
-        // 同一份结论写进磁盘：进程重启之后页头那枚状态还答得出"上次同步在什么时候、拉了几条"。
-        deps.syncRun?.write({
-          at: (deps.now?.() ?? new Date()).toISOString(),
-          ok: true,
-          pulled: outcome.pulled.length,
-          pushed: outcome.pushed.length,
-          // 跑完了但有几条没做到、或者改动要重启才生效：这两种都不是"一切太平"，页头那枚点据此变黄。
-          problems: outcome.problems,
-          // 点名版：哪条会话、为什么（见 `collectLeftovers()`）。窗口关掉之后，"上次同步"那张清单靠它。
-          leftovers: collectLeftovers(outcome),
-          takesEffect: effectOf(outcome.effect, takesEffect()),
-        })
-        applying = null
-        panelEmit({ type: 'sync', applying: null, last: lastApply })
-        // 拉取会把会话落到本机：别的页面（以及这个页面的清单）都得重读一次。
-        if (outcome.pulled.length > 0 || outcome.replaced.length > 0) panelEmit({ type: 'stale', what: 'state' })
-        sendEvent(res, { type: 'result', result: payloadOf(outcome) })
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      if (apply) {
-        // 失败也留一条：刷新之后进来的页面要能说"刚才那一趟没成、原因是这个"，而不是一片空白。
-        applying = null
-        lastApply = { startedAt, finishedAt: Date.now(), ok: false, pulled: 0, pushed: 0, error: message }
-        deps.syncRun?.write({
-          at: (deps.now?.() ?? new Date()).toISOString(),
-          ok: false,
-          pulled: 0,
-          pushed: 0,
-          error: message,
-        })
-        panelEmit({ type: 'sync', applying: null, last: lastApply })
-      }
-      sendEvent(res, { type: 'error', error: message })
-    } finally {
-      releaseRemote?.()
-    }
-    res.end()
-  }
-
-  /**
-   * 自动推送：`GET /auto-push` 当场跑一轮（**只推不拉**），边跑边报进度。
-   *
-   * 为什么只有一个方向、没有 `mode=apply` 那种分岔：自动推送这条路**没有确认那一步**——它不改本机
-   * 任何东西（见 [sync.ts](./operations/sync/sync.ts) 的 `runAutoPush()`），所以"预演"与"落地"在它这里本来就是同一件
-   * 事。界面上那枚「立即推送一次」点下去就是真跑，进度画在页面横幅上。
-   *
-   * 点下去就是真跑，没有"距上次才过了几秒"这种闸——自动推送现在只在写完一轮之后自己跑，这条是让人
-   * 手点一次（见 [那篇决策](../.agents/notes/implemented/simplification/2026-10-21-auto-push-only-after-a-turn.md)）。
-   *
-   * 流已经开始的错只能靠事件说（那时 HTTP 状态早就是 200 了）；没配同步 / 没有调度器这两件事发生在
-   * 写头之前，仍然是 JSON + 409。
-   */
-  const autoPushNow = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
-    const timer = await deps.autoPush?.()
-    if (timer === undefined) {
-      sendJson(res, 409, {
-        error: '这个宿主没有自动推送的调度器（没有配置 WebDAV 同步，或它启动失败）',
-      })
-      return
-    }
-    sendEventStream(res)
-    try {
-      const onProgress = (progress: SyncProgress): void => sendEvent(res, { type: 'progress', progress })
-      const outcome = await timer.tick({ onProgress })
-      sendEvent(res, {
-        type: 'result',
-        result: autoPushPayload(
-          outcome,
-          deps.syncInfo?.(),
-          // 只推那一档不会动本机，因此不吃"要不要重启"那一问；双向那一档按宿主能力说话。
-          deps.syncInfo?.()?.autoPush?.mode === 'sync' ? takesEffect() : 'immediate',
-        ),
-      })
-    } catch (error) {
-      sendEvent(res, { type: 'error', error: error instanceof Error ? error.message : String(error) })
-    }
-    res.end()
-  }
-
-  const removeDeps: RemoveDeps = {
-    sessionsRoot: paths.sessionsRoot,
-    registryPath: paths.registryPath,
-    backupRoot: paths.backupRoot,
+  // 各操作的端点工厂共用这一份：缓存、写锁与宿主能力位都只有一份，各自 new 一份会让库被扫两遍、
+  // 两趟落地各拿一把锁。`sync` 另带一份状态（预演缓存、正在跑的那一趟），所以单独收着。
+  const ctx: WebContext = {
+    deps,
+    paths,
     decodeAll,
+    now,
+    remoteWrite,
     resolveTitle,
+    sessionMeta,
     projection,
+    scanForAction,
+    logs,
     liveSessionIds,
-    // 勾了「同时删除远端」时走这条：删自己那一格里的包、留下删除记录（见 sync.ts 的
-    // `removeRemoteCopies()`）。没配同步时这口子也照着给，那句"这次删不了远端"由 `deps.sync?.()` 缺席
-    // 时原样报出来——比"静默只删本机"诚实。
-    remoteRemove: async (ids) => {
-      const runtime = await deps.sync?.()
-      if (runtime === undefined) {
-        return {
-          removed: 0,
-          bytes: 0,
-          others: [],
-          problems: ['这个宿主没有配置 WebDAV 同步，远端什么都没删（下次同步可能又拉回来）'],
-        }
-      }
-      /*
-       * 本机已经删完了，这一步只清远端；拿不到写权限就如实报"远端这次没删"，不排队等。
-       * 排队会拿着删除之前读到的索引去写，反而可能把别人刚写的条目盖掉。
-       */
-      const release = remoteWrite.tryAcquire('删除远端')
-      if (release === undefined) {
-        return {
-          removed: 0,
-          bytes: 0,
-          others: [],
-          problems: [`${remoteBusyMessage(remoteWrite.current())}，远端这次没有删`],
-        }
-      }
-      try {
-        return await removeRemoteCopies(
-          { dav: runtime.dav, settings: runtime.settings, ...(deps.now === undefined ? {} : { now: deps.now }) },
-          ids,
-        )
-      } finally {
-        release()
-      }
-    },
+    hostRegistry,
+    hostCheckpoints,
+    attachmentPort,
+    panelEmit,
+    migrateDeps,
+    takesEffect,
   }
+  const sync = syncHandlers(ctx)
 
-  /**
-   * 删除会话：`mode=apply` 才真删（**先备份再删**），缺省只预演。
-   *
-   * 恢复不在这里：删掉的那份就在本插件备份根下，走「备份与回滚」那份清单（见 journal.ts 的
-   * `BackupKind`）。删除**不碰注册表**，所以恢复之后登记与归档状态原样还在（见 src/operations/remove/remove.ts）。
-   */
-  const deleteSessions = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
-    let body: unknown
-    try {
-      body = await readJson(req)
-    } catch {
-      sendJson(res, 400, { error: '请求体不是合法 JSON' })
-      return
-    }
-    const fields = (body ?? {}) as Record<string, unknown>
-    const ids = fields['sessionIds']
-    if (!Array.isArray(ids) || ids.length === 0) {
-      sendJson(res, 400, { error: '请选择至少一个会话（sessionIds）' })
-      return
-    }
-    const apply = fields['mode'] === 'apply'
-    /** 同时删远端（缺省 false；界面在配了同步时默认勾上）。只在真删那一步才动远端。 */
-    const alsoRemote = fields['alsoRemote'] === true
-    // 删除落地要**先按字节备份整份会话目录**再删，整库删除同样是几十秒的活（与迁移同量级），
-    // 所以它也走事件流：`scan`（重算计划）、`backup`、`remove`、`verify`（勾了也走 `remote` 那一步）。
-    await streamResult(res, async (report) => {
-      const run: RemovalRun = await runRemoval(
-        removeDeps,
-        { sessionIds: ids.map((id) => String(id)), ...(alsoRemote ? { alsoRemote: true } : {}) },
-        { apply, onProgress: report },
-      )
-      return {
-        mode: apply ? 'apply' : 'plan',
-        ok: run.plan.ok && (!apply || run.verified),
-        /** 「将会删掉什么」的那份计划（预演与执行同源）。 */
-        preview: run.plan,
-        applied: run.applied,
-        dirsRemoved: run.dirsRemoved,
-        removedProjectDirs: run.removedProjectDirs,
-        verified: run.verified,
-        ...(run.backupDir === undefined ? {} : { backupDir: run.backupDir }),
-        ...(run.remote === undefined ? {} : { remote: run.remote }),
-        problems: run.plan.ok ? run.problems : run.plan.problems,
-        summary: run.summary,
-        // 复核没过时那句话与原来 500 那次的正文一致（计划不 ok 时 `applied` 本来就是 false，
-        // 界面读的是 `preview`，与 409 那次一样）。
-        ...(apply && run.plan.ok && !run.verified
-          ? { error: '删除后的复核未通过，请查看 problems 并从备份恢复' }
-          : {}),
-      }
-    })
-  }
 
-  /**
-   * 归档 / 取消归档所选会话（`archived: false` 即取消归档）。
-   *
-   * 走宿主的 `workspaceRegistry`：它一次做完"落盘 + 改内存 + 广播"，侧边栏即时跟着变，所以这里
-   * 如实回报 `immediate`。一条失败不影响其余（逐条收集失败原因）——把每条的状态原样告诉界面，
-   * 比"整体失败、什么都不说"更有用。
-   */
-  const archiveSessions = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
-    let body: unknown
-    try {
-      body = await readJson(req)
-    } catch {
-      sendJson(res, 400, { error: '请求体不是合法 JSON' })
-      return
-    }
-    const fields = (body ?? {}) as Record<string, unknown>
-    const ids = Array.isArray(fields['sessionIds']) ? fields['sessionIds'].map((id) => String(id)) : []
-    if (ids.length === 0) {
-      sendJson(res, 400, { error: '请选择至少一个会话（sessionIds）' })
-      return
-    }
-    const archived = fields['archived'] !== false
-    // 子智能体不单独动：勾父会话时它跟着一起归档 / 取消归档（族是一个单位，见 family.ts）。
-    const all = await scanForAction()
-    const lone = loneSubagentError(all, ids, resolveTitle)
-    if (lone !== undefined) {
-      sendJson(res, 400, { error: lone })
-      return
-    }
-    const targets = [...new Set(withSubagents(all, ids))]
-    const ops = deps.registryOps?.()
-    if (ops === undefined) {
-      // 非 Web profile 没有这个服务：如实拒绝，而不是写一遍注册表文件（写文件绕过宿主的内存副本，
-      // 既可能被覆盖，也要等重启才被承认——那不是"归档"，是给宿主埋雷）。
-      sendJson(res, 409, { error: '这个宿主没有 workspaceRegistry 服务（归档是它的能力），改不了归档状态' })
-      return
-    }
-    const done: string[] = []
-    const failed: Array<{ id: string; error: string }> = []
-    // 逐条走宿主的注册表动作（每条一次落盘 + 广播），勾一整页会话时这一段是可感知的，所以它报进度。
-    await streamResult(res, async (report) => {
-      for (const [index, id] of targets.entries()) {
-        report({ phase: 'archive', total: targets.length, done: index, id })
-        try {
-          if (archived) await ops.archive(id)
-          else await ops.unarchive(id)
-          done.push(id)
-        } catch (error) {
-          failed.push({ id, error: error instanceof Error ? error.message : String(error) })
-        }
-      }
-      return {
-        ok: failed.length === 0,
-        archived: done,
-        failed,
-        takesEffect: 'immediate',
-      }
-    })
-  }
 
-  /**
-   * 解析一条会话的内容：把日志折成"能从头读到尾的完整时间线"（见 transcript.ts）。
-   *
-   * 一次性响应而不是事件流：这是**一次读一份文件**（最大的那份 6 MB 左右，用户点开时才读），没有逐条
-   * 进度可报；真正要防的是"整库倒进浏览器"，那件事由分页参数（`from` / `limit`）与核心层每页的字符
-   * 上限一起挡住——所以它读的是**最高代次**那一份日志（宿主自己也是这么挑的），一次只解析一页事件。
-   *
-   * 定位这一条会话用 `locateSession()`，**不扫整库**：整库 1295 条要 1.4 秒量级，而这里只关心一条；
-   * 目录名就是 id 的编码，走一遍项目目录找同名目录、只读它那一份 header 就够（实测几毫秒）。内容视图
-   * 每翻一页都要发一次这个请求，那一秒多会被乘以页数。
-   *
-   * 读日志用 `logs`（log-text-cache.ts）：同一份日志连着读好几页时只解压一次；日志变了（大小或
-   * 修改时间变了）才重新读。
-   *
-   * 三处拒绝都在响应体里说清楚：没给 id（400）、会话库里没这条（404）、日志整份读不出来（422，例如
-   * header 坏了）。坏行**不算**拒绝——那种行由核心层如实记进 `problems`，其余事件照旧摆出来。
-   */
-  const transcript = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
-    const url = new URL(req.url ?? '/', 'http://localhost')
-    const id = (url.searchParams.get('id') ?? '').trim()
-    if (id === '') {
-      sendJson(res, 400, { error: '缺少会话 id（?id=…）' })
-      return
-    }
-    // 标题与 `/state` 同源（`resolveTitle` 先宿主投影缓存、后有界前缀）：内容视图顶上那行标题
-    // 该和列表里显示的是同一个，别自己再折一次。投影记录由扫描那条路读一次的那份缓存里取
-    // （`projection` 命中时连文件都不读），所以这里不会为一条会话再整份解一次投影文件。
-    const session = await locateSession(paths.sessionsRoot, id, decodeAll, { projection, resolveTitle })
-    if (session === undefined) {
-      sendJson(res, 404, { error: `会话库里没有 ${id}` })
-      return
-    }
-    // 代次日志：`session.v4.jsonl.zstd` 这种文件名里的版本号是格式代次，宿主读的也是最高的那一份
-    // （低的那些是历史档）。库里实测 583 个会话目录都只有一份，但按代次挑才是跟宿主一致的做法。
-    const file = [...session.files].sort((left, right) => right.version - left.version)[0]
-    if (file === undefined) {
-      sendJson(res, 422, { error: '这条会话目录里没有日志文件' })
-      return
-    }
-    try {
-      // `decodeAll` 是多帧感知的：一份日志的 JSONL 是分帧压的，单帧解不出全貌。这里走缓存那一层，
-      // 它内部用的是分块解压（块与块之间让出事件循环），整份解压不会把宿主主线程按死。
-      const lines = await logs.linesOf({ path: file.path, compression: file.compression })
-      const page = readTranscript(lines, {
-        from: intParam(url, 'from'),
-        limit: intParam(url, 'limit'),
-        maxChars: intParam(url, 'maxChars'),
-      })
-      sendJson(res, 200, {
-        ...page,
-        session: {
-          id: session.id,
-          title: session.title ?? null,
-          cwd: session.cwd ?? null,
-          createdAt: session.createdAt,
-          bytes: file.bytes,
-          file: file.name,
-          generation: file.version,
-          // 这条目录里一共有几代日志：界面上"这就是全部内容"的说法要跟它一致。
-          generations: session.files.length,
-        },
-      })
-    } catch (error) {
-      sendJson(res, 422, {
-        error: `这份日志读不出来：${error instanceof Error ? error.message : String(error)}`,
-      })
-    }
-  }
 
-  /**
-   * 重新生成名称：把点名的会话交给宿主的名称服务逐条重算（见 retitle.ts 与 tools.ts 的端口）。
-   *
-   * 走事件流：每条会话都要整份解一次日志（实测 6MB ≈1.7 秒）再跑一次模型调用（2～3 秒），勾十条就是
-   * 半分钟——那段时间界面只有一句不动的按钮，所以这一段照归档那套报进度。
-   *
-   * 两处**拒绝**在流开始之前回 JSON 带状态码（那时还没有字节发出去）：一条会话都没勾（400）、
-   * 这个宿主没有名称服务（409，"点了也没反应"的按钮比禁用更糟，两者都要能说清原因）。
-   * 子智能体不在这里拒——它不是错误，是"本来就不该动它"，由编排层按条记成跳过。
-   */
-  /**
-   * 比两份日志：本机这一份，与**远端某台机器**上同一个 id 的那一份。
-   *
-   * 这是同步里"同一个 id 两边各自写过"（计划里的 `diverged`）那条路的只读出口：那个判定只说得出
-   * "两边不一样"，说不出"哪儿不一样、谁多了什么"，而删哪边、留哪边只能由人决定。所以这里把两份日志都
-   * 读出来交给 `diffSessionLogs()` 算一份差异，**一个字节都不写**：不落盘本机、不改远端。
-   *
-   * 远端那一份得先下来：包在 `dsh-session-manager/<机器>/<id>.dshsess`，拉取时取的就是同一个对象，
-   * 所以这一步走网络、按条下（日志平均几百 KB，最大几 MB）。取哪台机器由调用方指名（界面从计划里
-   * 已经知道 `machine` 是谁）；没指名就用远端索引里这个 id 记的那一台。
-   *
-   * 拒绝都在响应体里说清是哪一步、哪一边：没给 id（400）、没配同步（409）、本机库里没有这条（404）、
-   * 远端索引 / 包 / 日志取不到或读不出来（502 / 404 / 422）。**坏行不算拒绝**：它由核心层如实记进
-   * `problems`，条数照报。
-   */
-  const syncDiff = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
-    const url = new URL(req.url ?? '/', 'http://localhost')
-    const id = (url.searchParams.get('id') ?? '').trim()
-    if (id === '') {
-      sendJson(res, 400, { error: '缺少会话 id（?id=…）' })
-      return
-    }
-    const runtime = await deps.sync?.()
-    if (runtime === undefined) {
-      sendJson(res, 409, { error: '这个宿主没有配置 WebDAV 同步（插件配置里的 sync.url 是空的）' })
-      return
-    }
-    // 与内容视图同一口径：按 id 直接找（不扫整库），标题也走同一份投影记录。
-    const session = await locateSession(paths.sessionsRoot, id, decodeAll, { projection, resolveTitle })
-    if (session === undefined) {
-      sendJson(res, 404, { error: `会话库里没有 ${id}` })
-      return
-    }
-    // 与内容视图同一口径：读宿主也读的那一份（最高代次）。
-    const file = [...session.files].sort((left, right) => right.version - left.version)[0]
-    if (file === undefined) {
-      sendJson(res, 422, { error: '这条会话目录里没有日志文件' })
-      return
-    }
-    let remote: Awaited<ReturnType<typeof readRemoteLibrary>>
-    try {
-      remote = await readRemoteLibrary(runtime.dav, runtime.settings)
-    } catch (error) {
-      sendJson(res, 502, { error: `读远端索引失败：${error instanceof Error ? error.message : String(error)}` })
-      return
-    }
-    const entry = remote.entries.get(id)
-    if (entry === undefined) {
-      sendJson(res, 404, { error: `远端索引里没有 ${id}` })
-      return
-    }
-    const wanted = (url.searchParams.get('machine') ?? '').trim()
-    if (wanted !== '' && entry.machine !== wanted) {
-      sendJson(res, 409, { error: `远端这一份是 ${entry.machine} 的，不是 ${wanted} 的` })
-      return
-    }
-    let bundleBytes: Buffer
-    try {
-      bundleBytes = await runtime.dav.get(remoteBundlePath(entry.machine, id))
-    } catch (error) {
-      sendJson(res, 502, { error: `取 ${entry.machine} 那份失败：${error instanceof Error ? error.message : String(error)}` })
-      return
-    }
-    let remoteLines: string[]
-    let remoteLogBytes: number
-    try {
-      const bundle = await readBundleAsync(bundleBytes)
-      const bundled = bundle.sessions.find((item) => item.id === id)
-      if (bundled === undefined) {
-        sendJson(res, 404, { error: `远端包里没有 ${id}（清单与索引对不上）` })
-        return
-      }
-      const remoteFile = [...bundled.files].sort((left, right) => right.version - left.version)[0]
-      if (remoteFile === undefined) {
-        sendJson(res, 422, { error: '远端那份包里没有日志文件' })
-        return
-      }
-      const bytes = entryBytes(bundle, remoteFile)
-      // 分块解压、块间让出：这条会话可能几十 MB，整份解会把宿主按住一两秒（差异页是点一下就要等的地方）。
-      remoteLines = await splitLinesAsync(await decodeLogTextChunked(bytes, remoteFile.compression))
-      remoteLogBytes = bytes.byteLength
-    } catch (error) {
-      sendJson(res, 422, { error: `远端那份读不出来：${error instanceof Error ? error.message : String(error)}` })
-      return
-    }
-    let localLines: string[]
-    try {
-      localLines = await splitLinesAsync(await decodeLogTextChunked(await readFile(file.path), file.compression))
-    } catch (error) {
-      sendJson(res, 422, { error: `本机那份读不出来：${error instanceof Error ? error.message : String(error)}` })
-      return
-    }
-    // 坏行条数交给解析器记账（`limit` 只影响条目，`problemCount` 是整份的账）；header 坏了就直说哪一边。
-    const problemsOf = (lines: readonly string[], label: string): number => {
-      try {
-        return readTranscript(lines, { limit: 1, maxChars: 1 }).problemCount
-      } catch (error) {
-        throw new Error(`${label}那份读不出来：${error instanceof Error ? error.message : String(error)}`)
-      }
-    }
-    try {
-      const diff = diffSessionLogs(localLines, remoteLines, {
-        localBytes: (await stat(file.path)).size,
-        remoteBytes: remoteLogBytes,
-        localProblems: problemsOf(localLines, '本机'),
-        remoteProblems: problemsOf(remoteLines, '远端'),
-      })
-      sendJson(res, 200, {
-        id,
-        machine: entry.machine,
-        localFile: basename(file.path),
-        // 下这一个包花了多少字节：界面上那句"看差异"背后真的发生了多少流量，说清楚。
-        bundleBytes: bundleBytes.byteLength,
-        diff,
-      })
-    } catch (error) {
-      sendJson(res, 422, { error: error instanceof Error ? error.message : String(error) })
-    }
-  }
 
-  /**
-   * 「这些会话在远端哪儿」：一遍读齐所有机器格子里的位置，界面一次刷新只问这一回。
-   *
-   * 为什么不并进 `/state`：那一份是"扫本机"的结果，页头与清单都等它；远端是另一台机器上的东西，
-   * 读不到（NAS 关着、密码过期）时不该把本机的清单一起拖住。所以另开一条，界面拿到新清单之后顺手问
-   * 一次，读到就整份缓存在页面这一层（见 `src/client/operations/sync/remoteLibrary.ts`）。
-   *
-   * 一次给全部而不是按会话问：右栏选中一条会话时要立刻有答案，按会话现问会让每次点选都等一次网络。
-   * 便宜是因为读的只是每台机器那份 `index.json`，不是包本身。
-   */
-  const remoteLibrary = async (_req: IncomingMessage, res: ServerResponse): Promise<void> => {
-    const runtime = await deps.sync?.()
-    if (runtime === undefined) {
-      sendJson(res, 409, { error: '这个宿主没有配置 WebDAV 同步（插件配置里的 sync.url 是空的）' })
-      return
-    }
-    let remote: Awaited<ReturnType<typeof readRemoteLibrary>>
-    try {
-      remote = await readRemoteLibrary(runtime.dav, runtime.settings)
-    } catch (error) {
-      sendJson(res, 502, { error: `读远端索引失败：${error instanceof Error ? error.message : String(error)}` })
-      return
-    }
-    sendJson(res, 200, remotePlacements(remote, (deps.now?.() ?? new Date()).getTime()))
-  }
 
-  const retitleSessions = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
-    let body: unknown
-    try {
-      body = await readJson(req)
-    } catch {
-      sendJson(res, 400, { error: '请求体不是合法 JSON' })
-      return
-    }
-    const fields = (body ?? {}) as Record<string, unknown>
-    const ids = Array.isArray(fields['sessionIds']) ? fields['sessionIds'].map((id) => String(id)) : []
-    if (ids.length === 0) {
-      sendJson(res, 400, { error: '请选择至少一个会话（sessionIds）' })
-      return
-    }
-    const port = deps.titleRefresh?.()
-    if (port === undefined) {
-      // 如实拒绝而不是"逐条报失败"：这是**这个宿主**没有这个能力，与"某条会话算不出来"不是一回事。
-      sendJson(res, 409, { error: '这个宿主没有会话名称服务（重新生成名称是它的能力），算不了标题' })
-      return
-    }
-    const all = await scanForAction({ titles: true })
-    // `includePinned`：连 `user` 源（用户改过名，或者那条标题本来是脚本 / 导入写下的）也一起重算。
-    // 界面**不传**这个字段（默认语义就是"别动用户的名字"），它给一次性清理用——只有显式 `true` 才算。
-    const includePinned = fields['includePinned'] === true
-    await streamResult(res, async (report) => {
-      const result = await runRetitle(
-        {
-          port,
-          // 子智能体由编排层跳过（`origin === 'subagent'`）：勾父会话时它跟着来，但它的标题在侧边栏里
-          // 根本看不到，请模型再算一遍纯属白花。
-          sessions: all.map((session) => ({
-            id: session.id,
-            ...(session.title === undefined ? {} : { title: session.title }),
-            subagent: session.header.origin === 'subagent',
-          })),
-        },
-        { sessionIds: ids, ...(includePinned ? { includePinned: true } : {}) },
-        { onProgress: report },
-      )
-      return result
-    })
-  }
+
+
+
+
 
   return {
     'GET /meta': meta,
     'GET /state': state,
     // 这一页打开期间只有这一条长连接：清单、落地那一趟、自动推送那一轮、以及"库变了"的通知都从它来。
     'GET /panel/events': panelEvents,
-    // 一条会话的完整内容（分页；只读，不动宿主内存）：会话页点一行看的就是它。
-    'GET /transcript': transcript,
-    'GET /sync-diff': syncDiff,
-    // 远端各机器格子里每条会话的位置（右栏那一行「远端」读它）：一次刷新读一次，读到的整份缓存。
-    'GET /remote': remoteLibrary,
-    'POST /export': exportSessions,
-    'POST /import': importSessions,
-    // 一个资源两种方法写一条：宿主的 `register()` 对重复的 (kind, path) 直接抛错。
-    'GET|POST /sync': syncSessions,
-    // 自动推送：只推不拉，没有确认那一步（点一次就是真跑），所以只有一个方向。
-    'GET /auto-push': autoPushNow,
-    'GET /backups': backups,
-    'POST /migrate': migrate,
-    'POST /rollback': rollbackBackup,
-    'POST /delete': deleteSessions,
-    'POST /archive': archiveSessions,
-    'POST /retitle': retitleSessions,
+    ...transcriptHandlers(ctx),
+    ...migrationHandlers(ctx),
+    ...transferHandlers(ctx),
+    ...removeHandlers(ctx),
+    ...retitleHandlers(ctx),
+    ...sync.handlers,
   }
 }
 

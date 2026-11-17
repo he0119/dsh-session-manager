@@ -25,7 +25,7 @@ Status: implemented
 - **宿主侧一个类型**：`src/shared/types.ts` 的 `ProgressEvent { phase, total, done, id?, label? }` 与
   `ProgressReporter`。同步原来那份 `SyncProgress` 就是它（`export type SyncProgress = ProgressEvent`），
   两处不再各有一份形状。
-- **宿主侧一个出口**：`src/web.ts` 的 `streamResult(res, run)`。`/state`、`/migrate`、`/delete`、
+- **宿主侧一个出口**：`src/shared/http/respond.ts` 的 `streamResult(res, run)`。`/state`、`/migrate`、`/delete`、
   `/rollback`、`/import`、`/archive` 都换成 SSE（`text/event-stream`），事件三种：`progress` 逐条、
   `result` 收尾（形状与原来那份一次性 JSON 完全一样）、`error`（流已经开始之后才出的错）。
 - **每条事件写完必须把 socket `uncork()` 一次**（`sendEvent()` 里那一句，不是保险）：`res.write()`
