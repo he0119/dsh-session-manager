@@ -104,6 +104,43 @@ test('开一趟：跑着的时候看得到进度，结束后结论留着等界�
   assert.equal(job.snapshot().done, null, '按「完成」之后才清空：结果页关掉，下一趟回来是面板段')
 })
 
+test('状态栏那两串数也跟着进度事件走：会话搬到第几条、附件对象处理了几个', async () => {
+  let emit: ((event: ProgressEvent) => void) | undefined
+  let resolveApply: ((value: SyncResponse) => void) | undefined
+  const apply: SyncJobApply = (_planId, onProgress) => {
+    emit = onProgress
+    return new Promise<SyncResponse>((resolve) => {
+      resolveApply = resolve
+    })
+  }
+  const job = createSyncJob({ apply, watch: fakeWatch().watch })
+  job.start({})
+  assert.deepEqual(job.snapshot().tally.sessions, null, '刚按下时还没有会话在搬')
+  emit?.(progress('pull', 0, 2))
+  emit?.(progress('pull', 1, 2))
+  emit?.(progress('push', 0, 7))
+  emit?.(progress('attach', 0, 1))
+  // 拉取那 2 条跑完并进推送段：一共搬完 2 条，这一趟共 9 条；附件那一批 0/1。
+  assert.deepEqual(job.snapshot().tally.sessions, { done: 2, total: 9 })
+  assert.equal(job.snapshot().tally.objects?.total, 1)
+  resolveApply?.(result(2, 7))
+  await settle()
+  assert.deepEqual(job.snapshot().tally.sessions, null, '跑完之后那一格换成结论，数不再留着')
+})
+
+test('认领来的那一趟：同一条进度重复推过来不会重复累加', async () => {
+  const host = fakeWatch()
+  const job = createSyncJob({ apply: () => Promise.reject(new Error('不该走到这里')), watch: host.watch })
+  job.refresh()
+  // 附件对象那条最容易露馅：`done === 0` 在折叠时就是"新的一批开始了"，同一条折三遍会攒出 3 批。
+  const status: SyncRoundStatus = { applying: { startedAt: 1000, progress: progress('attach', 0, 3) }, last: null }
+  host.push(status)
+  host.push(status)
+  host.push(status)
+  assert.equal(job.snapshot().tally.objectsBase, 0, '同一条事件不该被当成三批')
+  assert.deepEqual(job.snapshot().tally.objects, { done: 0, total: 3 })
+})
+
 test('已经有一趟在跑时不再开第二趟（两趟应用会互相踩）', async () => {
   let resolveApply: ((value: SyncResponse) => void) | undefined
   let calls = 0

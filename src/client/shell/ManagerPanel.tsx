@@ -45,7 +45,7 @@ import { HelpPanel } from '../operations/help/HelpPanel.tsx'
 import { Hint } from '../shared/ui/Hint.tsx'
 import { ManagePanel } from '../operations/manage/ManagePanel.tsx'
 import { RunDialog, RunChip } from '../shared/ui/RunDialog.tsx'
-import { ProgressBlock } from '../shared/ui/ProgressBlock.tsx'
+import { ProgressBlock, progressTextOf } from '../shared/ui/ProgressBlock.tsx'
 import { SyncPanel } from '../operations/sync/SyncPanel.tsx'
 import { foldSubagents } from '../operations/manage/manageRows.ts'
 import { ImportPanel } from '../operations/transfer/ImportPanel.tsx'
@@ -245,8 +245,19 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
    * 那一行要不要摆：同步弹窗会自己说这一趟的结论（成功说细的那几句、失败说原因），由它说时这里就不
    * 重复；其余情况——弹窗没开，或者这一趟是别处发起、同步那一面拿不到结论——由这里说。
    */
-  /** 状态栏那一格说什么（纯函数判，见 logic/syncJobLabel.ts）；`null` = 这一格不出现。 */
+  /** 状态栏那一格说什么（纯函数判，见 operations/sync/syncJobLabel.ts）；`null` = 这一格不出现。 */
   const barLabel = syncBarLabel(job)
+  /**
+   * 那一格的悬浮提示：跑着时是"最后一条事件那一段做到哪儿 + 正在处理的那一条"（会话标题往往很长，
+   * 39px 的单行塞不下），跑完就是结论那一句。
+   */
+  const barTip = ((): string | undefined => {
+    if (!job.running) return jobLine?.text
+    const progress = job.progress
+    if (progress === null) return undefined
+    const text = progressTextOf(t, progress)
+    return progress.label === undefined ? text : `${text} · ${progress.label}`
+  })()
 
   /**
    * 结论别在状态栏上留着不走：跑完 12 秒后自己收掉。
@@ -673,8 +684,9 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
           不属于其中任何一件）。它们都不跟着动作走，所以跟"库在哪"这一档信息一起待在状态栏。
         */}
         {/*
-          同步那一趟在状态栏里说一句（39px 的单行）：跑着时是「同步中 3/7」，刚跑完是「同步完成 · 2 条」
-          或「同步失败」，点一下开同步那一面。字节、正在处理的那条会话、失败原因都在那一面里说。
+          同步那一趟在状态栏里说一句（39px 的单行）：跑着时是「同步中 · 3/7 条会话」（这一趟真要搬附件对象时
+          再加「· 附件 1/2」），刚跑完是「同步完成 · 2 条」或「同步失败」，点一下开同步那一面。字节、
+          正在处理的那条会话、失败原因都在那一面里说；悬停时它顺带把"最后那条事件做到哪儿"说出来。
           为什么不是列表上方那条横幅：进度那一档有 100px 高，压的是列表；而这件事跟列表内容无关，
           位置该跟「导入…」「备份与回滚」排在同一排。弹窗开着时不摆——那一面正显示着更细的进度。
         */}
@@ -686,7 +698,7 @@ export function ManagerPanel({ t, directory }: ManagerPanelProps): React.ReactEl
             裸 `<button>` 会带出浏览器自己那套灰边白底。它读起来是"这段的状态"，但点下去是动作（开同步
             那一面），所以形状与邻居一致比"看起来不像按钮"更要紧。
           */
-          <Hint text={jobLine === null ? undefined : jobLine.text} side="top">
+          <Hint text={barTip} side="top">
             <Button
               className="dsm-statusAction dsm-statusJob"
               variant="outline"
