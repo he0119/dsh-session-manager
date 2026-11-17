@@ -570,7 +570,7 @@ export function SessionPickTools({
 }): React.ReactElement {
   return (
     <>
-      {/* 这一对只动勾选集、不写盘。禁用态由官方原语的 `disabled` 透传。 */}
+      {/* 这一对只动勾选集、不写入磁盘。禁用态由官方原语的 `disabled` 透传。 */}
       <Button variant="outline" size="sm" onClick={onSelectAll} disabled={selectableCount === 0}>
         {t('list.selectAll')}
       </Button>

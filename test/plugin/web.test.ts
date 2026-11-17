@@ -734,7 +734,7 @@ test('POST /export：单独导出子智能体被拒；点名父会话时子智�
   assert.ok(Number(packed.headers['x-dsh-session-bytes']) > 0)
 })
 
-test('POST /import：预览不写盘，应用后会话与注册表一起写入磁盘', async () => {
+test('POST /import：预览不写入磁盘，应用后会话与注册表一起写入磁盘', async () => {
   const source = makeSandbox('web-import-source')
   writeSession(source.sessionsRoot, 'session-a', CWD_A, 1000, { title: '被导出的会话' })
   const exportHandlers = createApiHandlers(deps(source))
@@ -766,7 +766,7 @@ test('POST /import：预览不写盘，应用后会话与注册表一起写入�
   assert.deepEqual(planBody['created'], ['session-a'])
   // 预览表里显示的是标题（id 退到悬浮提示）：它从包里的日志事件折出来，清单格式没为此改过。
   assert.equal((planBody['entries'] as Array<Record<string, unknown>>)[0]!['title'], '被导出的会话')
-  assert.equal(existsSync(join(sessionDir(target.sessionsRoot, CWD_B, 'session-a'))), false, '预览不写盘')
+  assert.equal(existsSync(join(sessionDir(target.sessionsRoot, CWD_B, 'session-a'))), false, '预览不写入磁盘')
 
   const applied = fakeRes()
   await handlers['POST /import']!(fakeReq('POST', `${targetUrl}&mode=apply`, bundleBytes), applied.res)
@@ -879,7 +879,7 @@ test('POST /import：包坏了、目标目录不合法、库已存在同 id，�
     '应用开始干活之后回的是事件流：状态码早就发出去了，结论只能从 result 里读',
   )
   assert.equal(payload(conflictApply.captured)['ok'], false)
-  // 一件都不会发生（会话都在库里、包里的附件对象本机也都有）时应用在写盘之前就被挡下。
+  // 一件都不会发生（会话都在库里、包里的附件对象本机也都有）时应用在写入磁盘之前就被挡下。
   assert.match(String(payload(conflictApply.captured)['error']), /没有可导入的内容/)
 })
 
@@ -1141,7 +1141,7 @@ test('POST /migrate：mode 缺省只预览，预览结果里带上来源/目标�
   assert.equal((preview['registryChange'] as Record<string, unknown>)['targetPath'], CWD_B)
   // 没注入 effectMode 时按保守说法回：注册表写入磁盘还要重启才被承认。
   assert.equal(body['takesEffect'], 'restart-required')
-  // 预览不写盘：会话还在源项目目录
+  // 预览不写入磁盘：会话还在源项目目录
   assert.equal(existsSync(sessionDir(sandbox.sessionsRoot, CWD_A, 'session-a')), true)
 })
 
@@ -1353,7 +1353,7 @@ test('POST /migrate：来源目录已经被删掉也照旧能迁（少了 sessio
   assert.deepEqual((preview['sessions'] as { id: string }[]).map((s) => s.id).sort(), ['session-a', 'session-b'])
   // 来源目录本身不在盘上这件事不该被当成问题：日志与 header 里的 cwd 都还在。
   assert.equal(payload(captured)['ok'], true)
-  // 预览不写盘
+  // 预览不写入磁盘
   assert.equal(existsSync(sessionDir(sandbox.sessionsRoot, gone, 'session-b')), true)
 
   // 少了 sessionIds：400 —— 源只有"点名了哪几条"这一条路（空数组同理）。
@@ -1678,7 +1678,7 @@ test('GET /state：注入归档端口后 archiveAvailable 为 true', async () =>
   assert.equal(payload(captured)['archiveAvailable'], true)
 })
 
-test('POST /delete：预览不写盘、应用先备份再删，二者共用同一份计划', async () => {
+test('POST /delete：预览不写入磁盘、应用先备份再删，二者共用同一份计划', async () => {
   const sandbox = makeSandbox('web-delete')
   const dir = sessionDir(sandbox.sessionsRoot, CWD_A, 'session-a')
   writeSession(sandbox.sessionsRoot, 'session-a', CWD_A, 1000, { title: '不要了的会话' })
@@ -2180,7 +2180,7 @@ test('POST /sync?mode=apply：预览不应用，apply 走事件流拉取远端�
         { phase: 'scan', total: 1, done: 0 },
         { phase: 'remote', total: 0, done: 0 },
       ],
-      '读远端索引那一段没有分母（total: 0）：界面只说"正在读取远端索引…"。预览没有 pull/push——那两段要真写盘；本机与远端没有同 id 的会话，比对那段一个文件都不用读',
+      '读远端索引那一段没有分母（total: 0）：界面只说"正在读取远端索引…"。预览没有 pull/push——那两段要真写入磁盘；本机与远端没有同 id 的会话，比对那段一个文件都不用读',
     )
     const plan = previewStream.find((event) => event['type'] === 'result')?.['result'] as Record<string, unknown>
     assert.equal(plan['mode'], 'plan')
@@ -2545,7 +2545,7 @@ test('POST /delete：先备整个会话目录再删，逐条报进度（预览�
   assert.deepEqual(
     progressOf(planned.captured).map((item) => item['phase']),
     ['scan', 'scan'],
-    '预览不写盘：不该出现 backup / remove / verify 那几段',
+    '预览不写入磁盘：不该出现 backup / remove / verify 那几段',
   )
 
   const applied = fakeRes()
@@ -2597,7 +2597,7 @@ test('POST /rollback：预览与应用都逐条报"正在还原"，迁移备份�
       ['restore', 2, 1, 'session-a'],
       ['registry', 0, 0, undefined],
     ],
-    '预览也要逐条走一遍清单（不写盘而已）：分母是会话数，注册表那一段没有分母',
+    '预览也要逐条走一遍清单（不写入磁盘而已）：分母是会话数，注册表那一段没有分母',
   )
   assert.equal(payload(dry)['dryRun'], true)
 
@@ -2668,7 +2668,7 @@ test('POST /import：预览按包里的条数读、应用只按"会创建"的那
       ['registry', 0, 0],
       ['warm', 1, 0],
     ],
-    '应用沿用同一份计划（不再读一遍包），只按会创建的那些逐条写盘',
+    '应用沿用同一份计划（不再读一遍包），只按会创建的那些逐条写入磁盘',
   )
   const body = payload(applied.captured)
   assert.deepEqual(body['written'], ['session-b'])

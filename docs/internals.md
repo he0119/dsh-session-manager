@@ -64,7 +64,7 @@
   这一条相邻两张卡片实测间距 0px。
 - [动作行里的动作带边框](../.agents/notes/implemented/bug-fix/2026-10-16-actions-carry-their-frame.md)：
   变体按角色分：会动数据的动作走 `outline`（卡片动作行）/ `primary`（这一页的主动作），不动数据的工具
-  保持缺省的 `ghost`——原来按"写不写盘"分，一条动作行看着就是一段灰字。
+  保持缺省的 `ghost`——原来按"写不写磁盘"分，一条动作行看着就是一段灰字。
 - [文件对象要带上它的名字](../.agents/notes/implemented/bug-fix/2026-10-16-file-objects-need-their-name.md)：
   文件在本机是 `files/<sha 前两位>/<sha>/<名字>`（图片没有名字），所以引用与包清单都要带着它，缺了算不出
   路径、整包按坏包拒掉。
@@ -267,7 +267,7 @@
 - [库没变时复用上一次的扫描结果](../.agents/notes/implemented/architecture/2026-10-19-reuse-scan-results-between-refreshes.md)：
   指纹是目录清单加每个日志与投影缓存文件的 `size`/`mtimeMs`；粗粒度时间戳下的漏判由 racy 窗口兜住，
   基准取"上一次取指纹的时刻"。页面打开（`GET /state`）与导出 / 归档 / 重算名称的发现阶段用它；
-  迁移与同步应用前仍重扫，不参与写盘判断。
+  迁移与同步应用前仍重扫，不参与写入磁盘判断。
 - [投影记录解析一次就记住](../.agents/notes/implemented/architecture/2026-11-10-projection-record-parsed-once.md)：
   按 `size + mtimeMs + 身份` 记住解析过的那四个字段，重扫时只有刚被改写的那些重新解析：同一份库再扫一遍
   1159～1203 ms → 395～421 ms。
@@ -280,7 +280,7 @@
 - [重新生成名称：临时把会话挂回宿主](../.agents/notes/implemented/feature/2026-10-12-retitle-attaches-the-session-to-ask-the-title-service.md)：
   名称服务的显式重算入口只认**活会话**，而这里要处理的是整库里早已不在内存里的那些——端口把一条会话
   临时读出来、挂上、重算、自己开写句柄把新事件写下去、再摘掉（`src/shared/host/ports.ts` 的 `titleRefreshPort()`
-  + `src/operations/retitle/retitle.ts`）。写盘不走 `sessions.flush()`：还原出来的副本比磁盘多一条 `session/end-seed`，
+  + `src/operations/retitle/retitle.ts`）。写入磁盘不走 `sessions.flush()`：还原出来的副本比磁盘多一条 `session/end-seed`，
   路由出去的事件序号对不上写句柄的游标。
 - [会话内容视图：在插件里把日志解析出来](../.agents/notes/implemented/feature/2026-10-12-transcript-view-parses-the-log-itself.md)：
   一条事件一条条目、工具调用只算一次、上限与分页都在解析层（`src/operations/transcript/transcript.ts` + `GET /transcript` +
@@ -341,7 +341,7 @@
 - [同步的进度在状态栏那一格](../.agents/notes/implemented/architecture/2026-11-12-sync-progress-lives-in-the-status-bar.md)：
   列表上方那条 100px 的进度横幅删掉——它压的是列表，而"跑到第几条"跟勾了什么无关。状态栏多一格说一句
   （跑着「同步中 3/7」，跑完十几秒的结论），细节留在同步那一面；页头那枚同步状态仍然是常驻的状态。
-- [写盘动作共用一扇执行窗](../.agents/notes/implemented/architecture/2026-11-15-actions-share-one-run-dialog.md)：
+- [写入磁盘动作共用一扇执行窗](../.agents/notes/implemented/architecture/2026-11-15-actions-share-one-run-dialog.md)：
   删除、迁移、导入、回滚、整理远端、重算名称、同步都是"确认 → 状态窗（进度 +「转到后台」）→ 同一个
   窗口换成结果页（一句结论 + 没做到的清单 +「撤销」）→「完成」"这一条线；执行中关窗等于转后台，
   进度与结论在状态栏那一格，点它回到同一扇窗。状态只在浏览器内存里，刷新就没了（后台同步例外，
@@ -399,10 +399,10 @@
   窄列装不下整句时改文案与列宽，不是让标签顶到邻居身上；三段清单同形，状态与会话名分成两列。
 - [同步预览的三段清单要有段头](../.agents/notes/implemented/bug-fix/2026-10-07-sync-plan-sections-need-headings.md)：
   三行条数原来是与正文同一档的 `.dsm-hint`，改成 `h3` 段头 + 条数药丸；段头贴住它自己那张表。
-- [写盘动作是一个按钮开一个确认弹窗](../.agents/notes/implemented/architecture/2026-10-03-one-click-confirm-dialog.md)：
-  计划与"做不做"这个决定同框；只有会写盘的动作问，归档与导出不问。
+- [写入磁盘动作是一个按钮开一个确认弹窗](../.agents/notes/implemented/architecture/2026-10-03-one-click-confirm-dialog.md)：
+  计划与"做不做"这个决定同框；只有会写入磁盘的动作问，归档与导出不问。
 - [同步的预览与应用都走 SSE 报进度](../.agents/notes/implemented/architecture/2026-10-03-sync-progress-streams-over-sse.md)：
-  预览与应用回同一个事件流形状；算计划的四段各有各的分母（没有分母的那段不画条），写盘分拉取与推送
+  预览与应用回同一个事件流形状；算计划的四段各有各的分母（没有分母的那段不画条），写入磁盘分拉取与推送
   两段，跳过的那些不进分母，也没有中途取消。
 - [每个长动作都报进度，段名共用一套词汇](../.agents/notes/implemented/architecture/2026-10-08-every-long-action-streams-progress.md)：
   同步那套地基（`ProgressEvent` + `streamResult()` + `ProgressBlock`）现在六个动作共用（迁移 / 删除 /

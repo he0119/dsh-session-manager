@@ -304,7 +304,7 @@ export interface RemoteRemoval {
   problems: string[]
 }
 
-/** 一次同步的计划（纯计算，不碰网络也不写盘）。 */
+/** 一次同步的计划（纯计算，不碰网络也不写入磁盘）。 */
 export interface SyncPlan {
   /** 没有阻塞问题（映射配错、目标目录不存在等）。 */
   ok: boolean
@@ -919,7 +919,7 @@ function missingTargetProblem(problem: string): string | undefined {
  * `done` 是**已经做完**的条数——事件发在开始处理下一条之前，所以正在处理的是第 `done + 1` 条。
  *
  * 六段各有各的分母：`scan` / `remote` / `repo` / `compare` 是算计划的四段（预览就有），
- * `pull` / `push` 是真写盘的两段。`id` 与 `label` 只有写盘那两段有（"正在处理某一条"），算计划那四段
+ * `pull` / `push` 是真写入磁盘的两段。`id` 与 `label` 只有写入磁盘那两段有（"正在处理某一条"），算计划那四段
  * 只报做到哪儿。
  */
 export type SyncProgress = ProgressEvent
@@ -927,7 +927,7 @@ export type SyncProgress = ProgressEvent
 /** 应用的结果。 */
 export interface SyncOutcome {
   plan: SyncPlan
-  /** 这次是不是真的写盘了（`apply` 为 false 时全是只读）。 */
+  /** 这次是不是真的写入磁盘了（`apply` 为 false 时全是只读）。 */
   applied: boolean
   /** 拉取并写入磁盘的会话 id。 */
   pulled: string[]
@@ -1658,7 +1658,7 @@ export function replanPrepared(
  * 只预览的那份结果（界面与工具层两条路共用同一个形状）。
  *
  * @param prepared 预览算出来的那份数据。
- * @returns `applied: false` 的结果：计划在里面，写盘那几项全空。
+ * @returns `applied: false` 的结果：计划在里面，写入磁盘那几项全空。
  */
 export function plannedOutcome(prepared: SyncPrepared): SyncOutcome {
   return {
@@ -1846,7 +1846,7 @@ export async function applyPreparedSync(
     }
   }
   /**
-   * 上报一条写盘阶段的事件。
+   * 上报一条写入磁盘阶段的事件。
    *
    * 与 `prepareSync()` 里那份同名同形：`what` 只在调用方给了的时候才带上（缺席 = 与今天逐字节相同，
    * 界面那两条手动路不传它）。
@@ -2156,7 +2156,7 @@ export async function applyPreparedSync(
 
   // ── 让宿主认下这批改动：拉取会把会话挂到目标工作区（改注册表），与迁移是同一条语义。
   //    整批应用之后按顺序统一处理一次，而不是每条会话各来一遍。注册表终态一并交过去：宿主没接住时
-  //    它会用内存副本盖掉这次写盘，那时得靠这份终态写回来（见 take-effect.ts 的 `restoreRegistry()`）。
+  //    它会用内存副本盖掉这次写入磁盘，那时得靠这份终态写回来（见 take-effect.ts 的 `restoreRegistry()`）。
   const effect = registryWritten
     ? await takeEffectOnHostAll(registryChanges, deps, { registry })
     : undefined
@@ -2610,7 +2610,7 @@ export async function syncPrepared(
  * @param deps 远端、设置与本地库的位置。
  * @param options.apply 为 false 只算计划（除了读远端，什么都不写）。
  * @param options.onProgress 每开始处理一条调一次（见 `SyncProgress`）；预览与应用报的是同一套事件
- *   （算计划的四段 + 写盘的两段）。回调同步调用、不 await，所以它自己不许抛。
+ *   （算计划的四段 + 写入磁盘的两段）。回调同步调用、不 await，所以它自己不许抛。
  * @returns 结果；单条失败只记进 `problems`，不半路放弃整次同步。
  */
 export async function runSync(

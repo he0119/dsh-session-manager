@@ -328,7 +328,7 @@ export async function rollback(
 
   for (const [index, s] of manifest.sessions.entries()) {
     // 还原进度按**会话**报：一条会话的动作是"整个目录搬回去 + 逐文件复写"，分母用会话数才是
-    // 用户认得出的那个数（预览那条路也报：dry-run 照样要逐条走一遍清单，只是不写盘）。
+    // 用户认得出的那个数（预览那条路也报：dry-run 照样要逐条走一遍清单，只是不写入磁盘）。
     options.onProgress?.({ phase: 'restore', total: manifest.sessions.length, done: index, id: s.id, label: s.id })
     // 1) 目录搬回
     //

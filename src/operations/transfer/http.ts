@@ -139,7 +139,7 @@ function fileName(count: number, at: Date): string {
     /*
      * 计划与应用都走事件流：包本身的字节是**请求体**（上传那一段宿主报不了，那是浏览器与网络的事），
      * 但收到之后还有几段长的——预览要逐条读包里的日志折标题（实测 250 条 / 70.9 MB 约 1.7 秒）、数
-     * 一遍包里的附件对象在不在本机，应用要逐条写盘并改写首帧 cwd（同一条包实测 18.9 秒）。这几段原来
+     * 一遍包里的附件对象在不在本机，应用要逐条写入磁盘并改写首帧 cwd（同一条包实测 18.9 秒）。这几段原来
      * 界面上只有一句「导入中…」。
      */
     await streamResult(res, async (report) => {
@@ -180,7 +180,7 @@ function fileName(count: number, at: Date): string {
         const outcome = await applyImport(bundle, plan, { ...options, decodeAll, onProgress: report })
         // 导入会改注册表（把会话挂进目标工作区），与迁移是同一条语义：改完就把活儿交给宿主自己做，
         // 而不是把"重启 DSH 最稳妥"留给用户。注册表这次没动时（没有要挂的 / 读不到注册表）没有这一步。
-        // 注册表终态一并交过去：宿主没接住时它会用内存副本盖掉这次写盘，那时得靠这份终态写回来
+        // 注册表终态一并交过去：宿主没接住时它会用内存副本盖掉这次写入磁盘，那时得靠这份终态写回来
         // （见 take-effect.ts 的 `restoreRegistry()`）。
         const effect = outcome.registryWritten
           ? await takeEffectOnHost(
@@ -219,7 +219,7 @@ function fileName(count: number, at: Date): string {
             .join('\n'),
         }
       } catch (error) {
-        // 写盘写到一半失败：正文里那份**计划**照样带回去（界面把冲突与原因摆在弹窗里），
+        // 写入磁盘写到一半失败：正文里那份**计划**照样带回去（界面把冲突与原因摆在弹窗里），
         // 与原来 500 那次的正文同一个形状。
         return { ...payload, ok: false, error: error instanceof Error ? error.message : String(error) }
       }

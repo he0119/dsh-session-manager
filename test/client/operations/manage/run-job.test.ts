@@ -1,6 +1,6 @@
 // test/client/operations/manage/run-job.test.ts — 「确认之后的那扇状态窗」这一份状态（`src/client/operations/manage/runJob.ts`）。
 //
-// 为什么单独钉它：删除 / 迁移 / 导入 / 回滚 / 整理远端 / 重算名称这六个写盘的动作，确认之后都交给
+// 为什么单独钉它：删除 / 迁移 / 导入 / 回滚 / 整理远端 / 重算名称这六个写入磁盘的动作，确认之后都交给
 // 同一个状态窗：跑着报进度、可以「转到后台」、跑完在**同一个窗口**里换成结果页、按「完成」收掉。
 // 这一套的"谁在跑、跑到哪、窗口开没开、结论还在不在"全是模块级状态，界面冒烟里推不动（假 React
 // 不跑副作用，也没法调用这个模块的入口），所以在这一层逐条钉住。
@@ -178,7 +178,7 @@ test('一次只跑一件：跑着时第二趟发不起来，第一趟跑完才�
       finish = resolve
     })
   assert.equal(startRun('delete', work, () => null), true)
-  assert.equal(startRun('migrate', work, () => null), false, '第二趟被拒：两趟同时写盘会互相踩着')
+  assert.equal(startRun('migrate', work, () => null), false, '第二趟被拒：两趟同时写入磁盘会互相踩着')
   assert.equal(getRun()?.kind, 'delete', '留下的是先发起的那一趟')
 
   finish?.()

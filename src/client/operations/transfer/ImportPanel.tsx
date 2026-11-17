@@ -10,7 +10,7 @@
  * `src/operations/transfer/transfer.ts`）：计划返回的就是将要发生的事，页面不自己推算。
  *
  * 应用那一下**先看清再确认**：点「导入」只算一份只读计划（`mode: 'plan'`），弹窗里逐条列出会写什么
- * （create / skip、cwd 改写到哪），确认了才写盘——与删除、迁移、回滚同一条分界。导出那一边不在这里：
+ * （create / skip、cwd 改写到哪），确认了才写入磁盘——与删除、迁移、回滚同一条分界。导出那一边不在这里：
  * 它只把已有字节打成包给浏览器下载，不改本机任何东西，所以那枚按钮按下去就做。
  *
  * @module dsh-session-manager/client/operations/transfer/ImportPanel
@@ -103,7 +103,7 @@ export function ImportPanel({
    * 最近收到的那条进度事件（见 api.ts 的 `importBundle()`）。
    *
    * 包上传那一段宿主报不了（那是浏览器与网络的事），收到之后的预览（逐条读包里的日志折标题）与应用
-   * （逐条写盘、改写首帧 cwd）是真花时间的两段。
+   * （逐条写入磁盘、改写首帧 cwd）是真花时间的两段。
    *
    * 声明排在**最后**（不跟 `busy` 挤在一起）：冒烟用例按位置往 null 状态里初始值（见 test/client.test.mjs
    * 的 `nulls`），插在中间会让后面那些种子的位置整体错一格。
@@ -173,7 +173,7 @@ export function ImportPanel({
   })
 
   /**
-   * 点「导入」：开确认弹窗，同时把只读的导入计划取回来（`mode=plan` 不写盘）。
+   * 点「导入」：开确认弹窗，同时把只读的导入计划取回来（`mode=plan` 不写入磁盘）。
    *
    * 包与目标目录都得先有：缺哪个就在弹窗里说出缺的那个（`import.needFile` / `import.needTarget`），
    * 而不是先弹一个空框再抱怨——那一步的错与"计划有什么问题"不是一件事。
@@ -207,7 +207,7 @@ export function ImportPanel({
   }
 
   /**
-   * 弹窗里按「确认导入」：真写盘。
+   * 弹窗里按「确认导入」：真写入磁盘。
    *
    * 一条都没写进去（计划里全是 skip，或应用被拒）时把结果摆回弹窗里：冲突原因就在 `problems` 与每行的
    * `reason` 上，用户得看着它改包或改目标，而不是只收到一句"没写成功"。
@@ -293,7 +293,7 @@ export function ImportPanel({
   /**
    * 弹窗处在哪一段：填表单 → 看计划。
    *
-   * 原来还有第三段"正在写盘"：确认之后这枚弹窗自己变成进度窗，做完再消失。现在那一段交给状态窗
+   * 原来还有第三段"正在写入磁盘"：确认之后这枚弹窗自己变成进度窗，做完再消失。现在那一段交给状态窗
    * （见 [RunDialog.tsx](../../shared/ui/RunDialog.tsx)），这里只管"选包 + 看计划"。
    */
   const phase: 'form' | 'plan' = pending === null ? 'form' : 'plan'
@@ -302,7 +302,7 @@ export function ImportPanel({
     <Modal
       open
       onClose={onClose}
-      // 标题跟着那一段走：填表单时是"导入会话包"，看计划时是"将要写入"，写盘时是"导入中…"。
+      // 标题跟着那一段走：填表单时是"导入会话包"，看计划时是"将要写入"，写入磁盘时是"导入中…"。
       title={t(phase === 'form' ? 'import.dialogTitle' : 'import.confirmTitle')}
       closeLabel={t('close')}
       className="dsm-dialog"
@@ -331,7 +331,7 @@ export function ImportPanel({
           <>
             {/*
               「取消」在这一段是**回表单**（不是关窗）：包与目标目录还在，改一改再算一次比重选一遍省事。
-              写盘那一趟里它照旧禁用——那几个动作关掉窗口只是把进度藏起来，结果照样会丢。
+              写入磁盘那一趟里它照旧禁用——那几个动作关掉窗口只是把进度藏起来，结果照样会丢。
             */}
             <Button variant="outline" onClick={() => setPending(null)}>
               {t('import.back')}

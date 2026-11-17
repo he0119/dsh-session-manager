@@ -352,7 +352,7 @@ export async function runMigration(
     ...(onProgress === undefined ? {} : { onProgress }),
   })
   // 复核失败也照样让宿主认：磁盘就是磁盘，宿主该看到的是真实状态，藏起来只会更晚暴露。
-  // 注册表终态一并交过去：宿主没接住那一步时它会用内存副本盖掉这次写盘，那时得靠这份终态写回来。
+  // 注册表终态一并交过去：宿主没接住那一步时它会用内存副本盖掉这次写入磁盘，那时得靠这份终态写回来。
   const effect = await takeEffectOnHost(plan.registryChange, deps, { registry: plan.nextRegistry })
   /*
    * 搬动改写了 header 的 cwd，而宿主的投影检查点把 cwd 记在身份里 —— 不重折一遍，侧边栏这些会话就是

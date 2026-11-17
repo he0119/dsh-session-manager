@@ -155,7 +155,7 @@ test('应用：备份原字节、原子替换、复验通过；再算一遍计�
   rmSync(base, { recursive: true, force: true })
 })
 
-test('应用：写盘前复验不过就抛，原文件一个字节都不动（不留半成品）', async () => {
+test('应用：写入磁盘前复验不过就抛，原文件一个字节都不动（不留半成品）', async () => {
   const base = sandboxDir('path-repair-guard')
   const root = join(base, 'sessions')
   rmSync(base, { recursive: true, force: true })

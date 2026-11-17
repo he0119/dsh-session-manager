@@ -163,7 +163,7 @@ gzip( 'DSHSESS1\n' | u32le 清单长度 | 清单 JSON | 各文件原始字节 | 
   对得上）；`files[].name` 必须是 `parseSessionLogName()` 认得的单段规范名（`session.jsonl`、
   `session.vN.jsonl`、可带 `.zstd`），且清单里的 `version` 与文件名里的代次一致——这一段是写入磁盘路径
   的唯一来源，放 `../` 或绝对路径进来就等于让包决定往哪儿写。
-- 应用走 `planImport()` / `applyImport()`：把 header 里的 `cwd` 改写成**这台机器**的路径，写盘先写
+- 应用走 `planImport()` / `applyImport()`：把 header 里的 `cwd` 改写成**这台机器**的路径，写入磁盘先写
   `.part` 再 rename；导入只跳过、不覆盖。
 
 ## 读写顺序

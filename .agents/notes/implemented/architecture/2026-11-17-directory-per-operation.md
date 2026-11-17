@@ -31,12 +31,12 @@ Status: implemented
 
 分成 7 个操作：`migrate`（迁移：计划、执行、产物）、`transfer`（导出 / 导入 `.dshsess`）、`sync`
 （WebDAV 同步与自动推送）、`remove`（删除）、`retitle`（重新生成名称）、`path-repair`（修已应用的日志
-路径）、`transcript`（会话日志解析）。浏览器半侧按同一批操作切，另加 `manage`（会话页与六个写盘动作的
+路径）、`transcript`（会话日志解析）。浏览器半侧按同一批操作切，另加 `manage`（会话页与六个写入磁盘动作的
 状态窗）、`backup`（备份与回滚）、`help`（说明页）。
 
 测试跟着 `src/` 走：`test/{shared,operations,client}/` 与源码同构，入口级与门禁那一批（端点、工具、
 配置、产物冒烟、文档检查）收进 `test/plugin/`，共用的测试数据在 `test/fixtures/`。runner 改成递归扫描——
-目录名不是判据，新加一层不该让文件悄悄不跑。测试写盘的临时目录收成一个根 `test/.sandbox/<名字>`
+目录名不是判据，新加一层不该让文件悄悄不跑。测试写入磁盘的临时目录收成一个根 `test/.sandbox/<名字>`
 （`test/fixtures/sandbox.ts` 的 `sandboxDir()`），不再每个文件在自己目录下各起一个 `.sandbox`。
 
 日志格式单独一层 `src/shared/log/`：字节与帧、解码、行缓存、保结构改写、跟随会话根搬的路径、会话名；
