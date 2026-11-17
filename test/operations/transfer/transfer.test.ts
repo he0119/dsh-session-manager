@@ -181,7 +181,7 @@ test('buildBundleAsync：与同步版本逐字节相同（异步不换格式）'
   }
 })
 
-test('包校验：sha256、截断、magic、formatVersion 任何一项不对都拒绝', () => {
+test('包校验：sha256、截断、magic、formatVersion 任何一项不对都拒绝', async () => {
   const root = makeRoot('transfer-validate')
   const source = writeSession(root, { id: 'session-a', cwd: FROM_CWD })
   const bundle = buildBundle([source])
@@ -190,6 +190,7 @@ test('包校验：sha256、截断、magic、formatVersion 任何一项不对都�
   const corrupted = Buffer.from(bundle)
   corrupted[corrupted.length - 1] = corrupted[corrupted.length - 1]! ^ 0xff
   assert.throws(() => readBundle(corrupted), /gzip|sha256/i)
+  await assert.rejects(readBundleAsync(corrupted), /gzip|sha256/i)
 
   // 截断到最后几字节之外的内容都读不出来
   assert.throws(() => readBundle(bundle.subarray(0, 8)), /gzip|truncated/i)
