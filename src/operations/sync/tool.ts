@@ -19,14 +19,8 @@ import type { DecodeAll, EffectMode } from '../../shared/types.ts'
 import { createSessionMetaResolver } from '../../shared/visibility.ts'
 import type { RemoteWriteGate } from './remote-write.ts'
 import { syncRuntime } from './runtime.ts'
-import {
-  collectLeftovers,
-  runSync,
-  type SyncAttachmentIn,
-  type SyncAttachmentOut,
-  type SyncLeftover,
-  type SyncPlan,
-} from './sync.ts'
+import { collectLeftovers, runSync, type SyncLeftover, type SyncPlan } from './sync.ts'
+import type { SyncAttachmentIn, SyncAttachmentOut } from './attachments.ts'
 
 /** 同步工具的返回值。 */
 export interface SyncToolResult {

@@ -93,7 +93,7 @@ Status: implemented
 - **`AutoPushSkip` 没有新增码**（见上，试过 `settle` 又撤了）。界面侧多了一份**运行期**清单
   `AUTO_PUSH_SKIP_CODES`（`src/client/operations/sync/autoPush.ts`）：`AutoPushSkip` 是类型，编译之后不存在，
   而界面要按码去字典里挑句子。两边对不上的表现很安静（那句话退回"宿主没有说原因"），所以
-  `test/client/operations/sync/sync-form.test.ts` 两处钉住它——清单里的码字典要有句子、`src/operations/sync/sync.ts` 会报的码清单要有。
+  `test/client/operations/sync/sync-form.test.ts` 两处钉住它——清单里的码字典要有句子、`src/operations/sync/auto-push.ts` 会报的码清单要有。
 - **核心层的 `tick()` 现在把 `force` 转交给 `run()`。** 原来只有本地那个 `disabled` 判断读它、不往下
   传；生产路径没暴露这个问题是因为 `src/operations/sync/runtime.ts` 另有一层 `forceNext` 闭包在做同样的转交。但
   "接受了 `force` 却没生效"是最难查的一类接口缺陷，核心层这个接口本身就该自洽（是隐藏窗口那条路把它

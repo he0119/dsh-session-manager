@@ -5,10 +5,10 @@
 // 闭包里、另一半搬走。
 //
 // @module dsh-session-manager/operations/sync/http
-import { readFile, stat } from 'node:fs/promises'
-import type { IncomingMessage, ServerResponse } from 'node:http'
-import { basename } from 'node:path'
 
+import { readFile, stat } from 'node:fs/promises'
+import { IncomingMessage, ServerResponse } from 'node:http'
+import { basename } from 'node:path'
 import type { Handler, WebContext } from '../../web.ts'
 import { readJson, sendEvent, sendEventStream, sendJson, streamResult } from '../../shared/http/respond.ts'
 import { effectOf } from '../../shared/host/take-effect.ts'
@@ -16,11 +16,14 @@ import { locateSession } from '../../shared/library/discovery.ts'
 import { decodeLogTextChunked } from '../../shared/log/log-decode.ts'
 import { splitLinesAsync } from '../../shared/text-chunks.ts'
 import type { EffectMode } from '../../shared/types.ts'
-import { collectLeftovers, plannedOutcome, prepareSync, readRemoteLibrary, remoteBundlePath, remotePlacements, replanPrepared, runSync, runTidy, syncPrepared, testSyncConnection, tidySummary, type AutoPushOutcome, type SyncDecision, type SyncLeftover, type SyncOutcome, type SyncPrepared, type SyncProgress } from './sync.ts'
+import { collectLeftovers, plannedOutcome, prepareSync, replanPrepared, runSync, syncPrepared, type SyncDecision, type SyncLeftover, type SyncOutcome, type SyncPrepared, type SyncProgress } from './sync.ts'
+import type { AutoPushOutcome } from './auto-push.ts'
 import type { SyncInfo } from './runtime.ts'
 import { diffSessionLogs } from './session-diff.ts'
 import { entryBytes, readBundleAsync } from '../transfer/transfer.ts'
 import { readTranscript } from '../transcript/transcript.ts'
+import { readRemoteLibrary, remoteBundlePath, remotePlacements } from './index.ts'
+import { runTidy, testSyncConnection, tidySummary } from './tidy.ts'
 import { remoteBusyMessage } from './remote-write.ts'
 
 /** 面板要读的那两份状态：正在跑的一趟、上一趟的结论。 */
@@ -114,7 +117,6 @@ export function syncHandlers(ctx: WebContext): SyncHandlers {
   }
 }
 
-
   /** 落地那一趟的当前状态（`null` = 没在跑）。面板流开头那条与之后每条事件都带它。 */
   const applyingPayload = (): Record<string, unknown> | null =>
     applying === null ? null : { startedAt: applying.startedAt, progress: applying.progress }
@@ -127,8 +129,6 @@ export function syncHandlers(ctx: WebContext): SyncHandlers {
       .map(([id, decision]) => `${id}\u0000${decision}`)
       .join('\n')
   }
-
-
 
   /**
    * WebDAV 同步：`?mode=apply` 才真跑（拉取 + 推送），`?mode=test` 只探一次连通性，缺省只预演（读远端，
@@ -663,4 +663,3 @@ export function syncHandlers(ctx: WebContext): SyncHandlers {
     applyStatus: () => ({ applying: applyingPayload(), last: lastApply }),
   }
 }
-

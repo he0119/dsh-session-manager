@@ -44,7 +44,7 @@
 
 ## 远端同步格子
 
-远端只是「一格格包 + 每格一份索引」，不是会话库（[src/operations/sync/sync.ts](../src/operations/sync/sync.ts)）：
+远端只是「一格格包 + 每格一份索引」，不是会话库（[src/operations/sync/index.ts](../src/operations/sync/index.ts)）：
 
 ```
 <url>/dsh-session-manager/<machineId>/index.json                     这台机器贡献了哪些会话

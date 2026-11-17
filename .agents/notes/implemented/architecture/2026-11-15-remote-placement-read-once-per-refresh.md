@@ -17,7 +17,7 @@ Status: implemented
 多一条一次性的读，右栏加一格：
 
 - **宿主**：`GET /remote` 一遍读齐远端（每台机器那份 `index.json`，不是包），回
-  `会话 id → [{ machine, path, bytes, lastActiveAt? }]`（`src/operations/sync/sync.ts` 的 `remotePlacements()`，
+  `会话 id → [{ machine, path, bytes, lastActiveAt? }]`（`src/operations/sync/index.ts` 的 `remotePlacements()`，
   纯函数，`test/operations/sync/sync.test.ts` 钉住排序与聚合）。与 `RemoteLibrary.entries` 的口径刻意不同：那里每个
   id 只留**赢的那一份**（用来判"该拿哪份"），这里按机器逐份列全（用来回答"哪几处有"）。
   没配同步 → 409（界面据此整格不出现），不是"远端空着"。

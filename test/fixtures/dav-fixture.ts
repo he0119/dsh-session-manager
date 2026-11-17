@@ -13,7 +13,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, wri
 import { dirname, join } from 'node:path'
 
 import type { DavPort } from '../../src/operations/sync/dav.ts'
-import { remoteBundlePath, remoteIndexPath, SYNC_INDEX_UNIT, SYNC_INDEX_VERSION } from '../../src/operations/sync/sync.ts'
+import { remoteBundlePath, remoteIndexPath, SYNC_INDEX_UNIT, SYNC_INDEX_VERSION } from '../../src/operations/sync/index.ts'
 import { buildBundle } from '../../src/operations/transfer/transfer.ts'
 
 /** 夹具句柄。 */

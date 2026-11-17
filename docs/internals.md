@@ -201,7 +201,7 @@
   弹窗里每点一次「以本机为准 / 以远端为准」，原来重走一遍 `prepareSync()`（预演 2.1 s）；现在带着
   `planId` 回来，宿主用预演留下的输入（本机清单、远端索引、项目身份、内容指纹、那几对的内容关系）只
   跑一遍纯计划计算（`replanPrepared()`），几十毫秒。
-- `src/operations/sync/dav.ts` 是那四种方法与 Basic 鉴权（含宽容的多状态响应解析），`src/operations/sync/sync.ts` 是索引、计划与落地：
+- `src/operations/sync/dav.ts` 是那四种方法与 Basic 鉴权（含宽容的多状态响应解析），`src/operations/sync/index.ts` 是索引与远端布局，`sync.ts` 是计划与落地：
   界面那条路是 `prepareSync()` 算计划并把输入留下、确认时 `syncPrepared()` 照它落地（`planId` 指认
   宿主手里那份），`src/operations/sync/tool.ts` 的 `sync_sessions` 走单次调用那条（`runSync()`）。自动推送是同一个
   计划层上的第三条路：`runAutoPush()` 用 `pushOnly` 算一份只推的计划（`narrowToPushOnly()` 把
