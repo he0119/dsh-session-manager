@@ -18,7 +18,8 @@
 // 半，那段时间里网页别的请求都排着——这一页只是要看日志，不该让整个宿主陪着停。
 //
 // @module dsh-session-manager/log-text-cache
-import { readFileSync, statSync } from 'node:fs'
+import { statSync } from 'node:fs'
+import { readFile } from 'node:fs/promises'
 
 import { decodeLogTextChunked } from './log-decode.ts'
 
@@ -60,11 +61,11 @@ export function createLogTextCache(options: { maxChars?: number } = {}): LogText
         key = `${source.path}\u0000${stat.size}:${stat.mtimeMs}:${source.compression ?? ''}`
         if (entry !== undefined && entry.key === key) return entry.lines
       } catch {
-        // 文件刚好被删 / 读不动：下面的 readFileSync 会抛同一件事，交给调用方按"读不出来"处理。
+        // 文件刚好被删 / 读不动：下面的 readFile 会抛同一件事，交给调用方按"读不出来"处理。
       }
       // 先把上一份放掉再解新的：这一页只看一条会话，没有理由让两份几千万字符的文本同时被引用。
       entry = undefined
-      const text = await decodeLogTextChunked(readFileSync(source.path), source.compression)
+      const text = await decodeLogTextChunked(await readFile(source.path), source.compression)
       const lines = text.split('\n')
       // 判据拿的是**读之前**的 stat：文件在我们读的这一刻又长了，这份结果就不会被当成"文件没变"复用。
       if (key !== undefined && text.length <= maxChars) entry = { key, lines }
