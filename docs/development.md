@@ -160,6 +160,7 @@ src/client/                浏览器半侧 → lib/client.js
 └─ operations/             每种操作一个文件夹（弹窗 + 它自己的判据）
 lib/                       构建产物（tsdown 输出，已 gitignore）
 locale/                    插件展示元信息：meta.title / meta.description，en.json 是宿主的发现入口
+bench/                     性能基准（run.mjs 是入口，口径见 bench/README.md）
 test/                      测试（run-all.mjs 是进程内 runner）
 ├─ plugin/                 入口级与门禁：端点、工具、配置、产物、文档检查
 ├─ shared/                 与 src/shared 对应（含 log/ library/ host/）
@@ -531,6 +532,7 @@ npx @deepseek-ai/dsh@next plugin --profile <name> add <本目录>
 pnpm run check        # 类型 + 测试
 pnpm run build        # 确认产物能出来（构建不做类型检查，所以两件事都要做）
 pnpm run check:package # 确认打包内容与入口自洽（依赖上一步的产物）
+pnpm run bench        # 性能基准：停顿预算 + 与基线比耗时（见 bench/README.md）
 ```
 
 涉及工具契约的改动，另外跑 `test/plugin/tools.test.ts` 那组；涉及帧/压缩的改动，

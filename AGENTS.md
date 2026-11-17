@@ -85,6 +85,16 @@
 pnpm typecheck && pnpm build && pnpm test && pnpm check:package
 ```
 
+动到**扫库、内容视图、导入导出、迁移、删除、同步**这些热路径时，再跑一次性能基准：
+
+```sh
+pnpm bench
+```
+
+判定与口径见 [bench/README.md](bench/README.md)：最长主线程停顿不得超过场景预算，归一化后的耗时不得
+比 `bench/baseline.json` 慢 25% 以上。有意变慢（换了实现、多了功能）要重写基线（`pnpm bench:update`）
+并在 PR 里说明慢在哪儿、值不值。
+
 - **新断言要篡改验证**：把被测行为改回去，测试必须变红；报告里说明做了哪些篡改。
   [颜色只走检查面的 token](.agents/notes/implemented/bug-fix/2026-09-27-token-only-colors.md) 里那句
   "反事实都验过会失败"就是这个意思。

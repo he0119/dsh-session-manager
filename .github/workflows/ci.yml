@@ -38,3 +38,25 @@ jobs:
       # spawn 子进程，在受限环境里会因命名管道不可用而 EPERM。详见 docs/development.md。
       # 工具层那一组会 import 真实（devDependency）的 @deepseek-ai/dsh-tools，因此 CI 会真正跑到它。
       - run: pnpm test
+
+  bench:
+    # 性能基准不挂进必需的 `check`：它跑在共享 runner 上，绝对耗时随机器与邻居波动，红了不代表代码坏了。
+    # 这里只把数字留下来（artifact），回归与否由维护者在本机跑 `pnpm bench` 判定——口径见 bench/README.md。
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22.19.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # 夹具第一次跑要现场生成（约 10 秒），之后同一次 job 里复用不到，所以这里每次都从头来。
+      - run: pnpm run bench --no-check --json > bench-report.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bench-report
+          path: bench-report.json
+          if-no-files-found: error
