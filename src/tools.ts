@@ -21,13 +21,13 @@ import {
   type SyncConfig,
 } from './config.ts'
 import { defineTool, type ToolDefinition } from '@deepseek-ai/dsh-tools'
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, renameSync, statSync } from 'node:fs'
 import { homedir, hostname } from 'node:os'
 import { dirname, join } from 'node:path'
 
 import { createDavClient, type DavPort } from './operations/sync/dav.ts'
 import type { AttachmentPort } from './shared/attachments.ts'
-import { readHeaderQuick, scanAllAsync } from './shared/library/discovery.ts'
+import { readLogHeader, scanAllAsync } from './shared/library/discovery.ts'
 import { applyPathRepair, planPathRepair, type PathRepairPlanResult } from './operations/path-repair/path-repair.ts'
 import {
   previewMigration,
@@ -1442,12 +1442,15 @@ export function registerTools(
             if (!statSync(dir).isDirectory()) continue
             for (const name of readdirSync(dir)) {
               if (!name.endsWith('.jsonl.zstd')) continue
-              const header = readHeaderQuick(readFileSync(join(dir, name)), decodeAll).header
+              // 只读前缀：这条工具以前把整份日志读进来，只为了第一行 header；大项目里会连续读几百 MB。
+              const { header } = readLogHeader(join(dir, name), decodeAll)
               if (header.cwd !== args.dir) problems.push(`${dirName}/${name}: header cwd ${header.cwd} != ${args.dir}`)
               if (header.cwd !== undefined && projectKey(header.cwd) !== projectKey(args.dir)) {
                 problems.push(`${dirName}/${name}: project directory does not match header cwd (host would report corrupt session log)`)
               }
               checked++
+              // 一个项目可能有几百条；每 32 条让出一轮，别让一次校验把宿主按住。
+              if (checked % 32 === 0) await new Promise<void>((resolve) => setImmediate(resolve))
             }
           }
           return {

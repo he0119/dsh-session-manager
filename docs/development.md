@@ -193,6 +193,7 @@ tsconfig.client.json       Web Client 自己的类型工程（DOM + JSX；Host �
 | 文件 | 职责 | DSH 依赖 |
 | --- | --- | --- |
 | `src/shared/types.ts` | 贯穿各层的共享类型（计划、产物、注册表视图等） | 无 |
+| `src/shared/text-chunks.ts` | 大文本/大缓冲的分块工具：`splitLinesAsync()`、`joinTextAsync()`、`concatBuffersAsync()`，结果与整份 `split` / `join` / `Buffer.concat` 逐字符或逐字节相同，段间让出一轮事件循环；请求体拼接、路径改写、差异页与内容关系共用（见 [阻塞预算](../.agents/notes/implemented/architecture/2026-11-17-blocking-budget.md)） | 无 |
 | `src/shared/paths.ts` | `encodeSegment()`、代次文件名、会话目录/日志路径 | 无 |
 | `src/shared/project-key.ts` | 逐字符复刻宿主 `projectKey()` + 有损碰撞检测 | 无 |
 | `src/shared/canonical-path.ts` | 落地目录的规范拼写（`canonicalDir()`：宿主存工作区 `path` 与会话 `cwd` 用的同一个 realpath），落地那条路上唯一的归一入口；`canonicalDirIfExists()` 是它的"解析不出来就是结论"版本（宿主建成员索引用的那一支） | 无 |

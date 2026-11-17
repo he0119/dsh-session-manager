@@ -19,7 +19,8 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 
 import { accountedOwners } from './shared/accounting.ts'
 import { canonicalDirIfExists } from './shared/canonical-path.ts'
-import { locateSession, scanAll, type DiscoveredSession } from './shared/library/discovery.ts'
+import { locateSession, type DiscoveredSession } from './shared/library/discovery.ts'
+import { concatBuffersAsync, splitLinesAsync } from './shared/text-chunks.ts'
 import {
   assertBackupDir,
   listBackups,
@@ -334,7 +335,9 @@ export function readBody(req: IncomingMessage, limit = MAX_BODY_BYTES): Promise<
       }
       chunks.push(chunk)
     })
-    req.on('end', () => resolve(Buffer.concat(chunks)))
+    req.on('end', () => {
+      void concatBuffersAsync(chunks).then(resolve, reject)
+    })
     req.on('error', (error: Error) => reject(error))
   })
 }
@@ -440,9 +443,6 @@ function loadRegistry(
     }
   }
 }
-
-/** 扫整个会话库（项目目录 → 会话）。实现在 discovery.ts；「会话」页与族展开用的是同一个。 */
-export const scanLibrary = scanAll
 
 /**
  * 这次点名的会话里有没有"单独的子智能体"（父会话还在库里、又不会被一起带上），有就给出拒绝文案。
@@ -730,7 +730,7 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
   const scans = createScanCache()
   /*
    * 导出、归档、重算名称这三处都要"按整库判断"（展开子智能体族、查同名、按标题认人），但它们原先直接
-   * 调同步的 `scanAll()`：整库 1400 多条冷扫要 1 秒以上，这期间 SSE 长连接与别的请求都排着队，而且
+   * 调 `scanAllAsync()`：整库 1400 多条冷扫要 1 秒以上，这期间 SSE 长连接与别的请求都排着队，而且
    * 每次动作都重扫一遍。这里统一走缓存扫描（库没变就直接交上一次那份）与 `scanAsync()`（每个项目目录
    * 之间让出事件循环）。
    *
@@ -1920,7 +1920,7 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
     // 标题与 `/state` 同源（`resolveTitle` 先宿主投影缓存、后有界前缀）：内容视图顶上那行标题
     // 该和列表里显示的是同一个，别自己再折一次。投影记录由扫描那条路读一次的那份缓存里取
     // （`projection` 命中时连文件都不读），所以这里不会为一条会话再整份解一次投影文件。
-    const session = locateSession(paths.sessionsRoot, id, decodeAll, { projection, resolveTitle })
+    const session = await locateSession(paths.sessionsRoot, id, decodeAll, { projection, resolveTitle })
     if (session === undefined) {
       sendJson(res, 404, { error: `会话库里没有 ${id}` })
       return
@@ -2000,7 +2000,7 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
       return
     }
     // 与内容视图同一口径：按 id 直接找（不扫整库），标题也走同一份投影记录。
-    const session = locateSession(paths.sessionsRoot, id, decodeAll, { projection, resolveTitle })
+    const session = await locateSession(paths.sessionsRoot, id, decodeAll, { projection, resolveTitle })
     if (session === undefined) {
       sendJson(res, 404, { error: `会话库里没有 ${id}` })
       return
@@ -2051,7 +2051,7 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
       }
       const bytes = entryBytes(bundle, remoteFile)
       // 分块解压、块间让出：这条会话可能几十 MB，整份解会把宿主按住一两秒（差异页是点一下就要等的地方）。
-      remoteLines = (await decodeLogTextChunked(bytes, remoteFile.compression)).split('\n')
+      remoteLines = await splitLinesAsync(await decodeLogTextChunked(bytes, remoteFile.compression))
       remoteLogBytes = bytes.byteLength
     } catch (error) {
       sendJson(res, 422, { error: `远端那份读不出来：${error instanceof Error ? error.message : String(error)}` })
@@ -2059,7 +2059,7 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
     }
     let localLines: string[]
     try {
-      localLines = (await decodeLogTextChunked(await readFile(file.path), file.compression)).split('\n')
+      localLines = await splitLinesAsync(await decodeLogTextChunked(await readFile(file.path), file.compression))
     } catch (error) {
       sendJson(res, 422, { error: `本机那份读不出来：${error instanceof Error ? error.message : String(error)}` })
       return

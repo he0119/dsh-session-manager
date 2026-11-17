@@ -20,12 +20,21 @@ import { SYNC_INDEX_FILE, SYNC_INDEX_UNIT, SYNC_INDEX_VERSION, SYNC_NAMESPACE_DI
 import type { DavPort } from '../../src/operations/sync/dav.ts'
 import type { SyncSettings } from '../../src/operations/sync/sync.ts'
 import type { DecodeAll, ProgressEvent, SessionHeader, WorkspaceRegistryState } from '../../src/shared/types.ts'
-import { API_PREFIX, createApiHandlers, registerWebRoutes, type ApiDeps, type WebRouteLike } from '../../src/web.ts'
+import { API_PREFIX, createApiHandlers, readBody, registerWebRoutes, type ApiDeps, type WebRouteLike } from '../../src/web.ts'
 import { encodeRawFrame } from '../../src/shared/log/zstd-frame.ts'
 import { putRemoteSession, startDavFixture } from '../fixtures/dav-fixture.ts'
 import { sandboxDir } from '../fixtures/sandbox.ts'
 
 const decodeAll: DecodeAll = (buf: Uint8Array): string => Buffer.from(decompress(buf)).toString('utf8')
+test('readBody：多块请求体拼成同一份字节', async () => {
+  const req = new EventEmitter() as unknown as IncomingMessage
+  const chunks = [Buffer.from('abc'), Buffer.from('def'), Buffer.from('ghi')]
+  const pending = readBody(req)
+  for (const chunk of chunks) req.emit('data', chunk)
+  req.emit('end')
+  assert.equal((await pending).toString('utf8'), 'abcdefghi')
+})
+
 
 const CWD_A = sandboxDir('web-a')
 const CWD_B = sandboxDir('web-b')

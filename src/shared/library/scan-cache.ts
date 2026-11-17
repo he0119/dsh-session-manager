@@ -27,7 +27,7 @@
 import { readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { scanAll, scanAllAsync, type DiscoveredSession, type ScanOptions } from './discovery.ts'
+import { scanAllAsync, type DiscoveredSession, type ScanOptions } from './discovery.ts'
 import { parseSessionLogName } from '../paths.ts'
 import type { DecodeAll } from '../types.ts'
 
@@ -44,7 +44,7 @@ function sameTick(a: number, b: number): boolean {
   return Math.floor(a / RACY_TICK_MS) === Math.floor(b / RACY_TICK_MS)
 }
 
-/** `scan()` 的选项：在扫描选项之上多要一个"投影缓存目录在哪"。 */
+/** `scanAsync()` 的选项：在扫描选项之上多要一个"投影缓存目录在哪"。 */
 export interface ScanCacheOptions extends ScanOptions {
   /**
    * 宿主投影缓存目录（见 paths.projectionCacheDir）。
@@ -72,15 +72,13 @@ export interface ScanCache {
    * @param root 会话库根。
    * @param decodeAll 解码器。
    * @param options 扫描选项；`projectionDir` 参与指纹。
-   * @returns 会话数组（按 createdAt 降序，与 `scanAll()` 一致）。命中缓存时返回的是同一批会话对象的
-   *   副本数组——调用方别改里面的会话（改了会污染下一份结果）。
+   * @returns 会话数组（按 createdAt 降序，与 `scanAllAsync()` 一致）。命中缓存时返回的是同一批会话
+   *   对象的副本数组——调用方别改里面的会话（改了会污染下一份结果）。
    */
-  scan(root: string, decodeAll: DecodeAll, options?: ScanCacheOptions): DiscoveredSession[]
-  /** 与 {@link scan} 同一份结果，扫描时每个项目目录之间让出事件循环（页面打开走这一条）。 */
   scanAsync(root: string, decodeAll: DecodeAll, options?: ScanCacheOptions): Promise<DiscoveredSession[]>
 }
 
-/** 目录读不动就当它不存在（与 `scanAll()` 同一个口径：坏目录不该让整页打不开）。 */
+/** 目录读不动就当它不存在（与 `scanAllAsync()` 同一个口径：坏目录不该让整页打不开）。 */
 function readdirSafe(dir: string): string[] {
   try {
     return readdirSync(dir)
@@ -187,18 +185,6 @@ export function createScanCache(): ScanCache {
   }
 
   return {
-    scan(root, decodeAll, options = {}) {
-      const key = `${root}\u0000${options.projectionDir ?? ''}`
-      const previous = entry !== undefined && entry.key === key ? entry : undefined
-      const observedAt = Date.now()
-      const { fingerprint, racy } = probe(root, options, previous, observedAt)
-      if (previous !== undefined && previous.fingerprint === fingerprint && !racy) {
-        return [...previous.sessions]
-      }
-      const sessions = scanAll(root, decodeAll, options)
-      entry = { key, fingerprint, observedAt, sessions }
-      return sessions
-    },
     async scanAsync(root, decodeAll, options = {}) {
       const key = `${root}\u0000${options.projectionDir ?? ''}`
       const previous = entry !== undefined && entry.key === key ? entry : undefined

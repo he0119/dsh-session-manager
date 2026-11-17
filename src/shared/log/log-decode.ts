@@ -23,6 +23,8 @@
 import { Decompress, decompress } from 'fzstd'
 import { StringDecoder } from 'node:string_decoder'
 
+import { joinTextAsync } from '../text-chunks.ts'
+
 /**
  * 一次推给解码器的压缩字节数。
  *
@@ -73,7 +75,7 @@ async function decodeChunks(bytes: Buffer, chunkBytes: number): Promise<string> 
     if (end < bytes.length) await yieldToLoop()
   }
   parts.push(decoder.end())
-  return parts.join('')
+  return joinTextAsync(parts)
 }
 
 /**

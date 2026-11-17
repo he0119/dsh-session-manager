@@ -10,6 +10,7 @@
 import { isAbsolute } from 'node:path'
 
 import { decodeAllChunked } from './log-decode.ts'
+import { concatBuffersAsync, joinTextAsync, splitLinesAsync } from '../text-chunks.ts'
 
 import { rewriteSelfRootLine, SELF_ROOT_PATH_MARKERS } from './self-root-path.ts'
 import type { CompressFrame, DecodeAll, SessionHeader } from '../types.ts'
@@ -215,8 +216,8 @@ export async function relocateSessionPathsChunked(
 ): Promise<RelocatePathsResult> {
   const { decodeAll, compressFrame = encodeRawFrame } = options
   const text = await decodeAllChunked(buf)
-  const events = text.split('\n').slice(1).filter((line) => line !== '').length
-  const whole = relocateSessionPathsText(text, options)
+  const whole = await relocateSessionPathsTextAsync(text, options)
+  const events = whole.eventLines
   if (whole.text === text) {
     return { ...whole, buffer: buf, events, frames: 0, unchanged: true }
   }
@@ -264,10 +265,10 @@ export async function relocateSessionPathsChunked(
     // 一帧一让：帧通常只有几十到几百 KB，让出去的代价远小于整份按住的代价。
     await yieldToLoop()
   }
-  if (texts.join('') !== whole.text) {
+  if ((await joinTextAsync(texts)) !== whole.text) {
     throw new Error(`session ${whole.header.id}: round-trip mismatch after path rewrite`)
   }
-  const buffer = Buffer.concat(parts)
+  const buffer = await concatBuffersAsync(parts)
   return { ...whole, buffer, events, frames: rewrittenFrames }
 }
 
@@ -757,6 +758,81 @@ export function relocateSessionPathsText(text: string, options: SelfRootPathOpti
     rewritten: ledger.rewritten,
     mappings: [...ledger.mappings].map(([from, to]) => ({ from, to })),
     unmapped: [...ledger.unmapped],
+  }
+}
+
+/**
+ * 与 {@link relocateSessionPathsText} 同一份结果，只是按 2M 字符切段、逐行改写，段间让出。
+ *
+ * 给帧形态的异步改写用：整份 45MB 文本的 `split` / `join` 会按住主线程上百毫秒，这里
+ * 只把“逐行改写”切成小块；判据仍是最终文本与同步版本逐字符相同。
+ */
+async function relocateSessionPathsTextAsync(
+  text: string,
+  options: SelfRootPathOptions,
+): Promise<SelfRootPathRewrite & { eventLines: number }> {
+  const lines = await splitLinesAsync(text)
+  const firstLine = lines[0]
+  if (!firstLine || !firstLine.includes('"type":"session"')) {
+    throw new Error('session log first line is not a session header')
+  }
+  let header: SessionHeader
+  try {
+    header = JSON.parse(firstLine) as SessionHeader
+  } catch (error) {
+    throw new Error(
+      `session log header is not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
+    )
+  }
+  const root = options.from ?? header.cwd
+  if (root === undefined) throw new Error(`session ${header.id}: nothing to use as the source root`)
+  if (
+    options.from !== undefined
+    && header.cwd !== undefined
+    && header.cwd !== options.to
+    && header.cwd !== options.from
+  ) {
+    throw new Error(`session ${header.id}: header cwd is ${header.cwd}, expected ${options.from} or ${options.to}`)
+  }
+
+  const ledger: SelfRootLedger = {
+    root,
+    to: options.to,
+    foreignOnly: options.foreignOnly !== false,
+    mappings: new Map(),
+    unmapped: new Set(),
+    rewritten: 0,
+  }
+  const head = relocateHeaderCwdText(firstLine, options.to)
+  const body: string[] = []
+  for (let index = 1; index < lines.length; index += 1) {
+    const line = lines[index] as string
+    if (line === '') {
+      body.push(line)
+    } else {
+      const rewritten = rewriteSelfRootLine(line, {
+        root: ledger.root,
+        to: ledger.to,
+        accept: (value) => !ledger.foreignOnly || !isAbsolute(value),
+      })
+      for (const value of rewritten.unmapped) ledger.unmapped.add(value)
+      if (rewritten.changes.length > 0) {
+        ledger.rewritten += 1
+        for (const change of rewritten.changes) ledger.mappings.set(change.before, change.after)
+      }
+      body.push(rewritten.line)
+    }
+    // 每 1000 行让出一轮；行本身很小，攒多了才会变成几十毫秒。
+    if (index % 1000 === 0) await new Promise<void>((resolve) => setImmediate(resolve))
+  }
+  return {
+    text: `${head.text}\n${await joinTextAsync(body, '\n')}`,
+    header,
+    nextHeader: head.nextHeader,
+    rewritten: ledger.rewritten,
+    mappings: [...ledger.mappings].map(([from, to]) => ({ from, to })),
+    unmapped: [...ledger.unmapped],
+    eventLines: lines.slice(1).filter((line) => line !== '').length,
   }
 }
 

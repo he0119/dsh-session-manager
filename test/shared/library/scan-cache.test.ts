@@ -81,7 +81,7 @@ function writeProjection(dir: string, id: string, title: string, secondsAgo = 12
   backdate(path, secondsAgo)
 }
 
-test('库没变：第二次直接用上一次的结果，不再读每条会话的投影记录', () => {
+test('库没变：第二次直接用上一次的结果，不再读每条会话的投影记录', async () => {
   const sandbox = resetSandbox('unchanged')
   writeSession(sandbox.root, 'session-a')
   writeSession(sandbox.root, 'session-b')
@@ -93,11 +93,11 @@ test('库没变：第二次直接用上一次的结果，不再读每条会话�
     return { title: `记录-${query.id}` }
   }
 
-  const first = scans.scan(sandbox.root, decodeAll, { projection, projectionDir: sandbox.projectionDir })
+  const first = await scans.scanAsync(sandbox.root, decodeAll, { projection, projectionDir: sandbox.projectionDir })
   assert.equal(asked, 2, '第一次扫描每条会话读一次')
   const before = asked
 
-  const second = scans.scan(sandbox.root, decodeAll, { projection, projectionDir: sandbox.projectionDir })
+  const second = await scans.scanAsync(sandbox.root, decodeAll, { projection, projectionDir: sandbox.projectionDir })
   assert.equal(asked, before, '库没变就不该再读')
   assert.deepEqual(second.map((s) => s.id), first.map((s) => s.id))
   assert.deepEqual(second.map((s) => s.meta?.title), ['记录-session-a', '记录-session-b'])
@@ -105,18 +105,18 @@ test('库没变：第二次直接用上一次的结果，不再读每条会话�
   assert.notEqual(second, first)
 })
 
-test('scanAsync：与同步入口同一份结果，也复用同一份缓存', async () => {
+test('scanAsync：第二次命中同一份缓存，结果不换内容', async () => {
   const sandbox = resetSandbox('async')
   writeSession(sandbox.root, 'session-a')
   writeSession(sandbox.root, 'session-b')
   const scans = createScanCache()
-  const sync = scans.scan(sandbox.root, decodeAll, { projectionDir: sandbox.projectionDir })
-  const asyncSessions = await scans.scanAsync(sandbox.root, decodeAll, { projectionDir: sandbox.projectionDir })
-  assert.deepEqual(asyncSessions.map((s) => s.id), sync.map((s) => s.id))
-  assert.deepEqual(asyncSessions.map((s) => s.files[0]?.bytes), sync.map((s) => s.files[0]?.bytes))
+  const first = await scans.scanAsync(sandbox.root, decodeAll, { projectionDir: sandbox.projectionDir })
+  const second = await scans.scanAsync(sandbox.root, decodeAll, { projectionDir: sandbox.projectionDir })
+  assert.deepEqual(second.map((s) => s.id), first.map((s) => s.id))
+  assert.deepEqual(second.map((s) => s.files[0]?.bytes), first.map((s) => s.files[0]?.bytes))
 })
 
-test('新增一条会话：指纹里的目录清单变了，必须重扫', () => {
+test('新增一条会话：指纹里的目录清单变了，必须重扫', async () => {
   const sandbox = resetSandbox('added')
   writeSession(sandbox.root, 'session-a')
   const scans = createScanCache()
@@ -125,30 +125,30 @@ test('新增一条会话：指纹里的目录清单变了，必须重扫', () =>
     asked += 1
     return undefined
   }
-  scans.scan(sandbox.root, decodeAll, { projection, projectionDir: sandbox.projectionDir })
+  await scans.scanAsync(sandbox.root, decodeAll, { projection, projectionDir: sandbox.projectionDir })
   writeSession(sandbox.root, 'session-b')
 
-  const after = scans.scan(sandbox.root, decodeAll, { projection, projectionDir: sandbox.projectionDir })
+  const after = await scans.scanAsync(sandbox.root, decodeAll, { projection, projectionDir: sandbox.projectionDir })
   assert.deepEqual(after.map((s) => s.id).sort(), ['session-a', 'session-b'])
 })
 
-test('投影记录变了（标题被重写）：那些文件在指纹里，结果必须跟着变', () => {
+test('投影记录变了（标题被重写）：那些文件在指纹里，结果必须跟着变', async () => {
   const sandbox = resetSandbox('projection')
   writeSession(sandbox.root, 'session-a')
   writeProjection(sandbox.projectionDir, 'session-a', '老标题')
 
   const scans = createScanCache()
   const projection = createProjectionReader(sandbox.projectionDir)
-  const first = scans.scan(sandbox.root, decodeAll, { projection, projectionDir: sandbox.projectionDir })
+  const first = await scans.scanAsync(sandbox.root, decodeAll, { projection, projectionDir: sandbox.projectionDir })
   assert.equal(first[0]!.meta?.title, '老标题')
 
   // 两个时间戳必须真的不同：整条用例跑完只要几毫秒，用同一个"两分钟前"可能落进同一毫秒。
   writeProjection(sandbox.projectionDir, 'session-a', '新标题', 60)
-  const second = scans.scan(sandbox.root, decodeAll, { projection, projectionDir: sandbox.projectionDir })
+  const second = await scans.scanAsync(sandbox.root, decodeAll, { projection, projectionDir: sandbox.projectionDir })
   assert.equal(second[0]!.meta?.title, '新标题')
 })
 
-test('日志被原样写回（大小不变、mtime 变了）：指纹看得见这一枚', () => {
+test('日志被原样写回（大小不变、mtime 变了）：指纹看得见这一枚', async () => {
   const sandbox = resetSandbox('mtime')
   const path = writeSession(sandbox.root, 'session-a')
   const scans = createScanCache()
@@ -157,7 +157,7 @@ test('日志被原样写回（大小不变、mtime 变了）：指纹看得见�
     asked += 1
     return undefined
   }
-  scans.scan(sandbox.root, decodeAll, { projection, projectionDir: sandbox.projectionDir })
+  await scans.scanAsync(sandbox.root, decodeAll, { projection, projectionDir: sandbox.projectionDir })
   const before = asked
 
   // 字节完全一样地写回：size 不变、inode 不变，只有 mtime 变——这正是"只看大小"会漏掉的那种改动。
@@ -165,11 +165,11 @@ test('日志被原样写回（大小不变、mtime 变了）：指纹看得见�
   writeFileSync(path, same)
   backdate(path, 90)
   assert.equal(statSync(path).size, same.length, '前提：大小确实没变')
-  scans.scan(sandbox.root, decodeAll, { projection, projectionDir: sandbox.projectionDir })
+  await scans.scanAsync(sandbox.root, decodeAll, { projection, projectionDir: sandbox.projectionDir })
   assert.ok(asked > before, 'mtime 变了就必须重扫')
 })
 
-test('文件刚被写过（落在 racy 窗口里）：这次不复用', () => {
+test('文件刚被写过（落在 racy 窗口里）：这次不复用', async () => {
   const sandbox = resetSandbox('racy')
   // 不调时间戳：文件的 mtime 就是"刚才"。
   const projectDir = join(sandbox.root, '--tmp-project--')
@@ -195,13 +195,13 @@ test('文件刚被写过（落在 racy 窗口里）：这次不复用', () => {
     asked += 1
     return undefined
   }
-  scans.scan(sandbox.root, decodeAll, { projection, projectionDir: sandbox.projectionDir })
+  await scans.scanAsync(sandbox.root, decodeAll, { projection, projectionDir: sandbox.projectionDir })
   const before = asked
-  scans.scan(sandbox.root, decodeAll, { projection, projectionDir: sandbox.projectionDir })
+  await scans.scanAsync(sandbox.root, decodeAll, { projection, projectionDir: sandbox.projectionDir })
   assert.ok(asked > before, '刚写过的文件宁可多扫一次，也不交出可能过期的结果')
 })
 
-test('换了库根：键对不上，不复用上一次的结果', () => {
+test('换了库根：键对不上，不复用上一次的结果', async () => {
   const sandbox = resetSandbox('root')
   const otherRoot = join(SANDBOX_ROOT, 'root', 'other-sessions')
   mkdirSync(otherRoot, { recursive: true })
@@ -210,8 +210,8 @@ test('换了库根：键对不上，不复用上一次的结果', () => {
 
   const scans = createScanCache()
   const projection = () => undefined
-  const a = scans.scan(sandbox.root, decodeAll, { projection, projectionDir: sandbox.projectionDir })
-  const b = scans.scan(otherRoot, decodeAll, { projection, projectionDir: sandbox.projectionDir })
+  const a = await scans.scanAsync(sandbox.root, decodeAll, { projection, projectionDir: sandbox.projectionDir })
+  const b = await scans.scanAsync(otherRoot, decodeAll, { projection, projectionDir: sandbox.projectionDir })
   assert.deepEqual(a.map((s) => s.id), ['session-a'])
   assert.deepEqual(b.map((s) => s.id), ['session-x'])
 })

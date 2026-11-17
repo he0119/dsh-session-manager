@@ -22,6 +22,7 @@ import { statSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 
 import { decodeLogTextChunked } from './log-decode.ts'
+import { splitLinesAsync } from '../text-chunks.ts'
 
 /** 要读的日志：路径与压缩方式（与 discovery.ts 的 `SessionLogFile` 同形）。 */
 export interface LogTextSource {
@@ -66,7 +67,7 @@ export function createLogTextCache(options: { maxChars?: number } = {}): LogText
       // 先把上一份放掉再解新的：这一页只看一条会话，没有理由让两份几千万字符的文本同时被引用。
       entry = undefined
       const text = await decodeLogTextChunked(await readFile(source.path), source.compression)
-      const lines = text.split('\n')
+      const lines = await splitLinesAsync(text)
       // 判据拿的是**读之前**的 stat：文件在我们读的这一刻又长了，这份结果就不会被当成"文件没变"复用。
       if (key !== undefined && text.length <= maxChars) entry = { key, lines }
       return lines

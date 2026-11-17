@@ -186,6 +186,24 @@ function sha256(buf: Buffer): string {
   return createHash('sha256').update(buf).digest('hex')
 }
 
+/** 每算这么多字节让出一次：4 MB 的哈希在十毫秒量级，整份几百 MB 不能一口气算完。 */
+const HASH_CHUNK_BYTES = 4 * 1024 * 1024
+
+/**
+ * 与 {@link sha256} 同一份结果，只是按块算、块间让出事件循环。
+ *
+ * 190 MB 的包整份哈希一次要 100 毫秒以上；读包时逐条核对 sha256 会把主线程按在那里。分块之后
+ * 总耗时基本不变，最长一次停顿降到一块的大小。
+ */
+async function sha256Async(buf: Buffer): Promise<string> {
+  const hash = createHash('sha256')
+  for (let offset = 0; offset < buf.length; offset += HASH_CHUNK_BYTES) {
+    hash.update(buf.subarray(offset, Math.min(offset + HASH_CHUNK_BYTES, buf.length)))
+    await new Promise<void>((resolve) => setImmediate(resolve))
+  }
+  return hash.digest('hex')
+}
+
 /**
  * 把若干会话打成 `.dshsess` 字节。
  *
@@ -337,6 +355,24 @@ function bundleBytes(
  * 拼完才交给 zlib。这里改成逐段 `write()`（压缩在线程池里），最后只拼压缩后的输出（约为原始体积的
  * 三分之一）。产物与一次性 gzip 逐字节相同（zlib 不在段间 flush）。
  */
+/**
+ * 把压缩流吐出的若干块拼成一份，按 4MB 一段拷贝、段间让出。
+ *
+ * 190MB 的包直接 `Buffer.concat()` 会在主线程上拷整份，实测就是那 90 毫秒的停顿；分段拷贝总耗时
+ * 不变，单段停顿回到几毫秒。
+ */
+async function concatChunksAsync(chunks: readonly Buffer[]): Promise<Buffer> {
+  const total = chunks.reduce((sum, chunk) => sum + chunk.length, 0)
+  const out = Buffer.allocUnsafe(total)
+  let offset = 0
+  for (const chunk of chunks) {
+    chunk.copy(out, offset)
+    offset += chunk.length
+    await new Promise<void>((resolve) => setImmediate(resolve))
+  }
+  return out
+}
+
 async function gzipParts(parts: readonly Buffer[]): Promise<Buffer> {
   const gzip = createGzip()
   const chunks: Buffer[] = []
@@ -351,7 +387,7 @@ async function gzipParts(parts: readonly Buffer[]): Promise<Buffer> {
   }
   gzip.end()
   await Promise.race([finished, failed])
-  return Buffer.concat(chunks)
+  return concatChunksAsync(chunks)
 }
 
 /**
@@ -397,7 +433,7 @@ export async function buildBundleAsync(
         compression: file.compression,
         bytes: buf.length,
         offset,
-        sha256: sha256(buf),
+        sha256: await sha256Async(buf),
       })
       parts.push(buf)
       offset += buf.length
@@ -596,6 +632,141 @@ export function parseBundle(raw: Buffer): SessionBundle {
   }
 }
 
+export async function parseBundleAsync(raw: Buffer): Promise<SessionBundle> {
+  if (raw.length < BUNDLE_MAGIC.length + 4) throw new Error('bundle is truncated before its manifest')
+  if (raw.subarray(0, BUNDLE_MAGIC.length).toString('utf8') !== BUNDLE_MAGIC) {
+    throw new Error('bundle magic mismatch (not a .dshsess file, or made by an incompatible version)')
+  }
+
+  const manifestLength = raw.readUInt32LE(BUNDLE_MAGIC.length)
+  const manifestStart = BUNDLE_MAGIC.length + 4
+  const payloadStart = manifestStart + manifestLength
+  if (manifestLength <= 0 || payloadStart > raw.length) throw new Error('bundle manifest length is out of range')
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw.subarray(manifestStart, payloadStart).toString('utf8'))
+  } catch (error) {
+    throw new Error(
+      `bundle manifest is not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
+    )
+  }
+  if (typeof parsed !== 'object' || parsed === null) throw new Error('bundle manifest is not an object')
+  const manifest = parsed as {
+    formatVersion?: unknown
+    createdAt?: unknown
+    source?: unknown
+    sessions?: unknown
+    attachments?: unknown
+  }
+  const formatVersion = manifest.formatVersion
+  if (
+    typeof formatVersion !== 'number' ||
+    !Number.isInteger(formatVersion) ||
+    formatVersion < BUNDLE_MIN_FORMAT_VERSION ||
+    formatVersion > BUNDLE_FORMAT_VERSION
+  ) {
+    throw new Error(`unsupported bundle formatVersion ${String(formatVersion)}`)
+  }
+  if (!Array.isArray(manifest.sessions)) throw new Error('bundle manifest has no sessions array')
+
+  const payload = raw.subarray(payloadStart)
+  const sessions: BundleSession[] = []
+  for (const value of manifest.sessions as BundleSession[]) {
+    if (typeof value?.id !== 'string' || value.id === '') throw new Error('bundle session without an id')
+    const expectedDir = encodeSegment(value.id)
+    if (value.dirName !== expectedDir) {
+      throw new Error(`bundle session ${value.id} has dirName ${String(value.dirName)}, expected ${expectedDir}`)
+    }
+    if (!Array.isArray(value.files) || value.files.length === 0) {
+      throw new Error(`bundle session ${value.id} carries no log files`)
+    }
+    for (const file of value.files) {
+      if (typeof file?.name !== 'string' || typeof file.bytes !== 'number' || typeof file.offset !== 'number') {
+        throw new Error(`bundle session ${value.id} has a malformed file entry`)
+      }
+      /*
+       * 文件名只能是单段规范名（`session.vN.jsonl[.zstd]`）。`applyImport()` 会拿它拼目标路径，
+       * 放 `../` 或绝对路径进来就等于让包决定往哪儿写；`parseSessionLogName()` 的正则同时排除了
+       * `/`、`\` 与 `..`，所以校验放在这里一次就够。
+       */
+      const parsedName = parseSessionLogName(file.name)
+      if (parsedName === undefined) {
+        throw new Error(
+          `bundle session ${value.id} has a log file name that is not a single session log: ${JSON.stringify(file.name)}`,
+        )
+      }
+      if (parsedName.version !== file.version) {
+        throw new Error(
+          `bundle session ${value.id} file ${file.name} says version ${file.version} in the manifest but ${parsedName.version} in its name`,
+        )
+      }
+      if (file.offset < 0 || file.bytes < 0 || file.offset + file.bytes > payload.length) {
+        throw new Error(`bundle session ${value.id} file ${file.name} points outside the payload`)
+      }
+      const slice = payload.subarray(file.offset, file.offset + file.bytes)
+      if ((await sha256Async(slice)) !== file.sha256) {
+        throw new Error(`bundle session ${value.id} file ${file.name} failed its sha256 check (corrupted bundle)`)
+      }
+    }
+    sessions.push({
+      id: value.id,
+      cwd: value.cwd,
+      createdAt: value.createdAt,
+      dirName: value.dirName,
+      files: value.files,
+    })
+  }
+
+  // v1 没有这一节（`undefined` 才是"老包"，也是现在写出来的"一个对象都没带"那种包）；空数组是别的
+  // 写入者留下的"这包里没有对象"——两者读出来都一样是空表，判定不必再分。写成别的形状就是坏包。
+  if (manifest.attachments !== undefined && !Array.isArray(manifest.attachments)) {
+    throw new Error('bundle manifest attachments is not an array')
+  }
+  const attachments: BundleAttachmentEntry[] = []
+  for (const value of (manifest.attachments ?? []) as BundleAttachmentEntry[]) {
+    if (!isAttachmentId(value?.id)) throw new Error(`bundle attachment has an invalid id ${String(value?.id)}`)
+    if (value.kind !== 'image' && value.kind !== 'file') {
+      throw new Error(`bundle attachment ${value.id} has an unknown kind ${String(value.kind)}`)
+    }
+    if (typeof value.bytes !== 'number' || typeof value.offset !== 'number' || value.bytes < 0 || value.offset < 0) {
+      throw new Error(`bundle attachment ${value.id} has a malformed entry`)
+    }
+    if (value.name !== undefined && (typeof value.name !== 'string' || value.name.length === 0)) {
+      throw new Error(`bundle attachment ${value.id} has a malformed name`)
+    }
+    // 文件对象的名字决定它落在哪儿，缺了就是个落不下去的条目：写这个格式的只有本插件，所以见到就是坏包。
+    if (value.kind === 'file' && value.name === undefined) {
+      throw new Error(`bundle attachment ${value.id} is a file without a name`)
+    }
+    if (value.offset + value.bytes > payload.length) {
+      throw new Error(`bundle attachment ${value.id} points outside the payload`)
+    }
+    const slice = payload.subarray(value.offset, value.offset + value.bytes)
+    if ((await sha256Async(slice)) !== value.id.slice('sha256:'.length)) {
+      throw new Error(`bundle attachment ${value.id} failed its sha256 check (corrupted bundle)`)
+    }
+    attachments.push({
+      id: value.id,
+      kind: value.kind,
+      ...(value.name === undefined ? {} : { name: value.name }),
+      bytes: value.bytes,
+      offset: value.offset,
+    })
+  }
+
+  return {
+    formatVersion,
+    createdAt: typeof manifest.createdAt === 'string' ? manifest.createdAt : '',
+    source: (typeof manifest.source === 'object' && manifest.source !== null
+      ? manifest.source
+      : {}) as BundleSourceInfo,
+    sessions,
+    attachments,
+    payload,
+  }
+}
+
 /** 把 gunzip 那一步的失败折成同一句原话（同步与异步两个入口共用）。 */
 function notGzip(error: unknown): Error {
   return new Error(`not a gzip-compressed session bundle: ${error instanceof Error ? error.message : String(error)}`)
@@ -644,7 +815,7 @@ export async function readBundleAsync(bytes: Buffer, options: ReadBundleOptions 
   } catch (error) {
     throw gunzipError(error, limit)
   }
-  return parseBundle(raw)
+  return await parseBundleAsync(raw)
 }
 
 /** 取某个文件条目的字节。 */
@@ -839,8 +1010,6 @@ export async function bundleTitlesAsync(
   decodeAll: DecodeAll,
   options: { onProgress?: ProgressReporter } = {},
 ): Promise<Map<string, string | undefined>> {
-  /** 每折这么多条让出一次：单条通常不到几毫秒，攒到这个数仍在几十毫秒的预算内。 */
-  const YIELD_EVERY = 8
   const titles = new Map<string, string | undefined>()
   for (const [index, session] of bundle.sessions.entries()) {
     options.onProgress?.({
@@ -851,7 +1020,8 @@ export async function bundleTitlesAsync(
       label: session.id,
     })
     titles.set(session.id, bundleTitle(bundle, session, decodeAll))
-    if ((index + 1) % YIELD_EVERY === 0) await new Promise<void>((resolve) => setImmediate(resolve))
+    // 每条都让出：一条就要解最多 256 KB（实测可达几十毫秒），攒几条就会越过 50 毫秒的预算。
+    await new Promise<void>((resolve) => setImmediate(resolve))
   }
   return titles
 }

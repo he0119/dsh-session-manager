@@ -16,6 +16,7 @@ import { basename, dirname, isAbsolute, join } from 'node:path'
 import type { DiscoveredSession } from '../../shared/library/discovery.ts'
 import { SELF_ROOT_PATH_FIELDS, SELF_ROOT_PATH_MARKERS } from '../../shared/log/self-root-path.ts'
 import { decodeLogTextChunked } from '../../shared/log/log-decode.ts'
+import { splitLinesAsync } from '../../shared/text-chunks.ts'
 import { relocateSessionPaths, relocateSessionPathsChunked, relocateSessionPathsText } from '../../shared/log/session-log.ts'
 import { stampName } from '../../shared/journal.ts'
 import type { CompressFrame, DecodeAll, ProgressReporter } from '../../shared/types.ts'
@@ -71,9 +72,9 @@ export interface PathRepairOptions {
 }
 
 /** 日志正文里出现过的、跟着会话根搬的取值（只读，按出现顺序去重）。 */
-function selfRootValues(text: string): string[] {
+async function selfRootValues(text: string): Promise<string[]> {
   const values: string[] = []
-  for (const line of text.split('\n')) {
+  for (const line of await splitLinesAsync(text)) {
     if (!SELF_ROOT_PATH_MARKERS.some((marker) => line.includes(marker))) continue
     let event: { type?: unknown; data?: Record<string, unknown> | null }
     try {
@@ -169,7 +170,7 @@ export async function planPathRepair(
         continue
       }
       // "本机不认的"才需要搬：本机就合法的路径属于历史事实（与 session-log.ts 的 `accept` 同一口径）。
-      const values = selfRootValues(text).filter((value) => !isAbsolute(value))
+      const values = (await selfRootValues(text)).filter((value) => !isAbsolute(value))
       if (values.length === 0) continue
       const from = options.from ?? deriveSourceRoot(values, to)
       if (from === undefined) {

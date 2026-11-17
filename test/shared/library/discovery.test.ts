@@ -11,7 +11,7 @@ import test from 'node:test'
 
 import { decompress } from 'fzstd'
 
-import { locateSession, readLogHeader, scanAll, scanAllAsync } from '../../../src/shared/library/discovery.ts'
+import { locateSession, readLogHeader, scanAllAsync } from '../../../src/shared/library/discovery.ts'
 import type { DecodeAll, SessionHeader } from '../../../src/shared/types.ts'
 import { encodeRawFrame } from '../../../src/shared/log/zstd-frame.ts'
 import { sandboxDir } from '../../fixtures/sandbox.ts'
@@ -72,43 +72,43 @@ test('readLogHeader：首帧比前缀还大时退回读整份，不丢这条会�
   assert.equal(bytes, statSync(path).size)
 })
 
-test('scanAll：整库扫描照旧报每条会话的字节数合计（只读前缀不等于只报前缀）', () => {
+test('scanAllAsync：整库扫描照旧报每条会话的字节数合计（只读前缀不等于只报前缀）', async () => {
   const root = resetSandbox()
   const tail = [JSON.stringify({ type: 'user/message', seq: 0, data: { text: 'z'.repeat(200 * 1024) } })]
   const a = writeLog(join(root, '--tmp-project--', 'session-a'), headerOf('session-a'), tail)
   const b = writeLog(join(root, '--tmp-project--', 'session-b'), headerOf('session-b'))
 
-  const sessions = scanAll(root, decodeAll)
+  const sessions = await scanAllAsync(root, decodeAll)
   const byId = new Map(sessions.map((session) => [session.id, session]))
   assert.equal(byId.get('session-a')!.files.reduce((sum, file) => sum + file.bytes, 0), statSync(a).size)
   assert.equal(byId.get('session-b')!.files.reduce((sum, file) => sum + file.bytes, 0), statSync(b).size)
   assert.ok(statSync(a).size > 200 * 1024)
 })
 
-test('scanAll：日志改写后立刻再扫，读到的必须是新的（缓存的判据是 size + mtime）', () => {
+test('scanAllAsync：日志改写后立刻再扫，读到的必须是新的（缓存的判据是 size + mtime）', async () => {
   const root = resetSandbox()
   const dir = join(root, '--tmp-project--', 'session-a')
   const path = writeLog(dir, headerOf('session-a', { cwd: '/tmp/aaa' }))
-  assert.equal(scanAll(root, decodeAll)[0]?.cwd, '/tmp/aaa')
+  assert.equal((await scanAllAsync(root, decodeAll))[0]?.cwd, '/tmp/aaa')
 
   // 同一秒里改写（清空再写）：大小可能一样，只有 mtime 变——缓存必须认出来。
   writeLog(dir, headerOf('session-a', { cwd: '/tmp/bbb' }))
-  assert.equal(scanAll(root, decodeAll)[0]?.cwd, '/tmp/bbb')
+  assert.equal((await scanAllAsync(root, decodeAll))[0]?.cwd, '/tmp/bbb')
 
   // 追加 eventos：header 没变，但报出去的字节数必须跟着文件走。
   writeLog(dir, headerOf('session-a', { cwd: '/tmp/bbb' }), [JSON.stringify({ type: 'user/message', seq: 0 })])
-  assert.equal(scanAll(root, decodeAll)[0]?.files[0]?.bytes, statSync(path).size)
+  assert.equal((await scanAllAsync(root, decodeAll))[0]?.files[0]?.bytes, statSync(path).size)
 })
 
-test('scanAllAsync：与同步 scanAll 同一份结果（分目录让出不换内容）', async () => {
+test('scanAllAsync：分目录让出不换内容（两次结果一致）', async () => {
   const root = resetSandbox()
   writeLog(join(root, '--proj-a--', 'session-a'), headerOf('session-a', { createdAt: 3000 }))
   writeLog(join(root, '--proj-b--', 'session-b'), headerOf('session-b', { createdAt: 2000 }))
   writeLog(join(root, '--proj-b--', 'session-c'), headerOf('session-c', { createdAt: 1000 }))
 
-  const sync = scanAll(root, decodeAll)
-  const asyncSessions = await scanAllAsync(root, decodeAll)
-  assert.deepEqual(asyncSessions, sync)
+  const first = await scanAllAsync(root, decodeAll)
+  const second = await scanAllAsync(root, decodeAll)
+  assert.deepEqual(second, first)
 })
 
 test('scanAllAsync：一个项目目录里也按会话让出，不是整目录读完才让', async () => {
@@ -131,7 +131,7 @@ test('scanAllAsync：一个项目目录里也按会话让出，不是整目录�
 
 // 按 id 直接定位：内容视图每翻一页都要定位一次，所以它不能是"扫一遍整库再筛"。
 // 这组用例同时钉住兜底：目录名不是 id 的编码时仍要能找到，找不到才算真的没有。
-test('locateSession：只读这一条，不为其它会话折标题（整库扫一遍会为每条都调一次）', () => {
+test('locateSession：只读这一条，不为其它会话折标题（整库扫一遍会为每条都调一次）', async () => {
   const root = resetSandbox()
   writeLog(join(root, '--proj-a--', 'session-a'), headerOf('session-a', { createdAt: 3000 }))
   writeLog(join(root, '--proj-a--', 'session-b'), headerOf('session-b', { createdAt: 2000 }))
@@ -139,7 +139,7 @@ test('locateSession：只读这一条，不为其它会话折标题（整库扫�
 
   const titled: string[] = []
   const record = { title: '投影里的标题' }
-  const session = locateSession(root, 'session-a', decodeAll, {
+  const session = await locateSession(root, 'session-a', decodeAll, {
     projection: (query) => {
       assert.equal(query.id, 'session-a', '只为这一条读投影记录')
       return record
@@ -157,35 +157,35 @@ test('locateSession：只读这一条，不为其它会话折标题（整库扫�
   assert.deepEqual(titled, ['session-a'], '整库扫描会给三条都折一遍标题')
 })
 
-test('locateSession：库里没有这条时 undefined', () => {
+test('locateSession：库里没有这条时 undefined', async () => {
   const root = resetSandbox()
   writeLog(join(root, '--proj-a--', 'session-a'), headerOf('session-a'))
 
-  assert.equal(locateSession(root, 'session-missing', decodeAll), undefined)
+  assert.equal(await locateSession(root, 'session-missing', decodeAll), undefined)
 })
 
-test('locateSession：同一个 id 在两个项目目录里时取新建的那一条', () => {
+test('locateSession：同一个 id 在两个项目目录里时取新建的那一条', async () => {
   const root = resetSandbox()
   writeLog(join(root, '--proj-a--', 'session-dup'), headerOf('session-dup', { createdAt: 1000 }))
   writeLog(join(root, '--proj-b--', 'session-dup'), headerOf('session-dup', { createdAt: 5000 }))
 
-  assert.equal(locateSession(root, 'session-dup', decodeAll)?.createdAt, 5000)
+  assert.equal((await locateSession(root, 'session-dup', decodeAll))?.createdAt, 5000)
 })
 
-test('locateSession：目录名不是 id 的编码时退回整库扫一遍，仍然找得到', () => {
+test('locateSession：目录名不是 id 的编码时退回整库扫一遍，仍然找得到', async () => {
   const root = resetSandbox()
   // 手改过 / 早期版本留下的库：目录名叫别的，header 里才是真 id。
   writeLog(join(root, '--proj-a--', 'not-the-encoded-id'), headerOf('session-odd'))
 
-  assert.equal(locateSession(root, 'session-odd', decodeAll)?.id, 'session-odd')
+  assert.equal((await locateSession(root, 'session-odd', decodeAll))?.id, 'session-odd')
 })
 
-test('locateSession：目录名对得上、header 里的 id 对不上时不算这条会话，但那条会话本身还找得到', () => {
+test('locateSession：目录名对得上、header 里的 id 对不上时不算这条会话，但那条会话本身还找得到', async () => {
   const root = resetSandbox()
   writeLog(join(root, '--proj-a--', 'session-x'), headerOf('session-y'))
 
   // 目录名叫 session-x，里面却是 session-y：按 id 找 session-x 不能被同名目录骗过去。
-  assert.equal(locateSession(root, 'session-x', decodeAll), undefined)
+  assert.equal(await locateSession(root, 'session-x', decodeAll), undefined)
   // 而 session-y 确实在库里（整库扫描也列得出它），兜底要把它找出来，不能因为目录名怪就丢。
-  assert.equal(locateSession(root, 'session-y', decodeAll)?.id, 'session-y')
+  assert.equal((await locateSession(root, 'session-y', decodeAll))?.id, 'session-y')
 })

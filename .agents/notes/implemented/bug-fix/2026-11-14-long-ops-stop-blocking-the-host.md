@@ -57,7 +57,7 @@ Status: implemented
   两套选项各自缓存，库变了都会重扫。
 
 - **导入 / 拉取的大包异步解、异步写**：导入与同步拉取改用 `readBundleAsync()`；导入预演先用
-  `bundleTitlesAsync()` 每几条让出一次，再交给 `planImport()`；`applyImport()` 与附件对象提交
+  `bundleTitlesAsync()` 每折一条就让出一次，再交给 `planImport()`；`applyImport()` 与附件对象提交
   改用 `fs/promises` 的 `mkdir` / `writeFile` / `rename` / `chmod`。几十 MB 的包不再整段按住主线程。
 - **日志首次读取与同步差异异步读**：内容视图第一次打开、`/sync-diff` 的两边日志都改用
   `readFile()` / `readBundleAsync()`；后面的分块解码本来就会让出。
@@ -67,6 +67,23 @@ Status: implemented
   以及 `applyArtifactMovesAsync()` 的同卷 rename / 跨卷 copy，都改走 `fs/promises`。
 - **扫库在项目目录内部也按会话让出**：`scanProjectDirAsync()` 每 16 条让出一次；`scanAllAsync()`
   不再等整个项目目录读完。
+- **整库扫描只留异步入口**：同步的 `scanAll()` 与扫描缓存里的同步 `scan()` 删除；`locateSession()`
+  改成异步，内容视图与同步差异两个端点跟着 `await`。真实库 1515 条冷扫 821 毫秒，同步版会把主线程
+  整段按住；异步版总耗时 477 毫秒、最长停顿 27 毫秒。
+- **读包哈希与导出拼接分块**：`readBundleAsync()` 改用 `parseBundleAsync()` 与 `sha256Async()`
+  （每 4MB 让出），190MB 包最长停顿 177 → 89 毫秒；`gzipParts()` 的输出按 4MB 拷进目标缓冲，
+  不再一次 `Buffer.concat()`，190MB 包导出最长停顿 92 → 4 毫秒。
+- **日志切行与解码拼接分块**：`linesOf()` 的 `text.split('\n')` 改成按 2M 字符切段、跨段行尾拼回；
+  `decodeAllChunked()` 的 `parts.join('')` 改成按 2M 字符归组再拼。45MB 文本的最长停顿从 175
+  毫秒降到 61～132 毫秒；仍有一段在 zstd 分块解码退回整份解压。
+- **请求体、路径改写、差异切行与产物规划再分块**：`readBody()` 不再一次
+  `Buffer.concat(chunks)`，190MB 包实测 82 毫秒 → 89 毫秒总耗时、最长停顿 1 毫秒；16MB 日志的
+  `relocateSessionPathsChunked()` 不再整份 `split`/`join`，最长停顿 72 → **37 毫秒**；`/sync-diff`
+  与同步内容关系改用 `splitLinesAsync()`；产物规划新增异步版本，迁移那条路不再整份切行。
+- **校验工具只读日志头**：`verify_workspace_sessions` 原来为一行 header 读整份日志，现在走
+  `readLogHeader()` 的 64KB 前缀，每 32 个文件让出一轮；大项目不会连续读几百 MB。
+- **路径修复的源根扫描分块**：`planPathRepair()` 的 `selfRootValues()` 改用 `splitLinesAsync()`，
+  不再整份 `split`；路径改写本身复用上面那套分块。
 
 ## Alternatives considered
 

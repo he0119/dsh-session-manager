@@ -15,7 +15,7 @@ import test from 'node:test'
 import { decompress } from 'fzstd'
 
 import { canonicalDirIfExists } from '../../../src/shared/canonical-path.ts'
-import { scanAll } from '../../../src/shared/library/discovery.ts'
+import { scanAllAsync } from '../../../src/shared/library/discovery.ts'
 import { runMigration, type MigrateDeps } from '../../../src/operations/migrate/migrate.ts'
 import { encodeSegment, projectionCacheDir, sessionDir } from '../../../src/shared/paths.ts'
 import { readRegistry, writeRegistryAtomic } from '../../../src/shared/registry.ts'
@@ -147,7 +147,7 @@ function makeFixture(
     hostRegistry: () => ({
       refreshIndex: async () => {
         index = new Map(
-          scanAll(root, decodeAll).map((session) => [
+          (await scanAllAsync(root, decodeAll)).map((session) => [
             session.id,
             session.cwd === undefined ? undefined : canonicalDirIfExists(session.cwd),
           ]),

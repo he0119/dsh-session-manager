@@ -59,10 +59,11 @@ import { commitAttachmentObjectAsync, isAttachmentId, scanAttachmentRefs, type A
 import { warmCheckpoints, type WarmDeps } from '../../shared/host/checkpoint-warm.ts'
 import type { AutoConfig } from '../../config.ts'
 import type { DavPort } from './dav.ts'
-import { scanAll, scanAllAsync, type DiscoveredSession } from '../../shared/library/discovery.ts'
+import { scanAllAsync, type DiscoveredSession } from '../../shared/library/discovery.ts'
 import { createBackup } from '../../shared/journal.ts'
 import { encodeSegment, parseSessionLogName } from '../../shared/paths.ts'
 import { decodeLogTextChunked } from '../../shared/log/log-decode.ts'
+import { splitLinesAsync } from '../../shared/text-chunks.ts'
 import { createGitRunner, repoLocation, createRepoLocationCache, type GitRunner, type RepoLocation, type RepoLocationLookup } from '../../shared/repo.ts'
 import { sessionMetaOfRecord } from '../../shared/visibility.ts'
 import type { ProjectionCacheReader } from '../../shared/library/projection-cache.ts'
@@ -1031,7 +1032,7 @@ export interface SyncPlanInput {
    * 都不动（`diverged`）。
    */
   decisions?: ReadonlyMap<string, SyncDecision>
-  /** 本机整库（`scanAll()` 的结果）。 */
+  /** 本机整库（`scanAllAsync()` 的结果）。 */
   local: readonly DiscoveredSession[]
   remote: RemoteLibrary
   mapping: ReadonlyMap<string, string>
@@ -2493,7 +2494,7 @@ function repoCandidates(deps: SyncDeps, local: readonly DiscoveredSession[]): st
 export interface SyncPrepared {
   /** 预演算出来的计划。 */
   plan: SyncPlan
-  /** 本机整库（`scanAll()` 的结果）。 */
+  /** 本机整库（`scanAllAsync()` 的结果）。 */
   local: DiscoveredSession[]
   /** 读回来的远端索引（落地不再读第二遍）。 */
   remote: RemoteLibrary
@@ -2833,8 +2834,8 @@ export async function prepareSync(
         const mine = await readFile(localFile.path)
         const theirs = entryBytes(bundle, remoteFile)
         const diff = diffSessionLogs(
-          (await decodeLogTextChunked(mine, localFile.compression)).split('\n'),
-          (await decodeLogTextChunked(theirs, remoteFile.compression)).split('\n'),
+          await splitLinesAsync(await decodeLogTextChunked(mine, localFile.compression)),
+          await splitLinesAsync(await decodeLogTextChunked(theirs, remoteFile.compression)),
           { localBytes: mine.byteLength, remoteBytes: theirs.byteLength },
         )
         const relation = {
