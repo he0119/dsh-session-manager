@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 
-import { adoptLegacyBackupRoot, resolvePaths } from '../../src/tools.ts'
+import { adoptLegacyBackupRoot, resolvePaths } from '../../src/shared/plugin-paths.ts'
 
 /** 旧默认根的目录名（0.3.x 及更早）。 */
 const LEGACY = 'dsh-session-manager-backups'

@@ -52,7 +52,7 @@ Status: implemented
 ## Consequences
 
 - 常驻内存：1295 条记录（每条四个字段）不到 1 MB。
-- 缓存跟着读取器实例活：界面那一个（每次打开这一页都走它）跨请求复用；`src/tools.ts` 里每次调用新建的
+- 缓存跟着读取器实例活：界面那一个（每次打开这一页都走它）跨请求复用；`src/operations/sync/runtime.ts` 里每次调用新建的
   读取器只有单次扫描内的收益，没有跨调用的。
 - 迁移、删除、重新生成名称这几条预演路也注入同一个读取器（见 `src/web.ts`）：它们照旧重扫库（那几步
   马上要动磁盘，见 [库没变时复用上一次的扫描结果](2026-10-19-reuse-scan-results-between-refreshes.md)），

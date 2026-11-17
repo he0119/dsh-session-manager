@@ -17,7 +17,7 @@ Status: implemented
 把窗口的语义从"攒连发"改成"等人停手"：
 
 - `AUTO_PUSH_SETTLE_MS`（10 秒）换成 `AUTO_PUSH_QUIET_MS = 300_000`（5 分钟）；
-- `src/tools.ts` 的 `attachAutoPushToSessions()` 从"只认 `turn/end`"改成**每个会话事件都重置计时**
+- `src/operations/sync/runtime.ts` 的 `attachAutoPushToSessions()` 从"只认 `turn/end`"改成**每个会话事件都重置计时**
   （`turn/start`、`step/end`、工具派发、`turn/end`、自动续轮、子智能体起停）；
 - 冲盘仍只在 `turn/end` 那一次做（`await ctx.sessions.flush(session)`），其余事件只重置计时：推送读的是
   磁盘字节，推之前磁盘必须是新的；而 `step/end` 一次模型调用就一条，每条都冲一次盘纯属白费。

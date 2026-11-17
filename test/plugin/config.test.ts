@@ -8,7 +8,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { Config, DEFAULT_PASSWORD_REF, SyncConfigSchema, TOOL_BY_SWITCH, syncSection, toolsSection, type PluginConfigInput } from '../../src/config.ts'
-import { describeSyncConfig, passwordRefOf, syncRuntime } from '../../src/tools.ts'
+import { describeSyncConfig, passwordRefOf, syncRuntime } from '../../src/operations/sync/runtime.ts'
 
 /**
  * 从 schemastery 的 `toJSON()` 里读一个字段的 `meta`。

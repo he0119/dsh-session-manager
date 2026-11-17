@@ -29,7 +29,7 @@ Status: implemented
   `kind:id` 去重；同一个对象被多条会话引用只进一份。
 - **对象从哪读、落到哪只走一个纯路径端口** `AttachmentPort.pathOf(ref)`（[`src/shared/attachments.ts`](../../../../src/shared/attachments.ts)）。
   核心层零 DSH 依赖，宿主半侧用 `ctx.attachments.imageHostPath()` / `fileHostPath()` 实现它、在
-  `src/tools.ts` 里探测成端口注入。**宿主没有这个服务时端口缺席**：包只带日志、导入只写日志、索引里不记
+  `src/shared/host/ports.ts` 里探测成端口注入。**宿主没有这个服务时端口缺席**：包只带日志、导入只写日志、索引里不记
   附件——与升级前逐字节一致，功能静默降级而不是报错。
 - **先落对象，再写日志**：会话不会以"图是挂的"状态先出现在库里。落对象**非致命**（失败逐条回报在
   `attachmentProblems` 里），日志写不下去仍然抛错。
