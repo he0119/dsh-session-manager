@@ -203,13 +203,13 @@
   跑一遍纯计划计算（`replanPrepared()`），几十毫秒。
 - `src/operations/sync/dav.ts` 是那四种方法与 Basic 鉴权（含宽容的多状态响应解析），`src/operations/sync/sync.ts` 是索引、计划与落地：
   界面那条路是 `prepareSync()` 算计划并把输入留下、确认时 `syncPrepared()` 照它落地（`planId` 指认
-  宿主手里那份），`src/tools.ts` 的 `sync_sessions` 走单次调用那条（`runSync()`）。自动推送是同一个
+  宿主手里那份），`src/operations/sync/tool.ts` 的 `sync_sessions` 走单次调用那条（`runSync()`）。自动推送是同一个
   计划层上的第三条路：`runAutoPush()` 用 `pushOnly` 算一份只推的计划（`narrowToPushOnly()` 把
   `skip` 里那些"本机会被远端顶掉"的行摘出去，拉取整表清空），没有预演与确认那一步，没得推时也落一次
   空计划把本机那格索引收窄；`createAutoPushTimer()` 手里只有安静窗口一个计时器、没有周期唤醒，开关是
-  活字段（关掉不必重启），`src/tools.ts` 的 `resolveAutoPushRuntime()` 是它唯一的接线（宿主造一个挂在
+  活字段（关掉不必重启），`src/operations/sync/runtime.ts` 的 `resolveAutoPushRuntime()` 是它唯一的接线（宿主造一个挂在
   插件生命周期上，`GET /auto-push` 端点用同一个，用户手点那一次就是直接 `tick()`）。
-- **自动推送唯一的触发源是"本机安静下来"**：`src/tools.ts` 的 `attachAutoPushToSessions()` 订阅
+- **自动推送唯一的触发源是"本机安静下来"**：`src/operations/sync/runtime.ts` 的 `attachAutoPushToSessions()` 订阅
   `session/event`，**每个**事件都把 `AutoPushTimer.touched()` 叫一下（只重置计时、不读盘）；只有
   `turn/end` 那一次先 `await ctx.sessions.flush(session)` 再叫——推送读的是磁盘字节，别的种类冲盘是白费。
   `touched()` 起/续的是 `AUTO_PUSH_QUIET_MS`（5 分钟）那个安静窗口，所以用户连着写、或者后台还有活儿
@@ -279,7 +279,7 @@
   拉取、迁移落地之后借宿主自己的两个服务冷读一遍补上（`src/shared/host/checkpoint-warm.ts`）。
 - [重新生成名称：临时把会话挂回宿主](../.agents/notes/implemented/feature/2026-10-12-retitle-attaches-the-session-to-ask-the-title-service.md)：
   名称服务的显式重算入口只认**活会话**，而这里要处理的是整库里早已不在内存里的那些——端口把一条会话
-  临时读出来、挂上、重算、自己开写句柄把新事件写下去、再摘掉（`src/tools.ts` 的 `titleRefreshPort()`
+  临时读出来、挂上、重算、自己开写句柄把新事件写下去、再摘掉（`src/shared/host/ports.ts` 的 `titleRefreshPort()`
   + `src/operations/retitle/retitle.ts`）。写盘不走 `sessions.flush()`：还原出来的副本比磁盘多一条 `session/end-seed`，
   路由出去的事件序号对不上写句柄的游标。
 - [会话内容视图：在插件里把日志解析出来](../.agents/notes/implemented/feature/2026-10-12-transcript-view-parses-the-log-itself.md)：
@@ -292,7 +292,7 @@
   整目录进备份、`registry untouched`；归档走的是相反的一条路——只能走宿主能力。
 - [备份根落在插件自己的目录下](../.agents/notes/implemented/architecture/2026-10-06-backup-root-lives-under-the-plugin-directory.md)：
   默认根是 `<DSH_HOME>/dsh-session-manager/backups`，`~/.dsh` 根下不再多一层平铺的插件名；插件启动时
-  把旧默认根整体搬过去（`src/tools.ts` 的 `adoptLegacyBackupRoot()`），老备份照旧列得出、滚得回。
+  把旧默认根整体搬过去（`src/shared/plugin-paths.ts` 的 `adoptLegacyBackupRoot()`），老备份照旧列得出、滚得回。
 
 ## 浏览器半侧
 

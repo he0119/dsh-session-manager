@@ -120,7 +120,7 @@ Linux/CI 上 symlink 正常，用 `pnpm install` 走 `pnpm-lock.yaml` 即可。
 ### 工具层测试怎么拿到真实的 `dsh-tools`
 
 `@deepseek-ai/dsh-tools` 是宿主的 peer 依赖，但仓库把它**同时列为 devDependency**，所以装了依赖之后
-`src/tools.ts` 的 `import '@deepseek-ai/dsh-tools'` 直接解析得到真实实现——`test/plugin/tools.test.ts`
+`src/tools.ts` 与各操作的 `tool.ts` 里 `import '@deepseek-ai/dsh-tools'` 直接解析得到真实实现——`test/plugin/tools.test.ts`
 因此能断言真正的工具注册契约（schema 归一化、实参校验、render），而不是走桩。
 
 ## 结构
@@ -134,15 +134,15 @@ src/                       手写源码（Host 半侧）
 ├─ tools.ts                6 个工具注册
 ├─ web.ts                  界面端点
 ├─ shared/                 多个操作共用的零件
-│  ├─ types.ts paths.ts project-key.ts canonical-path.ts registry.ts
+│  ├─ types.ts paths.ts plugin-paths.ts project-key.ts canonical-path.ts registry.ts
 │  ├─ accounting.ts visibility.ts family.ts repo.ts attachments.ts journal.ts
 │  ├─ log/                 日志的字节、帧与行（含改写）
 │  ├─ library/             会话库扫描与它的两级缓存
-│  └─ host/                落地之后请宿主认下改动
+│  └─ host/                宿主可选服务的探测（ports.ts）与落地后的两步善后
 └─ operations/             每种操作一个文件夹
-   ├─ migrate/             迁移：计划、执行、产物、编排
+   ├─ migrate/             迁移：计划、执行、产物、编排与四个工具
    ├─ transfer/            导出 / 导入 .dshsess
-   ├─ sync/                WebDAV 同步与自动推送
+   ├─ sync/                WebDAV 同步、自动推送与那条工具
    ├─ remove/              删除
    ├─ retitle/             重新生成名称
    ├─ path-repair/         修已经落地的日志路径
@@ -183,7 +183,7 @@ tsconfig.client.json       Web Client 自己的类型工程（DOM + JSX；Host �
 | --- | --- | --- |
 | `src/index.ts` | 插件入口 `apply(ctx, config)`：注册工具与设置页、把 web 路由接上；**自动推送的调度器也在这里造一次**（`resolveAutoPushRuntime()`，挂在插件生命周期上，同一个实例交给界面看状态、也给它当场跑一轮）。事件层的监听与调度器**挂在同一个 promise 上**（凭据与配置要先解析完才作得成，而 `turn/end` 可能来得更早：先拿着 promise、到位再接监听——接晚了不丢这一轮，用户接着写的下一轮马上就会触发），卸载时**先摘监听、再停调度器**（摘晚了会有事件在 `stop()` 之后进来） | `dsh-tools` |
 | `src/config.ts` | 插件配置的 schema：`sync` 那一节带 `volatile`（活字段，改完不用重启），三个路径字段不带；`syncSection()` 把"活引用"与"普通对象"两种来路收成一份值；自动那一节的拍平在 `autoPushSection()` 一处（两栏 `autoPush` / `autoSync` → 一档 `{ enabled, mode }`，强的那档赢：`autoSync` 是双向、`autoPush` 是只推、都没写是关；原来那个间隔数与它的下限跟着兜底定时器一起删了） | `@deepseek-ai/schemastery` |
-| `src/tools.ts` | 6 个工具注册（+ schema、平台解码器实例、可选服务探测（含 `hostRegistryPort()`、`hostCheckpointPort()` 与 `attachmentPort()`：把宿主的注册表实体 API、会话持久化、冷读一条会话并写回投影检查点、以及附件库那两个纯路径方法收成端口，以及 `titleRefreshPort()`：把"重算一条会话的标题"收成端口——见 `src/operations/retitle/retitle.ts`）、同步配置与运行时）——`describeSyncConfig()` 报的 `SyncInfo` 里那栏 `autoPush` 带 `{ enabled: true, mode }`（没开就整个缺席，界面据此在卡片里补一句话、并按 `mode` 换"只推 / 双向"的说法），`syncRuntime()` 把它拍进 `SyncSettings`；`resolveAutoPushRuntime()` 是全仓**唯一一份**自动推送接线（造 `SyncDeps` 时带 `pushOnly: true` 与 `progressWhat: 'auto-push'`，`src/index.ts` 与 `/auto-push` 端点都用它），“连续失败几次”与"正跑着的那一轮"两份状态留在它造的调度器闭包里——每个宿主只造一个，不能每次请求现造；`attachAutoPushToSessions()` 是事件那一层：`ctx.on('session/event', …)` 只认 `turn/end`（`step/end` 太密、`session/created` 还没内容），收到先 `await sessions.flush(session)`（`turn/end` 不保证落盘，而推送读磁盘字节）再 `timer.touched()`，`flush` 失败吞掉只记一笔（它只决定这次读得到多新，照旧推，这条会话下一轮结束时再补），返回卸载函数；`sessions` 按**可选服务**收（`optionalService()`，不进 `inject`：没有会话服务的 profile 照旧只有工具，拿不到就返回空卸载函数——那时自动推送不会自己跑，只剩界面那枚「立即推送一次」） | `dsh-tools` |
+| `src/tools.ts` | 6 个工具注册：读 `tools` 一节的开关、造一份迁移依赖（工具与界面端点同一个形状）、按顺序把定义交给 `ctx.tools.register`；关掉的连 `register` 都不调，卸载时把收下的 disposer 逐个调用 | `dsh-tools` |
 | `src/web.ts` | 界面端点（meta / state / transcript / export / import / sync / auto-push / migrate / backups / rollback / delete / archive / retitle），只要求 `{ register }` 形状；`GET /meta` 只答会话库位置与宿主能力位（不扫库），`GET /state` 是它的超集，另报一栏 `repos`（目录 → 项目身份，注入的入口认，见 `src/shared/repo.ts`）；`GET /state` 与 `/sync`（预演与落地）、`/migrate`、`/delete`、`/rollback`、`/import`、`/archive`、`/retitle`（正文带 `includePinned: true` 时连 `user` 源的标题一起重算——那是给一次性清理留的口子，界面不传这个字段）都回 SSE（`streamResult()`：`progress` 逐条、`result` 收尾，见 [决策](../.agents/notes/implemented/architecture/2026-10-08-every-long-action-streams-progress.md)）；`GET /meta`、`GET /backups`、`/export`、`GET /transcript`（一条会话的完整内容：只读、按事件位分页、一次读一份最高代次的日志）与 `GET /remote`（远端各机器格子里每条会话的位置：读的是每台机器那份 `index.json`，不是包；右栏那行「远端」一次刷新读一次，见 `src/client/operations/sync/remoteLibrary.ts`）是一次性响应（`/export` 的响应体就是产物本身，附件对象的条数 / 字节 / 本机缺的那几个报在 `x-dsh-attachment-*` 响应头里）。`POST /delete` 收 `sessionIds` / `mode` / `alsoRemote`（勾了「同时删除远端」才动远端，见 `src/operations/remove/remove.ts`）。`GET /auto-push` 是自动推送那一枚「立即推送一次」：**两种形状**——没配同步或这个宿主没有调度器（`deps.autoPush` 缺席）时是写头之前的 JSON + 409，其余时候当场跑一轮（`tick()`）并按 `/sync` 同一套回 SSE（事件带 `what: 'auto-push'`，`result` 是 `mode: 'auto-push'` + 那个 `AutoPushOutcome`，真跑过才把 `plan` / `pulled` / `pushed` / `bytesIn` / `bytesOut` / `problems` 那几项摊平，与 `/sync` 的 `payloadOf()` 同形）；这条路只推不拉、没有确认那一步，所以没有 `mode=apply` 那种分岔，也没有 `enable` / `disable`——开关只走配置表单。落地跑着的时候第二趟 `mode=apply` 拿到 409。`GET /panel/events` 是这一页**唯一**的长连接：开头 `ready`（宿主事实，不扫库）、两种后台状态的当下（`sync`：落地那一趟 + 上一轮结论；`auto-push`：自动推送那一轮 + 上一轮计数）、扫库的 `progress`、整库清单 `snapshot`（与 `/state` 同一份取值，走同一个 `readState()`），之后跟着推变化与 `stale`（本机会话库被改过了，页面据此重连要新清单），每 15 秒一次 `ping`，客户端断开就退订、退定时器的订阅（见 [决策](../.agents/notes/implemented/architecture/2026-10-21-one-stream-for-the-whole-panel.md)） | 无 |
 
 #### `src/shared/`：跨操作共用的零件
@@ -195,6 +195,7 @@ tsconfig.client.json       Web Client 自己的类型工程（DOM + JSX；Host �
 | `src/shared/types.ts` | 贯穿各层的共享类型（计划、产物、注册表视图等） | 无 |
 | `src/shared/text-chunks.ts` | 大文本/大缓冲的分块工具：`splitLinesAsync()`、`joinTextAsync()`、`concatBuffersAsync()`，结果与整份 `split` / `join` / `Buffer.concat` 逐字符或逐字节相同，段间让出一轮事件循环；请求体拼接、路径改写、差异页与内容关系共用（见 [阻塞预算](../.agents/notes/implemented/architecture/2026-11-17-blocking-budget.md)） | 无 |
 | `src/shared/paths.ts` | `encodeSegment()`、代次文件名、会话目录/日志路径 | 无 |
+| `src/shared/plugin-paths.ts` | 插件自己的目录：`dshHome()`（`$DSH_HOME`，缺席退到 `~/.dsh`）、`resolvePaths()`（会话库 / 注册表 / 备份根，三个都是对外默认值）、旧默认备份根的一次性整体搬迁 `adoptLegacyBackupRoot()` | 无 |
 | `src/shared/project-key.ts` | 逐字符复刻宿主 `projectKey()` + 有损碰撞检测 | 无 |
 | `src/shared/canonical-path.ts` | 落地目录的规范拼写（`canonicalDir()`：宿主存工作区 `path` 与会话 `cwd` 用的同一个 realpath），落地那条路上唯一的归一入口；`canonicalDirIfExists()` 是它的"解析不出来就是结论"版本（宿主建成员索引用的那一支） | 无 |
 | `src/shared/registry.ts` | 注册表启动不变式校验、`reHome()`、原子落盘 | 无 |
@@ -236,6 +237,7 @@ tsconfig.client.json       Web Client 自己的类型工程（DOM + JSX；Host �
 | --- | --- | --- |
 | `src/shared/host/take-effect.ts` | 「改完注册表之后让宿主立刻认下这处改动」的共用一步：迁移与导入 / 同步拉取都调它（回滚不走——它整份写回文件以保住工作区 id）；探测端口、执行顺序、宿主没接住时把算好的注册表整份写回（`restoreRegistry()`）、以及"要不要重启"的措辞只写在这里，**执行时机**留给各自编排层（批量落地时最后调一次） | 无 |
 | `src/shared/host/checkpoint-warm.ts` | 「落地之后请宿主把这批会话的列表元数据折出来」的共用一步：宿主的侧边栏标题不来自日志，只认它自己写的投影检查点，而检查点只在活着的会话上被写；这里借宿主自己的两个服务（`sessionQuery.readSession()` + `sessionProjectionCache.coldSnapshot()`）冷读一遍补上，逐条兜住失败（导入 / 同步拉取 / 迁移三个落地口共用） | 无 |
+| `src/shared/host/ports.ts` | 宿主那几件**可选**服务的探测，统一走 `ctx.get(name)`（属性访问在 Cordis 里会同步抛错，即使服务存在）：`optionalService()`、`effectMode()`、`hostRegistryPort()`（注册表实体 API + 会话持久化，收成"改注册表"的端口）、`hostCheckpointPort()`（冷读一条并写回投影检查点）、`titleRefreshPort()`（临时挂载 → 重算 → 自己开写句柄补事件 → 摘掉，见 `src/operations/retitle/retitle.ts`）、`attachmentPort()`（附件库那两个纯路径方法）、`directoryPickerKind()`、`archiveOps()`、`liveSessionIds()`。认形状不认实现，少一件就当"这个宿主没有这套动作" | 无 |
 
 ### 操作：`src/operations/<操作>/`
 
@@ -251,6 +253,7 @@ tsconfig.client.json       Web Client 自己的类型工程（DOM + JSX；Host �
 | `src/operations/migrate/plan.ts` | 只读计划：源是**点名的那些会话**（`sessionIds`，每条按自己的 `cwd` 算，所以可以跨目录）、目标推导、阻塞问题、注册表变更（隐藏的会话逐个点名拒绝，点中的那些再向下展开整族；宿主持着的进 `liveSkipped`，按来源目录分组算产物） | 无 |
 | `src/operations/migrate/execute.ts` | 执行 + 独立复核（含产物目标位校验） | 无 |
 | `src/operations/migrate/artifacts.ts` | 会话产物提取（证据分层）、规划（求交/剪枝）、搬迁 | 无 |
+| `src/operations/migrate/tool.ts` | 迁移四个工具的 schema 与执行：只读计划、落地、回滚、复核；返回形状 `PlanToolResult` / `MigrateToolResult` | `dsh-tools` |
 
 #### `operations/transfer/`：导出 / 导入 `.dshsess`
 
@@ -267,10 +270,12 @@ tsconfig.client.json       Web Client 自己的类型工程（DOM + JSX；Host �
 | 文件 | 职责 | DSH 依赖 |
 | --- | --- | --- |
 | `src/operations/sync/sync.ts` | WebDAV 同步编排：远端索引、映射、计划（四种关系 + 空白与「谁更新」）、拉取 / 覆盖本机那份 / 推送（都复用 transfer 的导入落地）；界面那条路把计划与它的输入一起留下（`prepareSync()` 的 `SyncPrepared`，确认时 `syncPrepared()` 照它落地、只在数据变了时重算），`runSync()` 是单次调用那条；整批拉取改完注册表之后最后调一次 `src/shared/host/take-effect.ts`，再调一次 `src/shared/host/checkpoint-warm.ts`。**自动推送**（只推不拉）也在这里：`narrowToPushOnly()` 是计划层唯一的改判处（拉取整表与 `pullIds` 清空、`bytesIn` 归零、推送表里把"远端更新 / 两边各自写过"那些 `skip` 摘出去，只留 `upload` / `update` / `identical`）；`runAutoPush()` 判定顺序是没开 → 算一份只推的计划 → 一条都推不动且索引也没得收尾就报 `idle`（不落地），否则 `applyPreparedSync()` 落地（没得推也落一次空计划，把本机那格索引收窄成眼下的库）；`AutoPushOutcome` / `AutoPushSkip` 是这一轮的结论与没跑的原因（`AutoPushSkip` 只有 `disabled` / `busy` / `idle` 三个码，**没有**"正在攒连发"那种：空闲窗口只推迟推送，不会让谁问出"没跑"；也没有"间隔未到"——兜底定时器与那个间隔一起删了，见 [决策](../.agents/notes/implemented/simplification/2026-10-21-auto-push-only-after-a-turn.md)）；`createAutoPushTimer()` 是调度器，手里只有空闲窗口一个计时器、**没有周期唤醒**（`AutoPushClock` 只剩开关一个活字段），一次只放一轮（`busy`）；它顺手记下"正跑着的那一轮"（`AutoPushRunning`：开始时刻 + 最后一条进度），`status()` 把这一份与上一轮结论一起交出去，`subscribe()` 把之后的每一条进度与收尾结论推给订阅者——两条发起路（后台写完一轮、界面那枚按钮）共用这一份，界面进同步页时据此接上进度，它同时收着那个触发口 `touched()`——**每个**会话事件都调一下（`turn/end` 那一次是在冲盘之后），起/续 `AUTO_PUSH_QUIET_MS`（300000，5 分钟）那个空闲窗口，所以用户连着写的时候一次都不推、停手满 5 分钟才推一轮；真正在跑时再来事件只记一笔欠账、跑完立刻补一次，关着时什么都不做（不排队、不记账）。**附件对象**不在包里，走远端共享目录（`SYNC_ATTACHMENTS_DIR`，与机器格同级：`attachments/{objects,file-objects}/<sha 前两位>/<sha>`）：推送只补远端缺的、拉取只取本机缺的（一次同步里每个前缀目录只列一次），手动同步还多跑一趟 `repairAttachments()` 去补「库里早就有、图却挂着」的那些会话（后台那条只推不拉的路不跑它；索引条目里的 `attachments` 记着每条会话引用过哪些对象，补对象时按它走，只有老条目才分块扫一遍日志并补写，见 [那篇](../.agents/notes/implemented/bug-fix/2026-11-14-sync-attachment-scan-blocks-the-host.md)）；`reservedMachineIdProblem()` 拦住撞上这个保留名的机器标识。**删除跟着墓碑走**：索引里可选的一串 `deleted`（删除记录）由 `tombstonesOf()` 合成（同一个 id 取最晚那次），计划据此三分——远端那份比墓碑旧的不再拉回来（`code: 'deleted'` 的跳过行）、本机那份比墓碑旧的进 `plan.deleted`（跟着删：先备份，再删目录与自己那一格里的包）、本机那份更新的留着并把自己那份墓碑摘掉（"谁更新谁赢"）；`removeRemoteCopies()` 是删除时清远端那一步（只动自己那一格，见 [那篇](../.agents/notes/implemented/feature/2026-11-15-deletion-travels-with-the-tombstone.md)）。**内容判据**那一步（`contentRelationsOf()`）按对取远端包、读两边最新那份日志判谁是谁的前缀：包走 `readBundleAsync()`、日志走 `decodeLogTextChunked()`（分块解压、对与对之间让出事件循环），判出来的关系按两边全部代次的哈希记进进程级 `contentRelationCache`（同一对没再动就不再重算，见 [决策](../.agents/notes/implemented/bug-fix/2026-10-21-content-relations-off-the-main-thread.md)） | 无 |
+| `src/operations/sync/runtime.ts` | 同步运行时：`describeSyncConfig()` 报的 `SyncInfo` 里那栏 `autoPush` 带 `{ enabled: true, mode }`（没开就整个缺席，界面据此补一句话、按 `mode` 换"只推 / 双向"的说法），`syncRuntime()` 把它拍进 `SyncSettings`（密码引用每次现解析：先问宿主 credentials，再退环境变量）；`resolveAutoPushRuntime()` 是全仓**唯一一份**自动推送接线（造 `SyncDeps` 时带 `pushOnly: true` 与 `progressWhat: 'auto-push'`，"连续失败几次"与"正跑着的那一轮"留在它造的调度器闭包里——每个宿主只造一个）；`attachAutoPushToSessions()` 是事件那一层：`session/event` 每种都重置安静窗口，`turn/end` 先 `await sessions.flush(session)`（它不保证落盘，而推送读磁盘字节）再 `timer.touched()`，`flush` 失败吞掉只记一笔；`sessions` 按可选服务收，拿不到就返回空卸载函数 | 无 |
 | `src/operations/sync/sync-state.ts` | 上一次手动同步的结论落在哪：`<DSH_HOME>/dsh-session-manager/state.json` 里的 `{ sync: { at, ok, pulled, pushed, error?, problems?, leftovers?, takesEffect? } }`（`pendingRestart` 不落盘，读的时候按进程启动时刻算；`leftovers` 是「没做到」的点名版，带会话 id，见 `src/operations/sync/sync.ts` 的 `collectLeftovers()`）。写是临时文件 + rename，读对坏 JSON / 缺字段 / 时间解不出来一律当没有；写失败静默（同步本身不该因为记不下一句话而失败）。入口在 `src/index.ts` 注入给 `web.ts`（`deps.syncRun`），`/meta` 的同步那一栏带上它 | 无 |
 | `src/operations/sync/remote-write.ts` | 远端写入闸门：同一台机器的那一格同一时刻只放一个写者（`createRemoteWriteGate()`），推送与删除清远端共用；见 [决策](../.agents/notes/implemented/architecture/2026-11-16-one-writer-per-remote-cell.md) | 无 |
 | `src/operations/sync/dav.ts` | WebDAV 客户端：PROPFIND / GET / PUT / MKCOL + Basic 鉴权 + 多状态响应解析 | 无 |
 | `src/operations/sync/session-diff.ts` | 两份日志的**只读**差异：逐行比原始行（不比解析后的事件）、header 单独比（`cwd` 常被迁移改写）、`working-directory/change` 里跟着会话根搬的值先归一成占位符再比（落地改写过的那份与远端那份因此仍算同一份）、尾巴分成「一致 / 一边是前缀 / 真分叉」，预览每条一行且有条数与字数上限；`/sync-diff` 与差异视图共用 | 无 |
+| `src/operations/sync/tool.ts` | 「同步」那条工具的 schema、结论措辞（`describeSync()` / `describeLeftovers()` / `describeSyncObjects()`）与执行 | `dsh-tools` |
 
 #### `operations/remove/`：删除
 
@@ -295,6 +300,7 @@ tsconfig.client.json       Web Client 自己的类型工程（DOM + JSX；Host �
 | 文件 | 职责 | DSH 依赖 |
 | --- | --- | --- |
 | `src/operations/path-repair/path-repair.ts` | 修**已经落地**的日志：从日志里推源根（末段与本机会话根同名的最长前缀，推不出就让调用方用 `from` 给）、算只读计划（有取值映射不上就整条不修）、落地（备份 → 逐文件原子替换 → 修完再规划一遍必须为空）；工具 `repair_session_paths` 的编排在这一层 | 无 |
+| `src/operations/path-repair/tool.ts` | 「修日志路径」那条工具的 schema、预演说明（`describePathRepair()`）与执行 | `dsh-tools` |
 
 #### `operations/transcript/`：会话日志解析
 
@@ -466,9 +472,10 @@ tsconfig.client.json       Web Client 自己的类型工程（DOM + JSX；Host �
 | --- | --- |
 | `src/client/operations/help/HelpPanel.tsx` | 说明弹窗的正文（不碰数据）。 |
 
-核心层（`src/shared/**` 与 `src/operations/**`）**不依赖 DSH**，所以插件外壳与测试共用同一段代码。
-只有 `src/tools.ts` 与 `src/index.ts` 依赖 `@deepseek-ai/dsh-tools`，`src/web.ts` 连它也不依赖
-（只认一个 `{ register }` 形状）。`src/config.ts` 依赖 `@deepseek-ai/schemastery`（schema 与 volatile
+核心层的**编排与判据**（`src/shared/**` 与 `src/operations/**` 里除 `tool.ts` 之外的文件）**不依赖 DSH**，
+所以插件外壳与测试共用同一段代码。依赖 `@deepseek-ai/dsh-tools` 的只有 `src/tools.ts`、`src/index.ts`
+与各操作的 `tool.ts`（后两者只是把定义交给宿主），`src/web.ts` 连它也不依赖（只认一个 `{ register }`
+形状）。`src/config.ts` 依赖 `@deepseek-ai/schemastery`（schema 与 volatile
 语义来自它），但不依赖插件外壳。
 
 `src/client/**` 不在 Host 半侧那份 tsconfig 的 include 里：它要 DOM 与 JSX，而 Host 半侧没有。

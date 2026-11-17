@@ -22,7 +22,7 @@ Status: implemented
 
 ## Decision
 
-给这个插件加一条宿主端口 **`titleRefreshPort()`**（`src/tools.ts`），它自己完成一次**临时挂载**：
+给这个插件加一条宿主端口 **`titleRefreshPort()`**（`src/shared/host/ports.ts`），它自己完成一次**临时挂载**：
 
 1. `sessionQuery.readSession(id)` 把日志整份读完并校验（不建活会话，与补检查点那条路同一个调用）；
 2. `sessions.prepare(id, { seed, meta: header, inheritedEventCount, eventState: 'detached' })` 用宿主

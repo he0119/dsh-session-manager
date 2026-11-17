@@ -67,7 +67,10 @@ import {
   type SyncProgress,
   type SyncDecision,
 } from './operations/sync/sync.ts'
-import { type EffectMode, type PickerKind, type RegistryOps, type ResolvedPaths, type SyncInfo, type SyncRuntime } from './tools.ts'
+import type { SyncInfo, SyncRuntime } from './operations/sync/runtime.ts'
+import type { PickerKind, RegistryOps } from './shared/host/ports.ts'
+import type { ResolvedPaths } from './shared/plugin-paths.ts'
+import type { EffectMode } from './shared/types.ts'
 import { lastRunView, type SyncRunRecord } from './operations/sync/sync-state.ts'
 import {
   createRemoteWriteGate,

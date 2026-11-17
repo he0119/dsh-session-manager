@@ -18,22 +18,20 @@ import { projectKey } from '../../src/shared/project-key.ts'
 import { readRegistry } from '../../src/shared/registry.ts'
 import { createRemoteWriteGate, type RemoteWriteGate } from '../../src/operations/sync/remote-write.ts'
 import { remoteBundlePath, remoteIndexPath } from '../../src/operations/sync/sync.ts'
+import type { MigrateToolResult, PlanToolResult } from '../../src/operations/migrate/tool.ts'
+import type { SyncToolResult } from '../../src/operations/sync/tool.ts'
+import { attachAutoPushToSessions, resolveAutoPushRuntime } from '../../src/operations/sync/runtime.ts'
 import {
   archiveOps,
   attachmentPort,
-  attachAutoPushToSessions,
   directoryPickerKind,
-  resolveAutoPushRuntime,
   effectMode,
-  liveSessionIds,
-  registerTools,
   hostCheckpointPort,
   hostRegistryPort,
+  liveSessionIds,
   titleRefreshPort,
-  type MigrateToolResult,
-  type PlanToolResult,
-  type SyncToolResult,
-} from '../../src/tools.ts'
+} from '../../src/shared/host/ports.ts'
+import { registerTools } from '../../src/tools.ts'
 import type { PluginConfig } from '../../src/config.ts'
 import type { DecodeAll, WorkspaceRegistryState } from '../../src/shared/types.ts'
 import { encodeRawFrame } from '../../src/shared/log/zstd-frame.ts'

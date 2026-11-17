@@ -23,7 +23,7 @@ Status: implemented
 - 默认备份根是 **`<DSH_HOME>/dsh-session-manager/backups`**，与 `dsh-config-manager` 那种
   "插件名 / 子目录"同一形状。另外两个默认路径（`sessions`、`storages/workspace.json`）不动：它们是
   宿主的目录，本插件只是读。
-- 旧位置由插件在 `apply()` 里**整体搬一次**（`src/tools.ts` 的 `adoptLegacyBackupRoot()`）：三个条件
+- 旧位置由插件在 `apply()` 里**整体搬一次**（`src/shared/plugin-paths.ts` 的 `adoptLegacyBackupRoot()`）：三个条件
   同时成立才动——用户没自己配 `backupRoot`（配了就按他说的来）、旧目录在、新目录不在。整个 `rename`
   在同一个 `$DSH_HOME` 下是原子的，清单字节不动（里面记着回滚要还原的原位）。
 - 搬不动就**原地不动并如实报错**（日志里给出两个路径与原因）：备份是回滚的唯一凭据，宁可不搬，也不能

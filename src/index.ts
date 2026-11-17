@@ -14,24 +14,19 @@ import type { Context } from '@deepseek-ai/cordis'
 
 import { Config, TOOL_BY_SWITCH, toolsSection, type PluginConfigInput, type ToolSwitch } from './config.ts'
 import { createGitRunner, createRepoLocationCache, createRepoLookup } from './shared/repo.ts'
+import { attachAutoPushToSessions, describeSyncConfig, resolveAutoPushRuntime, syncRuntime } from './operations/sync/runtime.ts'
 import {
-  adoptLegacyBackupRoot,
   archiveOps,
-  attachAutoPushToSessions,
   attachmentPort,
-  decodeAll,
-  describeSyncConfig,
   directoryPickerKind,
-  liveSessionIds,
-  registerTools,
-  dshHome,
-  resolveAutoPushRuntime,
-  resolvePaths,
-  syncRuntime,
   hostCheckpointPort,
   hostRegistryPort,
+  liveSessionIds,
   titleRefreshPort,
-} from './tools.ts'
+} from './shared/host/ports.ts'
+import { decodeAll } from './shared/log/log-decode.ts'
+import { adoptLegacyBackupRoot, dshHome, resolvePaths } from './shared/plugin-paths.ts'
+import { registerTools } from './tools.ts'
 import type { AutoPushTimer } from './operations/sync/sync.ts'
 import { readSyncRun, writeSyncRun } from './operations/sync/sync-state.ts'
 import { createRemoteWriteGate } from './operations/sync/remote-write.ts'

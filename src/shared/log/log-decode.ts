@@ -23,7 +23,19 @@
 import { Decompress, decompress } from 'fzstd'
 import { StringDecoder } from 'node:string_decoder'
 
+import type { DecodeAll } from '../types.ts'
 import { joinTextAsync } from '../text-chunks.ts'
+
+/**
+ * 平台的 fzstd 解码器（纯 JS、多帧感知）：整份一次解开的那个入口。
+ *
+ * 导出是为了让工具层与 Web 端点用**同一个**解码器实例：`assertMultiFrameAware()` 的探测结论只应对一份
+ * 实现成立，两处各挑一个解码器正是当初「只解首帧」那个坑的入口。
+ *
+ * 大日志不要走它：它的最长停顿就是整份解压的时间（实测 13.7 MB 压缩 / 48 MB 文本 ≈1.8 秒），
+ * 用户点一下就会等的地方用同文件的 `decodeAllChunked()`。
+ */
+export const decodeAll: DecodeAll = (buf: Uint8Array): string => Buffer.from(decompress(buf)).toString('utf8')
 
 /**
  * 一次推给解码器的压缩字节数。

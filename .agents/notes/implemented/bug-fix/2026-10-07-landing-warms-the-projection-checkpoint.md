@@ -37,7 +37,7 @@ smart-home-deploy 27/48）；`dsh-session-manager` 那 33 个成员里有一条�
 它是 `null`，也就是侧边栏回退成「未命名」的那一步。落盘是宿主自己的 fail-soft 后台写，在那之前值已经在
 它内存里那份表上。
 
-端口由宿主那半侧探测（[src/tools.ts](../../../../src/tools.ts) 的 `hostCheckpointPort()`），核心层只认
+端口由宿主那半侧探测（[src/shared/host/ports.ts](../../../../src/shared/host/ports.ts) 的 `hostCheckpointPort()`），核心层只认
 `{ warm(id) }` 这个形状——与 `hostRegistryPort()` 同一套做法：两个服务少一件就当"这个宿主没有这套动作"，
 如实报 `unavailable`，绝不半套上场。
 

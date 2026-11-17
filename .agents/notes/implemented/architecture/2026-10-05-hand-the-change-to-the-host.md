@@ -29,7 +29,7 @@ Status: implemented
 ## Decision
 
 改完注册表之后，插件**把活儿交给宿主自己做**（`src/shared/host/take-effect.ts` 的 `takeEffectOnHost()`，端口由
-`src/tools.ts` 的 `hostRegistryPort()` 从 `ctx.get('workspaceRegistry')` 与
+`src/shared/host/ports.ts` 的 `hostRegistryPort()` 从 `ctx.get('workspaceRegistry')` 与
 `ctx.get('sessionPersistence')` 上探测并收成形状）：
 
 1. **先让它按磁盘重看一眼**：`sessionPersistence.list()` 拿全部 header → `replaceHeaderIndex()` →

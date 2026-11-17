@@ -95,7 +95,7 @@ Status: implemented
   而界面要按码去字典里挑句子。两边对不上的表现很安静（那句话退回"宿主没有说原因"），所以
   `test/client/operations/sync/sync-form.test.ts` 两处钉住它——清单里的码字典要有句子、`src/operations/sync/sync.ts` 会报的码清单要有。
 - **核心层的 `tick()` 现在把 `force` 转交给 `run()`。** 原来只有本地那个 `disabled` 判断读它、不往下
-  传；生产路径没暴露这个问题是因为 `src/tools.ts` 另有一层 `forceNext` 闭包在做同样的转交。但
+  传；生产路径没暴露这个问题是因为 `src/operations/sync/runtime.ts` 另有一层 `forceNext` 闭包在做同样的转交。但
   "接受了 `force` 却没生效"是最难查的一类接口缺陷，核心层这个接口本身就该自洽（是隐藏窗口那条路把它
   暴露出来的）。
 - **`turn/end` 之后多一次 `flush`**：每次一轮结束时同步写一次盘。这是宿主本来就要在别处做的检查点，
