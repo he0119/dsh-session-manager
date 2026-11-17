@@ -56,6 +56,18 @@ Status: implemented
   （库没变时直接交上一次的结果，项目目录之间让出）；重算名称那一路带标题，导出与归档不带，
   两套选项各自缓存，库变了都会重扫。
 
+- **导入 / 拉取的大包异步解、异步写**：导入与同步拉取改用 `readBundleAsync()`；导入预演先用
+  `bundleTitlesAsync()` 每几条让出一次，再交给 `planImport()`；`applyImport()` 与附件对象提交
+  改用 `fs/promises` 的 `mkdir` / `writeFile` / `rename` / `chmod`。几十 MB 的包不再整段按住主线程。
+- **日志首次读取与同步差异异步读**：内容视图第一次打开、`/sync-diff` 的两边日志都改用
+  `readFile()` / `readBundleAsync()`；后面的分块解码本来就会让出。
+- **指纹与附件引用先异步读**：`contentFingerprintChunked()` 与 `attachmentRefsOfFile()` 的整份
+  `readFileSync()` 改成 `await readFile()`，哈希与解码仍按块让出。
+- **迁移落地与产物复制异步写**：`applyPlan()` 的逐文件读、临时文件写、改名、建目录 / 清空目录，
+  以及 `applyArtifactMovesAsync()` 的同卷 rename / 跨卷 copy，都改走 `fs/promises`。
+- **扫库在项目目录内部也按会话让出**：`scanProjectDirAsync()` 每 16 条让出一次；`scanAllAsync()`
+  不再等整个项目目录读完。
+
 ## Alternatives considered
 
 - **把 applyPlan / applyImport 整条改成异步**：能让 `cpSync` 与整份解码都走线程池，但要把
@@ -74,4 +86,6 @@ Status: implemented
 - 备份、删除、回滚的复制不再按住主线程；整库 1.2 GB 备份总耗时从 0.78 秒升到 3.9 秒，但最长停顿
   从 0.78 秒降到 12 毫秒。
 - 所有已知的按秒计主线程阻塞都已处理：迁移（含产物）、差异、导出（含整库）、路径改写、改名自检、
-  备份 / 删除 / 回滚、扫库、路径修复。
+  备份 / 删除 / 回滚、扫库、路径修复、导入 / 拉取、日志首次读取、指纹 / 附件引用。
+- 这里说的是"按秒计"的阻塞；小 JSON、单次 `stat` / `rename` 仍走同步，判据见
+  [异步化的边界那篇](../architecture/2026-11-17-blocking-budget.md)。
