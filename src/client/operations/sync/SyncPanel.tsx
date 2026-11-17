@@ -66,6 +66,7 @@ import { syncStage, type SyncStage } from './syncStage.ts'
 import { agoLabel } from '../../shared/logic/relativeTime.ts'
 import { describeSyncNotice } from './syncNotice.ts'
 import { leftoversOf } from './syncLeftovers.ts'
+import { SyncLeftoverList } from './SyncLeftoverList.tsx'
 import { remoteLibrary } from './remoteLibrary.ts'
 import { projectLabel, sessionLabel, type SessionLabel } from '../../shared/logic/planRows.ts'
 import { ProgressBlock } from '../../shared/ui/ProgressBlock.tsx'
@@ -1016,6 +1017,8 @@ export function SyncPanel({
   const done = job.done
   /** 结果页上那句话：成没成、搬了几条、另有几项。 */
   const doneVerdict = stage === 'done' && done !== null ? doneLine(done) : null
+  /** 结果页上的「没做到」：与面板段那张清单同一份（新宿主给点名版，旧记录退回汇总句）。 */
+  const doneLeftovers = done?.result === undefined ? [] : leftoversOf(done.result)
 
   /**
    * 「上次同步」那张清单要说的话。
@@ -1198,24 +1201,7 @@ export function SyncPanel({
             {lastItems.length > 0 && (
               <div className="dsm-leftovers">
                 <p className="dsm-leftoversTitle">{t('sync.leftovers.title', { count: lastItems.length })}</p>
-                <ul className="dsm-listPlain">
-                  {lastItems.map((item, index) => (
-                    <li key={`${index}-${item.message}`} className="dsm-leftoverRow">
-                      <span>{item.message}</span>
-                      {item.sessionId !== undefined && onFocusSession !== undefined && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => {
-                            if (item.sessionId !== undefined) onFocusSession(item.sessionId)
-                          }}
-                        >
-                          {t('sync.leftovers.focus')}
-                        </Button>
-                      )}
-                    </li>
-                  ))}
-                </ul>
+                <SyncLeftoverList items={lastItems} onFocus={onFocusSession} t={t} />
               </div>
             )}
           </div>
@@ -1537,7 +1523,13 @@ export function SyncPanel({
         {stage === 'done' && done !== null && doneVerdict !== null && (
           <div className="dsm-planBody">
             <div className={doneVerdict.ok ? 'dsm-ok' : 'dsm-error'}>{doneVerdict.text}</div>
-            {done.result === undefined ? null : <ProblemsBlock t={t} problems={done.result.problems} />}
+            {done.result === undefined || doneLeftovers.length === 0 ? null : (
+              // 与「上次同步」那张清单同一个画法：刚跑完看到的与之后翻开看到的必须是同一份。
+              <div className="dsm-leftovers">
+                <p className="dsm-leftoversTitle">{t('sync.leftovers.title', { count: doneLeftovers.length })}</p>
+                <SyncLeftoverList items={doneLeftovers} onFocus={onFocusSession} t={t} />
+              </div>
+            )}
             {done.result !== undefined &&
               done.result.pulled.length > 0 &&
               done.result.takesEffect === 'restart-required' && <p className="dsm-warn">{t('effect.restart')}</p>}

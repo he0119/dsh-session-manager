@@ -168,11 +168,23 @@ export interface SyncInfo {
  *
  * `sessionId` 有值 = 这一条点得出名字、也跳得回列表（界面上那枚「只看这一条」）；映射、远端索引、
  * 整理那几步的问题没有会话可指，只有一句话。
+ *
+ * `title` / `detail` 是同一句话的两半（哪条会话 / 为什么），界面分两行画；`kind` 是机器可读的分类，
+ * 界面按它分组。后三项是后加的，旧记录里只有 `message`（+ 可能有的 `sessionId`）。
  */
 export interface SyncLeftover {
   message: string
   sessionId?: string
+  /** 会话名；缺失 = 旧记录（界面直接画 `message`）或这一条不属于任何会话。 */
+  title?: string
+  /** 这一条属于哪一类（界面按它分组）；缺失或认不出 = 「其它问题」。 */
+  kind?: SyncLeftoverKind
+  /** 原因那一句，不含会话名与 id；缺失 = 旧记录，界面直接画 `message`。 */
+  detail?: string
 }
+
+/** 「没做到」的分类（与宿主同名类型一致）。 */
+export type SyncLeftoverKind = 'attachment' | 'fork' | 'live' | 'path' | 'other'
 
 /** 上一次手动同步落下的那条记录（与宿主 `src/operations/sync/sync-state.ts` 同一形状）。 */
 export interface SyncRunRecord {
@@ -577,6 +589,8 @@ export interface SyncPushEntry {
   action: 'upload' | 'update' | 'skip'
   /** `local-newer` = 两边各自写过、本机这份更新（`local-ahead` 是"远端确实是本机这份的前缀"）。 */
   code: 'missing' | 'local-ahead' | 'local-newer' | 'identical' | 'remote-ahead' | 'diverged' | 'keep-local'
+  /** 要动却动不了的原因（只有 `action: 'skip'` 的行有；缺失 = 旧宿主，界面归到「其它问题」）。 */
+  blockedBy?: 'no-mapping' | 'missing-target' | 'live' | 'newer-unknown'
   /** 远端那份由哪台机器贡献（"远端领先 / 两边各自写过"要指名道姓）。 */
   machine?: string
   /** 落选的远端那份也要留（「两份都保留」那一档）：应用时落成一条新会话。 */

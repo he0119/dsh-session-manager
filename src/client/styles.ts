@@ -1434,8 +1434,28 @@ export const CSS = `
   display: flex;
   flex-direction: column;
   gap: 0;
+  /* 一份遗留可能几十条：这里不再套一个 240px 的滚动框（那会把"有几类、各几条"藏起来）。默认每组只
+     摆三条，展开之后整块跟着弹窗正文滚——一次只看一组的全部，比在一个小框里滚 50 行清楚。 */
+  max-height: none;
+  overflow: visible;
 }
-/* 一条：原话（正文色——它是内容，不该比上面那枚小标签还暗）+ 可选的 sm 动作；多条之间一道发丝线。 */
+/* 一组：组头那枚类别标签 + 条数，下面是这一组的前几条。组与组之间一道发丝线，读的时候知道换了一类。 */
+.dsm-leftoverGroups { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.dsm-leftoverGroup { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.dsm-leftoverGroup + .dsm-leftoverGroup {
+  border-top: 1px solid var(--dsw-alias-border-l1, rgba(0, 0, 0, 0.06));
+  padding-top: 8px;
+}
+.dsm-leftoverGroupHead { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 8px; }
+/* 标签与条数同一行：标签默认 17px 行高，与条数那行 18px 差 1px，挂上去就参差（同 .dsm-planGroupHead 那条）。 */
+.dsm-leftoverGroupHead .dsm-tag { line-height: 18px; }
+.dsm-leftoverGroupCount {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-secondary, #646a73);
+  font-variant-numeric: tabular-nums;
+}
+/* 一条：三行（名字 / id / 原因）+ 可选的 sm 动作；多条之间一道发丝线。 */
 .dsm-leftoverRow {
   display: flex;
   align-items: flex-start;
@@ -1448,7 +1468,18 @@ export const CSS = `
 .dsm-leftoverRow + .dsm-leftoverRow {
   border-top: 1px solid var(--dsw-alias-border-l1, rgba(0, 0, 0, 0.06));
 }
-.dsm-leftoverRow > span { min-width: 0; flex: 1 1 auto; }
+/* 名字与原因各占一行：长标题不会把原因顶到屏幕外（原来两者挤在一句里，50 条清单只能看出开头四条）。 */
+.dsm-leftoverMain { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1 1 auto; }
+.dsm-leftoverName { font-weight: 500; overflow-wrap: anywhere; }
+.dsm-leftoverId {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-secondary, #646a73);
+  overflow-wrap: anywhere;
+}
+.dsm-leftoverReason { overflow-wrap: anywhere; }
+.dsm-leftoverMore { display: flex; }
 /* 那枚动作不许被挤窄：默认 flex 会把它压到内容宽度以下，五个字就折成两行（量到过 79px → 两行）。 */
 .dsm-leftoverRow > button { flex: none; }
 

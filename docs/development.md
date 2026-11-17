@@ -438,7 +438,8 @@ tsconfig.client.json       Web Client 自己的类型工程（DOM + JSX；Host �
 | `src/client/operations/sync/syncJobLabel.ts` | 同步那一趟在**状态栏**上说的那一句（跑着 / 刚跑完 / 没跑，三支各一句短话）；纯函数，`test/client/operations/sync/sync-job-label.test.ts` 钉住。 |
 | `src/client/operations/sync/syncChipDot.ts` | 那枚点该点哪一档（跑着 / 失败 / 有遗留 / 自动开着（只推或双向）/ 什么都没有，次序即优先级，`test/client/operations/sync/sync-chip-dot.test.ts` 摆开矩阵）与按钮悬浮提示那句短话（`syncChipNote()`）。 |
 | `src/client/operations/sync/syncNotice.ts` | 一次同步应用之后页面顶部那句话（结论先说条数，其余项折成一句「另有：A、B、C。」，顶掉 / 删掉本机内容时那句「旧的那份在「备份与回滚」里」只说一次；`test/client/operations/sync/sync-notice.test.ts` 钉住字数与分句）。 |
-| `src/client/operations/sync/syncLeftovers.ts` | 「上次同步没做到的那几条」在界面这一侧怎么读：页头那枚状态的悬浮提示与弹窗里那张清单共用一份，旧宿主只给 `problems` 时退到它。 |
+| `src/client/operations/sync/syncLeftovers.ts` | 「上次同步没做到的那几条」在界面这一侧怎么读：页头那枚状态的悬浮提示、弹窗里那张清单与同步结果页共用一份；按宿主给的 `kind` 分五组（缺附件 / 两边都写过 / 正开着 / 目录或映射对不上 / 其它），组次序、标签文案与档位也在这份纯数据里，旧宿主只给 `problems` 时退到它。 |
+| `src/client/operations/sync/SyncLeftoverList.tsx` | 「没做到」的清单本体：每组一枚类别标签 + 条数、默认摆前三条、其余「展开其余 N 条」；一条拆成名字 / id / 原因三行，带 id 的给「只看这一条」。同步面板的「上次同步」与同步结果页共用。 |
 | `src/client/operations/sync/autoPush.ts` | 自动推送「没跑」的原因码在**界面这一侧的运行期清单**（`AUTO_PUSH_SKIP_CODES`，与 `src/operations/sync/auto-push.ts` 的 `AutoPushSkip` 是同一套名字——联合类型编译之后就没了，而界面要按码去字典里挑那句句子；加一个码要四处一起改：core 的联合、这里、中英两份字典，`test/client/operations/sync/sync-form.test.ts` 是唯一那道闸）。 |
 | `src/client/operations/sync/diffStats.ts` | 差异视图两边那两块与三格计数的呈现判据（两块都在、0 条那块也摆出来，`test/client/operations/sync/diff-stats.test.ts` 钉住）。 |
 | `src/client/operations/sync/diffTags.ts` | 差异视图那两张分类对照表（关系 / 种类 / 两边各落官方 `Tag` 的哪一档——档位是判据，纯数据，`test/client/operations/sync/diff-tags.test.ts` 钉住）。 |

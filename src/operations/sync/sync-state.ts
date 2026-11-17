@@ -108,14 +108,17 @@ function isRecord(value: unknown): value is SyncRunRecord {
   if (
     leftovers !== undefined &&
     (!Array.isArray(leftovers) ||
-      leftovers.some(
-        (item) =>
-          item === null ||
-          typeof item !== 'object' ||
-          typeof (item as { message?: unknown }).message !== 'string' ||
-          ((item as { sessionId?: unknown }).sessionId !== undefined &&
-            typeof (item as { sessionId?: unknown }).sessionId !== 'string'),
-      ))
+      leftovers.some((item) => {
+        if (item === null || typeof item !== 'object') return true
+        const entry = item as { message?: unknown; sessionId?: unknown; title?: unknown; kind?: unknown; detail?: unknown }
+        if (typeof entry.message !== 'string') return true
+        if (entry.sessionId !== undefined && typeof entry.sessionId !== 'string') return true
+        // `title` / `detail` / `kind` 是后加的两半与分类：形状不对就整条记录当没有（与这一层同一标准）。
+        // `kind` 只核它是字符串——以后宿主多一种分类时，这一版读得回来，界面把认不出的归到「其它问题」。
+        if (entry.title !== undefined && typeof entry.title !== 'string') return true
+        if (entry.detail !== undefined && typeof entry.detail !== 'string') return true
+        return entry.kind !== undefined && typeof entry.kind !== 'string'
+      }))
   )
     return false
   const effect = record['takesEffect']

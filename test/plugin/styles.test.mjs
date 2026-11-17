@@ -240,6 +240,47 @@ test('「上次同步」那块：一次记录，不是四段连在一起的灰�
   assert.match(ruleBody('.dsm-leftoverRow > button') ?? '', /flex:\s*none/, '行内动作不许被挤窄')
 })
 
+test('「没做到」按原因分组：组头一枚标签，组间一道线，一条拆成名字/id/原因三行', () => {
+  /*
+   * 为什么钉它：一份遗留可能 50 条、混着"缺附件""两边都写过""正开着"几种完全不同的原因，原来全部
+   * 平铺成一句句长话，页面上只看得到开头四条；而且 `.dsm-listPlain` 自带 240px 的滚动框，等于把
+   * "有几类、各几条"藏在小窗里。分组之后每一类有自己的标签与条数，默认每组三条，其余按需展开。
+   *
+   * 反事实：把 `.dsm-leftovers .dsm-listPlain` 的 `max-height: none` 去掉，清单又回到 240px 小框；
+   * 把 `.dsm-leftoverMain` 的 `flex-direction: column` 去掉，名字与原因又挤回一行。
+   */
+  const groups = ruleBody('.dsm-leftoverGroups') ?? ''
+  assert.match(groups, /display:\s*flex/, '组与组纵向排')
+  assert.match(groups, /gap:\s*10px/, '组与组比组内的行更松一档')
+  assert.match(ruleBody('.dsm-leftoverGroup + .dsm-leftoverGroup') ?? '', /border-top:/, '组与组之间一道线')
+  // 组头：标签 + 条数，基线对齐；条数 12/18 次要色、等宽数字（4 与 5 不左右抖）。
+  const head = ruleBody('.dsm-leftoverGroupHead') ?? ''
+  assert.match(head, /display:\s*flex/, '标签与条数同一行')
+  assert.match(head, /align-items:\s*baseline/, '两段字按基线对齐')
+  assert.match(
+    ruleBody('.dsm-leftoverGroupHead .dsm-tag') ?? '',
+    /line-height:\s*18px/,
+    '标签与条数那行（18px）对齐，不差 1px',
+  )
+  const count = ruleBody('.dsm-leftoverGroupCount') ?? ''
+  assert.match(count, /font-size:\s*12px/, '条数是 12px 的次要文字')
+  assert.match(count, /font-variant-numeric:\s*tabular-nums/, '条数用等宽数字')
+  // 组内不再套 240px 的滚动框：默认三条 + 展开之后整块跟着弹窗正文滚。
+  const list = ruleBody('.dsm-leftovers .dsm-listPlain') ?? ''
+  assert.match(list, /max-height:\s*none/, '不再把清单关进 240px 的小框')
+  assert.match(list, /overflow:\s*visible/, '溢出交给弹窗正文处理')
+  // 一条三行：名字（500）/ id（12px 等宽次要色）/ 原因（正文色）。
+  const main = ruleBody('.dsm-leftoverMain') ?? ''
+  assert.match(main, /flex-direction:\s*column/, '名字与原因各占一行')
+  assert.match(main, /flex:\s*1 1 auto/, '左半边吃掉宽度，那枚动作不被挤窄')
+  assert.match(ruleBody('.dsm-leftoverName') ?? '', /font-weight:\s*500/, '名字比原因重一档')
+  const id = ruleBody('.dsm-leftoverId') ?? ''
+  assert.match(id, /font-size:\s*12px/, 'id 是 12px 的次要文字')
+  assert.match(id, /ui-monospace/, 'id 用等宽字（一串相似的字符才读得对）')
+  assert.match(id, /overflow-wrap:\s*anywhere/, '长 id 要能折行，不许顶出弹窗')
+  assert.match(ruleBody('.dsm-leftoverReason') ?? '', /overflow-wrap:\s*anywhere/, '长原因要能折行')
+})
+
 test('.dsm-tag 只剩布局挂钩：几何与配色都归官方 Tag 原语', () => {
   // 为什么钉它：标签的圆角/内边距/字号/配色是"标签长什么样"，官方 `Tag.module.css` 已经定死了
   // （999px 胶囊、padding 1px 8px、11px/17px、字重 500，tone 决定配色）。本页再写一遍就会与官方那份

@@ -244,6 +244,14 @@ export interface SyncPullEntry {
   reason?: string
 }
 
+/**
+ * 一条要动却动不了的计划行为什么没动。
+ *
+ * 与 `code`（两边的内容关系）分开：同样是 `diverged`，有的是"目标目录不存在"、有的是"会话正开着"、
+ * 还有的是"判不出谁更新"——三件事该由用户做的事完全不同，界面要按它分组，不能靠解析 `reason`。
+ */
+export type SyncBlockReason = 'no-mapping' | 'missing-target' | 'live' | 'newer-unknown'
+
 /** 推送方向的一条。 */
 export interface SyncPushEntry {
   id: string
@@ -254,6 +262,12 @@ export interface SyncPushEntry {
   action: 'upload' | 'update' | 'skip'
   /** 机器可读的分类（界面按它挑文案与过滤，不去解析 `reason`）。 */
   code: 'missing' | 'local-ahead' | 'local-newer' | 'identical' | 'remote-ahead' | 'diverged' | 'keep-local'
+  /**
+   * 没做成的原因（只有 `action: 'skip'` 的行有）。
+   *
+   * 缺失 = 旧宿主没这一项，或这一行不是"要动却动不了"的那一类；界面把它归到「其它问题」。
+   */
+  blockedBy?: SyncBlockReason
   /** 远端那一份由哪台机器贡献（"远端领先 / 两边各自写过"要指名道姓）。 */
   machine?: string
   /**
@@ -673,6 +687,7 @@ export function planSync(input: SyncPlanInput): SyncPlan {
           ...common,
           action: 'skip',
           code: 'diverged',
+          blockedBy: 'no-mapping',
           machine: remote.machine,
           reason: `本机这条没有 cwd，远端记的是 ${remote.cwd}，本机又没有它的同步映射——先补映射再同步`,
         })
@@ -680,7 +695,14 @@ export function planSync(input: SyncPlanInput): SyncPlan {
       }
       if (target !== undefined && session.cwd === undefined && !isDirectory(target)) {
         problems.push(`同步映射把 ${remote.cwd ?? ''} 指到了 ${target}，但那不是一个存在的目录`) // 见 missingTargetProblem()
-        push.push({ ...common, action: 'skip', code: 'diverged', machine: remote.machine, reason: `目标目录不存在：${target}` })
+        push.push({
+          ...common,
+          action: 'skip',
+          code: 'diverged',
+          blockedBy: 'missing-target',
+          machine: remote.machine,
+          reason: `目标目录不存在：${target}`,
+        })
         continue
       }
       if (input.isLive?.(session.id) === true) {
@@ -688,6 +710,7 @@ export function planSync(input: SyncPlanInput): SyncPlan {
           ...common,
           action: 'skip',
           code: 'diverged',
+          blockedBy: 'live',
           machine: remote.machine,
           reason: '这条会话正开着（宿主手里还有写句柄），裁决这次不生效',
         })
@@ -733,6 +756,7 @@ export function planSync(input: SyncPlanInput): SyncPlan {
           ...common,
           action: 'skip',
           code: kind,
+          blockedBy: 'live',
           machine: remote.machine,
           reason: `${remote.machine} 那份更新，但本机这条还在宿主内存里（运行中或已打开）——重启 DSH 让宿主放手，之后别先点开它再同步`,
         })
@@ -751,6 +775,7 @@ export function planSync(input: SyncPlanInput): SyncPlan {
             ...common,
             action: 'skip',
             code: kind,
+            blockedBy: 'no-mapping',
             machine: remote.machine,
             reason: `本机这条没有 cwd，远端记的是 ${remote.cwd}，本机又没有它的同步映射——先补映射再同步`,
           })
@@ -762,6 +787,7 @@ export function planSync(input: SyncPlanInput): SyncPlan {
             ...common,
             action: 'skip',
             code: kind,
+            blockedBy: 'missing-target',
             machine: remote.machine,
             reason: `目标目录不存在：${target}`,
           })
@@ -794,6 +820,7 @@ export function planSync(input: SyncPlanInput): SyncPlan {
       ...common,
       action: 'skip',
       code: 'diverged',
+      blockedBy: 'newer-unknown',
       machine: remote.machine,
       reason:
         `${forkText(content, remote.machine)}（本机 ${versionsText(mine)}，${remote.machine} ${versionsText(theirs)}），` +
@@ -999,12 +1026,47 @@ export interface SyncOutcome {
  * 数得出条数、看不出是哪条会话。同步跑完之后窗口一关，用户手上只剩页头那句"上次同步有 1 条没做到"，
  * 到底哪一条、为什么，`problems` 答不上来（它连会话 id 都没有）。这一份是点名版：每条会话一条，
  * 带上 id，界面据此给出「只看这一条」。
+ *
+ * 三组字段各有各的用处，缺一不可：
+ * - `message` 是一整句（工具输出、旧记录、以及"不属于任何一条会话"的那些都只有它）；
+ * - `title` / `detail` 把同一句话拆成"哪条会话"与"为什么"，界面分两行画（50 条的清单里，名字与原因
+ *   混在一行时读不出谁是谁）；
+ * - `kind` 是机器可读的分类，界面按它分组——"缺附件""两边都写过""目录对不上"要人做的事完全不同。
  */
 export interface SyncLeftover {
   /** 一句话，已经点名（会话名 + 原因，或 `problems` 里的原话）。 */
   message: string
   /** 能定位到某条会话时带上 id；映射、远端索引、整理那几步的问题没有这一项。 */
   sessionId?: string
+  /** 会话名（有的话）。界面拿它当标题，`sessionId` 单独一行；旧记录没有这一项。 */
+  title?: string
+  /** 这一条属于哪一类（界面按它分组）。缺失 = 旧记录，界面归到「其它问题」。 */
+  kind?: SyncLeftoverKind
+  /** 原因那一句，不含会话名与 id。缺失 = 旧记录，界面直接画 `message`。 */
+  detail?: string
+}
+
+/**
+ * 「没做到」的五类（四类具体原因 + 兜底），按界面分组的顺序排。
+ *
+ * 分类不是按句子猜的：计划行在造出来的时候就带着 `blockedBy`，附件那一段本来就是按会话折的。
+ */
+export type SyncLeftoverKind = 'attachment' | 'fork' | 'live' | 'path' | 'other'
+
+/** 计划行为什么没做成 → 界面上那一类。 */
+function leftoverKindOf(blocked: SyncBlockReason | undefined): SyncLeftoverKind {
+  switch (blocked) {
+    case 'no-mapping':
+    case 'missing-target':
+      return 'path'
+    case 'live':
+      return 'live'
+    case 'newer-unknown':
+      return 'fork'
+    default:
+      // 旧宿主没有 `blockedBy`（或以后多出一种我们还不认识的原因）：不猜，归到「其它问题」。
+      return 'other'
+  }
 }
 
 /**
@@ -1042,20 +1104,35 @@ export function collectLeftovers(outcome: SyncOutcome): SyncLeftover[] {
     const reason = 'reason' in row && typeof row.reason === 'string' ? row.reason : row.code
     const title = 'title' in row ? row.title : undefined
     const name = title === undefined || title === '' ? row.id : `${title}（${row.id}）`
-    push({ message: `${name}：${reason}`, sessionId: row.id })
+    /*
+     * 拉取那张表里唯一会跳过的原因是「目标目录不存在」（`no-mapping` 与 `deleted` 上面已经排掉）；
+     * 推送那张表带着 `blockedBy`，由它说清是目录、会话正开着、还是判不出谁更新。
+     */
+    const kind = 'blockedBy' in row ? leftoverKindOf(row.blockedBy) : row.code === 'missing-target' ? 'path' : 'other'
+    push({
+      message: `${name}：${reason}`,
+      sessionId: row.id,
+      ...(title === undefined || title === '' ? {} : { title }),
+      kind,
+      detail: reason,
+    })
   }
   /*
    * 附件对象那一头的"没做到"：对象本机没有、远端共享库里也没有（持有它们的机器还没推）。一句汇总只
    * 说得出数，处置却要落到**某一条会话**上，所以这里逐条点名、带上 id（与上面那些跳过同一个形状）。
    */
   for (const item of outcome.absentAttachments ?? []) {
+    const detail = `这条会话引用的 ${item.count} 个附件对象本机没有、远端共享库里也没有（持有这些对象的机器还没推送它们）`
     const name = item.title === undefined || item.title === '' ? item.sessionId : `${item.title}（${item.sessionId}）`
     push({
-      message: `${name}：这条会话引用的 ${item.count} 个附件对象本机没有、远端共享库里也没有（持有这些对象的机器还没推送它们）`,
+      message: `${name}：${detail}`,
       sessionId: item.sessionId,
+      ...(item.title === undefined || item.title === '' ? {} : { title: item.title }),
+      kind: 'attachment',
+      detail,
     })
   }
-  for (const problem of [...outcome.plan.problems, ...outcome.problems]) push({ message: problem })
+  for (const problem of [...outcome.plan.problems, ...outcome.problems]) push({ message: problem, kind: 'other' })
   return leftovers
 }
 
