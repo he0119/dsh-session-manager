@@ -136,6 +136,7 @@ src/                       手写源码（Host 半侧）
 ├─ shared/                 多个操作共用的零件
 │  ├─ types.ts paths.ts plugin-paths.ts project-key.ts canonical-path.ts registry.ts
 │  ├─ accounting.ts visibility.ts family.ts repo.ts attachments.ts journal.ts
+│  ├─ http/                界面端点共用的传输层、行视图与参数校验
 │  ├─ log/                 日志的字节、帧与行（含改写）
 │  ├─ library/             会话库扫描与它的两级缓存
 │  └─ host/                宿主可选服务的探测（ports.ts）与落地后的两步善后
@@ -184,7 +185,16 @@ tsconfig.client.json       Web Client 自己的类型工程（DOM + JSX；Host �
 | `src/index.ts` | 插件入口 `apply(ctx, config)`：注册工具与设置页、把 web 路由接上；**自动推送的调度器也在这里造一次**（`resolveAutoPushRuntime()`，挂在插件生命周期上，同一个实例交给界面看状态、也给它当场跑一轮）。事件层的监听与调度器**挂在同一个 promise 上**（凭据与配置要先解析完才作得成，而 `turn/end` 可能来得更早：先拿着 promise、到位再接监听——接晚了不丢这一轮，用户接着写的下一轮马上就会触发），卸载时**先摘监听、再停调度器**（摘晚了会有事件在 `stop()` 之后进来） | `dsh-tools` |
 | `src/config.ts` | 插件配置的 schema：`sync` 那一节带 `volatile`（活字段，改完不用重启），三个路径字段不带；`syncSection()` 把"活引用"与"普通对象"两种来路收成一份值；自动那一节的拍平在 `autoPushSection()` 一处（两栏 `autoPush` / `autoSync` → 一档 `{ enabled, mode }`，强的那档赢：`autoSync` 是双向、`autoPush` 是只推、都没写是关；原来那个间隔数与它的下限跟着兜底定时器一起删了） | `@deepseek-ai/schemastery` |
 | `src/tools.ts` | 6 个工具注册：读 `tools` 一节的开关、造一份迁移依赖（工具与界面端点同一个形状）、按顺序把定义交给 `ctx.tools.register`；关掉的连 `register` 都不调，卸载时把收下的 disposer 逐个调用 | `dsh-tools` |
-| `src/web.ts` | 界面端点（meta / state / transcript / export / import / sync / auto-push / migrate / backups / rollback / delete / archive / retitle），只要求 `{ register }` 形状；`GET /meta` 只答会话库位置与宿主能力位（不扫库），`GET /state` 是它的超集，另报一栏 `repos`（目录 → 项目身份，注入的入口认，见 `src/shared/repo.ts`）；`GET /state` 与 `/sync`（预演与落地）、`/migrate`、`/delete`、`/rollback`、`/import`、`/archive`、`/retitle`（正文带 `includePinned: true` 时连 `user` 源的标题一起重算——那是给一次性清理留的口子，界面不传这个字段）都回 SSE（`streamResult()`：`progress` 逐条、`result` 收尾，见 [决策](../.agents/notes/implemented/architecture/2026-10-08-every-long-action-streams-progress.md)）；`GET /meta`、`GET /backups`、`/export`、`GET /transcript`（一条会话的完整内容：只读、按事件位分页、一次读一份最高代次的日志）与 `GET /remote`（远端各机器格子里每条会话的位置：读的是每台机器那份 `index.json`，不是包；右栏那行「远端」一次刷新读一次，见 `src/client/operations/sync/remoteLibrary.ts`）是一次性响应（`/export` 的响应体就是产物本身，附件对象的条数 / 字节 / 本机缺的那几个报在 `x-dsh-attachment-*` 响应头里）。`POST /delete` 收 `sessionIds` / `mode` / `alsoRemote`（勾了「同时删除远端」才动远端，见 `src/operations/remove/remove.ts`）。`GET /auto-push` 是自动推送那一枚「立即推送一次」：**两种形状**——没配同步或这个宿主没有调度器（`deps.autoPush` 缺席）时是写头之前的 JSON + 409，其余时候当场跑一轮（`tick()`）并按 `/sync` 同一套回 SSE（事件带 `what: 'auto-push'`，`result` 是 `mode: 'auto-push'` + 那个 `AutoPushOutcome`，真跑过才把 `plan` / `pulled` / `pushed` / `bytesIn` / `bytesOut` / `problems` 那几项摊平，与 `/sync` 的 `payloadOf()` 同形）；这条路只推不拉、没有确认那一步，所以没有 `mode=apply` 那种分岔，也没有 `enable` / `disable`——开关只走配置表单。落地跑着的时候第二趟 `mode=apply` 拿到 409。`GET /panel/events` 是这一页**唯一**的长连接：开头 `ready`（宿主事实，不扫库）、两种后台状态的当下（`sync`：落地那一趟 + 上一轮结论；`auto-push`：自动推送那一轮 + 上一轮计数）、扫库的 `progress`、整库清单 `snapshot`（与 `/state` 同一份取值，走同一个 `readState()`），之后跟着推变化与 `stale`（本机会话库被改过了，页面据此重连要新清单），每 15 秒一次 `ping`，客户端断开就退订、退定时器的订阅（见 [决策](../.agents/notes/implemented/architecture/2026-10-21-one-stream-for-the-whole-panel.md)） | 无 |
+| `src/web.ts` | 界面端点的**外壳**：`ApiDeps` 与 `WebContext` 的形状、各读一次就够的共享件（扫库缓存、内容缓存、投影读取器、写远端那把闸）、`/meta` 与 `/state`、面板事件流，以及把各操作的 handler 拼成路由表；`GET /meta` 只答会话库位置与宿主能力位（不扫库），`GET /state` 是它的超集，另报一栏 `repos`（目录 → 项目身份，注入的入口认，见 `src/shared/repo.ts`） | 无 |
+| `src/shared/http/respond.ts` | 传输层：读请求体（有上限）、回 JSON / 字节、把长动作跑成 SSE（`streamResult()`）、读 JSON 体与整数查询参数 | 无 |
+| `src/shared/http/view.ts` | 界面要的「会话行 / 工作区行」：`summarizeSessions()` / `summarizeWorkspaces()` 与"单独的子智能体不许单独动"的拒绝文案（判据仍在 accounting.ts 与 visibility.ts） | 无 |
+| `src/shared/http/validate.ts` | 请求参数里"必须在盘上真的存在"的那一条：`assertTargetCwd()`（导入与迁移共过同一道门） | 无 |
+| `src/operations/migrate/http.ts` | `GET /backups`、`POST /migrate`、`POST /rollback` 三条端点：参数翻成 `MigrateRequest`，落地走事件流 | 无 |
+| `src/operations/sync/http.ts` | 同步那四条端点（预览与落地、自动推送、比两份日志、列远端格子）与它们共用的一份预演缓存 / 落地闸 | 无 |
+| `src/operations/transfer/http.ts` | `POST /export` 与 `POST /import`：包必须自校验通过、冲突只跳过不覆盖、目标目录必须真实存在 | 无 |
+| `src/operations/remove/http.ts` | `POST /delete` 与 `POST /archive`：删除先备份再删、归档只改注册表归档集并把改动交给宿主认下 | 无 |
+| `src/operations/transcript/http.ts` | `GET /transcript`：一条会话的完整内容（分页、只读） | 无 |
+| `src/operations/retitle/http.ts` | `POST /retitle`：逐条请宿主的名称服务重算，进度走事件流 | 无 |
 
 #### `src/shared/`：跨操作共用的零件
 

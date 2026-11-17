@@ -155,8 +155,9 @@ test('产物冒烟：宿主提供 webServer 时挂上十六条界面路由，卸
   const { routes, removed, dispose } = await loadPlugin()
   await waitFor(() => routes.length > 0, '插件激活后端点上挂')
 
+  // 顺序不是契约（各操作的 handler 由各自的工厂交上来），比的是"这套端点都在"。
   assert.deepEqual(
-    routes.map((route) => `${route.kind} ${route.path}`),
+    routes.map((route) => `${route.kind} ${route.path}`).sort(),
     [
       'exact /dsh-session-manager/api/meta',
       'exact /dsh-session-manager/api/state',
@@ -177,7 +178,7 @@ test('产物冒烟：宿主提供 webServer 时挂上十六条界面路由，卸
       'exact /dsh-session-manager/api/delete',
       'exact /dsh-session-manager/api/archive',
       'exact /dsh-session-manager/api/retitle',
-    ],
+    ].sort(),
     '界面端点必须都在本插件命名空间下，且是精确路由',
   )
   for (const route of routes) assert.equal(typeof route.handler, 'function')

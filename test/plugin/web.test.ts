@@ -1069,8 +1069,9 @@ test('registerWebRoutes：注册十六条精确路由，方法不对回 405', as
     { register: (route) => { routes.push(route); return () => {} } },
     deps(sandbox),
   )
+  // 顺序不是契约（各操作的 handler 由各自的工厂交上来，谁先谁后不影响派发），比的是"这套端点都在"。
   assert.deepEqual(
-    routes.map((route) => `${route.kind} ${route.path}`),
+    routes.map((route) => `${route.kind} ${route.path}`).sort(),
     [
       `exact ${API_PREFIX}/meta`,
       `exact ${API_PREFIX}/state`,
@@ -1092,7 +1093,7 @@ test('registerWebRoutes：注册十六条精确路由，方法不对回 405', as
       `exact ${API_PREFIX}/delete`,
       `exact ${API_PREFIX}/archive`,
       `exact ${API_PREFIX}/retitle`,
-    ],
+    ].sort(),
   )
 
   const exportRoute = routes.find((route) => route.path.endsWith('/export'))!
