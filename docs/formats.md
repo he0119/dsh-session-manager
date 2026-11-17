@@ -8,7 +8,7 @@
 
 ## 本机会话库
 
-路径按宿主的约定（本包复刻同一套口径，见 [src/paths.ts](../src/paths.ts)）：
+路径按宿主的约定（本包复刻同一套口径，见 [src/shared/paths.ts](../src/shared/paths.ts)）：
 
 ```
 <会话根>/<projectKey(cwd)>/<encodeSegment(id)>/session.vN.jsonl.zstd
@@ -44,7 +44,7 @@
 
 ## 远端同步格子
 
-远端只是「一格格包 + 每格一份索引」，不是会话库（[src/sync.ts](../src/sync.ts)）：
+远端只是「一格格包 + 每格一份索引」，不是会话库（[src/operations/sync/sync.ts](../src/operations/sync/sync.ts)）：
 
 ```
 <url>/dsh-session-manager/<machineId>/index.json                     这台机器贡献了哪些会话
@@ -114,7 +114,7 @@
 
 ## 会话包 `.dshsess`
 
-同步推的是它，界面上的「导出」产出的也是它（[src/transfer.ts](../src/transfer.ts)）：
+同步推的是它，界面上的「导出」产出的也是它（[src/operations/transfer/transfer.ts](../src/operations/transfer/transfer.ts)）：
 
 ```
 gzip( 'DSHSESS1\n' | u32le 清单长度 | 清单 JSON | 各文件原始字节 | 各附件对象原始字节 )

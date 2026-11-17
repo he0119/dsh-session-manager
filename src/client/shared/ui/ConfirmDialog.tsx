@@ -1,0 +1,178 @@
+/**
+ * 确认弹窗：动作按钮那一下就把「将要发生什么」摆在眼前，用户当场确认或取消。
+ *
+ * 为什么不是「先点预演、看着页面上的结果、再点一次确认」：那两步之间用户还得回到按钮那一行，而
+ * 按钮在卡片另一头；更要紧的是**预演结果落在页面里**时，页面本身会跟着变（迁移页的按钮从"预演迁移"
+ * 换成"确认迁移"、结果卡片插在字段下面把下面的内容推走），用户按第二下时看的东西已经不在原位。
+ * 弹窗把"将要发生什么"与"确认 / 取消"放进同一个视线范围：算计划、看清单、按确认，三件事在同一块
+ * 地方完成；取消就是关掉它，页面回到按之前的样子。
+ *
+ * 这是本页唯一 require 官方控件库的地方之一（另一处是同步设置里的密码框，见 `SyncConfigForm.tsx`）：
+ * 弹窗要 `createPortal` 到 `document.body`，而 `react-dom` **不是**平台基线模块（基线只有 react /
+ * react/jsx-runtime / 官方控件库）——所以自己写遮罩层既会被设置外壳的 overflow 裁掉，也得额外申请
+ * 一个非基线模块。官方 `Modal` 已经带齐遮罩、Escape、焦点归还与菜单叠层，用它就是最短路径。
+ *
+ * 本组件只负责"框"：标题、正文、底部那对按钮、四种状态（还在算计划 / 算不出来 / 可以确认 / 正在做）。
+ * 正文里摆什么由打开它的那一面决定——那里才有端点类型与清单结构。计划由**打开它的那一面**去取（而不是本组件
+ * 去取），因为"取哪一份计划"是那个动作自己的事：删除取删除计划、迁移取迁移计划、回滚取回滚动作。
+ *
+ * @module dsh-session-manager/client/shared/ui/ConfirmDialog
+ */
+
+import * as React from 'react'
+
+import { Button, Checkbox, IconWarningOutlineRegular, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
+
+import type { Translate } from '../i18n/locales.ts'
+
+export interface ConfirmDialogProps {
+  t: Translate
+  /** 弹窗标题：说的就是那个动作（「将要删除」）。 */
+  title: string
+  /** 主按钮文案。 */
+  confirmLabel: string
+  /**
+   * 风险那一句：摆在清单下面、勾选框上面（带官方那枚警告图标）。
+   *
+   * 这一句加下面那枚「我明白」勾选框，就是官方 `RiskConfirmation` 那套确认方式：主按钮先禁用，
+   * 勾上才按得动。官方那枚原语本身只收一句话（`description` 是字符串，没有放清单的位置），而这几个
+   * 动作的正文正是"将要发生什么"的清单，所以照着它的排法做在本组件里，清单留下来。
+   */
+  acknowledge: string
+  /**
+   * 正在做的时候主按钮显示的那句话（「删除中…」）。
+   *
+   * 现在只有**同步**那一面还给（它的落地段就在自己那扇窗里跑）；其余动作确认之后会换成一扇状态窗
+   * （见 [RunDialog.tsx](./RunDialog.tsx)），确认弹窗在那一刻就关掉了，没有"忙碌"这一档。
+   */
+  busyLabel?: string
+  /** 动作正在执行：主按钮换成 `busyLabel`，两个按钮都禁用（同上：现在只有同步给）。 */
+  busy?: boolean
+  /**
+   * 忙碌时「取消」那一枚换成的动作：窗口收起来，活儿继续在后台跑。
+   *
+   * 只有**关掉窗口不代表取消**的动作才给这一项（同步就是：宿主那边会一直跑到结束，见 SyncPanel 的
+   * 说明）。给了它，忙碌时这枚按钮不再禁用、字换成这里这句；没给（迁移 / 导入 / 删除）就仍是禁用——
+   * 那几个动作关掉窗口只是把进度藏起来，结果照样会丢，不该假装做得到。
+   */
+  backgroundLabel?: string
+  /** 计划还在算：正文是一行说明，主按钮禁用。 */
+  planning?: boolean
+  /**
+   * 算计划期间正文里摆什么（缺省是一句「预演中…」）。
+   *
+   * 给得出具体进度的调用方用进度条顶掉那句静态说明：一段"预演"要扫库、逐条读包或走一遍备份清单，
+   * 冷的时候是几秒。一条事件都还没到时照旧摆那句「预演中…」（`progress.waiting` 也是给这个位置的）。
+   */
+  planningDetail?: React.ReactNode
+  /** 计划没取到时的原话（宿主或网络层的异常），摆在正文里并禁用主按钮。 */
+  error?: string | null
+  /**
+   * 计划本身不允许落地（宿主说 `ok === false`）：主按钮禁用。
+   *
+   * 与 `error` 分开：计划算出来了、清单也摆出来了，只是里面有问题（例如"这条会话还活在宿主内存里"），
+   * 用户要看到清单与问题清单，而不是一句"失败了"。
+   */
+  disabled?: boolean
+  onConfirm: () => void
+  onCancel: () => void
+  children?: React.ReactNode
+}
+
+/**
+ * 确认弹窗。
+ *
+ * 取消落在两处、语义相同：底部那个「取消」、右上角那个叉、Escape、点遮罩。**取消不做任何写入**——
+ * 计划本来就是只读的一次计算（见 `src/operations/migrate/migrate.ts` 的 `apply:false`），所以关掉它不会留下半个动作。
+ *
+ * 初始焦点给「取消」而不是主按钮：确认键按下去是这个弹窗里最重的动作，键盘用户不该因为"对话框一出现
+ * 就抢了焦点"而误删。官方 `Modal` 按 `data-modal-autofocus` 认这个标记，并且关闭时会把焦点还给当初
+ * 触发它的那个按钮。
+ */
+export function ConfirmDialog({
+  t,
+  title,
+  confirmLabel,
+  acknowledge,
+  busyLabel,
+  busy = false,
+  backgroundLabel,
+  planning = false,
+  planningDetail,
+  error = null,
+  disabled = false,
+  onConfirm,
+  onCancel,
+  children,
+}: ConfirmDialogProps): React.ReactElement {
+  const [acknowledged, setAcknowledged] = React.useState(false)
+  return (
+    <Modal
+      open
+      onClose={onCancel}
+      title={title}
+      closeLabel={t('close')}
+      className="dsm-dialog"
+      contentClassName="dsm-dialogContent"
+      footer={
+        <>
+          {/*
+            「取消」走官方 `outline`、「确认」走官方 `primary`，都用**缺省尺寸**——这正是官方弹窗
+            （`RiskConfirmation` 那一对）的用法：`.primary` 用的就是 `--dsw-alias-button-primary-fill`
+            与 `--dsw-alias-label-primary-foreground`，本页原先手写填充按钮拼的那条回落链不再需要；
+            缺省尺寸是 36px / 14px，也不再用 `size="sm"`（28px / 12px 在弹窗里比官方那对轻一档）。
+            `data-modal-autofocus` 是官方 `Modal` 认的初始焦点标记，留在「取消」这一枚上。
+            两枚的最小宽度（72 / 136）也照官方 `RiskConfirmation` 给：五个动作的文案长短不一，
+            不给的话底栏宽度跟着字跳。
+          */}
+          {/*
+            忙碌时有两种口径：给了 `backgroundLabel` 的（同步）把这一枚变成「转到后台」——窗口关掉、
+            活儿照跑；没给的照旧禁用，因为那几个动作关掉窗口只会把进度藏起来，结果照样丢。
+          */}
+          <Button
+            variant="outline"
+            className="dsm-dialogAction"
+            data-modal-autofocus=""
+            onClick={onCancel}
+            disabled={busy && backgroundLabel === undefined}
+          >
+            {busy && backgroundLabel !== undefined ? backgroundLabel : t('cancel')}
+          </Button>
+          <Button
+            variant="primary"
+            className="dsm-dialogConfirm"
+            onClick={onConfirm}
+            disabled={busy || planning || error !== null || disabled || !acknowledged}
+          >
+            {busy ? busyLabel : confirmLabel}
+          </Button>
+        </>
+      }
+    >
+      {/* 正文自己再包一层：官方 `.body` 是纵向 flex 但不给块间距，而这里摆的是段落 + 清单 + 表格。 */}
+      <div className="dsm-dialogBody">
+        {planning && (planningDetail ?? <p className="dsm-hint">{t('dialog.previewing')}</p>)}
+        {error !== null && <p className="dsm-error">{error}</p>}
+        {children}
+        {/*
+          风险那一块照官方 RiskConfirmation 的排法：警告图标 + 一句话，下面是「我明白」那枚勾选，
+          主按钮勾上才按得动。忙起来（正在做）就撤掉这两样——那一步已经没有可确认的东西了。
+        */}
+        {!busy && (
+          <>
+            <div className="dsm-risk">
+              <IconWarningOutlineRegular size={18} className="dsm-riskIcon" />
+              <p>{acknowledge}</p>
+            </div>
+            <Checkbox
+              className="dsm-acknowledge"
+              checked={acknowledged}
+              label={t('dialog.acknowledge')}
+              onChange={setAcknowledged}
+            />
+          </>
+        )}
+      </div>
+    </Modal>
+  )
+}

@@ -67,9 +67,9 @@ padding 与 2px 边框照样多顶出去 14px）。
   （浅 `rgb(15, 17, 21)` / 深 `rgb(249, 250, 251)`），说明列 `label-secondary`。两套主题都是量出来的
   值，没有新 token。
 - 「这次不动」那一节从整行说明变成三列表，行高 38px；长标题照旧走省略号（`title` 属性里是完整 id）。
-- 验证：`test/client.test.mjs` 钉住三张表都带变体类、第三列表头是 `colNote`、可见文字是短标签、整句
-  在 `title` 上、状态与会话名**不再挤在同一个文本节点**里；`test/styles.test.mjs` 钉住两张表各自的
+- 验证：`test/plugin/client.test.mjs` 钉住三张表都带变体类、第三列表头是 `colNote`、可见文字是短标签、整句
+  在 `title` 上、状态与会话名**不再挤在同一个文本节点**里；`test/plugin/styles.test.mjs` 钉住两张表各自的
   列宽下界（88 / ≥111px，都是量出来的）与兜底那三条声明。五处篡改各自红在对应断言上：退回整行说明
   （红在"三张表都要带变体类"）、表上不带 `dsm-keptTable`、状态列放整句（红在标签文案）、列宽退回
   88px、标签去掉 `title`。
-- `test/client.test.mjs` 测的是**构建产物**：篡改源码之后要先 `pnpm build` 再跑，否则红不了。
+- `test/plugin/client.test.mjs` 测的是**构建产物**：篡改源码之后要先 `pnpm build` 再跑，否则红不了。

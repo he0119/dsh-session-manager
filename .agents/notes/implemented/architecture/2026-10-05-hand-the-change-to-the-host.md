@@ -28,7 +28,7 @@ Status: implemented
 
 ## Decision
 
-改完注册表之后，插件**把活儿交给宿主自己做**（`src/take-effect.ts` 的 `takeEffectOnHost()`，端口由
+改完注册表之后，插件**把活儿交给宿主自己做**（`src/shared/host/take-effect.ts` 的 `takeEffectOnHost()`，端口由
 `src/tools.ts` 的 `hostRegistryPort()` 从 `ctx.get('workspaceRegistry')` 与
 `ctx.get('sessionPersistence')` 上探测并收成形状）：
 
@@ -45,7 +45,7 @@ Status: implemented
 
 - **会话 id 一个都不变**：全程只有挂靠与摘除，没有 `session/create`，也不动日志 header 的 `id` 与目录名；
   迁移落地之后拿备份里那份（改动前）与落盘结果比一次——少了、多了计划外的 id 都算复核失败
-  （`src/registry.ts` 的 `verifyRegistryChange()`）；
+  （`src/shared/registry.ts` 的 `verifyRegistryChange()`）；
 - **已存在的工作区 id 不变**：复用目标时，宿主返回的 id 与计划预测的不一致就当场停下报"仍需重启"，
   绝不悄悄换 id。同一批里**前面几笔新建**的目标是唯一例外：新建的目标由宿主分配 id，计划里那个只是
   预测，后面几笔的计划会把预测值当成"已存在"，那种不一致要放行（同步一次拉多条时会走到）；

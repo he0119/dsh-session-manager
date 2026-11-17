@@ -16,8 +16,8 @@
 | 会话里发生的事 | **事件**（官方代码里是 `SessionEvent`，即 `session/event`） | 会话事件（内部叫法，界面别用） | 官方文档 [会话](https://deepseek-harness.github.io/deepseek-harness/reference/subsystems/session)：「由类型化 SessionEvent 组成的仅追加日志」 |
 | 会话的一轮 | **轮次 / 第 N 轮** | 回合 | 官方界面：`dsh-client-ui-trajectory` 的「轮次」「展开所有轮次」、`dsh-client-ui-chat` 的「第 {turn} 轮」 |
 | 子会话 | **子智能体**（英文 subagent） | 子代理、子 agent | 官方包中文文案里「子智能体」出现 39 次，「子代理」0 次 |
-| 插件的目录结构 | **项目目录**（宿主 `projectDir(root, cwd)`） | 桶、分桶 | 官方接口命名；本仓库 `src/registry.ts` 用它 |
-| 会话清单 | **注册表** | 账本 | 官方文档的 session registry；本仓库 `src/registry.ts` |
+| 插件的目录结构 | **项目目录**（宿主 `projectDir(root, cwd)`） | 桶、分桶 | 官方接口命名；本仓库 `src/shared/registry.ts` 用它 |
+| 会话清单 | **注册表** | 账本 | 官方文档的 session registry；本仓库 `src/shared/registry.ts` |
 | 工作树里的目录 | **工作区**（英文 workspace） | 空间、房间 | 官方界面「工作区」「添加工作区」 |
 | 结束态的会话 | **归档 / 取消归档** | 收起来、封存 | 官方界面「归档会话」「显示已归档」 |
 | 挂载点（插件往宿主挂东西的位置） | **`Slot`**（官方保留英文） | 槽位 | 官方文档 [客户端 Slots](https://deepseek-harness.github.io/deepseek-harness/reference/subsystems/slots) |

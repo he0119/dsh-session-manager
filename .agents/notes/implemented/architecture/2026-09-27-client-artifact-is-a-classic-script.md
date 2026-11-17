@@ -36,7 +36,7 @@ DSH 的[客户端模块系统](https://deepseek-harness.github.io/deepseek-harne
 
 ## Consequences
 
-- 契约错了在源码层面看不出来，只有跑一遍产物才知道：`test/client.test.mjs` 用假的加载器与假
+- 契约错了在源码层面看不出来，只有跑一遍产物才知道：`test/plugin/client.test.mjs` 用假的加载器与假
   `require` 按这份契约执行 `lib/client.js`。
 - 代价是跟上游的版本节奏绑在一起——模块表按 specifier 分发、没有版本协商，控件 API 改了编译期发现
   不了（控制范围的那道门见

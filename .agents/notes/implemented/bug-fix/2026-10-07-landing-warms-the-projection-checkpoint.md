@@ -20,7 +20,7 @@ smart-home-deploy 27/48）；`dsh-session-manager` 那 33 个成员里有一条�
 ## Decision
 
 三处落地（导入 / 同步拉取 / 迁移）在收口时多走一步 `warmCheckpoints()`
-（[src/checkpoint-warm.ts](../../../../src/checkpoint-warm.ts)）：对**这次刚落到本机**的会话逐条调用宿主
+（[src/shared/host/checkpoint-warm.ts](../../../../src/shared/host/checkpoint-warm.ts)）：对**这次刚落到本机**的会话逐条调用宿主
 自己的两个服务——
 
 1. `sessionQuery.readSession(id)`：读完整日志并校验，**不**把它变成活会话；
@@ -60,7 +60,7 @@ smart-home-deploy 27/48）；`dsh-session-manager` 那 33 个成员里有一条�
 被静默丢弃、`seq` 写错会让它跳过真事件。自己写等于把"折叠语义"的实现也抄进来，抄错的方向是**静默算错
 状态**，不是报错。
 
-**只让插件自己的页面显示标题。** 插件页面本来就自己解日志开头（[src/session-title.ts](../../../../src/session-title.ts)），
+**只让插件自己的页面显示标题。** 插件页面本来就自己解日志开头（[src/shared/log/session-title.ts](../../../../src/shared/log/session-title.ts)），
 从来不受影响；坏的是外壳侧边栏，它只认宿主那份检查点。
 
 **等上游在列表路径里自己冷读。** 上游 0.2.1-alpha 的冷列表只有"读检查点"这一条路，

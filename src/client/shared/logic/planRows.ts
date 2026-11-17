@@ -1,0 +1,401 @@
+/**
+ * 列表/表格里一行该怎么写——抽成纯函数，因为这两处都出过错。
+ *
+ * 一、cwd 那一格在**跳过**的行上说过错话。
+ *
+ * 计划里的 `toCwd` 只在「会写盘、而且包里本来有 cwd」的会话上出现（见 `src/operations/transfer/transfer.ts` 的
+ * `ImportEntry`）：按设计，跳过的行没有 `toCwd`，包里没有 cwd 的会话也没有。原来那一格只判断
+ * `toCwd === undefined`，于是把跳过的行显示成「保持无 cwd（落 _no-cwd）」——那些会话明明有 cwd
+ * （比如 `/home/uy_sun/dev/dsh-aperture`），而且它们根本不会被写盘。用户看到的是"我的会话要被丢进
+ * 无 cwd 项目目录了"，这是把"什么都不会发生"说成了"会发生一件坏事"。
+ *
+ * 二、一行的"名字"该是标题还是 id（`sessionLabel`）：以前到处显示 `session-9f3c…`，用户认不出是哪条。
+ *
+ * 判断点摆在一个地方，因此可以被直接测（`test/planRows.test.ts`）。
+ *
+ * 只用到这几个字段，所以这里**不 import** `/state` 或导入响应的类型：Host 半侧的 typecheck 工程
+ * `exclude` 了 `src/client`，而 import 会把它拉进那个没有 DOM 的工程里检查（见 groups.ts 里同一段
+ * 说明）。
+ *
+ * @module dsh-session-manager/client/shared/logic/planRows
+ */
+
+import type { SessionManagerKey, Translate } from '../i18n/locales.ts'
+
+/** 判断 cwd 这一格只用得上这三个字段。 */
+export interface CwdSubject {
+  readonly action: 'create' | 'skip'
+  /** 包里的原 cwd；缺省表示这条会话本来就没有 cwd。 */
+  readonly fromCwd?: string
+  /** 落盘后的 cwd；跳过的行与本来就没有 cwd 的会话都没有这个字段。 */
+  readonly toCwd?: string
+}
+
+/** 这一格的三种说法：跳过不改写 / 本来就没有 cwd / 会改写成目标路径。 */
+export type CwdPlan =
+  | { readonly kind: 'skip' }
+  | { readonly kind: 'keepNoCwd' }
+  | { readonly kind: 'rewrite'; readonly from: string; readonly to: string }
+
+/** 把一条计划映射成那一格要说的事。 */
+export function describeCwd(subject: CwdSubject): CwdPlan {
+  // 先判跳过：跳过时 `toCwd` 必然缺省，但那**不代表**"这条会话没有 cwd"，更不代表要落 _no-cwd。
+  if (subject.action === 'skip') return { kind: 'skip' }
+  if (subject.toCwd === undefined) return { kind: 'keepNoCwd' }
+  // 会写盘且有 cwd 时 `fromCwd` 必然有（`toCwd` 就是由它存在推出来的），兜底只为类型与坏数据。
+  return { kind: 'rewrite', from: subject.fromCwd ?? '—', to: subject.toCwd }
+}
+
+/** 认一条会话只用得上这两个字段。 */
+export interface LabelSubject {
+  readonly id: string
+  /** 折叠出的标题；读不到就没有（见 `src/shared/log/session-title.ts`）。 */
+  readonly title?: string
+}
+
+/** 一行会话在界面上怎么称呼。 */
+export interface SessionLabel {
+  /** 行上可见的文本。 */
+  readonly text: string
+  /** 悬浮提示（原生 tooltip）。标题在前、id 在后，见下面的说明。 */
+  readonly tip: string
+  /** 可见的是标题还是 id：前者走正文字体，后者走等宽（机器名就该长得像机器名）。 */
+  readonly kind: 'title' | 'id'
+}
+
+/**
+ * 一条会话在列表/表格里显示成什么。
+ *
+ * 显示**标题**而不是 id：`session-9f3c…` 这种 uuid 对人是零信息，用户是在"我上次问那个问题的会话"
+ * 这一层挑会话的。id 并没有消失，而是退到悬浮提示里——真要指名道姓（报 bug、对日志）时才需要它。
+ *
+ * 标题读不到（老会话、日志里就没有标题事件）时**回落到 id**：显示空行或"（无标题）"更没用，
+ * 那本来就是这个位置以前显示的东西。
+ *
+ * 提示里两行放着完整标题 + id：标题在行里可能被省略号截掉，悬停是唯一能看全的地方；而 id 是
+ * 用户明确要求"悬浮才显示"的东西。标题就是 id 时（没有标题）不重复一遍。
+ *
+ * @param subject 只读 id 与 title。
+ * @returns 可见文本、提示文本与字体种类。
+ */
+export function sessionLabel(subject: LabelSubject): SessionLabel {
+  const title = subject.title?.trim()
+  if (title === undefined || title === '') return { text: subject.id, tip: subject.id, kind: 'id' }
+  return { text: title, tip: `${title}\n${subject.id}`, kind: 'title' }
+}
+
+// ---- 一个目录在界面上怎么称呼：项目身份、标题与本机路径 ----
+
+/**
+ * 一个目录的三种称呼来源：本机路径（必有）、注册表里的工作区名称、仓库的项目身份。
+ *
+ * 项目身份是仓库的 git remote，宿主已经规范成 `host/owner/repo`（见宿主 `src/shared/repo.ts`）：同一个项目在
+ * 两台机器上可以落在完全不同的目录里，本机路径是**机器特有**的那一个，而身份是仓库自己的名字。组头上
+ * 只看得见**名字**，身份与本机路径一起进悬浮提示（两个都是机器字符串，摆在那一行里又长又会被截断）；
+ * 只有一行可用的那处（目录字段的值控件）里两个都摆在文本里——那里没有第二行可退，而同一个仓库在本机
+ * 的两个克隆只能靠路径区分（见 `pathLabel()` 与 `candidateRow()`）。
+ */
+export interface ProjectSubject {
+  /** 本机目录的绝对路径；空串 = 没有 cwd 的那一组。 */
+  readonly path: string
+  /** 注册表里的工作区名称（未登记目录没有）。 */
+  readonly title?: string
+  /** 项目身份（`host/owner/repo`）；认不出来时没有。 */
+  readonly repo?: string
+}
+
+/**
+ * 身份里的项目名：最后一段（`github.com/he0119/dsh-session-manager` → `dsh-session-manager`）。
+ *
+ * 末尾的 `.git` 会去掉：规范形式里它已经被剪掉，而"认不出来就原样退回"的那些形状（裸路径等）可能还带
+ * 着它，直接当名字显示会多一个后缀。
+ */
+export function repoName(repo: string): string {
+  const parts = repo.replace(/\.git$/, '').split('/')
+  return parts[parts.length - 1] || repo
+}
+
+/**
+ * 身份里的主机名：第一段（`github.com/he0119/dsh-session-manager` → `github.com`）。
+ *
+ * "认不出来就原样退回"的那些形状（裸路径等）没有主机段，那时整条原样当标签——这种身份本来就少见，
+ * 标签太长由 CSS 的 nowrap 兜住。
+ */
+export function repoHost(repo: string): string {
+  const cut = repo.indexOf('/')
+  return cut <= 0 ? repo : repo.slice(0, cut)
+}
+
+/**
+ * 一个组头要说的事：主名字（唯一可见的那串字）、一枚主机标签（有身份时），以及它们的悬浮提示。
+ */
+export interface ProjectLabel {
+  /** 主名字：工作区名称 → 项目名（没有标题时）→ 本机路径（都没有时）。 */
+  readonly name: string
+  /**
+   * 悬浮提示：**项目身份（有的话）与本机路径各一行**。
+   *
+   * 组头上只看得见名字——身份与本机路径都是机器字符串，摆在那一行里既长又会被截断（截断的身份比没有
+   * 还难认），而"这是哪个仓库、它在本机哪个目录"是"想知道才看"的信息。悬浮提示把两件都给出：身份在
+   * 上（跨机器认得出来的那个名字），本机路径在下（同一个仓库在本机的两个克隆靠它区分）。
+   */
+  readonly tip: string
+  /**
+   * 项目身份的主机名（`github.com`）：组头在名字后面挂一枚小标签。
+   *
+   * 只挂主机名，不挂整条身份——整条又长又会被截断（那正是它从这一行里撤下来的原因），而"这枚标签说的
+   * 是哪个远端"由标签自己的悬浮提示给全。它同时是个**看得见的记号**：哪些目录是认得出身份的仓库，扫
+   * 一眼就知道，不必逐个悬浮。
+   */
+  readonly host?: string
+}
+
+/**
+ * 一个目录组头怎么称呼。
+ *
+ * 名字取**人认得的那一个**：注册表里的工作区名称优先（那是用户自己起的名字），没有标题才退到项目名
+ * （身份最后一段——未登记目录原来拿整条本机路径当名字，机器特有的绝对路径对认项目没有帮助）。
+ *
+ * @param subject 路径、标题与身份。
+ * @param t 翻译（没有 cwd 的那一组用 `list.noCwdGroup`）。
+ * @returns 名字与悬浮提示。
+ */
+export function projectLabel(subject: ProjectSubject, t: Translate): ProjectLabel {
+  const { path, title, repo } = subject
+  const name = title ?? (path === '' ? t('list.noCwdGroup') : repo === undefined ? path : repoName(repo))
+  const lines = [repo, path].filter((line): line is string => line !== undefined && line !== '')
+  return {
+    name,
+    tip: lines.length === 0 ? name : lines.join('\n'),
+    ...(repo === undefined ? {} : { host: repoHost(repo) }),
+  }
+}
+
+/**
+ * 一行路径的称呼（不带条数）：项目身份优先「身份 — 路径」，没有身份就照旧「标题 — 路径」。
+ *
+ * 机器字符串的两种摆法与候选面板不同：面板里一行是两行文字（名字在上、路径在下，见 `candidateRow()`），
+ * 而**值控件**（目录字段那枚按钮，见 DirectoryField.tsx）只有一行可用——那里没有第二行可以退，路径就
+ * 不能从这一行里消失：同一个仓库在本机的两个克隆只能靠它区分。身份那一栏取代的是**标题**（标题只是
+ * 路径的标签，路径与身份都在这一行里）。
+ *
+ * @param subject 路径、标题与身份。
+ * @returns 一行的文案。
+ */
+export function pathLabel(subject: ProjectSubject): string {
+  const { path, title, repo } = subject
+  if (repo !== undefined) return `${repo} — ${path}`
+  return title === undefined ? path : `${title} — ${path}`
+}
+
+/** 一个目录字段里的一行候选（迁移的目标 / 导入的落地目录共用）。 */
+export interface PathRow extends ProjectSubject {
+  /** 值（也是 React 的 key）：目录路径。 */
+  path: string
+  /** 已登记工作区才有标题（注册表里的名字）。 */
+  title?: string
+  /** 库里这个目录下的会话条数（有会话可数的候选才有）。 */
+  count?: number
+  /**
+   * 盘上已经没有这个目录了（**只有目标候选能知道**这件事：宿主按工作区报 `exists`，见 `src/web.ts`
+   * 的 `summarizeWorkspaces()`）。
+   *
+   * 目标候选来自注册表，而注册表里的登记不保证盘上还有——项目文件夹被删掉、目录改了名之后，那条
+   * 登记照旧在。这种候选**列出来**（用户要能看见"我登记过的那块工作区还在名单里"）但**点不动**：
+   * 选它只会撞上宿主那句「目标工作区目录不存在」（`assertTargetCwd()`），那正是"点了一行必然报错"。
+   * 判据与文案见 `candidateRow()`。
+   */
+  missing?: boolean
+}
+
+/** 候选面板里一行怎么摆：名字一行、路径与条数一行，外加整行的悬浮提示。 */
+export interface CandidateRow {
+  /** 主名字：工作区名称 → 项目名 → 本机路径（同 `projectLabel()`）。 */
+  readonly name: string
+  /** 第二行：本机路径与条数（有哪个写哪个，都没有时缺省）。 */
+  readonly meta?: string
+  /** 名字后面那枚标签：这一行指向的目录盘上已经没有了（`PathRow.missing` 为真时才有）。 */
+  readonly missing?: string
+  /** 悬浮提示：项目身份（有的话）与本机路径各一行，再加条数。 */
+  readonly tip: string
+}
+
+/**
+ * 候选列表里一行摆成什么。
+ *
+ * 与值控件（`pathLabel()`）的写法不同：那里只有一行可用，名字、路径与条数只能挤成一整串（挤不下就
+ * 截断，所以路径必须留在里面——那枚按钮没有第二行可退，它的悬浮提示给的是完整值）。候选面板里一行是
+ * 一枚按钮、两行文字，于是**名字在第一行**（用户认的是它：工作区名称，没有标题才退到项目名），路径与
+ * 条数退到第二行的小字里，完整的一串留给悬浮提示。
+ *
+ * 盘上已经没有的目录（`PathRow.missing`）多一枚标签与一句悬浮提示：这一行仍在名单里（它是用户登记过的
+ * 工作区），但点下去只会撞上宿主那句「目标工作区目录不存在」，所以标签先把这件事说在点之前。
+ *
+ * @param row 一行候选（`directoryTargetRows()` 造出来的那些）。
+ * @param t 翻译（只用来拼"N 条会话"）。
+ * @returns 两行文字与悬浮提示。
+ */
+export function candidateRow(row: PathRow, t: Translate): CandidateRow {
+  const label = projectLabel(row, t)
+  const count = row.count === undefined ? undefined : t('list.sessionsInDir', { count: row.count })
+  const meta = [row.path, count].filter((part): part is string => part !== undefined && part !== '')
+  // 盘上已经没有的目录：名字后面挂一枚标签，悬浮提示里把"为什么点不动"说全（标签上一个字都不解释）。
+  const missing = row.missing === true ? t('pathField.missing') : undefined
+  return {
+    name: label.name,
+    ...(meta.length === 0 ? {} : { meta: meta.join(' · ') }),
+    ...(missing === undefined ? {} : { missing }),
+    tip: [label.tip, count, missing === undefined ? undefined : t('pathField.missingTip')]
+      .filter((line): line is string => line !== undefined)
+      .join('\n'),
+  }
+}
+
+/**
+ * 候选目录面板里那个筛选框的判据：关键词命中的那几行，顺序照旧。
+ *
+ * 候选会长到几十条（工作区一多就是），列表里只能一行行找——面板自己带一个筛选框把这个列表收窄
+ * （见 [目录字段是一个值控件，三条改值的路](../../../../.agents/notes/implemented/architecture/2026-09-27-directory-field-is-one-value-control.md)）。
+ *
+ * 关键词对**行自己的事实**匹配：路径、工作区名称、项目身份。
+ * 不对"渲染出来的那一整串"匹配——那一串里拼了「— 3 条会话」这样的装饰，拿它当关键词库会让「3」
+ * 命中一堆行。大小写不敏感的子串，不做模糊：筛完的顺序仍旧是候选本来的顺序（已登记工作区在前、
+ * 库里有会话的目录按路径排在后），筛一下就让行换位置，用户会以为候选变了。
+ *
+ * 空白关键词 = 原样返回一份新数组（调用方把它当列表内容，不该拿到内部引用）。
+ *
+ * @param rows 候选行（`directoryTargetRows()` 造出来的那些）。
+ * @param query 筛选框里的原文（两头空白不算）。
+ * @returns 命中的那几行，顺序与输入一致。
+ */
+export function filterPathRows(rows: readonly PathRow[], query: string): PathRow[] {
+  const needle = query.trim().toLowerCase()
+  if (needle === '') return [...rows]
+  return rows.filter((row) =>
+    [row.path, row.title ?? '', row.repo ?? ''].some((fact) => fact.toLowerCase().includes(needle)),
+  )
+}
+
+/**
+ * 一个目录字段的**目标**候选：已登记工作区（注册表里同一目录登记了两回就只留一条）**外加当前值本身**。
+ *
+ * 「迁移」的目标目录与「导入」的落地目录问的是同一件事——"落到哪个已登记的目录"，所以两处共用这一份
+ * 候选：候选多一份少一份都会变成"换个地方就换个说法"。
+ *
+ * 盘上已经没有的那些也照旧列出来（`missing: true`，面板里挂一枚标签、点不动）：它们是用户登记过的
+ * 工作区，"名单里怎么少了一块"比"多一条点不动的候选"更难查。
+ *
+ * 与源候选有三处不同：**不带条数**（目标是"要落到哪儿"，不是"这批会话从哪儿来"，条数是来源那一侧的
+ * 事实）、候选只来自注册表（库里真有会话的目录是**来源**的候选——目标必须已经存在且已登记，用户要落到
+ * 别处时走「手输路径」或「浏览文件系统…」）、以及源那边会列出已被删掉的目录而目标不会。
+ *
+ * @param workspaces 已登记的工作区。
+ * @param repos 目录 → 项目身份（宿主 `/state` 的 `repos`）；缺省按"没有身份"处理。
+ * @param current 当前值；缺省空串 = 还没选。
+ */
+export function directoryTargetRows(
+  workspaces: ReadonlyArray<{ readonly path: string; readonly title?: string; readonly exists?: boolean }>,
+  repos: Readonly<Record<string, string>> = {},
+  current = '',
+): PathRow[] {
+  const rows: PathRow[] = []
+  const seen = new Set<string>()
+  for (const workspace of workspaces) {
+    if (seen.has(workspace.path)) continue
+    seen.add(workspace.path)
+    rows.push({
+      path: workspace.path,
+      title: workspace.title,
+      ...(repos[workspace.path] === undefined ? {} : { repo: repos[workspace.path] }),
+      // 宿主说盘上没有了才标：`exists` 缺席（旧宿主 / 夹具）按"还在"处理，不在界面上替宿主猜。
+      ...(workspace.exists === false ? { missing: true } : {}),
+    })
+  }
+  // 当前值补一行（见 CandidatePanel 的说明）：值可能是「浏览文件系统…」选回来的、注册表没登记的目录，
+  // 没有这一行它既不在候选里、值控件也只剩一串光秃秃的路径。
+  if (current !== '' && !seen.has(current)) {
+    rows.push({ path: current, ...(repos[current] === undefined ? {} : { repo: repos[current] }) })
+  }
+  return rows
+}
+
+// ---- 计划清单：「这条是怎么进来的」 ----
+
+/** 计划清单里一条会话的出处只用得上这个字段。 */
+export interface FamilySubject {
+  /** 级联带进来的：用户点名的那个祖先会话（宿主 `RemoveEntry.via` / `SessionMove.via`）。 */
+  readonly via?: { readonly id: string; readonly title?: string }
+}
+
+/** 一个出处怎么称呼：有标题用标题，没有才用 id（与 `sessionLabel` 同一套口径）。 */
+function referentName(referent: { readonly id: string; readonly title?: string }): string {
+  const title = referent.title?.trim()
+  return title === undefined || title === '' ? referent.id : title
+}
+
+/**
+ * 计划清单里那枚"这条是怎么进来的"标签。
+ *
+ * 删除与迁移都会**沿着父子关系向下展开**（见 `src/operations/remove/remove.ts` 的 `familyOf()` 与 `src/operations/migrate/migrate.ts`），
+ * 所以清单里会冒出用户没勾过的会话；这枚标签就是它们的解释——"跟着 <点名的会话> 一起走"。判据与
+ * 称呼只写这一处，动词由调用方给（删除说「随父删」、迁移说「随父迁」）。
+ *
+ * @param subject 出处字段（宿主已经算好，界面只负责显示）。
+ * @param t 翻译。
+ * @param keys 标签文案与提示的字典键。
+ * @returns 标签文案与悬浮提示；没有出处时 `undefined`（不挂标签）。
+ */
+function familyNote(
+  subject: FamilySubject,
+  t: Translate,
+  keys: { readonly text: SessionManagerKey; readonly tip: SessionManagerKey },
+): { text: string; tip: string } | undefined {
+  if (subject.via === undefined) return undefined
+  return { text: t(keys.text), tip: t(keys.tip, { name: referentName(subject.via) }) }
+}
+
+/**
+ * 删除计划清单里那枚"随父会话删"标签。
+ *
+ * 标签文案刻意短（「随父删」）：它挂在名字右边且 `flex: none`，占的宽度就是从标题里扣的。
+ * 在真实 dev GUI 里量的（真实列表 534px 宽、名字列 305px，浅深两套主题同值）：四字的「随父会话删」
+ * 吃 74px、名字只剩 225px，两字的吃 50px、名字剩 249px；英文 "goes with parent" 吃 115px、名字只剩
+ * 184px，短一档的 "with parent" 吃 83px。省掉的那半句在悬浮提示里，弹窗里的摘要还会整句说一遍。
+ *
+ * @param subject 出处字段（宿主已经算好，界面只负责显示）。
+ * @param t 翻译。
+ * @returns 标签文案与悬浮提示；点名的那几条自己没有 `via`，于是 `undefined`（不挂标签）。
+ */
+export function deleteFamilyNote(subject: FamilySubject, t: Translate): { text: string; tip: string } | undefined {
+  return familyNote(subject, t, { text: 'manage.delete.via', tip: 'manage.delete.viaTip' })
+}
+
+/**
+ * 迁移计划清单里那一枚（「随父迁」）。
+ *
+ * 与删除那份分开是因为动词不同：迁移不删掉它，只是把它一起搬走——在那张清单上说「随父删」就是一句
+ * 错话，而这两张清单里的 `via` 是同一个字段（宿主两张计划各自的 `via`）。
+ */
+export function migrateFamilyNote(subject: FamilySubject, t: Translate): { text: string; tip: string } | undefined {
+  return familyNote(subject, t, { text: 'migrate.via', tip: 'migrate.viaTip' })
+}
+
+/**
+ * 「父会话在别的目录里」那枚标签（列表里缩进的那条子智能体用）。
+ *
+ * 分组键是目录，而子智能体的日志落在**它自己 cwd** 的项目目录里——那个 cwd 未必还是父会话现在的 cwd
+ * （父会话被单独迁走过一次就长成这样）。这种子智能体只能留在它自己的目录组里，缩进说明了父子关系，
+ * 这枚标签说明"父不在这里"。完整的父目录在悬浮提示里：标签是 `flex: none`，占的宽度从标题里扣。
+ *
+ * @param row 缩进后的一行（`groups.NestedRow` 的结构化形状）。
+ * @param t 翻译。
+ * @returns 标签文案与悬浮提示；父会话就在本组、或不在当前视图里时 `undefined`（不挂标签）。
+ */
+export function parentDirNote(
+  row: { readonly parentPath?: string },
+  t: Translate,
+): { text: string; tip: string } | undefined {
+  const path = row.parentPath
+  if (path === undefined || path === '') return undefined
+  return { text: t('manage.tag.parentElsewhere'), tip: t('manage.tag.parentElsewhereTip', { path }) }
+}

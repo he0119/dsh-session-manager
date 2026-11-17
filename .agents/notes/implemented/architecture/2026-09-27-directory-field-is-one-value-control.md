@@ -65,5 +65,5 @@ Status: implemented
 - 「框里显示的就是将要用的」是一条可检查的性质，也是上面第二条候选规则存在的唯一理由；筛选之后它
   仍然成立（当前值那一行一定留着）。
 - 这条形状不依赖宿主能力：能力缺失时少一条改值的路，值与语义不变。
-- 筛选的匹配判据钉在 `test/planRows.test.ts`（纯函数），"当前值那一行仍在""筛选词只管自己那个字段"
-  钉在 `test/client.test.mjs`（产物冒烟）。
+- 筛选的匹配判据钉在 `test/client/shared/logic/planRows.test.ts`（纯函数），"当前值那一行仍在""筛选词只管自己那个字段"
+  钉在 `test/plugin/client.test.mjs`（产物冒烟）。

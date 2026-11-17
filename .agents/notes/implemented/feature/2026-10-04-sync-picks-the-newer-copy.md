@@ -14,8 +14,8 @@ Status: implemented
 
 ## Decision
 
-`planSync()`（[src/sync.ts](../../../../src/sync.ts)）的决定表按两条规则重排，判据都来自宿主投影缓存
-（[src/projection-cache.ts](../../../../src/projection-cache.ts) 多读 `sessionListMetadata.blank`、
+`planSync()`（[src/operations/sync/sync.ts](../../../../src/operations/sync/sync.ts)）的决定表按两条规则重排，判据都来自宿主投影缓存
+（[src/shared/library/projection-cache.ts](../../../../src/shared/library/projection-cache.ts) 多读 `sessionListMetadata.blank`、
 `sessionListMetadata.lastPromptAt` 与 `timeContext.lastMessageTime`）：
 
 - **空白不搬**。`sessionListMetadata.blank` 说它是空白时：
@@ -36,7 +36,7 @@ Status: implemented
   下的场合——日志被重写（压缩续写）之后，先前推送过的那份就与现在这份"各自写过"了。
 
 远端那份赢时的落地：**先备份本机那份、再换成它**。备份种类多一个 `replace`
-（[src/journal.ts](../../../../src/journal.ts)），语义是"把备份里那份搬回原位"（与 `delete` 那份
+（[src/shared/journal.ts](../../../../src/shared/journal.ts)），语义是"把备份里那份搬回原位"（与 `delete` 那份
 一样），但回滚时**连注册表一起还原**（与 `migrate` 一样）——覆盖会把这条会话搬进它自己的 cwd、并
 reHome 它在注册表里的登记，只搬目录会让登记停在被覆盖之后的位置。
 
@@ -100,9 +100,9 @@ reHome 它在注册表里的登记，只搬目录会让登记停在被覆盖之�
   这时退回旧口径（两条都不动 + 说明），不猜。
 - 两枚钟都是**写日志那台机器的本地时间**：跨机器比时带一点时钟偏差的风险（与前一版只比提问时间同一
   个风险等级）。同一台机器上自己与自己比没有这个问题。
-- 验证：`test/sync.test.ts` 的计划层多两条（含空白、时间里三种"判不出来"、两枚钟各自分高下、以及版本
+- 验证：`test/operations/sync/sync.test.ts` 的计划层多两条（含空白、时间里三种"判不出来"、两枚钟各自分高下、以及版本
   2 那枚钟照旧认），端到端多三条（远端领先时的覆盖 + 备份 + 旧记录撤下、空白不上传且从索引撤下、两台各
-  自续写最后收敛到同一份），另有一条钉"推送那一刻记的是晚的那枚钟"；`test/migrate.test.ts` 有一条钉
-  `replace` 回滚的两种语义，`test/visibility.test.ts` 有一条钉两枚钟的读法（含只有细的那枚、形状不对
-  两种），`test/tools.test.ts` 有一条钉工具侧接线。全套从 `tests 363 / pass 361 / fail 0 / skipped 2`
+  自续写最后收敛到同一份），另有一条钉"推送那一刻记的是晚的那枚钟"；`test/operations/migrate/migrate.test.ts` 有一条钉
+  `replace` 回滚的两种语义，`test/shared/visibility.test.ts` 有一条钉两枚钟的读法（含只有细的那枚、形状不对
+  两种），`test/plugin/tools.test.ts` 有一条钉工具侧接线。全套从 `tests 363 / pass 361 / fail 0 / skipped 2`
   变成 `tests 373 / pass 371 / fail 0 / skipped 2`。

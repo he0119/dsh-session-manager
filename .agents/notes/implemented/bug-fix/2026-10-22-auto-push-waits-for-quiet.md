@@ -44,4 +44,4 @@ Status: implemented
 - 没开自动推送时仍然一个定时器都不挂；跑着的时候又来事件仍然记一笔、跑完补一次（`settleAgain`）。
 - `AUTO_PUSH_SETTLE_MS` 这个名字与 10 秒那个取值一起消失，`docs/internals.md`、`docs/development.md`、
   README 两份与界面文案都改成"连着 5 分钟没动静才推"（文案避开"停手"这类动作词：机器安静不等于用户
-  人不在）；`test/sync-form.test.ts` 那条文案用例改成核"要等多久"这个数在不在，而不是核"有没有提时间"。
+  人不在）；`test/client/operations/sync/sync-form.test.ts` 那条文案用例改成核"要等多久"这个数在不在，而不是核"有没有提时间"。

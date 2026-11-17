@@ -6,7 +6,7 @@
  * （`lib/client.js`；`test/client.test.mjs` 按产物核）。写坏这条链只会有一个现象：页面渲染时抛
  * ReferenceError，整页变成崩溃占位。
  *
- * 为什么单独一个模块而不是塞进 [version.ts](./logic/version.ts)：那一份要保持纯，测试要能直接
+ * 为什么单独一个模块而不是塞进 [version.ts](./shared/logic/version.ts)：那一份要保持纯，测试要能直接
  * import 它而不经过构建（这里一 import 就会去读那三个标识符）。
  *
  * @module dsh-session-manager/client/build

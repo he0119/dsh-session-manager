@@ -97,7 +97,7 @@ Status: implemented
   [只在写完一轮之后推](../simplification/2026-10-21-auto-push-only-after-a-turn.md)。
 - **`narrowToPushOnly()` 按"动作 + 码"过滤，不按关系重算**：它读的是已经算好的那张推送表。所以
   `local-newer`（分叉但本机更新）**在只推时仍然要推**——它是本机领先，把它一起摘掉会让这类会话在这条
-  路上永远推不上去。判据表在 `test/auto-push.test.ts` 里逐类钉着。
+  路上永远推不上去。判据表在 `test/operations/sync/auto-push.test.ts` 里逐类钉着。
 - **反事实**（把被测行为改回去，测试必须变红）：去掉 `planSync` 里那句过滤调用、去掉 `identical` 那个
   例外、去掉 `runAutoPush` 里传的 `pushOnly`、去掉 `idle` 早退、去掉 `indexNeedsSettling()`、去掉
   "目录不存在"那句改写。
@@ -105,10 +105,10 @@ Status: implemented
   已开"那句话，也决定要不要画那枚「立即推送一次」。
 - **实测**（自检跑的）：`pnpm typecheck` / `pnpm build` / `pnpm test`（tests 561 / pass 559 /
   fail 0 / skipped 2）/ `pnpm check:package`（42 个文件）四项全绿。
-- **一个既有布局的连带改动**：`test/client.test.mjs` 里"种第几个 `useState`"的偏移随 `SyncPanel` 多
-  两个状态位而变（八个 null + 结论）；`test/web.test.ts`、`test/artifact.test.mjs` 里"十二条界面路由"
+- **一个既有布局的连带改动**：`test/plugin/client.test.mjs` 里"种第几个 `useState`"的偏移随 `SyncPanel` 多
+  两个状态位而变（八个 null + 结论）；`test/plugin/web.test.ts`、`test/plugin/artifact.test.mjs` 里"十二条界面路由"
   跟着变成十三条。两处都补了注释说明"动这几个组件的 useState 个数或先后就要改这一行"。
 - **`src/client/api.ts` 里 `download()` 的 DOM 面改成就地声明**：本文件同时被两套工程检查，而
-  `tsconfig.test.json` 是 Host 侧、**没有 DOM lib**。从测试里 import 这个文件（`test/browser-auto-push.test.ts`
+  `tsconfig.test.json` 是 Host 侧、**没有 DOM lib**。从测试里 import 这个文件（`test/client/operations/sync/browser-auto-push.test.ts`
   引 `runAutoPushNow()`）就会把它拉进没有 DOM 的那一套，原来那三行全局 `document` 会把整个测试工程卡住。
   声明的是用到的那几个成员，不是一整套 DOM。

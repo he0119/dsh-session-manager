@@ -15,7 +15,7 @@ Status: implemented
 
 ## Decision
 
-`src/projection-cache.ts` 的 `createProjectionReader()` 把解析过的记录按文件记住：先 `statSync()` 拿
+`src/shared/library/projection-cache.ts` 的 `createProjectionReader()` 把解析过的记录按文件记住：先 `statSync()` 拿
 `size + mtimeMs`，加上这次查询的身份（`createdAt` + `cwd`）拼成键；对上就把上次那份记录直接交出去
 ——连文件都不读。上限 4096 条，超过就整体清空（它是纯缓存，清掉只是下次多读一遍）。
 

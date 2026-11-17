@@ -16,7 +16,7 @@ Status: implemented
 行上显示**标题**，id 只在悬浮提示里出现。最新一条生效（用户改名压过首条 fallback），且它**不是模型
 输入**，所以只是展示文本：一行、裁掉首尾空白。
 
-读它有两个来源，`src/session-title.ts` 按顺序取：
+读它有两个来源，`src/shared/log/session-title.ts` 按顺序取：
 
 1. **宿主的投影缓存** `<DSH_HOME>/storages/session_projcache/sessions/<encodeSegment(id)>.json`
    （`record.rows.title.val`）——宿主自己列会话就读它，所以它是「最新一条」的权威副本，零解码、
@@ -44,6 +44,6 @@ Status: implemented
 ## Consequences
 
 - `/state` 每次刷新列表都会走一遍，所以预算与缓存的先后顺序都是性能取舍的一部分，不是实现细节。
-- 导入预演里的标题不走上面这条路：它直接从 `.dshsess` 的**载荷**里折（`src/transfer.ts` 的
+- 导入预演里的标题不走上面这条路：它直接从 `.dshsess` 的**载荷**里折（`src/operations/transfer/transfer.ts` 的
   `bundleTitle`），因为那些会话还没落盘、宿主也没有它们的缓存；清单格式没为此改过
   （`BUNDLE_FORMAT_VERSION` 不动），所以旧包、别人的包一样能被折出标题。

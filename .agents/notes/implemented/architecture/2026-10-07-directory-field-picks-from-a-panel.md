@@ -18,7 +18,7 @@ Status: implemented
 ## Decision
 
 **值控件是一枚按钮，点开的是候选面板**；字段里只剩两件东西——这枚按钮与「手输路径」。三处目录字段是
-同一个组件（`src/client/components/DirectoryField.tsx`），候选由调用方算好（`migrationSourceRows()` /
+同一个组件（`src/client/shared/ui/DirectoryField.tsx`），候选由调用方算好（`migrationSourceRows()` /
 `directoryTargetRows()`）。
 
 - **按钮的文本就是那个值**（长值单行截断，完整值在它的悬浮提示里）：能对上候选时显示那一行的称呼
@@ -71,9 +71,9 @@ Status: implemented
 - 「框里显示的就是将要用的」变成"值控件的文本就是那个值"——比原来更直接（原来靠 `value` 绑在 `<select>` 上）。
 - 这条形状不依赖宿主能力：能力缺失只是面板头里少一枚按钮，值与语义不变。
 - 面板与浏览框共用 `.dsm-browser` / `.dsm-dirList` 那套皮，于是"候选列表长什么样"由这一份 CSS 说了算；
-  `test/styles.test.mjs` 的颜色检查面照旧覆盖它（没有新增色值）。
+  `test/plugin/styles.test.mjs` 的颜色检查面照旧覆盖它（没有新增色值）。
 - 文案的命名空间跟着组件走：字段自己的那几句是 `pathField.*`（原来叫 `migrate.path.*`）——三处都在用，
   名字里不该带着"迁移"。
-- 整页不再有原生 `<select>`：目录一律走那枚值控件（`test/client.test.mjs` 逐页核这一条）。「同步」那张
+- 整页不再有原生 `<select>`：目录一律走那枚值控件（`test/plugin/client.test.mjs` 逐页核这一条）。「同步」那张
   映射表里的两个框仍是文本框：远端那一侧在别的机器上，本机给不出候选（它带的是上一次计划里见过的
   `datalist` 提示）。

@@ -25,22 +25,22 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync 
 import { homedir, hostname } from 'node:os'
 import { dirname, join } from 'node:path'
 
-import { createDavClient, type DavPort } from './dav.ts'
-import type { AttachmentPort } from './attachments.ts'
-import { readHeaderQuick, scanAllAsync } from './discovery.ts'
-import { applyPathRepair, planPathRepair, type PathRepairPlanResult } from './path-repair.ts'
+import { createDavClient, type DavPort } from './operations/sync/dav.ts'
+import type { AttachmentPort } from './shared/attachments.ts'
+import { readHeaderQuick, scanAllAsync } from './shared/library/discovery.ts'
+import { applyPathRepair, planPathRepair, type PathRepairPlanResult } from './operations/path-repair/path-repair.ts'
 import {
   previewMigration,
   rollbackMigration,
   runMigration,
   type MigrateDeps,
-} from './migrate.ts'
-import { projectKey } from './project-key.ts'
-import { projectionCacheDir } from './paths.ts'
-import { createProjectionReader } from './projection-cache.ts'
-import { createRemoteWriteGate, type RemoteWriteGate } from './remote-write.ts'
-import { describeWarm, warmCheckpoints } from './checkpoint-warm.ts'
-import { describeEffect, describePlannedEffect, effectOf } from './take-effect.ts'
+} from './operations/migrate/migrate.ts'
+import { projectKey } from './shared/project-key.ts'
+import { projectionCacheDir } from './shared/paths.ts'
+import { createProjectionReader } from './shared/library/projection-cache.ts'
+import { createRemoteWriteGate, type RemoteWriteGate } from './operations/sync/remote-write.ts'
+import { describeWarm, warmCheckpoints } from './shared/host/checkpoint-warm.ts'
+import { describeEffect, describePlannedEffect, effectOf } from './shared/host/take-effect.ts'
 import {
   collectLeftovers,
   createAutoPushTimer,
@@ -54,9 +54,9 @@ import {
   type SyncPlan,
   type SyncDeps,
   type SyncSettings,
-} from './sync.ts'
-import type { CheckpointWarmPort, DecodeAll, EffectMode, HostRegistryPort, RetitleOutcome, TitleRefreshOptions, TitleRefreshPort } from './types.ts'
-import { createSessionMetaResolver } from './visibility.ts'
+} from './operations/sync/sync.ts'
+import type { CheckpointWarmPort, DecodeAll, EffectMode, HostRegistryPort, RetitleOutcome, TitleRefreshOptions, TitleRefreshPort } from './shared/types.ts'
+import { createSessionMetaResolver } from './shared/visibility.ts'
 
 /**
  * 平台的 fzstd 解码器（纯 JS、多帧感知）。
@@ -137,7 +137,7 @@ export interface LegacyBackupAdoption {
  * 默认备份根从 `<DSH_HOME>/dsh-session-manager-backups` 改成
  * `<DSH_HOME>/dsh-session-manager/backups`——与 `dsh-config-manager/snapshots` 那种"插件名 / 子目录"
  * 同一形状，别人的 `$DSH_HOME` 根下不再多出一层只属于某个插件的平铺名字。旧备份不能就这么留在原地：
- * 清单只读 `backupRoot` 一个根，而 `src/migrate.ts` 的 `assertBackupDir()` 只认备份根下的路径——留下的
+ * 清单只读 `backupRoot` 一个根，而 `src/operations/migrate/migrate.ts` 的 `assertBackupDir()` 只认备份根下的路径——留下的
  * 旧备份既列不出来，也没法按路径回滚（等于把已经写好的回退凭据锁在门外）。
  *
  * 三个条件同时成立才动：用户没自己配 `backupRoot`（配了就按他说的来）、旧目录在、新目录不在。整个
@@ -200,7 +200,7 @@ function machineIdOf(sync: SyncConfig): string {
 /**
  * 这次同步按哪个引用名取密码：配置里写了就用它，没写（或只有空白）用缺省名。
  *
- * 与界面同一套规则（[SyncConfigForm](../client/SyncConfigForm.tsx) 把密码写在这个名字下）：
+ * 与界面同一套规则（[SyncConfigForm](./client/operations/sync/SyncConfigForm.tsx) 把密码写在这个名字下）：
  * 用户不填引用名时两边都得算出同一个名字，否则界面存进去的密码这边不会去读。
  * @param sync 同步那一节。
  * @returns 凭据引用名（环境变量名）。
@@ -519,7 +519,7 @@ function describeSync(
 /**
  * 「没做到」的那几条：一句一条，多的折成"还有 N 条"。
  *
- * 界面上那张「上次同步」的清单是同一份数据（见 `src/sync.ts` 的 `collectLeftovers()`）；工具这边只说
+ * 界面上那张「上次同步」的清单是同一份数据（见 `src/operations/sync/sync.ts` 的 `collectLeftovers()`）；工具这边只说
  * 前几条，剩下的说个数——模型不需要读完整张清单，它要的是"有没有事没做完、是哪条"。
  */
 function describeLeftovers(leftovers: readonly SyncLeftover[], limit = 5): string | undefined {
@@ -1152,7 +1152,7 @@ export function registerTools(
   const paths = resolvePaths(config)
   const remoteWrite = options.remoteWrite ?? createRemoteWriteGate()
   const mode = (): EffectMode => effectMode(ctx)
-  // 预演/执行/回滚都走 src/migrate.ts 那一份编排，界面端点用的是同一个 deps 形状——
+  // 预演/执行/回滚都走 src/operations/migrate/migrate.ts 那一份编排，界面端点用的是同一个 deps 形状——
   // 两个入口（工具 / 界面）因此不会各写一套。
   const deps: MigrateDeps = {
     sessionsRoot: paths.sessionsRoot,

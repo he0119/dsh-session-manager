@@ -12,7 +12,7 @@ Status: implemented
 
 ## Decision
 
-编排只有一份（`src/migrate.ts`：预演 / 执行 / 回滚 / 备份清单），各入口只负责把结果翻译成自己的
+编排只有一份（`src/operations/migrate/migrate.ts`：预演 / 执行 / 回滚 / 备份清单），各入口只负责把结果翻译成自己的
 形状。`previewMigration()` 与 `runMigration()` 调的是同一个 `buildRelocationPlan()`，`apply:false`
 就是预演——「预览和实做不一致」在这种结构下不可能发生，它们本来就是同一次计算，只是一个不落盘。
 
@@ -26,11 +26,11 @@ Status: implemented
 **界面走工具层的入口（把工具当成内部 API）。** 工具层是给模型的**声明面**（schema、描述、返回
 形状），把它当内部调用面会让界面被工具的描述与权限口径绑住。
 
-**抽出第三个模块，两侧共用。** `src/migrate.ts` 就是那个模块——它的边界是「与界面和模型都无关的
+**抽出第三个模块，两侧共用。** `src/operations/migrate/migrate.ts` 就是那个模块——它的边界是「与界面和模型都无关的
 编排」，两侧的宿主依赖由调用方注入。
 
 ## Consequences
 
-- 编排层零 DSH 依赖（`src/migrate.ts` 只依赖注入进来的路径与能力），测试可以直接驱动它。
-- 工具与界面在同一个输入上必然给出同一个计划；`test/migrate.test.ts` 与 `test/web.test.ts`
+- 编排层零 DSH 依赖（`src/operations/migrate/migrate.ts` 只依赖注入进来的路径与能力），测试可以直接驱动它。
+- 工具与界面在同一个输入上必然给出同一个计划；`test/operations/migrate/migrate.test.ts` 与 `test/plugin/web.test.ts`
   分别在编排层与端点层钉住同一条。

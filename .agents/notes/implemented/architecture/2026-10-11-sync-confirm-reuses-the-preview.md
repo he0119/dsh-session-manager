@@ -12,7 +12,7 @@ Status: implemented
 
 ## Decision
 
-预演算出来的计划与它的输入一起留在宿主侧（`src/sync.ts` 的 `SyncPrepared`），预演的响应里带回一个
+预演算出来的计划与它的输入一起留在宿主侧（`src/operations/sync/sync.ts` 的 `SyncPrepared`），预演的响应里带回一个
 `planId`；确认那次带着它回来，宿主就照着那份数据落地（`syncPrepared()`），不再算第二遍。
 
 留下的输入：本机整库（`DiscoveredSession[]`）、远端索引、项目身份（含预演问过 git 的那些目录）、比对

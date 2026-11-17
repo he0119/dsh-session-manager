@@ -33,7 +33,7 @@ FAQ 那一栏自己声明单列：`.dsm-defsFaq { grid-template-columns: minmax(
 
 ## Consequences
 
-- 钉在 `test/styles.test.mjs`：`.dsm-defsFaq` 要声明单列。
+- 钉在 `test/plugin/styles.test.mjs`：`.dsm-defsFaq` 要声明单列。
 - 英文：答案从"零宽的一列单字、高 1122px"变成 534px 宽、4 行（高 88px）。
 - 中文：一条 FAQ 从 132px（问题与答案各在 280px / 242px 的列里折成 6 行）变成 94px（问题 1 行 +
   答案 3 行 + 6px 间距）——两种语言都变短了。

@@ -15,8 +15,8 @@ Status: implemented
 
 ## Decision
 
-「认领」只有一个定义，算在 `src/accounting.ts` 的 `accountedOwners()` 里：**登记过** 且 **header 的
-`cwd` 归一之后就是那条记录的 `path`**。归一用 `src/canonical-path.ts` 的 `canonicalDirIfExists()`
+「认领」只有一个定义，算在 `src/shared/accounting.ts` 的 `accountedOwners()` 里：**登记过** 且 **header 的
+`cwd` 归一之后就是那条记录的 `path`**。归一用 `src/shared/canonical-path.ts` 的 `canonicalDirIfExists()`
 （`realpathSync.native` + 必须是目录，解析不出来返回 `undefined`）——与宿主 `indexHeader()` 是同一支。
 
 - `/state` 的两处（`sessions[].ungrouped` 与 `workspaces[].sessionIds`）、迁移计划的三处（未分组来源
@@ -48,5 +48,5 @@ Status: implemented
 - `/state` 的 `workspaces[].sessionIds` 变成认领的那份，与宿主发给渲染层的取值同源；界面拿它当成员表
   看时不会再多出 `cwd` 已经对不上的登记。
 - 迁移的 `registered` 只决定级联带进来的子智能体改不改挂，不改变"能勾哪些"的口径。
-- `test/accounting.test.ts` 钉住四种边界（解析不出来 / 归一后不是同一个字符串 / 没有 `cwd` / 库里没有
+- `test/shared/accounting.test.ts` 钉住四种边界（解析不出来 / 归一后不是同一个字符串 / 没有 `cwd` / 库里没有
   这条会话），并按真实形状跑一次"目录改名"。

@@ -37,6 +37,6 @@ Status: implemented
 ## Consequences
 
 - 五个分页（会话 / 传输 / 同步 / 备份 / 说明）一起受益：分页内部一律 16px 的块间距。
-- 规格由 `test/styles.test.mjs` 钉住三条（`display: flex` / `flex-direction: column` / `gap: 16px`）：
+- 规格由 `test/plugin/styles.test.mjs` 钉住三条（`display: flex` / `flex-direction: column` / `gap: 16px`）：
   这一层将来再被谁改回 `block`，卡片会立刻重新贴在一起，而那种改动不会报错、不会崩。
 - 内建设置页那份 `padding: 16px 0` 是这一档的依据，将来官方改节奏时这里跟着改同一个数。

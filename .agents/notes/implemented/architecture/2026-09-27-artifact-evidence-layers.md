@@ -37,4 +37,4 @@ Status: implemented
 ## Consequences
 
 - 计划里的每一项都能追溯到是哪一类证据发现的，误报与漏报的方向是明确的（启发式只增不减候选）。
-- 三道判据都在 `test/artifacts.test.ts` 里钉住，包括「39 / 51」那种量出来的比例不是靠推的。
+- 三道判据都在 `test/operations/migrate/artifacts.test.ts` 里钉住，包括「39 / 51」那种量出来的比例不是靠推的。

@@ -14,9 +14,9 @@
  * @module dsh-session-manager/client/api
  */
 
-import { SseFrames, interpretStreamEvent, type ProgressEvent } from './logic/eventStream.ts'
-import type { TranscriptPage } from '../transcript.ts'
-import type { SessionDiff } from '../session-diff.ts'
+import { SseFrames, interpretStreamEvent, type ProgressEvent } from './shared/logic/eventStream.ts'
+import type { TranscriptPage } from '../operations/transcript/transcript.ts'
+import type { SessionDiff } from '../operations/sync/session-diff.ts'
 
 // 事件流的分帧与解释在 eventStream.ts（那份文件与 DOM 无关，所以 Host 半侧的测试图能直接引它）。类型
 // 从这里转出去，界面那一侧只认 api.ts 一个入口。
@@ -28,13 +28,13 @@ export const API_PREFIX = '/dsh-session-manager/api'
 /** 界面上一条会话。 */
 export interface SessionSummary {
   id: string
-  /** 折叠出的标题（宿主侧从投影缓存或日志里读，见 `src/session-title.ts`）；没有时界面显示 id。 */
+  /** 折叠出的标题（宿主侧从投影缓存或日志里读，见 `src/shared/log/session-title.ts`）；没有时界面显示 id。 */
   title?: string
   cwd?: string
   createdAt: number
   dir: string
   /**
-   * 外壳侧边栏会把它放进「未分组」那一组（宿主按 `src/visibility.ts` 的 `isUngrouped()` 算好发过来）。
+   * 外壳侧边栏会把它放进「未分组」那一组（宿主按 `src/shared/visibility.ts` 的 `isUngrouped()` 算好发过来）。
    *
    * 界面不再自己从"有没有工作区认领"推：那样推出来的「未分组」把子智能体、空白、已归档也算进去，
    * 而侧边栏从来不把它们放进那一组（它默认压根不显示它们）。
@@ -43,7 +43,7 @@ export interface SessionSummary {
   bytes: number
   files: Array<{ name: string; bytes: number }>
   /**
-   * 外壳侧边栏不显示这条会话的原因（缺省 = 会显示，见 `src/visibility.ts`）。
+   * 外壳侧边栏不显示这条会话的原因（缺省 = 会显示，见 `src/shared/visibility.ts`）。
    *
    * 判据在宿主侧算一次（`/state`），界面只读结论：传输页照单全收、迁移页只收看得见的、
    * 「会话」页把原因标出来——三处读同一个字段，不会各自算出一套。
@@ -51,7 +51,7 @@ export interface SessionSummary {
   hidden?: 'subagent' | 'blank' | 'archived'
   /** 在注册表的归档集里（「会话」页据此决定按钮写「归档」还是「取消归档」）。 */
   archived?: boolean
-  /** 宿主判它"一轮都没开始过"（见 `src/visibility.ts`）。 */
+  /** 宿主判它"一轮都没开始过"（见 `src/shared/visibility.ts`）。 */
   blank?: boolean
   /** 日志 header 里的 `origin`（只有子智能体会话会写）。 */
   origin?: string
@@ -129,7 +129,7 @@ export async function fetchMeta(): Promise<MetaResponse> {
 /** `GET /state` 的响应：`/meta` 那几项 + 这次扫库扫出来的清单。 */
 export interface StateResponse extends MetaResponse {
   /**
-   * 目录 → 项目身份（仓库的 git remote，规范成 `host/owner/repo`，见宿主 `src/repo.ts`）。
+   * 目录 → 项目身份（仓库的 git remote，规范成 `host/owner/repo`，见宿主 `src/shared/repo.ts`）。
    *
    * 界面把它显示在原来印本机路径的地方：路径是机器特有的，同一个项目在两台机器上可以落在完全不同的
    * 目录里，而 `host/owner/repo` 是仓库自己的名字。认不出来的目录不在表里（不是仓库、没有 remote、
@@ -164,7 +164,7 @@ export interface SyncInfo {
 }
 
 /**
- * 一趟同步「没做到」的一条（与宿主 `src/sync.ts` 的 `SyncLeftover` 同一形状）。
+ * 一趟同步「没做到」的一条（与宿主 `src/operations/sync/sync.ts` 的 `SyncLeftover` 同一形状）。
  *
  * `sessionId` 有值 = 这一条点得出名字、也跳得回列表（界面上那枚「只看这一条」）；映射、远端索引、
  * 整理那几步的问题没有会话可指，只有一句话。
@@ -174,7 +174,7 @@ export interface SyncLeftover {
   sessionId?: string
 }
 
-/** 上一次手动同步落下的那条记录（与宿主 `src/sync-state.ts` 同一形状）。 */
+/** 上一次手动同步落下的那条记录（与宿主 `src/operations/sync/sync-state.ts` 同一形状）。 */
 export interface SyncRunRecord {
   /** 结束时刻（ISO 8601）。 */
   at: string
@@ -265,7 +265,7 @@ async function asJson<T>(response: Response): Promise<T> {
   return parsed as T
 }
 
-/** 两边日志的差异（见 `src/session-diff.ts`）：这一趟只读，宿主一个字节都不写。 */
+/** 两边日志的差异（见 `src/operations/sync/session-diff.ts`）：这一趟只读，宿主一个字节都不写。 */
 export interface SyncDiffResponse {
   id: string
   /** 远端那一份是哪台机器贡献的。 */
@@ -298,7 +298,7 @@ export async function fetchSyncDiff(
 }
 
 /**
- * 一条会话在远端某一台机器格子里的位置（与宿主 `src/sync.ts` 的 `RemotePlacement` 同一形状）。
+ * 一条会话在远端某一台机器格子里的位置（与宿主 `src/operations/sync/sync.ts` 的 `RemotePlacement` 同一形状）。
  *
  * 远端是"一条会话一个包、一台机器一个格子"：同一条会话可能同时躺在几台机器的格子里，所以"它在远端
  * 哪儿"的答案是一份清单。
@@ -794,7 +794,7 @@ export async function tidyRemote(
 /**
  * 落地那一趟的状态（面板事件流上 `sync` 那一条的正文）。
  *
- * 为什么要它：落地这趟可以**关掉窗口继续跑**（见 [syncJob.ts](./logic/syncJob.ts)），于是它会比发起
+ * 为什么要它：落地这趟可以**关掉窗口继续跑**（见 [syncJob.ts](./operations/sync/syncJob.ts)），于是它会比发起
  * 它的那个页面活得久。刷新之后的页面、另一个页签都靠这一份知道"刚才那一趟还在跑 / 刚跑完"。
  *
  * 宿主进程内存里只留一份，重启就没了。
@@ -984,7 +984,7 @@ function parsePanelEvent(data: string): PanelEvent | null {
 /**
  * 开一条面板事件流（`GET /panel/events`）。
  *
- * 什么时候开、什么时候关由 [panelEvents.ts](./logic/panelEvents.ts) 说了算（那一份管重连与看门狗）；
+ * 什么时候开、什么时候关由 [panelEvents.ts](./shared/logic/panelEvents.ts) 说了算（那一份管重连与看门狗）；
  * 这里只负责把字节读成一帧帧事件。
  *
  * @param onEvent 收到一条事件调一次。
@@ -1357,7 +1357,7 @@ export interface RetitleEntry {
   title: string
 }
 
-/** 重新生成名称的响应（宿主 `src/retitle.ts` 的 `RetitleResult`）。 */
+/** 重新生成名称的响应（宿主 `src/operations/retitle/retitle.ts` 的 `RetitleResult`）。 */
 export interface RetitleResponse {
   ok: boolean
   /** provider 给出**不同**标题的那些。 */
@@ -1367,7 +1367,7 @@ export interface RetitleResponse {
   /**
    * 没被重算的那些，附原因。
    *
-   * `reason` 是与宿主共用的词汇（`src/types.ts` 的 `RetitleSkipReason`）：`pinned`（用户改过名）、
+   * `reason` 是与宿主共用的词汇（`src/shared/types.ts` 的 `RetitleSkipReason`）：`pinned`（用户改过名）、
    * `subagent`、`no-human-message`、`no-request-route`（这条会话没有过主模型请求）、
    * `no-title-provider`（宿主没装名称 provider）、`not-found`。
    */

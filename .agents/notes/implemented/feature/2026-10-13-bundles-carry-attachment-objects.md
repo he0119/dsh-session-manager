@@ -27,7 +27,7 @@ Status: implemented
 
 - **打哪些对象由日志决定**：逐行扫 `attachmentId`（先做整篇的字符串预筛，命中才逐行 `JSON.parse`），按
   `kind:id` 去重；同一个对象被多条会话引用只进一份。
-- **对象从哪读、落到哪只走一个纯路径端口** `AttachmentPort.pathOf(ref)`（[`src/attachments.ts`](../../../../src/attachments.ts)）。
+- **对象从哪读、落到哪只走一个纯路径端口** `AttachmentPort.pathOf(ref)`（[`src/shared/attachments.ts`](../../../../src/shared/attachments.ts)）。
   核心层零 DSH 依赖，宿主半侧用 `ctx.attachments.imageHostPath()` / `fileHostPath()` 实现它、在
   `src/tools.ts` 里探测成端口注入。**宿主没有这个服务时端口缺席**：包只带日志、导入只写日志、索引里不记
   附件——与升级前逐字节一致，功能静默降级而不是报错。

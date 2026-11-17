@@ -4,7 +4,7 @@ Status: implemented
 
 ## Problem
 
-自动推送每五分钟跑一轮，每一轮都会对"两边各自写过"的那些会话读整份日志判谁是谁的前缀（`src/sync.ts`
+自动推送每五分钟跑一轮，每一轮都会对"两边各自写过"的那些会话读整份日志判谁是谁的前缀（`src/operations/sync/sync.ts`
 的 `contentRelationsOf()`）。这一段原先做三件会占住主线程的事：
 
 1. `deps.dav.get()` 取回远端那个会话包之后，`readBundle()` 用 `gunzipSync()` 整份解开；
@@ -33,7 +33,7 @@ Status: implemented
 
 `contentRelationsOf()` 改成三件事：
 
-1. **不整份解压**：新增 `src/log-decode.ts` 的 `decodeAllChunked()`，用 fzstd 的流式 `Decompress`
+1. **不整份解压**：新增 `src/shared/log/log-decode.ts` 的 `decodeAllChunked()`，用 fzstd 的流式 `Decompress`
    按 128 KB 一块推进，块与块之间 `setImmediate` 让出一轮事件循环；块边界切在多字节字符中间时由
    `StringDecoder` 兜住。输出与 `decodeAll()` 逐字符一致（多帧也一样），代价是总耗时多约 13%。
    流式认不出的（一个 Raw 块超过 128 KB，这种数据本来就不合法）退回整份解压：宁可多停一会儿，也不能

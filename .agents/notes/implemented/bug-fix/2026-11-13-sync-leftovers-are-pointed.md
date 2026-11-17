@@ -17,7 +17,7 @@ Status: implemented
 
 「没做到」在宿主那侧摊成**点名版**，界面上两处把它说出来。
 
-- **点名版长这样**（`src/sync.ts`）：`SyncLeftover { message, sessionId? }`，
+- **点名版长这样**（`src/operations/sync/sync.ts`）：`SyncLeftover { message, sessionId? }`，
   由 `collectLeftovers(outcome)` 从两处来路拼：计划里那些 `action: 'skip'`、又不是 `identical` 也
   不是 `no-mapping` 的行（它们本来就有标题与 id，句子是 `名字（id）：原因`），加上 `plan.problems`
   与 `outcome.problems` 的原话（映射、远端索引、整理那几步不属于任何一条会话）。`identical` 不算——
@@ -66,7 +66,7 @@ Status: implemented
   的条目时出现；从没同步过、或上一趟干干净净时一个字都不加。
 - 这块要读成"一次记录"，不能读成四段说明：块里的段落必须把浏览器默认段距归零（不归零时量到的节奏是
   6 / 12 / 18px 混着，四行字一样灰），有遗留时才成块（告警色淡底 + 左边一道细线），条数那句缩成 12px
-  的小标签。踩到的两个坑（默认段距、行内按钮被挤成两行）已经钉进 `test/styles.test.mjs`。
+  的小标签。踩到的两个坑（默认段距、行内按钮被挤成两行）已经钉进 `test/plugin/styles.test.mjs`。
 - 页头的悬浮提示变长（最多 4 行原文 + 计数句）。`title` 本来就能多行，这一处不引入新的浮动面板。
 - 「只看这一条」是这一页唯一会往搜索框里写值的动作：用户看得到它做了什么（搜索框里有那个 id），
   清空搜索框就回到原来的列表。

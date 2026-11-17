@@ -49,6 +49,6 @@ Status: implemented
 
 - `/state` 的 `workspaces[]` 多一个 `exists: boolean`——对外契约的一次**加法**，拿不到就按旧行为走。
 - 每个工作区多一次 realpath + stat（本机 13 个工作区），用来挡"点了一行必然报错"。
-- `test/web.test.ts` 那条"登记过、但目录已经改名"的用例顺带核 `exists`（目录没了报 `false`、还在报
-  `true`）；`test/planRows.test.ts` 与 `test/client.test.mjs` 各钉一条：`exists: false` 的行带
+- `test/plugin/web.test.ts` 那条"登记过、但目录已经改名"的用例顺带核 `exists`（目录没了报 `false`、还在报
+  `true`）；`test/client/shared/logic/planRows.test.ts` 与 `test/plugin/client.test.mjs` 各钉一条：`exists: false` 的行带
   `missing`，面板里挂标签、置灰且点不动。

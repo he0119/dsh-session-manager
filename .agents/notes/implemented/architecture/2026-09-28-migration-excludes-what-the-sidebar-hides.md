@@ -12,7 +12,7 @@ Status: implemented
 
 ## Decision
 
-判据收进一处：`src/visibility.ts` 的 `hiddenReasonOf()`。计划层（`src/plan.ts`）与界面
+判据收进一处：`src/shared/visibility.ts` 的 `hiddenReasonOf()`。计划层（`src/operations/migrate/plan.ts`）与界面
 （`src/web.ts` 的 `/state`）读的是同一份结论，`/state` 把结论作为 `hidden` 字段发给各分页，界面只负责
 显示。
 
@@ -33,7 +33,7 @@ Status: implemented
   **读不到就按「会显示」处理**（`blank` 缺省 = `false`），与宿主冷会话分支的 `metadata?.blank ?? false`
   同一口径；身份（`createdAt` + `cwd`）对不上也不认。
 
-命令行那条路与界面走同一个编排层，空白读取器由 `src/migrate.ts` 按 `registryPath` 反推缓存目录自己
+命令行那条路与界面走同一个编排层，空白读取器由 `src/operations/migrate/migrate.ts` 按 `registryPath` 反推缓存目录自己
 造一个，所以「工具说 12 条、界面说 10 条」不会再出现。
 
 ## Alternatives considered
@@ -54,5 +54,5 @@ Status: implemented
 
 - 送进迁移计划的集合与外壳侧边栏显示的那些一一对应；多出来的那几类照旧列在清单里、各报各的理由，
   界面上的勾选则不被它们挡住（那几类在这一页还要被归档 / 删除）。
-- `test/hidden.test.ts` 把四种输入逐个钉住；`test/visibility.test.ts` 核三条理由的顺序与缓存缺席时
+- `test/operations/migrate/hidden.test.ts` 把四种输入逐个钉住；`test/shared/visibility.test.ts` 核三条理由的顺序与缓存缺席时
   的回落。

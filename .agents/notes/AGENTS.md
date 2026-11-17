@@ -70,6 +70,6 @@ Status: <状态>
 
 ## 门禁
 
-`test/notes.test.ts`（在 `pnpm test` 里跑）核：路径形状、三行头部、`Status:` 与目录一致、
+`test/plugin/notes.test.ts`（在 `pnpm test` 里跑）核：路径形状、三行头部、`Status:` 与目录一致、
 `## Problem` 是第一个二级标题、必备章节在、禁止章节不在、相对链接可解析。改笔记格式时同一次改动里
 改它。

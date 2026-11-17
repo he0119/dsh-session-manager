@@ -20,7 +20,7 @@ Status: implemented
 
 ## Decision
 
-落地目录在**计划**这一层就归一成宿主存的那个写法（`src/canonical-path.ts` 的 `canonicalDir()`）。
+落地目录在**计划**这一层就归一成宿主存的那个写法（`src/shared/canonical-path.ts` 的 `canonicalDir()`）。
 计划里报的 `toCwd`、改写进 header 的 `cwd`、注册表那条记录的 `path` 因此是同一个字符串——预演看到的
 就是落地用的（一条编排两个入口那条口径的延伸）。
 

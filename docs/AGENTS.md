@@ -30,5 +30,5 @@
 
 ## 门禁
 
-文档本身没有门禁。决策笔记的格式由 `test/notes.test.ts` 核（在 `pnpm test` 里跑），本文件里那张表
+文档本身没有门禁。决策笔记的格式由 `test/plugin/notes.test.ts` 核（在 `pnpm test` 里跑），本文件里那张表
 与 [.agents/notes/AGENTS.md](../.agents/notes/AGENTS.md) 的分工要保持一致。

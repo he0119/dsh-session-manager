@@ -32,14 +32,14 @@ Status: implemented
 **只靠字号。** 字号差一档在有缩进时是辅助，单独用时几乎看不出来——而缩进正是「一眼」这件事的主承重。
 
 **引一个图标包。** 宿主的图标包是打包器哈希过的私有产物；两个轮廓自己内联在
-`src/client/components/icons.tsx` 里（`currentColor`，不引图标包、不加资源）。
+`src/client/shared/ui/icons.tsx` 里（`currentColor`，不引图标包、不加资源）。
 
 **让组头折行来容纳长路径。** 本次改之前正是 `wrap`，路径一长数字就被挤到第二行，组头长成两行、数字
 跑到左边，看着像坏了（532px 宽的列表里真实发生过）。
 
 ## Consequences
 
-- 四层都在 `test/client.test.mjs`（两级各挂各的标记、组头仍是整组勾选的入口、计数块是一整块）与
-  `test/styles.test.mjs`（颜色只走 token）里钉着。
+- 四层都在 `test/plugin/client.test.mjs`（两级各挂各的标记、组头仍是整组勾选的入口、计数块是一整块）与
+  `test/plugin/styles.test.mjs`（颜色只走 token）里钉着。
 - 缩进、字重、图形这三层跟颜色无关，是层次的**主承重**；字号这一层与正文对齐内建那两档之后就
   不再承担区分（两级同号，靠 600 与 400 分开，内建的列表也是这么做的）。

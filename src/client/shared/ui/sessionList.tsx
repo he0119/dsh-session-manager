@@ -1,0 +1,748 @@
+/**
+ * 会话列表的共用骨架：列表与「导出 / 导入」弹窗里"一行会话长什么样、怎么勾、挂哪几枚标签、列表框的
+ * 框、筛选条"都从这里出。
+ *
+ * 这三件事原先在每个分页里各写了一遍（`.dsm-rowExport` / `.dsm-rowPick` / `.dsm-rowManage` 三份
+ * 行标记，`formatBytes` / `formatTime` 三份，标签判断两份），代价已经出现过两次：时间格式在迁移页
+ * 是另一套（那边绕了一圈 ISO 串），「未分组」那枚标签在三页里叫两个名字。一处逻辑写三遍，改一处
+ * 就会漏两处——所以共用的边界划在**一行的解剖结构**与**列表的框**上。
+ *
+ * 留在各自那一处的，是那一处自己的东西：导出清单的组头（按目录分组，见 `groups.ts`）、列表里归属
+ * 那一格与删除计划。
+ *
+ * 勾选那一套也在这里：`useSessionPicking()`（行勾选 / 整组勾选 / 全选 / 清空 / 锁定的判据）与
+ * `SessionPickTools`（那对常驻的「全选 / 清空」）两处共用一份，位置与作用面见
+ * [决策](../../../../.agents/notes/implemented/bug-fix/2026-10-08-one-pair-of-pick-tools.md)。
+ *
+ * 样式只在 [styles.ts](../../styles.ts) 里定义，颜色只用 `--dsw-alias-*` 主题 token。
+ *
+ * @module dsh-session-manager/client/shared/ui/sessionList
+ */
+
+import * as React from 'react'
+
+import { Button, Checkbox, Input, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
+
+import { ChevronIcon, SessionIcon, WorkspaceIcon } from './icons.tsx'
+import { Hint } from './Hint.tsx'
+import { lockedParentOf, type NestableSession } from '../logic/groups.ts'
+import { projectLabel, sessionLabel } from '../logic/planRows.ts'
+import {
+  attributeKeys,
+  filterCounts,
+  matchesFilters,
+  type AttributeKey,
+  type FilterKey,
+  type SessionFacts,
+} from '../../operations/manage/sessionFilter.ts'
+import type { SessionManagerKey, Translate } from '../i18n/locales.ts'
+
+/** 一行会话要显示的字段（两处传进来的 `SessionSummary` 都满足它）。 */
+export interface RowSession extends SessionFacts {
+  readonly cwd?: string
+  readonly createdAt: number
+  readonly bytes: number
+  /** 子智能体挂在哪条会话下面（平铺之后用来提示"父在别的项目里"，见 planRows.parentDirNote）。 */
+  readonly parentSession?: string
+}
+
+/** 一行的列组合：导出 / 挑选是五列，会话页多一格归属。 */
+export type RowVariant = 'export' | 'pick' | 'manage'
+
+const ROW_CLASS: Record<RowVariant, string> = {
+  export: 'dsm-row dsm-rowExport',
+  pick: 'dsm-row dsm-rowPick',
+  manage: 'dsm-row dsm-rowManage',
+}
+
+/**
+ * 缩进一级的行标记（`depth` = 0 时不加）。
+ *
+ * 级数在 `groups.ts` 里已经封顶（`MAX_NEST_DEPTH`），这里再夹一道只是防止调用方给出别的数：
+ * 类名写错不会报错、不会崩，只会让那一行**不缩进**（父子关系看着断了），所以两处都写死。
+ */
+export function nestClass(depth: number): string {
+  if (!Number.isFinite(depth) || depth <= 0) return ''
+  return ` dsm-rowNest${Math.min(Math.floor(depth), 3)}`
+}
+
+export function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 0) return '—'
+  const units = ['B', 'KB', 'MB', 'GB']
+  let value = bytes
+  let unit = 0
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024
+    unit++
+  }
+  return `${unit === 0 ? value : value.toFixed(1)} ${units[unit]}`
+}
+
+/** 时间那一格的显示格式只写一份（原先三个分页各一份，迁移页那份还绕了一圈 ISO 串）。 */
+function formatDate(date: Date): string {
+  const pad = (n: number): string => String(n).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+
+/** 毫秒时间戳 → "YYYY-MM-DD HH:mm"（会话行的 `createdAt` 就是它）。读不出来写破折号。 */
+export function formatTime(ms: number): string {
+  if (!Number.isFinite(ms) || ms <= 0) return '—'
+  const date = new Date(ms)
+  if (Number.isNaN(date.getTime())) return '—'
+  return formatDate(date)
+}
+
+/**
+ * ISO 串 → 同一套 "YYYY-MM-DD HH:mm"。
+ *
+ * 备份清单里的时间是 JSON 里的串（`journal.ts` 写进去的就是 ISO），与会话行那种毫秒时间戳不是一回事，
+ * 所以入参分两个函数、输出共用一份。读不出来时原样返回：清单里的值至少还是条线索，比破折号有用。
+ */
+export function formatStamp(iso: string): string {
+  const ms = Date.parse(iso)
+  if (!Number.isFinite(ms)) return iso
+  return formatDate(new Date(ms))
+}
+
+export function totalBytes(sessions: readonly { bytes: number }[]): number {
+  return sessions.reduce((sum, session) => sum + session.bytes, 0)
+}
+
+/**
+ * 一枚行内标签的两句字典键：`key` 是标签本身、`tip` 是"这条会话为什么是这样"的说明。
+ *
+ * 两处都收窄成字典键集而不是 `string`：筛选标签、行标签、筛选框三处共用同一批键，写成 `string` 时
+ * 打错一个键不会报错，只会在界面上露出键名。
+ */
+export type TagCopy = { key: SessionManagerKey; tip: SessionManagerKey }
+
+/** 行上的属性标签 → 字典键（文案与"这条会话为什么是这样"的说明）。 */
+export const ATTRIBUTE_TAGS: Record<AttributeKey, TagCopy> = {
+  subagent: { key: 'tag.subagent', tip: 'tag.subagentTip' },
+  blank: { key: 'tag.blank', tip: 'tag.blankTip' },
+  archived: { key: 'tag.archived', tip: 'tag.archivedTip' },
+  live: { key: 'tag.live', tip: 'tag.liveTip' },
+}
+
+/**
+ * 「未分组」那枚标签 / 那枚筛选标签。
+ *
+ * 一个事实一个名字：外壳侧边栏里那个组、迁移页那个来源、这里这枚标签，说的都是**侧边栏那一组**
+ * （"谁都没认领它，而且默认视图下它会显示"），所以三处都叫「未分组」，判据也共用
+ * `session.ungrouped`（原先列表里叫「未登记在册」，同一件事两个名字）。
+ */
+export const UNGROUPED_TAG: TagCopy = { key: 'list.ungrouped', tip: 'list.ungroupedTip' }
+
+/**
+ * 这一行该挂哪几枚标签。
+ *
+ * 属性标签**能挂几枚挂几枚**（空白且已归档的两枚都挂）：它们既是"侧边栏为什么不显示它"的答案，也是
+ * "这条会话是什么"的标记，而筛选条正是按后者工作的——只挂宿主先判的那一枚，筛「已归档」时就会冒出
+ * 几行没有归档标签的会话。
+ *
+ * @param options.ungrouped 这一页「未分组」那枚标签有没有信息量：会话页的归属那一格已经写着它，不挂；
+ *   迁移页切到「未分组」来源时每一行都不在册，也不挂（标了等于没标）。
+ */
+export function sessionTags(
+  session: SessionFacts,
+  options: { ungrouped: boolean },
+): TagCopy[] {
+  const tags = attributeKeys(session).map((key) => ATTRIBUTE_TAGS[key])
+  if (options.ungrouped && session.ungrouped === true) tags.push(UNGROUPED_TAG)
+  return tags
+}
+
+export interface SessionRowProps {
+  session: RowSession
+  variant: RowVariant
+  checked: boolean
+  onToggle: () => void
+  /** 归属那一格（只有会话页有这一列，给了才渲染）。 */
+  owner?: string
+  /** 「未分组」那枚标签在这一页有没有信息量（见 sessionTags）。 */
+  ungroupedTag?: boolean
+  /** 缩进级数：这条会话是子智能体、挂在上面那张父行下面时 > 0。 */
+  depth?: number
+  /**
+   * 行首那枚折叠标记：只有"有子智能体挂在它下面"的父行才有。
+   *
+   * 带上条数与文案（文案由调用方按展开状态翻好）：图形只有一份，状态走 `aria-expanded`。
+   */
+  disclosure?: { expanded: boolean; count: number; label: string; onToggle: () => void }
+  /** 名字后面跟一枚小标签（父会话在别的目录组里时用它说明父在哪儿）；文案由调用方翻好。 */
+  note?: { text: string; tip: string }
+  /**
+   * 这一行不能单独勾：子智能体跟着父会话走（要动它得勾上面那条父会话，见 family.ts）。
+   *
+   * 勾选框**禁用**而不是"允许勾但拒绝执行"：能勾的集合就该是"单独操作不会被拒的集合"，
+   * 否则用户只能靠试错发现自己点错了。提示里写明该勾哪一条。
+   */
+  locked?: { tip: string }
+  /**
+   * 把这一条交给右栏（`SessionInspector`）。给了它，这一行就变成"点哪儿都看详情"的行。
+   *
+   * 两个入口走同一个动作：**点整行**（项目、字节、时间、空白都算，见 `openDetailOf()`），或者
+   * **标题那一格**——那里是个真的按钮，键盘 Tab 到它、回车就打开（名字就是标题本身）。行尾没有
+   * 别的动作，最后一格仍是时刻。
+   *
+   * 完整时间线不在这行了：右栏里那枚「打开完整内容」才是它唯一的入口（见 SessionInspector）。
+   */
+  onOpenDetail?: () => void
+  /** 这一行是不是右栏正开着的那一条：给行加一层底色，看右栏时知道它对应哪一行。 */
+  opened?: boolean
+  t: Translate
+}
+
+/**
+ * 点整行 = 看详情（只有给得出 `onOpenDetail` 的列表才有这一下，也就是「会话」页）。
+ *
+ * 这一行是 `<div>`，不是 `<label>`：点的落点是"看详情"，不是"勾选"（勾选归最左边那枚勾选框，
+ * 它有自己的一层 label 给无障碍名字，见下面的 `.dsm-rowPick`）。所以这里只需把落在勾选框或标题
+ * 那枚按钮上的点击让出去，别的地方一律交给右栏。
+ */
+function openDetailOf(onOpenDetail: () => void) {
+  return (event: React.MouseEvent<HTMLElement>) => {
+    const target = event.target as Element | null
+    const interactive =
+      target !== null && typeof target.closest === 'function' ? target.closest('button, input, a, label') : null
+    if (interactive !== null) return
+    onOpenDetail()
+  }
+}
+
+/**
+ * 行首那枚折叠标记：尖角 + 挂在这一行下面的子智能体条数。
+ *
+ * 点击只改展开状态，不触发"点整行看详情"（`stopPropagation`）；无障碍名字由调用方给（展开 / 收起，
+ * 带条数），可见的只有尖角与数字。
+ */
+function Disclosure({
+  expanded,
+  count,
+  label,
+  onToggle,
+}: {
+  expanded: boolean
+  count: number
+  label: string
+  onToggle: () => void
+}): React.ReactElement {
+  return (
+    <Hint text={label}>
+      <span
+        className="dsm-rowDisclosure"
+        role="button"
+        tabIndex={0}
+        aria-expanded={expanded}
+        aria-label={label}
+        onClick={(event) => {
+          event.stopPropagation()
+          onToggle()
+        }}
+        onKeyDown={(event) => {
+          if (event.key !== 'Enter' && event.key !== ' ') return
+          event.preventDefault()
+          event.stopPropagation()
+          onToggle()
+        }}
+      >
+        <ChevronIcon />
+        <span className="dsm-rowDisclosureCount">{count}</span>
+      </span>
+    </Hint>
+  )
+}
+
+/** 列表里的一行：勾选框、标记、标题（+标签）、可选的归属、字节、时间。 */
+export function SessionRow({
+  session,
+  variant,
+  checked,
+  onToggle,
+  owner,
+  ungroupedTag = true,
+  depth = 0,
+  disclosure,
+  note,
+  locked,
+  onOpenDetail,
+  opened = false,
+  t,
+}: SessionRowProps): React.ReactElement {
+  // 行上显示标题、id 退到悬浮提示（见 planRows.sessionLabel）。
+  const label = sessionLabel(session)
+  const tags = sessionTags(session, { ungrouped: ungroupedTag })
+  // 给了 onOpenDetail 的行是"点哪儿都看详情"：这一行因此必须是 <div>（<label> 的默认动作是把点击
+  // 转给勾选框）。别的页（导出 / 迁移挑选）仍旧是 <label>：那里点哪儿都是勾选。
+  const interactive = onOpenDetail !== undefined
+  const Row = interactive ? 'div' : 'label'
+  const checkbox = (
+    <Checkbox
+      checked={checked}
+      disabled={locked !== undefined}
+      label=""
+      {...(locked === undefined ? {} : { title: locked.tip })}
+      onChange={onToggle}
+    />
+  )
+  /*
+   * 标题那一格里的东西：名字 + 分类标记（子智能体 / 空白 / 已归档 / 未分组）。
+   *
+   * 官方 `Tag` 不收 `title`（只有 tone / className / children），悬浮提示由外面那一层 span 给。
+   * `dsm-tag` 挂在**包着它的那层 span** 上：styles.ts 里那几条是"这一页怎么摆它"的布局挂钩
+   * （`flex: none` 不许被压扁、窄列里 nowrap、计划表里限宽截断），`>` 选中的就是这一层；
+   * 官方 Tag 自己的几何与配色不归本页管，别在它上面再写一遍。
+   */
+  const title = (
+    <>
+      <Hint text={label.tip}>
+        <span className={label.kind === 'title' ? 'dsm-rowTitle' : 'dsm-rowId'}>{label.text}</span>
+      </Hint>
+      {tags.map((tag) => (
+        <Hint key={tag.key} text={t(tag.tip)}>
+          <span className="dsm-tag">
+            <Tag tone="neutral">{t(tag.key)}</Tag>
+          </span>
+        </Hint>
+      ))}
+      {note !== undefined && (
+        <Hint text={note.tip}>
+          <span className="dsm-tag">
+            <Tag tone="neutral">{note.text}</Tag>
+          </span>
+        </Hint>
+      )}
+    </>
+  )
+  return (
+    <Row
+      className={`${ROW_CLASS[variant]}${nestClass(depth)}`}
+      {...(opened ? { 'data-opened': 'true' } : {})}
+      {...(interactive ? { onClick: openDetailOf(onOpenDetail) } : {})}
+    >
+      {/*
+        勾选框：`label` 给空串——这一行自己有标题，可见文案再由 Checkbox 画一遍就是重复。
+        无障碍名字分两种：这一行是 `<label>` 时由整行兜底；是 `<div>` 时由外面这层 `.dsm-rowPick`
+        给，它里面那句"勾选《标题》"平时看不见（`.dsm-srOnly`），只念给读屏软件。
+      */}
+      {interactive ? (
+        <label className="dsm-rowPick">
+          {checkbox}
+          <span className="dsm-srOnly">{t('manage.rowPick', { title: label.text })}</span>
+        </label>
+      ) : (
+        checkbox
+      )}
+      <SessionIcon />
+      {/*
+        标题那一格：会话页里它是个按钮（那才是这一行的主动作，键盘也走它），外观跟一段文字一样
+        （没有盒子、不换字号，见 `.dsm-rowOpen`）；别的页仍旧是一段文字。
+      */}
+      <span className="dsm-treeCell">{disclosure === undefined ? null : <Disclosure {...disclosure} />}</span>
+      <span className={`dsm-rowTitleCell${depth > 0 ? ' dsm-rowTitleCellChild' : ''}`}>
+        {interactive ? (
+          <Hint text={label.tip}>
+            <button
+              type="button"
+              className="dsm-rowLabel dsm-rowOpen"
+              onClick={(event) => {
+                event.stopPropagation()
+                onOpenDetail()
+              }}
+            >
+              {title}
+            </button>
+          </Hint>
+        ) : (
+          <span className="dsm-rowLabel">{title}</span>
+        )}
+      </span>
+      {owner !== undefined && (
+        <Hint text={session.cwd ?? ''}>
+          <span className="dsm-meta dsm-owner">{owner}</span>
+        </Hint>
+      )}
+      <span className="dsm-meta">{formatBytes(session.bytes)}</span>
+      <span className="dsm-meta">{formatTime(session.createdAt)}</span>
+    </Row>
+  )
+}
+
+/**
+ * 只读的一行：确认弹窗里那份计划清单用它（没有勾选框，也不该能点）——删除的"将要被删掉"、迁移的
+ * "将要被搬走"都是它。
+ *
+ * @param className 行标记由调用方给（`.dsm-rowPlan` 是四列，与可勾选的那些不一样）。
+ * @param metaTitle 字节那一格的悬浮提示（删除计划里给的是会话目录，迁移计划里是源会话目录）。
+ * @param note 名字后面跟一枚小标签（清单用它说明"这条是跟着谁来的"）；文案由调用方翻好。
+ * @param depth 缩进级数（级联带进来的那些缩进到点名的那条下面，见 groups.nestClass）。
+ */
+export function SessionStaticRow({
+  session,
+  className,
+  metaTitle,
+  note,
+  depth = 0,
+}: {
+  session: RowSession
+  className: string
+  metaTitle?: string
+  note?: { text: string; tip: string }
+  depth?: number
+}): React.ReactElement {
+  const label = sessionLabel(session)
+  return (
+    <div className={`${className}${nestClass(depth)}`}>
+      <SessionIcon />
+      <span className="dsm-rowLabel">
+        <Hint text={label.tip}>
+          <span className={label.kind === 'title' ? 'dsm-rowTitle' : 'dsm-rowId'}>{label.text}</span>
+        </Hint>
+        {note !== undefined && (
+          <Hint text={note.tip}>
+            <span className="dsm-tag">
+              <Tag tone="neutral">{note.text}</Tag>
+            </span>
+          </Hint>
+        )}
+      </span>
+      <Hint text={metaTitle}>
+        <span className="dsm-meta">{formatBytes(session.bytes)}</span>
+      </Hint>
+      <span className="dsm-meta">{formatTime(session.createdAt)}</span>
+    </div>
+  )
+}
+
+/**
+ * 三态勾选框。
+ *
+ * `indeterminate` 不是能写进 JSX 的属性（那是 DOM 节点上的状态），只能在节点上赋值——少了这一步，
+ * 组里勾了一部分时选框画成"空"，用户会以为自己的操作没生效。
+ *
+ * **这里用手写 `<input>` 而不是官方 `Checkbox`**（本页其余勾选框都已换）：官方原语的签名只有
+ * `checked / onChange / label / disabled / title / className`，既不收 `ref`、也没有
+ * `indeterminate`，内部的 input 节点从外面够不着——三态画不出来。硬换的代价是"勾了一部分"这一态
+ * 在界面上消失（组头看起来是全没勾），比样式不一致严重得多，所以这一处保留手写。
+ */
+export function GroupCheckbox({
+  checked,
+  indeterminate,
+  label,
+  onToggle,
+}: {
+  checked: boolean
+  indeterminate: boolean
+  label: string
+  onToggle: () => void
+}): React.ReactElement {
+  const ref = React.useRef<HTMLInputElement>(null)
+  React.useEffect(() => {
+    if (ref.current !== null) ref.current.indeterminate = indeterminate
+  }, [indeterminate, checked])
+  return (
+    <Hint text={label}>
+      <input ref={ref} type="checkbox" checked={checked} aria-label={label} onChange={onToggle} />
+    </Hint>
+  )
+}
+
+/**
+ * 一行能勾选的会话：除了筛选判据要的那几个字段，还得有族关系（判"能不能单独勾"）与标题（提示里点名
+ * 父会话）。`/state` 的 `SessionSummary` 满足它。
+ */
+export interface PickableSession extends NestableSession {
+  readonly title?: string
+}
+
+/**
+ * 一个清单的勾选状态：行勾选、整组勾选、全选、清空，以及"这一行为什么不能单独勾"。
+ *
+ * 「会话」页与「传输」页原先各写一份（两处的 `toggle` / `toggleGroup` / `lockOf` 逐字同形，只有变量名
+ * 不同），差别只剩"勾完之后拿去干什么"。收在一处之后三件事一起成立：
+ *
+ *   - 判据只有一条（禁用的集合就是宿主会拒的集合，见 [groups.lockedParentOf](../logic/groups.ts)）；
+ *   - 眼下的勾选永远只算**库还在**的会话（见下面的 `picked`：删完 / 换源之后再读，条数不会先报一个
+ *     已经不存在的数）；
+ *   - 选行那一对按钮（下面的 `SessionPickTools`）拿到的数字同源，两处的禁用态因此一致。
+ *
+ * @param library 整个库（**不筛**）：父会话在不在库里只与库有关，与当前筛选 / 折叠无关。
+ * @param t 注入面给的翻译函数（锁定提示里点名父会话）。
+ * @param lockable 这个清单有没有"不能单独勾"的行。缺省有（子智能体跟着父会话走）。「迁移」页也用缺省值：
+ *   宿主那条迁移路会拒点名的子智能体（要动它得勾它的父会话，见 `src/operations/migrate/plan.ts`），所以那些行必须灰着；
+ *   它另外把侧边栏看不见的空白 / 已归档会话也挡在外面（`library` 只收 `hidden === undefined` 的那些）。
+ */
+export interface SessionPicking<S extends PickableSession> {
+  /** 眼下真正勾上的那些 id（已经摘掉不在库里的）。 */
+  readonly picked: readonly string[]
+  /** 这一行为什么不能单独勾；能勾时 `undefined`。 */
+  readonly lockOf: (session: S) => { tip: string } | undefined
+  /** 这些行里能单独勾的那些（「全选」的作用面与禁用判据都读它）。 */
+  readonly selectableOf: (sessions: readonly S[]) => S[]
+  readonly toggle: (session: S) => void
+  /** 组头那一下：整组勾上，或整组取消（只勾了一部分时是"补齐"）。 */
+  readonly toggleGroup: (sessions: readonly S[]) => void
+  /** 勾上**眼下列出来的**这些能勾的行（筛过之后就是"这几类都选上"，不是"把看不见的也选上"）。 */
+  readonly selectAll: (listed: readonly S[]) => void
+  /** 清空整个勾选集（眼下的勾选可能包含被筛掉的行，所以不是"清掉列出来的那些"）。 */
+  readonly clear: () => void
+}
+
+export function useSessionPicking<S extends PickableSession>(
+  library: readonly S[],
+  t: Translate,
+  lockable = true,
+): SessionPicking<S> {
+  const [selected, setSelected] = React.useState<readonly string[]>([])
+  /**
+   * 库里还在的那些 id。
+   *
+   * 派生出 `picked` 而不是去改状态：写入成功后 `reload()` 会把清单换成新的那一份，这一帧里"已选 N"
+   * 因此不会先报上一个已经不存在的会话（原来传输页为此单摆了一个 effect 去清选择集，两页的写法不同）。
+   */
+  const known = React.useMemo(() => new Set(library.map((session) => session.id)), [library])
+  const picked = React.useMemo(() => selected.filter((id) => known.has(id)), [selected, known])
+
+  const lockOf = React.useMemo(() => {
+    if (!lockable) return () => undefined
+    const byId = new Map(library.map((session) => [session.id, session]))
+    return (session: S): { tip: string } | undefined => {
+      const parent = lockedParentOf(session, byId)
+      return parent === undefined
+        ? undefined
+        : { tip: t('list.lockedSubagentTip', { name: parent.title ?? parent.id }) }
+    }
+  }, [library, t, lockable])
+
+  const selectableOf = (sessions: readonly S[]): S[] => sessions.filter((session) => lockOf(session) === undefined)
+
+  const toggle = (session: S): void => {
+    if (lockOf(session) !== undefined) return
+    const id = session.id
+    setSelected((current) => (current.includes(id) ? current.filter((item) => item !== id) : [...current, id]))
+  }
+
+  const toggleGroup = (sessions: readonly S[]): void => {
+    const ids = selectableOf(sessions).map((session) => session.id)
+    if (ids.length === 0) return
+    const whole = ids.every((id) => picked.includes(id))
+    setSelected(whole ? picked.filter((id) => !ids.includes(id)) : [...new Set([...picked, ...ids])])
+  }
+
+  const selectAll = (listed: readonly S[]): void => setSelected(selectableOf(listed).map((session) => session.id))
+
+  const clear = (): void => setSelected([])
+
+  return { picked, lockOf, selectableOf, toggle, toggleGroup, selectAll, clear }
+}
+
+
+
+/**
+ * 清单的选行工具：一枚「全选」、一枚「清空」——两处共用同一对、同一套禁用判据。
+ *
+ * 为什么是**常驻的两枚**，而不是一枚会变脸的（全勾上了才显示「清空」）：勾了一部分时那枚按钮只剩
+ * 「全选」一个词可读，而那一刻用户最想点的偏偏是「清空」——它在界面上不存在，只能一行行点回去。
+ * 两枚各自带禁用态（没有能勾的行 / 一条都没勾）就够了，不必靠换标签省一个位置。
+ *
+ * 全选的作用面是**眼下列出来的那些**（筛过之后就是"这几类都选上"）；清空清的是整个勾选集。两者都由
+ * 调用方把数字算好送进来（数字来自上面的 `useSessionPicking`）。
+ *
+ * 摆在哪儿：清单之上那一行的右端——清单就是整张卡的内容时是卡头（会话页、传输页），清单是卡片里的
+ * 一段时是清单上方那一行（迁移页的范围勾选）。见
+ * [决策](../../../../.agents/notes/implemented/bug-fix/2026-10-08-one-pair-of-pick-tools.md)。
+ *
+ * @param selectableCount 眼下列出来的行里能勾的有几条（0 时「全选」禁用）。
+ * @param pickedCount 眼下勾了几条（0 时「清空」禁用）。
+ */
+export function SessionPickTools({
+  selectableCount,
+  pickedCount,
+  onSelectAll,
+  onClear,
+  t,
+}: {
+  selectableCount: number
+  pickedCount: number
+  onSelectAll: () => void
+  onClear: () => void
+  t: Translate
+}): React.ReactElement {
+  return (
+    <>
+      {/* 这一对只动勾选集、不写盘。禁用态由官方原语的 `disabled` 透传。 */}
+      <Button variant="outline" size="sm" onClick={onSelectAll} disabled={selectableCount === 0}>
+        {t('list.selectAll')}
+      </Button>
+      <Button variant="outline" size="sm" onClick={onClear} disabled={pickedCount === 0}>
+        {t('list.clear')}
+      </Button>
+    </>
+  )
+}
+
+
+/**
+ * 列表框。
+ *
+ * @param fixed 这个列表会不会随筛选变行数。会的话高度必须固定（见 styles.ts 的 `.dsm-listFixed`）：
+ *   框一变矮，整页跟着变矮，设置弹窗外层那条滚动条就一进一出，占位滚动条的环境里整个卡片会横移 15px。
+ *   主栏那一版（`.dsm-listFill`）不用这一档：它自己就是那一页的滚动视口，高度由卡片剩余空间给。
+ * @param fill 列表吃掉卡片剩下的高度，自己滚（主栏「会话」页）。与 `fixed` 互斥。
+ */
+export function SessionListBox({
+  fixed = false,
+  fill = false,
+  children,
+}: {
+  fixed?: boolean
+  fill?: boolean
+  children: React.ReactNode
+}): React.ReactElement {
+  const classes = ['dsm-list', fixed ? 'dsm-listFixed' : '', fill ? 'dsm-listFill' : ''].filter(Boolean).join(' ')
+  return <div className={classes}>{children}</div>
+}
+
+/** 框里的空态。放在框**里面**，框才不会因为"没内容"而消失。 */
+export function SessionListEmpty({ text }: { text: string }): React.ReactElement {
+  return <p className="dsm-empty">{text}</p>
+}
+
+/**
+ * 一个列表的筛选状态：类别筛选标签（多选＝任一命中）、关键词，以及每一类各有多少条。
+ *
+ * 计数是对**传进来的这一批**数的，不随当前筛选或关键词跳（会跳的计数没人信得过）。
+ */
+export interface SessionFilter {
+  readonly filters: readonly FilterKey[]
+  readonly query: string
+  readonly counts: Record<FilterKey, number>
+  /** 有筛选标签或关键词在起作用（界面据此报"显示 N / M 条"）。 */
+  readonly active: boolean
+  readonly matches: (session: SessionFacts) => boolean
+  readonly toggle: (key: FilterKey) => void
+  readonly clear: () => void
+  readonly setQuery: (query: string) => void
+}
+
+export function useSessionFilter(sessions: readonly SessionFacts[]): SessionFilter {
+  const [filters, setFilters] = React.useState<readonly FilterKey[]>([])
+  const [query, setQuery] = React.useState('')
+  const counts = React.useMemo(() => filterCounts(sessions), [sessions])
+  const matches = React.useCallback(
+    (session: SessionFacts) => matchesFilters(session, filters, query),
+    [filters, query],
+  )
+  const toggle = React.useCallback((key: FilterKey): void => {
+    setFilters((current) => (current.includes(key) ? current.filter((item) => item !== key) : [...current, key]))
+  }, [])
+  const clear = React.useCallback((): void => setFilters([]), [])
+  return {
+    filters,
+    query,
+    counts,
+    active: filters.length > 0 || query.trim() !== '',
+    matches,
+    toggle,
+    clear,
+    setQuery,
+  }
+}
+
+/** 筛选标签上的文案：四类属性与行上标签同一份，「未分组」与外壳那一组同名。 */
+const CHIP_LABELS: Record<FilterKey, TagCopy> = {
+  subagent: ATTRIBUTE_TAGS.subagent,
+  blank: ATTRIBUTE_TAGS.blank,
+  archived: ATTRIBUTE_TAGS.archived,
+  unowned: UNGROUPED_TAG,
+  live: ATTRIBUTE_TAGS.live,
+}
+
+export interface SessionFilterBarProps {
+  /**
+   * 列哪几枚类别筛选标签。
+   *
+   * 空数组 = 这一页只给搜索框，例如迁移页：它的列表**本来就是候选**（侧边栏看不见的会话按设计不进
+   * 候选），健康的那几类筛选标签在那页永远是 0，摆出来只会让人以为筛选坏了。
+   */
+  keys: readonly FilterKey[]
+  filter: SessionFilter
+  t: Translate
+}
+
+/**
+ * 一排类别筛选标签：`筛选` + `全部` + 每类一枚（带条数）。
+ *
+ * 从 [SessionFilterBar] 拆出来，是因为它现在有两个落点：「会话」页在左侧项目树里，「传输」页仍在
+ * 列表上方那一行。拆的是**渲染**，状态仍由页面的 `useSessionFilter()` 持有——两处读同一份。
+ */
+export function SessionFilterChips({ keys, filter, t }: SessionFilterBarProps): React.ReactElement {
+  return (
+    <div className="dsm-filters">
+      <span className="dsm-hint">{t('list.filter.label')}</span>
+      <button
+        type="button"
+        className="dsm-filter"
+        aria-pressed={filter.filters.length === 0}
+        onClick={filter.clear}
+      >
+        {t('list.filter.all')}
+      </button>
+      {keys.map((key) => (
+        <Hint key={key} text={t(CHIP_LABELS[key].tip)}>
+          <button
+            type="button"
+            className="dsm-filter"
+            aria-pressed={filter.filters.includes(key)}
+            onClick={() => filter.toggle(key)}
+          >
+            {t(CHIP_LABELS[key].key)}
+            <span className="dsm-filterCount">{filter.counts[key]}</span>
+          </button>
+        </Hint>
+      ))}
+    </div>
+  )
+}
+
+/**
+ * 搜索框：占位符与无障碍名字都走字典；值来自同一个筛选状态。
+ *
+ * 走官方 `Input`（不是裸 `<input>`）：候选面板那个筛选框一直是官方的，同一个 `.dsm-search` 挂在一个
+ * 裸 input 上时高度是 22px、挂在官方那层壳上是 36px（我们的边框与内边距叠在官方那层壳外面），两处
+ * 一个类名两种控件。现在两处都走官方，`.dsm-search` 只负责宽度。
+ */
+export function SessionSearch({ filter, t }: { filter: SessionFilter; t: Translate }): React.ReactElement {
+  return (
+    <Input
+      className="dsm-search"
+      type="search"
+      value={filter.query}
+      placeholder={t('list.filter.search')}
+      aria-label={t('list.filter.search')}
+      onChange={(event) => filter.setQuery(event.target.value)}
+    />
+  )
+}
+
+/**
+ * 筛选条：一排类别筛选标签，底下一行是搜索框与那句说明。
+ *
+ * 两行是刻意的：胶囊那一行只剩一百来 px 余量（窄 135px 就会换行），把那句说明或搜索框塞进去，容器
+ * 一窄就整块换行、位置乱跳（见 styles.ts 的 .dsm-filters 注释）。搜索框单独一行则两边都固定。
+ *
+ * 「会话」页不用这条整条：它的筛选标签在左侧项目树里、搜索框在卡头，两处各取上面那一个组件。
+ */
+export function SessionFilterBar({ keys, filter, t }: SessionFilterBarProps): React.ReactElement {
+  const chips = keys.length > 0
+  return (
+    <>
+      {chips && <SessionFilterChips keys={keys} filter={filter} t={t} />}
+      <div className="dsm-filterSearch">
+        {!chips && <span className="dsm-hint">{t('list.filter.label')}</span>}
+        <SessionSearch filter={filter} t={t} />
+        {chips && <span className="dsm-hint">{t('list.filter.hint')}</span>}
+      </div>
+    </>
+  )
+}

@@ -48,5 +48,5 @@ gzip( 'DSHSESS1\n' | u32le 清单长度 | 清单 JSON | 各文件的原始字节
 
 - 包是自校验的：坏包在落地之前被拒，进不了会话库。
 - 清单带 sha256 与偏移，导入不必信任文件名或顺序。
-- `test/transfer.test.ts` 核字节往返与整个拒绝面（每条校验各有一条用例）。
-- `test/client.test.mjs` 专门断言产物里不再出现那个少一个字母的后缀。
+- `test/operations/transfer/transfer.test.ts` 核字节往返与整个拒绝面（每条校验各有一条用例）。
+- `test/plugin/client.test.mjs` 专门断言产物里不再出现那个少一个字母的后缀。

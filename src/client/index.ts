@@ -4,14 +4,14 @@
  * **侧栏那一页做事**（挑会话、迁移、导入导出、同步、备份）：`main` 放页面本身，`sidebar.panellist`
  * 放侧栏那一行图标，两者用同一个 id 配对（宿主按 id 把侧栏那条指到主栏那一页）。
  *
- * **设置里那一页只放怎么配**：`settings.section` 挂的是 [SettingsPanel.tsx](./SettingsPanel.tsx)，
- * 里面只有 WebDAV 那张配置卡。为什么分两页：配置一年改两次，操作用天天用——挤在一页里时，每次同步
- * 都得先翻过十来个字段的配置卡，改配置又得先滚到底。官方的 `dsh-context` 也是这么分的（设置里只有
- * 偏好项，数据在侧栏那一页）。
+ * **配置只占插件页那一格**：`plugins.bundle.config` 挂
+ * [PluginConfigCard.tsx](./operations/sync/PluginConfigCard.tsx)（WebDAV 地址、机器标识、账号、路径映射、
+ * 自动推送）。为什么分开：配置一年改两次，操作用天天用——挤在一页里时，每次同步都得先翻过十来个字段
+ * 的配置卡，改配置又得先滚到底。官方的 `dsh-context` 也是这么分的（设置里只有偏好项，数据在侧栏那一页）。
  *
- * 页面主体在 [ManagerPanel.tsx](./ManagerPanel.tsx)（页面就是会话列表，导出 / 导入、同步、备份与回滚
- * 各是一处入口 + 一个宽弹窗），侧栏那一版外面多一层 [SessionManagerPage.tsx](./components/SessionManagerPage.tsx)
- * （主栏要自己带滚动视口），文案在 [locales.ts](./locales.ts)，端点调用在 [api.ts](./api.ts)，
+ * 页面主体在 [ManagerPanel.tsx](./shell/ManagerPanel.tsx)（页面就是会话列表，导出 / 导入、同步、备份与回滚
+ * 各是一处入口 + 一个宽弹窗），侧栏那一版外面多一层 [SessionManagerPage.tsx](./shell/SessionManagerPage.tsx)
+ * （主栏要自己带滚动视口），文案在 [locales.ts](./shared/i18n/locales.ts)，端点调用在 [api.ts](./api.ts)，
  * 样式在 [styles.ts](./styles.ts)——这里只做组装。
  *
  * 设置那一页与「通用 / 模型 / 插件 / 账户 / Agent 预设」并列。没有选另外两个相似的 Slot，理由是
@@ -33,7 +33,7 @@
  *     基线模块，颜色只用主题 token。基线模块没送到时整个 Slot 条目会变成崩溃占位，所以渲染路径上
  *     不做会抛的事。字典与命名空间那两处**只 import 类型**，产物里一个 require 都不会多。
  *
- * 文案与 `t` 走官方的 locale 机制：字典在 [locales.ts](./logic/locales.ts) 里注册进 `locale`
+ * 文案与 `t` 走官方的 locale 机制：字典在 [locales.ts](./shared/i18n/locales.ts) 里注册进 `locale`
  * 服务，注册 Slot 时带 `locale: NS`，页面的 `t` 由**框架 props** 送来（`PropsLocale`，见官方
  * 「新增设置卡片」那一页的示例）——本页不再自己 inject 一个 `t`，也不留中文兜底：那一层的服务
  * 不在时框架给的是崩溃占位，而不是"悄悄换一种语言"。`ctx` 的其余成员仍是结构化的最小面，由
@@ -53,7 +53,7 @@
  * 内置页撞 id，也是拿图标撒谎。要换图标只能等上游给注册选项加 `icon`（本页的 id 已经稳定，
  * 上游加了之后这里只需多传一个字段）。
  *
- * @module dsh-session-manager/client
+ * @module dsh-session-manager/client/index
  */
 
 import type { BuiltInLocaleId } from '@deepseek-ai/dsh-client-locale/client'
@@ -61,14 +61,14 @@ import type { LocaleDictOf } from '@deepseek-ai/dsh-client-ui-slots'
 
 import { type CredentialsApi, setCredentialsApi } from './credentials.ts'
 import { type DirectoryListing, getDirectoryApi, setDirectoryApi } from './directory.ts'
-import { NS, en, zh, type Translate } from './logic/locales.ts'
-import { SessionManagerIcon } from './components/icons.tsx'
-import { SessionManagerPage } from './components/SessionManagerPage.tsx'
-import { PluginConfigCard } from './components/PluginConfigCard.tsx'
+import { NS, en, zh, type Translate } from './shared/i18n/locales.ts'
+import { SessionManagerIcon } from './shared/ui/icons.tsx'
+import { SessionManagerPage } from './shell/SessionManagerPage.tsx'
+import { PluginConfigCard } from './operations/sync/PluginConfigCard.tsx'
 import { setNavigationApi } from './navigation.ts'
 import { PLUGIN_NAME } from './plugin.ts'
 import { installStyles } from './styles.ts'
-import { SYNC_SECTION, setSyncConfigApi, type SyncConfigApi } from './logic/syncForm.ts'
+import { SYNC_SECTION, setSyncConfigApi, type SyncConfigApi } from './operations/sync/syncForm.ts'
 
 /** 插件名（客户端模块系统里的 factory id，等于包名）。 */
 export { PLUGIN_NAME as name } from './plugin.ts'

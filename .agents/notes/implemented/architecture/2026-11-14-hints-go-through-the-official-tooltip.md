@@ -11,13 +11,13 @@ Status: implemented
 
 ## Decision
 
-- 新增 `src/client/components/Hint.tsx`：一层薄包装，文本交给官方 `Tooltip`，默认 `side="bottom"`、
+- 新增 `src/client/shared/ui/Hint.tsx`：一层薄包装，文本交给官方 `Tooltip`，默认 `side="bottom"`、
   `portal` 打开（列表卡片、表格、弹窗正文都带 `overflow`，不挂到 body 外会被裁掉）。
 - 所有提示改走 `Hint`：行、标签、项目树、排序表头、筛选项、值控件、面包屑、目录条目、进度那一条、
   状态栏、同步计划里的状态标签。
 - `title` 只剩组件的标题属性在用（`Modal` / `WorkDialog` / `HelpSection` / `PlanSectionHead` 的标题），
   它们不是悬浮提示。
-- `test/client.test.mjs` 加一条守卫：扫 `src/client/components/*.tsx`，`title={` 只准出现在上面那几
+- `test/plugin/client.test.mjs` 加一条守卫：扫 `src/client/**/*.tsx`，`title={` 只准出现在上面那几
   个组件里，且看的是最近的组件开标签（`title` 常单独占一行）。篡改（随便给一个 `<p>` 加回 `title`）
   这条守卫会红。
 

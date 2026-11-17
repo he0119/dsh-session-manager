@@ -24,7 +24,7 @@ Status: implemented
   同一条分界）。
 - **包可以拖进来**：整页是一个落点（`useFileDrop()`，拖着文件时一圈虚线 + 一句"松手就导入这个包"），
   松手就开这一面并已经拿着包；弹窗里那一格自己也是落点。判据只有一个——后缀是 `.dshsess`，一次一个
-  （`logic/fileDrop.ts` 的 `chooseBundle()`，三种情形单独测）。
+  （`operations/transfer/fileDrop.ts` 的 `chooseBundle()`，三种情形单独测）。
 
 导出的弹窗、`TransferPanel.tsx`、以及只为它存在的分组列表（`SessionGroupHead` / `SessionGroupTools` /
 `useGroupCollapse` / `nestSessions`）与它们的样式一起删掉。列表的分组从此只有一处：左栏那棵项目树

@@ -56,7 +56,7 @@ Status: implemented
 
 围绕这一条端口的三件事各有各的地方：
 
-- **谁不该动**（`src/retitle.ts`，零 DSH 依赖、可单测）：子智能体会话跳过（名称在侧边栏里看不见）；
+- **谁不该动**（`src/operations/retitle/retitle.ts`，零 DSH 依赖、可单测）：子智能体会话跳过（名称在侧边栏里看不见）；
   用户手动改过名的跳过（`source.kind === 'user'`，一次批量动作不该抹掉用户起的名字）；点名了但不在库
   里的记 `not-found`；没有过主模型请求的记 `no-request-route`（那是"本来就无从取名"，不是失败）。
 - **怎么报**（`POST /dsh-session-manager/api/retitle`，事件流）：改了 / 算过但没变 / 跳过（附原因）/
@@ -106,9 +106,9 @@ Status: implemented
   连续性校验挡下并如实报错，不会写歪。
 - **要落地就有进度**：勾十条会话是半分钟量级，因此这一枚按钮与归档 / 删除 / 迁移 / 同步共用
   [同一条事件流](../architecture/2026-10-08-every-long-action-streams-progress.md)。
-- 端口与编排各有一份用例钉住行为（`test/tools.test.ts` 的假宿主——照宿主的还原构造、`seq = 日志条数`
-  与写句柄的连续性校验造出来，断言的是"磁盘上真的多了哪几条、会话有没有留下来"；`test/retitle.test.ts`
-  的分类、`test/retitleNotes.test.ts` 的文案），四类跳过与失败都按"改一处就该红一条"的方式定过位。
+- 端口与编排各有一份用例钉住行为（`test/plugin/tools.test.ts` 的假宿主——照宿主的还原构造、`seq = 日志条数`
+  与写句柄的连续性校验造出来，断言的是"磁盘上真的多了哪几条、会话有没有留下来"；`test/operations/retitle/retitle.test.ts`
+  的分类、`test/client/operations/retitle/retitleNotes.test.ts` 的文案），四类跳过与失败都按"改一处就该红一条"的方式定过位。
 - **本机实测（2026-10-27，用宿主真实的 `sessions` / `sessionPersistence` / `sessionProjections` /
   `sessionTitle` / `sessionQuery` 跑这条端口，只把标题 provider 换成固定返回一句话的假件，库是真实日志
   的副本）**：三种末条形状各取一份——`282 条 / 末条 session/title`、`121 条 / 末条 session/end-seed`、

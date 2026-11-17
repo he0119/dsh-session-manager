@@ -44,5 +44,5 @@ Status: implemented
 
 - 勾中的都搬不走时，弹窗显示一句说明、确认按钮禁用，不再有永不结束的等待。
 - 部分搬不走时行为不变（照旧只送看得见的进计划，底部说"另有 N 条"）。
-- 新增一条界面文案 `migrate.nothingVisible`（中英各一条）；`test/client.test.mjs` 钉住"这一态不出现
+- 新增一条界面文案 `migrate.nothingVisible`（中英各一条）；`test/plugin/client.test.mjs` 钉住"这一态不出现
   `dialog.previewing`、出现新文案、确认按钮禁用"。

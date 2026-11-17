@@ -45,7 +45,7 @@ Status: implemented
   那几条规则只在容器查询那一档。
 - 收起后要等 160ms 才真的隐藏，这段时间里它仍接点击。这是刻意的：动画演完之前不该把底下那块列表
   放出来。
-- 由 `test/styles.test.mjs` 钉住：关着是 `visibility: hidden` 加位移到边界外、带 `transform 160ms`
+- 由 `test/plugin/styles.test.mjs` 钉住：关着是 `visibility: hidden` 加位移到边界外、带 `transform 160ms`
   的过渡、`visibility` 延迟 160ms；打开是 `visibility: visible` 加 `transform: none`；降级块里是
   `transition: none`。
 - 真实 dev GUI 里量过：开左栏 x 从 -200 滑到 80（80ms 时 -2、146ms 时 78），关左栏滑回 -200、

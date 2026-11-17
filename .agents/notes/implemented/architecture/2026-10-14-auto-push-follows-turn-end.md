@@ -66,7 +66,7 @@ Status: implemented
 这是这个改动里唯一一个"看着能省、实际上会造成静默数据错误"的选择，放弃。
 
 **等 N 秒假装落盘完成了。** 这是"不冲盘"的软化版：赌 30 秒足够写完。它把正确性押在 IO 时延上，
-而这个包本来就有别的路子在等落盘（`src/checkpoint-warm.ts`）。宿主既然点名给了 `flush()`，用它。
+而这个包本来就有别的路子在等落盘（`src/shared/host/checkpoint-warm.ts`）。宿主既然点名给了 `flush()`，用它。
 
 **只按事件推，把定时器删掉。** 干净，但上面那三类（别的机器推的、本机删会话、事件层漏了）就再也
 推不动——尤其第二类会让被删的会话永远留在自己那格的索引里，别的机器照着去取一个不存在的包。
@@ -91,9 +91,9 @@ Status: implemented
   与提示都跟着改了（`sync.field.autoPushInterval` = 自动推送兜底间隔），因为不改的话用户会按旧语义
   理解，以为改小了才推得勤——实际上写完一轮就推，跟那个数无关。
 - **`AutoPushSkip` 没有新增码**（见上，试过 `settle` 又撤了）。界面侧多了一份**运行期**清单
-  `AUTO_PUSH_SKIP_CODES`（`src/client/logic/autoPush.ts`）：`AutoPushSkip` 是类型，编译之后不存在，
+  `AUTO_PUSH_SKIP_CODES`（`src/client/operations/sync/autoPush.ts`）：`AutoPushSkip` 是类型，编译之后不存在，
   而界面要按码去字典里挑句子。两边对不上的表现很安静（那句话退回"宿主没有说原因"），所以
-  `test/sync-form.test.ts` 两处钉住它——清单里的码字典要有句子、`src/sync.ts` 会报的码清单要有。
+  `test/client/operations/sync/sync-form.test.ts` 两处钉住它——清单里的码字典要有句子、`src/operations/sync/sync.ts` 会报的码清单要有。
 - **核心层的 `tick()` 现在把 `force` 转交给 `run()`。** 原来只有本地那个 `disabled` 判断读它、不往下
   传；生产路径没暴露这个问题是因为 `src/tools.ts` 另有一层 `forceNext` 闭包在做同样的转交。但
   "接受了 `force` 却没生效"是最难查的一类接口缺陷，核心层这个接口本身就该自洽（是隐藏窗口那条路把它
@@ -105,7 +105,7 @@ Status: implemented
   类型、`flush` 失败往外抛、界面清单删掉一个真会被报的码、自查用的匹配式写坏。
 - **一处自己抓到的假断言**：那两条"顺序"断言最初写成两个各记各的数组（`flush` 一个、`touched` 一个），
   那样只能核"都发生了"，测不出先后——把顺序反过来这一组**照样全绿**。改成两边写进同一条日志之后才真的
-  红。`test/tools.test.ts` 里 `eventHost` 的 `calls` 因此是**一条**日志，并且有 `onCall` 让别处的调用
+  红。`test/plugin/tools.test.ts` 里 `eventHost` 的 `calls` 因此是**一条**日志，并且有 `onCall` 让别处的调用
   并进来。
 - **实测**（自检跑的）：`pnpm typecheck` / `pnpm build` / `pnpm test`（tests 574 / pass 572 /
   fail 0 / skipped 2）/ `pnpm check:package`（42 个文件）四项全绿。

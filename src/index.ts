@@ -13,7 +13,7 @@ import { readFileSync } from 'node:fs'
 import type { Context } from '@deepseek-ai/cordis'
 
 import { Config, TOOL_BY_SWITCH, toolsSection, type PluginConfigInput, type ToolSwitch } from './config.ts'
-import { createGitRunner, createRepoLocationCache, createRepoLookup } from './repo.ts'
+import { createGitRunner, createRepoLocationCache, createRepoLookup } from './shared/repo.ts'
 import {
   adoptLegacyBackupRoot,
   archiveOps,
@@ -32,9 +32,9 @@ import {
   hostRegistryPort,
   titleRefreshPort,
 } from './tools.ts'
-import type { AutoPushTimer } from './sync.ts'
-import { readSyncRun, writeSyncRun } from './sync-state.ts'
-import { createRemoteWriteGate } from './remote-write.ts'
+import type { AutoPushTimer } from './operations/sync/sync.ts'
+import { readSyncRun, writeSyncRun } from './operations/sync/sync-state.ts'
+import { createRemoteWriteGate } from './operations/sync/remote-write.ts'
 import { API_PREFIX, registerWebRoutes, type WebServerLike } from './web.ts'
 
 // 配置 schema 必须从入口导出：Loader 拿它校验 profile 里那一节，设置接缝拿它在插件管理器里生成
@@ -93,7 +93,7 @@ export function apply(ctx: Context, config: PluginConfigInput = {}): () => void 
   const disposers = registerTools(ctx, config, { remoteWrite })
 
   // 项目身份（git remote）只在这里造一份：它有进程内缓存（一个目录只问一次 git），而 /state 是页面的
-  // 热路径——每次请求都新建一份等于把缓存扔掉。见 src/repo.ts 的 createRepoLookup()。
+  // 热路径——每次请求都新建一份等于把缓存扔掉。见 src/shared/repo.ts 的 createRepoLookup()。
   //
   // 同一份缓存也交给同步（手动那条与后台自动推送那条）：一次同步计划要为每个候选目录起三个 git 进程，
   // 而项目身份几乎不变——不共用的话，每开一次同步弹窗就是几十个进程。
@@ -167,7 +167,7 @@ export function apply(ctx: Context, config: PluginConfigInput = {}): () => void 
       info('dsh-session-manager：webServer 形状不认，界面端点未挂')
       return
     }
-    // 上一次手动同步的结论存在插件自己那一层目录里（见 src/sync-state.ts）：进程重启之后，页头那枚
+    // 上一次手动同步的结论存在插件自己那一层目录里（见 src/operations/sync/sync-state.ts）：进程重启之后，页头那枚
     // 同步状态还答得出"多久以前、成没成"。读写都在这里注入，web.ts 不去解析 $DSH_HOME。
     const home = dshHome()
     const dispose = registerWebRoutes(webServer, {
@@ -182,10 +182,10 @@ export function apply(ctx: Context, config: PluginConfigInput = {}): () => void 
       // 与 `/state` 共用一份"目录 → 项目身份"的 git 缓存（见上面 `repoLocations`）。
       repoLocations,
       // "迁移何时生效"要读宿主服务（workspaceRegistry、sessionPersistence），那件事只在这里做得了。
-      // 交出的是**探测**而不是结论：执行过的那些由编排层按实际结果报（见 src/take-effect.ts）。
+      // 交出的是**探测**而不是结论：执行过的那些由编排层按实际结果报（见 src/shared/host/take-effect.ts）。
       hostRegistry: () => hostRegistryPort(ctx),
       // 落地（迁移 / 导入 / 拉取）之后要请宿主把那些会话的列表元数据折出来：侧边栏的名字不来自日志，
-      // 宿主只在"活的会话"时写那份检查点（见 src/checkpoint-warm.ts）。同样是**探测**不是结论。
+      // 宿主只在"活的会话"时写那份检查点（见 src/shared/host/checkpoint-warm.ts）。同样是**探测**不是结论。
       hostCheckpoints: () => hostCheckpointPort(ctx),
       // 同理：目录选择器是"桌面对话框"还是"页面内浏览"，只有宿主自己知道。
       pickerKind: () => directoryPickerKind(ctx),

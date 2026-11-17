@@ -28,5 +28,5 @@ Status: implemented
 ## Consequences
 
 - 碰撞被当成一次**计划层**的拒绝，附带两个撞在一起的路径，而不是执行到一半才发现。
-- `test/project-key.test.ts` 对着宿主的 `projectKey` / `encodeSegment` 逐字节比对，并钉住碰撞确实
+- `test/shared/project-key.test.ts` 对着宿主的 `projectKey` / `encodeSegment` 逐字节比对，并钉住碰撞确实
   存在——判据不能只在文档里成立。

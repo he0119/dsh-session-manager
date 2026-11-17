@@ -39,7 +39,7 @@ Status: implemented
 
 - 五个危险动作都要多勾一下；主按钮在那之前是禁用的（键盘也按不动）。
 - 计划算出问题（例如会话还活在宿主内存里）时，主按钮照旧禁用——两种禁用叠加，勾上也不会解锁。
-- 由 `test/client.test.mjs`（删除弹窗里没勾之前主按钮禁用、"我明白"那枚默认没勾、勾上写回的受控值
+- 由 `test/plugin/client.test.mjs`（删除弹窗里没勾之前主按钮禁用、"我明白"那枚默认没勾、勾上写回的受控值
   是 `true`、警告句在正文里）钉住；文案键 `dialog.acknowledge` 与五个动作各自的 `*.acknowledge`。
 - 真实 dev GUI 里量到的（删除那条，计划 ok 时）：勾选前 `确认删除` 的 `disabled` 是 `true`，勾上之后
   变 `false`；警告行带 `.dsm-riskIcon`（图标 18px），勾选框是官方 `Checkbox`（label 即「我明白」）；

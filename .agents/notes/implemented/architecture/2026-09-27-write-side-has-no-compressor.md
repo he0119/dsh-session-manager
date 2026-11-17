@@ -33,4 +33,4 @@ Status: implemented
 
 - 写侧不依赖任何压缩器、外部二进制或 Node 版本特性。
 - 「首帧不压缩」是这套做法的一个已知代价，并且只落在 header 那一行上，不是整份日志。
-- 这个帧由 `test/zstd-frame.test.ts` 用真实解码器读回来验，不是靠格式文档自证。
+- 这个帧由 `test/shared/log/zstd-frame.test.ts` 用真实解码器读回来验，不是靠格式文档自证。

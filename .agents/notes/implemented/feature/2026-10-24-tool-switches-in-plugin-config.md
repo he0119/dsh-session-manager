@@ -70,6 +70,6 @@ Status: implemented
 - `tools` 里写非布尔值（`migrate: 'no'`）在装配时当场抛，不会静默当成"开"混过去。
 - 全关是合法配置：插件照常装配，只是模型那份清单为空；设置页与 HTTP 端点照旧。
 - 加新工具时，`TOOL_BY_SWITCH`、`ToolsConfigSchema`、`toolsSection()` 三处都要跟着加一个键，
-  `test/config.test.ts` 里"键集与工具名对上"那条会拦住漏加。
+  `test/plugin/config.test.ts` 里"键集与工具名对上"那条会拦住漏加。
 - 反事实（把被测行为改回去，测试必须变红）：把 `when()` 里的开关判断去掉（关掉也注册）、把
   `!== false` 改成 `=== true`（缺席当成关）、把 `tools` 从 `Config` 里摘掉（非布尔值不再当场抛）。

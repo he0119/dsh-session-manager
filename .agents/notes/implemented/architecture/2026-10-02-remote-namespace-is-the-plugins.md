@@ -52,5 +52,5 @@ Status: implemented
 
 - 同一台 WebDAV 上跑本插件的多套数据只能靠 `url` 指向不同集合来区分；命名空间固定为
   `dsh-session-manager`，与同服务器上的其它插件互不干扰。
-- 命名空间是远端位置的一部分，改它（或改机器格在它下面的排布）等于换一套远端库：`test/sync.test.ts`
+- 命名空间是远端位置的一部分，改它（或改机器格在它下面的排布）等于换一套远端库：`test/operations/sync/sync.test.ts`
   里那条钉住字面路径的用例就是这条契约的钉子。

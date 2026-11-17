@@ -38,8 +38,8 @@ Status: implemented
 - 鼠标 / 触屏：点行里任何地方（标题、项目、字节、时间、空白）都打开右栏；点勾选框只改勾选。
 - 键盘：Tab 到勾选框 → Tab 到标题按钮（那一格就是这一条的名字）→ 回车打开右栏。
 - 行里没有第二枚动作，行尾那一格与别的列一样宽，不再靠叠格子藏东西。
-- 由 `test/client.test.mjs`（行是 div、标题是按钮且停冒泡、勾选框那层 label 有只念给读屏软件的名字、
-  行尾没有 `.dsm-rowDetail` / `.dsm-slot`）与 `test/styles.test.mjs`（`.dsm-rowOpen` 摘掉默认外观、
+- 由 `test/plugin/client.test.mjs`（行是 div、标题是按钮且停冒泡、勾选框那层 label 有只念给读屏软件的名字、
+  行尾没有 `.dsm-rowDetail` / `.dsm-slot`）与 `test/plugin/styles.test.mjs`（`.dsm-rowOpen` 摘掉默认外观、
   `.dsm-srOnly` 不参与布局、那三条旧规则确实没了）钉住。篡改验过：摘掉 `text-align`、删掉
   `.dsm-srOnly`、去掉标题按钮的 `stopPropagation`、把 `dsm-rowOpen` 这个类去掉，四处各自变红。
 - 真实 dev GUI 里量到的（1600 窗口，深浅两套各看一遍）：行是 `DIV`、标题是 `BUTTON`（`border 0px`、

@@ -25,7 +25,7 @@ Status: implemented
 - 筛选标签统一一套皮：20px 高、6px 圆角、`0 8px` 内边距、`border-l2`，内容视图那排从胶囊改回方块。
 - 三枚缺焦点环的手绘控件补上：品牌色 2px、`outline-offset: 1px`，与另外五个一致。
 - 项目树那一行整块可点却没有手型光标（别的行式控件都有），补上。
-- 规格写进 `docs/design.md` §6（"自己画的控件"那一条），把这三条数字钉住；`test/styles.test.mjs`
+- 规格写进 `docs/design.md` §6（"自己画的控件"那一条），把这三条数字钉住；`test/plugin/styles.test.mjs`
   再钉一次。
 
 ## Alternatives considered
@@ -45,8 +45,8 @@ Status: implemented
 - 键盘走遍整页只有一种焦点样式（品牌色 2px）；搜索框、筛选、面包屑、值控件都看得见焦点在哪。
 - 值控件与并排的官方 `size="sm"` 按钮对齐（28px）；输入框仍是官方那枚的 34px，本页不再另画一层。
 - 两处筛选长得一样，不再一个胶囊一个方块。
-- 由 `test/styles.test.mjs`（`.dsm-search` 不写边框、`.dsm-select` 28px/13px、`.dsm-chip` 与
-  `.dsm-filter` 同一套皮、三条焦点环）与 `test/client.test.mjs`（会话页搜索框是官方 `Input` 组件）
+- 由 `test/plugin/styles.test.mjs`（`.dsm-search` 不写边框、`.dsm-select` 28px/13px、`.dsm-chip` 与
+  `.dsm-filter` 同一套皮、三条焦点环）与 `test/plugin/client.test.mjs`（会话页搜索框是官方 `Input` 组件）
   钉住。篡改验过：删掉 `height: 28px`、删掉 `.dsm-chip` 的形状声明、删掉任一条焦点环、把搜索框
   改回裸 `<input>`，各自变红。
 - 真实 dev GUI 里量到的（1600 窗口）：搜索框是官方 `Input` 那层壳 34px（内部输入 24px），值控件

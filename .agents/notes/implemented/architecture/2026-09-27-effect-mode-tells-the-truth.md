@@ -18,7 +18,7 @@ Status: implemented
 （`hostRegistryPort()`，见[改完注册表把活儿交给宿主自己做](2026-10-05-hand-the-change-to-the-host.md)）。
 拿得到就返回 `'immediate'`，拿不到就返回 `'restart-required'`，由工具返回值告诉调用方「必须重启 DSH」。
 
-真的改过注册表的那一次不按探测说，按**实际结果**说：`src/take-effect.ts` 的 `effectOf()` 只在宿主自己改成功时才报
+真的改过注册表的那一次不按探测说，按**实际结果**说：`src/shared/host/take-effect.ts` 的 `effectOf()` 只在宿主自己改成功时才报
 `'immediate'`。探测回答"执行时会怎样"，只有写过盘的那次才有资格说"已经怎样"。
 
 ## Alternatives considered

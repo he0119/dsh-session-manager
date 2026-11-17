@@ -57,8 +57,8 @@ Status: implemented
     没有把这一行顶高；间距都是上 16px / 下 0px。
 - 没有新 token、没有新颜色：段头走 `label-primary`，药丸走既有的 `.dsm-tagIdle`（`label-secondary` +
   `border-l2`），两侧的回落值照旧。
-- 验证：`test/client.test.mjs` 钉住三段各一个 `h3.dsm-planHead`、标题键、药丸里的条数（1 / 2 / 1 那份
-  夹具）以及"这三个键不再由 `<p class="dsm-hint">` 渲染"；`test/styles.test.mjs` 钉住那些声明
+- 验证：`test/plugin/client.test.mjs` 钉住三段各一个 `h3.dsm-planHead`、标题键、药丸里的条数（1 / 2 / 1 那份
+  夹具）以及"这三个键不再由 `<p class="dsm-hint">` 渲染"；`test/plugin/styles.test.mjs` 钉住那些声明
   （600 / `label-primary` / 14px / flex / `margin: 16px 0 0`，药丸 400 / 18px）。四处篡改各自红在对应
   断言上：段头退回 `.dsm-hint` 的 `p`、条数不放进药丸、`font-weight` 退回 400、药丸行高退回 20px。
-- `test/client.test.mjs` 测的是**构建产物**：篡改源码之后要先 `pnpm build` 再跑，否则红不了。
+- `test/plugin/client.test.mjs` 测的是**构建产物**：篡改源码之后要先 `pnpm build` 再跑，否则红不了。

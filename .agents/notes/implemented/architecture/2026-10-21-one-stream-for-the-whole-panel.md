@@ -41,7 +41,7 @@ Status: implemented
 一眼就有；清单最后发，因为它要真扫库（实测 468 条 / 232 MB 约 0.2～0.45 秒，冷缓存与大库上几秒），
 而扫库那一段是同步的，会挡住这条连接上其它推送——先发状态，用户至少知道"后台在跑"，不是干等。
 
-客户端侧（`src/client/logic/panelEvents.ts`）是模块级的一份状态：`meta` / `state` / `scan` / `sync` /
+客户端侧（`src/client/shared/logic/panelEvents.ts`）是模块级的一份状态：`meta` / `state` / `scan` / `sync` /
 `autoPush` / 连接状态。清单只有一条读法——重连一次（`refresh()`），手动「刷新」、`stale`、以及"一次动作
 落地之后要重读"走的都是它。原来那些端点与"在跑才开"的小流全部删掉：
 
@@ -77,7 +77,7 @@ SSE：它天然属于那次点击（谁点的谁看细节，包括上千行的�
 ## Consequences
 
 - 一条连接断了就等于这一页什么都不知道：必须有退避重连（500ms 起、翻倍到 10 秒封顶，与官方那条
-  连接同一套节奏）与 15 秒心跳，`test/panel-events.test.ts` 钉住"断了会自己接回来""`stale` 只换一次
+  连接同一套节奏）与 15 秒心跳，`test/client/shared/logic/panel-events.test.ts` 钉住"断了会自己接回来""`stale` 只换一次
   重连""页面走了不再连"。
 - 重连不重放事件：接回来时宿主重新发 `ready` + 两种状态 + 一份新清单，所以"断开期间缺了哪几条进度"
   不需要补——状态本身就是新的。

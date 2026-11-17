@@ -42,7 +42,7 @@ Status: implemented
 
 - 悬停时行上只有时刻（行本身有底色与指针光标提示可点），Tab 进这一行时才出现那枚「详情」。
 - 键盘打开详情：Tab → 勾选框 → Tab → 「详情」→ 回车。完整时间线：点行 → 右栏 → 「打开完整内容」。
-- 由 `test/client.test.mjs` 与 `test/styles.test.mjs` 钉住：行上没有 `dsm-rowInspect`、只有一枚
+- 由 `test/plugin/client.test.mjs` 与 `test/plugin/styles.test.mjs` 钉住：行上没有 `dsm-rowInspect`、只有一枚
   `dsm-rowDetail` 且它与时刻同格；CSS 里没有 `:hover` 显形、没有 `@media (hover: none)` 的退路，
   只剩 `:focus-within`。
 - 真实 dev GUI 里量到的（1600 窗口）：悬停第三行时时刻 `visibility: visible`、动作组 `hidden`、

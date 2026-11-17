@@ -55,5 +55,5 @@ Status: implemented
   `.rowActions` 默认 `display: none`，悬停时与时间那一格互换）。
 - 静止时行上只剩状态标签，动作的发现性靠"悬停到哪儿都看得见"；触屏由 `@media (hover: none)` 兜住
   （那时两样并排，标题格窄 32px）。
-- 结构由 `test/client.test.mjs` 钉住（动作在行尾那一格里、不在 `.dsm-rowLabel` 里），颜色与可见性由
-  `test/styles.test.mjs` 钉住（叠格子、默认隐藏、悬停可见、触屏常显）。
+- 结构由 `test/plugin/client.test.mjs` 钉住（动作在行尾那一格里、不在 `.dsm-rowLabel` 里），颜色与可见性由
+  `test/plugin/styles.test.mjs` 钉住（叠格子、默认隐藏、悬停可见、触屏常显）。

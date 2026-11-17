@@ -29,7 +29,7 @@ Status: implemented
   ——见 [写盘动作共用一扇执行窗](./2026-11-15-actions-share-one-run-dialog.md)。
 
 列表上方的横幅整块删掉（`.dsm-progressBanner` 随之没有调用方）。状态栏那一格说哪一句由一个纯函数判
-（`logic/syncJobLabel.ts` 的 `syncBarLabel()`）：跑着且有分母 → `同步中 done/total`；跑着但没有分母
+（`operations/sync/syncJobLabel.ts` 的 `syncBarLabel()`）：跑着且有分母 → `同步中 done/total`；跑着但没有分母
 （认领来的那趟，宿主只留"跑没跑"）→ `同步中…`；跑完成功 → `同步完成 · N 条`（`result` 是两条数组，
 `adopted` 是两个数，都没有就说 `同步完成`，不编一个 0）；失败 → `同步失败`；没有那一趟 → 这一格不出现。
 
@@ -40,7 +40,7 @@ Status: implemented
 - **横幅留着但压成一行 48px**：仍然压在列表上方，仍然要说"这是哪一趟"，而页头那枚已经在说。省 50px
   换不来新信息。
 - **全部收进弹窗，页面上一个字不提**：同步跑在后台（可能从别的页发起，也可能是空闲时自己跑的），关掉
-  弹窗之后页面上没有任何东西说"它还在跑"，用户只能等——这正是 `logic/syncJob.ts` 当初存在的理由。
+  弹窗之后页面上没有任何东西说"它还在跑"，用户只能等——这正是 `operations/sync/syncJob.ts` 当初存在的理由。
 - **放 toast**：toast 会自己消失、不能点开、也不该承载"这一趟成没成"这种要回头看的事实。
 
 ## Consequences

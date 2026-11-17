@@ -52,6 +52,6 @@ Status: implemented
   `immediate`——没有那套宿主动作的机器上会回 `restart-required`。按老口径把"预演 = 这次不用重启"
   读的调用方会看到不同的答案，新答案才是对的。
 - 颜色没有新增 token：沿用 `dsm-warn` 与 `dsm-banner dsm-warn`（与失败横幅同一个面）。
-- 测试：`test/web.test.ts`（预演按探测说、没事可做时 `immediate`）、`test/tools.test.ts`（工具同口径
-  且正文带那句）、`test/client.test.mjs`（弹窗提前说、结论单独一条 warn 横幅、不需要重启时一句都不摆）。
+- 测试：`test/plugin/web.test.ts`（预演按探测说、没事可做时 `immediate`）、`test/plugin/tools.test.ts`（工具同口径
+  且正文带那句）、`test/plugin/client.test.mjs`（弹窗提前说、结论单独一条 warn 横幅、不需要重启时一句都不摆）。
   字典里删掉 `effect.immediate` 之后，谁再问这个键，那份"页面问到的键必须在字典里"的断言会当场变红。

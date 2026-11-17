@@ -34,7 +34,7 @@ export interface ConfigSchema {
   meta?: { volatile?: boolean }
 }
 
-/** 一次同步的配置（配置里的原始形态；核心层的解析形态见 src/sync.ts 的 `SyncSettings`）。 */
+/** 一次同步的配置（配置里的原始形态；核心层的解析形态见 src/operations/sync/sync.ts 的 `SyncSettings`）。 */
 export interface SyncConfig {
   /** 远端资源根（WebDAV 集合地址）；不配这一项就等于没开同步。 */
   url: string
@@ -47,7 +47,7 @@ export interface SyncConfig {
    * 与 DSH 自己的口径一致：配置里只放引用，值由宿主的 credentials 服务解析；没有那个服务时退到
    * `process.env`。于是配置备份、同步、截图都不会把密码带走。
    *
-   * 界面上的密码框（[SyncConfigForm](./client/SyncConfigForm.tsx)）把用户直接输入的密码写进
+   * 界面上的密码框（[SyncConfigForm](./client/operations/sync/SyncConfigForm.tsx)）把用户直接输入的密码写进
    * 宿主凭据服务、写在这个引用名下——所以这一项缺席时按 {@link DEFAULT_PASSWORD_REF} 解析，
    * 用户不必先给变量起个名字。这一项本身不在那张表单上（卡片只问密码是什么），要换引用名就在插件
    * 配置里改这一项。
@@ -61,7 +61,7 @@ export interface SyncConfig {
    * 打开**自动推送**：本机写完一轮之后，插件自己在后台跑一轮，**只往远端推**，一个字节都不拉。
    *
    * 为什么是"只推"而不是"照旧两个方向都做"：后台跑等于无人在场，而拉取那一侧会**动本机已有内容**
-   * （远端更新时先备份再顶掉本机那份，见 [sync.ts](./sync.ts) 的 `planSync()`）。那种动作要人看着——
+   * （远端更新时先备份再顶掉本机那份，见 [sync.ts](./operations/sync/sync.ts) 的 `planSync()`）。那种动作要人看着——
    * 界面那条路上它前面还挡着一个确认弹窗。只推的那一半是纯增量的：远端没有的就传上去、本机领先的就
    * 刷新，本机这边一个字节都不改，所以它可以无人值守地反复跑。
    */
@@ -136,7 +136,7 @@ export interface PluginConfig {
  * 一步；这一份名字同时也是往环境变量里放密码那条路要走的名字（与 DSH 的其他凭据引用同一套语法：
  * POSIX 环境变量名）。
  *
- * 浏览器半侧在 `src/client/logic/syncForm.ts` 里有一份同值副本（那一侧不 import 核心层，见那里的说明），
+ * 浏览器半侧在 `src/client/operations/sync/syncForm.ts` 里有一份同值副本（那一侧不 import 核心层，见那里的说明），
  * `test/sync-form.test.ts` 钉住两份相等。
  */
 export const DEFAULT_PASSWORD_REF = 'DSH_DAV_PASSWORD'
