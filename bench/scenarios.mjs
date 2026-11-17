@@ -179,12 +179,7 @@ export const SCENARIOS = [
   {
     id: 'transcript.large',
     title: '内容视图：最大的那条会话第一页',
-    /*
-     * 48 MB 那条日志在 `full` 档实测停顿 60～75 ms（`default` 档 12 MB 是 20 出头）：逐行 JSON 解析与
-     * 几十 MB 字符串分配带来的 GC，还没压进 50 ms。所以只有 `full` 档按 100 ms 判——它守的是"别再退回
-     * 整份解压按住 1.8 秒"那条线；默认档照旧按 50 判。这块继续优化之后再把 full 收紧回 50。
-     */
-    budgetMs: { default: 50, full: 100 },
+    budgetMs: 50,
     iterations: 1,
     async prepare(context) {
       context.ctx = await setup(context.manifest)
@@ -197,8 +192,7 @@ export const SCENARIOS = [
   {
     id: 'transcript.page',
     title: '内容视图：同一条翻到第 2000 条',
-    // 同一条 48 MB 日志翻页（`full` 实测 70 上下）：与上一条同一处成本，预算同样只有 full 档放到 100。
-    budgetMs: { default: 50, full: 100 },
+    budgetMs: 50,
     iterations: 3,
     async prepare(context) {
       context.ctx = await setup(context.manifest)

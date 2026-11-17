@@ -6,7 +6,12 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { countTranscript, readTranscript } from '../../../src/operations/transcript/transcript.ts'
+import {
+  countTranscript,
+  countTranscriptAsync,
+  readTranscript,
+  readTranscriptAsync,
+} from '../../../src/operations/transcript/transcript.ts'
 
 const HEADER = JSON.stringify({
   type: 'session',
@@ -220,4 +225,45 @@ test('readTranscript：header 读不出来就抛（那是"这份日志读不出�
   assert.throws(() => readTranscript([]), /empty/)
   assert.throws(() => readTranscript(['{"type":"session"}']), /header/)
   assert.throws(() => readTranscript(['not json']), /header/)
+})
+
+test('readTranscriptAsync：与同步那条解析出同一页（分页、问题、截断都不分叉）', async () => {
+  const sync = readTranscript(LINES, { limit: 4 })
+  const asynchronous = await readTranscriptAsync([...LINES], { limit: 4 })
+  assert.deepEqual(asynchronous, sync, '两个入口共用组装那一段，结果必须逐字段相同')
+})
+
+test('countTranscriptAsync：与同步那条同一份账，且超过一块之后已经让出过', async () => {
+  // 两条内容相同但**不同数组**：同一个数组会被计数缓存接住，那样量不出"有没有让出"。
+  const big = (): string[] => {
+    const lines = [HEADER]
+    for (let index = 0; index < 2048 * 2 + 10; index += 1) {
+      lines.push(
+        JSON.stringify({
+          type: index % 3 === 0 ? 'user/message' : 'tool/call',
+          seq: index,
+          time: 1791456394217 + index,
+          data: index % 3 === 0 ? { source: { kind: 'user' }, role: 'user', content: [] } : { callId: `c-${index}` },
+        }),
+      )
+    }
+    return lines
+  }
+  const counts = countTranscript(big())
+  let yielded = false
+  setImmediate(() => {
+    yielded = true
+  })
+  const asynchronous = await countTranscriptAsync(big())
+  assert.deepEqual(asynchronous, counts)
+  assert.equal(yielded, true, '超过一块的日志必须中途让出事件循环，否则就是一次长阻塞')
+})
+
+test('countTranscript：同一份行数组只数一次，换一份内容就重新数', async () => {
+  const lines = [HEADER, JSON.stringify({ type: 'turn/start', seq: 0, time: 1, data: {} })]
+  const first = await countTranscriptAsync(lines)
+  assert.equal(await countTranscriptAsync(lines), first, '同一个数组是同一份内容，账可以直接复用')
+  assert.equal(countTranscript(lines), first, '同步那条拿到的是同一份缓存')
+  const changed = [...lines, JSON.stringify({ type: 'turn/end', seq: 1, time: 2, data: {} })]
+  assert.equal((await countTranscriptAsync(changed)).events, 2, '新数组要重新数，不能把旧账带过来')
 })

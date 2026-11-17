@@ -21,7 +21,7 @@ import type { AutoPushOutcome } from './auto-push.ts'
 import type { SyncInfo } from './runtime.ts'
 import { diffSessionLogs } from './session-diff.ts'
 import { entryBytes, readBundleAsync } from '../transfer/transfer.ts'
-import { readTranscript } from '../transcript/transcript.ts'
+import { readTranscriptAsync } from '../transcript/transcript.ts'
 import { readRemoteLibrary, remoteBundlePath, remotePlacements } from './index.ts'
 import { runTidy, testSyncConnection, tidySummary } from './tidy.ts'
 import { remoteBusyMessage } from './remote-write.ts'
@@ -600,9 +600,10 @@ export function syncHandlers(ctx: WebContext): SyncHandlers {
       return
     }
     // 坏行条数交给解析器记账（`limit` 只影响条目，`problemCount` 是整份的账）；header 坏了就直说哪一边。
-    const problemsOf = (lines: readonly string[], label: string): number => {
+    // 坏行条数要在整份日志上数（几十 MB 的那种也有）：走分块版本，别把主线程按住。
+    const problemsOf = async (lines: readonly string[], label: string): Promise<number> => {
       try {
-        return readTranscript(lines, { limit: 1, maxChars: 1 }).problemCount
+        return (await readTranscriptAsync(lines, { limit: 1, maxChars: 1 })).problemCount
       } catch (error) {
         throw new Error(`${label}那份读不出来：${error instanceof Error ? error.message : String(error)}`)
       }
@@ -611,8 +612,8 @@ export function syncHandlers(ctx: WebContext): SyncHandlers {
       const diff = diffSessionLogs(localLines, remoteLines, {
         localBytes: (await stat(file.path)).size,
         remoteBytes: remoteLogBytes,
-        localProblems: problemsOf(localLines, '本机'),
-        remoteProblems: problemsOf(remoteLines, '远端'),
+        localProblems: await problemsOf(localLines, '本机'),
+        remoteProblems: await problemsOf(remoteLines, '远端'),
       })
       sendJson(res, 200, {
         id,

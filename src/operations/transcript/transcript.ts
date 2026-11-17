@@ -244,23 +244,49 @@ function callIdOf(data: Record<string, unknown>): string | undefined {
 const TYPE_PREFIX = /^\{"type":"([^"]+)"/
 
 /**
- * 按行头数一遍整份日志：事件条数、各类型条数、人发的与合成的消息数。
+ * 数一遍时每多少行让出一次事件循环。
  *
- * 这一步刻意不 `JSON.parse` 正文（大库上正文可能有几百 MB）：`user/message` 要看 `source.kind`
- * 才分得清人发的与标题模型那次的，所以只对这种行多解析一次。
+ * 实测本机最大的一份日志（150002 行、解开 31 MB）：整份一次数 67 ms，最长停顿 62 ms——超过 50 ms 的
+ * 预算。按 2048 行一块切开之后每块约 1 ms，整份仍是七十来毫秒，但主线程不再被按住。
  */
-export function countTranscript(lines: readonly string[]): TranscriptCounts {
-  const byType: Record<string, number> = {}
-  let events = 0
-  let human = 0
-  let synthetic = 0
-  for (let index = 1; index < lines.length; index += 1) {
+const COUNT_CHUNK_LINES = 2048
+
+/**
+ * 让出一轮事件循环。
+ *
+ * 这个模块浏览器那侧也会被打包（客户端那份 tsconfig 里没有 Node 的类型），所以不直接写 `setImmediate`：
+ * 宿主里用它（不经计时器、没有 1 ms 取整），浏览器里退到 `setTimeout(…, 0)`。
+ */
+const scheduleYield: (callback: () => void) => void = (() => {
+  const immediate = (globalThis as { setImmediate?: (callback: () => void) => void }).setImmediate
+  if (immediate !== undefined) return immediate
+  return (callback) => {
+    setTimeout(callback, 0)
+  }
+})()
+
+/** 把后续的活排到下一轮宏任务，中间那些请求才轮得上。 */
+const yieldToLoop = (): Promise<void> => new Promise((resolve) => scheduleYield(resolve))
+
+/** 数到一半的账：整份日志按块累加，最后才折成 `TranscriptCounts`。 */
+interface CountState {
+  byType: Record<string, number>
+  events: number
+  human: number
+  synthetic: number
+}
+
+const emptyState = (): CountState => ({ byType: {}, events: 0, human: 0, synthetic: 0 })
+
+/** 把 `[from, to)` 这几行记进账里（`countTranscript()` 与它的分块版本共用这一段，口径因此不会分叉）。 */
+function countRange(lines: readonly string[], from: number, to: number, state: CountState): void {
+  for (let index = from; index < to; index += 1) {
     const line = lines[index]
     if (line === undefined || line.trim() === '') continue
     const match = TYPE_PREFIX.exec(line)
     const type = match?.[1] ?? 'unknown'
-    byType[type] = (byType[type] ?? 0) + 1
-    events += 1
+    state.byType[type] = (state.byType[type] ?? 0) + 1
+    state.events += 1
     if (type === 'user/message') {
       let fromHuman = false
       try {
@@ -269,20 +295,69 @@ export function countTranscript(lines: readonly string[]): TranscriptCounts {
       } catch {
         fromHuman = false
       }
-      if (fromHuman) human += 1
-      else synthetic += 1
+      if (fromHuman) state.human += 1
+      else state.synthetic += 1
     }
   }
+}
+
+/** 折成对外的计数。 */
+function countsOf(state: CountState): TranscriptCounts {
   return {
-    events,
-    byType,
-    human,
-    synthetic,
-    assistant: byType['assistant/message'] ?? 0,
-    toolCalls: byType['tool/call'] ?? 0,
-    toolResults: byType['tool/result'] ?? 0,
-    system: byType['system/message'] ?? 0,
+    events: state.events,
+    byType: state.byType,
+    human: state.human,
+    synthetic: state.synthetic,
+    assistant: state.byType['assistant/message'] ?? 0,
+    toolCalls: state.byType['tool/call'] ?? 0,
+    toolResults: state.byType['tool/result'] ?? 0,
+    system: state.byType['system/message'] ?? 0,
   }
+}
+
+/**
+ * 整份日志数的账按**行数组本身**缓存。
+ *
+ * 为什么值得：内容视图一页一页翻（一页 80 条），每翻一页都要这份账；而同一份日志切出来的行数组由
+ * `log-text-cache.ts` 复用，数组没换就说明内容没变。键用数组本身（弱引用）：数组被回收，账跟着走，
+ * 不留悬挂引用。调用方按契约把 `lines` 当只读，所以同一个数组的账不会过期。
+ */
+const countCache = new WeakMap<readonly string[], TranscriptCounts>()
+
+/**
+ * 按行头数一遍整份日志：事件条数、各类型条数、人发的与合成的消息数。
+ *
+ * 这一步刻意不 `JSON.parse` 正文（大库上正文可能有几百 MB）：`user/message` 要看 `source.kind`
+ * 才分得清人发的与标题模型那次的，所以只对这种行多解析一次。
+ */
+export function countTranscript(lines: readonly string[]): TranscriptCounts {
+  const cached = countCache.get(lines)
+  if (cached !== undefined) return cached
+  const state = emptyState()
+  countRange(lines, 1, lines.length, state)
+  const counts = countsOf(state)
+  countCache.set(lines, counts)
+  return counts
+}
+
+/**
+ * `countTranscript()` 的分块版本：每 {@link COUNT_CHUNK_LINES} 行让出一轮事件循环。
+ *
+ * 为什么要有它：整份一次数在本机最大的一份日志上要按住主线程 62 ms，超过"用户会等的地方 50 ms"的预算
+ * （见 AGENTS.md 的「性能与阻塞预算」与 `bench/` 的 `transcript.large` 场景）。端点走这一条；测试与
+ * 只在几条差异行上跑的 `session-diff.ts` 照旧用同步那条。
+ */
+export async function countTranscriptAsync(lines: readonly string[]): Promise<TranscriptCounts> {
+  const cached = countCache.get(lines)
+  if (cached !== undefined) return cached
+  const state = emptyState()
+  for (let from = 1; from < lines.length; from += COUNT_CHUNK_LINES) {
+    countRange(lines, from, Math.min(from + COUNT_CHUNK_LINES, lines.length), state)
+    if (from + COUNT_CHUNK_LINES < lines.length) await yieldToLoop()
+  }
+  const counts = countsOf(state)
+  countCache.set(lines, counts)
+  return counts
 }
 
 /** `sourceEventSeqs` / `surfaceOp` 那点信息：不是普通的追加就照实说一句。 */
@@ -466,6 +541,23 @@ function kindText(type: string, data: Record<string, unknown>): string | undefin
  * @throws 第一行不是合法 session header 时抛错——那是调用方该报的"这份日志读不出来"。
  */
 export function readTranscript(lines: readonly string[], options: TranscriptOptions = {}): TranscriptPage {
+  return parsePage(lines, countTranscript(lines), options)
+}
+
+/**
+ * `readTranscript()` 的分块版本：整份计数改成每 {@link COUNT_CHUNK_LINES} 行让出一次。
+ *
+ * 端点走这一条——它面对的是可能有几十 MB 的日志，整份一次数会让主线程停 60 ms 上下。
+ */
+export async function readTranscriptAsync(
+  lines: readonly string[],
+  options: TranscriptOptions = {},
+): Promise<TranscriptPage> {
+  return parsePage(lines, await countTranscriptAsync(lines), options)
+}
+
+/** 拿到计数之后真正组装一页（两个入口共用这一段，分页与截断的口径因此不会分叉）。 */
+function parsePage(lines: readonly string[], counts: TranscriptCounts, options: TranscriptOptions): TranscriptPage {
   const headerLine = lines[0]
   if (headerLine === undefined) throw new Error('session log is empty')
   let header: TranscriptHeader
@@ -476,14 +568,12 @@ export function readTranscript(lines: readonly string[], options: TranscriptOpti
   } catch (error) {
     throw new Error(`session log header is not valid: ${error instanceof Error ? error.message : String(error)}`)
   }
-
   /** 事件行的行号（1 起）逐个记下来：空行不占事件位，但 `problems` 要报原始行号。 */
   const eventLines: number[] = []
   for (let index = 1; index < lines.length; index += 1) {
     if ((lines[index] ?? '').trim() !== '') eventLines.push(index)
   }
   const totalEvents = eventLines.length
-  const counts = countTranscript(lines)
 
   const from = Math.max(0, Math.trunc(options.from ?? 0))
   const limit = Math.min(MAX_TRANSCRIPT_LIMIT, Math.max(1, Math.trunc(options.limit ?? DEFAULT_TRANSCRIPT_LIMIT)))
