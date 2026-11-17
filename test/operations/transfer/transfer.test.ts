@@ -241,6 +241,28 @@ test('bundleTitlesAsync：与同步折标题同结果，planImport 直接用这�
   assert.equal(plan.entries[0]?.title, '异步折出来的标题', 'planImport 不再自己折一遍')
 })
 
+test('bundleTitlesAsync：每条标题之后都让出，不是一个宏任务里折完整包', async () => {
+  const root = makeRoot('transfer-title-yield')
+  const sources = Array.from({ length: 8 }, (_, index) =>
+    writeSession(root, {
+      id: `session-${index}`,
+      cwd: FROM_CWD,
+      eventLines: [JSON.stringify({ type: 'session/title', seq: 0, data: { title: `标题 ${index}` } })],
+    }),
+  )
+  const bundle = readBundle(buildBundle(sources))
+  let yielded = false
+  let sawProgressAfterYield = false
+  const titles = await bundleTitlesAsync(bundle, decodeAll, {
+    onProgress: (event) => {
+      if (event.done === 0) setImmediate(() => { yielded = true })
+      if (event.done >= 1 && yielded) sawProgressAfterYield = true
+    },
+  })
+  assert.equal(titles.size, 8)
+  assert.equal(sawProgressAfterYield, true, '第一条之后应当已经让出过一次事件循环')
+})
+
 test('导入：预演不写字节，落地后 cwd 被改写成目标工作区且除 cwd 外正文不变', async () => {
   const root = makeRoot('transfer-import')
   const source = writeSession(root, { id: 'session-a', cwd: FROM_CWD, events: 3 })

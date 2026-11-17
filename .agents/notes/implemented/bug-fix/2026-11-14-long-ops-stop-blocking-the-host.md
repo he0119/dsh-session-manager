@@ -57,7 +57,7 @@ Status: implemented
   两套选项各自缓存，库变了都会重扫。
 
 - **导入 / 拉取的大包异步解、异步写**：导入与同步拉取改用 `readBundleAsync()`；导入预演先用
-  `bundleTitlesAsync()` 每几条让出一次，再交给 `planImport()`；`applyImport()` 与附件对象提交
+  `bundleTitlesAsync()` 每折一条就让出一次，再交给 `planImport()`；`applyImport()` 与附件对象提交
   改用 `fs/promises` 的 `mkdir` / `writeFile` / `rename` / `chmod`。几十 MB 的包不再整段按住主线程。
 - **日志首次读取与同步差异异步读**：内容视图第一次打开、`/sync-diff` 的两边日志都改用
   `readFile()` / `readBundleAsync()`；后面的分块解码本来就会让出。

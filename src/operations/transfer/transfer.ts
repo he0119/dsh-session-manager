@@ -839,8 +839,6 @@ export async function bundleTitlesAsync(
   decodeAll: DecodeAll,
   options: { onProgress?: ProgressReporter } = {},
 ): Promise<Map<string, string | undefined>> {
-  /** 每折这么多条让出一次：单条通常不到几毫秒，攒到这个数仍在几十毫秒的预算内。 */
-  const YIELD_EVERY = 8
   const titles = new Map<string, string | undefined>()
   for (const [index, session] of bundle.sessions.entries()) {
     options.onProgress?.({
@@ -851,7 +849,8 @@ export async function bundleTitlesAsync(
       label: session.id,
     })
     titles.set(session.id, bundleTitle(bundle, session, decodeAll))
-    if ((index + 1) % YIELD_EVERY === 0) await new Promise<void>((resolve) => setImmediate(resolve))
+    // 每条都让出：一条就要解最多 256 KB（实测可达几十毫秒），攒几条就会越过 50 毫秒的预算。
+    await new Promise<void>((resolve) => setImmediate(resolve))
   }
   return titles
 }
