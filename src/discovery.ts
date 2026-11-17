@@ -516,6 +516,8 @@ export async function scanAllAsync(
     } catch {
       continue
     }
+    // 项目目录本身也是一层让出点：目录多、每个只有几条会话时，单靠会话计数攒不到 16 条。
+    await new Promise<void>((resolve) => setImmediate(resolve))
   }
   out.sort((a, b) => b.createdAt - a.createdAt)
   return out
