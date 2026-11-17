@@ -151,6 +151,57 @@ export function scanAttachmentRefs(text: string): AttachmentRef[] {
 }
 
 /**
+ * DeepSeek 官网导出导入器给每条回复盖的来源名（`@deepseek-ai/dsh-deepseek-chat-import` 的
+ * `IMPORTED_MODEL_SOURCE.provider`）。
+ */
+export const IMPORTED_SESSION_PROVIDER = 'deepseek-chat-export'
+
+/**
+ * 这条日志是不是「从别处导入的」会话：看 assistant 消息的来源名。
+ *
+ * 为什么要认这个：导入器给**非图片文件**写的是合成的引用（它自己算的 id，见
+ * `syntheticFileRef()`：「no attachment object exists for it」），字节从来没进过任何附件库。于是
+ * 同步每一趟都会去远端查、每次 404，然后报「本机没有、远端也没有」——而这件事没有任何处置动作：
+ * 没有哪台机器持有这些对象，等不来也补不上。认出来之后不再为它们报账（见
+ * [同步的补对象那一步](../../operations/sync/attachments.ts)）。
+ *
+ * 判据为什么不是"文本里出现这个字符串"：**正文里也会出现**。实测一条普通会话（provider 是
+ * `workbuddy`）因为工具输出里打印过这个包名，整份日志含这个字符串——按子串判会把它错当成导入会话，
+ * 于是它真正缺的附件就永远不报了。所以命中行还要解析、并确认是 `assistant/message` 且
+ * `data.message.source.provider` 等于 {@link IMPORTED_SESSION_PROVIDER}。
+ *
+ * 代价与 `scanAttachmentRefs()` 同级（一遍子串搜索，只对命中行切片 + 解析），不额外解压日志。
+ *
+ * @param text 日志明文（整份）。
+ * @returns 是导入会话就 `true`；读不出 assistant 来源（老日志、只有用户消息）时为 `false`。
+ */
+export function isImportedSessionLog(text: string): boolean {
+  let at = 0
+  while ((at = text.indexOf(IMPORTED_SESSION_PROVIDER, at)) !== -1) {
+    const start = text.lastIndexOf('\n', at) + 1
+    const end = text.indexOf('\n', at)
+    const line = text.slice(start, end === -1 ? undefined : end)
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(line)
+    } catch {
+      parsed = undefined // 半截行（或子串正好跨了行边界）：不算导入，继续找下一条
+    }
+    if (parsed !== undefined) {
+      const event = parsed as Record<string, unknown>
+      if (event['type'] === 'assistant/message') {
+        const data = event['data'] as Record<string, unknown> | undefined
+        const message = data?.['message'] as Record<string, unknown> | undefined
+        const source = message?.['source'] as Record<string, unknown> | undefined
+        if (source?.['provider'] === IMPORTED_SESSION_PROVIDER) return true
+      }
+    }
+    at = end === -1 ? text.length : end
+  }
+  return false
+}
+
+/**
  * 一份日志文件的明文：zstd 外壳的解一次，明文的原样。
  *
  * 与 `relocateHeaderCwd*` / `foldTitleInFrames` 同一标准——日志的压缩形态由文件后缀决定，核心不认识

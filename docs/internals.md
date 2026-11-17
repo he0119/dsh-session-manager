@@ -114,7 +114,9 @@
   弹窗里那张「上次同步」列全，带 id 的能一键把列表筛到它；页头那枚只报条数（见
   [提示缩成一句那篇](../.agents/notes/implemented/simplification/2026-11-14-sync-chip-tooltip-one-line.md)）。
   附件对象那一头（本机与远端共享库里都没有的那些）走同一条路：数留在汇总那句里（`: 涉及 N 条会话`），
-  逐条会话各占清单一行。
+  逐条会话各占清单一行。从别处导入的会话（`deepseek-chat-export`）除外：它们引用的非图片文件是导入器
+  算出来的合成引用，没有字节可等，不报也不点名（见
+  [导入会话的合成附件引用不算「缺附件」](../.agents/notes/implemented/bug-fix/2026-11-17-imported-sessions-skip-their-missing-attachments.md)）。
 - [删除跟着墓碑走](../.agents/notes/implemented/feature/2026-11-15-deletion-travels-with-the-tombstone.md)：
   删除原来只删本机，远端各机器格子里那份还在，下一次同步就把它当「远端有、本机没有」重新拉回来。
   现在删除可以连远端一起删（删自己那一格的包），并在自己那份索引里留一条删除记录（`deleted`）；
