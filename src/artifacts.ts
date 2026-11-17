@@ -11,6 +11,7 @@
 //     不存在的路径不能进搬迁计划；
 //   * **剪掉嵌套**：若某目录要被整体搬走，它内部的文件就不该再单独搬一遍。
 import { cpSync, existsSync as fsExists, mkdirSync, renameSync, rmSync, statSync } from 'node:fs'
+import { cp, mkdir, rename, rm } from 'node:fs/promises'
 import { dirname, posix, win32 } from 'node:path'
 
 import type { ArtifactMove, ArtifactSkip } from './types.ts'
@@ -271,6 +272,27 @@ export function planArtifactMoves(options: PlanArtifactOptions): ArtifactPlanRes
 /**
  * 搬迁产物（同卷 rename；跨卷退化为 copy + 删除）。
  */
+/** 与 `applyArtifactMoves()` 同一套搬运，只是每一步走异步文件 API。 */
+export async function applyArtifactMovesAsync(
+  moves: readonly ArtifactMove[],
+): Promise<{ moved: number; copies: number }> {
+  let moved = 0
+  let copies = 0
+  for (const m of moves) {
+    await mkdir(dirname(m.targetPath), { recursive: true })
+    try {
+      await rename(m.sourcePath, m.targetPath)
+      moved++
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EXDEV') throw error
+      await cp(m.sourcePath, m.targetPath, { recursive: true })
+      await rm(m.sourcePath, { recursive: true, force: true })
+      copies++
+    }
+  }
+  return { moved, copies }
+}
+
 export function applyArtifactMoves(moves: readonly ArtifactMove[]): { moved: number; copies: number } {
   let moved = 0
   let copies = 0

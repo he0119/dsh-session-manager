@@ -8,10 +8,11 @@
 //   5. 清理空的源项目目录
 //   6. 搬迁会话产物（可选）
 // 事后可用 verifyAppliedPlan() 独立复核。
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmdirSync, writeFileSync } from 'node:fs'
+import { existsSync } from 'node:fs'
+import { mkdir, readFile, readdir, rename, rmdir, writeFile } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 
-import { applyArtifactMoves } from './artifacts.ts'
+import { applyArtifactMovesAsync } from './artifacts.ts'
 import { createBackup } from './journal.ts'
 import { projectKey } from './project-key.ts'
 import { validateRegistry, writeRegistryAtomic } from './registry.ts'
@@ -93,7 +94,7 @@ export async function applyPlan(plan: RelocationPlan, options: ApplyOptions): Pr
     const { session: s, file: f } = item
     // 改写是"逐文件"的活：一条会话可能有几代日志，各是几 MB——分母用文件数，进度条才走得匀。
     onProgress?.({ phase: 'rewrite', total: rewrites.length, done: index, id: s.id, label: s.title ?? s.id })
-    const buf = readFileSync(f.path)
+    const buf = await readFile(f.path)
     /*
      * **只解首帧**（`relocateHeaderCwdShallow()`）：要改的只有 header 那一行，正文逐字节原样拼回。
      *
@@ -107,13 +108,13 @@ export async function applyPlan(plan: RelocationPlan, options: ApplyOptions): Pr
       continue
     }
     const tmp = `${f.path}.dsh-session-manager.tmp`
-    writeFileSync(tmp, r.buffer)
+    await writeFile(tmp, r.buffer)
     // 落盘前复验：临时文件的 header 必须是目标 cwd、id 不变（只读首帧，不整份解压）。
     const check = readLogHeader(tmp, decodeAll).header
     if (check.cwd !== s.to || check.id !== s.id) {
       throw new Error(`temp verification failed for ${f.path}`)
     }
-    renameSync(tmp, f.path)
+    await rename(tmp, f.path)
     rewritten++
     say(`rewrote ${basename(f.path)} (${s.id}) firstFrame=${r.boundary}B`)
   }
@@ -126,9 +127,9 @@ export async function applyPlan(plan: RelocationPlan, options: ApplyOptions): Pr
       say(`already in target project directory: ${basename(s.sourceDir)}`)
       continue
     }
-    mkdirSync(plan.targetProjectDir, { recursive: true })
+    await mkdir(plan.targetProjectDir, { recursive: true })
     if (existsSync(s.targetDir)) throw new Error(`target already exists, refusing to overwrite: ${s.targetDir}`)
-    renameSync(s.sourceDir, s.targetDir)
+    await rename(s.sourceDir, s.targetDir)
     moved++
     say(`moved ${basename(s.sourceDir)} -> ${projectKey(s.to)}`)
   }
@@ -147,20 +148,20 @@ export async function applyPlan(plan: RelocationPlan, options: ApplyOptions): Pr
   for (const projectDir of sourceProjectDirs) {
     if (projectDir === plan.targetProjectDir) continue
     if (!existsSync(projectDir)) continue
-    if (readdirSync(projectDir).length > 0) continue
-    rmdirSync(projectDir)
+    if ((await readdir(projectDir)).length > 0) continue
+    await rmdir(projectDir)
     say(`removed empty project directory ${basename(projectDir)}`)
   }
 
   // 6) 会话产物（可选）
   let artifactsMoved = 0
   if (artifactMoves.length > 0) {
-    const r = applyArtifactMoves(artifactMoves)
+    const r = await applyArtifactMovesAsync(artifactMoves)
     artifactsMoved = r.moved + r.copies
     say(`moved ${artifactsMoved} session artifacts (${artifactMoves.length} planned)`)
   }
 
-  writeFileSync(join(backup.dir, 'execution.log'), log.join('\n') + '\n')
+  await writeFile(join(backup.dir, 'execution.log'), log.join('\n') + '\n')
   return {
     backupDir: backup.dir,
     manifestPath: backup.manifestPath,
