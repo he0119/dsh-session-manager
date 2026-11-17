@@ -37,9 +37,10 @@ Status: implemented
 
 ## Consequences
 
-- `full` 档暴露了一个还没解决的点：48 MB 的那条日志，内容视图第一页与翻页的停顿在 60～75 ms（默认档 12 MB
-  是 20 出头），比 50 ms 的线高。所以 `full` 档这两条场景的预算暂定 100 ms，默认档仍是 50；继续优化之后
-  再把 `full` 收紧回 50。
+- 它第一次跑起来就抓到一个超出预算的点：`full` 档 48 MB 的那条日志，内容视图第一页与翻页的停顿在
+  60～84 ms，比 50 ms 的线高。原因是整份日志的计数在同步地过一遍（150002 行、67 ms）。
+  [计数搬出主线程](../bug-fix/2026-11-17-transcript-counting-off-main-thread.md) 之后两条场景都在 50 ms 以内
+  （第一页 27 ms、翻页 9 ms），`full` 档的预算也已收紧回 50。
 - 新增热路径要顺手加场景（`bench/scenarios.mjs`），并在 `run()` 里断言结果形状——否则测到一条报错分支也能
   得到一个漂亮数字。
 - 夹具生成要几秒、占 30～130 MB 磁盘（`bench/.work/`，已 gitignore）；改生成器要升 `FIXTURE_VERSION`，

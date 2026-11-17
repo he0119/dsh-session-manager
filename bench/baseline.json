@@ -3,246 +3,246 @@
   "profiles": {
     "default": {
       "node": "v24.21.0",
-      "generatedAt": "2026-11-17T07:51:27.547Z",
-      "calibrationMs": 56.2,
+      "generatedAt": "2026-11-17T08:02:25.882Z",
+      "calibrationMs": 53.8,
       "scenarios": {
         "calibration.cpu": {
-          "wallMs": 56.2,
-          "stallMs": 56,
-          "rssMb": 203
+          "wallMs": 53.8,
+          "stallMs": 58,
+          "rssMb": 182
         },
         "plugin.register": {
-          "wallMs": 1.5,
+          "wallMs": 1.2,
           "stallMs": 0,
-          "rssMb": 111
+          "rssMb": 110
         },
         "scan.cold": {
-          "wallMs": 78.9,
-          "stallMs": 5,
+          "wallMs": 79.4,
+          "stallMs": 4,
           "rssMb": 116
         },
         "state.cold": {
-          "wallMs": 94.6,
-          "stallMs": 17,
-          "rssMb": 130
+          "wallMs": 98.3,
+          "stallMs": 19,
+          "rssMb": 129
         },
         "state.warm": {
-          "wallMs": 14.1,
+          "wallMs": 15,
           "stallMs": 11,
-          "rssMb": 139
+          "rssMb": 136
         },
         "transcript.large": {
-          "wallMs": 248.4,
-          "stallMs": 22,
-          "rssMb": 192
+          "wallMs": 256,
+          "stallMs": 21,
+          "rssMb": 188
         },
         "transcript.page": {
-          "wallMs": 23.4,
-          "stallMs": 21,
-          "rssMb": 213
+          "wallMs": 2.9,
+          "stallMs": 2,
+          "rssMb": 187
         },
         "export.20": {
-          "wallMs": 115.3,
+          "wallMs": 121.9,
           "stallMs": 18,
-          "rssMb": 155
+          "rssMb": 154
         },
         "import.plan": {
-          "wallMs": 136.7,
+          "wallMs": 138,
           "stallMs": 15,
           "rssMb": 169
         },
         "migrate.preview": {
-          "wallMs": 51,
+          "wallMs": 53.7,
           "stallMs": 10,
-          "rssMb": 142
+          "rssMb": 141
         },
         "delete.preview": {
-          "wallMs": 52.6,
-          "stallMs": 9,
-          "rssMb": 137
+          "wallMs": 51.6,
+          "stallMs": 8,
+          "rssMb": 138
         },
         "migrate.apply": {
-          "wallMs": 218.8,
+          "wallMs": 210.9,
           "stallMs": 12,
-          "rssMb": 139
+          "rssMb": 138
         },
         "delete.apply": {
-          "wallMs": 173.1,
-          "stallMs": 13,
-          "rssMb": 122
+          "wallMs": 173,
+          "stallMs": 11,
+          "rssMb": 120
         },
         "import.apply": {
-          "wallMs": 465.5,
+          "wallMs": 477.1,
           "stallMs": 15,
-          "rssMb": 168
+          "rssMb": 174
         },
         "sync.preview": {
-          "wallMs": 71.3,
-          "stallMs": 15,
-          "rssMb": 151
+          "wallMs": 75,
+          "stallMs": 16,
+          "rssMb": 153
         }
       }
     },
     "small": {
       "node": "v24.21.0",
-      "generatedAt": "2026-11-17T07:51:32.858Z",
-      "calibrationMs": 53.7,
+      "generatedAt": "2026-11-17T08:02:31.234Z",
+      "calibrationMs": 54.7,
       "scenarios": {
         "calibration.cpu": {
-          "wallMs": 53.7,
-          "stallMs": 51,
-          "rssMb": 180
+          "wallMs": 54.7,
+          "stallMs": 58,
+          "rssMb": 181
         },
         "plugin.register": {
-          "wallMs": 1.1,
+          "wallMs": 2.1,
           "stallMs": 0,
-          "rssMb": 109
+          "rssMb": 111
         },
         "scan.cold": {
-          "wallMs": 30.1,
-          "stallMs": 5,
+          "wallMs": 23.6,
+          "stallMs": 4,
           "rssMb": 109
         },
         "state.cold": {
-          "wallMs": 31.6,
-          "stallMs": 4,
-          "rssMb": 112
+          "wallMs": 30.6,
+          "stallMs": 6,
+          "rssMb": 113
         },
         "state.warm": {
-          "wallMs": 2.7,
+          "wallMs": 2.5,
           "stallMs": 0,
-          "rssMb": 112
+          "rssMb": 113
         },
         "transcript.large": {
-          "wallMs": 98.8,
-          "stallMs": 25,
-          "rssMb": 143
+          "wallMs": 103,
+          "stallMs": 26,
+          "rssMb": 144
         },
         "transcript.page": {
-          "wallMs": 8.7,
-          "stallMs": 4,
-          "rssMb": 147
+          "wallMs": 1.2,
+          "stallMs": 0,
+          "rssMb": 140
         },
         "export.20": {
-          "wallMs": 96.5,
-          "stallMs": 8,
-          "rssMb": 135
+          "wallMs": 93.1,
+          "stallMs": 9,
+          "rssMb": 134
         },
         "import.plan": {
-          "wallMs": 107.4,
+          "wallMs": 108.8,
           "stallMs": 10,
           "rssMb": 157
         },
         "migrate.preview": {
-          "wallMs": 17.4,
-          "stallMs": 8,
-          "rssMb": 114
+          "wallMs": 16.9,
+          "stallMs": 9,
+          "rssMb": 115
         },
         "delete.preview": {
-          "wallMs": 13.9,
-          "stallMs": 9,
-          "rssMb": 116
+          "wallMs": 12.2,
+          "stallMs": 10,
+          "rssMb": 115
         },
         "migrate.apply": {
-          "wallMs": 134.7,
+          "wallMs": 139.8,
           "stallMs": 8,
           "rssMb": 116
         },
         "delete.apply": {
-          "wallMs": 109.2,
-          "stallMs": 7,
+          "wallMs": 109.7,
+          "stallMs": 9,
           "rssMb": 111
         },
         "import.apply": {
-          "wallMs": 370.3,
+          "wallMs": 385.1,
           "stallMs": 12,
-          "rssMb": 149
+          "rssMb": 145
         },
         "sync.preview": {
-          "wallMs": 22.5,
+          "wallMs": 18.7,
           "stallMs": 6,
-          "rssMb": 133
+          "rssMb": 130
         }
       }
     },
     "full": {
       "node": "v24.21.0",
-      "generatedAt": "2026-11-17T07:53:28.623Z",
-      "calibrationMs": 54.4,
+      "generatedAt": "2026-11-17T08:02:13.709Z",
+      "calibrationMs": 56.1,
       "scenarios": {
         "calibration.cpu": {
-          "wallMs": 54.4,
-          "stallMs": 55,
-          "rssMb": 181
+          "wallMs": 56.1,
+          "stallMs": 53,
+          "rssMb": 182
         },
         "plugin.register": {
-          "wallMs": 0.6,
+          "wallMs": 0.7,
           "stallMs": 0,
           "rssMb": 110
         },
         "scan.cold": {
-          "wallMs": 179.6,
-          "stallMs": 7,
-          "rssMb": 131
+          "wallMs": 179.4,
+          "stallMs": 6,
+          "rssMb": 130
         },
         "state.cold": {
-          "wallMs": 235,
+          "wallMs": 232.2,
           "stallMs": 43,
-          "rssMb": 156
+          "rssMb": 157
         },
         "state.warm": {
-          "wallMs": 37.5,
-          "stallMs": 34,
-          "rssMb": 171
+          "wallMs": 37.2,
+          "stallMs": 33,
+          "rssMb": 172
         },
         "transcript.large": {
-          "wallMs": 863.6,
-          "stallMs": 75,
-          "rssMb": 378
+          "wallMs": 896.8,
+          "stallMs": 32,
+          "rssMb": 387
         },
         "transcript.page": {
-          "wallMs": 74.9,
-          "stallMs": 71,
-          "rssMb": 457
+          "wallMs": 9.7,
+          "stallMs": 5,
+          "rssMb": 394
         },
         "export.20": {
-          "wallMs": 118.9,
-          "stallMs": 36,
+          "wallMs": 122.8,
+          "stallMs": 39,
           "rssMb": 162
         },
         "import.plan": {
-          "wallMs": 123.2,
-          "stallMs": 15,
-          "rssMb": 171
+          "wallMs": 123.5,
+          "stallMs": 16,
+          "rssMb": 169
         },
         "migrate.preview": {
-          "wallMs": 138.3,
-          "stallMs": 12,
-          "rssMb": 177
+          "wallMs": 148.4,
+          "stallMs": 13,
+          "rssMb": 188
         },
         "delete.preview": {
-          "wallMs": 131.3,
+          "wallMs": 133.8,
           "stallMs": 10,
-          "rssMb": 174
+          "rssMb": 167
         },
         "migrate.apply": {
-          "wallMs": 390.6,
+          "wallMs": 388.3,
           "stallMs": 17,
-          "rssMb": 186
+          "rssMb": 178
         },
         "delete.apply": {
-          "wallMs": 286.1,
-          "stallMs": 12,
-          "rssMb": 150
+          "wallMs": 301.4,
+          "stallMs": 13,
+          "rssMb": 153
         },
         "import.apply": {
-          "wallMs": 461.2,
-          "stallMs": 19,
-          "rssMb": 170
+          "wallMs": 445.2,
+          "stallMs": 20,
+          "rssMb": 175
         },
         "sync.preview": {
-          "wallMs": 177.5,
-          "stallMs": 26,
+          "wallMs": 183.2,
+          "stallMs": 25,
           "rssMb": 210
         }
       }

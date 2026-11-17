@@ -9,7 +9,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Handler, WebContext } from '../../web.ts'
 import { locateSession } from '../../shared/library/discovery.ts'
 import { intParam, sendJson } from '../../shared/http/respond.ts'
-import { readTranscript } from './transcript.ts'
+import { readTranscriptAsync } from './transcript.ts'
 
 export function transcriptHandlers(ctx: WebContext): Record<string, Handler> {
   const { paths, decodeAll, resolveTitle, projection, logs } = ctx
@@ -57,7 +57,7 @@ export function transcriptHandlers(ctx: WebContext): Record<string, Handler> {
       // `decodeAll` 是多帧感知的：一份日志的 JSONL 是分帧压的，单帧解不出全貌。这里走缓存那一层，
       // 它内部用的是分块解压（块与块之间让出事件循环），整份解压不会把宿主主线程按死。
       const lines = await logs.linesOf({ path: file.path, compression: file.compression })
-      const page = readTranscript(lines, {
+      const page = await readTranscriptAsync(lines, {
         from: intParam(url, 'from'),
         limit: intParam(url, 'limit'),
         maxChars: intParam(url, 'maxChars'),
