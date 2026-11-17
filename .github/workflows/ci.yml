@@ -18,15 +18,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      # pnpm 版本不在 workflow 里写死：action-setup 读 package.json 的 packageManager，
-      # 与本地 corepack 用同一个版本。它必须排在 setup-node 前面——下面的 cache: pnpm 要靠它算 store 路径。
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v5
+      # 一步装好 pnpm 与 Node：pnpm 版本不在 workflow 里写死，`pnpm/setup` 读 package.json 的
+      # packageManager（与本地 corepack 同一个版本）；Node 钉在 engines 的下限，确保不会无意中依赖更高
+      # 版本。`require-lockfile` 让这次安装就是 `--frozen-lockfile`（安装由它自己跑，不用再来一步）。
+      - uses: pnpm/setup@v3
         with:
-          # 与 engines 的下限一致，确保不会无意中依赖更高版本的 Node。
-          node-version: 22.19.0
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
+          runtime: node@22.19.0
+          cache: true
+          require-lockfile: true
       # 类型检查：源文件是 TypeScript，这一步同时覆盖「语法能否解析」与「类型是否自洽」。
       - run: pnpm run typecheck
       # 构建产物必须真的出得来——tsdown 不做类型检查，所以它与 typecheck 是两件独立的事。
@@ -47,12 +46,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v5
+      - uses: pnpm/setup@v3
         with:
-          node-version: 22.19.0
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
+          runtime: node@22.19.0
+          cache: true
+          require-lockfile: true
       # 夹具第一次跑要现场生成（约 10 秒），之后同一次 job 里复用不到，所以这里每次都从头来。
       - run: pnpm run bench --no-check --json > bench-report.json
       - uses: actions/upload-artifact@v4

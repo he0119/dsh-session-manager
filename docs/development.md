@@ -30,7 +30,7 @@ pnpm run check:package # 打包内容自检（要先 build，见 docs/releasing.
 单边重建：`pnpm run build:host` / `build:types` / `build:client`（三份配置共用 `lib/`，
 所以单独重建一端不会删掉另一端）。
 
-`pnpm install` 之前会先过一遍 pnpm 11 的供应链策略：发布不满 24 小时的版本默认不许进安装结果，连
+`pnpm install` 之前会先过一遍 pnpm 11 起就有的供应链策略：发布不满 24 小时的版本默认不许进安装结果，连
 `--frozen-lockfile` 也会逐条验锁文件并失败（`ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION`，CI 上就是
 这个）。跟着上游换 rc 线时因此要在 `pnpm-workspace.yaml` 的 `minimumReleaseAgeExclude` 里把那一代逐条
 放行；条目精确到版本，过了窗口就能整段删掉。

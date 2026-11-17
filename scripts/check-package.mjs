@@ -15,75 +15,78 @@
  *
  * ⚠️ 必须在 `build` 之后跑：`lib/` 不进 git，产物不存在时第 1 条就会（正确地）失败。
  *
- * 用 npm 自己的打包器而不是复述 `files` 规则：`files` 的通配、总是包含的文件
- * （`package.json` / `README*` / `LICENSE`）与 `npmignore` 交互都有边角，复述一遍等于
- * 又写一份会和 npm 漂移的实现。
+ * 用发布那一步**同一个打包器**（`pnpm pack`）而不是复述 `files` 规则：`files` 的通配、总是包含的
+ * 文件（`package.json` / `README*` / `LICENSE`）与忽略文件的交互都有边角，复述一遍等于又写一份会和
+ * 打包器漂移的实现。发布用的是 `pnpm publish`，所以判据也取 `pnpm pack`——两者只差最后那一下 PUT。
  */
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join, posix } from 'node:path'
+import { basename, join, posix } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const root = fileURLToPath(new URL('..', import.meta.url))
 const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
 
 /**
- * 找到 npm 自己的 JS 入口，用当前 node 直接跑它：不经过 PATH，也不起 shell。
+ * 找到 pnpm，并给出"怎么跑它"。
  *
- * 刻意**不读** `npm_execpath`：本仓库用 pnpm 跑脚本，那个变量会指向 pnpm，而
- * `pnpm pack` 的参数与输出都跟 `npm pack` 不是一套。要的就是 npm —— 发布那一步
- * 用的也是它（可信发布与 provenance 是 npm CLI 的能力）。
+ * 优先用 `npm_execpath`：`pnpm run` 会把 pnpm 自己的入口放在这个变量里（corepack 是 `.cjs`，
+ * 独立二进制是原生可执行文件），两种都能直接跑，且版本就是这次跑脚本的版本。没有这个变量
+ * （例如直接用 `node scripts/check-package.mjs` 跑）时退回 PATH 上的 `pnpm`。
  */
-function resolveNpmCli() {
-  const nodeDir = dirname(process.execPath)
-  const candidates = [
-    // 官方安装包（Windows）：node 目录下的 node_modules/npm
-    join(nodeDir, 'node_modules', 'npm', 'bin', 'npm-cli.js'),
-    // nvm / POSIX：<node>/../lib/node_modules/npm
-    join(nodeDir, '..', 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js'),
-  ]
-  const found = candidates.find(existsSync)
-  assert.ok(found, `找不到 npm 的 JS 入口，试过：\n  ${candidates.join('\n  ')}`)
-  return found
+function resolvePnpm() {
+  const execpath = process.env.npm_execpath
+  if (execpath !== undefined && existsSync(execpath) && basename(execpath).includes('pnpm')) {
+    return /\.[cm]?js$/.test(execpath)
+      ? { command: process.execPath, args: [execpath], shell: false }
+      : { command: execpath, args: [], shell: false }
+  }
+  // Windows 上 `pnpm` 是 `.cmd`，要经过 shell 才起得来；POSIX 不需要。
+  return process.platform === 'win32'
+    ? { command: 'pnpm.cmd', args: [], shell: true }
+    : { command: 'pnpm', args: [], shell: false }
 }
 
 /**
- * 让 npm 把缓存与日志写进一次性临时目录，而不是 `~/.npm`。
+ * 让 pnpm 把缓存与存储写进一次性临时目录，而不是 `~/.cache/pnpm`。
  *
- * 两个理由，都不是洁癖：受限环境（本仓库的开发就在 DSH 的文件沙箱里）下 `~/.npm/_logs`
- * 不可写，npm 会因为「日志写不进去」直接非零退出——那时失败的是环境而不是包内容，
- * 断言会指向一个假的原因。顺带也让自检不碰用户真实的 npm 缓存。
+ * 两个理由，都不是洁癖：受限环境（本仓库的开发就在 DSH 的文件沙箱里）下用户缓存目录可能不可写，
+ * pnpm 会因为「写不进去」直接非零退出——那时失败的是环境而不是包内容，断言会指向一个假的原因。
+ * 顺带也让自检不碰用户真实的缓存。
  */
 const sandbox = mkdtempSync(join(tmpdir(), 'dsh-check-package-'))
+const pnpm = resolvePnpm()
 
 let packed
 try {
   packed = spawnSync(
-    process.execPath,
+    pnpm.command,
     // --ignore-scripts：本包没有 prepack/prepare，但万一将来加了，也不该在自检里顺带跑构建。
-    [resolveNpmCli(), 'pack', '--dry-run', '--json', '--ignore-scripts'],
+    [...pnpm.args, 'pack', '--dry-run', '--json', '--ignore-scripts'],
     {
       cwd: root,
       encoding: 'utf8',
       maxBuffer: 32 * 1024 * 1024,
+      shell: pnpm.shell,
       env: {
         ...process.env,
         npm_config_cache: sandbox,
-        npm_config_logs_dir: join(sandbox, '_logs'),
+        npm_config_store_dir: join(sandbox, 'store'),
+        XDG_CACHE_HOME: join(sandbox, 'cache'),
         npm_config_update_notifier: 'false',
-        npm_config_fund: 'false',
-        npm_config_audit: 'false',
       },
     },
   )
 } finally {
   rmSync(sandbox, { recursive: true, force: true })
 }
-assert.equal(packed.status, 0, `npm pack 失败：\n${packed.stderr || packed.error?.message}`)
+assert.equal(packed.status, 0, `pnpm pack 失败：\n${packed.stderr || packed.error?.message}`)
 
-const [manifest] = JSON.parse(packed.stdout)
+// pnpm 的 `--json` 是一层对象（`{ name, version, filename, files }`），npm 是只含一个元素的数组；
+// 这里只认 pnpm 那个形状——换打包器时应当改这句，而不是两边都兼容。
+const manifest = JSON.parse(packed.stdout)
 const shipped = new Set(manifest.files.map((file) => file.path))
 
 // 1. 运行期文件。这份清单是「装进宿主之后真的会被读到的文件」，不是 `files` 的复述：
@@ -152,7 +155,7 @@ for (const path of entryPaths) {
 for (const entry of ['lib/index.js']) {
   const source = readFileSync(join(root, entry), 'utf8')
   for (const [, specifier] of source.matchAll(/(?:from|import\()\s*['"](\.\/[^'"]+)['"]/g)) {
-    // posix：npm 的打包清单一律用 `/` 分隔，Windows 上 join 会给出 `\` 而永远对不上。
+    // posix：打包清单一律用 `/` 分隔，Windows 上 join 会给出 `\` 而永远对不上。
     const target = posix.join(posix.dirname(entry), specifier)
     assert.ok(shipped.has(target), `${entry} import 了包外的相对路径：${specifier}（解析为 ${target}）`)
   }
