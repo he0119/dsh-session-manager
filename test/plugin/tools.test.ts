@@ -566,6 +566,7 @@ test('改完注册表交给宿主自己做：顺序、id 复核、失败退路',
   })) as MigrateToolResult
   assert.equal(heldRun.applied, true)
   assert.equal(heldRun.liveSkipped, 1, '工具层也要报出宿主持着几条：那是模型唯一看得见的一面')
+  assert.deepEqual(heldRun.liveSkippedIds, ['session-b'], '那几条的 id 也按结构给一份：模型据此重启后再点名')
   assert.match(heldRun.summary, /另有 1 条会话宿主持在内存里（还活着），这次没搬：session-b/)
   assert.deepEqual(readRegistry(held.registryPath).tables.workspaces['ws-dl']?.sessionIds, ['session-b'], '活会话仍归源工作区')
   assert.deepEqual(readRegistry(held.registryPath).tables.workspaces['ws-temp']?.sessionIds, ['session-a'])
@@ -586,6 +587,7 @@ test('改完注册表交给宿主自己做：顺序、id 复核、失败退路',
   })) as MigrateToolResult
   assert.equal(hiddenRun.applied, true)
   assert.equal(hiddenRun.stranded, 1, '工具层也要报出"侧边栏不显示因而没搬"的条数：模型只有这一面')
+  assert.deepEqual(hiddenRun.strandedIds, ['session-b'], '那几条的 id 也按结构给一份：模型据此去处理')
   assert.match(hiddenRun.summary, /另有 1 条会话侧边栏不显示（已归档 1），这次不搬：session-b/)
   assert.match(hiddenRun.summary, /那几块工作区因此不会被删/)
   assert.deepEqual(

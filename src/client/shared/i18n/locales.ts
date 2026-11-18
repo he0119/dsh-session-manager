@@ -182,10 +182,10 @@ export const zh = {
   'migrate.viaTip':
     '这条是子智能体：它属于你点名的「{name}」（可能隔了几层），所以跟着一起搬；搬完还是不算工作区成员。',
   'migrate.liveSkipped':
-    '另有 {count} 条会话宿主持在内存里（还活着），这次不搬：它们留在原目录、归属不变。重启 DSH 之后再迁一次即可。',
+    '另有 {count} 条会话还在运行，这次没搬：重启 DSH 之后再迁一次。',
   'migrate.stranded':
-    '另有 {count} 条会话侧边栏不显示（已归档 / 空白 / 子智能体），这次不搬：它们留在源工作区里，那块工作区因此不会被删。' +
-    '要清掉它，先在「会话」页处理这几条（已归档的取消归档、空白的删掉、子智能体连着它的父会话一起迁），再迁一次。',
+    '另有 {count} 条会话侧边栏不显示（{reasons}），这次没搬：它们留在源工作区，那块工作区因此没被删。' +
+    '要清掉它们，先在「会话」页处理这几条（已归档的取消归档、空白的删掉、子智能体连着它的父会话一起迁），再迁一次。',
   'migrate.projectDirs': '来源项目目录：{from}；目标项目目录：{to}',
   'registry.change.title': '注册表变更',
   'registry.create': '把目标工作区写进注册表（新建）',
@@ -198,7 +198,13 @@ export const zh = {
   'registry.unchanged': '注册表无需变更',
   'artifacts.planned': '计划搬迁 {count} 项产物',
   'artifacts.skipped': '跳过 {count} 项产物',
-  'migrate.done': '已迁移 {sessions} 条会话。',
+  'artifacts.moved': '搬迁 {count} 项产物',
+  'migrate.done': '已迁移 {sessions} 条会话到 {to}。',
+  'migrate.nothingDone': '这次没有迁移任何会话：先解决下面的问题，再试一次。',
+  'migrate.doneUnverified': '已迁移 {sessions} 条会话到 {to}，但复核没通过。',
+  'migrate.receipt': '改写 {files} 个日志、移动 {dirs} 个目录',
+  'migrate.warm.failed': '另有 {count} 条会话的侧边栏标题没补上：点开一次就有了。',
+  'migrate.warm.unavailable': '当前 DSH 不能当场补侧边栏标题：这几条会话点开一次就有了。',
   'verify.pass': '复核通过',
   'verify.fail': '复核未通过',
   // 生效方式只留短句：「为什么会这样」的长解释在说明页的 FAQ（`help.faq.restart*`），这里不复述。
@@ -340,6 +346,16 @@ export const zh = {
   'manage.delete.remoteHint':
     '远端这一格一起删掉，别的机器上的副本会在它下次同步时跟着删。远端没有备份。',
   'manage.delete.problemsTitle': '没做到 {count} 条',
+  // ── 删除的结论与说明（宿主只回结构，这几句由界面拼）────────────────────────
+  'manage.delete.plan': '将删除 {count} 个会话，先备份再删。',
+  'manage.delete.planBlocked': '这次不会删任何会话：先解决下面的问题。',
+  'manage.delete.planCascade': '其中 {count} 条是子智能体会话，跟着点名的会话一起删。',
+  'manage.delete.done': '已删除 {count} 个会话。',
+  'manage.delete.nothingDone': '这次没有删除任何会话：先解决下面的问题，再试一次。',
+  'manage.delete.verifyFailed': '复核没通过：见下面的问题清单。',
+  'manage.delete.remoteDone': '远端这一格也清掉了（{count} 个包）。',
+  'manage.delete.remoteOthers': '{machines} 上的副本会在它下次同步时删掉。',
+  'manage.delete.remoteStaysDeleted': '下次同步不会再把这些会话拉回来。',
   // ── 执行与结果（同一个状态窗，六个动作共用）──────────────────────────────
   'run.delete.running': '正在删除',
   'run.delete.done': '删除完成',
@@ -898,13 +914,11 @@ export const en: LocaleDictOf<typeof NS> = {
   'migrate.viaTip':
     'This is a subagent session: it belongs to “{name}”, one of the sessions you named (possibly a few levels up), so it moves with it — and still does not count as a workspace member.',
   'migrate.liveSkipped':
-    '{count} more sessions are live in the host (it still holds them in memory), so they are not moved: they stay in ' +
-    'their directory with their ownership unchanged. Restart DSH and migrate them again.',
+    '{count} more sessions are still running, so they are not moved: restart DSH, then migrate again.',
   'migrate.stranded':
-    '{count} more sessions are hidden from the sidebar (archived / blank / subagent), so they are not moved: they ' +
-    'stay registered in the source workspace, which therefore is not removed. To get rid of it, handle them on the ' +
-    'Sessions tab first (unarchive the archived ones, delete the blank ones, migrate a subagent together with its ' +
-    'parent), then migrate again.',
+    '{count} more sessions are hidden from the sidebar ({reasons}), so they are not moved: they stay in the ' +
+    'source workspace, which therefore is not removed. To clear them, handle them on the Sessions tab first ' +
+    '(unarchive the archived ones, delete the blank ones, migrate a subagent together with its parent), then migrate again.',
   'migrate.projectDirs': 'Source project directories: {from}; target project directory: {to}',
   'registry.change.title': 'Registry change',
   'registry.create': 'Write the target workspace into the registry (new)',
@@ -917,7 +931,13 @@ export const en: LocaleDictOf<typeof NS> = {
   'registry.unchanged': 'No registry change needed',
   'artifacts.planned': '{count} artifacts to move',
   'artifacts.skipped': '{count} artifacts skipped',
-  'migrate.done': 'Migrated {sessions} sessions.',
+  'artifacts.moved': '{count} artifacts moved',
+  'migrate.done': 'Migrated {sessions} sessions to {to}.',
+  'migrate.nothingDone': 'Nothing was migrated this time: clear the problems below, then try again.',
+  'migrate.doneUnverified': 'Migrated {sessions} sessions to {to}, but verification failed.',
+  'migrate.receipt': '{files} logs rewritten, {dirs} directories moved',
+  'migrate.warm.failed': '{count} sessions did not get their sidebar title yet: it appears once you open them.',
+  'migrate.warm.unavailable': 'This DSH cannot refresh sidebar titles on the spot: they appear once you open a session.',
   'verify.pass': 'verification passed',
   'verify.fail': 'verification FAILED',
   'effect.restart': 'Restart DSH for this to take effect; until then, do not change any workspace.',
@@ -1051,6 +1071,15 @@ export const en: LocaleDictOf<typeof NS> = {
   'manage.delete.remoteHint':
     'Also deletes this machine\'s remote bundle; copies on other machines go when those machines next sync. The remote copy has no backup.',
   'manage.delete.problemsTitle': '{count} could not be done',
+  'manage.delete.plan': 'Will delete {count} sessions; backup first, then delete.',
+  'manage.delete.planBlocked': 'Nothing will be deleted this time: clear the problems below.',
+  'manage.delete.planCascade': '{count} of them are subagent sessions and are deleted along with the sessions you ticked.',
+  'manage.delete.done': 'Deleted {count} sessions.',
+  'manage.delete.nothingDone': 'Nothing was deleted this time: clear the problems below, then try again.',
+  'manage.delete.verifyFailed': 'Verification failed: see the problems below.',
+  'manage.delete.remoteDone': 'This machine\'s remote bundle is gone too ({count} bundles).',
+  'manage.delete.remoteOthers': 'Copies on {machines} are deleted the next time they sync.',
+  'manage.delete.remoteStaysDeleted': 'The next sync will not pull these sessions back.',
   // ── Running and result (one dialog shared by six actions) ────────────────
   'run.delete.running': 'Deleting',
   'run.delete.done': 'Deleted',

@@ -127,7 +127,6 @@ export interface RemovalRun {
   removedProjectDirs: string[]
   /** 删远端那一步的结论（没勾、或这个宿主删不了远端时缺席）。 */
   remote?: RemoteRemoval
-  summary: string
 }
 
 /*
@@ -272,21 +271,11 @@ export async function runRemoval(
   const plan = await planRemoval(deps, request, { ...(onProgress === undefined ? {} : { onProgress }) })
   const empty = { plan, problems: plan.problems, verified: false, dirsRemoved: 0, removedProjectDirs: [] }
   /*
-   * 计划不 ok 时只给一句结论：原因由界面那块清单逐条摆（拼在一句话里既读不出条数，也会与清单重复
-   * 一遍——同一个弹窗里同一句话出现两次，用户截图里就是那个样子）。
+   * 计划不 ok 时只带回计划本身：原因在 `plan.problems` 里逐条摆，界面那块清单原样列出来。
+   * 这里不写字——"这次一条都没删"那句由界面按 `applied` 拼（见客户端 `deleteResult.ts`）。
    */
-  if (!plan.ok) return { applied: false, ...empty, summary: '这次一条都没删。' }
-  /** 整族一起删时把"多出来的那几条"说清楚，否则预览清单里会冒出用户没勾过的会话。 */
-  const cascadeNote =
-    plan.cascaded === 0 ? '' : ` 其中 ${plan.cascaded} 条是子智能体会话，跟着点名的会话一起删。`
-  if (!options.apply) {
-    return {
-      applied: false,
-      ...empty,
-      problems: [],
-      summary: `将删除 ${plan.entries.length} 个会话，先备份再删。${cascadeNote}`,
-    }
-  }
+  if (!plan.ok) return { applied: false, ...empty }
+  if (!options.apply) return { applied: false, ...empty, problems: [] }
 
   // 1) 备份（整份会话目录 + 注册表快照）。备份是唯一一份可以恢复的副本，删之前必须成功。
   const backup = await createBackup({
@@ -371,37 +360,5 @@ export async function runRemoval(
     dirsRemoved: plan.entries.length,
     removedProjectDirs,
     ...(remote === undefined ? {} : { remote }),
-    /*
-     * 提示条只留结果：日志文件数、字节数是收据，「复核通过」与备份目录对成功的那一次没有信息量——备份
-     * 就在提示条右边那枚「撤销」里，也在状态栏的「备份与回滚」里。失败才说，而且只说该做什么。
-     */
-    summary:
-      `已删除 ${plan.entries.length} 个会话。${cascadeNote}` +
-      (remote === undefined ? '' : remoteNote(remote)) +
-      (verified ? '' : ' 复核没通过：有文件没删掉。'),
   }
-}
-
-/**
- * 远端那一步的结论，折成一句人话。
- *
- * @param remote 删远端的结果。
- * @returns 一句话（带字节数，以及别的机器上还留着副本的情况）。
- */
-function remoteNote(remote: RemoteRemoval): string {
-  /*
-   * 一个包都没删、别的机器上也没有副本时整句不出现：这台机器根本没推过这条会话，说「删掉 0 个包
-   * （0 字节）」只是噪音。
-   */
-  if (remote.removed === 0 && remote.others.length === 0) return ''
-  const head =
-    remote.removed === 0
-      ? ''
-      : ` 远端这一格也清掉了（${remote.removed} 个包）`
-  const tail =
-    remote.others.length === 0
-      ? '，下次同步不会再把它拉回来。'
-      : `，${remote.others.join('、')} 上的副本会在它下次同步时删掉。`
-  if (head === '') return ` 远端的副本：${remote.others.join('、')} 上那份会在它下次同步时删掉。`
-  return `${head}${tail}`
 }

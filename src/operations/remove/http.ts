@@ -104,7 +104,6 @@ export function removeHandlers(ctx: WebContext): Record<string, Handler> {
         ...(run.backupDir === undefined ? {} : { backupDir: run.backupDir }),
         ...(run.remote === undefined ? {} : { remote: run.remote }),
         problems: run.plan.ok ? run.problems : run.plan.problems,
-        summary: run.summary,
         // 复核没过时那句话与原来 500 那次的正文一致（计划不 ok 时 `applied` 本来就是 false，
         // 界面读的是 `preview`，与 409 那次一样）。
         ...(apply && run.plan.ok && !run.verified

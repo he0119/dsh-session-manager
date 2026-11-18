@@ -22,7 +22,6 @@ import type {
   RelocationPlan,
   SessionMove,
   StrandedMember,
-  StrandedReason,
   StrandedSource,
   WorkspaceRegistryState,
 } from '../../shared/types.ts'
@@ -408,7 +407,7 @@ export async function buildRelocationPlan(options: BuildPlanOptions): Promise<Re
   }
 
   // 搬完还剩人的源工作区：留下的都是**侧边栏不显示**的会话（宿主认的成员，判据见 visibility.ts），
-  // 这次搬不走、那块记录也就删不掉。理由必须跟着预览与结果一起报出去（见 describeStranded()）。
+  // 这次搬不走、那块记录也就删不掉。理由必须跟着预览与结果一起报出去（见 report.ts 的 strandedLines()）。
   const strandedSources: StrandedSource[] = []
   if (registryChange !== null && nextRegistry !== null) {
     const removed = new Set(registryChange.removedSources.map((source) => source.workspaceId))
@@ -447,79 +446,4 @@ export async function buildRelocationPlan(options: BuildPlanOptions): Promise<Re
     registryChange,
     nextRegistry,
   }
-}
-
-/** 人类可读的计划摘要（工具返回值与预览摘要共用）。 */
-export function describePlan(plan: RelocationPlan): string {
-  const lines: string[] = []
-  lines.push(`迁移 ${plan.sessions.length} 个会话：`)
-  // 源可能有几处（勾选跨目录时就是这样）：逐条列出项目目录，不写"多个来源"这种含糊话。
-  lines.push(`  来源项目目录：${plan.sourceProjectDirs.join('、')}`)
-  lines.push(`  -> ${plan.to}`)
-  const files = plan.sessions.reduce((n, s) => n + s.files.length, 0)
-  lines.push(`  日志文件 ${files} 个；目标项目目录 ${plan.targetProjectDir}`)
-  if (plan.cascaded > 0) {
-    lines.push(`  其中 ${plan.cascaded} 条是子智能体会话（跟着点名的父会话一起搬，成员资格不变）`)
-  }
-  if (plan.liveSkipped.length > 0) {
-    // 少搬就说少搬：逐条点名，用户才知道是哪几条、下一次该迁谁（只有重启 DSH 才能让宿主放手）。
-    lines.push(
-      `  另有 ${plan.liveSkipped.length} 条会话宿主持在内存里（还活着），这次不搬：` +
-        plan.liveSkipped.map((s) => s.id).join('、'),
-    )
-    lines.push('    它们留在原目录、归属不变；重启 DSH 之后再迁一次即可。')
-  }
-  lines.push(...describeStranded(plan.strandedSources))
-  if (plan.artifacts) {
-    lines.push(`  会话产物：待搬 ${plan.artifacts.moves.length} 项、跳过 ${plan.artifacts.skipped.length} 项`)
-  }
-  if (plan.registryChange) {
-    const c = plan.registryChange
-    const staleCount = c.droppedStale.reduce((n, entry) => n + entry.sessionIds.length, 0)
-    lines.push(
-      `  注册表：目标工作区 ${c.targetId}${c.createdTarget ? '（新建，前插）' : '（复用）'}；` +
-        `新增归属 ${c.added.length}（其中未分组收编 ${c.adoptedFromUnowned.length}）；` +
-        `摘除自 ${c.movedFrom.length} 个工作区；删除空工作区 ${c.removedSources.length}` +
-        `${staleCount > 0 ? `；顺带清掉 ${staleCount} 条宿主不认的悬空登记` : ''}`,
-    )
-  }
-  if (plan.problems.length) {
-    lines.push(`  问题 ${plan.problems.length} 项：`)
-    for (const p of plan.problems) lines.push(`    - ${p}`)
-  }
-  return lines.join('\n')
-}
-
-/** `describeStranded()` 里三种理由的称呼与顺序（与 visibility.ts 的判据顺序一致）。 */
-const STRANDED_LABELS: ReadonlyArray<readonly [StrandedReason, string]> = [
-  ['subagent', '子智能体'],
-  ['blank', '空白'],
-  ['archived', '已归档'],
-]
-
-/**
- * 源工作区"搬完还剩人"那两行的措辞。
- *
- * 为什么两行都得说：留下的那几条**不在**这次的清单里（它们侧边栏不显示，见 visibility.ts），
- * 而不说清楚，用户看到的就是"全部迁完了，怎么还有一块空工作区"——预留一个"少搬了但没人提"的坑，
- * 与 `liveSkipped` 那句是同一个标准。
- *
- * @param sources 见 `RelocationPlan.strandedSources`。
- * @returns 摘要里要追加的行（空数组 = 每块源工作区都搬空了）。
- */
-export function describeStranded(sources: readonly StrandedSource[]): string[] {
-  const members = sources.flatMap((source) => source.members)
-  if (members.length === 0) return []
-  const reasons = STRANDED_LABELS.map(([reason, label]) => ({
-    label,
-    count: members.filter((member) => member.reason === reason).length,
-  }))
-    .filter((item) => item.count > 0)
-    .map((item) => `${item.label} ${item.count}`)
-    .join('、')
-  return [
-    `  另有 ${members.length} 条会话侧边栏不显示（${reasons}），这次不搬：${members.map((member) => member.id).join('、')}`,
-    `    它们留在 ${sources.map((source) => source.path).join('、')}，那几块工作区因此不会被删——` +
-      '要清掉它们：已归档的先去「会话」页取消归档、空白的删掉、子智能体连着它的父会话一起迁，然后再迁一次。',
-  ]
 }

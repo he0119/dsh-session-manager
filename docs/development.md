@@ -264,7 +264,8 @@ tsconfig.client.json       Web Client 自己的类型工程（DOM + JSX；Host �
 | `src/operations/migrate/plan.ts` | 只读计划：源是**点名的那些会话**（`sessionIds`，每条按自己的 `cwd` 算，所以可以跨目录）、目标推导、阻塞问题、注册表变更（隐藏的会话逐个点名拒绝，点中的那些再向下展开整族；宿主持着的进 `liveSkipped`，按来源目录分组算产物） | 无 |
 | `src/operations/migrate/execute.ts` | 执行 + 独立复核（含产物目标位校验） | 无 |
 | `src/operations/migrate/artifacts.ts` | 会话产物提取（证据分层）、规划（求交/剪枝）、搬迁 | 无 |
-| `src/operations/migrate/tool.ts` | 迁移四个工具的 schema 与执行：只读计划、应用、回滚、复核；返回形状 `PlanToolResult` / `MigrateToolResult` | `dsh-tools` |
+| `src/operations/migrate/tool.ts` | 迁移四个工具的 schema 与执行：只读计划、应用、回滚、复核；返回形状 `PlanToolResult` / `MigrateToolResult`（`summary` 那一段由 `report.ts` 渲染） | `dsh-tools` |
+| `src/operations/migrate/report.ts` | **给模型看的文字**：`describeMigrationPreview()` / `describeMigrationRun()` 把预览与结果的结构化数据渲染成多行文本（点名会话 id、备份目录、要不要重启）；界面不吃这两份，按同一份结构自己拼（判据见 [笔记](../.agents/notes/implemented/bug-fix/2026-11-18-results-return-structure-not-prose.md)） | 无 |
 
 #### `operations/transfer/`：导出 / 导入 `.dshsess`
 
@@ -420,6 +421,8 @@ tsconfig.client.json       Web Client 自己的类型工程（DOM + JSX；Host �
 | `src/client/operations/manage/statePatch.ts` | 动作应用之后就地改清单里的那几条（不等宿主重扫整库）；全是纯函数，一条都没变时原样返回同一个 state。 |
 | `src/client/operations/manage/runJob.ts` | 六个写入磁盘动作（删除 / 迁移 / 导入 / 回滚 / 整理远端 / 重算名称）共用的那一趟执行——模块级单槽状态：起跑时打开状态窗、进度一条条进来、可以「转到后台」（窗口关掉、活儿照跑）、跑完把结论挂到同一个槽里等用户按「完成」收走，一次只放一趟（第二趟被拒），`test/client/operations/manage/run-job.test.ts` 钉住。 |
 | `src/client/operations/manage/runLabel.ts` | 那一扇窗与其入口的说法（标题、状态栏那一格的短标签、失败那句「没做成」，纯函数，同一个 `test/client/operations/manage/run-job.test.ts` 钉住）。 |
+| `src/client/operations/manage/migrateResult.ts` | 迁移结果页那句话的拼法：把搬不走的会话按原因分类数出来（「子智能体 2、已归档 2」），称呼复用行上那几枚标签的键（判据见 [笔记](../.agents/notes/implemented/bug-fix/2026-11-18-results-return-structure-not-prose.md)）。 |
+| `src/client/operations/manage/deleteResult.ts` | 删除那一路的几句话（纯函数，`test/client/operations/manage/deleteResult.test.ts` 钉住）：确认弹窗的结论与级联说明、结果页的结论、级联、远端那一步（本机清掉几个包 / 别的机器上还留着哪几台）、复核没通过那句。宿主只回结构，这里按 locale 键拼。 |
 
 #### `operations/sync/`：同步面
 

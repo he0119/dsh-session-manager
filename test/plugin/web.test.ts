@@ -1205,7 +1205,6 @@ test('POST /migrate：宿主持着的会话不搬，预览里报出 liveSkipped�
   // 界面读的就是这个字段（`preview.liveSkipped.length > 0` 才多说一句"这次没搬"）。
   assert.deepEqual((preview['liveSkipped'] as { id: string }[]).map((s) => s.id), ['session-b'])
   assert.deepEqual(preview['strandedSources'], [], '没有搬不走的隐藏会话时这一项是空的（面板照旧读它）')
-  assert.match(String(payload(planned.captured)['summary']), /另有 1 条会话宿主持在内存里/)
 
   const applied = fakeRes()
   await handlers['POST /migrate']!(
@@ -1278,8 +1277,6 @@ test('POST /migrate：侧边栏不显示的会话搬不走、源工作区因此�
     ),
     [['session-blank:blank']],
   )
-  assert.match(String(body['summary']), /另有 1 条会话侧边栏不显示（空白 1），这次不搬：session-blank/)
-  assert.match(String(body['summary']), /那几块工作区因此不会被删/)
 
   const applied = fakeRes()
   await handlers['POST /migrate']!(
@@ -1484,7 +1481,8 @@ test('POST /migrate：mode=apply 真搬并回可回滚的备份；有那套动�
   assert.equal(body['takesEffect'], 'immediate')
   assert.equal(typeof body['backupDir'], 'string')
   assert.deepEqual(calls, ['session-a'], '刷新要真的发生，且发生在注册表写入磁盘之后')
-  assert.match(String(body['summary']), /无需重启 DSH/)
+  // 宿主只回结构，不再回一段拼好的文案：给人看的那一份由界面按字段拼（见 report.ts 与 ManagePanel）。
+  assert.equal('summary' in body, false, '响应里不带渲染好的文字')
 
   // 真的搬了：目标项目目录里有、源项目目录里没有、header.cwd 已改写
   const moved = sessionDir(sandbox.sessionsRoot, CWD_B, 'session-a')
@@ -1537,7 +1535,6 @@ test('POST /migrate：宿主没接住时如实报"需要重启"，而不是照�
   assert.equal(body['applied'], true, '宿主没接住不该把迁移说成失败')
   assert.equal(body['verified'], true)
   assert.equal(body['takesEffect'], 'restart-required', '界面能说的"无需重启"必须来自真实结果')
-  assert.match(String(body['summary']), /宿主没接住这次改动（假宿主没接住）/)
 })
 
 test('POST /rollback：先 dryRun 看动作，再真回滚到原状', async () => {
@@ -1706,7 +1703,8 @@ test('POST /delete：预览不写入磁盘、应用先备份再删，二者共�
   const applyBody = payload(applied)
   assert.equal(applyBody['applied'], true)
   assert.equal(applyBody['verified'], true)
-  assert.match(String(applyBody['summary']), /已删除 1 个会话/)
+  // 宿主只回结构：删了几条、复核过没过、远端怎样都在字段里，拼文案是界面的事。
+  assert.equal('summary' in applyBody, false, '响应里不带渲染好的文字')
   assert.equal(typeof applyBody['backupDir'], 'string')
   assert.equal(existsSync(dir), false, '应用之后会话目录该没了')
   // 备份落在本插件的备份根下（「备份与回滚」那张卡读的就是它）
@@ -1733,7 +1731,8 @@ test('POST /delete：删父会话时把子智能体一起带上，预览里带�
   assert.equal(entries[0]!['via'], undefined)
   assert.deepEqual(entries[1]!['via'], { id: 'session-parent', title: '父会话' })
   assert.equal(entries[1]!['origin'], 'subagent')
-  assert.match(String(payload(captured)['summary']), /其中 1 条是子智能体会话/)
+  // 级联条数按结构给（界面据此说那句「其中 1 条是子智能体会话」），响应里不再有拼好的文字。
+  assert.equal('summary' in payload(captured), false)
 })
 
 test('POST /delete：状态不允许（会话不在库里）时把完整计划带回来', async () => {
@@ -3656,7 +3655,8 @@ test('POST /delete：勾了 alsoRemote 就删掉自己那格的包并留下墓�
     assert.equal(remote['removed'], 1, '从自己那一格删掉了一个包')
     assert.ok(Number(remote['bytes']) > 0)
     assert.deepEqual(remote['others'], [], '这次只有一台机器有它')
-    assert.match(String(body['summary']), /下次同步不会再把它拉回来/)
+    // 远端那一步只回结构（removed / others），那句话由界面拼。
+    assert.equal('summary' in body, false)
     await assert.rejects(async () => dav.get(bundlePath), '远端那个包没了')
     const index = JSON.parse((await dav.get('dsh-session-manager/robot-a/index.json')).toString('utf8')) as {
       entries: Array<{ id: string }>
