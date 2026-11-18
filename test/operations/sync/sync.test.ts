@@ -61,6 +61,7 @@ import type { DiffRelation } from '../../../src/operations/sync/session-diff.ts'
 import { createRepoLocationCache, type GitRunner } from '../../../src/shared/repo.ts'
 import type { DecodeAll, SessionHeader, WorkspaceRegistryState } from '../../../src/shared/types.ts'
 import { encodeRawFrame } from '../../../src/shared/log/zstd-frame.ts'
+import { attachmentRefCache } from '../../../src/operations/sync/attachments.ts'
 import { attachmentEvent, attachmentIdOf, assistantSourceEvent, makeAttachmentStore } from '../../fixtures/attachment-fixture.ts'
 import { BUNDLE_MIN_FORMAT_VERSION, buildBundle, readBundle } from '../../../src/operations/transfer/transfer.ts'
 import { putRemoteSession, startDavFixture, type DavFixture } from '../../fixtures/dav-fixture.ts'
@@ -3460,6 +3461,102 @@ test('同步补对象：老索引没有附件清单时，扫一次顺手补进�
       after.entries.find((entry) => entry.id === 's2')?.attachments,
       [],
       '一个都没引用的也要记成空数组：空数组是"查过、没有"，与"没查过"分得开',
+    )
+  } finally {
+    await fixture.close()
+    rmSync(SANDBOX, { recursive: true, force: true })
+  }
+})
+
+test('同步补对象：索引里记着「导入会话」时不解日志、也不报缺附件', async () => {
+  rmSync(SANDBOX, { recursive: true, force: true })
+  mkdirSync(SANDBOX, { recursive: true })
+  const fixture = await startDavFixture({ root: join(SANDBOX, 'dav-attach-imported-index') })
+  const dav = createDavClient({ baseUrl: fixture.url })
+  const a = makeMachine('attach-imported-index-a')
+  const b = makeMachine('attach-imported-index-b')
+  const storeA = makeAttachmentStore('attach-imported-index-store-a')
+  const storeB = makeAttachmentStore('attach-imported-index-store-b')
+  const synthetic: AttachmentRef = {
+    id: attachmentIdOf(Buffer.from('deepseek-chat-export:file-3')),
+    kind: 'file',
+    name: 'paper.pdf',
+  }
+  try {
+    writeSession(a, 's1', 1000, {
+      eventLines: [attachmentEvent(synthetic, 1024, 'paper.pdf'), assistantSourceEvent('deepseek-chat-export')],
+    })
+    // 推送那一侧把"这条是导入的"写进自己那格的索引（本机也没有那个对象，只能记 missing）。
+    await syncMachine(a, dav, settings(a, { machineId: 'robot-a' }), { apply: true, attachments: () => storeA.port })
+
+    const config = settings(b, { machineId: 'robot-b', mapping: { [a.cwd]: b.cwd } })
+    await syncMachine(b, dav, config, { apply: true })
+
+    const deps = syncDepsOf(b, dav, config, { attachments: () => storeB.port })
+    const prepared = await prepareSync(deps)
+    const file = prepared.local.find((session) => session.id === 's1')?.files[0]
+    assert.ok(file !== undefined)
+    /*
+     * 判据来自条目里那个标记，不是又解了一遍日志：清空引用缓存再跑这一趟，跑完这份日志不该出现在
+     * 缓存里（`attachmentRefsOfFile()` 每解一份就把它记进去）。
+     */
+    attachmentRefCache.clear()
+    const outcome = await syncPrepared(deps, prepared, {})
+    assert.equal(attachmentRefCache.has(file.path), false, '补对象那一步没有解这份日志')
+    assert.deepEqual(
+      outcome.problems.filter((line) => line.includes('在远端共享库里也没有')),
+      [],
+      '条目记着导入会话：合成引用不报',
+    )
+    assert.equal(outcome.absentAttachments, undefined)
+    assert.deepEqual(outcome.attachmentIn, { written: 0, present: 0, bytes: 0 })
+  } finally {
+    await fixture.close()
+    rmSync(SANDBOX, { recursive: true, force: true })
+  }
+})
+
+test('同步补对象：自己那格的条目缺导入标记时，扫一次判出来并写回索引', async () => {
+  rmSync(SANDBOX, { recursive: true, force: true })
+  mkdirSync(SANDBOX, { recursive: true })
+  const fixture = await startDavFixture({ root: join(SANDBOX, 'dav-attach-imported-learn') })
+  const dav = createDavClient({ baseUrl: fixture.url })
+  const a = makeMachine('attach-imported-learn-a')
+  const store = makeAttachmentStore('attach-imported-learn-store')
+  const config = settings(a, { machineId: 'robot-a' })
+  const indexPath = join(fixture.root, remoteIndexPath('robot-a'))
+  const synthetic: AttachmentRef = {
+    id: attachmentIdOf(Buffer.from('deepseek-chat-export:file-4')),
+    kind: 'file',
+    name: 'paper.pdf',
+  }
+  try {
+    writeSession(a, 's1', 1000, {
+      eventLines: [attachmentEvent(synthetic, 1024, 'paper.pdf'), assistantSourceEvent('deepseek-chat-export')],
+    })
+    await syncMachine(a, dav, config, { apply: true, attachments: () => store.port })
+
+    // 装成"升级前写下的老条目"：把标记抹掉，这一趟没有任何会话要推，判据只能自己扫一遍。
+    const index = JSON.parse(readFileSync(indexPath, 'utf8')) as {
+      entries: Array<{ id: string; imported?: boolean }>
+    }
+    for (const entry of index.entries) delete entry.imported
+    writeFileSync(indexPath, JSON.stringify(index, null, 2) + '\n')
+
+    const again = await syncMachine(a, dav, config, { apply: true, attachments: () => store.port })
+    assert.deepEqual(again.pushed, [], '日志没变，一条都不推')
+    const after = JSON.parse(readFileSync(indexPath, 'utf8')) as {
+      entries: Array<{ id: string; imported?: boolean }>
+    }
+    assert.equal(
+      after.entries.find((entry) => entry.id === 's1')?.imported,
+      true,
+      '扫出来之后补进自己那一格：下一次（重启之后）不必再解一遍',
+    )
+    assert.deepEqual(
+      again.problems.filter((line) => line.includes('在远端共享库里也没有')),
+      [],
+      '判出来是导入会话，合成引用不报',
     )
   } finally {
     await fixture.close()

@@ -74,6 +74,16 @@ export interface RemoteSessionEntry {
    */
   attachments?: IndexedAttachment[]
   /**
+   * 这条会话是不是从别处导入的（DeepSeek 官网导出，见 `isImportedSessionLog()`）。
+   *
+   * 为什么写进索引：补对象那一步要知道"这条会话的附件引用有没有字节可等"，而判据只能读日志。索引里带
+   * 上它，别的机器（以及本机的第二趟同步）读索引就够了，不必再为自己的整库解压一遍——那条线的预算见
+   * [补附件对象不再整库解压日志](../../../.agents/notes/implemented/bug-fix/2026-11-14-sync-attachment-scan-blocks-the-host.md)。
+   *
+   * 缺席 = 还没判过（老版本写的索引）：按"不是导入"处理，宁可多报一句，也不静默吞掉真正缺的附件。
+   */
+  imported?: boolean
+  /**
    * 这台机器上这条会话的最后活动时间（毫秒时间戳，宿主两枚钟里晚的那枚，见 `activeAt()`）。
    *
    * 跨机器比"谁更新"用的就是它；读不到（老索引、宿主没挂投影缓存）就没有这一项，那几条判不出高下。
@@ -338,6 +348,7 @@ export function parseIndex(text: string, machine: string, problems: string[]): R
       ...(typeof entry.cwd === 'string' && entry.cwd !== '' ? { cwd: entry.cwd } : {}),
       ...(typeof entry.title === 'string' && entry.title !== '' ? { title: entry.title } : {}),
       ...(Array.isArray(entry.attachments) ? { attachments } : {}),
+      ...(entry.imported === true ? { imported: true } : {}),
       ...(typeof entry.repo === 'string' && entry.repo !== '' ? { repo: entry.repo } : {}),
       ...(typeof entry.repoPath === 'string' && entry.repoPath !== '' ? { repoPath: entry.repoPath } : {}),
       createdAt: typeof entry.createdAt === 'number' ? entry.createdAt : 0,

@@ -66,7 +66,13 @@ export function remoteAttachmentDir(ref: AttachmentRef): string {
  *
  * 上限按文件数（与指纹缓存同一量级）；超了整份丢掉重来，不做 LRU：这里的键只是路径，丢了最多再解一遍。
  */
-const attachmentRefCache = new Map<string, ScannedLog>()
+/**
+ * 进程级的引用缓存（键是日志路径，值是这次解出来的引用与导入标记）。
+ *
+ * 导出只为测试看"这一趟到底有没有解某份日志"：清空它、跑完再查那份日志在不在里面。生产代码只通过
+ * `attachmentRefsOfFile()` 的默认参数用它。
+ */
+export const attachmentRefCache = new Map<string, ScannedLog>()
 
 /** 附件引用缓存最多记多少个文件。 */
 const ATTACHMENT_REF_CACHE_MAX = 4096
@@ -488,6 +494,8 @@ export async function repairAttachments(
     const refs = scanned?.refs ?? (fromIndex ?? []).map((item) => attachmentRefOfIndexed(item))
     // 引用与导入标记是同一次解码算出来的，走到这里就用掉，别为同一份日志再解一遍。
     if (scanned?.imported === true) importedSessions.add(session.id)
+    // 清单来自索引时信条目里的标记（推送它的那台机器算好的），一个字节都不用解。
+    else if (entry?.imported === true) importedSessions.add(session.id)
     // 自己那一格的老条目还没有这一项：算过就补上，下一次（重启之后）不必再解一遍。
     if (fromIndex === undefined && entry !== undefined && entry.machine === ownDirName && identical.has(session.id)) {
       const current = ownedEntries.get(entry.id)
@@ -495,6 +503,7 @@ export async function repairAttachments(
         ownedEntries.set(entry.id, {
           ...current,
           attachments: refs.map((ref) => indexedAttachmentOf(ref)),
+          ...(scanned?.imported === true ? { imported: true } : {}),
         })
         learned += 1
       }
@@ -509,12 +518,30 @@ export async function repairAttachments(
         owners.set(session.id, session.title)
         wantedOwners.set(key, owners)
         /*
-         * 这条会话缺对象、而引用清单是从索引里拿的（这一趟没解过日志）：到这里才需要知道它是不是导入
-         * 的。**只对真有缺口的会话付这一次**——整库那些"两边一样、对象也齐"的会话照旧一个字节都不解。
+         * 这条会话缺对象、而清单是从索引里拿的（这一趟没解过日志）：此时只有两种办法知道它是不是导入
+         * 的——信索引里的标记，或者解一次本机日志。
+         *
+         * 解那一次只允许发生在**自己那一格**的条目上：别的机器写的条目我们改不了，解了也留不下，下一趟
+         * 还得再解（那条线的预算见 `repairAttachments()` 的文件头）。自己那一格判出来的结论顺手补写进
+         * 索引，之后就不用再判。**读不动的日志解不出结论**，那就按"不是导入"处理。
          */
-        if (scanned === undefined && !importedSessions.has(session.id) && !checkedImports.has(session.id)) {
+        if (
+          scanned === undefined &&
+          entry !== undefined &&
+          entry.machine === ownDirName &&
+          entry.imported === undefined &&
+          !importedSessions.has(session.id) &&
+          !checkedImports.has(session.id)
+        ) {
           checkedImports.add(session.id)
-          if ((await attachmentRefsOfFiles(session.files)).imported) importedSessions.add(session.id)
+          if ((await attachmentRefsOfFiles(session.files)).imported) {
+            importedSessions.add(session.id)
+            const current = ownedEntries.get(entry.id)
+            if (current !== undefined) {
+              ownedEntries.set(entry.id, { ...current, imported: true })
+              learned += 1
+            }
+          }
         }
       } else if (remoteKnows) extra.set(key, ref)
     }
