@@ -44,6 +44,29 @@ export function attachmentEvent(ref: AttachmentRef, declaredBytes: number, name 
   })
 }
 
+/**
+ * 一条 assistant 消息，只为了带上**来源名**：导入器（`@deepseek-ai/dsh-deepseek-chat-import`）用它给
+ * 每条回复盖 `provider: 'deepseek-chat-export'`，同步据此认出"这条会话是导进来的"。
+ *
+ * `text` 可以塞任意字符串，用来造"正文里提到过那个包名、但会话不是导入的"这种反例。
+ */
+export function assistantSourceEvent(provider: string, text = '回答', model = provider): string {
+  return JSON.stringify({
+    type: 'assistant/message',
+    seq: 1,
+    data: {
+      turn: 1,
+      step: 1,
+      message: {
+        id: 'a1',
+        role: 'assistant',
+        content: [{ type: 'text', text }],
+        source: { kind: 'model', provider, model },
+      },
+    },
+  })
+}
+
 /** 假附件库的句柄。 */
 export interface AttachmentStore {
   /** 库根（图片在 `objects/` 下，文件在 `files/` 下——与宿主同形）。 */

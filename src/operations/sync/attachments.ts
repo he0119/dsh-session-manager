@@ -8,7 +8,7 @@
 
 import { existsSync, statSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
-import { commitAttachmentObjectAsync, scanAttachmentRefs, type AttachmentPort, type AttachmentRef } from '../../shared/attachments.ts'
+import { commitAttachmentObjectAsync, isImportedSessionLog, scanAttachmentRefs, type AttachmentPort, type AttachmentRef } from '../../shared/attachments.ts'
 import type { DiscoveredSession } from '../../shared/library/discovery.ts'
 import { decodeLogTextChunked } from '../../shared/log/log-decode.ts'
 import { type RemoteLibrary, type RemoteIndex, SYNC_NAMESPACE_DIR, type IndexedAttachment } from './index.ts'
@@ -61,15 +61,32 @@ export function remoteAttachmentDir(ref: AttachmentRef): string {
  * 会话被写时才变。没有缓存时每点一次「同步」都把 1.2 GB 日志整份解压（实测 144 秒），有缓存之后同一份
  * 文件只解一次——第二次同步、自动推送之后的补扫都直接命中。
  *
+ * `imported` 与引用一起缓存：同一份文本上判"这是不是导入会话"（见 `isImportedSessionLog()`）只是多
+ * 一遍子串搜索，不该在第二次同步时再付一次。
+ *
  * 上限按文件数（与指纹缓存同一量级）；超了整份丢掉重来，不做 LRU：这里的键只是路径，丢了最多再解一遍。
  */
-const attachmentRefCache = new Map<string, { stamp: string; refs: AttachmentRef[] }>()
+/**
+ * 进程级的引用缓存（键是日志路径，值是这次解出来的引用与导入标记）。
+ *
+ * 导出只为测试看"这一趟到底有没有解某份日志"：清空它、跑完再查那份日志在不在里面。生产代码只通过
+ * `attachmentRefsOfFile()` 的默认参数用它。
+ */
+export const attachmentRefCache = new Map<string, ScannedLog>()
 
 /** 附件引用缓存最多记多少个文件。 */
 const ATTACHMENT_REF_CACHE_MAX = 4096
 
+/** 一份日志的解码结论：引用了什么，以及它是不是导入会话。 */
+export interface ScannedLog {
+  stamp?: string
+  refs: AttachmentRef[]
+  /** 这条日志是不是 DeepSeek 官网导出导入的会话（见 `isImportedSessionLog()`）。 */
+  imported: boolean
+}
+
 /** 附件引用缓存的形状（测试要 "每一轮互不影响" 时注入一份新的）。 */
-export type AttachmentRefCache = Map<string, { stamp: string; refs: AttachmentRef[] }>
+export type AttachmentRefCache = Map<string, ScannedLog>
 
 /** 新建一份附件引用缓存（测试用；生产用进程里那一份）。 */
 export function createAttachmentRefCache(): AttachmentRefCache {
@@ -90,23 +107,24 @@ export function createAttachmentRefCache(): AttachmentRefCache {
  *
  * @param files 这条会话的代次文件。
  * @param cache 缓存；缺省是进程里那一份（键：路径）。
- * @returns 去重后的引用。
+ * @returns 去重后的引用，以及这条会话是不是导入的（任一代次带上导入来源即算）。
  */
 export async function attachmentRefsOfFiles(
   files: readonly SessionLogFile[],
   cache: AttachmentRefCache = attachmentRefCache,
-): Promise<AttachmentRef[]> {
+): Promise<{ refs: AttachmentRef[]; imported: boolean }> {
   const found = new Map<string, AttachmentRef>()
+  let imported = false
   for (const file of files) {
-    for (const ref of await attachmentRefsOfFile(file, cache)) {
-      found.set(`${ref.kind}:${ref.id}`, ref)
-    }
+    const scanned = await attachmentRefsOfFile(file, cache)
+    if (scanned.imported) imported = true
+    for (const ref of scanned.refs) found.set(`${ref.kind}:${ref.id}`, ref)
   }
-  return [...found.values()]
+  return { refs: [...found.values()], imported }
 }
 
-/** 一个文件里扫出来的引用；命中缓存就直接给。 */
-export async function attachmentRefsOfFile(file: SessionLogFile, cache: AttachmentRefCache): Promise<AttachmentRef[]> {
+/** 一个文件里扫出来的引用与导入标记；命中缓存就直接给。 */
+export async function attachmentRefsOfFile(file: SessionLogFile, cache: AttachmentRefCache): Promise<ScannedLog> {
   let stamp: string | undefined
   try {
     const info = statSync(file.path)
@@ -115,15 +133,17 @@ export async function attachmentRefsOfFile(file: SessionLogFile, cache: Attachme
     // 读不到戳（文件刚被删 / 换掉）：直接解一遍，不往缓存里写一个来历不清的答案。
   }
   const hit = stamp === undefined ? undefined : cache.get(file.path)
-  if (hit !== undefined && hit.stamp === stamp) return hit.refs
+  if (hit !== undefined && hit.stamp === stamp) return hit
   const bytes = await readFile(file.path)
   const text = await decodeLogTextChunked(bytes, file.compression)
-  const refs = scanAttachmentRefs(text)
+  const scanned: ScannedLog = { refs: scanAttachmentRefs(text), imported: isImportedSessionLog(text) }
   if (stamp !== undefined) {
+    const entry = { ...scanned, stamp }
     if (cache.size >= ATTACHMENT_REF_CACHE_MAX && !cache.has(file.path)) cache.clear()
-    cache.set(file.path, { stamp, refs })
+    cache.set(file.path, entry)
+    return entry
   }
-  return refs
+  return scanned
 }
 
 /**
@@ -135,19 +155,23 @@ export async function attachmentRefsOfFile(file: SessionLogFile, cache: Attachme
  * 包自己带来的对象（v2 的包：旧版本推送的，或别人手工放进来的）从这份名单里摘掉——它们由导入那条
  * 路随包应用，共享库里没有它们，去那儿取只会白跑一趟并报一串假问题。
  */
-export async function attachmentRefsOfBundle(bundle: SessionBundle): Promise<AttachmentRef[]> {
+export async function attachmentRefsOfBundle(
+  bundle: SessionBundle,
+): Promise<{ refs: AttachmentRef[]; imported: boolean }> {
   const packed = new Set(bundle.attachments.map((entry) => `${entry.kind}:${entry.id}`))
   const found = new Map<string, AttachmentRef>()
+  let imported = false
   for (const session of bundle.sessions) {
     for (const file of session.files) {
       const text = await decodeLogTextChunked(entryBytes(bundle, file), file.compression)
+      if (isImportedSessionLog(text)) imported = true
       for (const ref of scanAttachmentRefs(text)) {
         const key = `${ref.kind}:${ref.id}`
         if (!packed.has(key)) found.set(key, ref)
       }
     }
   }
-  return [...found.values()]
+  return { refs: [...found.values()], imported }
 }
 
 /**
@@ -243,6 +267,9 @@ export function summarizeAbsent(absent: AbsentObjects): {
  * 字节照导入那条路的规格应用：`commitAttachmentObject()` 先写 `.part` 再 rename、`0o400`；本机已经有了
  * 的算 `present`（同一个对象被多条会话引用时只真写一次）。单个对象取不回来只记问题：一个对象缺失不该
  * 把整条会话挡在库外，与导入同一条标准。
+ *
+ * @param ignoreAbsent 这条会话是导入的（见 `isImportedSessionLog()`）：远端也没有时不记账。导入器给
+ *   非图片文件写的是合成的引用，字节从来没进过任何库，报出来也没有处置动作（没有哪台机器持有它们）。
  */
 export async function fetchAttachment(
   deps: SyncDeps,
@@ -252,6 +279,7 @@ export async function fetchAttachment(
   problems: string[],
   absent: AbsentObjects,
   owners: AttachmentOwners,
+  ignoreAbsent = false,
 ): Promise<void> {
   const path = port.pathOf(ref)
   if (path === undefined) {
@@ -269,7 +297,8 @@ export async function fetchAttachment(
     if ((error as { status?: number } | null)?.status === 404) {
       // 「远端也没有」不是错误，是"持有这些对象的机器还没推送它们"这一种状态：按**会话**记一笔，
       // 收尾汇总成一句（一个会话引用几十张图时，逐条对象报会把问题清单淹掉，而它们要的处置是同一件事）。
-      noteAbsent(absent, ref, owners)
+      // 导入会话除外：那种引用没有字节可等（见上面的 `ignoreAbsent`）。
+      if (!ignoreAbsent) noteAbsent(absent, ref, owners)
       return
     }
     problems.push(`取附件 ${ref.id} 失败：${error instanceof Error ? error.message : String(error)}`)
@@ -283,6 +312,7 @@ export async function fetchAttachment(
  * 机器拉同一批会话时，两台机器共用的那张图只传一次。
  *
  * @param owners 这些对象属于哪条会话（远端也没有的那些按它点名，见 `noteAbsent()`）。
+ * @param imported 这条会话是导入的：远端也没有的对象不记账（同 `fetchAttachment()` 的 `ignoreAbsent`）。
  */
 export async function pullAttachments(
   deps: SyncDeps,
@@ -293,6 +323,7 @@ export async function pullAttachments(
   absent: AbsentObjects,
   owners: AttachmentOwners,
   report?: AttachmentReporter,
+  imported = false,
 ): Promise<void> {
   // 本机已经有的那些只记个数、不进分母（同上：不花时间的条数不进分母）。
   const pending: AttachmentRef[] = []
@@ -302,7 +333,7 @@ export async function pullAttachments(
   }
   for (const [index, ref] of pending.entries()) {
     report?.(index, pending.length, ref)
-    await fetchAttachment(deps, port, ref, counters, problems, absent, owners)
+    await fetchAttachment(deps, port, ref, counters, problems, absent, owners, imported)
   }
 }
 
@@ -439,6 +470,14 @@ export async function repairAttachments(
   const wantedOwners = new Map<string, AttachmentOwners>()
   /** 本机有、远端索引里也认得这条会话的对象（远端缺就传上去）。 */
   const extra = new Map<string, AttachmentRef>()
+  /**
+   * 判过、确实是导入会话的那些 id（见 `isImportedSessionLog()`）。
+   *
+   * 只为"真有本机缺对象"的会话去判：判据要读日志，而整库那些对象齐的会话不该为它多解一遍。
+   */
+  const importedSessions = new Set<string>()
+  /** 已经问过"是不是导入"的会话（问过的不再问，避免同一趟里重复解码）。 */
+  const checkedImports = new Set<string>()
   /** 这一趟补记进自己索引的条目数（收尾时据此决定要不要再写一次索引）。 */
   let learned = 0
   const candidates = local.filter((session) => !handled.has(session.id))
@@ -451,10 +490,12 @@ export async function repairAttachments(
      */
     const fromIndex =
       entry !== undefined && entry.attachments !== undefined && identical.has(session.id) ? entry.attachments : undefined
-    const refs =
-      fromIndex === undefined
-        ? await attachmentRefsOfFiles(session.files)
-        : fromIndex.map((item) => attachmentRefOfIndexed(item))
+    const scanned = fromIndex === undefined ? await attachmentRefsOfFiles(session.files) : undefined
+    const refs = scanned?.refs ?? (fromIndex ?? []).map((item) => attachmentRefOfIndexed(item))
+    // 引用与导入标记是同一次解码算出来的，走到这里就用掉，别为同一份日志再解一遍。
+    if (scanned?.imported === true) importedSessions.add(session.id)
+    // 清单来自索引时信条目里的标记（推送它的那台机器算好的），一个字节都不用解。
+    else if (entry?.imported === true) importedSessions.add(session.id)
     // 自己那一格的老条目还没有这一项：算过就补上，下一次（重启之后）不必再解一遍。
     if (fromIndex === undefined && entry !== undefined && entry.machine === ownDirName && identical.has(session.id)) {
       const current = ownedEntries.get(entry.id)
@@ -462,6 +503,7 @@ export async function repairAttachments(
         ownedEntries.set(entry.id, {
           ...current,
           attachments: refs.map((ref) => indexedAttachmentOf(ref)),
+          ...(scanned?.imported === true ? { imported: true } : {}),
         })
         learned += 1
       }
@@ -475,6 +517,32 @@ export async function repairAttachments(
         const owners = wantedOwners.get(key) ?? new Map<string, string | undefined>()
         owners.set(session.id, session.title)
         wantedOwners.set(key, owners)
+        /*
+         * 这条会话缺对象、而清单是从索引里拿的（这一趟没解过日志）：此时只有两种办法知道它是不是导入
+         * 的——信索引里的标记，或者解一次本机日志。
+         *
+         * 解那一次只允许发生在**自己那一格**的条目上：别的机器写的条目我们改不了，解了也留不下，下一趟
+         * 还得再解（那条线的预算见 `repairAttachments()` 的文件头）。自己那一格判出来的结论顺手补写进
+         * 索引，之后就不用再判。**读不动的日志解不出结论**，那就按"不是导入"处理。
+         */
+        if (
+          scanned === undefined &&
+          entry !== undefined &&
+          entry.machine === ownDirName &&
+          entry.imported === undefined &&
+          !importedSessions.has(session.id) &&
+          !checkedImports.has(session.id)
+        ) {
+          checkedImports.add(session.id)
+          if ((await attachmentRefsOfFiles(session.files)).imported) {
+            importedSessions.add(session.id)
+            const current = ownedEntries.get(entry.id)
+            if (current !== undefined) {
+              ownedEntries.set(entry.id, { ...current, imported: true })
+              learned += 1
+            }
+          }
+        }
       } else if (remoteKnows) extra.set(key, ref)
     }
   }
@@ -482,25 +550,27 @@ export async function repairAttachments(
     // 先判"远端有没有"（列一次目录就够），再取：远端也没有的那些只进那句汇总，不算进度里的活。
     const toFetch: AttachmentRef[] = []
     for (const ref of wanted.values()) {
+      const key = `${ref.kind}:${ref.id}`
+      const owners = wantedOwners.get(key) ?? new Map<string, string | undefined>()
+      /*
+       * 引用它的会话**全是**导入会话时，这个对象没有字节可等：导入器给非图片文件写的是合成的引用
+       * （见 `isImportedSessionLog()`），本机没有、远端也永远不会有人推上来，报出来是一句空等。
+       * 只忽略"全都导入"的：同一个对象若还被一条真实会话引用着，那仍然是缺（照旧记账）。
+       */
+      const ignoreAbsent = owners.size > 0 && [...owners.keys()].every((id) => importedSessions.has(id))
       const names = await remoteObjectNamesIn(deps, listed, ref, problems)
       if (names === undefined) continue
       if (!names.has(attachmentHex(ref))) {
-        noteAbsent(absent, ref, wantedOwners.get(`${ref.kind}:${ref.id}`) ?? new Map())
+        if (!ignoreAbsent) noteAbsent(absent, ref, owners)
         continue
       }
       toFetch.push(ref)
     }
     for (const [index, ref] of toFetch.entries()) {
       report?.(index, toFetch.length, ref)
-      await fetchAttachment(
-        deps,
-        port,
-        ref,
-        incoming,
-        problems,
-        absent,
-        wantedOwners.get(`${ref.kind}:${ref.id}`) ?? new Map(),
-      )
+      const owners = wantedOwners.get(`${ref.kind}:${ref.id}`) ?? new Map<string, string | undefined>()
+      const ignoreAbsent = owners.size > 0 && [...owners.keys()].every((id) => importedSessions.has(id))
+      await fetchAttachment(deps, port, ref, incoming, problems, absent, owners, ignoreAbsent)
     }
   }
   // 远端缺的那些交给推送那一段：它自己按前缀列一次、只传远端真没有的（两个方向共用同一份缓存）。

@@ -2112,15 +2112,17 @@ export async function applyPreparedSync(
        * 引用从**包里的日志字节**读，不读本机那份——本机那份这会儿还不存在（或正要被换掉）。
        */
       if (port !== undefined) {
+        const bundleRefs = await attachmentRefsOfBundle(bundle)
         await pullAttachments(
           deps,
           port,
-          await attachmentRefsOfBundle(bundle),
+          bundleRefs.refs,
           attachmentIn,
           problems,
           absentObjects,
           new Map([[entry.id, entry.title]]),
           reportAttachments(entry.title ?? entry.id),
+          bundleRefs.imported,
         )
       }
       const importPlan = planImport(bundle, importOptions)
@@ -2205,15 +2207,17 @@ export async function applyPreparedSync(
         // 与"新建"那一条同一顺序：对象先落，再写日志。对象是共享的、本机可能早就有，所以这一步多数
         // 情况下一个字节都不取。
         if (port !== undefined) {
+          const bundleRefs = await attachmentRefsOfBundle(bundle)
           await pullAttachments(
             deps,
             port,
-            await attachmentRefsOfBundle(bundle),
+            bundleRefs.refs,
             attachmentIn,
             problems,
             absentObjects,
             new Map([[entry.id, entry.title ?? session.title]]),
             reportAttachments(entry.title ?? session.title ?? entry.id),
+            bundleRefs.imported,
           )
         }
         const importPlan = planImport(bundle, importOptions)
@@ -2331,8 +2335,12 @@ export async function applyPreparedSync(
        * 就够了，不必再把自己的整库日志解压一遍（那一步实测 144 秒，见 `repairAttachments()`）。
        */
       let refs: AttachmentRef[] = []
+      // 导入会话的标记跟着清单一起写进索引：别的机器（与本机第二趟）补对象时就不必再解一遍日志。
+      let importedSession = false
       if (port !== undefined) {
-        refs = await attachmentRefsOfFiles(session.files)
+        const scanned = await attachmentRefsOfFiles(session.files)
+        refs = scanned.refs
+        importedSession = scanned.imported
         await pushAttachments(
           deps,
           port,
@@ -2365,6 +2373,7 @@ export async function applyPreparedSync(
         ...(active === undefined ? {} : { lastActiveAt: active }),
         files: fingerprints(session, contentHash),
         ...(port === undefined ? {} : { attachments: refs.map((ref) => indexedAttachmentOf(ref)) }),
+        ...(importedSession ? { imported: true } : {}),
       })
       // 到这里只剩 upload / update 两种（上面筛过），写成三元的形状让类型也跟着收窄。
       pushed.push({ id: entry.id, action: entry.action === 'update' ? 'update' : 'upload' })

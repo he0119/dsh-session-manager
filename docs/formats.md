@@ -75,7 +75,8 @@
       "createdAt": 1794399862678,
       "lastActiveAt": 1794403462678,
       "files": [{ "version": 4, "bytes": 3962826, "sha256": "…" }],
-      "attachments": [{ "kind": "image", "id": "sha256:…", "name": "image.png" }]
+      "attachments": [{ "kind": "image", "id": "sha256:…", "name": "image.png" }],
+      "imported": true
     }
   ],
   "deleted": [{ "id": "session-…", "at": 1794403462678 }]
@@ -91,6 +92,7 @@
 | `entries[].repo` / `repoPath` | 跨机器的项目身份（仓库 remote 归一之后）与会话 cwd 在仓库里的相对路径；没有映射时靠它应用 |
 | `entries[].lastActiveAt` | 这条会话在这台机器上的最后活动时间（宿主投影里两枚钟取晚的那枚） |
 | `entries[].attachments` | 这条会话的日志引用过哪些附件对象（`{kind, id, name?}`，`id` 带 `sha256:` 前缀）。**空数组 = 查过、一个都没有**；缺席 = 还没查过（老版本写的，或写它的机器没有附件服务）。补对象那一步靠它决定"还缺哪些对象"，有它就不必把日志解压一遍 |
+| `entries[].imported` | 这条会话是从别处导入的（DeepSeek 官网导出，`assistant` 消息的来源名是 `deepseek-chat-export`）。补对象时据此不给它的合成引用报「缺附件」：那种 id 由导出里的文件 id 算出来，字节从未存在，没有哪台机器能补。**缺席 = 还没判过**（老版本写的），按"不是导入"处理 |
 | `deleted[]` | 这台机器删掉、并要求别再拉回来的那些会话（墓碑）：`{id, at}`，`at` 是删除时刻（毫秒）。同步据此不拉取比它旧的副本，并让别的机器把自己那份（比它旧的）跟着删掉。**缺席 = 一条都没删过**；老版本读不认它、写回时丢掉 |
 
 索引格式的版本：1 没有时间字段；2 加 `lastPromptAt`（最后一次提问）；3 换成 `lastActiveAt`。读的一侧
