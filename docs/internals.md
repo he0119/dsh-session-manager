@@ -34,8 +34,8 @@
   （`restoreRegistry()`），"重启后一致"才成立。
 - [宿主不认的登记不算成员，搬完剩下的要说出来](../.agents/notes/implemented/bug-fix/2026-10-08-stale-registrations-do-not-hold-a-workspace.md)：
   `reHome()` 判"源工作区被搬空了吗"按**认领**算（悬空登记不算数，并在同一次里顺手摘掉），只剩侧边栏
-  不显示的会话时那块工作区留着——`strandedSources` / `describeStranded()` 一处措辞，报给预览、结果、
-  界面与工具返回值。
+  不显示的会话时那块工作区留着——`strandedSources` 是结构，给模型的那段文字由 `report.ts` 渲染
+  （`strandedLines()`），界面按同一份结构自己拼；两边都不靠对方那份措辞。
 - [生效提示先说在事前，且只在需要重启时说话](../.agents/notes/implemented/architecture/2026-10-06-restart-notice-up-front-and-only-on-bad-news.md)：
   `/sync` 与 `sync_sessions` 的预览一律按探测回答"执行时会不会需要重启"（迁移那条路本来就是），界面在
   确认弹窗里先说、应用后只在需要重启时留一条 warn 横幅；长解释只在说明弹窗的 FAQ。
@@ -349,6 +349,11 @@
   窗口换成结果页（一句结论 + 没做到的清单 +「撤销」）→「完成」"这一条线；执行中关窗等于转后台，
   进度与结论在状态栏那一格，点它回到同一扇窗。状态只在浏览器内存里，刷新就没了（后台同步例外，
   能从面板那条长连接认领）。
+- [结果只回结构](../.agents/notes/implemented/bug-fix/2026-11-18-results-return-structure-not-prose.md)：
+  迁移与删除的预览、结果**只回结构化数据**，一段拼好的文字都不带：给模型的那份由工具层渲染
+  （`report.ts`：点名会话 id、备份目录、要不要重启），给界面的那份由页面按字段拼成一句一行
+  （`migrateResult.ts` / `deleteResult.ts`：结论、收据与复核、没搬的每类一句、远端那一步；类别与条数，
+  不列 id）。
 - [导出与导入是两处入口](../.agents/notes/implemented/architecture/2026-11-12-export-and-import-are-two-doors.md)：
   导出跟着勾选走（动作行里按下去就打包下载，不弹窗），导入跟勾选无关（状态栏那枚，640 的窄弹窗，
   目标目录默认填左栏选中的项目）。原来那一面把列表又画了一遍（筛选条、分组、勾选框），删掉之后

@@ -1134,7 +1134,6 @@ export interface MigrationPreview {
     droppedStale: Array<{ workspaceId: string; path: string; sessionIds: string[] }>
     unchanged: boolean
   } | null
-  summary: string
 }
 
 /** 迁移请求（与宿主 `MigrateRequest` 同形）。 */
@@ -1159,7 +1158,13 @@ export interface MigrationResponse {
   verified: boolean
   backupDir?: string
   problems: string[]
-  summary: string
+  /**
+   * 补侧边栏列表元数据（标题与最后活动时间）的结果；缺省 = 这一步没跑。
+   *
+   * 失败只影响侧边栏：会话照样搬到了目标目录，等用户点开一次标题就补上了。界面据此说一句
+   * "点开一次才有标题"，不说成"迁移没做完"。
+   */
+  warm?: { warmed: number; failed: number; unavailable: boolean; problems: string[] }
   takesEffect: 'immediate' | 'restart-required'
   error?: string
 }
@@ -1275,6 +1280,8 @@ export interface DeleteResponse {
     entries: DeleteEntry[]
     files: number
     bytes: number
+    /** 级联带进来的条数：点名的会话的子智能体后代（它们跟着一起删）。 */
+    cascaded: number
     /** 备份根（执行时真实落下的那一个在 `backupDir`）。 */
     backupRoot: string
   }
@@ -1297,7 +1304,6 @@ export interface DeleteResponse {
     problems: string[]
   }
   problems: string[]
-  summary: string
   error?: string
 }
 

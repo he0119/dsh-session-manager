@@ -2364,7 +2364,7 @@ test('客户端产物：迁移弹窗——计划逐条列出会话，跟着父�
   )
   const withStranded = withPlan(0, 0, 2)
   assert.ok(
-    withStranded.text.some((item) => String(item) === 'migrate.stranded:{"count":2}'),
+    withStranded.text.some((item) => String(item) === 'migrate.stranded:{"count":2,"reasons":"tag.blank 2"}'),
     '留下 2 条搬不走的要说出来，并说明源工作区因此不会被删',
   )
   assert.equal(
@@ -4359,7 +4359,6 @@ test('客户端产物：删除弹窗摆出清单与备份位置，计划不 ok �
     verified: false,
     // 计划不 ok 时宿主把 plan.problems 提到顶层（见 web.ts 的删除端点），界面读的就是这一份。
     problems: ok ? [] : ['s-9 还活在宿主内存里'],
-    summary: '将删除 2 条会话',
     takesEffect: 'restart-required',
   })
   // null 顺序：外壳的 error / 会话页的 busy / error / notice / **pending**（勾选集由 arrays 种）。
@@ -4378,7 +4377,11 @@ test('客户端产物：删除弹窗摆出清单与备份位置，计划不 ok �
   const dialogs = good.recorded.filter((node) => node.props?.role === 'dialog')
   assert.equal(dialogs.length, 1, '点删除之后页面上只有一个弹窗')
   assert.equal(dialogs[0].props['aria-label'], 'manage.delete.dialogTitle', '标题说的是那个动作')
-  assert.ok(good.text.some((item) => String(item) === '将删除 2 条会话'), '弹窗里摆的是宿主给的那份摘要')
+  // 结论由界面按计划字段拼（宿主只回结构）：删几条、级联几条各一句话。
+  assert.ok(
+    good.text.some((item) => String(item) === 'manage.delete.plan:{"count":2}'),
+    '结论说清这次要删几条',
+  )
   const rows = good.recorded.filter(
     (node) => typeof node.type === 'string' && String(node.props?.className).includes('dsm-rowPlan'),
   )
@@ -4490,7 +4493,6 @@ test('客户端产物：配了同步时删除弹窗多一枚「同时删除远�
     removedProjectDirs: [],
     verified: false,
     problems: [],
-    summary: '将删除 1 条会话',
   }
   const item = mount({
     state,
@@ -5169,7 +5171,17 @@ test('客户端产物：迁移应用之后进度在状态窗里，跑完换成�
   await run.flush()
   const done = run.render()
   assert.equal(dialogsOf(done.el)[0].props['aria-label'], 'run.migrate.done', '标题换成「迁移完成」')
-  assert.ok(done.text.includes('已迁移 1 条会话。'), '结论那一句在正文里')
+  // 结果页按结构化字段重拼（不摆宿主那段长摘要）：结论、收据、复核各占一行，逐条看得清。
+  assert.ok(
+    done.text.includes('migrate.done:{"sessions":1,"to":"/home/u/dev/beta"}'),
+    '结论那一句说清搬了几条、搬到哪',
+  )
+  assert.ok(
+    done.text.includes('migrate.receipt:{"files":1,"dirs":1}'),
+    '收据（改写几个日志、移动几个目录）另起一行',
+  )
+  assert.ok(done.text.includes(' · verify.pass'), '复核结论跟在收据后面')
+  assert.equal(done.text.includes('已迁移 1 条会话。'), false, '不再把宿主那段长摘要原样摆出来')
   assert.ok(done.text.includes('run.problemsTitle:{"count":1}'), '没做到的那些逐条列（1 条）')
   assert.ok(done.text.includes('s-2：这条还在跑，没搬'), '原话照搬，不吞掉是哪一条')
   assert.ok(done.text.includes('effect.restart'), '要重启才生效时在结果页上说')
@@ -5181,6 +5193,48 @@ test('客户端产物：迁移应用之后进度在状态窗里，跑完换成�
   primaryOf(done.el).props.onClick()
   const after = run.render()
   assert.deepEqual(dialogsOf(after.el), [], '按「完成」之后这一扇窗不在了')
+})
+
+test('客户端产物：迁移结果页把没搬的按类别与条数说清，不列会话 id', { skip }, async () => {
+  // 结果页不摆宿主那段长摘要（它给工具那一面用）：没搬的那几条按"哪几类、各几条"说，用户据此回
+  //「会话」页处理。判据见 .agents/notes/implemented/bug-fix/2026-11-18-results-return-structure-not-prose.md。
+  const run = migrationRun()
+  run.applied.preview = {
+    ...run.applied.preview,
+    liveSkipped: [{ id: 's-live-1', createdAt: 1 }],
+    strandedSources: [
+      {
+        workspaceId: 'w1',
+        path: '/home/u/dev/alpha',
+        title: '工作区甲',
+        members: [
+          { id: 's-hidden-1', reason: 'subagent' },
+          { id: 's-hidden-2', reason: 'archived' },
+        ],
+      },
+    ],
+  }
+  run.applied.warm = { warmed: 1, failed: 1, unavailable: false, problems: [] }
+  run.render()
+  primaryOf(run.mounted.recorded).props.onClick()
+  await run.flush()
+  run.push(`data: {"type":"result","result":${JSON.stringify(run.applied)}}\n\n`)
+  await run.flush()
+  run.end()
+  await run.flush()
+  const done = run.render()
+  assert.ok(
+    done.text.includes('migrate.liveSkipped:{"count":1}'),
+    '还在运行的那条单独说一句（重启 DSH 之后再迁一次）',
+  )
+  assert.ok(
+    done.text.includes('migrate.stranded:{"count":2,"reasons":"tag.subagent 1、tag.archived 1"}'),
+    '侧边栏不显示的那两条按类别与条数说，不列 id',
+  )
+  assert.ok(done.text.includes('migrate.warm.failed:{"count":1}'), '标题没补上时说一句"点开一次就有"')
+  const flat = done.text.join(' ')
+  assert.equal(flat.includes('s-hidden-1'), false, '会话 id 不上结果页（它们留在宿主给工具的摘要里）')
+  assert.equal(flat.includes('s-live-1'), false, '同上')
 })
 
 test('客户端产物：结果页上那枚「撤销」把用户送到「备份与回滚」', { skip }, async () => {
@@ -5595,7 +5649,10 @@ test('客户端产物：迁移应用时宿主报的每条进度都到了状态�
   await run.flush()
   const done = run.render()
   assert.equal(dialogsOf(done.el)[0].props['aria-label'], 'run.migrate.done', '收尾那条把它换成结果页')
-  assert.ok(done.text.includes('已迁移 1 条会话。'), '结果就是宿主回的那份')
+  assert.ok(
+    done.text.includes('migrate.done:{"sessions":1,"to":"/home/u/dev/beta"}'),
+    '结果页的结论按宿主回的结构化字段拼（不摆那段长摘要）',
+  )
 
   // `/meta` 与 `/state` 是外壳首屏那两条（假钩子把 effect 直接跑了），这里只认应用那一条。
   const landing = run.calls.filter((call) => call.url === '/dsh-session-manager/api/migrate')

@@ -2,7 +2,7 @@
 //
 // 为什么单开一个文件：这一条测的不是某一步，而是**三样东西的合取**——候选只收侧边栏显示的会话
 // （visibility.ts）、注册表判"搬空了吗"要按宿主认的成员算（registry.ts / plan.ts）、以及搬完剩下的
-// 那几条必须报出来（describeStranded()）。三者各自都有单测，但"全量迁移之后工作区还在不在"只有把它们
+// 那几条必须报出来（report.ts 的 strandedLines()）。三者各自都有单测，但"全量迁移之后工作区还在不在"只有把它们
 // 串起来才看得见，而它正是用户看见的那个现象（一个画出来却一条都不显示的工作区）。
 //
 // 宿主那一侧用假宿主接口"像真宿主"：成员按 header 的 cwd 归一之后是否等于记录的 path 过滤（宿主
@@ -17,6 +17,7 @@ import { decompress } from 'fzstd'
 import { canonicalDirIfExists } from '../../../src/shared/canonical-path.ts'
 import { scanAllAsync } from '../../../src/shared/library/discovery.ts'
 import { runMigration, type MigrateDeps } from '../../../src/operations/migrate/migrate.ts'
+import { describeMigrationPreview, describeMigrationRun } from '../../../src/operations/migrate/report.ts'
 import { encodeSegment, projectionCacheDir, sessionDir } from '../../../src/shared/paths.ts'
 import { readRegistry, writeRegistryAtomic } from '../../../src/shared/registry.ts'
 import type { DecodeAll, SessionHeader, WorkspaceRegistryState } from '../../../src/shared/types.ts'
@@ -209,7 +210,7 @@ test('E2E：只剩悬空登记的源工作区，全量迁移后必须被删掉',
     ['ws-from'],
   )
   assert.deepEqual(run.preview.registryChange?.droppedStale.map((entry) => entry.sessionIds), [['session-ghost']])
-  assert.match(run.preview.summary, /顺带清掉 1 条宿主不认的悬空登记/)
+  assert.match(describeMigrationPreview(run.preview), /顺带清掉 1 条宿主不认的悬空登记/)
 
   // 写入磁盘结果：源工作区没了、目标工作区认下了那条会话
   const after = readRegistry(fx.registryPath)
@@ -242,9 +243,9 @@ test('E2E：只剩侧边栏不显示的会话时，源工作区留着，但必�
     })),
     [{ workspaceId: 'ws-from', members: ['session-blank:blank', 'session-archived:archived'] }],
   )
-  assert.match(run.summary, /另有 2 条会话侧边栏不显示（空白 1、已归档 1），这次不搬：session-blank、session-archived/)
-  assert.match(run.summary, /那几块工作区因此不会被删/)
-  assert.match(run.preview.summary, /另有 2 条会话侧边栏不显示（空白 1、已归档 1），这次不搬：session-blank、session-archived/)
+  assert.match(describeMigrationRun(run), /另有 2 条会话侧边栏不显示（空白 1、已归档 1），这次不搬：session-blank、session-archived/)
+  assert.match(describeMigrationRun(run), /那几块工作区因此不会被删/)
+  assert.match(describeMigrationPreview(run.preview), /另有 2 条会话侧边栏不显示（空白 1、已归档 1），这次不搬：session-blank、session-archived/)
   // 悬空登记照旧顺手摘掉，但它不是这块工作区留下来的原因
   assert.deepEqual(run.preview.registryChange?.droppedStale.map((entry) => entry.sessionIds), [['session-ghost']])
 
@@ -266,7 +267,7 @@ test('E2E：只是用户自己挑了子集时，不报"侧边栏不显示"那一
 
   assert.equal(run.applied, true)
   assert.deepEqual(run.preview.strandedSources, [], '没被点名的可见会话不是"搬不走的"，别混进这一句')
-  assert.doesNotMatch(run.summary, /侧边栏不显示/)
+  assert.doesNotMatch(describeMigrationRun(run), /侧边栏不显示/)
   assert.deepEqual(readRegistry(fx.registryPath).tables.workspaces['ws-from']?.sessionIds, ['session-visible-2'])
 
   rmSync(fx.base, { recursive: true, force: true })

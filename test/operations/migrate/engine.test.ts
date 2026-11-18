@@ -12,7 +12,7 @@ import { decompress } from 'fzstd'
 
 import { applyPlan, verifyAppliedPlan } from '../../../src/operations/migrate/execute.ts'
 import { readManifest, rollback } from '../../../src/shared/journal.ts'
-import { buildRelocationPlan, describePlan } from '../../../src/operations/migrate/plan.ts'
+import { buildRelocationPlan } from '../../../src/operations/migrate/plan.ts'
 import { projectKey } from '../../../src/shared/project-key.ts'
 import { readRegistry } from '../../../src/shared/registry.ts'
 import type { DecodeAll, WorkspaceRegistryState } from '../../../src/shared/types.ts'
@@ -171,7 +171,6 @@ test('端到端：plan → apply → verify → rollback 全链路', async () =>
   assert.equal(plan.sessions.length, 2)
   assert.equal(plan.registryChange?.added.length, 2)
   assert.equal(plan.registryChange?.createdTarget, false)
-  assert.match(describePlan(plan), /迁移 2 个会话/)
   assert.equal(existsSync(join(sb.root, sb.targetProjectDir, 'session-a')), false, 'dry-run 不得移动目录')
   assert.deepEqual(readRegistry(sb.registryPath), sb.registry, 'dry-run 不得改注册表')
   assert.deepEqual(readFileSync(srcA), sb.logs['a'], 'dry-run 不得改日志')
@@ -311,8 +310,7 @@ test('宿主持着的会话不搬：留在原目录、源工作区不被摘空�
   assert.deepEqual(plan.registryChange?.added, ['session-a'], '注册表只登记真搬走的那条')
   assert.deepEqual(plan.registryChange?.removedSources, [], '源工作区还认着 session-b，不许删')
   assert.equal(plan.registryChange?.targetPath, sb.toDir)
-  assert.match(describePlan(plan), /另有 1 条会话宿主持在内存里（还活着），这次不搬：session-b/)
-  assert.match(describePlan(plan), /重启 DSH 之后再迁一次/)
+  // 预览那段文字（给模型看的那一份）由 report.ts 渲染，措辞在 migrate.test.ts 的预览断言里钉住。
 
   /*
    * 只点名那条活着的：这次没有东西可搬，说清是"宿主攥着"（重启后再迁）而不是"没选中会话"。

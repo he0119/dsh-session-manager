@@ -223,9 +223,8 @@ test('不在库里的 id 与空选择各自给出可读的拒绝，别的会话�
   const unknown = await runRemoval(deps(sandbox), { sessionIds: ['session-doomed', 'session-ghost'] }, { apply: false })
   assert.equal(unknown.plan.ok, false)
   assert.deepEqual(unknown.plan.problems, ['session-ghost 不在库里：可能已经删掉了。'])
-  // 结论那句话不再把问题拼进来：拼进去之后弹窗里同一句话会出现两次（结论一次、清单一次）。
-  assert.equal(unknown.summary, '这次一条都没删。')
-  assert.equal(unknown.summary.includes('不在库里'), false, '原因只在清单里说一遍')
+  // 原因只写在问题清单里（结论那句由界面按字段拼，宿主这段文字不掺原因）。
+  assert.equal(unknown.plan.problems.length, 1, '原因只在清单里说一遍')
   // 计划不 ok 时执行阶段整体拒绝，连那条存在的也不删
   const apply = await runRemoval(deps(sandbox), { sessionIds: ['session-doomed', 'session-ghost'] }, { apply: true })
   assert.equal(apply.applied, false)
@@ -280,10 +279,10 @@ test('级联：点名父会话 → 全部后代一起进计划（多级、跨项
     assert.deepEqual(entry.via, { id: 'session-parent', title: '父会话' }, `${id} 要说清是跟着谁来的`)
     assert.equal(entry.origin, 'subagent')
   }
-  // 预览摘要要把多出来的条数说出来，否则用户只会看到"我只勾了一条、它要删四条"
+  // 级联的条数要按结构报出来：界面据此说"其中 3 条是子智能体会话，跟着一起删"。
   const run = await runRemoval(deps(sandbox), { sessionIds: ['session-parent'] }, { apply: false })
-  assert.match(run.summary, /将删除 4 个会话/)
-  assert.match(run.summary, /其中 3 条是子智能体会话/)
+  assert.equal(run.plan.entries.length, 4)
+  assert.equal(run.plan.cascaded, 3)
 })
 
 test('级联：多级同族一起删时，执行把整族装进同一份备份、目录一并清掉', async () => {
@@ -297,7 +296,7 @@ test('级联：多级同族一起删时，执行把整族装进同一份备份�
   assert.equal(run.verified, true, run.problems.join('; '))
   assert.equal(run.dirsRemoved, 3)
   for (const dir of [parentDir, childDir, grandDir]) assert.equal(existsSync(dir), false, `${dir} 该没了`)
-  assert.match(run.summary, /其中 2 条是子智能体会话/)
+  assert.equal(run.plan.cascaded, 2, '级联条数照旧按结构报出来（那句话由界面拼）')
   const { manifest } = readManifest(run.backupDir!)
   assert.deepEqual(manifest.sessions.map((s) => s.id).sort(), ['session-child', 'session-grand', 'session-parent'])
 })
@@ -403,11 +402,8 @@ test('删除勾了「同时删除远端」：把那几条交给远端那一步�
   )
   assert.deepEqual(calls, [['session-doomed']], '交给远端那一步的就是这次删掉的会话')
   assert.deepEqual(run.remote, { removed: 1, bytes: 4096, others: ['robot-b'], problems: [] })
-  assert.match(run.summary, /远端这一格也清掉了（1 个包）/)
-  assert.match(run.summary, /robot-b 上的副本会在它下次同步时删掉/, '别的机器那份要说清什么时候删')
-  assert.doesNotMatch(run.summary, /复核：通过/, '成功的那一次不说复核（失败才说）')
-  assert.doesNotMatch(run.summary, /个日志文件/, '日志文件数是收据，不进提示条')
-  assert.doesNotMatch(run.summary, /backups\//, '备份目录不进提示条（「撤销」与「备份与回滚」都能到）')
+  // 远端那一步只说结构（谁删掉了、别的机器上还留着），那句话由界面拼（见 deleteResult.ts）。
+  assert.deepEqual(run.remote.others, ['robot-b'], '别的机器上还留着的副本要按结构报出来')
   assert.equal(run.verified, true, run.problems.join('; '))
 })
 
@@ -421,15 +417,19 @@ test('远端一个包都没删、别处也没有副本时，提示条里不提�
     { sessionIds: ['session-doomed'], alsoRemote: true },
     { apply: true },
   )
-  assert.equal(run.summary, '已删除 1 个会话。', '结果 + 收据都不进来')
+  assert.equal(run.dirsRemoved, 1, '本机那条照旧删掉了')
   assert.equal(run.remote?.removed, 0, '远端那一步照旧跑过（结论还在结果里，只是不写进提示）')
 })
 
-test('删除的预览那句也不再报文件数与字节数', async () => {
+test('预览只回结构：删几条、级联几条、备份根在哪，一句拼好的话都不带', async () => {
   const sandbox = makeSandbox('remove-plan-short')
   writeSession(sandbox, 'session-doomed', 1000)
   const run = await runRemoval(deps(sandbox), { sessionIds: ['session-doomed'] }, { apply: false })
-  assert.equal(run.summary, '将删除 1 个会话，先备份再删。')
+  assert.equal(run.applied, false)
+  assert.equal(run.plan.entries.length, 1)
+  assert.equal(run.plan.cascaded, 0)
+  assert.equal(run.plan.backupRoot, sandbox.backupRoot)
+  assert.equal('summary' in run, false, '宿主不再替界面拼那句话')
 })
 
 test('没勾「同时删除远端」时不碰远端（那一步一次都不调）', async () => {
@@ -448,7 +448,7 @@ test('没勾「同时删除远端」时不碰远端（那一步一次都不调�
   )
   assert.equal(called, 0)
   assert.equal(run.remote, undefined, '没删远端就没有那一项')
-  assert.doesNotMatch(run.summary, /远端：/)
+  assert.equal(run.remote, undefined, '没删远端就没有那一项（界面因此不提那句）')
 })
 
 test('远端那一步失败：本地删除照旧完成，问题清单里说清后果', async () => {

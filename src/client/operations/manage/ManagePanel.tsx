@@ -96,6 +96,8 @@ import {
 } from '../../shared/ui/sessionList.tsx'
 import { remoteLibrary, type RemoteLibraryState } from '../sync/remoteLibrary.ts'
 import { patchArchived, patchMoved, patchRemoved, patchTitles } from './statePatch.ts'
+import { strandedReasonsText } from './migrateResult.ts'
+import { deleteCascadeNote, deletePlanVerdict, describeDeleteResult } from './deleteResult.ts'
 import type { PanelShare } from '../../types.ts'
 
 /** 一次迁移应用之后的结论：复核过没过、备份在哪、要不要重启（原样透出宿主报的三件事）。 */
@@ -613,9 +615,44 @@ export function ManagePanel({
       (done) => {
         if (!done.ok) return <p className="dsm-error">{t('run.error', { reason: done.error ?? '' })}</p>
         const response = done.result as MigrationResponse
+        const moved = response.preview.sessions.length
+        const stranded = response.preview.strandedSources.flatMap((source) => source.members)
+        const warm = response.warm
+        /*
+          结果页那句话**按字段拼**（宿主只回结构，不给拼好的文字）：一句一行，
+          结论 → 收据与复核 → 没搬的每类各一行 → 补标题没补上 → 问题清单 → 要重启才生效。
+          判据见 `migrateResult.ts` 的模块头与那份决策笔记。
+        */
         return (
           <div className="dsm-planBody">
-            <div className={response.applied && response.verified ? 'dsm-ok' : 'dsm-warn'}>{response.summary}</div>
+            <div className={`dsm-planVerdict ${response.applied && response.verified ? 'dsm-ok' : 'dsm-warn'}`}>
+              {!response.applied
+                ? t('migrate.nothingDone')
+                : response.verified
+                  ? t('migrate.done', { sessions: moved, to: response.preview.to })
+                  : t('migrate.doneUnverified', { sessions: moved, to: response.preview.to })}
+            </div>
+            {response.applied && (
+              <p className="dsm-hint">
+                {t('migrate.receipt', { files: response.rewritten, dirs: response.moved })}
+                {response.artifactsMoved > 0 ? ` · ${t('artifacts.moved', { count: response.artifactsMoved })}` : ''}
+                {response.verified ? ` · ${t('verify.pass')}` : ''}
+              </p>
+            )}
+            {response.preview.liveSkipped.length > 0 && (
+              <p className="dsm-hint">{t('migrate.liveSkipped', { count: response.preview.liveSkipped.length })}</p>
+            )}
+            {stranded.length > 0 && (
+              <p className="dsm-hint">
+                {t('migrate.stranded', { count: stranded.length, reasons: strandedReasonsText(stranded, t) })}
+              </p>
+            )}
+            {/* 标题没补上时只影响侧边栏（点开一次就有），说一句就够，不说成"迁移没做完"。 */}
+            {warm !== undefined && (warm.unavailable || warm.failed > 0) && (
+              <p className="dsm-hint">
+                {warm.unavailable ? t('migrate.warm.unavailable') : t('migrate.warm.failed', { count: warm.failed })}
+              </p>
+            )}
             <ProblemsBlock t={t} problems={response.problems} />
             {/*
               需要重启才被宿主承认时，这一句跟着结果一起说（原来它单独挂在页面上）。宿主自己接住的
@@ -792,10 +829,26 @@ export function ManagePanel({
       (done) => {
         if (!done.ok) return <p className="dsm-error">{t('run.error', { reason: done.error ?? '' })}</p>
         const result = done.result as DeleteResponse
+        // 结论与它下面那几行按宿主回的字段拼（见 deleteResult.ts）：一句一条，成功色只落在结论上。
+        const lines = describeDeleteResult(
+          {
+            applied: result.applied,
+            verified: result.verified,
+            dirsRemoved: result.dirsRemoved,
+            cascaded: result.preview.cascaded,
+            ...(result.remote === undefined ? {} : { remote: result.remote }),
+          },
+          t,
+        )
         return (
           <div className="dsm-planBody">
-            {/* 结论那句由宿主给（"已删除 1 条会话。"）；失败它会说"复核没通过"。 */}
-            <div className={result.verified ? 'dsm-ok' : 'dsm-warn'}>{result.summary}</div>
+            <div className={`dsm-planVerdict ${lines.ok ? 'dsm-ok' : 'dsm-warn'}`}>{lines.verdict}</div>
+            {lines.notes.map((note) => (
+              <p key={note} className="dsm-hint">
+                {note}
+              </p>
+            ))}
+            {lines.warn === undefined ? null : <p className="dsm-warn">{lines.warn}</p>}
             <ProblemsBlock t={t} problems={result.problems} />
             {result.backupDir !== undefined && openBackup !== undefined && (
               <div>
@@ -836,6 +889,15 @@ export function ManagePanel({
    *
    * 在渲染期算而不是塞进状态：它是结果的**纯函数**，多存一份只会多一个可能与 `retitle` 不一致的地方。
    */
+
+  /*
+    删除弹窗里那句级联说明：计划还没到手、或这次没有级联时是 undefined（那一行整个不摆）。
+    确认弹窗与结果页共用同一个纯函数，同一个事实只有一份措辞。
+  */
+  const deleteCascade =
+    pending?.plan === null || pending?.plan === undefined
+      ? undefined
+      : deleteCascadeNote(pending.plan.preview.cascaded, t)
 
   // 迁移弹窗正文里那些从计划派生出来的东西（同原先的 MigrationPanel）。
   const preview = migratePending?.response?.preview ?? null
@@ -1160,8 +1222,12 @@ export function ManagePanel({
                 <p> 自带 1em 的上下边距，会和那 20px 叠成 32px，四行字看着一样松、谁也不挨着谁。
               */}
               <div className={`dsm-planVerdict ${pending.plan.preview.ok ? 'dsm-ok' : 'dsm-warn'}`}>
-                {pending.plan.summary}
+                {deletePlanVerdict(pending.plan.preview, t)}
               </div>
+              {/* 整族一起删时把"多出来的那几条"说清楚，否则清单里会冒出用户没勾过的会话。 */}
+              {pending.plan.preview.ok && deleteCascade !== undefined && (
+                <p className="dsm-hint">{deleteCascade}</p>
+              )}
               {/*
                 没做到的那几条：与「上次同步」那张卡里那块同一种画法（淡告警底 + 左边一道细线，标题是个
                 小标签，逐条原话用正文色、发丝线分隔）。原来它们是一串同色的橙色大段——结论、清单、说明
@@ -1340,6 +1406,7 @@ export function ManagePanel({
                     <p className="dsm-hint">
                       {t('migrate.stranded', {
                         count: preview.strandedSources.reduce((n, source) => n + source.members.length, 0),
+                        reasons: strandedReasonsText(preview.strandedSources.flatMap((source) => source.members), t),
                       })}
                     </p>
                   )}

@@ -15,6 +15,7 @@ import type { ResolvedPaths } from '../../shared/plugin-paths.ts'
 import { projectKey } from '../../shared/project-key.ts'
 import type { DecodeAll, EffectMode } from '../../shared/types.ts'
 import { previewMigration, rollbackMigration, runMigration, type MigrateDeps } from './migrate.ts'
+import { describeMigrationPreview, describeMigrationRun } from './report.ts'
 
 /** 计划类工具的返回值。 */
 export interface PlanToolResult {
@@ -24,11 +25,15 @@ export interface PlanToolResult {
   cascaded: number
   /** 宿主持在内存里、这次不搬的会话条数（见 plan.ts 的 `liveSkipped`）。 */
   liveSkipped: number
+  /** 那几条的 id：重启 DSH 之后要按它们再点名一次（`summary` 里也有，这里是结构化的一份）。 */
+  liveSkippedIds: string[]
   /**
    * 侧边栏不显示（已归档 / 空白 / 父会话不在这批里的子智能体）、这次也不搬的会话条数
    * （见 plan.ts 的 `strandedSources`）：它们留在源工作区的登记里，那块工作区因此不会被删。
    */
   stranded: number
+  /** 那几条的 id：要清掉它们得先在「会话」页按 id 处理（取消归档 / 删掉 / 连着父会话迁）。 */
+  strandedIds: string[]
   files: number
   targetProjectDir: string
   summary: string
@@ -43,8 +48,12 @@ export interface MigrateToolResult {
   cascaded: number
   /** 宿主持在内存里、这次没搬的会话条数（见 plan.ts 的 `liveSkipped`）。 */
   liveSkipped: number
+  /** 那几条的 id：重启 DSH 之后要按它们再点名一次。 */
+  liveSkippedIds: string[]
   /** 侧边栏不显示、这次也没搬的会话条数（见 plan.ts 的 `strandedSources`）。 */
   stranded: number
+  /** 那几条的 id：要清掉它们得先在「会话」页按 id 处理。 */
+  strandedIds: string[]
   rewritten: number
   moved: number
   artifactsMoved: number
@@ -123,7 +132,9 @@ export function migrationTools(context: MigrationToolContext): {
             sessions: { type: 'integer', required: true },
             cascaded: { type: 'integer', required: true },
             liveSkipped: { type: 'integer', required: true },
+            liveSkippedIds: { type: 'array', required: true, items: { type: 'string' } },
             stranded: { type: 'integer', required: true },
+            strandedIds: { type: 'array', required: true, items: { type: 'string' } },
             files: { type: 'integer', required: true },
             targetProjectDir: { type: 'string', required: true },
             summary: { type: 'string', required: true },
@@ -145,10 +156,12 @@ export function migrationTools(context: MigrationToolContext): {
           sessions: preview.sessions.length,
           cascaded: preview.cascaded,
           liveSkipped: preview.liveSkipped.length,
+          liveSkippedIds: preview.liveSkipped.map((session) => session.id),
           stranded: preview.strandedSources.reduce((n, source) => n + source.members.length, 0),
+          strandedIds: preview.strandedSources.flatMap((source) => source.members.map((member) => member.id)),
           files: preview.files,
           targetProjectDir: preview.targetProjectDir,
-          summary: preview.summary,
+          summary: describeMigrationPreview(preview),
           takesEffect: mode(),
           problems: preview.problems,
         }
@@ -201,7 +214,9 @@ export function migrationTools(context: MigrationToolContext): {
             applied: { type: 'boolean', required: true },
             cascaded: { type: 'integer', required: true },
             liveSkipped: { type: 'integer', required: true },
+            liveSkippedIds: { type: 'array', required: true, items: { type: 'string' } },
             stranded: { type: 'integer', required: true },
+            strandedIds: { type: 'array', required: true, items: { type: 'string' } },
             rewritten: { type: 'integer', required: true },
             moved: { type: 'integer', required: true },
             artifactsMoved: { type: 'integer', required: true },
@@ -226,16 +241,22 @@ export function migrationTools(context: MigrationToolContext): {
           },
           { apply: args.apply === true },
         )
-        const summary = run.applied
-          ? run.summary
-          : run.preview.ok
-            ? `${run.summary}\n\n（dry-run，未写任何字节；传 apply:true 执行）\n${describePlannedEffect(mode())}`
-            : run.summary
+        /*
+          给模型看的那一段文字在这里渲染（结构与渲染分开，界面那一面按同一份结构自己拼）：真搬过就报
+          结果，没搬就报计划——计划 ok 时再补一句"这是 dry-run、怎么真执行"。
+        */
+        const report = run.applied ? describeMigrationRun(run) : describeMigrationPreview(run.preview)
+        const summary =
+          !run.applied && run.preview.ok
+            ? `${report}\n\n（dry-run，未写任何字节；传 apply:true 执行）\n${describePlannedEffect(mode())}`
+            : report
         return {
           applied: run.applied,
           cascaded: run.preview.cascaded,
           liveSkipped: run.preview.liveSkipped.length,
+          liveSkippedIds: run.preview.liveSkipped.map((session) => session.id),
           stranded: run.preview.strandedSources.reduce((n, source) => n + source.members.length, 0),
+          strandedIds: run.preview.strandedSources.flatMap((source) => source.members.map((member) => member.id)),
           rewritten: run.rewritten,
           moved: run.moved,
           artifactsMoved: run.artifactsMoved,

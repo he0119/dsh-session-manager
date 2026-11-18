@@ -19,6 +19,7 @@ import {
   type MigrateDeps,
   type MigrateRequest,
 } from '../../../src/operations/migrate/migrate.ts'
+import { describeMigrationPreview, describeMigrationRun } from '../../../src/operations/migrate/report.ts'
 import { scanAllAsync } from '../../../src/shared/library/discovery.ts'
 import { createBackup, readManifest } from '../../../src/shared/journal.ts'
 import { sessionDir } from '../../../src/shared/paths.ts'
@@ -108,7 +109,7 @@ test('预览：把源项目目录的会话与注册表变更算出来，一个�
   assert.equal(preview.files, 1)
   assert.ok(preview.bytes > 0, '应当报出日志字节数')
   assert.equal(preview.registryChange?.targetPath, TO)
-  assert.match(preview.summary, /迁移/)
+  assert.match(describeMigrationPreview(preview), /迁移/)
 
   // 只读的证据：注册表没变、会话还在源项目目录、目标项目目录没被建出来
   assert.equal(readFileSync(sb.deps.registryPath, 'utf8'), before)
@@ -367,8 +368,8 @@ test('执行后请宿主补检查点：搬动的会话各补一次，补不上�
   assert.equal(run.warm?.failed, 1)
   assert.equal(run.verified, true, `复核应当照旧通过：${run.problems.join('; ')}`)
   assert.deepEqual(run.problems, [], '补齐列表元数据失败不该出现在迁移的问题清单里')
-  assert.match(run.summary, /已请宿主折好这 1 条会话的列表元数据/)
-  assert.match(run.summary, /1 条没补上/)
+  assert.match(describeMigrationRun(run), /已请宿主折好这 1 条会话的列表元数据/)
+  assert.match(describeMigrationRun(run), /1 条没补上/)
 
   rmSync(sb.base, { recursive: true, force: true })
 })
@@ -380,7 +381,7 @@ test('宿主没有补检查点那套服务时：如实说"要等第一次点开"
   assert.equal(run.applied, true)
   assert.equal(run.verified, true)
   assert.equal(run.warm?.unavailable, true)
-  assert.match(run.summary, /第一次点开才有标题/)
+  assert.match(describeMigrationRun(run), /第一次点开才有标题/)
   rmSync(sb.base, { recursive: true, force: true })
 })
 
@@ -395,7 +396,12 @@ test('执行：宿主持着的那条不搬（日志也不动），注册表里�
   assert.equal(run.applied, true)
   assert.deepEqual(run.preview.sessions.map((s) => s.id), ['session-go'], '只搬没被宿主持着的那条')
   assert.deepEqual(run.preview.liveSkipped.map((s) => s.id), ['session-hold'])
-  assert.match(run.summary, /另有 1 条会话宿主持在内存里（还活着），这次没搬：session-hold/)
+  assert.match(describeMigrationRun(run), /另有 1 条会话宿主持在内存里（还活着），这次没搬：session-hold/)
+  assert.match(
+    describeMigrationPreview(run.preview),
+    /另有 1 条会话宿主持在内存里（还活着），这次不搬：session-hold/,
+    '预览那一份也说清哪几条搬不走（工具只看得到这一段文字）',
+  )
   // 少搬的那条必须还在原处、还在源工作区那条记录里：源工作区因此不会被摘空、更不会被删。
   assert.equal(
     existsSync(sessionDir(sb.deps.sessionsRoot, FROM, 'session-hold')),
@@ -436,7 +442,7 @@ test('宿主没接住时把这次算好的注册表写回文件（它自己那�
   assert.equal(run.applied, true, '宿主没接住不该把迁移说成失败')
   assert.equal(run.effect?.kind, 'failed')
   assert.equal(run.effect?.registryRestored, true, '宿主动过手，就必须把这次的结果写回去')
-  assert.match(run.summary, /注册表已按这次的结果重新写回磁盘/)
+  assert.match(describeMigrationRun(run), /注册表已按这次的结果重新写回磁盘/)
   // 磁盘上留下的必须是这次的结果：目标工作区认下了那条会话，源工作区那条记录没了。
   const after = readRegistry(sb.deps.registryPath)
   const target = Object.values(after.tables.workspaces).find((record) => record.path === TO)
@@ -555,7 +561,7 @@ test('宿主全盘接受、却拿内存里那份抹掉了别人的归属：复�
   const after = readRegistry(sb.deps.registryPath)
   assert.deepEqual(after.tables.workspaces['ws-other']?.sessionIds, [stranger])
   assert.equal(run.verified, true, run.problems.join('; '))
-  assert.match(run.summary, /顺手抹掉了 1 条别的归属/)
+  assert.match(describeMigrationRun(run), /顺手抹掉了 1 条别的归属/)
   rmSync(sb.base, { recursive: true, force: true })
 })
 
@@ -575,7 +581,7 @@ test('宿主不认的悬空登记只报出来，不写回文件', async () => {
   assert.equal(run.applied, true)
   assert.equal(run.effect?.membershipsRestored, undefined, '要不回来的不能算要回来了')
   assert.deepEqual(run.effect?.membershipsUnrecognized, [ghost])
-  assert.match(run.summary, /另有 1 条归属宿主不认/)
+  assert.match(describeMigrationRun(run), /另有 1 条归属宿主不认/)
   // 关键：不硬写回文件（写回去只会让它下次写入磁盘再抹一次）。
   const after = readRegistry(sb.deps.registryPath)
   assert.deepEqual(after.tables.workspaces['ws-other']?.sessionIds, [])

@@ -10,12 +10,12 @@ import { existsSync, readdirSync, statSync } from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
 
 import { applyPlan, verifyAppliedPlan } from './execute.ts'
-import { describeWarm, warmCheckpoints, type WarmDeps } from '../../shared/host/checkpoint-warm.ts'
+import { warmCheckpoints, type WarmDeps } from '../../shared/host/checkpoint-warm.ts'
 import { readManifest, rollback, type BackupKind, type BackupManifest, type RollbackResult } from '../../shared/journal.ts'
 import { projectionCacheDir } from '../../shared/paths.ts'
 import { createProjectionReader, type ProjectionCacheReader } from '../../shared/library/projection-cache.ts'
-import { buildRelocationPlan, describePlan, describeStranded } from './plan.ts'
-import { takeEffectOnHost, describeEffect, type EffectDeps } from '../../shared/host/take-effect.ts'
+import { buildRelocationPlan } from './plan.ts'
+import { takeEffectOnHost, type EffectDeps } from '../../shared/host/take-effect.ts'
 import { readRegistry, validateRegistry, verifyRegistryChange } from '../../shared/registry.ts'
 import type { TitleQuery } from '../../shared/log/session-title.ts'
 import type {
@@ -141,8 +141,6 @@ export interface MigrationPreview {
     skipped: Array<{ path: string; reason: string; sessionId?: string }>
   } | null
   registryChange: RegistryChange | null
-  /** 给人看的整段描述（`describePlan()`）；界面也可以只用上面的结构化字段。 */
-  summary: string
 }
 
 /** 执行结果。 */
@@ -169,7 +167,6 @@ export interface MigrationRun {
    * 只在真的执行过、且这次真有会话搬动时才有（见 checkpoint-warm.ts）。
    */
   warm?: WarmOutcome
-  summary: string
 }
 
 /** 回滚结果。 */
@@ -256,7 +253,6 @@ function previewOf(plan: RelocationPlan): MigrationPreview {
       ? { moves: plan.artifacts.moves.length, problems: plan.artifacts.problems, skipped: plan.artifacts.skipped }
       : null,
     registryChange: plan.registryChange,
-    summary: describePlan(plan),
   }
 }
 
@@ -325,7 +321,6 @@ export async function runMigration(
       artifactsMoved: 0,
       verified: false,
       problems: plan.problems,
-      summary: preview.summary,
     }
   }
   if (!options.apply) {
@@ -337,7 +332,6 @@ export async function runMigration(
       artifactsMoved: 0,
       verified: false,
       problems: [],
-      summary: preview.summary,
     }
   }
 
@@ -377,22 +371,6 @@ export async function runMigration(
     problems,
     effect,
     warm,
-    summary: [
-      `已迁移 ${plan.sessions.length} 个会话（改写 ${result.rewritten} 个日志、移动 ${result.moved} 个目录` +
-        `${result.artifactsMoved > 0 ? `、搬迁 ${result.artifactsMoved} 项产物` : ''}）。`,
-      // 少搬了谁必须写在最前面那一段里：这一句是执行结果的全部交代，不能只出现在预览里。
-      plan.liveSkipped.length > 0
-        ? `另有 ${plan.liveSkipped.length} 条会话宿主持在内存里（还活着），这次没搬：` +
-          `${plan.liveSkipped.map((session) => session.id).join('、')}——重启 DSH 之后再迁一次。`
-        : '',
-      // 侧边栏不显示、这次搬不走的那几条同理：不说，用户就只会看到"还有一块空工作区"。
-      ...describeStranded(plan.strandedSources),
-      `复核：${verified.ok && registryCheck.length === 0 ? '通过' : '失败'}。备份：${result.backupDir}`,
-      describeEffect(effect),
-      describeWarm(warm),
-    ]
-      .filter((line): line is string => line !== undefined && line !== '')
-      .join('\n'),
   }
 }
 

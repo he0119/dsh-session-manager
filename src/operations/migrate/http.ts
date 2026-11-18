@@ -91,7 +91,6 @@ export function migrationHandlers(ctx: WebContext): Record<string, Handler> {
         verified: run.verified,
         ...(run.backupDir === undefined ? {} : { backupDir: run.backupDir }),
         problems: run.problems,
-        summary: run.summary,
         ...(run.warm === undefined ? {} : { warm: run.warm }),
         // 真的改过注册表就认执行结果，没改过才退到探测（见 take-effect.ts 的 effectOf）。
         takesEffect: effectOf(run.effect, takesEffect()),
