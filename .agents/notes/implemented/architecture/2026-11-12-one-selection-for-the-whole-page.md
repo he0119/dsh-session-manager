@@ -26,8 +26,10 @@ Status: implemented
   归档这类不留备份的动作不摆它；任何一条新提示都会把上一枚撤销清掉（一份备份只撤刚做的那件事）。
 - **状态栏那枚入口带份数**：一次 `/backups` 的目录列举，在挂载、手动刷新、以及任一弹窗关掉之后各读一次；
   0 份或还没读到时只写名字（不画"0 份"）。
-- **同步结论写入磁盘**：`<DSH_HOME>/dsh-session-manager/state.json` 里记一条
-  `{ sync: { at, ok, pulled, pushed, error? } }`（见 [sync-state.ts](../../../../src/operations/sync/sync-state.ts)），
+- **同步结论存下来**：一条记录（`{ at, ok, pulled, pushed, error? }`）记在官方领域存储的
+  `session_manager` 领域里（`<storages>/session_manager.json`，见
+  [sync-state.ts](../../../../src/operations/sync/sync-state.ts) 与
+  [那条记录搬进领域存储](./2026-11-19-sync-run-record-in-domain-storage.md)），
   `/meta` 的同步那一栏带上 `lastRun`。页头那枚状态按"证据新鲜程度"选句子：这一趟正跑着 → 这一进程里
   刚跑完 → 磁盘上那一条（多久以前 / 失败（多久以前））→ 配置事实（自动推送 / 未配置）。
   "多久以前"是纯函数（[relativeTime.ts](../../../../src/client/shared/logic/relativeTime.ts)），档位单独测。

@@ -156,7 +156,7 @@ export interface SyncInfo {
    */
   autoPush?: { enabled: boolean; mode: AutoMode }
   /**
-   * 上一次手动同步的结论（宿主存在 `<DSH_HOME>/dsh-session-manager/state.json` 里）。
+   * 上一次手动同步的结论（宿主存在官方领域存储的 `session_manager` 领域里，键 `last`）。
    *
    * 缺席 = 从没在这里同步过（或那台宿主没记）。页头那枚状态据此说"多久以前、成没成"。
    */

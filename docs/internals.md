@@ -110,7 +110,7 @@
   那几行「本机不认」的值，比对时两边归一成占位符，于是"只差这条路径"的两份仍算同一份。
 - [同步没做到的那几条要点得出名字](../.agents/notes/implemented/bug-fix/2026-11-13-sync-leftovers-are-pointed.md)：
   `problems` 只是几句汇总，界面从来没渲染过它们——状态变黄之后用户拿不到"哪条、为什么"。现在宿主由
-  计划里的 `skip` 行（`identical` 与"缺映射"除外）衍生一份点名版（带会话 id）落进 `state.json`，
+  计划里的 `skip` 行（`identical` 与"缺映射"除外）衍生一份点名版（带会话 id）落进那条同步记录，
   弹窗里那张「上次同步」列全，带 id 的能一键把列表筛到它；页头那枚只报条数（见
   [提示缩成一句那篇](../.agents/notes/implemented/simplification/2026-11-14-sync-chip-tooltip-one-line.md)）。
   附件对象那一头（本机与远端共享库里都没有的那些）走同一条路：数留在汇总那句里（`: 涉及 N 条会话`），
@@ -336,7 +336,12 @@
   跳过），自动整理只删重复与被取代的包、孤儿包留着。它给「只推」那篇加了边界。
 - [页头那枚同步状态点哪一档颜色](../.agents/notes/implemented/architecture/2026-11-13-sync-chip-dot-colors.md)：
   五档（转圈 / 红 / 黄 / 绿 / 灰），次序即优先级；黄=跑完了但有几条没做到或要重启，绿=自动推送开着。
-  记录里新增 `problems` / `takesEffect` 两列，"还要不要重启"不写入磁盘、按进程启动时刻算。
+  记录里新增 `problems` / `takesEffect` 两列，"还要不要重启"不写进记录、按进程启动时刻算。
+- [上次同步那条记录搬进官方领域存储](../.agents/notes/implemented/architecture/2026-11-19-sync-run-record-in-domain-storage.md)：
+  `<DSH_HOME>/dsh-session-manager/state.json` 换成 `ctx.storageDomain` 的 `session_manager` 领域（`single`
+  布局、表 `sync_runs`、键 `last`）。schema 读不懂就当没有——一条坏记录不该让整个领域打不开；拿不到
+  存储就退回"不记录"，旧文件首次打开时导入并改名 `.migrated`。备份目录不进去（几百 MB 的目录树，不是
+  键值）；`writeRegistryAtomic()` 仍绕过 `workspace` 领域，是已知遗留。
 - [同步的计划与应用并进同一个弹窗](../.agents/notes/implemented/architecture/2026-11-13-sync-plan-lives-in-the-same-dialog.md)：
   面板 → 计划 → 应用 → 结果四段同处一枚弹窗（外壳归 `SyncPanel`），标题 / 宽度 / 底栏跟着段换；有表才是 1080，
   一句话的计划仍是 640。它取代了"同步面板上再叠一层确认框"那个形状。

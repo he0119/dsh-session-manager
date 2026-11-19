@@ -42,7 +42,7 @@ DSM_FIXTURE=/path/to/backup pnpm test
 ```
 
 没设 `DSM_FIXTURE` 时，`test/plugin/real-data.test.ts` 会整组跳过——它是 runner 里默认跳过的两条之一，
-另一条是下面那条 `DSM_SMOKE_WORKSPACE`（所以全绿标准是 909 条里 907 通过、2 跳过）。
+另一条是下面那条 `DSM_SMOKE_WORKSPACE`（所以全绿标准是 967 条里 965 通过、2 跳过）。
 
 ### 版本声明自检（`test/plugin/manifest.test.mjs`）
 
@@ -289,7 +289,8 @@ tsconfig.client.json       Web Client 自己的类型工程（DOM + JSX；Host �
 | `src/operations/sync/auto-push.ts` | 自动推送：`createAutoPushTimer()`（空闲窗口一个计时器、没有周期唤醒；一次只放一轮，`busy` 时直接跳过）、`runAutoPush()`（判定顺序：没开 → 算一份只推的计划 → 一条都推不动且索引也没得收尾就报 `idle`，否则应用）、`AutoPushOutcome` / `AutoPushSkip` / `AutoPushRunning` 与订阅口 | 无 |
 | `src/operations/sync/sync.ts` | 同步的**计划与应用**：`planSync()` 的四种关系（内容一致 / 本机领先 / 远端领先 / 两边各自写过）与「谁更新」的判据、`narrowToPushOnly()`（只推那一档唯一的改判处）；`prepareSync()` 把计划与它的输入一起留下（`SyncPrepared`），`syncPrepared()` / `applyPreparedSync()` 照它应用（拉取与覆盖本机那份都复用 transfer 的导入应用），`runSync()` 是单次调用那条；落完改注册表要宿主认下（`src/shared/host/take-effect.ts`）、再请它补投影检查点；`SyncOutcome` / `SyncLeftover` / `collectLeftovers()` 是结论与「没做到」的点名版；`removeRemoteCopies()` 是删除时清远端那一步。拆出去的那几块在这里转出口（`export *`），调用方仍从本文件取 | 无 |
 | `src/operations/sync/runtime.ts` | 同步运行时：`describeSyncConfig()` 报的 `SyncInfo` 里那栏 `autoPush` 带 `{ enabled: true, mode }`（没开就整个缺席，界面据此补一句话、按 `mode` 换"只推 / 双向"的说法），`syncRuntime()` 把它拍进 `SyncSettings`（密码引用每次现解析：先问宿主 credentials，再退环境变量）；`resolveAutoPushRuntime()` 是全仓**唯一一份**自动推送接线（造 `SyncDeps` 时带 `pushOnly: true` 与 `progressWhat: 'auto-push'`，"连续失败几次"与"正跑着的那一轮"留在它造的调度器闭包里——每个宿主只造一个）；`attachAutoPushToSessions()` 是事件那一层：`session/event` 每种都重置安静窗口，`turn/end` 先 `await sessions.flush(session)`（它不保证写入磁盘，而推送读磁盘字节）再 `timer.touched()`，`flush` 失败吞掉只记一笔；`sessions` 按可选服务收，拿不到就返回空卸载函数 | 无 |
-| `src/operations/sync/sync-state.ts` | 上一次手动同步的结论落在哪：`<DSH_HOME>/dsh-session-manager/state.json` 里的 `{ sync: { at, ok, pulled, pushed, error?, problems?, leftovers?, takesEffect? } }`（`pendingRestart` 不写入磁盘，读的时候按进程启动时刻算；`leftovers` 是「没做到」的点名版，带会话 id，见 `src/operations/sync/sync.ts` 的 `collectLeftovers()`）。写是临时文件 + rename，读对坏 JSON / 缺字段 / 时间解不出来一律当没有；写失败静默（同步本身不该因为记不下一句话而失败）。入口在 `src/index.ts` 注入给 `web.ts`（`deps.syncRun`），`/meta` 的同步那一栏带上它 | 无 |
+| `src/operations/sync/sync-state.ts` | 上一次手动同步那条记录的形状与宽容读：`SyncRunRecord`（`at` / `ok` / `pulled` / `pushed`，可选 `error` / `problems` / `leftovers` / `takesEffect`）、`syncRunRecordSchema`（`unknown → 记录 \| undefined` 的规整：读不懂就当没有，别让一条坏记录把领域打不开）、`lastRunView()`（`pendingRestart` 不存，按进程启动时刻算；`leftovers` 是「没做到」的点名版，见 `src/operations/sync/sync.ts` 的 `collectLeftovers()`）、读写口 `SyncRunStore` 与降级用的 `NO_SYNC_RUN_STORE`；旧 `<DSH_HOME>/dsh-session-manager/state.json` 的读取与 `migrateLegacySyncRun()`（导入后改名 `.migrated`）也在这里 | `zod` |
+| `src/operations/sync/sync-domain.ts` | 那条记录在官方领域存储里的规格与打开流程：`defineDomain({ name: 'session_manager', version: 1, layout: 'single', tables: { sync_runs } })`、`openSyncRunStore()`（动态 `import()` 取 `@deepseek-ai/dsh-storage-domain`，拿不到就返回 `undefined`；领域句柄挂 `ctx.effect` 关闭；首次打开顺带迁移旧文件）。入口 `src/index.ts` 用可选注入 `ctx.inject(['storageDomain'], …)` 把它接到 `web.ts` 的 `deps.syncRun`（`/meta` 的同步那一栏带上它） | `@deepseek-ai/dsh-storage-domain`（peer，宿主提供）、`zod`（`dependencies`） |
 | `src/operations/sync/remote-write.ts` | 远端写入闸门：同一台机器的那一格同一时刻只放一个写者（`createRemoteWriteGate()`），推送与删除清远端共用；见 [决策](../.agents/notes/implemented/architecture/2026-11-16-one-writer-per-remote-cell.md) | 无 |
 | `src/operations/sync/dav.ts` | WebDAV 客户端：PROPFIND / GET / PUT / MKCOL + Basic 鉴权 + 多状态响应解析 | 无 |
 | `src/operations/sync/session-diff.ts` | 两份日志的**只读**差异：逐行比原始行（不比解析后的事件）、header 单独比（`cwd` 常被迁移改写）、`working-directory/change` 里跟着会话根搬的值先归一成占位符再比（应用改写过的那份与远端那份因此仍算同一份）、尾巴分成「一致 / 一边是前缀 / 真分叉」，预览每条一行且有条数与字数上限；`/sync-diff` 与差异视图共用 | 无 |
