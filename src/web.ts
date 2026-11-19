@@ -127,7 +127,8 @@ interface MetaFacts {
 export interface ApiDeps {
   paths: ResolvedPaths
   /**
-   * 上一次手动同步的记录（读 / 写）。由入口注入：文件位置属于 `$DSH_HOME`，本模块不解析家目录。
+   * 上一次手动同步的记录（读 / 写）。由入口注入：记录存在宿主的领域存储里，本模块既不解析 `$DSH_HOME`
+   * 也不认识 Cordis。
    *
    * 缺席 = 不记也不报（测试与纯工具前端就是这样），页头那枚同步状态于是只说"配没配"。
    */

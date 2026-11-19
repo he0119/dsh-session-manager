@@ -1,22 +1,25 @@
 /**
- * 上一次手动同步落在磁盘上的那条记录。
+ * 上一次手动同步的那条记录：形状、给界面的那一份、以及旧版 `state.json` 的迁移读取。
+ *
+ * 记录本身存在**官方的领域存储**里（`ctx.storageDomain`，域名 `session_manager`、表 `sync_runs`、
+ * 键固定 `last`，规格在 [sync-domain.ts](./sync-domain.ts)），不再由这个模块自己拼路径写 JSON。
  *
  * 为什么要有它：同步是这一页唯一"不点也会自己跑"的事，用户关掉窗口、重启 DSH 之后再打开，页头那枚
  * 状态如果只能说"配没配"，就答不了"昨晚那趟成没成"。宿主原来只在内存里记（`web.ts` 的 `lastApply`），
  * 进程一重启就没了。
  *
- * 存在插件自己的目录里（`<DSH_HOME>/dsh-session-manager/state.json`），与备份根是同一个父目录：那是
- * 这个插件唯一向用户的 `$DSH_HOME` 要的一层。**不写进插件配置**——配置是用户的东西，每次同步都改一遍
- * 会在设置页里攒出一串"已修改"的噪音。
- *
- * 记录只是**给界面看的一句话**：读不出来、写不进去都不该影响同步本身，所以读对坏数据宽容（当没有），
- * 写失败静默（下一次成功会覆盖它）。
+ * 记录只是**给界面看的一句话**：读不出来、写不进去都不该影响同步本身。所以这张表的 zod schema 带
+ * 形状不对时读成"没有"（见 `syncRunRecordSchema`），而不是让整个领域打不开；写失败静默（下一次
+ * 成功会覆盖它）。这条宽容也是旧记录能读的原因：`leftovers` / `takesEffect` 是后加的，缺了照样是
+ * 一条记录。
  *
  * @module dsh-session-manager/operations/sync/sync-state
  */
 
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { existsSync, readFileSync, renameSync } from 'node:fs'
+import { join } from 'node:path'
+
+import { z } from 'zod'
 
 import type { SyncLeftover } from './sync.ts'
 
@@ -82,86 +85,206 @@ export function lastRunView(run: SyncRunRecord, bootedAt: number): SyncRunView {
   return { ...run, pendingRestart }
 }
 
-/** 这个插件在 `$DSH_HOME` 下那一层。 */
+/** `sync_runs` 表里那条记录的键：只存一条，键固定。 */
+export const SYNC_RUN_KEY = 'last' as const
+
+/**
+ * 「没做到」的一条在存储里的形状。
+ *
+ * 字段与 `SyncLeftover` 一一对应，只有 `kind` 故意放宽成"任意字符串"：以后宿主多一种分类时，这一版
+ * 读得回来（界面把认不出的归到「其它问题」），不会因为一个字段不属于那五种就丢掉整份清单。
+ */
+const leftoverSchema = z.object({
+  message: z.string(),
+  sessionId: z.string().optional(),
+  title: z.string().optional(),
+  kind: z.custom<SyncLeftover['kind']>((value) => typeof value === 'string').optional(),
+  detail: z.string().optional(),
+})
+
+/**
+ * 一条记录在存储里的形状。
+ *
+ * 两处刻意的宽松：`leftovers` / `takesEffect` 都是可选的——旧版本写的记录没有它们，读回来照旧是一条
+ * 记录；`kind` 只核它是字符串——以后宿主多一种分类时这一版读得回来（界面把认不出的归到「其它问题」）。
+ */
+const recordShape = z.object({
+  at: z.string().refine((value) => Number.isFinite(Date.parse(value))),
+  ok: z.boolean(),
+  pulled: z.number(),
+  pushed: z.number(),
+  error: z.string().optional(),
+  problems: z.array(z.string()).optional(),
+  leftovers: z.array(leftoverSchema).optional(),
+  takesEffect: z.enum(['immediate', 'restart-required']).optional(),
+})
+
+/**
+ * 一张表记录在存储里的 schema。
+ *
+ * 它的职责是**规整**而不是拒绝：存着的本来就是一份 JSON，读得出形状就是一条记录，读不出形状就是
+ * `undefined`（=「没有上次同步记录」）。为什么不用一张会拒绝的 schema（也不挂 `.catch()`）：
+ * 领域层在打开时校验每条已存记录，一条读不懂的记录会带 `invalid-record` 把整个领域打不开——此后
+ * 连"下一次同步"都写不进去，而这一条只是页头上的一句话。
+ *
+ * 用 `transform` 而不是 `.catch()`：zod 4 的 `.catch()` 只能填一个与输出同类型的值，表达不了
+ * "读不懂就当没有"。
+ */
+export const syncRunRecordSchema = z
+  .unknown()
+  .transform((value): SyncRunRecord | undefined => {
+    const parsed = recordShape.safeParse(value)
+    return parsed.success ? parsed.data : undefined
+  })
+
+/** 存储里读出来的一条记录：形状对就是它，读不懂是 `undefined`（见 `syncRunRecordSchema`）。 */
+export type StoredSyncRun = z.infer<typeof syncRunRecordSchema>
+
+/**
+ * 把一个值读成记录。
+ *
+ * 坏 JSON 由调用方先 `JSON.parse`；这里只管形状。schema 是 `unknown → 记录 | undefined` 的规整，
+ * `parse()` 对任何输入都不抛，所以这里不必再套 try。
+ *
+ * @param value 存着的那个值（JSON 解出来的）。
+ * @returns 读得懂就是记录，否则 undefined。
+ */
+export function parseSyncRun(value: unknown): SyncRunRecord | undefined {
+  return syncRunRecordSchema.parse(value)
+}
+
+/**
+ * 记录读写的口子。
+ *
+ * 抽成接口是为了测试能换成内存假实现（不必搭真实领域，也不必起宿主）；生产实现只看得到一张领域表。
+ */
+export interface SyncRunStore {
+  /**
+   * 读上一次同步的记录。
+   *
+   * 宽容：没有记录、记录读不懂、存储已经关了，都是 `undefined`。
+   */
+  read(): SyncRunRecord | undefined
+  /**
+   * 记下这一趟同步。
+   *
+   * 失败静默：同步本身不该因为记不下来这一句而失败（下一次成功的那趟会再写一遍）。
+   */
+  write(run: SyncRunRecord): void
+}
+
+/** 没有存储可用时的降级：读永远没有、写丢掉。页头于是只说"配没配"，与读不到记录时一致。 */
+export const NO_SYNC_RUN_STORE: SyncRunStore = {
+  read: () => undefined,
+  write: () => {},
+}
+
+/**
+ * 领域表里这一层用得到的那两个方法。
+ *
+ * 值类型带 `undefined` 是 schema 的直接后果（读不懂的记录读成 `undefined`，见
+ * `syncRunRecordSchema`）；真实的 `KvTable<'last', StoredSyncRun>` 正好满足这个形状。
+ */
+export interface SyncRunTable {
+  get(key: typeof SYNC_RUN_KEY): StoredSyncRun
+  put(key: typeof SYNC_RUN_KEY, value: StoredSyncRun): Promise<void>
+}
+
+/** 这个插件在 `$DSH_HOME` 下那一层（旧状态文件、备份根都在这里）。 */
 function pluginDir(home: string): string {
   return join(home, 'dsh-session-manager')
 }
 
-/** 状态文件的位置：`<DSH_HOME>/dsh-session-manager/state.json`。 */
+/**
+ * 旧版状态文件的位置：`<DSH_HOME>/dsh-session-manager/state.json`。
+ *
+ * **只有迁移还读它**：记录现在在领域里（见 `sync-domain.ts`），新代码不再往这个文件写。
+ */
 export function syncStatePath(home: string): string {
   return join(pluginDir(home), 'state.json')
 }
 
-/** 一条记录读回来时能信到什么程度：形状不对就当没有。 */
-function isRecord(value: unknown): value is SyncRunRecord {
-  if (value === null || typeof value !== 'object') return false
-  const record = value as Record<string, unknown>
-  if (typeof record['at'] !== 'string' || record['at'] === '') return false
-  if (typeof record['ok'] !== 'boolean') return false
-  if (typeof record['pulled'] !== 'number' || typeof record['pushed'] !== 'number') return false
-  if (record['error'] !== undefined && typeof record['error'] !== 'string') return false
-  const problems = record['problems']
-  if (problems !== undefined && (!Array.isArray(problems) || problems.some((item) => typeof item !== 'string'))) {
-    return false
-  }
-  const leftovers = record['leftovers']
-  if (
-    leftovers !== undefined &&
-    (!Array.isArray(leftovers) ||
-      leftovers.some((item) => {
-        if (item === null || typeof item !== 'object') return true
-        const entry = item as { message?: unknown; sessionId?: unknown; title?: unknown; kind?: unknown; detail?: unknown }
-        if (typeof entry.message !== 'string') return true
-        if (entry.sessionId !== undefined && typeof entry.sessionId !== 'string') return true
-        // `title` / `detail` / `kind` 是后加的两半与分类：形状不对就整条记录当没有（与这一层同一标准）。
-        // `kind` 只核它是字符串——以后宿主多一种分类时，这一版读得回来，界面把认不出的归到「其它问题」。
-        if (entry.title !== undefined && typeof entry.title !== 'string') return true
-        if (entry.detail !== undefined && typeof entry.detail !== 'string') return true
-        return entry.kind !== undefined && typeof entry.kind !== 'string'
-      }))
-  )
-    return false
-  const effect = record['takesEffect']
-  if (effect !== undefined && effect !== 'immediate' && effect !== 'restart-required') return false
-  // 时间要能被 Date 认出来：界面要拿它算"多久以前"，一个解不出来的字符串只会变成 NaN。
-  return Number.isFinite(Date.parse(record['at']))
+/** 旧状态文件迁完之后的名字：`<DSH_HOME>/dsh-session-manager/state.json.migrated`。 */
+export function migratedSyncStatePath(home: string): string {
+  return `${syncStatePath(home)}.migrated`
 }
 
 /**
- * 读上一次同步的记录。
+ * 读旧版 `state.json` 里的那一条（`{ sync: {...} }`）。
  *
- * 文件不在、JSON 坏了、字段缺了都返回 `undefined`——这一条只是页头上的一句话，不该让页面读库失败。
+ * 文件不在、JSON 坏了、形状不对都返回 `undefined`——迁移据此决定"没什么可搬的"。
  *
  * @param home DSH 家目录（`$DSH_HOME`）。
- * @returns 上次同步的记录；没有或读不懂时 undefined。
+ * @returns 旧文件里的记录；没有或读不懂时 undefined。
  */
-export function readSyncRun(home: string): SyncRunRecord | undefined {
+export function readLegacySyncRunFile(home: string): SyncRunRecord | undefined {
   try {
     const parsed = JSON.parse(readFileSync(syncStatePath(home), 'utf8')) as { sync?: unknown } | null
-    const run = parsed?.sync
-    return isRecord(run) ? run : undefined
+    return parseSyncRun(parsed?.sync)
   } catch {
     return undefined
   }
 }
 
+/** 一次迁移做了什么（调用方据此决定要不要说一句话）。 */
+export interface SyncRunMigration {
+  /** 旧文件里的记录搬进了领域。 */
+  imported: boolean
+  /** 搬完之后旧文件改名成了 `state.json.migrated`。 */
+  renamed: boolean
+}
+
 /**
- * 记下这一趟同步。
+ * 把旧版 `state.json` 里的记录搬进领域，并给旧文件改名。
  *
- * 先写临时文件再 rename：读者（同一个宿主的另一个请求）不会读到写了一半的 JSON。写不进去就什么都不做，
- * 下一次成功的那趟会再写一遍；同步本身不该因为记不下来这一句而失败。
+ * 规则：
+ *
+ * - 旧文件不在 → 什么都不做（大多数机器）；
+ * - 领域里已经有 `last` → 不导入（领域是权威的），旧文件也不动；
+ * - 旧文件读不懂 → 不导入也不动它（那是用户目录里的东西，留给以后判断），下次启动再试一遍；
+ * - 导入成功 → 旧文件改名成 `state.json.migrated`，避免下一次被当成"还有旧数据"。
+ *
+ * 幂等：搬过一次之后领域里有记录、旧文件也不在原位了，再跑就是什么都不做。失败只打一行提示，不抛
+ * （这条记录不该挡住插件启动）。
  *
  * @param home DSH 家目录（`$DSH_HOME`）。
- * @param run 这一趟的结论。
+ * @param table 领域里那张 `sync_runs` 表。
+ * @param warn 打一行提示（插件入口给的是 logger）。
+ * @returns 这次搬了什么。
  */
-export function writeSyncRun(home: string, run: SyncRunRecord): void {
+export async function migrateLegacySyncRun(
+  home: string,
+  table: SyncRunTable,
+  warn: (message: string) => void,
+): Promise<SyncRunMigration> {
+  const result: SyncRunMigration = { imported: false, renamed: false }
   const path = syncStatePath(home)
-  const tmp = `${path}.tmp`
+  if (!existsSync(path)) return result
+  if (table.get(SYNC_RUN_KEY) !== undefined) return result
+
+  const legacy = readLegacySyncRunFile(home)
+  // 读不懂的旧文件：不导入、不改名。留着它比悄悄搬走一个看不懂的东西更安全。
+  if (legacy === undefined) return result
+
   try {
-    mkdirSync(dirname(path), { recursive: true })
-    writeFileSync(tmp, JSON.stringify({ sync: run }, null, 2) + '\n')
-    renameSync(tmp, path)
-  } catch {
-    // 记不下来就算了：界面上少一句"上次同步在几点"，同步本身已经做完了。
+    await table.put(SYNC_RUN_KEY, legacy)
+    result.imported = true
+  } catch (error) {
+    warn(`dsh-session-manager：旧 state.json 里的上次同步记录没能搬进存储，留在原处：${describe(error)}`)
+    return result
   }
+
+  try {
+    renameSync(path, migratedSyncStatePath(home))
+    result.renamed = true
+  } catch (error) {
+    // 没改名也不影响正确性：领域里已经有记录，下次启动会因为"领域里已有一条"而跳过导入。
+    warn(`dsh-session-manager：旧 state.json 已导入，但没能改名成 state.json.migrated：${describe(error)}`)
+  }
+  return result
+}
+
+/** 把任意异常说成一句人话（只用于日志）。 */
+function describe(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
 }
