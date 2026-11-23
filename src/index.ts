@@ -24,11 +24,13 @@ import {
   liveSessionIds,
   titleRefreshPort,
 } from './shared/host/ports.ts'
+import { logLines, type HostLoggerLike } from './shared/host/log-lines.ts'
 import { decodeAll } from './shared/log/log-decode.ts'
 import { adoptLegacyBackupRoot, dshHome, resolvePaths } from './shared/plugin-paths.ts'
 import { registerTools } from './tools.ts'
 import type { AutoPushTimer } from './operations/sync/sync.ts'
-import { readSyncRun, writeSyncRun } from './operations/sync/sync-state.ts'
+import { NO_SYNC_RUN_STORE, type SyncRunStore } from './operations/sync/sync-state.ts'
+import { openSyncRunStore, type SyncDomainFacility } from './operations/sync/sync-domain.ts'
 import { createRemoteWriteGate } from './operations/sync/remote-write.ts'
 import { API_PREFIX, registerWebRoutes, type WebServerLike } from './web.ts'
 
@@ -64,8 +66,8 @@ function pluginVersion(): string | undefined {
  * @returns 卸载函数：宿主热卸载时逐个注销已注册的工具与路由。
  */
 export function apply(ctx: Context, config: PluginConfigInput = {}): () => void {
-  const logger = (ctx as { logger?: { info?: (message: string) => void } }).logger
-  const info = (message: string): void => logger?.info?.(message)
+  // 两个口子走 logLines()：宿主的 logger 方法要靠调用时的接收者，取出来再调会抛（见那个模块的头注释）。
+  const { info, warn } = logLines((ctx as { logger?: HostLoggerLike }).logger)
 
   // 旧默认备份根搬进插件目录，一次就够（见 src/tools.ts 的 adoptLegacyBackupRoot()）。放在
   // resolvePaths() 之前：此后工具与界面拿到的 backupRoot 已经是新位置，旧备份照旧列得出、滚得回。
@@ -79,6 +81,7 @@ export function apply(ctx: Context, config: PluginConfigInput = {}): () => void 
   }
 
   const paths = resolvePaths(config)
+  const home = dshHome()
   /*
    * 写远端格子的互斥锁：手动同步、整理远端、删除远端、自动推送、模型工具 sync_sessions 共用这一把。
    * 它们各自在开始前读一次远端、应用时整份重写索引；两件一起跑时后写的会用旧快照盖掉前一个的条目。
@@ -153,6 +156,29 @@ export function apply(ctx: Context, config: PluginConfigInput = {}): () => void 
     void autoPushPromise.then((timer) => timer?.stop())
   }, 'dsh-session-manager: auto-push timer')
 
+  /*
+   * 「上一次同步」那条记录：存在官方的领域存储里（规格与打开流程见
+   * src/operations/sync/sync-domain.ts），不再是插件自己拼路径写 state.json。
+   *
+   * storageDomain 是**可选**服务：没有存储的宿主上，同步、备份、迁移这些核心功能照旧，只是页头那枚
+   * 状态答不了"上次成没成"。所以它既不进顶层 inject，也不让 apply 等它——先摆一个空手柄，服务到位后
+   * 再换成领域那个；下面交给 registerWebRoutes() 的是转发器，读写时才看当前是哪个手柄。
+   */
+  let syncRunStore: SyncRunStore = NO_SYNC_RUN_STORE
+  // 与 webServer 同一种写法（见下面那段）：子 fiber 等 storageDomain，服务晚于本插件到位也补得上，
+  // 而且这里不会因为属性读取没声明 inject 而抛。
+  ctx.inject(['storageDomain'], (storageCtx: Context) => {
+    const storageDomain = (storageCtx as { storageDomain?: SyncDomainFacility }).storageDomain
+    if (storageDomain === undefined) return
+    void openSyncRunStore({ storageDomain, ctx: storageCtx, home, warn }).then(
+      (store) => {
+        if (store !== undefined) syncRunStore = store
+      },
+      // openSyncRunStore() 自己吞掉所有失败；这里只是别让这个 promise 悬着。
+      () => {},
+    )
+  })
+
   // Web 端点用 `ctx.inject` 开一个子 fiber 去等 webServer，而不是在 apply 里直接读 `ctx.webServer`：
   // 一是属性读取要求本 fiber 声明过 inject（那会把插件变成硬依赖），二是子 fiber 顺带解决顺序问题
   // ——webServer 由另一个 bundle 提供，晚于本插件到位时路由会在它到位后补挂，而不是永远缺席。
@@ -162,17 +188,17 @@ export function apply(ctx: Context, config: PluginConfigInput = {}): () => void 
       info('dsh-session-manager：webServer 形状不认，界面端点未挂')
       return
     }
-    // 上一次手动同步的结论存在插件自己那一层目录里（见 src/operations/sync/sync-state.ts）：进程重启之后，页头那枚
-    // 同步状态还答得出"多久以前、成没成"。读写都在这里注入，web.ts 不去解析 $DSH_HOME。
-    const home = dshHome()
+    // 上一次手动同步的结论存在官方领域存储里（见 src/operations/sync/sync-domain.ts）：进程重启之后，
+    // 页头那枚同步状态还答得出"多久以前、成没成"。存储服务缺席时 syncRunStore 是空手柄，页面退回
+    // "配没配"那一句。读写都在这里注入，web.ts 既不认识 Cordis，也不认识领域。
     const dispose = registerWebRoutes(webServer, {
       paths,
       decodeAll,
       pluginVersion: pluginVersion(),
       remoteWrite,
       syncRun: {
-        read: () => readSyncRun(home),
-        write: (run) => writeSyncRun(home, run),
+        read: () => syncRunStore.read(),
+        write: (run) => syncRunStore.write(run),
       },
       // 与 `/state` 共用一份"目录 → 项目身份"的 git 缓存（见上面 `repoLocations`）。
       repoLocations,

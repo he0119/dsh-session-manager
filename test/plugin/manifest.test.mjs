@@ -24,7 +24,11 @@ const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
 const DSH_PEER = /^@deepseek-ai\/dsh(-|$)/
 
 /** 本包要跟着换代的 peer。集合变了要连这条断言一起改——宿主是按这个集合装配的。 */
-const DSH_PEERS = ['@deepseek-ai/dsh-client-ui-primitives', '@deepseek-ai/dsh-tools']
+const DSH_PEERS = [
+  '@deepseek-ai/dsh-client-ui-primitives',
+  '@deepseek-ai/dsh-storage-domain',
+  '@deepseek-ai/dsh-tools',
+]
 
 /**
  * 取一条版本范围的**代次**（主次版本），只认第一条 `||` 分支。
