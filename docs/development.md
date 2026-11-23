@@ -42,7 +42,7 @@ DSM_FIXTURE=/path/to/backup pnpm test
 ```
 
 没设 `DSM_FIXTURE` 时，`test/plugin/real-data.test.ts` 会整组跳过——它是 runner 里默认跳过的两条之一，
-另一条是下面那条 `DSM_SMOKE_WORKSPACE`（所以全绿标准是 967 条里 965 通过、2 跳过）。
+另一条是下面那条 `DSM_SMOKE_WORKSPACE`（所以全绿标准是 971 条里 969 通过、2 跳过）。
 
 ### 版本声明自检（`test/plugin/manifest.test.mjs`）
 
@@ -240,14 +240,15 @@ tsconfig.client.json       Web Client 自己的类型工程（DOM + JSX；Host �
 | `src/shared/library/scan-cache.ts` | 库没变时复用上一次的扫描结果：指纹 = 目录清单 + 每个日志与投影缓存文件的 `size`/`mtimeMs`，加上粗粒度时间戳的 racy 窗口；页面打开与导出 / 归档 / 重算名称的发现阶段用它 | 无 |
 | `src/shared/library/projection-cache.ts` | 读宿主投影缓存的单条记录（标题、`blank` 等列表元数据）；`createProjectionReader()` 按 `size + mtimeMs + 身份` 记住解析结果，重扫时只重解变了的那些 | 无 |
 
-#### `src/shared/host/`：把改动交给宿主
+#### `src/shared/host/`：与宿主打交道的几步
 
-写入磁盘之后的两步善后，迁移、导入、同步三个应用口共用：让宿主认下新的注册表、补上被改写会话的列表元数据。
+写入磁盘之后的两步善后，迁移、导入、同步三个应用口共用：让宿主认下新的注册表、补上被改写会话的列表元数据；此外还有往宿主 logger 说话的那一对函数。
 
 | 文件 | 职责 | DSH 依赖 |
 | --- | --- | --- |
 | `src/shared/host/take-effect.ts` | 「改完注册表之后让宿主立刻认下这处改动」的共用一步：迁移与导入 / 同步拉取都调它（回滚不走——它整份写回文件以保住工作区 id）；探测端口、执行顺序、宿主没接住时把算好的注册表整份写回（`restoreRegistry()`）、以及"要不要重启"的措辞只写在这里，**执行时机**留给各自编排层（批量应用时最后调一次） | 无 |
 | `src/shared/host/checkpoint-warm.ts` | 「应用之后请宿主把这批会话的列表元数据折出来」的共用一步：宿主的侧边栏标题不来自日志，只认它自己写的投影检查点，而检查点只在活着的会话上被写；这里借宿主自己的两个服务（`sessionQuery.readSession()` + `sessionProjectionCache.coldSnapshot()`）冷读一遍补上，逐条兜住失败（导入 / 同步拉取 / 迁移三个应用口共用） | 无 |
+| `src/shared/host/log-lines.ts` | 往宿主 logger 说话的两个口子：`logLines()` 收 `ctx.logger`（可能没有），交出 `info` / `warn`。两个都写成**成员调用**——Cordis 4.1.0 的 logger 方法要靠调用时的接收者，先取出函数值再调（`(logger.warn ?? logger.info)?.(m)`）会抛 `TypeError: this is not a function`；没有 `warn` 时退回 `info`。入口 `src/index.ts` 用它说启动、备份根搬迁与"上次同步记录已搬进存储"那几句话 | 无 |
 | `src/shared/host/ports.ts` | 宿主那几件**可选**服务的探测，统一走 `ctx.get(name)`（属性访问在 Cordis 里会同步抛错，即使服务存在）：`optionalService()`、`effectMode()`、`hostRegistryPort()`（注册表实体 API + 会话持久化，收成"改注册表"的端口）、`hostCheckpointPort()`（冷读一条并写回投影检查点）、`titleRefreshPort()`（临时挂载 → 重算 → 自己开写句柄补事件 → 摘掉，见 `src/operations/retitle/retitle.ts`）、`attachmentPort()`（附件库那两个纯路径方法）、`directoryPickerKind()`、`archiveOps()`、`liveSessionIds()`。认形状不认实现，少一件就当"这个宿主没有这套动作" | 无 |
 
 ### 操作：`src/operations/<操作>/`

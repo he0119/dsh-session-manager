@@ -24,6 +24,7 @@ import {
   liveSessionIds,
   titleRefreshPort,
 } from './shared/host/ports.ts'
+import { logLines, type HostLoggerLike } from './shared/host/log-lines.ts'
 import { decodeAll } from './shared/log/log-decode.ts'
 import { adoptLegacyBackupRoot, dshHome, resolvePaths } from './shared/plugin-paths.ts'
 import { registerTools } from './tools.ts'
@@ -65,9 +66,8 @@ function pluginVersion(): string | undefined {
  * @returns 卸载函数：宿主热卸载时逐个注销已注册的工具与路由。
  */
 export function apply(ctx: Context, config: PluginConfigInput = {}): () => void {
-  const logger = (ctx as { logger?: { info?: (message: string) => void; warn?: (message: string) => void } }).logger
-  const info = (message: string): void => logger?.info?.(message)
-  const warn = (message: string): void => (logger?.warn ?? logger?.info)?.(message)
+  // 两个口子走 logLines()：宿主的 logger 方法要靠调用时的接收者，取出来再调会抛（见那个模块的头注释）。
+  const { info, warn } = logLines((ctx as { logger?: HostLoggerLike }).logger)
 
   // 旧默认备份根搬进插件目录，一次就够（见 src/tools.ts 的 adoptLegacyBackupRoot()）。放在
   // resolvePaths() 之前：此后工具与界面拿到的 backupRoot 已经是新位置，旧备份照旧列得出、滚得回。

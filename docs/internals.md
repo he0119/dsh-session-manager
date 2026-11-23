@@ -342,6 +342,10 @@
   布局、表 `sync_runs`、键 `last`）。schema 读不懂就当没有——一条坏记录不该让整个领域打不开；拿不到
   存储就退回"不记录"，旧文件首次打开时导入并改名 `.migrated`。备份目录不进去（几百 MB 的目录树，不是
   键值）；`writeRegistryAtomic()` 仍绕过 `workspace` 领域，是已知遗留。
+- [往宿主 logger 说话保留接收者](../.agents/notes/implemented/bug-fix/2026-11-23-log-calls-keep-their-receiver.md)：
+  `(logger?.warn ?? logger?.info)?.(m)` 会把方法取出再调、丢掉接收者，Cordis 4.1.0 的 logger 方法因此
+  抛 `TypeError`；迁移那句提示一抛，打开领域整步失败、页头空一整个进程。两个口子改走
+  `src/shared/host/log-lines.ts` 的成员调用。
 - [同步的计划与应用并进同一个弹窗](../.agents/notes/implemented/architecture/2026-11-13-sync-plan-lives-in-the-same-dialog.md)：
   面板 → 计划 → 应用 → 结果四段同处一枚弹窗（外壳归 `SyncPanel`），标题 / 宽度 / 底栏跟着段换；有表才是 1080，
   一句话的计划仍是 640。它取代了"同步面板上再叠一层确认框"那个形状。
