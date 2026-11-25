@@ -1,5 +1,8 @@
 /**
- * 上一次手动同步的那条记录：形状、给界面的那一份、以及旧版 `state.json` 的迁移读取。
+ * 上一次同步的那条记录：形状、给界面的那一份、以及旧版 `state.json` 的迁移读取。
+ *
+ * 写它的有两条路：界面上按「确认同步」跑的那一趟，以及后台自动那一档跑完的每一轮（见
+ * `autoPushRunRecord()`）。空跑（一条都不用搬）的那一轮不写，见那份函数的说明。
  *
  * 记录本身存在**官方的领域存储**里（`ctx.storageDomain`，域名 `session_manager`、表 `sync_runs`、
  * 键固定 `last`，规格在 [sync-domain.ts](./sync-domain.ts)），不再由这个模块自己拼路径写 JSON。
@@ -22,6 +25,18 @@ import { join } from 'node:path'
 import { z } from 'zod'
 
 import type { SyncLeftover } from './sync.ts'
+
+/**
+ * 这条记录是哪一条路写下的。
+ *
+ * - `manual`：界面上按「确认同步」跑的那一趟，或模型工具 `sync_sessions`；
+ * - `auto-push`：后台「只推」那一档跑完的一轮（不改本机，所以永远拉 0 条）；
+ * - `auto-sync`：后台「双向」那一档跑完的一轮（该拉的拉、该推的推）。
+ *
+ * 为什么要记：界面那行要说清这趟是谁跑的。只推那一档**从来不拉**，写成"拉取 0 条"会被读成
+ * "拉了、一条都没拉到"。旧记录没有这一项——那时只有手动那趟会写，缺席一律按 `manual` 读。
+ */
+export type SyncRunSource = 'manual' | 'auto-push' | 'auto-sync'
 
 /** 一条同步记录。`at` 是 ISO 时间戳，`error` 只在失败时有。 */
 export interface SyncRunRecord {
@@ -56,6 +71,8 @@ export interface SyncRunRecord {
    * 拿进程启动时刻比一次。
    */
   takesEffect?: 'immediate' | 'restart-required'
+  /** 哪一条路写的（缺席 = 旧记录，那时只有手动那趟会写）。 */
+  source?: SyncRunSource
 }
 
 /** 一条记录摊给界面看的样子：原始记录 + 一条**现在**才成立的事实。 */
@@ -114,6 +131,9 @@ const recordShape = z.object({
   pulled: z.number(),
   pushed: z.number(),
   error: z.string().optional(),
+  // 与 `leftovers[].kind` 同一条宽容：只核"是个字符串"。以后多一条写入口时，这一版读得回来
+  // （界面把认不出的按手动那趟画），不会因为一个字段不属于那三个值就丢掉整份记录。
+  source: z.custom<SyncRunSource>((value) => typeof value === 'string').optional(),
   problems: z.array(z.string()).optional(),
   leftovers: z.array(leftoverSchema).optional(),
   takesEffect: z.enum(['immediate', 'restart-required']).optional(),

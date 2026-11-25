@@ -8,8 +8,11 @@
 
 import { machineDirName } from './index.ts'
 import { planTidy } from './tidy.ts'
-import { type SyncOutcome, type SyncProgress, type SyncPrepared, type SyncDeps, prepareSync, applyPreparedSync } from './sync.ts'
-import type { ProgressReporter } from '../../shared/types.ts'
+import { type SyncOutcome, type SyncProgress, type SyncPrepared, type SyncDeps, collectLeftovers, prepareSync, applyPreparedSync } from './sync.ts'
+import type { ProgressReporter, EffectMode } from '../../shared/types.ts'
+import { effectOf } from '../../shared/host/take-effect.ts'
+import type { AutoMode } from '../../config.ts'
+import type { SyncRunRecord, SyncRunSource } from './sync-state.ts'
 import { type RemoteWriteGate, createRemoteWriteGate } from './remote-write.ts'
 
 /**
@@ -447,5 +450,58 @@ export async function runAutoPush(
       failures: failures + 1,
       problem: error instanceof Error ? error.message : String(error),
     }
+  }
+}
+
+/**
+ * 把一轮自动同步的结论写成「上次同步」那条记录。
+ *
+ * 三条判据：
+ *
+ * 1. **空跑（`idle`）不写**：这一轮扫了一遍、一条都不用搬，写进去只会把那行变成「刚刚 · 拉取 0 条、
+ *    推送 0 条」，把上一趟真搬了东西的时刻盖掉。时间戳因此说的是"上一次真的同步了内容"，不是"上一次
+ *    被叫起来看了一眼"。
+ * 2. **没跑成的照样写**（`ok: false` 加原因）：后台无人在场，页头那枚点只有靠这条记录才红得起来。
+ * 3. **来源记下来**（`source`）：只推那一档从来不拉，界面据此决定要不要说"拉了几条"。
+ *
+ * 搬了东西那趟的 `ok` 是 `true`，哪怕有几条没做到——那几条进 `problems` / `leftovers`，与手动那趟
+ * 同一套读法（页头那枚点按遗留变黄，不按 `ok` 变红）。
+ *
+ * @param outcome 这一轮的结论（`runAutoPush()` 的返回值）。
+ * @param options.mode 跑的是哪一档：`sync` 双向、`push` 只推。
+ * @param options.takesEffect 这个宿主能不能当场认下注册表改动（只推那一档不问，写死 `immediate`）。
+ * @param options.now 造记录的时刻（毫秒）；失败那轮没有结束时刻，用它。
+ * @returns 要写的那条记录；这一轮压根没发生（没开、上一轮还跑着）或空跑时 undefined。
+ */
+export function autoPushRunRecord(
+  outcome: AutoPushOutcome,
+  options: { mode: AutoMode; takesEffect: EffectMode; now: number },
+): SyncRunRecord | undefined {
+  const source: SyncRunSource = options.mode === 'sync' ? 'auto-sync' : 'auto-push'
+  const at = new Date(outcome.finishedAt ?? options.now).toISOString()
+  const applied = outcome.outcome
+  if (applied === undefined) {
+    // 这一轮没发生（没开自动 / 上一轮还在跑 / 空跑）：什么都不留，时间戳留给上一趟真搬了东西的。
+    if (outcome.skip !== undefined) return undefined
+    // 跑了但抛了（连不上远端之类）：失败也要留一条，否则页头那枚点永远红不起来。
+    return {
+      at,
+      ok: false,
+      pulled: 0,
+      pushed: 0,
+      error: outcome.problem ?? '这一轮自动同步没成，没留下原因',
+      source,
+    }
+  }
+  return {
+    at,
+    ok: true,
+    pulled: applied.pulled.length,
+    pushed: applied.pushed.length,
+    ...(applied.problems.length === 0 ? {} : { problems: applied.problems }),
+    leftovers: collectLeftovers(applied),
+    // 只推那一档一个字节都不动本机，"要不要重启"这个问题对它不成立（与 /auto-push 端点同一个判据）。
+    takesEffect: effectOf(applied.effect, options.mode === 'sync' ? options.takesEffect : 'immediate'),
+    source,
   }
 }

@@ -156,7 +156,9 @@ export interface SyncInfo {
    */
   autoPush?: { enabled: boolean; mode: AutoMode }
   /**
-   * 上一次手动同步的结论（宿主存在官方领域存储的 `session_manager` 领域里，键 `last`）。
+   * 上一次同步的结论（宿主存在官方领域存储的 `session_manager` 领域里，键 `last`）。
+   *
+   * 写它的有手动那趟与后台自动那一轮（`source` 说是哪条路），空跑那轮不写。
    *
    * 缺席 = 从没在这里同步过（或那台宿主没记）。页头那枚状态据此说"多久以前、成没成"。
    */
@@ -186,7 +188,11 @@ export interface SyncLeftover {
 /** 「没做到」的分类（与宿主同名类型一致）。 */
 export type SyncLeftoverKind = 'attachment' | 'fork' | 'live' | 'path' | 'other'
 
-/** 上一次手动同步落下的那条记录（与宿主 `src/operations/sync/sync-state.ts` 同一形状）。 */
+/**
+ * 上一次同步落下的那条记录（与宿主 `src/operations/sync/sync-state.ts` 同一形状）。
+ *
+ * 写它的有两条路：手动按「确认同步」的那一趟，与后台自动那一档跑完的每一轮（空跑那几轮不写）。
+ */
 export interface SyncRunRecord {
   /** 结束时刻（ISO 8601）。 */
   at: string
@@ -205,6 +211,13 @@ export interface SyncRunRecord {
   leftovers?: SyncLeftover[]
   /** 那一趟的判断：改动立刻生效，还是要重启 DSH。 */
   takesEffect?: 'immediate' | 'restart-required'
+  /**
+   * 哪一条路写的：手动那趟、后台「只推」那一档、后台「双向」那一档。
+   *
+   * 缺这一项 = 旧宿主写的记录（那时只有手动那趟会写），按手动画。只推那一档从来不拉，
+   * 界面据此决定那句话要不要提"拉了几条"。
+   */
+  source?: 'manual' | 'auto-push' | 'auto-sync'
   /**
    * 那一趟要求的重启**还没发生**（宿主读记录时按进程启动时刻算好，不写入磁盘）。
    *

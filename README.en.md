@@ -152,6 +152,8 @@ sync:
   carry a "Show only this one" button that filters the list down to it. Each group shows the first
   three rows and offers "Show the other N". The record lives in the host's
   storage (`<storages>/session_manager.json`, the `sync_runs.last` record), so it survives a restart.
+  The background run refreshes it after every round that moved something, so "Last sync" follows the
+  background runs instead of freezing at your last manual sync.
 - **Auto sync** has three modes, one row in the form: off / push only / two-way. The background run
   waits until this machine has been idle for 5 minutes, so it never interrupts you while you write;
   "push only" pulls nothing — use manual sync or the two-way mode to pick up other machines'

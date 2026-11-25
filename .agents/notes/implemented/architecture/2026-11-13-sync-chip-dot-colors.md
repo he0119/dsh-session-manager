@@ -59,4 +59,4 @@ Status: implemented
   两条轴压在同一个 10px 点上，得靠悬浮提示把话说全。
 - `/meta` 里的 `sync.lastRun` 多了 `problems` / `takesEffect`（写入磁盘）与 `pendingRestart`（算出来的），客户端
   `SyncRunRecord` 跟着扩；旧宿主回来的记录没有这些字段，界面按"没有遗留"处理，不会崩。
-- 自动推送那一轮**不写**这条记录（只有「确认同步」写），所以绿点说的是"配置开着"，不是"刚刚自动推过"。
+- 后台自动那一轮现在也写这条记录（见 [那篇](../feature/2026-11-25-auto-round-records-last-run.md)），按钮上那句「多久以前」因此跟着后台走；绿点仍然只表示「自动开着」，成没成由文字说。

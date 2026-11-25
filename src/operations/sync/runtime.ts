@@ -30,9 +30,10 @@ import {
 } from '../../shared/host/ports.ts'
 import { createDavClient, type DavPort } from './dav.ts'
 import type { RemoteWriteGate } from './remote-write.ts'
-import { createAutoPushTimer, runAutoPush, type AutoPushTimer } from './auto-push.ts'
+import { autoPushRunRecord, createAutoPushTimer, runAutoPush, type AutoPushTimer } from './auto-push.ts'
 import type { SyncDeps } from './sync.ts'
 import type { SyncSettings } from './settings.ts'
+import type { SyncRunRecord } from './sync-state.ts'
 
 /** 界面要知道的同步配置（只有非敏感字段，没有密码）。 */
 export interface SyncInfo {
@@ -168,15 +169,21 @@ export async function syncRuntime(ctx: unknown, config: PluginConfigInput = {}):
  * @param ctx 宿主上下文（解析密码引用、探测可选服务）。
  * @param config 插件配置（活引用或普通对象）。
  * @param paths 三个库位置。
- * @param options.runOnRequest 这一次请求要不要真的跑一轮（界面那枚「立即推送一次」）。
- *   默认只**记状态**：`tick()` 在没开自动推送时照样回一句话（用户手点一次不该被开关挡住）。
+ * @param options.repoLocations 界面那一份"目录 → 项目身份"缓存（后台每轮要重新算计划，别每轮再问一遍 git）。
+ * @param options.remoteWrite 写远端格子那把闸（与手动那几处共用）。
+ * @param options.recordRun 把这一轮的结论写成「上次同步」那条记录（见 `autoPushRunRecord()`）。
+ *   由入口注入：记录存在宿主的领域存储里，这一层不认识 Cordis，也不解析 `$DSH_HOME`。缺席就不记。
  * @returns 运行时；没配 `sync.url` 时 undefined。
  */
 export async function resolveAutoPushRuntime(
   ctx: unknown,
   config: PluginConfigInput = {},
   paths: ResolvedPaths,
-  options: { repoLocations?: SyncDeps['repoLocations']; remoteWrite?: RemoteWriteGate } = {},
+  options: {
+    repoLocations?: SyncDeps['repoLocations']
+    remoteWrite?: RemoteWriteGate
+    recordRun?: (run: SyncRunRecord) => void
+  } = {},
 ): Promise<{ deps: SyncDeps; timer: AutoPushTimer } | undefined> {
   const runtime = await syncRuntime(ctx, config)
   if (runtime === undefined) return undefined
@@ -212,17 +219,31 @@ export async function resolveAutoPushRuntime(
   const timer = createAutoPushTimer({
     clock: { enabled: () => auto()?.enabled === true },
     ...(options.remoteWrite === undefined ? {} : { remoteWrite: options.remoteWrite }),
-    run: async (options) => {
+    run: async (tickOptions) => {
       // 每次真跑之前重新解析一次设置：`sync` 是活引用，用户可能刚把 URL 或密码改掉。
       const fresh = await syncRuntime(ctx, config)
+      const roundSettings = fresh?.settings ?? deps.settings
       const outcome = await runAutoPush(
         { ...deps, ...(fresh === undefined ? {} : { dav: fresh.dav, settings: fresh.settings }) },
         {
           failures,
-          ...(options?.onProgress === undefined ? {} : { onProgress: options.onProgress }),
+          ...(tickOptions?.onProgress === undefined ? {} : { onProgress: tickOptions.onProgress }),
         },
       )
       failures = outcome.failures
+      /*
+       * 这一轮搬了什么，写进「上次同步」那条记录：页头那枚点的文字（「同步 · 8 分钟前」）与弹窗里那行
+       * 读数读的都是它。不写的话，后台每天推几十趟，界面还停在最后一次手动按「确认同步」的时刻。
+       *
+       * 什么时候不写、为什么，都在 `autoPushRunRecord()` 那一份判据里（空跑不写、没跑成写失败）。
+       */
+      const record = autoPushRunRecord(outcome, {
+        mode: roundSettings.autoPush?.mode ?? 'push',
+        // 与界面那侧 `takesEffect()` 同一条判据：没有注册表动作的宿主，改动要重启才生效。
+        takesEffect: hostRegistryPort(ctx) === undefined ? 'restart-required' : 'immediate',
+        now: Date.now(),
+      })
+      if (record !== undefined) options.recordRun?.(record)
       return outcome
     },
   })

@@ -85,6 +85,18 @@ test('旧记录缺 leftovers / takesEffect 照旧算一条记录', () => {
   assert.deepEqual(parseSyncRun(sample), sample, '这两个字段本来就是后加的')
 })
 
+test('来源记在 source 里：三个值照读，缺了按旧记录读，认不出的也不丢整条', () => {
+  for (const source of ['manual', 'auto-push', 'auto-sync'] as const) {
+    assert.deepEqual(parseSyncRun({ ...sample, source }), { ...sample, source })
+  }
+  assert.deepEqual(parseSyncRun(sample), sample, '旧记录没有这一项：那时只有手动那趟会写')
+  assert.deepEqual(
+    parseSyncRun({ ...sample, source: '以后才会有的一条' }),
+    { ...sample, source: '以后才会有的一条' },
+    '以后多一条写入口时这一版读得回来（界面按手动那趟画），不是整条记录当没有',
+  )
+})
+
 test('读不懂的都当没有：少字段、类型不对、时间解不出来、根本不是对象', () => {
   assert.equal(parseSyncRun(undefined), undefined)
   assert.equal(parseSyncRun(null), undefined)
