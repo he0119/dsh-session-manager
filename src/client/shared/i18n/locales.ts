@@ -482,6 +482,9 @@ export const zh = {
   // 弹窗里那张「上次同步」：窗口关掉、重启之后还答得出"上次哪几条没做到、为什么"。
   'sync.last.title': '上次同步',
   'sync.last.facts': '{when} · 拉取 {pulled} 条、推送 {pushed} 条',
+  // 后台那两档各说各的：只推那一档从来不下行，写"拉取 0 条"会被读成"拉了、一条都没拉到"。
+  'sync.last.factsAutoPush': '{when} · 自动推送：推送 {pushed} 条',
+  'sync.last.factsAutoSync': '{when} · 自动同步：拉取 {pulled} 条、推送 {pushed} 条',
   'sync.last.failed': '上次同步没成：{reason}',
   'sync.last.justNow': '刚刚这一趟',
   'sync.leftovers.title': '没做到 {count} 条',
@@ -1200,6 +1203,8 @@ export const en: LocaleDictOf<typeof NS> = {
   'sync.chip.noteOff': 'No remote configured yet',
   'sync.last.title': 'Last sync',
   'sync.last.facts': '{when} · pulled {pulled}, pushed {pushed}',
+  'sync.last.factsAutoPush': '{when} · auto-push: pushed {pushed}',
+  'sync.last.factsAutoSync': '{when} · auto-sync: pulled {pulled}, pushed {pushed}',
   'sync.last.failed': 'Last sync failed: {reason}',
   'sync.last.justNow': 'The run that just finished',
   'sync.leftovers.title': '{count} item(s) left undone',

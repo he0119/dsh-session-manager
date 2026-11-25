@@ -39,7 +39,7 @@ export interface SyncChipFacts {
       }
     | null
     | undefined
-  /** 磁盘上记着的上一次手动同步（跨进程重启还在）。 */
+  /** 磁盘上记着的上一次同步（手动那趟或后台那一轮；跨进程重启还在）。 */
   lastRun?:
     | {
         ok: boolean

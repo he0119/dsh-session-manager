@@ -115,7 +115,10 @@ interface MetaFacts {
    */
   attachments: boolean
   /**
-   * 同步那一栏：没配置时是 null；配了的话带上 `lastRun`（上一次手动同步的结论，没有就不带）。
+   * 同步那一栏：没配置时是 null；配了的话带上 `lastRun`（上一次同步的结论，没有就不带）。
+   *
+   * 那条记录有两条来路：手动按「确认同步」的那一趟与后台自动那一轮（空跑那轮不写）。页头那枚点
+   * 因此说得出"上一次真的同步了内容是什么时候"，而不是"上一次手动点过是什么时候"。
    *
    * 为什么把 `lastRun` 塞进这一栏而不是单开一栏：页头那枚状态读的正是它，两处分的越细，界面越要
    * 记着"这几栏合起来才是同一个东西"。
@@ -127,8 +130,8 @@ interface MetaFacts {
 export interface ApiDeps {
   paths: ResolvedPaths
   /**
-   * 上一次手动同步的记录（读 / 写）。由入口注入：记录存在宿主的领域存储里，本模块既不解析 `$DSH_HOME`
-   * 也不认识 Cordis。
+   * 上一次同步的记录（读 / 写）。由入口注入：记录存在宿主的领域存储里，本模块既不解析 `$DSH_HOME`
+   * 也不认识 Cordis。写的人有两处——这个模块里手动那趟应用、以及入口交给自动推送那一轮的写入口。
    *
    * 缺席 = 不记也不报（测试与纯工具前端就是这样），页头那枚同步状态于是只说"配没配"。
    */
@@ -378,7 +381,7 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
    * 说得清"这一份之后有没有重启过"。
    */
   const bootedAt = Date.now()
-  /** 把"上一次手动同步"拼进同步那一栏：没配置同步时那一栏仍是 null。 */
+  /** 把"上一次同步"拼进同步那一栏：没配置同步时那一栏仍是 null。 */
   const withLastRun = (info: SyncInfo | undefined, lastRun: SyncRunRecord | undefined): MetaFacts['sync'] => {
     if (info === undefined) return null
     // 记录摊成"现在看到的"那份：多一条 `pendingRestart`，页头那枚黄点读的就是它。
@@ -397,7 +400,7 @@ export function createApiHandlers(deps: ApiDeps): Record<string, (req: IncomingM
     // 附件库服务：它决定"没有会话要搬"时那一句要不要提附件对象（见 MetaFacts.attachments）。
     attachments: attachmentPort() !== undefined,
     // 同步卡片：没有配置就是 null（界面据此说明"没配置 sync.url"，而不是画一个点了没反应的按钮）。
-    // 配了的话顺手带上上一次手动同步的结论——页头那枚状态据此说"多久以前、成没成"。
+    // 配了的话顺手带上上一次同步的结论（手动那趟或后台那一轮）——页头那枚状态据此说"多久以前、成没成"。
     sync: withLastRun(deps.syncInfo?.(), deps.syncRun?.read()),
   })
 

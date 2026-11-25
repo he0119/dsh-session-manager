@@ -1028,9 +1028,20 @@ export function SyncPanel({
    */
   const lastRun = syncInfo?.lastRun ?? null
   const lastItems = leftoversOf(job.done !== null && job.done.ok ? job.done.result : lastRun)
+  /*
+   * 这趟是谁跑的：手动那趟说“拉几条推几条”；后台那两档各说各的——「只推」从来不拉，写成“拉取 0 条”
+   * 会被读成“拉了、一条都没拉到”。缺 `source`（旧记录，那时只有手动那趟会写）与认不出的值都退回
+   * 手动那句：那句只说两个计数，对任何一趟都成立，不会替它编一个来源。
+   */
+  const lastFactsKey =
+    lastRun?.source === 'auto-push'
+      ? 'sync.last.factsAutoPush'
+      : lastRun?.source === 'auto-sync'
+        ? 'sync.last.factsAutoSync'
+        : 'sync.last.facts'
   const lastFacts =
     lastRun !== null
-      ? t('sync.last.facts', { when: agoLabel(t, lastRun.at), pulled: lastRun.pulled, pushed: lastRun.pushed })
+      ? t(lastFactsKey, { when: agoLabel(t, lastRun.at), pulled: lastRun.pulled, pushed: lastRun.pushed })
       : job.done !== null && job.done.ok
         ? t('sync.last.justNow')
         : null

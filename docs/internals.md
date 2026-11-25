@@ -342,6 +342,9 @@
   布局、表 `sync_runs`、键 `last`）。schema 读不懂就当没有——一条坏记录不该让整个领域打不开；拿不到
   存储就退回"不记录"，旧文件首次打开时导入并改名 `.migrated`。备份目录不进去（几百 MB 的目录树，不是
   键值）；`writeRegistryAtomic()` 仍绕过 `workspace` 领域，是已知遗留。
+- [后台那一轮也写上次同步那条记录](../.agents/notes/implemented/feature/2026-11-25-auto-round-records-last-run.md)：
+  只推与双向两档跑完都写（空跑那轮不写、失败照写 'ok: false'），记录多了 `source` 一列说明是哪条路
+  写的；页头那枚按钮上的"多久以前"因此跟着后台走，不再停在最后一次手动同步。
 - [往宿主 logger 说话保留接收者](../.agents/notes/implemented/bug-fix/2026-11-23-log-calls-keep-their-receiver.md)：
   `(logger?.warn ?? logger?.info)?.(m)` 会把方法取出再调、丢掉接收者，Cordis 4.1.0 的 logger 方法因此
   抛 `TypeError`；迁移那句提示一抛，打开领域整步失败、页头空一整个进程。两个口子改走

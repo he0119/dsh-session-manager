@@ -6099,6 +6099,51 @@ test('客户端产物：同步弹窗把没做到的按原因分组、每条拆�
   assert.ok(legacyText.includes('sync.leftovers.title:{"count":1}'), '条数按那几句数')
 })
 
+test('客户端产物：上次同步那行按来源说——「只推」那档不提拉了几条', { skip }, () => {
+  /*
+   * 后台那一轮也写这条记录之后，"上次同步"可能是自动那趟留下的。两档的说法不一样：只推那一档根本
+   * 不下行，写成"拉取 0 条"会被读成"拉了、一条都没拉到"；旧记录没有 source，按手动画。
+   */
+  const at = new Date(Date.now() - 8 * 60 * 1000).toISOString()
+  const render = (lastRun) => {
+    const sync = { url: 'https://dav.example.com/dsh', machineId: 'robot-a', mappings: 0, lastRun }
+    const state = {
+      sessionsRoot: '/home/u/.dsh/sessions',
+      registryPath: '/home/u/.dsh/registry.json',
+      problems: [],
+      sync,
+      sessions: [],
+      workspaces: [],
+    }
+    const meta = { sessionsRoot: state.sessionsRoot, registryPath: state.registryPath, sync }
+    const mounted = mount({ state, meta, panel: 'sync' })
+    return strings(mounted.registrations[0].component(mounted.registrations[0].registration.inject()))
+  }
+
+  const manual = render({ at, ok: true, pulled: 1, pushed: 2 })
+  assert.ok(
+    manual.includes('sync.last.facts:{"when":"time.minutes:{\\"count\\":8}","pulled":1,"pushed":2}'),
+    '手动那趟（或旧记录，没有 source）照旧说"拉几条推几条"',
+  )
+
+  const autoPush = render({ at, ok: true, pulled: 0, pushed: 2, source: 'auto-push' })
+  assert.ok(
+    autoPush.includes('sync.last.factsAutoPush:{"when":"time.minutes:{\\"count\\":8}","pulled":0,"pushed":2}'),
+    '后台只推那档说"自动推送：推送 2 条"',
+  )
+  assert.equal(
+    autoPush.includes('sync.last.facts:'),
+    false,
+    '只推那档不摆"拉取 X 条"那一句',
+  )
+
+  const autoSync = render({ at, ok: true, pulled: 1, pushed: 2, source: 'auto-sync' })
+  assert.ok(
+    autoSync.includes('sync.last.factsAutoSync:{"when":"time.minutes:{\\"count\\":8}","pulled":1,"pushed":2}'),
+    '后台双向那档说"自动同步：拉取 1 条、推送 2 条"',
+  )
+})
+
 test('组件源码：同步那一面自己就是弹窗，而且整条流程一个宽度（1080）', () => {
   // 为什么扫源码：计划那一段要靠真跑一趟同步才会出现，示例数据里种不出 planId 那一套状态。而"宽度"这条
   // 是返工两次的地方：先按"这一段摆什么"分档（面板 640、计划 1080、结果 640），于是在同一条流程里

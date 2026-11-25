@@ -110,6 +110,19 @@ export function apply(ctx: Context, config: PluginConfigInput = {}): () => void 
   }
 
   /*
+   * 「上一次同步」那条记录：存在官方的领域存储里（规格与打开流程见
+   * src/operations/sync/sync-domain.ts），不再是插件自己拼路径写 state.json。
+   *
+   * 两条写入口：界面那四条端点（手动按「确认同步」跑的那一趟，见 src/web.ts 的 `syncRun`）与后台
+   * 自动那一轮（这个文件下面把它交给 `resolveAutoPushRuntime()`）。读的人一个：`/meta` 里那一栏。
+   *
+   * storageDomain 是**可选**服务：没有存储的宿主上，同步、备份、迁移这些核心功能照旧，只是页头那枚
+   * 状态答不了"上次成没成"。所以它既不进顶层 inject，也不让 apply 等它——先摆一个空手柄，服务到位后
+   * 再换成领域那个；交给别处的是转发器，读写时才看当前是哪个手柄。
+   */
+  let syncRunStore: SyncRunStore = NO_SYNC_RUN_STORE
+
+  /*
    * 自动推送的调度器：**每个宿主只造一个**，挂在插件生命周期上。
    *
    * 为什么不在每个请求里现造：调度器手里有跨轮的状态（"正跑着的是哪一轮"与"连续失败几次"），现造的话
@@ -123,6 +136,8 @@ export function apply(ctx: Context, config: PluginConfigInput = {}): () => void 
   const autoPushPromise: Promise<AutoPushTimer | undefined> = resolveAutoPushRuntime(ctx, config, paths, {
     repoLocations,
     remoteWrite,
+    // 后台那一轮跑完也写「上次同步」：页头那枚点的文字不该停在最后一次手动同步。
+    recordRun: (run) => syncRunStore.write(run),
   }).then(
     (resolved) => {
       if (resolved === undefined) return undefined
@@ -156,15 +171,6 @@ export function apply(ctx: Context, config: PluginConfigInput = {}): () => void 
     void autoPushPromise.then((timer) => timer?.stop())
   }, 'dsh-session-manager: auto-push timer')
 
-  /*
-   * 「上一次同步」那条记录：存在官方的领域存储里（规格与打开流程见
-   * src/operations/sync/sync-domain.ts），不再是插件自己拼路径写 state.json。
-   *
-   * storageDomain 是**可选**服务：没有存储的宿主上，同步、备份、迁移这些核心功能照旧，只是页头那枚
-   * 状态答不了"上次成没成"。所以它既不进顶层 inject，也不让 apply 等它——先摆一个空手柄，服务到位后
-   * 再换成领域那个；下面交给 registerWebRoutes() 的是转发器，读写时才看当前是哪个手柄。
-   */
-  let syncRunStore: SyncRunStore = NO_SYNC_RUN_STORE
   // 与 webServer 同一种写法（见下面那段）：子 fiber 等 storageDomain，服务晚于本插件到位也补得上，
   // 而且这里不会因为属性读取没声明 inject 而抛。
   ctx.inject(['storageDomain'], (storageCtx: Context) => {
@@ -188,7 +194,7 @@ export function apply(ctx: Context, config: PluginConfigInput = {}): () => void 
       info('dsh-session-manager：webServer 形状不认，界面端点未挂')
       return
     }
-    // 上一次手动同步的结论存在官方领域存储里（见 src/operations/sync/sync-domain.ts）：进程重启之后，
+    // 上一次同步的结论存在官方领域存储里（见 src/operations/sync/sync-domain.ts）：进程重启之后，
     // 页头那枚同步状态还答得出"多久以前、成没成"。存储服务缺席时 syncRunStore 是空手柄，页面退回
     // "配没配"那一句。读写都在这里注入，web.ts 既不认识 Cordis，也不认识领域。
     const dispose = registerWebRoutes(webServer, {
